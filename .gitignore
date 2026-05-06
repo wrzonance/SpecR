@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnp.*
+.yarn/
+
+# Build
+dist/
+build/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# RESTRICTED: Copyrighted specification files that cannot be redistributed
+# ARCAT guide specifications - copyright ARCAT, Inc.
+docs/references/ARCAT/*.docx
+
+# Manufacturer specifications (CPI, etc.) - copyright respective manufacturers
+docs/references/MANUFACTURER_CPI/*.docx
+docs/references/MANUFACTURER_*/*.docx
+
+# Temporary/working files
+tmp/
+*.tmp
