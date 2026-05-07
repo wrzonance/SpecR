@@ -23,7 +23,7 @@ describe('healthHandler', () => {
   let statusSpy: ReturnType<typeof vi.fn>;
   let jsonSpy: ReturnType<typeof vi.fn>;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.resetModules();
     jsonSpy = vi.fn();
     statusSpy = vi.fn().mockReturnValue({ json: jsonSpy });

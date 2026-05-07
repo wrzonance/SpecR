@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { DatabaseError } from './index.js';
 
 // Mock pg Pool before importing db module

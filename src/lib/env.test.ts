@@ -1,17 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-describe('env validation', () => {
-  const originalEnv = { ...process.env };
+const originalEnv = { ...process.env };
 
-  beforeEach(() => {
-    vi.resetModules();
-    process.env = { ...originalEnv };
-  });
+beforeEach(() => {
+  vi.resetModules();
+  process.env = { ...originalEnv };
+});
 
-  afterEach(() => {
-    process.env = originalEnv;
-  });
+afterEach(() => {
+  process.env = originalEnv;
+});
 
+describe('env validation — defaults and coercion', () => {
   it('returns typed config with correct values when env is valid', async () => {
     process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
     process.env['NODE_ENV'] = 'test';
@@ -57,11 +57,13 @@ describe('env validation', () => {
     expect(config.PORT).toBe(4000);
     expect(typeof config.PORT).toBe('number');
   });
+});
 
+describe('env validation — invalid env exits process', () => {
   it('exits with code 1 when DATABASE_URL is missing', async () => {
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('process.exit called');
-    }) as never);
+    });
 
     process.env['DATABASE_URL'] = '';
     process.env['NODE_ENV'] = 'test';
@@ -72,9 +74,9 @@ describe('env validation', () => {
   });
 
   it('exits with code 1 when NODE_ENV is missing', async () => {
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('process.exit called');
-    }) as never);
+    });
 
     process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
     delete process.env['NODE_ENV'];

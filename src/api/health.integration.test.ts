@@ -9,6 +9,7 @@ let baseUrl: string;
 
 beforeAll(async () => {
   const app = express();
+  app.disable('x-powered-by');
   app.use(express.json());
   app.use(router);
   app.use(errorHandler);

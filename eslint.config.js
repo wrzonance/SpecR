@@ -24,6 +24,7 @@ export default defineConfig(
       'max-lines': ['error', { max: 400, skipBlankLines: true, skipComments: true }],
       'no-console': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'sonarjs/cognitive-complexity': ['error', 10],
     },
   },

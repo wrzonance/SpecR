@@ -6,6 +6,7 @@ import { router } from './api/router.js';
 import { errorHandler } from './api/middleware/error.js';
 
 const app = express();
+app.disable('x-powered-by');
 
 app.use(express.json());
 app.use(router);
@@ -23,5 +24,9 @@ async function shutdown(): Promise<void> {
   process.exit(0);
 }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+process.on('SIGTERM', () => {
+  void shutdown();
+});
+process.on('SIGINT', () => {
+  void shutdown();
+});

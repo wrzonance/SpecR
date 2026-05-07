@@ -11,7 +11,7 @@ const result = schema.safeParse(process.env);
 
 if (!result.success) {
   process.stderr.write('Invalid environment variables:\n');
-  process.stderr.write(JSON.stringify(result.error.format(), null, 2) + '\n');
+  process.stderr.write(JSON.stringify(result.error.issues, null, 2) + '\n');
   process.exit(1);
 }
 
