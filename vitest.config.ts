@@ -11,7 +11,12 @@ export default defineConfig({
       reporter: ['text', 'html', 'json'],
       thresholds: { lines: 80, functions: 80, branches: 80 },
       include: ['src/**/*.ts'],
-      exclude: ['src/**/*.test.ts', 'src/**/*.d.ts'],
+      exclude: [
+        'src/**/*.test.ts',
+        'src/**/*.d.ts',
+        'src/index.ts', // app bootstrap — covered by integration tests, not unit tests
+        'src/api/router.ts', // pure wiring, no branch logic
+      ],
     },
     projects: [
       {
