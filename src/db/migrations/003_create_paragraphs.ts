@@ -13,7 +13,7 @@ export const up = (pgm: MigrationBuilder): void => {
       references: 'specs',
       onDelete: 'CASCADE',
     },
-    parent_id: { type: 'uuid', references: 'paragraphs' },
+    parent_id: { type: 'uuid', references: 'paragraphs', onDelete: 'CASCADE' },
     node_type: { type: 'varchar(20)', notNull: true },
     text: { type: 'text', notNull: true },
     position: { type: 'integer', notNull: true },
@@ -36,5 +36,5 @@ export const up = (pgm: MigrationBuilder): void => {
 };
 
 export const down = (pgm: MigrationBuilder): void => {
-  pgm.dropTable('paragraphs');
+  pgm.dropTable('paragraphs', { cascade: true });
 };

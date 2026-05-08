@@ -20,5 +20,5 @@ export const up = (pgm: MigrationBuilder): void => {
 };
 
 export const down = (pgm: MigrationBuilder): void => {
-  pgm.dropTable('csi_sections');
+  pgm.dropTable('csi_sections', { cascade: true });
 };

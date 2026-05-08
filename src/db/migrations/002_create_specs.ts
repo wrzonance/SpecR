@@ -7,9 +7,9 @@ export const up = (pgm: MigrationBuilder): void => {
       primaryKey: true,
       default: pgm.func('gen_random_uuid()'),
     },
-    section: { type: 'varchar(20)' },
-    title: { type: 'text' },
-    source: { type: 'varchar(20)' },
+    section: { type: 'varchar(20)', notNull: true },
+    title: { type: 'text', notNull: true },
+    source: { type: 'varchar(20)', notNull: true },
     created_at: {
       type: 'timestamptz',
       notNull: true,
@@ -24,5 +24,5 @@ export const up = (pgm: MigrationBuilder): void => {
 };
 
 export const down = (pgm: MigrationBuilder): void => {
-  pgm.dropTable('specs');
+  pgm.dropTable('specs', { cascade: true });
 };

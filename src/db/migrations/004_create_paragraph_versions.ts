@@ -22,9 +22,9 @@ export const up = (pgm: MigrationBuilder): void => {
       default: pgm.func('now()'),
     },
   });
-  pgm.createIndex('paragraph_versions', ['paragraph_id', 'version']);
+  pgm.createIndex('paragraph_versions', ['paragraph_id', 'version'], { unique: true });
 };
 
 export const down = (pgm: MigrationBuilder): void => {
-  pgm.dropTable('paragraph_versions');
+  pgm.dropTable('paragraph_versions', { cascade: true });
 };
