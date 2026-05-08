@@ -1,4 +1,5 @@
-import { pool, DatabaseError } from '../index.js';
+import { DatabaseError } from '../index.js';
+import type { Pool } from 'pg';
 import type { CsiNode, CsiTree } from '../../ast/types.js';
 import { logger } from '../../lib/logger.js';
 
@@ -32,12 +33,12 @@ function flattenDfs(
   });
 }
 
-export async function insertTree(tree: CsiTree): Promise<void> {
+export async function insertTree(tree: CsiTree, specId: string, pool: Pool): Promise<void> {
   const rows: FlatRow[] = [];
-  flattenDfs(tree.parts, tree.id, null, rows);
+  flattenDfs(tree.parts, specId, null, rows);
 
   if (rows.length === 0) {
-    logger.debug({ specId: tree.id }, 'insertTree: no paragraphs to insert');
+    logger.debug({ specId }, 'insertTree: no paragraphs to insert');
     return;
   }
 
@@ -49,7 +50,7 @@ export async function insertTree(tree: CsiTree): Promise<void> {
         [row.id, row.specId, row.parentId, row.nodeType, row.text, row.position, row.vanish]
       );
     }
-    logger.info({ specId: tree.id, count: rows.length }, 'insertTree: paragraphs inserted');
+    logger.info({ specId, count: rows.length }, 'insertTree: paragraphs inserted');
   } catch (err) {
     throw new DatabaseError('failed to insert paragraph tree', { cause: err });
   }

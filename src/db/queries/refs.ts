@@ -1,8 +1,13 @@
-import { pool, DatabaseError } from '../index.js';
+import { DatabaseError } from '../index.js';
+import type { Pool } from 'pg';
 import type { SecRef } from '../../parser/index.js';
 import { logger } from '../../lib/logger.js';
 
-export async function insertRefs(specId: string, refs: readonly SecRef[]): Promise<void> {
+export async function insertRefs(
+  refs: readonly SecRef[],
+  specId: string,
+  pool: Pool
+): Promise<void> {
   if (refs.length === 0) {
     return;
   }

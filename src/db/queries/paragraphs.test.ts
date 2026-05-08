@@ -52,7 +52,7 @@ describe('insertTree — DFS ordering', () => {
       ],
     };
 
-    await insertTree(tree);
+    await insertTree(tree, 'spec-uuid-1', pool);
 
     expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
     const firstCall = vi.mocked(query).mock.calls[0];
@@ -92,7 +92,7 @@ describe('insertTree — vanish flag', () => {
       ],
     };
 
-    await insertTree(tree);
+    await insertTree(tree, 'spec-uuid-1', pool);
 
     expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
     const call = vi.mocked(query).mock.calls[0];
@@ -119,7 +119,7 @@ describe('insertTree — empty tree', () => {
       parts: [],
     };
 
-    await insertTree(tree);
+    await insertTree(tree, 'spec-uuid-1', pool);
 
     expect(vi.mocked(query)).not.toHaveBeenCalled();
   });
@@ -152,6 +152,6 @@ describe('insertTree — error handling', () => {
       ],
     };
 
-    await expect(insertTree(tree)).rejects.toBeInstanceOf(DatabaseError);
+    await expect(insertTree(tree, 'spec-uuid-1', pool)).rejects.toBeInstanceOf(DatabaseError);
   });
 });

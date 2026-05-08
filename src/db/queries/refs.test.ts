@@ -28,7 +28,7 @@ describe('insertRefs — empty input', () => {
     const { query } = pool;
 
     const { insertRefs } = await import('./refs.js');
-    await insertRefs('spec-1', []);
+    await insertRefs([], 'spec-uuid-1', pool);
 
     expect(vi.mocked(query)).not.toHaveBeenCalled();
   });
@@ -46,15 +46,14 @@ describe('insertRefs — section refs', () => {
     vi.mocked(query).mockResolvedValueOnce({ rows: [{ id: 'target-spec-42' }] } as never);
     vi.mocked(query).mockResolvedValueOnce({ rows: [] } as never);
 
+    const ref = {
+      sourceNodeId: 'node-1',
+      targetType: 'section' as const,
+      targetSpecSection: '03 30 00',
+      referenceText: 'See section 03 30 00',
+    };
     const { insertRefs } = await import('./refs.js');
-    await insertRefs('spec-1', [
-      {
-        sourceNodeId: 'node-1',
-        targetType: 'section',
-        targetSpecSection: '03 30 00',
-        referenceText: 'See section 03 30 00',
-      },
-    ]);
+    await insertRefs([ref], 'spec-uuid-1', pool);
 
     expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
     const selectCall = vi.mocked(query).mock.calls[0];
@@ -71,15 +70,14 @@ describe('insertRefs — section refs', () => {
     vi.mocked(query).mockResolvedValueOnce({ rows: [] } as never);
     vi.mocked(query).mockResolvedValueOnce({ rows: [] } as never);
 
+    const ref = {
+      sourceNodeId: 'node-2',
+      targetType: 'section' as const,
+      targetSpecSection: '99 99 99',
+      referenceText: 'Unknown section',
+    };
     const { insertRefs } = await import('./refs.js');
-    await insertRefs('spec-1', [
-      {
-        sourceNodeId: 'node-2',
-        targetType: 'section',
-        targetSpecSection: '99 99 99',
-        referenceText: 'Unknown section',
-      },
-    ]);
+    await insertRefs([ref], 'spec-uuid-1', pool);
 
     const insertCall = vi.mocked(query).mock.calls[1];
     expect(insertCall?.[1]?.[4]).toBeNull();
@@ -97,15 +95,14 @@ describe('insertRefs — standard refs', () => {
     const { query } = pool;
     vi.mocked(query).mockResolvedValueOnce({ rows: [] } as never);
 
+    const ref = {
+      sourceNodeId: 'node-3',
+      targetType: 'standard' as const,
+      standardCode: 'ASTM C150',
+      referenceText: 'ASTM C150 Standard',
+    };
     const { insertRefs } = await import('./refs.js');
-    await insertRefs('spec-1', [
-      {
-        sourceNodeId: 'node-3',
-        targetType: 'standard',
-        standardCode: 'ASTM C150',
-        referenceText: 'ASTM C150 Standard',
-      },
-    ]);
+    await insertRefs([ref], 'spec-uuid-1', pool);
 
     expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
     const insertCall = vi.mocked(query).mock.calls[0];
@@ -119,21 +116,22 @@ describe('insertRefs — standard refs', () => {
     const { query } = pool;
     vi.mocked(query).mockResolvedValue({ rows: [] } as never);
 
-    const { insertRefs } = await import('./refs.js');
-    await insertRefs('spec-1', [
+    const refs = [
       {
         sourceNodeId: 'node-a',
-        targetType: 'standard',
+        targetType: 'standard' as const,
         standardCode: 'ACI 318',
         referenceText: 'ACI 318',
       },
       {
         sourceNodeId: 'node-b',
-        targetType: 'standard',
+        targetType: 'standard' as const,
         standardCode: 'ASTM A36',
         referenceText: 'ASTM A36',
       },
-    ]);
+    ];
+    const { insertRefs } = await import('./refs.js');
+    await insertRefs(refs, 'spec-uuid-1', pool);
 
     expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
     expect(vi.mocked(query).mock.calls[0]?.[1]?.[5]).toBe('ACI 318');
@@ -152,16 +150,13 @@ describe('insertRefs — error handling', () => {
     const { query } = pool;
     vi.mocked(query).mockRejectedValueOnce(new Error('timeout'));
 
+    const ref = {
+      sourceNodeId: 'node-x',
+      targetType: 'standard' as const,
+      standardCode: 'ISO 9001',
+      referenceText: 'ISO 9001',
+    };
     const { insertRefs } = await import('./refs.js');
-    await expect(
-      insertRefs('spec-1', [
-        {
-          sourceNodeId: 'node-x',
-          targetType: 'standard',
-          standardCode: 'ISO 9001',
-          referenceText: 'ISO 9001',
-        },
-      ])
-    ).rejects.toBeInstanceOf(DatabaseError);
+    await expect(insertRefs([ref], 'spec-uuid-1', pool)).rejects.toBeInstanceOf(DatabaseError);
   });
 });
