@@ -226,6 +226,8 @@ docs/adr/
   007-all-divisions-from-day-one.md
   008-markdown-parallel-output.md
   009-revit-direct-api-calls.md
+  010-mcp-server-exposure.md
+  011-git-native-spec-versioning.md
 ```
 
 **ADR format:**
