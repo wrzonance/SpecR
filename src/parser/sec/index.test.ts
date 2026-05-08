@@ -80,6 +80,15 @@ function collectIds(nodes: readonly CsiNode[]): Set<string> {
   return ids;
 }
 
+function countNodes(nodes: readonly CsiNode[]): number {
+  let total = 0;
+  for (const n of nodes) {
+    total++;
+    total += countNodes(n.children);
+  }
+  return total;
+}
+
 describe('parseSec — section and title', () => {
   it('extracts section number from SCN', () => {
     const { tree } = parseSec(MINIMAL);
@@ -114,37 +123,39 @@ describe('parseSec — section and title', () => {
   });
 });
 
-describe('parseSec — PRT / SPT hierarchy', () => {
+describe('parseSec — PRT structure', () => {
   it('maps PRT to part nodes', () => {
     const { tree } = parseSec(WITH_PARTS);
     expect(tree.parts).toHaveLength(2);
     expect(tree.parts[0]?.type).toBe('part');
   });
-
   it('strips PART N prefix from part title', () => {
     const { tree } = parseSec(WITH_PARTS);
     expect(tree.parts[0]?.text).toBe('GENERAL');
     expect(tree.parts[1]?.text).toBe('PRODUCTS');
   });
-
   it('maps SPT to article nodes as part children', () => {
     const { tree } = parseSec(WITH_PARTS);
     expect(tree.parts[0]?.children).toHaveLength(2);
     expect(tree.parts[0]?.children[0]?.type).toBe('article');
   });
-
   it('sets article text from TTL', () => {
     const { tree } = parseSec(WITH_PARTS);
     expect(tree.parts[0]?.children[0]?.text).toBe('REFERENCES');
   });
+  it('sets source: ufgs on all node meta', () => {
+    const { tree } = parseSec(WITH_PARTS);
+    expect(tree.parts[0]?.meta.source).toBe('ufgs');
+  });
+});
 
+describe('parseSec — SPT content nodes', () => {
   it('maps TXT to continuation nodes', () => {
     const { tree } = parseSec(WITH_PARTS);
     const article = tree.parts[0]?.children[0];
     expect(article?.children[0]?.type).toBe('continuation');
     expect(article?.children[0]?.text).toContain('publications listed below');
   });
-
   it('maps LST to pr1 nodes', () => {
     const { tree } = parseSec(WITH_PARTS);
     const defs = tree.parts[0]?.children[1];
@@ -152,23 +163,18 @@ describe('parseSec — PRT / SPT hierarchy', () => {
     expect(pr1s).toHaveLength(2);
     expect(pr1s[0]?.text).toBe('For Army, the Network Enterprise Center (NEC)');
   });
-
   it('maps ITM to pr2 nodes', () => {
     const { tree } = parseSec(WITH_PARTS);
     const defs = tree.parts[0]?.children[1];
     const pr2 = defs?.children.find((c) => c.type === 'pr2');
     expect(pr2?.text).toBe('Sub-item text here');
   });
-
   it('assigns unique UUID to every node', () => {
     const { tree } = parseSec(WITH_PARTS);
     const ids = collectIds(tree.parts);
-    expect(ids.size).toBeGreaterThan(0);
-  });
-
-  it('sets source: ufgs on all node meta', () => {
-    const { tree } = parseSec(WITH_PARTS);
-    expect(tree.parts[0]?.meta.source).toBe('ufgs');
+    const total = countNodes(tree.parts);
+    expect(ids.size).toBe(total);
+    expect(total).toBeGreaterThan(0);
   });
 });
 

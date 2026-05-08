@@ -14,17 +14,17 @@ export interface RefNode {
 
 export interface SptNode {
   readonly TTL?: string;
-  readonly TXT?: string | readonly string[];
-  readonly LST?: string | readonly string[];
-  readonly ITM?: string | readonly string[];
+  readonly TXT?: readonly string[];
+  readonly LST?: readonly string[];
+  readonly ITM?: readonly string[];
   readonly OLG?: { readonly OLI?: string | readonly string[] };
-  readonly NTE?: NteNode | readonly NteNode[];
-  readonly SPT?: SptNode | readonly SptNode[];
-  readonly REF?: RefNode | readonly RefNode[];
+  readonly NTE?: readonly NteNode[];
+  readonly SPT?: readonly SptNode[];
+  readonly REF?: readonly RefNode[];
 }
 
 export interface PrtNode {
   readonly TTL?: string;
-  readonly SPT?: SptNode | readonly SptNode[];
-  readonly NTE?: NteNode | readonly NteNode[];
+  readonly SPT?: readonly SptNode[];
+  readonly NTE?: readonly NteNode[];
 }

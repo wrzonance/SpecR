@@ -102,18 +102,26 @@ function walkOlg(spt: SptNode, children: CsiNode[], refs: SecRef[]): void {
   walkTextItems(toArray(spt.OLG.OLI), 'pr1', children, refs);
 }
 
+function buildStandardRef(articleId: string, code: string, rtl: string): SecRef {
+  return {
+    sourceNodeId: articleId,
+    targetType: 'standard',
+    standardCode: code,
+    referenceText: rtl ? `${code} ${rtl}` : code,
+  };
+}
+
+function pushRefsForRids(refs: SecRef[], articleId: string, ref: RefNode): void {
+  const rtl = typeof ref.RTL === 'string' ? ref.RTL.trim() : '';
+  for (const rid of toArray(ref.RID)) {
+    const code = typeof rid === 'string' ? rid.trim() : '';
+    if (code) refs.push(buildStandardRef(articleId, code, rtl));
+  }
+}
+
 function pushStandardRefs(refs: SecRef[], articleId: string, refNodes: readonly RefNode[]): void {
   for (const ref of refNodes) {
-    for (const rid of toArray(ref.RID)) {
-      const code = typeof rid === 'string' ? rid.trim() : '';
-      if (!code) continue;
-      refs.push({
-        sourceNodeId: articleId,
-        targetType: 'standard',
-        standardCode: code,
-        referenceText: code,
-      });
-    }
+    pushRefsForRids(refs, articleId, ref);
   }
 }
 
@@ -133,8 +141,7 @@ function walkSpt(spt: SptNode, refs: SecRef[]): CsiNode {
   }
 
   const articleNode = makeNode('article', stripTags(ttlRaw) || 'UNTITLED', children);
-  const refNodes = toArray(spt.REF as readonly RefNode[] | undefined);
-  pushStandardRefs(refs, articleNode.id, refNodes);
+  pushStandardRefs(refs, articleNode.id, spt.REF ?? []);
   return articleNode;
 }
 

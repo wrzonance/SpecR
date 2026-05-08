@@ -53,56 +53,56 @@ const NO_REFS = `<?xml version="1.0" encoding="windows-1252"?>
   </PRT>
 </SEC>`;
 
-describe('reference extraction', () => {
-  describe('standard refs (REF/RID)', () => {
-    it('extracts standard codes from RID elements', () => {
-      const { refs } = parseSec(WITH_STANDARD_REFS);
-      const codes = refs.filter((r) => r.targetType === 'standard').map((r) => r.standardCode);
-      expect(codes).toContain('ANSI/TIA-568.1');
-      expect(codes).toContain('ANSI/TIA-569');
-      expect(codes).toContain('NFPA 70');
-    });
-
-    it('links standard refs to the article node id', () => {
-      const { refs, tree } = parseSec(WITH_STANDARD_REFS);
-      const articleId = tree.parts[0]?.children[0]?.id;
-      const standardRefs = refs.filter((r) => r.targetType === 'standard');
-      expect(standardRefs.length).toBeGreaterThan(0);
-      expect(standardRefs.every((r) => r.sourceNodeId === articleId)).toBe(true);
-    });
-
-    it('returns empty refs when no REF/SRF in spec', () => {
-      const { refs } = parseSec(NO_REFS);
-      expect(refs).toHaveLength(0);
-    });
+describe('standard refs (REF/RID)', () => {
+  it('standard ref referenceText includes RTL title when present', () => {
+    const { refs } = parseSec(WITH_STANDARD_REFS);
+    const nfpa70 = refs.find((r) => r.standardCode === 'NFPA 70');
+    expect(nfpa70?.referenceText).toContain('National Electrical Code');
   });
 
-  describe('section refs (SRF)', () => {
-    it('extracts section numbers from SRF in TXT', () => {
-      const { refs } = parseSec(WITH_SECTION_REFS);
-      const sections = refs
-        .filter((r) => r.targetType === 'section')
-        .map((r) => r.targetSpecSection);
-      expect(sections).toContain('26 20 00');
-    });
+  it('extracts standard codes from RID elements', () => {
+    const { refs } = parseSec(WITH_STANDARD_REFS);
+    const codes = refs.filter((r) => r.targetType === 'standard').map((r) => r.standardCode);
+    expect(codes).toContain('ANSI/TIA-568.1');
+    expect(codes).toContain('ANSI/TIA-569');
+    expect(codes).toContain('NFPA 70');
+  });
 
-    it('extracts section numbers from SRF in LST', () => {
-      const { refs } = parseSec(WITH_SECTION_REFS);
-      const sections = refs
-        .filter((r) => r.targetType === 'section')
-        .map((r) => r.targetSpecSection);
-      expect(sections).toContain('27 05 13.43');
-    });
+  it('links standard refs to the article node id', () => {
+    const { refs, tree } = parseSec(WITH_STANDARD_REFS);
+    const articleId = tree.parts[0]?.children[0]?.id;
+    const standardRefs = refs.filter((r) => r.targetType === 'standard');
+    expect(standardRefs.length).toBeGreaterThan(0);
+    expect(standardRefs.every((r) => r.sourceNodeId === articleId)).toBe(true);
+  });
 
-    it('links section ref to the content node containing it', () => {
-      const { refs, tree } = parseSec(WITH_SECTION_REFS);
-      const article = tree.parts[0]?.children[0];
-      const contId = article?.children.find((c) => c.type === 'continuation')?.id;
-      const pr1Id = article?.children.find((c) => c.type === 'pr1')?.id;
-      const sRef1 = refs.find((r) => r.targetSpecSection === '26 20 00');
-      const sRef2 = refs.find((r) => r.targetSpecSection === '27 05 13.43');
-      expect(sRef1?.sourceNodeId).toBe(contId);
-      expect(sRef2?.sourceNodeId).toBe(pr1Id);
-    });
+  it('returns empty refs when no REF/SRF in spec', () => {
+    const { refs } = parseSec(NO_REFS);
+    expect(refs).toHaveLength(0);
+  });
+});
+
+describe('section refs (SRF)', () => {
+  it('extracts section numbers from SRF in TXT', () => {
+    const { refs } = parseSec(WITH_SECTION_REFS);
+    const sections = refs.filter((r) => r.targetType === 'section').map((r) => r.targetSpecSection);
+    expect(sections).toContain('26 20 00');
+  });
+
+  it('extracts section numbers from SRF in LST', () => {
+    const { refs } = parseSec(WITH_SECTION_REFS);
+    const sections = refs.filter((r) => r.targetType === 'section').map((r) => r.targetSpecSection);
+    expect(sections).toContain('27 05 13.43');
+  });
+
+  it('links section ref to the content node containing it', () => {
+    const { refs, tree } = parseSec(WITH_SECTION_REFS);
+    const article = tree.parts[0]?.children[0];
+    const contId = article?.children.find((c) => c.type === 'continuation')?.id;
+    const pr1Id = article?.children.find((c) => c.type === 'pr1')?.id;
+    const sRef1 = refs.find((r) => r.targetSpecSection === '26 20 00');
+    const sRef2 = refs.find((r) => r.targetSpecSection === '27 05 13.43');
+    expect(sRef1?.sourceNodeId).toBe(contId);
+    expect(sRef2?.sourceNodeId).toBe(pr1Id);
   });
 });
