@@ -1,0 +1,3 @@
+# pnpm 11 — allow esbuild postinstall binary build (required by vitest/tsx)
+allowBuilds:
+  esbuild: true

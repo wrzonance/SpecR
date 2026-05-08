@@ -31,6 +31,9 @@ docs/references/ARCAT/*.docx
 docs/references/MANUFACTURER_CPI/*.docx
 docs/references/MANUFACTURER_*/*.docx
 
+# Test output
+coverage/
+
 # Temporary/working files
 tmp/
 *.tmp
