@@ -16,7 +16,6 @@ vi.mock('pg', () => {
   const Pool = vi.fn(function () {
     return pool;
   });
-  Pool.prototype = pool;
   return { Pool };
 });
 
