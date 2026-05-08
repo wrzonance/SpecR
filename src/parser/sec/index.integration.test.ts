@@ -9,7 +9,8 @@ const FIXTURES = join(process.cwd(), 'tests/fixtures/sec');
 const cleanupIds: string[] = [];
 
 async function loadFixture(
-  filename: string
+  filename: string,
+  onSpecCreated?: (id: string) => void
 ): Promise<{ specId: string; nodeCount: number; refCount: number }> {
   const xml = await readFile(join(FIXTURES, filename), 'latin1');
   const { tree, refs } = parseSec(xml);
@@ -20,7 +21,10 @@ async function loadFixture(
      RETURNING id`,
     [tree.section, tree.title]
   );
-  const specId = r.rows[0]?.id ?? '';
+  const specId = r.rows[0]?.id;
+  if (!specId) throw new Error(`upsert for ${filename} returned no id`);
+
+  onSpecCreated?.(specId);
 
   await pool.query(`DELETE FROM spec_references WHERE source_spec_id = $1`, [specId]);
   await pool.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);
@@ -51,10 +55,9 @@ describe('integration: 27_41_00.SEC', () => {
   let expectedNodeCount: number;
 
   beforeAll(async () => {
-    const result = await loadFixture('27_41_00.SEC');
+    const result = await loadFixture('27_41_00.SEC', (id) => cleanupIds.push(id));
     specId = result.specId;
     expectedNodeCount = result.nodeCount;
-    cleanupIds.push(specId);
   });
 
   it('inserts spec row with correct section and source', async () => {
@@ -97,9 +100,8 @@ describe('integration: 27_10_00.SEC', () => {
   let specId: string;
 
   beforeAll(async () => {
-    const result = await loadFixture('27_10_00.SEC');
+    const result = await loadFixture('27_10_00.SEC', (id) => cleanupIds.push(id));
     specId = result.specId;
-    cleanupIds.push(specId);
   });
 
   it('inserts section refs with target_spec_section populated', async () => {

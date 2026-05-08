@@ -86,36 +86,39 @@ async function loadFile(
 
 async function main(): Promise<void> {
   const pool = createPool();
-  const files = await collectFiles();
-  console.log(`Found ${files.length} .SEC files`);
+  try {
+    const files = await collectFiles();
+    console.log(`Found ${files.length} .SEC files`);
 
-  const successes: LoadSuccess[] = [];
-  const failures: LoadFailure[] = [];
+    const successes: LoadSuccess[] = [];
+    const failures: LoadFailure[] = [];
 
-  for (const file of files) {
-    try {
-      const result = await loadFile(file, pool);
-      successes.push(result);
-      console.log(`✓ ${result.section}  ${result.nodeCount} nodes  ${result.refCount} refs`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      failures.push({ file, error: msg });
-      console.error(`✗ ${file}: ${msg}`);
+    for (const file of files) {
+      try {
+        const result = await loadFile(file, pool);
+        successes.push(result);
+        console.log(`✓ ${result.section}  ${result.nodeCount} nodes  ${result.refCount} refs`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        failures.push({ file, error: msg });
+        console.error(`✗ ${file}: ${msg}`);
+      }
     }
-  }
 
-  const totalNodes = successes.reduce((s, r) => s + r.nodeCount, 0);
-  const totalRefs = successes.reduce((s, r) => s + r.refCount, 0);
-  console.log(
-    `\nLoaded ${successes.length}/${files.length} specs  ${totalNodes} paragraphs  ${totalRefs} refs`
-  );
-  if (failures.length > 0) {
-    console.error(`\nFailed (${failures.length}):`);
-    for (const f of failures) console.error(`  ${f.file}: ${f.error}`);
-  }
+    const totalNodes = successes.reduce((s, r) => s + r.nodeCount, 0);
+    const totalRefs = successes.reduce((s, r) => s + r.refCount, 0);
+    console.log(
+      `\nLoaded ${successes.length}/${files.length} specs  ${totalNodes} paragraphs  ${totalRefs} refs`
+    );
+    if (failures.length > 0) {
+      console.error(`\nFailed (${failures.length}):`);
+      for (const f of failures) console.error(`  ${f.file}: ${f.error}`);
+    }
 
-  await pool.end();
-  process.exit(failures.length > 0 ? 1 : 0);
+    process.exit(failures.length > 0 ? 1 : 0);
+  } finally {
+    await pool.end();
+  }
 }
 
 main().catch((err: unknown) => {
