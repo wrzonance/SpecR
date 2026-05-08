@@ -28,5 +28,14 @@ export default defineConfig(
       'sonarjs/cognitive-complexity': ['error', 10],
     },
   },
+  // In test files, vi.mocked(obj.method) is the standard pattern for mocking
+  // instance methods. The method is always a vi.fn() at runtime, so the
+  // unbound-method warning is a false positive here.
+  {
+    files: ['src/**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
   eslintConfigPrettier,
 )
