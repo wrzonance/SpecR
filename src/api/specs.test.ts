@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response } from 'express';
 
-vi.mock('../db/queries/specs.js', () => ({
+vi.mock('../db/index.js', () => ({
   findSpecById: vi.fn(),
   updateSpec: vi.fn(),
 }));
@@ -19,13 +19,13 @@ function makeRes(): {
   return { status, json };
 }
 
-describe('getSpecHandler', () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
+beforeEach(() => {
+  vi.resetModules();
+});
 
+describe('getSpecHandler', () => {
   it('returns 200 with CsiTree when spec exists', async () => {
-    const { findSpecById } = await import('../db/queries/specs.js');
+    const { findSpecById } = await import('../db/index.js');
     vi.mocked(findSpecById).mockResolvedValueOnce({
       id: 'abc',
       section: '27 21 00',
@@ -43,7 +43,7 @@ describe('getSpecHandler', () => {
   });
 
   it('returns 404 when spec not found', async () => {
-    const { findSpecById } = await import('../db/queries/specs.js');
+    const { findSpecById } = await import('../db/index.js');
     vi.mocked(findSpecById).mockResolvedValueOnce(null);
     const { getSpecHandler } = await import('./specs.js');
     const req = { params: { id: 'missing' } } as unknown as Request;
@@ -55,7 +55,7 @@ describe('getSpecHandler', () => {
   });
 
   it('returns 500 on database error', async () => {
-    const { findSpecById } = await import('../db/queries/specs.js');
+    const { findSpecById } = await import('../db/index.js');
     vi.mocked(findSpecById).mockRejectedValueOnce(new Error('db down'));
     const { getSpecHandler } = await import('./specs.js');
     const req = { params: { id: 'abc' } } as unknown as Request;
@@ -63,25 +63,28 @@ describe('getSpecHandler', () => {
     await getSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(500);
   });
+
+  it('returns 400 when id param is missing', async () => {
+    const { getSpecHandler } = await import('./specs.js');
+    const req = { params: {} } as unknown as Request;
+    const res = makeRes();
+    await getSpecHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['error']).toBe('missing spec id');
+  });
 });
 
 describe('updateSpecHandler', () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
-
   it('returns 200 with SpecSummary when update succeeds', async () => {
-    const { updateSpec } = await import('../db/queries/specs.js');
+    const { updateSpec } = await import('../db/index.js');
     vi.mocked(updateSpec).mockResolvedValueOnce({
       specId: 'abc',
       title: 'New Title',
       section: '27 21 00',
     });
     const { updateSpecHandler } = await import('./specs.js');
-    const req = {
-      params: { id: 'abc' },
-      body: { title: 'New Title' },
-    } as unknown as Request;
+    const req = { params: { id: 'abc' }, body: { title: 'New Title' } } as unknown as Request;
     const res = makeRes();
     await updateSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(200);
@@ -90,25 +93,32 @@ describe('updateSpecHandler', () => {
   });
 
   it('returns 404 when spec not found', async () => {
-    const { updateSpec } = await import('../db/queries/specs.js');
+    const { updateSpec } = await import('../db/index.js');
     vi.mocked(updateSpec).mockResolvedValueOnce(null);
     const { updateSpecHandler } = await import('./specs.js');
-    const req = {
-      params: { id: 'missing' },
-      body: { title: 'x' },
-    } as unknown as Request;
+    const req = { params: { id: 'missing' }, body: { title: 'x' } } as unknown as Request;
     const res = makeRes();
     await updateSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(404);
   });
 
   it('returns 500 on database error', async () => {
-    const { updateSpec } = await import('../db/queries/specs.js');
+    const { updateSpec } = await import('../db/index.js');
     vi.mocked(updateSpec).mockRejectedValueOnce(new Error('db down'));
     const { updateSpecHandler } = await import('./specs.js');
     const req = { params: { id: 'abc' }, body: {} } as unknown as Request;
     const res = makeRes();
     await updateSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(500);
+  });
+
+  it('returns 400 when id param is missing', async () => {
+    const { updateSpecHandler } = await import('./specs.js');
+    const req = { params: {}, body: { title: 'x' } } as unknown as Request;
+    const res = makeRes();
+    await updateSpecHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['error']).toBe('missing spec id');
   });
 });

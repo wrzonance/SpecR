@@ -5,7 +5,6 @@ interface SpecRow {
   readonly id: string;
   readonly section: string | null;
   readonly title: string | null;
-  readonly source: string | null;
 }
 
 interface UpdateRow {
@@ -27,10 +26,9 @@ export interface UpdateSpecInput {
 
 export async function findSpecById(id: string): Promise<CsiTree | null> {
   try {
-    const result = await pool.query<SpecRow>(
-      'SELECT id, section, title, source FROM specs WHERE id = $1',
-      [id]
-    );
+    const result = await pool.query<SpecRow>('SELECT id, section, title FROM specs WHERE id = $1', [
+      id,
+    ]);
     const row = result.rows[0];
     if (!row) return null;
     return { id: row.id, section: row.section ?? '', title: row.title ?? '', parts: [] };

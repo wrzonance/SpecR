@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { findSpecById, updateSpec } from '../db/queries/specs.js';
+import { findSpecById, updateSpec } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 
 export async function getSpecHandler(req: Request, res: Response): Promise<void> {
