@@ -1,7 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pool } from './index.js';
-import { logger } from '../lib/logger.js';
+import { fileURLToPath } from 'node:url';
 
 const UFGS_DIR = join(process.cwd(), 'docs/references/UFGS');
 
@@ -32,7 +31,7 @@ async function collectDivisionRecords(divPath: string): Promise<SectionRecord[]>
   const records: SectionRecord[] = [];
 
   for (const file of files) {
-    if (!file.endsWith('.SEC')) continue;
+    if (!file.toLowerCase().endsWith('.sec')) continue;
     const content = await readFile(join(divPath, file), 'latin1');
     const record = extractSectionMeta(content);
     if (record !== null) records.push(record);
@@ -55,6 +54,9 @@ async function collectRecords(): Promise<SectionRecord[]> {
 }
 
 async function seed(): Promise<void> {
+  const { pool } = await import('./index.js');
+  const { logger } = await import('../lib/logger.js');
+
   logger.info('seeding CSI section reference data');
 
   const records = await collectRecords();
@@ -73,7 +75,11 @@ async function seed(): Promise<void> {
   await pool.end();
 }
 
-seed().catch((err: unknown) => {
-  logger.error({ err }, 'seed failed');
-  process.exit(1);
-});
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain) {
+  seed().catch(async (err: unknown) => {
+    const { logger } = await import('../lib/logger.js');
+    logger.error({ err }, 'seed failed');
+    process.exit(1);
+  });
+}

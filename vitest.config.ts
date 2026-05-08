@@ -27,10 +27,6 @@ export default defineConfig({
           environment: 'node',
           include: ['src/**/*.test.ts'],
           exclude: ['src/**/*.integration.test.ts'],
-          env: {
-            DATABASE_URL: 'postgres://specr:specr@localhost:5432/specr_test',
-            NODE_ENV: 'test',
-          },
         },
       },
       {
