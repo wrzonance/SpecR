@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { NodeTypeSchema, CsiTreeSchema } from './schemas.js';
+import {
+  NodeTypeSchema,
+  CsiNodeMetaSchema,
+  CsiTreeSchema,
+  PatchSpecBodySchema,
+} from './schemas.js';
 
 const VALID_NODE_TYPES = [
   'spec',
@@ -94,5 +99,50 @@ describe('CsiTreeSchema — invalid inputs', () => {
         parts: [],
       })
     ).toThrow();
+  });
+});
+
+describe('CsiNodeMetaSchema', () => {
+  it('accepts empty meta', () => {
+    expect(CsiNodeMetaSchema.parse({})).toEqual({});
+  });
+
+  it('accepts fully populated meta', () => {
+    const result = CsiNodeMetaSchema.parse({
+      vanish: true,
+      source: 'ufgs',
+      revitParam: 'Manufacturer',
+      baseVersion: 1,
+    });
+    expect(result.vanish).toBe(true);
+    expect(result.source).toBe('ufgs');
+  });
+
+  it('rejects unknown source value', () => {
+    expect(() => CsiNodeMetaSchema.parse({ source: 'unknown-vendor' })).toThrow();
+  });
+});
+
+describe('PatchSpecBodySchema', () => {
+  it('accepts empty object (no-op patch)', () => {
+    expect(PatchSpecBodySchema.parse({})).toEqual({});
+  });
+
+  it('accepts title-only patch', () => {
+    const result = PatchSpecBodySchema.parse({ title: 'New Title' });
+    expect(result.title).toBe('New Title');
+  });
+
+  it('accepts section-only patch', () => {
+    const result = PatchSpecBodySchema.parse({ section: '27 21 00' });
+    expect(result.section).toBe('27 21 00');
+  });
+
+  it('rejects empty string title', () => {
+    expect(() => PatchSpecBodySchema.parse({ title: '' })).toThrow();
+  });
+
+  it('rejects malformed section', () => {
+    expect(() => PatchSpecBodySchema.parse({ section: '27210' })).toThrow();
   });
 });

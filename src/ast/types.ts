@@ -1,14 +1,7 @@
-export type NodeType =
-  | 'spec'
-  | 'part'
-  | 'article'
-  | 'pr1'
-  | 'pr2'
-  | 'pr3'
-  | 'pr4'
-  | 'pr5'
-  | 'note'
-  | 'continuation';
+import { z } from 'zod';
+import { NodeTypeSchema } from './schemas.js';
+
+export type NodeType = z.infer<typeof NodeTypeSchema>;
 
 export interface CsiNodeMeta {
   readonly vanish?: boolean;

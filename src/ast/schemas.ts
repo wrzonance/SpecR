@@ -25,7 +25,7 @@ export const CsiNodeSchema: z.ZodType<CsiNode> = z.lazy(() =>
   z.object({
     id: z.uuid(),
     type: NodeTypeSchema,
-    text: z.string(),
+    text: z.string().check(z.minLength(1)),
     children: z.array(CsiNodeSchema),
     meta: CsiNodeMetaSchema,
   })
