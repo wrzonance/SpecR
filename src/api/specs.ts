@@ -1,12 +1,10 @@
 import type { Request, Response } from 'express';
 import { findSpecById, updateSpec } from '../db/queries/specs.js';
-import type { UpdateSpecInput } from '../db/queries/specs.js';
 import { logger } from '../lib/logger.js';
 
 export async function getSpecHandler(req: Request, res: Response): Promise<void> {
-  const idParam = req.params['id'];
-  const id = Array.isArray(idParam) ? idParam[0] : idParam;
-  if (!id) {
+  const id = req.params['id'];
+  if (!id || typeof id !== 'string') {
     res.status(400).json({ success: false, error: 'missing spec id' });
     return;
   }
@@ -24,14 +22,13 @@ export async function getSpecHandler(req: Request, res: Response): Promise<void>
 }
 
 export async function updateSpecHandler(req: Request, res: Response): Promise<void> {
-  const idParam = req.params['id'];
-  const id = Array.isArray(idParam) ? idParam[0] : idParam;
-  if (!id) {
+  const id = req.params['id'];
+  if (!id || typeof id !== 'string') {
     res.status(400).json({ success: false, error: 'missing spec id' });
     return;
   }
   try {
-    const body = req.body as UpdateSpecInput;
+    const body = req.body as { readonly title?: string; readonly section?: string };
     const spec = await updateSpec(id, body);
     if (!spec) {
       res.status(404).json({ success: false, error: 'spec not found' });
