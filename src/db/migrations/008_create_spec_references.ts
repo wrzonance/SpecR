@@ -4,7 +4,12 @@ export const up = (pgm: MigrationBuilder): void => {
   pgm.createTable('spec_references', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
     source_spec_id: { type: 'uuid', notNull: true, references: 'specs', onDelete: 'CASCADE' },
-    source_paragraph_id: { type: 'uuid', notNull: true, references: 'paragraphs', onDelete: 'CASCADE' },
+    source_paragraph_id: {
+      type: 'uuid',
+      notNull: true,
+      references: 'paragraphs',
+      onDelete: 'CASCADE',
+    },
     target_type: { type: 'varchar(20)', notNull: true },
     target_spec_section: { type: 'varchar(20)' },
     target_spec_id: { type: 'uuid', references: 'specs', onDelete: 'SET NULL' },

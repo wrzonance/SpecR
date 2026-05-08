@@ -9,7 +9,11 @@ export const up = (pgm: MigrationBuilder): void => {
   });
   pgm.addConstraint('project_specs', 'project_specs_pkey', 'PRIMARY KEY (project_id, spec_id)');
   pgm.createIndex('project_specs', 'spec_id');
-  pgm.addConstraint('project_specs', 'project_specs_project_position_unique', 'UNIQUE (project_id, position)');
+  pgm.addConstraint(
+    'project_specs',
+    'project_specs_project_position_unique',
+    'UNIQUE (project_id, position)'
+  );
 };
 
 export const down = (pgm: MigrationBuilder): void => {
