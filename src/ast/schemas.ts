@@ -18,7 +18,7 @@ export const CsiNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
   source: z.enum(['ufgs', 'arcat', 'masterspec', 'unknown']).exactOptional(),
   revitParam: z.string().exactOptional(),
-  baseVersion: z.number().int().positive().exactOptional(),
+  baseVersion: z.number().int().nonnegative().exactOptional(),
 });
 
 export const CsiNodeSchema: z.ZodType<CsiNode> = z.lazy(() =>

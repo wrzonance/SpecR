@@ -53,14 +53,23 @@ describe('CsiTreeSchema — valid inputs', () => {
           id: '660e8400-e29b-41d4-a716-446655440001',
           type: 'part',
           text: 'GENERAL',
-          children: [],
+          children: [
+            {
+              id: '770e8400-e29b-41d4-a716-446655440002',
+              type: 'article',
+              text: 'Scope',
+              children: [],
+              meta: {},
+            },
+          ],
           meta: {},
         },
       ],
     };
     const result = CsiTreeSchema.parse(input);
     expect(result.parts).toHaveLength(1);
-    expect(result.parts[0]?.type).toBe('part');
+    expect(result.parts[0]?.children).toHaveLength(1);
+    expect(result.parts[0]?.children[0]?.type).toBe('article');
   });
 });
 
