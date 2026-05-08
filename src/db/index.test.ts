@@ -1,7 +1,16 @@
-import { describe, it, expect, vi } from 'vitest';
-import { DatabaseError } from './index.js';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 
-// Mock pg Pool before importing db module
+// Provide required env vars before any module evaluation
+vi.mock('../lib/env.js', () => ({
+  config: {
+    PORT: 3000,
+    DATABASE_URL: 'postgres://test:test@localhost:5432/test',
+    NODE_ENV: 'test',
+    LOG_LEVEL: 'info',
+  },
+}));
+
+// Mock pg Pool — hoisted before static imports
 vi.mock('pg', () => {
   const mockPool = {
     query: vi.fn(),
@@ -15,12 +24,19 @@ vi.mock('pg', () => {
   return { Pool: MockPool };
 });
 
+import { DatabaseError } from './index.js';
+
 describe('db/index', () => {
   describe('pingDatabase', () => {
-    it('calls pool.query with SELECT 1', async () => {
+    let mockPool: { query: ReturnType<typeof vi.fn> };
+
+    beforeAll(async () => {
       const { Pool } = await import('pg');
+      mockPool = new Pool() as unknown as { query: ReturnType<typeof vi.fn> };
+    });
+
+    it('calls pool.query with SELECT 1', async () => {
       const { pingDatabase } = await import('./index.js');
-      const mockPool = new Pool() as unknown as { query: ReturnType<typeof vi.fn> };
       mockPool.query.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] });
 
       await pingDatabase(mockPool as never);
@@ -28,18 +44,14 @@ describe('db/index', () => {
     });
 
     it('throws DatabaseError when query fails', async () => {
-      const { Pool } = await import('pg');
       const { pingDatabase } = await import('./index.js');
-      const mockPool = new Pool() as unknown as { query: ReturnType<typeof vi.fn> };
       mockPool.query.mockRejectedValueOnce(new Error('connection refused'));
 
       await expect(pingDatabase(mockPool as never)).rejects.toThrow(DatabaseError);
     });
 
     it('DatabaseError carries original error as cause', async () => {
-      const { Pool } = await import('pg');
       const { pingDatabase } = await import('./index.js');
-      const mockPool = new Pool() as unknown as { query: ReturnType<typeof vi.fn> };
       const originalError = new Error('ECONNREFUSED');
       mockPool.query.mockRejectedValueOnce(originalError);
 
