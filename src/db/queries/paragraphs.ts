@@ -1,6 +1,10 @@
 import { DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
 import type { CsiNode, CsiTree } from '../../ast/types.js';
+
+interface Queryable {
+  query: Pool['query'];
+}
 import { logger } from '../../lib/logger.js';
 
 interface FlatRow {
@@ -26,14 +30,14 @@ function flattenDfs(
       parentId,
       nodeType: node.type,
       text: node.text,
-      position: idx,
+      position: idx + 1,
       vanish: node.meta.vanish ?? false,
     });
     flattenDfs(node.children, specId, node.id, rows);
   });
 }
 
-export async function insertTree(tree: CsiTree, specId: string, pool: Pool): Promise<void> {
+export async function insertTree(tree: CsiTree, specId: string, pool: Queryable): Promise<void> {
   const rows: FlatRow[] = [];
   flattenDfs(tree.parts, specId, null, rows);
 

@@ -1,19 +1,23 @@
 import { DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
 import type { SecRef } from '../../parser/index.js';
+
+interface Queryable {
+  query: Pool['query'];
+}
 import { logger } from '../../lib/logger.js';
 
 export async function insertRefs(
   refs: readonly SecRef[],
   specId: string,
-  pool: Pool
+  pool: Queryable
 ): Promise<void> {
   if (refs.length === 0) {
     return;
   }
 
-  try {
-    for (const ref of refs) {
+  for (const ref of refs) {
+    try {
       let targetSpecId: string | null = null;
 
       if (ref.targetType === 'section' && ref.targetSpecSection) {
@@ -39,10 +43,12 @@ export async function insertRefs(
           ref.referenceText,
         ]
       );
+    } catch (err) {
+      throw new DatabaseError(`insertRefs: failed on ref ${ref.sourceNodeId} (${ref.targetType})`, {
+        cause: err,
+      });
     }
-
-    logger.info({ specId, count: refs.length }, 'insertRefs: references inserted');
-  } catch (err) {
-    throw new DatabaseError('failed to insert spec references', { cause: err });
   }
+
+  logger.info({ specId, count: refs.length }, 'insertRefs: references inserted');
 }

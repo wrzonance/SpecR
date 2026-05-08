@@ -125,6 +125,47 @@ describe('insertTree — empty tree', () => {
   });
 });
 
+describe('insertTree — 1-based position', () => {
+  const SIMPLE_TREE = {
+    id: 'tree-pos',
+    section: '01 00 00',
+    title: 'General',
+    parts: [
+      {
+        id: 'part-pos-1',
+        type: 'part' as const,
+        text: 'PART 1',
+        children: [],
+        meta: { source: 'ufgs' as const },
+      },
+      {
+        id: 'part-pos-2',
+        type: 'part' as const,
+        text: 'PART 2',
+        children: [],
+        meta: { source: 'ufgs' as const },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it('uses 1-based position for sibling ordering', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValue({ rows: [] } as never);
+    const { insertTree } = await import('./paragraphs.js');
+    await insertTree(SIMPLE_TREE, 'spec-uuid-1', pool);
+    const firstInsert = vi
+      .mocked(pool.query)
+      .mock.calls.find((c) => typeof c[0] === 'string' && c[0].includes('INSERT INTO paragraphs'));
+    // position is $6 (index 5 in params array)
+    expect(firstInsert?.[1]?.[5]).toBe(1);
+  });
+});
+
 describe('insertTree — error handling', () => {
   beforeEach(() => {
     vi.resetModules();
