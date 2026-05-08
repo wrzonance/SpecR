@@ -25,3 +25,5 @@ pool.on('error', (err: Error) => {
 
 export { findSpecById, updateSpec } from './queries/specs.js';
 export type { SpecSummary, UpdateSpecInput } from './queries/specs.js';
+export { insertTree } from './queries/paragraphs.js';
+export { insertRefs } from './queries/refs.js';
