@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Pool } from 'pg';
 
 const UFGS_DIR = join(process.cwd(), 'docs/references/UFGS');
 
@@ -53,7 +54,7 @@ async function collectRecords(): Promise<SectionRecord[]> {
   return all;
 }
 
-async function seed(pool: { query: (...args: unknown[]) => Promise<unknown> }): Promise<void> {
+async function seed(pool: Pool): Promise<void> {
   const { logger } = await import('../lib/logger.js');
   const { DatabaseError } = await import('./index.js');
 
