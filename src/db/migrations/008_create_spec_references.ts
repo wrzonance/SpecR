@@ -15,6 +15,7 @@ export const up = (pgm: MigrationBuilder): void => {
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   pgm.createIndex('spec_references', 'source_spec_id');
+  pgm.createIndex('spec_references', 'source_paragraph_id');
   pgm.createIndex('spec_references', 'target_spec_id');
   pgm.createIndex('spec_references', 'target_spec_section');
   pgm.createIndex('spec_references', ['is_broken'], { where: 'is_broken = true' });
