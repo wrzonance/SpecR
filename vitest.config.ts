@@ -16,6 +16,8 @@ export default defineConfig({
         'src/**/*.d.ts',
         'src/index.ts', // app bootstrap — covered by integration tests, not unit tests
         'src/api/router.ts', // pure wiring, no branch logic
+        'src/db/migrations/**', // run by migration CLI, not test suite
+        'src/db/seed.ts', // CLI script — run directly, not by test suite
       ],
     },
     projects: [
