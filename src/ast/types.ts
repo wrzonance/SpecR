@@ -24,3 +24,11 @@ export interface CsiTree {
   readonly title: string;
   readonly parts: readonly CsiNode[];
 }
+
+export interface SecRef {
+  readonly sourceNodeId: string;
+  readonly targetType: 'section' | 'standard';
+  readonly targetSpecSection?: string;
+  readonly standardCode?: string;
+  readonly referenceText: string;
+}

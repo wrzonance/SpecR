@@ -9,7 +9,7 @@ export interface NteNode {
 export interface RefNode {
   readonly ORG?: string;
   readonly RID?: string | readonly string[];
-  readonly RTL?: string;
+  readonly RTL?: readonly string[];
 }
 
 export interface SptNode {

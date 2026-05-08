@@ -37,5 +37,13 @@ export default defineConfig(
       '@typescript-eslint/unbound-method': 'off',
     },
   },
+  // scripts/ are CLI entry points — console.log is the intended output mechanism.
+  // They are excluded from tsconfig.json so type-checked rules don't apply.
+  {
+    files: ['scripts/**/*.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
   eslintConfigPrettier,
 )

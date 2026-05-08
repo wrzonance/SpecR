@@ -1,16 +1,10 @@
 import { XMLParser } from 'fast-xml-parser';
 import { v4 as uuidv4 } from 'uuid';
-import type { CsiNode, CsiTree, NodeType } from '../../ast/types.js';
+import type { CsiNode, CsiTree, NodeType, SecRef } from '../../ast/types.js';
 import { ParserError } from '../error.js';
 import type { NteNode, PrtNode, RefNode, SptNode } from './elements.js';
 
-export interface SecRef {
-  readonly sourceNodeId: string;
-  readonly targetType: 'section' | 'standard';
-  readonly targetSpecSection?: string;
-  readonly standardCode?: string;
-  readonly referenceText: string;
-}
+export type { SecRef };
 
 export interface ParsedSec {
   readonly tree: CsiTree;
@@ -26,7 +20,7 @@ const xmlParser = new XMLParser({
   attributeNamePrefix: '@_',
   textNodeName: '#text',
   isArray: (name) =>
-    ['PRT', 'SPT', 'NTE', 'NPR', 'TXT', 'LST', 'ITM', 'REF', 'RID', 'OLI'].includes(name),
+    ['PRT', 'SPT', 'NTE', 'NPR', 'TXT', 'LST', 'ITM', 'REF', 'RID', 'RTL', 'OLI'].includes(name),
   stopNodes: STOP_NODES,
   trimValues: true,
   processEntities: false,
@@ -112,11 +106,15 @@ function buildStandardRef(articleId: string, code: string, rtl: string): SecRef 
 }
 
 function pushRefsForRids(refs: SecRef[], articleId: string, ref: RefNode): void {
-  const rtl = typeof ref.RTL === 'string' ? ref.RTL.trim() : '';
-  for (const rid of toArray(ref.RID)) {
+  const rids = toArray(ref.RID);
+  const rtls = ref.RTL ?? [];
+  rids.forEach((rid, i) => {
     const code = typeof rid === 'string' ? rid.trim() : '';
-    if (code) refs.push(buildStandardRef(articleId, code, rtl));
-  }
+    if (!code) return;
+    const rtlEntry = rtls[i];
+    const rtl = typeof rtlEntry === 'string' ? rtlEntry.trim() : '';
+    refs.push(buildStandardRef(articleId, code, rtl));
+  });
 }
 
 function pushStandardRefs(refs: SecRef[], articleId: string, refNodes: readonly RefNode[]): void {

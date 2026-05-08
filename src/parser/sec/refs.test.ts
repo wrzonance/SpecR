@@ -60,6 +60,16 @@ describe('standard refs (REF/RID)', () => {
     expect(nfpa70?.referenceText).toContain('National Electrical Code');
   });
 
+  it('pairs each RID with its own RTL in multi-RID REF blocks', () => {
+    const { refs } = parseSec(WITH_STANDARD_REFS);
+    const tia568 = refs.find((r) => r.standardCode === 'ANSI/TIA-568.1');
+    const tia569 = refs.find((r) => r.standardCode === 'ANSI/TIA-569');
+    expect(tia568?.referenceText).toContain(
+      'Commercial Building Telecommunications Infrastructure Standard'
+    );
+    expect(tia569?.referenceText).toContain('Telecommunications Pathways and Spaces');
+  });
+
   it('extracts standard codes from RID elements', () => {
     const { refs } = parseSec(WITH_STANDARD_REFS);
     const codes = refs.filter((r) => r.targetType === 'standard').map((r) => r.standardCode);

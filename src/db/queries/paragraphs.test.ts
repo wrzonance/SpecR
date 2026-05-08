@@ -195,4 +195,29 @@ describe('insertTree — error handling', () => {
 
     await expect(insertTree(tree, 'spec-uuid-1', pool)).rejects.toBeInstanceOf(DatabaseError);
   });
+
+  it('includes node id in error message on failure', async () => {
+    const { pool, DatabaseError } = await import('../index.js');
+    vi.mocked(pool.query).mockRejectedValueOnce(new Error('constraint violation'));
+
+    const { insertTree } = await import('./paragraphs.js');
+    const tree = {
+      id: 'tree-5',
+      section: '01 00 00',
+      title: 'General',
+      parts: [
+        {
+          id: 'part-uuid-1',
+          type: 'part' as const,
+          text: 'GENERAL',
+          children: [],
+          meta: { source: 'ufgs' as const },
+        },
+      ],
+    };
+
+    await expect(insertTree(tree, 'spec-uuid-1', pool)).rejects.toSatisfy(
+      (err) => err instanceof DatabaseError && err.message.includes('part-uuid-1')
+    );
+  });
 });

@@ -46,16 +46,16 @@ export async function insertTree(tree: CsiTree, specId: string, pool: Queryable)
     return;
   }
 
-  try {
-    for (const row of rows) {
+  for (const row of rows) {
+    try {
       await pool.query(
         `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position, vanish)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [row.id, row.specId, row.parentId, row.nodeType, row.text, row.position, row.vanish]
       );
+    } catch (err) {
+      throw new DatabaseError(`insertTree: failed to insert paragraph ${row.id}`, { cause: err });
     }
-    logger.info({ specId, count: rows.length }, 'insertTree: paragraphs inserted');
-  } catch (err) {
-    throw new DatabaseError('failed to insert paragraph tree', { cause: err });
   }
+  logger.info({ specId, count: rows.length }, 'insertTree: paragraphs inserted');
 }

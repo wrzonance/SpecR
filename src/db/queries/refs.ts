@@ -1,6 +1,6 @@
 import { DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
-import type { SecRef } from '../../parser/index.js';
+import type { SecRef } from '../../ast/types.js';
 
 interface Queryable {
   query: Pool['query'];
