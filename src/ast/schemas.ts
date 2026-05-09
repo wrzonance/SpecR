@@ -45,3 +45,16 @@ export const PatchSpecBodySchema = z.object({
     .regex(/^\d{2} \d{2} \d{2}$/)
     .exactOptional(),
 });
+
+export const CreateProjectBodySchema = z.object({
+  name: z.string().check(z.minLength(1)),
+  description: z.string().check(z.minLength(1)).exactOptional(),
+});
+
+export type CreateProjectBody = z.infer<typeof CreateProjectBodySchema>;
+
+export const AddSpecToProjectBodySchema = z.object({
+  specId: z.uuid(),
+});
+
+export type AddSpecToProjectBody = z.infer<typeof AddSpecToProjectBodySchema>;

@@ -5,4 +5,7 @@ export {
   CsiNodeSchema,
   CsiTreeSchema,
   PatchSpecBodySchema,
+  CreateProjectBodySchema,
+  AddSpecToProjectBodySchema,
 } from './schemas.js';
+export type { CreateProjectBody, AddSpecToProjectBody } from './schemas.js';
