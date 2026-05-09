@@ -59,7 +59,7 @@ This is an opt-in advanced workflow, not the default. The DOCX round-trip (ADR-0
 
 ## Consequences
 
-- **Markdown output is a prerequisite.** ADR-008 deferred Markdown to Phase 6; ADR-010 (MCP) already pulled it forward to Phase 2. Git sync further validates that decision — Markdown must exist before git sync can ship.
+- **Markdown output is a prerequisite.** ADR-008 deferred Markdown to Phase 6; ADR-010 (Model Context Protocol) already pulled it forward to Phase 2. Git sync further validates that decision — Markdown must exist before git sync can ship.
 - **No git dependency in Phase 0–5.** Git sync is Phase 6. No git client library enters the dependency graph before then. The DB schema and AST design must not be designed *around* git, but they already support it because the AST is plain text.
 - **Org credentials are org-owned.** SpecR never holds a GitHub token with write access beyond the org's designated repo. The token is stored encrypted per-org, not shared.
 - **DB is always recoverable from git.** The JSON serialization is lossless — if the database is lost, all spec content can be restored by importing from the git repo. This is a disaster recovery property, not a normal operational path.
