@@ -125,42 +125,37 @@ export async function addSpecToProject(
   specId: string,
   pool: Queryable
 ): Promise<AddSpecResult> {
-  let position: number;
   try {
     const result = await pool.query<{ spec_id: string; position: number }>(
-      `INSERT INTO project_specs (project_id, spec_id, position)
-       SELECT $1, $2, COALESCE(MAX(position), 0) + 1 FROM project_specs WHERE project_id = $1
-       RETURNING spec_id, position`,
+      `WITH spec_section AS (
+         SELECT section FROM specs WHERE id = $2
+       ),
+       inserted AS (
+         INSERT INTO project_specs (project_id, spec_id, position)
+         SELECT $1, $2, COALESCE(MAX(position), 0) + 1 FROM project_specs WHERE project_id = $1
+         RETURNING spec_id, position
+       ),
+       repaired AS (
+         UPDATE spec_references sr
+         SET target_spec_id = $2, is_broken = false
+         FROM project_specs ps, spec_section ss
+         WHERE sr.target_spec_section = ss.section
+           AND sr.is_broken = true
+           AND sr.source_spec_id = ps.spec_id
+           AND ps.project_id = $1
+           AND EXISTS (SELECT 1 FROM inserted)
+       )
+       SELECT spec_id, position FROM inserted`,
       [projectId, specId]
     );
     const row = result.rows[0];
     if (!row) throw new DatabaseError('addSpecToProject: no row returned after insert');
-    position = row.position;
+    logger.info({ projectId, specId, position: row.position }, 'addSpecToProject: spec added');
+    return { specId: row.spec_id, position: row.position };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
-    throw new DatabaseError(`addSpecToProject: insert failed for spec ${specId}`, { cause: err });
+    throw new DatabaseError(`addSpecToProject: failed for spec ${specId}`, { cause: err });
   }
-  try {
-    const specRes = await pool.query<{ section: string }>(
-      'SELECT section FROM specs WHERE id = $1',
-      [specId]
-    );
-    const section = specRes.rows[0]?.section;
-    if (section) {
-      await pool.query(
-        `UPDATE spec_references
-         SET target_spec_id = $1, is_broken = false
-         WHERE target_spec_section = $2 AND is_broken = true`,
-        [specId, section]
-      );
-    }
-  } catch (err) {
-    throw new DatabaseError(`addSpecToProject: ref resolution failed for spec ${specId}`, {
-      cause: err,
-    });
-  }
-  logger.info({ projectId, specId, position }, 'addSpecToProject: spec added to project');
-  return { specId, position };
 }
 
 export async function removeSpecFromProject(
@@ -174,8 +169,14 @@ export async function removeSpecFromProject(
          DELETE FROM project_specs WHERE project_id = $1 AND spec_id = $2 RETURNING spec_id
        ),
        mark_broken AS (
-         UPDATE spec_references SET is_broken = true
-         WHERE target_spec_id = $2 AND EXISTS (SELECT 1 FROM deleted)
+         UPDATE spec_references sr
+         SET is_broken = true
+         FROM project_specs ps
+         WHERE sr.target_spec_id = $2
+           AND sr.source_spec_id = ps.spec_id
+           AND ps.project_id = $1
+           AND sr.source_spec_id <> $2
+           AND EXISTS (SELECT 1 FROM deleted)
        )
        SELECT COUNT(*)::int AS deleted_count FROM deleted`,
       [projectId, specId]

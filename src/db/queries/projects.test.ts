@@ -83,16 +83,19 @@ describe('findProjectById', () => {
 });
 
 describe('addSpecToProject', () => {
-  it('returns AddSpecResult with atomic position from INSERT RETURNING', async () => {
+  it('returns AddSpecResult from single atomic CTE with project-scoped ref repair', async () => {
     const { pool } = await import('../index.js');
-    vi.mocked(pool.query)
-      .mockResolvedValueOnce({ rows: [{ spec_id: 'spec-1', position: 3 }], rowCount: 1 } as never)
-      .mockResolvedValueOnce({ rows: [{ section: '03 30 00' }], rowCount: 1 } as never)
-      .mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [{ spec_id: 'spec-1', position: 3 }],
+      rowCount: 1,
+    } as never);
     const { addSpecToProject } = await import('./projects.js');
     const result = await addSpecToProject('proj-1', 'spec-1', pool);
     expect(result.specId).toBe('spec-1');
     expect(result.position).toBe(3);
+    expect(vi.mocked(pool.query)).toHaveBeenCalledTimes(1);
+    const sql = (vi.mocked(pool.query).mock.calls[0]?.[0] as string) ?? '';
+    expect(sql).toContain('ps.project_id = $1');
   });
 
   it('throws DatabaseError when insert fails', async () => {
@@ -115,7 +118,7 @@ describe('removeSpecFromProject', () => {
     expect(result).toBe(false);
   });
 
-  it('marks broken refs atomically via CTE and returns true on success', async () => {
+  it('marks broken refs atomically, project-scoped, excluding removed spec itself', async () => {
     const { pool } = await import('../index.js');
     vi.mocked(pool.query).mockResolvedValueOnce({
       rows: [{ deleted_count: 1 }],
@@ -125,6 +128,9 @@ describe('removeSpecFromProject', () => {
     const result = await removeSpecFromProject('proj-1', 'spec-1', pool);
     expect(result).toBe(true);
     expect(vi.mocked(pool.query)).toHaveBeenCalledTimes(1);
+    const sql = (vi.mocked(pool.query).mock.calls[0]?.[0] as string) ?? '';
+    expect(sql).toContain('ps.project_id = $1');
+    expect(sql).toContain('source_spec_id <> $2');
   });
 
   it('throws DatabaseError when delete fails', async () => {

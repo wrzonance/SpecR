@@ -33,12 +33,41 @@ async function postJSON(path: string, body: unknown): Promise<Response> {
   });
 }
 
+async function insertParagraph(specId: string, text: string): Promise<string> {
+  const r = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, node_type, text, position) VALUES ($1, 'article', $2, 1) RETURNING id`,
+    [specId, text]
+  );
+  const row = r.rows[0];
+  if (!row) throw new Error('failed to insert paragraph');
+  return row.id;
+}
+
+async function insertRef(
+  sourceSpecId: string,
+  sourceParaId: string,
+  section: string,
+  targetSpecId: string,
+  text: string
+): Promise<string> {
+  const r = await pool.query<{ id: string }>(
+    `INSERT INTO spec_references
+       (source_spec_id, source_paragraph_id, target_type, target_spec_section, target_spec_id, reference_text)
+     VALUES ($1, $2, 'section', $3, $4, $5) RETURNING id`,
+    [sourceSpecId, sourceParaId, section, targetSpecId, text]
+  );
+  const row = r.rows[0];
+  if (!row) throw new Error('failed to insert ref');
+  return row.id;
+}
+
 let server: Server;
 let baseUrl: string;
 let testProjectId: string;
 let specA: string;
 let specB: string;
 let refId: string;
+let reverseRefId: string;
 
 beforeAll(async () => {
   const app = express();
@@ -61,22 +90,14 @@ beforeAll(async () => {
     `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1,$2,1),($1,$3,2)`,
     [testProjectId, specA, specB]
   );
-  const p = await pool.query<{ id: string }>(
-    `INSERT INTO paragraphs (spec_id, node_type, text, position)
-     VALUES ($1, 'article', 'See Section 09 91 00', 1) RETURNING id`,
-    [specA]
-  );
-  const para = p.rows[0];
-  if (!para) throw new Error('failed to insert paragraph');
-  const r = await pool.query<{ id: string }>(
-    `INSERT INTO spec_references
-       (source_spec_id, source_paragraph_id, target_type, target_spec_section, target_spec_id, reference_text)
-     VALUES ($1, $2, 'section', $3, $4, $5) RETURNING id`,
-    [specA, para.id, '09 91 00', specB, 'See Section 09 91 00']
-  );
-  const ref = r.rows[0];
-  if (!ref) throw new Error('failed to insert ref');
-  refId = ref.id;
+  const [paraAId, paraBId] = await Promise.all([
+    insertParagraph(specA, 'See Section 09 91 00'),
+    insertParagraph(specB, 'See Section 03 30 00'),
+  ]);
+  [refId, reverseRefId] = await Promise.all([
+    insertRef(specA, paraAId, '09 91 00', specB, 'See Section 09 91 00'),
+    insertRef(specB, paraBId, '03 30 00', specA, 'See Section 03 30 00'),
+  ]);
 });
 
 afterAll(async () => {
@@ -205,6 +226,14 @@ describe('DELETE from TOC (broken ref cascade)', () => {
       [refId]
     );
     expect(row.rows[0]?.is_broken).toBe(true);
+  });
+
+  it("removed spec's own outgoing refs are not marked broken", async () => {
+    const row = await pool.query<{ is_broken: boolean }>(
+      'SELECT is_broken FROM spec_references WHERE id = $1',
+      [reverseRefId]
+    );
+    expect(row.rows[0]?.is_broken).toBe(false);
   });
 
   it('spec row still exists in library after TOC removal', async () => {
