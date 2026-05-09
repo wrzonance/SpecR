@@ -29,6 +29,7 @@ The technical challenge is not any single feature but the intersection of five r
 5. **Public domain first.** UFGS provides 666 spec files across all CSI divisions, hierarchy already explicit, no copyright friction. Seed the database before building the library management layer.
 6. **Phases are gates.** MVP proves round-trip. Each subsequent phase adds one integration. Don't skip gates.
 7. **AI-native from the start.** The canonical AST stores plain text — not OOXML encoding. Every design decision that makes the data readable to humans also makes it readable to LLMs. MCP exposure (ADR-010) is a natural consequence of this, not a retrofit.
+8. **Git-native versioning (future).** Once specs are serializable to pure text (JSON, Markdown, or SEC-XML), git becomes the natural version control layer — branching for master template, per-client template, and per-project tiers; commits for audit history; PRs for redline review. DOCX is an opaque binary and cannot participate. The canonical AST is the prerequisite: text-serializable AST unlocks direct GitHub/GitLab integration as a first-class feature. See ADR-011.
 
 ## Tech Stack
 
@@ -287,7 +288,69 @@ CREATE TABLE paragraph_versions (
   node_type VARCHAR(20),
   snapshot_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Projects own a TOC (ordered set of spec sections)
+CREATE TABLE projects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  description TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- TOC junction: which specs belong to which project, in what order
+CREATE TABLE project_specs (
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  spec_id    UUID REFERENCES specs(id)    ON DELETE RESTRICT,
+  position   INTEGER NOT NULL,            -- TOC display order
+  added_at   TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (project_id, spec_id)
+);
+
+-- Cross-references extracted at parse time
+-- target_spec_id resolved lazily (NULL = unresolved or broken)
+CREATE TABLE spec_references (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_spec_id      UUID REFERENCES specs(id)      ON DELETE CASCADE,
+  source_paragraph_id UUID REFERENCES paragraphs(id) ON DELETE CASCADE,
+  target_type         VARCHAR(20) NOT NULL,  -- 'section' | 'paragraph' | 'standard'
+  target_spec_section VARCHAR(20),           -- "09 91 00" — for section refs
+  target_spec_id      UUID REFERENCES specs(id)      ON DELETE SET NULL,
+  target_paragraph_id UUID REFERENCES paragraphs(id) ON DELETE SET NULL,
+  standard_code       TEXT,                  -- "ASTM C150" — for standard refs
+  reference_text      TEXT NOT NULL,         -- verbatim text from source paragraph
+  is_broken           BOOLEAN DEFAULT false, -- set true when target removed
+  created_at          TIMESTAMPTZ DEFAULT now()
+);
 ```
+
+## Cross-Reference Awareness
+
+Specs are not isolated documents — they form a web of dependencies within a project. SpecR must model and enforce this.
+
+### Reference types extracted at parse time
+
+| Type | Example | Source in .SEC |
+|------|---------|----------------|
+| Section | "See Section 09 91 00" | Text regex + `<REF>` blocks |
+| Standard | "ASTM C150", "UFC 3-580-01" | `<REF>` / `<RID>` elements |
+| Paragraph | "See paragraph 1.1 REFERENCES" | Text regex |
+
+All references land in `spec_references` at parse time. `target_spec_id` is resolved against the library; unresolved refs start with `is_broken = false` (target may not be loaded yet).
+
+### Two operation contexts — different cascade behaviors
+
+**TOC edit (intentional):** Spec manager edits the project table of contents. Removing a section is a deliberate act — no warning prompt. System auto-cascades: `spec_references` rows pointing to the removed section are deleted; surviving paragraphs that referenced it have their `is_broken` flag set to `true`. Re-adding the section restores the resolved `target_spec_id` and clears `is_broken`.
+
+**In-flight paragraph edit:** Granular changes during spec authoring. Broken references are flagged and surfaced via `GET /projects/:id/references/broken`. Spec writer resolves manually. 3-way merge history provides recovery if content was deleted by mistake.
+
+### Revit sync (Phase 4 hook point)
+
+When a Revit model sync pushes new Family Instance data, the system will surface:
+- Proposed Part 2 paragraph additions (new equipment → new product paragraphs)
+- Candidate new spec sections (new Revit category with no matching spec in TOC)
+
+These appear in the web dashboard as pending additions — not auto-applied. The spec manager approves or rejects. The `spec_references` model supports this: a Revit-sourced paragraph can carry references the same way parsed content does.
 
 ## Phased Delivery
 
@@ -299,11 +362,24 @@ CREATE TABLE paragraph_versions (
 - CI pipeline (lint + test + build + LOC check)
 
 ### Phase 1: Parser (Weeks 3–6)
+
+Sub-MVP 1a — UFGS parser + cross-reference model:
+- `projects` / `project_specs` / `spec_references` DB migrations (schema only, no API)
 - UFGS .SEC parser: SpecsIntact XML → canonical AST → PostgreSQL
-- DOCX numbering.xml analyzer (abstractNum → num → pStyle map)
-- DOCX styles.xml analyzer (basedOn chains, numPr-carrying styles)
-- 5-signal hierarchy inference engine
-- `POST /parse` endpoint
+- Cross-reference extraction at parse time → `spec_references` table
+- Bulk corpus loader: all 666 UFGS .SEC files → library namespace
+
+Sub-MVP 1b — Project + TOC API:
+- `POST /projects`, `GET /projects/:id`
+- TOC management: add/remove spec sections from a project
+- TOC-level cascade: removing a section auto-purges dangling `spec_references`, marks broken refs on remaining sections
+- `GET /projects/:id/references/broken` — surface broken refs for spec writer review
+
+Sub-MVP 1c — DOCX hierarchy inference:
+- DOCX `numbering.xml` analyzer (abstractNum → num → pStyle map)
+- DOCX `styles.xml` analyzer (basedOn chains, numPr-carrying styles)
+- 5-signal hierarchy inference engine (port of Clippit `ListItemRetriever`)
+- `POST /parse` endpoint (accepts .SEC and .docx)
 - Test against ARCAT fixtures (machine-generated, cleanest) first, MASTERSPEC second
 
 ### Phase 2: Generator + MCP Foundation (Weeks 5–7, overlaps Phase 1)

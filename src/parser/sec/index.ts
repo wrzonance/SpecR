@@ -1,0 +1,189 @@
+import { XMLParser } from 'fast-xml-parser';
+import { v4 as uuidv4 } from 'uuid';
+import type { CsiNode, CsiTree, NodeType, SecRef } from '../../ast/types.js';
+import { ParserError } from '../error.js';
+import type { NteNode, PrtNode, RefNode, SptNode } from './elements.js';
+
+export type { SecRef };
+
+export interface ParsedSec {
+  readonly tree: CsiTree;
+  readonly refs: readonly SecRef[];
+}
+
+// stopNodes: returns raw XML string instead of parsed object for mixed-content elements.
+// fast-xml-parser v5 requires wildcard-prefix syntax '*.ElementName' to match any parent.
+const STOP_NODES = ['*.TXT', '*.LST', '*.ITM', '*.NPR', '*.OLI', '*.TTL'];
+
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  textNodeName: '#text',
+  isArray: (name) =>
+    ['PRT', 'SPT', 'NTE', 'NPR', 'TXT', 'LST', 'ITM', 'REF', 'RID', 'RTL', 'OLI'].includes(name),
+  stopNodes: STOP_NODES,
+  trimValues: true,
+  processEntities: false,
+});
+
+// Split on '<' then drop the tag token (everything up to and including '>') from each piece.
+// Avoids regex backtracking concerns while preserving inter-tag text.
+function stripTags(raw: string): string {
+  return raw
+    .split('<')
+    .map((chunk, i) => (i === 0 ? chunk : chunk.slice(chunk.indexOf('>') + 1)))
+    .join(' ')
+    .replace(/[ \t\r\n]+/g, ' ')
+    .trim();
+}
+
+function extractSrfSections(raw: string): string[] {
+  return [...raw.matchAll(/<SRF>([^<]+)<\/SRF>/g)].map((m) => m[1]?.trim() ?? '').filter(Boolean);
+}
+
+function stripPartPrefix(raw: string): string {
+  return raw.replace(/^PART\s+\d+\s+[-–]?\s*/i, '').trim();
+}
+
+function toArray<T>(val: T | readonly T[] | undefined): readonly T[] {
+  if (val === undefined) return [];
+  return Array.isArray(val) ? (val as readonly T[]) : [val as T];
+}
+
+function makeNode(type: NodeType, text: string, children: CsiNode[], vanish?: boolean): CsiNode {
+  return {
+    id: uuidv4(),
+    type,
+    text: text.trim() || type,
+    children,
+    meta: { source: 'ufgs', ...(vanish === true ? { vanish: true } : {}) },
+  };
+}
+
+function walkNte(nte: NteNode): CsiNode[] {
+  return toArray(nte.NPR)
+    .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+    .map((raw) => makeNode('note', stripTags(raw), [], true));
+}
+
+function pushSrfRefs(raw: string, nodeId: string, refs: SecRef[]): void {
+  for (const sec of extractSrfSections(raw)) {
+    refs.push({
+      sourceNodeId: nodeId,
+      targetType: 'section',
+      targetSpecSection: sec,
+      referenceText: stripTags(raw).slice(0, 200),
+    });
+  }
+}
+
+function walkTextItems(
+  items: readonly (string | undefined)[],
+  type: NodeType,
+  children: CsiNode[],
+  refs: SecRef[]
+): void {
+  for (const raw of items) {
+    if (typeof raw !== 'string' || !raw.trim()) continue;
+    const node = makeNode(type, stripTags(raw), []);
+    children.push(node);
+    pushSrfRefs(raw, node.id, refs);
+  }
+}
+
+function walkOlg(spt: SptNode, children: CsiNode[], refs: SecRef[]): void {
+  if (!spt.OLG) return;
+  walkTextItems(toArray(spt.OLG.OLI), 'pr1', children, refs);
+}
+
+function buildStandardRef(articleId: string, code: string, rtl: string): SecRef {
+  return {
+    sourceNodeId: articleId,
+    targetType: 'standard',
+    standardCode: code,
+    referenceText: rtl ? `${code} ${rtl}` : code,
+  };
+}
+
+function pushRefsForRids(refs: SecRef[], articleId: string, ref: RefNode): void {
+  const rids = toArray(ref.RID);
+  const rtls = ref.RTL ?? [];
+  rids.forEach((rid, i) => {
+    const code = typeof rid === 'string' ? rid.trim() : '';
+    if (!code) return;
+    const rtlEntry = rtls[i];
+    const rtl = typeof rtlEntry === 'string' ? rtlEntry.trim() : '';
+    refs.push(buildStandardRef(articleId, code, rtl));
+  });
+}
+
+function pushStandardRefs(refs: SecRef[], articleId: string, refNodes: readonly RefNode[]): void {
+  for (const ref of refNodes) {
+    pushRefsForRids(refs, articleId, ref);
+  }
+}
+
+function walkSpt(spt: SptNode, refs: SecRef[]): CsiNode {
+  const ttlRaw = typeof spt.TTL === 'string' ? spt.TTL : '';
+  const children: CsiNode[] = [];
+
+  for (const nte of toArray(spt.NTE)) {
+    children.push(...walkNte(nte));
+  }
+  walkTextItems(toArray(spt.TXT), 'continuation', children, refs);
+  walkTextItems(toArray(spt.LST), 'pr1', children, refs);
+  walkTextItems(toArray(spt.ITM), 'pr2', children, refs);
+  walkOlg(spt, children, refs);
+  for (const nested of toArray(spt.SPT)) {
+    children.push(walkSpt(nested, refs));
+  }
+
+  const articleNode = makeNode('article', stripTags(ttlRaw) || 'UNTITLED', children);
+  pushStandardRefs(refs, articleNode.id, spt.REF ?? []);
+  return articleNode;
+}
+
+function walkPrt(prt: PrtNode, refs: SecRef[]): CsiNode {
+  const ttlRaw = typeof prt.TTL === 'string' ? prt.TTL : '';
+  const partChildren: CsiNode[] = [];
+
+  for (const nte of toArray(prt.NTE)) {
+    partChildren.push(...walkNte(nte));
+  }
+  for (const spt of toArray(prt.SPT)) {
+    partChildren.push(walkSpt(spt, refs));
+  }
+
+  return makeNode('part', stripPartPrefix(stripTags(ttlRaw)) || 'PART', partChildren);
+}
+
+function requireString(val: unknown, fieldName: string): string {
+  if (typeof val !== 'string' || !val.trim()) {
+    throw new ParserError(`SEC file missing <${fieldName}> element`);
+  }
+  return val.trim();
+}
+
+export function parseSec(xml: string): ParsedSec {
+  let root: unknown;
+  try {
+    root = xmlParser.parse(xml) as unknown;
+  } catch (err) {
+    throw new ParserError('failed to parse SEC XML', { cause: err });
+  }
+
+  const sec = (root as Record<string, unknown>)['SEC'] as Record<string, unknown> | undefined;
+  if (!sec) throw new ParserError('SEC root element not found');
+
+  const section = requireString(sec['SCN'], 'SCN')
+    .replace(/^SECTION\s+/i, '')
+    .trim();
+  const title = requireString(sec['STL'], 'STL');
+
+  const refs: SecRef[] = [];
+  const parts = toArray(sec['PRT'] as readonly PrtNode[] | undefined).map((prt) =>
+    walkPrt(prt, refs)
+  );
+
+  return { tree: { id: uuidv4(), section, title, parts }, refs };
+}

@@ -20,7 +20,8 @@
     "test:coverage": "vitest run --coverage",
     "migrate": "node-pg-migrate --tsx --migrations-dir src/db/migrations up",
     "migrate:down": "node-pg-migrate --tsx --migrations-dir src/db/migrations down 1",
-    "seed": "tsx src/db/seed.ts"
+    "seed": "tsx src/db/seed.ts",
+    "load:ufgs": "tsx scripts/load-ufgs.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

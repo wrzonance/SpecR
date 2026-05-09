@@ -1,4 +1,4 @@
-export type { NodeType, CsiNodeMeta, CsiNode, CsiTree } from './types.js';
+export type { NodeType, CsiNodeMeta, CsiNode, CsiTree, SecRef } from './types.js';
 export {
   NodeTypeSchema,
   CsiNodeMetaSchema,
