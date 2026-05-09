@@ -27,3 +27,18 @@ export { findSpecById, updateSpec } from './queries/specs.js';
 export type { SpecSummary, UpdateSpecInput } from './queries/specs.js';
 export { insertTree } from './queries/paragraphs.js';
 export { insertRefs } from './queries/refs.js';
+export {
+  createProject,
+  findProjectById,
+  addSpecToProject,
+  removeSpecFromProject,
+  getBrokenRefs,
+} from './queries/projects.js';
+export type {
+  ProjectSummary,
+  ProjectWithToc,
+  ProjectTocEntry,
+  BrokenRef,
+  CreateProjectInput,
+  AddSpecResult,
+} from './queries/projects.js';
