@@ -1,30 +1,43 @@
 version: 2
+
 updates:
-  - package-ecosystem: "npm"
-    directory: "/"
+  - package-ecosystem: npm
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
     open-pull-requests-limit: 10
     labels:
-      - "dependencies"
+      - dependencies
     commit-message:
       prefix: "chore(deps)"
     ignore:
       # Major version bumps for OOXML/DOCX libraries require manual review —
       # they may change numbering or content control behavior.
-      - dependency-name: "docx"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "jszip"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: docx
+        update-types:
+          - version-update:semver-major
+      - dependency-name: jszip
+        update-types:
+          - version-update:semver-major
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
 
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: weekly
+      day: monday
     open-pull-requests-limit: 5
     labels:
-      - "ci"
+      - ci
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
