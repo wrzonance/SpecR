@@ -179,3 +179,64 @@ describe('emptyNumberingMap', () => {
     expect(map.nums.size).toBe(0);
   });
 });
+
+describe('buildNumberingMap — missing optional fields', () => {
+  it('handles level with no lvlText or pStyle', () => {
+    const xml = `<?xml version="1.0"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+</w:numbering>`;
+    const map = buildNumberingMap(xml);
+    const lvl = map.abstractNums.get(0)?.levels[0];
+    expect(lvl?.lvlText).toBeUndefined();
+    expect(lvl?.pStyle).toBeUndefined();
+    expect(lvl?.start).toBeUndefined();
+  });
+
+  it('uses decimal as default numFmt when w:numFmt absent', () => {
+    const xml = `<?xml version="1.0"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0"/>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+</w:numbering>`;
+    const map = buildNumberingMap(xml);
+    expect(map.abstractNums.get(0)?.levels[0]?.numFmt).toBe('decimal');
+  });
+});
+
+describe('buildNumberingMap — lvlRestart and orphan num', () => {
+  it('handles level with lvlRestart', () => {
+    const xml = `<?xml version="1.0"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0">
+      <w:start w:val="1"/>
+      <w:numFmt w:val="decimal"/>
+      <w:lvlRestart w:val="0"/>
+    </w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+</w:numbering>`;
+    const map = buildNumberingMap(xml);
+    expect(map.abstractNums.get(0)?.levels[0]?.lvlRestart).toBe(0);
+  });
+
+  it('skips pStyleToNumId for num referencing missing abstractNum', () => {
+    const xml = `<?xml version="1.0"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:pStyle w:val="PRT"/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+  <w:num w:numId="2"><w:abstractNumId w:val="99"/></w:num>
+</w:numbering>`;
+    const map = buildNumberingMap(xml);
+    expect(map.pStyleToNumId.get('PRT')).toBe(1);
+    expect(map.nums.size).toBe(2);
+  });
+});
