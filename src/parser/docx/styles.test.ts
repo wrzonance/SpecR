@@ -158,8 +158,8 @@ describe('buildStyleMap — cycle guard', () => {
     const map = buildStyleMap(CYCLE_STYLES);
     expect(map.styles.size).toBe(2);
     expect(map.resolvedNumPr.get('B')).toEqual({ numId: 1, ilvl: 1 });
-    // A→B: depth guard fires before resolving A via cycle, so A may not resolve
-    // (implementation-defined). What matters: no infinite loop and B resolves.
+    // KNOWN AMBIGUITY: A→B cycle may leave A unresolved depending on guard traversal order.
+    // What matters: no infinite loop and B resolves.
     expect(map.resolvedNumPr.has('B')).toBe(true);
   });
 });
@@ -185,7 +185,7 @@ const LC_SUPPRESSION_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="
 </w:styles>`;
 
 describe('buildStyleMap — Clippit numId=0 chain stop', () => {
-  it('PR1lc with numId=0 has suppressesNumbering and no resolvedNumPr', () => {
+  it('styles: numId=0 stops inherited numbering for continuation style PR1lc', () => {
     // Regression: without chain stop, PR1lc inherits PR1's numPr → wrong node type
     const map = buildStyleMap(LC_SUPPRESSION_STYLES);
     expect(map.styles.get('PR1lc')?.suppressesNumbering).toBe(true);
@@ -193,7 +193,7 @@ describe('buildStyleMap — Clippit numId=0 chain stop', () => {
     expect(map.resolvedNumPr.has('PR1lc')).toBe(false);
   });
 
-  it('PR1 itself still resolves normally', () => {
+  it('styles: suppression on PR1lc does not affect PR1 resolution', () => {
     const map = buildStyleMap(LC_SUPPRESSION_STYLES);
     expect(map.resolvedNumPr.get('PR1')).toEqual({ numId: 1, ilvl: 4 });
   });
