@@ -130,9 +130,9 @@ ARCAT specs are **machine-generated** from ARCAT's content management system. Ev
 8: %9)          (lowerLetter: a), b), c))  [defined but unused]
 ```
 
-### CPI / MASTERSPEC (6 files, manufacturer specs using Deltek template)
+### Chatsworth Products Inc. / MASTERSPEC (6 files, manufacturer specs using Deltek template)
 
-CPI uses the MASTERSPEC template, which is the CSI standard format used by most professional spec writers. It's more sophisticated than ARCAT but introduces several complications.
+Chatsworth Products Inc. (CPI) is a telecom equipment manufacturer whose guide specs implement CSI MasterFormat using the MASTERSPEC template (a commercial spec-authoring system by Deltek/ARCOM). MASTERSPEC is the most widely used commercial tool for producing CSI MasterFormat–compliant specifications. It's more sophisticated than ARCAT but introduces several complications.
 
 **Key patterns:**
 - Style naming follows MASTERSPEC convention: `PRT`, `ART`, `PR1`-`PR5`, `SCT`, `EOS`, `CMT`

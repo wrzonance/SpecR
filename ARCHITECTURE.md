@@ -503,7 +503,7 @@ specr/
 ### Specifications Analyzed
 - `docs/references/UFGS/` — 666 .SEC files (SpecsIntact XML), 31 divisions, public domain
 - ARCAT — 23 DOCX files (machine-generated, cleanest). See `docs/references/ARCAT/README.md`.
-- CPI/MASTERSPEC — 6 DOCX files (MASTERSPEC template). See `docs/references/MANUFACTURER_CPI/README.md`.
+- Chatsworth Products Inc. (CPI) — 6 DOCX files (telecom equipment manufacturer specs implementing CSI MasterFormat via MASTERSPEC template). See `docs/references/MANUFACTURER_CPI/README.md`.
 
 ### Key Libraries
 - dolanmiu/docx (TS, MIT): DOCX generation
