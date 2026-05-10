@@ -6,7 +6,7 @@ Headless REST API for CSI MasterFormat specification document automation with ro
 
 SpecR treats construction specification documents as structured data with true parent/child paragraph relationships — not opaque Word files. It parses DOCX and UFGS `.SEC` specifications into a canonical CSI AST, stores them in PostgreSQL, and will regenerate them with full numbering fidelity. It targets git-style 3-way merge when edited documents come back from reviewers.
 
-The target: a spec writer connects a Revit model, sees their Part 2 (Products) sections auto-populate from equipment families, exports a clean DOCX, receives a redlined version from the Owner, and merges accepted changes back into the database — all without manual transcription.
+The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2 (Products) sections auto-populate from equipment families, is able to export clean DOCX files, receives a redlined version from the Owner, and merges accepted changes back into the database — all without manual transcription; but still with full control and manual bi-directional editing of paragraph language in the database.
 
 ## Status
 
