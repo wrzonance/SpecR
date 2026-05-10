@@ -180,7 +180,7 @@ Algorithm is a port of Clippit's `ListItemRetriever` from C#, extended with sign
 
 Universal across all spec sources — the one thing you can count on:
 
-| Level | CSI Role | ARCAT ilvl | MASTERSPEC ilvl | UFGS XML | Format |
+| Level | CSI Role | ARCAT ilvl | CPI ilvl | UFGS XML | Format |
 |-------|----------|------------|-----------------|----------|--------|
 | Part | Part heading | 0 | 0 | `<PRT>` | `PART 1 - GENERAL` |
 | Article | Section heading | 1 | 3 | `<SPT>` | `1.1 REFERENCES` |
@@ -190,7 +190,7 @@ Universal across all spec sources — the one thing you can count on:
 | PR4 | Fourth tier | 5 | 7 | `<TXT>` depth 4 | `1) text` |
 | PR5 | Fifth tier | 6 | 8 | `<TXT>` depth 5 | `a) text` |
 
-Note: MASTERSPEC reserves ilvl 1-2 for Schedule/PDS (rarely used) — so the same logical CSI Article level maps to different ilvl values depending on which template authored the document. The inference engine normalizes this.
+Note: CPI files reserve ilvl 1-2 for Schedule/PDS (rarely used) — so the same logical CSI Article level maps to different ilvl values depending on which template authored the document. The inference engine normalizes this.
 
 ## Canonical CSI AST
 
@@ -216,7 +216,7 @@ interface CsiNode {
   children: CsiNode[]
   meta: {
     vanish?: boolean   // specifier note (CMT / ARCATnote / NTE)
-    source?: 'ufgs' | 'arcat' | 'masterspec' | 'unknown'
+    source?: 'ufgs' | 'arcat' | 'cpi' | 'unknown'
     revitParam?: string // Revit parameter binding (Phase 4)
     baseVersion?: number // for 3-way merge
   }
@@ -259,7 +259,7 @@ CREATE TABLE specs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   section VARCHAR(20),  -- "27 21 00"
   title TEXT,
-  source VARCHAR(20),   -- 'ufgs' | 'arcat' | 'masterspec' | 'unknown'
+  source VARCHAR(20),   -- 'ufgs' | 'arcat' | 'cpi' | 'unknown'
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -380,7 +380,7 @@ Sub-MVP 1c — DOCX hierarchy inference:
 - DOCX `styles.xml` analyzer (basedOn chains, numPr-carrying styles)
 - 5-signal hierarchy inference engine (port of Clippit `ListItemRetriever`)
 - `POST /parse` endpoint (accepts .SEC and .docx)
-- Test against ARCAT fixtures (machine-generated, cleanest) first, MASTERSPEC second
+- Test against ARCAT fixtures (machine-generated, cleanest) first, CPI second
 
 ### Phase 2: Generator + MCP Foundation (Weeks 5–7, overlaps Phase 1)
 - AST → DOCX with dolanmiu/docx
@@ -503,7 +503,7 @@ specr/
 ### Specifications Analyzed
 - `docs/references/UFGS/` — 666 .SEC files (SpecsIntact XML), 31 divisions, public domain
 - ARCAT — 23 DOCX files (machine-generated, cleanest). See `docs/references/ARCAT/README.md`.
-- CPI/MASTERSPEC — 6 DOCX files (MASTERSPEC template). See `docs/references/MANUFACTURER_CPI/README.md`.
+- Chatsworth Products Inc. (CPI) — 6 DOCX files (telecom equipment manufacturer specs implementing CSI MasterFormat). See `docs/references/MANUFACTURER_CPI/README.md`.
 
 ### Key Libraries
 - dolanmiu/docx (TS, MIT): DOCX generation

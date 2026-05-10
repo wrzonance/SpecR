@@ -130,18 +130,18 @@ ARCAT specs are **machine-generated** from ARCAT's content management system. Ev
 8: %9)          (lowerLetter: a), b), c))  [defined but unused]
 ```
 
-### CPI / MASTERSPEC (6 files, manufacturer specs using Deltek template)
+### Chatsworth Products Inc. (CPI) (6 files, CSI MasterFormat manufacturer specs)
 
-CPI uses the MASTERSPEC template, which is the CSI standard format used by most professional spec writers. It's more sophisticated than ARCAT but introduces several complications.
+Chatsworth Products Inc. (CPI) is a telecom equipment manufacturer whose guide specs implement CSI MasterFormat. Their DOCX files are more sophisticated than ARCAT's but introduce several complications.
 
 **Key patterns:**
-- Style naming follows MASTERSPEC convention: `PRT`, `ART`, `PR1`-`PR5`, `SCT`, `EOS`, `CMT`
+- Style naming in CPI files: `PRT`, `ART`, `PR1`-`PR5`, `SCT`, `EOS`, `CMT`
 - Numbering lives in style definitions — paragraphs do NOT redundantly carry numPr (opposite of ARCAT)
 - **Continuation styles (lc variants)**: `PR1lc` through `PR5lc` suppress numbering while maintaining indentation. 34% of content uses these. The `next` style property means pressing Enter after an lc paragraph switches to the numbered variant.
 - **Manual numbering in text is rampant**: People type "A." or "1.5" in the paragraph text on lc-styled paragraphs, defeating OOXML automatic numbering. A parser seeing `PR1lc` with text "A. ANSI/TIA-569..." must recognize the "A." is cosmetic, not structural.
 - **Override numbering**: Multiple numId values reference different abstractNums or the same abstractNum with different `lvlOverride` settings. Product section headers like "2.2 ZETAFRAME CABINET SYSTEM" use PR1 with numId=12 instead of the ART style — creating "fake" article headings outside the main numbering sequence.
 - **numId=0 for explicit suppression**: Some paragraphs explicitly disable numbering that their style would otherwise provide.
-- **ilvl gap**: MASTERSPEC reserves ilvl 1 and 2 for Schedule and Product Data Sheet (rarely used), so Article jumps to ilvl 3. PR1 is ilvl 4. This means the same logical CSI level maps to different ilvl values depending on which template authored the document.
+- **ilvl gap**: CPI files reserve ilvl 1 and 2 for Schedule and Product Data Sheet (rarely used), so Article jumps to ilvl 3. PR1 is ilvl 4. This means the same logical CSI level maps to different ilvl values depending on which template authored the document.
 - **outlineLvl=9 overrides**: 307 paragraphs override their style's outline level to 9 (body text), suppressing them from the document outline.
 - **Unit markup**: Character styles `IP` (red) and `SI` (teal) mark Imperial/metric alternatives within the same paragraph, with `esUOMDelimiter` separating them. This is semantic markup that could be programmatically toggled.
 - 215 hidden `CMT` paragraphs (29% of document) — specifier notes in blue with `w:vanish`
@@ -168,7 +168,7 @@ UFGS specifications are NOT DOCX files. They are SpecsIntact XML (`.SEC` format)
 - Files are XML with a `<SEC>` root element, using the schema at `specsintactSEC.xsd`
 - **Hierarchy IS the XML tree**: `<PRT>` (Part) contains `<SPT>` (Sub-Part/Article) contains `<TXT>` (body text) and `<LST>`/`<ITM>` (lists/items). No inference needed.
 - `<NTE>` wraps specifier notes with `<NPR>` for note paragraphs — equivalent to CMT/ARCATnote but semantically tagged
-- `<MET>`/`<ENG>` tags wrap metric/English unit alternatives — similar to MASTERSPEC's IP/SI character styles but as proper XML elements
+- `<MET>`/`<ENG>` tags wrap metric/English unit alternatives — similar to IP/SI unit-alternation approaches in DOCX templates but as proper XML elements
 - `<TAI OPT="ARMY">` elements mark service-branch-specific tailoring options
 - `<RID>` tags mark reference identifiers (linked to the References article)
 - `<URL>` tags with `HREF` attributes for linked resources
@@ -184,7 +184,7 @@ UFGS specifications are NOT DOCX files. They are SpecsIntact XML (`.SEC` format)
 
 Despite wildly different encodings, all three sources use the same logical hierarchy:
 
-| Logical Level | CSI Role | ARCAT ilvl | MASTERSPEC ilvl | UFGS XML | Rendered |
+| Logical Level | CSI Role | ARCAT ilvl | CPI ilvl | UFGS XML | Rendered |
 |---|---|---|---|---|---|
 | Part | Part heading | 0 | 0 | `<PRT>` | PART 1 - GENERAL |
 | Article | Section heading | 1 | 3 | `<SPT>` | 1.1 REFERENCES |
@@ -200,15 +200,15 @@ The numbering format sequence (decimal → upperLetter → decimal → lowerLett
 
 ## Why "Just Build Adapters" Won't Work
 
-The temptation after analyzing ARCAT and MASTERSPEC is to think: "Two known formats, two adapters, done." This would be a critical mistake. Here's why:
+The temptation after analyzing ARCAT and CPI is to think: "Two known formats, two adapters, done." This would be a critical mistake. Here's why:
 
 ### 1. Every Firm Customizes Their Templates
 
-No two firms use MASTERSPEC the same way. A firm might:
+No two firms implement CSI MasterFormat DOCX templates the same way. A firm might:
 - Rename styles (`PR1` → `SpecParagraph1`, `ART` → `SectionHeading`)
 - Add custom styles not in any standard template
-- Use Word's built-in Heading styles instead of MASTERSPEC styles
-- Mix MASTERSPEC styles with custom styles in the same document
+- Use Word's built-in Heading styles instead of CSI MasterFormat template styles
+- Mix standard CSI styles with custom styles in the same document
 - Override numbering definitions to match their house style
 - Change the numbering format (some firms use `1)` instead of `1.` at certain levels)
 
@@ -277,7 +277,7 @@ Instead of named adapters, the parser needs a **multi-signal inference engine**:
 
 **Signal 1: Numbering XML analysis.** Read `numbering.xml`. Map every `abstractNum` → `num` → `pStyle` linkage. This is the most reliable structural signal because it's the one thing Word's numbering engine actually respects.
 
-**Signal 2: Style analysis.** Read `styles.xml`. Build the `basedOn` chain. Identify which styles carry `numPr`. Map styles to their effective numbering levels. Recognize known template signatures (ARCAT, MASTERSPEC) but don't depend on them.
+**Signal 2: Style analysis.** Read `styles.xml`. Build the `basedOn` chain. Identify which styles carry `numPr`. Map styles to their effective numbering levels. Recognize known template signatures (ARCAT, CPI) but don't depend on them.
 
 **Signal 3: Document-order heuristics.** Walk `document.xml` in order. Track ilvl transitions. When ilvl increases, that's a child. When ilvl decreases, walk back up the tree. When ilvl stays the same, that's a sibling. This is the fallback when style and numbering signals are ambiguous.
 
@@ -427,13 +427,13 @@ MVP is the smallest thing that proves the core thesis: **specification documents
    - Reads numbering.xml, styles.xml, document.xml
    - Infers hierarchy using the multi-signal approach (numbering + style + document order + text heuristics + indentation)
    - Outputs canonical CSI AST
-   - Handles at least ARCAT and MASTERSPEC conventions, plus a "best effort" fallback for unknown templates
+   - Handles at least ARCAT and CPI conventions, plus a "best effort" fallback for unknown templates
    - Identifies and strips specifier notes (vanish text)
 
 3. **DOCX generator**
    - Takes canonical AST → produces DOCX with correct multilevel numbering
    - Content controls with UUID tags on every generated paragraph
-   - Single hardcoded style template (can be MASTERSPEC or ARCAT convention)
+   - Single hardcoded style template (can be CPI or ARCAT convention)
 
 4. **Round-trip proof of concept**
    - Generate DOCX from database
@@ -487,7 +487,7 @@ Take a real ARCAT spec DOCX. Parse it. Store it. Regenerate it. Open in Word. Ed
 - AST → DOCX with dolanmiu/docx library
 - Multilevel numbering engine (reproduce exact CSI numbering from AST)
 - Content control wrapping for round-trip anchoring
-- Style template loading (at minimum: ARCAT and MASTERSPEC conventions)
+- Style template loading (at minimum: ARCAT and CPI conventions)
 - OOXML direct manipulation via JSZip for anything dolanmiu/docx can't handle
 
 ### Phase 3: Merge Engine (Weeks 7-9)
@@ -537,7 +537,7 @@ Take a real ARCAT spec DOCX. Parse it. Store it. Regenerate it. Open in Word. Ed
 
 ### Risks
 
-1. **The "messy middle" of real-world specs**: Our analysis covered machine-generated (ARCAT) and template-generated (CPI/MASTERSPEC) specs. The hardest specs to parse will be the ones that started from a template, were edited by 5 different people over 3 years, had content pasted from 4 other documents, and were last saved in compatibility mode from Word 2010. This is the majority of specs in production.
+1. **The "messy middle" of real-world specs**: Our analysis covered machine-generated (ARCAT) and manufacturer-authored (CPI) specs. The hardest specs to parse will be the ones that started from a template, were edited by 5 different people over 3 years, had content pasted from 4 other documents, and were last saved in compatibility mode from Word 2010. This is the majority of specs in production.
 
 2. **OOXML version differences**: Word 2007, 2010, 2013, 2016, 2019, 2021, and 365 each introduced OOXML extensions. LibreOffice and Google Docs produce slightly different OOXML. The parser must handle all of them.
 
@@ -555,7 +555,7 @@ Take a real ARCAT spec DOCX. Parse it. Store it. Regenerate it. Open in Word. Ed
 
 ### Specifications Analyzed
 - `docs/references/ARCAT/` — 23 DOCX files, ARCAT manufacturer guide specs
-- `docs/references/MANUFACTURER_CPI/` — 6 DOCX files, CPI/MASTERSPEC format
+- `docs/references/MANUFACTURER_CPI/` — 6 DOCX files, Chatsworth Products Inc. CSI MasterFormat specs
 - `docs/references/UFGS/` — 31 directories by division, SpecsIntact .SEC format
 
 ### Key Libraries (with repository links)

@@ -279,7 +279,7 @@ Every PR must have a single, demonstrable outcome — not "progress toward Phase
 main                          ← always builds, always passes CI
  └── feat/sec-parser          ← one sub-MVP per branch
  └── feat/numbering-analyzer  ← branch from main, not from other feat branches
- └── fix/ilvl-gap-masterspec  ← fixes also get branches
+ └── fix/ilvl-gap-cpi  ← fixes also get branches
 ```
 
 No long-lived feature branches. Branch from main, PR back to main, delete branch after merge.
@@ -306,7 +306,7 @@ Red → Green → Refactor. No implementation code without a failing test first.
 - Database schema design (schema = migration files, not test targets)
 - Content accuracy of UFGS reference data
 
-**Regression rule:** Every bug-fix gets a regression test. Test name includes the symptom: `'inference: MASTERSPEC ilvl gap — Article at ilvl=3, not ilvl=1'`
+**Regression rule:** Every bug-fix gets a regression test. Test name includes the symptom: `'inference: CPI ilvl gap — Article at ilvl=3, not ilvl=1'`
 
 ## CI/CD Pipeline
 

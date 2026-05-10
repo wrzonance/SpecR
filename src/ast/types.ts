@@ -5,7 +5,7 @@ export type NodeType = z.infer<typeof NodeTypeSchema>;
 
 export interface CsiNodeMeta {
   readonly vanish?: boolean;
-  readonly source?: 'ufgs' | 'arcat' | 'masterspec' | 'unknown';
+  readonly source?: 'ufgs' | 'arcat' | 'cpi' | 'unknown';
   readonly revitParam?: string;
   readonly baseVersion?: number;
 }
