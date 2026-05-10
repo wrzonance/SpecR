@@ -16,7 +16,7 @@ export const NodeTypeSchema = z.enum([
 
 export const CsiNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
-  source: z.enum(['ufgs', 'arcat', 'masterspec', 'unknown']).exactOptional(),
+  source: z.enum(['ufgs', 'arcat', 'cpi', 'unknown']).exactOptional(),
   revitParam: z.string().exactOptional(),
   baseVersion: z.number().int().nonnegative().exactOptional(),
 });

@@ -31,7 +31,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 ### Parsing
 
 - **UFGS `.SEC` parser** — SpecsIntact XML → canonical `CsiTree` with `CsiNode` hierarchy. Extracts `<PRT>` / `<SPT>` / `<TXT>` elements into Part → Article → PR1–PR5 levels. Parses cross-references between sections at ingest time.
-- **DOCX `numbering.xml` analyzer** — builds the complete `abstractNum → num → paragraph style` linkage map. Handles `basedOn` inheritance chains, `lvlOverride` overrides, and the Clippit `ListItemRetriever` sentinel: `numId=0` as explicit numbering suppression (halts `basedOn` traversal rather than inheriting parent numbering). This correctly handles MASTERSPEC continuation styles (`PR1lc`–`PR5lc`) which represent ~34% of document content.
+- **DOCX `numbering.xml` analyzer** — builds the complete `abstractNum → num → paragraph style` linkage map. Handles `basedOn` inheritance chains, `lvlOverride` overrides, and the Clippit `ListItemRetriever` sentinel: `numId=0` as explicit numbering suppression (halts `basedOn` traversal rather than inheriting parent numbering). This correctly handles CPI continuation styles (`PR1lc`–`PR5lc`) which represent ~34% of document content.
 - **DOCX `styles.xml` analyzer** — resolves full `basedOn` chains, identifies `numPr`-carrying styles, and propagates `suppressesNumbering` through style inheritance. Produces the style map consumed by the inference engine.
 - **Extraction rules as typed data constants** — numbering and style rules are defined as MCP-readable data structures, not code, enabling LLM agent exploration and parse explainability.
 

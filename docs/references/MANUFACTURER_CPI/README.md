@@ -2,7 +2,7 @@
 
 CPI manufacturer guide specifications are copyrighted by Chatsworth Products, Inc. Per CPI's [Terms of Use](https://www.chatsworth.com/en-us/terms-of-use), these documents are limited to personal, non-commercial use and may not be distributed.
 
-These specifications use the MASTERSPEC template format (Deltek/ARCOM).
+These specifications are CSI MasterFormat–compliant DOCX files authored by Chatsworth Products Inc.
 
 ## How to Obtain
 
