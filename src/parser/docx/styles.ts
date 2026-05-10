@@ -11,13 +11,20 @@ const xmlParser = new XMLParser({
 
 const MAX_BASED_ON_DEPTH = 20; // cycle guard
 
-function parseNumPr(pPr: Record<string, unknown>): StyleNumPr | undefined {
+type NumPrResult =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'suppressed' }
+  | { readonly kind: 'active'; readonly numPr: StyleNumPr };
+
+// Clippit ListItemRetriever: numId=0 explicitly suppresses numbering and STOPS basedOn chain.
+// Must distinguish from "no w:numPr element at all" (which continues the chain).
+function parseNumPr(pPr: Record<string, unknown>): NumPrResult {
   const numPr = pPr['w:numPr'] as Record<string, unknown> | undefined;
-  if (!numPr) return undefined;
+  if (!numPr) return { kind: 'absent' };
   const numId = getAttrNumVal(numPr['w:numId']);
-  if (numId === 0) return undefined; // numId=0 suppresses numbering
+  if (numId === 0) return { kind: 'suppressed' };
   const ilvl = getAttrNumVal(numPr['w:ilvl']);
-  return { numId, ilvl };
+  return { kind: 'active', numPr: { numId, ilvl } };
 }
 
 function parseVanish(raw: Record<string, unknown>): boolean {
@@ -39,6 +46,12 @@ function resolvedName(raw: Record<string, unknown>, fallback: string): string {
   return getAttrVal(raw['w:name']) || fallback;
 }
 
+function numPrFields(result: NumPrResult): Pick<StyleInfo, 'numPr' | 'suppressesNumbering'> {
+  if (result.kind === 'active') return { numPr: result.numPr };
+  if (result.kind === 'suppressed') return { suppressesNumbering: true };
+  return {};
+}
+
 function parseStyleInfo(raw: Record<string, unknown>): StyleInfo | null {
   const styleType = extractAttrStr(raw, '@_w:type') || 'paragraph';
   if (styleType !== 'paragraph') return null;
@@ -48,7 +61,7 @@ function parseStyleInfo(raw: Record<string, unknown>): StyleInfo | null {
   const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
   const basedOn = getAttrVal(raw['w:basedOn']);
   const next = getAttrVal(raw['w:next']);
-  const numPr = pPr ? parseNumPr(pPr) : undefined;
+  const numPrResult = pPr ? parseNumPr(pPr) : ({ kind: 'absent' } as const);
   const outlineLvl = parseOutlineLvl(pPr);
 
   return {
@@ -56,7 +69,7 @@ function parseStyleInfo(raw: Record<string, unknown>): StyleInfo | null {
     name: resolvedName(raw, styleId),
     ...(basedOn ? { basedOn } : {}),
     ...(next ? { next } : {}),
-    ...(numPr ? { numPr } : {}),
+    ...numPrFields(numPrResult),
     ...(parseVanish(raw) ? { isVanish: true as const } : {}),
     ...(outlineLvl !== undefined ? { outlineLvl } : {}),
   };
@@ -70,6 +83,7 @@ function resolveNumPrChain(
   if (depth > MAX_BASED_ON_DEPTH) return undefined;
   const style = styles.get(styleId);
   if (!style) return undefined;
+  if (style.suppressesNumbering) return undefined; // numId=0 stops chain (Clippit behavior)
   if (style.numPr) return style.numPr;
   if (style.basedOn) return resolveNumPrChain(style.basedOn, styles, depth + 1);
   return undefined;

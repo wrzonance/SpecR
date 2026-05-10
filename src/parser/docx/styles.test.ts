@@ -115,9 +115,10 @@ describe('buildStyleMap — basic parsing', () => {
     expect(map.styles.get('PR1')?.numPr).toEqual({ numId: 1, ilvl: 4 });
   });
 
-  it('treats numId=0 as no numPr (suppress numbering)', () => {
+  it('treats numId=0 as explicit suppression — no numPr, sets suppressesNumbering', () => {
     const map = buildStyleMap(MASTERSPEC_STYLES);
     expect(map.styles.get('NoNum')?.numPr).toBeUndefined();
+    expect(map.styles.get('NoNum')?.suppressesNumbering).toBe(true);
   });
 });
 
@@ -160,6 +161,41 @@ describe('buildStyleMap — cycle guard', () => {
     // A→B: depth guard fires before resolving A via cycle, so A may not resolve
     // (implementation-defined). What matters: no infinite loop and B resolves.
     expect(map.resolvedNumPr.has('B')).toBe(true);
+  });
+});
+
+// MASTERSPEC lc styles (PR1lc-PR5lc) carry numId=0 to suppress inherited numbering.
+// Without this chain stop, PR1lc would incorrectly resolve PR1's numPr — misclassifying
+// 34% of MASTERSPEC content as numbered when it's continuation paragraphs.
+const LC_SUPPRESSION_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles ${W}>
+  <w:style w:type="paragraph" w:styleId="PR1">
+    <w:name w:val="PR1"/>
+    <w:pPr>
+      <w:numPr><w:ilvl w:val="4"/><w:numId w:val="1"/></w:numPr>
+    </w:pPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="PR1lc">
+    <w:name w:val="PR1lc"/>
+    <w:basedOn w:val="PR1"/>
+    <w:pPr>
+      <w:numPr><w:ilvl w:val="4"/><w:numId w:val="0"/></w:numPr>
+    </w:pPr>
+  </w:style>
+</w:styles>`;
+
+describe('buildStyleMap — Clippit numId=0 chain stop', () => {
+  it('PR1lc with numId=0 has suppressesNumbering and no resolvedNumPr', () => {
+    // Regression: without chain stop, PR1lc inherits PR1's numPr → wrong node type
+    const map = buildStyleMap(LC_SUPPRESSION_STYLES);
+    expect(map.styles.get('PR1lc')?.suppressesNumbering).toBe(true);
+    expect(map.styles.get('PR1lc')?.numPr).toBeUndefined();
+    expect(map.resolvedNumPr.has('PR1lc')).toBe(false);
+  });
+
+  it('PR1 itself still resolves normally', () => {
+    const map = buildStyleMap(LC_SUPPRESSION_STYLES);
+    expect(map.resolvedNumPr.get('PR1')).toEqual({ numId: 1, ilvl: 4 });
   });
 });
 

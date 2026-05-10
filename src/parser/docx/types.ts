@@ -48,6 +48,9 @@ export interface StyleInfo {
   readonly name: string;
   readonly basedOn?: string;
   readonly numPr?: StyleNumPr;
+  // numId=0 in the style's own pPr explicitly suppresses inherited numbering.
+  // Clippit ListItemRetriever stops basedOn chain traversal here.
+  readonly suppressesNumbering?: boolean;
   readonly isVanish?: boolean;
   readonly outlineLvl?: number;
   readonly next?: string;
