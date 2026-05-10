@@ -29,9 +29,9 @@ function parseVanish(raw: Record<string, unknown>): boolean {
 
 function parseOutlineLvl(pPr: Record<string, unknown> | undefined): number | undefined {
   if (!pPr) return undefined;
-  const raw = pPr['w:outlineLvl'];
-  if (raw === undefined) return undefined;
-  const n = getAttrNumVal(raw);
+  const rawVal = getAttrVal(pPr['w:outlineLvl']);
+  if (!rawVal) return undefined;
+  const n = parseInt(rawVal, 10);
   return isNaN(n) ? undefined : n;
 }
 

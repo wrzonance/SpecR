@@ -32,8 +32,8 @@ function parseAbstractNums(rawList: readonly unknown[]): ReadonlyMap<number, Abs
     const r = raw as Record<string, unknown>;
     const id = parseInt(extractAttrStr(r, '@_w:abstractNumId'), 10);
     if (isNaN(id)) continue;
-    const levels = toArray(r['w:lvl'] as readonly Record<string, unknown>[] | undefined)
-      .filter((l): l is Record<string, unknown> => typeof l === 'object')
+    const levels = toArray(r['w:lvl'] as readonly unknown[] | undefined)
+      .filter((l): l is Record<string, unknown> => typeof l === 'object' && l !== null)
       .map((l) => parseLvl(l, parseInt(extractAttrStr(l, '@_w:ilvl') || '0', 10)));
     map.set(id, { abstractNumId: id, levels });
   }
@@ -47,17 +47,18 @@ function parseNums(rawList: readonly unknown[]): ReadonlyMap<number, Num> {
     const r = raw as Record<string, unknown>;
     const numId = parseInt(extractAttrStr(r, '@_w:numId'), 10);
     if (isNaN(numId)) continue;
-    const abstractNumId = getAttrNumVal(r['w:abstractNumId']);
-    const overrides = toArray(r['w:lvlOverride'] as readonly Record<string, unknown>[] | undefined)
-      .filter((l): l is Record<string, unknown> => typeof l === 'object')
-      .map(
-        (l): NumLvlOverride => ({
+    const abstractNumId = parseInt(getAttrVal(r['w:abstractNumId']), 10);
+    if (isNaN(abstractNumId)) continue;
+    const overrides = toArray(r['w:lvlOverride'] as readonly unknown[] | undefined)
+      .filter((l): l is Record<string, unknown> => typeof l === 'object' && l !== null)
+      .map((l): NumLvlOverride => {
+        const startRaw = getAttrVal(l['w:startOverride']);
+        const startOverride = startRaw ? parseInt(startRaw, 10) : NaN;
+        return {
           ilvl: parseInt(extractAttrStr(l, '@_w:ilvl') || '0', 10),
-          ...(l['w:startOverride'] !== undefined
-            ? { startOverride: getAttrNumVal(l['w:startOverride']) }
-            : {}),
-        })
-      );
+          ...(!isNaN(startOverride) ? { startOverride } : {}),
+        };
+      });
     map.set(numId, {
       numId,
       abstractNumId,

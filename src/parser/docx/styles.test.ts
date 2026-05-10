@@ -151,12 +151,15 @@ describe('buildStyleMap — vanish detection', () => {
 });
 
 describe('buildStyleMap — cycle guard', () => {
-  it('resolves chain without infinite loop when cycle exists', () => {
-    // B has numPr; A→B→A is a cycle. Expect resolution to terminate.
-    expect(() => buildStyleMap(CYCLE_STYLES)).not.toThrow();
+  it('terminates and resolves reachable numPr when cycle exists', () => {
+    // A→B→A cycle. B has numPr. A has no direct numPr, inherits from B via basedOn.
+    // Guard must terminate; B's numPr must be resolved for B itself.
     const map = buildStyleMap(CYCLE_STYLES);
-    // A→B which has numPr — but cycle guard may or may not resolve depending on traversal order
     expect(map.styles.size).toBe(2);
+    expect(map.resolvedNumPr.get('B')).toEqual({ numId: 1, ilvl: 1 });
+    // A→B: depth guard fires before resolving A via cycle, so A may not resolve
+    // (implementation-defined). What matters: no infinite loop and B resolves.
+    expect(map.resolvedNumPr.has('B')).toBe(true);
   });
 });
 
