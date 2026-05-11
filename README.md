@@ -92,15 +92,19 @@ pnpm tsx scripts/parse-debug.ts <file.docx>
 Parses a DOCX file locally (no server, no DB) and prints the inferred hierarchy with signal attribution:
 
 ```
-Parsed:  27 21 00 — Structured Cabling
+Parsed:  unknown — unknown
 Source:  arcat
-Nodes:   127
+Nodes:   57
 
-PART 1 - GENERAL                      [part,    sig:1]
-  1.1 REFERENCES                      [article, sig:1]
-    A. Provide materials...           [pr1,     sig:1]
-       See Section 09 91 00           [continuation, sig:3]
+GENERAL                                                   [part, src:arcat]
+  SECTION INCLUDES                                          [article, src:arcat]
+    Project Identification: ((Name and location)).            [pr1, src:arcat]
+      Existing site conditions and restrictions: (())           [pr2, src:arcat]
+    Coordination:                                             [pr1, src:arcat]
+       Coordinate the work of all trades.                       [continuation, src:arcat]
 ```
+
+Note: `section` and `title` show as `unknown` when `docProps/core.xml` is absent from the file — common in vendor-generated ARCAT specs. The `Source:` field and node type inference are unaffected.
 
 ## CSI Numbering Hierarchy
 
