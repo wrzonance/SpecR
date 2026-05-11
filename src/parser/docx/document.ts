@@ -82,6 +82,12 @@ function resolveOutlineLvl(pPr: Record<string, unknown> | undefined): number | u
   return isNaN(n) ? undefined : n;
 }
 
+function resolveIsVanish(pPr: Record<string, unknown> | undefined): boolean {
+  const raw = pPr?.['w:rPr'];
+  if (raw === null || typeof raw !== 'object') return false;
+  return 'w:vanish' in (raw as Record<string, unknown>);
+}
+
 function parseParagraph(raw: Record<string, unknown>, numberingMap: NumberingMap): DocxParagraph {
   const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
   const styleVal = pPr ? getAttrVal(pPr['w:pStyle']) : '';
@@ -89,21 +95,17 @@ function parseParagraph(raw: Record<string, unknown>, numberingMap: NumberingMap
   const { numId, ilvl } = resolveNumPr(pPr, styleId, numberingMap);
   const leftIndent = resolveLeftIndent(pPr);
   const outlineLvl = resolveOutlineLvl(pPr);
-  const pRprRaw = pPr?.['w:rPr'];
-  const pRpr =
-    pRprRaw !== null && typeof pRprRaw === 'object'
-      ? (pRprRaw as Record<string, unknown>)
-      : undefined;
-  const isVanish = pRpr !== undefined && 'w:vanish' in pRpr;
-
-  return {
+  const para: DocxParagraph = {
     text: extractText(raw),
+    isVanish: resolveIsVanish(pPr),
+  };
+  return {
+    ...para,
     ...(styleId !== undefined ? { styleId } : {}),
     ...(numId !== undefined ? { numId } : {}),
     ...(ilvl !== undefined ? { ilvl } : {}),
     ...(leftIndent !== undefined ? { leftIndent } : {}),
     ...(outlineLvl !== undefined ? { outlineLvl } : {}),
-    isVanish,
   };
 }
 

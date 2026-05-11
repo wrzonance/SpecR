@@ -87,18 +87,10 @@ function buildPStyleMaps(
   return { pStyleToNumId, pStyleToIlvl };
 }
 
-// CPI reserves ilvl 1-2 for Schedule/PDS; Article starts at ilvl 3.
-// Detect by checking lvlText of ilvl 1 or 2 for those keywords.
-function detectArticleIlvl(abstractNums: ReadonlyMap<number, AbstractNum>): number {
-  for (const an of abstractNums.values()) {
-    for (const lvl of an.levels) {
-      if (lvl.ilvl !== 1 && lvl.ilvl !== 2) continue;
-      const upper = (lvl.lvlText ?? '').toUpperCase();
-      if (upper.includes('SCHEDULE') || upper.includes('PRODUCT DATA')) return 3;
-    }
-  }
-  return 1;
-}
+// articleIlvl cannot be reliably detected from numbering.xml alone — CPI files
+// carry no pStyle links or SCHEDULE/PDS lvlText markers in their numbering.xml.
+// Detection is deferred to the orchestrator (index.ts) which has both NumberingMap
+// and StyleMap, and calls withArticleIlvl() to produce the final map.
 
 export function buildNumberingMap(xml: string): NumberingMap {
   let parsed: unknown;
@@ -117,8 +109,14 @@ export function buildNumberingMap(xml: string): NumberingMap {
   );
   const nums = parseNums(toArray(root['w:num'] as readonly unknown[] | undefined));
   const { pStyleToNumId, pStyleToIlvl } = buildPStyleMaps(nums, abstractNums);
-  const articleIlvl = detectArticleIlvl(abstractNums);
-  return { nums, abstractNums, pStyleToNumId, pStyleToIlvl, articleIlvl };
+  // articleIlvl defaults to 1 (ARCAT-style); orchestrator overrides via withArticleIlvl()
+  // once StyleMap is available to detect CPI-style (ART style at ilvl 3).
+  return { nums, abstractNums, pStyleToNumId, pStyleToIlvl, articleIlvl: 1 };
+}
+
+/** Return a new NumberingMap with articleIlvl overridden. Used by orchestrator after StyleMap detection. */
+export function withArticleIlvl(map: NumberingMap, articleIlvl: number): NumberingMap {
+  return { ...map, articleIlvl };
 }
 
 export function emptyNumberingMap(): NumberingMap {

@@ -1,12 +1,12 @@
 import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
-import { buildNumberingMap, emptyNumberingMap } from './numbering.js';
+import { buildNumberingMap, emptyNumberingMap, withArticleIlvl } from './numbering.js';
 import { buildStyleMap } from './styles.js';
 import { parseDocument } from './document.js';
 import { classifyParagraphs, buildTree } from './inference.js';
 import type { CsiTree } from '../../ast/types.js';
-import type { NumberingMap, StyleMap } from './types.js';
+import type { StyleMap } from './types.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
 // reject if total uncompressed bytes > 50MB to prevent ZIP bomb exhaustion.
@@ -34,18 +34,27 @@ function parseCoreMetadata(xml: string): { section: string; title: string } {
   }
 }
 
-// Detect spec source from style names — ARCAT embeds ARCAT-prefixed styles in every file.
-// CPI files use generic styles (Heading1, etc.) with no vendor prefix.
-// articleIlvl is not reliable for CPI detection since CPI numbering.xml carries no
-// pStyle links or Schedule/PDS lvlText markers in the actual fixture files.
+// Detect spec source from style names.
+// ARCAT: every file embeds ARCAT-prefixed styles (ARCATPart, ARCATArticle, …).
+// CPI v1 (older): uses generic Word styles — Heading1 for PART lines, no vendor prefix.
+// CPI v2 (newer): uses short-form CPI styles — PRT, ART, PR1, PR2, … with numPr in styles.xml.
 function detectSource(styleMap: StyleMap): Source {
-  const hasArcatStyle = [...styleMap.styles.keys()].some((id) => id.startsWith('ARCAT'));
-  if (hasArcatStyle) return 'arcat';
-  // CPI: detect by Heading1 presence (used for PART lines) combined with absence of ARCAT styles.
-  // Future: add CPI-specific style fingerprint if other vendors also use Heading1.
-  const hasHeading1 = styleMap.styles.has('Heading1');
-  if (hasHeading1) return 'cpi';
+  if ([...styleMap.styles.keys()].some((id) => id.startsWith('ARCAT'))) return 'arcat';
+  // CPI v2: ART style present (explicit article style with numPr at ilvl 3)
+  if (styleMap.styles.has('ART') && styleMap.styles.has('PRT')) return 'cpi';
+  // CPI v1: Heading1 used for PART lines (no ARCAT styles present)
+  if (styleMap.styles.has('Heading1')) return 'cpi';
   return 'unknown';
+}
+
+// Detect articleIlvl from StyleMap — the ilvl at which the 'article' level starts.
+// ARCAT: ARCATArticle style has numPr ilvl=1 → articleIlvl=1.
+// CPI v2: ART style has numPr ilvl=3 → articleIlvl=3.
+// CPI v1 / unknown: no style-based numPr link → default articleIlvl=1.
+function detectArticleIlvl(styleMap: StyleMap): number {
+  const artStyle = styleMap.resolvedNumPr.get('ART') ?? styleMap.resolvedNumPr.get('ARCATArticle');
+  if (artStyle) return artStyle.ilvl;
+  return 1;
 }
 
 async function extractEntries(zip: JSZip): Promise<{
@@ -86,15 +95,20 @@ function runPipeline(
   onProgress?.('styles', 40);
   const styleMap = buildStyleMap(entries.stylesXml);
 
+  // Override articleIlvl now that StyleMap is available — numbering.xml alone cannot
+  // distinguish CPI-v2 (ART at ilvl=3) from ARCAT (article at ilvl=1).
+  const articleIlvl = detectArticleIlvl(styleMap);
+  const resolvedNumberingMap = withArticleIlvl(numberingMap, articleIlvl);
+
   onProgress?.('document', 55);
-  const paragraphs = parseDocument(entries.documentXml, numberingMap);
+  const paragraphs = parseDocument(entries.documentXml, resolvedNumberingMap);
 
   if (paragraphs.length === 0) {
     throw new ParserError('document contains no paragraphs');
   }
 
   onProgress?.('classifying', 75);
-  const classified = classifyParagraphs(paragraphs, numberingMap, styleMap);
+  const classified = classifyParagraphs(paragraphs, resolvedNumberingMap, styleMap);
 
   const source = detectSource(styleMap);
   const meta = entries.coreXml
