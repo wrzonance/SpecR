@@ -6,6 +6,8 @@ import type { DocxParagraph, NumberingMap } from './types.js';
 // fast-xml-parser processEntities: true decodes &lt; &gt; &amp; etc. (no external fetch).
 // trimValues: false preserves trailing/leading spaces in w:t text nodes — trimming would
 // corrupt concatenated paragraph text across adjacent runs.
+// SECURITY: audit fast-xml-parser options — ensure processEntities
+// does not resolve external entities via DOCTYPE/ENTITY declarations (issue #19).
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',

@@ -76,6 +76,12 @@ describe('parseDocument — pPr field extraction', () => {
     expect(result[0]?.leftIndent).toBe(720);
   });
 
+  it('extracts outlineLvl', () => {
+    const xml = makeDocXml(makePara({ text: 'text', outlineLvl: 2 }));
+    const result = parseDocument(xml, emptyNumberingMap());
+    expect(result[0]?.outlineLvl).toBe(2);
+  });
+
   it('detects vanish', () => {
     const xml = makeDocXml(makePara({ text: 'hidden', vanish: true }));
     const result = parseDocument(xml, emptyNumberingMap());
