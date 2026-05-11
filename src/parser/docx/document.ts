@@ -89,8 +89,12 @@ function parseParagraph(raw: Record<string, unknown>, numberingMap: NumberingMap
   const { numId, ilvl } = resolveNumPr(pPr, styleId, numberingMap);
   const leftIndent = resolveLeftIndent(pPr);
   const outlineLvl = resolveOutlineLvl(pPr);
-  const pRpr = pPr?.['w:rPr'] as Record<string, unknown> | undefined;
-  const isVanish = 'w:vanish' in (pRpr ?? {});
+  const pRprRaw = pPr?.['w:rPr'];
+  const pRpr =
+    pRprRaw !== null && typeof pRprRaw === 'object'
+      ? (pRprRaw as Record<string, unknown>)
+      : undefined;
+  const isVanish = pRpr !== undefined && 'w:vanish' in pRpr;
 
   return {
     text: extractText(raw),

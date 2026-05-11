@@ -6,7 +6,7 @@ import { buildStyleMap } from './styles.js';
 import { parseDocument } from './document.js';
 import { classifyParagraphs, buildTree } from './inference.js';
 import type { CsiTree } from '../../ast/types.js';
-import type { NumberingMap } from './types.js';
+import type { NumberingMap, StyleMap } from './types.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
 // reject if total uncompressed bytes > 50MB to prevent ZIP bomb exhaustion.
@@ -34,9 +34,17 @@ function parseCoreMetadata(xml: string): { section: string; title: string } {
   }
 }
 
-function detectSource(numberingMap: NumberingMap): Source {
-  if (numberingMap.articleIlvl === 1) return 'arcat';
-  if (numberingMap.articleIlvl === 3) return 'cpi';
+// Detect spec source from style names — ARCAT embeds ARCAT-prefixed styles in every file.
+// CPI files use generic styles (Heading1, etc.) with no vendor prefix.
+// articleIlvl is not reliable for CPI detection since CPI numbering.xml carries no
+// pStyle links or Schedule/PDS lvlText markers in the actual fixture files.
+function detectSource(styleMap: StyleMap): Source {
+  const hasArcatStyle = [...styleMap.styles.keys()].some((id) => id.startsWith('ARCAT'));
+  if (hasArcatStyle) return 'arcat';
+  // CPI: detect by Heading1 presence (used for PART lines) combined with absence of ARCAT styles.
+  // Future: add CPI-specific style fingerprint if other vendors also use Heading1.
+  const hasHeading1 = styleMap.styles.has('Heading1');
+  if (hasHeading1) return 'cpi';
   return 'unknown';
 }
 
@@ -88,7 +96,7 @@ function runPipeline(
   onProgress?.('classifying', 75);
   const classified = classifyParagraphs(paragraphs, numberingMap, styleMap);
 
-  const source = detectSource(numberingMap);
+  const source = detectSource(styleMap);
   const meta = entries.coreXml
     ? parseCoreMetadata(entries.coreXml)
     : { section: 'unknown', title: 'unknown' };

@@ -27,11 +27,15 @@ function parseNumPr(pPr: Record<string, unknown>): NumPrResult {
   return { kind: 'active', numPr: { numId, ilvl } };
 }
 
+function asObject(val: unknown): Record<string, unknown> | undefined {
+  return val !== null && typeof val === 'object' ? (val as Record<string, unknown>) : undefined;
+}
+
 function parseVanish(raw: Record<string, unknown>): boolean {
-  const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
-  const pRpr = pPr?.['w:rPr'] as Record<string, unknown> | undefined;
-  const rPr = raw['w:rPr'] as Record<string, unknown> | undefined;
-  return 'w:vanish' in (pRpr ?? {}) || 'w:vanish' in (rPr ?? {});
+  const pPr = asObject(raw['w:pPr']);
+  const pRpr = asObject(pPr?.['w:rPr']);
+  const rPr = asObject(raw['w:rPr']);
+  return (pRpr !== undefined && 'w:vanish' in pRpr) || (rPr !== undefined && 'w:vanish' in rPr);
 }
 
 function parseOutlineLvl(pPr: Record<string, unknown> | undefined): number | undefined {
