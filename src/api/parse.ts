@@ -15,10 +15,10 @@ interface ParseBody {
 function parseBody(raw: unknown): ParseBody {
   if (typeof raw !== 'object' || raw === null) return {};
   const r = raw as Record<string, unknown>;
-  const result: ParseBody = {};
-  if (typeof r['section'] === 'string') return { ...result, section: r['section'] };
-  if (typeof r['title'] === 'string') return { ...result, title: r['title'] };
-  return result;
+  return {
+    ...(typeof r['section'] === 'string' ? { section: r['section'] } : {}),
+    ...(typeof r['title'] === 'string' ? { title: r['title'] } : {}),
+  };
 }
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
