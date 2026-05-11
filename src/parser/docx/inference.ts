@@ -179,7 +179,8 @@ function drainTop(stack: StackEntry[], roots: CsiNode[], source: Source): void {
   const popped = stack.pop();
   if (!popped) return;
   const node = makeNode(popped.cp, popped.children, source);
-  const parentChildren = stack.length > 0 ? stack[stack.length - 1]!.children : roots;
+  const top = stack[stack.length - 1];
+  const parentChildren = top !== undefined ? top.children : roots;
   parentChildren.push(node);
 }
 
@@ -205,7 +206,9 @@ export function buildTree(
       continue;
     }
 
-    while (stack.length > 0 && stack[stack.length - 1]!.cp.resolvedIlvl >= cp.resolvedIlvl) {
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1];
+      if (top === undefined || top.cp.resolvedIlvl < cp.resolvedIlvl) break;
       drainTop(stack, roots, source);
     }
 
