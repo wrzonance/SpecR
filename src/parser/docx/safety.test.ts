@@ -96,4 +96,13 @@ describe('assertDocxSafe — bomb and relationship rejection', () => {
     const buf = await makeZip({ 'word/_rels/document.xml.rels': EXTERNAL_RELS_XML });
     await expect(assertDocxSafe(buf)).rejects.toThrow('external relationship');
   });
+
+  it('rejects zip with more than 200 entries', async () => {
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<Types/>');
+    zip.file('word/document.xml', '<w:document/>');
+    for (let i = 0; i < 200; i++) zip.file(`word/chunk${i}.xml`, '<x/>');
+    const buf = await zip.generateAsync({ type: 'nodebuffer' });
+    await expect(assertDocxSafe(buf)).rejects.toThrow('too many zip entries');
+  });
 });

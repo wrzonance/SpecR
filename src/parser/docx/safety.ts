@@ -30,49 +30,72 @@ function isAllowedEntry(name: string): boolean {
   return ALLOWED_PREFIXES.some((p) => name === p || name.startsWith(p));
 }
 
-interface EntryState {
-  count: number;
-  totalUncompressed: number;
-  sawContentTypes: boolean;
-  sawDocument: boolean;
-  relEntries: yauzl.Entry[];
-}
-
-function checkNameAndType(name: string): string | null {
-  if (hasDangerousPath(name)) return 'path traversal in zip entry';
-  if (!isAllowedEntry(name)) return `unexpected zip entry: ${name}`;
-  if (name === 'word/vbaProject.bin') return 'macros not allowed';
+/** Pure — checks entry name/type only, no side effects. Returns error string or null. */
+function checkNameAndType(entryName: string): string | null {
+  if (hasDangerousPath(entryName)) return 'path traversal in zip entry';
+  if (!isAllowedEntry(entryName)) return `unexpected zip entry: ${entryName}`;
+  if (entryName === 'word/vbaProject.bin') return 'macros not allowed';
   return null;
 }
 
-function checkSizeConstraints(entry: yauzl.Entry, state: EntryState): string | null {
-  state.totalUncompressed += entry.uncompressedSize;
-  if (state.totalUncompressed > MAX_UNCOMPRESSED) return 'uncompressed size exceeds 50 MB';
-  if (ratioExceeded(entry)) return 'suspicious compression ratio';
-  return null;
+/** Pure — checks size/ratio. Returns new total and error string or null. */
+function checkSizeConstraints(
+  entry: yauzl.Entry,
+  currentTotal: number
+): { readonly error: string | null; readonly newTotal: number } {
+  const newTotal = currentTotal + entry.uncompressedSize;
+  if (newTotal > MAX_UNCOMPRESSED) return { error: 'uncompressed size exceeds 50 MB', newTotal };
+  if (ratioExceeded(entry)) return { error: 'suspicious compression ratio', newTotal };
+  return { error: null, newTotal };
 }
 
-function updateRequiredFlags(entry: yauzl.Entry, state: EntryState): void {
-  const { fileName } = entry;
-  if (fileName === '[Content_Types].xml') state.sawContentTypes = true;
-  if (fileName === 'word/document.xml') state.sawDocument = true;
-  if (fileName.startsWith('word/_rels/') || fileName === '_rels/.rels')
-    state.relEntries.push(entry);
+interface EntryResult {
+  readonly error: string | null;
+  readonly newTotal: number;
+  readonly isRelEntry: boolean;
+  readonly sawContentTypes: boolean;
+  readonly sawDocument: boolean;
 }
 
-/** Returns an error message string, or null if the entry is acceptable. Mutates state. */
-function validateZipEntry(entry: yauzl.Entry, state: EntryState): string | null {
-  state.count++;
-  if (state.count > MAX_ENTRIES) return 'too many zip entries';
-
+/**
+ * Pure — validates one zip entry and returns classification flags.
+ * Takes current accumulator values; never mutates anything.
+ */
+function processEntry(entry: yauzl.Entry, count: number, totalUncompressed: number): EntryResult {
+  if (count > MAX_ENTRIES)
+    return {
+      error: 'too many zip entries',
+      newTotal: totalUncompressed,
+      isRelEntry: false,
+      sawContentTypes: false,
+      sawDocument: false,
+    };
   const nameErr = checkNameAndType(entry.fileName);
-  if (nameErr != null) return nameErr;
-
-  const sizeErr = checkSizeConstraints(entry, state);
-  if (sizeErr != null) return sizeErr;
-
-  updateRequiredFlags(entry, state);
-  return null;
+  if (nameErr != null)
+    return {
+      error: nameErr,
+      newTotal: totalUncompressed,
+      isRelEntry: false,
+      sawContentTypes: false,
+      sawDocument: false,
+    };
+  const { error: sizeErr, newTotal } = checkSizeConstraints(entry, totalUncompressed);
+  if (sizeErr != null)
+    return {
+      error: sizeErr,
+      newTotal,
+      isRelEntry: false,
+      sawContentTypes: false,
+      sawDocument: false,
+    };
+  const { fileName } = entry;
+  return {
+    error: null,
+    newTotal,
+    sawContentTypes: fileName === '[Content_Types].xml',
+    sawDocument: fileName === 'word/document.xml',
+    isRelEntry: fileName.startsWith('word/_rels/') || fileName === '_rels/.rels',
+  };
 }
 
 function openZip(buf: Buffer): Promise<yauzl.ZipFile> {
@@ -87,13 +110,11 @@ function openZip(buf: Buffer): Promise<yauzl.ZipFile> {
 /** Phase 1: scan the central directory without decompressing. Returns _rels entries. */
 function scanZipEntries(zip: yauzl.ZipFile): Promise<readonly yauzl.Entry[]> {
   return new Promise((resolve, reject) => {
-    const state: EntryState = {
-      count: 0,
-      totalUncompressed: 0,
-      sawContentTypes: false,
-      sawDocument: false,
-      relEntries: [],
-    };
+    let count = 0;
+    let totalUncompressed = 0;
+    let sawContentTypes = false;
+    let sawDocument = false;
+    const relEntries: yauzl.Entry[] = [];
     let settled = false;
 
     const fail = (msg: string): void => {
@@ -104,26 +125,30 @@ function scanZipEntries(zip: yauzl.ZipFile): Promise<readonly yauzl.Entry[]> {
 
     zip.on('entry', (entry: yauzl.Entry) => {
       if (settled) return;
-      const errMsg = validateZipEntry(entry, state);
-      if (errMsg != null) {
-        fail(errMsg);
+      const result = processEntry(entry, ++count, totalUncompressed);
+      if (result.error != null) {
+        fail(result.error);
         return;
       }
+      totalUncompressed = result.newTotal;
+      if (result.sawContentTypes) sawContentTypes = true;
+      if (result.sawDocument) sawDocument = true;
+      if (result.isRelEntry) relEntries.push(entry);
       zip.readEntry();
     });
 
     zip.on('end', () => {
       if (settled) return;
+      if (!sawContentTypes) {
+        fail('missing [Content_Types].xml');
+        return;
+      }
+      if (!sawDocument) {
+        fail('missing word/document.xml');
+        return;
+      }
       settled = true;
-      if (!state.sawContentTypes) {
-        reject(new Error('missing [Content_Types].xml'));
-        return;
-      }
-      if (!state.sawDocument) {
-        reject(new Error('missing word/document.xml'));
-        return;
-      }
-      resolve(state.relEntries);
+      resolve(relEntries);
     });
 
     zip.on('error', (err: Error) => {
