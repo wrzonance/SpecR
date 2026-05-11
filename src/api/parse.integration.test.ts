@@ -88,11 +88,11 @@ async function assertFailsForPdf(): Promise<void> {
     'file.pdf'
   );
   const postRes = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
-  expect(postRes.status).toBe(202);
-  const postBody = (await postRes.json()) as { success: boolean; data: { jobId: string } };
-  const job = await waitForJob(postBody.data.jobId);
-  expect(job.status).toBe('failed');
-  expect(typeof job.error).toBe('string');
+  // Security hardening (issue #22): unsupported extensions now rejected at the handler
+  // before createJob — returns 400, no job created.
+  expect(postRes.status).toBe(400);
+  const postBody = (await postRes.json()) as { success: boolean; error: string };
+  expect(postBody.success).toBe(false);
 }
 
 describe('POST /parse integration', () => {
