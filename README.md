@@ -67,7 +67,7 @@ The async `POST /parse` pattern (202 + poll) is intentional — inference over l
 - Revit integration (Phase 4)
 - Web UI with progress bars, live preview, diff/merge review (Phase 5)
 - DOCX cross-reference extraction (Phase 1c-iii) — pending after Phase 2a
-- Security hardening: ZIP bomb guard, MIME type validation for `POST /parse` (issue #19)
+- Security hardening: concurrency cap on parse workers (piscina) — follow-up to issue #22
 
 ## The Core Technical Challenge
 
@@ -91,7 +91,7 @@ pnpm tsx scripts/parse-debug.ts <file.docx>
 
 Parses a DOCX file locally (no server, no DB) and prints the inferred hierarchy with signal attribution:
 
-```
+```text
 Parsed:  unknown — unknown
 Source:  arcat
 Nodes:   57
