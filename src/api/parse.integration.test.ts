@@ -91,8 +91,10 @@ async function assertFailsForPdf(): Promise<void> {
   // Security hardening (issue #22): unsupported extensions now rejected at the handler
   // before createJob — returns 400, no job created.
   expect(postRes.status).toBe(400);
-  const postBody = (await postRes.json()) as { success: boolean; error: string };
+  const postBody = (await postRes.json()) as { success: boolean; error: string; data?: unknown };
   expect(postBody.success).toBe(false);
+  expect(typeof postBody.error).toBe('string');
+  expect(postBody.data).toBeUndefined();
 }
 
 describe('POST /parse integration', () => {
