@@ -11,8 +11,9 @@ describe('fast-xml-parser entity behaviour (issue #22 audit)', () => {
   it('does not expand recursive custom entity declarations', () => {
     const parser = new XMLParser({ processEntities: true });
     const xml = '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "&b;"><!ENTITY b "&a;">]><x>&a;</x>';
-    // fxp v5 returns the literal entity reference — no infinite expansion
+    // fxp v5 silently drops entities whose values reference other entities.
+    // &a; is left verbatim in output — no infinite expansion, no throw.
     const result = parser.parse(xml) as Record<string, unknown>;
-    expect(result['x']).toBeDefined();
+    expect(result['x']).toBe('&a;');
   });
 });
