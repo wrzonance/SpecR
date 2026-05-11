@@ -8,6 +8,6 @@ export function assertSecSafe(buf: Buffer): void {
   const text = buf.toString('utf-8');
   if (text.includes('\0')) throw new ParserError('null byte in .sec file');
   if (CONTROL_CHAR_RE.test(text)) throw new ParserError('control character in .sec file');
-  if (text.split('\n').some((line) => line.length > MAX_LINE_LENGTH))
+  if (text.split('\n').some((line) => line.replace(/\r$/, '').length > MAX_LINE_LENGTH))
     throw new ParserError('line too long in .sec file');
 }
