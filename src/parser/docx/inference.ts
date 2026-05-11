@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import { ilvlToNodeType } from './rules.js';
 import { matchTextSignal, matchIndentSignal } from './heuristics.js';
 import type {
@@ -7,7 +8,7 @@ import type {
   SignalConflict,
   StyleMap,
 } from './types.js';
-import type { CsiTree, NodeType } from '../../ast/types.js';
+import type { CsiNode, CsiTree, NodeType } from '../../ast/types.js';
 
 // Canonical normalized ilvl: part=0, article=1, pr1=2, pr2=3, pr3=4, pr4=5, pr5=6
 const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
@@ -154,12 +155,68 @@ export function classifyParagraphs(
   });
 }
 
-// buildTree implemented in Task 5
+type Source = 'arcat' | 'cpi' | 'unknown';
+
+interface StackEntry {
+  readonly cp: ClassifiedParagraph;
+  readonly children: CsiNode[];
+}
+
+function makeNode(cp: ClassifiedParagraph, children: CsiNode[], source: Source): CsiNode {
+  return {
+    id: uuidv4(),
+    type: cp.isVanish ? 'note' : cp.nodeType,
+    text: cp.paragraph.text,
+    children,
+    meta: {
+      source,
+      ...(cp.isVanish ? { vanish: true as const } : {}),
+    },
+  };
+}
+
+function drainTop(stack: StackEntry[], roots: CsiNode[], source: Source): void {
+  const popped = stack.pop();
+  if (!popped) return;
+  const node = makeNode(popped.cp, popped.children, source);
+  const parentChildren = stack.length > 0 ? stack[stack.length - 1]!.children : roots;
+  parentChildren.push(node);
+}
+
 export function buildTree(
-  _classified: readonly ClassifiedParagraph[],
-  _section: string,
-  _title: string,
-  _source: 'arcat' | 'cpi' | 'unknown'
+  classified: readonly ClassifiedParagraph[],
+  section: string,
+  title: string,
+  source: Source
 ): CsiTree {
-  throw new Error('buildTree not yet implemented');
+  const roots: CsiNode[] = [];
+  const stack: StackEntry[] = [];
+  let lastNonContChildren: CsiNode[] = roots;
+
+  for (const cp of classified) {
+    if (cp.nodeType === 'continuation') {
+      lastNonContChildren.push({
+        id: uuidv4(),
+        type: 'continuation',
+        text: cp.paragraph.text,
+        children: [],
+        meta: { source },
+      });
+      continue;
+    }
+
+    while (stack.length > 0 && stack[stack.length - 1]!.cp.resolvedIlvl >= cp.resolvedIlvl) {
+      drainTop(stack, roots, source);
+    }
+
+    const entry: StackEntry = { cp, children: [] };
+    stack.push(entry);
+    lastNonContChildren = entry.children;
+  }
+
+  while (stack.length > 0) {
+    drainTop(stack, roots, source);
+  }
+
+  return { id: uuidv4(), section, title, parts: roots };
 }

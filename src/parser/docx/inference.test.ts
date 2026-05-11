@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { classifyParagraphs } from './inference.js';
+import { classifyParagraphs, buildTree } from './inference.js';
 import { emptyNumberingMap } from './numbering.js';
-import type { DocxParagraph, NumberingMap, StyleMap } from './types.js';
+import type { ClassifiedParagraph, DocxParagraph, NumberingMap, StyleMap } from './types.js';
+import type { NodeType } from '../../ast/types.js';
 
 function emptyStyleMap(): StyleMap {
   return { styles: new Map(), resolvedNumPr: new Map() };
@@ -151,5 +152,126 @@ describe('classifyParagraphs — CPI regressions', () => {
       styleMap
     );
     expect(result[0]?.nodeType).toBe('continuation');
+  });
+});
+
+function makeClassified(
+  nodeType: NodeType,
+  normalizedIlvl: number,
+  text = '',
+  isVanish = false
+): ClassifiedParagraph {
+  return {
+    paragraph: { text, isVanish },
+    resolvedIlvl: normalizedIlvl,
+    nodeType,
+    signalUsed: 1,
+    conflicts: [],
+    isVanish,
+  };
+}
+
+describe('buildTree — Pass 2: tree structure', () => {
+  it('builds single part node as root', () => {
+    const tree = buildTree([makeClassified('part', 0, 'PART 1')], '01 10 00', 'Title', 'arcat');
+    expect(tree.parts).toHaveLength(1);
+    expect(tree.parts[0]?.type).toBe('part');
+    expect(tree.parts[0]?.text).toBe('PART 1');
+    expect(tree.section).toBe('01 10 00');
+    expect(tree.title).toBe('Title');
+  });
+
+  it('nests article under part', () => {
+    const classified = [makeClassified('part', 0, 'PART 1'), makeClassified('article', 1, '1.1')];
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    expect(tree.parts[0]?.children).toHaveLength(1);
+    expect(tree.parts[0]?.children[0]?.type).toBe('article');
+  });
+
+  it('nests pr1 under article under part', () => {
+    const classified = [
+      makeClassified('part', 0, 'PART 1'),
+      makeClassified('article', 1, '1.1'),
+      makeClassified('pr1', 2, 'A. text'),
+    ];
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    expect(tree.parts[0]?.children[0]?.children[0]?.type).toBe('pr1');
+  });
+
+  it('handles multiple parts at root', () => {
+    const classified = [
+      makeClassified('part', 0, 'PART 1'),
+      makeClassified('part', 0, 'PART 2'),
+      makeClassified('part', 0, 'PART 3'),
+    ];
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    expect(tree.parts).toHaveLength(3);
+  });
+
+  it('handles sibling articles (ilvl stepping back to article level)', () => {
+    const classified = [
+      makeClassified('part', 0, 'PART 1'),
+      makeClassified('article', 1, '1.1'),
+      makeClassified('pr1', 2, 'A. text'),
+      makeClassified('article', 1, '1.2'),
+    ];
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    expect(tree.parts[0]?.children).toHaveLength(2);
+    expect(tree.parts[0]?.children[0]?.children).toHaveLength(1);
+    expect(tree.parts[0]?.children[1]?.children).toHaveLength(0);
+  });
+});
+
+describe('buildTree — Pass 2: edge cases and meta', () => {
+  it('assigns UUID to tree and all nodes', () => {
+    const tree = buildTree([makeClassified('part', 0, 'PART 1')], '01', 'T', 'arcat');
+    expect(tree.id).toMatch(/^[\da-f-]{36}$/);
+    expect(tree.parts[0]?.id).toMatch(/^[\da-f-]{36}$/);
+  });
+
+  it('handles ilvl jump forward > 1 without synthetic nodes', () => {
+    const classified = [
+      makeClassified('part', 0, 'PART 1'),
+      makeClassified('pr1', 2, 'A. text'), // jumps from 0 to 2, skipping article
+    ];
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    expect(tree.parts[0]?.children).toHaveLength(1);
+    expect(tree.parts[0]?.children[0]?.type).toBe('pr1');
+  });
+
+  it('attaches continuation to last non-continuation paragraph', () => {
+    const cont: ClassifiedParagraph = {
+      paragraph: { text: 'cont text', isVanish: false },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      isVanish: false,
+    };
+    const classified = [
+      makeClassified('part', 0, 'PART 1'),
+      makeClassified('article', 1, '1.1'),
+      makeClassified('pr1', 2, 'A. text'),
+      cont,
+    ];
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    const pr1 = tree.parts[0]?.children[0]?.children[0];
+    expect(pr1?.children).toHaveLength(1);
+    expect(pr1?.children[0]?.type).toBe('continuation');
+  });
+
+  it('sets meta.source from source parameter', () => {
+    const tree = buildTree([makeClassified('part', 0, 'PART 1')], '01', 'T', 'cpi');
+    expect(tree.parts[0]?.meta.source).toBe('cpi');
+  });
+
+  it('overrides nodeType to note for vanish paragraphs', () => {
+    const classified = [
+      makeClassified('part', 0, 'PART 1'),
+      makeClassified('article', 1, 'note text', true), // isVanish=true
+    ];
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    expect(tree.parts[0]?.children[0]?.type).toBe('note');
+    expect(tree.parts[0]?.children[0]?.meta.vanish).toBe(true);
   });
 });
