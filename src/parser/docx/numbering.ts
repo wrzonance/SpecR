@@ -87,7 +87,7 @@ function buildPStyleMaps(
   return { pStyleToNumId, pStyleToIlvl };
 }
 
-// MASTERSPEC reserves ilvl 1-2 for Schedule/PDS; Article starts at ilvl 3.
+// CPI reserves ilvl 1-2 for Schedule/PDS; Article starts at ilvl 3.
 // Detect by checking lvlText of ilvl 1 or 2 for those keywords.
 function detectArticleIlvl(abstractNums: ReadonlyMap<number, AbstractNum>): number {
   for (const an of abstractNums.values()) {
