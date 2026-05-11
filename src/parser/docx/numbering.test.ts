@@ -134,11 +134,13 @@ describe('buildNumberingMap — MASTERSPEC style', () => {
   });
 
   it('withArticleIlvl overrides articleIlvl on an existing map', () => {
-    const map = buildNumberingMap(MASTERSPEC_NUMBERING);
-    const overridden = withArticleIlvl(map, 3);
+    // Start from emptyNumberingMap (articleIlvl=1) and override to 3
+    const base = emptyNumberingMap();
+    expect(base.articleIlvl).toBe(1);
+    const overridden = withArticleIlvl(base, 3);
     expect(overridden.articleIlvl).toBe(3);
     // other fields preserved
-    expect(overridden.pStyleToIlvl.get('ART')).toBe(map.pStyleToIlvl.get('ART'));
+    expect(overridden.pStyleToNumId).toBe(base.pStyleToNumId);
   });
 
   it('maps ART style to ilvl 3', () => {
