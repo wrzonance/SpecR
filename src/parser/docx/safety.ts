@@ -176,18 +176,37 @@ function readZipEntry(zip: yauzl.ZipFile, entry: yauzl.Entry): Promise<string> {
   });
 }
 
-function hasExternalTarget(xml: string): boolean {
-  return /TargetMode\s*=\s*["']External["']/i.test(xml);
+// Relationship types that trigger automatic network fetching when Word opens the document
+// (SSRF / server-side request forgery vectors). Hyperlinks and images are passive — they
+// only activate on user interaction — so they are intentionally excluded.
+// Corpus finding: all 28 ARCAT + CPI fixtures use hyperlink external rels (arcat.com URLs).
+const DANGEROUS_EXTERNAL_REL_TYPES = [
+  'attachedTemplate',
+  'externalLinkPath',
+  'frame',
+  'oleObject',
+  'subDocument',
+] as const;
+
+function isDangerousExternalRel(xml: string): boolean {
+  return DANGEROUS_EXTERNAL_REL_TYPES.some((relType) => {
+    // Match: relationships/<type>" … TargetMode="External"
+    const pattern = new RegExp(
+      `relationships/${relType}[^>]*TargetMode\\s*=\\s*["']External["']`,
+      'i'
+    );
+    return pattern.test(xml);
+  });
 }
 
-/** Phase 2: open read streams for _rels entries; reject if TargetMode="External" found. */
+/** Phase 2: open read streams for _rels entries; reject dangerous external relationships. */
 async function checkExternalRelationships(
   zip: yauzl.ZipFile,
   relEntries: readonly yauzl.Entry[]
 ): Promise<void> {
   for (const entry of relEntries) {
     const content = await readZipEntry(zip, entry);
-    if (hasExternalTarget(content)) {
+    if (isDangerousExternalRel(content)) {
       throw new Error(`external relationship in ${entry.fileName}`);
     }
   }

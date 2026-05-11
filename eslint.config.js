@@ -38,6 +38,8 @@ export default defineConfig(
     rules: {
       '@typescript-eslint/unbound-method': 'off',
       'max-lines-per-function': 'off',
+      // Integration tests use console.warn/info for fixture diagnostics — not production code.
+      'no-console': 'off',
     },
   },
   // scripts/ are CLI entry points — console.log is the intended output mechanism.

