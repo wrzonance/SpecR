@@ -32,7 +32,7 @@ export interface NumberingMap {
   readonly abstractNums: ReadonlyMap<number, AbstractNum>;
   readonly pStyleToNumId: ReadonlyMap<string, number>;
   readonly pStyleToIlvl: ReadonlyMap<string, number>;
-  // ilvl at which 'article' starts: ARCAT-style=1, MASTERSPEC-style=3
+  // ilvl at which 'article' starts: ARCAT-style=1, CPI-style=3
   readonly articleIlvl: number;
 }
 
@@ -71,5 +71,25 @@ export interface DocxParagraph {
   readonly ilvl?: number;
   readonly leftIndent?: number; // twips (1/1440 inch)
   readonly outlineLvl?: number;
+  readonly isVanish: boolean;
+}
+
+// ─── inference.ts output ──────────────────────────────────────────────────────
+
+import type { NodeType } from '../../ast/types.js';
+
+export interface SignalConflict {
+  readonly signal: 1 | 2 | 3 | 4 | 5;
+  readonly reportedIlvl: number;
+  readonly reportedNodeType: NodeType;
+}
+
+export interface ClassifiedParagraph {
+  readonly paragraph: DocxParagraph;
+  // Canonical normalized ilvl: part=0, article=1, pr1=2, pr2=3, pr3=4, pr4=5, pr5=6
+  readonly resolvedIlvl: number;
+  readonly nodeType: NodeType;
+  readonly signalUsed: 1 | 2 | 3 | 4 | 5;
+  readonly conflicts: readonly SignalConflict[];
   readonly isVanish: boolean;
 }

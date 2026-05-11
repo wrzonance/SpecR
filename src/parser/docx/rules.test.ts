@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ilvlToNodeType, SECTION_REF_RULES, ARCAT_ILVL_MAP, MASTERSPEC_ILVL_MAP } from './rules.js';
+import { ilvlToNodeType, SECTION_REF_RULES, ARCAT_ILVL_MAP, CPI_ILVL_MAP } from './rules.js';
 
 describe('ilvlToNodeType', () => {
   describe('ARCAT-style (articleIlvl=1)', () => {
@@ -13,7 +13,7 @@ describe('ilvlToNodeType', () => {
     it('maps ilvl 7+ to continuation', () => expect(ilvlToNodeType(7, 1)).toBe('continuation'));
   });
 
-  describe('MASTERSPEC-style (articleIlvl=3)', () => {
+  describe('CPI-style (articleIlvl=3)', () => {
     it('maps ilvl 0 to part', () => expect(ilvlToNodeType(0, 3)).toBe('part'));
     it('maps ilvl 1 to continuation (reserved Schedule level)', () =>
       expect(ilvlToNodeType(1, 3)).toBe('continuation'));
@@ -62,13 +62,13 @@ describe('ilvl maps — documentation completeness', () => {
     expect(types).toContain('pr5');
   });
 
-  it('MASTERSPEC_ILVL_MAP article rule has description mentioning reserved levels', () => {
-    const articleRule = MASTERSPEC_ILVL_MAP.find((r) => r.nodeType === 'article');
+  it('CPI_ILVL_MAP article rule has description mentioning reserved levels', () => {
+    const articleRule = CPI_ILVL_MAP.find((r) => r.nodeType === 'article');
     expect(articleRule?.description.toLowerCase()).toContain('reserved');
   });
 
   it('all signal rules have non-empty description', () => {
-    for (const rule of [...ARCAT_ILVL_MAP, ...MASTERSPEC_ILVL_MAP]) {
+    for (const rule of [...ARCAT_ILVL_MAP, ...CPI_ILVL_MAP]) {
       expect(rule.description.length).toBeGreaterThan(0);
     }
   });
