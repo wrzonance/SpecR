@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseDocx } from './index.js';
 import type { CsiNode } from '../../ast/types.js';
 
 const ARCAT_DIR = resolve('docs/references/ARCAT');
+// ARCAT .docx files are copyrighted and gitignored — only present in local dev environments.
+const FIXTURES_AVAILABLE = existsSync(resolve(ARCAT_DIR, '01_10_00arc.docx'));
 
 function allNodes(nodes: readonly CsiNode[]): CsiNode[] {
   return [...nodes, ...nodes.flatMap((n) => allNodes(n.children))];
@@ -36,7 +38,8 @@ const ARCAT_FIXTURES = [
   '40_13_00nfb.docx',
 ];
 
-describe('ARCAT fixture parsing', () => {
+// Files are copyrighted and gitignored — tests skip automatically in CI.
+describe.skipIf(!FIXTURES_AVAILABLE)('ARCAT fixture parsing', () => {
   for (const fixture of ARCAT_FIXTURES) {
     it(`${fixture}: parses with source=arcat`, async () => {
       const buffer = readFileSync(resolve(ARCAT_DIR, fixture));

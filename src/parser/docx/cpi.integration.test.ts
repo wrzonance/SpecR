@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseDocx } from './index.js';
 import type { CsiNode } from '../../ast/types.js';
 
 const CPI_DIR = resolve('docs/references/MANUFACTURER_CPI');
+// CPI .docx files are copyrighted and gitignored — only present in local dev environments.
+const FIXTURES_AVAILABLE = existsSync(resolve(CPI_DIR, 'CPI_BUSBAR_CSIMFS.docx'));
 
 function allNodes(nodes: readonly CsiNode[]): CsiNode[] {
   return [...nodes, ...nodes.flatMap((n) => allNodes(n.children))];
@@ -19,7 +21,8 @@ const CPI_FIXTURES = [
   'CPI_ELECTRICAL_CABINETS_AND_ENCLOSURES_CSIMFS.docx',
 ];
 
-describe('CPI fixture parsing', () => {
+// Files are copyrighted and gitignored — tests skip automatically in CI.
+describe.skipIf(!FIXTURES_AVAILABLE)('CPI fixture parsing', () => {
   for (const fixture of CPI_FIXTURES) {
     it(`${fixture}: parses with source=cpi`, async () => {
       const buffer = readFileSync(resolve(CPI_DIR, fixture));

@@ -58,15 +58,6 @@ async function waitForJob(jobId: string, maxMs = 20_000): Promise<JobData> {
   throw new Error(`job ${jobId} did not complete within ${maxMs}ms`);
 }
 
-function makeFormData(buffer: Buffer, filename: string): FormData {
-  const form = new FormData();
-  const blob = new Blob([new Uint8Array(buffer)], {
-    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  });
-  form.append('file', blob, filename);
-  return form;
-}
-
 const cleanupIds: string[] = [];
 
 afterAll(async () => {
@@ -74,6 +65,20 @@ afterAll(async () => {
     await pool.query('DELETE FROM specs WHERE id = $1', [id]);
   }
 });
+
+async function assertUfgsSpecInDb(specId: string): Promise<void> {
+  const specResult = await pool.query<{ source: string }>(
+    'SELECT source FROM specs WHERE id = $1',
+    [specId]
+  );
+  expect(specResult.rows).toHaveLength(1);
+  expect(specResult.rows[0]?.source).toBe('ufgs');
+  const paraResult = await pool.query<{ count: string }>(
+    'SELECT COUNT(*) AS count FROM paragraphs WHERE spec_id = $1',
+    [specId]
+  );
+  expect(parseInt(paraResult.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
+}
 
 async function assertFailsForPdf(): Promise<void> {
   const form = new FormData();
@@ -90,24 +95,15 @@ async function assertFailsForPdf(): Promise<void> {
   expect(typeof job.error).toBe('string');
 }
 
-async function assertSpecInDb(specId: string): Promise<void> {
-  const specResult = await pool.query<{ section: string; source: string }>(
-    'SELECT section, source FROM specs WHERE id = $1',
-    [specId]
-  );
-  expect(specResult.rows).toHaveLength(1);
-  expect(specResult.rows[0]?.source).toBe('arcat');
-  const paraResult = await pool.query<{ count: string }>(
-    'SELECT COUNT(*) AS count FROM paragraphs WHERE spec_id = $1',
-    [specId]
-  );
-  expect(parseInt(paraResult.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
-}
-
 describe('POST /parse integration', () => {
-  it('parses ARCAT DOCX and stores paragraphs in DB', async () => {
-    const buffer = readFileSync(resolve('docs/references/ARCAT/01_10_00arc.docx'));
-    const form = makeFormData(buffer, '01_10_00arc.docx');
+  it('parses UFGS .sec file and stores paragraphs in DB', async () => {
+    // Use UFGS .sec fixture — public domain, tracked in git, available in CI.
+    const secContent = readFileSync(
+      resolve('docs/references/UFGS/DIVISION_01/01_11_00.SEC'),
+      'utf-8'
+    );
+    const form = new FormData();
+    form.append('file', new Blob([secContent], { type: 'text/plain' }), '01_11_00.sec');
 
     const postRes = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
     expect(postRes.status).toBe(202);
@@ -123,7 +119,7 @@ describe('POST /parse integration', () => {
     expect(specId).toBeDefined();
     if (specId) {
       cleanupIds.push(specId);
-      await assertSpecInDb(specId);
+      await assertUfgsSpecInDb(specId);
     }
   }, 30_000);
 
