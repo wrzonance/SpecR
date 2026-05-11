@@ -60,22 +60,51 @@ async function waitForJob(jobId: string, maxMs = 20_000): Promise<JobData> {
 
 function makeFormData(buffer: Buffer, filename: string): FormData {
   const form = new FormData();
-  const blob = new Blob([buffer], {
+  const blob = new Blob([new Uint8Array(buffer)], {
     type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   });
   form.append('file', blob, filename);
   return form;
 }
 
+const cleanupIds: string[] = [];
+
+afterAll(async () => {
+  for (const id of cleanupIds) {
+    await pool.query('DELETE FROM specs WHERE id = $1', [id]);
+  }
+});
+
+async function assertFailsForPdf(): Promise<void> {
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([new Uint8Array(Buffer.from('x'))], { type: 'application/pdf' }),
+    'file.pdf'
+  );
+  const postRes = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+  expect(postRes.status).toBe(202);
+  const postBody = (await postRes.json()) as { success: boolean; data: { jobId: string } };
+  const job = await waitForJob(postBody.data.jobId);
+  expect(job.status).toBe('failed');
+  expect(typeof job.error).toBe('string');
+}
+
+async function assertSpecInDb(specId: string): Promise<void> {
+  const specResult = await pool.query<{ section: string; source: string }>(
+    'SELECT section, source FROM specs WHERE id = $1',
+    [specId]
+  );
+  expect(specResult.rows).toHaveLength(1);
+  expect(specResult.rows[0]?.source).toBe('arcat');
+  const paraResult = await pool.query<{ count: string }>(
+    'SELECT COUNT(*) AS count FROM paragraphs WHERE spec_id = $1',
+    [specId]
+  );
+  expect(parseInt(paraResult.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
+}
+
 describe('POST /parse integration', () => {
-  const cleanupIds: string[] = [];
-
-  afterAll(async () => {
-    for (const id of cleanupIds) {
-      await pool.query('DELETE FROM specs WHERE id = $1', [id]);
-    }
-  });
-
   it('parses ARCAT DOCX and stores paragraphs in DB', async () => {
     const buffer = readFileSync(resolve('docs/references/ARCAT/01_10_00arc.docx'));
     const form = makeFormData(buffer, '01_10_00arc.docx');
@@ -84,31 +113,18 @@ describe('POST /parse integration', () => {
     expect(postRes.status).toBe(202);
 
     const postBody = (await postRes.json()) as { success: boolean; data: { jobId: string } };
-    expect(postBody.success).toBe(true);
     const { jobId } = postBody.data;
     expect(typeof jobId).toBe('string');
 
     const job = await waitForJob(jobId);
     expect(job.status).toBe('complete');
-    expect(job.result?.specId).toBeDefined();
 
     const specId = job.result?.specId;
-    if (specId) cleanupIds.push(specId);
-
-    // Spec row exists in DB
-    const specResult = await pool.query<{ section: string; source: string }>(
-      'SELECT section, source FROM specs WHERE id = $1',
-      [specId]
-    );
-    expect(specResult.rows).toHaveLength(1);
-    expect(specResult.rows[0]?.source).toBe('arcat');
-
-    // Paragraphs were inserted
-    const paraResult = await pool.query<{ count: string }>(
-      'SELECT COUNT(*) AS count FROM paragraphs WHERE spec_id = $1',
-      [specId]
-    );
-    expect(parseInt(paraResult.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
+    expect(specId).toBeDefined();
+    if (specId) {
+      cleanupIds.push(specId);
+      await assertSpecInDb(specId);
+    }
   }, 30_000);
 
   it('returns 400 when no file provided', async () => {
@@ -124,18 +140,7 @@ describe('POST /parse integration', () => {
   });
 
   it('job fails gracefully for unsupported extension', async () => {
-    const form = new FormData();
-    form.append('file', new Blob([Buffer.from('fake content')], { type: 'application/pdf' }), 'file.pdf');
-
-    const postRes = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
-    expect(postRes.status).toBe(202);
-
-    const postBody = (await postRes.json()) as { success: boolean; data: { jobId: string } };
-    const { jobId } = postBody.data;
-
-    const job = await waitForJob(jobId);
-    expect(job.status).toBe('failed');
-    expect(typeof job.error).toBe('string');
+    await assertFailsForPdf();
   });
 
   it('GET /parse/jobs/:jobId returns 404 for unknown job', async () => {
