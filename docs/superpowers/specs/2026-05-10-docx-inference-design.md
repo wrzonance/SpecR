@@ -365,6 +365,59 @@ Known ambiguous cases marked `// KNOWN AMBIGUITY: <description>`.
 
 ---
 
+## Manual Testing (no UI)
+
+Three layers, in order of speed:
+
+### 1. `scripts/parse-debug.ts` — fastest, no server, no DB
+
+```bash
+pnpm tsx scripts/parse-debug.ts docs/references/ARCAT/01_10_00arc.docx
+```
+
+Calls `parseDocx(buffer)` directly, prints human-readable tree to stdout:
+
+```
+Parsed: 01 10 00 — Summary of Work
+Source:  arcat
+Nodes:   127
+
+PART 1 - GENERAL                      [part,    sig:4]
+  1.1 SUMMARY                         [article, sig:1]
+    A. Section includes...            [pr1,     sig:1]
+       See Section 09 91 00           [continuation, sig:3]
+
+Conflicts (2):
+  #34  sig1=pr2 sig4=pr1  "A. Provide..."
+  #89  sig2=article sig4=pr2  "1.1..."
+```
+
+Dev loop: edit inference → run script → inspect → repeat. No process startup.
+
+### 2. curl + jq — full pipeline with DB
+
+```bash
+# Upload
+JOB=$(curl -s -F file=@fixture.docx http://localhost:3000/parse | jq -r '.jobId')
+# Poll
+watch -n1 "curl -s http://localhost:3000/parse/jobs/$JOB | jq '.progress'"
+# Inspect tree
+SPEC=$(curl -s http://localhost:3000/parse/jobs/$JOB | jq -r '.result.specId')
+curl -s http://localhost:3000/specs/$SPEC | jq '.'
+```
+
+`GET /specs/:id` returns full `CsiTree` JSON — existing endpoint, no new code.
+
+### 3. Vitest snapshot tests — regression guard
+
+```bash
+pnpm test src/parser/docx/arcat.integration.test.ts
+```
+
+First run generates JSON snapshots; subsequent runs catch regressions automatically. Covers all ARCAT + CPI fixtures.
+
+---
+
 ## Related Issues
 
 - #12 — Phase 1c tracking issue (this sub-MVP closes it)
