@@ -118,6 +118,8 @@ function runPipeline(
   return buildTree(classified, meta.section, meta.title, source);
 }
 
+export { assertDocxSafe } from './safety.js';
+
 export async function parseDocx(
   buffer: Buffer,
   onProgress?: (stage: string, pct: number) => void
