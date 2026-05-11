@@ -85,50 +85,50 @@ export const ARCAT_ILVL_MAP: readonly IlvlSignalRule[] = [
   },
 ];
 
-// MASTERSPEC / Deltek template: ilvl 1-2 reserved for Schedule and PDS (rarely used).
+// CPI (Chatsworth Products Inc.) manufacturer specs: ilvl 1-2 reserved for Schedule/PDS.
 // Article appears at ilvl 3, shifting all content tiers up by 2 vs ARCAT.
-export const MASTERSPEC_ILVL_MAP: readonly IlvlSignalRule[] = [
+export const CPI_ILVL_MAP: readonly IlvlSignalRule[] = [
   {
-    id: 'ms-part',
+    id: 'cpi-part',
     ilvl: 0,
     nodeType: 'part',
-    description: 'MASTERSPEC Part heading (ilvl 0 → PART N - GENERAL)',
+    description: 'CPI Part heading (ilvl 0 → PART N - GENERAL)',
   },
   {
-    id: 'ms-article',
+    id: 'cpi-article',
     ilvl: 3,
     nodeType: 'article',
-    description: 'MASTERSPEC Article — ilvl 3 because ilvl 1-2 are reserved for Schedule/PDS',
+    description: 'CPI Article — ilvl 3 because ilvl 1-2 are reserved for Schedule/PDS',
   },
   {
-    id: 'ms-pr1',
+    id: 'cpi-pr1',
     ilvl: 4,
     nodeType: 'pr1',
-    description: 'MASTERSPEC PR1 first paragraph tier (ilvl 4 → A. text)',
+    description: 'CPI PR1 first paragraph tier (ilvl 4 → A. text)',
   },
   {
-    id: 'ms-pr2',
+    id: 'cpi-pr2',
     ilvl: 5,
     nodeType: 'pr2',
-    description: 'MASTERSPEC PR2 second paragraph tier (ilvl 5 → 1. text)',
+    description: 'CPI PR2 second paragraph tier (ilvl 5 → 1. text)',
   },
   {
-    id: 'ms-pr3',
+    id: 'cpi-pr3',
     ilvl: 6,
     nodeType: 'pr3',
-    description: 'MASTERSPEC PR3 third paragraph tier (ilvl 6 → a. text)',
+    description: 'CPI PR3 third paragraph tier (ilvl 6 → a. text)',
   },
   {
-    id: 'ms-pr4',
+    id: 'cpi-pr4',
     ilvl: 7,
     nodeType: 'pr4',
-    description: 'MASTERSPEC PR4 fourth paragraph tier (ilvl 7 → 1) text)',
+    description: 'CPI PR4 fourth paragraph tier (ilvl 7 → 1) text)',
   },
   {
-    id: 'ms-pr5',
+    id: 'cpi-pr5',
     ilvl: 8,
     nodeType: 'pr5',
-    description: 'MASTERSPEC PR5 fifth paragraph tier (ilvl 8 → a) text)',
+    description: 'CPI PR5 fifth paragraph tier (ilvl 8 → a) text)',
   },
 ];
 
@@ -138,7 +138,7 @@ const NODE_TYPE_SEQUENCE: readonly NodeType[] = ['article', 'pr1', 'pr2', 'pr3',
 
 /**
  * Map a raw OOXML ilvl to a canonical CSI NodeType.
- * articleIlvl is detected from numbering.xml (1 for ARCAT-style, 3 for MASTERSPEC-style).
+ * articleIlvl comes from NumberingMap — detected from numbering.xml or overridden by orchestrator via StyleMap.
  * Returns 'continuation' for ilvl values beyond the defined sequence.
  */
 export function ilvlToNodeType(ilvl: number, articleIlvl: number): NodeType {

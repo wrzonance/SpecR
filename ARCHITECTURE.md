@@ -244,7 +244,8 @@ interface ApiResponse<T> {
 
 | Method | Path | Body | Response |
 |--------|------|------|----------|
-| POST | `/parse` | multipart: `file` (.docx or .sec) | `{ specId, section, title, nodeCount }` |
+| POST | `/parse` | multipart: `file` (.docx or .sec), `section?`, `title?` | `202 { jobId }` — async; poll `GET /parse/jobs/:jobId` for result |
+| GET | `/parse/jobs/:jobId` | — | `{ jobId, status, progress, result?, error? }` |
 | GET | `/specs/:id` | — | `CsiTree` |
 | PATCH | `/specs/:id` | `{ title?, section? }` | `{ specId, title, section }` |
 | POST | `/specs/:id/generate` | `{ templateId? }` | DOCX buffer (octet-stream) |
@@ -375,22 +376,41 @@ Sub-MVP 1b — Project + TOC API:
 - TOC-level cascade: removing a section auto-purges dangling `spec_references`, marks broken refs on remaining sections
 - `GET /projects/:id/references/broken` — surface broken refs for spec writer review
 
-Sub-MVP 1c — DOCX hierarchy inference:
-- DOCX `numbering.xml` analyzer (abstractNum → num → pStyle map)
-- DOCX `styles.xml` analyzer (basedOn chains, numPr-carrying styles)
-- 5-signal hierarchy inference engine (port of Clippit `ListItemRetriever`)
-- `POST /parse` endpoint (accepts .SEC and .docx)
-- Test against ARCAT fixtures (machine-generated, cleanest) first, CPI second
+Sub-MVP 1c-i — DOCX numbering + style analyzers (complete, PR #17):
+- DOCX `numbering.xml` analyzer (abstractNum → num → pStyle map, articleIlvl auto-detection)
+- DOCX `styles.xml` analyzer (basedOn chains, numPr-carrying styles, Clippit numId=0 chain-stop)
+- Intermediate types: `NumberingMap`, `StyleMap`, `DocxParagraph`
+- Extraction rule constants (`ARCAT_ILVL_MAP`, `CPI_ILVL_MAP`, `SECTION_REF_RULES`) as typed MCP-surfaceable data
+
+Sub-MVP 1c-ii — DOCX hierarchy inference + `POST /parse` (issue #12):
+- `document.ts`: extract `DocxParagraph[]` from `word/document.xml` (JSZip + fast-xml-parser)
+- `heuristics.ts`: signal 4 (text regex, anchored to `^`, min-length guard) + signal 5 (indentation / 576 twips)
+- `inference.ts`: two-pass engine — pass 1 signal priority chain (1→5) with conflict logging; pass 2 stack-based tree construction
+- `index.ts`: DOCX orchestrator with `onProgress` callback for async job tracking
+- `POST /parse` + `GET /parse/jobs/:jobId`: async job pattern (202 + poll) for progress surfacing in Phase 5 UI
+- Test against ARCAT fixtures first (machine-generated, cleanest), CPI second
+
+Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
+- Run `SECTION_REF_RULES` regex over DOCX paragraph text → `spec_references` table
+- Parity with .SEC parser cross-reference extraction
 
 ### Phase 2: Generator + MCP Foundation (Weeks 5–7, overlaps Phase 1)
+
+**Phase 2a — Core generator:**
 - AST → DOCX with dolanmiu/docx
 - AST → Markdown renderer (prerequisite for MCP resources — ADR-008/010)
-- CSI multilevel numbering engine
+- CSI multilevel numbering engine (hardcoded default styles)
 - Content control UUID injection (`w:sdt` wrapping)
 - `POST /specs/:id/generate` endpoint
 - MCP server scaffold: `search_library`, `get_spec`, `list_sections` tools
 - MCP resources: `specr://specs/{id}` (Markdown), `specr://library/{div}/{sec}`
 - Round-trip smoke test: generate DOCX → open in Word → verify numbering
+
+**Phase 2b — Firm style template engine (issue #20):**
+- `style_templates` + `style_rules` DB tables; default CSI styles seeded at migration
+- Generator accepts `templateId?` (already in `POST /specs/:id/generate` body) — wired through to numbering + controls
+- Template import API: `POST /templates`, `POST /templates/:id/rules`
+- Prerequisite for Phase 5 live preview: generate DOCX → blob → client render
 
 ### Phase 3: Merge Engine (Weeks 7–9)
 - UUID-based paragraph matching across round-trips

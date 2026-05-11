@@ -14,6 +14,7 @@ import {
   CreateProjectBodySchema,
   AddSpecToProjectBodySchema,
 } from '../ast/index.js';
+import { parseHandler, parseJobHandler, upload } from './parse.js';
 
 export const router: RouterType = Router();
 
@@ -29,3 +30,5 @@ router.post(
 );
 router.delete('/projects/:id/specs/:specId', removeSpecFromProjectHandler);
 router.get('/projects/:id/references/broken', getBrokenRefsHandler);
+router.post('/parse', upload.single('file'), parseHandler);
+router.get('/parse/jobs/:jobId', parseJobHandler);

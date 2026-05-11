@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildNumberingMap, emptyNumberingMap } from './numbering.js';
+import { buildNumberingMap, emptyNumberingMap, withArticleIlvl } from './numbering.js';
 import { ParserError } from '../error.js';
 
 const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
@@ -128,9 +128,19 @@ describe('buildNumberingMap — ARCAT style', () => {
 });
 
 describe('buildNumberingMap — MASTERSPEC style', () => {
-  it('detects articleIlvl=3 when Schedule/PDS reserved at ilvl 1-2', () => {
+  it('detects articleIlvl=3 from SCHEDULE/PDS lvlText in numbering.xml', () => {
     const map = buildNumberingMap(MASTERSPEC_NUMBERING);
     expect(map.articleIlvl).toBe(3);
+  });
+
+  it('withArticleIlvl overrides articleIlvl on an existing map', () => {
+    // Start from emptyNumberingMap (articleIlvl=1) and override to 3
+    const base = emptyNumberingMap();
+    expect(base.articleIlvl).toBe(1);
+    const overridden = withArticleIlvl(base, 3);
+    expect(overridden.articleIlvl).toBe(3);
+    // other fields preserved
+    expect(overridden.pStyleToNumId).toBe(base.pStyleToNumId);
   });
 
   it('maps ART style to ilvl 3', () => {

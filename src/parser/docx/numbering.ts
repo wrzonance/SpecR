@@ -87,8 +87,9 @@ function buildPStyleMaps(
   return { pStyleToNumId, pStyleToIlvl };
 }
 
-// MASTERSPEC reserves ilvl 1-2 for Schedule/PDS; Article starts at ilvl 3.
-// Detect by checking lvlText of ilvl 1 or 2 for those keywords.
+// Detect articleIlvl from numbering.xml: CPI v1 files reserve ilvl 1-2 for
+// Schedule/PDS and mark them with those keywords in lvlText. This is a secondary
+// signal; the orchestrator prefers StyleMap-based detection when available.
 function detectArticleIlvl(abstractNums: ReadonlyMap<number, AbstractNum>): number {
   for (const an of abstractNums.values()) {
     for (const lvl of an.levels) {
@@ -119,6 +120,11 @@ export function buildNumberingMap(xml: string): NumberingMap {
   const { pStyleToNumId, pStyleToIlvl } = buildPStyleMaps(nums, abstractNums);
   const articleIlvl = detectArticleIlvl(abstractNums);
   return { nums, abstractNums, pStyleToNumId, pStyleToIlvl, articleIlvl };
+}
+
+/** Return a new NumberingMap with articleIlvl overridden. Used by orchestrator after StyleMap detection. */
+export function withArticleIlvl(map: NumberingMap, articleIlvl: number): NumberingMap {
+  return { ...map, articleIlvl };
 }
 
 export function emptyNumberingMap(): NumberingMap {
