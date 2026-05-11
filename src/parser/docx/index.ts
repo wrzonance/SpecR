@@ -6,7 +6,7 @@ import { buildStyleMap } from './styles.js';
 import { parseDocument } from './document.js';
 import { classifyParagraphs, buildTree } from './inference.js';
 import type { CsiTree } from '../../ast/types.js';
-import type { StyleMap } from './types.js';
+import type { NumberingMap, StyleMap } from './types.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
 // reject if total uncompressed bytes > 50MB to prevent ZIP bomb exhaustion.
@@ -40,21 +40,20 @@ function parseCoreMetadata(xml: string): { section: string; title: string } {
 // CPI v2 (newer): uses short-form CPI styles — PRT, ART, PR1, PR2, … with numPr in styles.xml.
 function detectSource(styleMap: StyleMap): Source {
   if ([...styleMap.styles.keys()].some((id) => id.startsWith('ARCAT'))) return 'arcat';
-  // CPI v2: ART style present (explicit article style with numPr at ilvl 3)
+  // CPI v2: vendor-specific PRT + ART styles (not present in generic Word templates)
   if (styleMap.styles.has('ART') && styleMap.styles.has('PRT')) return 'cpi';
-  // CPI v1: Heading1 used for PART lines (no ARCAT styles present)
-  if (styleMap.styles.has('Heading1')) return 'cpi';
   return 'unknown';
 }
 
-// Detect articleIlvl from StyleMap — the ilvl at which the 'article' level starts.
+// Detect articleIlvl using StyleMap first, then numbering.xml as fallback.
 // ARCAT: ARCATArticle style has numPr ilvl=1 → articleIlvl=1.
 // CPI v2: ART style has numPr ilvl=3 → articleIlvl=3.
-// CPI v1 / unknown: no style-based numPr link → default articleIlvl=1.
-function detectArticleIlvl(styleMap: StyleMap): number {
+// Fallback: numbering.xml detectArticleIlvl (SCHEDULE/PDS lvlText heuristic).
+function detectArticleIlvl(styleMap: StyleMap, numberingMap: NumberingMap): number {
   const artStyle = styleMap.resolvedNumPr.get('ART') ?? styleMap.resolvedNumPr.get('ARCATArticle');
   if (artStyle) return artStyle.ilvl;
-  return 1;
+  // Fall back to numbering.xml detection (SCHEDULE/PDS lvlText heuristic)
+  return numberingMap.articleIlvl;
 }
 
 async function extractEntries(zip: JSZip): Promise<{
@@ -97,7 +96,7 @@ function runPipeline(
 
   // Override articleIlvl now that StyleMap is available — numbering.xml alone cannot
   // distinguish CPI-v2 (ART at ilvl=3) from ARCAT (article at ilvl=1).
-  const articleIlvl = detectArticleIlvl(styleMap);
+  const articleIlvl = detectArticleIlvl(styleMap, numberingMap);
   const resolvedNumberingMap = withArticleIlvl(numberingMap, articleIlvl);
 
   onProgress?.('document', 55);

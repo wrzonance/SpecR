@@ -138,7 +138,7 @@ const NODE_TYPE_SEQUENCE: readonly NodeType[] = ['article', 'pr1', 'pr2', 'pr3',
 
 /**
  * Map a raw OOXML ilvl to a canonical CSI NodeType.
- * articleIlvl is detected from numbering.xml (1 for ARCAT-style, 3 for CPI-style).
+ * articleIlvl comes from NumberingMap — detected from numbering.xml or overridden by orchestrator via StyleMap.
  * Returns 'continuation' for ilvl values beyond the defined sequence.
  */
 export function ilvlToNodeType(ilvl: number, articleIlvl: number): NodeType {

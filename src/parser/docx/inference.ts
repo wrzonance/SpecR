@@ -162,6 +162,16 @@ interface StackEntry {
   readonly children: CsiNode[];
 }
 
+function makeContinuationNode(cp: ClassifiedParagraph, source: Source): CsiNode {
+  return {
+    id: uuidv4(),
+    type: cp.isVanish ? 'note' : 'continuation',
+    text: cp.paragraph.text,
+    children: [],
+    meta: { source, ...(cp.isVanish ? { vanish: true } : {}) },
+  };
+}
+
 function makeNode(cp: ClassifiedParagraph, children: CsiNode[], source: Source): CsiNode {
   return {
     id: uuidv4(),
@@ -196,13 +206,7 @@ export function buildTree(
 
   for (const cp of classified) {
     if (cp.nodeType === 'continuation') {
-      lastNonContChildren.push({
-        id: uuidv4(),
-        type: 'continuation',
-        text: cp.paragraph.text,
-        children: [],
-        meta: { source },
-      });
+      lastNonContChildren.push(makeContinuationNode(cp, source));
       continue;
     }
 

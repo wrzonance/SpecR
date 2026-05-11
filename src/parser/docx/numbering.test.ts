@@ -128,11 +128,9 @@ describe('buildNumberingMap — ARCAT style', () => {
 });
 
 describe('buildNumberingMap — MASTERSPEC style', () => {
-  // articleIlvl detection moved to orchestrator (index.ts) which calls withArticleIlvl()
-  // after StyleMap is available. buildNumberingMap always defaults to articleIlvl=1.
-  it('returns default articleIlvl=1 (orchestrator overrides via withArticleIlvl)', () => {
+  it('detects articleIlvl=3 from SCHEDULE/PDS lvlText in numbering.xml', () => {
     const map = buildNumberingMap(MASTERSPEC_NUMBERING);
-    expect(map.articleIlvl).toBe(1);
+    expect(map.articleIlvl).toBe(3);
   });
 
   it('withArticleIlvl overrides articleIlvl on an existing map', () => {

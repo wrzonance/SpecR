@@ -244,7 +244,8 @@ interface ApiResponse<T> {
 
 | Method | Path | Body | Response |
 |--------|------|------|----------|
-| POST | `/parse` | multipart: `file` (.docx or .sec) | `{ specId, section, title, nodeCount }` |
+| POST | `/parse` | multipart: `file` (.docx or .sec), `section?`, `title?` | `202 { jobId }` — async; poll `GET /parse/jobs/:jobId` for result |
+| GET | `/parse/jobs/:jobId` | — | `{ jobId, status, progress, result?, error? }` |
 | GET | `/specs/:id` | — | `CsiTree` |
 | PATCH | `/specs/:id` | `{ title?, section? }` | `{ specId, title, section }` |
 | POST | `/specs/:id/generate` | `{ templateId? }` | DOCX buffer (octet-stream) |

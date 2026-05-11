@@ -7,6 +7,20 @@ import { pool, createSpec, insertTree } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import type { CsiNode, CsiTree } from '../ast/types.js';
 
+interface ParseBody {
+  readonly section?: string;
+  readonly title?: string;
+}
+
+function parseBody(raw: unknown): ParseBody {
+  if (typeof raw !== 'object' || raw === null) return {};
+  const r = raw as Record<string, unknown>;
+  const result: ParseBody = {};
+  if (typeof r['section'] === 'string') return { ...result, section: r['section'] };
+  if (typeof r['title'] === 'string') return { ...result, title: r['title'] };
+  return result;
+}
+
 // SECURITY (issue #19): validate MIME type — .docx must match
 // application/vnd.openxmlformats-officedocument.wordprocessingml.document
 // AND magic bytes PK\x03\x04. Reject mismatch before processing.
@@ -21,8 +35,7 @@ export function parseHandler(req: Request, res: Response): void {
     return;
   }
   const jobId = createJob();
-  const body = req.body as { section?: string; title?: string };
-  void processParseJob(jobId, req.file, body);
+  void processParseJob(jobId, req.file, parseBody(req.body));
   res.status(202).json({ success: true, data: { jobId } });
 }
 
@@ -65,10 +78,12 @@ async function persistTree(tree: CsiTree): Promise<string> {
 async function processParseJob(
   jobId: string,
   file: Express.Multer.File,
-  body: { section?: string; title?: string }
+  body: ParseBody
 ): Promise<void> {
   try {
     const ext = path.extname(file.originalname).toLowerCase();
+    // parseDocx emits only valid ParseStage literals; the string type is kept
+    // in the parser interface to avoid coupling lib/jobs to the parser module.
     const onProgress = (stage: string, pct: number): void => {
       updateJob(jobId, { stage: stage as ParseStage, pct, status: 'running' });
     };
