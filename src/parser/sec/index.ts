@@ -187,3 +187,5 @@ export function parseSec(xml: string): ParsedSec {
 
   return { tree: { id: uuidv4(), section, title, parts }, refs };
 }
+
+export { assertSecSafe } from './safety.js';

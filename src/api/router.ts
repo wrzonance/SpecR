@@ -1,4 +1,5 @@
 import { type Router as RouterType, Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { healthHandler } from './health.js';
 import { getSpecHandler, updateSpecHandler } from './specs.js';
 import {
@@ -16,6 +17,14 @@ import {
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 
+const parseRateLimit = rateLimit({
+  windowMs: 60 * 1000, // 1 minute window
+  max: 10, // 10 uploads per IP per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'too many requests — please wait before uploading again' },
+});
+
 export const router: RouterType = Router();
 
 router.get('/health', healthHandler);
@@ -30,5 +39,5 @@ router.post(
 );
 router.delete('/projects/:id/specs/:specId', removeSpecFromProjectHandler);
 router.get('/projects/:id/references/broken', getBrokenRefsHandler);
-router.post('/parse', upload.single('file'), parseHandler);
+router.post('/parse', parseRateLimit, upload.single('file'), parseHandler);
 router.get('/parse/jobs/:jobId', parseJobHandler);

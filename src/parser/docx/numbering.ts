@@ -6,6 +6,7 @@ import type { AbstractNum, AbstractNumLevel, Num, NumberingMap, NumLvlOverride }
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
+  processEntities: true,
   isArray: (name) => ['w:abstractNum', 'w:lvl', 'w:num', 'w:lvlOverride'].includes(name),
 });
 

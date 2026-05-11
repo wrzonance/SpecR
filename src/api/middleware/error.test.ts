@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import multer from 'multer';
 import type { Request, Response, NextFunction } from 'express';
 import { errorHandler } from './error.js';
 
@@ -28,5 +29,13 @@ describe('errorHandler middleware', () => {
     errorHandler(err, {} as Request, res, mockNext);
     expect(status).toHaveBeenCalledWith(404);
     expect(json).toHaveBeenCalledWith({ success: false, error: 'internal server error' });
+  });
+
+  it('returns 400 for MulterError', () => {
+    const { res, status, json } = makeRes();
+    const err = new multer.MulterError('LIMIT_FILE_SIZE');
+    errorHandler(err, {} as Request, res, mockNext);
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({ success: false, error: err.message });
   });
 });

@@ -3,11 +3,12 @@ import { ParserError } from '../error.js';
 import { extractAttrStr, getAttrVal, getAttrNumVal, toArray } from './xml-utils.js';
 import type { DocxParagraph, NumberingMap } from './types.js';
 
-// fast-xml-parser processEntities: true decodes &lt; &gt; &amp; etc. (no external fetch).
+// Entity audit (issue #22): fxp v5 does not resolve custom or recursive entity declarations
+// — undefined/recursive &refs; are returned verbatim, not expanded (no billion-laughs risk).
+// processEntities: true is required: OOXML text content uses &amp; &lt; &gt; for ampersands
+// and angle brackets; setting false would corrupt those characters in paragraph text.
 // trimValues: false preserves trailing/leading spaces in w:t text nodes — trimming would
 // corrupt concatenated paragraph text across adjacent runs.
-// SECURITY: audit fast-xml-parser options — ensure processEntities
-// does not resolve external entities via DOCTYPE/ENTITY declarations (issue #19).
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',

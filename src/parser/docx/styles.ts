@@ -6,6 +6,7 @@ import type { StyleInfo, StyleMap, StyleNumPr } from './types.js';
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
+  processEntities: true,
   isArray: (name) => name === 'w:style',
 });
 
