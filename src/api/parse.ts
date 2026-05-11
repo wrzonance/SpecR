@@ -1,7 +1,7 @@
 import multer from 'multer';
 import path from 'node:path';
 import type { Request, Response } from 'express';
-import { parseSec, parseDocx } from '../parser/index.js';
+import { parseSec, parseDocx, assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { createJob, updateJob, getJob, type ParseStage } from '../lib/jobs.js';
 import { pool, createSpec, insertTree } from '../db/index.js';
 import { logger } from '../lib/logger.js';
@@ -21,21 +21,52 @@ function parseBody(raw: unknown): ParseBody {
   return result;
 }
 
-// SECURITY (issue #19): validate MIME type — .docx must match
-// application/vnd.openxmlformats-officedocument.wordprocessingml.document
-// AND magic bytes PK\x03\x04. Reject mismatch before processing.
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const ALLOWED_EXT = new Set(['.docx', '.sec']);
+
 export const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10 MB compressed limit (yauzl enforces uncompressed)
+    files: 1,
+    fields: 5,
+    fieldSize: 1024,
+  },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    // Silent reject — handler provides the descriptive error message
+    cb(null, ALLOWED_EXT.has(ext));
+  },
 });
 
-export function parseHandler(req: Request, res: Response): void {
+async function validateUpload(req: Request, ext: string): Promise<string | null> {
+  if (!ALLOWED_EXT.has(ext)) return 'unsupported file extension';
+  if (ext === '.docx' && req.file?.mimetype !== DOCX_MIME) return 'MIME type mismatch for .docx';
+  try {
+    if (ext === '.docx') await assertDocxSafe(req.file!.buffer);
+    else assertSecSafe(req.file!.buffer);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : 'invalid file';
+  }
+}
+
+export async function parseHandler(req: Request, res: Response): Promise<void> {
   if (!req.file) {
     res.status(400).json({ success: false, error: 'file required' });
     return;
   }
+
+  const ext = path.extname(req.file.originalname).toLowerCase();
+  const validationError = await validateUpload(req, ext);
+  if (validationError !== null) {
+    res.status(400).json({ success: false, error: validationError });
+    return;
+  }
+
   const jobId = createJob();
-  void processParseJob(jobId, req.file, parseBody(req.body));
+  // Pass buffer and ext, not the full file object, so the request closure can be GC'd
+  void processParseJob(jobId, req.file.buffer, ext, parseBody(req.body));
   res.status(202).json({ success: true, data: { jobId } });
 }
 
@@ -77,13 +108,11 @@ async function persistTree(tree: CsiTree): Promise<string> {
 
 async function processParseJob(
   jobId: string,
-  file: Express.Multer.File,
+  buffer: Buffer,
+  ext: string,
   body: ParseBody
 ): Promise<void> {
   try {
-    const ext = path.extname(file.originalname).toLowerCase();
-    // parseDocx emits only valid ParseStage literals; the string type is kept
-    // in the parser interface to avoid coupling lib/jobs to the parser module.
     const onProgress = (stage: string, pct: number): void => {
       updateJob(jobId, { stage: stage as ParseStage, pct, status: 'running' });
     };
@@ -91,14 +120,10 @@ async function processParseJob(
     let tree: CsiTree;
     if (ext === '.sec') {
       onProgress('extracting', 10);
-      const parsed = parseSec(file.buffer.toString('utf-8'));
-      tree = parsed.tree;
+      tree = parseSec(buffer.toString('utf-8')).tree;
       onProgress('classifying', 75);
-    } else if (ext === '.docx') {
-      tree = await parseDocx(file.buffer, onProgress);
     } else {
-      updateJob(jobId, { status: 'failed', error: `unsupported format: ${ext || '(none)'}` });
-      return;
+      tree = await parseDocx(buffer, onProgress);
     }
 
     const finalTree: CsiTree = {
