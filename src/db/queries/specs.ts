@@ -88,9 +88,7 @@ export interface SpecTreeResult {
 function buildNodeTree(rows: readonly ParaRow[]): readonly CsiNode[] {
   const childrenByParent = new Map<string | null, ParaRow[]>();
   for (const row of rows) {
-    const siblings = childrenByParent.get(row.parent_id) ?? [];
-    siblings.push(row);
-    childrenByParent.set(row.parent_id, siblings);
+    childrenByParent.set(row.parent_id, [...(childrenByParent.get(row.parent_id) ?? []), row]);
   }
 
   function buildNode(row: ParaRow): CsiNode {
@@ -106,9 +104,7 @@ function buildNodeTree(rows: readonly ParaRow[]): readonly CsiNode[] {
     };
   }
 
-  return (childrenByParent.get(null) ?? [])
-    .sort((a, b) => a.position - b.position)
-    .map(buildNode);
+  return (childrenByParent.get(null) ?? []).sort((a, b) => a.position - b.position).map(buildNode);
 }
 
 export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
