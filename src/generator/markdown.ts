@@ -16,35 +16,42 @@ export function getLabel(type: NodeType, index: number, partNumber = 1): string 
 const INDENT = '   ';
 
 function renderPrNode(node: CsiNode, index: number, depth: number): string {
-  if (node.type === 'note' || node.meta.vanish) {
+  if (node.type === 'note') {
     return `\n> **[NOTE]** ${node.text}`;
+  }
+  if (node.meta.vanish) {
+    return '';
   }
   if (node.type === 'continuation') {
     return `\n${INDENT.repeat(depth)}${node.text}`;
   }
   const pad = INDENT.repeat(depth);
   const label = getLabel(node.type, index);
-  const lines = [`\n${pad}${label} ${node.text}`];
-  node.children.forEach((child, i) => lines.push(renderPrNode(child, i, depth + 1)));
-  return lines.join('');
+  return [
+    `\n${pad}${label} ${node.text}`,
+    ...node.children.map((child, i) => renderPrNode(child, i, depth + 1)),
+  ].join('');
 }
 
 function renderArticle(node: CsiNode, index: number, partNumber: number): string {
   const label = getLabel('article', index, partNumber);
-  const lines = [`\n### ${label} ${node.text}\n`];
-  node.children.forEach((child, i) => lines.push(renderPrNode(child, i, 0)));
-  return lines.join('');
+  return [
+    `\n### ${label} ${node.text}\n`,
+    ...node.children.map((child, i) => renderPrNode(child, i, 0)),
+  ].join('');
 }
 
 function renderPart(node: CsiNode, index: number): string {
   const label = getLabel('part', index);
-  const lines = [`\n## ${label} ${node.text}\n`];
-  node.children.forEach((child, i) => lines.push(renderArticle(child, i, index + 1)));
-  return lines.join('');
+  return [
+    `\n## ${label} ${node.text}\n`,
+    ...node.children.map((child, i) => renderArticle(child, i, index + 1)),
+  ].join('');
 }
 
 export function renderMarkdown(tree: CsiTree): string {
-  const lines = [`# SECTION ${tree.section} — ${tree.title}`];
-  tree.parts.forEach((part, i) => lines.push(renderPart(part, i)));
-  return lines.join('\n');
+  return [
+    `# SECTION ${tree.section} — ${tree.title}`,
+    ...tree.parts.map((part, i) => renderPart(part, i)),
+  ].join('\n');
 }

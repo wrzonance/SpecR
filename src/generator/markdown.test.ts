@@ -73,7 +73,7 @@ const TREE: CsiTree = {
               type: 'note',
               text: 'Edit for local conditions.',
               children: [],
-              meta: { vanish: true },
+              meta: {},
             },
           ],
           meta: {},
@@ -85,6 +85,16 @@ const TREE: CsiTree = {
 };
 
 describe('renderMarkdown', () => {
+  it('renders full TREE fixture exactly', () => {
+    expect(renderMarkdown(TREE)).toBe(
+      '# SECTION 27 21 00 — Structured Cabling\n' +
+      '\n## PART 1 - GENERAL\n' +
+      '\n### 1.1 REFERENCES\n' +
+      '\nA. Coordinate work of all trades.' +
+      '\n   1. Include cable routing plans.' +
+      '\n> **[NOTE]** Edit for local conditions.'
+    );
+  });
   it('renders section heading', () => {
     expect(renderMarkdown(TREE)).toContain('# SECTION 27 21 00 — Structured Cabling');
   });
@@ -100,8 +110,43 @@ describe('renderMarkdown', () => {
   it('renders pr2 label indented', () => {
     expect(renderMarkdown(TREE)).toContain('   1. Include cable routing plans.');
   });
-  it('renders note as blockquote', () => {
+  it('renders note as blockquote by type, not by vanish flag', () => {
     expect(renderMarkdown(TREE)).toContain('> **[NOTE]** Edit for local conditions.');
+  });
+  it('suppresses pr1 with meta.vanish — returns empty, not rendered', () => {
+    const treeWithVanish: CsiTree = {
+      id: '00000000-0000-0000-0000-000000000001',
+      section: '27 21 00',
+      title: 'Vanish Test',
+      parts: [
+        {
+          id: '00000000-0000-0000-0000-000000000002',
+          type: 'part',
+          text: 'GENERAL',
+          children: [
+            {
+              id: '00000000-0000-0000-0000-000000000003',
+              type: 'article',
+              text: 'SCOPE',
+              children: [
+                {
+                  id: '00000000-0000-0000-0000-000000000004',
+                  type: 'pr1',
+                  text: 'Hidden paragraph.',
+                  children: [],
+                  meta: { vanish: true },
+                },
+              ],
+              meta: {},
+            },
+          ],
+          meta: {},
+        },
+      ],
+    };
+    const md = renderMarkdown(treeWithVanish);
+    expect(md).not.toContain('Hidden paragraph.');
+    expect(md).not.toContain('A.');
   });
   it('renders empty tree without error', () => {
     const empty: CsiTree = {
