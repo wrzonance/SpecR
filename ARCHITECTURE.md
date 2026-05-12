@@ -65,14 +65,15 @@ Clippit is the only open-source library that builds the actual parent/child para
 ┌──────────────────────────────────────────────────────────────────────┐
 │                    Client Surfaces                                     │
 │                                                                        │
-│  REST API (Express)         MCP Server (stdio/SSE)                    │
-│  ─────────────────          ───────────────────────                   │
-│  POST /parse                tools: search_library                      │
-│  GET  /specs/:id                   get_spec, get_diff                  │
-│  POST /specs/:id/generate          parse_document                      │
-│  POST /specs/:id/diff              list_sections                       │
-│  POST /specs/:id/merge    resources: specr://specs/{id} (Markdown)    │
-│                                    specr://library/{div}/{sec}         │
+│  REST API (Express)         MCP (Streamable HTTP, same process)        │
+│  ─────────────────          ────────────────────────────────           │
+│  POST /parse                POST /mcp  ← stateless per-request        │
+│  GET  /specs/:id            GET  /mcp  (405 stub)                     │
+│  POST /specs/:id/generate   DELETE /mcp (405 stub)                    │
+│  POST /specs/:id/diff       tools: search_library, get_spec           │
+│  POST /specs/:id/merge             list_sections                       │
+│                             resources: specr://specs/{id} (Markdown)  │
+│                                       specr://sections                 │
 │            │                                │                          │
 │            └────────────┬───────────────────┘                          │
 │                         │  shared service layer                        │
@@ -251,6 +252,9 @@ interface ApiResponse<T> {
 | POST | `/specs/:id/generate` | `{ templateId? }` | DOCX buffer (octet-stream) |
 | POST | `/specs/:id/diff` | multipart: `file` (edited .docx) | `{ added[], modified[], deleted[], conflicts[] }` |
 | POST | `/specs/:id/merge` | `{ accept: string[] }` (UUID list) | `{ applied: number, rejected: number }` |
+| POST | `/mcp` | MCP JSON-RPC request | MCP JSON-RPC response (Streamable HTTP transport) |
+| GET | `/mcp` | — | `405 Method Not Allowed` |
+| DELETE | `/mcp` | — | `405 Method Not Allowed` |
 
 ## Database Schema (Overview)
 
@@ -396,17 +400,23 @@ Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
 
 ### Phase 2: Generator + MCP Foundation (Weeks 5–7, overlaps Phase 1)
 
-**Phase 2a — Core generator:**
+**Phase 2a — MCP server + Markdown renderer:**
+- MCP server integrated into Express via Streamable HTTP (`POST /mcp`, `GET /mcp` 405 stub, `DELETE /mcp` 405 stub) — stateless `StreamableHTTPServerTransport` with `sessionIdGenerator: undefined`, one `McpServer` instance per request. Supersedes ADR-010's original stdio/SSE stance; see ADR-010 Decision Update.
+- `src/generator/markdown.ts`: pure function `renderMarkdown(CsiTree): string` + `getLabel(NodeType, index, partNumber?)`. Vanish/note nodes render as `> **[NOTE]**` blockquotes (not hidden) in MCP output. Shared with future DOCX generator and Phase 6.
+- MCP tools (read-only Phase 2a scope): `search_library(query, division?, limit?)`, `get_spec(specId)` → `{ tree: CsiTree, references: SpecReference[] }` (each reference includes `isResolved: boolean`), `list_sections(division?)`
+- MCP resources: `specr://specs/{id}` (Markdown), `specr://sections` (Markdown table)
+- Auth: none for Phase 2. Auth hook comment in `src/mcp/server.ts`; auth added in same PR as REST auth (future).
+- **Stateful session upgrade path (Phase 5+):** change `sessionIdGenerator: undefined` → `sessionIdGenerator: () => randomUUID()` + session Map in the route handler. Tool/resource definitions unchanged.
+- Deferred to later phases: `get_paragraph`, `parse_document`, write tools, stateful sessions, MCP prompts
+
+**Phase 2b — Core DOCX generator:**
 - AST → DOCX with dolanmiu/docx
-- AST → Markdown renderer (prerequisite for MCP resources — ADR-008/010)
 - CSI multilevel numbering engine (hardcoded default styles)
 - Content control UUID injection (`w:sdt` wrapping)
 - `POST /specs/:id/generate` endpoint
-- MCP server scaffold: `search_library`, `get_spec`, `list_sections` tools
-- MCP resources: `specr://specs/{id}` (Markdown), `specr://library/{div}/{sec}`
 - Round-trip smoke test: generate DOCX → open in Word → verify numbering
 
-**Phase 2b — Firm style template engine (issue #20):**
+**Phase 2c — Firm style template engine (issue #20):**
 - `style_templates` + `style_rules` DB tables; default CSI styles seeded at migration
 - Generator accepts `templateId?` (already in `POST /specs/:id/generate` body) — wired through to numbering + controls
 - Template import API: `POST /templates`, `POST /templates/:id/rules`
@@ -445,9 +455,9 @@ specr/
 ├── src/                         # All TypeScript source
 │   ├── index.ts                 # Entry: Express, env validation, graceful shutdown
 │   ├── mcp/
-│   │   ├── server.ts            # MCP server entry (stdio/SSE, @modelcontextprotocol/sdk)
-│   │   ├── tools.ts             # Tool definitions: search_library, get_spec, get_diff, etc.
-│   │   └── resources.ts         # Resource handlers: specr://specs/{id}, specr://library/...
+│   │   ├── server.ts            # registerMcpRoutes(app) — Streamable HTTP, stateless per-request McpServer
+│   │   ├── tools.ts             # registerTools(server): search_library, get_spec, list_sections
+│   │   └── resources.ts         # registerResources(server): specr://specs/{id}, specr://sections
 │   ├── api/
 │   ├── parser/
 │   ├── generator/

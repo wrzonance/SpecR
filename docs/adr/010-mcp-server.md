@@ -74,10 +74,53 @@ suggest_paragraphs(spec_id, article_id, context)
 
 ## Consequences
 
-- MCP server is a separate entry point (`src/mcp/server.ts`) using the `@modelcontextprotocol/sdk` package. It does NOT share the Express HTTP server — it runs as a stdio or SSE MCP server.
+- MCP server is a separate entry point (`src/mcp/server.ts`) using the `@modelcontextprotocol/sdk` package. It does NOT share the Express HTTP server — it runs as a stdio or SSE MCP server. (**Superseded — see Decision Update below.**)
 - The service layer (`src/parser/`, `src/generator/`, `src/merge/`, `src/db/`) is called directly from both `src/api/` (REST) and `src/mcp/` (MCP). No duplication of business logic.
 - **Markdown output becomes a Phase 2 priority**, not Phase 6. MCP resources that return raw JSON AST are technically correct but LLM-unfriendly. Markdown rendering of `CsiTree` is a prerequisite for useful MCP resources.
 - The canonical AST (ADR-003) — especially the decision to store plain text without OOXML encoding — is what makes MCP viable. An LLM cannot reason about `<w:r><w:t>A.</w:t></w:r>` but can reason about `{ type: 'pr1', text: 'Manufacturer: Corning' }`.
 - Authentication for MCP tools follows the same token-based auth as the REST API. The MCP server receives a bearer token in its initialization arguments and validates it against the same auth layer.
 - MCP tool input validation uses the same Zod schemas as the REST API middleware — no separate validation layer.
 - The MCP server is not in MVP (Phase 0–3). Its placement in Phase 2+ is because: (a) the service layer must be stable before adding a second interface, (b) Markdown output must exist first, (c) the library must have content worth searching before AI assistance adds value.
+
+---
+
+## Decision Update (Phase 2a, 2026-05-12)
+
+**Original:** "It does NOT share the Express HTTP server — it runs as a stdio or SSE MCP server."
+
+**Revised:** The MCP server IS integrated into the existing Express app via Streamable HTTP transport — same process, same port.
+
+### What changed
+
+`src/mcp/server.ts` exports `registerMcpRoutes(app)`, which mounts three routes on the Express instance:
+
+```
+POST /mcp     ← MCP JSON-RPC requests (StreamableHTTPServerTransport)
+GET  /mcp     ← 405 stub
+DELETE /mcp   ← 405 stub
+```
+
+Each `POST /mcp` request creates a fresh `McpServer` instance with `StreamableHTTPServerTransport` configured as stateless (`sessionIdGenerator: undefined`). The McpServer calls `registerTools(server)` and `registerResources(server)` from `tools.ts` / `resources.ts`, then handles the request and disposes.
+
+### Why
+
+Streamable HTTP is the MCP spec's recommended transport for 2025+. It works identically for local clients (Claude Code, Claude Desktop) and remote clients — no different from the REST API's perspective. A separate stdio or SSE process would add operational complexity (process management, IPC, port coordination) with no benefit at this stage.
+
+### Stateful session upgrade path (Phase 5+)
+
+The stateless configuration is one parameter deep. When persistent sessions are needed (streaming tool progress, multi-turn tool state):
+
+```typescript
+// Stateless (current):
+new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+
+// Stateful (Phase 5+):
+new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() })
+// + session Map<sessionId, McpServer> in the route handler
+```
+
+Tool and resource definitions in `tools.ts` / `resources.ts` are unchanged by this upgrade.
+
+### Auth
+
+No auth in Phase 2. A comment in `src/mcp/server.ts` marks the hook point. Auth will be added in the same PR as REST API auth (future phase).
