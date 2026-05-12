@@ -2,14 +2,22 @@ import type { CsiNode, CsiTree, NodeType } from '../ast/types.js';
 
 export function getLabel(type: NodeType, index: number, partNumber = 1): string {
   switch (type) {
-    case 'part':    return `PART ${index + 1} -`;
-    case 'article': return `${partNumber}.${index + 1}`;
-    case 'pr1':     return `${String.fromCharCode(65 + index)}.`;
-    case 'pr2':     return `${index + 1}.`;
-    case 'pr3':     return `${String.fromCharCode(97 + index)}.`;
-    case 'pr4':     return `${index + 1})`;
-    case 'pr5':     return `${String.fromCharCode(97 + index)})`;
-    default:        return '';
+    case 'part':
+      return `PART ${index + 1} -`;
+    case 'article':
+      return `${partNumber}.${index + 1}`;
+    case 'pr1':
+      return `${String.fromCharCode(65 + index)}.`;
+    case 'pr2':
+      return `${index + 1}.`;
+    case 'pr3':
+      return `${String.fromCharCode(97 + index)}.`;
+    case 'pr4':
+      return `${index + 1})`;
+    case 'pr5':
+      return `${String.fromCharCode(97 + index)})`;
+    default:
+      return '';
   }
 }
 

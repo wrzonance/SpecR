@@ -1,0 +1,222 @@
+// src/mcp/server.integration.test.ts
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import express from 'express';
+import type { Server } from 'http';
+import { pool } from '../db/index.js';
+import { createSpec } from '../db/queries/specs.js';
+import { insertTree } from '../db/queries/paragraphs.js';
+import { registerMcpRoutes } from './server.js';
+
+let server: Server;
+let baseUrl: string;
+let mcpSpecId: string;
+
+async function mcpCall(
+  url: string,
+  method: string,
+  params: Record<string, unknown>
+): Promise<unknown> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  const text = await res.text();
+  // StreamableHTTP may return SSE (text/event-stream) or plain JSON.
+  // For stateless single-request calls it typically returns JSON directly.
+  // If we get SSE, parse out the first data: line.
+  if (res.headers.get('content-type')?.includes('text/event-stream')) {
+    const dataLine = text.split('\n').find((l) => l.startsWith('data: '));
+    if (dataLine) return JSON.parse(dataLine.slice(6)) as unknown;
+    return {};
+  }
+  return JSON.parse(text) as unknown;
+}
+
+beforeAll(async () => {
+  const app = express();
+  app.use(express.json());
+  registerMcpRoutes(app);
+
+  await new Promise<void>((resolve) => {
+    server = app.listen(0, () => resolve());
+  });
+
+  const address = server.address();
+  const port = typeof address === 'object' && address !== null ? address.port : 3001;
+  baseUrl = `http://localhost:${port}`;
+
+  // Use a section that exists in csi_sections for list_sections test to work.
+  // Query csi_sections to find a valid division-27 section, then create spec with that section.
+  const sectionRow = await pool.query<{ section_number: string }>(
+    `SELECT section_number FROM csi_sections WHERE division = '27' LIMIT 1`
+  );
+  const testSection = sectionRow.rows[0]?.section_number ?? '27 10 00';
+
+  mcpSpecId = await createSpec({ section: testSection, title: 'MCP Test Spec', source: 'arcat' });
+  await insertTree(
+    {
+      id: mcpSpecId,
+      section: testSection,
+      title: 'MCP Test Spec',
+      parts: [
+        {
+          id: '30000000-0000-0000-0000-000000000001',
+          type: 'part',
+          text: 'GENERAL',
+          children: [
+            {
+              id: '30000000-0000-0000-0000-000000000002',
+              type: 'article',
+              text: 'SCOPE',
+              children: [
+                {
+                  id: '30000000-0000-0000-0000-000000000003',
+                  type: 'pr1',
+                  text: 'Provide fiber optic backbone cabling.',
+                  children: [],
+                  meta: {},
+                },
+              ],
+              meta: {},
+            },
+          ],
+          meta: {},
+        },
+      ],
+    },
+    mcpSpecId,
+    pool
+  );
+
+  // Store for tests
+  (global as Record<string, unknown>)['mcpTestSection'] = testSection;
+});
+
+afterAll(async () => {
+  await pool.query('DELETE FROM specs WHERE id = $1', [mcpSpecId]);
+  await new Promise<void>((resolve, reject) => {
+    server.close((err) => (err != null ? reject(err) : resolve()));
+  });
+});
+
+describe('POST /mcp — initialize', () => {
+  it('responds to initialize request', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'test', version: '1.0' },
+    });
+    const b = body as Record<string, unknown>;
+    expect(b['jsonrpc']).toBe('2.0');
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['serverInfo']).toBeDefined();
+  });
+});
+
+describe('tool: search_library', () => {
+  it('finds paragraphs by text', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'search_library',
+      arguments: { query: 'fiber optic backbone' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    expect(content[0]!.type).toBe('text');
+    const results = JSON.parse(content[0]!.text) as unknown[];
+    expect(results.length).toBeGreaterThan(0);
+  });
+
+  it('returns empty for no match', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'search_library',
+      arguments: { query: 'xyznonexistent99999' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const results = JSON.parse(content[0]!.text) as unknown[];
+    expect(results).toEqual([]);
+  });
+});
+
+describe('tool: get_spec', () => {
+  it('returns tree with parts', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_spec',
+      arguments: { specId: mcpSpecId },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as Record<string, unknown>;
+    const tree = data['tree'] as Record<string, unknown>;
+    expect(tree['id']).toBe(mcpSpecId);
+    expect(Array.isArray(tree['parts'])).toBe(true);
+  });
+
+  it('returns isError for unknown id', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_spec',
+      arguments: { specId: '00000000-0000-0000-0000-000000000000' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
+  });
+});
+
+describe('tool: list_sections', () => {
+  it('returns sections with inDatabase flag for loaded spec', async () => {
+    const testSection = (global as Record<string, unknown>)['mcpTestSection'] as string;
+    const division = testSection.slice(0, 2);
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'list_sections',
+      arguments: { division },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const sections = JSON.parse(content[0]!.text) as { section: string; inDatabase: boolean }[];
+    const loaded = sections.find((s) => s.section === testSection);
+    expect(loaded).toBeDefined();
+    expect(loaded!.inDatabase).toBe(true);
+  });
+});
+
+describe('resource: specr://specs/{id}', () => {
+  it('returns spec as markdown', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'resources/read', {
+      uri: `specr://specs/${mcpSpecId}`,
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const contents = result['contents'] as { mimeType: string; text: string }[];
+    expect(contents[0]!.mimeType).toBe('text/markdown');
+    expect(contents[0]!.text).toContain('## PART 1 - GENERAL');
+  });
+});
+
+describe('resource: specr://sections', () => {
+  it('returns section index as markdown table', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'resources/read', {
+      uri: 'specr://sections',
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const contents = result['contents'] as { mimeType: string; text: string }[];
+    expect(contents[0]!.mimeType).toBe('text/markdown');
+    expect(contents[0]!.text).toContain('| Section |');
+  });
+});
+
+describe('GET /mcp', () => {
+  it('returns 405 in stateless mode', async () => {
+    const res = await fetch(`${baseUrl}/mcp`);
+    expect(res.status).toBe(405);
+  });
+});

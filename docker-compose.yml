@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: specr
       POSTGRES_DB: specr
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - specr_pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -88,11 +88,11 @@ describe('renderMarkdown', () => {
   it('renders full TREE fixture exactly', () => {
     expect(renderMarkdown(TREE)).toBe(
       '# SECTION 27 21 00 — Structured Cabling\n' +
-      '\n## PART 1 - GENERAL\n' +
-      '\n### 1.1 REFERENCES\n' +
-      '\nA. Coordinate work of all trades.' +
-      '\n   1. Include cable routing plans.' +
-      '\n> **[NOTE]** Edit for local conditions.'
+        '\n## PART 1 - GENERAL\n' +
+        '\n### 1.1 REFERENCES\n' +
+        '\nA. Coordinate work of all trades.' +
+        '\n   1. Include cable routing plans.' +
+        '\n> **[NOTE]** Edit for local conditions.'
     );
   });
   it('renders section heading', () => {
