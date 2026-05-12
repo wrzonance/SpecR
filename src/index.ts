@@ -4,12 +4,14 @@ import { logger } from './lib/logger.js';
 import { pool } from './db/index.js';
 import { router } from './api/router.js';
 import { errorHandler } from './api/middleware/error.js';
+import { registerMcpRoutes } from './mcp/server.js';
 
 const app = express();
 app.disable('x-powered-by');
 
 app.use(express.json());
 app.use(router);
+registerMcpRoutes(app);
 app.use(errorHandler);
 
 const server = app.listen(config.PORT, () => {
