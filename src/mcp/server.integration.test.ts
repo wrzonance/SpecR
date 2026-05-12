@@ -2,9 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
-import { pool } from '../db/index.js';
-import { createSpec } from '../db/queries/specs.js';
-import { insertTree } from '../db/queries/paragraphs.js';
+import { pool, createSpec, insertTree } from '../db/index.js';
 import { registerMcpRoutes } from './server.js';
 
 let server: Server;

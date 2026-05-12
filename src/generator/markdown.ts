@@ -24,6 +24,8 @@ export function getLabel(type: NodeType, index: number, partNumber = 1): string 
 const INDENT = '   ';
 
 function renderPrNode(node: CsiNode, index: number, depth: number): string {
+  // note nodes always render as [NOTE] blockquotes regardless of meta.vanish — editorial
+  // notes are structural metadata visible to spec writers, not owner-facing content.
   if (node.type === 'note') {
     return `\n> **[NOTE]** ${node.text}`;
   }

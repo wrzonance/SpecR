@@ -28,6 +28,7 @@ export function registerMcpRoutes(app: Express): void {
       await transport.handleRequest(req, res, req.body);
       res.on('finish', () => {
         void transport.close();
+        void server.close();
       });
     } catch (err) {
       logger.error({ err }, 'mcp request failed');
