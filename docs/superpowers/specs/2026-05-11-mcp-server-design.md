@@ -24,7 +24,7 @@ All Phase 2a tools are read-only queries — no streaming, no cross-call state. 
 
 **Route surface added to Express:**
 
-```
+```text
 POST   /mcp   — all MCP requests (JSON-RPC over Streamable HTTP)
 GET    /mcp   — SSE stream for server-push (stub in Phase 2, used in stateful sessions)
 DELETE /mcp   — session teardown (stub in Phase 2)
@@ -37,7 +37,7 @@ DELETE /mcp   — session teardown (stub in Phase 2)
 
 ## File Layout
 
-```
+```text
 src/
 ├── mcp/
 │   ├── server.ts      # creates McpServer, registers tools+resources, exports registerMcpRoutes()
@@ -156,10 +156,10 @@ Node type → rendering:
 | `part`       | `## PART N - TITLE`               |
 | `article`    | `### N.N TITLE`                   |
 | `pr1`        | `A. text` (lettered per siblings) |
-| `pr2`        | `   1. text`                      |
-| `pr3`        | `      a. text`                   |
-| `pr4`        | `         1) text`                |
-| `pr5`        | `            a) text`             |
+| `pr2`        | `1. text` (3-space indent)        |
+| `pr3`        | `a. text` (6-space indent)        |
+| `pr4`        | `1) text` (9-space indent)        |
+| `pr5`        | `a) text` (12-space indent)       |
 | `continuation` | plain paragraph, no label       |
 | `vanish`     | `> **[NOTE]** text` (blockquote)  |
 
