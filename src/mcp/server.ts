@@ -25,11 +25,18 @@ export function registerMcpRoutes(app: Express): void {
       const transport = new StreamableHTTPServerTransport({});
       const server = createMcpServer();
       await server.connect(transport as Transport);
-      await transport.handleRequest(req, res, req.body);
+      const cleanup = async (): Promise<void> => {
+        const results = await Promise.allSettled([transport.close(), server.close()]);
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            logger.warn({ err: result.reason }, 'mcp transport cleanup failed');
+          }
+        }
+      };
       res.on('finish', () => {
-        void transport.close();
-        void server.close();
+        void cleanup();
       });
+      await transport.handleRequest(req, res, req.body);
     } catch (err) {
       logger.error({ err }, 'mcp request failed');
       if (!res.headersSent) {
