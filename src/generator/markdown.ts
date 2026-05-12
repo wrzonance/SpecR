@@ -1,5 +1,17 @@
 import type { CsiNode, CsiTree, NodeType } from '../ast/types.js';
 
+function alphaLabel(index: number, upper: boolean): string {
+  let n = index + 1;
+  let out = '';
+  const base = upper ? 65 : 97;
+  while (n > 0) {
+    n -= 1;
+    out = String.fromCharCode(base + (n % 26)) + out;
+    n = Math.floor(n / 26);
+  }
+  return out;
+}
+
 export function getLabel(type: NodeType, index: number, partNumber = 1): string {
   switch (type) {
     case 'part':
@@ -7,15 +19,15 @@ export function getLabel(type: NodeType, index: number, partNumber = 1): string 
     case 'article':
       return `${partNumber}.${index + 1}`;
     case 'pr1':
-      return `${String.fromCharCode(65 + index)}.`;
+      return `${alphaLabel(index, true)}.`;
     case 'pr2':
       return `${index + 1}.`;
     case 'pr3':
-      return `${String.fromCharCode(97 + index)}.`;
+      return `${alphaLabel(index, false)}.`;
     case 'pr4':
       return `${index + 1})`;
     case 'pr5':
-      return `${String.fromCharCode(97 + index)})`;
+      return `${alphaLabel(index, false)})`;
     default:
       return '';
   }

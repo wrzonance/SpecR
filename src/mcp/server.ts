@@ -33,7 +33,7 @@ export function registerMcpRoutes(app: Express): void {
     } catch (err) {
       logger.error({ err }, 'mcp request failed');
       if (!res.headersSent) {
-        res.status(500).json({ error: 'internal server error' });
+        res.status(500).json({ success: false, error: 'internal server error' });
       }
     }
   });
@@ -41,10 +41,10 @@ export function registerMcpRoutes(app: Express): void {
   // GET /mcp and DELETE /mcp: stubs for stateful session upgrade (Phase 5+).
   // In stateless mode these are unused — clients only POST.
   app.get('/mcp', (_req, res) => {
-    res.status(405).json({ error: 'stateless mode: SSE streams not supported' });
+    res.status(405).json({ success: false, error: 'stateless mode: SSE streams not supported' });
   });
 
   app.delete('/mcp', (_req, res) => {
-    res.status(405).json({ error: 'stateless mode: no sessions to terminate' });
+    res.status(405).json({ success: false, error: 'stateless mode: no sessions to terminate' });
   });
 }

@@ -94,7 +94,7 @@ suggest_paragraphs(spec_id, article_id, context)
 
 `src/mcp/server.ts` exports `registerMcpRoutes(app)`, which mounts three routes on the Express instance:
 
-```
+```text
 POST /mcp     ← MCP JSON-RPC requests (StreamableHTTPServerTransport)
 GET  /mcp     ← 405 stub
 DELETE /mcp   ← 405 stub
