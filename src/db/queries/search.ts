@@ -1,3 +1,4 @@
+// src/db/queries/search.ts
 import { pool, DatabaseError } from '../index.js';
 
 export interface ParagraphSearchResult {
@@ -22,20 +23,19 @@ export async function searchParagraphs(
   limit = 20
 ): Promise<ParagraphSearchResult[]> {
   try {
-    const params: unknown[] = [`%${query}%`, limit];
-    let sql = `
+    const divisionClause = division !== undefined ? ` AND s.section LIKE $3` : '';
+    const params: unknown[] =
+      division !== undefined ? [`%${query}%`, limit, `${division} %`] : [`%${query}%`, limit];
+
+    const sql = `
       SELECT p.id AS "paragraphId", p.text, p.node_type AS "nodeType",
              s.id AS "specId",
              COALESCE(s.section, '') AS "specSection",
              COALESCE(s.title, '') AS "specTitle"
       FROM paragraphs p
       JOIN specs s ON p.spec_id = s.id
-      WHERE p.text ILIKE $1`;
-    if (division !== undefined) {
-      params.push(`${division} %`);
-      sql += ` AND s.section LIKE $${params.length}`;
-    }
-    sql += ` ORDER BY s.section, p.position LIMIT $2`;
+      WHERE p.text ILIKE $1${divisionClause}
+      ORDER BY s.section, p.position LIMIT $2`;
 
     const result = await pool.query<ParagraphSearchResult>(sql, params);
     return result.rows;
@@ -46,17 +46,15 @@ export async function searchParagraphs(
 
 export async function listCsiSections(division?: string): Promise<CsiSectionResult[]> {
   try {
-    const params: unknown[] = [];
-    let sql = `
+    const whereClause = division !== undefined ? ` WHERE cs.division = $1` : '';
+    const params: unknown[] = division !== undefined ? [division] : [];
+
+    const sql = `
       SELECT cs.section_number AS section, cs.title, cs.division,
              (s.id IS NOT NULL) AS "inDatabase"
       FROM csi_sections cs
-      LEFT JOIN specs s ON s.section = cs.section_number`;
-    if (division !== undefined) {
-      params.push(division);
-      sql += ` WHERE cs.division = $1`;
-    }
-    sql += ` ORDER BY cs.section_number`;
+      LEFT JOIN specs s ON s.section = cs.section_number${whereClause}
+      ORDER BY cs.section_number`;
 
     const result = await pool.query<CsiSectionResult>(sql, params);
     return result.rows;
