@@ -1,6 +1,6 @@
 # ADR-010: Expose MCP Server Alongside REST API
 
-## Status: Accepted (deferred implementation — Phase 2+)
+## Status: Accepted — implemented Phase 2a (2026-05-12)
 
 ## Context
 
@@ -28,7 +28,7 @@ SpecR exposes an MCP server (`src/mcp/`) as a thin layer over the same service l
 
 ### MCP Tools (callable functions)
 
-```
+```text
 search_library(query, division?, section?, limit?)  → CsiNode[]
   Search paragraph library by text content and optional CSI filters.
 
@@ -50,7 +50,7 @@ parse_document(filename, content_base64)            → { spec_id, section, titl
 
 ### MCP Resources (readable data)
 
-```
+```text
 specr://specs/{id}              → spec tree as Markdown (ADR-008 parallel output)
 specr://specs/{id}/diff         → current diff as structured JSON
 specr://library/{division}      → all specs in a division (summary list)
@@ -62,7 +62,7 @@ Resources return **Markdown** as the primary format for LLM consumption. This is
 
 ### MCP Prompts (reusable instructions)
 
-```
+```text
 review_spec(spec_id)
   Loads the spec tree and provides a structured prompt for completeness review:
   cross-reference integrity, Part 1/2/3 balance, missing standard article types.
