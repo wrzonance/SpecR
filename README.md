@@ -19,7 +19,9 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 1b | Project + TOC management API | ✅ Complete |
 | 1c-i | DOCX `numbering.xml` + `styles.xml` analyzers (Clippit-ported) | ✅ Complete (PR #17) |
 | 1c-ii | 5-signal hierarchy inference engine + `POST /parse` async endpoint | ✅ Complete (PR #21) |
-| 2 | Generator (AST → DOCX) + MCP server scaffold | Planned |
+| 2a | MCP server (Streamable HTTP, read-only tools + resources) + Markdown renderer | In Progress |
+| 2b | AST → DOCX generator + content controls | Planned |
+| 2c | Firm style template engine (issue #20) | Planned |
 | 3 | Round-trip merge engine | Planned |
 | 4 | Revit integration | Planned |
 | 5 | Web UI | Planned |
@@ -60,14 +62,21 @@ The async `POST /parse` pattern (202 + poll) is intentional — inference over l
 
 ## Not Yet Built
 
-- AST → DOCX generator (Phase 2)
-- MCP server (Phase 2)
-- Style template engine — firm-specific fonts, spacing, numbering formats (Phase 2b, issue #20)
+**Phase 2a — In Progress:**
+- MCP server: `POST /mcp` Streamable HTTP transport (stateless, integrated into Express)
+- MCP tools: `search_library`, `get_spec` (returns tree + `isResolved` references), `list_sections`
+- MCP resources: `specr://specs/{id}` (Markdown), `specr://sections` (Markdown table)
+- `src/generator/markdown.ts`: `renderMarkdown(CsiTree)` pure function (prerequisite for MCP resources)
+
+**Remaining planned work:**
+- AST → DOCX generator + CSI multilevel numbering + content control UUID injection (Phase 2b)
+- Style template engine — firm-specific fonts, spacing, numbering formats (Phase 2c, issue #20)
 - Round-trip merge engine (Phase 3)
 - Revit integration (Phase 4)
 - Web UI with progress bars, live preview, diff/merge review (Phase 5)
 - DOCX cross-reference extraction (Phase 1c-iii) — pending after Phase 2a
 - Security hardening: concurrency cap on parse workers (piscina) — follow-up to issue #22
+- MCP write tools, stateful sessions, MCP prompts (`review_spec`, `suggest_paragraphs`) — Phase 5+
 
 ## The Core Technical Challenge
 

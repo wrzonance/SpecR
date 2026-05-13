@@ -32,11 +32,6 @@ export const upload = multer({
     fields: 5,
     fieldSize: 1024,
   },
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    // Silent reject — handler provides the descriptive error message
-    cb(null, ALLOWED_EXT.has(ext));
-  },
 });
 
 async function validateUpload(req: Request, ext: string): Promise<string | null> {

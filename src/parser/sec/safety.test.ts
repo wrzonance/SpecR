@@ -2,6 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { assertSecSafe } from './safety.js';
 
 describe('assertSecSafe', () => {
+  it('rejects invalid UTF-8 byte sequence', () => {
+    const buf = Buffer.from([0xc3, 0x28]); // malformed UTF-8 (incomplete 2-byte sequence)
+    expect(() => assertSecSafe(buf)).toThrow('invalid UTF-8');
+  });
+
   it('accepts valid UTF-8 SEC content', () => {
     const content = '<?xml version="1.0"?>\n<SEC>\n  <PRT ID="1">GENERAL</PRT>\n</SEC>';
     expect(() => assertSecSafe(Buffer.from(content, 'utf-8'))).not.toThrow();

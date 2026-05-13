@@ -8,8 +8,8 @@ export function assertSecSafe(buf: Buffer): void {
   let text: string;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(buf);
-  } catch {
-    throw new ParserError('invalid UTF-8 in .sec file');
+  } catch (cause) {
+    throw new ParserError('invalid UTF-8 in .sec file', { cause });
   }
   if (text.includes('\0')) throw new ParserError('null byte in .sec file');
   if (CONTROL_CHAR_RE.test(text)) throw new ParserError('control character in .sec file');

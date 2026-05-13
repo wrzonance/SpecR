@@ -89,6 +89,9 @@ jobs:
       - name: Run database migrations
         run: pnpm migrate
 
+      - name: Seed CSI section reference data
+        run: pnpm seed
+
       - name: Run unit tests
         run: pnpm test --reporter=verbose
 
