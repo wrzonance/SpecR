@@ -67,27 +67,37 @@ src/
 │       ├── inference.ts  # Multi-signal hierarchy inference engine (5 signals)
 │       └── heuristics.ts # Text-content + indentation heuristics
 ├── generator/
-│   ├── index.ts          # AST → DOCX (dolanmiu/docx)
+│   ├── markdown.ts       # CsiTree → Markdown renderer (renderMarkdown, getLabel) — shared with MCP + future DOCX
+│   ├── index.ts          # AST → DOCX (dolanmiu/docx) — Phase 2b
 │   ├── error.ts          # GeneratorError
-│   ├── numbering.ts      # CSI multilevel numbering engine
-│   └── controls.ts       # w:sdt UUID content control injection
+│   ├── numbering.ts      # CSI multilevel numbering engine — Phase 2b
+│   └── controls.ts       # w:sdt UUID content control injection — Phase 2b
+├── mcp/
+│   ├── server.ts         # registerMcpRoutes(app) — stateless Streamable HTTP, one McpServer per request
+│   ├── tools.ts          # registerTools(server): search_library, get_spec, list_sections
+│   └── resources.ts      # registerResources(server): specr://specs/{id}, specr://sections
 ├── merge/
-│   ├── index.ts          # 3-way merge orchestrator
+│   ├── index.ts          # 3-way merge orchestrator — Phase 3
 │   ├── error.ts          # MergeError
 │   ├── diff.ts           # 3-way diff algorithm
 │   └── conflict.ts       # Conflict detection + resolution
 ├── db/
-│   ├── index.ts          # pg Pool, query helper
+│   ├── index.ts          # pg Pool, query helper — barrel re-exports all query functions
 │   ├── migrations/       # Numbered .sql files — always reversible (up + down)
 │   └── queries/
-│       ├── specs.ts      # Spec CRUD
-│       ├── paragraphs.ts # Tree queries (recursive CTEs)
+│       ├── specs.ts      # Spec CRUD + getSpecTree (paragraph tree reconstruction + cross-refs)
+│       ├── paragraphs.ts # Tree insert (recursive)
+│       ├── search.ts     # searchParagraphs (ILIKE), listCsiSections (LEFT JOIN csi_sections)
+│       ├── projects.ts   # Project + TOC queries, broken-ref cascade
+│       ├── refs.ts       # Cross-reference insert
 │       └── versions.ts   # Base version tracking per paragraph
 ├── ast/
 │   ├── types.ts          # CsiNode, CsiTree, NodeType — canonical AST types
 │   └── schemas.ts        # Zod schemas for all AST node types
 └── lib/
     ├── errors.ts         # SpecrError base class
+    ├── jobs.ts           # In-memory async job store (parse progress)
+    ├── env.ts            # Zod env validation — exits process on invalid config
     └── logger.ts         # Structured logging (pino)
 ```
 
@@ -199,6 +209,7 @@ generator/ ← knows about AST types and dolanmiu/docx, nothing else
 merge/     ← knows about AST types and DB queries, nothing about parsing
 db/        ← knows about AST types and pg, nothing about domain logic
 api/       ← orchestrates all modules, owns HTTP concerns only
+mcp/       ← imports from db/index.ts and generator/markdown.ts only; no parser/ or api/ internals
 ```
 
 Imports between modules go through `index.ts` re-exports only:
@@ -296,10 +307,11 @@ Red → Green → Refactor. No implementation code without a failing test first.
 **What gets tested:**
 - Parser: known .SEC and .docx fixtures → expected AST output (deterministic)
 - Inference engine: paragraph sequences with known ilvl/style/text → expected hierarchy
-- Generator: AST → DOCX → re-parse → AST round-trip fidelity
-- Merge: 3-way diff with known base/theirs/ours → expected conflict set
+- Generator: `renderMarkdown(CsiTree)` → expected Markdown string (pure function, deterministic); AST → DOCX → re-parse round-trip fidelity (Phase 2b)
+- Merge: 3-way diff with known base/theirs/ours → expected conflict set (Phase 3)
 - DB queries: integration tests against real PostgreSQL
 - API: request/response contracts (HTTP status, body shape)
+- MCP: JSON-RPC `POST /mcp` integration tests — spin up Express, call `tools/call` and `resources/read` with known fixtures, assert response shape. No MCP client binary needed — it's plain HTTP POST.
 
 **What does NOT get tested:**
 - Third-party library internals (dolanmiu/docx rendering, pg driver)
@@ -316,6 +328,8 @@ Every push to a PR branch triggers:
 jobs:
   lint:   ESLint + tsc --noEmit + prettier --check
   test:   Unit tests (no DB) + integration tests (postgres service)
+          Sequence: pnpm migrate → pnpm seed → pnpm test → pnpm test:integration
+          pnpm seed required: listCsiSections and MCP list_sections tests depend on csi_sections data
   build:  pnpm build — verifies compilation succeeds
   loc-check: warn if PR LOC delta > 500 (excludes fixtures, migrations, lockfile)
 ```
@@ -356,3 +370,60 @@ Every test must justify itself against four properties:
 Coverage % is a diagnostic, not a target. Tests at module API boundaries beat tests on internals. Pin every bug-fix with a regression test.
 
 **OOXML-specific rule:** The inference engine has known ambiguous cases (see research summary). When a case is genuinely ambiguous, document it in a test marked `// KNOWN AMBIGUITY: <description>` rather than picking an arbitrary behavior silently.
+
+## MCP Server Patterns
+
+**Architecture:** `src/mcp/server.ts` exports `registerMcpRoutes(app: Express)`. One fresh `McpServer` + `StreamableHTTPServerTransport` is created per `POST /mcp` request (stateless). `registerTools(server)` and `registerResources(server)` wire all capabilities. `GET /mcp` and `DELETE /mcp` return 405 (stubs for future stateful session upgrade).
+
+**Adding a tool:**
+
+```typescript
+// src/mcp/tools.ts — inside registerTools(server)
+server.registerTool('tool_name', {
+  description: 'What this tool does for an AI agent.',
+  inputSchema: {
+    param: z.string().describe('param description'),
+  },
+}, async ({ param }) => {
+  try {
+    const result = await someQuery(param);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+  } catch (err) {
+    logger.error({ err }, 'mcp tool tool_name failed');
+    return { isError: true, content: [{ type: 'text' as const, text: 'Internal error' }] };
+  }
+});
+```
+
+Key rules:
+- Import DB functions from `'../db/index.js'` only — no internal query file imports
+- Use `z.uuid()` for UUID params (Zod v4), not `z.string().uuid()`
+- Always return `{ isError: true, content: [...] }` on error — never throw from a tool handler
+- Extract handler functions if body exceeds 50 lines (ESLint `max-lines-per-function` rule)
+
+**Adding a resource:**
+
+```typescript
+// Static URI:
+server.registerResource('name', 'specr://path', { description: '...', mimeType: 'text/markdown' }, async (uri) => {
+  return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text: markdownString }] };
+});
+
+// Template URI:
+server.registerResource('name', new ResourceTemplate('specr://path/{id}', { list: undefined }), { ... }, async (uri, { id }) => { ... });
+```
+
+**Stateful session upgrade (Phase 5+):** Change `new StreamableHTTPServerTransport({})` to `new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() })` and add a `Map<sessionId, McpServer>` session store. Tool/resource definitions are unchanged.
+
+**Auth hook:** Lines 19–21 of `server.ts` mark the insertion point. Add `Authorization: Bearer <token>` validation there when REST auth is implemented — same PR, same middleware logic.
+
+## Markdown Renderer
+
+`src/generator/markdown.ts` is a pure module (no I/O, no DB) shared between MCP resources and the future DOCX generator.
+
+- `renderMarkdown(tree: CsiTree): string` — full spec as Markdown
+- `getLabel(type: NodeType, index: number, partNumber?: number): string` — CSI label for any node type (A./1./a./1)/a), PART N -, N.N). Uses base-26 arithmetic for `pr1`/`pr3`/`pr5` — handles >26 siblings correctly.
+- `note` type nodes always render as `> **[NOTE]** text` regardless of `meta.vanish` — editorial notes are structural metadata for spec writers, not owner-facing content.
+- `meta.vanish` on non-note nodes → returns `''` (suppressed from output).
+
+When the DOCX generator (Phase 2b) needs numbering labels, import `getLabel` from here rather than reimplementing.

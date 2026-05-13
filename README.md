@@ -10,7 +10,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 
 ## Status
 
-**Active development — Phase 1c complete, Phase 2 next.**
+**Active development — Phase 2a complete, Phase 2b next.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -19,7 +19,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 1b | Project + TOC management API | ✅ Complete |
 | 1c-i | DOCX `numbering.xml` + `styles.xml` analyzers (Clippit-ported) | ✅ Complete (PR #17) |
 | 1c-ii | 5-signal hierarchy inference engine + `POST /parse` async endpoint | ✅ Complete (PR #21) |
-| 2a | MCP server (Streamable HTTP, read-only tools + resources) + Markdown renderer | In Progress |
+| 2a | MCP server (Streamable HTTP, read-only tools + resources) + Markdown renderer | ✅ Complete (PR #24) |
 | 2b | AST → DOCX generator + content controls | Planned |
 | 2c | Firm style template engine (issue #20) | Planned |
 | 3 | Round-trip merge engine | Planned |
@@ -54,6 +54,17 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 
 The async `POST /parse` pattern (202 + poll) is intentional — inference over large DOCX files takes measurable time, and the job endpoint is designed for Phase 5 Web UI progress bars without further backend changes.
 
+### MCP Server
+
+- `POST /mcp` — MCP JSON-RPC endpoint (Streamable HTTP, stateless, integrated into Express)
+- **Tool: `search_library(query, division?, limit?)`** — ILIKE paragraph search with optional CSI division filter. Returns `{ paragraphId, text, nodeType, specId, specSection, specTitle }[]`
+- **Tool: `get_spec(specId)`** — full spec tree + cross-reference resolution. Returns `{ tree: CsiTree, references: SpecReference[] }` where each reference has `isResolved: boolean` (whether target spec is loaded in DB)
+- **Tool: `list_sections(division?)`** — CSI MasterFormat section index with `inDatabase` flag
+- **Resource: `specr://specs/{id}`** — full spec as LLM-readable Markdown. Note/vanish nodes rendered as `> **[NOTE]**` blockquotes (editor instructions visible to spec writer, hidden from published output)
+- **Resource: `specr://sections`** — full CSI section index as Markdown table with loaded (✓) flag
+
+Configure in Claude Code via `.mcp.json` in the repo root (points to `http://localhost:3000/mcp` when `pnpm dev` is running).
+
 ### Database
 
 - PostgreSQL schema: `specs`, `paragraphs` (recursive parent/child), `versions`, `projects`, `project_specs`, `spec_references`
@@ -62,21 +73,16 @@ The async `POST /parse` pattern (202 + poll) is intentional — inference over l
 
 ## Not Yet Built
 
-**Phase 2a — In Progress:**
-- MCP server: `POST /mcp` Streamable HTTP transport (stateless, integrated into Express)
-- MCP tools: `search_library`, `get_spec` (returns tree + `isResolved` references), `list_sections`
-- MCP resources: `specr://specs/{id}` (Markdown), `specr://sections` (Markdown table)
-- `src/generator/markdown.ts`: `renderMarkdown(CsiTree)` pure function (prerequisite for MCP resources)
-
-**Remaining planned work:**
 - AST → DOCX generator + CSI multilevel numbering + content control UUID injection (Phase 2b)
 - Style template engine — firm-specific fonts, spacing, numbering formats (Phase 2c, issue #20)
 - Round-trip merge engine (Phase 3)
 - Revit integration (Phase 4)
 - Web UI with progress bars, live preview, diff/merge review (Phase 5)
-- DOCX cross-reference extraction (Phase 1c-iii) — pending after Phase 2a
+- DOCX cross-reference extraction (Phase 1c-iii)
 - Security hardening: concurrency cap on parse workers (piscina) — follow-up to issue #22
-- MCP write tools, stateful sessions, MCP prompts (`review_spec`, `suggest_paragraphs`) — Phase 5+
+- MCP write tools (`add_paragraph`, `update_paragraph`, etc.) — Phase 5
+- MCP stateful sessions, `get_paragraph` + `parse_document` tools — Phase 2b follow-up
+- MCP prompts (`review_spec`, `suggest_paragraphs`) — Phase 6
 
 ## The Core Technical Challenge
 
@@ -136,10 +142,10 @@ Note: `section` and `title` show as `unknown` when `docProps/core.xml` is absent
 | API framework | Express |
 | Database | PostgreSQL (recursive CTEs, JSONB) |
 | Input validation | Zod |
-| DOCX generation | dolanmiu/docx (planned) |
+| DOCX generation | dolanmiu/docx (Phase 2b) |
 | DOCX parsing | JSZip + raw OOXML (no TS library does style inheritance) |
 | SEC parsing | fast-xml-parser |
-| MCP server | @modelcontextprotocol/sdk (planned) |
+| MCP server | @modelcontextprotocol/sdk (Streamable HTTP, stateless) |
 | Logging | pino |
 
 ## Development
