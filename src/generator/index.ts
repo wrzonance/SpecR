@@ -30,6 +30,8 @@ function emitNode(node: CsiNode, out: Paragraph[]): boolean {
     out.push(plainParagraph(node.text));
     return true;
   }
+  // 'spec' is a root-container type; never appears as a paragraph node in tree.parts.
+  // All unknown types fall through: getNodeLevel returns null, no paragraph emitted.
   const level = getNodeLevel(node.type);
   if (level !== null) out.push(numberedParagraph(node.text, level));
   return true;

@@ -71,6 +71,9 @@ describe('POST /specs/:id/generate (integration)', () => {
     expect(contentType).toContain(
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     );
+    const disposition = res.headers.get('content-disposition') ?? '';
+    expect(disposition).toContain('attachment');
+    expect(disposition).toContain('.docx');
   });
 
   it('returns a non-empty body (valid DOCX bytes)', async () => {

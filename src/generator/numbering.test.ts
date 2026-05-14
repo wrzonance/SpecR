@@ -49,6 +49,12 @@ describe('buildCsiNumberingConfig', () => {
     expect(config.levels[2]?.text).toBe('%3.');
   });
 
+  it('level 3 is DECIMAL with %4. text (pr2 1.)', () => {
+    const config = buildCsiNumberingConfig();
+    expect(config.levels[3]?.format).toBe(LevelFormat.DECIMAL);
+    expect(config.levels[3]?.text).toBe('%4.');
+  });
+
   it('level 4 is LOWER_LETTER with %5. text (pr3 a.)', () => {
     const config = buildCsiNumberingConfig();
     expect(config.levels[4]?.format).toBe(LevelFormat.LOWER_LETTER);
