@@ -16,6 +16,7 @@ import {
   AddSpecToProjectBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
+import { generateHandler } from './generate.js';
 
 const parseRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
@@ -30,6 +31,7 @@ export const router: RouterType = Router();
 router.get('/health', healthHandler);
 router.get('/specs/:id', getSpecHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
+router.post('/specs/:id/generate', generateHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects/:id', getProjectHandler);
 router.post(
