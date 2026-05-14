@@ -106,6 +106,9 @@ describe('POST /specs/:id/generate (integration)', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
+    const body = (await res.json()) as Record<string, unknown>;
     expect(res.status).toBe(400);
+    expect(body['success']).toBe(false);
+    expect(typeof body['error']).toBe('string');
   });
 });

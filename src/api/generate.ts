@@ -7,7 +7,7 @@ import { logger } from '../lib/logger.js';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 function safeFilename(section: string, title: string): string {
-  const s = section.replace(/\s/g, '-');
+  const s = section.replace(/[^a-zA-Z0-9-]/g, '-').replace(/-+/g, '-');
   const t = title
     .replace(/[^a-zA-Z0-9-]/g, '-')
     .replace(/-+/g, '-')
