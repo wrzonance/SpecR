@@ -140,15 +140,14 @@ describe('integration: 27_10_00.SEC via Buffer + assertSecSafe (encoding fix)', 
     await insertRefs(refs, specId, pool);
   });
 
-  it('parses 27_10_00.SEC from raw Buffer without throwing', async () => {
+  it('beforeAll pipeline succeeded: Buffer → assertSecSafe → parseSec → DB insert', () => {
     expect(specId).toBeDefined();
   });
 
   it('produces section "27 10 00"', async () => {
-    const r = await pool.query<{ section: string }>(
-      `SELECT section FROM specs WHERE id = $1`,
-      [specId]
-    );
+    const r = await pool.query<{ section: string }>(`SELECT section FROM specs WHERE id = $1`, [
+      specId,
+    ]);
     expect(r.rows[0]?.section).toBe('27 10 00');
   });
 
