@@ -10,7 +10,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 
 ## Status
 
-**Active development — Phase 2a complete, Phase 2b next.**
+**Active development — Phase 2b-ii complete, Phase 2b-iii next.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -20,7 +20,9 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 1c-i | DOCX `numbering.xml` + `styles.xml` analyzers (Clippit-ported) | ✅ Complete (PR #17) |
 | 1c-ii | 5-signal hierarchy inference engine + `POST /parse` async endpoint | ✅ Complete (PR #21) |
 | 2a | MCP server (Streamable HTTP, read-only tools + resources) + Markdown renderer | ✅ Complete (PR #24) |
-| 2b | AST → DOCX generator + content controls | Planned |
+| 2b-i | AST → DOCX generator, 7-level CSI multilevel numbering | ✅ Complete (PR #26) |
+| 2b-ii | `w:sdt` content control UUID injection (round-trip anchors) | ✅ Complete (PR #28) |
+| 2b-iii | MCP tools: `generate_docx`, `get_paragraph` (issue #29) | Planned |
 | 2c | Firm style template engine (issue #20) | Planned |
 | 3 | Round-trip merge engine | Planned |
 | 4 | Revit integration | Planned |
@@ -39,12 +41,19 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - **5-signal hierarchy inference engine** — two-pass pipeline: Pass 1 classifies each paragraph using a priority chain (numbering XML > style chain > text regex > indentation), logging signal conflicts into `meta.conflicts` for MCP surfacing. Pass 2 builds the parent/child tree using a stack algorithm (handles ilvl gaps, jumps, continuation paragraphs, and hidden note nodes). Source template (`arcat` / `cpi` / `unknown`) auto-detected from style names and numbering.xml heuristics.
 - **Extraction rules as typed data constants** — numbering, style, and signal rules are defined as MCP-readable data structures, not code, enabling LLM agent exploration and parse explainability.
 
+### Generator
+
+- `POST /specs/:id/generate` → streams DOCX buffer with 7-level CSI multilevel numbering
+- Each paragraph wrapped in `w:sdt` content control with `specr-uuid-<id>` UUID tag — round-trip merge anchors per ADR-004. Phase 3 merge engine reads these tags to map owner-redlined paragraphs back to `paragraphs.id`.
+- Title paragraph intentionally bare (synthetic, no DB id) — Phase 3 merge skips unwrapped paragraphs.
+
 ### API
 
 - `GET /health` — liveness check
 - `POST /parse` — upload a `.docx` or `.sec` file; returns `202 { jobId }` immediately (async)
 - `GET /parse/jobs/:jobId` — poll parse progress: `{ status, progress: { stage, pct }, result?, error? }`
 - `GET /specs/:id` — retrieve a spec with its paragraph tree
+- `POST /specs/:id/generate` — generate DOCX from stored spec AST
 - `PATCH /specs/:id` — update spec metadata
 - `POST /projects` — create a project
 - `GET /projects/:id` — retrieve project with TOC
@@ -73,7 +82,7 @@ Configure in Claude Code via `.mcp.json` in the repo root (points to `http://loc
 
 ## Not Yet Built
 
-- AST → DOCX generator + CSI multilevel numbering + content control UUID injection (Phase 2b)
+- MCP write tools for generator: `generate_docx`, `get_paragraph` (Phase 2b-iii, issue #29)
 - Style template engine — firm-specific fonts, spacing, numbering formats (Phase 2c, issue #20)
 - Round-trip merge engine (Phase 3)
 - Revit integration (Phase 4)

@@ -157,3 +157,50 @@ describe('generateDocx', () => {
     expect(buffer.length).toBeGreaterThan(0);
   });
 });
+
+describe('generateDocx — content controls', () => {
+  it('document.xml contains w:sdt elements', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE);
+    const xml = await getDocXml(buffer);
+    expect(xml).toContain('w:sdt');
+  });
+
+  it('wraps part node in specr-uuid content control', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE);
+    const xml = await getDocXml(buffer);
+    // part node id: 00000000-0000-0000-0000-000000000002
+    expect(xml).toContain('specr-uuid-00000000-0000-0000-0000-000000000002');
+  });
+
+  it('wraps note node in specr-uuid content control', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE);
+    const xml = await getDocXml(buffer);
+    // note node id: 00000000-0000-0000-0000-000000000006
+    expect(xml).toContain('specr-uuid-00000000-0000-0000-0000-000000000006');
+  });
+
+  it('wraps continuation node in specr-uuid content control', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE);
+    const xml = await getDocXml(buffer);
+    // continuation node id: 00000000-0000-0000-0000-000000000007
+    expect(xml).toContain('specr-uuid-00000000-0000-0000-0000-000000000007');
+  });
+
+  it('does not wrap vanished node', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE);
+    const xml = await getDocXml(buffer);
+    // vanished node id: 00000000-0000-0000-0000-000000000012
+    expect(xml).not.toContain('specr-uuid-00000000-0000-0000-0000-000000000012');
+  });
+
+  it('title paragraph is not wrapped (no CsiNode.id)', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE);
+    const xml = await getDocXml(buffer);
+    expect(xml).toContain('27 21 00');
+    expect(xml).toContain('Structured Cabling');
+    // Non-vanished nodes: 002,003,004,005,006,007 (part1 subtree) + 010,011 (part2 subtree) = 8
+    // Title paragraph is synthetic — no UUID tag
+    const uuidMatches = xml.match(/specr-uuid-/g) ?? [];
+    expect(uuidMatches.length).toBe(8);
+  });
+});
