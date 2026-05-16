@@ -12,6 +12,7 @@ build/
 .env
 .env.*
 !.env.example
+*.mcp.json
 
 # IDE
 .vscode/
