@@ -7,44 +7,15 @@ import {
   listCsiSections,
   getSpecTree,
   getParagraphWithAncestors,
-  pool,
-  insertTree,
+  persistParsedSpec,
 } from '../db/index.js';
 import { parseSec, parseDocx, assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { generateDocx } from '../generator/index.js';
-import type { CsiNode, CsiTree } from '../ast/types.js';
+import type { CsiNode, CsiTree, SecRef } from '../ast/types.js';
 import { logger } from '../lib/logger.js';
-import { McpError } from './error.js';
 
 function countNodes(nodes: readonly CsiNode[]): number {
   return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
-}
-
-async function persistParsedSpec(tree: CsiTree): Promise<string> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const source = tree.parts[0]?.meta.source ?? 'unknown';
-    const res = await client.query<{ id: string }>(
-      `INSERT INTO specs (section, title, source)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (section, source) DO UPDATE
-         SET title = EXCLUDED.title, updated_at = now()
-       RETURNING id`,
-      [tree.section, tree.title, source]
-    );
-    const specId = res.rows[0]?.id;
-    if (!specId) throw new McpError('upsert spec returned no id');
-    const treeWithId: CsiTree = { ...tree, id: specId };
-    await insertTree(treeWithId, specId, client);
-    await client.query('COMMIT');
-    return specId;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw new McpError('failed to persist parsed spec', { cause: err });
-  } finally {
-    client.release();
-  }
 }
 
 type ToolError = {
@@ -102,18 +73,18 @@ async function handleParseDocument({
     const bufOrErr = await decodeSafeBuffer(ext, contentBase64);
     if (isToolError(bufOrErr)) return bufOrErr;
     const noop = (_stage: string, _pct: number): void => {};
-    const tree =
+    const parseResult: { tree: CsiTree; refs: readonly SecRef[] } =
       ext === '.sec'
-        ? parseSec(bufOrErr as string).tree
-        : await parseDocx(bufOrErr as Buffer, noop);
-    const specId = await persistParsedSpec(tree);
-    const nodeCount = countNodes(tree.parts);
+        ? parseSec(bufOrErr as string)
+        : { tree: await parseDocx(bufOrErr as Buffer, noop), refs: [] };
+    const specId = await persistParsedSpec(parseResult);
+    const nodeCount = countNodes(parseResult.tree.parts);
     return {
       content: [
         {
           type: 'text' as const,
           text: JSON.stringify(
-            { specId, section: tree.section, title: tree.title, nodeCount },
+            { specId, section: parseResult.tree.section, title: parseResult.tree.title, nodeCount },
             null,
             2
           ),

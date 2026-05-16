@@ -23,7 +23,13 @@ pool.on('error', (err: Error) => {
   logger.error({ err }, 'pg pool error');
 });
 
-export { findSpecById, updateSpec, createSpec, getSpecTree } from './queries/specs.js';
+export {
+  findSpecById,
+  updateSpec,
+  createSpec,
+  getSpecTree,
+  persistParsedSpec,
+} from './queries/specs.js';
 export type {
   SpecSummary,
   UpdateSpecInput,
