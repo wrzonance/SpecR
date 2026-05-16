@@ -59,7 +59,8 @@ function toolError(text: string): ToolError {
 }
 
 function isToolError(v: Buffer | string | ToolError): v is ToolError {
-  return typeof v === 'object' && 'isError' in v;
+  // eslint-disable-next-line sonarjs/different-types-comparison
+  return v !== null && typeof v === 'object' && 'isError' in v;
 }
 
 async function decodeSafeBuffer(
