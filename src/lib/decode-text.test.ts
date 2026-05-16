@@ -7,8 +7,8 @@ describe('decodeTextBuffer', () => {
     expect(decodeTextBuffer(buf)).toBe('hello world');
   });
 
-  it('decodes a windows-1252 buffer containing em-dash (0x96)', () => {
-    // 0x96 = em-dash in windows-1252; invalid in strict UTF-8
+  it('decodes a windows-1252 buffer containing en-dash (0x96)', () => {
+    // 0x96 = en-dash (U+2013) in windows-1252; invalid in strict UTF-8
     const buf = Buffer.from([0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x96, 0x77, 0x6f, 0x72, 0x6c, 0x64]);
     const result = decodeTextBuffer(buf);
     // chardet detects windows-1252 / ISO-8859-1 variant; iconv transcodes 0x96 → U+2013 (–)
