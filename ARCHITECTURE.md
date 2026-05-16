@@ -409,12 +409,11 @@ Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
 - **Stateful session upgrade path (Phase 5+):** change `sessionIdGenerator: undefined` → `sessionIdGenerator: () => randomUUID()` + session Map in the route handler. Tool/resource definitions unchanged.
 - Deferred to later phases: `get_paragraph`, `parse_document`, write tools, stateful sessions, MCP prompts
 
-**Phase 2b — Core DOCX generator:**
-- AST → DOCX with dolanmiu/docx
-- CSI multilevel numbering engine (hardcoded default styles)
-- Content control UUID injection (`w:sdt` wrapping)
-- `POST /specs/:id/generate` endpoint
-- Round-trip smoke test: generate DOCX → open in Word → verify numbering
+**Phase 2b — Core DOCX generator:** ✅ Complete (PR #26, PR #28)
+
+- **2b-i** ✅ — `generateDocx()` + `buildCsiNumberingConfig()`, 7-level CSI multilevel numbering, `POST /specs/:id/generate` endpoint (PR #26)
+- **2b-ii** ✅ — `wrapWithControl()`, `SdtBlock extends FileChild`, `specr-uuid-<CsiNode.id>` tags in `w:sdtPr` as round-trip merge anchors per ADR-004 (PR #28). Uses `StringValueElement('w:tag', ...)` for idiomatic docx-native attribute injection. Title paragraph intentionally bare — synthetic, no DB id.
+- **2b-iii** — MCP tools: `generate_docx`, `get_paragraph` (issue #29)
 
 **Phase 2c — Firm style template engine (issue #20):**
 - `style_templates` + `style_rules` DB tables; default CSI styles seeded at migration
