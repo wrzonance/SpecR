@@ -8,6 +8,7 @@ import { registerMcpRoutes } from './server.js';
 let server: Server;
 let baseUrl: string;
 let mcpSpecId: string;
+let parsedSpecId: string | null = null;
 
 async function mcpCall(
   url: string,
@@ -36,7 +37,12 @@ async function mcpCall(
 
 beforeAll(async () => {
   const app = express();
-  app.use(express.json());
+  // Skip global JSON parsing for /mcp — route applies its own 15mb-limit parser
+  const restJson = express.json();
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/mcp')) return next();
+    restJson(req, res, next);
+  });
   registerMcpRoutes(app);
 
   await new Promise<void>((resolve) => {
@@ -62,17 +68,17 @@ beforeAll(async () => {
       title: 'MCP Test Spec',
       parts: [
         {
-          id: '30000000-0000-0000-0000-000000000001',
+          id: '30000000-0000-4000-8000-000000000001',
           type: 'part',
           text: 'GENERAL',
           children: [
             {
-              id: '30000000-0000-0000-0000-000000000002',
+              id: '30000000-0000-4000-8000-000000000002',
               type: 'article',
               text: 'SCOPE',
               children: [
                 {
-                  id: '30000000-0000-0000-0000-000000000003',
+                  id: '30000000-0000-4000-8000-000000000003',
                   type: 'pr1',
                   text: 'Provide fiber optic backbone cabling.',
                   children: [],
@@ -95,6 +101,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (parsedSpecId) {
+    await pool.query('DELETE FROM specs WHERE id = $1', [parsedSpecId]);
+  }
   await pool.query('DELETE FROM specs WHERE id = $1', [mcpSpecId]);
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err != null ? reject(err) : resolve()));
@@ -209,6 +218,124 @@ describe('resource: specr://sections', () => {
     const contents = result['contents'] as { mimeType: string; text: string }[];
     expect(contents[0]!.mimeType).toBe('text/markdown');
     expect(contents[0]!.text).toContain('| Section |');
+  });
+});
+
+describe('tool: get_paragraph', () => {
+  it('returns node and ancestor chain for known paragraph', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_paragraph',
+      arguments: { paragraphId: '30000000-0000-4000-8000-000000000003' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as {
+      node: { id: string; nodeType: string; text: string };
+      ancestors: { id: string; nodeType: string }[];
+    };
+    expect(data.node.id).toBe('30000000-0000-4000-8000-000000000003');
+    expect(data.node.nodeType).toBe('pr1');
+    expect(data.node.text).toBe('Provide fiber optic backbone cabling.');
+    expect(data.ancestors).toHaveLength(2);
+    expect(data.ancestors[0]!.id).toBe('30000000-0000-4000-8000-000000000001');
+    expect(data.ancestors[1]!.id).toBe('30000000-0000-4000-8000-000000000002');
+    expect(data.ancestors[0]!.nodeType).toBe('part');
+    expect(data.ancestors[1]!.nodeType).toBe('article');
+  });
+
+  it('returns isError for unknown UUID', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_paragraph',
+      arguments: { paragraphId: '00000000-0000-0000-0000-000000000000' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
+  });
+});
+
+describe('tool: parse_document', () => {
+  it('parses a valid base64-encoded SEC file and returns spec summary', async () => {
+    // Inline minimal SEC — section 99 99 99 is not in the seed corpus, so no
+    // conflict with parallel tests that operate on seeded UFGS specs.
+    const minimalSec =
+      '<SEC><SCN>99 99 99</SCN><STL>MCP Test Section</STL>' +
+      '<PRT><TTL>PART 1 - GENERAL</TTL>' +
+      '<SPT><TTL>SUMMARY</TTL><TXT>Test paragraph content.</TXT></SPT>' +
+      '</PRT></SEC>';
+    const secBase64 = Buffer.from(minimalSec, 'utf-8').toString('base64');
+
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'parse_document',
+      arguments: { filename: 'test.sec', contentBase64: secBase64 },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    expect(result['isError'], content[0]?.text).not.toBe(true);
+    const data = JSON.parse(content[0]!.text) as {
+      specId: string;
+      section: string;
+      title: string;
+      nodeCount: number;
+    };
+    expect(typeof data.specId).toBe('string');
+    expect(data.nodeCount).toBeGreaterThan(0);
+    parsedSpecId = data.specId;
+  });
+
+  it('returns isError for invalid base64', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'parse_document',
+      arguments: { filename: 'test.sec', contentBase64: '!!!not-base64!!!' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
+  });
+
+  it('returns isError for unsupported file extension', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'parse_document',
+      arguments: { filename: 'file.pdf', contentBase64: Buffer.from('hello').toString('base64') },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
+  });
+});
+
+describe('tool: generate_docx', () => {
+  it('returns base64 DOCX for a valid spec', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'generate_docx',
+      arguments: { specId: mcpSpecId },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as {
+      specId: string;
+      section: string;
+      title: string;
+      sizeBytes: number;
+      contentBase64: string;
+    };
+    expect(data.specId).toBe(mcpSpecId);
+    expect(data.sizeBytes).toBeGreaterThan(0);
+    expect(typeof data.contentBase64).toBe('string');
+    expect(data.contentBase64.length).toBeGreaterThan(0);
+  });
+
+  it('returns isError for unknown spec UUID', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'generate_docx',
+      arguments: { specId: '00000000-0000-4000-8000-000000000000' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
   });
 });
 

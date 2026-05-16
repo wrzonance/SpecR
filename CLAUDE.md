@@ -209,7 +209,7 @@ generator/ ← knows about AST types and dolanmiu/docx, nothing else
 merge/     ← knows about AST types and DB queries, nothing about parsing
 db/        ← knows about AST types and pg, nothing about domain logic
 api/       ← orchestrates all modules, owns HTTP concerns only
-mcp/       ← imports from db/index.ts and generator/markdown.ts only; no parser/ or api/ internals
+mcp/       ← imports from db/index.ts, generator/index.ts, parser/index.ts; no api/ internals
 ```
 
 Imports between modules go through `index.ts` re-exports only:

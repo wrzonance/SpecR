@@ -10,7 +10,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 
 ## Status
 
-**Active development — Phase 2b-ii complete, Phase 2b-iii next.**
+**Active development — Phase 2b-iii complete, Phase 2c next.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -22,7 +22,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 2a | MCP server (Streamable HTTP, read-only tools + resources) + Markdown renderer | ✅ Complete (PR #24) |
 | 2b-i | AST → DOCX generator, 7-level CSI multilevel numbering | ✅ Complete (PR #26) |
 | 2b-ii | `w:sdt` content control UUID injection (round-trip anchors) | ✅ Complete (PR #28) |
-| 2b-iii | MCP tools: `generate_docx`, `get_paragraph` (issue #29) | Planned |
+| 2b-iii | MCP tools: `get_paragraph`, `parse_document`, `generate_docx` | ✅ Complete |
 | 2c | Firm style template engine (issue #20) | Planned |
 | 3 | Round-trip merge engine | Planned |
 | 4 | Revit integration | Planned |
@@ -69,6 +69,9 @@ The async `POST /parse` pattern (202 + poll) is intentional — inference over l
 - **Tool: `search_library(query, division?, limit?)`** — ILIKE paragraph search with optional CSI division filter. Returns `{ paragraphId, text, nodeType, specId, specSection, specTitle }[]`
 - **Tool: `get_spec(specId)`** — full spec tree + cross-reference resolution. Returns `{ tree: CsiTree, references: SpecReference[] }` where each reference has `isResolved: boolean` (whether target spec is loaded in DB)
 - **Tool: `list_sections(division?)`** — CSI MasterFormat section index with `inDatabase` flag
+- **Tool: `get_paragraph(paragraphId)`** — returns `{ node, ancestors }` for a single paragraph. `node` and each ancestor are `{ id, nodeType, text, vanish }`. Ancestors ordered root → immediate parent.
+- **Tool: `parse_document(filename, contentBase64)`** — base64-decode a DOCX or SEC file, parse it, insert into the database, return `{ specId, section, title, nodeCount }`. Max 10 MB decoded. Computation-intensive for large DOCX files.
+- **Tool: `generate_docx(specId)`** — generate DOCX from a stored spec, returned as base64 in `{ specId, section, title, sizeBytes, contentBase64 }`. On-demand from current DB state — not cached.
 - **Resource: `specr://specs/{id}`** — full spec as LLM-readable Markdown. Note/vanish nodes rendered as `> **[NOTE]**` blockquotes (editor instructions visible to spec writer, hidden from published output)
 - **Resource: `specr://sections`** — full CSI section index as Markdown table with loaded (✓) flag
 
@@ -82,7 +85,6 @@ Configure in Claude Code via `.mcp.json` in the repo root (points to `http://loc
 
 ## Not Yet Built
 
-- MCP write tools for generator: `generate_docx`, `get_paragraph` (Phase 2b-iii, issue #29)
 - Style template engine — firm-specific fonts, spacing, numbering formats (Phase 2c, issue #20)
 - Round-trip merge engine (Phase 3)
 - Revit integration (Phase 4)
@@ -90,7 +92,6 @@ Configure in Claude Code via `.mcp.json` in the repo root (points to `http://loc
 - DOCX cross-reference extraction (Phase 1c-iii)
 - Security hardening: concurrency cap on parse workers (piscina) — follow-up to issue #22
 - MCP write tools (`add_paragraph`, `update_paragraph`, etc.) — Phase 5
-- MCP stateful sessions, `get_paragraph` + `parse_document` tools — Phase 2b follow-up
 - MCP prompts (`review_spec`, `suggest_paragraphs`) — Phase 6
 
 ## The Core Technical Challenge

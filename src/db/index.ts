@@ -31,7 +31,8 @@ export type {
   SpecTreeResult,
   SpecReference,
 } from './queries/specs.js';
-export { insertTree } from './queries/paragraphs.js';
+export { insertTree, getParagraphWithAncestors } from './queries/paragraphs.js';
+export type { ParagraphRow, ParagraphWithAncestors } from './queries/paragraphs.js';
 export { insertRefs } from './queries/refs.js';
 export {
   createProject,

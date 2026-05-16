@@ -9,7 +9,12 @@ import { registerMcpRoutes } from './mcp/server.js';
 const app = express();
 app.disable('x-powered-by');
 
-app.use(express.json());
+// REST routes use default JSON limit; /mcp applies its own larger limit route-locally
+const restJson = express.json();
+app.use((req, res, next) => {
+  if (req.path.startsWith('/mcp')) return next();
+  restJson(req, res, next);
+});
 app.use(router);
 registerMcpRoutes(app);
 app.use(errorHandler);
