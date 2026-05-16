@@ -182,6 +182,8 @@ export async function persistParsedSpec(result: {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // eslint-disable-next-line sonarjs/todo-tag
+    // TODO: source should be a top-level CsiTree field — parts[0].meta.source is a stopgap
     const source = result.tree.parts[0]?.meta.source ?? 'unknown';
     const res = await client.query<{ id: string }>(
       `INSERT INTO specs (section, title, source)
@@ -201,7 +203,11 @@ export async function persistParsedSpec(result: {
     await client.query('COMMIT');
     return specId;
   } catch (err) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* best-effort */
+    }
     throw new DatabaseError('failed to persist parsed spec', { cause: err });
   } finally {
     client.release();
