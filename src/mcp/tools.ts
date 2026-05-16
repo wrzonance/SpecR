@@ -58,7 +58,14 @@ function toolError(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };
 }
 
-async function decodeSafeBuffer(ext: string, contentBase64: string): Promise<Buffer | ToolError> {
+function isToolError(v: Buffer | string | ToolError): v is ToolError {
+  return typeof v === 'object' && 'isError' in v;
+}
+
+async function decodeSafeBuffer(
+  ext: string,
+  contentBase64: string
+): Promise<Buffer | string | ToolError> {
   const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
   if (!BASE64_RE.test(contentBase64)) {
     return toolError('contentBase64 is not valid base64');
@@ -69,12 +76,15 @@ async function decodeSafeBuffer(ext: string, contentBase64: string): Promise<Buf
   }
   const buf = Buffer.from(contentBase64, 'base64');
   try {
-    if (ext === '.docx') await assertDocxSafe(buf);
-    else assertSecSafe(buf);
+    if (ext === '.docx') {
+      await assertDocxSafe(buf);
+      return buf;
+    } else {
+      return assertSecSafe(buf);
+    }
   } catch (err) {
     return toolError(err instanceof Error ? err.message : 'invalid file');
   }
-  return buf;
 }
 
 async function handleParseDocument({
@@ -90,10 +100,12 @@ async function handleParseDocument({
       return toolError(`Unsupported extension: ${ext}. Use .docx or .sec`);
     }
     const bufOrErr = await decodeSafeBuffer(ext, contentBase64);
-    if ('isError' in bufOrErr) return bufOrErr;
+    if (isToolError(bufOrErr)) return bufOrErr;
     const noop = (_stage: string, _pct: number): void => {};
     const tree =
-      ext === '.sec' ? parseSec(bufOrErr.toString('utf-8')).tree : await parseDocx(bufOrErr, noop);
+      ext === '.sec'
+        ? parseSec(bufOrErr as string).tree
+        : await parseDocx(bufOrErr as Buffer, noop);
     const specId = await persistParsedSpec(tree);
     const nodeCount = countNodes(tree.parts);
     return {

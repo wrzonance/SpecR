@@ -2,14 +2,27 @@ import { describe, it, expect } from 'vitest';
 import { assertSecSafe } from './safety.js';
 
 describe('assertSecSafe', () => {
-  it('rejects invalid UTF-8 byte sequence', () => {
-    const buf = Buffer.from([0xc3, 0x28]); // malformed UTF-8 (incomplete 2-byte sequence)
-    expect(() => assertSecSafe(buf)).toThrow('invalid UTF-8');
+  it('accepts windows-1252 bytes that fail strict UTF-8 validation', () => {
+    // 0x96 = en-dash (U+2013) in windows-1252; was previously rejected as "invalid UTF-8"
+    const buf = Buffer.from([0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x96]);
+    expect(() => assertSecSafe(buf)).not.toThrow();
   });
 
-  it('accepts valid UTF-8 SEC content', () => {
+  it('accepts valid UTF-8 SEC content and returns a string', () => {
     const content = '<?xml version="1.0"?>\n<SEC>\n  <PRT ID="1">GENERAL</PRT>\n</SEC>';
-    expect(() => assertSecSafe(Buffer.from(content, 'utf-8'))).not.toThrow();
+    const result = assertSecSafe(Buffer.from(content, 'utf-8'));
+    expect(typeof result).toBe('string');
+    expect(result).toContain('<SEC>');
+  });
+
+  it('returns decoded string for windows-1252 input', () => {
+    // Build a minimal windows-1252 buffer
+    const buf = Buffer.from([0x41, 0x96, 0x42]); // 'A' + en-dash (U+2013) + 'B' in windows-1252
+    const result = assertSecSafe(buf);
+    expect(typeof result).toBe('string');
+    expect(result).toContain('A');
+    expect(result).toContain('–'); // 0x96 → U+2013 en-dash
+    expect(result).toContain('B');
   });
 
   it('rejects buffer containing a null byte', () => {
@@ -18,14 +31,20 @@ describe('assertSecSafe', () => {
   });
 
   it('rejects buffer containing ASCII control characters', () => {
-    // BEL (\x07) — not whitespace, not valid SEC content
     const buf = Buffer.from('<?xml version="1.0"?>\x07<SEC/>', 'utf-8');
     expect(() => assertSecSafe(buf)).toThrow('control character');
   });
 
-  it('rejects buffer with a line exceeding 4096 characters', () => {
-    const longLine = 'A'.repeat(4097);
+  it('rejects buffer with a line exceeding 65536 characters', () => {
+    const longLine = 'A'.repeat(65537);
     const buf = Buffer.from(`<?xml?>\n${longLine}\n</SEC>`, 'utf-8');
     expect(() => assertSecSafe(buf)).toThrow('line too long');
+  });
+
+  it('accepts a real UFGS <REF> line of ~8596 characters', () => {
+    // UFGS 27 10 00 has a reference block on a single line of 8596 chars — must not throw.
+    const longLine = 'A'.repeat(8596);
+    const buf = Buffer.from(`<?xml?>\n${longLine}\n</SEC>`, 'utf-8');
+    expect(() => assertSecSafe(buf)).not.toThrow();
   });
 });
