@@ -465,6 +465,11 @@ specr/
 │   ├── db/
 │   ├── ast/
 │   └── lib/
+│       ├── decode-text.ts        # Buffer → UTF-8 string, encoding-agnostic (chardet + iconv-lite)
+│       ├── errors.ts             # SpecrError base class
+│       ├── jobs.ts               # In-memory async job store (parse progress)
+│       ├── env.ts                # Zod env validation — exits process on invalid config
+│       └── logger.ts             # Structured logging (pino)
 ├── tests/
 │   ├── fixtures/                # .SEC and .docx test files (binary, gitlfs candidate)
 │   ├── unit/                    # Unit tests — no DB, no I/O
@@ -506,7 +511,9 @@ specr/
     "pino": "^9",
     "multer": "^1",
     "uuid": "^11",
-    "@modelcontextprotocol/sdk": "^1"
+    "@modelcontextprotocol/sdk": "^1",
+    "chardet": "^2",
+    "iconv-lite": "^0.6"
   },
   "devDependencies": {
     "typescript": "^5",

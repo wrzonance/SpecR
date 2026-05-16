@@ -35,6 +35,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 ### Parsing
 
 - **UFGS `.SEC` parser** — SpecsIntact XML → canonical `CsiTree` with `CsiNode` hierarchy. Extracts `<PRT>` / `<SPT>` / `<TXT>` elements into Part → Article → PR1–PR5 levels. Parses cross-references between sections at ingest time.
+- **Encoding-transparent ingest** — `POST /parse` accepts `.sec` (UFGS SpecsIntact XML) and `.docx` files. Encoding detection is automatic via chardet + iconv-lite: `windows-1252`, `latin-1`, UTF-8, and ~100 other encodings detected and transcoded without manual flags.
 - **DOCX `numbering.xml` analyzer** — builds the complete `abstractNum → num → paragraph style` linkage map. Handles `basedOn` inheritance chains, `lvlOverride` overrides, and the Clippit `ListItemRetriever` sentinel: `numId=0` as explicit numbering suppression (halts `basedOn` traversal rather than inheriting parent numbering). This correctly handles CPI continuation styles (`PR1lc`–`PR5lc`) which represent roughly one-third of document content in CPI samples.
 - **DOCX `styles.xml` analyzer** — resolves full `basedOn` chains, identifies `numPr`-carrying styles, and propagates `suppressesNumbering` through style inheritance. Produces the style map consumed by the inference engine.
 - **DOCX `word/document.xml` extractor** — walks paragraph sequence via JSZip + fast-xml-parser, extracts text (multi-run concat), styleId, numId/ilvl, left indent, outlineLvl, and vanish flag. Merges style-inherited numPr when paragraph has no own `w:numPr`.

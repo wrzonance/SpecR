@@ -95,6 +95,7 @@ src/
 │   ├── types.ts          # CsiNode, CsiTree, NodeType — canonical AST types
 │   └── schemas.ts        # Zod schemas for all AST node types
 └── lib/
+    ├── decode-text.ts    # Buffer → UTF-8 string, encoding-agnostic (chardet + iconv-lite)
     ├── errors.ts         # SpecrError base class
     ├── jobs.ts           # In-memory async job store (parse progress)
     ├── env.ts            # Zod env validation — exits process on invalid config
@@ -210,6 +211,7 @@ merge/     ← knows about AST types and DB queries, nothing about parsing
 db/        ← knows about AST types and pg, nothing about domain logic
 api/       ← orchestrates all modules, owns HTTP concerns only
 mcp/       ← imports from db/index.ts, generator/index.ts, parser/index.ts; no api/ internals
+lib/       ← format-agnostic utilities (errors, logging, encoding); usable by any module
 ```
 
 Imports between modules go through `index.ts` re-exports only:
