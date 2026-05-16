@@ -296,6 +296,39 @@ describe('tool: parse_document', () => {
   });
 });
 
+describe('tool: generate_docx', () => {
+  it('returns base64 DOCX for a valid spec', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'generate_docx',
+      arguments: { specId: mcpSpecId },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as {
+      specId: string;
+      section: string;
+      title: string;
+      sizeBytes: number;
+      contentBase64: string;
+    };
+    expect(data.specId).toBe(mcpSpecId);
+    expect(data.sizeBytes).toBeGreaterThan(0);
+    expect(typeof data.contentBase64).toBe('string');
+    expect(data.contentBase64.length).toBeGreaterThan(0);
+  });
+
+  it('returns isError for unknown spec UUID', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'generate_docx',
+      arguments: { specId: '00000000-0000-4000-8000-000000000000' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
+  });
+});
+
 describe('GET /mcp', () => {
   it('returns 405 in stateless mode', async () => {
     const res = await fetch(`${baseUrl}/mcp`);

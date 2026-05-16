@@ -12,6 +12,7 @@ import {
   insertTree,
 } from '../db/index.js';
 import { parseSec, parseDocx, assertDocxSafe, assertSecSafe } from '../parser/index.js';
+import { generateDocx } from '../generator/index.js';
 import type { CsiNode, CsiTree } from '../ast/types.js';
 import { logger } from '../lib/logger.js';
 
@@ -184,6 +185,37 @@ async function handleGetParagraph({ paragraphId }: { paragraphId: string }) {
   }
 }
 
+async function handleGenerateDocx({ specId }: { specId: string }): Promise<ToolResult> {
+  try {
+    const result = await getSpecTree(specId);
+    if (!result) {
+      return toolError(`Spec not found: id=${specId}`);
+    }
+    const buf = await generateDocx(result.tree);
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              specId,
+              section: result.tree.section,
+              title: result.tree.title,
+              sizeBytes: buf.byteLength,
+              contentBase64: buf.toString('base64'),
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  } catch (err) {
+    logger.error({ err }, 'mcp tool generate_docx failed');
+    return toolError('Internal error — DOCX generation failed');
+  }
+}
+
 const divisionSchema = z
   .string()
   .regex(/^\d{2}$/)
@@ -266,8 +298,23 @@ function registerParserTools(server: McpServer): void {
   );
 }
 
+function registerGeneratorTools(server: McpServer): void {
+  server.registerTool(
+    'generate_docx',
+    {
+      description:
+        'Generate a DOCX file from a stored spec. Returns base64-encoded content (typically 50–400 KB). Note: generates on-demand from current database state — not cached. Avoid calling in tight loops.',
+      inputSchema: {
+        specId: z.uuid().describe('Spec UUID to generate DOCX for'),
+      },
+    },
+    handleGenerateDocx
+  );
+}
+
 export function registerTools(server: McpServer): void {
   registerLibraryTools(server);
   registerSpecTools(server);
   registerParserTools(server);
+  registerGeneratorTools(server);
 }
