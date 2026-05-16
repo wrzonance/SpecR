@@ -25,14 +25,16 @@ Merged: Phase 0, 1a, 1b, 1c-i, 1c-ii, security hardening (#23), Phase 2a, Phase 
 
 ## Milestones
 
-| Milestone | Purpose |
-|-----------|---------|
-| Phase 1c | DOCX parser completion (orphaned 1c-iii) |
-| Phase 2b | Core DOCX generator (2b-ii content controls, 2b-iii MCP tools) |
-| Phase 2c | Firm style template engine |
-| Phase 3 | Round-trip merge engine |
-| Phase 4 | Revit integration |
-| Phase 5 | Web UI |
+| Milestone | Purpose | Priority |
+|-----------|---------|----------|
+| Phase 1c | DOCX parser completion (orphaned 1c-iii) | Cleanup |
+| Phase 2b | Core DOCX generator (2b-ii content controls, 2b-iii MCP tools) | Active |
+| Phase 2c | Firm style template engine | Active |
+| Phase 3 | Round-trip merge engine | Active |
+| Phase 5 | Web UI (browser editor is primary surface) | After Phase 3 |
+| Phase 4 | Revit integration (standalone, lowest priority) | Last |
+
+> **Phase ordering note:** Phase 5 (Web UI) precedes Phase 4 (Revit) in priority. The browser editor is the primary user-facing surface; Revit bi-directional sync is a secondary integration that can be developed independently or deferred. Phase 4 has no dependencies on Phase 5.
 
 ---
 
@@ -405,7 +407,7 @@ pnpm test:integration    # merge.integration.test.ts
 
 **Milestone:** Phase 3  
 **Blocked by:** Issue J  
-**Blocks:** Issue Q (Phase 5a)
+**Blocks:** nothing (Phase 5 scaffold can start after J; e2e test is Phase 3 completion marker only)
 
 **Context:**  
 Proves the entire value proposition: parse → generate → edit → diff → merge → verify. This is the milestone acceptance test for Phase 3 and the PR that updates Phase 3 status to complete in all docs.
@@ -439,10 +441,12 @@ pnpm test:integration    # roundtrip.integration.test.ts
 
 ### Phase 4
 
+> **Standalone phase.** Phase 4 has no dependencies on Phase 5 and no Phase 5 issues depend on it. The Revit add-in (C#/.NET) calls the same REST API endpoints that Phase 3 and Phase 5 use. Phase 4 can be worked on in parallel with Phase 5 or deferred entirely. The DB and API work (Issues L and M) is pure TypeScript and can merge any time after Phase 3; the add-in work (Issues N, O, P) is a separate C# project.
+
 #### Issue L — `feat(db): Phase 4a — Revit parameter mapping schema + migrations`
 
 **Milestone:** Phase 4  
-**Blocked by:** nothing (independent, start anytime)  
+**Blocked by:** nothing (standalone; can start any time after Phase 3)  
 **Blocks:** Issues M, N
 
 **Context:**  
@@ -575,11 +579,11 @@ Modify:
 #### Issue Q — `feat(ui): Phase 5a — frontend scaffold (React/TS, Vite, OpenAPI client codegen)`
 
 **Milestone:** Phase 5  
-**Blocked by:** Issue K (Phase 3 must be complete)  
+**Blocked by:** Issue J (merge API must exist; e2e test K is not a hard gate)  
 **Blocks:** Issues R, S, T, U
 
 **Context:**  
-First Phase 5 issue. Establishes the frontend project structure within the monorepo. React + TypeScript + Vite. API client generated from `openapi.yaml` so it stays in sync with the backend contract. No features yet — scaffold only.
+First Phase 5 issue. Establishes the frontend project structure within the monorepo. React + TypeScript + Vite. API client generated from `openapi.yaml` so it stays in sync with the backend contract. No features yet — scaffold only. The browser editor is the primary user surface; Phase 4 Revit integration is a secondary integration that proceeds independently.
 
 **Scope:**  
 Create:
@@ -780,16 +784,17 @@ Modify:
 ## Dependency Graph
 
 ```
-Critical path to Phase 5:
-B → H → I → J → K → Q → S
-                         └→ R
-                         └→ T (also needs F)
-                         └→ U
+Critical path (Phase 3 → Phase 5):
+B → H → I → J → Q → S
+                 |    └→ R
+                 |    └→ T (also needs F)
+                 |    └→ U
+                 └→ K (e2e test; Phase 3 completion marker, not a gate for Q)
 
-Phase 2c (independent):
+Phase 2c (independent, parallel):
 D → E → F → [T]
 
-Phase 4 (independent):
+Phase 4 (standalone, lowest priority — no Phase 5 dependency):
 L → M → O → P
 L → N → O
 
