@@ -18,12 +18,11 @@ describe('decodeTextBuffer', () => {
   });
 
   it('decodes a latin-1 buffer with accented characters', () => {
-    // 0xe9 = 'é' in latin-1/ISO-8859-1
-    const buf = Buffer.from([0x63, 0x61, 0x66, 0xe9]);
+    // 0xe9 = 'é' (U+00E9) in latin-1/ISO-8859-1
+    const buf = Buffer.from('café au lait', 'binary');
     const result = decodeTextBuffer(buf);
     expect(result).toContain('caf');
-    // iconv transcodes 0xe9 to U+00E9 (é) — may appear as é or in a variant form
-    expect(result.length).toBeGreaterThan(0);
+    expect(result).toContain('é');
   });
 
   it('does not throw when chardet returns null (minimal buffer)', () => {
