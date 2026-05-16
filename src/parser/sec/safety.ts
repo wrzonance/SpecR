@@ -1,7 +1,9 @@
 import { ParserError } from '../error.js';
 import { decodeTextBuffer } from '../../lib/decode-text.js';
 
-const MAX_LINE_LENGTH = 4096;
+// 64 KiB per line — guards against binary files masquerading as .sec,
+// while accommodating real UFGS <REF> blocks that can exceed 8 KiB.
+const MAX_LINE_LENGTH = 65536;
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHAR_RE = /[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 

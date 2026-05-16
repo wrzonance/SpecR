@@ -4,6 +4,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { pool } from '../../db/index.js';
 import { parseSec } from './index.js';
 import { insertTree, insertRefs } from '../../db/index.js';
+import { assertSecSafe } from './safety.js';
 
 const FIXTURES = join(process.cwd(), 'tests/fixtures/sec');
 const cleanupIds: string[] = [];
@@ -112,6 +113,51 @@ describe('integration: 27_10_00.SEC', () => {
     );
     expect(r.rows.length).toBeGreaterThan(0);
     expect(r.rows.every((row) => row.target_spec_section !== null)).toBe(true);
+  });
+});
+
+describe('integration: 27_10_00.SEC via Buffer + assertSecSafe (encoding fix)', () => {
+  let specId: string | undefined;
+
+  beforeAll(async () => {
+    const buf = await readFile(join(FIXTURES, '27_10_00.SEC'));
+    const xml = assertSecSafe(buf);
+    const { tree, refs } = parseSec(xml);
+
+    const r = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source) VALUES ($1, $2, 'ufgs')
+       ON CONFLICT (section, source) DO UPDATE SET title = EXCLUDED.title, updated_at = now()
+       RETURNING id`,
+      [tree.section, tree.title]
+    );
+    specId = r.rows[0]?.id;
+    if (!specId) throw new Error('upsert for 27_10_00.SEC returned no id');
+    cleanupIds.push(specId);
+
+    await pool.query(`DELETE FROM spec_references WHERE source_spec_id = $1`, [specId]);
+    await pool.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);
+    await insertTree(tree, specId, pool);
+    await insertRefs(refs, specId, pool);
+  });
+
+  it('parses 27_10_00.SEC from raw Buffer without throwing', async () => {
+    expect(specId).toBeDefined();
+  });
+
+  it('produces section "27 10 00"', async () => {
+    const r = await pool.query<{ section: string }>(
+      `SELECT section FROM specs WHERE id = $1`,
+      [specId]
+    );
+    expect(r.rows[0]?.section).toBe('27 10 00');
+  });
+
+  it('inserts paragraphs (nodeCount > 0)', async () => {
+    const r = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM paragraphs WHERE spec_id = $1`,
+      [specId]
+    );
+    expect(parseInt(r.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
   });
 });
 

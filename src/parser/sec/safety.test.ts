@@ -35,9 +35,16 @@ describe('assertSecSafe', () => {
     expect(() => assertSecSafe(buf)).toThrow('control character');
   });
 
-  it('rejects buffer with a line exceeding 4096 characters', () => {
-    const longLine = 'A'.repeat(4097);
+  it('rejects buffer with a line exceeding 65536 characters', () => {
+    const longLine = 'A'.repeat(65537);
     const buf = Buffer.from(`<?xml?>\n${longLine}\n</SEC>`, 'utf-8');
     expect(() => assertSecSafe(buf)).toThrow('line too long');
+  });
+
+  it('accepts a real UFGS <REF> line of ~8596 characters', () => {
+    // UFGS 27 10 00 has a reference block on a single line of 8596 chars — must not throw.
+    const longLine = 'A'.repeat(8596);
+    const buf = Buffer.from(`<?xml?>\n${longLine}\n</SEC>`, 'utf-8');
+    expect(() => assertSecSafe(buf)).not.toThrow();
   });
 });
