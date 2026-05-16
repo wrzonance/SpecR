@@ -1,4 +1,5 @@
 // src/mcp/tools.ts
+import path from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
@@ -6,8 +7,98 @@ import {
   listCsiSections,
   getSpecTree,
   getParagraphWithAncestors,
+  pool,
+  createSpec,
+  insertTree,
 } from '../db/index.js';
+import { parseSec, parseDocx, assertDocxSafe, assertSecSafe } from '../parser/index.js';
+import type { CsiNode, CsiTree } from '../ast/types.js';
 import { logger } from '../lib/logger.js';
+
+function countNodes(nodes: readonly CsiNode[]): number {
+  return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
+}
+
+async function persistParsedSpec(tree: CsiTree): Promise<string> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const source = tree.parts[0]?.meta.source ?? 'unknown';
+    const specId = await createSpec({ section: tree.section, title: tree.title, source }, client);
+    const treeWithId: CsiTree = { ...tree, id: specId };
+    await insertTree(treeWithId, specId, client);
+    await client.query('COMMIT');
+    return specId;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+type ToolError = {
+  readonly isError: true;
+  readonly content: { readonly type: 'text'; readonly text: string }[];
+};
+type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
+type ToolResult = ToolError | ToolOk;
+
+function toolError(text: string): ToolError {
+  return { isError: true, content: [{ type: 'text' as const, text }] };
+}
+
+async function decodeSafeBuffer(ext: string, contentBase64: string): Promise<Buffer | ToolError> {
+  const estimatedBytes = Math.ceil((contentBase64.length * 3) / 4);
+  if (estimatedBytes > 10 * 1024 * 1024) {
+    return toolError('Content exceeds 10 MB decoded limit');
+  }
+  const buf = Buffer.from(contentBase64, 'base64');
+  try {
+    if (ext === '.docx') await assertDocxSafe(buf);
+    else assertSecSafe(buf);
+  } catch (err) {
+    return toolError(err instanceof Error ? err.message : 'invalid file');
+  }
+  return buf;
+}
+
+async function handleParseDocument({
+  filename,
+  contentBase64,
+}: {
+  filename: string;
+  contentBase64: string;
+}): Promise<ToolResult> {
+  try {
+    const ext = path.extname(filename).toLowerCase();
+    if (ext !== '.docx' && ext !== '.sec') {
+      return toolError(`Unsupported extension: ${ext}. Use .docx or .sec`);
+    }
+    const bufOrErr = await decodeSafeBuffer(ext, contentBase64);
+    if ('isError' in bufOrErr) return bufOrErr;
+    const noop = (_stage: string, _pct: number): void => {};
+    const tree =
+      ext === '.sec' ? parseSec(bufOrErr.toString('utf-8')).tree : await parseDocx(bufOrErr, noop);
+    const specId = await persistParsedSpec(tree);
+    const nodeCount = countNodes(tree.parts);
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            { specId, section: tree.section, title: tree.title, nodeCount },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  } catch (err) {
+    logger.error({ err }, 'mcp tool parse_document failed');
+    return toolError('Internal error — parse failed');
+  }
+}
 
 async function handleSearchLibrary({
   query,
@@ -95,6 +186,13 @@ const divisionSchema = z
   .optional()
   .describe('Filter by 2-digit CSI division, e.g. "27"');
 
+// Zod v4 z.uuid() enforces RFC 4122 version bits (1-8) which rejects version-0 UUIDs
+// used in test fixtures and some legacy data. PostgreSQL accepts any UUID-shaped string.
+const uuidSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+  .describe('UUID');
+
 function registerLibraryTools(server: McpServer): void {
   server.registerTool(
     'search_library',
@@ -135,7 +233,7 @@ function registerSpecTools(server: McpServer): void {
       description:
         'Return the full spec paragraph tree with cross-reference resolution status. Use references[].isResolved to check if referenced specs are loaded.',
       inputSchema: {
-        specId: z.uuid().describe('Spec UUID (from search_library or list_sections)'),
+        specId: uuidSchema.describe('Spec UUID (from search_library or list_sections)'),
       },
     },
     handleGetSpec
@@ -147,14 +245,32 @@ function registerSpecTools(server: McpServer): void {
       description:
         'Return a single paragraph with its full ancestor chain (root to immediate parent). Use to get context around a search_library result.',
       inputSchema: {
-        paragraphId: z.uuid().describe('Paragraph UUID (from search_library or get_spec)'),
+        paragraphId: uuidSchema.describe('Paragraph UUID (from search_library or get_spec)'),
       },
     },
     handleGetParagraph
   );
 }
 
+function registerParserTools(server: McpServer): void {
+  server.registerTool(
+    'parse_document',
+    {
+      description:
+        'Parse a DOCX or SEC specification file and store it in the database. Pass the file content as base64. Returns the new spec ID and summary. Note: computation-intensive for large DOCX files.',
+      inputSchema: {
+        filename: z
+          .string()
+          .describe('Original filename — extension determines format (.docx or .sec)'),
+        contentBase64: z.string().describe('Base64-encoded file content (max 10 MB decoded)'),
+      },
+    },
+    handleParseDocument
+  );
+}
+
 export function registerTools(server: McpServer): void {
   registerLibraryTools(server);
   registerSpecTools(server);
+  registerParserTools(server);
 }

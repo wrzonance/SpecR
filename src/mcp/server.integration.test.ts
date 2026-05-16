@@ -2,12 +2,15 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { pool, createSpec, insertTree } from '../db/index.js';
 import { registerMcpRoutes } from './server.js';
 
 let server: Server;
 let baseUrl: string;
 let mcpSpecId: string;
+let parsedSpecId: string | null = null;
 
 async function mcpCall(
   url: string,
@@ -36,7 +39,7 @@ async function mcpCall(
 
 beforeAll(async () => {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '15mb' }));
   registerMcpRoutes(app);
 
   await new Promise<void>((resolve) => {
@@ -95,6 +98,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (parsedSpecId) {
+    await pool.query('DELETE FROM specs WHERE id = $1', [parsedSpecId]);
+  }
   await pool.query('DELETE FROM specs WHERE id = $1', [mcpSpecId]);
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err != null ? reject(err) : resolve()));
@@ -239,6 +245,50 @@ describe('tool: get_paragraph', () => {
     const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
       name: 'get_paragraph',
       arguments: { paragraphId: '00000000-0000-0000-0000-000000000000' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
+  });
+});
+
+describe('tool: parse_document', () => {
+  it('parses a valid base64-encoded SEC file and returns spec summary', async () => {
+    const secBuffer = readFileSync(join(process.cwd(), 'tests/fixtures/sec/27_41_00.SEC'));
+    const secBase64 = secBuffer.toString('base64');
+
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'parse_document',
+      arguments: { filename: '27_10_00.SEC', contentBase64: secBase64 },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as {
+      specId: string;
+      section: string;
+      title: string;
+      nodeCount: number;
+    };
+    expect(typeof data.specId).toBe('string');
+    expect(data.nodeCount).toBeGreaterThan(0);
+    parsedSpecId = data.specId;
+  });
+
+  it('returns isError for invalid base64', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'parse_document',
+      arguments: { filename: 'test.sec', contentBase64: '!!!not-base64!!!' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
+  });
+
+  it('returns isError for unsupported file extension', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'parse_document',
+      arguments: { filename: 'file.pdf', contentBase64: Buffer.from('hello').toString('base64') },
     });
     const b = body as Record<string, unknown>;
     const result = b['result'] as Record<string, unknown>;
