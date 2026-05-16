@@ -84,6 +84,8 @@ export function assertSecSafe(buf: Buffer): string {
 
 Signature change: `void` → `string`. Safety checks are unchanged — they run on the decoded string. Callers that just guard (catch errors, ignore return) still work unchanged. Callers that need the string use the return value.
 
+`MAX_LINE_LENGTH` also raised from 4096 → 65536 during implementation: real UFGS `<REF>` blocks reach 8596 characters on a single line, which the original 4 KiB guard incorrectly rejected. 64 KiB preserves the binary-file guard while accommodating the observed UFGS maximum.
+
 ### Data Flow: Ingest (the only place encoding matters)
 
 ```text
@@ -160,7 +162,7 @@ Here `assertSecSafe` is called once and the returned string is used directly.
 ### `src/lib/decode-text.test.ts` (new — unit, no DB)
 
 - UTF-8 buffer (`Buffer.from('hello', 'utf-8')`) → returns `'hello'`
-- windows-1252 buffer with em-dash byte (0x96) → returns string with `–` (U+2013)
+- windows-1252 buffer with en-dash byte (0x96) → returns string with `–` (U+2013)
 - `chardet` null fallback: minimal 1-byte buffer that confuses chardet → returns something without throwing
 - latin-1 buffer with accented char → returns correctly transcoded string
 
