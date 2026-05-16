@@ -118,11 +118,15 @@ describe('integration: 27_10_00.SEC', () => {
 
 describe('integration: 27_10_00.SEC via Buffer + assertSecSafe (encoding fix)', () => {
   let specId: string | undefined;
+  let expectedNodeCount = 0;
 
   beforeAll(async () => {
     const buf = await readFile(join(FIXTURES, '27_10_00.SEC'));
     const xml = assertSecSafe(buf);
     const { tree, refs } = parseSec(xml);
+    const countNodes = (nodes: readonly import('../../ast/types.js').CsiNode[]): number =>
+      nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
+    expectedNodeCount = countNodes(tree.parts);
 
     const r = await pool.query<{ id: string }>(
       `INSERT INTO specs (section, title, source) VALUES ($1, $2, 'ufgs')
@@ -151,12 +155,12 @@ describe('integration: 27_10_00.SEC via Buffer + assertSecSafe (encoding fix)', 
     expect(r.rows[0]?.section).toBe('27 10 00');
   });
 
-  it('inserts paragraphs (nodeCount > 0)', async () => {
+  it('inserts paragraphs matching parsed tree count', async () => {
     const r = await pool.query<{ count: string }>(
       `SELECT COUNT(*) AS count FROM paragraphs WHERE spec_id = $1`,
       [specId]
     );
-    expect(parseInt(r.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
+    expect(parseInt(r.rows[0]?.count ?? '0', 10)).toBe(expectedNodeCount);
   });
 });
 

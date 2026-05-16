@@ -86,7 +86,7 @@ Signature change: `void` → `string`. Safety checks are unchanged — they run 
 
 ### Data Flow: Ingest (the only place encoding matters)
 
-```
+```text
 Raw bytes (upload or base64-decoded)
   │
   ▼
