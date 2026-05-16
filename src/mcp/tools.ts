@@ -50,13 +50,13 @@ function toolError(text: string): ToolError {
 }
 
 async function decodeSafeBuffer(ext: string, contentBase64: string): Promise<Buffer | ToolError> {
-  const estimatedBytes = Math.ceil((contentBase64.length * 3) / 4);
-  if (estimatedBytes > 10 * 1024 * 1024) {
-    return toolError('Content exceeds 10 MB decoded limit');
-  }
   const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
   if (!BASE64_RE.test(contentBase64)) {
     return toolError('contentBase64 is not valid base64');
+  }
+  const estimatedBytes = Math.ceil((contentBase64.length * 3) / 4);
+  if (estimatedBytes > 10 * 1024 * 1024) {
+    return toolError('Content exceeds 10 MB decoded limit');
   }
   const buf = Buffer.from(contentBase64, 'base64');
   try {
