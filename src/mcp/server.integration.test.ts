@@ -39,7 +39,12 @@ async function mcpCall(
 
 beforeAll(async () => {
   const app = express();
-  app.use(express.json({ limit: '15mb' }));
+  // Skip global JSON parsing for /mcp — route applies its own 15mb-limit parser
+  const restJson = express.json();
+  app.use((req, res, next) => {
+    if (req.path === '/mcp') return next();
+    restJson(req, res, next);
+  });
   registerMcpRoutes(app);
 
   await new Promise<void>((resolve) => {
@@ -264,6 +269,7 @@ describe('tool: parse_document', () => {
     const b = body as Record<string, unknown>;
     const result = b['result'] as Record<string, unknown>;
     const content = result['content'] as { type: string; text: string }[];
+    expect(result['isError'], content[0]?.text).not.toBe(true);
     const data = JSON.parse(content[0]!.text) as {
       specId: string;
       section: string;

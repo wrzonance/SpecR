@@ -2,6 +2,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import { json } from 'express';
 import type { Express } from 'express';
 import { registerTools } from './tools.js';
 import { registerResources } from './resources.js';
@@ -15,7 +16,7 @@ function createMcpServer(): McpServer {
 }
 
 export function registerMcpRoutes(app: Express): void {
-  app.post('/mcp', async (req, res) => {
+  app.post('/mcp', json({ limit: '15mb' }), async (req, res) => {
     // AUTH HOOK: validate Authorization: Bearer <token> here before connecting transport.
     // Same token validation as REST middleware. Reject 401 if invalid.
     // Write tools especially depend on this gate — add when REST auth is implemented.

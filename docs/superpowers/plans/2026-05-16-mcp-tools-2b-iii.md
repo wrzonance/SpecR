@@ -828,13 +828,13 @@ Replace with:
 
 Find in ARCHITECTURE.md:
 
-```
+```text
 mcp/       ← imports from db/index.ts and generator/markdown.ts only; no parser/ or api/ internals
 ```
 
 Replace with:
 
-```
+```text
 mcp/       ← imports from db/index.ts, generator/index.ts, parser/index.ts; no api/ internals
 ```
 
@@ -850,13 +850,13 @@ Find the Phase 6 bullet list. Add:
 
 Find in CLAUDE.md (in "MCP Server Patterns" or "Module Boundaries" section):
 
-```
+```text
 mcp/       ← imports from db/index.ts and generator/markdown.ts only; no parser/ or api/ internals
 ```
 
 Replace with:
 
-```
+```text
 mcp/       ← imports from db/index.ts, generator/index.ts, parser/index.ts; no api/ internals
 ```
 

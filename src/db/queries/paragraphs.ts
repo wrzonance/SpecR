@@ -87,6 +87,7 @@ export async function getParagraphWithAncestors(
          UNION ALL
          SELECT p.id, p.node_type, p.text, p.vanish, p.parent_id, c.depth + 1
          FROM paragraphs p JOIN chain c ON p.id = c.parent_id
+         WHERE c.depth + 1 < 10
        )
        SELECT id, node_type AS "nodeType", text, vanish, depth
        FROM chain ORDER BY depth DESC`,

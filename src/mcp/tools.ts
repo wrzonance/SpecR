@@ -8,13 +8,13 @@ import {
   getSpecTree,
   getParagraphWithAncestors,
   pool,
-  createSpec,
   insertTree,
 } from '../db/index.js';
 import { parseSec, parseDocx, assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { generateDocx } from '../generator/index.js';
 import type { CsiNode, CsiTree } from '../ast/types.js';
 import { logger } from '../lib/logger.js';
+import { McpError } from './error.js';
 
 function countNodes(nodes: readonly CsiNode[]): number {
   return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
@@ -25,14 +25,23 @@ async function persistParsedSpec(tree: CsiTree): Promise<string> {
   try {
     await client.query('BEGIN');
     const source = tree.parts[0]?.meta.source ?? 'unknown';
-    const specId = await createSpec({ section: tree.section, title: tree.title, source }, client);
+    const res = await client.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (section, source) DO UPDATE
+         SET title = EXCLUDED.title, updated_at = now()
+       RETURNING id`,
+      [tree.section, tree.title, source]
+    );
+    const specId = res.rows[0]?.id;
+    if (!specId) throw new McpError('upsert spec returned no id');
     const treeWithId: CsiTree = { ...tree, id: specId };
     await insertTree(treeWithId, specId, client);
     await client.query('COMMIT');
     return specId;
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    throw new McpError('failed to persist parsed spec', { cause: err });
   } finally {
     client.release();
   }
