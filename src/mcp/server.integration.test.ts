@@ -40,7 +40,7 @@ beforeAll(async () => {
   // Skip global JSON parsing for /mcp — route applies its own 15mb-limit parser
   const restJson = express.json();
   app.use((req, res, next) => {
-    if (req.path === '/mcp') return next();
+    if (req.path.startsWith('/mcp')) return next();
     restJson(req, res, next);
   });
   registerMcpRoutes(app);
