@@ -212,6 +212,37 @@ describe('resource: specr://sections', () => {
   });
 });
 
+describe('tool: get_paragraph', () => {
+  it('returns node and ancestor chain for known paragraph', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_paragraph',
+      arguments: { paragraphId: '30000000-0000-0000-0000-000000000003' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as {
+      node: { id: string; nodeType: string };
+      ancestors: { id: string; nodeType: string }[];
+    };
+    expect(data.node.id).toBe('30000000-0000-0000-0000-000000000003');
+    expect(data.node.nodeType).toBe('pr1');
+    expect(data.ancestors).toHaveLength(2);
+    expect(data.ancestors[0]!.nodeType).toBe('part');
+    expect(data.ancestors[1]!.nodeType).toBe('article');
+  });
+
+  it('returns isError for unknown UUID', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_paragraph',
+      arguments: { paragraphId: '00000000-0000-0000-0000-000000000000' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
+  });
+});
+
 describe('GET /mcp', () => {
   it('returns 405 in stateless mode', async () => {
     const res = await fetch(`${baseUrl}/mcp`);

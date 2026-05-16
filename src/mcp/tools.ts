@@ -1,7 +1,12 @@
 // src/mcp/tools.ts
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { searchParagraphs, listCsiSections, getSpecTree } from '../db/index.js';
+import {
+  searchParagraphs,
+  listCsiSections,
+  getSpecTree,
+  getParagraphWithAncestors,
+} from '../db/index.js';
 import { logger } from '../lib/logger.js';
 
 async function handleSearchLibrary({
@@ -63,13 +68,34 @@ async function handleListSections({ division }: { division: string | undefined }
   }
 }
 
+async function handleGetParagraph({ paragraphId }: { paragraphId: string }) {
+  try {
+    const result = await getParagraphWithAncestors(paragraphId);
+    if (!result) {
+      return {
+        isError: true,
+        content: [{ type: 'text' as const, text: `Paragraph not found: id=${paragraphId}` }],
+      };
+    }
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (err) {
+    logger.error({ err }, 'mcp tool get_paragraph failed');
+    return {
+      isError: true,
+      content: [{ type: 'text' as const, text: 'Internal error — paragraph retrieval failed' }],
+    };
+  }
+}
+
 const divisionSchema = z
   .string()
   .regex(/^\d{2}$/)
   .optional()
   .describe('Filter by 2-digit CSI division, e.g. "27"');
 
-export function registerTools(server: McpServer): void {
+function registerLibraryTools(server: McpServer): void {
   server.registerTool(
     'search_library',
     {
@@ -92,6 +118,18 @@ export function registerTools(server: McpServer): void {
   );
 
   server.registerTool(
+    'list_sections',
+    {
+      description:
+        'List CSI MasterFormat sections with inDatabase flag. Use to discover which specs are loaded and identify library gaps.',
+      inputSchema: { division: divisionSchema },
+    },
+    handleListSections
+  );
+}
+
+function registerSpecTools(server: McpServer): void {
+  server.registerTool(
     'get_spec',
     {
       description:
@@ -104,12 +142,19 @@ export function registerTools(server: McpServer): void {
   );
 
   server.registerTool(
-    'list_sections',
+    'get_paragraph',
     {
       description:
-        'List CSI MasterFormat sections with inDatabase flag. Use to discover which specs are loaded and identify library gaps.',
-      inputSchema: { division: divisionSchema },
+        'Return a single paragraph with its full ancestor chain (root to immediate parent). Use to get context around a search_library result.',
+      inputSchema: {
+        paragraphId: z.uuid().describe('Paragraph UUID (from search_library or get_spec)'),
+      },
     },
-    handleListSections
+    handleGetParagraph
   );
+}
+
+export function registerTools(server: McpServer): void {
+  registerLibraryTools(server);
+  registerSpecTools(server);
 }
