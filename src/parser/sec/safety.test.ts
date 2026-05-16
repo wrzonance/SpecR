@@ -17,10 +17,11 @@ describe('assertSecSafe', () => {
 
   it('returns decoded string for windows-1252 input', () => {
     // Build a minimal windows-1252 buffer
-    const buf = Buffer.from([0x41, 0x96, 0x42]) // 'A' + en-dash + 'B' in windows-1252
+    const buf = Buffer.from([0x41, 0x96, 0x42]) // 'A' + en-dash (U+2013) + 'B' in windows-1252
     const result = assertSecSafe(buf)
     expect(typeof result).toBe('string')
     expect(result).toContain('A')
+    expect(result).toContain('–') // 0x96 → U+2013 en-dash
     expect(result).toContain('B')
   })
 
