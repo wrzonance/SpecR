@@ -53,6 +53,10 @@ async function decodeSafeBuffer(ext: string, contentBase64: string): Promise<Buf
   if (estimatedBytes > 10 * 1024 * 1024) {
     return toolError('Content exceeds 10 MB decoded limit');
   }
+  const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+  if (!BASE64_RE.test(contentBase64)) {
+    return toolError('contentBase64 is not valid base64');
+  }
   const buf = Buffer.from(contentBase64, 'base64');
   try {
     if (ext === '.docx') await assertDocxSafe(buf);
