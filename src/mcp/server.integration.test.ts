@@ -2,8 +2,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { pool, createSpec, insertTree } from '../db/index.js';
 import { registerMcpRoutes } from './server.js';
 
@@ -259,12 +257,18 @@ describe('tool: get_paragraph', () => {
 
 describe('tool: parse_document', () => {
   it('parses a valid base64-encoded SEC file and returns spec summary', async () => {
-    const secBuffer = readFileSync(join(process.cwd(), 'tests/fixtures/sec/27_41_00.SEC'));
-    const secBase64 = secBuffer.toString('base64');
+    // Inline minimal SEC — section 99 99 99 is not in the seed corpus, so no
+    // conflict with parallel tests that operate on seeded UFGS specs.
+    const minimalSec =
+      '<SEC><SCN>99 99 99</SCN><STL>MCP Test Section</STL>' +
+      '<PRT><TTL>PART 1 - GENERAL</TTL>' +
+      '<SPT><TTL>SUMMARY</TTL><TXT>Test paragraph content.</TXT></SPT>' +
+      '</PRT></SEC>';
+    const secBase64 = Buffer.from(minimalSec, 'utf-8').toString('base64');
 
     const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
       name: 'parse_document',
-      arguments: { filename: '27_41_00.SEC', contentBase64: secBase64 },
+      arguments: { filename: 'test.sec', contentBase64: secBase64 },
     });
     const b = body as Record<string, unknown>;
     const result = b['result'] as Record<string, unknown>;
