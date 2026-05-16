@@ -115,7 +115,7 @@ async function processParseJob(
     let tree: CsiTree;
     if (ext === '.sec') {
       onProgress('extracting', 10);
-      tree = parseSec(buffer.toString('utf-8')).tree;
+      tree = parseSec(assertSecSafe(buffer)).tree;
       onProgress('classifying', 75);
     } else {
       tree = await parseDocx(buffer, onProgress);
