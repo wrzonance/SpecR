@@ -65,17 +65,17 @@ beforeAll(async () => {
       title: 'MCP Test Spec',
       parts: [
         {
-          id: '30000000-0000-0000-0000-000000000001',
+          id: '30000000-0000-4000-8000-000000000001',
           type: 'part',
           text: 'GENERAL',
           children: [
             {
-              id: '30000000-0000-0000-0000-000000000002',
+              id: '30000000-0000-4000-8000-000000000002',
               type: 'article',
               text: 'SCOPE',
               children: [
                 {
-                  id: '30000000-0000-0000-0000-000000000003',
+                  id: '30000000-0000-4000-8000-000000000003',
                   type: 'pr1',
                   text: 'Provide fiber optic backbone cabling.',
                   children: [],
@@ -222,7 +222,7 @@ describe('tool: get_paragraph', () => {
   it('returns node and ancestor chain for known paragraph', async () => {
     const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
       name: 'get_paragraph',
-      arguments: { paragraphId: '30000000-0000-0000-0000-000000000003' },
+      arguments: { paragraphId: '30000000-0000-4000-8000-000000000003' },
     });
     const b = body as Record<string, unknown>;
     const result = b['result'] as Record<string, unknown>;
@@ -231,12 +231,12 @@ describe('tool: get_paragraph', () => {
       node: { id: string; nodeType: string; text: string };
       ancestors: { id: string; nodeType: string }[];
     };
-    expect(data.node.id).toBe('30000000-0000-0000-0000-000000000003');
+    expect(data.node.id).toBe('30000000-0000-4000-8000-000000000003');
     expect(data.node.nodeType).toBe('pr1');
     expect(data.node.text).toBe('Provide fiber optic backbone cabling.');
     expect(data.ancestors).toHaveLength(2);
-    expect(data.ancestors[0]!.id).toBe('30000000-0000-0000-0000-000000000001');
-    expect(data.ancestors[1]!.id).toBe('30000000-0000-0000-0000-000000000002');
+    expect(data.ancestors[0]!.id).toBe('30000000-0000-4000-8000-000000000001');
+    expect(data.ancestors[1]!.id).toBe('30000000-0000-4000-8000-000000000002');
     expect(data.ancestors[0]!.nodeType).toBe('part');
     expect(data.ancestors[1]!.nodeType).toBe('article');
   });
@@ -259,7 +259,7 @@ describe('tool: parse_document', () => {
 
     const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
       name: 'parse_document',
-      arguments: { filename: '27_10_00.SEC', contentBase64: secBase64 },
+      arguments: { filename: '27_41_00.SEC', contentBase64: secBase64 },
     });
     const b = body as Record<string, unknown>;
     const result = b['result'] as Record<string, unknown>;

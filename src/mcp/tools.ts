@@ -186,13 +186,6 @@ const divisionSchema = z
   .optional()
   .describe('Filter by 2-digit CSI division, e.g. "27"');
 
-// Zod v4 z.uuid() enforces RFC 4122 version bits (1-8) which rejects version-0 UUIDs
-// used in test fixtures and some legacy data. PostgreSQL accepts any UUID-shaped string.
-const uuidSchema = z
-  .string()
-  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
-  .describe('UUID');
-
 function registerLibraryTools(server: McpServer): void {
   server.registerTool(
     'search_library',
@@ -233,7 +226,7 @@ function registerSpecTools(server: McpServer): void {
       description:
         'Return the full spec paragraph tree with cross-reference resolution status. Use references[].isResolved to check if referenced specs are loaded.',
       inputSchema: {
-        specId: uuidSchema.describe('Spec UUID (from search_library or list_sections)'),
+        specId: z.uuid().describe('Spec UUID (from search_library or list_sections)'),
       },
     },
     handleGetSpec
@@ -245,7 +238,7 @@ function registerSpecTools(server: McpServer): void {
       description:
         'Return a single paragraph with its full ancestor chain (root to immediate parent). Use to get context around a search_library result.',
       inputSchema: {
-        paragraphId: uuidSchema.describe('Paragraph UUID (from search_library or get_spec)'),
+        paragraphId: z.uuid().describe('Paragraph UUID (from search_library or get_spec)'),
       },
     },
     handleGetParagraph
