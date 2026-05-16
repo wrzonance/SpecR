@@ -10,7 +10,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 
 ## Status
 
-**Active development — Phase 2b-iii complete, Phase 2c next.**
+**Active development — Phase 2b complete, Phase 2c next.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -20,9 +20,9 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 1c-i | DOCX `numbering.xml` + `styles.xml` analyzers (Clippit-ported) | ✅ Complete (PR #17) |
 | 1c-ii | 5-signal hierarchy inference engine + `POST /parse` async endpoint | ✅ Complete (PR #21) |
 | 2a | MCP server (Streamable HTTP, read-only tools + resources) + Markdown renderer | ✅ Complete (PR #24) |
-| 2b-i | AST → DOCX generator, 7-level CSI multilevel numbering | ✅ Complete (PR #26) |
-| 2b-ii | `w:sdt` content control UUID injection (round-trip anchors) | ✅ Complete (PR #28) |
-| 2b-iii | MCP tools: `get_paragraph`, `parse_document`, `generate_docx` | ✅ Complete |
+| 2b-i | AST → DOCX generator + 7-level CSI multilevel numbering | ✅ Complete (PR #26) |
+| 2b-ii | `w:sdt` content control UUID injection (round-trip anchors) | ✅ Complete (PR #51) |
+| 2b-iii | MCP tools: `get_paragraph`, `parse_document`, `generate_docx` | ✅ Complete (PR #55) |
 | 2c | Firm style template engine (issue #20) | Planned |
 | 3 | Round-trip merge engine | Planned |
 | 4 | Revit integration | Planned |
@@ -71,8 +71,8 @@ The async `POST /parse` pattern (202 + poll) is intentional — inference over l
 - **Tool: `get_spec(specId)`** — full spec tree + cross-reference resolution. Returns `{ tree: CsiTree, references: SpecReference[] }` where each reference has `isResolved: boolean` (whether target spec is loaded in DB)
 - **Tool: `list_sections(division?)`** — CSI MasterFormat section index with `inDatabase` flag
 - **Tool: `get_paragraph(paragraphId)`** — returns `{ node, ancestors }` for a single paragraph. `node` and each ancestor are `{ id, nodeType, text, vanish }`. Ancestors ordered root → immediate parent.
-- **Tool: `parse_document(filename, contentBase64)`** — base64-decode a DOCX or SEC file, parse it, insert into the database, return `{ specId, section, title, nodeCount }`. Max 10 MB decoded. Computation-intensive for large DOCX files.
-- **Tool: `generate_docx(specId)`** — generate DOCX from a stored spec, returned as base64 in `{ specId, section, title, sizeBytes, contentBase64 }`. On-demand from current DB state — not cached.
+- **Tool: `parse_document(filename, contentBase64)`** — base64-decode a DOCX or SEC file, parse it, insert into the database, return `{ specId, section, title, nodeCount }`. Max 10 MB decoded. Encoding-transparent for `.sec` files.
+- **Tool: `generate_docx(specId)`** — generate DOCX from a stored spec, returned as base64 in `{ specId, section, title, sizeBytes, contentBase64 }`. Each paragraph wrapped in `w:sdt` UUID content control. On-demand from current DB state — not cached.
 - **Resource: `specr://specs/{id}`** — full spec as LLM-readable Markdown. Note/vanish nodes rendered as `> **[NOTE]**` blockquotes (editor instructions visible to spec writer, hidden from published output)
 - **Resource: `specr://sections`** — full CSI section index as Markdown table with loaded (✓) flag
 
@@ -92,7 +92,9 @@ Configure in Claude Code via `.mcp.json` in the repo root (points to `http://loc
 - Web UI with progress bars, live preview, diff/merge review (Phase 5)
 - DOCX cross-reference extraction (Phase 1c-iii)
 - Security hardening: concurrency cap on parse workers (piscina) — follow-up to issue #22
+- Bulk UFGS corpus loader — parse all 666 `.SEC` files into library (issue #58)
 - MCP write tools (`add_paragraph`, `update_paragraph`, etc.) — Phase 5
+- MCP stateful sessions — Phase 5 upgrade
 - MCP prompts (`review_spec`, `suggest_paragraphs`) — Phase 6
 
 ## The Core Technical Challenge
