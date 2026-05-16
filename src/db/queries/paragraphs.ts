@@ -1,4 +1,4 @@
-import { DatabaseError } from '../index.js';
+import { pool, DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
 import type { CsiNode, CsiTree } from '../../ast/types.js';
 
@@ -58,4 +58,54 @@ export async function insertTree(tree: CsiTree, specId: string, pool: Queryable)
     }
   }
   logger.info({ specId, count: rows.length }, 'insertTree: paragraphs inserted');
+}
+
+export interface ParagraphRow {
+  readonly id: string;
+  readonly nodeType: string;
+  readonly text: string;
+  readonly vanish: boolean;
+}
+
+export interface ParagraphWithAncestors {
+  readonly node: ParagraphRow;
+  readonly ancestors: readonly ParagraphRow[];
+}
+
+interface ChainRow extends ParagraphRow {
+  readonly depth: number;
+}
+
+export async function getParagraphWithAncestors(
+  id: string
+): Promise<ParagraphWithAncestors | null> {
+  try {
+    const result = await pool.query<ChainRow>(
+      `WITH RECURSIVE chain AS (
+         SELECT id, node_type, text, vanish, parent_id, 0 AS depth
+         FROM paragraphs WHERE id = $1
+         UNION ALL
+         SELECT p.id, p.node_type, p.text, p.vanish, p.parent_id, c.depth + 1
+         FROM paragraphs p JOIN chain c ON p.id = c.parent_id
+       )
+       SELECT id, node_type AS "nodeType", text, vanish, depth
+       FROM chain ORDER BY depth DESC`,
+      [id]
+    );
+    if (result.rows.length === 0) return null;
+    const rows = result.rows;
+    const node = rows[rows.length - 1]!;
+    const ancestors = rows.slice(0, -1);
+    return {
+      node: { id: node.id, nodeType: node.nodeType, text: node.text, vanish: node.vanish },
+      ancestors: ancestors.map((r) => ({
+        id: r.id,
+        nodeType: r.nodeType,
+        text: r.text,
+        vanish: r.vanish,
+      })),
+    };
+  } catch (err) {
+    throw new DatabaseError('getParagraphWithAncestors failed', { cause: err });
+  }
 }
