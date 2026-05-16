@@ -1,5 +1,6 @@
 // src/mcp/tools.ts
 import path from 'node:path';
+import { glob } from 'node:fs/promises';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
@@ -11,6 +12,7 @@ import {
 } from '../db/index.js';
 import { parseSec, parseDocx, assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { generateDocx } from '../generator/index.js';
+import { loadFiles } from '../lib/file-loader.js';
 import type { CsiNode, CsiTree, SecRef } from '../ast/types.js';
 import { logger } from '../lib/logger.js';
 
@@ -304,9 +306,64 @@ function registerGeneratorTools(server: McpServer): void {
   );
 }
 
+async function handleLoadFiles({
+  glob: globPattern,
+  paths: explicitPaths,
+  dry_run,
+}: {
+  glob: string | undefined;
+  paths: string[] | undefined;
+  dry_run: boolean | undefined;
+}): Promise<ToolResult> {
+  if (!globPattern && (!explicitPaths || explicitPaths.length === 0)) {
+    return toolError('Provide at least one of: glob, paths');
+  }
+  try {
+    const resolved: string[] = [];
+    if (globPattern) {
+      const matches = await Array.fromAsync(glob(globPattern, { cwd: process.cwd() }));
+      resolved.push(...matches.map((m) => path.resolve(m)));
+    }
+    if (explicitPaths) {
+      resolved.push(...explicitPaths.map((fp) => path.resolve(fp)));
+    }
+    const result = await loadFiles(resolved, { dryRun: dry_run ?? false });
+    return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+  } catch (err) {
+    logger.error({ err }, 'mcp tool load_files failed');
+    return toolError('Internal error — file loading failed');
+  }
+}
+
+function registerLoaderTools(server: McpServer): void {
+  server.registerTool(
+    'load_files',
+    {
+      description:
+        'Bulk-load spec files into the library from a glob pattern or explicit paths. Accepts .SEC and .docx formats. Returns a summary of succeeded, failed, and any error details. Idempotent — re-loading an existing spec updates it.',
+      inputSchema: {
+        glob: z
+          .string()
+          .optional()
+          .describe('Glob pattern relative to project root, e.g. "docs/references/UFGS/**/*.SEC"'),
+        paths: z
+          .array(z.string())
+          .optional()
+          .describe('Explicit file paths (absolute or relative to project root)'),
+        dry_run: z
+          .boolean()
+          .optional()
+          .describe('If true, parse files but skip database writes — useful for validation'),
+      },
+    },
+    handleLoadFiles
+  );
+}
+
 export function registerTools(server: McpServer): void {
   registerLibraryTools(server);
   registerSpecTools(server);
   registerParserTools(server);
   registerGeneratorTools(server);
+  registerLoaderTools(server);
 }
