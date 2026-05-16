@@ -222,12 +222,15 @@ describe('tool: get_paragraph', () => {
     const result = b['result'] as Record<string, unknown>;
     const content = result['content'] as { type: string; text: string }[];
     const data = JSON.parse(content[0]!.text) as {
-      node: { id: string; nodeType: string };
+      node: { id: string; nodeType: string; text: string };
       ancestors: { id: string; nodeType: string }[];
     };
     expect(data.node.id).toBe('30000000-0000-0000-0000-000000000003');
     expect(data.node.nodeType).toBe('pr1');
+    expect(data.node.text).toBe('Provide fiber optic backbone cabling.');
     expect(data.ancestors).toHaveLength(2);
+    expect(data.ancestors[0]!.id).toBe('30000000-0000-0000-0000-000000000001');
+    expect(data.ancestors[1]!.id).toBe('30000000-0000-0000-0000-000000000002');
     expect(data.ancestors[0]!.nodeType).toBe('part');
     expect(data.ancestors[1]!.nodeType).toBe('article');
   });
