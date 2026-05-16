@@ -2,6 +2,7 @@ import * as chardet from 'chardet';
 import * as iconv from 'iconv-lite';
 
 export function decodeTextBuffer(buf: Buffer): string {
-  const encoding = chardet.detect(buf) ?? 'utf-8';
+  const detected = chardet.detect(buf) ?? 'utf-8';
+  const encoding = iconv.encodingExists(detected) ? detected : 'utf-8';
   return iconv.decode(buf, encoding);
 }

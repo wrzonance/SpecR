@@ -54,16 +54,17 @@ Both have TypeScript types bundled. No native code. Zero transitive deps of conc
 ### `src/lib/decode-text.ts` (new)
 
 ```typescript
-import chardet from 'chardet';
-import iconv from 'iconv-lite';
+import * as chardet from 'chardet';
+import * as iconv from 'iconv-lite';
 
 export function decodeTextBuffer(buf: Buffer): string {
-  const encoding = chardet.detect(buf) ?? 'utf-8';
+  const detected = chardet.detect(buf) ?? 'utf-8';
+  const encoding = iconv.encodingExists(detected) ? detected : 'utf-8';
   return iconv.decode(buf, encoding);
 }
 ```
 
-Single exported function. Never throws. `chardet.detect` returns `null` on detection failure — fallback to `'utf-8'` handles that. `iconv-lite.decode` handles any encoding chardet returns.
+Single exported function. `chardet.detect` returns `null` on detection failure — `?? 'utf-8'` handles that. `iconv.encodingExists()` guards against encoding names chardet may return that iconv-lite does not recognise (their supported sets are not identical); unrecognised encodings fall back to `'utf-8'`. `iconv.decode` always returns a string for supported encodings — it replaces untranslatable characters rather than throwing.
 
 **Supported encodings include:** UTF-8, windows-1252, ISO-8859-1 (latin-1), UTF-16 LE/BE, Shift-JIS, GB2312, and ~100 others.
 
