@@ -38,6 +38,7 @@ interface JobResult {
   section: string;
   title: string;
   nodeCount: number;
+  capabilities?: string[];
 }
 
 interface JobData {
@@ -161,7 +162,14 @@ describe('POST /parse — .txt upload', () => {
     const body = (await res.json()) as { success: boolean; data: { jobId: string } };
     expect(body.success).toBe(true);
     expect(typeof body.data.jobId).toBe('string');
-  });
+
+    const job = await waitForJob(body.data.jobId);
+    expect(job.status).toBe('complete');
+    const specId = job.result?.specId;
+    if (specId) {
+      await pool.query('DELETE FROM specs WHERE id = $1', [specId]);
+    }
+  }, 30_000);
 
   it('parse job completes with nodeCount > 0 and capabilities read-only', async () => {
     const fixture = readFileSync(resolve('tests/fixtures/text/numbered-prefixes.txt'));
@@ -171,26 +179,14 @@ describe('POST /parse — .txt upload', () => {
     const postRes = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
     const postBody = (await postRes.json()) as { data: { jobId: string } };
 
-    type JobResponse = {
-      data: { status: string; result?: { nodeCount: number; capabilities?: string[] } };
-    };
-    let result: { nodeCount: number; capabilities?: string[] } | undefined;
-    for (let i = 0; i < 50; i++) {
-      await new Promise((r) => setTimeout(r, 100));
-      const pollRes = await fetch(`${baseUrl}/parse/jobs/${postBody.data.jobId}`);
-      const pollBody = (await pollRes.json()) as JobResponse;
-      if (pollBody.data.status === 'complete') {
-        result = pollBody.data.result;
-        break;
-      }
-      if (pollBody.data.status === 'failed') {
-        throw new Error(`Parse job failed`);
-      }
-    }
+    const job = await waitForJob(postBody.data.jobId);
+    if (job.status === 'failed') throw new Error('Parse job failed');
+    const specId = job.result?.specId;
+    if (specId) cleanupIds.push(specId);
 
-    expect(result).toBeDefined();
-    expect(result?.nodeCount ?? 0).toBeGreaterThan(0);
-    expect(result?.capabilities).toContain('read-only');
+    expect(job.result).toBeDefined();
+    expect(job.result?.nodeCount ?? 0).toBeGreaterThan(0);
+    expect(job.result?.capabilities).toContain('read-only');
   }, 30_000);
 
   it('rejects .xyz file with 400', async () => {

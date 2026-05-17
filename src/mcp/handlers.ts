@@ -27,8 +27,8 @@ export function toolError(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };
 }
 
-function isToolError(v: Buffer | string | ToolError): v is ToolError {
-  return typeof v === 'object' && 'isError' in v;
+function isToolError(v: unknown): v is ToolError {
+  return typeof v === 'object' && v !== null && 'isError' in v;
 }
 
 export function countNodes(nodes: readonly CsiNode[]): number {
@@ -178,6 +178,24 @@ export async function handleGetParagraph({
   }
 }
 
+async function dispatchParse(
+  ext: string,
+  buf: Buffer | string
+): Promise<{ tree: CsiTree; refs: readonly SecRef[] } | ToolError> {
+  const noop = (_stage: string, _pct: number): void => {};
+  if (ext === '.sec') {
+    if (typeof buf !== 'string') return toolError('invalid .sec payload');
+    return parseSec(buf);
+  }
+  if (ext === '.txt') {
+    if (!Buffer.isBuffer(buf)) return toolError('invalid .txt payload');
+    const { tree, refs } = parseText(decodeTextBuffer(buf));
+    return { tree, refs };
+  }
+  if (!Buffer.isBuffer(buf)) return toolError('invalid .docx payload');
+  return { tree: await parseDocx(buf, noop), refs: [] };
+}
+
 export async function handleParseDocument({
   filename,
   contentBase64,
@@ -192,17 +210,9 @@ export async function handleParseDocument({
     }
     const bufOrErr = await decodeSafeBuffer(ext, contentBase64);
     if (isToolError(bufOrErr)) return bufOrErr;
-    const noop = (_stage: string, _pct: number): void => {};
-    let raw: { tree: CsiTree; refs: readonly SecRef[] };
-    if (ext === '.sec') {
-      raw = parseSec(bufOrErr as string);
-    } else if (ext === '.txt') {
-      const { tree, refs } = parseText(decodeTextBuffer(bufOrErr as Buffer));
-      raw = { tree, refs };
-    } else {
-      raw = { tree: await parseDocx(bufOrErr as Buffer, noop), refs: [] };
-    }
-    const enriched = await enrichInferenceForMcp(raw.tree, raw.refs);
+    const rawOrErr = await dispatchParse(ext, bufOrErr);
+    if (isToolError(rawOrErr)) return rawOrErr;
+    const enriched = await enrichInferenceForMcp(rawOrErr.tree, rawOrErr.refs);
     const specId = await persistParsedSpec(enriched);
     const nodeCount = countNodes(enriched.tree.parts);
     const response: Record<string, unknown> = {

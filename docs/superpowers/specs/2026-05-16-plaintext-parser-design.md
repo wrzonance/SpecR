@@ -77,7 +77,7 @@ Parse job result (`GET /parse/jobs/:jobId`) response includes optional `capabili
 |----------|---------|----------|-------|
 | 1 | `^SECTION \d{2} \d{2} \d{2}` | `header` (metadata only) | — |
 | 2 | `^PART \d+ [-—]` or `^PART \d+\s*$` | `part` | 0 |
-| 3 | `^\d+\.\d+ ` | `article` | 1 |
+| 3 | `^\d+\.\d+[ ]` | `article` | 1 |
 | 4 | `^[A-Z]\.\s+` | `pr1` | 2 |
 | 5 | `^\d+\.\s+` | `pr2` | 3 |
 | 6 | `^[a-z]\.\s+` | `pr3` | 4 |
@@ -99,7 +99,7 @@ Parse job result (`GET /parse/jobs/:jobId`) response includes optional `capabili
 
 Stack-based, same approach as DOCX inference engine:
 
-```
+```text
 stack: CsiNode[]  ← open ancestor stack
 root: CsiNode[]   ← top-level part nodes
 

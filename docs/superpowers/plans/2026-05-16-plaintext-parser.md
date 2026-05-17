@@ -70,7 +70,7 @@ pnpm tsx scripts/gen-text-fixtures.ts
 ```
 
 Expected output:
-```
+```text
 Generated: tests/fixtures/text/ufgs-27-10-00.txt
 ```
 
@@ -86,7 +86,7 @@ Should contain lines like `SECTION 27 10 00`, `BUILDING TELECOMMUNICATIONS CABLI
 
 Create `tests/fixtures/text/numbered-prefixes.txt` with this exact content:
 
-```
+```text
 SECTION 03 30 00 - CAST-IN-PLACE CONCRETE
 
 PART 1 - GENERAL
@@ -129,7 +129,7 @@ a. Protect fresh concrete from freezing.
 
 Create `tests/fixtures/text/indent-only.txt` with this exact content:
 
-```
+```text
 SECTION 27 21 00 - INSIDE PLANT TELECOMMUNICATIONS CABLING
 
 PART 1 - GENERAL
@@ -1010,13 +1010,13 @@ git commit -m "feat(api): accept .txt uploads in POST /parse — plaintext spec 
 
 In `src/mcp/tools.ts`, find:
 
-```
+```typescript
 'Bulk-load spec files into the library from a glob pattern or explicit paths. Accepts .SEC and .docx formats. Returns a summary of succeeded, failed, and any error details. Idempotent — re-loading an existing spec updates it.',
 ```
 
 Replace with:
 
-```
+```typescript
 'Bulk-load spec files into the library from a glob pattern or explicit paths. Accepts .SEC, .docx, and .txt formats. Returns a summary of succeeded, failed, and any error details. Idempotent — re-loading an existing spec updates it. Plaintext specs (.txt) are read-only — no round-trip merge anchors.',
 ```
 
@@ -1214,7 +1214,7 @@ git push -u origin feat/plaintext-parser
 
 Open PR with body:
 
-```
+```markdown
 ## Summary
 - Add standalone `.txt` spec parser: 4-signal cascade (PART/article/prefix/indentation)
 - Wire into `POST /parse`, `load_files` MCP tool, and `pnpm load:files` CLI

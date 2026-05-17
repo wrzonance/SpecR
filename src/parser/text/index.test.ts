@@ -121,12 +121,15 @@ describe('parseText — section extraction edge cases', () => {
   });
 
   it('infers section from bare numbers when no SECTION header present', () => {
-    // This test exercises the applyInference path: inferSectionMeta scans
-    // the tree for bare numbers (e.g., "27 10 00") when section is "unknown".
-    // The input has no SECTION header line, so extractSectionMeta returns null,
-    // but the tree has a part node starting with "27 10 00", which
-    // scanBareNumber finds and infers as the section.
+    // extractSectionMeta matches a bare "XX XX XX" line (BARE_SECTION_RE) as
+    // a fallback when no "SECTION XX XX XX" header is found.
     const result = parseText('27 10 00\nPART 1 - GENERAL\n1.1 SCOPE\nSome text.\n');
     expect(result.tree.section).toBe('27 10 00');
+  });
+
+  it('skips continuation lines before first structural element', () => {
+    const result = parseText('Some prose before any PART\nPART 1 - GENERAL\n1.1 SCOPE\n');
+    expect(result.tree.parts.every((p) => p.type === 'part')).toBe(true);
+    expect(result.tree.parts).toHaveLength(1);
   });
 });
