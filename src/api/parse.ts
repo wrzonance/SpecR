@@ -1,5 +1,6 @@
 import multer from 'multer';
 import path from 'node:path';
+import { z } from 'zod';
 import type { Request, Response } from 'express';
 import { assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { createJob, updateJob, getJob, type ParseStage } from '../lib/jobs.js';
@@ -104,6 +105,16 @@ async function persistTree(tree: CsiTree): Promise<string> {
   }
 }
 
+const workerOutputSchema = z.object({
+  tree: z.object({
+    id: z.string(),
+    section: z.string(),
+    title: z.string(),
+    parts: z.array(z.unknown()),
+  }),
+  capabilities: z.array(z.string()).optional(),
+});
+
 async function processParseJob(
   jobId: string,
   buffer: Buffer,
@@ -116,10 +127,11 @@ async function processParseJob(
     };
 
     onProgress('extracting', 10);
-    const { tree, capabilities } = (await parsePool.run(
+    const workerRaw: unknown = await parsePool.run(
       { buffer, ext },
       { transferList: [buffer.buffer as ArrayBuffer] }
-    )) as WorkerOutput;
+    );
+    const { tree, capabilities } = workerOutputSchema.parse(workerRaw) as WorkerOutput;
     onProgress('classifying', 75);
 
     const finalTree: CsiTree = {

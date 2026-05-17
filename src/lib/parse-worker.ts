@@ -22,7 +22,10 @@ export default async function parseWorker({ buffer, ext }: WorkerInput): Promise
     const parsed = parseText(rawText);
     return { tree: parsed.tree, capabilities: parsed.capabilities };
   }
-  // .docx — validation already performed in main thread
-  const tree = await parseDocx(buffer);
-  return { tree };
+  if (ext === '.docx') {
+    // validation already performed in main thread
+    const tree = await parseDocx(buffer);
+    return { tree };
+  }
+  throw new Error(`unsupported extension in parse worker: ${ext}`);
 }
