@@ -24,6 +24,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 2b-ii | `w:sdt` content control UUID injection (round-trip anchors) | ✅ Complete (PR #51) |
 | 2b-iii | MCP tools: `get_paragraph`, `parse_document`, `generate_docx` | ✅ Complete (PR #55) |
 | 2b-iv | Universal file loader: `load:files`, `seed:corpus`, `load_files` MCP tool | ✅ Complete (PR #58) |
+| 1c-iii | Plaintext `.txt` parser — 4-signal hierarchy inference, read-only ingest | ✅ Complete (PR #66) |
 | 2c | Firm style template engine (issue #20) | Planned |
 | 3 | Round-trip merge engine | Planned |
 | 4 | Revit integration | Planned |
@@ -42,6 +43,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - **DOCX `word/document.xml` extractor** — walks paragraph sequence via JSZip + fast-xml-parser, extracts text (multi-run concat), styleId, numId/ilvl, left indent, outlineLvl, and vanish flag. Merges style-inherited numPr when paragraph has no own `w:numPr`.
 - **5-signal hierarchy inference engine** — two-pass pipeline: Pass 1 classifies each paragraph using a priority chain (numbering XML > style chain > text regex > indentation), logging signal conflicts into `meta.conflicts` for MCP surfacing. Pass 2 builds the parent/child tree using a stack algorithm (handles ilvl gaps, jumps, continuation paragraphs, and hidden note nodes). Source template (`arcat` / `cpi` / `unknown`) auto-detected from style names and numbering.xml heuristics.
 - **Extraction rules as typed data constants** — numbering, style, and signal rules are defined as MCP-readable data structures, not code, enabling LLM agent exploration and parse explainability.
+- **Plaintext `.txt` parser** — infers CSI hierarchy from text signals: `PART N` headings, `N.N` article numbers, `A.`/`1.`/`a.`/`1)`/`a)` prefix patterns, and leading-whitespace indentation depth as fallback. Section and title extracted from `SECTION XX XX XX` header line (scans first 10 non-blank lines); falls back to `inferSectionMeta`. Read-only — no round-trip merge anchors. `POST /parse` accepts `.txt` uploads; `load_files` MCP tool and `pnpm load:files` CLI accept `**/*.txt` globs; `parse_document` MCP tool accepts `.txt` filenames. Parse job result and MCP response include `capabilities: ["read-only"]`.
 
 ### Generator
 

@@ -105,7 +105,9 @@ function registerParserTools(server: McpServer): void {
       inputSchema: {
         filename: z
           .string()
-          .describe('Original filename — extension determines format (.docx or .sec)'),
+          .describe(
+            'Original filename — extension determines format (.docx, .sec, or .txt). Plaintext .txt returns capabilities: ["read-only"] in result.'
+          ),
         contentBase64: z.string().describe('Base64-encoded file content (max 10 MB decoded)'),
       },
     },
@@ -223,7 +225,7 @@ function registerLoaderTools(server: McpServer): void {
     'load_files',
     {
       description:
-        'Bulk-load spec files into the library from a glob pattern or explicit paths. Accepts .SEC and .docx formats. Returns a summary of succeeded, failed, and any error details. Idempotent — re-loading an existing spec updates it.',
+        'Bulk-load spec files into the library from a glob pattern or explicit paths. Accepts .SEC, .docx, and .txt formats. Returns a summary of succeeded, failed, and any error details. Idempotent — re-loading an existing spec updates it. Plaintext specs (.txt) are read-only — no round-trip merge anchors.',
       inputSchema: {
         glob: z
           .string()

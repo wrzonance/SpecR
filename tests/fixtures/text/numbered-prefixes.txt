@@ -1,0 +1,36 @@
+SECTION 03 30 00 - CAST-IN-PLACE CONCRETE
+
+PART 1 - GENERAL
+
+1.1 SCOPE
+
+A. This section covers cast-in-place concrete construction.
+B. Related work in other sections:
+1. Section 03 10 00 - Concrete Forming.
+2. Section 03 20 00 - Concrete Reinforcing.
+
+1.2 REFERENCES
+
+A. American Concrete Institute:
+1. ACI 301 Specifications for Structural Concrete.
+2. ACI 318 Building Code Requirements for Structural Concrete.
+a. Chapter 26 covers construction documents.
+b. Chapter 27 covers strength evaluation.
+
+PART 2 - PRODUCTS
+
+2.1 MATERIALS
+
+A. Portland cement conforming to ASTM C 150.
+B. Aggregates conforming to ASTM C 33.
+1. Coarse aggregate: maximum size 1-1/2 inches.
+2. Fine aggregate: clean, well-graded natural sand.
+
+PART 3 - EXECUTION
+
+3.1 INSTALLATION
+
+A. Place concrete in accordance with ACI 301.
+1. Do not place concrete in rain or temperatures below 40 degrees F.
+a. Protect fresh concrete from freezing.
+1) Use insulating blankets when ambient temperature is below 32 degrees F.

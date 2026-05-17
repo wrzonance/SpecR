@@ -38,6 +38,7 @@ interface JobResult {
   section: string;
   title: string;
   nodeCount: number;
+  capabilities?: string[];
 }
 
 interface JobData {
@@ -147,5 +148,51 @@ describe('POST /parse integration', () => {
     const body = (await res.json()) as { success: boolean; error: string };
     expect(body.success).toBe(false);
     expect(body.error).toBe('job not found');
+  });
+});
+
+describe('POST /parse — .txt upload', () => {
+  it('accepts .txt file and returns 202 with jobId', async () => {
+    const fixture = readFileSync(resolve('tests/fixtures/text/numbered-prefixes.txt'));
+    const form = new FormData();
+    form.append('file', new Blob([fixture], { type: 'text/plain' }), 'numbered-prefixes.txt');
+
+    const res = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { success: boolean; data: { jobId: string } };
+    expect(body.success).toBe(true);
+    expect(typeof body.data.jobId).toBe('string');
+
+    const job = await waitForJob(body.data.jobId);
+    expect(job.status).toBe('complete');
+    const specId = job.result?.specId;
+    if (specId) {
+      await pool.query('DELETE FROM specs WHERE id = $1', [specId]);
+    }
+  }, 30_000);
+
+  it('parse job completes with nodeCount > 0 and capabilities read-only', async () => {
+    const fixture = readFileSync(resolve('tests/fixtures/text/numbered-prefixes.txt'));
+    const form = new FormData();
+    form.append('file', new Blob([fixture], { type: 'text/plain' }), 'test.txt');
+
+    const postRes = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+    const postBody = (await postRes.json()) as { data: { jobId: string } };
+
+    const job = await waitForJob(postBody.data.jobId);
+    if (job.status === 'failed') throw new Error('Parse job failed');
+    const specId = job.result?.specId;
+    if (specId) cleanupIds.push(specId);
+
+    expect(job.result).toBeDefined();
+    expect(job.result?.nodeCount ?? 0).toBeGreaterThan(0);
+    expect(job.result?.capabilities).toContain('read-only');
+  }, 30_000);
+
+  it('rejects .xyz file with 400', async () => {
+    const form = new FormData();
+    form.append('file', new Blob(['content'], { type: 'text/plain' }), 'bad.xyz');
+    const res = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+    expect(res.status).toBe(400);
   });
 });

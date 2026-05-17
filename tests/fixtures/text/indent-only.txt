@@ -1,0 +1,30 @@
+SECTION 27 21 00 - INSIDE PLANT TELECOMMUNICATIONS CABLING
+
+PART 1 - GENERAL
+
+1.1 SUMMARY
+
+    This section covers telecommunications cabling for building interiors.
+    Coordinate work with electrical, mechanical, and security trades.
+
+1.2 QUALITY ASSURANCE
+
+    Installer shall have minimum five years experience with structured cabling.
+    Testing technician shall be manufacturer-certified.
+        Certification documentation shall be submitted prior to installation.
+        Re-certification required if lapsed more than two years.
+
+PART 2 - PRODUCTS
+
+2.1 CABLE
+
+    Horizontal cabling shall be Category 6A unshielded twisted pair.
+        Cable shall be listed and labeled for the intended application.
+
+PART 3 - EXECUTION
+
+3.1 INSTALLATION
+
+    Install cable in accordance with manufacturer instructions.
+    Support cable at intervals not exceeding five feet.
+        Use cable hangers rated for the cable weight.
