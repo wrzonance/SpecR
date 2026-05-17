@@ -149,3 +149,54 @@ describe('POST /parse integration', () => {
     expect(body.error).toBe('job not found');
   });
 });
+
+describe('POST /parse — .txt upload', () => {
+  it('accepts .txt file and returns 202 with jobId', async () => {
+    const fixture = readFileSync(resolve('tests/fixtures/text/numbered-prefixes.txt'));
+    const form = new FormData();
+    form.append('file', new Blob([fixture], { type: 'text/plain' }), 'numbered-prefixes.txt');
+
+    const res = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { success: boolean; data: { jobId: string } };
+    expect(body.success).toBe(true);
+    expect(typeof body.data.jobId).toBe('string');
+  });
+
+  it('parse job completes with nodeCount > 0 and capabilities read-only', async () => {
+    const fixture = readFileSync(resolve('tests/fixtures/text/numbered-prefixes.txt'));
+    const form = new FormData();
+    form.append('file', new Blob([fixture], { type: 'text/plain' }), 'test.txt');
+
+    const postRes = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+    const postBody = (await postRes.json()) as { data: { jobId: string } };
+
+    type JobResponse = {
+      data: { status: string; result?: { nodeCount: number; capabilities?: string[] } };
+    };
+    let result: { nodeCount: number; capabilities?: string[] } | undefined;
+    for (let i = 0; i < 50; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const pollRes = await fetch(`${baseUrl}/parse/jobs/${postBody.data.jobId}`);
+      const pollBody = (await pollRes.json()) as JobResponse;
+      if (pollBody.data.status === 'complete') {
+        result = pollBody.data.result;
+        break;
+      }
+      if (pollBody.data.status === 'failed') {
+        throw new Error(`Parse job failed`);
+      }
+    }
+
+    expect(result).toBeDefined();
+    expect(result?.nodeCount ?? 0).toBeGreaterThan(0);
+    expect(result?.capabilities).toContain('read-only');
+  }, 30_000);
+
+  it('rejects .xyz file with 400', async () => {
+    const form = new FormData();
+    form.append('file', new Blob(['content'], { type: 'text/plain' }), 'bad.xyz');
+    const res = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+    expect(res.status).toBe(400);
+  });
+});
