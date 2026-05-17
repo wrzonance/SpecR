@@ -3,25 +3,17 @@ import path from 'node:path';
 import { glob } from 'node:fs/promises';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import {
-  searchParagraphs,
-  listCsiSections,
-  getSpecTree,
-  getParagraphWithAncestors,
-  persistParsedSpec,
-  lookupCsiSectionTitle,
-} from '../db/index.js';
-import { inferSectionMeta, computeTitleMatch } from '../lib/infer-section.js';
-import type { SectionInference } from '../lib/infer-section.js';
-import { parseSec, parseDocx, assertDocxSafe, assertSecSafe } from '../parser/index.js';
-import { generateDocx } from '../generator/index.js';
 import { loadFiles } from '../lib/file-loader.js';
-import type { CsiNode, CsiTree, SecRef } from '../ast/types.js';
 import { logger } from '../lib/logger.js';
-
-function countNodes(nodes: readonly CsiNode[]): number {
-  return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
-}
+import {
+  toolError,
+  handleSearchLibrary,
+  handleGetSpec,
+  handleListSections,
+  handleGetParagraph,
+  handleParseDocument,
+  handleGenerateDocx,
+} from './handlers.js';
 
 type ToolError = {
   readonly isError: true;
@@ -29,218 +21,14 @@ type ToolError = {
 };
 type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
 type ToolResult = ToolError | ToolOk;
+type PathResolution = { readonly ok: true; readonly paths: string[] } | ToolError;
 
-function toolError(text: string): ToolError {
-  return { isError: true, content: [{ type: 'text' as const, text }] };
-}
-
-function isToolError(v: Buffer | string | ToolError): v is ToolError {
+function isToolError(v: Buffer | string | ToolError | PathResolution): v is ToolError {
   return typeof v === 'object' && 'isError' in v;
 }
 
-async function decodeSafeBuffer(
-  ext: string,
-  contentBase64: string
-): Promise<Buffer | string | ToolError> {
-  const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
-  if (!BASE64_RE.test(contentBase64)) {
-    return toolError('contentBase64 is not valid base64');
-  }
-  const estimatedBytes = Math.ceil((contentBase64.length * 3) / 4);
-  if (estimatedBytes > 10 * 1024 * 1024) {
-    return toolError('Content exceeds 10 MB decoded limit');
-  }
-  const buf = Buffer.from(contentBase64, 'base64');
-  try {
-    if (ext === '.docx') {
-      await assertDocxSafe(buf);
-      return buf;
-    } else {
-      return assertSecSafe(buf);
-    }
-  } catch (err) {
-    return toolError(err instanceof Error ? err.message : 'invalid file');
-  }
-}
-
-async function resolveStandardTitleForMcp(section: string): Promise<string | null> {
-  try {
-    return await lookupCsiSectionTitle(section);
-  } catch {
-    return null;
-  }
-}
-
-async function enrichInferenceForMcp(
-  tree: CsiTree,
-  refs: readonly SecRef[]
-): Promise<{ tree: CsiTree; refs: readonly SecRef[]; sectionInference: SectionInference }> {
-  const raw = inferSectionMeta(tree);
-  if (raw.method === 'metadata' || raw.confidence === 'none') {
-    return { tree, refs, sectionInference: raw };
-  }
-  const updatedTree = { ...tree, section: raw.inferredSection, title: raw.inferredTitle };
-  const standardTitle = await resolveStandardTitleForMcp(raw.inferredSection);
-  const { titleMatch, titleMatchScore } = computeTitleMatch(raw.inferredTitle, standardTitle);
-  const sectionInference: SectionInference = {
-    ...raw,
-    ...(standardTitle !== null ? { standardTitle } : {}),
-    titleMatch,
-    ...(titleMatchScore !== undefined ? { titleMatchScore } : {}),
-  };
-  return { tree: updatedTree, refs, sectionInference };
-}
-
-async function handleParseDocument({
-  filename,
-  contentBase64,
-}: {
-  filename: string;
-  contentBase64: string;
-}): Promise<ToolResult> {
-  try {
-    const ext = path.extname(filename).toLowerCase();
-    if (ext !== '.docx' && ext !== '.sec') {
-      return toolError(`Unsupported extension: ${ext}. Use .docx or .sec`);
-    }
-    const bufOrErr = await decodeSafeBuffer(ext, contentBase64);
-    if (isToolError(bufOrErr)) return bufOrErr;
-    const noop = (_stage: string, _pct: number): void => {};
-    const raw: { tree: CsiTree; refs: readonly SecRef[] } =
-      ext === '.sec'
-        ? parseSec(bufOrErr as string)
-        : { tree: await parseDocx(bufOrErr as Buffer, noop), refs: [] };
-    const enriched = await enrichInferenceForMcp(raw.tree, raw.refs);
-    const specId = await persistParsedSpec(enriched);
-    const nodeCount = countNodes(enriched.tree.parts);
-    const response: Record<string, unknown> = {
-      specId,
-      section: enriched.tree.section,
-      title: enriched.tree.title,
-      nodeCount,
-    };
-    if (enriched.sectionInference.method !== 'metadata') {
-      response['sectionInference'] = {
-        ...enriched.sectionInference,
-        note: 'Section metadata missing. Section number and title inferred from content. Please verify.',
-      };
-    }
-    return { content: [{ type: 'text' as const, text: JSON.stringify(response, null, 2) }] };
-  } catch (err) {
-    logger.error({ err }, 'mcp tool parse_document failed');
-    return toolError('Internal error — parse failed');
-  }
-}
-
-async function handleSearchLibrary({
-  query,
-  division,
-  limit,
-}: {
-  query: string;
-  division: string | undefined;
-  limit: number;
-}) {
-  try {
-    const results = await searchParagraphs(query, division, limit);
-    return {
-      content: [{ type: 'text' as const, text: JSON.stringify(results, null, 2) }],
-    };
-  } catch (err) {
-    logger.error({ err }, 'mcp tool search_library failed');
-    return {
-      isError: true,
-      content: [{ type: 'text' as const, text: 'Internal error — search failed' }],
-    };
-  }
-}
-
-async function handleGetSpec({ specId }: { specId: string }) {
-  try {
-    const result = await getSpecTree(specId);
-    if (!result) {
-      return {
-        isError: true,
-        content: [{ type: 'text' as const, text: `Spec not found: id=${specId}` }],
-      };
-    }
-    return {
-      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-    };
-  } catch (err) {
-    logger.error({ err }, 'mcp tool get_spec failed');
-    return {
-      isError: true,
-      content: [{ type: 'text' as const, text: 'Internal error — spec retrieval failed' }],
-    };
-  }
-}
-
-async function handleListSections({ division }: { division: string | undefined }) {
-  try {
-    const sections = await listCsiSections(division);
-    return {
-      content: [{ type: 'text' as const, text: JSON.stringify(sections, null, 2) }],
-    };
-  } catch (err) {
-    logger.error({ err }, 'mcp tool list_sections failed');
-    return {
-      isError: true,
-      content: [{ type: 'text' as const, text: 'Internal error — section list failed' }],
-    };
-  }
-}
-
-async function handleGetParagraph({ paragraphId }: { paragraphId: string }) {
-  try {
-    const result = await getParagraphWithAncestors(paragraphId);
-    if (!result) {
-      return {
-        isError: true,
-        content: [{ type: 'text' as const, text: `Paragraph not found: id=${paragraphId}` }],
-      };
-    }
-    return {
-      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-    };
-  } catch (err) {
-    logger.error({ err }, 'mcp tool get_paragraph failed');
-    return {
-      isError: true,
-      content: [{ type: 'text' as const, text: 'Internal error — paragraph retrieval failed' }],
-    };
-  }
-}
-
-async function handleGenerateDocx({ specId }: { specId: string }): Promise<ToolResult> {
-  try {
-    const result = await getSpecTree(specId);
-    if (!result) {
-      return toolError(`Spec not found: id=${specId}`);
-    }
-    const buf = await generateDocx(result.tree);
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: JSON.stringify(
-            {
-              specId,
-              section: result.tree.section,
-              title: result.tree.title,
-              sizeBytes: buf.byteLength,
-              contentBase64: buf.toString('base64'),
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  } catch (err) {
-    logger.error({ err }, 'mcp tool generate_docx failed');
-    return toolError('Internal error — DOCX generation failed');
-  }
+function pathOk(paths: string[]): PathResolution {
+  return { ok: true, paths };
 }
 
 const divisionSchema = z
@@ -347,6 +135,47 @@ function guardPath(fp: string, projectRoot: string): ToolError | null {
   return null;
 }
 
+async function resolveGlobPaths(globPattern: string, projectRoot: string): Promise<PathResolution> {
+  const matches = await Array.fromAsync(glob(globPattern, { cwd: projectRoot }));
+  const resolved: string[] = [];
+  for (const m of matches) {
+    const abs = path.resolve(m);
+    const guardErr = guardPath(abs, projectRoot);
+    if (guardErr) return guardErr;
+    resolved.push(abs);
+  }
+  return pathOk(resolved);
+}
+
+function resolveExplicitPaths(explicitPaths: string[], projectRoot: string): PathResolution {
+  const resolved: string[] = [];
+  for (const fp of explicitPaths) {
+    const err = guardPath(fp, projectRoot);
+    if (err) return err;
+    resolved.push(path.resolve(fp));
+  }
+  return pathOk(resolved);
+}
+
+async function collectResolvedPaths(
+  globPattern: string | undefined,
+  explicitPaths: string[] | undefined,
+  projectRoot: string
+): Promise<PathResolution> {
+  const resolved: string[] = [];
+  if (globPattern) {
+    const globResult = await resolveGlobPaths(globPattern, projectRoot);
+    if (isToolError(globResult)) return globResult;
+    resolved.push(...globResult.paths);
+  }
+  if (explicitPaths && explicitPaths.length > 0) {
+    const pathResult = resolveExplicitPaths(explicitPaths, projectRoot);
+    if (isToolError(pathResult)) return pathResult;
+    resolved.push(...pathResult.paths);
+  }
+  return pathOk(resolved);
+}
+
 async function handleLoadFiles({
   glob: globPattern,
   paths: explicitPaths,
@@ -360,20 +189,10 @@ async function handleLoadFiles({
     return toolError('Provide at least one of: glob, paths');
   }
   try {
-    const resolved: string[] = [];
-    if (globPattern) {
-      const matches = await Array.fromAsync(glob(globPattern, { cwd: process.cwd() }));
-      resolved.push(...matches.map((m) => path.resolve(m)));
-    }
-    if (explicitPaths) {
-      const projectRoot = process.cwd();
-      for (const fp of explicitPaths) {
-        const err = guardPath(fp, projectRoot);
-        if (err) return err;
-        resolved.push(path.resolve(fp));
-      }
-    }
-    const result = await loadFiles(resolved, { dryRun: dry_run ?? false });
+    const projectRoot = process.cwd();
+    const resolved = await collectResolvedPaths(globPattern, explicitPaths, projectRoot);
+    if (isToolError(resolved)) return resolved;
+    const result = await loadFiles(resolved.paths, { dryRun: dry_run ?? false });
     return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
   } catch (err) {
     logger.error({ err }, 'mcp tool load_files failed');
