@@ -7,6 +7,11 @@ vi.mock('../parser/index.js', () => ({
   assertDocxSafe: vi.fn().mockResolvedValue(undefined),
   assertSecSafe: vi.fn(),
 }));
+vi.mock('../lib/parse-pool.js', () => ({
+  parsePool: {
+    run: vi.fn().mockResolvedValue({ tree: { id: '', section: 'test', title: 'T', parts: [] } }),
+  },
+}));
 vi.mock('../lib/jobs.js', () => ({
   createJob: vi.fn().mockReturnValue('test-job-id'),
   updateJob: vi.fn(),

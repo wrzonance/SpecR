@@ -1,9 +1,10 @@
 import multer from 'multer';
 import path from 'node:path';
 import type { Request, Response } from 'express';
-import { parseSec, parseDocx, parseText, assertDocxSafe, assertSecSafe } from '../parser/index.js';
-import { decodeTextBuffer } from '../lib/decode-text.js';
+import { assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { createJob, updateJob, getJob, type ParseStage } from '../lib/jobs.js';
+import { parsePool } from '../lib/parse-pool.js';
+import type { WorkerOutput } from '../lib/parse-worker.js';
 import { pool, createSpec, insertTree } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import type { CsiNode, CsiTree } from '../ast/types.js';
@@ -103,33 +104,6 @@ async function persistTree(tree: CsiTree): Promise<string> {
   }
 }
 
-interface DispatchResult {
-  readonly tree: CsiTree;
-  readonly capabilities?: readonly string[];
-}
-
-async function dispatchParse(
-  buffer: Buffer,
-  ext: string,
-  onProgress: (stage: string, pct: number) => void
-): Promise<DispatchResult> {
-  if (ext === '.sec') {
-    onProgress('extracting', 10);
-    const tree = parseSec(assertSecSafe(buffer)).tree;
-    onProgress('classifying', 75);
-    return { tree };
-  }
-  if (ext === '.txt') {
-    onProgress('extracting', 10);
-    const rawText = decodeTextBuffer(buffer);
-    const parsed = parseText(rawText);
-    onProgress('classifying', 75);
-    return { tree: parsed.tree, capabilities: parsed.capabilities };
-  }
-  const tree = await parseDocx(buffer, onProgress);
-  return { tree };
-}
-
 async function processParseJob(
   jobId: string,
   buffer: Buffer,
@@ -141,7 +115,12 @@ async function processParseJob(
       updateJob(jobId, { stage: stage as ParseStage, pct, status: 'running' });
     };
 
-    const { tree, capabilities } = await dispatchParse(buffer, ext, onProgress);
+    onProgress('extracting', 10);
+    const { tree, capabilities } = (await parsePool.run(
+      { buffer, ext },
+      { transferList: [buffer.buffer as ArrayBuffer] }
+    )) as WorkerOutput;
+    onProgress('classifying', 75);
 
     const finalTree: CsiTree = {
       ...tree,
