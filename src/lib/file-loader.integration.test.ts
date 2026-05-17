@@ -52,10 +52,7 @@ describe('loadFiles() integration', () => {
 
   it('dryRun — parse succeeds, nothing written to DB for new spec', async () => {
     // Use 27_41_00.SEC (section "27 41 00") to test dryRun isolation
-    const altFixture = path.join(
-      PROJECT_ROOT,
-      'docs/references/UFGS/DIVISION_27/27_41_00.SEC'
-    );
+    const altFixture = path.join(PROJECT_ROOT, 'docs/references/UFGS/DIVISION_27/27_41_00.SEC');
     // Delete any pre-existing row to ensure clean state
     await pool.query(`DELETE FROM specs WHERE section = '27 41 00' AND source = 'ufgs'`);
 
