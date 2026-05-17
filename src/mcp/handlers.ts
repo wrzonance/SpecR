@@ -206,7 +206,7 @@ export async function handleParseDocument({
     if (enriched.sectionInference.method !== 'metadata') {
       response['sectionInference'] = {
         ...enriched.sectionInference,
-        note: 'Section metadata missing. Section number and title inferred from content. Please verify.',
+        note: 'Section metadata missing. Section number and title inferred from document content. Standard title (if present) sourced from UFGS reference corpus — not authoritative CSI MasterFormat. Please verify.',
       };
     }
     return { content: [{ type: 'text' as const, text: JSON.stringify(response, null, 2) }] };

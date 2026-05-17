@@ -55,7 +55,7 @@ async function buildInferenceWarning(
     titleMatchScore: titleMatchScore ?? null,
     titleMatch,
     confidence: inference.confidence,
-    note: 'Section metadata missing. Section number and title inferred from document content. Please verify.',
+    note: 'Section metadata missing. Section number and title inferred from document content. Standard title (if present) sourced from UFGS reference corpus — not authoritative CSI MasterFormat. Please verify.',
   };
 }
 
