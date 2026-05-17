@@ -22,6 +22,20 @@ const MIN_TEXT_LENGTH = 4;
 const TWIPS_PER_LEVEL = 576;
 const MAX_ILVL = 8;
 
+// PART heading pattern — shared with Signal 1 guard in inference.ts.
+// LibreOffice exports <ol><li> items with numId > 0 at ilvl=0 (same level as PART headings).
+// Without this guard, Signal 1 misclassifies them as 'part'.
+const PART_HEADING_PATTERN = /^PART\s+\d+/i;
+
+/**
+ * Returns true if the text looks like a CSI PART heading (e.g. "PART 1 – GENERAL").
+ * Used by Signal 1 as a confirmation guard when ilvl=0, preventing generic numbered
+ * lists exported by LibreOffice/Word from being misclassified as PART nodes.
+ */
+export function isPartHeading(text: string): boolean {
+  return PART_HEADING_PATTERN.test(text.trim());
+}
+
 /**
  * Signal 4: Text regex heuristics.
  * Detects CSI hierarchical patterns from paragraph text.
