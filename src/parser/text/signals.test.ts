@@ -138,4 +138,31 @@ describe('classifyLine', () => {
     const r = classifyLine('SECTION 03 30 00');
     expect(r.type).toBe('header');
   });
+
+  // Fix 1: Noise-prefix strip
+  it('classifyLine: ] PART 2 — strips specifier-note bracket before classification', () => {
+    const r = classifyLine('] PART 2 PRODUCTS');
+    expect(r.type).toBe('part');
+    expect(r.text).toBe('PRODUCTS');
+  });
+
+  it('classifyLine: ]] PART 3 — strips double bracket', () => {
+    const r = classifyLine(']] PART 3 EXECUTION');
+    expect(r.type).toBe('part');
+  });
+
+  it('classifyLine: [_____] PART 3 — strips blank placeholder', () => {
+    const r = classifyLine('[_____] PART 3 EXECUTION');
+    expect(r.type).toBe('part');
+  });
+
+  it('classifyLine: ][ 1.1 SCOPE — strips close bracket; open bracket keeps it as continuation', () => {
+    const r = classifyLine('][ 1.1 SCOPE');
+    expect(r.type).toBe('continuation');
+  });
+
+  it('classifyLine: [ open bracket line stays continuation', () => {
+    const r = classifyLine('[ Optional specifier note content');
+    expect(r.type).toBe('continuation');
+  });
 });

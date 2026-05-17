@@ -11,6 +11,11 @@ export interface LineClassification {
 const SECTION_HEADER_RE = /^SECTION\s+\d{2}\s+\d{2}\s+\d{2}/i;
 const PART_RE = /^PART\s+\d+/i;
 const ARTICLE_RE = /^\d+\.\d+\s+\S/;
+const NOISE_PREFIX_RE = /^(?:\]\]?|\[_+\])\s*/;
+
+function stripNoisePrefixes(s: string): string {
+  return s.replace(NOISE_PREFIX_RE, '');
+}
 
 interface PrSignal {
   readonly re: RegExp;
@@ -62,7 +67,7 @@ export function classifyLine(line: string): LineClassification {
     return { type: 'blank', text: '', level: -1 };
   }
 
-  const trimmed = line.trim();
+  const trimmed = stripNoisePrefixes(line.trim());
 
   if (SECTION_HEADER_RE.test(trimmed)) {
     return { type: 'header', text: trimmed, level: -1 };
