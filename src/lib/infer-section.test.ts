@@ -66,6 +66,28 @@ describe('inferSectionMeta', () => {
     expect(inferSectionMeta(tree).inferredTitle).toBe('MOTOR CONTROLLERS');
   });
 
+  it('level 1: finds title exactly 10 nodes after section node (boundary)', () => {
+    const empties = Array.from({ length: 9 }, () => ({ text: '  ' }));
+    const tree = makeTree([
+      { text: 'SECTION 26 09 33' },
+      ...empties,
+      { text: 'MOTOR CONTROLLERS' },
+    ]);
+    // Node at offset +10 from section node — should be found
+    expect(inferSectionMeta(tree).inferredTitle).toBe('MOTOR CONTROLLERS');
+  });
+
+  it('level 1: does NOT find title 11 nodes after section node (beyond window)', () => {
+    const empties = Array.from({ length: 10 }, () => ({ text: '  ' }));
+    const tree = makeTree([
+      { text: 'SECTION 26 09 33' },
+      ...empties,
+      { text: 'MOTOR CONTROLLERS' },
+    ]);
+    // Node at offset +11 from section node — beyond window, title should be 'unknown'
+    expect(inferSectionMeta(tree).inferredTitle).toBe('unknown');
+  });
+
   it('level 2: bare number only — confidence medium', () => {
     const tree = makeTree([{ text: '26 09 33' }]);
     const result = inferSectionMeta(tree);
