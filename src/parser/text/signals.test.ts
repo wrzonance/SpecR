@@ -110,4 +110,32 @@ describe('classifyLine', () => {
     expect(r.type).toBe('continuation');
     expect(r.level).toBe(-1);
   });
+
+  it('SECTION header is case-insensitive', () => {
+    const r = classifyLine('section 27 10 00 building cabling');
+    expect(r.type).toBe('header');
+  });
+
+  it('PART heading with en-dash stripped correctly', () => {
+    const r = classifyLine('PART 1 – GENERAL');
+    expect(r.type).toBe('part');
+    expect(r.text).toBe('GENERAL');
+  });
+
+  it('indent level 3 (12 spaces)', () => {
+    const r = classifyLine('            triple indent');
+    expect(r.type).toBe('continuation');
+    expect(r.level).toBe(3);
+  });
+
+  it('indent capped at level 6 (24+ spaces)', () => {
+    const r = classifyLine('                        deep indent'); // 24 spaces
+    expect(r.type).toBe('continuation');
+    expect(r.level).toBe(6);
+  });
+
+  it('SECTION header with no title still classified as header', () => {
+    const r = classifyLine('SECTION 03 30 00');
+    expect(r.type).toBe('header');
+  });
 });
