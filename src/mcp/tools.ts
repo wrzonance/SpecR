@@ -9,7 +9,10 @@ import {
   getSpecTree,
   getParagraphWithAncestors,
   persistParsedSpec,
+  lookupCsiSectionTitle,
 } from '../db/index.js';
+import { inferSectionMeta, computeTitleMatch } from '../lib/infer-section.js';
+import type { SectionInference } from '../lib/infer-section.js';
 import { parseSec, parseDocx, assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { generateDocx } from '../generator/index.js';
 import { loadFiles } from '../lib/file-loader.js';
@@ -60,6 +63,34 @@ async function decodeSafeBuffer(
   }
 }
 
+async function resolveStandardTitleForMcp(section: string): Promise<string | null> {
+  try {
+    return await lookupCsiSectionTitle(section);
+  } catch {
+    return null;
+  }
+}
+
+async function enrichInferenceForMcp(
+  tree: CsiTree,
+  refs: readonly SecRef[]
+): Promise<{ tree: CsiTree; refs: readonly SecRef[]; sectionInference: SectionInference }> {
+  const raw = inferSectionMeta(tree);
+  if (raw.method === 'metadata' || raw.confidence === 'none') {
+    return { tree, refs, sectionInference: raw };
+  }
+  const updatedTree = { ...tree, section: raw.inferredSection, title: raw.inferredTitle };
+  const standardTitle = await resolveStandardTitleForMcp(raw.inferredSection);
+  const { titleMatch, titleMatchScore } = computeTitleMatch(raw.inferredTitle, standardTitle);
+  const sectionInference: SectionInference = {
+    ...raw,
+    ...(standardTitle !== null ? { standardTitle } : {}),
+    titleMatch,
+    ...(titleMatchScore !== undefined ? { titleMatchScore } : {}),
+  };
+  return { tree: updatedTree, refs, sectionInference };
+}
+
 async function handleParseDocument({
   filename,
   contentBase64,
@@ -75,24 +106,26 @@ async function handleParseDocument({
     const bufOrErr = await decodeSafeBuffer(ext, contentBase64);
     if (isToolError(bufOrErr)) return bufOrErr;
     const noop = (_stage: string, _pct: number): void => {};
-    const parseResult: { tree: CsiTree; refs: readonly SecRef[] } =
+    const raw: { tree: CsiTree; refs: readonly SecRef[] } =
       ext === '.sec'
         ? parseSec(bufOrErr as string)
         : { tree: await parseDocx(bufOrErr as Buffer, noop), refs: [] };
-    const specId = await persistParsedSpec(parseResult);
-    const nodeCount = countNodes(parseResult.tree.parts);
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: JSON.stringify(
-            { specId, section: parseResult.tree.section, title: parseResult.tree.title, nodeCount },
-            null,
-            2
-          ),
-        },
-      ],
+    const enriched = await enrichInferenceForMcp(raw.tree, raw.refs);
+    const specId = await persistParsedSpec(enriched);
+    const nodeCount = countNodes(enriched.tree.parts);
+    const response: Record<string, unknown> = {
+      specId,
+      section: enriched.tree.section,
+      title: enriched.tree.title,
+      nodeCount,
     };
+    if (enriched.sectionInference.method !== 'metadata') {
+      response['sectionInference'] = {
+        ...enriched.sectionInference,
+        note: 'Section metadata missing. Section number and title inferred from content. Please verify.',
+      };
+    }
+    return { content: [{ type: 'text' as const, text: JSON.stringify(response, null, 2) }] };
   } catch (err) {
     logger.error({ err }, 'mcp tool parse_document failed');
     return toolError('Internal error — parse failed');
