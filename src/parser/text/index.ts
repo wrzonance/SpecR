@@ -8,11 +8,13 @@ type StructuralType = Exclude<LineType, 'blank' | 'header' | 'continuation'>;
 
 const SECTION_EXTRACT_RE = /SECTION\s+(\d{2})\s+(\d{2})\s+(\d{2})(?:\s*[-–—]\s*(.+))?/i;
 
-/** Scan up to this many non-blank lines for the SECTION header. */
+/** Scan up to this many non-blank lines for the SECTION header.
+ * 10 instead of 5: UFGS files have a metadata header block before the SECTION line
+ */
 const MAX_HEADER_SCAN = 10;
 
 interface StackEntry {
-  readonly mutableChildren: CsiNode[];
+  readonly children: CsiNode[];
   readonly level: number;
 }
 
@@ -54,7 +56,7 @@ export interface ParsedText {
 
 function buildTree(lines: readonly string[]): readonly CsiNode[] {
   const rootChildren: CsiNode[] = [];
-  const rootEntry: StackEntry = { mutableChildren: rootChildren, level: -1 };
+  const rootEntry: StackEntry = { children: rootChildren, level: -1 };
   const stack: StackEntry[] = [rootEntry];
 
   for (const line of lines) {
@@ -64,7 +66,7 @@ function buildTree(lines: readonly string[]): readonly CsiNode[] {
 
     if (cls.type === 'continuation') {
       const top = stack[stack.length - 1]!;
-      top.mutableChildren.push(makeNode('continuation', cls.text, []));
+      top.children.push(makeNode('continuation', cls.text, []));
       continue;
     }
 
@@ -76,8 +78,8 @@ function buildTree(lines: readonly string[]): readonly CsiNode[] {
 
     const children: CsiNode[] = [];
     const node = makeNode(cls.type, cls.text, children);
-    stack[stack.length - 1]!.mutableChildren.push(node);
-    stack.push({ mutableChildren: children, level: cls.level });
+    stack[stack.length - 1]!.children.push(node);
+    stack.push({ children: children, level: cls.level });
   }
 
   return rootChildren;
