@@ -345,3 +345,57 @@ describe('GET /mcp', () => {
     expect(res.status).toBe(405);
   });
 });
+
+describe('load_files tool', () => {
+  it('returns LoadResult JSON for a valid glob', async () => {
+    const url = `${baseUrl}/mcp`;
+    const response = await mcpCall(url, 'tools/call', {
+      name: 'load_files',
+      arguments: {
+        glob: 'docs/references/UFGS/DIVISION_27/*.SEC',
+        dry_run: true,
+      },
+    });
+
+    const rpc = response as { result?: { content?: { text?: string }[] } };
+    const text = rpc.result?.content?.[0]?.text;
+    expect(text).toBeDefined();
+    const loadResult = JSON.parse(text ?? '{}') as {
+      total: number;
+      succeeded: number;
+      failed: number;
+      errors: unknown[];
+    };
+    expect(typeof loadResult.total).toBe('number');
+    expect(typeof loadResult.succeeded).toBe('number');
+    expect(typeof loadResult.failed).toBe('number');
+    expect(Array.isArray(loadResult.errors)).toBe(true);
+    expect(loadResult.total).toBeGreaterThan(0);
+  });
+
+  it('returns zero-result for non-matching glob — not an error', async () => {
+    const url = `${baseUrl}/mcp`;
+    const response = await mcpCall(url, 'tools/call', {
+      name: 'load_files',
+      arguments: {
+        glob: 'docs/references/UFGS/**/*.NOMATCH',
+      },
+    });
+
+    const rpc = response as { result?: { content?: { text?: string }[] } };
+    const text = rpc.result?.content?.[0]?.text;
+    const loadResult = JSON.parse(text ?? '{}') as { total: number };
+    expect(loadResult.total).toBe(0);
+  });
+
+  it('returns error when neither glob nor paths provided', async () => {
+    const url = `${baseUrl}/mcp`;
+    const response = await mcpCall(url, 'tools/call', {
+      name: 'load_files',
+      arguments: {},
+    });
+
+    const rpc = response as { result?: { isError?: boolean; content?: { text?: string }[] } };
+    expect(rpc.result?.isError).toBe(true);
+  });
+});

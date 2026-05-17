@@ -23,6 +23,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 2b-i | AST → DOCX generator + 7-level CSI multilevel numbering | ✅ Complete (PR #26) |
 | 2b-ii | `w:sdt` content control UUID injection (round-trip anchors) | ✅ Complete (PR #51) |
 | 2b-iii | MCP tools: `get_paragraph`, `parse_document`, `generate_docx` | ✅ Complete (PR #55) |
+| 2b-iv | Universal file loader: `load:files`, `seed:corpus`, `load_files` MCP tool | ✅ Complete (PR #58) |
 | 2c | Firm style template engine (issue #20) | Planned |
 | 3 | Round-trip merge engine | Planned |
 | 4 | Revit integration | Planned |
@@ -73,6 +74,7 @@ The async `POST /parse` pattern (202 + poll) is intentional — inference over l
 - **Tool: `get_paragraph(paragraphId)`** — returns `{ node, ancestors }` for a single paragraph. `node` and each ancestor are `{ id, nodeType, text, vanish }`. Ancestors ordered root → immediate parent.
 - **Tool: `parse_document(filename, contentBase64)`** — base64-decode a DOCX or SEC file, parse it, insert into the database, return `{ specId, section, title, nodeCount }`. Max 10 MB decoded. Encoding-transparent for `.sec` files.
 - **Tool: `generate_docx(specId)`** — generate DOCX from a stored spec, returned as base64 in `{ specId, section, title, sizeBytes, contentBase64 }`. Each paragraph wrapped in `w:sdt` UUID content control. On-demand from current DB state — not cached.
+- **Tool: `load_files(glob?, paths?, dry_run?)`** — bulk-load specs from a glob pattern or file path list. Accepts `.SEC` and `.docx` formats. Returns `{ total, succeeded, failed, errors[] }`. Idempotent — re-loading an existing spec updates it.
 - **Resource: `specr://specs/{id}`** — full spec as LLM-readable Markdown. Note/vanish nodes rendered as `> **[NOTE]**` blockquotes (editor instructions visible to spec writer, hidden from published output)
 - **Resource: `specr://sections`** — full CSI section index as Markdown table with loaded (✓) flag
 
@@ -92,7 +94,6 @@ Configure in Claude Code via `.mcp.json` in the repo root (points to `http://loc
 - Web UI with progress bars, live preview, diff/merge review (Phase 5)
 - DOCX cross-reference extraction (Phase 1c-iii)
 - Security hardening: concurrency cap on parse workers (piscina) — follow-up to issue #22
-- Bulk UFGS corpus loader — parse all 666 `.SEC` files into library (issue #58)
 - MCP write tools (`add_paragraph`, `update_paragraph`, etc.) — Phase 5
 - MCP stateful sessions — Phase 5 upgrade
 - MCP prompts (`review_spec`, `suggest_paragraphs`) — Phase 6
@@ -177,8 +178,13 @@ pnpm format       # Prettier write
 pnpm migrate      # Run pending DB migrations
 ```
 
+| Script | Description |
+|--------|-------------|
+| `pnpm load:files <glob>` | Bulk-load spec files matching a glob pattern (`.SEC`, `.docx`) into the library |
+| `pnpm seed:corpus` | Load all 665 UFGS `.SEC` files into the library — idempotent, safe to re-run |
+
 ## Reference Data
 
-- `docs/references/UFGS/` — Unified Facilities Guide Specifications (666 `.SEC` files, public domain)
+- `docs/references/UFGS/` — Unified Facilities Guide Specifications (665 `.SEC` files, public domain)
 - `docs/references/ARCAT/README.md` — Download instructions for ARCAT guide specs (copyrighted, not included)
 - `docs/references/MANUFACTURER_CPI/README.md` — Download instructions for Chatsworth Products Inc. (CPI) telecom equipment manufacturer specs (copyrighted, not included)

@@ -1,6 +1,8 @@
 import { pool, DatabaseError } from '../index.js';
-import type { CsiNode, CsiTree, NodeType } from '../../ast/index.js';
+import type { CsiNode, CsiTree, NodeType, SecRef } from '../../ast/index.js';
 import type { Pool } from 'pg';
+import { insertTree } from './paragraphs.js';
+import { insertRefs } from './refs.js';
 
 interface SpecRow {
   readonly id: string;
@@ -170,5 +172,46 @@ export async function updateSpec(id: string, input: UpdateSpecInput): Promise<Sp
     return { specId: row.id, section: row.section ?? '', title: row.title ?? '' };
   } catch (err) {
     throw new DatabaseError('failed to update spec', { cause: err });
+  }
+}
+
+export async function persistParsedSpec(result: {
+  readonly tree: CsiTree;
+  readonly refs: readonly SecRef[];
+}): Promise<string> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // eslint-disable-next-line sonarjs/todo-tag
+    // TODO: source should be a top-level CsiTree field — parts[0].meta.source is a stopgap
+    const source = result.tree.parts[0]?.meta.source ?? 'unknown';
+    const res = await client.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (section, source) DO UPDATE
+         SET title = EXCLUDED.title, updated_at = now()
+       RETURNING id`,
+      [result.tree.section, result.tree.title, source]
+    );
+    const specId = res.rows[0]?.id;
+    if (!specId) throw new DatabaseError('upsert spec returned no id');
+    await client.query(`DELETE FROM spec_references WHERE source_spec_id = $1`, [specId]);
+    await client.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);
+    const treeWithId: CsiTree = { ...result.tree, id: specId };
+    await insertTree(treeWithId, specId, client);
+    if (result.refs.length > 0) {
+      await insertRefs(result.refs, specId, client);
+    }
+    await client.query('COMMIT');
+    return specId;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* best-effort */
+    }
+    throw new DatabaseError('failed to persist parsed spec', { cause: err });
+  } finally {
+    client.release();
   }
 }
