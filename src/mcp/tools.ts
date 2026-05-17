@@ -140,7 +140,8 @@ async function guardPath(fp: string, projectRoot: string): Promise<ToolError | n
       );
       abs = path.resolve(fp);
     }
-    if (!abs.startsWith(root + path.sep) && abs !== root) {
+    const rel = path.relative(root, abs);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
       return toolError(`path is outside project root: ${fp}`);
     }
     return null;
