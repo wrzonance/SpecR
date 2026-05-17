@@ -49,7 +49,7 @@ export async function parse(buffer: Buffer, filename: string): Promise<ParseResu
     const text = decodeTextBuffer(buffer);
     const { tree, refs, capabilities } = parseText(text);
     const sectionInference = inferSectionMeta(tree);
-    return { tree: applyInference(tree, sectionInference), refs, sectionInference, capabilities };
+    return { tree, refs, sectionInference, capabilities };
   }
   throw new ParserError(`unsupported format: ${ext}`);
 }

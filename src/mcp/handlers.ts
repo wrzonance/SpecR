@@ -11,7 +11,8 @@ import {
 } from '../db/index.js';
 import { inferSectionMeta, computeTitleMatch } from '../lib/infer-section.js';
 import type { SectionInference } from '../lib/infer-section.js';
-import { parseSec, parseDocx, assertDocxSafe, assertSecSafe } from '../parser/index.js';
+import { parseSec, parseDocx, parseText, assertDocxSafe, assertSecSafe } from '../parser/index.js';
+import { decodeTextBuffer } from '../lib/decode-text.js';
 import { generateDocx } from '../generator/index.js';
 import { logger } from '../lib/logger.js';
 
@@ -51,8 +52,10 @@ async function decodeSafeBuffer(
     if (ext === '.docx') {
       await assertDocxSafe(buf);
       return buf;
-    } else {
+    } else if (ext === '.sec') {
       return assertSecSafe(buf);
+    } else {
+      return buf;
     }
   } catch (err) {
     return toolError(err instanceof Error ? err.message : 'invalid file');
@@ -184,16 +187,21 @@ export async function handleParseDocument({
 }): Promise<ToolResult> {
   try {
     const ext = path.extname(filename).toLowerCase();
-    if (ext !== '.docx' && ext !== '.sec') {
-      return toolError(`Unsupported extension: ${ext}. Use .docx or .sec`);
+    if (ext !== '.docx' && ext !== '.sec' && ext !== '.txt') {
+      return toolError(`Unsupported extension: ${ext}. Use .docx, .sec, or .txt`);
     }
     const bufOrErr = await decodeSafeBuffer(ext, contentBase64);
     if (isToolError(bufOrErr)) return bufOrErr;
     const noop = (_stage: string, _pct: number): void => {};
-    const raw: { tree: CsiTree; refs: readonly SecRef[] } =
-      ext === '.sec'
-        ? parseSec(bufOrErr as string)
-        : { tree: await parseDocx(bufOrErr as Buffer, noop), refs: [] };
+    let raw: { tree: CsiTree; refs: readonly SecRef[] };
+    if (ext === '.sec') {
+      raw = parseSec(bufOrErr as string);
+    } else if (ext === '.txt') {
+      const { tree, refs } = parseText(decodeTextBuffer(bufOrErr as Buffer));
+      raw = { tree, refs };
+    } else {
+      raw = { tree: await parseDocx(bufOrErr as Buffer, noop), refs: [] };
+    }
     const enriched = await enrichInferenceForMcp(raw.tree, raw.refs);
     const specId = await persistParsedSpec(enriched);
     const nodeCount = countNodes(enriched.tree.parts);

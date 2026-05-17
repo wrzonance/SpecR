@@ -122,7 +122,6 @@ async function dispatchParse(
   if (ext === '.txt') {
     onProgress('extracting', 10);
     const rawText = decodeTextBuffer(buffer);
-    onProgress('classifying', 50);
     const parsed = parseText(rawText);
     onProgress('classifying', 75);
     return { tree: parsed.tree, capabilities: parsed.capabilities };
