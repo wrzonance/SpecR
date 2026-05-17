@@ -10,7 +10,7 @@ Format-agnostic bulk ingest of spec files into the SpecR library. Accepts `.SEC`
 
 ## Architecture
 
-```
+```text
 src/parser/index.ts          ← add parse(buffer, filename): CsiTree dispatcher
 src/db/queries/specs.ts      ← extract persistParsedSpec() from mcp/tools.ts
 src/db/index.ts              ← re-export persistParsedSpec
@@ -93,11 +93,11 @@ inputSchema: {
 
 ## Data Flow
 
-```
+```text
 CLI args / MCP input
     │
     ▼
-fast-glob(pattern) → string[]   (sorted, deterministic)
+fs.glob(pattern) → string[]   (sorted, deterministic)
     │
     ▼  for each path
 readFile(path) → Buffer
