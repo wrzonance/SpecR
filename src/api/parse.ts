@@ -1,7 +1,8 @@
 import multer from 'multer';
 import path from 'node:path';
 import type { Request, Response } from 'express';
-import { parseSec, parseDocx, assertDocxSafe, assertSecSafe } from '../parser/index.js';
+import { parseSec, parseDocx, parseText, assertDocxSafe, assertSecSafe } from '../parser/index.js';
+import { decodeTextBuffer } from '../lib/decode-text.js';
 import { createJob, updateJob, getJob, type ParseStage } from '../lib/jobs.js';
 import { pool, createSpec, insertTree } from '../db/index.js';
 import { logger } from '../lib/logger.js';
@@ -22,7 +23,7 @@ function parseBody(raw: unknown): ParseBody {
 }
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const ALLOWED_EXT = new Set(['.docx', '.sec']);
+const ALLOWED_EXT = new Set(['.docx', '.sec', '.txt']);
 
 export const upload = multer({
   storage: multer.memoryStorage(),
@@ -36,6 +37,7 @@ export const upload = multer({
 
 async function validateUpload(req: Request, ext: string): Promise<string | null> {
   if (!ALLOWED_EXT.has(ext)) return 'unsupported file extension';
+  if (ext === '.txt') return null; // plaintext: no archive or XML validation needed
   if (ext === '.docx' && req.file?.mimetype !== DOCX_MIME) return 'MIME type mismatch for .docx';
   try {
     if (ext === '.docx') await assertDocxSafe(req.file!.buffer);
@@ -101,6 +103,34 @@ async function persistTree(tree: CsiTree): Promise<string> {
   }
 }
 
+interface DispatchResult {
+  readonly tree: CsiTree;
+  readonly capabilities?: readonly string[];
+}
+
+async function dispatchParse(
+  buffer: Buffer,
+  ext: string,
+  onProgress: (stage: string, pct: number) => void
+): Promise<DispatchResult> {
+  if (ext === '.sec') {
+    onProgress('extracting', 10);
+    const tree = parseSec(assertSecSafe(buffer)).tree;
+    onProgress('classifying', 75);
+    return { tree };
+  }
+  if (ext === '.txt') {
+    onProgress('extracting', 10);
+    const rawText = decodeTextBuffer(buffer);
+    onProgress('classifying', 50);
+    const parsed = parseText(rawText);
+    onProgress('classifying', 75);
+    return { tree: parsed.tree, capabilities: parsed.capabilities };
+  }
+  const tree = await parseDocx(buffer, onProgress);
+  return { tree };
+}
+
 async function processParseJob(
   jobId: string,
   buffer: Buffer,
@@ -112,14 +142,7 @@ async function processParseJob(
       updateJob(jobId, { stage: stage as ParseStage, pct, status: 'running' });
     };
 
-    let tree: CsiTree;
-    if (ext === '.sec') {
-      onProgress('extracting', 10);
-      tree = parseSec(assertSecSafe(buffer)).tree;
-      onProgress('classifying', 75);
-    } else {
-      tree = await parseDocx(buffer, onProgress);
-    }
+    const { tree, capabilities } = await dispatchParse(buffer, ext, onProgress);
 
     const finalTree: CsiTree = {
       ...tree,
@@ -135,7 +158,13 @@ async function processParseJob(
       status: 'complete',
       stage: 'complete',
       pct: 100,
-      result: { specId, section: finalTree.section, title: finalTree.title, nodeCount },
+      result: {
+        specId,
+        section: finalTree.section,
+        title: finalTree.title,
+        nodeCount,
+        ...(capabilities !== undefined ? { capabilities } : {}),
+      },
     });
   } catch (err) {
     logger.error({ err, jobId }, 'parse job failed');
