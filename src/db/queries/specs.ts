@@ -195,6 +195,8 @@ export async function persistParsedSpec(result: {
     );
     const specId = res.rows[0]?.id;
     if (!specId) throw new DatabaseError('upsert spec returned no id');
+    await client.query(`DELETE FROM spec_references WHERE source_spec_id = $1`, [specId]);
+    await client.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);
     const treeWithId: CsiTree = { ...result.tree, id: specId };
     await insertTree(treeWithId, specId, client);
     if (result.refs.length > 0) {

@@ -306,6 +306,14 @@ function registerGeneratorTools(server: McpServer): void {
   );
 }
 
+function guardPath(fp: string, projectRoot: string): ToolError | null {
+  const abs = path.resolve(fp);
+  if (!abs.startsWith(projectRoot + path.sep) && abs !== projectRoot) {
+    return toolError(`path is outside project root: ${fp}`);
+  }
+  return null;
+}
+
 async function handleLoadFiles({
   glob: globPattern,
   paths: explicitPaths,
@@ -325,7 +333,12 @@ async function handleLoadFiles({
       resolved.push(...matches.map((m) => path.resolve(m)));
     }
     if (explicitPaths) {
-      resolved.push(...explicitPaths.map((fp) => path.resolve(fp)));
+      const projectRoot = process.cwd();
+      for (const fp of explicitPaths) {
+        const err = guardPath(fp, projectRoot);
+        if (err) return err;
+        resolved.push(path.resolve(fp));
+      }
     }
     const result = await loadFiles(resolved, { dryRun: dry_run ?? false });
     return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };

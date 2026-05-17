@@ -31,14 +31,36 @@ describe('loadFiles() integration', () => {
     expect(parseInt(paras.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
   });
 
-  it('is idempotent — re-loading same file does not duplicate the spec row', async () => {
-    await loadFiles([SEC_FIXTURE]);
+  it('is idempotent — re-loading same file does not duplicate the spec row or paragraphs', async () => {
     await loadFiles([SEC_FIXTURE]);
 
-    const row = await pool.query<{ count: string }>(
+    const specRow = await pool.query<{ id: string }>(
+      `SELECT id FROM specs WHERE section = '27 10 00' LIMIT 1`
+    );
+    const specId = specRow.rows[0]?.id;
+    expect(specId).toBeDefined();
+
+    const parasBefore = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) as count FROM paragraphs WHERE spec_id = $1`,
+      [specId]
+    );
+    const countBefore = parseInt(parasBefore.rows[0]?.count ?? '0', 10);
+    expect(countBefore).toBeGreaterThan(0);
+
+    // Second load — must not duplicate
+    await loadFiles([SEC_FIXTURE]);
+
+    const parasAfter = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) as count FROM paragraphs WHERE spec_id = $1`,
+      [specId]
+    );
+    const countAfter = parseInt(parasAfter.rows[0]?.count ?? '0', 10);
+    expect(countAfter).toBe(countBefore);
+
+    const specCount = await pool.query<{ count: string }>(
       `SELECT COUNT(*) as count FROM specs WHERE section = '27 10 00'`
     );
-    expect(parseInt(row.rows[0]?.count ?? '0', 10)).toBe(1);
+    expect(parseInt(specCount.rows[0]?.count ?? '0', 10)).toBe(1);
   });
 
   it('reports failure for non-existent file, continues processing remaining files', async () => {

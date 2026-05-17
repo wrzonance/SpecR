@@ -28,11 +28,9 @@ async function main(): Promise<number> {
   }
 
   console.log(`Loading ${allFiles.length} file(s)...`);
-  let done = 0;
 
   const result = await loadFiles(allFiles, {
-    onProgress: (_done, total, file, ok) => {
-      done++;
+    onProgress: (done, total, file, ok) => {
       const rel = path.relative(PROJECT_ROOT, file);
       process.stdout.write(`${ok ? '✓' : '✗'} [${done}/${total}] ${rel}\n`);
     },
