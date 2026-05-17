@@ -133,14 +133,19 @@ async function guardPath(fp: string, projectRoot: string): Promise<ToolError | n
     let abs: string;
     try {
       abs = await realpath(path.resolve(projectRoot, fp));
-    } catch {
+    } catch (realpathErr) {
+      logger.debug(
+        { err: realpathErr, fp },
+        'guardPath: realpath failed (file may not exist), falling back to lexical check'
+      );
       abs = path.resolve(fp);
     }
     if (!abs.startsWith(root + path.sep) && abs !== root) {
       return toolError(`path is outside project root: ${fp}`);
     }
     return null;
-  } catch {
+  } catch (err) {
+    logger.warn({ err, fp }, 'guardPath: containment check failed');
     return toolError(`path containment check failed: ${fp}`);
   }
 }
