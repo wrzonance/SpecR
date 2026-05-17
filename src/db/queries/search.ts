@@ -62,3 +62,15 @@ export async function listCsiSections(division?: string): Promise<CsiSectionResu
     throw new DatabaseError('listCsiSections failed', { cause: err });
   }
 }
+
+export async function lookupCsiSectionTitle(sectionNumber: string): Promise<string | null> {
+  try {
+    const result = await pool.query<{ title: string }>(
+      `SELECT title FROM csi_sections WHERE section_number = $1 LIMIT 1`,
+      [sectionNumber]
+    );
+    return result.rows[0]?.title ?? null;
+  } catch (err) {
+    throw new DatabaseError('lookupCsiSectionTitle failed', { cause: err });
+  }
+}
