@@ -48,7 +48,7 @@ function findInlineTitle(nodeText: string): string | null {
 }
 
 function findFollowingTitle(nodes: readonly CsiNode[], fromIdx: number): string {
-  const searchEnd = Math.min(fromIdx + 11, nodes.length);
+  const searchEnd = Math.min(fromIdx + 10, nodes.length);
   for (let i = fromIdx; i < searchEnd; i++) {
     const t = nodes[i]?.text?.trim() ?? '';
     if (isValidTitle(t)) return t;
