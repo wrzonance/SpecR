@@ -17,6 +17,7 @@ export interface ParseJobResult {
   readonly section: string;
   readonly title: string;
   readonly nodeCount: number;
+  readonly capabilities?: readonly string[];
 }
 
 export interface ParseJob {
