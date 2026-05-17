@@ -127,10 +127,8 @@ async function processParseJob(
     };
 
     onProgress('extracting', 10);
-    const workerRaw: unknown = await parsePool.run(
-      { buffer, ext },
-      { transferList: [buffer.buffer as ArrayBuffer] }
-    );
+    // Buffer from multer may reference a shared pool — structured clone (no transferList) is safe.
+    const workerRaw: unknown = await parsePool.run({ buffer, ext });
     const { tree, capabilities } = workerOutputSchema.parse(workerRaw) as WorkerOutput;
     onProgress('classifying', 75);
 
