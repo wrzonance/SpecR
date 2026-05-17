@@ -27,7 +27,7 @@ A reusable global skill (`/parallel-issues`) for running multiple independent Gi
 
 Conflict analysis and brainstorming are inherently sequential (need the whole picture, need user steering). Implementation is the expensive part — that's where parallelism pays off.
 
-```
+```text
 Phase 1 (sequential, orchestrator):
   detect repo → scan issues → conflict analysis →
   recommendation → user approval →
@@ -68,7 +68,7 @@ Read each issue's title, labels, and body. Reason about which source files each 
 - Issue body scope/deliverables sections
 
 Output a conflict map:
-```
+```text
 Safe to parallelize:
   #57 (DOCX resilience) → parser/docx/, tests/fixtures/docx/
   #54 (rate limiting)   → mcp/server.ts
@@ -128,7 +128,7 @@ Each agent receives:
 - Instruction to run: `writing-plans` → `subagent-driven-development` → `finishing-a-development-branch` (option 2: PR)
 - Path to `CLAUDE.md` for conventions
 
-```
+```text
 You are implementing GitHub issue #NNN in an isolated worktree.
 
 Work from: .worktrees/feat/issue-NNN
@@ -156,7 +156,7 @@ Report back: PR URL or BLOCKED with reason.
 
 After all agents return, orchestrator prints:
 
-```
+```text
 Parallel execution complete:
 
   #57 DOCX resilience    → PR #67 https://github.com/owner/repo/pull/67

@@ -32,10 +32,10 @@ interface LineClassification {
 
 **`src/parser/text/index.ts`**
 
-`parseText(text: string): { tree: CsiTree; refs: readonly SecRef[] }`
+`parseText(text: string): { tree: CsiTree; refs: readonly SecRef[]; capabilities: readonly string[] }`
 
 - Splits input into lines
-- Extracts section/title from first 5 non-blank lines (pattern: `SECTION XX XX XX - TITLE`)
+- Extracts section/title from first 10 non-blank lines (pattern: `SECTION XX XX XX - TITLE`)
 - Walks lines through `classifyLine` signal cascade
 - Builds tree with stack algorithm
 - Returns `refs: []` (no cross-reference extraction for plaintext)
@@ -119,7 +119,7 @@ for each classified line:
 
 Level mapping: `part=0, article=1, pr1=2, pr2=3, pr3=4, pr4=5, pr5=6`
 
-Section/title: if `SECTION XX XX XX - TITLE` found in first 5 non-blank lines, use that. Otherwise `inferSectionMeta(tree)` runs as usual (same as DOCX/SEC paths).
+Section/title: if `SECTION XX XX XX - TITLE` found in first 10 non-blank lines, use that. Otherwise `inferSectionMeta(tree)` runs as usual (same as DOCX/SEC paths).
 
 ---
 
