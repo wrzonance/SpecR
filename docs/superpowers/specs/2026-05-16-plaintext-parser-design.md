@@ -169,7 +169,7 @@ Generation strategy: parse UFGS `.SEC` → `renderMarkdown()` output → strip M
 **Integration test** (`tests/integration/`):
 
 - Upload `.txt` fixture via `POST /parse`, poll to complete, verify `nodeCount > 0` and `capabilities: ['read-only']`
-- `loadFiles(['tests/fixtures/text/ufgs-03-30-00.txt'])` — verify spec inserted, inference warning surfaced
+- `loadFiles(['tests/fixtures/text/ufgs-27-10-00.txt'])` — verify spec inserted, inference warning surfaced
 
 All ambiguity cases marked `// KNOWN AMBIGUITY: <description>` in test file.
 
