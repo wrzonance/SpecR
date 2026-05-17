@@ -14,6 +14,8 @@ const KEYWORD_RE = /\bSECTION\s+(\d{2})\s+(\d{2})\s+(\d{2})\b/i;
 const INLINE_TITLE_RE = /\bSECTION\s+\d{2}\s+\d{2}\s+\d{2}\b\s+(.*)/i;
 const BARE_NUM_RE = /^(\d{2})\s+(\d{2})\s+(\d{2})$/;
 const MAX_NODES = 50;
+const TITLE_MIN_LENGTH = 3;
+const TITLE_MAX_LENGTH = 150;
 
 function flattenNodes(parts: readonly CsiNode[]): readonly CsiNode[] {
   const out: CsiNode[] = [];
@@ -31,8 +33,8 @@ function flattenNodes(parts: readonly CsiNode[]): readonly CsiNode[] {
 function isValidTitle(text: string): boolean {
   const t = text.trim();
   return (
-    t.length >= 3 &&
-    t.length <= 150 &&
+    t.length >= TITLE_MIN_LENGTH &&
+    t.length <= TITLE_MAX_LENGTH &&
     !/^\d+$/.test(t) &&
     !KEYWORD_RE.test(t) &&
     !BARE_NUM_RE.test(t)
