@@ -55,5 +55,5 @@ export type {
   CreateProjectInput,
   AddSpecResult,
 } from './queries/projects.js';
-export { searchParagraphs, listCsiSections } from './queries/search.js';
+export { searchParagraphs, listCsiSections, lookupCsiSectionTitle } from './queries/search.js';
 export type { ParagraphSearchResult, CsiSectionResult } from './queries/search.js';
