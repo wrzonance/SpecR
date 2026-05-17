@@ -4,9 +4,18 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { json } from 'express';
 import type { Express } from 'express';
+import rateLimit from 'express-rate-limit';
 import { registerTools } from './tools.js';
 import { registerResources } from './resources.js';
 import { logger } from '../lib/logger.js';
+
+const mcpRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'too many MCP requests — please wait before retrying' },
+});
 
 function createMcpServer(): McpServer {
   const server = new McpServer({ name: 'specr', version: '0.1.0' });
@@ -16,7 +25,7 @@ function createMcpServer(): McpServer {
 }
 
 export function registerMcpRoutes(app: Express): void {
-  app.post('/mcp', json({ limit: '15mb' }), async (req, res) => {
+  app.post('/mcp', mcpRateLimit, json({ limit: '15mb' }), async (req, res) => {
     // AUTH HOOK: validate Authorization: Bearer <token> here before connecting transport.
     // Same token validation as REST middleware. Reject 401 if invalid.
     // Write tools especially depend on this gate — add when REST auth is implemented.
