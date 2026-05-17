@@ -109,7 +109,10 @@ for each classified line:
   elif type == 'header':
     skip (used for section/title extraction only)
   elif type == 'continuation':
-    attach as child of stack.top; do not push
+    if stack not empty (stack.length > 1):
+      attach as child of stack.top; do not push
+    else:
+      skip (no structural parent yet — continuation before first PART is dropped)
   else:
     while stack.top.level >= this.level: stack.pop()
     node = new CsiNode(type, text, uuid)
