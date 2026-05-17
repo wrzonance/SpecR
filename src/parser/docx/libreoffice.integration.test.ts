@@ -43,10 +43,10 @@ describe.skipIf(!FIXTURES_AVAILABLE)('LibreOffice DOCX fixture parsing', () => {
 
   it('LibreOffice ol items not misclassified as part (Signal 1 vs Signal 4 conflict)', async () => {
     // KNOWN AMBIGUITY: LibreOffice exports <ol><li> items with numId > 0 and ilvl=0
-    // (same ilvl as PART). Signal 1 fires as 'part'; Signal 4 fires as 'pr2' ("1. " pattern).
-    // Signal 1 wins in the hit array (first hit). This regression test confirms that ol items
-    // with "1. " text are NOT misclassified as 'part' nodes. If this test fails, Signal 4
-    // must be scored higher than Signal 1 when text unambiguously matches a non-part pattern.
+    // (same ilvl as PART). Signal 1 now requires PART-heading text via isPartHeading guard, so
+    // generic ordered-list items are not classified as 'part'. Signal 4 ("1. " pattern) handles
+    // them correctly as pr2. If this test fails, the isPartHeading guard in inference.ts has
+    // regressed or Signal 1 ilvl=0 handling has changed.
     const buffer = readFileSync(FIXTURE_PATH);
     const tree = await parseDocx(buffer);
     const nodes = allNodes(tree.parts);
