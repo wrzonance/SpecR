@@ -24,7 +24,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 2b-ii | `w:sdt` content control UUID injection (round-trip anchors) | ✅ Complete (PR #51) |
 | 2b-iii | MCP tools: `get_paragraph`, `parse_document`, `generate_docx` | ✅ Complete (PR #55) |
 | 2b-iv | Universal file loader: `load:files`, `seed:corpus`, `load_files` MCP tool | ✅ Complete (PR #58) |
-| 1c-iii | Plaintext `.txt` parser — 4-signal hierarchy inference, read-only ingest | ✅ Complete (PR #XX) |
+| 1c-iii | Plaintext `.txt` parser — 4-signal hierarchy inference, read-only ingest | ✅ Complete (PR #66) |
 | 2c | Firm style template engine (issue #20) | Planned |
 | 3 | Round-trip merge engine | Planned |
 | 4 | Revit integration | Planned |
