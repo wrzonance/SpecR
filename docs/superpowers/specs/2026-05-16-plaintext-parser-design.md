@@ -45,7 +45,7 @@ interface LineClassification {
 | File | Change |
 |------|--------|
 | `src/parser/index.ts` | Add `.txt` case: `decodeTextBuffer(buffer)` → `parseText(text)` |
-| `src/api/parse.ts` | Add `'.txt'` to `ALLOWED_EXT`; add `text/plain` MIME validation; add `.txt` branch in `processParseJob` |
+| `src/api/parse.ts` | Add `'.txt'` to `ALLOWED_EXT`; no MIME check (text-only, same as `.sec`); add `.txt` branch in `processParseJob` |
 | `src/mcp/tools.ts` | Update `load_files` inputSchema description to mention `.txt` |
 
 `src/lib/file-loader.ts` gets `.txt` support for free — it calls `parse(buffer, filename)` which dispatches by extension.
@@ -129,8 +129,8 @@ Three fixture files in `tests/fixtures/text/`:
 
 | File | Description | Primary signals tested |
 |------|-------------|----------------------|
-| `ufgs-03-30-00.txt` | Concrete section derived from UFGS .SEC | PART/article/PR prefix cascade, blank-line grouping |
-| `ufgs-27-21-00.txt` | Telecom section derived from UFGS .SEC | Same; known territory from existing tests |
+| `ufgs-27-10-00.txt` | Telecom section derived from UFGS 27 10 00 .SEC | PART/article/PR prefix cascade, blank-line grouping |
+| `numbered-prefixes.txt` | Synthetic: SECTION 03 30 00, PART/1.1/A./1./a./1)/a) hierarchy | Full 4-signal cascade including all prefix types |
 | `indent-only.txt` | Synthetic: no numbering prefixes, 4-space indent | Indentation-only hierarchy fallback |
 
 Generation strategy: parse UFGS `.SEC` → `renderMarkdown()` output → strip Markdown syntax → save as `.txt`. Validates that text parser can parse SpecR's own output.
