@@ -1,0 +1,26 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "minimumReleaseAge": "7 days",
+  "automerge": false,
+  "labels": ["dependencies"],
+  "commitMessagePrefix": "chore(deps):",
+  "packageRules": [
+    {
+      "matchManagers": ["npm"],
+      "groupName": "npm-deps"
+    },
+    {
+      "description": "Major bumps for OOXML/DOCX libs require manual review — may change numbering or content control behavior",
+      "matchPackageNames": ["docx", "jszip"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "labels": ["ci"],
+      "commitMessagePrefix": "chore(ci):",
+      "groupName": "github-actions"
+    }
+  ]
+}
