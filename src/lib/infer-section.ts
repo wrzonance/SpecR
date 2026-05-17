@@ -10,8 +10,8 @@ export interface SectionInference {
   readonly titleMatch: 'exact' | 'close' | 'divergent' | 'unknown';
 }
 
-const KEYWORD_RE = /SECTION\s+(\d{2})\s+(\d{2})\s+(\d{2})/i;
-const INLINE_TITLE_RE = /SECTION\s+\d{2}\s+\d{2}\s+\d{2}\s+(.*)/i;
+const KEYWORD_RE = /\bSECTION\s+(\d{2})\s+(\d{2})\s+(\d{2})\b/i;
+const INLINE_TITLE_RE = /\bSECTION\s+\d{2}\s+\d{2}\s+\d{2}\b\s+(.*)/i;
 const BARE_NUM_RE = /^(\d{2})\s+(\d{2})\s+(\d{2})$/;
 const MAX_NODES = 50;
 

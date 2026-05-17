@@ -34,11 +34,10 @@ describe.skipIf(!ARCAT_AVAILABLE)('parse() with ARCAT DOCX — content inference
     const buffer = await readFile(ARCAT_DOCX);
     const result = await parse(buffer, ARCAT_DOCX);
     // ARCAT docs lack dc:subject — inference should fire
-    expect(result.sectionInference.method).not.toBe('none');
-    if (result.sectionInference.confidence !== 'none') {
-      expect(result.sectionInference.inferredSection).toMatch(/^\d{2} \d{2} \d{2}$/);
-      expect(result.tree.section).toBe(result.sectionInference.inferredSection);
-    }
+    expect(result.sectionInference.method).toBe('content-high');
+    expect(result.sectionInference.confidence).toBe('high');
+    expect(result.sectionInference.inferredSection).toMatch(/^\d{2} \d{2} \d{2}$/);
+    expect(result.tree.section).toBe(result.sectionInference.inferredSection);
   });
 });
 

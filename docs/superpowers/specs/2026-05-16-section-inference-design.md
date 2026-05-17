@@ -61,7 +61,7 @@ src/mcp/tools.ts                    ← parse_document + load_files include sect
 
 ## Fuzzy Title Matching
 
-Implemented inside `inferSectionMeta` after `standardTitle` is known (enrichment step — see Pipeline Integration).
+Implemented in the calling layer (enrichment step in `file-loader.ts` and `handleParseDocument`) after `standardTitle` is retrieved via DB lookup. `inferSectionMeta` itself never computes fuzzy match — it always returns `titleMatch: 'unknown'`.
 
 ```typescript
 function titleMatchScore(a: string, b: string): number {
@@ -171,11 +171,11 @@ loadFiles / handleParseDocument
 ```typescript
 export async function lookupCsiSectionTitle(sectionNumber: string): Promise<string | null> {
   try {
-    const result = await pool.query<{ section_title: string }>(
-      `SELECT section_title FROM csi_sections WHERE section_number = $1 LIMIT 1`,
+    const result = await pool.query<{ title: string }>(
+      `SELECT title FROM csi_sections WHERE section_number = $1 LIMIT 1`,
       [sectionNumber]
     );
-    return result.rows[0]?.section_title ?? null;
+    return result.rows[0]?.title ?? null;
   } catch (err) {
     throw new DatabaseError('lookupCsiSectionTitle failed', { cause: err });
   }

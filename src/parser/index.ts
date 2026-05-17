@@ -21,7 +21,11 @@ export interface ParseResult {
 
 function applyInference(tree: CsiTree, inference: SectionInference): CsiTree {
   if (inference.method === 'metadata' || inference.confidence === 'none') return tree;
-  return { ...tree, section: inference.inferredSection, title: inference.inferredTitle };
+  const section =
+    inference.inferredSection !== 'unknown' ? inference.inferredSection : tree.section;
+  const title = inference.inferredTitle !== 'unknown' ? inference.inferredTitle : tree.title;
+  if (section === tree.section && title === tree.title) return tree;
+  return { ...tree, section, title };
 }
 
 export async function parse(buffer: Buffer, filename: string): Promise<ParseResult> {

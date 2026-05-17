@@ -1,6 +1,6 @@
 // src/mcp/tools.ts
 import path from 'node:path';
-import { glob } from 'node:fs/promises';
+import { glob, realpath } from 'node:fs/promises';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { loadFiles } from '../lib/file-loader.js';
@@ -127,30 +127,42 @@ function registerGeneratorTools(server: McpServer): void {
   );
 }
 
-function guardPath(fp: string, projectRoot: string): ToolError | null {
-  const abs = path.resolve(fp);
-  if (!abs.startsWith(projectRoot + path.sep) && abs !== projectRoot) {
-    return toolError(`path is outside project root: ${fp}`);
+async function guardPath(fp: string, projectRoot: string): Promise<ToolError | null> {
+  try {
+    const root = await realpath(projectRoot);
+    let abs: string;
+    try {
+      abs = await realpath(path.resolve(projectRoot, fp));
+    } catch {
+      abs = path.resolve(fp);
+    }
+    if (!abs.startsWith(root + path.sep) && abs !== root) {
+      return toolError(`path is outside project root: ${fp}`);
+    }
+    return null;
+  } catch {
+    return toolError(`path containment check failed: ${fp}`);
   }
-  return null;
 }
 
 async function resolveGlobPaths(globPattern: string, projectRoot: string): Promise<PathResolution> {
   const matches = await Array.fromAsync(glob(globPattern, { cwd: projectRoot }));
   const resolved: string[] = [];
   for (const m of matches) {
-    const abs = path.resolve(m);
-    const guardErr = guardPath(abs, projectRoot);
+    const guardErr = await guardPath(m, projectRoot);
     if (guardErr) return guardErr;
-    resolved.push(abs);
+    resolved.push(path.resolve(projectRoot, m));
   }
   return pathOk(resolved);
 }
 
-function resolveExplicitPaths(explicitPaths: string[], projectRoot: string): PathResolution {
+async function resolveExplicitPaths(
+  explicitPaths: string[],
+  projectRoot: string
+): Promise<PathResolution> {
   const resolved: string[] = [];
   for (const fp of explicitPaths) {
-    const err = guardPath(fp, projectRoot);
+    const err = await guardPath(fp, projectRoot);
     if (err) return err;
     resolved.push(path.resolve(fp));
   }
@@ -169,7 +181,7 @@ async function collectResolvedPaths(
     resolved.push(...globResult.paths);
   }
   if (explicitPaths && explicitPaths.length > 0) {
-    const pathResult = resolveExplicitPaths(explicitPaths, projectRoot);
+    const pathResult = await resolveExplicitPaths(explicitPaths, projectRoot);
     if (isToolError(pathResult)) return pathResult;
     resolved.push(...pathResult.paths);
   }
