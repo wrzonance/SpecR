@@ -32,6 +32,8 @@ describe('parse() dispatcher', () => {
     expect(parseSec).toHaveBeenCalled();
     expect(result.tree).toBe(mockTree);
     expect(result.refs).toEqual([]);
+    expect(result.sectionInference.method).toBe('metadata');
+    expect(result.sectionInference.inferredSection).toBe('27 10 00');
   });
 
   it('dispatches .docx to parseDocx', async () => {
@@ -41,15 +43,35 @@ describe('parse() dispatcher', () => {
     expect(parseDocx).toHaveBeenCalledWith(buf, expect.any(Function));
     expect(result.tree).toBe(mockTree);
     expect(result.refs).toEqual([]);
+    expect(result.sectionInference.method).toBe('metadata');
   });
 
   it('is case-insensitive for extension', async () => {
     vi.mocked(parseSec).mockReturnValue({ tree: mockTree, refs: [] });
-    await parse(Buffer.from(''), 'SPEC.SEC');
+    const result = await parse(Buffer.from(''), 'SPEC.SEC');
     expect(parseSec).toHaveBeenCalled();
+    expect(result.sectionInference).toBeDefined();
   });
 
   it('throws ParserError for unsupported extension', async () => {
     await expect(parse(Buffer.from(''), 'spec.pdf')).rejects.toBeInstanceOf(ParserError);
+  });
+
+  it('updates tree section and title when inference fires on unknown section', async () => {
+    const unknownTree: CsiTree = {
+      id: 'x',
+      section: 'unknown',
+      title: 'unknown',
+      parts: [
+        { id: 'n1', type: 'part', text: 'SECTION 26 09 33', children: [], meta: {} },
+        { id: 'n2', type: 'part', text: 'MOTOR CONTROLLERS', children: [], meta: {} },
+      ],
+    };
+    vi.mocked(parseSec).mockReturnValue({ tree: unknownTree, refs: [] });
+    const result = await parse(Buffer.from(''), 'spec.sec');
+    expect(result.tree.section).toBe('26 09 33');
+    expect(result.tree.title).toBe('MOTOR CONTROLLERS');
+    expect(result.sectionInference.method).toBe('content-high');
+    expect(result.sectionInference.confidence).toBe('high');
   });
 });
