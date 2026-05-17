@@ -165,4 +165,30 @@ describe('classifyLine', () => {
     const r = classifyLine('[ Optional specifier note content');
     expect(r.type).toBe('continuation');
   });
+
+  // Fix 2: Joined-prefix lookahead
+  it('classifyLine: 1.3QUALITY — joined article prefix without space', () => {
+    const r = classifyLine('1.3QUALITY ASSURANCE');
+    expect(r.type).toBe('article');
+    expect(r.text).toBe('QUALITY ASSURANCE');
+  });
+
+  it('classifyLine: B.Included — joined pr1 prefix without space', () => {
+    const r = classifyLine('B.Included in this section');
+    expect(r.type).toBe('pr1');
+    expect(r.text).toBe('Included in this section');
+  });
+
+  it('classifyLine: 1.Manufacturers — joined pr2 prefix without space', () => {
+    const r = classifyLine('1.Manufacturers cut sheets');
+    expect(r.type).toBe('pr2');
+    expect(r.text).toBe('Manufacturers cut sheets');
+  });
+
+  // KNOWN AMBIGUITY: single-uppercase-letter-period at line start — U.S. Army would
+  // match pr1; accepted as implausible in CSI spec content
+  it('classifyLine: U.S. — single uppercase letter before period matches pr1 (known ambiguity)', () => {
+    const r = classifyLine('U.S. Army standard');
+    expect(r.type).toBe('pr1');
+  });
 });
