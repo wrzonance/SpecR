@@ -62,8 +62,8 @@ describe('POST /mcp rate limiting', () => {
       responses.push(res.status);
     }
 
-    // First 20 must not be 429
-    expect(responses.slice(0, 20).every((s) => s !== 429)).toBe(true);
+    // First 20 must be successful (2xx)
+    expect(responses.slice(0, 20).every((s) => s >= 200 && s < 300)).toBe(true);
     // 21st must be 429
     expect(responses[20]).toBe(429);
   });
