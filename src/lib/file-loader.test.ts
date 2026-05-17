@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../parser/index.js', () => ({ parse: vi.fn() }));
 vi.mock('../db/index.js', () => ({ persistParsedSpec: vi.fn() }));
 vi.mock('node:fs/promises', () => ({ readFile: vi.fn() }));
+vi.mock('./logger.js', () => ({ logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 import { loadFiles } from './file-loader.js';
 import { parse } from '../parser/index.js';

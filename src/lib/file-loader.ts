@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { parse } from '../parser/index.js';
 import { persistParsedSpec } from '../db/index.js';
+import { logger } from './logger.js';
 
 export interface LoadResult {
   readonly total: number;
@@ -12,6 +13,20 @@ export interface LoadResult {
 export interface LoadOptions {
   readonly dryRun?: boolean;
   readonly onProgress?: (done: number, total: number, file: string, ok: boolean) => void;
+}
+
+function fireProgress(
+  opts: LoadOptions | undefined,
+  done: number,
+  total: number,
+  file: string,
+  ok: boolean
+): void {
+  try {
+    opts?.onProgress?.(done, total, file, ok);
+  } catch (err) {
+    logger.warn({ err, file }, 'loadFiles onProgress callback failed');
+  }
 }
 
 export async function loadFiles(paths: readonly string[], opts?: LoadOptions): Promise<LoadResult> {
@@ -38,7 +53,7 @@ export async function loadFiles(paths: readonly string[], opts?: LoadOptions): P
       errors.push({ file, error: err instanceof Error ? err.message : String(err) });
     }
     done++;
-    opts?.onProgress?.(done, total, file, ok);
+    fireProgress(opts, done, total, file, ok);
   }
 
   return { total, succeeded, failed, errors };

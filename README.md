@@ -185,6 +185,6 @@ pnpm migrate      # Run pending DB migrations
 
 ## Reference Data
 
-- `docs/references/UFGS/` — Unified Facilities Guide Specifications (666 `.SEC` files, public domain)
+- `docs/references/UFGS/` — Unified Facilities Guide Specifications (665 `.SEC` files, public domain)
 - `docs/references/ARCAT/README.md` — Download instructions for ARCAT guide specs (copyrighted, not included)
 - `docs/references/MANUFACTURER_CPI/README.md` — Download instructions for Chatsworth Products Inc. (CPI) telecom equipment manufacturer specs (copyrighted, not included)

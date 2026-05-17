@@ -20,7 +20,7 @@ describe('loadFiles() integration', () => {
     expect(result.errors).toHaveLength(0);
 
     const row = await pool.query<{ id: string; section: string }>(
-      `SELECT id, section FROM specs WHERE section = '27 10 00' LIMIT 1`
+      `SELECT id, section FROM specs WHERE section = '27 10 00' AND source = 'ufgs' LIMIT 1`
     );
     expect(row.rows[0]?.section).toBe('27 10 00');
 
@@ -35,7 +35,7 @@ describe('loadFiles() integration', () => {
     await loadFiles([SEC_FIXTURE]);
 
     const specRow = await pool.query<{ id: string }>(
-      `SELECT id FROM specs WHERE section = '27 10 00' LIMIT 1`
+      `SELECT id FROM specs WHERE section = '27 10 00' AND source = 'ufgs' LIMIT 1`
     );
     const specId = specRow.rows[0]?.id;
     expect(specId).toBeDefined();
@@ -58,7 +58,7 @@ describe('loadFiles() integration', () => {
     expect(countAfter).toBe(countBefore);
 
     const specCount = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM specs WHERE section = '27 10 00'`
+      `SELECT COUNT(*) as count FROM specs WHERE section = '27 10 00' AND source = 'ufgs'`
     );
     expect(parseInt(specCount.rows[0]?.count ?? '0', 10)).toBe(1);
   });

@@ -353,6 +353,7 @@ describe('load_files tool', () => {
       name: 'load_files',
       arguments: {
         glob: 'docs/references/UFGS/DIVISION_27/*.SEC',
+        dry_run: true,
       },
     });
 

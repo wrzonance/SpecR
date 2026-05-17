@@ -87,7 +87,7 @@ inputSchema: {
 ### `package.json` scripts
 
 ```json
-"load:files": "ts-node scripts/load-files.ts",
+"load:files": "tsx scripts/load-files.ts",
 "seed:corpus": "pnpm load:files 'docs/references/UFGS/**/*.SEC'"
 ```
 

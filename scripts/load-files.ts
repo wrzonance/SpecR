@@ -13,10 +13,13 @@ async function main(): Promise<number> {
   }
 
   const allFiles: string[] = [];
+  const hasGlobChars = (s: string): boolean => /[*?{}[\]]/.test(s);
   for (const arg of args) {
     const matches = await Array.fromAsync(glob(arg, { cwd: PROJECT_ROOT }));
     if (matches.length > 0) {
       allFiles.push(...matches.map((m) => path.join(PROJECT_ROOT, m)));
+    } else if (hasGlobChars(arg)) {
+      process.stderr.write(`Warning: glob pattern matched no files: ${arg}\n`);
     } else {
       allFiles.push(path.resolve(arg));
     }
