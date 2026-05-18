@@ -29,4 +29,4 @@ Key elements:
 
 ## Use in SpecR
 
-UFGS is the **sole** source for the `csi_sections` reference table seed. See [ADR-013](../../adr/013-csi-sections-seed-public-domain-derivation.md).
+UFGS is the **sole** source for the `spec_sections` reference table seed. See [ADR-013](../../adr/013-csi-sections-seed-public-domain-derivation.md).

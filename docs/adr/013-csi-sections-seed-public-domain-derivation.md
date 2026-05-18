@@ -1,20 +1,22 @@
-# ADR-013: csi_sections seed data derives exclusively from public-domain UFGS
+# ADR-013: spec_sections seed data derives exclusively from public-domain UFGS
+
+> **Historical note:** This ADR's filename references the original table name `csi_sections`. Migration `009_rename_csi_sections_to_spec_sections` renamed the table to `spec_sections`. The filename is preserved for stable cross-references; the body has been updated to use the current name. All provenance guarantees below apply unchanged to the renamed table.
 
 ## Status: Accepted
 
 ## Context
 
-The `csi_sections` PostgreSQL table (created in `src/db/migrations/001_create_csi_sections.ts`) stores section numbers, titles, and division IDs that follow the CSI MasterFormat® classification scheme. CSI, Inc. asserts copyright on MasterFormat numbers + titles + classifications, and its EULA forbids embedding "any portion of the CSI Product into commercial construction software" without written permission.
+The `spec_sections` PostgreSQL table (created in `src/db/migrations/001_create_csi_sections.ts` and renamed by `src/db/migrations/009_rename_csi_sections_to_spec_sections.ts`) stores section numbers, titles, and division IDs that follow the CSI MasterFormat® classification scheme. CSI, Inc. asserts copyright on MasterFormat numbers + titles + classifications, and its EULA forbids embedding "any portion of the CSI Product into commercial construction software" without written permission.
 
 SpecR ships open-source under MIT. If the seed contained content lifted from CSI publications, redistribution would violate the EULA regardless of license.
 
 ## Decision
 
-The `csi_sections` seed is derived **exclusively** from the public-domain Unified Facilities Guide Specifications (UFGS) corpus under `docs/references/UFGS/`. Specifically:
+The `spec_sections` seed is derived **exclusively** from the public-domain Unified Facilities Guide Specifications (UFGS) corpus under `docs/references/UFGS/`. Specifically:
 
 1. `src/db/seed.ts` reads `.SEC` files from `docs/references/UFGS/DIVISION_*/`.
 2. It extracts `<SCN>SECTION NN NN NN</SCN>` and `<STL>Title</STL>` tags via regex.
-3. It upserts `(section_number, title, division)` triples into `csi_sections`.
+3. It upserts `(section_number, title, division)` triples into `spec_sections`.
 
 No other data source feeds this table. The `docs/references/ARCAT/` and `docs/references/MANUFACTURER_CPI/` reference directories contain README-only stubs documenting how to obtain those third-party copyrighted specs for local testing; their content is **never committed** and **never feeds the seed**.
 
@@ -23,15 +25,15 @@ UFGS is a work of the U.S. Government (USACE / NAVFAC / AFCEC) and is in the pub
 ## Consequences
 
 - SpecR can redistribute the seeded table data without a CSI license, because every row originated in a public-domain UFGS document.
-- The coverage of `csi_sections` is bounded by UFGS coverage: divisions and sections the federal government does not publish are absent from the table. This is acceptable; the seed is reference data for parser/MCP convenience, not an authoritative MasterFormat index.
+- The coverage of `spec_sections` is bounded by UFGS coverage: divisions and sections the federal government does not publish are absent from the table. This is acceptable; the seed is reference data for parser/MCP convenience, not an authoritative MasterFormat index.
 - The MCP tool description `list_sections` and resource `specr://sections` reference "CSI MasterFormat" in nominative use to identify the numbering scheme — this is descriptive fair use, not a claim of authoritative MasterFormat content.
 - Future seed additions MUST come from public-domain or properly-licensed sources only. Adding a CSI-sourced publication, MasterSpec content, or any other copyrighted reference dataset to the seed pipeline would invalidate this ADR and require revisiting.
 
 ## Verification
 
 ```bash
-# Confirm src/db/seed.ts is the only writer to csi_sections
-grep -rn 'INSERT INTO csi_sections' src/
+# Confirm src/db/seed.ts is the only writer to spec_sections
+grep -rn 'INSERT INTO spec_sections' src/
 
 # Confirm ARCAT and CPI dirs document "Not Included" status
 cat docs/references/ARCAT/README.md
