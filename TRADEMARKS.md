@@ -24,14 +24,15 @@ the document formats and classification systems SpecR processes.
 ## Copyrighted Works
 
 CSI asserts copyright over the MasterFormat numbering scheme and section
-titles. The scope of that assertion is contested — under the merger doctrine
-([17 U.S.C. § 102(b)](https://www.law.cornell.edu/uscode/text/17/102)) and
-*Feist Publications, Inc. v. Rural Telephone Service Co.*, 499 U.S. 340
-(1991), facts and short functional designations extracted from a
-public-domain source are generally not copyrightable. SpecR does not
-adjudicate this question. It moots the question by sourcing the
-`spec_sections` seed exclusively from the public-domain Unified Facilities
-Guide Specifications (UFGS) corpus rather than from CSI publications — see
+titles. The scope of that assertion is contested — under the idea/expression
+dichotomy ([17 U.S.C. § 102(b)](https://www.law.cornell.edu/uscode/text/17/102))
+and *Feist Publications, Inc. v. Rural Telephone Service Co.*, 499 U.S. 340
+(1991), facts are not copyrightable and copyright in a factual compilation
+extends only to original selection and arrangement, not to the underlying
+facts. SpecR does not adjudicate this question. It moots the question by
+sourcing the `spec_sections` seed exclusively from the public-domain
+Unified Facilities Guide Specifications (UFGS) corpus rather than from CSI
+publications — see
 [ADR-013](docs/adr/013-csi-sections-seed-public-domain-derivation.md).
 
 The American Institute of Architects holds copyright on MasterSpec content.
