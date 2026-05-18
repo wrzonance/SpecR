@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ilvlToNodeType } from './rules.js';
-import { matchTextSignal, matchIndentSignal } from './heuristics.js';
+import { matchTextSignal, matchIndentSignal, isPartHeading } from './heuristics.js';
 import type {
   ClassifiedParagraph,
   DocxParagraph,
@@ -46,6 +46,10 @@ function trySignal1(para: DocxParagraph, numberingMap: NumberingMap): SignalHit 
   if (para.ilvl === undefined) return null;
   const nodeType = ilvlToNodeType(para.ilvl, numberingMap.articleIlvl);
   if (nodeType === 'continuation') return null;
+  // Guard: ilvl=0 maps to 'part', but LibreOffice and Word also assign numId+ilvl=0
+  // to generic <ol> list items. Only claim 'part' if text matches the PART heading
+  // pattern — otherwise Signal 1 would misclassify numbered list items as PART nodes.
+  if (nodeType === 'part' && !isPartHeading(para.text)) return null;
   return { nodeType, normalizedIlvl: toNormalizedIlvl(nodeType), signal: 1 };
 }
 

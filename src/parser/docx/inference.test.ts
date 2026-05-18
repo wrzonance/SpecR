@@ -16,8 +16,10 @@ const numMap = (articleIlvl = 1): NumberingMap => ({ ...emptyNumberingMap(), art
 
 describe('classifyParagraphs — signal 1 (numId+ilvl)', () => {
   it('ARCAT-style ilvl=0 → part, normalizedIlvl=0', () => {
+    // Signal 1 requires PART heading text when ilvl=0 — prevents <ol> list items
+    // (also numId > 0 at ilvl=0 in LibreOffice) from being misclassified as PART nodes.
     const result = classifyParagraphs(
-      [makePara({ numId: 1, ilvl: 0 })],
+      [makePara({ numId: 1, ilvl: 0, text: 'PART 1 – GENERAL' })],
       numMap(1),
       emptyStyleMap()
     );
@@ -35,6 +37,18 @@ describe('classifyParagraphs — signal 1 (numId+ilvl)', () => {
     expect(result[0]?.nodeType).toBe('article');
     expect(result[0]?.resolvedIlvl).toBe(1);
     expect(result[0]?.signalUsed).toBe(1);
+  });
+
+  it('ilvl=0 without PART text does NOT claim part — LibreOffice ol regression', () => {
+    // Regression: LibreOffice exports <ol><li> with numId > 0 at ilvl=0.
+    // Without the PART text guard, Signal 1 would misclassify these as 'part'.
+    // "All work shall comply..." has no PART pattern → falls through to continuation.
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 0, text: 'All work shall comply with applicable standards.' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).not.toBe('part');
   });
 
   it('numId=0 does NOT fire (OOXML suppress sentinel) — falls through to signal 4', () => {
@@ -128,7 +142,7 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
 
   it('vanish paragraph: isVanish propagated from DocxParagraph', () => {
     const result = classifyParagraphs(
-      [makePara({ numId: 1, ilvl: 0, isVanish: true })],
+      [makePara({ numId: 1, ilvl: 0, isVanish: true, text: 'PART 1 – GENERAL' })],
       numMap(1),
       emptyStyleMap()
     );
