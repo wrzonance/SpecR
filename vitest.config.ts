@@ -35,6 +35,11 @@ export default defineConfig({
           environment: 'node',
           include: ['src/**/*.integration.test.ts'],
           testTimeout: 30_000,
+          // Serialize integration test files — they share a single PostgreSQL
+          // instance and otherwise race on FK constraints + unique keys.
+          // Vitest 4: `fileParallelism: false` replaces v3's
+          // `pool: 'forks' + poolOptions.forks.singleFork`. See issue #73.
+          fileParallelism: false,
         },
       },
     ],
