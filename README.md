@@ -204,3 +204,5 @@ pnpm migrate      # Run pending DB migrations
 ## Trademarks
 
 CSI® and MasterFormat® are registered trademarks of The Construction Specifications Institute, Inc. References to these marks throughout SpecR are nominative fair use — used to identify the document formats and classification systems SpecR processes. SpecR is an independent project, not affiliated with or endorsed by CSI. See [TRADEMARKS.md](TRADEMARKS.md) for full attribution of all third-party marks and copyrighted works.
+
+Third-party MIT attributions for upstream code (Clippit / Open-Xml-PowerTools) are preserved in [`NOTICES`](./NOTICES).

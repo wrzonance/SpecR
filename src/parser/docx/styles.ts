@@ -1,3 +1,16 @@
+/*
+ * Portions of this file are a TypeScript port of logic from Clippit's
+ * `ListItemRetriever` (originally C#), which is itself derived from Eric
+ * White's Open-Xml-PowerTools. The `numId=0` basedOn-chain-stop sentinel
+ * and the surrounding style-inheritance resolution come from that
+ * upstream.
+ *
+ *   - https://github.com/sergey-tihon/Clippit (MIT)
+ *   - https://github.com/EricWhiteDev/Open-Xml-PowerTools (MIT, predecessor)
+ *
+ * Upstream copyright preserved in the repo-root NOTICES file.
+ */
+
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { getAttrVal, getAttrNumVal, extractAttrStr, toArray } from './xml-utils.js';
