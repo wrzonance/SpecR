@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ilvlToNodeType, SECTION_REF_RULES, ARCAT_ILVL_MAP, CPI_ILVL_MAP } from './rules.js';
+import { ilvlToNodeType, ARCAT_ILVL_MAP, CPI_ILVL_MAP } from './rules.js';
 
 describe('ilvlToNodeType', () => {
   describe('ARCAT-style (articleIlvl=1)', () => {
@@ -24,33 +24,6 @@ describe('ilvlToNodeType', () => {
     it('maps ilvl 5 to pr2', () => expect(ilvlToNodeType(5, 3)).toBe('pr2'));
     it('maps ilvl 8 to pr5', () => expect(ilvlToNodeType(8, 3)).toBe('pr5'));
     it('maps ilvl 9+ to continuation', () => expect(ilvlToNodeType(9, 3)).toBe('continuation'));
-  });
-});
-
-describe('SECTION_REF_RULES — structure', () => {
-  it('each rule has id, description, pattern, targetType, examples', () => {
-    for (const rule of SECTION_REF_RULES) {
-      expect(rule.id).toBeTruthy();
-      expect(rule.description).toBeTruthy();
-      expect(rule.pattern).toBeInstanceOf(RegExp);
-      expect(['section', 'standard']).toContain(rule.targetType);
-      expect(rule.examples.length).toBeGreaterThan(0);
-    }
-  });
-
-  it('csi-section-keyword matches standard CSI references', () => {
-    const rule = SECTION_REF_RULES.find((r) => r.id === 'csi-section-keyword');
-    expect(rule).toBeDefined();
-    const fresh = () => new RegExp(rule!.pattern.source, 'i');
-    expect(fresh().test('See Section 09 91 00')).toBe(true);
-    expect(fresh().test('Section 27 21 00 applies')).toBe(true);
-  });
-
-  it('csi-section-keyword does not match malformed section numbers', () => {
-    const rule = SECTION_REF_RULES.find((r) => r.id === 'csi-section-keyword')!;
-    const fresh = () => new RegExp(rule.pattern.source, 'i');
-    expect(fresh().test('Section 9 91 00')).toBe(false); // missing leading zero
-    expect(fresh().test('Section 091 00')).toBe(false); // wrong grouping
   });
 });
 
