@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { pool, lookupCsiSectionTitle } from '../db/index.js';
+import { pool, lookupSpecSectionTitle } from '../db/index.js';
 import { loadFiles } from './file-loader.js';
 import { parse } from '../parser/index.js';
 
@@ -16,15 +16,15 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe('lookupCsiSectionTitle', () => {
+describe('lookupSpecSectionTitle', () => {
   it('returns standard title for known CSI section', async () => {
-    const title = await lookupCsiSectionTitle('27 10 00');
+    const title = await lookupSpecSectionTitle('27 10 00');
     expect(typeof title).toBe('string');
     expect((title ?? '').length).toBeGreaterThan(0);
   });
 
-  it('returns null for section not in csi_sections', async () => {
-    const title = await lookupCsiSectionTitle('99 99 99');
+  it('returns null for section not in spec_sections', async () => {
+    const title = await lookupSpecSectionTitle('99 99 99');
     expect(title).toBeNull();
   });
 });

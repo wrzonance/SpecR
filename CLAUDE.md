@@ -87,7 +87,7 @@ src/
 │   └── queries/
 │       ├── specs.ts      # Spec CRUD + getSpecTree (paragraph tree reconstruction + cross-refs)
 │       ├── paragraphs.ts # Tree insert (recursive)
-│       ├── search.ts     # searchParagraphs (ILIKE), listCsiSections (LEFT JOIN csi_sections)
+│       ├── search.ts     # searchParagraphs (ILIKE), listSpecSections (LEFT JOIN spec_sections)
 │       ├── projects.ts   # Project + TOC queries, broken-ref cascade
 │       ├── refs.ts       # Cross-reference insert
 │       └── versions.ts   # Base version tracking per paragraph
@@ -331,7 +331,7 @@ jobs:
   lint:   ESLint + tsc --noEmit + prettier --check
   test:   Unit tests (no DB) + integration tests (postgres service)
           Sequence: pnpm migrate → pnpm seed → pnpm test → pnpm test:integration
-          pnpm seed required: listCsiSections and MCP list_sections tests depend on csi_sections data
+          pnpm seed required: listSpecSections and MCP list_sections tests depend on spec_sections data
   build:  pnpm build — verifies compilation succeeds
   loc-check: warn if PR LOC delta > 500 (excludes fixtures, migrations, lockfile)
 ```

@@ -44,7 +44,7 @@ export async function searchParagraphs(
   }
 }
 
-export async function listCsiSections(division?: string): Promise<SpecSectionResult[]> {
+export async function listSpecSections(division?: string): Promise<SpecSectionResult[]> {
   try {
     const whereClause = division !== undefined ? ` WHERE cs.division = $1` : '';
     const params: unknown[] = division !== undefined ? [division] : [];
@@ -52,25 +52,25 @@ export async function listCsiSections(division?: string): Promise<SpecSectionRes
     const sql = `
       SELECT cs.section_number AS section, cs.title, cs.division,
              (s.id IS NOT NULL) AS "inDatabase"
-      FROM csi_sections cs
+      FROM spec_sections cs
       LEFT JOIN specs s ON s.section = cs.section_number${whereClause}
       ORDER BY cs.section_number`;
 
     const result = await pool.query<SpecSectionResult>(sql, params);
     return result.rows;
   } catch (err) {
-    throw new DatabaseError('listCsiSections failed', { cause: err });
+    throw new DatabaseError('listSpecSections failed', { cause: err });
   }
 }
 
-export async function lookupCsiSectionTitle(sectionNumber: string): Promise<string | null> {
+export async function lookupSpecSectionTitle(sectionNumber: string): Promise<string | null> {
   try {
     const result = await pool.query<{ title: string }>(
-      `SELECT title FROM csi_sections WHERE section_number = $1 LIMIT 1`,
+      `SELECT title FROM spec_sections WHERE section_number = $1 LIMIT 1`,
       [sectionNumber]
     );
     return result.rows[0]?.title ?? null;
   } catch (err) {
-    throw new DatabaseError('lookupCsiSectionTitle failed', { cause: err });
+    throw new DatabaseError('lookupSpecSectionTitle failed', { cause: err });
   }
 }

@@ -20,7 +20,7 @@ Phase 4 Revit integration will be implemented for Division 27/28 first (because 
 
 ## Consequences
 
-- The CSI section reference table (`csi_sections`: `section_number`, `division`, `title`) is seeded for all MasterFormat 2020 divisions at project initialization. This is a one-time data import, not ongoing work.
+- The CSI section reference table (`spec_sections`: `section_number`, `division`, `title`) is seeded for all MasterFormat 2020 divisions at project initialization. This is a one-time data import, not ongoing work.
 - No `if division === 27` branches exist in src/. Division is metadata on a spec, not a code path.
 - The inference engine is tested against ARCAT specs from Division 01 through 40, not just Division 27/28. The UFGS fixtures provide coverage across all 31 seeded divisions.
 - "We only support Division 27" is never a valid scope limit. "We have not yet loaded Revit parameter mappings for Division 03" is a valid current state.

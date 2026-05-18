@@ -53,10 +53,10 @@ beforeAll(async () => {
   const port = typeof address === 'object' && address !== null ? address.port : 3001;
   baseUrl = `http://localhost:${port}`;
 
-  // Use a section that exists in csi_sections for list_sections test to work.
-  // Query csi_sections to find a valid division-27 section, then create spec with that section.
+  // Use a section that exists in spec_sections for list_sections test to work.
+  // Query spec_sections to find a valid division-27 section, then create spec with that section.
   const sectionRow = await pool.query<{ section_number: string }>(
-    `SELECT section_number FROM csi_sections WHERE division = '27' LIMIT 1`
+    `SELECT section_number FROM spec_sections WHERE division = '27' LIMIT 1`
   );
   const testSection = sectionRow.rows[0]?.section_number ?? '27 10 00';
 

@@ -3,14 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../parser/index.js', () => ({ parse: vi.fn() }));
 vi.mock('../db/index.js', () => ({
   persistParsedSpec: vi.fn(),
-  lookupCsiSectionTitle: vi.fn(),
+  lookupSpecSectionTitle: vi.fn(),
 }));
 vi.mock('node:fs/promises', () => ({ readFile: vi.fn() }));
 vi.mock('./logger.js', () => ({ logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 import { loadFiles } from './file-loader.js';
 import { parse } from '../parser/index.js';
-import { persistParsedSpec, lookupCsiSectionTitle } from '../db/index.js';
+import { persistParsedSpec, lookupSpecSectionTitle } from '../db/index.js';
 import { readFile } from 'node:fs/promises';
 import type { SpecTree } from '../ast/types.js';
 import type { SectionInference } from './infer-section.js';
@@ -59,7 +59,7 @@ describe('loadFiles()', () => {
     const result = await loadFiles(['/a/spec.sec']);
     expect(result.succeeded).toBe(1);
     expect(result.inferenceWarnings).toHaveLength(0);
-    expect(lookupCsiSectionTitle).not.toHaveBeenCalled();
+    expect(lookupSpecSectionTitle).not.toHaveBeenCalled();
   });
 
   it('adds inferenceWarning when content-high inference fires', async () => {
@@ -70,7 +70,7 @@ describe('loadFiles()', () => {
       sectionInference: contentInference,
     });
     vi.mocked(persistParsedSpec).mockResolvedValue('spec-id-2');
-    vi.mocked(lookupCsiSectionTitle).mockResolvedValue('Variable Frequency Motor Controllers');
+    vi.mocked(lookupSpecSectionTitle).mockResolvedValue('Variable Frequency Motor Controllers');
     const result = await loadFiles(['/a/26_09_33.docx']);
     expect(result.succeeded).toBe(1);
     expect(result.inferenceWarnings).toHaveLength(1);
@@ -79,7 +79,7 @@ describe('loadFiles()', () => {
     expect(w?.standardTitle).toBe('Variable Frequency Motor Controllers');
     expect(w?.confidence).toBe('high');
     expect(w?.titleMatch).toMatch(/^(exact|close|divergent|unknown)$/);
-    expect(lookupCsiSectionTitle).toHaveBeenCalledWith('26 09 33');
+    expect(lookupSpecSectionTitle).toHaveBeenCalledWith('26 09 33');
   });
 
   it('emits warning with standardTitle:null when csi lookup fails', async () => {
@@ -90,7 +90,7 @@ describe('loadFiles()', () => {
       sectionInference: contentInference,
     });
     vi.mocked(persistParsedSpec).mockResolvedValue('spec-id-3');
-    vi.mocked(lookupCsiSectionTitle).mockRejectedValue(new Error('db fail'));
+    vi.mocked(lookupSpecSectionTitle).mockRejectedValue(new Error('db fail'));
     const result = await loadFiles(['/a/spec.docx']);
     expect(result.succeeded).toBe(1);
     expect(result.inferenceWarnings).toHaveLength(1);
@@ -107,7 +107,7 @@ describe('loadFiles()', () => {
     });
     const result = await loadFiles(['/a/spec.docx'], { dryRun: true });
     expect(persistParsedSpec).not.toHaveBeenCalled();
-    expect(lookupCsiSectionTitle).not.toHaveBeenCalled();
+    expect(lookupSpecSectionTitle).not.toHaveBeenCalled();
     expect(result.inferenceWarnings).toHaveLength(0);
   });
 

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { parse } from '../parser/index.js';
-import { persistParsedSpec, lookupCsiSectionTitle } from '../db/index.js';
+import { persistParsedSpec, lookupSpecSectionTitle } from '../db/index.js';
 import { computeTitleMatch } from './infer-section.js';
 import { logger } from './logger.js';
 import type { SectionInference } from './infer-section.js';
@@ -32,7 +32,7 @@ export interface LoadOptions {
 
 async function resolveStandardTitle(section: string): Promise<string | null> {
   try {
-    return await lookupCsiSectionTitle(section);
+    return await lookupSpecSectionTitle(section);
   } catch {
     return null;
   }

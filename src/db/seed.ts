@@ -67,7 +67,7 @@ async function seed(pool: Pool): Promise<void> {
   try {
     for (const { sectionNumber, title, division } of records) {
       await pool.query(
-        `INSERT INTO csi_sections (section_number, title, division)
+        `INSERT INTO spec_sections (section_number, title, division)
          VALUES ($1, $2, $3)
          ON CONFLICT (section_number) DO UPDATE SET title = EXCLUDED.title`,
         [sectionNumber, title, division]

@@ -2,7 +2,7 @@
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Variables } from '@modelcontextprotocol/sdk/shared/uriTemplate.js';
-import { getSpecTree, listCsiSections } from '../db/index.js';
+import { getSpecTree, listSpecSections } from '../db/index.js';
 import { renderMarkdown } from '../generator/markdown.js';
 import { logger } from '../lib/logger.js';
 
@@ -33,7 +33,7 @@ async function handleSpecTree(uri: URL, { id }: Variables) {
 
 async function handleCsiSections(uri: URL) {
   try {
-    const sections = await listCsiSections();
+    const sections = await listSpecSections();
     const header = '| Section | Title | In DB |\n|---------|-------|-------|\n';
     const rows = sections
       .map((s) => `| ${s.section} | ${s.title} | ${s.inDatabase ? '✓' : ''} |`)

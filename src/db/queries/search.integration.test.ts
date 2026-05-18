@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { pool } from '../index.js';
 import { createSpec } from './specs.js';
 import { insertTree } from './paragraphs.js';
-import { searchParagraphs, listCsiSections } from './search.js';
+import { searchParagraphs, listSpecSections } from './search.js';
 
 let searchSpecId: string;
 
@@ -81,22 +81,22 @@ describe('searchParagraphs', () => {
   });
 });
 
-describe('listCsiSections', () => {
+describe('listSpecSections', () => {
   it('returns sections with inDatabase flag', async () => {
-    const sections = await listCsiSections('27');
+    const sections = await listSpecSections('27');
     const s = sections.find((r) => r.section === '27 10 00');
     expect(s).toBeDefined();
     expect(s!.inDatabase).toBe(true);
   });
 
   it('returns sections not in DB with inDatabase=false', async () => {
-    const sections = await listCsiSections('27');
+    const sections = await listSpecSections('27');
     const notLoaded = sections.filter((r) => !r.inDatabase);
     expect(notLoaded.length).toBeGreaterThan(0);
   });
 
   it('returns all divisions when no filter given', async () => {
-    const sections = await listCsiSections();
+    const sections = await listSpecSections();
     expect(sections.length).toBeGreaterThan(10);
   });
 });

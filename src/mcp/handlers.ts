@@ -3,11 +3,11 @@ import path from 'node:path';
 import type { SpecNode, SpecTree, SecRef } from '../ast/types.js';
 import {
   searchParagraphs,
-  listCsiSections,
+  listSpecSections,
   getSpecTree,
   getParagraphWithAncestors,
   persistParsedSpec,
-  lookupCsiSectionTitle,
+  lookupSpecSectionTitle,
 } from '../db/index.js';
 import { inferSectionMeta, computeTitleMatch } from '../lib/infer-section.js';
 import type { SectionInference } from '../lib/infer-section.js';
@@ -64,7 +64,7 @@ async function decodeSafeBuffer(
 
 async function resolveStandardTitleForMcp(section: string): Promise<string | null> {
   try {
-    return await lookupCsiSectionTitle(section);
+    return await lookupSpecSectionTitle(section);
   } catch {
     return null;
   }
@@ -140,7 +140,7 @@ export async function handleListSections({
   division: string | undefined;
 }): Promise<ToolResult> {
   try {
-    const sections = await listCsiSections(division);
+    const sections = await listSpecSections(division);
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(sections, null, 2) }],
     };
