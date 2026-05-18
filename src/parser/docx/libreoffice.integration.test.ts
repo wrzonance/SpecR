@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseDocx } from './index.js';
-import type { CsiNode } from '../../ast/types.js';
+import type { SpecNode } from '../../ast/types.js';
 
 const FIXTURE_PATH = resolve('tests/fixtures/libreoffice/csi-spec-sample.docx');
 // DOCX is committed — always available in CI.
 const FIXTURES_AVAILABLE = existsSync(FIXTURE_PATH);
 
-function allNodes(nodes: readonly CsiNode[]): CsiNode[] {
+function allNodes(nodes: readonly SpecNode[]): SpecNode[] {
   return [...nodes, ...nodes.flatMap((n) => allNodes(n.children))];
 }
 

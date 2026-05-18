@@ -1,4 +1,4 @@
-import type { CsiTree, CsiNode } from '../ast/types.js';
+import type { SpecTree, SpecNode } from '../ast/types.js';
 
 export interface SectionInference {
   readonly method: 'metadata' | 'content-high' | 'content-medium' | 'none';
@@ -17,9 +17,9 @@ const MAX_NODES = 50;
 const TITLE_MIN_LENGTH = 3;
 const TITLE_MAX_LENGTH = 150;
 
-function flattenNodes(parts: readonly CsiNode[]): readonly CsiNode[] {
-  const out: CsiNode[] = [];
-  function walk(nodes: readonly CsiNode[]): void {
+function flattenNodes(parts: readonly SpecNode[]): readonly SpecNode[] {
+  const out: SpecNode[] = [];
+  function walk(nodes: readonly SpecNode[]): void {
     for (const n of nodes) {
       if (out.length >= MAX_NODES) return;
       out.push(n);
@@ -49,7 +49,7 @@ function findInlineTitle(nodeText: string): string | null {
   return null;
 }
 
-function findFollowingTitle(nodes: readonly CsiNode[], fromIdx: number): string {
+function findFollowingTitle(nodes: readonly SpecNode[], fromIdx: number): string {
   const searchEnd = Math.min(fromIdx + 10, nodes.length);
   for (let i = fromIdx; i < searchEnd; i++) {
     const t = nodes[i]?.text?.trim() ?? '';
@@ -58,7 +58,7 @@ function findFollowingTitle(nodes: readonly CsiNode[], fromIdx: number): string 
   return 'unknown';
 }
 
-function findTitle(nodes: readonly CsiNode[], sectionIdx: number): string {
+function findTitle(nodes: readonly SpecNode[], sectionIdx: number): string {
   const inline = findInlineTitle(nodes[sectionIdx]?.text ?? '');
   return inline ?? findFollowingTitle(nodes, sectionIdx + 1);
 }
@@ -98,7 +98,7 @@ const NONE_RESULT: SectionInference = {
   titleMatch: 'unknown',
 };
 
-function scanKeyword(nodes: readonly CsiNode[]): SectionInference | null {
+function scanKeyword(nodes: readonly SpecNode[]): SectionInference | null {
   for (let i = 0; i < nodes.length; i++) {
     const m = KEYWORD_RE.exec(nodes[i]?.text ?? '');
     if (m !== null) {
@@ -114,7 +114,7 @@ function scanKeyword(nodes: readonly CsiNode[]): SectionInference | null {
   return null;
 }
 
-function scanBareNumber(nodes: readonly CsiNode[]): SectionInference | null {
+function scanBareNumber(nodes: readonly SpecNode[]): SectionInference | null {
   for (let i = 0; i < nodes.length; i++) {
     const m = BARE_NUM_RE.exec((nodes[i]?.text ?? '').trim());
     if (m !== null) {
@@ -130,7 +130,7 @@ function scanBareNumber(nodes: readonly CsiNode[]): SectionInference | null {
   return null;
 }
 
-export function inferSectionMeta(tree: CsiTree): SectionInference {
+export function inferSectionMeta(tree: SpecTree): SectionInference {
   try {
     if (tree.section !== 'unknown' && tree.section.trim().length > 0) {
       return {

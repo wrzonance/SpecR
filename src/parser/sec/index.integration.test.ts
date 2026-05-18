@@ -34,7 +34,7 @@ async function loadFixture(
   await insertRefs(refs, specId, pool);
 
   let nodeCount = 0;
-  const count = (nodes: readonly import('../../ast/types.js').CsiNode[]): void => {
+  const count = (nodes: readonly import('../../ast/types.js').SpecNode[]): void => {
     for (const n of nodes) {
       nodeCount++;
       count(n.children);
@@ -124,7 +124,7 @@ describe('integration: 27_10_00.SEC via Buffer + assertSecSafe (encoding fix)', 
     const buf = await readFile(join(FIXTURES, '27_10_00.SEC'));
     const xml = assertSecSafe(buf);
     const { tree, refs } = parseSec(xml);
-    const countNodes = (nodes: readonly import('../../ast/types.js').CsiNode[]): number =>
+    const countNodes = (nodes: readonly import('../../ast/types.js').SpecNode[]): number =>
       nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
     expectedNodeCount = countNodes(tree.parts);
 

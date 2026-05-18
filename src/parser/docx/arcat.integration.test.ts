@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseDocx } from './index.js';
-import type { CsiNode } from '../../ast/types.js';
+import type { SpecNode } from '../../ast/types.js';
 
 const ARCAT_DIR = resolve('docs/references/ARCAT');
 // ARCAT .docx files are copyrighted and gitignored — only present in local dev environments.
 const FIXTURES_AVAILABLE = existsSync(resolve(ARCAT_DIR, '01_10_00arc.docx'));
 
-function allNodes(nodes: readonly CsiNode[]): CsiNode[] {
+function allNodes(nodes: readonly SpecNode[]): SpecNode[] {
   return [...nodes, ...nodes.flatMap((n) => allNodes(n.children))];
 }
 

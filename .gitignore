@@ -32,6 +32,11 @@ docs/references/ARCAT/*.docx
 docs/references/MANUFACTURER_CPI/*.docx
 docs/references/MANUFACTURER_*/*.docx
 
+# Text-extracted copies of copyrighted specs (parser test fixtures only - never commit)
+tests/fixtures/text/cpi-*.txt
+tests/fixtures/text/arcat-*.txt
+tests/fixtures/text/manufacturer-*.txt
+
 # Test output
 coverage/
 

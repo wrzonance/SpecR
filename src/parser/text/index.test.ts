@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseText } from './index.js';
-import type { CsiNode } from '../../ast/types.js';
+import type { SpecNode } from '../../ast/types.js';
 
 describe('parseText — numbered-prefixes fixture', () => {
   const fixture = readFileSync(join('tests', 'fixtures', 'text', 'numbered-prefixes.txt'), 'utf-8');
@@ -57,7 +57,7 @@ describe('parseText — numbered-prefixes fixture', () => {
 
   it('all node ids are unique UUIDs', () => {
     const ids: string[] = [];
-    function collect(nodes: readonly CsiNode[]): void {
+    function collect(nodes: readonly SpecNode[]): void {
       for (const n of nodes) {
         ids.push(n.id);
         collect(n.children);

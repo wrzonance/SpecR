@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
 import { generateDocx } from './index.js';
-import type { CsiTree } from '../ast/types.js';
+import type { SpecTree } from '../ast/types.js';
 
 // Covers: part, article, pr1, pr2, note, continuation, vanish
-const SYNTHETIC_TREE: CsiTree = {
+const SYNTHETIC_TREE: SpecTree = {
   id: '00000000-0000-0000-0000-000000000001',
   section: '27 21 00',
   title: 'Structured Cabling',
@@ -146,7 +146,7 @@ describe('generateDocx', () => {
   });
 
   it('handles empty tree without error', async () => {
-    const empty: CsiTree = {
+    const empty: SpecTree = {
       id: '00000000-0000-0000-0000-000000000001',
       section: '00 00 00',
       title: 'Empty Spec',
@@ -193,7 +193,7 @@ describe('generateDocx — content controls', () => {
     expect(xml).not.toContain('specr-uuid-00000000-0000-0000-0000-000000000012');
   });
 
-  it('title paragraph is not wrapped (no CsiNode.id)', async () => {
+  it('title paragraph is not wrapped (no SpecNode.id)', async () => {
     const buffer = await generateDocx(SYNTHETIC_TREE);
     const xml = await getDocXml(buffer);
     expect(xml).toContain('27 21 00');

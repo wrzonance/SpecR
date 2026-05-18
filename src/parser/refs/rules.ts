@@ -1,5 +1,5 @@
 // Format-agnostic extraction rules: CSI section refs + standards-org refs.
-// Operates on any text content reachable through CsiTree walks.
+// Operates on any text content reachable through SpecTree walks.
 // Rules are data — not code — so agents can inspect, propose, and fix them.
 
 // ─── Rule type ────────────────────────────────────────────────────────────────

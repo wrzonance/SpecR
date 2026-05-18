@@ -1,13 +1,13 @@
 import { XMLParser } from 'fast-xml-parser';
 import { v4 as uuidv4 } from 'uuid';
-import type { CsiNode, CsiTree, NodeType, SecRef } from '../../ast/types.js';
+import type { SpecNode, SpecTree, NodeType, SecRef } from '../../ast/types.js';
 import { ParserError } from '../error.js';
 import type { NteNode, PrtNode, RefNode, SptNode } from './elements.js';
 
 export type { SecRef };
 
 export interface ParsedSec {
-  readonly tree: CsiTree;
+  readonly tree: SpecTree;
   readonly refs: readonly SecRef[];
 }
 
@@ -50,7 +50,7 @@ function toArray<T>(val: T | readonly T[] | undefined): readonly T[] {
   return Array.isArray(val) ? (val as readonly T[]) : [val as T];
 }
 
-function makeNode(type: NodeType, text: string, children: CsiNode[], vanish?: boolean): CsiNode {
+function makeNode(type: NodeType, text: string, children: SpecNode[], vanish?: boolean): SpecNode {
   return {
     id: uuidv4(),
     type,
@@ -60,7 +60,7 @@ function makeNode(type: NodeType, text: string, children: CsiNode[], vanish?: bo
   };
 }
 
-function walkNte(nte: NteNode): CsiNode[] {
+function walkNte(nte: NteNode): SpecNode[] {
   return toArray(nte.NPR)
     .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
     .map((raw) => makeNode('note', stripTags(raw), [], true));
@@ -80,7 +80,7 @@ function pushSrfRefs(raw: string, nodeId: string, refs: SecRef[]): void {
 function walkTextItems(
   items: readonly (string | undefined)[],
   type: NodeType,
-  children: CsiNode[],
+  children: SpecNode[],
   refs: SecRef[]
 ): void {
   for (const raw of items) {
@@ -91,7 +91,7 @@ function walkTextItems(
   }
 }
 
-function walkOlg(spt: SptNode, children: CsiNode[], refs: SecRef[]): void {
+function walkOlg(spt: SptNode, children: SpecNode[], refs: SecRef[]): void {
   if (!spt.OLG) return;
   walkTextItems(toArray(spt.OLG.OLI), 'pr1', children, refs);
 }
@@ -123,9 +123,9 @@ function pushStandardRefs(refs: SecRef[], articleId: string, refNodes: readonly 
   }
 }
 
-function walkSpt(spt: SptNode, refs: SecRef[]): CsiNode {
+function walkSpt(spt: SptNode, refs: SecRef[]): SpecNode {
   const ttlRaw = typeof spt.TTL === 'string' ? spt.TTL : '';
-  const children: CsiNode[] = [];
+  const children: SpecNode[] = [];
 
   for (const nte of toArray(spt.NTE)) {
     children.push(...walkNte(nte));
@@ -143,9 +143,9 @@ function walkSpt(spt: SptNode, refs: SecRef[]): CsiNode {
   return articleNode;
 }
 
-function walkPrt(prt: PrtNode, refs: SecRef[]): CsiNode {
+function walkPrt(prt: PrtNode, refs: SecRef[]): SpecNode {
   const ttlRaw = typeof prt.TTL === 'string' ? prt.TTL : '';
-  const partChildren: CsiNode[] = [];
+  const partChildren: SpecNode[] = [];
 
   for (const nte of toArray(prt.NTE)) {
     partChildren.push(...walkNte(nte));

@@ -56,4 +56,4 @@ export type {
   AddSpecResult,
 } from './queries/projects.js';
 export { searchParagraphs, listCsiSections, lookupCsiSectionTitle } from './queries/search.js';
-export type { ParagraphSearchResult, CsiSectionResult } from './queries/search.js';
+export type { ParagraphSearchResult, SpecSectionResult } from './queries/search.js';

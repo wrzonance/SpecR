@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { inferSectionMeta, computeTitleMatch } from './infer-section.js';
-import type { CsiTree } from '../ast/types.js';
+import type { SpecTree } from '../ast/types.js';
 
-function makeTree(nodes: { text: string }[]): CsiTree {
+function makeTree(nodes: { text: string }[]): SpecTree {
   return {
     id: 'x',
     section: 'unknown',
@@ -19,7 +19,7 @@ function makeTree(nodes: { text: string }[]): CsiTree {
 
 describe('inferSectionMeta', () => {
   it('returns method:metadata when section already set', () => {
-    const tree: CsiTree = { id: 'x', section: '27 10 00', title: 'Telecom', parts: [] };
+    const tree: SpecTree = { id: 'x', section: '27 10 00', title: 'Telecom', parts: [] };
     const result = inferSectionMeta(tree);
     expect(result.method).toBe('metadata');
     expect(result.confidence).toBe('high');
@@ -129,7 +129,7 @@ describe('inferSectionMeta', () => {
   });
 
   it('returns none for empty tree — never throws', () => {
-    const tree: CsiTree = { id: 'x', section: 'unknown', title: 'unknown', parts: [] };
+    const tree: SpecTree = { id: 'x', section: 'unknown', title: 'unknown', parts: [] };
     expect(() => inferSectionMeta(tree)).not.toThrow();
     expect(inferSectionMeta(tree).confidence).toBe('none');
   });

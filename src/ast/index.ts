@@ -1,9 +1,9 @@
-export type { NodeType, CsiNodeMeta, CsiNode, CsiTree, SecRef } from './types.js';
+export type { NodeType, SpecNodeMeta, SpecNode, SpecTree, SecRef } from './types.js';
 export {
   NodeTypeSchema,
-  CsiNodeMetaSchema,
-  CsiNodeSchema,
-  CsiTreeSchema,
+  SpecNodeMetaSchema,
+  SpecNodeSchema,
+  SpecTreeSchema,
   PatchSpecBodySchema,
   CreateProjectBodySchema,
   AddSpecToProjectBodySchema,

@@ -1,4 +1,4 @@
-import type { CsiNode, CsiTree, NodeType } from '../ast/types.js';
+import type { SpecNode, SpecTree, NodeType } from '../ast/types.js';
 
 function alphaLabel(index: number, upper: boolean): string {
   let n = index + 1;
@@ -35,7 +35,7 @@ export function getLabel(type: NodeType, index: number, partNumber = 1): string 
 
 const INDENT = '   ';
 
-function renderPrNode(node: CsiNode, index: number, depth: number): string {
+function renderPrNode(node: SpecNode, index: number, depth: number): string {
   // note nodes always render as [NOTE] blockquotes regardless of meta.vanish — editorial
   // notes are structural metadata visible to spec writers, not owner-facing content.
   if (node.type === 'note') {
@@ -55,7 +55,7 @@ function renderPrNode(node: CsiNode, index: number, depth: number): string {
   ].join('');
 }
 
-function renderArticle(node: CsiNode, index: number, partNumber: number): string {
+function renderArticle(node: SpecNode, index: number, partNumber: number): string {
   const label = getLabel('article', index, partNumber);
   return [
     `\n### ${label} ${node.text}\n`,
@@ -63,7 +63,7 @@ function renderArticle(node: CsiNode, index: number, partNumber: number): string
   ].join('');
 }
 
-function renderPart(node: CsiNode, index: number): string {
+function renderPart(node: SpecNode, index: number): string {
   const label = getLabel('part', index);
   return [
     `\n## ${label} ${node.text}\n`,
@@ -71,7 +71,7 @@ function renderPart(node: CsiNode, index: number): string {
   ].join('');
 }
 
-export function renderMarkdown(tree: CsiTree): string {
+export function renderMarkdown(tree: SpecTree): string {
   return [
     `# SECTION ${tree.section} — ${tree.title}`,
     ...tree.parts.map((part, i) => renderPart(part, i)),
