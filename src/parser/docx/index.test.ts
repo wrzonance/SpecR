@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
 import { parseDocx } from './index.js';
-import type { CsiNode } from '../../ast/types.js';
+import type { SpecNode } from '../../ast/types.js';
 
 const MINIMAL_STYLES = `<?xml version="1.0" encoding="UTF-8"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>`;
 
@@ -62,7 +62,7 @@ const CORE_XML = `<?xml version="1.0"?>
   <dc:title>Structured Cabling</dc:title>
 </cp:coreProperties>`;
 
-function flatTypes(nodes: readonly CsiNode[]): string[] {
+function flatTypes(nodes: readonly SpecNode[]): string[] {
   return [...nodes.flatMap((n) => [n.type, ...flatTypes(n.children)])];
 }
 

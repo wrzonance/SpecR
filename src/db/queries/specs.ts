@@ -1,5 +1,5 @@
 import { pool, DatabaseError } from '../index.js';
-import type { CsiNode, CsiTree, NodeType, SecRef } from '../../ast/index.js';
+import type { SpecNode, SpecTree, NodeType, SecRef } from '../../ast/index.js';
 import type { Pool } from 'pg';
 import { insertTree } from './paragraphs.js';
 import { insertRefs } from './refs.js';
@@ -52,7 +52,7 @@ export async function createSpec(input: CreateSpecInput, db: Queryable = pool): 
   }
 }
 
-export async function findSpecById(id: string): Promise<CsiTree | null> {
+export async function findSpecById(id: string): Promise<SpecTree | null> {
   try {
     const result = await pool.query<SpecRow>('SELECT id, section, title FROM specs WHERE id = $1', [
       id,
@@ -83,17 +83,17 @@ export interface SpecReference {
 }
 
 export interface SpecTreeResult {
-  readonly tree: CsiTree;
+  readonly tree: SpecTree;
   readonly references: readonly SpecReference[];
 }
 
-function buildNodeTree(rows: readonly ParaRow[]): readonly CsiNode[] {
+function buildNodeTree(rows: readonly ParaRow[]): readonly SpecNode[] {
   const childrenByParent = new Map<string | null, ParaRow[]>();
   for (const row of rows) {
     childrenByParent.set(row.parent_id, [...(childrenByParent.get(row.parent_id) ?? []), row]);
   }
 
-  function buildNode(row: ParaRow): CsiNode {
+  function buildNode(row: ParaRow): SpecNode {
     const children = (childrenByParent.get(row.id) ?? [])
       .sort((a, b) => a.position - b.position)
       .map(buildNode);
@@ -135,7 +135,7 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
       [id]
     );
 
-    const tree: CsiTree = {
+    const tree: SpecTree = {
       id: specRow.id,
       section: specRow.section ?? '',
       title: specRow.title ?? '',
@@ -176,14 +176,14 @@ export async function updateSpec(id: string, input: UpdateSpecInput): Promise<Sp
 }
 
 export async function persistParsedSpec(result: {
-  readonly tree: CsiTree;
+  readonly tree: SpecTree;
   readonly refs: readonly SecRef[];
 }): Promise<string> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     // eslint-disable-next-line sonarjs/todo-tag
-    // TODO: source should be a top-level CsiTree field — parts[0].meta.source is a stopgap
+    // TODO: source should be a top-level SpecTree field — parts[0].meta.source is a stopgap
     const source = result.tree.parts[0]?.meta.source ?? 'unknown';
     const res = await client.query<{ id: string }>(
       `INSERT INTO specs (section, title, source)
@@ -197,7 +197,7 @@ export async function persistParsedSpec(result: {
     if (!specId) throw new DatabaseError('upsert spec returned no id');
     await client.query(`DELETE FROM spec_references WHERE source_spec_id = $1`, [specId]);
     await client.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);
-    const treeWithId: CsiTree = { ...result.tree, id: specId };
+    const treeWithId: SpecTree = { ...result.tree, id: specId };
     await insertTree(treeWithId, specId, client);
     if (result.refs.length > 0) {
       await insertRefs(result.refs, specId, client);

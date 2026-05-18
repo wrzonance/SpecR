@@ -35,6 +35,6 @@ Project tier  ← Project-specific overrides + Revit-injected content
 ## Consequences
 
 - MVP does not implement multi-tier library management. Phase 0–3 work with a single flat spec. The **data model must support the hierarchy from day one** (parent_library_id, tier columns) even if Phase 1 doesn't use them.
-- The legal separation between tiers matters: UFGS content (public domain) must never be mistakenly presented as the firm's proprietary work. The `source` field on `CsiNode` and `paragraphs.source` column enforce this.
+- The legal separation between tiers matters: UFGS content (public domain) must never be mistakenly presented as the firm's proprietary work. The `source` field on `SpecNode` and `paragraphs.source` column enforce this.
 - Revit parameter injection (Phase 4) populates project-tier paragraphs, not firm-tier paragraphs. A Revit model change updates the project spec, not the master library.
 - Style template configuration (Phase 5) replaces the single hardcoded CSI MasterFormat/ARCAT output format used in MVP.

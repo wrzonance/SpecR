@@ -1,6 +1,6 @@
 import { parseSec, parseDocx, parseText, assertSecSafe } from '../parser/index.js';
 import { decodeTextBuffer } from './decode-text.js';
-import type { CsiTree } from '../ast/types.js';
+import type { SpecTree } from '../ast/types.js';
 
 export interface WorkerInput {
   readonly buffer: Buffer;
@@ -8,7 +8,7 @@ export interface WorkerInput {
 }
 
 export interface WorkerOutput {
-  readonly tree: CsiTree;
+  readonly tree: SpecTree;
   readonly capabilities?: readonly string[];
 }
 

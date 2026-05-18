@@ -17,9 +17,9 @@ import { parseSec } from './sec/index.js';
 import { parseDocx } from './docx/index.js';
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { ParserError } from './error.js';
-import type { CsiTree } from '../ast/types.js';
+import type { SpecTree } from '../ast/types.js';
 
-const mockTree: CsiTree = { id: 'spec-1', section: '27 10 00', title: 'Test', parts: [] };
+const mockTree: SpecTree = { id: 'spec-1', section: '27 10 00', title: 'Test', parts: [] };
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -58,7 +58,7 @@ describe('parse() dispatcher', () => {
   });
 
   it('updates tree section and title when inference fires on unknown section', async () => {
-    const unknownTree: CsiTree = {
+    const unknownTree: SpecTree = {
       id: 'x',
       section: 'unknown',
       title: 'unknown',

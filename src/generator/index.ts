@@ -1,6 +1,6 @@
 import { Document, Paragraph, TextRun, Packer } from 'docx';
 import { wrapWithControl, SdtBlock } from './controls.js';
-import type { CsiNode, CsiTree } from '../ast/types.js';
+import type { SpecNode, SpecTree } from '../ast/types.js';
 import { GeneratorError } from './error.js';
 import { buildCsiNumberingConfig, getNodeLevel } from './numbering.js';
 
@@ -21,7 +21,7 @@ function plainParagraph(text: string): Paragraph {
   return new Paragraph({ children: [new TextRun(text)] });
 }
 
-function emitNode(node: CsiNode, out: (Paragraph | SdtBlock)[]): boolean {
+function emitNode(node: SpecNode, out: (Paragraph | SdtBlock)[]): boolean {
   if (node.type === 'note') {
     out.push(wrapWithControl(noteParagraph(node.text), node.id));
     return true;
@@ -38,15 +38,15 @@ function emitNode(node: CsiNode, out: (Paragraph | SdtBlock)[]): boolean {
   return true;
 }
 
-function collectParagraphs(nodes: readonly CsiNode[], out: (Paragraph | SdtBlock)[]): void {
+function collectParagraphs(nodes: readonly SpecNode[], out: (Paragraph | SdtBlock)[]): void {
   for (const node of nodes) {
     if (emitNode(node, out)) collectParagraphs(node.children, out);
   }
 }
 
-export async function generateDocx(tree: CsiTree): Promise<Buffer> {
+export async function generateDocx(tree: SpecTree): Promise<Buffer> {
   try {
-    // Title paragraph is synthetic — no CsiNode.id, not a round-trip anchor
+    // Title paragraph is synthetic — no SpecNode.id, not a round-trip anchor
     const children: (Paragraph | SdtBlock)[] = [
       plainParagraph(`SECTION ${tree.section} — ${tree.title}`),
     ];

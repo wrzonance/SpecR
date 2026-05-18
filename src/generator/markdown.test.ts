@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getLabel, renderMarkdown } from './markdown.js';
-import type { CsiTree } from '../ast/types.js';
+import type { SpecTree } from '../ast/types.js';
 
 describe('getLabel', () => {
   it('labels parts', () => {
@@ -38,7 +38,7 @@ describe('getLabel', () => {
   });
 });
 
-const TREE: CsiTree = {
+const TREE: SpecTree = {
   id: '00000000-0000-0000-0000-000000000001',
   section: '27 21 00',
   title: 'Structured Cabling',
@@ -114,7 +114,7 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown(TREE)).toContain('> **[NOTE]** Edit for local conditions.');
   });
   it('suppresses pr1 with meta.vanish — returns empty, not rendered', () => {
-    const treeWithVanish: CsiTree = {
+    const treeWithVanish: SpecTree = {
       id: '00000000-0000-0000-0000-000000000001',
       section: '27 21 00',
       title: 'Vanish Test',
@@ -149,7 +149,7 @@ describe('renderMarkdown', () => {
     expect(md).not.toContain('A.');
   });
   it('renders empty tree without error', () => {
-    const empty: CsiTree = {
+    const empty: SpecTree = {
       id: '00000000-0000-0000-0000-000000000001',
       section: '00 00 00',
       title: 'Empty',
@@ -158,7 +158,7 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown(empty)).toBe('# SECTION 00 00 00 — Empty');
   });
   it('renders continuation without label', () => {
-    const withCont: CsiTree = {
+    const withCont: SpecTree = {
       id: '00000000-0000-0000-0000-000000000001',
       section: '27 21 00',
       title: 'Test',

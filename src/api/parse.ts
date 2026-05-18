@@ -8,7 +8,7 @@ import { parsePool } from '../lib/parse-pool.js';
 import type { WorkerOutput } from '../lib/parse-worker.js';
 import { pool, createSpec, insertTree } from '../db/index.js';
 import { logger } from '../lib/logger.js';
-import type { CsiNode, CsiTree } from '../ast/types.js';
+import type { SpecNode, SpecTree } from '../ast/types.js';
 import { ParseWarningSchema } from '../ast/schemas.js';
 
 interface ParseBody {
@@ -84,17 +84,17 @@ export function parseJobHandler(req: Request, res: Response): void {
   res.status(200).json({ success: true, data: job });
 }
 
-function countNodes(nodes: readonly CsiNode[]): number {
+function countNodes(nodes: readonly SpecNode[]): number {
   return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
 }
 
-async function persistTree(tree: CsiTree): Promise<string> {
+async function persistTree(tree: SpecTree): Promise<string> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const source = tree.parts[0]?.meta.source ?? 'unknown';
     const specId = await createSpec({ section: tree.section, title: tree.title, source }, client);
-    const treeWithId: CsiTree = { ...tree, id: specId };
+    const treeWithId: SpecTree = { ...tree, id: specId };
     await insertTree(treeWithId, specId, client);
     await client.query('COMMIT');
     return specId;
@@ -134,7 +134,7 @@ async function processParseJob(
     const { tree, capabilities } = workerOutputSchema.parse(workerRaw) as WorkerOutput;
     onProgress('classifying', 75);
 
-    const finalTree: CsiTree = {
+    const finalTree: SpecTree = {
       ...tree,
       ...(body.section ? { section: body.section } : {}),
       ...(body.title ? { title: body.title } : {}),

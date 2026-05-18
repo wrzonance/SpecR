@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseDocx } from '../src/parser/docx/index.js';
-import type { CsiNode } from '../src/ast/types.js';
+import type { SpecNode } from '../src/ast/types.js';
 
 const filePath = process.argv[2];
 if (!filePath) {
@@ -9,11 +9,11 @@ if (!filePath) {
   process.exit(1);
 }
 
-function countNodes(nodes: readonly CsiNode[]): number {
+function countNodes(nodes: readonly SpecNode[]): number {
   return nodes.reduce((n, node) => n + 1 + countNodes(node.children), 0);
 }
 
-function printTree(nodes: readonly CsiNode[], depth = 0): void {
+function printTree(nodes: readonly SpecNode[], depth = 0): void {
   for (const node of nodes) {
     const indent = '  '.repeat(depth);
     const preview = node.text.slice(0, 55).replace(/\n/g, ' ');

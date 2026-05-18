@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { CsiNode } from './types.js';
+import type { SpecNode } from './types.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -14,20 +14,20 @@ export const NodeTypeSchema = z.enum([
   'continuation',
 ]);
 
-export const CsiNodeMetaSchema = z.object({
+export const SpecNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
   source: z.enum(['ufgs', 'arcat', 'cpi', 'unknown']).exactOptional(),
   revitParam: z.string().exactOptional(),
   baseVersion: z.number().int().nonnegative().exactOptional(),
 });
 
-export const CsiNodeSchema: z.ZodType<CsiNode> = z.lazy(() =>
+export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>
   z.object({
     id: z.uuid(),
     type: NodeTypeSchema,
     text: z.string().check(z.minLength(1)),
-    children: z.array(CsiNodeSchema),
-    meta: CsiNodeMetaSchema,
+    children: z.array(SpecNodeSchema),
+    meta: SpecNodeMetaSchema,
   })
 );
 
@@ -43,11 +43,11 @@ export const ParseWarningSchema = z.object({
   suggestion: z.string().exactOptional(),
 });
 
-export const CsiTreeSchema = z.object({
+export const SpecTreeSchema = z.object({
   id: z.uuid(),
   section: z.string().regex(/^\d{2} \d{2} \d{2}$/),
   title: z.string().check(z.minLength(1)),
-  parts: z.array(CsiNodeSchema),
+  parts: z.array(SpecNodeSchema),
   warnings: z.array(ParseWarningSchema).exactOptional(),
 });
 

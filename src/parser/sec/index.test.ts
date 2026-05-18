@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseSec } from './index.js';
 import { ParserError } from '../error.js';
-import type { CsiNode } from '../../ast/types.js';
+import type { SpecNode } from '../../ast/types.js';
 
 const MINIMAL = `<?xml version="1.0" encoding="windows-1252"?>
 <SEC>
@@ -68,9 +68,9 @@ const WITH_MIXED_CONTENT = `<?xml version="1.0" encoding="windows-1252"?>
   </PRT>
 </SEC>`;
 
-function collectIds(nodes: readonly CsiNode[]): Set<string> {
+function collectIds(nodes: readonly SpecNode[]): Set<string> {
   const ids = new Set<string>();
-  const walk = (ns: readonly CsiNode[]) => {
+  const walk = (ns: readonly SpecNode[]) => {
     for (const n of ns) {
       ids.add(n.id);
       walk(n.children);
@@ -80,7 +80,7 @@ function collectIds(nodes: readonly CsiNode[]): Set<string> {
   return ids;
 }
 
-function countNodes(nodes: readonly CsiNode[]): number {
+function countNodes(nodes: readonly SpecNode[]): number {
   let total = 0;
   for (const n of nodes) {
     total++;

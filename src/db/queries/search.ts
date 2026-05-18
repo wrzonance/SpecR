@@ -10,7 +10,7 @@ export interface ParagraphSearchResult {
   readonly specTitle: string;
 }
 
-export interface CsiSectionResult {
+export interface SpecSectionResult {
   readonly section: string;
   readonly title: string;
   readonly division: string;
@@ -44,7 +44,7 @@ export async function searchParagraphs(
   }
 }
 
-export async function listCsiSections(division?: string): Promise<CsiSectionResult[]> {
+export async function listCsiSections(division?: string): Promise<SpecSectionResult[]> {
   try {
     const whereClause = division !== undefined ? ` WHERE cs.division = $1` : '';
     const params: unknown[] = division !== undefined ? [division] : [];
@@ -56,7 +56,7 @@ export async function listCsiSections(division?: string): Promise<CsiSectionResu
       LEFT JOIN specs s ON s.section = cs.section_number${whereClause}
       ORDER BY cs.section_number`;
 
-    const result = await pool.query<CsiSectionResult>(sql, params);
+    const result = await pool.query<SpecSectionResult>(sql, params);
     return result.rows;
   } catch (err) {
     throw new DatabaseError('listCsiSections failed', { cause: err });

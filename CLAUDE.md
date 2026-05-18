@@ -67,11 +67,11 @@ src/
 │       ├── inference.ts  # Multi-signal hierarchy inference engine (5 signals)
 │       └── heuristics.ts # Text-content + indentation heuristics
 ├── generator/
-│   ├── markdown.ts       # CsiTree → Markdown renderer (renderMarkdown, getLabel) — shared with MCP + future DOCX
-│   ├── index.ts          # AST → DOCX (dolanmiu/docx) — Phase 2b
+│   ├── markdown.ts       # SpecTree → Markdown renderer (renderMarkdown, getLabel) — shared with MCP + DOCX generator
+│   ├── index.ts          # AST → DOCX (dolanmiu/docx)
 │   ├── error.ts          # GeneratorError
-│   ├── numbering.ts      # CSI multilevel numbering engine — Phase 2b
-│   └── controls.ts       # w:sdt UUID content control injection — Phase 2b
+│   ├── numbering.ts      # CSI multilevel numbering engine
+│   └── controls.ts       # w:sdt UUID content control injection
 ├── mcp/
 │   ├── server.ts         # registerMcpRoutes(app) — stateless Streamable HTTP, one McpServer per request
 │   ├── tools.ts          # registerTools(server): search_library, get_spec, list_sections
@@ -92,7 +92,7 @@ src/
 │       ├── refs.ts       # Cross-reference insert
 │       └── versions.ts   # Base version tracking per paragraph
 ├── ast/
-│   ├── types.ts          # CsiNode, CsiTree, NodeType — canonical AST types
+│   ├── types.ts          # SpecNode, SpecTree, NodeType — canonical AST types
 │   └── schemas.ts        # Zod schemas for all AST node types
 └── lib/
     ├── decode-text.ts    # Buffer → UTF-8 string, encoding-agnostic (chardet + iconv-lite)
@@ -278,7 +278,7 @@ Every PR must have a single, demonstrable outcome — not "progress toward Phase
 **Rules:**
 - **500 LOC max per PR** (excluding fixtures, migrations, `pnpm-lock.yaml`, `openapi.yaml`, `docs/references/`). CI warns; reviewer enforces.
 - **Each PR = one sub-MVP.** Smallest unit a reviewer can understand, test, and verify in isolation. Examples:
-  - "SEC parser reads `<PRT>`/`<SPT>`/`<TXT>` into CsiNode tree" — sub-MVP
+  - "SEC parser reads `<PRT>`/`<SPT>`/`<TXT>` into SpecNode tree" — sub-MVP
   - "numbering.xml analyzer builds abstractNum → num → pStyle map" — sub-MVP
   - "PostgreSQL migrations create spec + paragraph + version tables" — sub-MVP
   - "Phase 1 complete" — NOT a sub-MVP
@@ -309,7 +309,7 @@ Red → Green → Refactor. No implementation code without a failing test first.
 **What gets tested:**
 - Parser: known .SEC and .docx fixtures → expected AST output (deterministic)
 - Inference engine: paragraph sequences with known ilvl/style/text → expected hierarchy
-- Generator: `renderMarkdown(CsiTree)` → expected Markdown string (pure function, deterministic); AST → DOCX → re-parse round-trip fidelity (Phase 2b)
+- Generator: `renderMarkdown(SpecTree)` → expected Markdown string (pure function, deterministic); AST → DOCX → re-parse round-trip fidelity (Phase 2b)
 - Merge: 3-way diff with known base/theirs/ours → expected conflict set (Phase 3)
 - DB queries: integration tests against real PostgreSQL
 - API: request/response contracts (HTTP status, body shape)
@@ -423,7 +423,7 @@ server.registerResource('name', new ResourceTemplate('specr://path/{id}', { list
 
 `src/generator/markdown.ts` is a pure module (no I/O, no DB) shared between MCP resources and the future DOCX generator.
 
-- `renderMarkdown(tree: CsiTree): string` — full spec as Markdown
+- `renderMarkdown(tree: SpecTree): string` — full spec as Markdown
 - `getLabel(type: NodeType, index: number, partNumber?: number): string` — CSI label for any node type (A./1./a./1)/a), PART N -, N.N). Uses base-26 arithmetic for `pr1`/`pr3`/`pr5` — handles >26 siblings correctly.
 - `note` type nodes always render as `> **[NOTE]** text` regardless of `meta.vanish` — editorial notes are structural metadata for spec writers, not owner-facing content.
 - `meta.vanish` on non-note nodes → returns `''` (suppressed from output).

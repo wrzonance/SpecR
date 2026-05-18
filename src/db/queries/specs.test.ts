@@ -22,7 +22,7 @@ describe('findSpecById', () => {
     vi.resetModules();
   });
 
-  it('returns CsiTree when row found', async () => {
+  it('returns SpecTree when row found', async () => {
     const { pool } = await import('../index.js');
     const { query } = pool;
     vi.mocked(query).mockResolvedValueOnce({

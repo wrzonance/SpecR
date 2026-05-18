@@ -8,7 +8,7 @@ import type {
   SignalConflict,
   StyleMap,
 } from './types.js';
-import type { CsiNode, CsiTree, NodeType } from '../../ast/types.js';
+import type { SpecNode, SpecTree, NodeType } from '../../ast/types.js';
 
 // Canonical normalized ilvl: part=0, article=1, pr1=2, pr2=3, pr3=4, pr4=5, pr5=6
 const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
@@ -163,10 +163,10 @@ type Source = 'arcat' | 'cpi' | 'unknown';
 
 interface StackEntry {
   readonly cp: ClassifiedParagraph;
-  readonly children: CsiNode[];
+  readonly children: SpecNode[];
 }
 
-function makeContinuationNode(cp: ClassifiedParagraph, source: Source): CsiNode {
+function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode {
   return {
     id: uuidv4(),
     type: cp.isVanish ? 'note' : 'continuation',
@@ -176,7 +176,7 @@ function makeContinuationNode(cp: ClassifiedParagraph, source: Source): CsiNode 
   };
 }
 
-function makeNode(cp: ClassifiedParagraph, children: CsiNode[], source: Source): CsiNode {
+function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source): SpecNode {
   return {
     id: uuidv4(),
     type: cp.isVanish ? 'note' : cp.nodeType,
@@ -189,7 +189,7 @@ function makeNode(cp: ClassifiedParagraph, children: CsiNode[], source: Source):
   };
 }
 
-function drainTop(stack: StackEntry[], roots: CsiNode[], source: Source): void {
+function drainTop(stack: StackEntry[], roots: SpecNode[], source: Source): void {
   const popped = stack.pop();
   if (!popped) return;
   const node = makeNode(popped.cp, popped.children, source);
@@ -203,10 +203,10 @@ export function buildTree(
   section: string,
   title: string,
   source: Source
-): CsiTree {
-  const roots: CsiNode[] = [];
+): SpecTree {
+  const roots: SpecNode[] = [];
   const stack: StackEntry[] = [];
-  let lastNonContChildren: CsiNode[] = roots;
+  let lastNonContChildren: SpecNode[] = roots;
 
   for (const cp of classified) {
     if (cp.nodeType === 'continuation') {

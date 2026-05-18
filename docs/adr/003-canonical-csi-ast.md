@@ -12,7 +12,7 @@ An alternative is storing raw OOXML in the database. This preserves every format
 
 ## Decision
 
-A canonical CSI AST (`CsiNode` / `CsiTree`) is the single internal representation. All inputs parse to this AST. All outputs render from this AST. The database stores the AST, not raw OOXML.
+A canonical CSI AST (`SpecNode` / `SpecTree`) is the single internal representation. All inputs parse to this AST. All outputs render from this AST. The database stores the AST, not raw OOXML.
 
 The AST is defined in `src/ast/types.ts` and validated by Zod schemas in `src/ast/schemas.ts`. It captures:
 - `NodeType`: part, article, pr1–pr5, note, continuation

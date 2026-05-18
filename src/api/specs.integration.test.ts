@@ -43,7 +43,7 @@ afterAll(async () => {
 });
 
 describe('GET /specs/:id (integration)', () => {
-  it('returns 200 with CsiTree for existing spec', async () => {
+  it('returns 200 with SpecTree for existing spec', async () => {
     const res = await fetch(`${baseUrl}/specs/${testSpecId}`);
     const body = (await res.json()) as Record<string, unknown>;
     expect(res.status).toBe(200);

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   NodeTypeSchema,
-  CsiNodeMetaSchema,
-  CsiTreeSchema,
+  SpecNodeMetaSchema,
+  SpecTreeSchema,
   PatchSpecBodySchema,
 } from './schemas.js';
 
@@ -34,21 +34,21 @@ describe('NodeTypeSchema', () => {
   });
 });
 
-describe('CsiTreeSchema — valid inputs', () => {
-  it('parses minimal valid CsiTree', () => {
+describe('SpecTreeSchema — valid inputs', () => {
+  it('parses minimal valid SpecTree', () => {
     const input = {
       id: VALID_UUID,
       section: VALID_SECTION,
       title: 'Structured Cabling',
       parts: [],
     };
-    const result = CsiTreeSchema.parse(input);
+    const result = SpecTreeSchema.parse(input);
     expect(result.id).toBe(input.id);
     expect(result.section).toBe(VALID_SECTION);
     expect(result.parts).toEqual([]);
   });
 
-  it('parses CsiTree with nested CsiNode children', () => {
+  it('parses SpecTree with nested SpecNode children', () => {
     const input = {
       id: VALID_UUID,
       section: VALID_SECTION,
@@ -71,17 +71,17 @@ describe('CsiTreeSchema — valid inputs', () => {
         },
       ],
     };
-    const result = CsiTreeSchema.parse(input);
+    const result = SpecTreeSchema.parse(input);
     expect(result.parts).toHaveLength(1);
     expect(result.parts[0]?.children).toHaveLength(1);
     expect(result.parts[0]?.children[0]?.type).toBe('article');
   });
 });
 
-describe('CsiTreeSchema — invalid inputs', () => {
+describe('SpecTreeSchema — invalid inputs', () => {
   it('rejects section not matching DD NN NN format', () => {
     expect(() =>
-      CsiTreeSchema.parse({
+      SpecTreeSchema.parse({
         id: VALID_UUID,
         section: '27210',
         title: 'Bad',
@@ -92,7 +92,7 @@ describe('CsiTreeSchema — invalid inputs', () => {
 
   it('rejects empty title', () => {
     expect(() =>
-      CsiTreeSchema.parse({
+      SpecTreeSchema.parse({
         id: VALID_UUID,
         section: VALID_SECTION,
         title: '',
@@ -102,13 +102,13 @@ describe('CsiTreeSchema — invalid inputs', () => {
   });
 });
 
-describe('CsiNodeMetaSchema', () => {
+describe('SpecNodeMetaSchema', () => {
   it('accepts empty meta', () => {
-    expect(CsiNodeMetaSchema.parse({})).toEqual({});
+    expect(SpecNodeMetaSchema.parse({})).toEqual({});
   });
 
   it('accepts fully populated meta', () => {
-    const result = CsiNodeMetaSchema.parse({
+    const result = SpecNodeMetaSchema.parse({
       vanish: true,
       source: 'ufgs',
       revitParam: 'Manufacturer',
@@ -119,7 +119,7 @@ describe('CsiNodeMetaSchema', () => {
   });
 
   it('rejects unknown source value', () => {
-    expect(() => CsiNodeMetaSchema.parse({ source: 'unknown-vendor' })).toThrow();
+    expect(() => SpecNodeMetaSchema.parse({ source: 'unknown-vendor' })).toThrow();
   });
 });
 

@@ -1,6 +1,6 @@
 import { pool, DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
-import type { CsiNode, CsiTree } from '../../ast/types.js';
+import type { SpecNode, SpecTree } from '../../ast/types.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -18,7 +18,7 @@ interface FlatRow {
 }
 
 function flattenDfs(
-  nodes: readonly CsiNode[],
+  nodes: readonly SpecNode[],
   specId: string,
   parentId: string | null,
   rows: FlatRow[]
@@ -37,7 +37,7 @@ function flattenDfs(
   });
 }
 
-export async function insertTree(tree: CsiTree, specId: string, pool: Queryable): Promise<void> {
+export async function insertTree(tree: SpecTree, specId: string, pool: Queryable): Promise<void> {
   const rows: FlatRow[] = [];
   flattenDfs(tree.parts, specId, null, rows);
 

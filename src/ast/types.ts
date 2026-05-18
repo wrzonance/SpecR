@@ -3,19 +3,19 @@ import { NodeTypeSchema } from './schemas.js';
 
 export type NodeType = z.infer<typeof NodeTypeSchema>;
 
-export interface CsiNodeMeta {
+export interface SpecNodeMeta {
   readonly vanish?: boolean;
   readonly source?: 'ufgs' | 'arcat' | 'cpi' | 'unknown';
   readonly revitParam?: string;
   readonly baseVersion?: number;
 }
 
-export interface CsiNode {
+export interface SpecNode {
   readonly id: string;
   readonly type: NodeType;
   readonly text: string;
-  readonly children: readonly CsiNode[];
-  readonly meta: CsiNodeMeta;
+  readonly children: readonly SpecNode[];
+  readonly meta: SpecNodeMeta;
 }
 
 export type ParseWarningType = 'root-continuation' | 'empty-part' | 'no-structure-found';
@@ -26,11 +26,11 @@ export interface ParseWarning {
   readonly suggestion?: string;
 }
 
-export interface CsiTree {
+export interface SpecTree {
   readonly id: string;
   readonly section: string;
   readonly title: string;
-  readonly parts: readonly CsiNode[];
+  readonly parts: readonly SpecNode[];
   readonly warnings?: readonly ParseWarning[];
 }
 

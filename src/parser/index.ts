@@ -6,7 +6,7 @@ import { extractRefsFromTree } from './refs/index.js';
 import { ParserError } from './error.js';
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { inferSectionMeta } from '../lib/infer-section.js';
-import type { CsiTree, SecRef } from '../ast/types.js';
+import type { SpecTree, SecRef } from '../ast/types.js';
 import type { SectionInference } from '../lib/infer-section.js';
 
 export { parseSec, assertSecSafe } from './sec/index.js';
@@ -18,13 +18,13 @@ export { ParserError } from './error.js';
 export type { SectionInference } from '../lib/infer-section.js';
 
 export interface ParseResult {
-  readonly tree: CsiTree;
+  readonly tree: SpecTree;
   readonly refs: readonly SecRef[];
   readonly sectionInference: SectionInference;
   readonly capabilities?: readonly string[];
 }
 
-function applyInference(tree: CsiTree, inference: SectionInference): CsiTree {
+function applyInference(tree: SpecTree, inference: SectionInference): SpecTree {
   if (inference.method === 'metadata' || inference.confidence === 'none') return tree;
   const section =
     inference.inferredSection !== 'unknown' ? inference.inferredSection : tree.section;

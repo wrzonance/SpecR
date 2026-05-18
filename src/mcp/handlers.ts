@@ -1,6 +1,6 @@
 // src/mcp/handlers.ts
 import path from 'node:path';
-import type { CsiNode, CsiTree, SecRef } from '../ast/types.js';
+import type { SpecNode, SpecTree, SecRef } from '../ast/types.js';
 import {
   searchParagraphs,
   listCsiSections,
@@ -31,7 +31,7 @@ function isToolError(v: unknown): v is ToolError {
   return typeof v === 'object' && v !== null && 'isError' in v;
 }
 
-export function countNodes(nodes: readonly CsiNode[]): number {
+export function countNodes(nodes: readonly SpecNode[]): number {
   return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
 }
 
@@ -71,9 +71,9 @@ async function resolveStandardTitleForMcp(section: string): Promise<string | nul
 }
 
 async function enrichInferenceForMcp(
-  tree: CsiTree,
+  tree: SpecTree,
   refs: readonly SecRef[]
-): Promise<{ tree: CsiTree; refs: readonly SecRef[]; sectionInference: SectionInference }> {
+): Promise<{ tree: SpecTree; refs: readonly SecRef[]; sectionInference: SectionInference }> {
   const raw = inferSectionMeta(tree);
   if (raw.method === 'metadata' || raw.confidence === 'none') {
     return { tree, refs, sectionInference: raw };
@@ -181,7 +181,7 @@ export async function handleGetParagraph({
 async function dispatchParse(
   ext: string,
   buf: Buffer | string
-): Promise<{ tree: CsiTree; refs: readonly SecRef[] } | ToolError> {
+): Promise<{ tree: SpecTree; refs: readonly SecRef[] } | ToolError> {
   const noop = (_stage: string, _pct: number): void => {};
   if (ext === '.sec') {
     if (typeof buf !== 'string') return toolError('invalid .sec payload');

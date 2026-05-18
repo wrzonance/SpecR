@@ -1,13 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
 import { extractRefsFromTree } from './extract.js';
-import type { CsiNode, CsiTree } from '../../ast/types.js';
+import type { SpecNode, SpecTree } from '../../ast/types.js';
 
-function makeNode(type: CsiNode['type'], text: string, children: readonly CsiNode[] = []): CsiNode {
+function makeNode(
+  type: SpecNode['type'],
+  text: string,
+  children: readonly SpecNode[] = []
+): SpecNode {
   return { id: uuidv4(), type, text, children, meta: {} };
 }
 
-function treeWith(parts: readonly CsiNode[]): CsiTree {
+function treeWith(parts: readonly SpecNode[]): SpecTree {
   return { id: uuidv4(), section: '27 41 00', title: 'TEST', parts };
 }
 

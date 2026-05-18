@@ -5,7 +5,7 @@ import { buildNumberingMap, emptyNumberingMap, withArticleIlvl } from './numberi
 import { buildStyleMap } from './styles.js';
 import { parseDocument } from './document.js';
 import { classifyParagraphs, buildTree } from './inference.js';
-import type { CsiTree } from '../../ast/types.js';
+import type { SpecTree } from '../../ast/types.js';
 import type { NumberingMap, StyleMap } from './types.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
@@ -85,7 +85,7 @@ interface ValidEntries {
 function runPipeline(
   entries: ValidEntries,
   onProgress?: (stage: string, pct: number) => void
-): CsiTree {
+): SpecTree {
   onProgress?.('numbering', 25);
   const numberingMap = entries.numberingXml
     ? buildNumberingMap(entries.numberingXml)
@@ -123,7 +123,7 @@ export { assertDocxSafe } from './safety.js';
 export async function parseDocx(
   buffer: Buffer,
   onProgress?: (stage: string, pct: number) => void
-): Promise<CsiTree> {
+): Promise<SpecTree> {
   let zip: JSZip;
   try {
     zip = await JSZip.loadAsync(buffer);

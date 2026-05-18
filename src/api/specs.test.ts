@@ -24,7 +24,7 @@ beforeEach(() => {
 });
 
 describe('getSpecHandler', () => {
-  it('returns 200 with CsiTree when spec exists', async () => {
+  it('returns 200 with SpecTree when spec exists', async () => {
     const { findSpecById } = await import('../db/index.js');
     vi.mocked(findSpecById).mockResolvedValueOnce({
       id: 'abc',

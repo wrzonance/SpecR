@@ -1,9 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { inferSectionMeta } from '../../lib/infer-section.js';
 import type {
-  CsiNode,
-  CsiNodeMeta,
-  CsiTree,
+  SpecNode,
+  SpecNodeMeta,
+  SpecTree,
   NodeType,
   ParseWarning,
   ParseWarningType,
@@ -20,7 +20,7 @@ interface DroppedLine {
 }
 
 interface BuildResult {
-  readonly parts: readonly CsiNode[];
+  readonly parts: readonly SpecNode[];
   readonly droppedAtRoot: readonly DroppedLine[];
   readonly partLineIndex: ReadonlyMap<string, number>;
 }
@@ -45,15 +45,15 @@ const BARE_SECTION_RE = /^(\d{2})\s+(\d{2})\s+(\d{2})(?:\s*[-–—]\s*(.+))?/;
 const MAX_HEADER_SCAN = 10;
 
 interface StackEntry {
-  readonly children: CsiNode[];
+  readonly children: SpecNode[];
   readonly level: number;
 }
 
-function makeMeta(): CsiNodeMeta {
+function makeMeta(): SpecNodeMeta {
   return { source: 'unknown' };
 }
 
-function makeNode(type: NodeType, text: string, children: CsiNode[]): CsiNode {
+function makeNode(type: NodeType, text: string, children: SpecNode[]): SpecNode {
   return { id: uuidv4(), type, text, children, meta: makeMeta() };
 }
 
@@ -81,7 +81,7 @@ function isStructural(type: LineType): type is StructuralType {
 }
 
 export interface ParsedText {
-  readonly tree: CsiTree;
+  readonly tree: SpecTree;
   readonly refs: readonly SecRef[];
   readonly capabilities: readonly string[];
 }
@@ -102,11 +102,11 @@ function pushContinuation(
 function attachStructuralNode(
   stack: StackEntry[],
   cls: { type: StructuralType; text: string; level: number }
-): CsiNode {
+): SpecNode {
   while (stack.length > 1 && stack[stack.length - 1]!.level >= cls.level) {
     stack.pop();
   }
-  const children: CsiNode[] = [];
+  const children: SpecNode[] = [];
   const node = makeNode(cls.type, cls.text, children);
   stack[stack.length - 1]!.children.push(node);
   stack.push({ children: children, level: cls.level });
@@ -114,7 +114,7 @@ function attachStructuralNode(
 }
 
 function buildTree(lines: readonly string[]): BuildResult {
-  const rootChildren: CsiNode[] = [];
+  const rootChildren: SpecNode[] = [];
   const rootEntry: StackEntry = { children: rootChildren, level: -1 };
   const stack: StackEntry[] = [rootEntry];
   const droppedAtRoot: DroppedLine[] = [];
@@ -173,7 +173,7 @@ function detectWarnings(result: BuildResult): readonly ParseWarning[] {
   return warnings;
 }
 
-function applyInference(rawTree: CsiTree): CsiTree {
+function applyInference(rawTree: SpecTree): SpecTree {
   const inference = inferSectionMeta(rawTree);
   const shouldApply = inference.method !== 'metadata' && inference.confidence !== 'none';
   if (!shouldApply) return rawTree;
@@ -190,7 +190,7 @@ export function parseText(text: string): ParsedText {
   const buildResult = buildTree(lines);
   const warnings = detectWarnings(buildResult);
 
-  const rawTree: CsiTree = {
+  const rawTree: SpecTree = {
     id: uuidv4(),
     section: headerMeta?.section ?? 'unknown',
     title: headerMeta?.title ?? 'unknown',

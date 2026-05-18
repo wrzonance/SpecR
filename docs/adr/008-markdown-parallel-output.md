@@ -20,9 +20,9 @@ However, the canonical CSI AST must be designed to support Markdown rendering wi
 - `text` fields store plain text — no OOXML encoding, no numbering prefixes (numbering is structural, not content)
 - `NodeType` maps cleanly to Markdown hierarchy: `part` → `# PART 1`, `article` → `## 1.1`, `pr1` → `**A.**`, etc.
 - `meta.vanish` notes map to Markdown blockquotes or admonitions
-- No OOXML-specific fields in `CsiNode`
+- No OOXML-specific fields in `SpecNode`
 
-The generator module is designed as a renderer: `render(tree: CsiTree, format: 'docx' | 'json'): Buffer | object`. Adding `'markdown'` as a third format option must not require changes to `CsiTree` or `CsiNode` types.
+The generator module is designed as a renderer: `render(tree: SpecTree, format: 'docx' | 'json'): Buffer | object`. Adding `'markdown'` as a third format option must not require changes to `SpecTree` or `SpecNode` types.
 
 ## Consequences
 

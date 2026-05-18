@@ -12,10 +12,10 @@ import { loadFiles } from './file-loader.js';
 import { parse } from '../parser/index.js';
 import { persistParsedSpec, lookupCsiSectionTitle } from '../db/index.js';
 import { readFile } from 'node:fs/promises';
-import type { CsiTree } from '../ast/types.js';
+import type { SpecTree } from '../ast/types.js';
 import type { SectionInference } from './infer-section.js';
 
-const mockTree: CsiTree = { id: 'x', section: '27 10 00', title: 'T', parts: [] };
+const mockTree: SpecTree = { id: 'x', section: '27 10 00', title: 'T', parts: [] };
 const mockBuf = Buffer.from('data');
 
 const metadataInference: SectionInference = {
