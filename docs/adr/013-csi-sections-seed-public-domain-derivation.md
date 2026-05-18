@@ -8,6 +8,8 @@
 
 The `spec_sections` PostgreSQL table (created in `src/db/migrations/001_create_csi_sections.ts` and renamed by `src/db/migrations/009_rename_csi_sections_to_spec_sections.ts`) stores section numbers, titles, and division IDs that follow the CSI MasterFormat® classification scheme. CSI, Inc. asserts copyright on MasterFormat numbers + titles + classifications, and its EULA forbids embedding "any portion of the CSI Product into commercial construction software" without written permission.
 
+The copyright assertion itself is contested under the idea/expression dichotomy ([17 U.S.C. § 102(b)](https://www.law.cornell.edu/uscode/text/17/102)) and *Feist Publications, Inc. v. Rural Telephone Service Co.*, 499 U.S. 340 (1991) — facts are not copyrightable and copyright in a factual compilation reaches only original selection and arrangement, not the underlying facts. SpecR does not adjudicate the question; it avoids it by not sourcing from CSI publications.
+
 SpecR ships open-source under MIT. If the seed contained content lifted from CSI publications, redistribution would violate the EULA regardless of license.
 
 ## Decision
@@ -25,7 +27,7 @@ UFGS is a work of the U.S. Government (USACE / NAVFAC / AFCEC) and is in the pub
 ## Consequences
 
 - SpecR can redistribute the seeded table data without a CSI license, because every row originated in a public-domain UFGS document.
-- The coverage of `spec_sections` is bounded by UFGS coverage: divisions and sections the federal government does not publish are absent from the table. This is acceptable; the seed is reference data for parser/MCP convenience, not an authoritative MasterFormat index.
+- The coverage of `spec_sections` is bounded by UFGS coverage: divisions and sections the federal government does not publish are absent from the table. This is acceptable; the seed is reference data for parser/MCP convenience, not an authoritative MasterFormat index. The deliberate incompleteness of `spec_sections` relative to CSI's published MasterFormat is itself evidence that this seed is a UFGS-derived dataset, not a MasterFormat clone. A reviewer can confirm this by comparing `spec_sections` row coverage against the UFGS corpus under `docs/references/UFGS/`.
 - The MCP tool description `list_sections` and resource `specr://sections` reference "CSI MasterFormat" in nominative use to identify the numbering scheme — this is descriptive fair use, not a claim of authoritative MasterFormat content.
 - Future seed additions MUST come from public-domain or properly-licensed sources only. Adding a CSI-sourced publication, MasterSpec content, or any other copyrighted reference dataset to the seed pipeline would invalidate this ADR and require revisiting.
 
@@ -48,3 +50,9 @@ grep -n "UFGS_DIR\|docs/references" src/db/seed.ts
 - [TRADEMARKS.md](../../TRADEMARKS.md) — full trademark and copyright notices
 - [ADR-012](012-ufgs-as-reference-not-authoritative-csi.md) — UFGS positioned as reference data, not authoritative CSI MasterFormat
 - [docs/references/UFGS/README.md](../references/UFGS/README.md) — UFGS corpus provenance
+
+### Related precedent
+
+- *Feist Publications, Inc. v. Rural Telephone Service Co.*, 499 U.S. 340 (1991) — facts are not copyrightable; copyright in a factual compilation extends only to original selection/arrangement, not the underlying facts. [Cornell LII](https://www.law.cornell.edu/supremecourt/text/499/340)
+- 17 U.S.C. § 102(b) — copyright protection does not extend to any idea, procedure, process, system, method of operation, concept, principle, or discovery. [Cornell LII](https://www.law.cornell.edu/uscode/text/17/102)
+- *Veeck v. Southern Building Code Congress Int'l, Inc.*, 293 F.3d 791 (5th Cir. 2002) (en banc) — held that model building codes lose copyright protection once enacted into law. The opinion's merger reasoning is tied to the codes-as-law context ("the law…can be expressed in only one way"); the court expressly distinguished cases involving private standards merely *referenced* (not adopted) by legislation. MasterFormat is neither enacted as law nor incorporated by reference into one, so Veeck's holding does not reach it. Cited for context on the broader public-domain-via-adoption line of cases, not as authority for SpecR's posture. [Court opinion via OpenJurist](https://openjurist.org/293/f3d/791)
