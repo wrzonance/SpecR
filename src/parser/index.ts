@@ -2,6 +2,7 @@ import path from 'node:path';
 import { parseSec } from './sec/index.js';
 import { parseDocx } from './docx/index.js';
 import { parseText } from './text/index.js';
+import { extractRefsFromTree } from './refs/index.js';
 import { ParserError } from './error.js';
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { inferSectionMeta } from '../lib/infer-section.js';
@@ -12,6 +13,7 @@ export { parseSec, assertSecSafe } from './sec/index.js';
 export type { ParsedSec } from './sec/index.js';
 export { parseDocx, assertDocxSafe } from './docx/index.js';
 export { parseText } from './text/index.js';
+export { extractRefsFromTree } from './refs/index.js';
 export { ParserError } from './error.js';
 export type { SectionInference } from '../lib/infer-section.js';
 
@@ -43,7 +45,9 @@ export async function parse(buffer: Buffer, filename: string): Promise<ParseResu
     const noop = (_stage: string, _pct: number): void => {};
     const tree = await parseDocx(buffer, noop);
     const sectionInference = inferSectionMeta(tree);
-    return { tree: applyInference(tree, sectionInference), refs: [], sectionInference };
+    const finalTree = applyInference(tree, sectionInference);
+    const refs = extractRefsFromTree(finalTree);
+    return { tree: finalTree, refs, sectionInference };
   }
   if (ext === '.txt') {
     const text = decodeTextBuffer(buffer);

@@ -1,32 +1,11 @@
-// Extraction rules and ilvl signal maps as typed data constants.
+// ilvl signal maps and ilvl → NodeType resolution for DOCX parsing.
 // Plain-language descriptions make these surfaceable to LLMs via MCP tools.
 // Rules are data — not code — so agents can inspect, propose, and fix them.
+//
+// Format-agnostic cross-reference extraction (SECTION_REF_RULES, standards
+// orgs) now lives in src/parser/refs/.
 
 import type { NodeType } from '../../ast/types.js';
-
-// ─── Cross-reference extraction rules ────────────────────────────────────────
-
-export interface ExtractionRule {
-  readonly id: string;
-  readonly description: string;
-  readonly pattern: RegExp;
-  readonly targetType: 'section' | 'standard';
-  readonly examples: readonly string[];
-  readonly knownFalsePositives?: readonly string[];
-}
-
-export const SECTION_REF_RULES: readonly ExtractionRule[] = [
-  {
-    id: 'csi-section-keyword',
-    description:
-      'Matches "Section XX XX XX" — standard CSI cross-reference with keyword prefix. ' +
-      'Most reliable pattern; matches how spec writers are trained to cite other sections.',
-    pattern: /\bSection\s+(\d{2})\s+(\d{2})\s+(\d{2})\b/gi,
-    targetType: 'section',
-    examples: ['See Section 09 91 00', 'Section 27 21 00 applies to this work'],
-    knownFalsePositives: [],
-  },
-];
 
 // ─── ilvl → NodeType signal maps ─────────────────────────────────────────────
 // Used for MCP surfacing: agents can read these to understand how ilvl values
