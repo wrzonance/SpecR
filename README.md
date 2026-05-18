@@ -10,7 +10,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 
 ## Status
 
-**Active development — Phase 2b complete, Phase 2c next.**
+**Active development — Phase 1c + 2b complete, Phase 2c next.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -19,12 +19,19 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 1b | Project + TOC management API | ✅ Complete |
 | 1c-i | DOCX `numbering.xml` + `styles.xml` analyzers (Clippit-ported) | ✅ Complete (PR #17) |
 | 1c-ii | 5-signal hierarchy inference engine + `POST /parse` async endpoint | ✅ Complete (PR #21) |
+| 1c-iii | DOCX cross-reference extraction — format-agnostic refs module | ✅ Complete (PR #76) |
+| 1c-iv | Plaintext `.txt` parser — 4-signal hierarchy inference, read-only ingest | ✅ Complete (PR #66) |
+| 1c-v | Plaintext signal hardening — noise-prefix strip + joined-prefix lookahead | ✅ Complete (PR #70) |
+| 1c-vi | Parse-anomaly warnings — `meta.warnings` on `CsiTree`, `parse-warnings` capability | ✅ Complete (PR #75) |
+| 1c-vii | DOCX resilience — LibreOffice fixture + integration tests | ✅ Complete (PR #72) |
+| 1c-viii | Integration test serialization — `fileParallelism: false` deflakes shared-DB race | ✅ Complete (PR #74) |
+| 1c-sec-i | MCP rate limiting on `POST /mcp` — DoS hardening for `parse_document` / `generate_docx` | ✅ Complete (PR #69) |
+| 1c-sec-ii | Parse worker concurrency cap — piscina worker pool | ✅ Complete (PR #71) |
 | 2a | MCP server (Streamable HTTP, read-only tools + resources) + Markdown renderer | ✅ Complete (PR #24) |
 | 2b-i | AST → DOCX generator + 7-level CSI multilevel numbering | ✅ Complete (PR #26) |
 | 2b-ii | `w:sdt` content control UUID injection (round-trip anchors) | ✅ Complete (PR #51) |
 | 2b-iii | MCP tools: `get_paragraph`, `parse_document`, `generate_docx` | ✅ Complete (PR #55) |
 | 2b-iv | Universal file loader: `load:files`, `seed:corpus`, `load_files` MCP tool | ✅ Complete (PR #58) |
-| 1c-iii | Plaintext `.txt` parser — 4-signal hierarchy inference, read-only ingest | ✅ Complete (PR #66) |
 | 2c | Firm style template engine (issue #20) | Planned |
 | 3 | Round-trip merge engine | Planned |
 | 4 | Revit integration | Planned |
@@ -45,6 +52,9 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - **DOCX cross-reference extraction** — format-agnostic refs module (`src/parser/refs/`) walks the canonical `CsiTree` after inference; extracts CSI section refs (`Section XX XX XX`) and standards-org refs for ASTM, ANSI, IEEE, NFPA, UL, NEMA, NEC, TIA, BICSI, ASME, ASHRAE. Refs flow into `spec_references` and participate in `GET /projects/:id/references/broken` cascade detection.
 - **Extraction rules as typed data constants** — numbering, style, and signal rules are defined as MCP-readable data structures, not code, enabling LLM agent exploration and parse explainability.
 - **Plaintext `.txt` parser** — infers CSI hierarchy from text signals: `PART N` headings, `N.N` article numbers, `A.`/`1.`/`a.`/`1)`/`a)` prefix patterns, and leading-whitespace indentation depth as fallback. Section and title extracted from `SECTION XX XX XX` header line (scans first 10 non-blank lines); falls back to `inferSectionMeta`. Read-only — no round-trip merge anchors. `POST /parse` accepts `.txt` uploads; `load_files` MCP tool and `pnpm load:files` CLI accept `**/*.txt` globs; `parse_document` MCP tool accepts `.txt` filenames. Parse job result and MCP response include `capabilities: ["read-only"]`.
+- **Plaintext signal hardening** — noise prefixes on structural headings (`] PART 2 PRODUCTS`, en-dash variants, joined `PART2PRODUCTS`) detected via prefix-strip + lookahead pass before signal classification. Prevents silent fall-through to `continuation` when bracket-bleed or formatting artifacts pollute the leading characters. (PR #70)
+- **Parse-anomaly warnings** — text parser emits structured `ParseWarning[]` on the returned `CsiTree` when anomalies are detected: `root-continuation` (continuations dropped before first structural heading; capped at 5), `empty-part` (a `part` node with zero article children, with `"line N: <text>"` hint), `no-structure-found` (zero parts). Parse job result adds `"parse-warnings"` to `capabilities` when any warning fires; MCP `parse_document` returns the same envelope. Observability layer; nothing persisted to DB. (PR #75)
+- **DOCX resilience suite** — integration fixture coverage for LibreOffice-exported DOCX, in addition to ARCAT and CPI vendor templates. Numbered-list false-positive in LibreOffice exports fixed (Signal 1 over-eager match). (PR #72)
 
 ### Generator
 
@@ -70,7 +80,7 @@ The async `POST /parse` pattern (202 + poll) is intentional — inference over l
 
 ### MCP Server
 
-- `POST /mcp` — MCP JSON-RPC endpoint (Streamable HTTP, stateless, integrated into Express)
+- `POST /mcp` — MCP JSON-RPC endpoint (Streamable HTTP, stateless, integrated into Express). Rate-limited via `express-rate-limit` (DoS hardening; `parse_document` and `generate_docx` are CPU/memory-bound and require the gate). (PR #69)
 - **Tool: `search_library(query, division?, limit?)`** — ILIKE paragraph search with optional CSI division filter. Returns `{ paragraphId, text, nodeType, specId, specSection, specTitle }[]`
 - **Tool: `get_spec(specId)`** — full spec tree + cross-reference resolution. Returns `{ tree: CsiTree, references: SpecReference[] }` where each reference has `isResolved: boolean` (whether target spec is loaded in DB)
 - **Tool: `list_sections(division?)`** — CSI MasterFormat section index with `inDatabase` flag
@@ -95,11 +105,10 @@ Configure in Claude Code via `.mcp.json` in the repo root (points to `http://loc
 - Round-trip merge engine (Phase 3)
 - Revit integration (Phase 4)
 - Web UI with progress bars, live preview, diff/merge review (Phase 5)
-- DOCX cross-reference extraction (Phase 1c-iii)
-- Security hardening: concurrency cap on parse workers (piscina) — follow-up to issue #22
 - MCP write tools (`add_paragraph`, `update_paragraph`, etc.) — Phase 5
 - MCP stateful sessions — Phase 5 upgrade
 - MCP prompts (`review_spec`, `suggest_paragraphs`) — Phase 6
+- `persistTree` / `persistSpec` consolidation — REST `POST /parse` path ignores extracted refs; MCP / file-loader paths do not. Tracked as a follow-up to issue #53.
 
 ## The Core Technical Challenge
 
