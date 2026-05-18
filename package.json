@@ -1,7 +1,7 @@
 {
   "name": "specr",
   "version": "0.1.0",
-  "description": "Headless REST API for CSI MasterFormat specification document automation",
+  "description": "Headless REST API for round-trip automation of CSI MasterFormat®-compatible specification documents (UFGS, generic DOCX). Independent project; not affiliated with CSI.",
   "type": "module",
   "engines": {
     "node": ">=22.0.0",
