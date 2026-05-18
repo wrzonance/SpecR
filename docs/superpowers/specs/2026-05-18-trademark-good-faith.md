@@ -47,7 +47,7 @@
 ### Task A1: Create TRADEMARKS.md
 
 **Files:**
-- Create: `/home/adam/github/SpecR/TRADEMARKS.md`
+- Create: `TRADEMARKS.md`
 
 - [ ] **Step 1: Write the file**
 
@@ -197,7 +197,7 @@ git commit -m "docs(readme): add registered marks on first use + link TRADEMARKS
 ### Task B1: Write ADR-013 documenting UFGS-only seed derivation
 
 **Files:**
-- Create: `/home/adam/github/SpecR/docs/adr/013-csi-sections-seed-public-domain-derivation.md`
+- Create: `docs/adr/013-csi-sections-seed-public-domain-derivation.md`
 
 - [ ] **Step 1: Write the ADR**
 

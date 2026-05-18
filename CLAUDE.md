@@ -67,11 +67,11 @@ src/
 │       ├── inference.ts  # Multi-signal hierarchy inference engine (5 signals)
 │       └── heuristics.ts # Text-content + indentation heuristics
 ├── generator/
-│   ├── markdown.ts       # SpecTree → Markdown renderer (renderMarkdown, getLabel) — shared with MCP + future DOCX
-│   ├── index.ts          # AST → DOCX (dolanmiu/docx) — Phase 2b
+│   ├── markdown.ts       # SpecTree → Markdown renderer (renderMarkdown, getLabel) — shared with MCP + DOCX generator
+│   ├── index.ts          # AST → DOCX (dolanmiu/docx)
 │   ├── error.ts          # GeneratorError
-│   ├── numbering.ts      # CSI multilevel numbering engine — Phase 2b
-│   └── controls.ts       # w:sdt UUID content control injection — Phase 2b
+│   ├── numbering.ts      # CSI multilevel numbering engine
+│   └── controls.ts       # w:sdt UUID content control injection
 ├── mcp/
 │   ├── server.ts         # registerMcpRoutes(app) — stateless Streamable HTTP, one McpServer per request
 │   ├── tools.ts          # registerTools(server): search_library, get_spec, list_sections
