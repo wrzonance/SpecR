@@ -138,4 +138,57 @@ describe('classifyLine', () => {
     const r = classifyLine('SECTION 03 30 00');
     expect(r.type).toBe('header');
   });
+
+  // Fix 1: Noise-prefix strip
+  it('classifyLine: ] PART 2 — strips specifier-note bracket before classification', () => {
+    const r = classifyLine('] PART 2 PRODUCTS');
+    expect(r.type).toBe('part');
+    expect(r.text).toBe('PRODUCTS');
+  });
+
+  it('classifyLine: ]] PART 3 — strips double bracket', () => {
+    const r = classifyLine(']] PART 3 EXECUTION');
+    expect(r.type).toBe('part');
+  });
+
+  it('classifyLine: [_____] PART 3 — strips blank placeholder', () => {
+    const r = classifyLine('[_____] PART 3 EXECUTION');
+    expect(r.type).toBe('part');
+  });
+
+  it('classifyLine: ][ 1.1 SCOPE — strips close bracket; open bracket keeps it as continuation', () => {
+    const r = classifyLine('][ 1.1 SCOPE');
+    expect(r.type).toBe('continuation');
+  });
+
+  it('classifyLine: [ open bracket line stays continuation', () => {
+    const r = classifyLine('[ Optional specifier note content');
+    expect(r.type).toBe('continuation');
+  });
+
+  // Fix 2: Joined-prefix lookahead
+  it('classifyLine: 1.3QUALITY — joined article prefix without space', () => {
+    const r = classifyLine('1.3QUALITY ASSURANCE');
+    expect(r.type).toBe('article');
+    expect(r.text).toBe('QUALITY ASSURANCE');
+  });
+
+  it('classifyLine: B.Included — joined pr1 prefix without space', () => {
+    const r = classifyLine('B.Included in this section');
+    expect(r.type).toBe('pr1');
+    expect(r.text).toBe('Included in this section');
+  });
+
+  it('classifyLine: 1.Manufacturers — joined pr2 prefix without space', () => {
+    const r = classifyLine('1.Manufacturers cut sheets');
+    expect(r.type).toBe('pr2');
+    expect(r.text).toBe('Manufacturers cut sheets');
+  });
+
+  // KNOWN AMBIGUITY: single-uppercase-letter-period at line start — U.S. Army would
+  // match pr1; accepted as implausible in CSI spec content
+  it('classifyLine: U.S. — single uppercase letter before period matches pr1 (known ambiguity)', () => {
+    const r = classifyLine('U.S. Army standard');
+    expect(r.type).toBe('pr1');
+  });
 });

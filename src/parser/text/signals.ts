@@ -10,7 +10,12 @@ export interface LineClassification {
 
 const SECTION_HEADER_RE = /^SECTION\s+\d{2}\s+\d{2}\s+\d{2}/i;
 const PART_RE = /^PART\s+\d+/i;
-const ARTICLE_RE = /^\d+\.\d+\s+\S/;
+const ARTICLE_RE = /^\d+\.\d+(?:\s+|(?=\S))/;
+const NOISE_PREFIX_RE = /^(?:\]\]?|\[_+\])\s*/;
+
+function stripNoisePrefixes(s: string): string {
+  return s.replace(NOISE_PREFIX_RE, '');
+}
 
 interface PrSignal {
   readonly re: RegExp;
@@ -19,8 +24,8 @@ interface PrSignal {
 }
 
 const PR_SIGNALS: readonly PrSignal[] = [
-  { re: /^[A-Z]\.\s+\S/, type: 'pr1', level: 2 },
-  { re: /^\d+\.\s+\S/, type: 'pr2', level: 3 },
+  { re: /^[A-Z]\.(?:\s+|\b)/, type: 'pr1', level: 2 },
+  { re: /^\d+\.(?:\s+|(?=[^\d\s]))/, type: 'pr2', level: 3 },
   { re: /^[a-z]\.\s+\S/, type: 'pr3', level: 4 },
   { re: /^\d+\)\s+\S/, type: 'pr4', level: 5 },
   { re: /^[a-z]\)\s+\S/, type: 'pr5', level: 6 },
@@ -31,11 +36,11 @@ function stripPartPrefix(s: string): string {
 }
 
 function stripArticlePrefix(s: string): string {
-  return s.replace(/^\d+\.\d+\s+/, '').trim();
+  return s.replace(/^\d+\.\d+\s*/, '').trim();
 }
 
 function stripPrPrefix(s: string): string {
-  return s.replace(/^(?:[A-Za-z][.)]|\d+[.)])\s+/, '').trim();
+  return s.replace(/^(?:[A-Za-z][.)]|\d+[.)])\s*/, '').trim();
 }
 
 function indentLevel(line: string): number {
@@ -62,7 +67,7 @@ export function classifyLine(line: string): LineClassification {
     return { type: 'blank', text: '', level: -1 };
   }
 
-  const trimmed = line.trim();
+  const trimmed = stripNoisePrefixes(line.trim());
 
   if (SECTION_HEADER_RE.test(trimmed)) {
     return { type: 'header', text: trimmed, level: -1 };
