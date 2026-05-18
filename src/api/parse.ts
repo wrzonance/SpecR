@@ -9,6 +9,7 @@ import type { WorkerOutput } from '../lib/parse-worker.js';
 import { pool, createSpec, insertTree } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import type { CsiNode, CsiTree } from '../ast/types.js';
+import { ParseWarningSchema } from '../ast/schemas.js';
 
 interface ParseBody {
   readonly section?: string;
@@ -111,6 +112,7 @@ const workerOutputSchema = z.object({
     section: z.string(),
     title: z.string(),
     parts: z.array(z.unknown()),
+    warnings: z.array(ParseWarningSchema).optional(),
   }),
   capabilities: z.array(z.string()).optional(),
 });
@@ -152,6 +154,7 @@ async function processParseJob(
         title: finalTree.title,
         nodeCount,
         ...(capabilities !== undefined ? { capabilities } : {}),
+        ...(finalTree.warnings !== undefined ? { warnings: finalTree.warnings } : {}),
       },
     });
   } catch (err) {

@@ -31,11 +31,24 @@ export const CsiNodeSchema: z.ZodType<CsiNode> = z.lazy(() =>
   })
 );
 
+export const ParseWarningTypeSchema = z.enum([
+  'root-continuation',
+  'empty-part',
+  'no-structure-found',
+]);
+
+export const ParseWarningSchema = z.object({
+  type: ParseWarningTypeSchema,
+  lineHint: z.string().exactOptional(),
+  suggestion: z.string().exactOptional(),
+});
+
 export const CsiTreeSchema = z.object({
   id: z.uuid(),
   section: z.string().regex(/^\d{2} \d{2} \d{2}$/),
   title: z.string().check(z.minLength(1)),
   parts: z.array(CsiNodeSchema),
+  warnings: z.array(ParseWarningSchema).exactOptional(),
 });
 
 export const PatchSpecBodySchema = z.object({
