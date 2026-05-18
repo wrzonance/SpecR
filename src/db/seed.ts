@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 
+// Provenance: see docs/adr/013-csi-sections-seed-public-domain-derivation.md
 const UFGS_DIR = join(process.cwd(), 'docs/references/UFGS');
 
 export interface SectionRecord {

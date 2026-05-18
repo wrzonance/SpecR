@@ -26,3 +26,7 @@ Key elements:
 - `<TAI>` — Service branch tailoring options
 - `<RID>` — Reference identifiers
 - `<SRF>` — Section cross-references
+
+## Use in SpecR
+
+UFGS is the **sole** source for the `csi_sections` reference table seed. See [ADR-013](../../adr/013-csi-sections-seed-public-domain-derivation.md).
