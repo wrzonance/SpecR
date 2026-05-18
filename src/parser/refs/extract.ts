@@ -23,11 +23,11 @@ export function extractRefsFromTree(
   rules: readonly ExtractionRule[] = DEFAULT_RULES
 ): readonly SecRef[] {
   const refs: SecRef[] = [];
+  const compiledRules: readonly { readonly rule: ExtractionRule; readonly pattern: RegExp }[] =
+    rules.map((rule) => ({ rule, pattern: toGlobalPattern(rule) }));
   const walk = (node: CsiNode): void => {
-    for (const rule of rules) {
-      // Fresh iterator per (rule, node) — global regex state is per-iterator
-      // in matchAll, so this is safe and deterministic.
-      for (const match of node.text.matchAll(rule.pattern)) {
+    for (const { rule, pattern } of compiledRules) {
+      for (const match of node.text.matchAll(pattern)) {
         refs.push(buildRef(node.id, rule, match));
       }
     }
@@ -35,6 +35,13 @@ export function extractRefsFromTree(
   };
   tree.parts.forEach(walk);
   return refs;
+}
+
+// matchAll throws TypeError on non-global RegExp. DEFAULT_RULES already use the
+// `g` flag, but caller-provided rules may not — coerce defensively.
+function toGlobalPattern(rule: ExtractionRule): RegExp {
+  if (rule.pattern.global) return rule.pattern;
+  return new RegExp(rule.pattern.source, `${rule.pattern.flags}g`);
 }
 
 function buildRef(sourceNodeId: string, rule: ExtractionRule, match: RegExpMatchArray): SecRef {

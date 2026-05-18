@@ -80,6 +80,21 @@ describe('extractRefsFromTree', () => {
     expect(refs.every((r) => r.sourceNodeId === node.id)).toBe(true);
   });
 
+  it('caller-provided non-global rule: coerced to global, does not throw', () => {
+    const nonGlobalRule = {
+      id: 'test-non-global',
+      description: 'non-global pattern',
+      pattern: /\bASTM\s+([A-Z]\d+)\b/i,
+      targetType: 'standard' as const,
+      examples: ['ASTM C150'],
+    };
+    const node = makeNode('pr1', 'See ASTM C150 and ASTM A615 both.');
+    const tree = treeWith([makeNode('part', 'PART 1', [node])]);
+    const refs = extractRefsFromTree(tree, [nonGlobalRule]);
+    expect(refs).toHaveLength(2);
+    expect(refs.map((r) => r.referenceText)).toEqual(['ASTM C150', 'ASTM A615']);
+  });
+
   it('rules parameter override: empty rules array → no refs', () => {
     const node = makeNode('pr1', 'See Section 09 91 00 and ASTM C150.');
     const tree = treeWith([makeNode('part', 'PART 1', [node])]);
