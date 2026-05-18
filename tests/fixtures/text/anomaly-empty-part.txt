@@ -1,0 +1,23 @@
+SECTION 09 91 00 - PAINTING
+
+PART 1 - GENERAL
+
+1.1 SCOPE
+
+This section covers painting and coating systems for the project.
+
+1.2 REFERENCES
+
+ASTM D16 Standard Terminology for Paint, Related Coatings.
+
+PART 2 - PRODUCTS
+
+PART 3 - EXECUTION
+
+3.1 INSTALLATION
+
+Install all coatings per manufacturer instructions.
+
+3.2 INSPECTION
+
+Inspect surfaces before applying first coat.

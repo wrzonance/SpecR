@@ -111,6 +111,7 @@ const workerOutputSchema = z.object({
     section: z.string(),
     title: z.string(),
     parts: z.array(z.unknown()),
+    warnings: z.array(z.unknown()).optional(),
   }),
   capabilities: z.array(z.string()).optional(),
 });
@@ -152,6 +153,7 @@ async function processParseJob(
         title: finalTree.title,
         nodeCount,
         ...(capabilities !== undefined ? { capabilities } : {}),
+        ...(finalTree.warnings !== undefined ? { warnings: finalTree.warnings } : {}),
       },
     });
   } catch (err) {

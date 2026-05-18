@@ -18,11 +18,20 @@ export interface CsiNode {
   readonly meta: CsiNodeMeta;
 }
 
+export type ParseWarningType = 'root-continuation' | 'empty-part' | 'no-structure-found';
+
+export interface ParseWarning {
+  readonly type: ParseWarningType;
+  readonly lineHint?: string;
+  readonly suggestion?: string;
+}
+
 export interface CsiTree {
   readonly id: string;
   readonly section: string;
   readonly title: string;
   readonly parts: readonly CsiNode[];
+  readonly warnings?: readonly ParseWarning[];
 }
 
 export interface SecRef {
