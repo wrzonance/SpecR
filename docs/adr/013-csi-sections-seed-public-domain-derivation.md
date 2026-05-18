@@ -1,0 +1,48 @@
+# ADR-013: csi_sections seed data derives exclusively from public-domain UFGS
+
+## Status: Accepted
+
+## Context
+
+The `csi_sections` PostgreSQL table (created in `src/db/migrations/001_create_csi_sections.ts`) stores section numbers, titles, and division IDs that follow the CSI MasterFormat® classification scheme. CSI, Inc. asserts copyright on MasterFormat numbers + titles + classifications, and its EULA forbids embedding "any portion of the CSI Product into commercial construction software" without written permission.
+
+SpecR ships open-source under MIT. If the seed contained content lifted from CSI publications, redistribution would violate the EULA regardless of license.
+
+## Decision
+
+The `csi_sections` seed is derived **exclusively** from the public-domain Unified Facilities Guide Specifications (UFGS) corpus under `docs/references/UFGS/`. Specifically:
+
+1. `src/db/seed.ts` reads `.SEC` files from `docs/references/UFGS/DIVISION_*/`.
+2. It extracts `<SCN>SECTION NN NN NN</SCN>` and `<STL>Title</STL>` tags via regex.
+3. It upserts `(section_number, title, division)` triples into `csi_sections`.
+
+No other data source feeds this table. The `docs/references/ARCAT/` and `docs/references/MANUFACTURER_CPI/` reference directories contain README-only stubs documenting how to obtain those third-party copyrighted specs for local testing; their content is **never committed** and **never feeds the seed**.
+
+UFGS is a work of the U.S. Government (USACE / NAVFAC / AFCEC) and is in the public domain under [17 USC § 105](https://www.law.cornell.edu/uscode/text/17/105). The numbering scheme used by UFGS follows CSI MasterFormat conventions under a separate arrangement between the federal government and CSI; SpecR inherits the public-domain status by parsing UFGS rather than CSI's own publications.
+
+## Consequences
+
+- SpecR can redistribute the seeded table data without a CSI license, because every row originated in a public-domain UFGS document.
+- The coverage of `csi_sections` is bounded by UFGS coverage: divisions and sections the federal government does not publish are absent from the table. This is acceptable; the seed is reference data for parser/MCP convenience, not an authoritative MasterFormat index.
+- The MCP tool description `list_sections` and resource `specr://sections` reference "CSI MasterFormat" in nominative use to identify the numbering scheme — this is descriptive fair use, not a claim of authoritative MasterFormat content.
+- Future seed additions MUST come from public-domain or properly-licensed sources only. Adding a CSI-sourced publication, MasterSpec content, or any other copyrighted reference dataset to the seed pipeline would invalidate this ADR and require revisiting.
+
+## Verification
+
+```bash
+# Confirm src/db/seed.ts is the only writer to csi_sections
+grep -rn 'INSERT INTO csi_sections' src/
+
+# Confirm ARCAT and CPI dirs document "Not Included" status
+cat docs/references/ARCAT/README.md
+cat docs/references/MANUFACTURER_CPI/README.md
+
+# Confirm seed reads from UFGS only
+grep -n "UFGS_DIR\|docs/references" src/db/seed.ts
+```
+
+## Related
+
+- [TRADEMARKS.md](../../TRADEMARKS.md) — full trademark and copyright notices
+- [ADR-012](012-ufgs-as-reference-not-authoritative-csi.md) — UFGS positioned as reference data, not authoritative CSI MasterFormat
+- [docs/references/UFGS/README.md](../references/UFGS/README.md) — UFGS corpus provenance
