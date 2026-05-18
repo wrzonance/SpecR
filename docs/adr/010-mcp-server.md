@@ -12,13 +12,13 @@ The REST API (ADR-002) already defines the capabilities. MCP is a second interfa
 
 ### What MCP unlocks for SpecR specifically
 
-**Paragraph library search with semantic context.** An AI spec writer could ask "find all paragraphs about seismic bracing requirements in Division 27" and get structured `CsiNode` results back — not a full-text search dump, but a traversable tree fragment. This requires the library to be queryable by an AI, which MCP enables.
+**Paragraph library search with semantic context.** An AI spec writer could ask "find all paragraphs about seismic bracing requirements in Division 27" and get structured `SpecNode` results back — not a full-text search dump, but a traversable tree fragment. This requires the library to be queryable by an AI, which MCP enables.
 
 **AI-assisted merge conflict resolution.** When `POST /specs/:id/diff` returns a conflict, the spec writer can ask an AI to compare the base, theirs, and ours versions and recommend which to accept. The AI needs to read the conflict data directly — not have it pasted into a chat. An MCP resource exposing the diff result makes this a single tool call.
 
 **Spec completeness and cross-reference checking.** A spec reviewer could ask Claude to verify that every referenced section number in Division 27 21 00 has a corresponding spec loaded in the database, or that Part 2 product paragraphs reference equipment that exists in Part 1 submittals. This requires reading multiple spec trees at once — a natural MCP multi-resource operation.
 
-**Natural language library management.** "Add a new paragraph under Article 2.2 of spec 27 21 00 specifying cable management per TIA-568" — the AI calls `search_library` to find the right anchor, then calls a write tool with the new `CsiNode`. No web UI required for simple edits.
+**Natural language library management.** "Add a new paragraph under Article 2.2 of spec 27 21 00 specifying cable management per TIA-568" — the AI calls `search_library` to find the right anchor, then calls a write tool with the new `SpecNode`. No web UI required for simple edits.
 
 **Revit parameter mapping assistance.** When setting up Revit parameter → spec paragraph mappings (Phase 4), an AI assistant could browse the spec tree via MCP resources, identify the correct paragraph UUIDs, and generate the mapping configuration — a task that would otherwise require a developer to manually inspect the database.
 
@@ -29,10 +29,10 @@ SpecR exposes an MCP server (`src/mcp/`) as a thin layer over the same service l
 ### MCP Tools (callable functions)
 
 ```text
-search_library(query, division?, section?, limit?)  → CsiNode[]
+search_library(query, division?, section?, limit?)  → SpecNode[]
   Search paragraph library by text content and optional CSI filters.
 
-get_spec(spec_id)                                   → CsiTree
+get_spec(spec_id)                                   → SpecTree
   Return full spec tree as canonical CSI AST.
 
 get_spec_diff(spec_id)                              → DiffResult
@@ -41,7 +41,7 @@ get_spec_diff(spec_id)                              → DiffResult
 list_sections(division?)                            → CsiSection[]
   List CSI MasterFormat sections, optionally filtered by division.
 
-get_paragraph(paragraph_id)                         → { node: CsiNode, ancestors: CsiNode[] }
+get_paragraph(paragraph_id)                         → { node: SpecNode, ancestors: SpecNode[] }
   Return a paragraph with its full ancestor chain (for context).
 
 parse_document(filename, content_base64)            → { spec_id, section, title, node_count }
@@ -76,7 +76,7 @@ suggest_paragraphs(spec_id, article_id, context)
 
 - MCP server is a separate entry point (`src/mcp/server.ts`) using the `@modelcontextprotocol/sdk` package. It does NOT share the Express HTTP server — it runs as a stdio or SSE MCP server. (**Superseded — see Decision Update below.**)
 - The service layer (`src/parser/`, `src/generator/`, `src/merge/`, `src/db/`) is called directly from both `src/api/` (REST) and `src/mcp/` (MCP). No duplication of business logic.
-- **Markdown output becomes a Phase 2 priority**, not Phase 6. MCP resources that return raw JSON AST are technically correct but LLM-unfriendly. Markdown rendering of `CsiTree` is a prerequisite for useful MCP resources.
+- **Markdown output becomes a Phase 2 priority**, not Phase 6. MCP resources that return raw JSON AST are technically correct but LLM-unfriendly. Markdown rendering of `SpecTree` is a prerequisite for useful MCP resources.
 - The canonical AST (ADR-003) — especially the decision to store plain text without OOXML encoding — is what makes MCP viable. An LLM cannot reason about `<w:r><w:t>A.</w:t></w:r>` but can reason about `{ type: 'pr1', text: 'Manufacturer: Corning' }`.
 - Authentication for MCP tools follows the same token-based auth as the REST API. The MCP server receives a bearer token in its initialization arguments and validates it against the same auth layer.
 - MCP tool input validation uses the same Zod schemas as the REST API middleware — no separate validation layer.
