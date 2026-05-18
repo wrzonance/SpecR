@@ -42,44 +42,32 @@ describe('integration: DOCX cross-reference extraction', () => {
   });
 
   it('extracts CSI section ref "Section 09 91 00"', () => {
-    const sections = refs
-      .filter((r) => r.targetType === 'section')
-      .map((r) => r.targetSpecSection);
+    const sections = refs.filter((r) => r.targetType === 'section').map((r) => r.targetSpecSection);
     expect(sections).toContain('09 91 00');
   });
 
   it('extracts second CSI section ref "Section 26 05 19"', () => {
-    const sections = refs
-      .filter((r) => r.targetType === 'section')
-      .map((r) => r.targetSpecSection);
+    const sections = refs.filter((r) => r.targetType === 'section').map((r) => r.targetSpecSection);
     expect(sections).toContain('26 05 19');
   });
 
   it('extracts ASTM standard ref "ASTM C150"', () => {
-    const codes = refs
-      .filter((r) => r.targetType === 'standard')
-      .map((r) => r.standardCode);
+    const codes = refs.filter((r) => r.targetType === 'standard').map((r) => r.standardCode);
     expect(codes).toContain('ASTM C150');
   });
 
   it('extracts NFPA standard ref "NFPA 70"', () => {
-    const codes = refs
-      .filter((r) => r.targetType === 'standard')
-      .map((r) => r.standardCode);
+    const codes = refs.filter((r) => r.targetType === 'standard').map((r) => r.standardCode);
     expect(codes).toContain('NFPA 70');
   });
 
   it('extracts IEEE standard ref "IEEE 802.3"', () => {
-    const codes = refs
-      .filter((r) => r.targetType === 'standard')
-      .map((r) => r.standardCode);
+    const codes = refs.filter((r) => r.targetType === 'standard').map((r) => r.standardCode);
     expect(codes).toContain('IEEE 802.3');
   });
 
   it('extracts UL standard ref "UL 94"', () => {
-    const codes = refs
-      .filter((r) => r.targetType === 'standard')
-      .map((r) => r.standardCode);
+    const codes = refs.filter((r) => r.targetType === 'standard').map((r) => r.standardCode);
     expect(codes).toContain('UL 94');
   });
 

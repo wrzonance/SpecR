@@ -37,11 +37,7 @@ export function extractRefsFromTree(
   return refs;
 }
 
-function buildRef(
-  sourceNodeId: string,
-  rule: ExtractionRule,
-  match: RegExpMatchArray
-): SecRef {
+function buildRef(sourceNodeId: string, rule: ExtractionRule, match: RegExpMatchArray): SecRef {
   if (rule.targetType === 'section') {
     return {
       sourceNodeId,

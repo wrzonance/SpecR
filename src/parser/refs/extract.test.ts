@@ -3,11 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { extractRefsFromTree } from './extract.js';
 import type { CsiNode, CsiTree } from '../../ast/types.js';
 
-function makeNode(
-  type: CsiNode['type'],
-  text: string,
-  children: readonly CsiNode[] = []
-): CsiNode {
+function makeNode(type: CsiNode['type'], text: string, children: readonly CsiNode[] = []): CsiNode {
   return { id: uuidv4(), type, text, children, meta: {} };
 }
 
@@ -41,18 +37,13 @@ describe('extractRefsFromTree', () => {
     const node = makeNode('pr1', 'Per NFPA 70 and IEEE 802.3, install per code.');
     const tree = treeWith([makeNode('part', 'PART 1', [node])]);
     const refs = extractRefsFromTree(tree);
-    const codes = refs
-      .filter((r) => r.targetType === 'standard')
-      .map((r) => r.standardCode);
+    const codes = refs.filter((r) => r.targetType === 'standard').map((r) => r.standardCode);
     expect(codes).toContain('NFPA 70');
     expect(codes).toContain('IEEE 802.3');
   });
 
   it('extracts both section and standard refs from same node', () => {
-    const node = makeNode(
-      'pr1',
-      'See Section 09 91 00 and comply with ASTM C150.'
-    );
+    const node = makeNode('pr1', 'See Section 09 91 00 and comply with ASTM C150.');
     const tree = treeWith([makeNode('part', 'PART 1', [node])]);
     const refs = extractRefsFromTree(tree);
     expect(refs.some((r) => r.targetType === 'section')).toBe(true);
@@ -104,9 +95,7 @@ describe('extractRefsFromTree', () => {
     const tree = treeWith([makeNode('part', 'PART 1', [node])]);
     const refs = extractRefsFromTree(tree);
     const orgs = new Set(
-      refs
-        .filter((r) => r.targetType === 'standard')
-        .map((r) => r.standardCode?.split(' ')[0])
+      refs.filter((r) => r.targetType === 'standard').map((r) => r.standardCode?.split(' ')[0])
     );
     for (const expected of [
       'ASTM',

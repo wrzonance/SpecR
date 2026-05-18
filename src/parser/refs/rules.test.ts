@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  SECTION_REF_RULES,
-  STANDARD_ORG_PATTERNS,
-  buildStandardRefRules,
-} from './rules.js';
+import { SECTION_REF_RULES, STANDARD_ORG_PATTERNS, buildStandardRefRules } from './rules.js';
 
 describe('SECTION_REF_RULES', () => {
   it('csi-section-keyword: each example string matches the pattern', () => {
@@ -88,9 +84,9 @@ describe('buildStandardRefRules', () => {
   it('pattern captures org code as group 1 and identifier as group 2', () => {
     const rules = buildStandardRefRules(STANDARD_ORG_PATTERNS);
     const astmRule = rules.find((r) => r.id === 'standard-astm')!;
-    // Non-global clone so match returns capture groups.
+    // Non-global clone so capture groups are stable across runs.
     const reSingle = new RegExp(astmRule.pattern.source);
-    const capture = 'Comply with ASTM C150 throughout.'.match(reSingle);
+    const capture = reSingle.exec('Comply with ASTM C150 throughout.');
     expect(capture).not.toBeNull();
     expect(capture![1]).toBe('ASTM');
     expect(capture![2]).toBe('C150');
