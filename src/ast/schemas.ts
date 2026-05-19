@@ -31,13 +31,22 @@ export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>
   })
 );
 
-export const SecRefSchema = z.object({
-  sourceNodeId: z.string(),
-  targetType: z.enum(['section', 'standard']),
-  targetSpecSection: z.string().exactOptional(),
-  standardCode: z.string().exactOptional(),
-  referenceText: z.string(),
-});
+export const SecRefSchema = z.discriminatedUnion('targetType', [
+  z.object({
+    sourceNodeId: z.uuid(),
+    targetType: z.literal('section'),
+    targetSpecSection: z.string().check(z.minLength(1)),
+    standardCode: z.never().optional(),
+    referenceText: z.string(),
+  }),
+  z.object({
+    sourceNodeId: z.uuid(),
+    targetType: z.literal('standard'),
+    standardCode: z.string().check(z.minLength(1)),
+    targetSpecSection: z.never().optional(),
+    referenceText: z.string(),
+  }),
+]);
 
 export const ParseWarningTypeSchema = z.enum([
   'root-continuation',

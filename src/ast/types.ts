@@ -34,10 +34,18 @@ export interface SpecTree {
   readonly warnings?: readonly ParseWarning[];
 }
 
-export interface SecRef {
-  readonly sourceNodeId: string;
-  readonly targetType: 'section' | 'standard';
-  readonly targetSpecSection?: string;
-  readonly standardCode?: string;
-  readonly referenceText: string;
-}
+export type SecRef =
+  | {
+      readonly sourceNodeId: string;
+      readonly targetType: 'section';
+      readonly targetSpecSection: string;
+      readonly standardCode?: undefined;
+      readonly referenceText: string;
+    }
+  | {
+      readonly sourceNodeId: string;
+      readonly targetType: 'standard';
+      readonly standardCode: string;
+      readonly targetSpecSection?: undefined;
+      readonly referenceText: string;
+    };

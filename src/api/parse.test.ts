@@ -173,7 +173,7 @@ describe('processParseJob refs persistence (#53)', () => {
 
     const refs = [
       {
-        sourceNodeId: 'node-1',
+        sourceNodeId: 'a1b2c3d4-e5f6-4789-8abc-def012345678',
         targetType: 'section' as const,
         targetSpecSection: '01 33 00',
         referenceText: 'Section 01 33 00 SUBMITTAL PROCEDURES',
