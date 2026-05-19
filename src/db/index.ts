@@ -57,3 +57,11 @@ export type {
 } from './queries/projects.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
 export type { ParagraphSearchResult, SpecSectionResult } from './queries/search.js';
+export {
+  getTemplate,
+  getTemplateByName,
+  listTemplates,
+  createTemplate,
+  upsertStyleRule,
+} from './queries/templates.js';
+export type { StyleRule, Template, TemplateMeta } from './queries/templates.js';

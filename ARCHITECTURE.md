@@ -312,6 +312,31 @@ CREATE TABLE project_specs (
   PRIMARY KEY (project_id, spec_id)
 );
 
+-- Style templates: per-firm DOCX rendering rules
+-- (Phase 2c-i — schema only; generator wiring lands in #32)
+CREATE TABLE style_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL UNIQUE,         -- 'UFGS-Default', 'Acme-Firm', ...
+  owner TEXT,                        -- NULL for built-in templates
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Per-NodeType style rules (one row per node_type per template)
+CREATE TABLE style_rules (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  template_id UUID NOT NULL REFERENCES style_templates(id) ON DELETE CASCADE,
+  node_type VARCHAR(20) NOT NULL,    -- 'part' | 'article' | 'pr1'..'pr5'
+  font_family TEXT,
+  font_size_half_pt INTEGER,         -- OOXML native unit (20 = 10pt)
+  bold BOOLEAN NOT NULL DEFAULT false,
+  caps BOOLEAN NOT NULL DEFAULT false,
+  indent_twips INTEGER,              -- OOXML native unit (1440 twips = 1in)
+  space_before_twips INTEGER,
+  space_after_twips INTEGER,
+  numbering_format TEXT,             -- 'PART %1 -', '%1.%2', '%3.', ...
+  UNIQUE (template_id, node_type)
+);
+
 -- Cross-references extracted at parse time
 -- target_spec_id resolved lazily (NULL = unresolved or broken)
 CREATE TABLE spec_references (
