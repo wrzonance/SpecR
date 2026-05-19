@@ -6,6 +6,7 @@ import {
   listTemplates,
   createTemplate,
   upsertStyleRule,
+  type StyleNodeType,
   type StyleRule,
 } from './templates.js';
 
@@ -95,7 +96,7 @@ describe('createTemplate', () => {
 });
 
 describe('upsertStyleRule', () => {
-  function ruleFor(nodeType: string, indent: number): StyleRule {
+  function ruleFor(nodeType: StyleNodeType, indent: number): StyleRule {
     return {
       nodeType,
       fontFamily: 'Arial',

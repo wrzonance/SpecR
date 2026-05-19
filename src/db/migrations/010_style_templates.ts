@@ -33,6 +33,21 @@ export const up = (pgm: MigrationBuilder): void => {
   pgm.addConstraint('style_rules', 'style_rules_template_node_type_key', {
     unique: ['template_id', 'node_type'],
   });
+  // Enforce the StyleNodeType domain at the DB boundary — mirrors the TS union
+  // exported from src/db/queries/templates.ts. Keep the two in sync.
+  pgm.addConstraint('style_rules', 'style_rules_node_type_check', {
+    check: `node_type IN ('part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5')`,
+  });
+  // OOXML units are unsigned by definition: half-points and twips cannot be negative.
+  // Defends against bad data from future template imports / API writes.
+  pgm.addConstraint('style_rules', 'style_rules_non_negative_ooxml_units_check', {
+    check: `
+      (font_size_half_pt IS NULL OR font_size_half_pt >= 0) AND
+      (indent_twips IS NULL OR indent_twips >= 0) AND
+      (space_before_twips IS NULL OR space_before_twips >= 0) AND
+      (space_after_twips IS NULL OR space_after_twips >= 0)
+    `,
+  });
   pgm.createIndex('style_rules', 'template_id', { name: 'style_rules_template_idx' });
 };
 

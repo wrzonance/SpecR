@@ -35,8 +35,10 @@ import type { MigrationBuilder } from 'node-pg-migrate';
  * no value, we write NULL — never fabricate.
  */
 
+type SeedNodeType = 'part' | 'article' | 'pr1' | 'pr2' | 'pr3' | 'pr4' | 'pr5';
+
 interface SeedRow {
-  readonly nodeType: string;
+  readonly nodeType: SeedNodeType;
   readonly fontFamily: string | null;
   readonly fontSizeHalfPt: number | null;
   readonly bold: boolean;
@@ -58,7 +60,7 @@ const ROWS: readonly SeedRow[] = [
 ];
 
 function cn(
-  nodeType: string,
+  nodeType: SeedNodeType,
   bold: boolean,
   caps: boolean,
   indent: number | null,
