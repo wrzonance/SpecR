@@ -327,7 +327,59 @@ CREATE TABLE spec_references (
   is_broken           BOOLEAN DEFAULT false, -- set true when target removed
   created_at          TIMESTAMPTZ DEFAULT now()
 );
+
+-- Revit parameter mappings (Phase 4a). One Revit family instance fans out to
+-- many paragraphs across many specs. The natural key uses NULLS NOT DISTINCT
+-- (PG 15+) so family-instance-level rows (NULL component_role) collide
+-- correctly under idempotent upsert. spec_id is intentionally NOT denormalized
+-- here — derive via paragraphs.spec_id when filtering by spec.
+CREATE TABLE revit_parameter_mappings (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  paragraph_id         UUID NOT NULL REFERENCES paragraphs(id) ON DELETE CASCADE,
+  revit_instance_id    TEXT NOT NULL,       -- Revit element GUID, stable per element
+  revit_component_role TEXT,                -- 'faceplate' | 'jack' | 'conduit' | ...
+                                            -- NULL = family-instance-level param
+  revit_param          TEXT NOT NULL,       -- e.g. 'Manufacturer', 'PortCount'
+  direction            VARCHAR(20) NOT NULL DEFAULT 'to_spec'
+    CHECK (direction IN ('to_spec','to_revit','bidirectional','spec_only')),
+  transform_type       VARCHAR(20) NOT NULL
+    CHECK (transform_type IN ('replace','placeholder','append','prepend')),
+  transform_config     JSONB,               -- Zod-validated in app layer (#47)
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE NULLS NOT DISTINCT
+    (paragraph_id, revit_instance_id, revit_component_role, revit_param)
+);
 ```
+
+### Composite Revit identity
+
+A single Revit family instance (e.g., "Data Outlet A") is rarely one parameter source — it contains multiple sub-components (faceplate, jack, conduit, backbox, cable), each with its own Revit parameters. The schema treats `(revit_instance_id, revit_component_role, revit_param)` as the source identity, with `revit_component_role = NULL` reserved for parameters defined at the family-instance level itself.
+
+That same instance also fans out across **multiple specs** — a Data Outlet touches both Division 26 (pathways) and Division 27 (telecommunications). One Revit instance ID therefore appears on many `paragraph_id`s in different specs, retrieved via `getMappingsByInstance(...)`.
+
+### Direction enum reserves bidirectional sync
+
+`direction` enumerates four edge directions:
+
+| Value | Meaning | Phase |
+|-------|---------|-------|
+| `to_spec` (default) | Revit value populates the spec paragraph | 4a — only direction implemented today |
+| `to_revit` | Spec-authoritative value pushed back to Revit | reserved for #85 |
+| `bidirectional` | Mutual sync — diff resolution required | reserved for #85 |
+| `spec_only` | Spec is authoritative; Revit is advisory / read-only | reserved for #85 |
+
+The check constraint blocks invalid values now so the write path in #47 can rely on the enum surface without re-validating.
+
+### Deferred work building on this schema
+
+| Concern | Tracked by |
+|---------|-----------|
+| `PATCH /specs/:id/paragraphs/:nodeId` endpoint that consumes mappings | #47 |
+| Revit add-in (C#/.NET) scaffold that writes mappings via the REST API | #48 |
+| Family-category → required MasterFormat sections registry + project preflight | #82 |
+| Family-type-level mappings (`revit_family_type_id`) | #83 |
+| Multi-Revit-model support (`revit_model_id`) | #84 |
+| Bidirectional sync write path (`to_revit` / `bidirectional` / `spec_only`) | #85 |
 
 ## Cross-Reference Awareness
 
