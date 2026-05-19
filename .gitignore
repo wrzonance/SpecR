@@ -38,6 +38,9 @@ tests/fixtures/text/cpi-*.txt
 tests/fixtures/text/arcat-*.txt
 tests/fixtures/text/manufacturer-*.txt
 
+# UFGS source fixtures — extracted at implementation time, values encoded in migrations
+docs/references/UFGS/**/*.docx
+
 # Test output
 coverage/
 

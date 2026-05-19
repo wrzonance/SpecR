@@ -2,9 +2,9 @@ import { Document, Paragraph, TextRun, Packer } from 'docx';
 import { wrapWithControl, SdtBlock } from './controls.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
 import { GeneratorError } from './error.js';
-import { buildCsiNumberingConfig, getNodeLevel } from './numbering.js';
+import { buildSpecNumberingConfig, getNodeLevel } from './numbering.js';
 
-const CSI_NUM_REF = 'csi-numbering' as const;
+const SPEC_NUM_REF = 'spec-numbering' as const;
 
 function noteParagraph(text: string): Paragraph {
   return new Paragraph({ children: [new TextRun(`[NOTE] ${text}`)] });
@@ -12,7 +12,7 @@ function noteParagraph(text: string): Paragraph {
 
 function numberedParagraph(text: string, level: number): Paragraph {
   return new Paragraph({
-    numbering: { reference: CSI_NUM_REF, level },
+    numbering: { reference: SPEC_NUM_REF, level },
     children: [new TextRun(text)],
   });
 }
@@ -52,7 +52,7 @@ export async function generateDocx(tree: SpecTree): Promise<Buffer> {
     ];
     collectParagraphs(tree.parts, children);
     const doc = new Document({
-      numbering: { config: [buildCsiNumberingConfig()] },
+      numbering: { config: [buildSpecNumberingConfig()] },
       sections: [{ properties: {}, children }],
     });
     return await Packer.toBuffer(doc);

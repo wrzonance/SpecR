@@ -22,9 +22,9 @@ export function getNodeLevel(type: NodeType): number | null {
   }
 }
 
-export function buildCsiNumberingConfig() {
+export function buildSpecNumberingConfig() {
   return {
-    reference: 'csi-numbering' as const,
+    reference: 'spec-numbering' as const,
     levels: [
       { level: 0, format: LevelFormat.DECIMAL, text: 'PART %1 -', alignment: AlignmentType.START },
       { level: 1, format: LevelFormat.DECIMAL, text: '%1.%2', alignment: AlignmentType.START },
