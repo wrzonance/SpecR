@@ -57,3 +57,16 @@ export type {
 } from './queries/projects.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
 export type { ParagraphSearchResult, SpecSectionResult } from './queries/search.js';
+export {
+  upsertMapping,
+  deleteMapping,
+  getMappingsBySpec,
+  getMappingsByInstance,
+  getMappingsByParagraph,
+} from './queries/revit.js';
+export type {
+  RevitMapping,
+  RevitMappingInput,
+  RevitDirection,
+  RevitTransformType,
+} from './queries/revit.js';
