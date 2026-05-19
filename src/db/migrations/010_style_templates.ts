@@ -7,6 +7,11 @@ export const up = (pgm: MigrationBuilder): void => {
     owner: { type: 'text' },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
+  // Reject empty / whitespace-only template names — semantically invalid and
+  // would silently break getTemplateByName() lookups.
+  pgm.addConstraint('style_templates', 'style_templates_name_non_empty_check', {
+    check: `length(trim(name)) > 0`,
+  });
 
   pgm.createTable('style_rules', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
