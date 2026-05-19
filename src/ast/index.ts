@@ -4,6 +4,7 @@ export {
   SpecNodeMetaSchema,
   SpecNodeSchema,
   SpecTreeSchema,
+  SecRefSchema,
   PatchSpecBodySchema,
   CreateProjectBodySchema,
   AddSpecToProjectBodySchema,

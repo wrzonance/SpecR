@@ -31,6 +31,14 @@ export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>
   })
 );
 
+export const SecRefSchema = z.object({
+  sourceNodeId: z.string(),
+  targetType: z.enum(['section', 'standard']),
+  targetSpecSection: z.string().exactOptional(),
+  standardCode: z.string().exactOptional(),
+  referenceText: z.string(),
+});
+
 export const ParseWarningTypeSchema = z.enum([
   'root-continuation',
   'empty-part',
