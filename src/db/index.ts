@@ -66,3 +66,16 @@ export {
 } from './queries/templates.js';
 export { STYLE_NODE_TYPES } from './queries/templates.js';
 export type { StyleNodeType, StyleRule, Template, TemplateMeta } from './queries/templates.js';
+export {
+  upsertMapping,
+  deleteMapping,
+  getMappingsBySpec,
+  getMappingsByInstance,
+  getMappingsByParagraph,
+} from './queries/revit.js';
+export type {
+  RevitMapping,
+  RevitMappingInput,
+  RevitDirection,
+  RevitTransformType,
+} from './queries/revit.js';
