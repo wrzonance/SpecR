@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { NodeTypeSchema } from './schemas.js';
+import { NodeTypeSchema, SecRefSchema } from './schemas.js';
 
 export type NodeType = z.infer<typeof NodeTypeSchema>;
 
@@ -34,18 +34,4 @@ export interface SpecTree {
   readonly warnings?: readonly ParseWarning[];
 }
 
-export type SecRef =
-  | {
-      readonly sourceNodeId: string;
-      readonly targetType: 'section';
-      readonly targetSpecSection: string;
-      readonly standardCode?: undefined;
-      readonly referenceText: string;
-    }
-  | {
-      readonly sourceNodeId: string;
-      readonly targetType: 'standard';
-      readonly standardCode: string;
-      readonly targetSpecSection?: undefined;
-      readonly referenceText: string;
-    };
+export type SecRef = z.infer<typeof SecRefSchema>;
