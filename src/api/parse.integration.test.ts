@@ -151,6 +151,71 @@ describe('POST /parse integration', () => {
   });
 });
 
+describe('POST /parse — refs persistence + replace-on-reparse (#53)', () => {
+  async function postSecFixture(): Promise<string> {
+    const secContent = readFileSync(
+      resolve('docs/references/UFGS/DIVISION_01/01_11_00.SEC'),
+      'utf-8'
+    );
+    const form = new FormData();
+    form.append('file', new Blob([secContent], { type: 'text/plain' }), '01_11_00.sec');
+    const postRes = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+    expect(postRes.status).toBe(202);
+    const postBody = (await postRes.json()) as { success: boolean; data: { jobId: string } };
+    const job = await waitForJob(postBody.data.jobId);
+    expect(job.status).toBe('complete');
+    const specId = job.result?.specId;
+    if (!specId) throw new Error('expected specId in completed job result');
+    return specId;
+  }
+
+  it('persists spec_references rows on API path (SEC fixture with SRF tags)', async () => {
+    // Ensure clean slate — delete any spec from a previous test run that used the same fixture.
+    await pool.query(`DELETE FROM specs WHERE section = '01 11 00' AND source = 'ufgs'`);
+    const specId = await postSecFixture();
+    cleanupIds.push(specId);
+
+    const refsResult = await pool.query<{ count: string }>(
+      'SELECT COUNT(*) AS count FROM spec_references WHERE source_spec_id = $1',
+      [specId]
+    );
+    const refCount = parseInt(refsResult.rows[0]?.count ?? '0', 10);
+    expect(refCount).toBeGreaterThan(0);
+  }, 30_000);
+
+  it('re-POST same fixture returns same specId (upsert) and replaces paragraphs + refs', async () => {
+    await pool.query(`DELETE FROM specs WHERE section = '01 11 00' AND source = 'ufgs'`);
+    const firstSpecId = await postSecFixture();
+    cleanupIds.push(firstSpecId);
+
+    const firstParaIds = await pool.query<{ id: string }>(
+      'SELECT id FROM paragraphs WHERE spec_id = $1 ORDER BY id',
+      [firstSpecId]
+    );
+    expect(firstParaIds.rows.length).toBeGreaterThan(0);
+
+    const secondSpecId = await postSecFixture();
+    // Upsert: same row, same id.
+    expect(secondSpecId).toBe(firstSpecId);
+
+    const secondParaIds = await pool.query<{ id: string }>(
+      'SELECT id FROM paragraphs WHERE spec_id = $1 ORDER BY id',
+      [secondSpecId]
+    );
+    // Replace-on-reparse: old paragraph ids gone, new ids present.
+    const firstSet = new Set(firstParaIds.rows.map((r) => r.id));
+    const overlap = secondParaIds.rows.filter((r) => firstSet.has(r.id));
+    expect(overlap).toEqual([]);
+
+    // Refs still present after re-upload (deleted + reinserted).
+    const refsResult = await pool.query<{ count: string }>(
+      'SELECT COUNT(*) AS count FROM spec_references WHERE source_spec_id = $1',
+      [secondSpecId]
+    );
+    expect(parseInt(refsResult.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
+  }, 60_000);
+});
+
 describe('POST /parse — .txt upload', () => {
   it('accepts .txt file and returns 202 with jobId', async () => {
     const fixture = readFileSync(resolve('tests/fixtures/text/numbered-prefixes.txt'));

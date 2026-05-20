@@ -9,7 +9,9 @@ vi.mock('../parser/index.js', () => ({
 }));
 vi.mock('../lib/parse-pool.js', () => ({
   parsePool: {
-    run: vi.fn().mockResolvedValue({ tree: { id: '', section: 'test', title: 'T', parts: [] } }),
+    run: vi
+      .fn()
+      .mockResolvedValue({ tree: { id: '', section: 'test', title: 'T', parts: [] }, refs: [] }),
   },
 }));
 vi.mock('../lib/jobs.js', () => ({
@@ -18,9 +20,7 @@ vi.mock('../lib/jobs.js', () => ({
   getJob: vi.fn(),
 }));
 vi.mock('../db/index.js', () => ({
-  pool: { connect: vi.fn(), query: vi.fn() },
-  createSpec: vi.fn(),
-  insertTree: vi.fn(),
+  persistParsedSpec: vi.fn().mockResolvedValue('persisted-spec-id'),
 }));
 vi.mock('../lib/logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
@@ -35,6 +35,7 @@ function makeRes(): Response {
 
 beforeEach(() => {
   vi.resetModules();
+  vi.clearAllMocks();
 });
 
 describe('parseHandler', () => {
@@ -161,5 +162,122 @@ describe('parseJobHandler', () => {
     const res = makeRes();
     parseJobHandler(req, res);
     expect(res.status).toHaveBeenCalledWith(200);
+  });
+});
+
+describe('processParseJob refs persistence (#53)', () => {
+  it('forwards populated refs from worker output to persistParsedSpec', async () => {
+    const { parsePool } = await import('../lib/parse-pool.js');
+    const { persistParsedSpec } = await import('../db/index.js');
+    const { updateJob } = await import('../lib/jobs.js');
+
+    const refs = [
+      {
+        sourceNodeId: 'a1b2c3d4-e5f6-4789-8abc-def012345678',
+        targetType: 'section' as const,
+        targetSpecSection: '01 33 00',
+        referenceText: 'Section 01 33 00 SUBMITTAL PROCEDURES',
+      },
+    ];
+    vi.mocked(parsePool.run).mockResolvedValueOnce({
+      tree: {
+        id: '00000000-0000-0000-0000-000000000001',
+        section: '01 11 00',
+        title: 'T',
+        parts: [],
+      },
+      refs,
+    });
+    vi.mocked(persistParsedSpec).mockResolvedValueOnce('persisted-spec-id');
+    vi.mocked(updateJob).mockImplementation(() => {});
+
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: {
+        originalname: 'spec.sec',
+        mimetype: 'text/xml',
+        buffer: Buffer.from('<?xml?>', 'utf-8'),
+      },
+      body: {},
+    } as unknown as Request;
+    await parseHandler(req, makeRes());
+    // wait for the async processParseJob to run
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(persistParsedSpec).toHaveBeenCalledTimes(1);
+    const callArg = vi.mocked(persistParsedSpec).mock.calls[0]?.[0];
+    expect(callArg?.tree.section).toBe('01 11 00');
+    expect(callArg?.refs).toEqual(refs);
+  });
+
+  it('defaults refs to [] when worker omits the field (legacy worker output)', async () => {
+    const { parsePool } = await import('../lib/parse-pool.js');
+    const { persistParsedSpec } = await import('../db/index.js');
+    const { updateJob } = await import('../lib/jobs.js');
+
+    // Worker omits refs entirely — schema .default([]) must fill it in.
+    vi.mocked(parsePool.run).mockResolvedValueOnce({
+      tree: {
+        id: '00000000-0000-0000-0000-000000000002',
+        section: '01 11 00',
+        title: 'T',
+        parts: [],
+      },
+    });
+    vi.mocked(persistParsedSpec).mockResolvedValueOnce('persisted-spec-id-2');
+    vi.mocked(updateJob).mockImplementation(() => {});
+
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: {
+        originalname: 'spec.sec',
+        mimetype: 'text/xml',
+        buffer: Buffer.from('<?xml?>', 'utf-8'),
+      },
+      body: {},
+    } as unknown as Request;
+    await parseHandler(req, makeRes());
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(persistParsedSpec).toHaveBeenCalledTimes(1);
+    const callArg = vi.mocked(persistParsedSpec).mock.calls[0]?.[0];
+    expect(callArg?.refs).toEqual([]);
+  });
+
+  it('forwards empty refs array unchanged when worker emits refs: []', async () => {
+    const { parsePool } = await import('../lib/parse-pool.js');
+    const { persistParsedSpec } = await import('../db/index.js');
+    const { updateJob } = await import('../lib/jobs.js');
+
+    vi.mocked(parsePool.run).mockResolvedValueOnce({
+      tree: {
+        id: '00000000-0000-0000-0000-000000000003',
+        section: '01 11 00',
+        title: 'T',
+        parts: [],
+      },
+      refs: [],
+    });
+    vi.mocked(persistParsedSpec).mockResolvedValueOnce('persisted-spec-id-3');
+    vi.mocked(updateJob).mockImplementation(() => {});
+
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: {
+        originalname: 'spec.sec',
+        mimetype: 'text/xml',
+        buffer: Buffer.from('<?xml?>', 'utf-8'),
+      },
+      body: {},
+    } as unknown as Request;
+    await parseHandler(req, makeRes());
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(persistParsedSpec).toHaveBeenCalledTimes(1);
+    const callArg = vi.mocked(persistParsedSpec).mock.calls[0]?.[0];
+    expect(callArg?.refs).toEqual([]);
   });
 });

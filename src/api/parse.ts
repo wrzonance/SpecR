@@ -6,10 +6,10 @@ import { assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { createJob, updateJob, getJob, type ParseStage } from '../lib/jobs.js';
 import { parsePool } from '../lib/parse-pool.js';
 import type { WorkerOutput } from '../lib/parse-worker.js';
-import { pool, createSpec, insertTree } from '../db/index.js';
+import { persistParsedSpec } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
-import { ParseWarningSchema } from '../ast/schemas.js';
+import { ParseWarningSchema, SecRefSchema } from '../ast/schemas.js';
 
 interface ParseBody {
   readonly section?: string;
@@ -88,24 +88,6 @@ function countNodes(nodes: readonly SpecNode[]): number {
   return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
 }
 
-async function persistTree(tree: SpecTree): Promise<string> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const source = tree.parts[0]?.meta.source ?? 'unknown';
-    const specId = await createSpec({ section: tree.section, title: tree.title, source }, client);
-    const treeWithId: SpecTree = { ...tree, id: specId };
-    await insertTree(treeWithId, specId, client);
-    await client.query('COMMIT');
-    return specId;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
 const workerOutputSchema = z.object({
   tree: z.object({
     id: z.string(),
@@ -114,6 +96,7 @@ const workerOutputSchema = z.object({
     parts: z.array(z.unknown()),
     warnings: z.array(ParseWarningSchema).optional(),
   }),
+  refs: z.array(SecRefSchema).default([]),
   capabilities: z.array(z.string()).optional(),
 });
 
@@ -131,7 +114,7 @@ async function processParseJob(
     onProgress('extracting', 10);
     // Buffer from multer may reference a shared pool — structured clone (no transferList) is safe.
     const workerRaw: unknown = await parsePool.run({ buffer, ext });
-    const { tree, capabilities } = workerOutputSchema.parse(workerRaw) as WorkerOutput;
+    const { tree, refs, capabilities } = workerOutputSchema.parse(workerRaw) as WorkerOutput;
     onProgress('classifying', 75);
 
     const finalTree: SpecTree = {
@@ -141,7 +124,7 @@ async function processParseJob(
     };
 
     updateJob(jobId, { stage: 'persisting', pct: 90, status: 'running' });
-    const specId = await persistTree(finalTree);
+    const specId = await persistParsedSpec({ tree: finalTree, refs });
     const nodeCount = countNodes(finalTree.parts);
 
     updateJob(jobId, {
