@@ -1,6 +1,6 @@
 # SpecR
 
-Headless REST API for CSI® MasterFormat®-compatible specification document automation with round-trip DOCX support. Independent project; not affiliated with CSI. See [TRADEMARKS.md](TRADEMARKS.md).
+Headless REST API for CSI® MasterFormat®-compatible specification document automation with round-trip DOCX support. Independent project; not affiliated with CSI.
 
 ## What Is This
 
@@ -201,8 +201,3 @@ pnpm migrate      # Run pending DB migrations
 - `docs/references/ARCAT/README.md` — Download instructions for ARCAT guide specs (copyrighted, not included)
 - `docs/references/MANUFACTURER_CPI/README.md` — Download instructions for Chatsworth Products Inc. (CPI) telecom equipment manufacturer specs (copyrighted, not included)
 
-## Trademarks
-
-CSI® and MasterFormat® are registered trademarks of The Construction Specifications Institute, Inc. References to these marks throughout SpecR are nominative fair use — used to identify the document formats and classification systems SpecR processes. SpecR is an independent project, not affiliated with or endorsed by CSI. See [TRADEMARKS.md](TRADEMARKS.md) for full attribution of all third-party marks and copyrighted works.
-
-Third-party MIT attributions for upstream code (Clippit / Open-Xml-PowerTools) are preserved in [`NOTICES`](./NOTICES).

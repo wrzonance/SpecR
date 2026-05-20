@@ -47,7 +47,6 @@ grep -n "UFGS_DIR\|docs/references" src/db/seed.ts
 
 ## Related
 
-- [TRADEMARKS.md](../../TRADEMARKS.md) — full trademark and copyright notices
 - [ADR-012](012-ufgs-as-reference-not-authoritative-csi.md) — UFGS positioned as reference data, not authoritative CSI MasterFormat
 - [docs/references/UFGS/README.md](../references/UFGS/README.md) — UFGS corpus provenance
 
