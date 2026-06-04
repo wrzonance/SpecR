@@ -26,7 +26,7 @@ Repo becomes a pnpm workspace as part of 7a.
 
 ## Dependency graph
 
-```
+```text
 #35, #36 (Phase 3) ─────────────┐
                                  ▼
 7-core ──► 7c ──┐            ┌► 7e

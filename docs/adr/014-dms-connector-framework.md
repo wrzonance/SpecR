@@ -52,7 +52,7 @@ A small framework defines the generic contract; each DMS is a **plugin** that
 implements it. ProjectWise is the **reference plugin** and ships first. Package
 topology (the repo becomes a pnpm workspace; today it is a single package):
 
-```
+```text
 packages/
   connector-core/          framework: interfaces, capability registry, sync
                            orchestrator, SpecrClient (REST), generic endpoint,
@@ -140,7 +140,7 @@ Two clarifications that prevent confusion:
 
 Version-out (7c) and round-trip (7e) must never blindly `push`:
 
-```
+```text
 before push(doc, bytes):
   if has('access-control')  → assertWritable(doc)           # caller identity may edit?
   if has('lifecycle-state') → getLifecycleState(doc).isWritable?  # not mid-approval?
