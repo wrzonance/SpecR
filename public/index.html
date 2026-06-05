@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SpecR — Section Linkage Console</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230e2a3a'/%3E%3Cpath d='M6 22 Q 16 6 26 22' stroke='%2369c7e4' stroke-width='2' fill='none'/%3E%3Ccircle cx='6' cy='22' r='3' fill='%23ffb224'/%3E%3Ccircle cx='26' cy='22' r='3' fill='%23ffb224'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;600;700;800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <div id="grid-overlay" aria-hidden="true"></div>
+
+    <header class="masthead">
+      <div class="masthead-brand">
+        <h1 class="brand-mark">Spec<span class="brand-r">R</span></h1>
+        <p class="brand-sub">SECTION LINKAGE CONSOLE</p>
+      </div>
+      <div class="title-block" role="presentation">
+        <div class="tb-cell"><span class="tb-key">PROJECT</span><span class="tb-val">HIERARCHY + CROSS-REF DEMO</span></div>
+        <div class="tb-cell"><span class="tb-key">DATE</span><span class="tb-val" id="tb-date"></span></div>
+        <div class="tb-cell"><span class="tb-key">ENGINE</span><span class="tb-val">MULTI-SIGNAL INFERENCE</span></div>
+        <div class="tb-cell"><span class="tb-key">SCALE</span><span class="tb-val">NTS</span></div>
+        <div class="tb-cell tb-health"><span class="tb-key">API</span><span class="tb-val" id="health-dot">●&nbsp;CHECKING</span></div>
+      </div>
+    </header>
+
+    <section class="ref-web" id="ref-web-section">
+      <div class="band-rule">
+        <h2 class="band-title">REFERENCE WEB</h2>
+        <p class="band-hint" id="web-hint">arcs draw as sections cite one another</p>
+      </div>
+      <div id="ref-web-canvas" class="ref-web-canvas"></div>
+    </section>
+
+    <main id="spec-board" class="spec-board">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-reticle" aria-hidden="true">
+          <span class="ret-h"></span><span class="ret-v"></span>
+        </div>
+        <h2>DROP SPEC SECTIONS ANYWHERE</h2>
+        <p>
+          Drag in <code>.SEC</code> (UFGS / SpecsIntact), <code>.DOCX</code>, or <code>.TXT</code> files —
+          SpecR parses each into its canonical CSI hierarchy and extracts every
+          <em>Section&nbsp;XX&nbsp;XX&nbsp;XX</em> cross-reference.
+        </p>
+        <p class="empty-tip">
+          Try the interlinked set under <code>docs/references/UFGS/</code>:
+          <code>09_29_00</code> cites <code>09_22_00</code>, <code>07_92_00</code>,
+          <code>05_40_00</code> &amp; <code>01_33_00</code> — drop them together and watch the web knit itself.
+        </p>
+        <button class="pick-btn" id="pick-btn" type="button">— OR BROWSE FOR FILES —</button>
+      </div>
+    </main>
+
+    <input type="file" id="file-input" multiple accept=".sec,.SEC,.docx,.txt" hidden />
+
+    <button class="add-fab" id="add-fab" type="button" hidden>+ ADD SECTIONS</button>
+
+    <aside class="upload-dock" id="upload-dock" hidden>
+      <h3 class="dock-title">INGEST QUEUE</h3>
+      <ul id="upload-list" class="upload-list"></ul>
+    </aside>
+
+    <div class="drop-veil" id="drop-veil" hidden>
+      <div class="veil-frame">
+        <span class="corner c-tl"></span><span class="corner c-tr"></span>
+        <span class="corner c-bl"></span><span class="corner c-br"></span>
+        <p class="veil-text">RELEASE&nbsp;TO&nbsp;INGEST</p>
+      </div>
+    </div>
+
+    <div id="toast-rack" class="toast-rack" aria-live="polite"></div>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
