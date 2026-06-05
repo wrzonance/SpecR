@@ -218,6 +218,13 @@ function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source)
   };
 }
 
+// Empty paragraphs are layout spacing, not content — keeping them produced
+// blank root nodes that rendered as phantom PARTs.
+function appendContinuation(cp: ClassifiedParagraph, target: SpecNode[], source: Source): void {
+  if (cp.paragraph.text.trim().length === 0) return;
+  target.push(makeContinuationNode(cp, source));
+}
+
 function drainTop(stack: StackEntry[], roots: SpecNode[], source: Source): void {
   const popped = stack.pop();
   if (!popped) return;
@@ -281,7 +288,7 @@ export function buildTree(
 
   for (const cp of classified) {
     if (cp.nodeType === 'continuation') {
-      lastNonContChildren.push(makeContinuationNode(cp, source));
+      appendContinuation(cp, lastNonContChildren, source);
       continue;
     }
 

@@ -414,3 +414,24 @@ describe('auditTreeStructure — sanity post-pass warnings', () => {
     expect(auditTreeStructure(parts)).toEqual([]);
   });
 });
+
+describe('buildTree — empty paragraphs are dropped', () => {
+  it('regression: empty continuation paragraphs rendered as blank PART rows in the demo', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: '' }),
+        makePara({ text: '   ' }),
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ text: '' }),
+        makePara({ text: 'Real continuation text.' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '21 11 00', 'T', 'arcat');
+    expect(tree.parts).toHaveLength(1);
+    expect(tree.parts[0]?.type).toBe('part');
+    const childTexts = tree.parts[0]?.children.map((c) => c.text);
+    expect(childTexts).toEqual(['Real continuation text.']);
+  });
+});
