@@ -121,7 +121,80 @@ function countNodes(nodes) {
   return total;
 }
 
-function renderRefsFooter(references, ownSection, ctx) {
+// Opens every collapsed part/article between a node and the sheet root so a
+// citation hidden inside a collapsed article becomes visible before scrolling.
+function expandAncestors(node) {
+  let current = node.parentElement;
+  while (current) {
+    if (
+      current.classList.contains('is-closed') &&
+      (current.classList.contains('tree-article') || current.classList.contains('tree-part'))
+    ) {
+      current.classList.remove('is-closed');
+    }
+    current = current.parentElement;
+  }
+}
+
+// Steps through the in-body citation sites of `section` within this sheet,
+// cycling on repeated clicks. Returns { index, total } or null when the body
+// has no linkified occurrence (refs can come from text the linkifier missed).
+function walkToCitation(sheet, section, walkState) {
+  const links = [...sheet.querySelectorAll('.ref-link')].filter((l) => l.textContent === section);
+  if (links.length === 0) return null;
+  const index = ((walkState.get(section) ?? -1) + 1) % links.length;
+  walkState.set(section, index);
+  const link = links[index];
+  expandAncestors(link);
+  link.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  link.classList.remove('is-located');
+  void link.offsetWidth; // restart the locate animation
+  link.classList.add('is-located');
+  link.addEventListener('animationend', () => link.classList.remove('is-located'), { once: true });
+  return { index, total: links.length };
+}
+
+// Split chip: the main button walks the citation sites inside THIS spec's
+// body; the ↗ tail keeps the old jump-to-referenced-sheet behavior.
+function makeSectionChip(section, count, ctx, sheet, walkState) {
+  const status = ctx.statusFor(section) || 'unresolved';
+  const chip = el('span', `ref-chip is-${status}`);
+
+  const walk = el('button', 'ref-walk');
+  walk.type = 'button';
+  walk.title = `Walk to each citation of Section ${section} in this spec`;
+  walk.appendChild(el('span', 'dot'));
+  walk.appendChild(document.createTextNode(section));
+  const pos = el('span', 'walk-pos', count > 1 ? `×${count}` : '');
+  walk.appendChild(pos);
+  walk.addEventListener('click', () => {
+    const result = walkToCitation(sheet, section, walkState);
+    if (result) {
+      pos.textContent = `${result.index + 1}/${result.total}`;
+    } else if (status === 'loaded') {
+      ctx.onNavigate(section); // no in-body site found — fall back to the jump
+    }
+  });
+  chip.appendChild(walk);
+
+  if (status === 'loaded' || status === 'library') {
+    const jump = el('button', 'ref-jump', '↗');
+    jump.type = 'button';
+    if (status === 'loaded') {
+      jump.title = `Jump to Section ${section}`;
+      jump.addEventListener('click', () => ctx.onNavigate(section));
+    } else {
+      jump.title = 'In SpecR library — drop the file to load it here';
+      jump.addEventListener('click', () => ctx.onLibraryRef(section));
+    }
+    chip.appendChild(jump);
+  } else {
+    chip.title = 'Unresolved — target section not in library';
+  }
+  return chip;
+}
+
+function renderRefsFooter(references, ownSection, ctx, sheet, walkState) {
   const footer = el('footer', 'sheet-refs');
   const sectionRefs = new Map(); // targetSection -> count
   const standards = new Set();
@@ -141,24 +214,10 @@ function renderRefsFooter(references, ownSection, ctx) {
   }
 
   if (sectionRefs.size > 0) {
-    footer.appendChild(el('p', 'refs-caption', 'CITES SECTIONS'));
+    footer.appendChild(el('p', 'refs-caption', 'CITES SECTIONS — CLICK TO WALK CITATIONS, ↗ TO OPEN'));
     const row = el('div', 'ref-chip-row');
     for (const [section, count] of [...sectionRefs.entries()].sort()) {
-      const status = ctx.statusFor(section) || 'unresolved';
-      const chip = el('button', `ref-chip is-${status}`);
-      chip.type = 'button';
-      chip.appendChild(el('span', 'dot'));
-      chip.appendChild(document.createTextNode(count > 1 ? `${section} ×${count}` : section));
-      if (status === 'loaded') {
-        chip.title = `Jump to Section ${section}`;
-        chip.addEventListener('click', () => ctx.onNavigate(section));
-      } else if (status === 'library') {
-        chip.title = `In SpecR library — drop the file to load it here`;
-        chip.addEventListener('click', () => ctx.onLibraryRef(section));
-      } else {
-        chip.title = 'Unresolved — target section not in library';
-      }
-      row.appendChild(chip);
+      row.appendChild(makeSectionChip(section, count, ctx, sheet, walkState));
     }
     footer.appendChild(row);
   }
@@ -232,6 +291,8 @@ export function renderSpecSheet(spec, ctx) {
   }
   sheet.appendChild(body);
 
-  sheet.appendChild(renderRefsFooter(references, tree.section, ctx));
+  // per-sheet cursor for citation walking: section -> last visited index
+  const walkState = new Map();
+  sheet.appendChild(renderRefsFooter(references, tree.section, ctx, sheet, walkState));
   return sheet;
 }

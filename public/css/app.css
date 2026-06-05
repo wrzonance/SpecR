@@ -682,19 +682,73 @@ body {
 
 .ref-chip {
   display: inline-flex;
-  align-items: center;
-  gap: 0.45em;
+  align-items: stretch;
   font-family: var(--mono);
   font-size: 0.72rem;
   border: 1px solid;
-  padding: 0.22rem 0.55rem;
   background: var(--vellum);
-  cursor: pointer;
   transition: transform 120ms ease;
 }
 
 .ref-chip:hover {
   transform: translateY(-1px);
+}
+
+.ref-walk {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  border: none;
+  background: none;
+  padding: 0.22rem 0.55rem;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ref-walk:hover {
+  background: rgba(43, 42, 35, 0.06);
+}
+
+.walk-pos {
+  font-size: 0.85em;
+  opacity: 0.75;
+  min-width: 2.1em;
+  text-align: right;
+}
+
+.walk-pos:empty {
+  display: none;
+}
+
+.ref-jump {
+  border: none;
+  border-left: 1px dashed currentColor;
+  background: none;
+  padding: 0.22rem 0.5rem;
+  font: inherit;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+}
+
+.ref-jump:hover {
+  opacity: 1;
+  background: rgba(43, 42, 35, 0.06);
+}
+
+/* citation-walk locate flash on the in-body ref link */
+@keyframes ref-locate {
+  0% {
+    box-shadow: 0 0 0 4px var(--orange);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(255, 122, 26, 0);
+  }
+}
+
+.ref-link.is-located {
+  animation: ref-locate 1.5s ease-out;
 }
 
 .ref-chip .dot {
