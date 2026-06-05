@@ -49,3 +49,9 @@ tmp/
 *.tmp
 .worktrees
 .superpowers/
+
+# Windows one-click bootstrap runtime (portable Node + PostgreSQL + data)
+.specr-runtime/
+
+# Playwright MCP verification artifacts
+.playwright-mcp/

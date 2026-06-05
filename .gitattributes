@@ -1,0 +1,6 @@
+# Windows double-click entry points need CRLF in the working tree
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# UFGS reference fixtures are latin1/CP1252 — never normalize
+docs/references/UFGS/** -text
