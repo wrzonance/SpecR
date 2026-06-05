@@ -180,23 +180,40 @@ function readZipEntry(zip: yauzl.ZipFile, entry: yauzl.Entry): Promise<string> {
 // (SSRF / server-side request forgery vectors). Hyperlinks and images are passive — they
 // only activate on user interaction — so they are intentionally excluded.
 // Corpus finding: all 28 ARCAT + CPI fixtures use hyperlink external rels (arcat.com URLs).
-const DANGEROUS_EXTERNAL_REL_TYPES = [
-  'attachedTemplate',
-  'externalLinkPath',
-  'frame',
-  'oleObject',
-  'subDocument',
-] as const;
+//
+// attachedTemplate (settings.xml.rels) is also excluded: it is provenance metadata that
+// Word writes for any document authored from a template (ubiquitous in corporate specs
+// created from firm .dotm files on network shares). SpecR never dereferences relationship
+// targets and discards the upload buffer after parsing, so it carries no fetch risk here —
+// rejecting it blocked real-world ingest (field report 2026-06-05).
+const DANGEROUS_EXTERNAL_REL_TYPES = ['externalLinkPath', 'frame', 'oleObject', 'subDocument'];
 
-function isDangerousExternalRel(xml: string): boolean {
-  return DANGEROUS_EXTERNAL_REL_TYPES.some((relType) => {
-    // Match: relationships/<type>" … TargetMode="External"
-    const pattern = new RegExp(
-      `relationships/${relType}[^>]*TargetMode\\s*=\\s*["']External["']`,
-      'i'
-    );
-    return pattern.test(xml);
-  });
+interface DangerousRel {
+  readonly relType: string;
+  readonly scheme: string;
+}
+
+function targetScheme(target: string): string {
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(target)?.[1];
+  if (scheme) return scheme.toLowerCase();
+  return target.startsWith('\\\\') ? 'unc' : 'relative';
+}
+
+// Reports WHAT was rejected (rel type + target URL scheme) without echoing the
+// target itself — proprietary documents must stay diagnosable from the error
+// alone, but server names/paths in targets must not leak into messages.
+function findDangerousExternalRels(xml: string): readonly DangerousRel[] {
+  const found: DangerousRel[] = [];
+  for (const relType of DANGEROUS_EXTERNAL_REL_TYPES) {
+    const tagPattern = new RegExp(`<Relationship\\b[^>]*relationships/${relType}["'][^>]*>`, 'gi');
+    for (const match of xml.matchAll(tagPattern)) {
+      const tag = match[0];
+      if (!/TargetMode\s*=\s*["']External["']/i.test(tag)) continue;
+      const target = /Target\s*=\s*["']([^"']*)["']/i.exec(tag)?.[1] ?? '';
+      found.push({ relType, scheme: targetScheme(target) });
+    }
+  }
+  return found;
 }
 
 /** Phase 2: open read streams for _rels entries; reject dangerous external relationships. */
@@ -206,8 +223,13 @@ async function checkExternalRelationships(
 ): Promise<void> {
   for (const entry of relEntries) {
     const content = await readZipEntry(zip, entry);
-    if (isDangerousExternalRel(content)) {
-      throw new Error(`external relationship in ${entry.fileName}`);
+    const dangerous = findDangerousExternalRels(content);
+    if (dangerous.length > 0) {
+      const detail = dangerous.map((d) => `${d.relType} (target scheme: ${d.scheme})`).join('; ');
+      throw new Error(
+        `dangerous external relationship in ${entry.fileName}: ${detail} — ` +
+          'these relationship types make Word auto-fetch external content'
+      );
     }
   }
 }
