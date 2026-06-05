@@ -63,6 +63,40 @@ export async function createSpec(input: CreateSpecInput, db: Queryable = pool): 
   }
 }
 
+export interface SpecListEntry {
+  readonly specId: string;
+  readonly section: string;
+  readonly title: string;
+  readonly nodeCount: number;
+}
+
+interface SpecListRow {
+  readonly id: string;
+  readonly section: string | null;
+  readonly title: string | null;
+  readonly node_count: string;
+}
+
+export async function listSpecs(): Promise<readonly SpecListEntry[]> {
+  try {
+    const result = await pool.query<SpecListRow>(
+      `SELECT s.id, s.section, s.title, COUNT(p.id) AS node_count
+       FROM specs s
+       LEFT JOIN paragraphs p ON p.spec_id = s.id
+       GROUP BY s.id, s.section, s.title
+       ORDER BY s.section`
+    );
+    return result.rows.map((row) => ({
+      specId: row.id,
+      section: row.section ?? '',
+      title: row.title ?? '',
+      nodeCount: Number(row.node_count),
+    }));
+  } catch (err) {
+    throw new DatabaseError('failed to list specs', { cause: err });
+  }
+}
+
 export async function findSpecById(id: string): Promise<SpecTree | null> {
   try {
     const result = await pool.query<SpecRow>('SELECT id, section, title FROM specs WHERE id = $1', [

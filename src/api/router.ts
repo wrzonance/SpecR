@@ -1,7 +1,13 @@
 import { type Router as RouterType, Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { healthHandler } from './health.js';
-import { getSpecHandler, getSpecLineageHandler, updateSpecHandler } from './specs.js';
+import {
+  getSpecHandler,
+  getSpecLineageHandler,
+  updateSpecHandler,
+  listSpecsHandler,
+  getSpecTreeHandler,
+} from './specs.js';
 import {
   createProjectHandler,
   getProjectHandler,
@@ -51,8 +57,10 @@ const parseRateLimit = rateLimit({
 export const router: RouterType = Router();
 
 router.get('/health', healthHandler);
+router.get('/specs', listSpecsHandler);
 router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
+router.get('/specs/:id/tree', getSpecTreeHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.post('/specs/:id/generate', generateHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
