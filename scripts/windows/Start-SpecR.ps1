@@ -120,6 +120,20 @@ function Invoke-Native([string]$Label, [scriptblock]$Block) {
     }
 }
 
+# Variant of Invoke-Native for commands that spawn a long-running daemon
+# (pg_ctl start). The daemon inherits this console's output handles, so a
+# PowerShell capture pipeline never sees EOF and blocks forever AFTER the
+# launcher itself has exited ('server started' prints, then the script hangs).
+# Start-Process creates no pipes -- output still reaches the console -- and
+# WaitForExit() waits only for the launcher process, never its descendants
+# (PS 5.1's Start-Process -Wait would wait for the whole tree, hanging again).
+function Invoke-NativeUnpiped([string]$Label, [string]$FilePath, [string]$Arguments) {
+    Write-Host "    >> $Label" -ForegroundColor DarkCyan
+    $proc = Start-Process -FilePath $FilePath -ArgumentList $Arguments -NoNewWindow -PassThru
+    $proc.WaitForExit()
+    return $proc.ExitCode
+}
+
 # -- Node.js ------------------------------------------------------------------
 
 # npm's global prefix is where `npm install --global` puts pnpm.cmd. On a
@@ -249,11 +263,14 @@ function Initialize-Postgres {
         & (Join-Path $pgBin 'pg_ctl.exe') status -D $pgData
     }
     if ($code -ne 0) {
-        $code = Invoke-Native "pg_ctl start: launching PostgreSQL on port $PgPort (log: $pgLog)" {
-            & (Join-Path $pgBin 'pg_ctl.exe') start -D $pgData -l $pgLog -w -o "-p $PgPort"
-        }
+        # MUST go through Invoke-NativeUnpiped: capturing pg_ctl start's output
+        # hangs the script after 'server started' (daemon inherits the pipe).
+        $code = Invoke-NativeUnpiped "pg_ctl start: launching PostgreSQL on port $PgPort (log: $pgLog)" `
+            (Join-Path $pgBin 'pg_ctl.exe') `
+            ('start -D "{0}" -l "{1}" -w -o "-p {2}"' -f $pgData, $pgLog, $PgPort)
         if ($code -ne 0) { throw "pg_ctl start failed -- see $pgLog" }
         $script:StopPgOnExit = $true
+        Write-Ok "(that 'server started' was PostgreSQL -- the SpecR web server starts after the build steps below)"
     }
 
     Write-Host "    >> psql: checking whether database 'specr' exists" -ForegroundColor DarkCyan
