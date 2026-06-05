@@ -435,3 +435,35 @@ describe('buildTree — empty paragraphs are dropped', () => {
     expect(childTexts).toEqual(['Real continuation text.']);
   });
 });
+
+describe('classifyParagraphs — note-style name matching (CodeRabbit #113)', () => {
+  it('regression: VendorNote style IS a note — "vendor" contains "end" and must not be excluded', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([['VendorNote', { styleId: 'VendorNote', name: 'VendorNote' }]]),
+      resolvedNumPr: new Map(),
+    };
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ styleId: 'VendorNote', text: 'Coordinate finishes with vendor.' }),
+      ],
+      numMap(1),
+      styleMap
+    );
+    const tree = buildTree(classified, '01 00 00', 'T', 'arcat');
+    expect(tree.parts[0]?.children[0]?.type).toBe('note');
+  });
+
+  it('EndnoteText style is NOT a specifier note', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([['EndnoteText', { styleId: 'EndnoteText', name: 'endnote text' }]]),
+      resolvedNumPr: new Map(),
+    };
+    const classified = classifyParagraphs(
+      [makePara({ styleId: 'EndnoteText', text: 'See bibliography.' })],
+      numMap(1),
+      styleMap
+    );
+    expect(classified[0]?.isVanish).toBe(false);
+  });
+});
