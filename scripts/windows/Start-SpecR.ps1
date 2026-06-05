@@ -14,6 +14,7 @@
 #   SPECR_DATABASE_URL  use an existing PostgreSQL instead of the bundled one
 #   SPECR_NODE_VERSION  portable Node.js version         (default 22.14.0)
 #   SPECR_PG_VERSION    portable PostgreSQL version      (default 16.4-1)
+#   SPECR_NO_SYSTEM_CA  set to 1 to skip exporting Windows root CAs to Node
 # -----------------------------------------------------------------------------
 
 $ErrorActionPreference = 'Stop'
@@ -138,6 +139,41 @@ function Invoke-NativeUnpiped([string]$Label, [string]$FilePath, [string]$Argume
     $proc = [System.Diagnostics.Process]::Start($psi)
     $proc.WaitForExit()
     return $proc.ExitCode
+}
+
+# Node ships its own CA bundle and ignores the Windows certificate store.
+# Behind a TLS-inspecting proxy or antivirus (corporate root CA installed in
+# Windows but unknown to Node), npm/pnpm fail every registry request with
+# UNABLE_TO_GET_ISSUER_CERT_LOCALLY and crawl through retries -- while
+# PowerShell's own downloads work fine. Exporting the machine's trusted roots
+# and handing them to Node via NODE_EXTRA_CA_CERTS fixes that WITHOUT
+# disabling TLS verification. Skip with SPECR_NO_SYSTEM_CA=1.
+function Export-WindowsCaBundle {
+    if ($env:SPECR_NO_SYSTEM_CA) {
+        Write-Note 'SPECR_NO_SYSTEM_CA set -- skipping Windows CA export'
+        return
+    }
+    $pem = Join-Path $Runtime 'windows-ca-bundle.pem'
+    $builder = New-Object System.Text.StringBuilder
+    $count = 0
+    foreach ($store in @('Cert:\LocalMachine\Root', 'Cert:\LocalMachine\CA', 'Cert:\CurrentUser\Root', 'Cert:\CurrentUser\CA')) {
+        foreach ($cert in (Get-ChildItem $store -ErrorAction SilentlyContinue)) {
+            try {
+                $base64 = [Convert]::ToBase64String($cert.RawData, [System.Base64FormattingOptions]::InsertLineBreaks)
+                $null = $builder.AppendLine('-----BEGIN CERTIFICATE-----')
+                $null = $builder.AppendLine($base64)
+                $null = $builder.AppendLine('-----END CERTIFICATE-----')
+                $count++
+            }
+            catch { }
+        }
+    }
+    if ($count -gt 0) {
+        [System.IO.File]::WriteAllText($pem, $builder.ToString())
+        $env:NODE_EXTRA_CA_CERTS = $pem
+        Write-Ok "exported $count Windows-trusted CA certificates for Node.js (NODE_EXTRA_CA_CERTS)"
+        Write-Note 'this prevents UNABLE_TO_GET_ISSUER_CERT_LOCALLY behind TLS-inspecting proxies/antivirus'
+    }
 }
 
 # -- Node.js ------------------------------------------------------------------
@@ -485,6 +521,9 @@ try {
     }
 
     New-Item -ItemType Directory -Path $Runtime -Force | Out-Null
+
+    Write-Step 'Preparing TLS trust for Node.js (Windows certificate store export)'
+    Export-WindowsCaBundle
 
     Initialize-Node
     $databaseUrl = Initialize-Postgres
