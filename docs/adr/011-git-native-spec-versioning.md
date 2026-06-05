@@ -9,7 +9,7 @@ SpecR's 3-way merge engine (ADR-005) already tracks `base_version` per paragraph
 Construction specification libraries are organizational IP — master paragraphs built and refined over years. Firms need:
 
 1. **Version history** — who changed what paragraph, when, and why
-2. **Branching** — master firm library vs. client-specific variants vs. per-project overrides (ADR-006 tier model)
+2. **Branching** — master firm library vs. client-specific variants vs. per-project overrides (ADR-006 tier model, now specified by ADR-015)
 3. **Review workflow** — Owner redlines reviewed before acceptance; same workflow as a PR
 4. **Audit trail** — liability-driven; spec writers must demonstrate what was in a spec at contract time
 5. **Ownership** — firm's IP should live in their infrastructure, not solely in a SaaS vendor's database
@@ -45,7 +45,7 @@ project/<id>            ← per-project overrides, branched from firm/
 seed/ufgs               ← UFGS public domain corpus (read-only reference)
 ```
 
-This mirrors the four-tier hierarchy in ADR-006 as git branches, making the inheritance relationship inspectable and diffable.
+This mirrors the library hierarchy of ADR-015 (which supersedes ADR-006's four-tier sketch) as git branches, making the inheritance relationship inspectable and diffable. Package issuances (ADR-015 D5) map naturally to git tags. The relational model and the branch structure must stay isomorphic.
 
 ### Serialization format
 

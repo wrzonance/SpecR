@@ -1,6 +1,12 @@
 # ADR-006: Multi-Tier Paragraph Libraries
 
-## Status: Accepted
+## Status: Superseded by [ADR-015](015-layered-spec-hierarchy-chain-of-custody.md)
+
+> ADR-015 restates the valid core of this ADR (tier separation; public-domain/firm-IP
+> isolation) and specifies the schema this ADR promised but never shipped
+> (`parent_library_id` / tier columns) — adding the client-master tier, owned project
+> copies, design packages, issuance revisions, and chain-of-custody lineage. The style
+> tier shipped separately as `style_templates` / `style_rules` (Phase 2c).
 
 ## Context
 

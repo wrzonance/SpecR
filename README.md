@@ -33,6 +33,8 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 2b-iii | MCP tools: `get_paragraph`, `parse_document`, `generate_docx` | ✅ Complete (PR #55) |
 | 2b-iv | Universal file loader: `load:files`, `seed:corpus`, `load_files` MCP tool | ✅ Complete (PR #58) |
 | 2c | Firm style template engine (issue #20) | Planned |
+| 2d | Library hierarchy + chain of custody — masters, project copies, packages, issuances — see [ADR-015](docs/adr/015-layered-spec-hierarchy-chain-of-custody.md) | Planned |
+| 2e | Project-manual publishing — assembly, cover/TOC, addenda — see [ADR-017](docs/adr/017-project-manual-publishing.md) | Planned |
 | 3 | Round-trip merge engine | Planned |
 | 4 | Revit integration | Planned |
 | 5 | Web UI | Planned |
