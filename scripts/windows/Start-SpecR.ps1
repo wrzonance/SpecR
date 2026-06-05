@@ -17,7 +17,7 @@
 # -----------------------------------------------------------------------------
 
 $ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'   # makes Invoke-WebRequest dramatically faster
+$ProgressPreference = 'SilentlyContinue'   # Get-Download prints its own progress
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # Start-SpecR.bat runs this file as command text (Invoke-Expression) so that
@@ -47,24 +47,72 @@ function Write-Ok([string]$Message) {
     Write-Host "    $Message" -ForegroundColor Green
 }
 
-function Get-Download([string]$Url, [string]$Destination, [string]$What) {
-    if (Test-Path $Destination) { return }
-    Write-Host "    downloading $What ..." -ForegroundColor Yellow
-    Write-Host "    $Url"
-    $tmp = "$Destination.partial"
-    Invoke-WebRequest -Uri $Url -OutFile $tmp -UseBasicParsing
-    Move-Item $tmp $Destination
+function Write-Note([string]$Message) {
+    Write-Host "    $Message" -ForegroundColor Yellow
 }
 
-# Runs a native executable while tolerating stderr chatter. With
+# Streams a download to disk with a live percent counter so the big archives
+# (PostgreSQL is ~320 MB) never look like a frozen window.
+function Get-Download([string]$Url, [string]$Destination, [string]$What) {
+    if (Test-Path $Destination) {
+        Write-Ok "$What already downloaded -- using cached $(Split-Path $Destination -Leaf)"
+        return
+    }
+    Write-Note "downloading $What"
+    Write-Host "    from $Url" -ForegroundColor DarkGray
+    $tmp = "$Destination.partial"
+    $response = [System.Net.WebRequest]::Create($Url).GetResponse()
+    try {
+        $total = $response.ContentLength
+        $inStream = $response.GetResponseStream()
+        $outStream = [System.IO.File]::Create($tmp)
+        try {
+            $buffer = New-Object byte[] (1MB)
+            $done = [long]0
+            $lastPct = -1
+            while (($read = $inStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $outStream.Write($buffer, 0, $read)
+                $done += $read
+                if ($total -gt 0) {
+                    $pct = [int](100 * $done / $total)
+                    if ($pct -ne $lastPct) {
+                        $lastPct = $pct
+                        Write-Host -NoNewline ("`r    {0,3}%  {1:N0} / {2:N0} MB" -f $pct, ($done / 1MB), ($total / 1MB))
+                    }
+                }
+                else {
+                    Write-Host -NoNewline ("`r    {0:N0} MB" -f ($done / 1MB))
+                }
+            }
+        }
+        finally {
+            $outStream.Dispose()
+            $inStream.Dispose()
+        }
+    }
+    finally {
+        $response.Dispose()
+    }
+    Write-Host ''
+    Move-Item $tmp $Destination
+    Write-Ok "saved $(Split-Path $Destination -Leaf)"
+}
+
+# Runs a native executable, echoing the step and streaming the tool's own
+# output line by line. Also tolerates stderr chatter: with
 # $ErrorActionPreference = 'Stop', PowerShell 5.1 turns any redirected stderr
 # line into a terminating NativeCommandError -- pg_ctl/psql write status text
 # to stderr routinely, so native calls go through this wrapper instead.
-function Invoke-Native([scriptblock]$Block) {
+function Invoke-Native([string]$Label, [scriptblock]$Block) {
+    Write-Host "    >> $Label" -ForegroundColor DarkCyan
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Block 2>&1 | ForEach-Object { "$_" } | Out-Null
+        # Sentinel: if the executable itself is missing, no native command runs,
+        # $LASTEXITCODE would keep a stale value from an EARLIER command, and a
+        # failure could read as success. 9009 = cmd.exe's "not recognized" code.
+        $global:LASTEXITCODE = 9009
+        & $Block 2>&1 | ForEach-Object { Write-Host "       $_" -ForegroundColor DarkGray }
         return $LASTEXITCODE
     }
     finally {
@@ -73,6 +121,25 @@ function Invoke-Native([scriptblock]$Block) {
 }
 
 # -- Node.js ------------------------------------------------------------------
+
+# npm's global prefix is where `npm install --global` puts pnpm.cmd. On a
+# fresh Node install that folder (%APPDATA%\npm for system Node) is often not
+# on the session PATH yet, so we resolve it explicitly after installing.
+function Get-NpmGlobalPrefix {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & npm prefix --global 2>$null | Select-Object -First 1
+        if ($LASTEXITCODE -eq 0 -and $out) { return ("$out").Trim() }
+        return $null
+    }
+    catch {
+        return $null
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+}
 
 function Test-NodeVersion {
     $node = Get-Command node -ErrorAction SilentlyContinue
@@ -86,37 +153,61 @@ function Install-PortableNode {
     if (-not (Test-Path (Join-Path $nodeDir 'node.exe'))) {
         $zip = Join-Path $Runtime "node-v$NodeVersion.zip"
         Get-Download "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip" $zip "Node.js v$NodeVersion (portable)"
+        Write-Note "extracting $(Split-Path $zip -Leaf) -> $nodeDir"
         Expand-Archive -Path $zip -DestinationPath $Runtime -Force
+        Write-Ok 'extraction complete'
+    }
+    else {
+        Write-Ok "reusing portable Node.js already extracted at $nodeDir"
     }
     $env:PATH = "$nodeDir;$env:PATH"
-    Write-Ok "Node.js $(& node --version) (portable)"
+    Write-Ok "Node.js $(& node --version) (portable) now first on PATH"
 }
 
 function Initialize-Node {
     Write-Step 'Checking Node.js (need v22+)'
     if (Test-NodeVersion) {
-        Write-Ok "Node.js $(& node --version) found on PATH"
+        Write-Ok "Node.js $(& node --version) found at $((Get-Command node).Source)"
     }
     else {
+        Write-Note 'no Node.js v22+ on PATH -- fetching a portable copy'
         Install-PortableNode
     }
 
     if (Get-Command pnpm -ErrorAction SilentlyContinue) {
-        Write-Ok "pnpm $(& pnpm --version) found on PATH"
+        Write-Ok "pnpm $(& pnpm --version) found at $((Get-Command pnpm).Source)"
         return
     }
 
-    Write-Host '    pnpm not found -- installing ...' -ForegroundColor Yellow
-    $code = Invoke-Native { npm install --global --no-fund --loglevel=error pnpm }
+    Write-Note 'pnpm not found -- installing with npm (full npm output follows)'
+    $code = Invoke-Native 'npm install --global pnpm' { npm install --global --no-fund pnpm }
     if ($code -ne 0) {
         # System Node without write access to its global prefix -- switch to a
         # portable Node (its directory is user-writable) and retry there.
-        Write-Host '    global install failed -- switching to portable Node.js' -ForegroundColor Yellow
+        Write-Note "npm exited with code $code -- switching to portable Node.js and retrying"
         Install-PortableNode
-        $code = Invoke-Native { npm install --global --no-fund --loglevel=error pnpm }
-        if ($code -ne 0) { throw 'could not install pnpm' }
+        $code = Invoke-Native 'npm install --global pnpm (portable Node)' { npm install --global --no-fund pnpm }
     }
-    Write-Ok "pnpm $(& pnpm --version) installed"
+    if ($code -ne 0) {
+        throw ("could not install pnpm (npm exit code $code) -- scroll up for npm's own error output. " +
+            'Common causes: no internet access, a corporate proxy/TLS inspection blocking registry.npmjs.org, ' +
+            'or antivirus quarantining npm. Workaround: install pnpm yourself (https://pnpm.io/installation), ' +
+            'then re-run this script.')
+    }
+
+    # npm succeeded, but pnpm.cmd lives in npm's global prefix, which may not
+    # be on this session's PATH yet -- resolve it and put it first.
+    $prefixDir = Get-NpmGlobalPrefix
+    if ($prefixDir -and (Test-Path (Join-Path $prefixDir 'pnpm.cmd'))) {
+        Write-Note "pnpm.cmd found in npm global prefix: $prefixDir (adding to PATH)"
+        $env:PATH = "$prefixDir;$env:PATH"
+    }
+    $installed = Get-Command pnpm -ErrorAction SilentlyContinue
+    if (-not $installed) {
+        throw ("npm reported success but pnpm is still not callable (looked on PATH and in '$prefixDir'). " +
+            "Open a NEW terminal and run 'pnpm --version' -- if that works, re-run this script from a fresh window.")
+    }
+    Write-Ok "pnpm $(& pnpm --version) installed at $($installed.Source)"
 }
 
 # -- PostgreSQL ---------------------------------------------------------------
@@ -136,28 +227,45 @@ function Initialize-Postgres {
     if (-not (Test-Path (Join-Path $pgBin 'pg_ctl.exe'))) {
         $zip = Join-Path $Runtime "postgresql-$PgVersion.zip"
         Get-Download "https://get.enterprisedb.com/postgresql/postgresql-$PgVersion-windows-x64-binaries.zip" $zip "PostgreSQL $PgVersion (portable, ~320 MB)"
-        Write-Host '    extracting PostgreSQL (takes a minute) ...' -ForegroundColor Yellow
+        Write-Note "extracting $(Split-Path $zip -Leaf) -> $(Join-Path $Runtime 'pgsql') (takes a minute)"
         Expand-Archive -Path $zip -DestinationPath $Runtime -Force   # zip contains pgsql\
+        Write-Ok 'extraction complete'
+    }
+    else {
+        Write-Ok "reusing portable PostgreSQL already extracted at $pgBin"
     }
 
     if (-not (Test-Path (Join-Path $pgData 'PG_VERSION'))) {
-        Write-Host '    initializing database cluster ...' -ForegroundColor Yellow
-        $code = Invoke-Native { & (Join-Path $pgBin 'initdb.exe') -D $pgData -U specr -A trust -E UTF8 --locale=C }
+        $code = Invoke-Native "initdb: create database cluster at $pgData" {
+            & (Join-Path $pgBin 'initdb.exe') -D $pgData -U specr -A trust -E UTF8 --locale=C
+        }
         if ($code -ne 0) { throw 'initdb failed (note: PostgreSQL refuses to run from an Administrator shell)' }
     }
+    else {
+        Write-Ok "reusing existing database cluster at $pgData"
+    }
 
-    $code = Invoke-Native { & (Join-Path $pgBin 'pg_ctl.exe') status -D $pgData }
+    $code = Invoke-Native 'pg_ctl status: is the bundled PostgreSQL already running?' {
+        & (Join-Path $pgBin 'pg_ctl.exe') status -D $pgData
+    }
     if ($code -ne 0) {
-        Write-Host "    starting PostgreSQL on port $PgPort ..." -ForegroundColor Yellow
-        $code = Invoke-Native { & (Join-Path $pgBin 'pg_ctl.exe') start -D $pgData -l $pgLog -w -o "-p $PgPort" }
+        $code = Invoke-Native "pg_ctl start: launching PostgreSQL on port $PgPort (log: $pgLog)" {
+            & (Join-Path $pgBin 'pg_ctl.exe') start -D $pgData -l $pgLog -w -o "-p $PgPort"
+        }
         if ($code -ne 0) { throw "pg_ctl start failed -- see $pgLog" }
         $script:StopPgOnExit = $true
     }
 
+    Write-Host "    >> psql: checking whether database 'specr' exists" -ForegroundColor DarkCyan
     $dbExists = & (Join-Path $pgBin 'psql.exe') -h localhost -p $PgPort -U specr -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='specr'"
     if ("$dbExists" -notmatch '1') {
-        $code = Invoke-Native { & (Join-Path $pgBin 'createdb.exe') -h localhost -p $PgPort -U specr specr }
+        $code = Invoke-Native "createdb: creating database 'specr'" {
+            & (Join-Path $pgBin 'createdb.exe') -h localhost -p $PgPort -U specr specr
+        }
         if ($code -ne 0) { throw 'createdb specr failed' }
+    }
+    else {
+        Write-Ok "database 'specr' already exists"
     }
 
     Write-Ok "PostgreSQL ready on port $PgPort (data: .specr-runtime\pgdata)"
@@ -169,9 +277,8 @@ function Stop-Postgres {
     $pgCtl = Join-Path $Runtime 'pgsql\bin\pg_ctl.exe'
     $pgData = Join-Path $Runtime 'pgdata'
     if (Test-Path $pgCtl) {
-        Write-Host ''
-        Write-Host '==> Stopping bundled PostgreSQL' -ForegroundColor Cyan
-        Invoke-Native { & $pgCtl stop -D $pgData -m fast } | Out-Null
+        Write-Step 'Stopping bundled PostgreSQL'
+        Invoke-Native 'pg_ctl stop' { & $pgCtl stop -D $pgData -m fast } | Out-Null
     }
 }
 
@@ -191,7 +298,7 @@ function Test-PortBusy([int]$Port) {
 }
 
 function Invoke-CheckedPnpm([string]$What, [string[]]$PnpmArgs) {
-    Write-Host "    pnpm $($PnpmArgs -join ' ')" -ForegroundColor Yellow
+    Write-Host "    >> pnpm $($PnpmArgs -join ' ')" -ForegroundColor DarkCyan
     & pnpm @PnpmArgs
     if ($LASTEXITCODE -ne 0) { throw "$What failed (pnpm $($PnpmArgs -join ' '))" }
 }
@@ -204,6 +311,7 @@ function Start-SpecR([string]$DatabaseUrl) {
     $env:DATABASE_URL = $DatabaseUrl
     $env:NODE_ENV = 'production'
     $env:PORT = $AppPort
+    Write-Note "environment: PORT=$AppPort NODE_ENV=production DATABASE_URL=$DatabaseUrl"
 
     Write-Step 'Installing dependencies'
     Invoke-CheckedPnpm 'dependency install' @('install', '--frozen-lockfile')
@@ -216,6 +324,7 @@ function Start-SpecR([string]$DatabaseUrl) {
     Invoke-CheckedPnpm 'build' @('build')
 
     Write-Step "Starting SpecR on http://localhost:$AppPort"
+    Write-Note 'a browser tab will open as soon as the server answers on the port'
     Write-Host ''
     Write-Host '    +---------------------------------------------------+' -ForegroundColor Green
     Write-Host "    |  SpecR console:  http://localhost:$AppPort             |" -ForegroundColor Green
@@ -252,7 +361,8 @@ $script:AppExitCode = 0
 try {
     Write-Host ''
     Write-Host '  === SpecR -- one-click bootstrap ===' -ForegroundColor White
-    Write-Host "  repo: $RepoRoot"
+    Write-Host "  repo:    $RepoRoot"
+    Write-Host "  runtime: $Runtime"
 
     New-Item -ItemType Directory -Path $Runtime -Force | Out-Null
 
