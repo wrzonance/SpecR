@@ -20,7 +20,18 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # makes Invoke-WebRequest dramatically faster
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+# Start-SpecR.bat runs this file as command text (Invoke-Expression) so that
+# execution policy can never block it; in that mode $PSScriptRoot is empty and
+# the bat supplies the repo root via SPECR_REPO_ROOT instead.
+$RepoRoot = if ($PSScriptRoot) {
+    Resolve-Path (Join-Path $PSScriptRoot '..\..')
+}
+elseif ($env:SPECR_REPO_ROOT) {
+    Resolve-Path $env:SPECR_REPO_ROOT
+}
+else {
+    throw 'cannot locate the SpecR repo -- launch via Start-SpecR.bat'
+}
 $Runtime = Join-Path $RepoRoot '.specr-runtime'
 $AppPort = if ($env:SPECR_PORT) { $env:SPECR_PORT } else { '3000' }
 $PgPort = if ($env:SPECR_PG_PORT) { $env:SPECR_PG_PORT } else { '5439' }
@@ -231,9 +242,12 @@ function Start-SpecR([string]$DatabaseUrl) {
     } | Out-Null
 
     & node dist/index.js
+    $script:AppExitCode = $LASTEXITCODE
 }
 
 # -- Main ---------------------------------------------------------------------
+
+$script:AppExitCode = 0
 
 try {
     Write-Host ''
@@ -249,3 +263,7 @@ try {
 finally {
     Stop-Postgres
 }
+
+# Propagate the server's exit code; required because the bat launches this
+# file as command text, where powershell.exe only reports explicit exits.
+exit $script:AppExitCode
