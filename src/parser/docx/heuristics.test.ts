@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchTextSignal, matchIndentSignal } from './heuristics.js';
+import { matchTextSignal, matchIndentSignal, isSpecifierNote } from './heuristics.js';
 
 describe('matchTextSignal', () => {
   it('detects PART heading', () => {
@@ -73,4 +73,35 @@ describe('matchIndentSignal', () => {
   it('returns null for ilvl > 8', () => {
     expect(matchIndentSignal(576 * 10)).toBeNull();
   });
+});
+
+describe('isSpecifierNote — fuzzy specifier-note detection', () => {
+  const positives = [
+    '** NOTE TO SPECIFIER ** AGF Manufacturing, Inc.; fire sprinkler products.',
+    'NOTE TO SPECIFIER: delete items below not required.',
+    '## SPECIFIER NOTES ##',
+    'NOTES TO SPEC WRITER - choose one of the following.',
+    '-- NOTE TO THE SPECIFIER --',
+    'SPEC NOTE: verify voltage before ordering.',
+    '[SPECIFIER NOTE] coordinate with Division 26.',
+  ];
+  for (const text of positives) {
+    it(`detects: ${text.slice(0, 44)}`, () => {
+      expect(isSpecifierNote(text)).toBe(true);
+    });
+  }
+
+  const negatives = [
+    'NOTEWORTHY PRODUCTS INCLUDE THE FOLLOWING',
+    'The specifier notes that all work shall comply.',
+    'PART 1 GENERAL',
+    'NOTES:',
+    'NOTE TO USERS OF THIS SECTION',
+    'A. Provide written notes to the owner.',
+  ];
+  for (const text of negatives) {
+    it(`rejects: ${text.slice(0, 44)}`, () => {
+      expect(isSpecifierNote(text)).toBe(false);
+    });
+  }
 });

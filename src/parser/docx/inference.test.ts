@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { classifyParagraphs, buildTree } from './inference.js';
+import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
 import { emptyNumberingMap } from './numbering.js';
 import type { ClassifiedParagraph, DocxParagraph, NumberingMap, StyleMap } from './types.js';
-import type { NodeType } from '../../ast/types.js';
+import type { NodeType, SpecNode } from '../../ast/types.js';
 
 function emptyStyleMap(): StyleMap {
   return { styles: new Map(), resolvedNumPr: new Map() };
@@ -287,5 +287,130 @@ describe('buildTree — Pass 2: edge cases and meta', () => {
     const tree = buildTree(classified, '01', 'T', 'arcat');
     expect(tree.parts[0]?.children[0]?.type).toBe('note');
     expect(tree.parts[0]?.children[0]?.meta.vanish).toBe(true);
+  });
+});
+
+describe('classifyParagraphs — numbering-generated PART headings (ARCAT regression)', () => {
+  const specShaped = (): NumberingMap => ({
+    ...emptyNumberingMap(),
+    articleIlvl: 1,
+    specShapedNumIds: new Set([1]),
+  });
+
+  it('regression: ilvl=0 "GENERAL" with spec-shaped numbering → part (21 11 00 yielded 34 roots, not 3)', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 0, text: 'GENERAL' })],
+      specShaped(),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('part');
+    expect(result[0]?.signalUsed).toBe(1);
+  });
+
+  it('ilvl=0 generic text on a NON-spec-shaped numId is still rejected — LibreOffice guard intact', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 7, ilvl: 0, text: 'All work shall comply with applicable standards.' })],
+      specShaped(),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).not.toBe('part');
+  });
+
+  it('literal "PART 1 – GENERAL" still classifies as part without spec-shaped evidence', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 9, ilvl: 0, text: 'PART 1 – GENERAL' })],
+      specShaped(),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('part');
+  });
+});
+
+describe('classifyParagraphs + buildTree — specifier notes become vanish notes', () => {
+  it('banner text "** NOTE TO SPECIFIER **" → note node with meta.vanish', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ text: '** NOTE TO SPECIFIER ** Delete items below not required.' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '21 11 00', 'T', 'arcat');
+    const note = tree.parts[0]?.children[0];
+    expect(note?.type).toBe('note');
+    expect(note?.meta.vanish).toBe(true);
+  });
+
+  it('note-named style (ARCATnote) without banner text → note node with meta.vanish', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([['ARCATnote', { styleId: 'ARCATnote', name: 'ARCATnote' }]]),
+      resolvedNumPr: new Map(),
+    };
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ styleId: 'ARCATnote', text: 'Coordinate paint colors with Architect.' }),
+      ],
+      numMap(1),
+      styleMap
+    );
+    const tree = buildTree(classified, '21 11 00', 'T', 'arcat');
+    const note = tree.parts[0]?.children[0];
+    expect(note?.type).toBe('note');
+    expect(note?.meta.vanish).toBe(true);
+  });
+
+  it('FootnoteText style is NOT a specifier note', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([['FootnoteText', { styleId: 'FootnoteText', name: 'footnote text' }]]),
+      resolvedNumPr: new Map(),
+    };
+    const classified = classifyParagraphs(
+      [makePara({ styleId: 'FootnoteText', text: 'See appendix for details.' })],
+      numMap(1),
+      styleMap
+    );
+    expect(classified[0]?.isVanish).toBe(false);
+  });
+});
+
+describe('auditTreeStructure — sanity post-pass warnings', () => {
+  function leaf(type: NodeType, text: string): SpecNode {
+    return { id: 't', type, text, children: [], meta: {} };
+  }
+
+  it('zero parts → no-structure-found warning', () => {
+    const warnings = auditTreeStructure([leaf('article', 'SECTION INCLUDES')]);
+    expect(warnings.some((w) => w.type === 'no-structure-found')).toBe(true);
+  });
+
+  it('non-part root nodes → root-continuation warning with count', () => {
+    const warnings = auditTreeStructure([
+      leaf('continuation', 'Copyright 2018 ARCAT'),
+      leaf('part', 'GENERAL'),
+    ]);
+    const w = warnings.find((x) => x.type === 'root-continuation');
+    expect(w).toBeDefined();
+    expect(w?.suggestion).toContain('1');
+  });
+
+  it('4-5 parts → unusual-part-count warning noting MasterFormat allows it', () => {
+    const parts = Array.from({ length: 4 }, (_, i) => leaf('part', `P${i}`));
+    const warnings = auditTreeStructure(parts);
+    const w = warnings.find((x) => x.type === 'unusual-part-count');
+    expect(w?.suggestion).toContain('MasterFormat allows');
+  });
+
+  it('more than 5 parts → unusual-part-count warning suggesting over-matching', () => {
+    const parts = Array.from({ length: 7 }, (_, i) => leaf('part', `P${i}`));
+    const warnings = auditTreeStructure(parts);
+    const w = warnings.find((x) => x.type === 'unusual-part-count');
+    expect(w?.suggestion).toContain('over-matched');
+  });
+
+  it('healthy 3-part tree with no junk roots → no warnings', () => {
+    const parts = [leaf('part', 'GENERAL'), leaf('part', 'PRODUCTS'), leaf('part', 'EXECUTION')];
+    expect(auditTreeStructure(parts)).toEqual([]);
   });
 });

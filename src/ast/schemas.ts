@@ -52,6 +52,7 @@ export const ParseWarningTypeSchema = z.enum([
   'root-continuation',
   'empty-part',
   'no-structure-found',
+  'unusual-part-count',
 ]);
 
 export const ParseWarningSchema = z.object({

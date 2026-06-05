@@ -88,6 +88,26 @@ function buildPStyleMaps(
   return { pStyleToNumId, pStyleToIlvl };
 }
 
+const SPEC_SHAPED_MIN_LINKED_LEVELS = 3;
+
+// A numbering definition whose levels link a multi-level style ladder is
+// spec-shaped: flat lists (LibreOffice <ol>) link zero styles, single-purpose
+// numbering links one. Three or more linked levels means part/article/pr
+// tiers — strong evidence ilvl=0 under this numId is a real PART heading.
+function findSpecShapedNumIds(
+  nums: ReadonlyMap<number, Num>,
+  abstractNums: ReadonlyMap<number, AbstractNum>
+): ReadonlySet<number> {
+  const specShaped = new Set<number>();
+  for (const num of nums.values()) {
+    const an = abstractNums.get(num.abstractNumId);
+    if (!an) continue;
+    const linkedLevels = an.levels.filter((lvl) => lvl.pStyle).length;
+    if (linkedLevels >= SPEC_SHAPED_MIN_LINKED_LEVELS) specShaped.add(num.numId);
+  }
+  return specShaped;
+}
+
 // Detect articleIlvl from numbering.xml: CPI v1 files reserve ilvl 1-2 for
 // Schedule/PDS and mark them with those keywords in lvlText. This is a secondary
 // signal; the orchestrator prefers StyleMap-based detection when available.
@@ -120,7 +140,8 @@ export function buildNumberingMap(xml: string): NumberingMap {
   const nums = parseNums(toArray(root['w:num'] as readonly unknown[] | undefined));
   const { pStyleToNumId, pStyleToIlvl } = buildPStyleMaps(nums, abstractNums);
   const articleIlvl = detectArticleIlvl(abstractNums);
-  return { nums, abstractNums, pStyleToNumId, pStyleToIlvl, articleIlvl };
+  const specShapedNumIds = findSpecShapedNumIds(nums, abstractNums);
+  return { nums, abstractNums, pStyleToNumId, pStyleToIlvl, articleIlvl, specShapedNumIds };
 }
 
 /** Return a new NumberingMap with articleIlvl overridden. Used by orchestrator after StyleMap detection. */
@@ -135,5 +156,6 @@ export function emptyNumberingMap(): NumberingMap {
     pStyleToNumId: new Map(),
     pStyleToIlvl: new Map(),
     articleIlvl: 1,
+    specShapedNumIds: new Set(),
   };
 }

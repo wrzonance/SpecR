@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseDocx } from './index.js';
+import { parse } from '../index.js';
 import type { SpecNode } from '../../ast/types.js';
 
 const ARCAT_DIR = resolve('docs/references/ARCAT');
@@ -54,16 +55,37 @@ describe.skipIf(!FIXTURES_AVAILABLE)('ARCAT fixture parsing', () => {
       expect(sources.has('cpi')).toBe(false);
     });
 
-    it(`${fixture}: CSI hierarchy detected — has at least one non-continuation node`, async () => {
+    // Regression: ARCAT "PART n" prefixes are numbering-generated (lvlText
+    // "PART %1"), so the literal-text part guard demoted every PART heading to
+    // continuation — 21_11_00agf.docx rendered 34 roots instead of 3 parts.
+    it(`${fixture}: exactly 3 part-type roots (GENERAL/PRODUCTS/EXECUTION)`, async () => {
       const buffer = readFileSync(resolve(ARCAT_DIR, fixture));
       const tree = await parseDocx(buffer);
 
-      const nodes = allNodes(tree.parts);
-      const structured = nodes.filter(
-        (n) => n.type === 'part' || n.type === 'article' || n.type === 'pr1'
-      );
-      // ARCAT files have structured CSI content (part/article/pr1) via numPr signal
-      expect(structured.length).toBeGreaterThan(0);
+      const partRoots = tree.parts.filter((n) => n.type === 'part');
+      expect(partRoots).toHaveLength(3);
+      // articles nest under parts, never at root
+      expect(tree.parts.filter((n) => n.type === 'article')).toHaveLength(0);
+    });
+
+    it(`${fixture}: parse() infers section from content when core.xml is empty`, async () => {
+      const buffer = readFileSync(resolve(ARCAT_DIR, fixture));
+      const { tree, sectionInference } = await parse(buffer, fixture);
+
+      expect(sectionInference.method).toBe('content-high');
+      expect(tree.section).toMatch(/^\d{2} \d{2} \d{2}(\.\d{2})?$/);
+      expect(tree.title).not.toBe('unknown');
+    });
+
+    it(`${fixture}: specifier notes are vanish notes, preamble junk is warned`, async () => {
+      const buffer = readFileSync(resolve(ARCAT_DIR, fixture));
+      const tree = await parseDocx(buffer);
+
+      const notes = allNodes(tree.parts).filter((n) => n.type === 'note');
+      expect(notes.length).toBeGreaterThan(0);
+      expect(notes.every((n) => n.meta.vanish === true)).toBe(true);
+      // preamble (title/copyright lines) still lands at root — flagged loudly
+      expect((tree.warnings ?? []).some((w) => w.type === 'root-continuation')).toBe(true);
     });
   }
 });

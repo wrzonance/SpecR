@@ -250,3 +250,39 @@ describe('buildNumberingMap — lvlRestart and orphan num', () => {
     expect(map.nums.size).toBe(2);
   });
 });
+
+describe('buildNumberingMap — spec-shaped ladder detection', () => {
+  it('regression: ARCAT ladder (3 pStyle-linked levels) marks numId 1 spec-shaped — 21 11 00 produced 34 parts', () => {
+    const map = buildNumberingMap(ARCAT_NUMBERING);
+    expect(map.specShapedNumIds.has(1)).toBe(true);
+  });
+
+  it('MasterFormat-style ladder (4 linked levels) is spec-shaped', () => {
+    const map = buildNumberingMap(MASTERSPEC_NUMBERING);
+    expect(map.specShapedNumIds.has(1)).toBe(true);
+  });
+
+  it('single-linked-level numbering is NOT spec-shaped (both numIds)', () => {
+    const map = buildNumberingMap(MULTI_NUM_NUMBERING);
+    expect(map.specShapedNumIds.has(1)).toBe(false);
+    expect(map.specShapedNumIds.has(2)).toBe(false);
+  });
+
+  it('flat generic list with zero pStyle links is NOT spec-shaped — LibreOffice <ol> stays guarded', () => {
+    const flat = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+    <w:lvl w:ilvl="1"><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%2."/></w:lvl>
+    <w:lvl w:ilvl="2"><w:numFmt w:val="lowerRoman"/><w:lvlText w:val="%3."/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="5"><w:abstractNumId w:val="0"/></w:num>
+</w:numbering>`;
+    const map = buildNumberingMap(flat);
+    expect(map.specShapedNumIds.has(5)).toBe(false);
+  });
+
+  it('emptyNumberingMap has empty specShapedNumIds', () => {
+    expect(emptyNumberingMap().specShapedNumIds.size).toBe(0);
+  });
+});

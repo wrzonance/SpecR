@@ -4,7 +4,7 @@ import { ParserError } from '../error.js';
 import { buildNumberingMap, emptyNumberingMap, withArticleIlvl } from './numbering.js';
 import { buildStyleMap } from './styles.js';
 import { parseDocument } from './document.js';
-import { classifyParagraphs, buildTree } from './inference.js';
+import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
 import type { SpecTree } from '../../ast/types.js';
 import type { NumberingMap, StyleMap } from './types.js';
 
@@ -110,12 +110,17 @@ function runPipeline(
   const classified = classifyParagraphs(paragraphs, resolvedNumberingMap, styleMap);
 
   const source = detectSource(styleMap);
+  // Section/title from core.xml only; when absent, the parse() orchestrator's
+  // inferSectionMeta (lib/infer-section.ts) recovers them from tree content
+  // with method/confidence reporting — do not duplicate that here.
   const meta = entries.coreXml
     ? parseCoreMetadata(entries.coreXml)
     : { section: 'unknown', title: 'unknown' };
 
   onProgress?.('complete', 100);
-  return buildTree(classified, meta.section, meta.title, source);
+  const tree = buildTree(classified, meta.section, meta.title, source);
+  const warnings = auditTreeStructure(tree.parts);
+  return warnings.length > 0 ? { ...tree, warnings } : tree;
 }
 
 export { assertDocxSafe } from './safety.js';
