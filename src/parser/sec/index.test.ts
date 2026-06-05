@@ -209,3 +209,117 @@ describe('parseSec — text extraction from mixed content', () => {
     expect(pr1?.text).not.toContain('<SRF>');
   });
 });
+
+describe('parseSec — XML entity decoding', () => {
+  const WITH_ENTITIES = `<?xml version="1.0" encoding="windows-1252"?>
+<SEC>
+  <SCN>SECTION 01 78 23</SCN>
+  <STL>OPERATION &amp; MAINTENANCE DATA</STL>
+  <PRT>
+    <TTL>PART 1   GENERAL</TTL>
+    <SPT>
+      <TTL>O&amp;M MANUAL CONTENT</TTL>
+      <TXT>Submit data per Section <SRF>01 33 00</SRF> &amp; the contract clauses.</TXT>
+      <LST>Temperature range 10&#176;C to 40&#176;C (&quot;operating&quot;)</LST>
+      <ITM>Clearance &lt; 600 mm &gt; 300 mm; use O&apos;Brien&#x2019;s fittings</ITM>
+      <NTE>
+        <NPR>NOTE: O&amp;M data goes to the Contracting Officer.</NPR>
+      </NTE>
+      <REF>
+        <RID>ASTM D709</RID>
+        <RTL>Laminated Thermosetting Materials &amp; Components</RTL>
+      </REF>
+    </SPT>
+  </PRT>
+</SEC>`;
+
+  it('regression: O&amp;M in article TTL decodes to O&M, not double-escaped (01 78 23 part 1.6)', () => {
+    const { tree } = parseSec(WITH_ENTITIES);
+    const article = tree.parts[0]?.children.find((c) => c.type === 'article');
+    expect(article?.text).toBe('O&M MANUAL CONTENT');
+  });
+
+  it('decodes &amp; in STL section title', () => {
+    const { tree } = parseSec(WITH_ENTITIES);
+    expect(tree.title).toBe('OPERATION & MAINTENANCE DATA');
+  });
+
+  it('decodes &amp; in TXT mixed content', () => {
+    const { tree } = parseSec(WITH_ENTITIES);
+    const article = tree.parts[0]?.children.find((c) => c.type === 'article');
+    const txt = article?.children.find((c) => c.type === 'continuation');
+    expect(txt?.text).toContain('& the contract clauses');
+    expect(txt?.text).not.toContain('&amp;');
+  });
+
+  it('decodes numeric and named entities in LST (&#176; -> degree sign, &quot; -> ")', () => {
+    const { tree } = parseSec(WITH_ENTITIES);
+    const article = tree.parts[0]?.children.find((c) => c.type === 'article');
+    const lst = article?.children.find((c) => c.type === 'pr1');
+    expect(lst?.text).toBe('Temperature range 10°C to 40°C ("operating")');
+  });
+
+  it('decodes &lt; &gt; &apos; and hex references in ITM', () => {
+    const { tree } = parseSec(WITH_ENTITIES);
+    const article = tree.parts[0]?.children.find((c) => c.type === 'article');
+    const itm = article?.children.find((c) => c.type === 'pr2');
+    expect(itm?.text).toBe("Clearance < 600 mm > 300 mm; use O'Brien’s fittings");
+  });
+
+  it('decodes entities in note NPR text', () => {
+    const { tree } = parseSec(WITH_ENTITIES);
+    const article = tree.parts[0]?.children.find((c) => c.type === 'article');
+    const note = article?.children.find((c) => c.type === 'note');
+    expect(note?.text).toContain('O&M data');
+  });
+
+  it('decodes entities in standard-ref referenceText (RTL)', () => {
+    const { refs } = parseSec(WITH_ENTITIES);
+    const std = refs.find((r) => r.targetType === 'standard');
+    expect(std?.referenceText).toBe('ASTM D709 Laminated Thermosetting Materials & Components');
+  });
+
+  it('decodes entities in section-ref referenceText', () => {
+    const { refs } = parseSec(WITH_ENTITIES);
+    const sec = refs.find((r) => r.targetType === 'section');
+    expect(sec?.referenceText).toContain('& the contract clauses');
+  });
+
+  it('double-escaped &amp;amp; decodes exactly once (to literal &amp;)', () => {
+    const xml = `<?xml version="1.0"?>
+<SEC>
+  <SCN>SECTION 01 00 00</SCN>
+  <STL>TEST</STL>
+  <PRT>
+    <TTL>PART 1   GENERAL</TTL>
+    <SPT>
+      <TTL>ESCAPING</TTL>
+      <TXT>literal entity: &amp;amp; stays escaped once</TXT>
+    </SPT>
+  </PRT>
+</SEC>`;
+    const { tree } = parseSec(xml);
+    const article = tree.parts[0]?.children.find((c) => c.type === 'article');
+    const txt = article?.children.find((c) => c.type === 'continuation');
+    expect(txt?.text).toContain('literal entity: &amp; stays escaped once');
+  });
+
+  it('leaves out-of-range numeric references untouched instead of throwing', () => {
+    const xml = `<?xml version="1.0"?>
+<SEC>
+  <SCN>SECTION 01 00 00</SCN>
+  <STL>TEST</STL>
+  <PRT>
+    <TTL>PART 1   GENERAL</TTL>
+    <SPT>
+      <TTL>BOUNDS</TTL>
+      <TXT>bogus reference &#x110000; survives</TXT>
+    </SPT>
+  </PRT>
+</SEC>`;
+    const { tree } = parseSec(xml);
+    const article = tree.parts[0]?.children.find((c) => c.type === 'article');
+    const txt = article?.children.find((c) => c.type === 'continuation');
+    expect(txt?.text).toContain('bogus reference &#x110000; survives');
+  });
+});

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { SpecNode, SpecTree, NodeType, SecRef } from '../../ast/types.js';
 import { ParserError } from '../error.js';
 import type { NteNode, PrtNode, RefNode, SptNode } from './elements.js';
+import { decodeXmlEntities } from './entities.js';
 
 export type { SecRef };
 
@@ -27,14 +28,18 @@ const xmlParser = new XMLParser({
 });
 
 // Split on '<' then drop the tag token (everything up to and including '>') from each piece.
-// Avoids regex backtracking concerns while preserving inter-tag text.
+// Avoids regex backtracking concerns while preserving inter-tag text. Entities decode AFTER
+// tag-stripping — stopNodes return raw XML, so &amp; etc. are still escaped here (the
+// "O&amp;M MANUAL CONTENT" bug).
 function stripTags(raw: string): string {
-  return raw
-    .split('<')
-    .map((chunk, i) => (i === 0 ? chunk : chunk.slice(chunk.indexOf('>') + 1)))
-    .join(' ')
-    .replace(/[ \t\r\n]+/g, ' ')
-    .trim();
+  return decodeXmlEntities(
+    raw
+      .split('<')
+      .map((chunk, i) => (i === 0 ? chunk : chunk.slice(chunk.indexOf('>') + 1)))
+      .join(' ')
+      .replace(/[ \t\r\n]+/g, ' ')
+      .trim()
+  );
 }
 
 function extractSrfSections(raw: string): string[] {
@@ -109,10 +114,11 @@ function pushRefsForRids(refs: SecRef[], articleId: string, ref: RefNode): void 
   const rids = toArray(ref.RID);
   const rtls = ref.RTL ?? [];
   rids.forEach((rid, i) => {
-    const code = typeof rid === 'string' ? rid.trim() : '';
+    // RID/RTL are parsed with processEntities: false — decode here
+    const code = typeof rid === 'string' ? decodeXmlEntities(rid.trim()) : '';
     if (!code) return;
     const rtlEntry = rtls[i];
-    const rtl = typeof rtlEntry === 'string' ? rtlEntry.trim() : '';
+    const rtl = typeof rtlEntry === 'string' ? decodeXmlEntities(rtlEntry.trim()) : '';
     refs.push(buildStandardRef(articleId, code, rtl));
   });
 }
@@ -175,10 +181,13 @@ export function parseSec(xml: string): ParsedSec {
   const sec = (root as Record<string, unknown>)['SEC'] as Record<string, unknown> | undefined;
   if (!sec) throw new ParserError('SEC root element not found');
 
-  const section = requireString(sec['SCN'], 'SCN')
-    .replace(/^SECTION\s+/i, '')
-    .trim();
-  const title = requireString(sec['STL'], 'STL');
+  // SCN/STL are parsed with processEntities: false — decode here
+  const section = decodeXmlEntities(
+    requireString(sec['SCN'], 'SCN')
+      .replace(/^SECTION\s+/i, '')
+      .trim()
+  );
+  const title = decodeXmlEntities(requireString(sec['STL'], 'STL'));
 
   const refs: SecRef[] = [];
   const parts = toArray(sec['PRT'] as readonly PrtNode[] | undefined).map((prt) =>
