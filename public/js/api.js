@@ -35,7 +35,13 @@ export async function uploadSpec(file) {
   }
   const body = await res.json();
   if (!res.ok || !body.success) {
-    throw new Error(body.error || `upload failed: ${res.status}`);
+    const err = new Error(body.error || `upload failed: ${res.status}`);
+    err.status = res.status;
+    err.responseBody = body;
+    // Full server response in the console — proprietary files can't be shared,
+    // so the failure must be diagnosable from local output alone.
+    console.error(`SpecR upload rejected (HTTP ${res.status}) for ${file.name}:`, body);
+    throw err;
   }
   return body.data;
 }
@@ -52,7 +58,10 @@ export async function waitForParseJob(jobId, onProgress, pollMs = 400) {
     if (onProgress) onProgress(job);
     if (job.status === 'complete') return job.result;
     if (job.status === 'failed') {
-      throw new Error(job.error || 'parse failed');
+      console.error(`SpecR parse job ${jobId} failed:`, job);
+      const err = new Error(job.error || 'parse failed');
+      err.jobId = jobId;
+      throw err;
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }

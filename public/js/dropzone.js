@@ -58,13 +58,21 @@ export function initDropzone({ onSpecReady, onReject }) {
     if (pct !== undefined) item.fill.style.width = `${pct}%`;
   }
 
-  function fail(item, message) {
+  function fail(item, error) {
     item.li.classList.add('is-failed');
     setStage(item, 'failed', 100);
     const err = document.createElement('p');
     err.className = 'ui-err';
-    err.textContent = message;
+    const parts = [];
+    if (error.status) parts.push(`HTTP ${error.status}`);
+    if (error.jobId) parts.push(`job ${error.jobId.slice(0, 8)}`);
+    const prefix = parts.length > 0 ? `[${parts.join(' · ')}] ` : '';
+    err.textContent = `${prefix}${error.message || 'upload failed'}`;
     item.li.appendChild(err);
+    const hint = document.createElement('p');
+    hint.className = 'ui-err-hint';
+    hint.textContent = 'full server response logged to the browser console (F12)';
+    item.li.appendChild(hint);
   }
 
   async function uploadWithBackoff(file, item) {
@@ -97,7 +105,7 @@ export function initDropzone({ onSpecReady, onReject }) {
         if (list.children.length === 0) dock.hidden = true;
       }, 4000);
     } catch (err) {
-      fail(item, err.message || 'upload failed');
+      fail(item, err);
     }
   }
 

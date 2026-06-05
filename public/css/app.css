@@ -991,6 +991,13 @@ body {
   white-space: pre-wrap;
 }
 
+.ui-err-hint {
+  margin-top: 0.15rem;
+  color: var(--line-dim);
+  font-size: 0.6rem;
+  font-style: italic;
+}
+
 /* ── Drop veil ──────────────────────────────────────────────────────────── */
 
 .drop-veil {
