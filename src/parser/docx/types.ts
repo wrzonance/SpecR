@@ -34,6 +34,12 @@ export interface NumberingMap {
   readonly pStyleToIlvl: ReadonlyMap<string, number>;
   // ilvl at which 'article' starts: ARCAT-style=1, CPI-style=3
   readonly articleIlvl: number;
+  // numIds whose abstractNum links a multi-level pStyle ladder (>=3 levels) —
+  // a numbering definition shaped like a spec, not a flat list. Lets Signal 1
+  // accept ilvl=0 as 'part' when the "PART n" prefix is numbering-generated
+  // (ARCAT: literal text is just "GENERAL") without re-opening the
+  // LibreOffice generic-<ol> false positive.
+  readonly specShapedNumIds: ReadonlySet<number>;
 }
 
 // ─── styles.xml ───────────────────────────────────────────────────────────────

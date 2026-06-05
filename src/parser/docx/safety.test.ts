@@ -125,3 +125,40 @@ describe('assertDocxSafe — bomb and relationship rejection', () => {
     await expect(assertDocxSafe(buf)).rejects.toThrow('too many zip entries');
   });
 });
+
+// attachedTemplate is provenance metadata — Word records which .dotm the doc
+// was created from. Ubiquitous in corporate documents authored from firm
+// templates. SpecR never dereferences relationship targets and discards the
+// upload buffer after parsing, so there is nothing to SSRF.
+const ATTACHED_TEMPLATE_RELS_XML = [
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+  '  <Relationship Id="rId1"',
+  '    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/attachedTemplate"',
+  '    Target="file:///\\\\corp-fs01\\templates\\FirmSpec.dotm"',
+  '    TargetMode="External"/>',
+  '</Relationships>',
+].join('\n');
+
+describe('assertDocxSafe — attachedTemplate regression (field report)', () => {
+  it('regression: accepts external attachedTemplate in settings.xml.rels — corporate template provenance', async () => {
+    const buf = await makeZip({ 'word/_rels/settings.xml.rels': ATTACHED_TEMPLATE_RELS_XML });
+    await expect(assertDocxSafe(buf)).resolves.toBeUndefined();
+  });
+
+  it('still rejects oleObject, with verbose detail: rel type + target scheme + rels file', async () => {
+    const buf = await makeZip({ 'word/_rels/document.xml.rels': DANGEROUS_EXTERNAL_RELS_XML });
+    await expect(assertDocxSafe(buf)).rejects.toThrow(
+      /oleObject.*scheme: http.*word\/_rels\/document\.xml\.rels|word\/_rels\/document\.xml\.rels.*oleObject.*scheme: http/
+    );
+  });
+
+  it('reports UNC targets with scheme "file" for frame rels', async () => {
+    const frameRels = DANGEROUS_EXTERNAL_RELS_XML.replace('oleObject', 'frame').replace(
+      'http://evil.example.com/payload',
+      'file:///\\\\fileserver\\share\\sub.docx'
+    );
+    const buf = await makeZip({ 'word/_rels/document.xml.rels': frameRels });
+    await expect(assertDocxSafe(buf)).rejects.toThrow(/frame.*scheme: file/);
+  });
+});

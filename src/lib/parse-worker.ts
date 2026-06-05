@@ -1,6 +1,4 @@
-import { parseSec, parseDocx, parseText, assertSecSafe } from '../parser/index.js';
-import { extractRefsFromTree } from '../parser/index.js';
-import { decodeTextBuffer } from './decode-text.js';
+import { parse } from '../parser/index.js';
 import type { SpecTree, SecRef } from '../ast/types.js';
 
 export interface WorkerInput {
@@ -14,21 +12,13 @@ export interface WorkerOutput {
   readonly capabilities?: readonly string[];
 }
 
+// Delegates to the parse() orchestrator so the upload path runs the same
+// pipeline as CLI ingest — including lib/infer-section section/title recovery,
+// which this worker previously skipped (DOCX uploads whose docProps/core.xml
+// carries no metadata persisted section='unknown').
+// Format safety validation (assertSecSafe/assertDocxSafe) already ran in the
+// main thread before the job was created.
 export default async function parseWorker({ buffer, ext }: WorkerInput): Promise<WorkerOutput> {
-  if (ext === '.sec') {
-    const { tree, refs } = parseSec(assertSecSafe(buffer));
-    return { tree, refs };
-  }
-  if (ext === '.txt') {
-    const rawText = decodeTextBuffer(buffer);
-    const parsed = parseText(rawText);
-    return { tree: parsed.tree, refs: parsed.refs, capabilities: parsed.capabilities };
-  }
-  if (ext === '.docx') {
-    // validation already performed in main thread
-    const tree = await parseDocx(buffer);
-    const refs = extractRefsFromTree(tree);
-    return { tree, refs };
-  }
-  throw new Error(`unsupported extension in parse worker: ${ext}`);
+  const { tree, refs, capabilities } = await parse(buffer, `upload${ext}`);
+  return { tree, refs, ...(capabilities !== undefined ? { capabilities } : {}) };
 }

@@ -36,6 +36,26 @@ export function isPartHeading(text: string): boolean {
   return PART_HEADING_PATTERN.test(text.trim());
 }
 
+// Specifier-note banners vary by vendor: "** NOTE TO SPECIFIER **" (ARCAT),
+// "SPECIFIER NOTES:", "NOTES TO SPEC WRITER", with arbitrary decoration
+// (asterisks, dashes, brackets, hashes) around the phrase. Strip decoration
+// and collapse whitespace, then match the phrase variants at the start.
+const NOTE_TO_SPECIFIER_PATTERN = /^NOTES? TO (?:THE )?SPEC(?:IFIER|S| WRITER)?S?\b/;
+const SPECIFIER_NOTES_PATTERN = /^SPEC(?:IFIER)?S? NOTES?\b/;
+
+/**
+ * Returns true if the text opens with a specifier-note banner in any of its
+ * vendor variants, ignoring leading decoration characters.
+ */
+export function isSpecifierNote(text: string): boolean {
+  const undecorated = text
+    .trim()
+    .replace(/^[^A-Za-z0-9]+/, '')
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+  return NOTE_TO_SPECIFIER_PATTERN.test(undecorated) || SPECIFIER_NOTES_PATTERN.test(undecorated);
+}
+
 /**
  * Signal 4: Text regex heuristics.
  * Detects CSI hierarchical patterns from paragraph text.

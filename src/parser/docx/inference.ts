@@ -1,6 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ilvlToNodeType } from './rules.js';
-import { matchTextSignal, matchIndentSignal, isPartHeading } from './heuristics.js';
+import {
+  matchTextSignal,
+  matchIndentSignal,
+  isPartHeading,
+  isSpecifierNote,
+} from './heuristics.js';
 import type {
   ClassifiedParagraph,
   DocxParagraph,
@@ -8,7 +13,7 @@ import type {
   SignalConflict,
   StyleMap,
 } from './types.js';
-import type { SpecNode, SpecTree, NodeType } from '../../ast/types.js';
+import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
 
 // Canonical normalized ilvl: part=0, article=1, pr1=2, pr2=3, pr3=4, pr4=5, pr5=6
 const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
@@ -47,9 +52,19 @@ function trySignal1(para: DocxParagraph, numberingMap: NumberingMap): SignalHit 
   const nodeType = ilvlToNodeType(para.ilvl, numberingMap.articleIlvl);
   if (nodeType === 'continuation') return null;
   // Guard: ilvl=0 maps to 'part', but LibreOffice and Word also assign numId+ilvl=0
-  // to generic <ol> list items. Only claim 'part' if text matches the PART heading
-  // pattern — otherwise Signal 1 would misclassify numbered list items as PART nodes.
-  if (nodeType === 'part' && !isPartHeading(para.text)) return null;
+  // to generic <ol> list items. Claim 'part' only when either:
+  //   (a) the literal text matches the PART heading pattern, or
+  //   (b) the numbering definition itself is spec-shaped (>=3 pStyle-linked
+  //       levels) — ARCAT generates the "PART n" prefix from lvlText, so the
+  //       paragraph text is just "GENERAL"/"PRODUCTS"/"EXECUTION".
+  // Generic <ol> lists satisfy neither, so the false positive stays dead.
+  if (
+    nodeType === 'part' &&
+    !isPartHeading(para.text) &&
+    !numberingMap.specShapedNumIds.has(para.numId)
+  ) {
+    return null;
+  }
   return { nodeType, normalizedIlvl: toNormalizedIlvl(nodeType), signal: 1 };
 }
 
@@ -93,12 +108,45 @@ function buildConflicts(winner: SignalHit, hits: readonly SignalHit[]): readonly
     }));
 }
 
+// Specifier notes are editorial metadata, not spec content: banner text in any
+// vendor variant, or a note-named paragraph style (ARCATnote). Footnote/endnote
+// styles are document apparatus, not specifier notes.
+function isNoteParagraph(para: DocxParagraph, styleMap: StyleMap): boolean {
+  if (isSpecifierNote(para.text)) return true;
+  if (!para.styleId) return false;
+  const style = styleMap.styles.get(para.styleId);
+  const label = `${para.styleId} ${style?.name ?? ''}`;
+  // exclusion targets Word's built-in FootnoteText/EndnoteText styles —
+  // bare /foot|end/ would also exclude e.g. VendorNote ("vEND-or")
+  return /note/i.test(label) && !/footnote|endnote/i.test(label);
+}
+
+function continuationResult(
+  para: DocxParagraph,
+  prevNonContIlvl: number,
+  isVanish: boolean
+): ClassifiedParagraph {
+  return {
+    paragraph: para,
+    resolvedIlvl: prevNonContIlvl,
+    nodeType: 'continuation',
+    signalUsed: 3,
+    conflicts: [],
+    isVanish,
+  };
+}
+
 function classifyOne(
   para: DocxParagraph,
   numberingMap: NumberingMap,
   styleMap: StyleMap,
   prevNonContIlvl: number
 ): ClassifiedParagraph {
+  // specifier notes render as vanish notes — SEC NTE/NPR parity
+  if (isNoteParagraph(para, styleMap)) {
+    return continuationResult(para, prevNonContIlvl, true);
+  }
+
   const hits: SignalHit[] = [];
 
   const s1 = trySignal1(para, numberingMap);
@@ -110,27 +158,10 @@ function classifyOne(
   const s5 = trySignal5(para);
   if (s5) hits.push(s5);
 
-  if (hits.length === 0) {
-    return {
-      paragraph: para,
-      resolvedIlvl: prevNonContIlvl,
-      nodeType: 'continuation',
-      signalUsed: 3,
-      conflicts: [],
-      isVanish: para.isVanish,
-    };
-  }
-
   const winner = hits[0];
-  if (!winner)
-    return {
-      paragraph: para,
-      resolvedIlvl: prevNonContIlvl,
-      nodeType: 'continuation',
-      signalUsed: 3,
-      conflicts: [],
-      isVanish: para.isVanish,
-    };
+  if (!winner) {
+    return continuationResult(para, prevNonContIlvl, para.isVanish);
+  }
   const conflicts = buildConflicts(winner, hits);
 
   return {
@@ -189,6 +220,13 @@ function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source)
   };
 }
 
+// Empty paragraphs are layout spacing, not content — keeping them produced
+// blank root nodes that rendered as phantom PARTs.
+function appendContinuation(cp: ClassifiedParagraph, target: SpecNode[], source: Source): void {
+  if (cp.paragraph.text.trim().length === 0) return;
+  target.push(makeContinuationNode(cp, source));
+}
+
 function drainTop(stack: StackEntry[], roots: SpecNode[], source: Source): void {
   const popped = stack.pop();
   if (!popped) return;
@@ -196,6 +234,48 @@ function drainTop(stack: StackEntry[], roots: SpecNode[], source: Source): void 
   const top = stack[stack.length - 1];
   const parentChildren = top !== undefined ? top.children : roots;
   parentChildren.push(node);
+}
+
+// MasterFormat specs typically have 3 parts; more is permitted but uncommon
+// (warn above 3), and counts past 5 usually mean headings were over-matched.
+const TYPICAL_PART_COUNT = 3;
+const PLAUSIBLE_MAX_PARTS = 5;
+
+function partCountWarning(partCount: number): ParseWarning | null {
+  if (partCount <= TYPICAL_PART_COUNT) return null;
+  const suggestion =
+    partCount > PLAUSIBLE_MAX_PARTS
+      ? `${partCount} PART nodes detected — more than ${PLAUSIBLE_MAX_PARTS} usually means headings were over-matched`
+      : `${partCount} PART nodes detected — MasterFormat allows this, but specs typically have ${TYPICAL_PART_COUNT}`;
+  return { type: 'unusual-part-count', suggestion };
+}
+
+// Sanity post-pass: a healthy CSI parse has a small number of part-type roots
+// (typically 3) and nothing else at root. Degraded parses previously rendered
+// silently — 21 11 00agf.docx produced 34 roots with zero warnings.
+export function auditTreeStructure(roots: readonly SpecNode[]): ParseWarning[] {
+  const warnings: ParseWarning[] = [];
+  const partCount = roots.filter((n) => n.type === 'part').length;
+  const junkRoots = roots.filter((n) => n.type !== 'part');
+
+  if (partCount === 0) {
+    warnings.push({
+      type: 'no-structure-found',
+      suggestion:
+        'no PART headings detected — document may not be a CSI spec, or its numbering convention is unrecognized',
+    });
+  }
+  if (junkRoots.length > 0) {
+    const first = junkRoots[0];
+    warnings.push({
+      type: 'root-continuation',
+      ...(first && first.text ? { lineHint: first.text.slice(0, 60) } : {}),
+      suggestion: `${junkRoots.length} node(s) at root level are not PART headings (preamble or unclassified content)`,
+    });
+  }
+  const countWarning = partCountWarning(partCount);
+  if (countWarning) warnings.push(countWarning);
+  return warnings;
 }
 
 export function buildTree(
@@ -210,7 +290,7 @@ export function buildTree(
 
   for (const cp of classified) {
     if (cp.nodeType === 'continuation') {
-      lastNonContChildren.push(makeContinuationNode(cp, source));
+      appendContinuation(cp, lastNonContChildren, source);
       continue;
     }
 

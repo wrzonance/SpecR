@@ -18,7 +18,11 @@ export interface SpecNode {
   readonly meta: SpecNodeMeta;
 }
 
-export type ParseWarningType = 'root-continuation' | 'empty-part' | 'no-structure-found';
+export type ParseWarningType =
+  | 'root-continuation'
+  | 'empty-part'
+  | 'no-structure-found'
+  | 'unusual-part-count';
 
 export interface ParseWarning {
   readonly type: ParseWarningType;

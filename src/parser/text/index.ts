@@ -34,6 +34,8 @@ const WARNING_SUGGESTIONS: Readonly<Record<ParseWarningType, string>> = {
     'Part has no Articles. May indicate truncated content or unrecognized child prefixes.',
   'root-continuation':
     'Continuation text appeared before first structural heading and was dropped. Possible noise-prefix bleed; consider whether this line should be a heading.',
+  'unusual-part-count':
+    'More PART headings than a CSI spec normally has (typically 3). Headings may be over-matched.',
 };
 
 const SECTION_EXTRACT_RE = /SECTION\s+(\d{2})\s+(\d{2})\s+(\d{2})(?:\s*[-–—]\s*(.+))?/i;

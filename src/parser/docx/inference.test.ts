@@ -289,3 +289,39 @@ describe('buildTree — Pass 2: edge cases and meta', () => {
     expect(tree.parts[0]?.children[0]?.meta.vanish).toBe(true);
   });
 });
+
+describe('classifyParagraphs — numbering-generated PART headings (ARCAT regression)', () => {
+  const specShaped = (): NumberingMap => ({
+    ...emptyNumberingMap(),
+    articleIlvl: 1,
+    specShapedNumIds: new Set([1]),
+  });
+
+  it('regression: ilvl=0 "GENERAL" with spec-shaped numbering → part (21 11 00 yielded 34 roots, not 3)', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 0, text: 'GENERAL' })],
+      specShaped(),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('part');
+    expect(result[0]?.signalUsed).toBe(1);
+  });
+
+  it('ilvl=0 generic text on a NON-spec-shaped numId is still rejected — LibreOffice guard intact', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 7, ilvl: 0, text: 'All work shall comply with applicable standards.' })],
+      specShaped(),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).not.toBe('part');
+  });
+
+  it('literal "PART 1 – GENERAL" still classifies as part without spec-shaped evidence', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 9, ilvl: 0, text: 'PART 1 – GENERAL' })],
+      specShaped(),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('part');
+  });
+});
