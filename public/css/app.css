@@ -470,6 +470,16 @@ body {
   line-height: 1.5;
 }
 
+/* Root-level non-part content (document front matter: title lines, copyright) */
+.front-matter {
+  margin: 0.3rem 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--vellum-edge);
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--ink-on-vellum-dim);
+}
+
 .tree-part {
   margin-top: 0.7rem;
 }

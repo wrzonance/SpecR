@@ -213,8 +213,22 @@ export function renderSpecSheet(spec, ctx) {
   sheet.appendChild(head);
 
   const body = el('div', 'sheet-body');
-  for (let i = 0; i < tree.parts.length; i += 1) {
-    body.appendChild(renderPart(tree.parts[i], i, ctx));
+  // tree.parts holds ROOT nodes, not necessarily part-type nodes: degraded or
+  // preamble-bearing parses put notes and continuations at root too. Only
+  // part-type nodes get PART numbering — labelling roots by raw array index
+  // rendered ARCAT preambles as "PART 1..10" and the real parts as 11/12/13.
+  let partIndex = 0;
+  for (const node of tree.parts) {
+    if (node.type === 'part') {
+      body.appendChild(renderPart(node, partIndex, ctx));
+      partIndex += 1;
+    } else if (node.type === 'note') {
+      body.appendChild(renderNote(node, ctx));
+    } else if (node.text.trim().length > 0) {
+      const fm = el('p', 'front-matter');
+      fm.appendChild(linkifyText(node.text, ctx));
+      body.appendChild(fm);
+    }
   }
   sheet.appendChild(body);
 
