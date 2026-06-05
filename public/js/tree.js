@@ -5,7 +5,15 @@
 import { getLabel } from './labels.js';
 
 // Matches CSI section numbers, including UFGS dotted variants (09 67 23.13).
-const SECTION_PATTERN = /\b\d{2} \d{2} \d{2}(?:\.\d{2})?\b/g;
+// Whitespace-tolerant: Word text routinely separates the digit groups with
+// non-breaking spaces or doubled spaces (\s covers   in JS). The server
+// extractor normalizes those at ingest, so the stored targetSection has single
+// spaces — matched text must be normalized the same way before lookups.
+const SECTION_PATTERN = /\b\d{2}\s{1,3}\d{2}\s{1,3}\d{2}(?:\.\d{2})?\b/g;
+
+function normalizeSection(text) {
+  return text.replace(/\s+/g, ' ');
+}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -21,12 +29,14 @@ function linkifyText(text, ctx) {
   const frag = document.createDocumentFragment();
   let last = 0;
   for (const match of text.matchAll(SECTION_PATTERN)) {
-    const section = match[0];
+    const section = normalizeSection(match[0]);
     const status = ctx.statusFor(section);
     if (!status) continue;
     frag.appendChild(document.createTextNode(text.slice(last, match.index)));
-    const link = el('button', 'ref-link', section);
+    // display the original text verbatim; navigate/walk by normalized section
+    const link = el('button', 'ref-link', match[0]);
     link.type = 'button';
+    link.dataset.section = section;
     if (status === 'loaded') {
       link.title = `Jump to Section ${section}`;
       link.addEventListener('click', () => ctx.onNavigate(section));
@@ -39,7 +49,7 @@ function linkifyText(text, ctx) {
       link.title = `Section ${section} — unresolved (not in library)`;
     }
     frag.appendChild(link);
-    last = match.index + section.length;
+    last = match.index + match[0].length;
   }
   frag.appendChild(document.createTextNode(text.slice(last)));
   return frag;
@@ -177,7 +187,9 @@ export function locateLink(link) {
 // cycling on repeated clicks. Returns { index, total } or null when the body
 // has no linkified occurrence (refs can come from text the linkifier missed).
 function walkToCitation(sheet, section, walkState) {
-  const links = [...sheet.querySelectorAll('.ref-link')].filter((l) => l.textContent === section);
+  const links = [...sheet.querySelectorAll('.ref-link')].filter(
+    (l) => l.dataset.section === section
+  );
   if (links.length === 0) return null;
   const index = ((walkState.get(section) ?? -1) + 1) % links.length;
   walkState.set(section, index);
@@ -202,9 +214,20 @@ function makeSectionChip(section, count, ctx, sheet, walkState) {
     const result = walkToCitation(sheet, section, walkState);
     if (result) {
       pos.textContent = `${result.index + 1}/${result.total}`;
-    } else if (status === 'loaded') {
-      ctx.onNavigate(section); // no in-body site found — fall back to the jump
+      return;
     }
+    // The ref row exists (chip rendered) but the body has no linkified site —
+    // surface WHY instead of failing silently. Headings aren't linkified, and
+    // unknown text shapes can escape the matcher; the console gets specifics.
+    const bodyHasPattern = sheet.textContent.replace(/\s+/g, ' ').includes(section);
+    console.warn(
+      `SpecR citation walk: no in-body link for ${section} on sheet ${sheet.dataset.section}.`,
+      bodyHasPattern
+        ? 'The section number DOES appear in the sheet text — likely inside a heading bar or a text shape the linkifier missed. Please report this with the surrounding text.'
+        : 'The section number does not appear in the body text at all — the reference was extracted from text that does not contain the number verbatim.'
+    );
+    if (ctx.onWalkMiss) ctx.onWalkMiss(section, bodyHasPattern);
+    if (status === 'loaded') ctx.onNavigate(section); // fall back to the jump
   });
   chip.appendChild(walk);
 

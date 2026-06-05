@@ -78,6 +78,13 @@ const sheetCtx = {
   statusFor,
   onNavigate: navigateToSection,
   onLibraryRef,
+  onWalkMiss: (section, foundInText) =>
+    toast(
+      foundInText
+        ? `${section} appears in this spec but isn't linkable — details in console (F12)`
+        : `${section} was extracted at ingest but its text isn't in the body verbatim`,
+      'warn'
+    ),
 };
 
 function refreshWeb() {
