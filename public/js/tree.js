@@ -123,7 +123,7 @@ function countNodes(nodes) {
 
 // Opens every collapsed part/article between a node and the sheet root so a
 // citation hidden inside a collapsed article becomes visible before scrolling.
-function expandAncestors(node) {
+export function expandAncestors(node) {
   let current = node.parentElement;
   while (current) {
     if (
@@ -136,6 +136,16 @@ function expandAncestors(node) {
   }
 }
 
+// Expands, scrolls to, and locate-flashes an in-body citation link.
+export function locateLink(link) {
+  expandAncestors(link);
+  link.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  link.classList.remove('is-located');
+  void link.offsetWidth; // restart the locate animation
+  link.classList.add('is-located');
+  link.addEventListener('animationend', () => link.classList.remove('is-located'), { once: true });
+}
+
 // Steps through the in-body citation sites of `section` within this sheet,
 // cycling on repeated clicks. Returns { index, total } or null when the body
 // has no linkified occurrence (refs can come from text the linkifier missed).
@@ -144,13 +154,7 @@ function walkToCitation(sheet, section, walkState) {
   if (links.length === 0) return null;
   const index = ((walkState.get(section) ?? -1) + 1) % links.length;
   walkState.set(section, index);
-  const link = links[index];
-  expandAncestors(link);
-  link.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  link.classList.remove('is-located');
-  void link.offsetWidth; // restart the locate animation
-  link.classList.add('is-located');
-  link.addEventListener('animationend', () => link.classList.remove('is-located'), { once: true });
+  locateLink(links[index]);
   return { index, total: links.length };
 }
 

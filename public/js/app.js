@@ -8,6 +8,7 @@ import { checkHealth, listSpecs, getSpecTree } from './api.js';
 import { renderSpecSheet } from './tree.js';
 import { buildWebModel, renderWeb } from './web.js';
 import { initDropzone } from './dropzone.js';
+import { initRefPopover } from './popover.js';
 
 const specs = new Map(); // specId -> { tree, references, warnings?, capabilities? }
 const board = document.getElementById('spec-board');
@@ -148,6 +149,7 @@ async function boot() {
     onSpecReady,
     onReject: (message) => toast(message, 'err'),
   });
+  initRefPopover();
 
   // Pull anything already in the library from a previous session. Each spec
   // restores independently — one bad tree must not abort the rest.

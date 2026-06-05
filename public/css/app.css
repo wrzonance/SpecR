@@ -737,6 +737,50 @@ body {
   background: rgba(43, 42, 35, 0.06);
 }
 
+/* Floating citation-walk pill (hover a body reference) */
+.ref-popover {
+  position: fixed;
+  z-index: 45;
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  background: var(--ink-950);
+  border: 1px solid var(--line-dim);
+  border-bottom: 2px solid var(--orange);
+  padding: 0.12rem 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--vellum);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+}
+
+.ref-popover[hidden] {
+  display: none;
+}
+
+.pop-step {
+  border: none;
+  background: none;
+  color: var(--line);
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+}
+
+.pop-step:hover {
+  color: var(--orange);
+}
+
+.pop-counter {
+  color: var(--line-dim);
+  letter-spacing: 0.06em;
+  min-width: 3.2em;
+  text-align: center;
+}
+
 /* citation-walk locate flash on the in-body ref link */
 @keyframes ref-locate {
   0% {
