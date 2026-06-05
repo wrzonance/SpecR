@@ -244,6 +244,11 @@ docs/adr/
   012-ufgs-as-reference-not-authoritative-csi.md
   013-csi-sections-seed-public-domain-derivation.md
   014-dms-connector-framework.md
+  015-layered-spec-hierarchy-chain-of-custody.md
+  016-keynoting-engine.md
+  017-project-manual-publishing.md
+  018-document-concurrency-state-model.md
+  019-scope-boundaries-content-neutral-platform.md
 ```
 
 **ADR format:**

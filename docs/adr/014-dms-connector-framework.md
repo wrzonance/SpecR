@@ -13,7 +13,7 @@ and (Phase 3) merges owner redlines back in. Today documents enter and leave onl
 by manual upload/download or the in-process file loader. Real engineering firms
 keep their documents in a Document Management System (DMS): Bentley **ProjectWise**,
 Autodesk **ACC / Docs / Forma** (APS), Microsoft **SharePoint / OneDrive** (Graph),
-plus generic stores (Google Drive, Dropbox). A spec writer should be able to point
+Newforma **Project Center / Info Exchange**, plus generic stores (Google Drive, Dropbox). A spec writer should be able to point
 SpecR at a folder in their DMS, ingest the documents, and push regenerated /
 merged versions back — without manual file shuffling.
 
@@ -60,6 +60,7 @@ packages/
   connector-projectwise/   reference plugin — Bentley WSG REST       (built first)
   connector-acc/           future plugin — Autodesk Platform Services (Data Mgmt)
   connector-sharepoint/    future plugin — Microsoft Graph drives/items
+  connector-newforma/      future plugin — Newforma Project Center / Info Exchange
   connector-itwin/         future plugin — iTwin Platform Storage API
 ```
 
@@ -226,7 +227,9 @@ perfect interface against a single backend, baking in its idioms, then discoveri
 the next backend does not fit. Mitigation, made explicit: the interface is designed
 with the 2nd/3rd provider in mind, but **building a second plugin (7f) is the
 acceptance test for the abstraction** — not a "someday." Until a second plugin
-(ACC, SharePoint, or iTwin) exercises the interface, the contract is provisional.
+(ACC, SharePoint, Newforma, or iTwin) exercises the interface, the contract is
+provisional. Newforma is a strong 7f candidate: its auth and attribute model differ
+enough from WSG to genuinely exercise the abstraction.
 
 ## Phase 7 breakdown
 
@@ -256,7 +259,7 @@ No connector code should be written until the following are supplied:
    commands).
 3. **Test credentials + a non-prod datasource** (WSG) or a **registered service app**
    (iTwin: client_id/secret, scope `itwin-platform`, an iTwin id + Storage repo).
-4. **Per second-plugin research spike** — before any of ACC/SharePoint/iTwin is built,
+4. **Per second-plugin research spike** — before any of ACC/SharePoint/Newforma/iTwin is built,
    map that provider's CRUD **and** its permission, approval, locking, retention, and
    attribute models (the write-guard + provenance capabilities), the same way WSG was
    analyzed.
