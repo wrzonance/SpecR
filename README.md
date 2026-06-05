@@ -36,6 +36,8 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 3 | Round-trip merge engine | Planned |
 | 4 | Revit integration | Planned |
 | 5 | Web UI | Planned |
+| 6 | Scale — APS/Forge, full-text search, DOCX cache, MCP prompts | Planned |
+| 7 | DMS connector framework (ProjectWise + pluggable backends) — see [ADR-014](docs/adr/014-dms-connector-framework.md) | Planned |
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/research-executive-summary.md`](docs/research-executive-summary.md) for the landscape analysis.
 

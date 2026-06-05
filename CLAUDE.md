@@ -239,8 +239,11 @@ docs/adr/
   007-all-divisions-from-day-one.md
   008-markdown-parallel-output.md
   009-revit-direct-api-calls.md
-  010-mcp-server-exposure.md
+  010-mcp-server.md
   011-git-native-spec-versioning.md
+  012-ufgs-as-reference-not-authoritative-csi.md
+  013-csi-sections-seed-public-domain-derivation.md
+  014-dms-connector-framework.md
 ```
 
 **ADR format:**
