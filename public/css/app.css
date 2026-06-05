@@ -781,13 +781,23 @@ body {
   text-align: center;
 }
 
-/* citation-walk locate flash on the in-body ref link */
+/* citation-walk: persistent marker on the current citation (until next step) */
+.ref-link.is-current {
+  outline: 2px solid var(--orange);
+  outline-offset: 1px;
+}
+
+/* citation-walk: arrival pulse — fires when the link enters the viewport */
 @keyframes ref-locate {
   0% {
-    box-shadow: 0 0 0 4px var(--orange);
+    box-shadow:
+      0 0 0 4px var(--orange),
+      0 0 0 10px rgba(255, 122, 26, 0.4);
   }
   100% {
-    box-shadow: 0 0 0 12px rgba(255, 122, 26, 0);
+    box-shadow:
+      0 0 0 4px rgba(255, 122, 26, 0),
+      0 0 0 26px rgba(255, 122, 26, 0);
   }
 }
 

@@ -136,14 +136,41 @@ export function expandAncestors(node) {
   }
 }
 
-// Expands, scrolls to, and locate-flashes an in-body citation link.
+let currentLocated = null;
+
+function pulseOnArrival(link) {
+  // Smooth scrollIntoView can take seconds on long sheets; an animation
+  // started at click time finishes while the target is still off-screen.
+  // Defer the pulse until the link actually enters the viewport.
+  const observer = new IntersectionObserver(
+    (entries, obs) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      obs.disconnect();
+      link.classList.remove('is-located');
+      void link.offsetWidth; // restart the locate animation
+      link.classList.add('is-located');
+      link.addEventListener('animationend', () => link.classList.remove('is-located'), {
+        once: true,
+      });
+    },
+    { threshold: 0.9 }
+  );
+  observer.observe(link);
+  setTimeout(() => observer.disconnect(), 10000); // hygiene: never observe forever
+}
+
+// Expands, scrolls to, marks, and locate-pulses an in-body citation link.
+// The is-current marker is persistent (until the next walk step) so the
+// found citation stays identifiable even after the pulse fades.
 export function locateLink(link) {
   expandAncestors(link);
+  if (currentLocated && currentLocated !== link) {
+    currentLocated.classList.remove('is-current', 'is-located');
+  }
+  currentLocated = link;
+  link.classList.add('is-current');
   link.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  link.classList.remove('is-located');
-  void link.offsetWidth; // restart the locate animation
-  link.classList.add('is-located');
-  link.addEventListener('animationend', () => link.classList.remove('is-located'), { once: true });
+  pulseOnArrival(link);
 }
 
 // Steps through the in-body citation sites of `section` within this sheet,
