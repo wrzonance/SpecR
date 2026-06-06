@@ -62,6 +62,11 @@ describe('sectionNumberFragment', () => {
     expect(re.exec('SECTION 26 00 13 GENERAL')?.[1]).toBe('26 00 13');
   });
 
+  it('exposes exactly ONE capture group (group 1 = whole number)', () => {
+    // length === 2 → [full match, group 1]; consumer-added groups start at 2
+    expect(new RegExp(sectionNumberFragment()).exec('26 00 13.10 20')?.length).toBe(2);
+  });
+
   it('does not capture a trailing pair as agency without a dotted suffix', () => {
     const re = new RegExp(String.raw`\bSECTION\s+${sectionNumberFragment()}`, 'i');
     // "20 AMP" must not become an agency suffix — agency requires the dot first
@@ -99,6 +104,18 @@ describe('findSectionNumbers', () => {
 
   it('returns empty array when nothing matches', () => {
     expect(findSectionNumbers('no numbers here')).toEqual([]);
+  });
+
+  it('matches across a newline inter-group separator (\\s+) and normalizes', () => {
+    // inter-group separators use \s+, which spans the newline
+    const found = findSectionNumbers('26\n00 13');
+    expect(found.map((f) => f.value)).toEqual(['26 00 13']);
+  });
+
+  it('does not absorb a next-line pair as agency (horizontal-only separator)', () => {
+    // agency separator is [^\S\r\n]+ — a 2-digit token on the NEXT line is left out
+    const found = findSectionNumbers('see 26 00 13.10\n20 items');
+    expect(found.map((f) => f.value)).toEqual(['26 00 13.10']);
   });
 });
 

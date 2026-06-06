@@ -21,7 +21,14 @@ export const SECTION_NUMBER_RE = /^\d{2} \d{2} \d{2}(?:\.\d{2}(?: \d{2})?)?$/;
 //   and recover the value via normalizeSectionNumber(match[1]).
 const FRAGMENT = String.raw`(?<![\d.])(\d{2}\s+\d{2}\s+\d{2}(?:\.\d{2}(?!\d)(?:[^\S\r\n]+\d{2}(?!\d))?)?)(?!\d)`;
 
-/** Regex source fragment for embedding in larger scanners (keyword/prose/bare). */
+/**
+ * Regex source fragment for embedding in larger scanners (keyword/prose/bare).
+ *
+ * Capture-group contract: the fragment wraps the whole section number in
+ * exactly ONE capture group, so group 1 is always the full number. Any groups
+ * a consumer adds around the fragment therefore start at index 2. Recover the
+ * canonical value via normalizeSectionNumber(match[1]).
+ */
 export function sectionNumberFragment(): string {
   return FRAGMENT;
 }
