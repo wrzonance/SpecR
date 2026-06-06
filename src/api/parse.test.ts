@@ -9,9 +9,10 @@ vi.mock('../parser/index.js', () => ({
 }));
 vi.mock('../lib/parse-pool.js', () => ({
   parsePool: {
-    run: vi
-      .fn()
-      .mockResolvedValue({ tree: { id: '', section: 'test', title: 'T', parts: [] }, refs: [] }),
+    run: vi.fn().mockResolvedValue({
+      tree: { id: '', section: '27 21 00', title: 'T', parts: [] },
+      refs: [],
+    }),
   },
 }));
 vi.mock('../lib/jobs.js', () => ({
@@ -135,6 +136,41 @@ describe('parseHandler', () => {
     const res = makeRes();
     await parseHandler(req, res);
     expect(res.status).toHaveBeenCalledWith(202);
+  });
+
+  it('parse: dirty section override normalized before persist', async () => {
+    const { persistParsedSpec } = await import('../db/index.js');
+    const { updateJob } = await import('../lib/jobs.js');
+    vi.mocked(updateJob).mockImplementation(() => {});
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: { originalname: 'spec.txt', mimetype: 'text/plain', buffer: Buffer.from('x') },
+      body: { section: '26  00 13.10' },
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(202);
+    await vi.waitFor(() => {
+      expect(persistParsedSpec).toHaveBeenCalledTimes(1);
+    });
+    const callArg = vi.mocked(persistParsedSpec).mock.calls[0]?.[0];
+    expect(callArg?.tree.section).toBe('26 00 13.10');
+  });
+
+  it('parse: malformed section override → 400 before job creation', async () => {
+    const { createJob } = await import('../lib/jobs.js');
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: { originalname: 'spec.txt', mimetype: 'text/plain', buffer: Buffer.from('x') },
+      body: { section: '26 00 13.1' },
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'invalid section override format' })
+    );
+    expect(createJob).not.toHaveBeenCalled();
   });
 });
 

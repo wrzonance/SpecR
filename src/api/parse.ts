@@ -10,6 +10,7 @@ import { persistParsedSpec } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
 import { ParseWarningSchema, SecRefSchema } from '../ast/schemas.js';
+import { SectionNumberSchema, normalizeSectionNumber } from '../lib/section-number.js';
 
 interface ParseBody {
   readonly section?: string;
@@ -64,9 +65,21 @@ export async function parseHandler(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  const rawBody = parseBody(req.body);
+  const normalizedSection =
+    rawBody.section !== undefined ? normalizeSectionNumber(rawBody.section) : undefined;
+  if (rawBody.section !== undefined && normalizedSection === null) {
+    res.status(400).json({ success: false, error: 'invalid section override format' });
+    return;
+  }
+  const body: ParseBody = {
+    ...rawBody,
+    ...(normalizedSection != null ? { section: normalizedSection } : {}),
+  };
+
   const jobId = createJob();
   // Pass buffer and ext, not the full file object, so the request closure can be GC'd
-  void processParseJob(jobId, req.file.buffer, ext, parseBody(req.body));
+  void processParseJob(jobId, req.file.buffer, ext, body);
   res.status(202).json({ success: true, data: { jobId } });
 }
 
@@ -91,7 +104,7 @@ function countNodes(nodes: readonly SpecNode[]): number {
 const workerOutputSchema = z.object({
   tree: z.object({
     id: z.string(),
-    section: z.string(),
+    section: z.union([SectionNumberSchema, z.literal('unknown')]),
     title: z.string(),
     parts: z.array(z.unknown()),
     warnings: z.array(ParseWarningSchema).optional(),
