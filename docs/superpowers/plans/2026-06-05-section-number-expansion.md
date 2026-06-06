@@ -11,7 +11,7 @@
 **Branch:** All work on `feat/section-number-expansion` (this worktree, based on origin/main `ba99b64`). PR cutting at the end (Task 16).
 
 **Key grammar facts** (corpus-verified, 665 UFGS `.SEC` files):
-- 422 base / 162 dotted / 76 agency-suffixed; whitespace dirt exists (leading/double spaces); 2 SCN tags lack the `SECTION ` prefix.
+- 422 base / 162 dotted / 76 agency-suffixed; whitespace dirt exists (leading/double spaces); 2 SCN tags lack the `SECTION` keyword prefix.
 - `26 00 13` and `26 00 13.10` and `26 00 13.20` are THREE DIFFERENT sections. Truncation is data corruption.
 - Linking is **exact match only** (locked decision). Lexicographic sort is already correct for this grammar — do not touch ordering.
 - JS `\s` already matches NBSP (` `); normalization still canonicalizes runs to single ASCII spaces.
@@ -302,9 +302,9 @@ what the source document said.
 - [ ] **Step 2: Add to CLAUDE.md ADR list**
 
 In `CLAUDE.md`, in the `docs/adr/` listing, after the line
-`  019-scope-boundaries-content-neutral-platform.md`, add:
+`019-scope-boundaries-content-neutral-platform.md`, add:
 
-```
+```text
   020-section-number-expanded-shape.md
 ```
 
