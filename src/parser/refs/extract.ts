@@ -5,6 +5,7 @@ import {
   buildStandardRefRules,
   type ExtractionRule,
 } from './rules.js';
+import { normalizeSectionNumber } from '../../lib/section-number.js';
 
 const DEFAULT_RULES: readonly ExtractionRule[] = [
   ...SECTION_REF_RULES,
@@ -46,10 +47,11 @@ function toGlobalPattern(rule: ExtractionRule): RegExp {
 
 function buildRef(sourceNodeId: string, rule: ExtractionRule, match: RegExpMatchArray): SecRef {
   if (rule.targetType === 'section') {
+    const raw = match[1] ?? '';
     return {
       sourceNodeId,
       targetType: 'section',
-      targetSpecSection: `${match[1]} ${match[2]} ${match[3]}`,
+      targetSpecSection: normalizeSectionNumber(raw) ?? raw.trim(),
       referenceText: match[0],
     };
   }

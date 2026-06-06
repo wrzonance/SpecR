@@ -27,6 +27,18 @@ describe('SECTION_REF_RULES', () => {
       expect(rule.examples.length).toBeGreaterThan(0);
     }
   });
+
+  it('csi-section-keyword: captures dotted suffix — Section 26 00 13.10 not truncated to base', () => {
+    const rule = SECTION_REF_RULES.find((r) => r.id === 'csi-section-keyword')!;
+    const fresh = new RegExp(rule.pattern.source, rule.pattern.flags.replace('g', ''));
+    expect(fresh.exec('See Section 26 00 13.10 for switchgear')?.[1]).toBe('26 00 13.10');
+  });
+
+  it('csi-section-keyword: captures agency suffix — Section 01 32 01.00 10', () => {
+    const rule = SECTION_REF_RULES.find((r) => r.id === 'csi-section-keyword')!;
+    const fresh = new RegExp(rule.pattern.source, rule.pattern.flags.replace('g', ''));
+    expect(fresh.exec('per Section 01 32 01.00 10 requirements')?.[1]).toBe('01 32 01.00 10');
+  });
 });
 
 describe('STANDARD_ORG_PATTERNS', () => {
