@@ -156,6 +156,18 @@ describe('generateDocx', () => {
     expect(Buffer.isBuffer(buffer)).toBe(true);
     expect(buffer.length).toBeGreaterThan(0);
   });
+
+  it('generateDocx: agency-suffixed section survives into document.xml', async () => {
+    const suffixedTree: SpecTree = {
+      id: '00000000-0000-0000-0000-000000000001',
+      section: '01 32 01.00 10',
+      title: 'Project Schedule',
+      parts: [],
+    };
+    const buffer = await generateDocx(suffixedTree);
+    const xml = await getDocXml(buffer);
+    expect(xml).toContain('01 32 01.00 10');
+  });
 });
 
 describe('generateDocx — content controls', () => {

@@ -157,6 +157,15 @@ describe('renderMarkdown', () => {
     };
     expect(renderMarkdown(empty)).toBe('# SECTION 00 00 00 — Empty');
   });
+  it('renderMarkdown: suffixed section renders verbatim in H1', () => {
+    const suffixed: SpecTree = {
+      id: '00000000-0000-0000-0000-000000000001',
+      section: '27 05 13.43',
+      title: 'TV Distribution',
+      parts: [],
+    };
+    expect(renderMarkdown(suffixed)).toBe('# SECTION 27 05 13.43 — TV Distribution');
+  });
   it('renders continuation without label', () => {
     const withCont: SpecTree = {
       id: '00000000-0000-0000-0000-000000000001',
