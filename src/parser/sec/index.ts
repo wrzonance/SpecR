@@ -4,6 +4,7 @@ import type { SpecNode, SpecTree, NodeType, SecRef } from '../../ast/types.js';
 import { ParserError } from '../error.js';
 import type { NteNode, PrtNode, RefNode, SptNode } from './elements.js';
 import { decodeXmlEntities } from './entities.js';
+import { normalizeSectionNumber } from '../../lib/section-number.js';
 
 export type { SecRef };
 
@@ -76,7 +77,9 @@ function pushSrfRefs(raw: string, nodeId: string, refs: SecRef[]): void {
     refs.push({
       sourceNodeId: nodeId,
       targetType: 'section',
-      targetSpecSection: sec,
+      // Normalize-or-verbatim: a tagged ref is never rejected; exact-match
+      // resolution simply won't find non-conforming targets.
+      targetSpecSection: normalizeSectionNumber(sec) ?? sec,
       referenceText: stripTags(raw).slice(0, 200),
     });
   }
@@ -181,12 +184,16 @@ export function parseSec(xml: string): ParsedSec {
   const sec = (root as Record<string, unknown>)['SEC'] as Record<string, unknown> | undefined;
   if (!sec) throw new ParserError('SEC root element not found');
 
-  // SCN/STL are parsed with processEntities: false — decode here
-  const section = decodeXmlEntities(
+  // SCN/STL are parsed with processEntities: false — decode here.
+  // Normalize-or-verbatim: canonicalize section whitespace when the value is a
+  // valid expanded-shape number; keep verbatim otherwise (downstream schema
+  // gates decide what to do with non-conforming values).
+  const scnRaw = decodeXmlEntities(
     requireString(sec['SCN'], 'SCN')
       .replace(/^SECTION\s+/i, '')
       .trim()
   );
+  const section = normalizeSectionNumber(scnRaw) ?? scnRaw;
   const title = decodeXmlEntities(requireString(sec['STL'], 'STL'));
 
   const refs: SecRef[] = [];

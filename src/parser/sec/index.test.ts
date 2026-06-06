@@ -323,3 +323,30 @@ describe('parseSec — XML entity decoding', () => {
     expect(txt?.text).toContain('bogus reference &#x110000; survives');
   });
 });
+
+describe('parseSec — SCN/SRF whitespace canonicalization', () => {
+  it('sec parser: SCN with whitespace dirt normalizes to canonical form', () => {
+    const xml = `<?xml version="1.0"?><SEC><SCN>SECTION  26 00 13.10 </SCN><STL>PANELBOARDS</STL></SEC>`;
+    const { tree } = parseSec(xml);
+    expect(tree.section).toBe('26 00 13.10');
+  });
+
+  it('sec parser: SRF target normalizes NBSP separators to canonical form', () => {
+    // NBSP (U+00A0) separators -- written as escape sequences to avoid no-irregular-whitespace
+    const nbsp = '\u00a0';
+    const srfContent = `26${nbsp}00${nbsp}13.10`;
+    const xml =
+      `<?xml version="1.0"?><SEC><SCN>SECTION 27 41 00</SCN><STL>T</STL>` +
+      `<PRT><TTL>PART 1</TTL><SPT><TTL>X</TTL><TXT>See <SRF>${srfContent}</SRF> now.</TXT></SPT></PRT></SEC>`;
+    const { refs } = parseSec(xml);
+    const sRef = refs.find((r) => r.targetType === 'section');
+    expect(sRef?.targetSpecSection).toBe('26 00 13.10');
+  });
+
+  it('sec parser: unnormalizable SRF content kept verbatim (never dropped)', () => {
+    const xml = `<?xml version="1.0"?><SEC><SCN>SECTION 27 41 00</SCN><STL>T</STL><PRT><TTL>PART 1</TTL><SPT><TTL>X</TTL><TXT>See <SRF>APPENDIX B</SRF> now.</TXT></SPT></PRT></SEC>`;
+    const { refs } = parseSec(xml);
+    const sRef = refs.find((r) => r.targetType === 'section');
+    expect(sRef?.targetSpecSection).toBe('APPENDIX B');
+  });
+});
