@@ -13,6 +13,11 @@ export interface SectionRecord {
   readonly division: string;
 }
 
+export interface CollectResult {
+  readonly records: readonly SectionRecord[];
+  readonly scanned: number;
+}
+
 // Optional leading whitespace + optional 'SECTION ' keyword: real corpus files
 // carry both a bare SCN (2 files omit the keyword) and a leading space before it
 // (e.g. 26_29_23.SEC: `<SCN> SECTION 26 29 23</SCN>`). The capture is anchored to
@@ -37,31 +42,44 @@ export function extractSectionMeta(content: string): SectionRecord | null {
   return { sectionNumber, title, division };
 }
 
-async function collectDivisionRecords(divPath: string): Promise<SectionRecord[]> {
-  const entries = await readdir(divPath, { withFileTypes: true });
-  const records: SectionRecord[] = [];
+/**
+ * Pure extraction over a batch of file contents. `scanned` counts every input;
+ * `records` holds only the canonical ones. A gap between the two is the
+ * silent-truncation signal the seed warns on.
+ */
+export function collectFromContents(contents: readonly string[]): CollectResult {
+  const records = contents
+    .map((content) => extractSectionMeta(content))
+    .filter((record): record is SectionRecord => record !== null);
 
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.sec')) continue;
-    const content = await readFile(join(divPath, entry.name), 'latin1');
-    const record = extractSectionMeta(content);
-    if (record !== null) records.push(record);
-  }
-
-  return records;
+  return { records, scanned: contents.length };
 }
 
-async function collectRecords(): Promise<SectionRecord[]> {
+async function collectDivisionRecords(divPath: string): Promise<CollectResult> {
+  const entries = await readdir(divPath, { withFileTypes: true });
+  const secFiles = entries.filter(
+    (entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.sec')
+  );
+  const contents = await Promise.all(
+    secFiles.map((entry) => readFile(join(divPath, entry.name), 'latin1'))
+  );
+
+  return collectFromContents(contents);
+}
+
+async function collectRecords(): Promise<CollectResult> {
   const entries = await readdir(UFGS_DIR, { withFileTypes: true });
-  const all: SectionRecord[] = [];
+  const records: SectionRecord[] = [];
+  let scanned = 0;
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const divRecords = await collectDivisionRecords(join(UFGS_DIR, entry.name));
-    all.push(...divRecords);
+    const division = await collectDivisionRecords(join(UFGS_DIR, entry.name));
+    records.push(...division.records);
+    scanned += division.scanned;
   }
 
-  return all;
+  return { records, scanned };
 }
 
 async function seed(pool: Pool): Promise<void> {
@@ -70,8 +88,15 @@ async function seed(pool: Pool): Promise<void> {
 
   logger.info('seeding CSI section reference data');
 
-  const records = await collectRecords();
+  const { records, scanned } = await collectRecords();
   logger.info({ count: records.length }, 'collected section records');
+
+  if (scanned > records.length) {
+    logger.warn(
+      { scanned, kept: records.length, skipped: scanned - records.length },
+      'section files skipped during seed'
+    );
+  }
 
   try {
     for (const { sectionNumber, title, division } of records) {

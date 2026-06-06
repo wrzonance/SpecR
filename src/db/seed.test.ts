@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractSectionMeta } from './seed.js';
+import { extractSectionMeta, collectFromContents } from './seed.js';
 
 describe('extractSectionMeta', () => {
   it('extracts section number and title from valid SEC content', () => {
@@ -56,5 +56,24 @@ describe('extractSectionMeta', () => {
   it('seed: leading whitespace before SECTION keyword tolerated (26_29_23.SEC corpus shape)', () => {
     const content = `<?xml version="1.0"?><SEC><SCN> SECTION 26 29 23</SCN><STL>X</STL></SEC>`;
     expect(extractSectionMeta(content)?.sectionNumber).toBe('26 29 23');
+  });
+});
+
+describe('collectFromContents', () => {
+  it('counts every scanned content vs the records it keeps', () => {
+    const good = `<?xml version="1.0"?><SEC><SCN>SECTION 01 11 00</SCN><STL>SUMMARY</STL></SEC>`;
+    const bad = `<?xml version="1.0"?><SEC><SCN>SECTION TBD</SCN><STL>X</STL></SEC>`;
+    const result = collectFromContents([good, bad]);
+    expect(result.scanned).toBe(2);
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0]?.sectionNumber).toBe('01 11 00');
+  });
+
+  it('scanned equals kept when every content is canonical', () => {
+    const a = `<SEC><SCN>SECTION 01 11 00</SCN><STL>A</STL></SEC>`;
+    const b = `<SEC><SCN>SECTION 27 21 00</SCN><STL>B</STL></SEC>`;
+    const result = collectFromContents([a, b]);
+    expect(result.scanned).toBe(2);
+    expect(result.records).toHaveLength(2);
   });
 });
