@@ -159,6 +159,18 @@ describe('inferSectionMeta', () => {
     expect(result.method).toBe('content-medium');
     expect(result.inferredSection).toBe('26 00 13.10');
   });
+
+  it('infer-section: dash-separated inline title — dash stripped, parity with text parser', () => {
+    const tree = makeTree([{ text: 'SECTION 26 00 13.10 - PANELBOARDS' }]);
+    const result = inferSectionMeta(tree);
+    expect(result.inferredSection).toBe('26 00 13.10');
+    expect(result.inferredTitle).toBe('PANELBOARDS');
+  });
+
+  it('infer-section: em-dash separated inline title on base section', () => {
+    const tree = makeTree([{ text: 'SECTION 26 09 33 — MOTOR CONTROLLERS' }]);
+    expect(inferSectionMeta(tree).inferredTitle).toBe('MOTOR CONTROLLERS');
+  });
 });
 
 describe('computeTitleMatch', () => {

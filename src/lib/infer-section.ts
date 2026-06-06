@@ -13,7 +13,7 @@ export interface SectionInference {
 
 const KEYWORD_RE = new RegExp(String.raw`\bSECTION\s+${sectionNumberFragment()}`, 'i');
 const INLINE_TITLE_RE = new RegExp(
-  String.raw`\bSECTION\s+${sectionNumberFragment()}\s+(\S.*)`,
+  String.raw`\bSECTION\s+${sectionNumberFragment()}(?:\s*[-–—]\s*|\s+)(\S.*)`,
   'i'
 );
 const BARE_NUM_RE = new RegExp(`^${sectionNumberFragment()}$`);
