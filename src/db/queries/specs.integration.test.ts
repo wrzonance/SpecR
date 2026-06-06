@@ -102,3 +102,33 @@ describe('createSpec', () => {
     }
   });
 });
+
+describe('migration 013 — section shape CHECK constraints', () => {
+  it('db: specs.section CHECK accepts expanded shapes and the unknown sentinel', async () => {
+    const r1 = await pool.query(
+      `INSERT INTO specs (section, title, source) VALUES ('99 88 77.10 20', 'Shape OK', 'arcat') RETURNING section`
+    );
+    expect(r1.rows[0]).toMatchObject({ section: '99 88 77.10 20' });
+    const r2 = await pool.query(
+      `INSERT INTO specs (section, title, source) VALUES ('unknown', 'Sentinel OK', 'arcat') RETURNING section`
+    );
+    expect(r2.rows[0]).toMatchObject({ section: 'unknown' });
+    await pool.query(
+      `DELETE FROM specs WHERE section IN ('99 88 77.10 20', 'unknown') AND source = 'arcat'`
+    );
+  });
+
+  it('db: specs.section CHECK rejects malformed sections', async () => {
+    await expect(
+      pool.query(`INSERT INTO specs (section, title, source) VALUES ('99 8877', 'Bad', 'arcat')`)
+    ).rejects.toThrow(/specs_section_shape_check/);
+  });
+
+  it('db: spec_sections shape CHECK rejects the sentinel (catalog is canonical-only)', async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO spec_sections (section_number, title, division) VALUES ('unknown', 'Bad', 'un')`
+      )
+    ).rejects.toThrow(/spec_sections_section_number_shape_check/);
+  });
+});
