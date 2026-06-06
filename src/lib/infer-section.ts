@@ -1,4 +1,5 @@
 import type { SpecTree, SpecNode } from '../ast/types.js';
+import { normalizeSectionNumber, sectionNumberFragment } from './section-number.js';
 
 export interface SectionInference {
   readonly method: 'metadata' | 'content-high' | 'content-medium' | 'none';
@@ -10,9 +11,12 @@ export interface SectionInference {
   readonly titleMatch: 'exact' | 'close' | 'divergent' | 'unknown';
 }
 
-const KEYWORD_RE = /\bSECTION\s+(\d{2})\s+(\d{2})\s+(\d{2})\b/i;
-const INLINE_TITLE_RE = /\bSECTION\s+\d{2}\s+\d{2}\s+\d{2}\b\s+(.*)/i;
-const BARE_NUM_RE = /^(\d{2})\s+(\d{2})\s+(\d{2})$/;
+const KEYWORD_RE = new RegExp(String.raw`\bSECTION\s+${sectionNumberFragment()}`, 'i');
+const INLINE_TITLE_RE = new RegExp(
+  String.raw`\bSECTION\s+${sectionNumberFragment()}\s+(\S.*)`,
+  'i'
+);
+const BARE_NUM_RE = new RegExp(`^${sectionNumberFragment()}$`);
 const MAX_NODES = 50;
 const TITLE_MIN_LENGTH = 3;
 const TITLE_MAX_LENGTH = 150;
@@ -43,8 +47,8 @@ function isValidTitle(text: string): boolean {
 
 function findInlineTitle(nodeText: string): string | null {
   const inlineMatch = INLINE_TITLE_RE.exec(nodeText);
-  if (inlineMatch?.[1] !== undefined && isValidTitle(inlineMatch[1])) {
-    return inlineMatch[1].trim();
+  if (inlineMatch?.[2] !== undefined && isValidTitle(inlineMatch[2])) {
+    return inlineMatch[2].trim();
   }
   return null;
 }
@@ -101,11 +105,12 @@ const NONE_RESULT: SectionInference = {
 function scanKeyword(nodes: readonly SpecNode[]): SectionInference | null {
   for (let i = 0; i < nodes.length; i++) {
     const m = KEYWORD_RE.exec(nodes[i]?.text ?? '');
-    if (m !== null) {
+    const section = m === null ? null : normalizeSectionNumber(m[1] ?? '');
+    if (section !== null) {
       return {
         method: 'content-high',
         confidence: 'high',
-        inferredSection: `${m[1]} ${m[2]} ${m[3]}`,
+        inferredSection: section,
         inferredTitle: findTitle(nodes, i),
         titleMatch: 'unknown',
       };
@@ -117,11 +122,12 @@ function scanKeyword(nodes: readonly SpecNode[]): SectionInference | null {
 function scanBareNumber(nodes: readonly SpecNode[]): SectionInference | null {
   for (let i = 0; i < nodes.length; i++) {
     const m = BARE_NUM_RE.exec((nodes[i]?.text ?? '').trim());
-    if (m !== null) {
+    const section = m === null ? null : normalizeSectionNumber(m[1] ?? '');
+    if (section !== null) {
       return {
         method: 'content-medium',
         confidence: 'medium',
-        inferredSection: `${m[1]} ${m[2]} ${m[3]}`,
+        inferredSection: section,
         inferredTitle: findTitle(nodes, i),
         titleMatch: 'unknown',
       };
