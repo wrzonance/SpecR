@@ -3,6 +3,23 @@ import { v4 as uuidv4 } from 'uuid';
 import { extractRefsFromTree } from './extract.js';
 import type { SpecNode, SpecTree } from '../../ast/types.js';
 
+function makeTreeWithText(text: string): SpecTree {
+  return {
+    id: '00000000-0000-4000-8000-000000000001',
+    section: '27 21 00',
+    title: 'Test',
+    parts: [
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        type: 'part',
+        text,
+        children: [],
+        meta: {},
+      },
+    ],
+  };
+}
+
 function makeNode(
   type: SpecNode['type'],
   text: string,
@@ -131,5 +148,20 @@ describe('extractRefsFromTree', () => {
     ]) {
       expect(orgs).toContain(expected);
     }
+  });
+
+  it('refs: Section 26 00 13.10 citation — suffix retained, not truncated to base', () => {
+    const tree = makeTreeWithText('Comply with Section 26 00 13.10 and Section 09 91 00.');
+    const refs = extractRefsFromTree(tree);
+    const sections = refs.filter((r) => r.targetType === 'section').map((r) => r.targetSpecSection);
+    expect(sections).toContain('26 00 13.10');
+    expect(sections).toContain('09 91 00');
+    expect(sections).not.toContain('26 00 13');
+  });
+
+  it('refs: NBSP-separated citation normalizes to canonical spacing', () => {
+    const tree = makeTreeWithText('See Section 26 00 13.10 now.');
+    const refs = extractRefsFromTree(tree);
+    expect(refs.find((r) => r.targetType === 'section')?.targetSpecSection).toBe('26 00 13.10');
   });
 });

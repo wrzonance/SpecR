@@ -133,6 +133,44 @@ describe('inferSectionMeta', () => {
     expect(() => inferSectionMeta(tree)).not.toThrow();
     expect(inferSectionMeta(tree).confidence).toBe('none');
   });
+
+  it('infer-section: keyword scan keeps .33 — 01 33 23.33 is not 01 33 23', () => {
+    const tree = makeTree([{ text: 'SECTION 01 33 23.33 AVIATION FUEL DISTRIBUTION' }]);
+    const result = inferSectionMeta(tree);
+    expect(result.method).toBe('content-high');
+    expect(result.inferredSection).toBe('01 33 23.33');
+  });
+
+  it('infer-section: keyword scan keeps agency suffix — 01 32 01.00 10', () => {
+    const tree = makeTree([{ text: 'SECTION 01 32 01.00 10' }, { text: 'QUALITY CONTROL' }]);
+    const result = inferSectionMeta(tree);
+    expect(result.inferredSection).toBe('01 32 01.00 10');
+    expect(result.inferredTitle).toBe('QUALITY CONTROL');
+  });
+
+  it('infer-section: inline title extracted from suffixed header', () => {
+    const tree = makeTree([{ text: 'SECTION 01 33 23.33 AVIATION FUEL DISTRIBUTION' }]);
+    expect(inferSectionMeta(tree).inferredTitle).toBe('AVIATION FUEL DISTRIBUTION');
+  });
+
+  it('infer-section: bare suffixed header 26 00 13.10 inferred, not none', () => {
+    const tree = makeTree([{ text: '26 00 13.10' }, { text: 'PANELBOARDS' }]);
+    const result = inferSectionMeta(tree);
+    expect(result.method).toBe('content-medium');
+    expect(result.inferredSection).toBe('26 00 13.10');
+  });
+
+  it('infer-section: dash-separated inline title — dash stripped, parity with text parser', () => {
+    const tree = makeTree([{ text: 'SECTION 26 00 13.10 - PANELBOARDS' }]);
+    const result = inferSectionMeta(tree);
+    expect(result.inferredSection).toBe('26 00 13.10');
+    expect(result.inferredTitle).toBe('PANELBOARDS');
+  });
+
+  it('infer-section: em-dash separated inline title on base section', () => {
+    const tree = makeTree([{ text: 'SECTION 26 09 33 — MOTOR CONTROLLERS' }]);
+    expect(inferSectionMeta(tree).inferredTitle).toBe('MOTOR CONTROLLERS');
+  });
 });
 
 describe('computeTitleMatch', () => {

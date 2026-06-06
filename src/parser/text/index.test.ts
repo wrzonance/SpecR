@@ -132,4 +132,35 @@ describe('parseText — section extraction edge cases', () => {
     expect(result.tree.parts.every((p) => p.type === 'part')).toBe(true);
     expect(result.tree.parts).toHaveLength(1);
   });
+
+  it('text parser: SECTION 27 05 13.43 - TITLE — suffix kept, title extracted', () => {
+    const result = parseText('SECTION 27 05 13.43 - TELEVISION DISTRIBUTION\n\nPART 1 GENERAL\n');
+    expect(result.tree.section).toBe('27 05 13.43');
+    expect(result.tree.title).toBe('TELEVISION DISTRIBUTION');
+  });
+
+  it('text parser: agency-suffixed header with dash title', () => {
+    const result = parseText('SECTION 01 32 01.00 10 - QUALITY CONTROL\n\nPART 1 GENERAL\n');
+    expect(result.tree.section).toBe('01 32 01.00 10');
+    expect(result.tree.title).toBe('QUALITY CONTROL');
+  });
+
+  it('text parser: bare suffixed header line', () => {
+    const result = parseText('26 00 13.10 - PANELBOARDS\n\nPART 1 GENERAL\n');
+    expect(result.tree.section).toBe('26 00 13.10');
+    expect(result.tree.title).toBe('PANELBOARDS');
+  });
+
+  it('text parser: suffixed SECTION line classified as header, not body content', () => {
+    const result = parseText(
+      'SECTION 27 05 13.43 - TELEVISION DISTRIBUTION\nPART 1 GENERAL\n1.1 SUMMARY\n'
+    );
+    const texts: string[] = [];
+    const walk = (n: SpecNode): void => {
+      texts.push(n.text);
+      n.children.forEach((c) => walk(c));
+    };
+    result.tree.parts.forEach((p) => walk(p));
+    expect(texts.some((t) => t.includes('TELEVISION DISTRIBUTION'))).toBe(false);
+  });
 });

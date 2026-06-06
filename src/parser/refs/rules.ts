@@ -2,6 +2,8 @@
 // Operates on any text content reachable through SpecTree walks.
 // Rules are data — not code — so agents can inspect, propose, and fix them.
 
+import { sectionNumberFragment } from '../../lib/section-number.js';
+
 // ─── Rule type ────────────────────────────────────────────────────────────────
 
 export interface ExtractionRule {
@@ -19,12 +21,18 @@ export const SECTION_REF_RULES: readonly ExtractionRule[] = [
   {
     id: 'csi-section-keyword',
     description:
-      'Matches "Section XX XX XX" — standard CSI cross-reference with keyword prefix. ' +
+      'Matches "Section XX XX XX[.XX[ XX]]" — standard CSI cross-reference with keyword ' +
+      'prefix, including Level 4 dotted suffixes and UFGS Level 5 agency suffixes. ' +
       'Most reliable pattern; matches how spec writers are trained to cite other sections.',
-    pattern: /\bSection\s+(\d{2})\s+(\d{2})\s+(\d{2})\b/gi,
+    pattern: new RegExp(String.raw`\bSection\s+${sectionNumberFragment()}`, 'gi'),
     targetType: 'section',
-    examples: ['See Section 09 91 00', 'Section 27 21 00 applies to this work'],
-    knownFalsePositives: [],
+    examples: [
+      'See Section 09 91 00',
+      'Section 27 21 00 applies to this work',
+      'See Section 26 00 13.10',
+      'per Section 01 32 01.00 10',
+    ],
+    knownFalsePositives: ['Section 26 00 13.10 20 mm pipe — trailing pair reads as agency'],
   },
 ];
 
