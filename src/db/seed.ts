@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
+import { normalizeSectionNumber } from '../lib/section-number.js';
 
 // Provenance: see docs/adr/013-csi-sections-seed-public-domain-derivation.md
 const UFGS_DIR = join(process.cwd(), 'docs/references/UFGS');
@@ -12,16 +13,23 @@ export interface SectionRecord {
   readonly division: string;
 }
 
-const SCN_RE = /<SCN>SECTION ([^<]+)<\/SCN>/;
+// Try prefix form first; fall back to bare number (2 corpus files omit 'SECTION ').
+// Capture starts at \d so it cannot overlap with the preceding \s+ — no backtracking.
+const SCN_PREFIX_RE = /<SCN>SECTION\s+(\d[^<]*)<\/SCN>/i;
+const SCN_BARE_RE = /<SCN>(\d[^<]*)<\/SCN>/;
 const STL_RE = /<STL>([^<]+)<\/STL>/;
 
 export function extractSectionMeta(content: string): SectionRecord | null {
-  const scnMatch = SCN_RE.exec(content);
+  const scnMatch = SCN_PREFIX_RE.exec(content) ?? SCN_BARE_RE.exec(content);
   const stlMatch = STL_RE.exec(content);
 
   if (!scnMatch?.[1] || !stlMatch?.[1]) return null;
 
-  const sectionNumber = scnMatch[1].trim();
+  // Catalog rows must be canonical — the shape CHECK constraint (migration 013)
+  // enforces this at the DB layer; skipping here keeps the seed loud-and-clean.
+  const sectionNumber = normalizeSectionNumber(scnMatch[1]);
+  if (sectionNumber === null) return null;
+
   const title = stlMatch[1].trim();
   const division = sectionNumber.slice(0, 2);
 
