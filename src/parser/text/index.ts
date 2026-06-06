@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { inferSectionMeta } from '../../lib/infer-section.js';
+import { normalizeSectionNumber, sectionNumberFragment } from '../../lib/section-number.js';
 import type {
   SpecNode,
   SpecNodeMeta,
@@ -38,8 +39,11 @@ const WARNING_SUGGESTIONS: Readonly<Record<ParseWarningType, string>> = {
     'More PART headings than a CSI spec normally has (typically 3). Headings may be over-matched.',
 };
 
-const SECTION_EXTRACT_RE = /SECTION\s+(\d{2})\s+(\d{2})\s+(\d{2})(?:\s*[-–—]\s*(.+))?/i;
-const BARE_SECTION_RE = /^(\d{2})\s+(\d{2})\s+(\d{2})(?:\s*[-–—]\s*(.+))?/;
+const SECTION_EXTRACT_RE = new RegExp(
+  String.raw`SECTION\s+${sectionNumberFragment()}(?:\s*[-–—]\s*(.+))?`,
+  'i'
+);
+const BARE_SECTION_RE = new RegExp(String.raw`^${sectionNumberFragment()}(?:\s*[-–—]\s*(.+))?`);
 
 /** Scan up to this many non-blank lines for the SECTION header.
  * 10 instead of 5: UFGS files have a metadata header block before the SECTION line
@@ -68,10 +72,13 @@ function extractSectionMeta(
     const trimmed = line.trim();
     const m = SECTION_EXTRACT_RE.exec(trimmed) ?? BARE_SECTION_RE.exec(trimmed);
     if (m !== null) {
-      return {
-        section: `${m[1]} ${m[2]} ${m[3]}`,
-        title: (m[4] ?? '').trim() || 'unknown',
-      };
+      const section = normalizeSectionNumber(m[1] ?? '');
+      if (section !== null) {
+        return {
+          section,
+          title: (m[2] ?? '').trim() || 'unknown',
+        };
+      }
     }
     if (++scanned >= MAX_HEADER_SCAN) break;
   }
