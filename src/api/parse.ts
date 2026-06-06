@@ -17,14 +17,12 @@ interface ParseBody {
   readonly title?: string;
 }
 
-function parseBody(raw: unknown): ParseBody {
-  if (typeof raw !== 'object' || raw === null) return {};
-  const r = raw as Record<string, unknown>;
-  return {
-    ...(typeof r['section'] === 'string' ? { section: r['section'] } : {}),
-    ...(typeof r['title'] === 'string' ? { title: r['title'] } : {}),
-  };
-}
+// Multipart text fields from multer. Non-strict (unknown keys stripped) to
+// match PatchSpecBodySchema; non-string section/title is a 400, not a silent drop.
+const ParseBodySchema = z.object({
+  section: z.string().exactOptional(),
+  title: z.string().exactOptional(),
+});
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const ALLOWED_EXT = new Set(['.docx', '.sec', '.txt']);
@@ -65,7 +63,12 @@ export async function parseHandler(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const rawBody = parseBody(req.body);
+  const bodyResult = ParseBodySchema.safeParse(req.body ?? {});
+  if (!bodyResult.success) {
+    res.status(400).json({ success: false, error: 'invalid request body' });
+    return;
+  }
+  const rawBody: ParseBody = bodyResult.data;
   const normalizedSection =
     rawBody.section !== undefined ? normalizeSectionNumber(rawBody.section) : undefined;
   if (rawBody.section !== undefined && normalizedSection === null) {
