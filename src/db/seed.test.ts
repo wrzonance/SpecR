@@ -52,4 +52,9 @@ describe('extractSectionMeta', () => {
     const content = `<?xml version="1.0"?><SEC><SCN>SECTION TBD</SCN><STL>X</STL></SEC>`;
     expect(extractSectionMeta(content)).toBeNull();
   });
+
+  it('seed: leading whitespace before SECTION keyword tolerated (26_29_23.SEC corpus shape)', () => {
+    const content = `<?xml version="1.0"?><SEC><SCN> SECTION 26 29 23</SCN><STL>X</STL></SEC>`;
+    expect(extractSectionMeta(content)?.sectionNumber).toBe('26 29 23');
+  });
 });

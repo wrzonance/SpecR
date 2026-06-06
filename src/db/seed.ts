@@ -13,14 +13,15 @@ export interface SectionRecord {
   readonly division: string;
 }
 
-// Try prefix form first; fall back to bare number (2 corpus files omit 'SECTION ').
-// Capture starts at \d so it cannot overlap with the preceding \s+ — no backtracking.
-const SCN_PREFIX_RE = /<SCN>SECTION\s+(\d[^<]*)<\/SCN>/i;
-const SCN_BARE_RE = /<SCN>(\d[^<]*)<\/SCN>/;
+// Optional leading whitespace + optional 'SECTION ' keyword: real corpus files
+// carry both a bare SCN (2 files omit the keyword) and a leading space before it
+// (e.g. 26_29_23.SEC: `<SCN> SECTION 26 29 23</SCN>`). The capture is anchored to
+// a digit, so [^<]* cannot backtrack past </SCN> — no ReDoS.
+const SCN_RE = /<SCN>\s*(?:SECTION\s+)?(\d[^<]*)<\/SCN>/i;
 const STL_RE = /<STL>([^<]+)<\/STL>/;
 
 export function extractSectionMeta(content: string): SectionRecord | null {
-  const scnMatch = SCN_PREFIX_RE.exec(content) ?? SCN_BARE_RE.exec(content);
+  const scnMatch = SCN_RE.exec(content);
   const stlMatch = STL_RE.exec(content);
 
   if (!scnMatch?.[1] || !stlMatch?.[1]) return null;
