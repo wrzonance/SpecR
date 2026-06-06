@@ -225,7 +225,7 @@ interface CsiNode {
 
 interface CsiTree {
   id: string           // spec ID
-  section: string      // CSI section number, e.g. "27 21 00"
+  section: string      // CSI section number, e.g. "27 21 00", "26 00 13.10", "01 32 01.00 10"
   title: string
   parts: CsiNode[]     // root-level Part nodes
 }
@@ -262,7 +262,7 @@ interface ApiResponse<T> {
 -- Specs
 CREATE TABLE specs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  section VARCHAR(20),  -- "27 21 00"
+  section VARCHAR(20),  -- "27 21 00" | "26 00 13.10" | "01 32 01.00 10" (expanded shape, ADR-020)
   title TEXT,
   source VARCHAR(20),   -- 'ufgs' | 'arcat' | 'cpi' | 'unknown'
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -344,7 +344,7 @@ CREATE TABLE spec_references (
   source_spec_id      UUID REFERENCES specs(id)      ON DELETE CASCADE,
   source_paragraph_id UUID REFERENCES paragraphs(id) ON DELETE CASCADE,
   target_type         VARCHAR(20) NOT NULL,  -- 'section' | 'paragraph' | 'standard'
-  target_spec_section VARCHAR(20),           -- "09 91 00" — for section refs
+  target_spec_section VARCHAR(20),           -- "09 91 00" / "26 00 13.10" — for section refs
   target_spec_id      UUID REFERENCES specs(id)      ON DELETE SET NULL,
   target_paragraph_id UUID REFERENCES paragraphs(id) ON DELETE SET NULL,
   standard_code       TEXT,                  -- "ASTM C150" — for standard refs

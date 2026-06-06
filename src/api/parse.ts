@@ -10,20 +10,19 @@ import { persistParsedSpec } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
 import { ParseWarningSchema, SecRefSchema } from '../ast/schemas.js';
+import { SectionNumberSchema, normalizeSectionNumber } from '../lib/section-number.js';
 
 interface ParseBody {
   readonly section?: string;
   readonly title?: string;
 }
 
-function parseBody(raw: unknown): ParseBody {
-  if (typeof raw !== 'object' || raw === null) return {};
-  const r = raw as Record<string, unknown>;
-  return {
-    ...(typeof r['section'] === 'string' ? { section: r['section'] } : {}),
-    ...(typeof r['title'] === 'string' ? { title: r['title'] } : {}),
-  };
-}
+// Multipart text fields from multer. Non-strict (unknown keys stripped) to
+// match PatchSpecBodySchema; non-string section/title is a 400, not a silent drop.
+const ParseBodySchema = z.object({
+  section: z.string().exactOptional(),
+  title: z.string().exactOptional(),
+});
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const ALLOWED_EXT = new Set(['.docx', '.sec', '.txt']);
@@ -64,9 +63,26 @@ export async function parseHandler(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  const bodyResult = ParseBodySchema.safeParse(req.body ?? {});
+  if (!bodyResult.success) {
+    res.status(400).json({ success: false, error: 'invalid request body' });
+    return;
+  }
+  const rawBody: ParseBody = bodyResult.data;
+  const normalizedSection =
+    rawBody.section !== undefined ? normalizeSectionNumber(rawBody.section) : undefined;
+  if (rawBody.section !== undefined && normalizedSection === null) {
+    res.status(400).json({ success: false, error: 'invalid section override format' });
+    return;
+  }
+  const body: ParseBody = {
+    ...rawBody,
+    ...(normalizedSection != null ? { section: normalizedSection } : {}),
+  };
+
   const jobId = createJob();
   // Pass buffer and ext, not the full file object, so the request closure can be GC'd
-  void processParseJob(jobId, req.file.buffer, ext, parseBody(req.body));
+  void processParseJob(jobId, req.file.buffer, ext, body);
   res.status(202).json({ success: true, data: { jobId } });
 }
 
@@ -91,7 +107,7 @@ function countNodes(nodes: readonly SpecNode[]): number {
 const workerOutputSchema = z.object({
   tree: z.object({
     id: z.string(),
-    section: z.string(),
+    section: z.union([SectionNumberSchema, z.literal('unknown')]),
     title: z.string(),
     parts: z.array(z.unknown()),
     warnings: z.array(ParseWarningSchema).optional(),
@@ -99,6 +115,19 @@ const workerOutputSchema = z.object({
   refs: z.array(SecRefSchema).default([]),
   capabilities: z.array(z.string()).optional(),
 });
+
+const SECTION_GATE_MESSAGE =
+  'parsed section number is not a valid CSI section (expected NN NN NN[.NN[ NN]])';
+
+// A worker-output section that fails the gate surfaces as a raw Zod issue blob.
+// Translate that one case to a human-readable message; everything else keeps its
+// original error text (still context-chained via SpecrError where applicable).
+function jobErrorMessage(err: unknown): string {
+  if (err instanceof z.ZodError && err.issues.some((i) => i.path.includes('section'))) {
+    return SECTION_GATE_MESSAGE;
+  }
+  return err instanceof Error ? err.message : 'parse failed';
+}
 
 async function processParseJob(
   jobId: string,
@@ -144,7 +173,7 @@ async function processParseJob(
     logger.error({ err, jobId }, 'parse job failed');
     updateJob(jobId, {
       status: 'failed',
-      error: err instanceof Error ? err.message : 'parse failed',
+      error: jobErrorMessage(err),
     });
   }
 }

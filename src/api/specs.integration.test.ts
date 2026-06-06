@@ -106,4 +106,26 @@ describe('PATCH /specs/:id (integration)', () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it('accepts a dotted-suffix section', async () => {
+    const res = await fetch(`${baseUrl}/specs/${testSpecId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: '27 21 00.10' }),
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    expect((body['data'] as Record<string, unknown>)['section']).toBe('27 21 00.10');
+  });
+
+  it('accepts an agency-suffix section', async () => {
+    const res = await fetch(`${baseUrl}/specs/${testSpecId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: '27 21 00.10 20' }),
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    expect((body['data'] as Record<string, unknown>)['section']).toBe('27 21 00.10 20');
+  });
 });

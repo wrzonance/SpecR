@@ -7,6 +7,7 @@ import { parseDocument } from './document.js';
 import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
 import type { SpecTree } from '../../ast/types.js';
 import type { NumberingMap, StyleMap } from './types.js';
+import { normalizeSectionNumber } from '../../lib/section-number.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
 // reject if total uncompressed bytes > 50MB to prevent ZIP bomb exhaustion.
@@ -25,8 +26,13 @@ function parseCoreMetadata(xml: string): { section: string; title: string } {
     const props = parsed['cp:coreProperties'] as Record<string, unknown> | undefined;
     const subject = props?.['dc:subject'];
     const titleVal = props?.['dc:title'];
+    // dc:subject is free-text in Word — normalize so non-conforming values degrade
+    // to 'unknown' and the orchestrator's content inference takes over (instead of
+    // leaking prose downstream where the worker section-gate would kill the job).
+    const section =
+      typeof subject === 'string' ? (normalizeSectionNumber(subject) ?? 'unknown') : 'unknown';
     return {
-      section: typeof subject === 'string' && subject.trim() ? subject.trim() : 'unknown',
+      section,
       title: typeof titleVal === 'string' && titleVal.trim() ? titleVal.trim() : 'unknown',
     };
   } catch {

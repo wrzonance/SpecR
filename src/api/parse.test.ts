@@ -3,15 +3,16 @@ import type { Request, Response } from 'express';
 
 vi.mock('../parser/index.js', () => ({
   parseSec: vi.fn(),
-  parseDocx: vi.fn().mockResolvedValue({ id: '', section: 'test', title: 'T', parts: [] }),
+  parseDocx: vi.fn().mockResolvedValue({ id: '', section: '27 21 00', title: 'T', parts: [] }),
   assertDocxSafe: vi.fn().mockResolvedValue(undefined),
   assertSecSafe: vi.fn(),
 }));
 vi.mock('../lib/parse-pool.js', () => ({
   parsePool: {
-    run: vi
-      .fn()
-      .mockResolvedValue({ tree: { id: '', section: 'test', title: 'T', parts: [] }, refs: [] }),
+    run: vi.fn().mockResolvedValue({
+      tree: { id: '', section: '27 21 00', title: 'T', parts: [] },
+      refs: [],
+    }),
   },
 }));
 vi.mock('../lib/jobs.js', () => ({
@@ -131,6 +132,70 @@ describe('parseHandler', () => {
         buffer: Buffer.from('<?xml?>', 'utf-8'),
       },
       body: {},
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(202);
+  });
+
+  it('parse: dirty section override normalized before persist', async () => {
+    const { persistParsedSpec } = await import('../db/index.js');
+    const { updateJob } = await import('../lib/jobs.js');
+    vi.mocked(updateJob).mockImplementation(() => {});
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: { originalname: 'spec.txt', mimetype: 'text/plain', buffer: Buffer.from('x') },
+      body: { section: '26  00 13.10' },
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(202);
+    await vi.waitFor(() => {
+      expect(persistParsedSpec).toHaveBeenCalledTimes(1);
+    });
+    const callArg = vi.mocked(persistParsedSpec).mock.calls[0]?.[0];
+    expect(callArg?.tree.section).toBe('26 00 13.10');
+  });
+
+  it('parse: malformed section override → 400 before job creation', async () => {
+    const { createJob } = await import('../lib/jobs.js');
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: { originalname: 'spec.txt', mimetype: 'text/plain', buffer: Buffer.from('x') },
+      body: { section: '26 00 13.1' },
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'invalid section override format' })
+    );
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('parse: non-string body fields → 400, not silently dropped', async () => {
+    const { createJob } = await import('../lib/jobs.js');
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: { originalname: 'spec.txt', mimetype: 'text/plain', buffer: Buffer.from('x') },
+      body: { section: 12345 },
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'invalid request body' })
+    );
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('parse: non-object body treated as empty (multer yields {} for fieldless multipart)', async () => {
+    const { createJob } = await import('../lib/jobs.js');
+    vi.mocked(createJob).mockReturnValue('no-body-job');
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: { originalname: 'spec.txt', mimetype: 'text/plain', buffer: Buffer.from('x') },
+      body: undefined,
     } as unknown as Request;
     const res = makeRes();
     await parseHandler(req, res);
@@ -279,5 +344,45 @@ describe('processParseJob refs persistence (#53)', () => {
     expect(persistParsedSpec).toHaveBeenCalledTimes(1);
     const callArg = vi.mocked(persistParsedSpec).mock.calls[0]?.[0];
     expect(callArg?.refs).toEqual([]);
+  });
+});
+
+describe('processParseJob section-gate error message', () => {
+  it('surfaces a friendly message (not a Zod blob) when the worker section fails the gate', async () => {
+    const { parsePool } = await import('../lib/parse-pool.js');
+    const { updateJob, createJob } = await import('../lib/jobs.js');
+    vi.mocked(createJob).mockReturnValue('gate-job-id');
+
+    vi.mocked(parsePool.run).mockResolvedValueOnce({
+      tree: {
+        id: '00000000-0000-0000-0000-000000000004',
+        section: 'garbage',
+        title: 'T',
+        parts: [],
+      },
+      refs: [],
+    });
+    vi.mocked(updateJob).mockImplementation(() => {});
+
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: {
+        originalname: 'spec.sec',
+        mimetype: 'text/xml',
+        buffer: Buffer.from('<?xml?>', 'utf-8'),
+      },
+      body: {},
+    } as unknown as Request;
+    await parseHandler(req, makeRes());
+
+    await vi.waitFor(() => {
+      expect(updateJob).toHaveBeenCalledWith(
+        'gate-job-id',
+        expect.objectContaining({
+          status: 'failed',
+          error: 'parsed section number is not a valid CSI section (expected NN NN NN[.NN[ NN]])',
+        })
+      );
+    });
   });
 });

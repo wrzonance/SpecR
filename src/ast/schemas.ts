@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { SpecNode } from './types.js';
+import { SectionNumberSchema } from '../lib/section-number.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -63,7 +64,9 @@ export const ParseWarningSchema = z.object({
 
 export const SpecTreeSchema = z.object({
   id: z.uuid(),
-  section: z.string().regex(/^\d{2} \d{2} \d{2}$/),
+  // Canonical expanded shape, or the 'unknown' sentinel emitted by parsers
+  // when no section number is found (content inference may fill it later).
+  section: z.union([SectionNumberSchema, z.literal('unknown')]),
   title: z.string().check(z.minLength(1)),
   parts: z.array(SpecNodeSchema),
   warnings: z.array(ParseWarningSchema).exactOptional(),
@@ -71,10 +74,8 @@ export const SpecTreeSchema = z.object({
 
 export const PatchSpecBodySchema = z.object({
   title: z.string().check(z.minLength(1)).exactOptional(),
-  section: z
-    .string()
-    .regex(/^\d{2} \d{2} \d{2}$/)
-    .exactOptional(),
+  // PATCH must set a real section — the sentinel is not assignable by clients.
+  section: SectionNumberSchema.exactOptional(),
 });
 
 export const CreateProjectBodySchema = z.object({
