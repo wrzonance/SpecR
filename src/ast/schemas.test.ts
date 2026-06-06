@@ -78,6 +78,28 @@ describe('SpecTreeSchema — valid inputs', () => {
   });
 });
 
+describe('SpecTreeSchema — expanded section shapes', () => {
+  it('SpecTreeSchema: accepts dotted and agency-suffixed sections', () => {
+    const base = { id: '00000000-0000-4000-8000-000000000001', title: 'T', parts: [] };
+    expect(SpecTreeSchema.safeParse({ ...base, section: '26 00 13.10' }).success).toBe(true);
+    expect(SpecTreeSchema.safeParse({ ...base, section: '01 32 01.00 10' }).success).toBe(true);
+  });
+
+  it('SpecTreeSchema: accepts the unknown sentinel (parser output for section-less docs)', () => {
+    const base = { id: '00000000-0000-4000-8000-000000000001', title: 'T', parts: [] };
+    expect(SpecTreeSchema.safeParse({ ...base, section: 'unknown' }).success).toBe(true);
+  });
+});
+
+describe('PatchSpecBodySchema — expanded section shapes', () => {
+  it('PatchSpecBodySchema: accepts suffixed sections, rejects the unknown sentinel', () => {
+    expect(PatchSpecBodySchema.safeParse({ section: '26 00 13.10' }).success).toBe(true);
+    expect(PatchSpecBodySchema.safeParse({ section: '01 32 01.00 10' }).success).toBe(true);
+    expect(PatchSpecBodySchema.safeParse({ section: 'unknown' }).success).toBe(false);
+    expect(PatchSpecBodySchema.safeParse({ section: '26 00 13.1' }).success).toBe(false);
+  });
+});
+
 describe('SpecTreeSchema — invalid inputs', () => {
   it('rejects section not matching DD NN NN format', () => {
     expect(() =>
