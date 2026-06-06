@@ -155,6 +155,35 @@ describe('parseDocx — error handling', () => {
   });
 });
 
+describe('parseDocx — dc:subject section normalization (#gate)', () => {
+  function coreWith(subject: string): string {
+    return `<?xml version="1.0"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <dc:subject>${subject}</dc:subject>
+  <dc:title>Structured Cabling</dc:title>
+</cp:coreProperties>`;
+  }
+
+  it('degrades free-text dc:subject to unknown (does not leak prose as section)', async () => {
+    const buffer = await makeDocx({ coreXml: coreWith('Division 26 - Electrical') });
+    const tree = await parseDocx(buffer);
+    expect(tree.section).toBe('unknown');
+  });
+
+  it('keeps a conforming dc:subject section number', async () => {
+    const buffer = await makeDocx({ coreXml: coreWith('26 00 13.10') });
+    const tree = await parseDocx(buffer);
+    expect(tree.section).toBe('26 00 13.10');
+  });
+
+  it('normalizes a dirty (multi-space) dc:subject section number', async () => {
+    const buffer = await makeDocx({ coreXml: coreWith('26  00 13.10') });
+    const tree = await parseDocx(buffer);
+    expect(tree.section).toBe('26 00 13.10');
+  });
+});
+
 // ── ARCAT-realistic end-to-end: numbering-generated PART prefixes, style-only
 //    part linkage (reverse pStyle), preamble, specifier notes, no core.xml ──
 
