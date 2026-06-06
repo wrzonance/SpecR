@@ -172,6 +172,35 @@ describe('parseHandler', () => {
     );
     expect(createJob).not.toHaveBeenCalled();
   });
+
+  it('parse: non-string body fields → 400, not silently dropped', async () => {
+    const { createJob } = await import('../lib/jobs.js');
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: { originalname: 'spec.txt', mimetype: 'text/plain', buffer: Buffer.from('x') },
+      body: { section: 12345 },
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'invalid request body' })
+    );
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('parse: non-object body treated as empty (multer yields {} for fieldless multipart)', async () => {
+    const { createJob } = await import('../lib/jobs.js');
+    vi.mocked(createJob).mockReturnValue('no-body-job');
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: { originalname: 'spec.txt', mimetype: 'text/plain', buffer: Buffer.from('x') },
+      body: undefined,
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(202);
+  });
 });
 
 describe('parseJobHandler', () => {
