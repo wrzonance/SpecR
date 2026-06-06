@@ -186,8 +186,10 @@ export function parseSec(xml: string): ParsedSec {
 
   // SCN/STL are parsed with processEntities: false — decode here.
   // Normalize-or-verbatim: canonicalize section whitespace when the value is a
-  // valid expanded-shape number; keep verbatim otherwise (downstream schema
-  // gates decide what to do with non-conforming values).
+  // valid expanded-shape number; keep verbatim otherwise. Tagged values are
+  // never rejected here — exact-match linkage simply won't find
+  // non-conforming sections (validation gates arrive with the API schema +
+  // DB CHECK constraint work).
   const scnRaw = decodeXmlEntities(
     requireString(sec['SCN'], 'SCN')
       .replace(/^SECTION\s+/i, '')
