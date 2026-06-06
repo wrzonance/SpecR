@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: ["main"]
+  # No base-branch filter: stacked sub-MVP PRs target feature branches and
+  # must pass CI independently (CLAUDE.md PR discipline).
   pull_request:
-    branches: ["main"]
 
 permissions:
   contents: read

@@ -249,6 +249,7 @@ docs/adr/
   017-project-manual-publishing.md
   018-document-concurrency-state-model.md
   019-scope-boundaries-content-neutral-platform.md
+  020-section-number-expanded-shape.md
 ```
 
 **ADR format:**
