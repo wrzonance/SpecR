@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 
 vi.mock('../parser/index.js', () => ({
   parseSec: vi.fn(),
-  parseDocx: vi.fn().mockResolvedValue({ id: '', section: 'test', title: 'T', parts: [] }),
+  parseDocx: vi.fn().mockResolvedValue({ id: '', section: '27 21 00', title: 'T', parts: [] }),
   assertDocxSafe: vi.fn().mockResolvedValue(undefined),
   assertSecSafe: vi.fn(),
 }));
@@ -315,5 +315,45 @@ describe('processParseJob refs persistence (#53)', () => {
     expect(persistParsedSpec).toHaveBeenCalledTimes(1);
     const callArg = vi.mocked(persistParsedSpec).mock.calls[0]?.[0];
     expect(callArg?.refs).toEqual([]);
+  });
+});
+
+describe('processParseJob section-gate error message', () => {
+  it('surfaces a friendly message (not a Zod blob) when the worker section fails the gate', async () => {
+    const { parsePool } = await import('../lib/parse-pool.js');
+    const { updateJob, createJob } = await import('../lib/jobs.js');
+    vi.mocked(createJob).mockReturnValue('gate-job-id');
+
+    vi.mocked(parsePool.run).mockResolvedValueOnce({
+      tree: {
+        id: '00000000-0000-0000-0000-000000000004',
+        section: 'garbage',
+        title: 'T',
+        parts: [],
+      },
+      refs: [],
+    });
+    vi.mocked(updateJob).mockImplementation(() => {});
+
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: {
+        originalname: 'spec.sec',
+        mimetype: 'text/xml',
+        buffer: Buffer.from('<?xml?>', 'utf-8'),
+      },
+      body: {},
+    } as unknown as Request;
+    await parseHandler(req, makeRes());
+
+    await vi.waitFor(() => {
+      expect(updateJob).toHaveBeenCalledWith(
+        'gate-job-id',
+        expect.objectContaining({
+          status: 'failed',
+          error: 'parsed section number is not a valid CSI section (expected NN NN NN[.NN[ NN]])',
+        })
+      );
+    });
   });
 });

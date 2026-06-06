@@ -113,6 +113,19 @@ const workerOutputSchema = z.object({
   capabilities: z.array(z.string()).optional(),
 });
 
+const SECTION_GATE_MESSAGE =
+  'parsed section number is not a valid CSI section (expected NN NN NN[.NN[ NN]])';
+
+// A worker-output section that fails the gate surfaces as a raw Zod issue blob.
+// Translate that one case to a human-readable message; everything else keeps its
+// original error text (still context-chained via SpecrError where applicable).
+function jobErrorMessage(err: unknown): string {
+  if (err instanceof z.ZodError && err.issues.some((i) => i.path.includes('section'))) {
+    return SECTION_GATE_MESSAGE;
+  }
+  return err instanceof Error ? err.message : 'parse failed';
+}
+
 async function processParseJob(
   jobId: string,
   buffer: Buffer,
@@ -157,7 +170,7 @@ async function processParseJob(
     logger.error({ err, jobId }, 'parse job failed');
     updateJob(jobId, {
       status: 'failed',
-      error: err instanceof Error ? err.message : 'parse failed',
+      error: jobErrorMessage(err),
     });
   }
 }
