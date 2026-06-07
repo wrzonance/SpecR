@@ -496,7 +496,7 @@ No unit tests (repo precedent for bootstrap scripts — spec §Verification). Al
 - [ ] **Step 1: Broken-daemon error path** (the dev box's Docker daemon is currently broken — exercise it as-is)
 
 Run: `./Start-SpecR.sh; echo "exit=$?"`
-Expected: intro banner → CA step → Node found (system node exists here) → pnpm found → `==> Checking PostgreSQL` → `FAILED: the Docker daemon is not reachable.` with the systemctl/usermod/SPECR_DATABASE_URL remedies → `exit=1`. No compose postgres started, no `pnpm install` reached.
+Expected: intro banner → CA step → Node found (system node exists here) → pnpm found → `==> Checking PostgreSQL` → `using docker compose` (the compose CLI is client-side and resolves even with the daemon down) → then ONE of: (a) daemon unreachable → `FAILED: the Docker daemon is not reachable.` with the systemctl/usermod/SPECR_DATABASE_URL remedies, exit=1; or (b) if the daemon answers `docker info` but containerd cannot start containers (this box's earlier state), the failure surfaces later as `FAILED: compose up failed -- scroll up for Docker's own error output`, exit=1. Either way: no postgres left running, no `pnpm install` reached. If the daemon turns out fully healthy, record that Step 1's error path cannot be exercised without stopping the daemon — do NOT stop the daemon yourself; note it and move on (the path is covered by code review).
 
 - [ ] **Step 2: App-port collision path** (uses SPECR_DATABASE_URL to bypass Docker; collision check fires before any pnpm step)
 
