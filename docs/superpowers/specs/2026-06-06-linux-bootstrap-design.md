@@ -98,9 +98,12 @@ Environment overrides (parity with the ps1 where applicable):
      `ps --status=running`.)
    - Else choose a host port: start at `SPECR_PG_PORT`; while busy (bash
      `/dev/tcp` probe) bump +1 up to +20; exhausted → die. If the chosen port
-     ≠ 5432, write `.specr-runtime/compose.port.yml` overriding
-     `services.postgres.ports` to `["<port>:5432"]` and add `-f` flags for
-     both files to every compose invocation this run.
+     ≠ 5432, write `.specr-runtime/compose.port.yml` as a complete standalone
+     copy of the postgres service publishing `<port>:5432`, and use it as the
+     only `-f` file with `--project-directory <repo>` so the project name and
+     `specr_pgdata` volume stay identical. (Compose merges `ports` lists by
+     appending; the `!override` tag needs v2.24+, which would break the
+     legacy-v1 support promised above.)
    - `compose up -d postgres` (its own progress output suffices; no custom
      meter). Probe readiness: loop `compose exec -T postgres pg_isready -U
      specr -q` every 1s, 30s deadline; timeout → print `compose logs --tail 40
