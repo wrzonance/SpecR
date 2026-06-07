@@ -187,7 +187,7 @@ node_is_v22() {
   major="$(node --version)"
   major="${major#v}"
   major="${major%%.*}"
-  [[ "$major" -ge 22 ]]
+  [[ "$major" =~ ^[0-9]+$ ]] && ((major >= 22))
 }
 
 install_portable_node() {
