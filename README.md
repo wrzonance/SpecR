@@ -10,7 +10,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 
 ## Status
 
-**Active development — Phase 1c + 2b complete, Phase 2c next.**
+**Active development — Phase 1c + 2b complete, Phase 2c next (2c-i DB schema already landed).**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -32,11 +32,13 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 2b-i | AST → DOCX generator + 7-level CSI multilevel numbering | ✅ Complete (PR #26) |
 | 2b-ii | `w:sdt` content control UUID injection (round-trip anchors) | ✅ Complete (PR #51) |
 | 2b-iii | MCP tools: `get_paragraph`, `parse_document`, `generate_docx` | ✅ Complete (PR #55) |
-| 2b-iv | Universal file loader: `load:files`, `seed:corpus`, `load_files` MCP tool | ✅ Complete (PR #58) |
+| 2b-iv | Universal file loader: `load:files`, `seed:corpus`, `load_files` MCP tool | ✅ Complete (PR #60) |
+| 2c-i | Style template DB schema — `style_templates` + `style_rules` + default rules seed | ✅ Complete (PR #87) |
 | 2c | Firm style template engine (issue #20) | Planned |
 | 2d | Library hierarchy + chain of custody — masters, project copies, packages, issuances — see [ADR-015](docs/adr/015-layered-spec-hierarchy-chain-of-custody.md) | Planned |
 | 2e | Project-manual publishing — assembly, cover/TOC, addenda — see [ADR-017](docs/adr/017-project-manual-publishing.md) | Planned |
 | 3 | Round-trip merge engine | Planned |
+| 4a | Revit parameter mapping schema + migrations | ✅ Complete (PR #86) |
 | 4 | Revit integration | Planned |
 | 5 | Web UI | Planned |
 | 6 | Scale — APS/Forge, full-text search, DOCX cache, MCP prompts | Planned |
@@ -60,6 +62,8 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - **Plaintext signal hardening** — noise prefixes on structural headings (`] PART 2 PRODUCTS`, en-dash variants, joined `PART2PRODUCTS`) detected via prefix-strip + lookahead pass before signal classification. Prevents silent fall-through to `continuation` when bracket-bleed or formatting artifacts pollute the leading characters. (PR #70)
 - **Parse-anomaly warnings** — text parser emits structured `ParseWarning[]` on the returned `SpecTree` when anomalies are detected: `root-continuation` (continuations dropped before first structural heading; capped at 5), `empty-part` (a `part` node with zero article children, with `"line N: <text>"` hint), `no-structure-found` (zero parts). Parse job result adds `"parse-warnings"` to `capabilities` when any warning fires; MCP `parse_document` returns the same envelope. Observability layer; nothing persisted to DB. (PR #75)
 - **DOCX resilience suite** — integration fixture coverage for LibreOffice-exported DOCX, in addition to ARCAT and CPI vendor templates. Numbered-list false-positive in LibreOffice exports fixed (Signal 1 over-eager match). (PR #72)
+- **Numbering-generated PART headings** — ARCAT-style part headings whose literal text is just `GENERAL` / `PRODUCTS` / `EXECUTION` (the `PART %1` prefix lives in numbering.xml `lvlText`) are recognized via a spec-shaped-ladder test on the linked style chain. Fuzzy `NOTE TO SPECIFIER` detection produces hidden `note` nodes (parity with SEC `NTE` handling), and a sanity post-pass audits the tree (`no-structure-found`, `root-continuation`, `unusual-part-count`). (PR #113)
+- **SEC XML entity decoding** — character entities in `<TXT>` content are decoded at parse time, so `O&M` no longer surfaces as `O&amp;M`. (PR #112)
 
 ### Generator
 
@@ -96,11 +100,11 @@ The async `POST /parse` pattern (202 + poll) is intentional — inference over l
 - **Resource: `specr://specs/{id}`** — full spec as LLM-readable Markdown. Note/vanish nodes rendered as `> **[NOTE]**` blockquotes (editor instructions visible to spec writer, hidden from published output)
 - **Resource: `specr://sections`** — full CSI section index as Markdown table with loaded (✓) flag
 
-Configure in Claude Code via `.mcp.json` in the repo root (points to `http://localhost:3000/mcp` when `pnpm dev` is running).
+Configure in Claude Code by creating a `.mcp.json` in the repo root (gitignored) pointing at `http://localhost:3000/mcp` while `pnpm dev` is running.
 
 ### Database
 
-- PostgreSQL schema: `specs`, `paragraphs` (recursive parent/child), `versions`, `projects`, `project_specs`, `spec_references`
+- PostgreSQL schema: `specs`, `paragraphs` (recursive parent/child), `paragraph_versions`, `projects`, `project_specs`, `spec_references`, `spec_sections` (CSI section catalog), `style_templates` + `style_rules` (Phase 2c-i), `revit_parameter_mappings` (Phase 4a)
 - 31 CSI MasterFormat divisions seeded from UFGS corpus as reference data (666 section records, 239 with Level 4/5 suffixes)
 - Section-number shape CHECK constraints — `specs.section` and `spec_sections.section_number` enforce the expanded grammar at the DB layer ([ADR-020](docs/adr/020-section-number-expanded-shape.md)); `spec_references.target_spec_section` deliberately unconstrained (records what the source document said)
 - Migration runner with reversible up/down migrations
@@ -114,7 +118,6 @@ Configure in Claude Code via `.mcp.json` in the repo root (points to `http://loc
 - MCP write tools (`add_paragraph`, `update_paragraph`, etc.) — Phase 5
 - MCP stateful sessions — Phase 5 upgrade
 - MCP prompts (`review_spec`, `suggest_paragraphs`) — Phase 6
-- `persistTree` / `persistSpec` consolidation — REST `POST /parse` path ignores extracted refs; MCP / file-loader paths do not. Tracked as a follow-up to issue #53.
 
 ## The Core Technical Challenge
 
@@ -199,11 +202,11 @@ pnpm migrate      # Run pending DB migrations
 | Script | Description |
 |--------|-------------|
 | `pnpm load:files <glob>` | Bulk-load spec files matching a glob pattern (`.SEC`, `.docx`) into the library |
-| `pnpm seed:corpus` | Load all 665 UFGS `.SEC` files into the library — idempotent, safe to re-run |
+| `pnpm seed:corpus` | Load all 666 UFGS `.SEC` files into the library — idempotent, safe to re-run |
 
 ## Reference Data
 
-- `docs/references/UFGS/` — Unified Facilities Guide Specifications (665 `.SEC` files, public domain)
+- `docs/references/UFGS/` — Unified Facilities Guide Specifications (666 `.SEC` files, public domain)
 - `docs/references/ARCAT/README.md` — Download instructions for ARCAT guide specs (copyrighted, not included)
 - `docs/references/MANUFACTURER_CPI/README.md` — Download instructions for Chatsworth Products Inc. (CPI) telecom equipment manufacturer specs (copyrighted, not included)
 

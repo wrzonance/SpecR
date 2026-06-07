@@ -22,7 +22,7 @@
     "migrate:down": "node-pg-migrate --tsx --migrations-dir src/db/migrations down 1",
     "seed": "tsx src/db/seed.ts",
     "load:files": "tsx scripts/load-files.ts",
-    "seed:corpus": "pnpm load:files 'docs/references/UFGS/**/*.SEC'"
+    "seed:corpus": "pnpm load:files 'docs/references/UFGS/**/*.SEC' 'docs/references/UFGS/**/*.sec'"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
