@@ -62,6 +62,24 @@ function renderNote(node, ctx) {
   return wrap;
 }
 
+// Notes render as NOTE blocks, continuations with an empty label, vanish nodes
+// as hidden content — none carry a CSI number, so none may consume an ordinal.
+// Counting them shifted numbered siblings (#122): specifier-note banners pushed
+// a 1..15 list to 5..20. Mirrors generator/markdown.ts consumesNumber.
+function consumesNumber(node) {
+  return node.type !== 'note' && node.type !== 'continuation' && !(node.meta && node.meta.vanish);
+}
+
+// Append each child, advancing the CSI ordinal only past numbered siblings so
+// notes/continuations/vanish nodes interleave without disturbing the sequence.
+function appendNumberedChildren(container, children, render) {
+  let ordinal = 0;
+  for (const child of children) {
+    container.appendChild(render(child, ordinal));
+    if (consumesNumber(child)) ordinal += 1;
+  }
+}
+
 function renderPrNode(node, index, ctx) {
   if (node.type === 'note') return renderNote(node, ctx);
 
@@ -79,9 +97,7 @@ function renderPrNode(node, index, ctx) {
   if (node.meta && node.meta.vanish) {
     body.appendChild(el('span', 'vanish-tag', 'VANISH'));
   }
-  for (let i = 0; i < node.children.length; i += 1) {
-    body.appendChild(renderPrNode(node.children[i], i, ctx));
-  }
+  appendNumberedChildren(body, node.children, (child, ordinal) => renderPrNode(child, ordinal, ctx));
   row.appendChild(body);
   return row;
 }
@@ -102,9 +118,9 @@ function renderArticle(node, index, partNumber, ctx) {
   const label = getLabel('article', index, partNumber);
   wrap.appendChild(makeCollapsible(wrap, 'article-bar', label, node.text, true));
   const children = el('div', 'article-children');
-  for (let i = 0; i < node.children.length; i += 1) {
-    children.appendChild(renderPrNode(node.children[i], i, ctx));
-  }
+  appendNumberedChildren(children, node.children, (child, ordinal) =>
+    renderPrNode(child, ordinal, ctx)
+  );
   wrap.appendChild(children);
   return wrap;
 }
@@ -113,14 +129,11 @@ function renderPart(node, index, ctx) {
   const wrap = el('div', 'tree-part');
   wrap.appendChild(makeCollapsible(wrap, 'part-bar', getLabel('part', index), node.text, false));
   const children = el('div', 'part-children');
-  for (let i = 0; i < node.children.length; i += 1) {
-    const child = node.children[i];
-    if (child.type === 'article') {
-      children.appendChild(renderArticle(child, i, index + 1, ctx));
-    } else {
-      children.appendChild(renderPrNode(child, i, ctx));
-    }
-  }
+  appendNumberedChildren(children, node.children, (child, ordinal) =>
+    child.type === 'article'
+      ? renderArticle(child, ordinal, index + 1, ctx)
+      : renderPrNode(child, ordinal, ctx)
+  );
   wrap.appendChild(children);
   return wrap;
 }
