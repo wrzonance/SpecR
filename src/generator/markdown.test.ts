@@ -148,6 +148,62 @@ describe('renderMarkdown', () => {
     expect(md).not.toContain('Hidden paragraph.');
     expect(md).not.toContain('A.');
   });
+  // Regression (#122): notes/continuations/vanish siblings must NOT consume a CSI
+  // number. A "Related Sections" pr1 whose first children are specifier-note banners
+  // rendered its 1..n list starting at the note count (e.g. "5." instead of "1.").
+  it('numbers pr2 siblings from 1, skipping leading note siblings', () => {
+    const tree: SpecTree = {
+      id: '00000000-0000-0000-0000-000000000001',
+      section: '09 05 00',
+      title: 'Numbering',
+      parts: [
+        {
+          id: '00000000-0000-0000-0000-000000000002',
+          type: 'part',
+          text: 'GENERAL',
+          meta: {},
+          children: [
+            {
+              id: '00000000-0000-0000-0000-000000000003',
+              type: 'article',
+              text: 'SUMMARY',
+              meta: {},
+              children: [
+                {
+                  id: '00000000-0000-0000-0000-000000000004',
+                  type: 'pr1',
+                  text: 'Related Sections:',
+                  meta: {},
+                  children: [
+                    {
+                      id: 'n1',
+                      type: 'note',
+                      text: 'banner one',
+                      children: [],
+                      meta: { vanish: true },
+                    },
+                    {
+                      id: 'n2',
+                      type: 'note',
+                      text: 'banner two',
+                      children: [],
+                      meta: { vanish: true },
+                    },
+                    { id: 'r1', type: 'pr2', text: 'Section 01 30 00', children: [], meta: {} },
+                    { id: 'r2', type: 'pr2', text: 'Section 01 33 00', children: [], meta: {} },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const md = renderMarkdown(tree);
+    expect(md).toContain('   1. Section 01 30 00');
+    expect(md).toContain('   2. Section 01 33 00');
+    expect(md).not.toContain('3. Section 01 30 00');
+  });
   it('renders empty tree without error', () => {
     const empty: SpecTree = {
       id: '00000000-0000-0000-0000-000000000001',

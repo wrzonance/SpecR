@@ -35,6 +35,29 @@ export function getLabel(type: NodeType, index: number, partNumber = 1): string 
 
 const INDENT = '   ';
 
+// notes render as [NOTE] blockquotes, continuations as plain text, and vanish
+// nodes not at all — none carry a CSI number, so none may consume an ordinal.
+// Counting them shifted numbered siblings (#122): specifier-note banners pushed
+// a 1..15 "Related Sections" list to 5..20.
+function consumesNumber(node: SpecNode): boolean {
+  return node.type !== 'note' && node.type !== 'continuation' && !node.meta.vanish;
+}
+
+// Render a node's children, advancing the CSI ordinal only past numbered siblings
+// so notes/continuations/vanish nodes interleave without disturbing the sequence.
+function renderChildren(
+  children: readonly SpecNode[],
+  render: (child: SpecNode, ordinal: number) => string
+): string {
+  let ordinal = 0;
+  const out: string[] = [];
+  for (const child of children) {
+    out.push(render(child, ordinal));
+    if (consumesNumber(child)) ordinal += 1;
+  }
+  return out.join('');
+}
+
 function renderPrNode(node: SpecNode, index: number, depth: number): string {
   // note nodes always render as [NOTE] blockquotes regardless of meta.vanish — editorial
   // notes are structural metadata visible to spec writers, not owner-facing content.
@@ -49,26 +72,26 @@ function renderPrNode(node: SpecNode, index: number, depth: number): string {
   }
   const pad = INDENT.repeat(depth);
   const label = getLabel(node.type, index);
-  return [
-    `\n${pad}${label} ${node.text}`,
-    ...node.children.map((child, i) => renderPrNode(child, i, depth + 1)),
-  ].join('');
+  return (
+    `\n${pad}${label} ${node.text}` +
+    renderChildren(node.children, (child, ordinal) => renderPrNode(child, ordinal, depth + 1))
+  );
 }
 
 function renderArticle(node: SpecNode, index: number, partNumber: number): string {
   const label = getLabel('article', index, partNumber);
-  return [
-    `\n### ${label} ${node.text}\n`,
-    ...node.children.map((child, i) => renderPrNode(child, i, 0)),
-  ].join('');
+  return (
+    `\n### ${label} ${node.text}\n` +
+    renderChildren(node.children, (child, ordinal) => renderPrNode(child, ordinal, 0))
+  );
 }
 
 function renderPart(node: SpecNode, index: number): string {
   const label = getLabel('part', index);
-  return [
-    `\n## ${label} ${node.text}\n`,
-    ...node.children.map((child, i) => renderArticle(child, i, index + 1)),
-  ].join('');
+  return (
+    `\n## ${label} ${node.text}\n` +
+    renderChildren(node.children, (child, ordinal) => renderArticle(child, ordinal, index + 1))
+  );
 }
 
 export function renderMarkdown(tree: SpecTree): string {
