@@ -97,7 +97,9 @@ function renderPrNode(node, index, ctx) {
   if (node.meta && node.meta.vanish) {
     body.appendChild(el('span', 'vanish-tag', 'VANISH'));
   }
-  appendNumberedChildren(body, node.children, (child, ordinal) => renderPrNode(child, ordinal, ctx));
+  appendNumberedChildren(body, node.children, (child, ordinal) =>
+    renderPrNode(child, ordinal, ctx)
+  );
   row.appendChild(body);
   return row;
 }
@@ -281,7 +283,9 @@ function renderRefsFooter(references, ownSection, ctx, sheet, walkState) {
   }
 
   if (sectionRefs.size > 0) {
-    footer.appendChild(el('p', 'refs-caption', 'CITES SECTIONS — CLICK TO WALK CITATIONS, ↗ TO OPEN'));
+    footer.appendChild(
+      el('p', 'refs-caption', 'CITES SECTIONS — CLICK TO WALK CITATIONS, ↗ TO OPEN')
+    );
     const row = el('div', 'ref-chip-row');
     for (const [section, count] of [...sectionRefs.entries()].sort()) {
       row.appendChild(makeSectionChip(section, count, ctx, sheet, walkState));
