@@ -9,12 +9,17 @@ import type { DocxParagraph, NumberingMap } from './types.js';
 // and angle brackets; setting false would corrupt those characters in paragraph text.
 // trimValues: false preserves trailing/leading spaces in w:t text nodes — trimming would
 // corrupt concatenated paragraph text across adjacent runs.
+// parseTagValue: false keeps w:t text as strings (#120): fxp's default numeric coercion
+// turns a bare-integer run (<w:t>9</w:t>) into the number 9, which extractRunText cannot
+// read and silently drops — deleting digits from numbers Word split across runs, e.g.
+// "09 91 26" stored as ["09 ", "9", "1 26"] rendered as "09 1 26".
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
   textNodeName: '#text',
   processEntities: true,
   trimValues: false,
+  parseTagValue: false,
   isArray: (name) => ['w:p', 'w:r', 'w:hyperlink'].includes(name),
 });
 
