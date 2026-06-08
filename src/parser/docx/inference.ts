@@ -220,10 +220,7 @@ function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source)
   };
 }
 
-// Empty paragraphs are layout spacing, not content — keeping them produced
-// blank root nodes that rendered as phantom PARTs.
 function appendContinuation(cp: ClassifiedParagraph, target: SpecNode[], source: Source): void {
-  if (cp.paragraph.text.trim().length === 0) return;
   target.push(makeContinuationNode(cp, source));
 }
 
@@ -288,7 +285,13 @@ export function buildTree(
   const stack: StackEntry[] = [];
   let lastNonContChildren: SpecNode[] = roots;
 
-  for (const cp of classified) {
+  // Empty paragraphs are layout spacing, not content — drop before structuring.
+  // A blank that inherited a numbered style (Signal 2) otherwise became an empty
+  // numbered node (#122): a phantom row consuming a CSI number; an empty paragraph
+  // at root previously rendered as a phantom PART.
+  const content = classified.filter((cp) => cp.paragraph.text.trim().length > 0);
+
+  for (const cp of content) {
     if (cp.nodeType === 'continuation') {
       appendContinuation(cp, lastNonContChildren, source);
       continue;
