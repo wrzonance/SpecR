@@ -54,6 +54,19 @@ describe('parseDocument — text extraction', () => {
     const result = parseDocument(xml, emptyNumberingMap());
     expect(result[0]?.text).toBe('<Insert text here>');
   });
+
+  // Regression (#120): Word splits a number like "09 91 26" across runs at
+  // edit/rsid boundaries. A run whose text is a bare integer ("9") was coerced
+  // to a JS number by fast-xml-parser and dropped — corrupting "09 91 26" → "09 1 26".
+  it('preserves a bare-integer run split across a number (#120: numeric run drop)', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t xml:space="preserve">09 </w:t></w:r>` +
+        `<w:r><w:t>9</w:t></w:r>` +
+        `<w:r><w:t xml:space="preserve">1 26</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap());
+    expect(result[0]?.text).toBe('09 91 26');
+  });
 });
 
 describe('parseDocument — pPr field extraction', () => {
