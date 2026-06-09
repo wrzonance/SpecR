@@ -234,6 +234,35 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts[0]?.children[0]?.children).toHaveLength(1);
     expect(tree.parts[0]?.children[1]?.children).toHaveLength(0);
   });
+
+  // Regression (#122): a blank paragraph that inherits a numbered style (Signal 2)
+  // was emitted as an empty numbered node, rendering a phantom "13." row and
+  // consuming a CSI number. Empty paragraphs are layout spacing and must be dropped.
+  it('drops an empty numbered paragraph instead of emitting a blank node', () => {
+    const classified = [
+      makeClassified('part', 0, 'PART 1'),
+      makeClassified('article', 1, '1.1'),
+      makeClassified('pr2', 3, 'first'),
+      makeClassified('pr2', 3, ''),
+      makeClassified('pr2', 3, 'second'),
+    ];
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    const prs = tree.parts[0]?.children[0]?.children ?? [];
+    expect(prs.map((n) => n.text)).toEqual(['first', 'second']);
+  });
+
+  it('keeps a non-empty punctuation-only paragraph (e.g. a stray tailoring bracket)', () => {
+    const classified = [
+      makeClassified('part', 0, 'PART 1'),
+      makeClassified('article', 1, '1.1'),
+      makeClassified('pr2', 3, 'first'),
+      makeClassified('pr2', 3, ']'),
+      makeClassified('pr2', 3, 'second'),
+    ];
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    const prs = tree.parts[0]?.children[0]?.children ?? [];
+    expect(prs.map((n) => n.text)).toEqual(['first', ']', 'second']);
+  });
 });
 
 describe('buildTree — Pass 2: edge cases and meta', () => {
