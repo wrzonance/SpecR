@@ -142,7 +142,7 @@ export interface DerivedRule {
 export interface PropertyDecision {
   readonly path: string; // dotted leaf path, e.g. 'rPr.sz'
   readonly value: unknown; // chosen JSON value
-  readonly source: 'consensus' | 'intent' | 'median' | 'single';
+  readonly source: 'consensus' | 'intent' | 'median' | 'single' | 'mode';
   readonly confidence: number; // winner share of styled paragraphs, 0..1
   readonly disagreesWithIntent: boolean;
   readonly rejected: readonly { readonly value: unknown; readonly count: number }[];
@@ -184,7 +184,7 @@ export function deriveTemplate(
    - winner share > 0.5 → winner, `source: 'consensus'`.
    - else if the modal style has a value at this path → that value, `source: 'intent'` (**consistency wins, else intent**).
    - else if all defined votes are numbers → median (lower-middle for even counts), `source: 'median'`.
-   - else → plain mode with deterministic first-seen tie-break, `source: 'consensus'`, low confidence (the share).
+   - else → plain mode with first-seen tie-break, `source: 'mode'` (its true low share as confidence — `'consensus'` is reserved for the dominant >0.5 arm).
    - `confidence` = chosen value's share of `styledCount`; `rejected` = all non-chosen defined values with counts (these ARE the §5 outliers); `disagreesWithIntent` = chosen ≠ modal style's value at the path (when the modal style defines one).
 6. **Assemble:** unflatten chosen paths → `StyleProperties`; validate with `StylePropertiesSchema.parse` (the blob stays pure — canonical values only; all provenance lives in the report). Emit rules in `STYLE_NODE_TYPES` order.
 
