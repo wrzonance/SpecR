@@ -153,6 +153,14 @@ after its dependency is merged.
 raw `.docx` artifacts; auth/multi-tenancy (#43); tables/drawings/embedded-object fidelity;
 `note` styling. Revisit per real fixture need.
 
+**Related future work — issue #125 (style management engine).** The `properties` JSONB is the
+*universal* style substrate, not a DOCX-only artifact. DOCX import (WT-3) is the **capture**
+source; for `.SEC` / raw-text / PDF specs there is no adopted style to capture, so style is
+**assigned** — either defined **manually** per paragraph (type), or **inherited** from an
+existing master / client / project / package / issuance spec in the library (ADR-015 custody).
+That style-source-resolution engine and its editor GUI are tracked separately in **#125**
+(Phase 5+); this program builds the substrate (storage + capture) that #125 manipulates.
+
 ---
 
 ## 4. WT-1 — detailed spec (the immediately-actionable worktree)
