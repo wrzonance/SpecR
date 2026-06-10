@@ -17,6 +17,7 @@ import {
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 import { generateHandler } from './generate.js';
+import { importTemplateHandler } from './templates.js';
 
 const parseRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
@@ -43,3 +44,4 @@ router.delete('/projects/:id/specs/:specId', removeSpecFromProjectHandler);
 router.get('/projects/:id/references/broken', getBrokenRefsHandler);
 router.post('/parse', parseRateLimit, upload.single('file'), parseHandler);
 router.get('/parse/jobs/:jobId', parseJobHandler);
+router.post('/templates/import', parseRateLimit, upload.single('file'), importTemplateHandler);
