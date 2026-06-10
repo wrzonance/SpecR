@@ -400,6 +400,202 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /templates:
+    post:
+      operationId: createTemplate
+      summary: Create a style template (no rules)
+      tags: [templates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  description: Unique template name
+                owner:
+                  type: string
+                  minLength: 1
+                  description: Optional firm / owner label
+      responses:
+        '201':
+          description: Template created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TemplateMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      operationId: listTemplates
+      summary: List all style templates (metadata only, no rules)
+      tags: [templates]
+      responses:
+        '200':
+          description: Template list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TemplateMeta'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /templates/{id}:
+    get:
+      operationId: getTemplate
+      summary: Retrieve a style template with its rules
+      tags: [templates]
+      parameters:
+        - $ref: '#/components/parameters/TemplateId'
+      responses:
+        '200':
+          description: Template with rules
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: patchTemplate
+      summary: Update template metadata (name and/or owner)
+      description: >
+        At least one of `name` or `owner` must be present. Pass `owner: null`
+        to clear the owner field.
+      tags: [templates]
+      parameters:
+        - $ref: '#/components/parameters/TemplateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                owner:
+                  type: [string, 'null']
+                  minLength: 1
+                  description: Pass null to clear the owner
+      responses:
+        '200':
+          description: Updated template metadata
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TemplateMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteTemplate
+      summary: Delete a style template and all its rules
+      tags: [templates]
+      parameters:
+        - $ref: '#/components/parameters/TemplateId'
+      responses:
+        '204':
+          description: Template deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /templates/{id}/rules:
+    post:
+      operationId: upsertTemplateRules
+      summary: Bulk-upsert style rules for a template (transactional)
+      description: >
+        Replace (or add) rules for the given NodeTypes atomically. Existing rules
+        for NodeTypes not in the request are left unchanged. All rules are
+        validated before any write — one invalid rule rolls back all changes.
+        Unknown OOXML property keys are preserved in `properties` (JSONB catchall).
+      tags: [templates]
+      parameters:
+        - $ref: '#/components/parameters/TemplateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rules]
+              properties:
+                rules:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: '#/components/schemas/StyleRule'
+      responses:
+        '200':
+          description: Template with updated rules
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /templates/import:
     post:
       operationId: importTemplate
@@ -492,6 +688,14 @@ components:
       in: path
       required: true
       description: Project UUID
+      schema:
+        type: string
+        format: uuid
+    TemplateId:
+      name: id
+      in: path
+      required: true
+      description: Template UUID
       schema:
         type: string
         format: uuid
@@ -893,9 +1097,10 @@ components:
           additionalProperties: true
       additionalProperties: true
 
-    Template:
+    TemplateMeta:
       type: object
-      required: [id, name, owner, createdAt, rules]
+      required: [id, name, owner, createdAt]
+      description: Template identity and metadata without style rules
       properties:
         id:
           type: string
@@ -909,11 +1114,18 @@ components:
         createdAt:
           type: string
           format: date-time
-        rules:
-          type: array
-          items:
-            $ref: '#/components/schemas/StyleRule'
-          description: One rule per derived NodeType (7 max)
+
+    Template:
+      allOf:
+        - $ref: '#/components/schemas/TemplateMeta'
+        - type: object
+          required: [rules]
+          properties:
+            rules:
+              type: array
+              items:
+                $ref: '#/components/schemas/StyleRule'
+              description: One rule per NodeType (7 max)
 
     DerivationReport:
       type: object
