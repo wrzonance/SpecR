@@ -48,3 +48,4 @@ coverage/
 tmp/
 *.tmp
 .worktrees
+.superpowers/
