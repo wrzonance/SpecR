@@ -16,7 +16,7 @@
 **File structure:**
 - Create: `src/parser/docx/resolver.ts` (the resolver; keep ≤400 lines — extract helpers if needed)
 - Create: `src/parser/docx/resolver.test.ts` (unit tests)
-- (No changes to `styles.ts`/`document.ts`/`index.ts` in this WT — the resolver is standalone; pipeline wiring happens in WT-3.)
+- (No changes to `styles.ts`/`document.ts` logic in this WT — the resolver is standalone; `src/parser/docx/index.ts` gains one re-export of `resolveStyleCascade` (Task 5), and `styles.ts` swaps its local `asObject` for the shared `asRecord` hoisted to `xml-utils.ts` (Task 1 review). Pipeline wiring happens in WT-3.)
 
 ---
 
@@ -35,7 +35,7 @@ describe('extractRunProps', () => {
     const rPr = {
       'w:rFonts': { '@_w:ascii': 'Courier New' },
       'w:sz': { '@_w:val': 20 },
-      'w:b': {},                       // present, no val → true
+      'w:b': '',                       // present, no val → true (fxp emits '' for self-closing <w:b/>)
       'w:i': { '@_w:val': '0' },       // explicit off → false
       'w:caps': { '@_w:val': '1' },    // explicit on → true
       'w:u': { '@_w:val': 'single' },
@@ -137,23 +137,26 @@ export function extractRunProps(rPr: Record<string, unknown> | undefined): RunPr
 
 export function extractParaProps(pPr: Record<string, unknown> | undefined): ParagraphProperties {
   if (!pPr) return {};
-  const sp = asObj(pPr['w:spacing']);
-  const ind = asObj(pPr['w:ind']);
-  const spacing = sp
-    ? compact({
-        before: numAttr(sp, '@_w:before'), after: numAttr(sp, '@_w:after'),
-        line: numAttr(sp, '@_w:line'), lineRule: strAttr(sp, '@_w:lineRule'),
-      })
-    : undefined;
-  const indent = ind
-    ? compact({
-        left: numAttr(ind, '@_w:left'), right: numAttr(ind, '@_w:right'),
-        firstLine: numAttr(ind, '@_w:firstLine'), hanging: numAttr(ind, '@_w:hanging'),
-      })
-    : undefined;
+  const sp = asRecord(pPr['w:spacing']);
+  const ind = asRecord(pPr['w:ind']);
+  // w:contextualSpacing is a w:pPr SIBLING element, but the schema normalizes it
+  // under spacing — so it must be folded in even when w:spacing itself is absent.
+  const spacing = subObj({
+    before: numAttr(sp, '@_w:before'),
+    after: numAttr(sp, '@_w:after'),
+    line: numAttr(sp, '@_w:line'),
+    lineRule: strAttr(sp, '@_w:lineRule'),
+    contextualSpacing: toggle(pPr['w:contextualSpacing']),
+  });
+  const indent = subObj({
+    left: numAttr(ind, '@_w:left'),
+    right: numAttr(ind, '@_w:right'),
+    firstLine: numAttr(ind, '@_w:firstLine'),
+    hanging: numAttr(ind, '@_w:hanging'),
+  });
   return compact({
-    spacing: spacing && Object.keys(spacing).length ? spacing : undefined,
-    ind: indent && Object.keys(indent).length ? indent : undefined,
+    spacing,
+    ind: indent,
     jc: getAttrVal(pPr['w:jc']) || undefined,
   }) as ParagraphProperties;
 }
