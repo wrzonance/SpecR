@@ -90,3 +90,67 @@ export const AddSpecToProjectBodySchema = z.object({
 });
 
 export type AddSpecToProjectBody = z.infer<typeof AddSpecToProjectBodySchema>;
+
+// ── Style properties (ADR-021): OOXML-faithful, OPEN (unknown keys preserved) ──
+// StyleNodeType is the subset of NodeType that carries visual style —
+// excludes the structural-only 'spec' | 'note' | 'continuation'.
+// Numeric fields are int-only with NO sign/range bound on purpose (ADR-021):
+// we capture the author's value verbatim and warn at a higher layer rather
+// than reject — `z.looseObject` already preserves unknown keys. Do not add
+// .nonnegative()/.max() here.
+export const StyleNodeTypeSchema = z.enum(['part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5']);
+
+const RunPropertiesSchema = z.looseObject({
+  rFonts: z
+    .looseObject({
+      ascii: z.string().exactOptional(),
+      hAnsi: z.string().exactOptional(),
+      cs: z.string().exactOptional(),
+      eastAsia: z.string().exactOptional(),
+    })
+    .exactOptional(),
+  sz: z.number().int().exactOptional(),
+  b: z.boolean().exactOptional(),
+  i: z.boolean().exactOptional(),
+  caps: z.boolean().exactOptional(),
+  smallCaps: z.boolean().exactOptional(),
+  u: z.string().exactOptional(),
+  strike: z.boolean().exactOptional(),
+  // OOXML color token: 'RRGGBB' hex (e.g. 'FF0000') or 'auto'.
+  color: z.string().exactOptional(),
+  highlight: z.string().exactOptional(),
+});
+
+const ParagraphPropertiesSchema = z.looseObject({
+  spacing: z
+    .looseObject({
+      before: z.number().int().exactOptional(),
+      after: z.number().int().exactOptional(),
+      line: z.number().int().exactOptional(),
+      lineRule: z.enum(['auto', 'exact', 'atLeast']).exactOptional(),
+      contextualSpacing: z.boolean().exactOptional(),
+    })
+    .exactOptional(),
+  ind: z
+    .looseObject({
+      left: z.number().int().exactOptional(),
+      right: z.number().int().exactOptional(),
+      firstLine: z.number().int().exactOptional(),
+      hanging: z.number().int().exactOptional(),
+    })
+    .exactOptional(),
+  jc: z.enum(['left', 'center', 'right', 'both', 'distribute', 'start', 'end']).exactOptional(),
+});
+
+const NumberingDefSchema = z.looseObject({
+  ilvl: z.number().int().exactOptional(),
+  numFmt: z.string().exactOptional(),
+  lvlText: z.string().exactOptional(),
+  start: z.number().int().exactOptional(),
+});
+
+export const StylePropertiesSchema = z.looseObject({
+  rPr: RunPropertiesSchema.exactOptional(),
+  pPr: ParagraphPropertiesSchema.exactOptional(),
+  numbering: NumberingDefSchema.exactOptional(),
+});

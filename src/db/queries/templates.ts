@@ -1,22 +1,11 @@
 import { pool, DatabaseError } from '../index.js';
+import type { StyleNodeType, StyleProperties } from '../../ast/types.js';
+import { STYLE_NODE_TYPES } from '../../ast/types.js';
 
-/**
- * Finite set of node types that may carry visual style.
- * Subset of the broader AST NodeType — excludes structural-only kinds
- * ('spec', 'note', 'continuation') that never receive style rules.
- * Mirrored by the `style_rules.node_type` CHECK constraint in migration 010.
- */
-export type StyleNodeType = 'part' | 'article' | 'pr1' | 'pr2' | 'pr3' | 'pr4' | 'pr5';
-
-export const STYLE_NODE_TYPES: readonly StyleNodeType[] = [
-  'part',
-  'article',
-  'pr1',
-  'pr2',
-  'pr3',
-  'pr4',
-  'pr5',
-];
+// Re-export the relocated symbols (local bindings) so existing importers
+// (db/index.ts barrel, integration tests) keep resolving them from this module.
+export type { StyleNodeType, StyleProperties };
+export { STYLE_NODE_TYPES };
 
 export interface StyleRule {
   readonly nodeType: StyleNodeType;
