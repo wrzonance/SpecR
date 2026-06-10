@@ -143,7 +143,7 @@ after its dependency is merged.
 |----|-----------|----------|------------|
 | **WT-1** | `feat/style-jsonb` → `feat/issue-31` | JSONB style payload + migration `013`; #31 template CRUD over the payload | #30 (merged) |
 | **WT-2** | `feat/effective-style-resolver` | Pure OOXML cascade resolver: `docDefaults → style basedOn chain → direct props` → effective `StyleProperties` | — (parser-internal) |
-| **WT-3** | `feat/template-import-docx` | Opt-in `POST /templates/import` (multipart DOCX) → derive per-NodeType definitions → persist → discard bytes; return derived rules + flagged anomalies | WT-1, WT-2 |
+| **WT-3** | `feat/template-import-docx` | Opt-in `POST /templates/import` (multipart DOCX) → derive per-NodeType definitions **by consensus (§5)** → persist → discard bytes; return derived rules + derivation report | WT-1, WT-2 |
 | WT-4 (Layer 2a) | `feat/paragraph-style-overrides` | Capture paragraph-level deviations from the active template as `properties` deltas on `paragraphs`; persist + surface | WT-2, WT-3 |
 | WT-5 (Layer 2b) | `feat/run-span-fidelity` | Character-span-addressable run overrides (the "one bold word" case) | WT-4 |
 | WT-6 (generator) | `feat/generator-apply-style` (advances #32) | Generator applies template `properties` + overrides on export | WT-1 (+WT-4 for overrides) |
@@ -262,7 +262,52 @@ accept and round-trip unknown keys.
 
 ---
 
-## 5. Risks & notes
+## 5. Template derivation algorithm (WT-3 — recorded ahead of build)
+
+WT-3 imports a source-of-truth DOCX and derives the per-NodeType `properties` blobs. The
+derivation is a **per-property robust consensus**, *not* a literal average — averaging is
+meaningless for categoricals and yields synthetic, non-canonical values for numerics.
+
+**Inputs (per source document):** every paragraph, classified to a NodeType by the existing
+5-signal inference engine, with its *effective* style resolved by the WT-2 cascade resolver
+(`docDefaults → named-style basedOn chain → direct props`), plus its assigned named style
+resolved on its own (the *intent* signal).
+
+**Procedure** — for each inferred NodeType, for each style property:
+
+1. Build the value distribution across all paragraphs of that NodeType, using **resolved
+   effective values** so every paragraph contributes a comparable value.
+2. **Categorical** props (font family, alignment, `numFmt`, bold/italic, underline,
+   `lineRule`) → take the **mode**. **Numeric** props (size, indents, spacing, `line`) →
+   **mode first, median fallback** when no value dominates. **Never a mean.**
+3. Reject **idiosyncratic outliers** — lone deviations do not move the template; they are
+   candidate Layer-2 overrides, not house style.
+4. Record a **confidence** = dominance of the winning value (its share of the population).
+5. **Reconcile consensus (reality) vs assigned named style (intent)** —
+   **policy: consistency wins, else intent.** Use the dominant observed value when clearly
+   dominant; fall back to the named-style value when the population is split/noisy.
+   **Always flag disagreements** (consensus ≠ intent) in the derivation report.
+6. Low sample size (e.g. a single `part` paragraph) → use that paragraph's resolved style +
+   named-style intent, flagged low-confidence; never fabricate consensus from n=1.
+
+**Outputs:**
+- The clean `properties` JSON blob per NodeType (**canonical values only**) → stored via
+  WT-1's persistence path. The blob stays pure — it is the rendering source.
+- A **derivation report** (per property: chosen value, confidence, consensus-vs-intent flag,
+  rejected outliers) → returned by `POST /templates/import` for human review before/with
+  persistence. Same transparency surface as Layer 3 clean-up and #56: the mechanism by which
+  "humans do goofy things" (declared style ≠ actual usage; typed numbers vs auto-lists)
+  becomes **visible rather than silently absorbed**.
+
+**Grouping note:** aggregation groups by **inferred NodeType**, not by named style — a messy
+document may use several named styles (or direct formatting) for the same CSI level. The named
+style is a per-paragraph *intent* signal within the group, not the grouping key.
+
+**Deferred (additive later):** multi-document pooling (seed from several source docs);
+per-paragraph length/role weighting; persisting the derivation report as audit metadata.
+First build is single-document, one-paragraph-one-vote.
+
+## 6. Risks & notes
 
 - **Migration on shipped schema.** `013` rewrites a table #30 shipped. Only UFGS-Default data
   exists today, so backfill risk is low; still, the down path is tested for reversibility.
