@@ -2,7 +2,7 @@
 // Pure module: no I/O, no DB, no XML. Deterministic output (paths sorted).
 
 import { STYLE_NODE_TYPES, StylePropertiesSchema } from '../../ast/index.js';
-import type { StyleNodeType, StyleProperties } from '../../ast/types.js';
+import type { NodeType, StyleNodeType, StyleProperties } from '../../ast/types.js';
 import type { ClassifiedParagraph } from './types.js';
 
 // ─── Public shapes ────────────────────────────────────────────────────────────
@@ -399,6 +399,10 @@ function partitionVanish(classified: readonly ClassifiedParagraph[]): Partition 
   return { active, vanishSkipped };
 }
 
+function isStyleNodeType(nt: NodeType): nt is StyleNodeType {
+  return STYLE_NODE_TYPES.some((styleable) => styleable === nt);
+}
+
 function groupByNodeType(
   active: readonly ClassifiedParagraph[]
 ): ReadonlyMap<StyleNodeType, ClassifiedParagraph[]> {
@@ -407,9 +411,8 @@ function groupByNodeType(
     groups.set(nt, []);
   }
   for (const cp of active) {
-    const nt = cp.nodeType as StyleNodeType;
-    const group = groups.get(nt);
-    if (group) group.push(cp);
+    if (!isStyleNodeType(cp.nodeType)) continue; // continuation/note/spec never vote
+    mustGet(groups, cp.nodeType, 'groupByNodeType').push(cp);
   }
   return groups;
 }

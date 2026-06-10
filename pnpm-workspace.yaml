@@ -1,3 +1,8 @@
-# pnpm 11 — allow esbuild postinstall binary build (required by vitest/tsx)
+# pnpm 11 — allow esbuild postinstall binary build (required by vitest/tsx).
+# core-js/protobufjs (transitive deps of @redocly/cli) have install scripts we
+# explicitly DENY — they are not needed for `redocly lint` and false silences
+# pnpm's unapproved-build error.
 allowBuilds:
+  core-js: false
   esbuild: true
+  protobufjs: false

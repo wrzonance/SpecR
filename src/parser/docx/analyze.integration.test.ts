@@ -16,7 +16,10 @@ describe.skipIf(!existsSync(FIXTURE))('analyzeDocxStyles — real DOCX fixture',
     );
     expect(styleable.length).toBeGreaterThan(0);
   });
+});
 
+// Not fixture-dependent — must run even when the DOCX fixture is absent.
+describe('analyzeDocxStyles — error paths', () => {
   it('throws ParserError on a non-DOCX buffer', async () => {
     await expect(analyzeDocxStyles(Buffer.from('not a zip'))).rejects.toThrow(ParserError);
   });
