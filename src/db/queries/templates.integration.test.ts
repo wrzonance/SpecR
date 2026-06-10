@@ -6,6 +6,7 @@ import {
   listTemplates,
   createTemplate,
   upsertStyleRule,
+  createTemplateWithRules,
   type StyleNodeType,
   type StyleRule,
 } from './templates.js';
@@ -181,5 +182,64 @@ describe('UNIQUE constraint on template name', () => {
     const name = trackName(`unique-test-${Date.now()}`);
     await createTemplate(name);
     await expect(createTemplate(name)).rejects.toThrow();
+  });
+});
+
+describe('createTemplateWithRules', () => {
+  function ruleFor(nodeType: StyleNodeType, indent: number): StyleRule {
+    return {
+      nodeType,
+      properties: StylePropertiesSchema.parse({ pPr: { ind: { left: indent } } }),
+    };
+  }
+
+  it('atomic create: returns Template with both rules; getTemplate confirms persistence', async () => {
+    const name = trackName(`atomic-create-${Date.now()}`);
+    const ruleA = ruleFor('pr1', 720);
+    const ruleB = ruleFor('pr2', 1440);
+    const tpl = await createTemplateWithRules(name, 'test-owner', [ruleA, ruleB]);
+
+    expect(tpl.name).toBe(name);
+    expect(tpl.owner).toBe('test-owner');
+    expect(tpl.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(tpl.rules).toHaveLength(2);
+    const nodeTypes = tpl.rules.map((r) => r.nodeType).sort((a, b) => a.localeCompare(b));
+    expect(nodeTypes).toEqual(['pr1', 'pr2']);
+
+    const loaded = await getTemplate(tpl.id);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.owner).toBe('test-owner');
+    const pr1 = loaded!.rules.find((r) => r.nodeType === 'pr1');
+    const pr2 = loaded!.rules.find((r) => r.nodeType === 'pr2');
+    expect(pr1!.properties.pPr?.ind?.left).toBe(720);
+    expect(pr2!.properties.pPr?.ind?.left).toBe(1440);
+  });
+
+  it('duplicate name: rejects; no orphan style_rules beyond the first template', async () => {
+    const name = trackName(`dup-name-${Date.now()}`);
+    const rule = ruleFor('pr1', 720);
+    await createTemplateWithRules(name, null, [rule]);
+
+    await expect(createTemplateWithRules(name, null, [rule])).rejects.toThrow();
+
+    const result = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+       FROM style_rules sr
+       JOIN style_templates st ON st.id = sr.template_id
+       WHERE st.name = $1`,
+      [name]
+    );
+    expect(Number(result.rows[0]!.count)).toBe(1);
+  });
+
+  it('all-or-nothing rollback: invalid node_type rejects and template row is absent', async () => {
+    const name = trackName(`rollback-${Date.now()}`);
+    const validRule = ruleFor('pr1', 720);
+    const badRule = { nodeType: 'bogus' as StyleNodeType, properties: {} };
+
+    await expect(createTemplateWithRules(name, null, [validRule, badRule])).rejects.toThrow();
+
+    const rolled = await getTemplateByName(name);
+    expect(rolled).toBeNull();
   });
 });

@@ -62,6 +62,7 @@ export {
   getTemplateByName,
   listTemplates,
   createTemplate,
+  createTemplateWithRules,
   upsertStyleRule,
 } from './queries/templates.js';
 export { STYLE_NODE_TYPES } from './queries/templates.js';
