@@ -10,7 +10,7 @@
 # postgres service. Re-runs reuse everything already downloaded or running.
 #
 # Overrides (set as environment variables before launching):
-#   SPECR_PORT          HTTP port for the server            (default 3000)
+#   SPECR_PORT          HTTP port for the server  (default 3000, bumps if busy)
 #   SPECR_PG_PORT       host port for compose PostgreSQL    (default 5432)
 #   SPECR_DATABASE_URL  use an existing PostgreSQL; skips Docker entirely
 #   SPECR_NODE_VERSION  portable Node.js version            (default 22.14.0)
@@ -307,11 +307,25 @@ open_browser_when_ready() {
   WATCH_PID=$!
 }
 
+# Settle on a free HTTP port: start at $APP_PORT and walk upward to the first
+# one nothing is listening on, mirroring the PostgreSQL port-bump logic in
+# ensure_postgres. Only gives up if the whole range is taken.
+resolve_app_port() {
+  local start_port="$APP_PORT"
+  local max_port=$((start_port + 20))
+  while port_busy "$APP_PORT" && [[ "$APP_PORT" -lt "$max_port" ]]; do
+    note "port $APP_PORT is in use by another program -- trying $((APP_PORT + 1))"
+    APP_PORT=$((APP_PORT + 1))
+  done
+  port_busy "$APP_PORT" && die "no free HTTP port in range $start_port..$max_port -- set SPECR_PORT to a free port and re-run"
+  if [[ "$APP_PORT" != "$start_port" ]]; then
+    ok "using HTTP port $APP_PORT (port $start_port was busy)"
+  fi
+}
+
 start_specr() {
   cd "$REPO_ROOT"
-  if port_busy "$APP_PORT"; then
-    die "port $APP_PORT is already in use -- close the other program or set SPECR_PORT to a free port and re-run"
-  fi
+  resolve_app_port
   export DATABASE_URL="$DATABASE_URL_CHOSEN"
   export NODE_ENV=production
   export PORT="$APP_PORT"

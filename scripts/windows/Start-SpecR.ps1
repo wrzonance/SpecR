@@ -9,7 +9,7 @@
 # script files unless they carry a UTF-8 BOM.
 #
 # Overrides (set as environment variables before launching):
-#   SPECR_PORT          HTTP port for the server         (default 3000)
+#   SPECR_PORT          HTTP port for the server  (default 3000, bumps if busy)
 #   SPECR_PG_PORT       port for the bundled PostgreSQL  (default 5439)
 #   SPECR_DATABASE_URL  use an existing PostgreSQL instead of the bundled one
 #   SPECR_NODE_VERSION  portable Node.js version         (default 22.14.0)
@@ -455,9 +455,25 @@ function Invoke-CheckedPnpm([string]$What, [string[]]$PnpmArgs) {
 
 function Start-SpecR([string]$DatabaseUrl) {
     Set-Location $RepoRoot
-    if (Test-PortBusy ([int]$AppPort)) {
-        throw "port $AppPort is already in use -- close the other program or set SPECR_PORT to a free port and re-run"
+
+    # Settle on a free HTTP port: start at the requested port and walk upward to
+    # the first one nothing is listening on, mirroring the PostgreSQL port-bump
+    # logic in Initialize-Postgres. Only gives up if the whole range is taken.
+    $startPort = [int]$AppPort
+    $port = $startPort
+    $maxPort = $startPort + 20
+    while ((Test-PortBusy $port) -and ($port -lt $maxPort)) {
+        Write-Note "port $port is already in use by another program -- trying $($port + 1)"
+        $port++
     }
+    if (Test-PortBusy $port) {
+        throw "no free HTTP port in range $startPort..$maxPort -- set SPECR_PORT to a free port and re-run"
+    }
+    if ($port -ne $startPort) {
+        Write-Ok "using HTTP port $port (port $startPort was busy)"
+    }
+    $AppPort = "$port"
+
     $env:DATABASE_URL = $DatabaseUrl
     $env:NODE_ENV = 'production'
     $env:PORT = $AppPort
