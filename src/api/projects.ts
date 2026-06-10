@@ -6,20 +6,10 @@ import {
   removeSpecFromProject,
   getBrokenRefs,
   pool,
-  DatabaseError,
 } from '../db/index.js';
 import type { CreateProjectBody, AddSpecToProjectBody } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
-
-function getPgCode(err: unknown): string | undefined {
-  if (!(err instanceof DatabaseError)) return undefined;
-  const { cause } = err;
-  if (cause !== null && typeof cause === 'object' && 'code' in cause) {
-    const code = (cause as { code?: unknown }).code;
-    return typeof code === 'string' ? code : undefined;
-  }
-  return undefined;
-}
+import { getPgCode } from '../lib/pg-errors.js';
 
 export async function createProjectHandler(req: Request, res: Response): Promise<void> {
   try {

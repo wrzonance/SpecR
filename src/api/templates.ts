@@ -2,8 +2,9 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { Request, Response } from 'express';
 import { analyzeDocxStyles, deriveTemplate, assertDocxSafe, ParserError } from '../parser/index.js';
-import { createTemplateWithRules, DatabaseError } from '../db/index.js';
+import { createTemplateWithRules } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+import { getPgCode } from '../lib/pg-errors.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -11,18 +12,6 @@ const ImportBodySchema = z.object({
   name: z.string().check(z.minLength(1)),
   owner: z.string().check(z.minLength(1)).exactOptional(),
 });
-
-// Duplicated verbatim from api/projects.ts — hoist BOTH to src/lib/pg-errors.ts in
-// PR-1b (#31, which planned that module). Do not copy a third time.
-function getPgCode(err: unknown): string | undefined {
-  if (!(err instanceof DatabaseError)) return undefined;
-  const { cause } = err;
-  if (cause !== null && typeof cause === 'object' && 'code' in cause) {
-    const code = (cause as { code?: unknown }).code;
-    return typeof code === 'string' ? code : undefined;
-  }
-  return undefined;
-}
 
 function validateRequest(
   req: Request
