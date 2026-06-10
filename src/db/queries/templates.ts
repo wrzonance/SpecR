@@ -114,6 +114,52 @@ export async function createTemplate(name: string, owner?: string): Promise<Temp
   }
 }
 
+export async function createTemplateWithRules(
+  name: string,
+  owner: string | null,
+  rules: readonly StyleRule[]
+): Promise<Template> {
+  // Parse up front so the stored and returned rules are the SAME validated values,
+  // and so a validation throw never opens a transaction.
+  const parsedRules = rules.map((r) => ({
+    ...r,
+    properties: StylePropertiesSchema.parse(r.properties),
+  }));
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query<TemplateRow>(
+      `INSERT INTO style_templates (name, owner) VALUES ($1, $2)
+       RETURNING id, name, owner, created_at`,
+      [name, owner]
+    );
+    const row = result.rows[0];
+    if (!row) throw new DatabaseError('createTemplateWithRules: no row returned');
+    for (const rule of parsedRules) {
+      await client.query(
+        `INSERT INTO style_rules (template_id, node_type, properties)
+         VALUES ($1, $2, $3::jsonb)`,
+        [row.id, rule.nodeType, JSON.stringify(rule.properties)]
+      );
+    }
+    await client.query('COMMIT');
+    return { ...mapMetaRow(row), rules: parsedRules };
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* connection-level failure — original error wins */
+    }
+    // Unlike persistParsedSpec (which wraps unconditionally), internal DatabaseErrors
+    // (e.g. the no-row sentinel) re-throw as-is — their specific message beats the
+    // generic wrapper. Deliberate divergence.
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError('failed to create template with rules', { cause: err });
+  } finally {
+    client.release();
+  }
+}
+
 export async function upsertStyleRule(templateId: string, rule: StyleRule): Promise<void> {
   try {
     // Validate at the boundary, then serialize + cast explicitly (matches revit.ts):

@@ -5,8 +5,9 @@ import { buildNumberingMap, emptyNumberingMap, withArticleIlvl } from './numberi
 import { buildStyleMap } from './styles.js';
 import { parseDocument } from './document.js';
 import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
-import type { SpecTree } from '../../ast/types.js';
-import type { NumberingMap, StyleMap } from './types.js';
+import type { SpecTree, StyleProperties } from '../../ast/types.js';
+import type { NumberingMap, StyleMap, ClassifiedParagraph } from './types.js';
+import { resolveStyleCascade } from './resolver.js';
 import { normalizeSectionNumber } from '../../lib/section-number.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
@@ -92,28 +93,9 @@ function runPipeline(
   entries: ValidEntries,
   onProgress?: (stage: string, pct: number) => void
 ): SpecTree {
-  onProgress?.('numbering', 25);
-  const numberingMap = entries.numberingXml
-    ? buildNumberingMap(entries.numberingXml)
-    : emptyNumberingMap();
-
-  onProgress?.('styles', 40);
-  const styleMap = buildStyleMap(entries.stylesXml);
-
   // Override articleIlvl now that StyleMap is available — numbering.xml alone cannot
   // distinguish CPI-v2 (ART at ilvl=3) from ARCAT (article at ilvl=1).
-  const articleIlvl = detectArticleIlvl(styleMap, numberingMap);
-  const resolvedNumberingMap = withArticleIlvl(numberingMap, articleIlvl);
-
-  onProgress?.('document', 55);
-  const paragraphs = parseDocument(entries.documentXml, resolvedNumberingMap);
-
-  if (paragraphs.length === 0) {
-    throw new ParserError('document contains no paragraphs');
-  }
-
-  onProgress?.('classifying', 75);
-  const classified = classifyParagraphs(paragraphs, resolvedNumberingMap, styleMap);
+  const { classified, styleMap } = buildClassification(entries, onProgress);
 
   const source = detectSource(styleMap);
   // Section/title from core.xml only; when absent, the parse() orchestrator's
@@ -129,8 +111,87 @@ function runPipeline(
   return warnings.length > 0 ? { ...tree, warnings } : tree;
 }
 
+// ─── Internal classification helper ──────────────────────────────────────────
+
+interface Classification {
+  readonly classified: readonly ClassifiedParagraph[];
+  // styleMap is consumed by runPipeline (detectSource); analyzeDocxStyles
+  // ignores it — effective styles come from resolveStyleCascade instead.
+  readonly styleMap: StyleMap;
+}
+
+function buildClassification(
+  entries: {
+    readonly numberingXml: string | null;
+    readonly stylesXml: string;
+    readonly documentXml: string;
+  },
+  onProgress?: (stage: string, pct: number) => void
+): Classification {
+  onProgress?.('numbering', 25);
+  const numberingMap = entries.numberingXml
+    ? buildNumberingMap(entries.numberingXml)
+    : emptyNumberingMap();
+
+  onProgress?.('styles', 40);
+  const styleMap = buildStyleMap(entries.stylesXml);
+
+  const articleIlvl = detectArticleIlvl(styleMap, numberingMap);
+  const resolvedNumberingMap = withArticleIlvl(numberingMap, articleIlvl);
+
+  onProgress?.('document', 55);
+  const paragraphs = parseDocument(entries.documentXml, resolvedNumberingMap);
+
+  if (paragraphs.length === 0) {
+    throw new ParserError('document contains no paragraphs');
+  }
+
+  onProgress?.('classifying', 75);
+  return {
+    classified: classifyParagraphs(paragraphs, resolvedNumberingMap, styleMap),
+    styleMap,
+  };
+}
+
+// ─── Public exports ───────────────────────────────────────────────────────────
+
 export { assertDocxSafe } from './safety.js';
 export { resolveStyleCascade } from './resolver.js';
+export type { ClassifiedParagraph } from './types.js';
+export { deriveTemplate } from './derive-template.js';
+export type {
+  DerivedTemplate,
+  DerivedRule,
+  DerivationReport,
+  NodeTypeReport,
+  PropertyDecision,
+} from './derive-template.js';
+
+// ─── Style-analysis seam (WT-3 template import) ───────────────────────────────
+
+export interface DocxStyleAnalysis {
+  readonly classified: readonly ClassifiedParagraph[];
+  readonly effectiveStyles: ReadonlyMap<string, StyleProperties>;
+}
+
+/**
+ * Style-analysis seam for template import (WT-3): classify the document's
+ * paragraphs AND resolve every paragraph style's effective StyleProperties.
+ * The buffer is read once and discarded — nothing raw is persisted (ADR-021).
+ */
+export async function analyzeDocxStyles(buffer: Buffer): Promise<DocxStyleAnalysis> {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(buffer);
+  } catch (err) {
+    throw new ParserError('failed to read DOCX archive', { cause: err });
+  }
+  const { numberingXml, stylesXml, documentXml } = await extractEntries(zip);
+  if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
+  if (!documentXml) throw new ParserError('DOCX missing word/document.xml');
+  const { classified } = buildClassification({ numberingXml, stylesXml, documentXml });
+  return { classified, effectiveStyles: resolveStyleCascade(stylesXml, numberingXml) };
+}
 
 export async function parseDocx(
   buffer: Buffer,
