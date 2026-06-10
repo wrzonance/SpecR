@@ -3,6 +3,10 @@ import { STYLE_NODE_TYPES, StylePropertiesSchema } from '../../ast/index.js';
 import type { StyleProperties } from '../../ast/types.js';
 import type { ClassifiedParagraph } from './types.js';
 import { deriveTemplate } from './derive-template.js';
+import {
+  analyzeDocxStyles as fromParserBarrel,
+  deriveTemplate as deriveFromBarrel,
+} from '../index.js';
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -312,5 +316,14 @@ describe('deriveTemplate — unknown OOXML key preserved, schema valid', () => {
     for (const rule of rules) {
       expect(() => StylePropertiesSchema.parse(rule.properties)).not.toThrow();
     }
+  });
+});
+
+// ─── Module barrel surface ────────────────────────────────────────────────────
+
+describe('module barrel surface', () => {
+  it('exposes analyzeDocxStyles + deriveTemplate via parser/index.js', () => {
+    expect(typeof fromParserBarrel).toBe('function');
+    expect(typeof deriveFromBarrel).toBe('function');
   });
 });

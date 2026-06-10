@@ -158,6 +158,14 @@ function buildClassification(
 export { assertDocxSafe } from './safety.js';
 export { resolveStyleCascade } from './resolver.js';
 export type { ClassifiedParagraph } from './types.js';
+export { deriveTemplate } from './derive-template.js';
+export type {
+  DerivedTemplate,
+  DerivedRule,
+  DerivationReport,
+  NodeTypeReport,
+  PropertyDecision,
+} from './derive-template.js';
 
 // ─── Style-analysis seam (WT-3 template import) ───────────────────────────────
 

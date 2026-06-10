@@ -11,7 +11,15 @@ import type { SectionInference } from '../lib/infer-section.js';
 
 export { parseSec, assertSecSafe } from './sec/index.js';
 export type { ParsedSec } from './sec/index.js';
-export { parseDocx, assertDocxSafe } from './docx/index.js';
+export { parseDocx, assertDocxSafe, analyzeDocxStyles, deriveTemplate } from './docx/index.js';
+export type {
+  DocxStyleAnalysis,
+  DerivedTemplate,
+  DerivedRule,
+  DerivationReport,
+  NodeTypeReport,
+  PropertyDecision,
+} from './docx/index.js';
 export { parseText } from './text/index.js';
 export { extractRefsFromTree } from './refs/index.js';
 export { ParserError } from './error.js';
