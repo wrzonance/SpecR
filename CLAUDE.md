@@ -250,6 +250,8 @@ docs/adr/
   018-document-concurrency-state-model.md
   019-scope-boundaries-content-neutral-platform.md
   020-section-number-expanded-shape.md
+  021-extensible-jsonb-style-storage.md
+  022-editability-semantics-convention-profiles.md
 ```
 
 **ADR format:**
