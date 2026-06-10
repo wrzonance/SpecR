@@ -148,6 +148,59 @@ function parseOneStyle(raw: unknown): readonly [string, RawStyle] | undefined {
   return [styleId, entry];
 }
 
+// ─── style cascade resolution ─────────────────────────────────────────────────
+
+// Plain object — not null, not array (arrays are last-wins values, not deep-merged).
+function isPlainObj(x: unknown): x is Record<string, unknown> {
+  return x !== null && typeof x === 'object' && !Array.isArray(x);
+}
+
+// Deep-merge `over` onto `base`: value/toggle props last-wins; nested plain objects merge.
+// Pure — never mutates base or over.
+function mergeRecord(
+  base: Record<string, unknown>,
+  over: Record<string, unknown>
+): Record<string, unknown> {
+  return Object.entries(over).reduce<Record<string, unknown>>(
+    (acc, [k, v]) => {
+      if (v === undefined) return acc;
+      const b = acc[k];
+      return { ...acc, [k]: isPlainObj(b) && isPlainObj(v) ? mergeRecord(b, v) : v };
+    },
+    { ...base }
+  );
+}
+
+export function mergeStyleProps(base: StyleProperties, over: StyleProperties): StyleProperties {
+  return mergeRecord(base, over) as StyleProperties;
+}
+
+// Build [self, parent, grandparent, ...] following basedOn links.
+// Stops on cycle / missing target. The `seen` Set guarantees termination —
+// each iteration adds a new id or breaks.
+function styleChain(styleId: string, parsed: ParsedStyles): readonly StyleProperties[] {
+  const seen = new Set<string>();
+  const layers: StyleProperties[] = [];
+  let id: string | undefined = styleId;
+  while (id !== undefined && !seen.has(id)) {
+    const s = parsed.styles.get(id);
+    if (!s) break;
+    seen.add(id);
+    layers.push(s.own);
+    id = s.basedOn;
+  }
+  return layers;
+}
+
+// Resolve the full effective style: docDefaults base, ancestors furthest-first down to
+// the style itself (closest wins).
+export function resolveStyleChain(styleId: string, parsed: ParsedStyles): StyleProperties {
+  return styleChain(styleId, parsed).reduceRight(
+    (acc, layer) => mergeStyleProps(acc, layer),
+    parsed.docDefaults
+  );
+}
+
 export function parseStylesFull(xml: string): ParsedStyles {
   let parsed: unknown;
   try {

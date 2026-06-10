@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { extractRunProps, extractParaProps, parseStylesFull } from './resolver.js';
+import {
+  extractRunProps,
+  extractParaProps,
+  parseStylesFull,
+  mergeStyleProps,
+  resolveStyleChain,
+} from './resolver.js';
 
 describe('extractRunProps', () => {
   it('reads fonts, size, toggles, underline, color from a w:rPr object', () => {
@@ -85,5 +91,61 @@ describe('parseStylesFull', () => {
     const parsed = parseStylesFull('<?xml version="1.0"?><other/>');
     expect(parsed.docDefaults).toEqual({});
     expect(parsed.styles.size).toBe(0);
+  });
+});
+
+describe('mergeStyleProps (value last-wins; nested deep-merge)', () => {
+  it('overrides value props and merges nested rPr/pPr', () => {
+    const base = { rPr: { sz: 22, b: false }, pPr: { spacing: { after: 0 } } };
+    const over = { rPr: { sz: 20 }, pPr: { ind: { left: 720 } } };
+    expect(mergeStyleProps(base, over)).toEqual({
+      rPr: { sz: 20, b: false },
+      pPr: { spacing: { after: 0 }, ind: { left: 720 } },
+    });
+  });
+  it('does NOT mutate its inputs', () => {
+    const base = { rPr: { sz: 22 } };
+    const over = { rPr: { sz: 20 } };
+    mergeStyleProps(base, over);
+    expect(base).toEqual({ rPr: { sz: 22 } });
+    expect(over).toEqual({ rPr: { sz: 20 } });
+  });
+  it('deep-merges nested rFonts, preserving sibling keys', () => {
+    expect(
+      mergeStyleProps(
+        { rPr: { rFonts: { ascii: 'A', hAnsi: 'A' } } },
+        { rPr: { rFonts: { ascii: 'B' } } }
+      )
+    ).toEqual({ rPr: { rFonts: { ascii: 'B', hAnsi: 'A' } } });
+  });
+});
+
+describe('resolveStyleChain', () => {
+  const XML = `<?xml version="1.0"?>
+  <w:styles xmlns:w="x">
+    <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman"/><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>
+    <w:style w:type="paragraph" w:styleId="PRT"><w:rPr><w:b/><w:sz w:val="20"/></w:rPr></w:style>
+    <w:style w:type="paragraph" w:styleId="PR1"><w:basedOn w:val="PRT"/><w:pPr><w:ind w:left="720"/></w:pPr></w:style>
+  </w:styles>`;
+  it('layers docDefaults -> basedOn parent -> own (closest wins)', () => {
+    expect(resolveStyleChain('PR1', parseStylesFull(XML))).toEqual({
+      rPr: { rFonts: { ascii: 'Times New Roman' }, sz: 20, b: true },
+      pPr: { ind: { left: 720 } },
+    });
+  });
+  it('tolerates a missing basedOn target (resolves what exists)', () => {
+    const parsed = parseStylesFull(
+      `<w:styles xmlns:w="x"><w:style w:type="paragraph" w:styleId="X"><w:basedOn w:val="Ghost"/><w:rPr><w:i/></w:rPr></w:style></w:styles>`
+    );
+    expect(resolveStyleChain('X', parsed)).toEqual({ rPr: { i: true } });
+  });
+  it('terminates on a basedOn cycle without infinite recursion', () => {
+    const parsed = parseStylesFull(
+      `<w:styles xmlns:w="x">
+        <w:style w:type="paragraph" w:styleId="A"><w:basedOn w:val="B"/><w:rPr><w:sz w:val="20"/></w:rPr></w:style>
+        <w:style w:type="paragraph" w:styleId="B"><w:basedOn w:val="A"/></w:style>
+      </w:styles>`
+    );
+    expect(resolveStyleChain('A', parsed)).toEqual({ rPr: { sz: 20 } });
   });
 });
