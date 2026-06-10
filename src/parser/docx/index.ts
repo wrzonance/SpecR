@@ -130,6 +130,7 @@ function runPipeline(
 }
 
 export { assertDocxSafe } from './safety.js';
+export { resolveStyleCascade } from './resolver.js';
 
 export async function parseDocx(
   buffer: Buffer,

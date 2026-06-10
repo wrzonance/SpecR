@@ -10,6 +10,12 @@ export {
   AddSpecToProjectBodySchema,
 } from './schemas.js';
 export type { CreateProjectBody, AddSpecToProjectBody } from './schemas.js';
-export type { StyleNodeType, StyleProperties } from './types.js';
+export type {
+  StyleNodeType,
+  StyleProperties,
+  RunProperties,
+  ParagraphProperties,
+  NumberingDef,
+} from './types.js';
 export { STYLE_NODE_TYPES } from './types.js';
 export { StyleNodeTypeSchema, StylePropertiesSchema } from './schemas.js';

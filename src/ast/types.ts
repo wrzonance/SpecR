@@ -57,3 +57,22 @@ export const STYLE_NODE_TYPES = StyleNodeTypeSchema.options;
  * any other OOXML key a real document carries (the type carries an index signature).
  */
 export type StyleProperties = z.infer<typeof StylePropertiesSchema>;
+
+/**
+ * Run (character) formatting properties extracted from a w:rPr element.
+ * Derived from the rPr sub-shape of StylePropertiesSchema.
+ */
+export type RunProperties = NonNullable<StyleProperties['rPr']>;
+
+/**
+ * Paragraph formatting properties extracted from a w:pPr element.
+ * Derived from the pPr sub-shape of StylePropertiesSchema.
+ */
+export type ParagraphProperties = NonNullable<StyleProperties['pPr']>;
+
+/**
+ * Numbering context (ilvl, numFmt, lvlText, start) resolved from a style's
+ * effective numPr through numbering.xml. Derived from the numbering sub-shape
+ * of StylePropertiesSchema.
+ */
+export type NumberingDef = NonNullable<StyleProperties['numbering']>;
