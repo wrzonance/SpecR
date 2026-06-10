@@ -95,7 +95,7 @@ payload**, replacing the scalar style columns. Concretely:
   captured values. The DB still owns the `node_type` enum and the structural uniqueness.
 - SQL filtering on individual style properties now uses JSONB operators (`->`, `->>`,
   `@>`); add a GIN or expression index only if a real query need appears (none today).
-- Requires a conversion migration (`013`): add `properties`, backfill it from the existing
+- Requires a conversion migration (`014`): add `properties`, backfill it from the existing
   columns (and enrich UFGS-Default with the previously-unstorable `line=360`), then drop the
   scalar style columns. The down migration recreates the columns and back-projects.
 - Reverses part of the shipped #30 design and reshapes the (unbuilt) #31 CRUD API to operate

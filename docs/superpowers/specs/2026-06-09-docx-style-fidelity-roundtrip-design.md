@@ -141,7 +141,7 @@ after its dependency is merged.
 
 | WT | Branch(es) | Delivers | Depends on |
 |----|-----------|----------|------------|
-| **WT-1** | `feat/style-jsonb` → `feat/issue-31` | JSONB style payload + migration `013`; #31 template CRUD over the payload | #30 (merged) |
+| **WT-1** | `feat/style-jsonb` → `feat/issue-31` | JSONB style payload + migration `014`; #31 template CRUD over the payload | #30 (merged) |
 | **WT-2** | `feat/effective-style-resolver` | Pure OOXML cascade resolver: `docDefaults → style basedOn chain → direct props` → effective `StyleProperties` | — (parser-internal) |
 | **WT-3** | `feat/template-import-docx` | Opt-in `POST /templates/import` (multipart DOCX) → derive per-NodeType definitions **by consensus (§5)** → persist → discard bytes; return derived rules + derivation report | WT-1, WT-2 |
 | WT-4 (Layer 2a) | `feat/paragraph-style-overrides` | Capture paragraph-level deviations from the active template as `properties` deltas on `paragraphs`; persist + surface | WT-2, WT-3 |
@@ -164,9 +164,9 @@ via REST — and so nothing a future importer captures can overflow the schema.
 Lands as **two stacked PRs** on the worktree branch (keeps each within the 500-LOC sub-MVP
 rule):
 
-### PR-1a — `feat(db): JSONB style payload + migration 013`
+### PR-1a — `feat(db): JSONB style payload + migration 014`
 
-**Migration `013_style_rules_jsonb.ts`** (reversible):
+**Migration `014_style_rules_jsonb.ts`** (reversible):
 - `up`:
   1. Add `properties jsonb NOT NULL DEFAULT '{}'` to `style_rules`.
   2. **Backfill** `properties` from the existing columns via
@@ -230,7 +230,7 @@ accept and round-trip unknown keys.
 
 - **Migration reversibility:** `up` then `down` restores the prior column shape; UFGS-Default
   data survives the round-trip (integration, real PG).
-- **Backfill correctness:** after `013`, UFGS-Default `pr1` has
+- **Backfill correctness:** after `014`, UFGS-Default `pr1` has
   `properties.pPr.spacing.line === 360` and `properties.numbering.numFmt === 'upperLetter'`.
 - **Query round-trip:** `upsertStyleRule` then `loadRules` returns the identical
   `StyleProperties` object (jsonb in/out fidelity).
@@ -244,7 +244,7 @@ accept and round-trip unknown keys.
 
 ### 4.2 Acceptance criteria
 
-- [ ] Migration `013` up/down both run clean; CI `migrate → seed → test → test:integration` green.
+- [ ] Migration `014` up/down both run clean; CI `migrate → seed → test → test:integration` green.
 - [ ] UFGS-Default's previously-unstorable `line=360` is present in `properties` after migrate.
 - [ ] All six #31 endpoints behave per the contract matrix, carrying `properties`.
 - [ ] An unknown OOXML property survives a store→load round-trip unchanged (★ test passes).
@@ -309,9 +309,9 @@ First build is single-document, one-paragraph-one-vote.
 
 ## 6. Risks & notes
 
-- **Migration on shipped schema.** `013` rewrites a table #30 shipped. Only UFGS-Default data
+- **Migration on shipped schema.** `014` rewrites a table #30 shipped. Only UFGS-Default data
   exists today, so backfill risk is low; still, the down path is tested for reversibility.
-- **`011` runs before `013` on fresh DBs.** `011` seeds the scalar columns, `013` converts then
+- **`011` runs before `014` on fresh DBs.** `011` seeds the scalar columns, `014` converts then
   drops them — correct ordering, no edit to the immutable `011`.
 - **Zod v4 open-object API.** Confirm the exact loose/catchall form during implementation; the
   requirement (preserve unknowns) is fixed, the API spelling is an implementation detail.
