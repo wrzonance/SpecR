@@ -145,6 +145,14 @@ export const CreateRevisionBodySchema = z.object({
 
 export type CreateRevisionBody = z.infer<typeof CreateRevisionBodySchema>;
 
+// Body for PATCH /specs/:id/paragraphs/:paragraphId — the inline editor sends
+// the full replacement body text for one paragraph.
+export const UpdateParagraphBodySchema = z.object({
+  text: z.string().check(z.minLength(1)),
+});
+
+export type UpdateParagraphBody = z.infer<typeof UpdateParagraphBodySchema>;
+
 // ── Style properties (ADR-021): OOXML-faithful, OPEN (unknown JSON keys preserved) ──
 // StyleNodeType is the subset of NodeType that carries visual style —
 // excludes the structural-only 'spec' | 'note' | 'continuation'.

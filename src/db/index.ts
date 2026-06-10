@@ -30,6 +30,7 @@ export {
   getSpecTree,
   listSpecs,
   persistParsedSpec,
+  deleteSpec,
 } from './queries/specs.js';
 export type {
   SpecSummary,
@@ -40,9 +41,18 @@ export type {
   OriginMeta,
   SpecListEntry,
 } from './queries/specs.js';
-export { insertTree, getParagraphWithAncestors } from './queries/paragraphs.js';
-export type { ParagraphRow, ParagraphWithAncestors } from './queries/paragraphs.js';
-export { insertRefs } from './queries/refs.js';
+export {
+  insertTree,
+  getParagraphWithAncestors,
+  deleteParagraph,
+  updateParagraphText,
+} from './queries/paragraphs.js';
+export type {
+  ParagraphRow,
+  ParagraphWithAncestors,
+  UpdatedParagraph,
+} from './queries/paragraphs.js';
+export { insertRefs, deleteReference } from './queries/refs.js';
 export {
   createProject,
   findProjectById,

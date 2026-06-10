@@ -48,6 +48,10 @@ function linkifyText(text, ctx) {
       link.classList.add('is-unresolved');
       link.title = `Section ${section} — unresolved (not in library)`;
     }
+    if (ctx.brokenSections && ctx.brokenSections.has(section)) {
+      link.classList.add('is-broken');
+      link.title = `Section ${section} — broken reference (target removed from project)`;
+    }
     frag.appendChild(link);
     last = match.index + match[0].length;
   }
@@ -80,10 +84,117 @@ function appendNumberedChildren(container, children, render) {
   }
 }
 
+// ── Inline edit + delete affordances (mockup demo) ──────────────────────────
+
+// How many times each normalized section number appears in a block of text.
+function sectionCounts(text) {
+  const counts = new Map();
+  for (const match of text.matchAll(SECTION_PATTERN)) {
+    const section = normalizeSection(match[0]);
+    counts.set(section, (counts.get(section) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// References this edit removed. Compares per-section OCCURRENCE counts (not mere
+// presence) so deleting ONE of two identical citations in a paragraph is still
+// detected — set membership can't express that delta. Only references whose
+// number actually appeared in the original body can be judged from text alone.
+function removedReferences(originalText, newText, paraRefs) {
+  const before = sectionCounts(originalText);
+  const after = sectionCounts(newText);
+  const bySection = new Map();
+  for (const ref of paraRefs) {
+    if (!ref.targetSection) continue;
+    bySection.set(ref.targetSection, [...(bySection.get(ref.targetSection) ?? []), ref]);
+  }
+  const removed = [];
+  for (const [section, refs] of bySection) {
+    const delta = (before.get(section) ?? 0) - (after.get(section) ?? 0);
+    if (delta > 0) removed.push(...refs.slice(0, delta));
+  }
+  return removed;
+}
+
+function autosize(textarea) {
+  textarea.style.height = 'auto';
+  textarea.style.height = `${textarea.scrollHeight}px`;
+}
+
+function makeParaActions(node, row, ctx) {
+  const actions = el('div', 'para-actions');
+  const edit = el('button', 'para-act para-edit', '✎');
+  edit.type = 'button';
+  edit.title = 'Edit this paragraph';
+  edit.addEventListener('click', () => beginEdit(node, row, ctx));
+  const del = el('button', 'para-act para-del', '✕');
+  del.type = 'button';
+  del.title = 'Delete this paragraph (and any reference it contains)';
+  del.addEventListener('click', () => ctx.onDeleteParagraph(ctx.spec, node));
+  actions.appendChild(edit);
+  actions.appendChild(del);
+  return actions;
+}
+
+function beginEdit(node, row, ctx) {
+  if (row.classList.contains('is-editing')) return;
+  const ownText = row.querySelector(':scope > .node-text > .node-own-text');
+  if (!ownText) return;
+  row.classList.add('is-editing');
+
+  const editor = el('div', 'para-editor');
+  const input = el('textarea', 'para-input');
+  input.value = node.text;
+  const bar = el('div', 'para-editbar');
+  const save = el('button', 'para-save', 'Save');
+  save.type = 'button';
+  const cancel = el('button', 'para-cancel', 'Cancel');
+  cancel.type = 'button';
+  bar.appendChild(save);
+  bar.appendChild(cancel);
+  editor.appendChild(input);
+  editor.appendChild(bar);
+  ownText.replaceWith(editor);
+  autosize(input);
+  input.focus();
+  input.addEventListener('input', () => autosize(input));
+
+  cancel.addEventListener('click', () => {
+    const fresh = el('span', 'node-own-text');
+    fresh.appendChild(linkifyText(node.text, ctx));
+    editor.replaceWith(fresh);
+    row.classList.remove('is-editing');
+  });
+  save.addEventListener('click', () => void commitEdit({ node, ctx, input, save, cancel }));
+}
+
+async function commitEdit({ node, ctx, input, save, cancel }) {
+  const newText = input.value.trim();
+  if (newText.length === 0) {
+    if (ctx.toast) ctx.toast('A paragraph cannot be empty — delete it instead', 'warn');
+    return;
+  }
+  if (newText === node.text) {
+    cancel.click(); // no change — just leave the editor
+    return;
+  }
+  const removed = removedReferences(node.text, newText, ctx.referencesFor(node.id));
+  save.disabled = true;
+  cancel.disabled = true;
+  // 'committed' → the board re-renders and discards this editor; otherwise the
+  // user backed out of the warning, so re-enable and stay in edit mode.
+  const outcome = await ctx.onSaveParagraphEdit({ spec: ctx.spec, node, newText, removedRefs: removed });
+  if (outcome !== 'committed') {
+    save.disabled = false;
+    cancel.disabled = false;
+  }
+}
+
 function renderPrNode(node, index, ctx) {
   if (node.type === 'note') return renderNote(node, ctx);
 
   const row = el('div', 'tree-node');
+  row.dataset.nodeId = node.id;
   if (node.meta && node.meta.vanish) row.classList.add('is-vanish');
   if (node.type === 'continuation') {
     row.classList.add('tree-continuation');
@@ -93,7 +204,9 @@ function renderPrNode(node, index, ctx) {
   }
 
   const body = el('div', 'node-text');
-  body.appendChild(linkifyText(node.text, ctx));
+  const ownText = el('span', 'node-own-text');
+  ownText.appendChild(linkifyText(node.text, ctx));
+  body.appendChild(ownText);
   if (node.meta && node.meta.vanish) {
     body.appendChild(el('span', 'vanish-tag', 'VANISH'));
   }
@@ -101,6 +214,7 @@ function renderPrNode(node, index, ctx) {
     renderPrNode(child, ordinal, ctx)
   );
   row.appendChild(body);
+  if (ctx.editEnabled) row.appendChild(makeParaActions(node, row, ctx));
   return row;
 }
 
@@ -216,7 +330,8 @@ function walkToCitation(sheet, section, walkState) {
 // body; the ↗ tail keeps the old jump-to-referenced-sheet behavior.
 function makeSectionChip(section, count, ctx, sheet, walkState) {
   const status = ctx.statusFor(section) || 'unresolved';
-  const chip = el('span', `ref-chip is-${status}`);
+  const broken = Boolean(ctx.brokenSections && ctx.brokenSections.has(section));
+  const chip = el('span', `ref-chip is-${status}${broken ? ' is-broken' : ''}`);
 
   const walk = el('button', 'ref-walk');
   walk.type = 'button';
@@ -259,6 +374,11 @@ function makeSectionChip(section, count, ctx, sheet, walkState) {
     chip.appendChild(jump);
   } else {
     chip.title = 'Unresolved — target section not in library';
+  }
+  if (broken) {
+    const flag = el('span', 'chip-broken', '⚠ BROKEN');
+    flag.title = `Section ${section} — the server marked this citation broken (target removed from the project)`;
+    chip.appendChild(flag);
   }
   return chip;
 }
@@ -315,9 +435,34 @@ function renderRefsFooter(references, ownSection, ctx, sheet, walkState) {
   return footer;
 }
 
+// Derives a per-sheet render context: the base callbacks plus the spec, a
+// paragraph→references index, the broken-section set, and an edit flag. Edit
+// affordances appear only when the host wired an onDeleteParagraph callback.
+function buildSheetCtx(spec, ctx) {
+  const refsByParagraph = new Map();
+  for (const ref of spec.references) {
+    if (!ref.sourceParagraphId) continue;
+    refsByParagraph.set(ref.sourceParagraphId, [
+      ...(refsByParagraph.get(ref.sourceParagraphId) ?? []),
+      ref,
+    ]);
+  }
+  const brokenSections = new Set(
+    spec.references.filter((r) => r.isBroken && r.targetSection).map((r) => r.targetSection)
+  );
+  return {
+    ...ctx,
+    spec,
+    editEnabled: typeof ctx.onDeleteParagraph === 'function',
+    referencesFor: (nodeId) => refsByParagraph.get(nodeId) ?? [],
+    brokenSections,
+  };
+}
+
 // spec: { tree, references, warnings?, capabilities? }
 export function renderSpecSheet(spec, ctx) {
   const { tree, references } = spec;
+  const actx = buildSheetCtx(spec, ctx);
   const sheet = el('article', 'spec-sheet');
   sheet.dataset.section = tree.section;
   sheet.id = `sheet-${tree.id}`;
@@ -350,13 +495,13 @@ export function renderSpecSheet(spec, ctx) {
   let partIndex = 0;
   for (const node of tree.parts) {
     if (node.type === 'part') {
-      body.appendChild(renderPart(node, partIndex, ctx));
+      body.appendChild(renderPart(node, partIndex, actx));
       partIndex += 1;
     } else if (node.type === 'note') {
-      body.appendChild(renderNote(node, ctx));
+      body.appendChild(renderNote(node, actx));
     } else if (node.text.trim().length > 0) {
       const fm = el('p', 'front-matter');
-      fm.appendChild(linkifyText(node.text, ctx));
+      fm.appendChild(linkifyText(node.text, actx));
       body.appendChild(fm);
     }
   }
@@ -364,6 +509,6 @@ export function renderSpecSheet(spec, ctx) {
 
   // per-sheet cursor for citation walking: section -> last visited index
   const walkState = new Map();
-  sheet.appendChild(renderRefsFooter(references, tree.section, ctx, sheet, walkState));
+  sheet.appendChild(renderRefsFooter(references, tree.section, actx, sheet, walkState));
   return sheet;
 }

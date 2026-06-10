@@ -7,7 +7,10 @@ import {
   updateSpecHandler,
   listSpecsHandler,
   getSpecTreeHandler,
+  deleteSpecHandler,
 } from './specs.js';
+import { deleteParagraphHandler, updateParagraphHandler } from './paragraphs.js';
+import { deleteReferenceHandler } from './references.js';
 import {
   createProjectHandler,
   getProjectHandler,
@@ -33,6 +36,7 @@ import {
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
+  UpdateParagraphBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 import { generateHandler } from './generate.js';
@@ -62,6 +66,15 @@ router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.get('/specs/:id/tree', getSpecTreeHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
+// Demo edit mutations (mockup): delete a spec, delete/edit a paragraph, delete a reference.
+router.delete('/specs/:id', deleteSpecHandler);
+router.delete('/specs/:id/paragraphs/:paragraphId', deleteParagraphHandler);
+router.patch(
+  '/specs/:id/paragraphs/:paragraphId',
+  validateBody(UpdateParagraphBodySchema),
+  updateParagraphHandler
+);
+router.delete('/specs/:id/references/:refId', deleteReferenceHandler);
 router.post('/specs/:id/generate', generateHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects/:id', getProjectHandler);

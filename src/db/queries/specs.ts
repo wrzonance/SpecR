@@ -111,6 +111,11 @@ export async function findSpecById(id: string): Promise<SpecTree | null> {
 }
 
 export interface SpecReference {
+  // Stable identity of the spec_references row — lets clients delete one
+  // specific reference, and lets the editor map a citation back to the
+  // paragraph that contains it (source_paragraph_id) for removal detection.
+  readonly id: string;
+  readonly sourceParagraphId: string;
   readonly referenceText: string;
   readonly targetSection: string | null;
   readonly targetSpecId: string | null;
@@ -177,12 +182,14 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
     );
 
     const refResult = await pool.query<{
+      id: string;
+      source_paragraph_id: string;
       reference_text: string;
       target_spec_section: string | null;
       target_spec_id: string | null;
       is_broken: boolean;
     }>(
-      `SELECT reference_text, target_spec_section, target_spec_id, is_broken
+      `SELECT id, source_paragraph_id, reference_text, target_spec_section, target_spec_id, is_broken
        FROM spec_references WHERE source_spec_id = $1`,
       [id]
     );
@@ -195,6 +202,8 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
     };
 
     const references: readonly SpecReference[] = refResult.rows.map((row) => ({
+      id: row.id,
+      sourceParagraphId: row.source_paragraph_id,
       referenceText: row.reference_text,
       targetSection: row.target_spec_section,
       targetSpecId: row.target_spec_id,
@@ -228,6 +237,26 @@ export async function updateSpec(id: string, input: UpdateSpecInput): Promise<Sp
     return { specId: row.id, section: row.section ?? '', title: row.title ?? '' };
   } catch (err) {
     throw new DatabaseError('failed to update spec', { cause: err });
+  }
+}
+
+// Hard-deletes a spec. Cascades (per schema) to its paragraphs, their
+// spec_references and paragraph_versions, and any spec_references whose
+// SOURCE is this spec. References from OTHER specs that pointed here have
+// target_spec_id set NULL (ON DELETE SET NULL) — their is_broken flag is the
+// caller's concern (removeSpecFromProject sets it before this runs).
+// Throws a DatabaseError wrapping pg 23503 if the spec is still a member of a
+// project (project_specs.spec_id is ON DELETE RESTRICT). Returns false when no
+// spec matched the id.
+export async function deleteSpec(id: string): Promise<boolean> {
+  try {
+    const result = await pool.query<{ id: string }>(
+      `DELETE FROM specs WHERE id = $1 RETURNING id`,
+      [id]
+    );
+    return result.rows.length > 0;
+  } catch (err) {
+    throw new DatabaseError('failed to delete spec', { cause: err });
   }
 }
 

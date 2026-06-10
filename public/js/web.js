@@ -45,6 +45,9 @@ export function buildWebModel(specs) {
         status = 'unresolved';
         if (!ghosts.has(to)) ghosts.set(to, 'unresolved');
       }
+      // A server-marked broken citation overrides the arc colour regardless of
+      // whether the target is still a ghost on the baseline.
+      if (ref.isBroken) status = 'broken';
       const key = `${from}→${to}`;
       const existing = edgeMap.get(key);
       if (existing) {

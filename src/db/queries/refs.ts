@@ -1,4 +1,4 @@
-import { DatabaseError } from '../index.js';
+import { pool, DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
 import type { SecRef } from '../../ast/types.js';
 
@@ -51,4 +51,19 @@ export async function insertRefs(
   }
 
   logger.info({ specId, count: refs.length }, 'insertRefs: references inserted');
+}
+
+// Deletes one cross-reference row (scoped to its source spec for safety).
+// Used when an edit removes a citation but the containing paragraph stays.
+// Returns false if no reference matched.
+export async function deleteReference(refId: string, sourceSpecId: string): Promise<boolean> {
+  try {
+    const result = await pool.query<{ id: string }>(
+      `DELETE FROM spec_references WHERE id = $1 AND source_spec_id = $2 RETURNING id`,
+      [refId, sourceSpecId]
+    );
+    return result.rows.length > 0;
+  } catch (err) {
+    throw new DatabaseError(`deleteReference: failed for ${refId}`, { cause: err });
+  }
 }

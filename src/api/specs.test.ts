@@ -156,6 +156,8 @@ describe('getSpecTreeHandler', () => {
       },
       references: [
         {
+          id: 'ref-1',
+          sourceParagraphId: 'p1',
           referenceText: '09 22 00',
           targetSection: '09 22 00',
           targetSpecId: 'def',

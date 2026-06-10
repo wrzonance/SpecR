@@ -21,6 +21,7 @@ export {
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
   CreateRevisionBodySchema,
+  UpdateParagraphBodySchema,
 } from './schemas.js';
 export type {
   CreateProjectBody,
@@ -28,6 +29,7 @@ export type {
   CreatePackageBody,
   SetPackageSpecsBody,
   CreateRevisionBody,
+  UpdateParagraphBody,
 } from './schemas.js';
 export type {
   StyleNodeType,

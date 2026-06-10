@@ -10,6 +10,31 @@ async function getJson(path) {
   return body.data;
 }
 
+// JSON request for mutations (POST/PATCH/DELETE). Resolves with `data`. Throws
+// an Error carrying `.status` so callers can branch on 404/409 etc.
+async function sendJson(method, path, payload) {
+  const opts = { method, headers: {} };
+  if (payload !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(payload);
+  }
+  const res = await fetch(path, opts);
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+  if (!res.ok || !body || body.success !== true) {
+    const err = new Error((body && body.error) || `request failed: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return body.data;
+}
+
+const enc = encodeURIComponent;
+
 export function checkHealth() {
   return getJson('/health');
 }
@@ -48,6 +73,51 @@ export async function uploadSpec(file) {
 
 export function getParseJob(jobId) {
   return getJson(`/parse/jobs/${encodeURIComponent(jobId)}`);
+}
+
+// ── Demo edit mutations ──────────────────────────────────────────────────
+
+// Deletes a paragraph; the server cascade also removes any reference it held
+// and any descendant paragraphs.
+export function deleteParagraph(specId, paragraphId) {
+  return sendJson('DELETE', `/specs/${enc(specId)}/paragraphs/${enc(paragraphId)}`);
+}
+
+// Replaces a paragraph's body text.
+export function updateParagraph(specId, paragraphId, text) {
+  return sendJson('PATCH', `/specs/${enc(specId)}/paragraphs/${enc(paragraphId)}`, { text });
+}
+
+// Deletes one cross-reference, leaving its paragraph in place.
+export function deleteReference(specId, refId) {
+  return sendJson('DELETE', `/specs/${enc(specId)}/references/${enc(refId)}`);
+}
+
+// Hard-deletes a spec (and everything it owns).
+export function deleteSpec(specId) {
+  return sendJson('DELETE', `/specs/${enc(specId)}`);
+}
+
+// ── Project membership (backs the demo board's broken-ref cascade) ─────────
+
+export function createProject(name, description) {
+  return sendJson('POST', '/projects', description ? { name, description } : { name });
+}
+
+export function getProject(projectId) {
+  return getJson(`/projects/${enc(projectId)}`);
+}
+
+export function addSpecToProject(projectId, specId) {
+  return sendJson('POST', `/projects/${enc(projectId)}/specs`, { specId });
+}
+
+export function removeSpecFromProject(projectId, specId) {
+  return sendJson('DELETE', `/projects/${enc(projectId)}/specs/${enc(specId)}`);
+}
+
+export function getBrokenRefs(projectId) {
+  return getJson(`/projects/${enc(projectId)}/references/broken`);
 }
 
 // Polls a parse job until it completes or fails. Calls onProgress with the

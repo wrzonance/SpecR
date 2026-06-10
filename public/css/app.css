@@ -1146,3 +1146,286 @@ body {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ── Broken-reference indicators (demo edit mutations) ───────────────────── */
+
+.tb-broken.is-broken .tb-val,
+.tb-broken.is-broken .tb-key {
+  color: var(--err);
+}
+.tb-broken.is-broken .tb-val {
+  font-weight: 600;
+}
+
+.ref-link.is-broken {
+  color: #b3261e;
+  background: rgba(179, 38, 30, 0.1);
+  border-bottom-style: dashed;
+  border-bottom-color: #b3261e;
+  text-decoration: line-through;
+}
+
+.ref-chip.is-broken {
+  border-color: #b3261e;
+  color: #b3261e;
+}
+.ref-chip.is-broken .dot {
+  background: #b3261e;
+}
+.chip-broken {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.45rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  color: var(--vellum);
+  background: #b3261e;
+}
+
+.web-arc.is-broken {
+  stroke: #e0564b;
+  stroke-dasharray: 3 3;
+  opacity: 0.9;
+}
+
+/* ── Per-paragraph edit / delete affordances ─────────────────────────────── */
+
+.tree-node {
+  position: relative;
+}
+
+.para-actions {
+  position: absolute;
+  top: 0.05rem;
+  right: 0.2rem;
+  display: inline-flex;
+  gap: 0.2rem;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.tree-node:has(> .node-text > .node-own-text:hover) > .para-actions,
+.tree-node:has(> .node-label:hover) > .para-actions,
+.tree-node > .para-actions:hover,
+.tree-node > .para-actions:focus-within {
+  opacity: 1;
+}
+
+.tree-node.is-editing > .para-actions {
+  display: none;
+}
+
+.para-act {
+  border: 1px solid var(--vellum-edge);
+  background: var(--vellum);
+  color: var(--ink-on-vellum-dim);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1;
+  padding: 0.14rem 0.36rem;
+  cursor: pointer;
+  border-radius: 2px;
+  transition:
+    background 110ms ease,
+    color 110ms ease,
+    border-color 110ms ease;
+}
+.para-edit:hover {
+  color: #1d567f;
+  border-color: #1d567f;
+  background: rgba(47, 111, 163, 0.12);
+}
+.para-del:hover {
+  color: var(--vellum);
+  border-color: #b3261e;
+  background: #b3261e;
+}
+
+.tree-node.is-editing {
+  background: rgba(47, 111, 163, 0.06);
+}
+.para-editor {
+  display: block;
+  margin: 0.1rem 0 0.3rem;
+}
+.para-input {
+  width: 100%;
+  min-height: 2.4rem;
+  resize: vertical;
+  font-family: var(--serif);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--ink-on-vellum);
+  background: #fffdf7;
+  border: 1px solid var(--line-dim);
+  padding: 0.45rem 0.55rem;
+  box-shadow: inset 0 1px 3px rgba(43, 42, 35, 0.12);
+}
+.para-input:focus {
+  outline: 2px solid var(--line);
+  outline-offset: 0;
+}
+.para-editbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+.para-save,
+.para-cancel {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  padding: 0.32rem 0.85rem;
+  cursor: pointer;
+  border: 1px solid;
+}
+.para-save {
+  background: #1d567f;
+  color: var(--vellum);
+  border-color: #1d567f;
+}
+.para-save:hover {
+  background: #16456a;
+}
+.para-save:disabled,
+.para-cancel:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.para-cancel {
+  background: transparent;
+  color: var(--ink-on-vellum-dim);
+  border-color: var(--vellum-edge);
+}
+.para-cancel:hover {
+  background: rgba(43, 42, 35, 0.06);
+}
+
+/* ── Modal dialog ────────────────────────────────────────────────────────── */
+
+.modal-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(8, 23, 34, 0.74);
+  backdrop-filter: blur(2px);
+  animation: modal-fade 140ms ease;
+}
+@keyframes modal-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.modal {
+  width: min(34rem, 100%);
+  background: var(--vellum);
+  color: var(--ink-on-vellum);
+  border: 1px solid var(--vellum-edge);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  padding: 1.3rem 1.4rem 1.15rem;
+  animation: modal-rise 160ms ease;
+}
+@keyframes modal-rise {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.modal-title {
+  margin: 0 0 0.7rem;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.35rem;
+  letter-spacing: 0.01em;
+  color: var(--ink-on-vellum);
+}
+.modal-body {
+  margin-bottom: 1.1rem;
+}
+.modal-line {
+  margin: 0 0 0.5rem;
+  font-family: var(--serif);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+.modal-line:last-child {
+  margin-bottom: 0;
+}
+.modal-line.is-strong {
+  font-weight: 600;
+}
+.modal-line.is-muted {
+  color: var(--ink-on-vellum-dim);
+  font-size: 0.85rem;
+}
+.modal-line.is-mono {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  background: var(--vellum-dim);
+  border-left: 3px solid var(--line-dim);
+  padding: 0.4rem 0.55rem;
+  color: #4a4838;
+}
+.modal-line.is-warn {
+  color: #8a3b00;
+  background: rgba(255, 122, 26, 0.12);
+  border-left: 3px solid var(--orange);
+  padding: 0.4rem 0.55rem;
+  font-size: 0.86rem;
+}
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+.modal-btn {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  border: 1px solid;
+  transition:
+    background 110ms ease,
+    color 110ms ease;
+}
+.modal-btn.is-ghost {
+  background: transparent;
+  color: var(--ink-on-vellum-dim);
+  border-color: var(--vellum-edge);
+}
+.modal-btn.is-ghost:hover {
+  background: rgba(43, 42, 35, 0.07);
+}
+.modal-btn.is-primary {
+  background: #1d567f;
+  color: var(--vellum);
+  border-color: #1d567f;
+}
+.modal-btn.is-primary:hover {
+  background: #16456a;
+}
+.modal-btn.is-danger {
+  background: #b3261e;
+  color: var(--vellum);
+  border-color: #b3261e;
+}
+.modal-btn.is-danger:hover {
+  background: #8f1d17;
+}
+.modal-btn:focus-visible {
+  outline: 2px solid var(--line);
+  outline-offset: 2px;
+}

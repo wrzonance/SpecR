@@ -1,6 +1,7 @@
 import { DatabaseError } from '../errors.js';
 import type { Pool } from 'pg';
 import type { LibraryTier } from './libraries.js';
+import { logger } from '../../lib/logger.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -88,6 +89,11 @@ export interface CreateProjectInput {
   readonly name: string;
   readonly description?: string;
   readonly sourceLibraryIds: readonly string[];
+}
+
+export interface AddSpecResult {
+  readonly specId: string;
+  readonly position: number;
 }
 
 /** Sources must be company or client masters (ADR-015 D3) — reference-tier
@@ -204,6 +210,86 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
   } catch (err) {
     throw new DatabaseError(`findProjectById: toc query failed for ${id}`, { cause: err });
   }
+}
+
+export async function addSpecToProject(
+  projectId: string,
+  specId: string,
+  pool: Queryable
+): Promise<AddSpecResult> {
+  try {
+    const result = await pool.query<{ spec_id: string; position: number }>(
+      `WITH spec_section AS (
+         SELECT section FROM specs WHERE id = $2
+       ),
+       inserted AS (
+         INSERT INTO project_specs (project_id, spec_id, position)
+         SELECT $1, $2, COALESCE(MAX(position), 0) + 1 FROM project_specs WHERE project_id = $1
+         RETURNING spec_id, position
+       ),
+       repaired AS (
+         UPDATE spec_references sr
+         SET target_spec_id = $2, is_broken = false
+         FROM project_specs ps, spec_section ss
+         WHERE sr.target_spec_section = ss.section
+           AND sr.is_broken = true
+           AND sr.source_spec_id = ps.spec_id
+           AND ps.project_id = $1
+           AND EXISTS (SELECT 1 FROM inserted)
+       )
+       SELECT spec_id, position FROM inserted`,
+      [projectId, specId]
+    );
+    const row = result.rows[0];
+    if (!row) throw new DatabaseError('addSpecToProject: no row returned after insert');
+    logger.info({ projectId, specId, position: row.position }, 'addSpecToProject: spec added');
+    return { specId: row.spec_id, position: row.position };
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`addSpecToProject: failed for spec ${specId}`, { cause: err });
+  }
+}
+
+export async function removeSpecFromProject(
+  projectId: string,
+  specId: string,
+  pool: Queryable
+): Promise<boolean> {
+  try {
+    const result = await pool.query<{ deleted_count: number }>(
+      `WITH removed AS (
+         SELECT section FROM specs WHERE id = $2
+       ),
+       deleted AS (
+         DELETE FROM project_specs WHERE project_id = $1 AND spec_id = $2 RETURNING spec_id
+       ),
+       mark_broken AS (
+         UPDATE spec_references sr
+         SET is_broken = true
+         FROM project_specs ps, removed r
+         -- Break citations of the removed spec from other project members:
+         -- refs that resolved to this exact spec id, plus refs that never
+         -- resolved (parsed before the target loaded) but match its section
+         -- number. The IS NULL guard is essential — a ref that resolved to a
+         -- DIFFERENT spec sharing this section number (same section, other
+         -- source) must stay intact, since that target is still loaded.
+         WHERE (sr.target_spec_id = $2
+                OR (sr.target_spec_id IS NULL AND sr.target_spec_section = r.section))
+           AND sr.source_spec_id = ps.spec_id
+           AND ps.project_id = $1
+           AND sr.source_spec_id <> $2
+           AND EXISTS (SELECT 1 FROM deleted)
+       )
+       SELECT COUNT(*)::int AS deleted_count FROM deleted`,
+      [projectId, specId]
+    );
+    const count = result.rows[0]?.deleted_count ?? 0;
+    if (count === 0) return false;
+  } catch (err) {
+    throw new DatabaseError(`removeSpecFromProject: failed for spec ${specId}`, { cause: err });
+  }
+  logger.info({ projectId, specId }, 'removeSpecFromProject: spec removed, refs marked broken');
+  return true;
 }
 
 export async function getBrokenRefs(
