@@ -28,4 +28,11 @@ describe('StylePropertiesSchema (ADR-021 open style payload)', () => {
     const input = { pPr: { ind: { left: -360 } } };
     expect(StylePropertiesSchema.parse(input)).toEqual(input);
   });
+
+  it('rejects a non-JSON value in an unknown key (the JSONB column holds only JSON)', () => {
+    // Would otherwise throw (BigInt) or be silently dropped (function/symbol) on
+    // JSON.stringify at the DB boundary — reject it at parse instead.
+    expect(() => StylePropertiesSchema.parse({ weird: 10n })).toThrow();
+    expect(() => StylePropertiesSchema.parse({ pPr: { vendorFn: () => 1 } })).toThrow();
+  });
 });
