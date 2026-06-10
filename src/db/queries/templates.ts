@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import type { StyleNodeType, StyleProperties } from '../../ast/types.js';
 import { STYLE_NODE_TYPES } from '../../ast/types.js';
@@ -47,14 +48,34 @@ function mapMetaRow(row: TemplateRow): TemplateMeta {
   return { id: row.id, name: row.name, owner: row.owner, createdAt: row.created_at };
 }
 
-async function loadRules(templateId: string): Promise<readonly StyleRule[]> {
-  const result = await pool.query<StyleRuleRow>(
+type Queryable = Pick<PoolClient, 'query'>;
+
+async function loadRules(
+  templateId: string,
+  client?: Queryable
+): Promise<readonly StyleRule[]> {
+  const q = client ?? pool;
+  const result = await q.query<StyleRuleRow>(
     `SELECT node_type, properties
      FROM style_rules WHERE template_id = $1
      ORDER BY node_type`,
     [templateId]
   );
   return result.rows.map(mapRuleRow);
+}
+
+// Public so the bulk-rules transaction can read inside its client.
+export async function selectTemplateMeta(
+  id: string,
+  client?: Queryable
+): Promise<TemplateMeta | null> {
+  const q = client ?? pool;
+  const result = await q.query<TemplateRow>(
+    `SELECT id, name, owner, created_at FROM style_templates WHERE id = $1`,
+    [id]
+  );
+  const row = result.rows[0];
+  return row ? mapMetaRow(row) : null;
 }
 
 export async function getTemplate(id: string): Promise<Template | null> {
@@ -172,5 +193,121 @@ export async function upsertStyleRule(templateId: string, rule: StyleRule): Prom
     );
   } catch (err) {
     throw new DatabaseError('failed to upsert style rule', { cause: err });
+  }
+}
+
+interface TemplatePatch {
+  readonly name?: string;
+  readonly owner?: string | null;
+}
+
+export async function updateTemplateMeta(
+  id: string,
+  patch: TemplatePatch
+): Promise<TemplateMeta | null> {
+  // Build a dynamic SET clause from whichever fields are present.
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (patch.name !== undefined) {
+    values.push(patch.name);
+    fields.push(`name = $${values.length}`);
+  }
+  if ('owner' in patch) {
+    values.push(patch.owner ?? null);
+    fields.push(`owner = $${values.length}`);
+  }
+  if (fields.length === 0) {
+    throw new DatabaseError('updateTemplateMeta: patch must contain at least one field');
+  }
+  values.push(id);
+  const sql = `UPDATE style_templates SET ${fields.join(', ')}
+               WHERE id = $${values.length}
+               RETURNING id, name, owner, created_at`;
+  try {
+    const result = await pool.query<TemplateRow>(sql, values);
+    const row = result.rows[0];
+    return row ? mapMetaRow(row) : null;
+  } catch (err) {
+    throw new DatabaseError('failed to update template meta', { cause: err });
+  }
+}
+
+export async function deleteTemplate(id: string): Promise<boolean> {
+  try {
+    const result = await pool.query(
+      `DELETE FROM style_templates WHERE id = $1`,
+      [id]
+    );
+    return result.rowCount === 1;
+  } catch (err) {
+    throw new DatabaseError('failed to delete template', { cause: err });
+  }
+}
+
+/**
+ * Upsert all rules for a template inside the provided client transaction.
+ * Validates ALL rules via StylePropertiesSchema BEFORE any insert so that
+ * a single bad rule triggers a full rollback (caller's responsibility).
+ */
+export async function upsertStyleRulesBulk(
+  templateId: string,
+  rules: readonly StyleRule[],
+  client: PoolClient
+): Promise<void> {
+  // Parse all first — a schema failure here throws before any DB writes.
+  const parsed = rules.map((r) => ({
+    nodeType: r.nodeType,
+    properties: StylePropertiesSchema.parse(r.properties),
+  }));
+  for (const rule of parsed) {
+    await client.query(
+      `INSERT INTO style_rules (template_id, node_type, properties)
+       VALUES ($1, $2, $3::jsonb)
+       ON CONFLICT (template_id, node_type) DO UPDATE SET properties = EXCLUDED.properties`,
+      [templateId, rule.nodeType, JSON.stringify(rule.properties)]
+    );
+  }
+}
+
+/**
+ * Transactional bulk-rules endpoint helper: replaces all rules for a template
+ * atomically. Returns the updated Template or null if template not found.
+ */
+export async function replaceTemplateRules(
+  id: string,
+  rules: readonly StyleRule[]
+): Promise<Template | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Lock the row to prevent concurrent deletes racing this transaction.
+    const lockResult = await client.query(
+      `SELECT 1 FROM style_templates WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    if (lockResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    await upsertStyleRulesBulk(id, rules, client);
+    const meta = await selectTemplateMeta(id, client);
+    if (!meta) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const updatedRules = await loadRules(id, client);
+    await client.query('COMMIT');
+    return { ...meta, rules: updatedRules };
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* connection-level failure — original error wins */
+    }
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError('failed to replace template rules', { cause: err });
+  } finally {
+    client.release();
   }
 }
