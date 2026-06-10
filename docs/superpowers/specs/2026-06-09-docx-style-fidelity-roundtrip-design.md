@@ -144,10 +144,28 @@ after its dependency is merged.
 | **WT-1** | `feat/style-jsonb` → `feat/issue-31` | JSONB style payload + migration `014`; #31 template CRUD over the payload | #30 (merged) |
 | **WT-2** | `feat/effective-style-resolver` | Pure OOXML cascade resolver: `docDefaults → style basedOn chain → direct props` → effective `StyleProperties` | — (parser-internal) |
 | **WT-3** | `feat/template-import-docx` | Opt-in `POST /templates/import` (multipart DOCX) → derive per-NodeType definitions **by consensus (§5)** → persist → discard bytes; return derived rules + derivation report | WT-1, WT-2 |
-| WT-4 (Layer 2a) | `feat/paragraph-style-overrides` | Capture paragraph-level deviations from the active template as `properties` deltas on `paragraphs`; persist + surface | WT-2, WT-3 |
-| WT-5 (Layer 2b) | `feat/run-span-fidelity` | Character-span-addressable run overrides (the "one bold word" case) | WT-4 |
-| WT-6 (generator) | `feat/generator-apply-style` (advances #32) | Generator applies template `properties` + overrides on export | WT-1 (+WT-4 for overrides) |
-| WT-7 (Layer 3) | `feat/style-cleanup-classifiers` | Classify deviations as intent vs artifact; normalize/surface (extends Signal 4 + #56) | WT-4 |
+| WT-4 (Layer 2a) | `feat/paragraph-style-overrides` | Capture paragraph-level deviations from the active template as `properties` deltas on `paragraphs`; persist + surface | WT-2, WT-3, **onboarding Wave 1 (#129/#131)** |
+| WT-5 (Layer 2b) | `feat/run-span-fidelity` | Character-span-addressable run overrides (the "one bold word" case) — **reuses #129's run-walk + span-offset machinery** | WT-4 |
+| WT-6 (generator) | `feat/generator-apply-style` (advances #32) | Generator applies template `properties` on export (override application is additive later) | WT-1, WT-3 |
+| WT-7 (Layer 3) | `feat/style-cleanup-classifiers` | Classify deviations as intent vs artifact; normalize/surface — **re-spec post-ADR-022 to ride the `source_facts` + conventions architecture** (#131/#133), not its own substrate | WT-4, onboarding Wave 2 |
+
+### Resequencing (2026-06-10) — aligned with the onboarding program (ADR-022, #128–#147)
+
+Execution order after WT-3 changed from `WT-4 → WT-5 → WT-6 → WT-7` to:
+
+```
+WT-3 → PR-1b (#31 CRUD) + #149 (theme fonts) → WT-6 → [onboarding Wave 1 lands] → WT-4/5 → WT-7
+```
+
+Why: **#138** (style-source assignment, onboarding Wave 3) is blocked by **#31** — PR-1b is now
+critical path; **#145/#146** (conformance audit, restyle-as-re-render) gate on **WT-6**, which
+only needs WT-1+WT-3, so it is promoted (this also completes the original round-trip promise —
+import styled → edit → export styled — at template grain); **#135** (library import) consumes
+WT-3's *functions* (`analyzeDocxStyles` / `deriveTemplate` / `createTemplateWithRules`), so the
+import endpoint stays a thin wrapper; **#129/#131** build the run-walk + span-offset machinery
+and the per-paragraph facts JSONB that WT-4/5 should reuse rather than duplicate — one run-walk,
+two consumers (editability facts; fidelity deltas); **#149** lands before broad real-world
+imports so theme-font documents don't derive font-less templates.
 
 **Out of scope for the whole program (for now):** byte-exact raw-OOXML round-trip; storing
 raw `.docx` artifacts; auth/multi-tenancy (#43); tables/drawings/embedded-object fidelity;
