@@ -171,3 +171,43 @@ export const StylePropertiesSchema = z
     numbering: NumberingDefSchema.exactOptional(),
   })
   .catchall(JsonValue);
+
+// ── Template CRUD request bodies ──────────────────────────────────────────────
+
+export const CreateTemplateBodySchema = z.object({
+  name: z.string().check(z.minLength(1)),
+  owner: z.string().check(z.minLength(1)).exactOptional(),
+});
+
+export type CreateTemplateBody = z.infer<typeof CreateTemplateBodySchema>;
+
+export const PatchTemplateBodySchema = z
+  .object({
+    name: z.string().check(z.minLength(1)).exactOptional(),
+    // owner can be set to a string (non-empty) or null (to clear it).
+    // exactOptional() would make `null` invalid — we want null to be a valid
+    // explicit value when the key is present, but undefined when absent.
+    owner: z.string().check(z.minLength(1)).nullable().optional(),
+  })
+  .check((ctx) => {
+    if (ctx.value.name === undefined && ctx.value.owner === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        message: 'at least one of name or owner must be present',
+      });
+    }
+  });
+
+export type PatchTemplateBody = z.infer<typeof PatchTemplateBodySchema>;
+
+const StyleRuleInputSchema = z.object({
+  nodeType: StyleNodeTypeSchema,
+  properties: StylePropertiesSchema,
+});
+
+export const UpsertStyleRulesBodySchema = z.object({
+  rules: z.array(StyleRuleInputSchema).check(z.minLength(1)),
+});
+
+export type UpsertStyleRulesBody = z.infer<typeof UpsertStyleRulesBodySchema>;

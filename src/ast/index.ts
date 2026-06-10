@@ -19,3 +19,9 @@ export type {
 } from './types.js';
 export { STYLE_NODE_TYPES } from './types.js';
 export { StyleNodeTypeSchema, StylePropertiesSchema } from './schemas.js';
+export {
+  CreateTemplateBodySchema,
+  PatchTemplateBodySchema,
+  UpsertStyleRulesBodySchema,
+} from './schemas.js';
+export type { CreateTemplateBody, PatchTemplateBody, UpsertStyleRulesBody } from './schemas.js';

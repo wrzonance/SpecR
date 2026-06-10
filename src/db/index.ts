@@ -64,6 +64,9 @@ export {
   createTemplate,
   createTemplateWithRules,
   upsertStyleRule,
+  updateTemplateMeta,
+  deleteTemplate,
+  bulkUpsertTemplateRules,
 } from './queries/templates.js';
 export { STYLE_NODE_TYPES } from './queries/templates.js';
 export type {

@@ -84,6 +84,12 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - `POST /projects/:id/specs` — add a spec section to a project TOC
 - `DELETE /projects/:id/specs/:specId` — remove a section, cascades dangling cross-references
 - `GET /projects/:id/references/broken` — surface broken cross-references for spec writer review
+- `POST /templates` — create a style template (no rules; returns `TemplateMeta`)
+- `GET /templates` — list all templates (metadata only)
+- `GET /templates/:id` — retrieve a template with its style rules
+- `PATCH /templates/:id` — update template name and/or owner (`owner: null` clears it)
+- `DELETE /templates/:id` — delete a template and cascade-remove its rules (204)
+- `POST /templates/:id/rules` — bulk-upsert style rules (transactional; one invalid rule rolls back all)
 - `POST /templates/import` — derive a firm style template from a source-of-truth DOCX
 
 The async `POST /parse` pattern (202 + poll) is intentional — inference over large DOCX files takes measurable time, and the job endpoint is designed for Phase 5 Web UI progress bars without further backend changes.
