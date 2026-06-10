@@ -33,3 +33,8 @@ export function toArray<T>(val: T | readonly T[] | undefined): readonly T[] {
 export function asRecord(v: unknown): Record<string, unknown> | undefined {
   return v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : undefined;
 }
+
+// Keep only defined keys so absent properties are not stored as explicit `undefined`.
+export function compact<T extends object>(o: T): T {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
+}

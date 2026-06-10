@@ -11,6 +11,8 @@ import {
 import { buildStyleMap } from './styles.js';
 import { buildNumberingMap } from './numbering.js';
 
+// Theme font resolution tests live in resolver-theme.test.ts (400-line file limit).
+
 describe('extractRunProps', () => {
   it('reads fonts, size, toggles, underline, color from a w:rPr object', () => {
     const rPr = {
@@ -219,6 +221,17 @@ describe('resolveStyleCascade (public API)', () => {
     expect(resolveStyleCascade(styles, numbering).get('PRT')).toEqual({
       rPr: { b: true },
       numbering: { ilvl: 0, numFmt: 'decimal', lvlText: 'PART %1 -' },
+    });
+  });
+
+  it('2-arg call is identical to before — no-theme regression', () => {
+    const styles = `<?xml version="1.0"?><w:styles xmlns:w="x">
+      <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman"/><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>
+      <w:style w:type="paragraph" w:styleId="PRT"><w:rPr><w:b/></w:rPr></w:style>
+    </w:styles>`;
+    const map = resolveStyleCascade(styles, null);
+    expect(map.get('PRT')).toEqual({
+      rPr: { rFonts: { ascii: 'Times New Roman' }, sz: 22, b: true },
     });
   });
 });
