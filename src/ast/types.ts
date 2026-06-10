@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { NodeTypeSchema, SecRefSchema } from './schemas.js';
+import {
+  NodeTypeSchema,
+  SecRefSchema,
+  StyleNodeTypeSchema,
+  StylePropertiesSchema,
+} from './schemas.js';
 
 export type NodeType = z.infer<typeof NodeTypeSchema>;
 
@@ -39,3 +44,16 @@ export interface SpecTree {
 }
 
 export type SecRef = z.infer<typeof SecRefSchema>;
+
+// ── Style (ADR-021) ─────────────────────────────────────────────────────────
+// StyleNodeType / STYLE_NODE_TYPES relocated here from db/queries/templates.ts:
+// ast/ is the foundational layer (db/ depends on ast/, never the reverse).
+export type StyleNodeType = z.infer<typeof StyleNodeTypeSchema>;
+export const STYLE_NODE_TYPES = StyleNodeTypeSchema.options;
+
+/**
+ * OOXML-faithful per-NodeType visual style, stored as the `style_rules.properties`
+ * JSONB payload. Typed keys are the ones we understand; the loose schema preserves
+ * any other OOXML key a real document carries (the type carries an index signature).
+ */
+export type StyleProperties = z.infer<typeof StylePropertiesSchema>;

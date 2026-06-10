@@ -1,33 +1,16 @@
 import { pool, DatabaseError } from '../index.js';
+import type { StyleNodeType, StyleProperties } from '../../ast/types.js';
+import { STYLE_NODE_TYPES } from '../../ast/types.js';
+import { StylePropertiesSchema } from '../../ast/index.js';
 
-/**
- * Finite set of node types that may carry visual style.
- * Subset of the broader AST NodeType — excludes structural-only kinds
- * ('spec', 'note', 'continuation') that never receive style rules.
- * Mirrored by the `style_rules.node_type` CHECK constraint in migration 010.
- */
-export type StyleNodeType = 'part' | 'article' | 'pr1' | 'pr2' | 'pr3' | 'pr4' | 'pr5';
-
-export const STYLE_NODE_TYPES: readonly StyleNodeType[] = [
-  'part',
-  'article',
-  'pr1',
-  'pr2',
-  'pr3',
-  'pr4',
-  'pr5',
-];
+// Re-export the relocated symbols (local bindings) so existing importers
+// (db/index.ts barrel, integration tests) keep resolving them from this module.
+export type { StyleNodeType, StyleProperties };
+export { STYLE_NODE_TYPES };
 
 export interface StyleRule {
   readonly nodeType: StyleNodeType;
-  readonly fontFamily: string | null;
-  readonly fontSizeHalfPt: number | null;
-  readonly bold: boolean;
-  readonly caps: boolean;
-  readonly indentTwips: number | null;
-  readonly spaceBeforeTwips: number | null;
-  readonly spaceAfterTwips: number | null;
-  readonly numberingFormat: string | null;
+  readonly properties: StyleProperties;
 }
 
 export interface TemplateMeta {
@@ -50,28 +33,14 @@ interface TemplateRow {
 
 interface StyleRuleRow {
   readonly node_type: StyleNodeType;
-  readonly font_family: string | null;
-  readonly font_size_half_pt: number | null;
-  readonly bold: boolean;
-  readonly caps: boolean;
-  readonly indent_twips: number | null;
-  readonly space_before_twips: number | null;
-  readonly space_after_twips: number | null;
-  readonly numbering_format: string | null;
+  // pg returns jsonb as an unknown JS value — validated in mapRuleRow, never trusted.
+  readonly properties: unknown;
 }
 
 function mapRuleRow(row: StyleRuleRow): StyleRule {
-  return {
-    nodeType: row.node_type,
-    fontFamily: row.font_family,
-    fontSizeHalfPt: row.font_size_half_pt,
-    bold: row.bold,
-    caps: row.caps,
-    indentTwips: row.indent_twips,
-    spaceBeforeTwips: row.space_before_twips,
-    spaceAfterTwips: row.space_after_twips,
-    numberingFormat: row.numbering_format,
-  };
+  // Validate the jsonb at the DB boundary: the open schema preserves unknown OOXML
+  // keys but enforces the StyleProperties contract on the keys we understand.
+  return { nodeType: row.node_type, properties: StylePropertiesSchema.parse(row.properties) };
 }
 
 function mapMetaRow(row: TemplateRow): TemplateMeta {
@@ -80,8 +49,7 @@ function mapMetaRow(row: TemplateRow): TemplateMeta {
 
 async function loadRules(templateId: string): Promise<readonly StyleRule[]> {
   const result = await pool.query<StyleRuleRow>(
-    `SELECT node_type, font_family, font_size_half_pt, bold, caps,
-            indent_twips, space_before_twips, space_after_twips, numbering_format
+    `SELECT node_type, properties
      FROM style_rules WHERE template_id = $1
      ORDER BY node_type`,
     [templateId]
@@ -148,32 +116,13 @@ export async function createTemplate(name: string, owner?: string): Promise<Temp
 
 export async function upsertStyleRule(templateId: string, rule: StyleRule): Promise<void> {
   try {
+    // Validate at the boundary, then serialize + cast explicitly (matches revit.ts):
+    // pass JSON text into $3::jsonb.
     await pool.query(
-      `INSERT INTO style_rules (
-         template_id, node_type, font_family, font_size_half_pt,
-         bold, caps, indent_twips, space_before_twips, space_after_twips, numbering_format
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       ON CONFLICT (template_id, node_type) DO UPDATE SET
-         font_family = EXCLUDED.font_family,
-         font_size_half_pt = EXCLUDED.font_size_half_pt,
-         bold = EXCLUDED.bold,
-         caps = EXCLUDED.caps,
-         indent_twips = EXCLUDED.indent_twips,
-         space_before_twips = EXCLUDED.space_before_twips,
-         space_after_twips = EXCLUDED.space_after_twips,
-         numbering_format = EXCLUDED.numbering_format`,
-      [
-        templateId,
-        rule.nodeType,
-        rule.fontFamily,
-        rule.fontSizeHalfPt,
-        rule.bold,
-        rule.caps,
-        rule.indentTwips,
-        rule.spaceBeforeTwips,
-        rule.spaceAfterTwips,
-        rule.numberingFormat,
-      ]
+      `INSERT INTO style_rules (template_id, node_type, properties)
+       VALUES ($1, $2, $3::jsonb)
+       ON CONFLICT (template_id, node_type) DO UPDATE SET properties = EXCLUDED.properties`,
+      [templateId, rule.nodeType, JSON.stringify(StylePropertiesSchema.parse(rule.properties))]
     );
   } catch (err) {
     throw new DatabaseError('failed to upsert style rule', { cause: err });

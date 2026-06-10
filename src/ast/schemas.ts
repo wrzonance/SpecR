@@ -90,3 +90,84 @@ export const AddSpecToProjectBodySchema = z.object({
 });
 
 export type AddSpecToProjectBody = z.infer<typeof AddSpecToProjectBodySchema>;
+
+// ── Style properties (ADR-021): OOXML-faithful, OPEN (unknown JSON keys preserved) ──
+// StyleNodeType is the subset of NodeType that carries visual style —
+// excludes the structural-only 'spec' | 'note' | 'continuation'.
+// Numeric fields are int-only with NO sign/range bound on purpose (ADR-021):
+// we capture the author's value verbatim and warn at a higher layer rather
+// than reject. Do not add .nonnegative()/.max() to them here.
+// Each object uses `.catchall(JsonValue)` so unknown OOXML keys are preserved —
+// but only as JSON values, matching the JSONB column. A non-JSON value (BigInt,
+// function, symbol) is rejected at parse rather than silently dropped or thrown
+// on JSON.stringify at the DB boundary.
+export const StyleNodeTypeSchema = z.enum(['part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5']);
+
+// Catchall for unknown keys: any JSON value (string|number|boolean|null|array|object).
+const JsonValue = z.json();
+
+const RunPropertiesSchema = z
+  .object({
+    rFonts: z
+      .object({
+        ascii: z.string().exactOptional(),
+        hAnsi: z.string().exactOptional(),
+        cs: z.string().exactOptional(),
+        eastAsia: z.string().exactOptional(),
+      })
+      .catchall(JsonValue)
+      .exactOptional(),
+    sz: z.number().int().exactOptional(),
+    b: z.boolean().exactOptional(),
+    i: z.boolean().exactOptional(),
+    caps: z.boolean().exactOptional(),
+    smallCaps: z.boolean().exactOptional(),
+    u: z.string().exactOptional(),
+    strike: z.boolean().exactOptional(),
+    // OOXML color token: 'RRGGBB' hex (e.g. 'FF0000') or 'auto'.
+    color: z.string().exactOptional(),
+    highlight: z.string().exactOptional(),
+  })
+  .catchall(JsonValue);
+
+const ParagraphPropertiesSchema = z
+  .object({
+    spacing: z
+      .object({
+        before: z.number().int().exactOptional(),
+        after: z.number().int().exactOptional(),
+        line: z.number().int().exactOptional(),
+        lineRule: z.enum(['auto', 'exact', 'atLeast']).exactOptional(),
+        contextualSpacing: z.boolean().exactOptional(),
+      })
+      .catchall(JsonValue)
+      .exactOptional(),
+    ind: z
+      .object({
+        left: z.number().int().exactOptional(),
+        right: z.number().int().exactOptional(),
+        firstLine: z.number().int().exactOptional(),
+        hanging: z.number().int().exactOptional(),
+      })
+      .catchall(JsonValue)
+      .exactOptional(),
+    jc: z.enum(['left', 'center', 'right', 'both', 'distribute', 'start', 'end']).exactOptional(),
+  })
+  .catchall(JsonValue);
+
+const NumberingDefSchema = z
+  .object({
+    ilvl: z.number().int().exactOptional(),
+    numFmt: z.string().exactOptional(),
+    lvlText: z.string().exactOptional(),
+    start: z.number().int().exactOptional(),
+  })
+  .catchall(JsonValue);
+
+export const StylePropertiesSchema = z
+  .object({
+    rPr: RunPropertiesSchema.exactOptional(),
+    pPr: ParagraphPropertiesSchema.exactOptional(),
+    numbering: NumberingDefSchema.exactOptional(),
+  })
+  .catchall(JsonValue);

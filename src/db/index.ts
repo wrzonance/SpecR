@@ -65,7 +65,13 @@ export {
   upsertStyleRule,
 } from './queries/templates.js';
 export { STYLE_NODE_TYPES } from './queries/templates.js';
-export type { StyleNodeType, StyleRule, Template, TemplateMeta } from './queries/templates.js';
+export type {
+  StyleNodeType,
+  StyleRule,
+  Template,
+  TemplateMeta,
+  StyleProperties,
+} from './queries/templates.js';
 export {
   upsertMapping,
   deleteMapping,
