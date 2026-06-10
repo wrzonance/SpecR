@@ -68,18 +68,23 @@ async function extractEntries(zip: JSZip): Promise<{
   stylesXml: string | null;
   documentXml: string | null;
   coreXml: string | null;
+  themeXml: string | null;
 }> {
   const read = async (name: string): Promise<string | null> => {
     const file = zip.file(name);
     return file ? file.async('string') : null;
   };
-  const [numberingXml, stylesXml, documentXml, coreXml] = await Promise.all([
+  // NOTE: Strict discovery of the theme part should follow the officeDocument→theme
+  // relationship in word/_rels/document.xml.rels; reading theme1.xml by convention
+  // is an adequate approximation for spec-import use-cases.
+  const [numberingXml, stylesXml, documentXml, coreXml, themeXml] = await Promise.all([
     read('word/numbering.xml'),
     read('word/styles.xml'),
     read('word/document.xml'),
     read('docProps/core.xml'),
+    read('word/theme/theme1.xml'),
   ]);
-  return { numberingXml, stylesXml, documentXml, coreXml };
+  return { numberingXml, stylesXml, documentXml, coreXml, themeXml };
 }
 
 interface ValidEntries {
@@ -186,11 +191,14 @@ export async function analyzeDocxStyles(buffer: Buffer): Promise<DocxStyleAnalys
   } catch (err) {
     throw new ParserError('failed to read DOCX archive', { cause: err });
   }
-  const { numberingXml, stylesXml, documentXml } = await extractEntries(zip);
+  const { numberingXml, stylesXml, documentXml, themeXml } = await extractEntries(zip);
   if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
   if (!documentXml) throw new ParserError('DOCX missing word/document.xml');
   const { classified } = buildClassification({ numberingXml, stylesXml, documentXml });
-  return { classified, effectiveStyles: resolveStyleCascade(stylesXml, numberingXml) };
+  return {
+    classified,
+    effectiveStyles: resolveStyleCascade(stylesXml, numberingXml, themeXml),
+  };
 }
 
 export async function parseDocx(

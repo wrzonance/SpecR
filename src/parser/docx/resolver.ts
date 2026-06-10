@@ -2,7 +2,7 @@
 // into the RunProperties / ParagraphProperties shapes.  No cascade — no DB — no I/O.
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
-import { getAttrVal, extractAttrStr, asRecord, toArray } from './xml-utils.js';
+import { getAttrVal, extractAttrStr, asRecord, toArray, compact } from './xml-utils.js';
 import type {
   RunProperties,
   ParagraphProperties,
@@ -13,6 +13,8 @@ import type { StyleMap, NumberingMap } from './types.js';
 import { buildStyleMap } from './styles.js';
 import { buildNumberingMap } from './numbering.js';
 import { StylePropertiesSchema } from '../../ast/index.js';
+import { parseThemeFonts, resolveToken } from './theme.js';
+import type { ThemeFonts } from './theme.js';
 
 // ─── internal helpers ─────────────────────────────────────────────────────────
 
@@ -40,11 +42,6 @@ function toggle(el: unknown): boolean | undefined {
   return v !== '0' && v !== 'false' && v !== 'off';
 }
 
-// Keep only defined keys so absent properties are not stored as explicit `undefined`.
-function compact<T extends Record<string, unknown>>(o: T): T {
-  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
-}
-
 // Compact a built sub-object; collapse to undefined when no key survived
 // (an all-absent nested element must not appear as an empty {} in the payload).
 function subObj<T extends object>(built: Partial<T>): T | undefined {
@@ -57,12 +54,20 @@ function subObj<T extends object>(built: Partial<T>): T | undefined {
 export function extractRunProps(rPr: Record<string, unknown> | undefined): RunProperties {
   if (!rPr) return {};
   const rFontsEl = asRecord(rPr['w:rFonts']);
+  // ECMA-376 §17.3.2.26: w:rFonts carries both direct (ascii/hAnsi/cs/eastAsia) and
+  // theme (asciiTheme/hAnsiTheme/cstheme/eastAsiaTheme) attributes.
+  // Theme attrs are preserved here as provenance; resolution happens in resolveStyleCascade.
+  // Note OOXML casing: w:cstheme (lowercase 't') per ECMA-376 §17.18.96 ST_Theme.
   const rFonts = rFontsEl
     ? subObj({
         ascii: strAttr(rFontsEl, '@_w:ascii'),
         hAnsi: strAttr(rFontsEl, '@_w:hAnsi'),
         cs: strAttr(rFontsEl, '@_w:cs'),
         eastAsia: strAttr(rFontsEl, '@_w:eastAsia'),
+        asciiTheme: strAttr(rFontsEl, '@_w:asciiTheme'),
+        hAnsiTheme: strAttr(rFontsEl, '@_w:hAnsiTheme'),
+        cstheme: strAttr(rFontsEl, '@_w:cstheme'),
+        eastAsiaTheme: strAttr(rFontsEl, '@_w:eastAsiaTheme'),
       })
     : undefined;
   return compact({
@@ -164,17 +169,56 @@ function isPlainObj(x: unknown): x is Record<string, unknown> {
   return x !== null && typeof x === 'object' && !Array.isArray(x);
 }
 
+// Font pair-slots: each (direct, theme) pair is ONE logical slot per MS-OI29500.
+// When a closer cascade level specifies either flavor of a pair, the other flavor
+// from an earlier level must be cleared — otherwise the generic merge would leave
+// an inherited theme attr next to a child's direct attr, which is wrong.
+const RFONT_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ['ascii', 'asciiTheme'],
+  ['hAnsi', 'hAnsiTheme'],
+  ['cs', 'cstheme'],
+  ['eastAsia', 'eastAsiaTheme'],
+] as const;
+
+// Merge two rFonts objects with pair-slot semantics.
+// "over" represents a closer (child) cascade level.
+// For each pair: if over specifies either member, clear both from base before applying over.
+function mergeRFonts(
+  base: Record<string, unknown>,
+  over: Record<string, unknown>
+): Record<string, unknown> {
+  // For each pair-slot touched by `over`, clear both flavors from base first.
+  const keysToDelete = new Set<string>();
+  for (const [direct, theme] of RFONT_PAIRS) {
+    if (direct in over || theme in over) {
+      keysToDelete.add(direct);
+      keysToDelete.add(theme);
+    }
+  }
+  const cleared = Object.fromEntries(Object.entries(base).filter(([k]) => !keysToDelete.has(k)));
+  return { ...cleared, ...over };
+}
+
 // Deep-merge `over` onto `base`: value/toggle props last-wins; nested plain objects merge.
+// rFonts receives specialized pair-slot merge (pair-slot clearing per MS-OI29500).
 // Pure — never mutates base or over.
 function mergeRecord(
   base: Record<string, unknown>,
-  over: Record<string, unknown>
+  over: Record<string, unknown>,
+  key?: string
 ): Record<string, unknown> {
   return Object.entries(over).reduce<Record<string, unknown>>(
     (acc, [k, v]) => {
       if (v === undefined) return acc;
       const b = acc[k];
-      return { ...acc, [k]: isPlainObj(b) && isPlainObj(v) ? mergeRecord(b, v) : v };
+      if (isPlainObj(b) && isPlainObj(v)) {
+        // Path assumption: only fires for rPr immediately under the root StyleProperties
+        // object. A deeper rPr (e.g. a future numbering-level rPr) would need its own
+        // mergeRecord call with key='rPr'. Revisit as a mergeStrategy map in #154.
+        const merged = key === 'rPr' && k === 'rFonts' ? mergeRFonts(b, v) : mergeRecord(b, v, k);
+        return { ...acc, [k]: merged };
+      }
+      return { ...acc, [k]: v };
     },
     { ...base }
   );
@@ -182,6 +226,51 @@ function mergeRecord(
 
 export function mergeStyleProps(base: StyleProperties, over: StyleProperties): StyleProperties {
   return mergeRecord(base, over) as StyleProperties;
+}
+
+// ─── theme font resolution pass ───────────────────────────────────────────────
+
+// Per ECMA-376 §17.3.2.26: within one w:rFonts element, the *Theme attr supersedes
+// its direct counterpart. Resolution fills the concrete slot only when the theme
+// resolves to a non-empty typeface; preserves the *Theme key as provenance.
+// Called after cascade resolution, before schema validation.
+const RFONT_THEME_CARRYING_ATTRS: ReadonlyArray<{
+  readonly themeKey: string;
+  readonly directKey: string;
+}> = [
+  { themeKey: 'asciiTheme', directKey: 'ascii' },
+  { themeKey: 'hAnsiTheme', directKey: 'hAnsi' },
+  { themeKey: 'cstheme', directKey: 'cs' },
+  { themeKey: 'eastAsiaTheme', directKey: 'eastAsia' },
+];
+
+function resolveRFonts(
+  rFonts: Record<string, unknown>,
+  fonts: ThemeFonts
+): Record<string, unknown> {
+  let result = { ...rFonts };
+  for (const { themeKey, directKey } of RFONT_THEME_CARRYING_ATTRS) {
+    const token = result[themeKey];
+    if (typeof token !== 'string') continue;
+    const resolved = resolveToken(token, fonts);
+    if (resolved !== undefined) {
+      // Theme supersedes direct: overwrite the concrete slot with the resolved value.
+      result = { ...result, [directKey]: resolved };
+    }
+  }
+  return result;
+}
+
+function applyThemeToStyleProps(props: StyleProperties, fonts: ThemeFonts): StyleProperties {
+  const rPr = props.rPr;
+  if (!rPr) return props;
+  const rFonts = (rPr as Record<string, unknown>)['rFonts'];
+  if (!isPlainObj(rFonts)) return props;
+  const resolved = resolveRFonts(rFonts, fonts);
+  return {
+    ...props,
+    rPr: { ...(rPr as Record<string, unknown>), rFonts: resolved } as typeof rPr,
+  };
 }
 
 // Build [self, parent, grandparent, ...] following basedOn links.
@@ -264,27 +353,37 @@ export function resolveNumberingFor(
 /**
  * Resolve the effective StyleProperties for every paragraph style in styles.xml.
  * Applies docDefaults → basedOn chain → own-props cascade, then merges any
- * numbering context resolved from numbering.xml.  Every produced value is
- * validated through StylePropertiesSchema — guarantees JSON-safe, schema-valid
- * output at the module boundary.
+ * numbering context resolved from numbering.xml.
+ *
+ * When themeXml is provided (word/theme/theme1.xml), theme font tokens in rFonts
+ * (asciiTheme/hAnsiTheme/cstheme/eastAsiaTheme) are resolved to concrete typefaces
+ * per ECMA-376 §17.3.2.26: the theme attr supersedes its direct counterpart within
+ * the same element; theme attrs are kept in the payload as provenance.
+ *
+ * Every produced value is validated through StylePropertiesSchema — guarantees
+ * JSON-safe, schema-valid output at the module boundary.
+ *
+ * NOTE: parseStylesFull and buildStyleMap each parse stylesXml independently
+ * (visual props vs structural numPr). Unifying into one parse is a worthwhile
+ * refactor when the inference pipeline is next touched — deferred, not an oversight.
  */
 export function resolveStyleCascade(
   stylesXml: string,
-  numberingXml?: string | null
+  numberingXml?: string | null,
+  themeXml?: string | null
 ): Map<string, StyleProperties> {
-  // NOTE: parseStylesFull and buildStyleMap each parse stylesXml independently
-  // (visual props vs structural numPr). Unifying into one parse is a worthwhile
-  // refactor when the inference pipeline is next touched — deferred, not an oversight.
   const parsed = parseStylesFull(stylesXml);
   const styleMap = buildStyleMap(stylesXml);
   const numberingMap = numberingXml ? buildNumberingMap(numberingXml) : undefined;
+  const themeFonts = themeXml ? parseThemeFonts(themeXml) : undefined;
   const out = new Map<string, StyleProperties>();
   for (const styleId of parsed.styles.keys()) {
     const visual = resolveStyleChain(styleId, parsed);
     const numbering = numberingMap
       ? resolveNumberingFor(styleId, styleMap, numberingMap)
       : undefined;
-    const eff = numbering ? mergeStyleProps(visual, { numbering }) : visual;
+    const cascaded = numbering ? mergeStyleProps(visual, { numbering }) : visual;
+    const eff = themeFonts ? applyThemeToStyleProps(cascaded, themeFonts) : cascaded;
     // Validate at the boundary — every produced value is schema-valid + JSON-safe.
     out.set(styleId, StylePropertiesSchema.parse(eff));
   }
