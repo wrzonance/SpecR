@@ -3,8 +3,8 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool } from '../db/index.js';
-import type { Template, TemplateMeta } from '../db/index.js';
+import { pool, bulkUpsertTemplateRules } from '../db/index.js';
+import type { Template, TemplateMeta, StyleNodeType, StyleRule } from '../db/index.js';
 
 // ─── Test setup ───────────────────────────────────────────────────────────────
 
@@ -133,12 +133,12 @@ describe('POST /templates', () => {
     expect(body.error).toContain('already exists');
   });
 
-  it('400 — missing name', async () => {
+  it('422 — missing name', async () => {
     const res = await post('/templates', { owner: 'someone' });
     expect(res.status).toBe(422);
   });
 
-  it('400 — empty name string', async () => {
+  it('422 — empty name string', async () => {
     const res = await post('/templates', { name: '' });
     expect(res.status).toBe(422);
   });
@@ -245,7 +245,7 @@ describe('PATCH /templates/:id', () => {
     expect(res.status).toBe(404);
   });
 
-  it('400/422 — empty body (no fields)', async () => {
+  it('422 — empty body (no fields)', async () => {
     const meta = await createTemplate(`crud-patch-empty-${Date.now()}`);
     const res = await patch(`/templates/${meta.id}`, {});
     // Validation failure → 422 (validateBody uses 422)
@@ -360,7 +360,7 @@ describe('POST /templates/:id/rules', () => {
     expect(partRules[0]?.properties.rPr?.sz).toBe(24);
   });
 
-  it('400 — non-enum nodeType', async () => {
+  it('422 — non-enum nodeType', async () => {
     const meta = await createTemplate(`crud-rules-bad-type-${Date.now()}`);
 
     const res = await post(`/templates/${meta.id}/rules`, {
@@ -376,18 +376,12 @@ describe('POST /templates/:id/rules', () => {
     expect(res.status).toBe(404);
   });
 
-  it('atomicity — invalid rule (DB CHECK) rolls back all writes', async () => {
+  it('atomicity — invalid rule rejected at Zod layer, zero writes', async () => {
     const meta = await createTemplate(`crud-rules-atomic-${Date.now()}`);
 
-    // A valid rule + a rule whose node_type is a valid enum string but the properties
-    // contain a value that violates a DB CHECK constraint.
-    // The style_rules table has a CHECK on node_type being in the enum.
-    // We cast via SQL — the only CHECK-violation path we can trigger from the API is
-    // via the DB directly. Instead we test Zod atomicity: send one valid rule and one
-    // with an invalid nodeType; Zod rejects before any DB write.
-    // For a true DB-level atomicity test, use an invalid nodeType that passes Zod but
-    // fails the DB CHECK. We can't trivially forge that from outside, so we verify the
-    // Zod path: all-or-nothing at parse layer → zero rows on failure.
+    // One valid rule + one with a non-enum nodeType: validateBody rejects the
+    // whole request (422) BEFORE any DB write. The DB-level transactional path
+    // is covered separately below ('bulk upsert: mid-batch DB CHECK failure…').
     const mixedRules = [
       { nodeType: 'part', properties: { rPr: { b: true } } },
       { nodeType: 'invalid-type', properties: {} },
@@ -401,5 +395,35 @@ describe('POST /templates/:id/rules', () => {
       meta.id,
     ]);
     expect(rulesCheck.rows).toHaveLength(0);
+  });
+});
+
+// ─── DB-layer transactional rollback ──────────────────────────────────────────
+
+describe('bulkUpsertTemplateRules (db layer)', () => {
+  it('bulk upsert: mid-batch DB CHECK failure rolls back ALL rule writes (FOR UPDATE txn)', async () => {
+    const meta = await createTemplate(`crud-rules-rollback-${Date.now()}`);
+
+    // upsertStyleRulesBulk only Zod-parses `properties` — nodeType goes to SQL
+    // verbatim. 'bogus' passes the TypeScript layer via a test-only cast, the
+    // VALID first rule inserts, then 'bogus' violates style_rules_node_type_check
+    // (pg 23514) mid-batch. The transaction must roll back the valid insert too.
+    const validRule: StyleRule = { nodeType: 'part', properties: { rPr: { b: true } } };
+    const bogusRule: StyleRule = {
+      nodeType: 'bogus' as StyleNodeType, // test-only cast to reach the DB CHECK
+      properties: {},
+    };
+
+    await expect(bulkUpsertTemplateRules(meta.id, [validRule, bogusRule])).rejects.toThrow();
+
+    // The valid first insert must have been rolled back — zero rows.
+    const rulesCheck = await pool.query(`SELECT 1 FROM style_rules WHERE template_id = $1`, [
+      meta.id,
+    ]);
+    expect(rulesCheck.rows).toHaveLength(0);
+
+    // The template row itself must survive (only the rule batch rolled back).
+    const tmplCheck = await pool.query(`SELECT 1 FROM style_templates WHERE id = $1`, [meta.id]);
+    expect(tmplCheck.rows).toHaveLength(1);
   });
 });

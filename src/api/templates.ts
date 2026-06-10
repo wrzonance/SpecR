@@ -4,7 +4,7 @@ import type { Request, Response } from 'express';
 import { analyzeDocxStyles, deriveTemplate, assertDocxSafe, ParserError } from '../parser/index.js';
 import { createTemplateWithRules } from '../db/index.js';
 import { logger } from '../lib/logger.js';
-import { getPgCode } from '../lib/pg-errors.js';
+import { pgErrorToHttp } from '../lib/pg-errors.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -62,8 +62,9 @@ export async function importTemplateHandler(req: Request, res: Response): Promis
     const template = await createTemplateWithRules(name, owner ?? null, rules);
     res.status(201).json({ success: true, data: { template, report } });
   } catch (err) {
-    if (getPgCode(err) === '23505') {
-      res.status(409).json({ success: false, error: 'template name already exists' });
+    const mapped = pgErrorToHttp(err, { '23505': 'template name already exists' });
+    if (mapped) {
+      res.status(mapped.status).json({ success: false, error: mapped.error });
       return;
     }
     if (err instanceof ParserError) {

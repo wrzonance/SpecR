@@ -9,7 +9,7 @@ import {
 } from '../db/index.js';
 import type { CreateProjectBody, AddSpecToProjectBody } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
-import { getPgCode } from '../lib/pg-errors.js';
+import { pgErrorToHttp } from '../lib/pg-errors.js';
 
 export async function createProjectHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -52,13 +52,12 @@ export async function addSpecToProjectHandler(req: Request, res: Response): Prom
     const result = await addSpecToProject(id, body.specId, pool);
     res.status(201).json({ success: true, data: result });
   } catch (err) {
-    const pgCode = getPgCode(err);
-    if (pgCode === '23503') {
-      res.status(404).json({ success: false, error: 'project or spec not found' });
-      return;
-    }
-    if (pgCode === '23505') {
-      res.status(409).json({ success: false, error: 'spec already in project' });
+    const mapped = pgErrorToHttp(err, {
+      '23503': 'project or spec not found',
+      '23505': 'spec already in project',
+    });
+    if (mapped) {
+      res.status(mapped.status).json({ success: false, error: mapped.error });
       return;
     }
     logger.error({ err }, 'add spec to project failed');

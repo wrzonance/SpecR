@@ -1,4 +1,4 @@
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import type { StyleNodeType, StyleProperties } from '../../ast/types.js';
 import { STYLE_NODE_TYPES } from '../../ast/types.js';
@@ -48,12 +48,11 @@ function mapMetaRow(row: TemplateRow): TemplateMeta {
   return { id: row.id, name: row.name, owner: row.owner, createdAt: row.created_at };
 }
 
-type Queryable = Pick<PoolClient, 'query'>;
+interface Queryable {
+  query: Pool['query'];
+}
 
-async function loadRules(
-  templateId: string,
-  client?: Queryable
-): Promise<readonly StyleRule[]> {
+async function loadRules(templateId: string, client?: Queryable): Promise<readonly StyleRule[]> {
   const q = client ?? pool;
   const result = await q.query<StyleRuleRow>(
     `SELECT node_type, properties
@@ -64,11 +63,8 @@ async function loadRules(
   return result.rows.map(mapRuleRow);
 }
 
-// Public so the bulk-rules transaction can read inside its client.
-export async function selectTemplateMeta(
-  id: string,
-  client?: Queryable
-): Promise<TemplateMeta | null> {
+// Internal: the bulk-rules transaction reads meta inside its own client.
+async function selectTemplateMeta(id: string, client?: Queryable): Promise<TemplateMeta | null> {
   const q = client ?? pool;
   const result = await q.query<TemplateRow>(
     `SELECT id, name, owner, created_at FROM style_templates WHERE id = $1`,
@@ -198,7 +194,9 @@ export async function upsertStyleRule(templateId: string, rule: StyleRule): Prom
 
 interface TemplatePatch {
   readonly name?: string;
-  readonly owner?: string | null;
+  // `| undefined` matches the Zod-inferred PatchTemplateBody (.nullable().optional()).
+  // JSON can never carry an explicit undefined; key-present-undefined is unreachable.
+  readonly owner?: string | null | undefined;
 }
 
 export async function updateTemplateMeta(
@@ -235,22 +233,20 @@ export async function updateTemplateMeta(
 
 export async function deleteTemplate(id: string): Promise<boolean> {
   try {
-    const result = await pool.query(
-      `DELETE FROM style_templates WHERE id = $1`,
-      [id]
-    );
-    return result.rowCount === 1;
+    const result = await pool.query(`DELETE FROM style_templates WHERE id = $1`, [id]);
+    return (result.rowCount ?? 0) === 1;
   } catch (err) {
     throw new DatabaseError('failed to delete template', { cause: err });
   }
 }
 
 /**
- * Upsert all rules for a template inside the provided client transaction.
- * Validates ALL rules via StylePropertiesSchema BEFORE any insert so that
- * a single bad rule triggers a full rollback (caller's responsibility).
+ * Internal: upsert the submitted rules inside the provided client transaction.
+ * Validates ALL rules' properties via StylePropertiesSchema BEFORE any insert
+ * so that a schema failure never leaves partial writes (caller rolls back on
+ * any throw, including mid-batch DB constraint violations).
  */
-export async function upsertStyleRulesBulk(
+async function upsertStyleRulesBulk(
   templateId: string,
   rules: readonly StyleRule[],
   client: PoolClient
@@ -271,10 +267,13 @@ export async function upsertStyleRulesBulk(
 }
 
 /**
- * Transactional bulk-rules endpoint helper: replaces all rules for a template
- * atomically. Returns the updated Template or null if template not found.
+ * Transactional bulk-rules endpoint helper: UPSERTS the submitted NodeTypes
+ * atomically — existing rules for NodeTypes absent from `rules` are left
+ * untouched (re-running the same bulk upsert updates, never duplicates).
+ * All-or-nothing: one bad rule rolls back every write in the batch.
+ * Returns the updated Template or null if the template does not exist.
  */
-export async function replaceTemplateRules(
+export async function bulkUpsertTemplateRules(
   id: string,
   rules: readonly StyleRule[]
 ): Promise<Template | null> {
@@ -286,7 +285,7 @@ export async function replaceTemplateRules(
       `SELECT 1 FROM style_templates WHERE id = $1 FOR UPDATE`,
       [id]
     );
-    if (lockResult.rowCount === 0) {
+    if ((lockResult.rowCount ?? 0) === 0) {
       await client.query('ROLLBACK');
       return null;
     }
@@ -306,7 +305,7 @@ export async function replaceTemplateRules(
       /* connection-level failure — original error wins */
     }
     if (err instanceof DatabaseError) throw err;
-    throw new DatabaseError('failed to replace template rules', { cause: err });
+    throw new DatabaseError('failed to bulk upsert template rules', { cause: err });
   } finally {
     client.release();
   }

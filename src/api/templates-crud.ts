@@ -6,12 +6,19 @@ import {
   getTemplate,
   updateTemplateMeta,
   deleteTemplate,
-  replaceTemplateRules,
+  bulkUpsertTemplateRules,
 } from '../db/index.js';
+import type { CreateTemplateBody, PatchTemplateBody, UpsertStyleRulesBody } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
-import { getPgCode } from '../lib/pg-errors.js';
+import { pgErrorToHttp } from '../lib/pg-errors.js';
 
 const UUID_SCHEMA = z.uuid();
+
+// Caller-specific wording for the pg-code → HTTP mapping.
+const TEMPLATE_PG_MESSAGES = {
+  '23505': 'template name already exists',
+  '23514': 'rule violates check constraint',
+} as const;
 
 function parseId(req: Request, res: Response): string | null {
   const result = UUID_SCHEMA.safeParse(req.params['id']);
@@ -22,19 +29,25 @@ function parseId(req: Request, res: Response): string | null {
   return result.data;
 }
 
+// Shared catch tail: pg-mapped status if recognised, else logged 500.
+function sendDbError(err: unknown, res: Response, logMsg: string): void {
+  const mapped = pgErrorToHttp(err, TEMPLATE_PG_MESSAGES);
+  if (mapped) {
+    res.status(mapped.status).json({ success: false, error: mapped.error });
+    return;
+  }
+  logger.error({ err }, logMsg);
+  res.status(500).json({ success: false, error: 'internal server error' });
+}
+
 export async function createTemplateHandler(req: Request, res: Response): Promise<void> {
   // Body already validated + parsed by validateBody middleware.
-  const { name, owner } = req.body as { name: string; owner?: string };
+  const { name, owner } = req.body as CreateTemplateBody;
   try {
     const meta = await createTemplate(name, owner);
     res.status(201).json({ success: true, data: meta });
   } catch (err) {
-    if (getPgCode(err) === '23505') {
-      res.status(409).json({ success: false, error: 'template name already exists' });
-      return;
-    }
-    logger.error({ err }, 'create template failed');
-    res.status(500).json({ success: false, error: 'internal server error' });
+    sendDbError(err, res, 'create template failed');
   }
 }
 
@@ -68,7 +81,7 @@ export async function patchTemplateHandler(req: Request, res: Response): Promise
   const id = parseId(req, res);
   if (!id) return;
   // Body already validated + parsed by validateBody middleware.
-  const patch = req.body as { name?: string; owner?: string | null };
+  const patch = req.body as PatchTemplateBody;
   try {
     const meta = await updateTemplateMeta(id, patch);
     if (!meta) {
@@ -77,12 +90,7 @@ export async function patchTemplateHandler(req: Request, res: Response): Promise
     }
     res.status(200).json({ success: true, data: meta });
   } catch (err) {
-    if (getPgCode(err) === '23505') {
-      res.status(409).json({ success: false, error: 'template name already exists' });
-      return;
-    }
-    logger.error({ err }, 'patch template failed');
-    res.status(500).json({ success: false, error: 'internal server error' });
+    sendDbError(err, res, 'patch template failed');
   }
 }
 
@@ -106,25 +114,15 @@ export async function upsertTemplateRulesHandler(req: Request, res: Response): P
   const id = parseId(req, res);
   if (!id) return;
   // Body already validated + parsed by validateBody middleware.
-  const { rules } = req.body as {
-    rules: Array<{ nodeType: string; properties: Record<string, unknown> }>;
-  };
+  const { rules } = req.body as UpsertStyleRulesBody;
   try {
-    const template = await replaceTemplateRules(
-      id,
-      rules as Parameters<typeof replaceTemplateRules>[1]
-    );
+    const template = await bulkUpsertTemplateRules(id, rules);
     if (!template) {
       res.status(404).json({ success: false, error: 'template not found' });
       return;
     }
     res.status(200).json({ success: true, data: template });
   } catch (err) {
-    if (getPgCode(err) === '23514') {
-      res.status(422).json({ success: false, error: 'rule violates check constraint' });
-      return;
-    }
-    logger.error({ err }, 'upsert template rules failed');
-    res.status(500).json({ success: false, error: 'internal server error' });
+    sendDbError(err, res, 'upsert template rules failed');
   }
 }

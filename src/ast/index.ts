@@ -24,8 +24,4 @@ export {
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
 } from './schemas.js';
-export type {
-  CreateTemplateBody,
-  PatchTemplateBody,
-  UpsertStyleRulesBody,
-} from './schemas.js';
+export type { CreateTemplateBody, PatchTemplateBody, UpsertStyleRulesBody } from './schemas.js';
