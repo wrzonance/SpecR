@@ -55,15 +55,22 @@ const SQL_ENRICH_NUMFMT = `
 `;
 
 // Back-projection: JSONB → scalar columns (best-effort; enrichment-only values dropped).
+// The JSONB schema is sign-permissive (ADR-021), but the restored scalar columns carry
+// a non-negative CHECK, so any negative value is mapped to NULL — the old schema has no
+// representation for it. This keeps up → write(negative) → down reversible.
 const SQL_BACK_PROJECT = `
   UPDATE style_rules SET
     font_family        = properties #>> '{rPr,rFonts,ascii}',
-    font_size_half_pt  = (properties #>> '{rPr,sz}')::int,
+    font_size_half_pt  = CASE WHEN (properties #>> '{rPr,sz}')::int >= 0
+                              THEN (properties #>> '{rPr,sz}')::int END,
     bold               = COALESCE((properties #>> '{rPr,b}')::boolean, false),
     caps               = COALESCE((properties #>> '{rPr,caps}')::boolean, false),
-    indent_twips       = (properties #>> '{pPr,ind,left}')::int,
-    space_before_twips = (properties #>> '{pPr,spacing,before}')::int,
-    space_after_twips  = (properties #>> '{pPr,spacing,after}')::int,
+    indent_twips       = CASE WHEN (properties #>> '{pPr,ind,left}')::int >= 0
+                              THEN (properties #>> '{pPr,ind,left}')::int END,
+    space_before_twips = CASE WHEN (properties #>> '{pPr,spacing,before}')::int >= 0
+                              THEN (properties #>> '{pPr,spacing,before}')::int END,
+    space_after_twips  = CASE WHEN (properties #>> '{pPr,spacing,after}')::int >= 0
+                              THEN (properties #>> '{pPr,spacing,after}')::int END,
     numbering_format   = properties #>> '{numbering,lvlText}'
 `;
 
