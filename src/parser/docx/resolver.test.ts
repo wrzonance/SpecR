@@ -5,7 +5,10 @@ import {
   parseStylesFull,
   mergeStyleProps,
   resolveStyleChain,
+  resolveNumberingFor,
 } from './resolver.js';
+import { buildStyleMap } from './styles.js';
+import { buildNumberingMap } from './numbering.js';
 
 describe('extractRunProps', () => {
   it('reads fonts, size, toggles, underline, color from a w:rPr object', () => {
@@ -147,5 +150,41 @@ describe('resolveStyleChain', () => {
       </w:styles>`
     );
     expect(resolveStyleChain('A', parsed)).toEqual({ rPr: { sz: 20 } });
+  });
+});
+
+describe('resolveNumberingFor', () => {
+  const STYLES = `<?xml version="1.0"?><w:styles xmlns:w="x">
+    <w:style w:type="paragraph" w:styleId="PRT"><w:pPr><w:numPr><w:numId w:val="2"/><w:ilvl w:val="0"/></w:numPr></w:pPr></w:style>
+    <w:style w:type="paragraph" w:styleId="Body"/>
+  </w:styles>`;
+  const NUMBERING = `<?xml version="1.0"?><w:numbering xmlns:w="x">
+    <w:abstractNum w:abstractNumId="5">
+      <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="PART %1 -"/><w:start w:val="1"/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="2"><w:abstractNumId w:val="5"/></w:num>
+  </w:numbering>`;
+
+  it('resolves ilvl/numFmt/lvlText/start for a numbered style', () => {
+    const styleMap = buildStyleMap(STYLES);
+    const numberingMap = buildNumberingMap(NUMBERING);
+    expect(resolveNumberingFor('PRT', styleMap, numberingMap)).toEqual({
+      ilvl: 0,
+      numFmt: 'decimal',
+      lvlText: 'PART %1 -',
+      start: 1,
+    });
+  });
+
+  it('returns undefined for a style with no resolved numPr', () => {
+    const styleMap = buildStyleMap(STYLES);
+    const numberingMap = buildNumberingMap(NUMBERING);
+    expect(resolveNumberingFor('Body', styleMap, numberingMap)).toBeUndefined();
+  });
+
+  it('returns just { ilvl } when the numId is not defined in numbering.xml', () => {
+    const styleMap = buildStyleMap(STYLES);
+    const empty = buildNumberingMap('<?xml version="1.0"?><w:numbering xmlns:w="x"/>');
+    expect(resolveNumberingFor('PRT', styleMap, empty)).toEqual({ ilvl: 0 });
   });
 });

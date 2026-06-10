@@ -15,6 +15,7 @@ export type {
   StyleProperties,
   RunProperties,
   ParagraphProperties,
+  NumberingDef,
 } from './types.js';
 export { STYLE_NODE_TYPES } from './types.js';
 export { StyleNodeTypeSchema, StylePropertiesSchema } from './schemas.js';

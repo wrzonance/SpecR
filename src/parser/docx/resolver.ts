@@ -3,7 +3,13 @@
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { getAttrVal, extractAttrStr, asRecord, toArray } from './xml-utils.js';
-import type { RunProperties, ParagraphProperties, StyleProperties } from '../../ast/types.js';
+import type {
+  RunProperties,
+  ParagraphProperties,
+  StyleProperties,
+  NumberingDef,
+} from '../../ast/types.js';
+import type { StyleMap, NumberingMap } from './types.js';
 
 // ─── internal helpers ─────────────────────────────────────────────────────────
 
@@ -218,4 +224,34 @@ export function parseStylesFull(xml: string): ParsedStyles {
     if (result) styles.set(result[0], result[1]);
   }
   return { docDefaults, styles };
+}
+
+// ─── numbering context resolution ────────────────────────────────────────────
+
+/**
+ * Resolve the numbering context (ilvl + level format) for a style by looking up
+ * its effective numPr (already resolved through the basedOn chain in StyleMap)
+ * and cross-referencing the abstractNum level definition in NumberingMap.
+ *
+ * Returns undefined when the style has no resolved numPr.
+ * Returns at least { ilvl } when the numId is not present in numbering.xml
+ * (lvlOverride / startOverride handling is intentionally deferred).
+ */
+export function resolveNumberingFor(
+  styleId: string,
+  styleMap: StyleMap,
+  numberingMap: NumberingMap
+): NumberingDef | undefined {
+  const np = styleMap.resolvedNumPr.get(styleId);
+  if (!np) return undefined;
+  const num = numberingMap.nums.get(np.numId);
+  const an = num ? numberingMap.abstractNums.get(num.abstractNumId) : undefined;
+  const lvl = an?.levels.find((l) => l.ilvl === np.ilvl);
+  // (lvlOverride startOverride not applied here — deferred)
+  return compact({
+    ilvl: np.ilvl,
+    numFmt: lvl?.numFmt,
+    lvlText: lvl?.lvlText,
+    start: lvl?.start,
+  }) as NumberingDef;
 }

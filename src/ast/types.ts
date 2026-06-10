@@ -69,3 +69,10 @@ export type RunProperties = NonNullable<StyleProperties['rPr']>;
  * Derived from the pPr sub-shape of StylePropertiesSchema.
  */
 export type ParagraphProperties = NonNullable<StyleProperties['pPr']>;
+
+/**
+ * Numbering context (ilvl, numFmt, lvlText, start) resolved from a style's
+ * effective numPr through numbering.xml. Derived from the numbering sub-shape
+ * of StylePropertiesSchema.
+ */
+export type NumberingDef = NonNullable<StyleProperties['numbering']>;
