@@ -1,0 +1,1001 @@
+openapi: 3.1.0
+info:
+  title: SpecR API
+  version: 0.1.0
+  description: >
+    Headless REST API for CSI® MasterFormat®-compatible specification document
+    automation with round-trip DOCX support. Independent project; not affiliated
+    with CSI.
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+
+# ─── Paths ────────────────────────────────────────────────────────────────────
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness check
+      tags: [system]
+      responses:
+        '200':
+          description: Server is alive and the database is reachable
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [db, uptime]
+                        properties:
+                          db:
+                            type: string
+                            description: Database connectivity state ("connected")
+                          uptime:
+                            type: integer
+                            description: Process uptime in whole seconds
+        '503':
+          description: 'Database unavailable — `{success: false, error: "database unavailable"}`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /parse:
+    post:
+      operationId: parseDocument
+      summary: Upload and parse a spec document (async)
+      description: >
+        Upload a `.docx`, `.sec`, or `.txt` file. Returns 202 immediately with a
+        `jobId`; poll `/parse/jobs/{jobId}` for progress and result. Rate-limited
+        to 10 requests per IP per minute.
+      tags: [parse]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Spec document (.docx, .sec, or .txt). Max 10 MB.
+                section:
+                  type: string
+                  description: Override the detected CSI section number (e.g. "09 91 26").
+                title:
+                  type: string
+                  description: Override the detected section title.
+      responses:
+        '202':
+          description: Parse job accepted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [jobId]
+                        properties:
+                          jobId:
+                            type: string
+                            format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /parse/jobs/{jobId}:
+    get:
+      operationId: getParseJob
+      summary: Poll parse job progress
+      tags: [parse]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ParseJob'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}:
+    get:
+      operationId: getSpec
+      summary: Retrieve a spec with its full paragraph tree
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Spec with paragraph tree
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecTree'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateSpec
+      summary: Update spec metadata
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                section:
+                  type: string
+                  description: CSI section number (e.g. "09 91 26").
+                title:
+                  type: string
+      responses:
+        '200':
+          description: Updated spec summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/generate:
+    post:
+      operationId: generateDocx
+      summary: Generate a DOCX from a stored spec AST
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: DOCX file stream
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects:
+    post:
+      operationId: createProject
+      summary: Create a project
+      tags: [projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                description:
+                  type: string
+                  minLength: 1
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProjectSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}:
+    get:
+      operationId: getProject
+      summary: Retrieve a project with its TOC
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project with TOC
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProjectWithToc'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/specs:
+    post:
+      operationId: addSpecToProject
+      summary: Add a spec section to a project TOC
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [specId]
+              properties:
+                specId:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Spec added to project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [specId, position]
+                        properties:
+                          specId:
+                            type: string
+                            format: uuid
+                          position:
+                            type: integer
+                            description: 1-based TOC position assigned to the spec
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 'Spec already in project — `{success: false, error: "spec already in project"}`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/specs/{specId}:
+    delete:
+      operationId: removeSpecFromProject
+      summary: Remove a spec from a project TOC (cascades dangling cross-references)
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: specId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Spec removed (dangling cross-references marked broken)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId, specId]
+                        properties:
+                          projectId:
+                            type: string
+                            format: uuid
+                          specId:
+                            type: string
+                            format: uuid
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/references/broken:
+    get:
+      operationId: getBrokenRefs
+      summary: List broken cross-references in a project
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Broken cross-reference list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/BrokenRef'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /templates/import:
+    post:
+      operationId: importTemplate
+      summary: Derive a firm style template from a source-of-truth DOCX
+      description: >
+        Upload a `.docx` file to derive a reusable firm style template via
+        per-NodeType consensus derivation (mode/median, consistency-wins-else-intent
+        per §5 of the style fidelity program). Returns the persisted template and
+        a `DerivationReport` for review.
+
+
+        The raw DOCX is never stored — only the derived JSONB style definition is
+        persisted (ADR-021). Unknown OOXML property keys are preserved in the
+        `properties` object.
+
+
+        **Theme-font caveat:** `asciiTheme` references are not yet resolved
+        (issue #149). Documents that use theme fonts will derive without a
+        concrete font family until theme-font support lands.
+
+
+        Rate-limited to 10 requests per IP per minute (shared with `POST /parse`).
+      tags: [templates]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, name]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Source-of-truth `.docx` file. Max 10 MB.
+                name:
+                  type: string
+                  minLength: 1
+                  description: Unique template name (used as the lookup key).
+                owner:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Optional firm / owner label (e.g. "ACME Architects"). Stored
+                    as metadata only; has no effect on derivation.
+      responses:
+        '201':
+          description: Template derived and persisted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [template, report]
+                        properties:
+                          template:
+                            $ref: '#/components/schemas/Template'
+                          report:
+                            $ref: '#/components/schemas/DerivationReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+# ─── Components ───────────────────────────────────────────────────────────────
+
+components:
+  parameters:
+    SpecId:
+      name: id
+      in: path
+      required: true
+      description: Spec UUID
+      schema:
+        type: string
+        format: uuid
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      description: Project UUID
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Bad request — validation error or unsupported file type
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Conflict — a resource with that identity already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnprocessableEntity:
+      description: Unprocessable — file parsed but semantically unusable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: >
+        Rate limit exceeded (10 uploads per IP per minute) —
+        `{success: false, error: "too many requests — please wait before uploading again"}`
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    # ── Envelope shapes ────────────────────────────────────────────────────────
+
+    SuccessResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: string
+
+    # ── Parse ──────────────────────────────────────────────────────────────────
+
+    ParseStage:
+      type: string
+      enum:
+        - queued
+        - running
+        - extracting
+        - numbering
+        - styles
+        - document
+        - classifying
+        - persisting
+        - complete
+        - failed
+
+    ParseJob:
+      type: object
+      required: [jobId, status, progress, expiresAt]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/ParseStage'
+          description: >
+            Overall job state. In practice takes `queued`, `running`, `complete`,
+            or `failed`; the fine-grained pipeline step lives in `progress.stage`.
+        progress:
+          type: object
+          required: [stage, pct]
+          properties:
+            stage:
+              $ref: '#/components/schemas/ParseStage'
+              description: Current pipeline step
+            pct:
+              type: number
+              minimum: 0
+              maximum: 100
+        result:
+          $ref: '#/components/schemas/ParseJobResult'
+          description: Present once status is `complete`
+        error:
+          type: string
+          description: Present once status is `failed`
+        expiresAt:
+          type: integer
+          description: Job record expiry as a Unix epoch timestamp in milliseconds
+
+    ParseJobResult:
+      type: object
+      required: [specId, section, title, nodeCount]
+      properties:
+        specId:
+          type: string
+          format: uuid
+        section:
+          type: string
+          description: CSI section number, or "unknown" if not detected
+        title:
+          type: string
+        nodeCount:
+          type: integer
+          description: Total nodes in the persisted paragraph tree
+        capabilities:
+          type: array
+          items:
+            type: string
+          description: 'Parser capability flags (e.g. "read-only", "parse-warnings")'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParseWarning'
+
+    ParseWarning:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [root-continuation, empty-part, no-structure-found, unusual-part-count]
+        lineHint:
+          type: string
+          description: 'Source location hint (e.g. "line 12: <text>")'
+        suggestion:
+          type: string
+
+    # ── Specs ──────────────────────────────────────────────────────────────────
+
+    SpecNode:
+      type: object
+      required: [id, type, text, children, meta]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, note, continuation]
+        text:
+          type: string
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecNode'
+        meta:
+          type: object
+          properties:
+            vanish:
+              type: boolean
+              description: Hidden (w:vanish) paragraph — editorial note, not owner-facing
+            source:
+              type: string
+              enum: [ufgs, arcat, cpi, unknown]
+            revitParam:
+              type: string
+            baseVersion:
+              type: integer
+              minimum: 0
+
+    SpecTree:
+      type: object
+      required: [id, section, title, parts]
+      properties:
+        id:
+          type: string
+          format: uuid
+        section:
+          type: string
+          description: 'CSI section number (e.g. "09 91 26"), or "unknown" if not detected'
+        title:
+          type: string
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecNode'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParseWarning'
+
+    SpecSummary:
+      type: object
+      required: [specId, title, section]
+      properties:
+        specId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        section:
+          type: string
+
+    # ── Projects ───────────────────────────────────────────────────────────────
+
+    ProjectSummary:
+      type: object
+      required: [projectId, name, description]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+
+    ProjectWithToc:
+      type: object
+      required: [projectId, name, description, toc]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        toc:
+          type: array
+          items:
+            type: object
+            required: [specId, section, title, position]
+            properties:
+              specId:
+                type: string
+                format: uuid
+              section:
+                type: string
+              title:
+                type: string
+              position:
+                type: integer
+                description: 1-based TOC ordering
+
+    BrokenRef:
+      type: object
+      required: [refId, sourceSpecId, sourceSpecSection, targetSpecSection, referenceText]
+      properties:
+        refId:
+          type: string
+          format: uuid
+        sourceSpecId:
+          type: string
+          format: uuid
+        sourceSpecSection:
+          type: string
+          description: CSI section number of the spec containing the reference
+        targetSpecSection:
+          type: [string, 'null']
+          description: Section number the reference points at (as written in the source document)
+        referenceText:
+          type: string
+
+    # ── Templates ──────────────────────────────────────────────────────────────
+
+    StyleNodeType:
+      type: string
+      enum: [part, article, pr1, pr2, pr3, pr4, pr5]
+      description: >
+        CSI paragraph role. Maps to the seven structural levels: `part` (PART 1 –
+        GENERAL), `article` (1.1 REFERENCES), `pr1`–`pr5` (A. / 1. / a. / 1) / a)
+        paragraph tiers).
+
+    StyleRule:
+      type: object
+      required: [nodeType, properties]
+      properties:
+        nodeType:
+          $ref: '#/components/schemas/StyleNodeType'
+        properties:
+          $ref: '#/components/schemas/StyleProperties'
+
+    StyleProperties:
+      type: object
+      description: >
+        OOXML-derived style properties for a CSI paragraph role. Recognized keys
+        are documented below; **unknown OOXML keys are preserved** via the JSONB
+        catchall schema. All sub-objects also accept additional OOXML properties.
+      properties:
+        rPr:
+          type: object
+          description: Run (character) properties
+          properties:
+            rFonts:
+              type: object
+              description: Font references
+              properties:
+                ascii:
+                  type: string
+                hAnsi:
+                  type: string
+                cs:
+                  type: string
+                eastAsia:
+                  type: string
+              additionalProperties: true
+            sz:
+              type: integer
+              description: Font size in half-points (e.g. 20 = 10 pt)
+            b:
+              type: boolean
+              description: Bold
+            i:
+              type: boolean
+              description: Italic
+            caps:
+              type: boolean
+              description: All-caps
+            smallCaps:
+              type: boolean
+            u:
+              type: string
+              description: Underline type (e.g. "single")
+            strike:
+              type: boolean
+            color:
+              type: string
+              description: 'RRGGBB hex or "auto" (e.g. "FF0000")'
+            highlight:
+              type: string
+          additionalProperties: true
+        pPr:
+          type: object
+          description: Paragraph properties
+          properties:
+            spacing:
+              type: object
+              properties:
+                before:
+                  type: integer
+                  description: Space before in twips
+                after:
+                  type: integer
+                  description: Space after in twips
+                line:
+                  type: integer
+                  description: Line spacing value in twips
+                lineRule:
+                  type: string
+                  enum: [auto, exact, atLeast]
+                contextualSpacing:
+                  type: boolean
+              additionalProperties: true
+            ind:
+              type: object
+              description: Indentation (twips)
+              properties:
+                left:
+                  type: integer
+                right:
+                  type: integer
+                firstLine:
+                  type: integer
+                hanging:
+                  type: integer
+              additionalProperties: true
+            jc:
+              type: string
+              enum: [left, center, right, both, distribute, start, end]
+          additionalProperties: true
+        numbering:
+          type: object
+          description: Numbering definition (from `numbering.xml` level)
+          properties:
+            ilvl:
+              type: integer
+            numFmt:
+              type: string
+            lvlText:
+              type: string
+            start:
+              type: integer
+          additionalProperties: true
+      additionalProperties: true
+
+    Template:
+      type: object
+      required: [id, name, owner, createdAt, rules]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Unique template name
+        owner:
+          type: [string, 'null']
+          description: Firm / owner label, or null if not provided
+        createdAt:
+          type: string
+          format: date-time
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/StyleRule'
+          description: One rule per derived NodeType (7 max)
+
+    DerivationReport:
+      type: object
+      required: [nodeTypes, skippedNodeTypes, vanishSkipped]
+      description: >
+        Per-NodeType derivation audit trail returned alongside the template. Use
+        this to review confidence levels, intent disagreements, and rejected
+        outlier values before accepting the template as authoritative.
+      properties:
+        nodeTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeTypeReport'
+          description: Report for each NodeType that had at least one paragraph
+        skippedNodeTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/StyleNodeType'
+          description: NodeTypes with zero paragraphs in the source document
+        vanishSkipped:
+          type: integer
+          description: >
+            Count of `w:vanish` (hidden) paragraphs excluded from derivation.
+            Hidden paragraphs are editorial instructions, not layout specimens.
+
+    NodeTypeReport:
+      type: object
+      required: [nodeType, paragraphCount, styledCount, modalStyleId, decisions]
+      properties:
+        nodeType:
+          $ref: '#/components/schemas/StyleNodeType'
+        paragraphCount:
+          type: integer
+          description: Total non-vanish paragraphs for this NodeType
+        styledCount:
+          type: integer
+          description: Paragraphs that carried a recognised Word style ID
+        modalStyleId:
+          type: [string, 'null']
+          description: >
+            Most-common Word style ID among voters. Used as the **intent**
+            reference in §5 consensus derivation: when no majority exists,
+            the modal style's own property value is preferred over the median.
+        decisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PropertyDecision'
+          description: One decision per derived OOXML property path
+
+    PropertyDecision:
+      type: object
+      required: [path, value, source, confidence, disagreesWithIntent, rejected]
+      description: >
+        Decision record for a single OOXML property (e.g. `rPr.sz`, `pPr.ind.left`).
+      properties:
+        path:
+          type: string
+          description: Dotted OOXML leaf path (e.g. "rPr.b", "pPr.ind.left")
+        value:
+          description: Chosen property value
+        source:
+          type: string
+          enum: [consensus, intent, median, single, mode]
+          description: >
+            Algorithm branch that produced this value.
+            `consensus` — strict majority (>50%) agreed.
+            `intent` — no majority; modal style's own value used as tie-breaker.
+            `median` — no majority, no intent, numeric values; lower-middle median chosen.
+            `single` — only one styled paragraph for this NodeType.
+            `mode` — low-plurality non-numeric fallback (first-seen tie-break).
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fraction of styled voters that agreed on the chosen value
+        disagreesWithIntent:
+          type: boolean
+          description: >
+            True when `source` is not `intent` but the modal style's value differs
+            from the chosen value. Flag for human review.
+        rejected:
+          type: array
+          description: Alternate values that were not chosen
+          items:
+            type: object
+            required: [value, count]
+            properties:
+              value:
+                description: The rejected property value
+              count:
+                type: integer
+                description: Number of voters that carried this value

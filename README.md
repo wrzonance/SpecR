@@ -84,6 +84,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - `POST /projects/:id/specs` — add a spec section to a project TOC
 - `DELETE /projects/:id/specs/:specId` — remove a section, cascades dangling cross-references
 - `GET /projects/:id/references/broken` — surface broken cross-references for spec writer review
+- `POST /templates/import` — derive a firm style template from a source-of-truth DOCX
 
 The async `POST /parse` pattern (202 + poll) is intentional — inference over large DOCX files takes measurable time, and the job endpoint is designed for Phase 5 Web UI progress bars without further backend changes.
 
@@ -108,6 +109,10 @@ Configure in Claude Code by creating a `.mcp.json` in the repo root (gitignored)
 - 31 CSI MasterFormat divisions seeded from UFGS corpus as reference data (666 section records, 239 with Level 4/5 suffixes)
 - Section-number shape CHECK constraints — `specs.section` and `spec_sections.section_number` enforce the expanded grammar at the DB layer ([ADR-020](docs/adr/020-section-number-expanded-shape.md)); `spec_references.target_spec_section` deliberately unconstrained (records what the source document said)
 - Migration runner with reversible up/down migrations
+
+### Template Import (Style Fidelity)
+
+`POST /templates/import` accepts a multipart `.docx` file plus a `name` (required) and `owner` (optional). It derives a reusable firm style template via per-NodeType consensus derivation: for each of the seven CSI paragraph roles (`part`, `article`, `pr1`–`pr5`), all non-vanish paragraphs that carry a recognised Word style ID vote on each OOXML property leaf; a strict majority (>50%) wins as `consensus`, falling back to the modal style's own value as `intent`, then `median` for numeric properties, then `mode` — per §5 of the style fidelity program spec. The endpoint returns both the persisted template (`{id, name, owner, createdAt, rules}`) and a `DerivationReport` that records confidence scores, `disagreesWithIntent` flags, and rejected outlier values for every property decision, so spec writers can review the derivation before accepting the template as authoritative. The raw DOCX is never stored — only the derived JSONB style definition is persisted (ADR-021). **Theme-font caveat:** `asciiTheme` references in `w:rFonts` are not yet resolved (issue #149); documents that use theme fonts will derive without a concrete font family until theme-font support lands.
 
 ## Not Yet Built
 
