@@ -13,7 +13,7 @@
 
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
-import { getAttrVal, getAttrNumVal, extractAttrStr, toArray } from './xml-utils.js';
+import { getAttrVal, getAttrNumVal, extractAttrStr, toArray, asRecord } from './xml-utils.js';
 import type { StyleInfo, StyleMap, StyleNumPr } from './types.js';
 
 const xmlParser = new XMLParser({
@@ -41,14 +41,10 @@ function parseNumPr(pPr: Record<string, unknown>): NumPrResult {
   return { kind: 'active', numPr: { numId, ilvl } };
 }
 
-function asObject(val: unknown): Record<string, unknown> | undefined {
-  return val !== null && typeof val === 'object' ? (val as Record<string, unknown>) : undefined;
-}
-
 function parseVanish(raw: Record<string, unknown>): boolean {
-  const pPr = asObject(raw['w:pPr']);
-  const pRpr = asObject(pPr?.['w:rPr']);
-  const rPr = asObject(raw['w:rPr']);
+  const pPr = asRecord(raw['w:pPr']);
+  const pRpr = asRecord(pPr?.['w:rPr']);
+  const rPr = asRecord(raw['w:rPr']);
   return (pRpr !== undefined && 'w:vanish' in pRpr) || (rPr !== undefined && 'w:vanish' in rPr);
 }
 

@@ -28,3 +28,8 @@ export function toArray<T>(val: T | readonly T[] | undefined): readonly T[] {
   if (val === undefined) return [];
   return Array.isArray(val) ? (val as readonly T[]) : [val as T];
 }
+
+// Narrow an unknown fast-xml-parser node to a Record, or undefined if not an object.
+export function asRecord(v: unknown): Record<string, unknown> | undefined {
+  return v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : undefined;
+}
