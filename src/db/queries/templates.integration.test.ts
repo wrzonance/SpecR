@@ -9,6 +9,7 @@ import {
   type StyleNodeType,
   type StyleRule,
 } from './templates.js';
+import { StylePropertiesSchema } from '../../ast/index.js';
 
 const CREATED_TEMPLATE_NAMES: string[] = [];
 
@@ -44,15 +45,31 @@ describe('getTemplateByName — UFGS-Default seed', () => {
     expect(types).toEqual(['article', 'part', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5']);
   });
 
-  it('part rule has correct UFGS-extracted values', async () => {
+  it('part rule carries UFGS-extracted values in the JSONB payload', async () => {
     const tpl = await getTemplateByName('UFGS-Default');
     const part = tpl!.rules.find((r) => r.nodeType === 'part');
     expect(part).toBeDefined();
-    expect(part!.fontFamily).toBe('Courier New');
-    expect(part!.fontSizeHalfPt).toBe(20);
-    expect(part!.bold).toBe(true);
-    expect(part!.caps).toBe(true);
-    expect(part!.numberingFormat).toBe('PART %1 -');
+    expect(part!.properties.rPr?.rFonts?.ascii).toBe('Courier New');
+    expect(part!.properties.rPr?.sz).toBe(20);
+    expect(part!.properties.rPr?.b).toBe(true);
+    expect(part!.properties.rPr?.caps).toBe(true);
+    expect(part!.properties.numbering?.lvlText).toBe('PART %1 -');
+  });
+
+  it('migration 014 enriched UFGS-Default pr1 with the previously-lost line spacing', async () => {
+    const tpl = await getTemplateByName('UFGS-Default');
+    const pr1 = tpl!.rules.find((r) => r.nodeType === 'pr1');
+    expect(pr1!.properties.pPr?.spacing?.line).toBe(360);
+    expect(pr1!.properties.pPr?.spacing?.lineRule).toBe('auto');
+    expect(pr1!.properties.numbering?.numFmt).toBe('upperLetter');
+    expect(pr1!.properties.pPr?.ind?.left).toBe(720);
+  });
+
+  it('article rule has no empty ind object after backfill (NULLIF tidy)', async () => {
+    const tpl = await getTemplateByName('UFGS-Default');
+    const article = tpl!.rules.find((r) => r.nodeType === 'article');
+    expect(article!.properties.pPr?.ind).toBeUndefined();
+    expect(article!.properties.rPr?.rFonts?.ascii).toBe('Courier New');
   });
 });
 
@@ -97,17 +114,7 @@ describe('createTemplate', () => {
 
 describe('upsertStyleRule', () => {
   function ruleFor(nodeType: StyleNodeType, indent: number): StyleRule {
-    return {
-      nodeType,
-      fontFamily: 'Arial',
-      fontSizeHalfPt: 24,
-      bold: false,
-      caps: false,
-      indentTwips: indent,
-      spaceBeforeTwips: null,
-      spaceAfterTwips: null,
-      numberingFormat: null,
-    };
+    return { nodeType, properties: { pPr: { ind: { left: indent } } } };
   }
 
   it('inserts on first call, updates on second call (idempotent)', async () => {
@@ -117,12 +124,29 @@ describe('upsertStyleRule', () => {
     await upsertStyleRule(meta.id, ruleFor('pr1', 720));
     const first = await getTemplate(meta.id);
     expect(first!.rules).toHaveLength(1);
-    expect(first!.rules[0]!.indentTwips).toBe(720);
+    expect(first!.rules[0]!.properties.pPr?.ind?.left).toBe(720);
 
     await upsertStyleRule(meta.id, ruleFor('pr1', 1440));
     const second = await getTemplate(meta.id);
     expect(second!.rules).toHaveLength(1); // still one row
-    expect(second!.rules[0]!.indentTwips).toBe(1440); // updated
+    expect(second!.rules[0]!.properties.pPr?.ind?.left).toBe(1440); // updated
+  });
+
+  it('round-trips an UNKNOWN OOXML property through jsonb (footgun closed)', async () => {
+    const name = trackName(`footgun-test-${Date.now()}`);
+    const meta = await createTemplate(name);
+    // Build via the schema so `properties` has exactly the inferred type and so this
+    // also proves a schema-validated payload (incl. its unknown key) survives the DB.
+    const properties = StylePropertiesSchema.parse({
+      rPr: { rFonts: { ascii: 'Arial' }, sz: 24, i: true },
+      pPr: { spacing: { line: 360, lineRule: 'auto' }, ind: { left: 720, hanging: 360 } },
+      numbering: { ilvl: 2, numFmt: 'upperLetter', lvlText: '%3.' },
+      pBdrUnknown: { top: 'single' }, // not modelled — must survive
+    });
+    await upsertStyleRule(meta.id, { nodeType: 'pr1', properties });
+    const loaded = await getTemplate(meta.id);
+    const rule = loaded!.rules.find((r) => r.nodeType === 'pr1');
+    expect(rule!.properties).toEqual(properties);
   });
 });
 
@@ -130,17 +154,7 @@ describe('FK cascade behavior', () => {
   it('deleting a template cascades to its style_rules rows', async () => {
     const name = trackName(`cascade-test-${Date.now()}`);
     const meta = await createTemplate(name);
-    await upsertStyleRule(meta.id, {
-      nodeType: 'pr1',
-      fontFamily: null,
-      fontSizeHalfPt: null,
-      bold: false,
-      caps: false,
-      indentTwips: null,
-      spaceBeforeTwips: null,
-      spaceAfterTwips: null,
-      numberingFormat: null,
-    });
+    await upsertStyleRule(meta.id, { nodeType: 'pr1', properties: {} });
 
     const before = await pool.query<{ count: string }>(
       'SELECT COUNT(*)::text AS count FROM style_rules WHERE template_id = $1',
