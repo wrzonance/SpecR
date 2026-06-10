@@ -6,6 +6,7 @@ import {
   mergeStyleProps,
   resolveStyleChain,
   resolveNumberingFor,
+  resolveStyleCascade,
 } from './resolver.js';
 import { buildStyleMap } from './styles.js';
 import { buildNumberingMap } from './numbering.js';
@@ -186,5 +187,38 @@ describe('resolveNumberingFor', () => {
     const styleMap = buildStyleMap(STYLES);
     const empty = buildNumberingMap('<?xml version="1.0"?><w:numbering xmlns:w="x"/>');
     expect(resolveNumberingFor('PRT', styleMap, empty)).toEqual({ ilvl: 0 });
+  });
+});
+
+describe('resolveStyleCascade (public API)', () => {
+  it('returns effective StyleProperties per style, with inheritance + explicit override', () => {
+    const styles = `<?xml version="1.0"?><w:styles xmlns:w="x">
+      <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Courier New"/><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>
+      <w:style w:type="paragraph" w:styleId="PRT"><w:rPr><w:b/><w:caps/></w:rPr></w:style>
+      <w:style w:type="paragraph" w:styleId="PR1"><w:basedOn w:val="PRT"/><w:pPr><w:ind w:left="720"/></w:pPr><w:rPr><w:b w:val="0"/></w:rPr></w:style>
+    </w:styles>`;
+    const map = resolveStyleCascade(styles, null);
+    expect(map.get('PRT')).toEqual({
+      rPr: { rFonts: { ascii: 'Courier New' }, sz: 20, b: true, caps: true },
+    });
+    // PR1 inherits font/size from docDefaults, caps from PRT, but turns bold OFF explicitly:
+    expect(map.get('PR1')).toEqual({
+      rPr: { rFonts: { ascii: 'Courier New' }, sz: 20, b: false, caps: true },
+      pPr: { ind: { left: 720 } },
+    });
+  });
+
+  it('merges numbering context into the effective style', () => {
+    const styles = `<?xml version="1.0"?><w:styles xmlns:w="x">
+      <w:style w:type="paragraph" w:styleId="PRT"><w:pPr><w:numPr><w:numId w:val="2"/><w:ilvl w:val="0"/></w:numPr></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+    </w:styles>`;
+    const numbering = `<?xml version="1.0"?><w:numbering xmlns:w="x">
+      <w:abstractNum w:abstractNumId="5"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="PART %1 -"/></w:lvl></w:abstractNum>
+      <w:num w:numId="2"><w:abstractNumId w:val="5"/></w:num>
+    </w:numbering>`;
+    expect(resolveStyleCascade(styles, numbering).get('PRT')).toEqual({
+      rPr: { b: true },
+      numbering: { ilvl: 0, numFmt: 'decimal', lvlText: 'PART %1 -' },
+    });
   });
 });

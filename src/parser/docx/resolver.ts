@@ -10,6 +10,9 @@ import type {
   NumberingDef,
 } from '../../ast/types.js';
 import type { StyleMap, NumberingMap } from './types.js';
+import { buildStyleMap } from './styles.js';
+import { buildNumberingMap } from './numbering.js';
+import { StylePropertiesSchema } from '../../ast/index.js';
 
 // ─── internal helpers ─────────────────────────────────────────────────────────
 
@@ -254,4 +257,36 @@ export function resolveNumberingFor(
     lvlText: lvl?.lvlText,
     start: lvl?.start,
   }) as NumberingDef;
+}
+
+// ─── public entry point ───────────────────────────────────────────────────────
+
+/**
+ * Resolve the effective StyleProperties for every paragraph style in styles.xml.
+ * Applies docDefaults → basedOn chain → own-props cascade, then merges any
+ * numbering context resolved from numbering.xml.  Every produced value is
+ * validated through StylePropertiesSchema — guarantees JSON-safe, schema-valid
+ * output at the module boundary.
+ */
+export function resolveStyleCascade(
+  stylesXml: string,
+  numberingXml?: string | null
+): Map<string, StyleProperties> {
+  // NOTE: parseStylesFull and buildStyleMap each parse stylesXml independently
+  // (visual props vs structural numPr). Unifying into one parse is a worthwhile
+  // refactor when the inference pipeline is next touched — deferred, not an oversight.
+  const parsed = parseStylesFull(stylesXml);
+  const styleMap = buildStyleMap(stylesXml);
+  const numberingMap = numberingXml ? buildNumberingMap(numberingXml) : undefined;
+  const out = new Map<string, StyleProperties>();
+  for (const styleId of parsed.styles.keys()) {
+    const visual = resolveStyleChain(styleId, parsed);
+    const numbering = numberingMap
+      ? resolveNumberingFor(styleId, styleMap, numberingMap)
+      : undefined;
+    const eff = numbering ? mergeStyleProps(visual, { numbering }) : visual;
+    // Validate at the boundary — every produced value is schema-valid + JSON-safe.
+    out.set(styleId, StylePropertiesSchema.parse(eff));
+  }
+  return out;
 }
