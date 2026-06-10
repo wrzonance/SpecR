@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractRunProps, extractParaProps } from './resolver.js';
+import { extractRunProps, extractParaProps, parseStylesFull } from './resolver.js';
 
 describe('extractRunProps', () => {
   it('reads fonts, size, toggles, underline, color from a w:rPr object', () => {
@@ -51,5 +51,39 @@ describe('extractParaProps', () => {
 
   it('returns an empty object for an empty w:pPr', () => {
     expect(extractParaProps({})).toEqual({});
+  });
+});
+
+const STYLES_XML = `<?xml version="1.0"?>
+<w:styles xmlns:w="x">
+  <w:docDefaults>
+    <w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman"/><w:sz w:val="22"/></w:rPr></w:rPrDefault>
+    <w:pPrDefault><w:pPr><w:spacing w:after="0"/></w:pPr></w:pPrDefault>
+  </w:docDefaults>
+  <w:style w:type="paragraph" w:styleId="PRT"><w:name w:val="Part"/><w:rPr><w:b/><w:sz w:val="20"/></w:rPr><w:pPr><w:jc w:val="center"/></w:pPr></w:style>
+  <w:style w:type="paragraph" w:styleId="PR1"><w:basedOn w:val="PRT"/><w:pPr><w:ind w:left="720"/></w:pPr></w:style>
+  <w:style w:type="character" w:styleId="IP"><w:rPr><w:i/></w:rPr></w:style>
+</w:styles>`;
+
+describe('parseStylesFull', () => {
+  it('extracts docDefaults + paragraph styles (own props) + basedOn, skipping character styles', () => {
+    const parsed = parseStylesFull(STYLES_XML);
+    expect(parsed.docDefaults).toEqual({
+      rPr: { rFonts: { ascii: 'Times New Roman' }, sz: 22 },
+      pPr: { spacing: { after: 0 } },
+    });
+    expect(parsed.styles.get('IP')).toBeUndefined(); // character style skipped
+    const prt = parsed.styles.get('PRT');
+    expect(prt?.own).toEqual({ rPr: { b: true, sz: 20 }, pPr: { jc: 'center' } });
+    expect(prt?.basedOn).toBeUndefined();
+    const pr1 = parsed.styles.get('PR1');
+    expect(pr1?.basedOn).toBe('PRT');
+    expect(pr1?.own).toEqual({ pPr: { ind: { left: 720 } } });
+  });
+
+  it('returns empty docDefaults + empty map for styles.xml with no w:styles root', () => {
+    const parsed = parseStylesFull('<?xml version="1.0"?><other/>');
+    expect(parsed.docDefaults).toEqual({});
+    expect(parsed.styles.size).toBe(0);
   });
 });

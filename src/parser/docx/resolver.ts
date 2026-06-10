@@ -1,7 +1,9 @@
 // Pure helpers that extract a single OOXML style's own rPr / pPr visual properties
 // into the RunProperties / ParagraphProperties shapes.  No cascade — no DB — no I/O.
-import { getAttrVal, extractAttrStr, asRecord } from './xml-utils.js';
-import type { RunProperties, ParagraphProperties } from '../../ast/types.js';
+import { XMLParser } from 'fast-xml-parser';
+import { ParserError } from '../error.js';
+import { getAttrVal, extractAttrStr, asRecord, toArray } from './xml-utils.js';
+import type { RunProperties, ParagraphProperties, StyleProperties } from '../../ast/types.js';
 
 // ─── internal helpers ─────────────────────────────────────────────────────────
 
@@ -92,4 +94,75 @@ export function extractParaProps(pPr: Record<string, unknown> | undefined): Para
     ind: indent,
     jc: getAttrVal(pPr['w:jc']) || undefined,
   }) as ParagraphProperties;
+}
+
+// ─── styles.xml full-parse for cascade resolution ────────────────────────────
+
+// Stateless between parse() calls — safe as a module-level singleton.
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  processEntities: true,
+  isArray: (name) => name === 'w:style',
+});
+
+export interface RawStyle {
+  readonly basedOn?: string;
+  readonly own: StyleProperties;
+}
+
+export interface ParsedStyles {
+  readonly docDefaults: StyleProperties;
+  readonly styles: ReadonlyMap<string, RawStyle>;
+}
+
+// Assemble a StyleProperties from optional rPr + pPr element objects.
+function ownProps(
+  rPr: Record<string, unknown> | undefined,
+  pPr: Record<string, unknown> | undefined
+): StyleProperties {
+  return compact({
+    rPr: subObj(extractRunProps(rPr)),
+    pPr: subObj(extractParaProps(pPr)),
+  }) as StyleProperties;
+}
+
+// Extract docDefaults from the w:docDefaults element.
+function parseDocDefaults(root: Record<string, unknown>): StyleProperties {
+  const dd = asRecord(root['w:docDefaults']);
+  const ddRpr = asRecord(asRecord(dd?.['w:rPrDefault'])?.['w:rPr']);
+  const ddPpr = asRecord(asRecord(dd?.['w:pPrDefault'])?.['w:pPr']);
+  return ownProps(ddRpr, ddPpr);
+}
+
+// Parse a single w:style element into a RawStyle, or undefined if it should be skipped.
+function parseOneStyle(raw: unknown): readonly [string, RawStyle] | undefined {
+  const s = asRecord(raw);
+  if (!s) return undefined;
+  if ((extractAttrStr(s, '@_w:type') || 'paragraph') !== 'paragraph') return undefined;
+  const styleId = extractAttrStr(s, '@_w:styleId');
+  if (!styleId) return undefined;
+  const basedOnVal = getAttrVal(s['w:basedOn']) || undefined;
+  const own = ownProps(asRecord(s['w:rPr']), asRecord(s['w:pPr']));
+  const entry: RawStyle = basedOnVal !== undefined ? { basedOn: basedOnVal, own } : { own };
+  return [styleId, entry];
+}
+
+export function parseStylesFull(xml: string): ParsedStyles {
+  let parsed: unknown;
+  try {
+    parsed = xmlParser.parse(xml);
+  } catch (err) {
+    throw new ParserError('failed to parse styles.xml for cascade resolution', { cause: err });
+  }
+  const root = asRecord((parsed as Record<string, unknown>)['w:styles']);
+  if (!root) return { docDefaults: {}, styles: new Map() };
+
+  const docDefaults = parseDocDefaults(root);
+  const styles = new Map<string, RawStyle>();
+  for (const raw of toArray(root['w:style'] as readonly unknown[] | undefined)) {
+    const result = parseOneStyle(raw);
+    if (result) styles.set(result[0], result[1]);
+  }
+  return { docDefaults, styles };
 }
