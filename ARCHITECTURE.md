@@ -538,11 +538,12 @@ specr/
 │   ├── parser/
 │   ├── generator/
 │   │   └── markdown.ts          # AST → Markdown renderer (used by MCP resources + Phase 6)
-│   ├── merge/                   # Phase 3a — depends on ast/types + db/queries/versions only
+│   ├── merge/                   # Phase 3a — pure algorithm + DOCX extractor; base side fed by db/queries/versions (wired in #35)
 │   │   ├── error.ts             # MergeError
 │   │   ├── types.ts             # ExtractResult, DiffResult, TrackChangeRecord (ParagraphSnapshot lives in ast/)
 │   │   ├── extract.ts           # DOCX buffer → uuid→text map via w:sdt specr-uuid anchors (virtual-accept track changes)
-│   │   └── diff.ts              # computeDiff — pure git-style 3-way diff (base/ours/theirs)
+│   │   ├── diff.ts              # computeDiff — pure git-style 3-way diff (base/ours/theirs)
+│   │   └── index.ts             # barrel — public surface (MergeError, computeDiff, extractContentControls, types)
 │   ├── db/
 │   ├── ast/
 │   └── lib/
