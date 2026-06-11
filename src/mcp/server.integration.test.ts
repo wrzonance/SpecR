@@ -43,7 +43,8 @@ beforeAll(async () => {
     if (req.path.startsWith('/mcp')) return next();
     restJson(req, res, next);
   });
-  registerMcpRoutes(app);
+  // This suite intentionally makes >20 MCP calls — raise the rate limit to avoid 429s.
+  registerMcpRoutes(app, { rateLimitMax: 1000 });
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
