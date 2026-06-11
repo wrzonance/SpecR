@@ -76,3 +76,13 @@ export type ParagraphProperties = NonNullable<StyleProperties['pPr']>;
  * of StylePropertiesSchema.
  */
 export type NumberingDef = NonNullable<StyleProperties['numbering']>;
+
+// ── Merge (ADR-005) ─────────────────────────────────────────────────────────
+// ParagraphSnapshot is a pure data shape shared by db/ and merge/. It lives in
+// ast/ (the foundational layer) so db/ never imports from merge/ — that would
+// invert the module dependency graph. Mirrors the StyleNodeType relocation (#31).
+export interface ParagraphSnapshot {
+  readonly uuid: string;
+  readonly text: string;
+  readonly baseVersion: number;
+}

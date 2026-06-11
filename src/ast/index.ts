@@ -1,4 +1,11 @@
-export type { NodeType, SpecNodeMeta, SpecNode, SpecTree, SecRef } from './types.js';
+export type {
+  NodeType,
+  SpecNodeMeta,
+  SpecNode,
+  SpecTree,
+  SecRef,
+  ParagraphSnapshot,
+} from './types.js';
 export {
   NodeTypeSchema,
   SpecNodeMetaSchema,
