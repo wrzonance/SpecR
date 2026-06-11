@@ -5,6 +5,7 @@ export type {
   SpecNode,
   SpecTree,
   SecRef,
+  ParagraphSnapshot,
 } from './types.js';
 export {
   NodeTypeSchema,

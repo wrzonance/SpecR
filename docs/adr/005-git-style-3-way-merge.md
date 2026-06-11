@@ -1,6 +1,6 @@
 # ADR-005: Git-Style 3-Way Merge for Owner Redlines
 
-## Status: Accepted
+## Status: In progress — Phase 3a (extract + diff algorithm)
 
 ## Context
 
@@ -38,4 +38,5 @@ The spec writer reviews conflicts via `POST /specs/:id/diff` response, then subm
 - `paragraph_versions` table stores text snapshots at each version, enabling the "base" side of the 3-way diff even after the database has moved on.
 - The merge UI (Phase 5 web interface) must present conflicts clearly: base | theirs | ours side-by-side. The API (`/diff` response) must carry all three versions in the payload.
 - We do not attempt to auto-merge within a paragraph (word-level diffing). If a paragraph was touched by both sides, it is a conflict. Word-level merging would require linguistic analysis and introduce false confidence.
-- Track changes in the Owner's DOCX are not automatically processed. If the Owner used Word's track changes feature, they must accept/reject within Word before returning the file. This is documented as a workflow requirement, not a technical limitation to fix.
+- Track changes in the Owner's DOCX are not automatically processed. If the Owner used Word's track changes feature, they must accept/reject within Word before returning the file. This is documented as a workflow requirement, not a technical limitation to fix. (Superseded for Phase 3a by the bullet below — virtual acceptance replaced the hard requirement.)
+- Phase 3a (issue #34) accepts track changes virtually: `w:ins` text is counted as present, `w:del` text as absent, every record is captured raw, and the diff emits a warning. Refusing track-changes documents or consuming the records directly (preserve as pending review) is deferred to a follow-up issue and an ADR-005 amendment.
