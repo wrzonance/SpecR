@@ -143,4 +143,74 @@ describe('computeDiff', () => {
     const result = computeDiff([], [], extract([]));
     expect(result.warnings).toEqual([]);
   });
+
+  it('unknown controlled UUID in theirs → warning with count, buckets empty', () => {
+    // U1 is known (in base), U2 is unknown (not in base) — U2 must surface as a warning
+    const result = computeDiff(
+      [snap(U1, 'base text')],
+      [snap(U1, 'base text')],
+      extract([
+        [U1, 'base text'],
+        [U2, 'surprise text'],
+      ])
+    );
+    expect(result.warnings).toEqual([
+      '1 controlled paragraph(s) in the returned DOCX carry unknown UUIDs and were ignored',
+    ]);
+    expect(result.modified).toEqual([]);
+    expect(result.conflicts).toEqual([]);
+    expect(result.added).toEqual([]);
+    expect(result.deleted).toEqual([]);
+  });
+
+  it('all controlled UUIDs known → no unknown-uuid warning', () => {
+    const result = computeDiff(
+      [snap(U1, 'base text'), snap(U2, 'other')],
+      [snap(U1, 'base text'), snap(U2, 'other')],
+      extract([
+        [U1, 'base text'],
+        [U2, 'other'],
+      ])
+    );
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('unknown-uuid warning appears before track-changes warning when both present', () => {
+    const records: TrackChangeRecord[] = [
+      { kind: 'ins', uuid: U1, text: 'added', author: 'OwnerA', date: '2026-05-20T10:00:00Z' },
+    ];
+    const result = computeDiff(
+      [snap(U1, 'base')],
+      [snap(U1, 'base')],
+      extract(
+        [
+          [U1, 'base'],
+          [U2, 'surprise'],
+        ],
+        [],
+        records
+      )
+    );
+    expect(result.warnings).toEqual([
+      '1 controlled paragraph(s) in the returned DOCX carry unknown UUIDs and were ignored',
+      'document contained 1 track-change records — diff treats them as accepted',
+    ]);
+  });
+
+  it('combined: theirs-edited paragraph + orphan → modified and added, no leakage between buckets', () => {
+    let n = 0;
+    const result = computeDiff(
+      [snap(U1, 'base text')],
+      [snap(U1, 'base text')],
+      extract([[U1, 'owner edit']], [{ text: 'new paragraph', index: 5 }]),
+      { uuidGen: () => `fixed-${n++}` }
+    );
+    expect(result.modified).toEqual([
+      { uuid: U1, base: 'base text', theirs: 'owner edit', ours: 'base text' },
+    ]);
+    expect(result.added).toEqual([{ uuid: 'fixed-0', text: 'new paragraph', index: 5 }]);
+    expect(result.conflicts).toEqual([]);
+    expect(result.deleted).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
 });
