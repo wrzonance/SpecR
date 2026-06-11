@@ -2,11 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../index.js', () => ({
   DatabaseError: class DatabaseError extends Error {
-    cause?: unknown;
     constructor(message: string, options?: ErrorOptions) {
       super(message, options);
       this.name = 'DatabaseError';
-      this.cause = options?.cause;
     }
   },
   pool: { query: vi.fn() },
@@ -108,6 +106,13 @@ describe('findLibraryByName', () => {
     vi.mocked(pool.query).mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
     const { findLibraryByName } = await import('./libraries.js');
     expect(await findLibraryByName('missing')).toBeNull();
+  });
+
+  it('wraps query failure in DatabaseError', async () => {
+    const { pool, DatabaseError } = await import('../index.js');
+    vi.mocked(pool.query).mockRejectedValueOnce(new Error('db down'));
+    const { findLibraryByName } = await import('./libraries.js');
+    await expect(findLibraryByName('x')).rejects.toBeInstanceOf(DatabaseError);
   });
 });
 
