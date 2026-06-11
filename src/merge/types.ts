@@ -1,3 +1,4 @@
+// Re-exported for merge consumers' convenience; canonical definition is src/ast/types.ts
 export type { ParagraphSnapshot } from '../ast/types.js';
 
 export interface TrackChangeRecord {
