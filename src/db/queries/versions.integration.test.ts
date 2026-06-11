@@ -52,4 +52,20 @@ describe('getParagraphSnapshots', () => {
     const rows = await getParagraphSnapshots('00000000-0000-0000-0000-0000000000ff');
     expect(rows).toEqual([]);
   });
+
+  it('ignores snapshot rows whose version does not match base_version', async () => {
+    await pool.query(
+      `INSERT INTO paragraph_versions (paragraph_id, version, text, node_type)
+       VALUES ($1, 2, 'Future v2 text — must not be returned.', 'pr1')
+       ON CONFLICT DO NOTHING`,
+      [PR1_ID]
+    );
+    const rows = await getParagraphSnapshots(SPEC_ID);
+    // Without AND v.version = p.base_version the join produces a duplicate row for PR1
+    // (one for each version row), so total would be 4 instead of 3.
+    expect(rows).toHaveLength(3);
+    const pr1 = rows.find((r) => r.uuid === PR1_ID);
+    // base_version is still 1 → the v1 snapshot wins; v2 row is invisible
+    expect(pr1).toEqual({ uuid: PR1_ID, text: 'Snapshot pr1 text.', baseVersion: 1 });
+  });
 });
