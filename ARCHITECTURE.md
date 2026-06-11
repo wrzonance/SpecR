@@ -193,7 +193,7 @@ Universal across all spec sources — the one thing you can count on:
 
 Note: CPI files reserve ilvl 1-2 for Schedule/PDS (rarely used) — so the same logical CSI Article level maps to different ilvl values depending on which template authored the document. The inference engine normalizes this.
 
-**Conflict persistence (#56):** when multiple signals fire and disagree, the losing signals are recorded as `{ signal, reportedIlvl, reportedNodeType }` and persisted to `paragraphs.conflicts` (JSONB, `NOT NULL DEFAULT '[]'`). They surface through `meta.conflicts` on `get_spec` / `get_paragraph` MCP tools and the shared `getSpecTree` query — empty arrays are omitted on the wire. This makes inference ambiguity transparent to agents and the future UI instead of silently picking a winner.
+**Conflict persistence (#56):** when multiple signals fire and disagree, the losing signals are recorded as `{ signal, reportedIlvl, reportedNodeType }` and persisted to `paragraphs.conflicts` (JSONB, `NOT NULL DEFAULT '[]'`). They surface as `meta.conflicts` on tree nodes (`get_spec` MCP tool and the shared `getSpecTree` query) and as a top-level `conflicts` field on the node and each ancestor returned by the `get_paragraph` MCP tool — empty arrays are omitted on the wire. This makes inference ambiguity transparent to agents and the future UI instead of silently picking a winner.
 
 ## Canonical CSI AST
 
