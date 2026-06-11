@@ -15,11 +15,18 @@ export const NodeTypeSchema = z.enum([
   'continuation',
 ]);
 
+export const SignalConflictSchema = z.object({
+  signal: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+  reportedIlvl: z.number().int(),
+  reportedNodeType: NodeTypeSchema,
+});
+
 export const SpecNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
   source: z.enum(['ufgs', 'arcat', 'cpi', 'unknown']).exactOptional(),
   revitParam: z.string().exactOptional(),
   baseVersion: z.number().int().nonnegative().exactOptional(),
+  conflicts: z.array(SignalConflictSchema).exactOptional(),
 });
 
 export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>

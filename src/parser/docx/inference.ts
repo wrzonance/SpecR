@@ -216,6 +216,7 @@ function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source)
     meta: {
       source,
       ...(cp.isVanish ? { vanish: true as const } : {}),
+      ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
     },
   };
 }

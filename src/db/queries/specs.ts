@@ -1,5 +1,5 @@
 import { pool, DatabaseError } from '../index.js';
-import type { SpecNode, SpecTree, NodeType, SecRef } from '../../ast/index.js';
+import type { SignalConflict, SpecNode, SpecTree, NodeType, SecRef } from '../../ast/index.js';
 import type { Pool } from 'pg';
 import { insertTree } from './paragraphs.js';
 import { insertRefs } from './refs.js';
@@ -72,6 +72,7 @@ interface ParaRow {
   readonly text: string;
   readonly position: number;
   readonly vanish: boolean;
+  readonly conflicts: readonly SignalConflict[];
 }
 
 export interface SpecReference {
@@ -102,7 +103,10 @@ function buildNodeTree(rows: readonly ParaRow[]): readonly SpecNode[] {
       type: row.node_type as NodeType,
       text: row.text,
       children,
-      meta: row.vanish ? { vanish: true } : {},
+      meta: {
+        ...(row.vanish ? { vanish: true } : {}),
+        ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
+      },
     };
   }
 
@@ -119,7 +123,7 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
     if (!specRow) return null;
 
     const paraResult = await pool.query<ParaRow>(
-      `SELECT id, parent_id, node_type, text, position, vanish
+      `SELECT id, parent_id, node_type, text, position, vanish, conflicts
        FROM paragraphs WHERE spec_id = $1`,
       [id]
     );

@@ -1,6 +1,6 @@
 import { pool, DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
-import type { SpecNode, SpecTree } from '../../ast/types.js';
+import type { SignalConflict, SpecNode, SpecTree } from '../../ast/types.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -15,6 +15,7 @@ interface FlatRow {
   readonly text: string;
   readonly position: number;
   readonly vanish: boolean;
+  readonly conflicts: readonly SignalConflict[];
 }
 
 function flattenDfs(
@@ -32,6 +33,7 @@ function flattenDfs(
       text: node.text,
       position: idx + 1,
       vanish: node.meta.vanish ?? false,
+      conflicts: node.meta.conflicts ?? [],
     });
     flattenDfs(node.children, specId, node.id, rows);
   });
@@ -49,9 +51,18 @@ export async function insertTree(tree: SpecTree, specId: string, pool: Queryable
   for (const row of rows) {
     try {
       await pool.query(
-        `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position, vanish)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [row.id, row.specId, row.parentId, row.nodeType, row.text, row.position, row.vanish]
+        `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position, vanish, conflicts)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+        [
+          row.id,
+          row.specId,
+          row.parentId,
+          row.nodeType,
+          row.text,
+          row.position,
+          row.vanish,
+          JSON.stringify(row.conflicts),
+        ]
       );
     } catch (err) {
       throw new DatabaseError(`insertTree: failed to insert paragraph ${row.id}`, { cause: err });
@@ -65,6 +76,8 @@ export interface ParagraphRow {
   readonly nodeType: string;
   readonly text: string;
   readonly vanish: boolean;
+  /** Inference signal disagreements (#56). Present only when non-empty. */
+  readonly conflicts?: readonly SignalConflict[];
 }
 
 export interface ParagraphWithAncestors {
@@ -72,8 +85,23 @@ export interface ParagraphWithAncestors {
   readonly ancestors: readonly ParagraphRow[];
 }
 
-interface ChainRow extends ParagraphRow {
+interface ChainRow {
+  readonly id: string;
+  readonly nodeType: string;
+  readonly text: string;
+  readonly vanish: boolean;
+  readonly conflicts: readonly SignalConflict[];
   readonly depth: number;
+}
+
+function toParagraphRow(r: ChainRow): ParagraphRow {
+  return {
+    id: r.id,
+    nodeType: r.nodeType,
+    text: r.text,
+    vanish: r.vanish,
+    ...(r.conflicts.length > 0 ? { conflicts: r.conflicts } : {}),
+  };
 }
 
 export async function getParagraphWithAncestors(
@@ -82,14 +110,14 @@ export async function getParagraphWithAncestors(
   try {
     const result = await pool.query<ChainRow>(
       `WITH RECURSIVE chain AS (
-         SELECT id, node_type, text, vanish, parent_id, 0 AS depth
+         SELECT id, node_type, text, vanish, conflicts, parent_id, 0 AS depth
          FROM paragraphs WHERE id = $1
          UNION ALL
-         SELECT p.id, p.node_type, p.text, p.vanish, p.parent_id, c.depth + 1
+         SELECT p.id, p.node_type, p.text, p.vanish, p.conflicts, p.parent_id, c.depth + 1
          FROM paragraphs p JOIN chain c ON p.id = c.parent_id
          WHERE c.depth + 1 < 10
        )
-       SELECT id, node_type AS "nodeType", text, vanish, depth
+       SELECT id, node_type AS "nodeType", text, vanish, conflicts, depth
        FROM chain ORDER BY depth DESC`,
       [id]
     );
@@ -98,13 +126,8 @@ export async function getParagraphWithAncestors(
     const node = rows[rows.length - 1]!;
     const ancestors = rows.slice(0, -1);
     return {
-      node: { id: node.id, nodeType: node.nodeType, text: node.text, vanish: node.vanish },
-      ancestors: ancestors.map((r) => ({
-        id: r.id,
-        nodeType: r.nodeType,
-        text: r.text,
-        vanish: r.vanish,
-      })),
+      node: toParagraphRow(node),
+      ancestors: ancestors.map(toParagraphRow),
     };
   } catch (err) {
     throw new DatabaseError('getParagraphWithAncestors failed', { cause: err });

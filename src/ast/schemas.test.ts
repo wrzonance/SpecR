@@ -4,6 +4,7 @@ import {
   SpecNodeMetaSchema,
   SpecTreeSchema,
   PatchSpecBodySchema,
+  SignalConflictSchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -166,5 +167,57 @@ describe('PatchSpecBodySchema', () => {
 
   it('rejects malformed section', () => {
     expect(() => PatchSpecBodySchema.parse({ section: '27210' })).toThrow();
+  });
+});
+
+describe('SignalConflictSchema', () => {
+  it('accepts signals 1 through 5', () => {
+    for (const signal of [1, 2, 3, 4, 5] as const) {
+      const result = SignalConflictSchema.parse({
+        signal,
+        reportedIlvl: 2,
+        reportedNodeType: 'pr1',
+      });
+      expect(result.signal).toBe(signal);
+    }
+  });
+
+  it('rejects signal 6', () => {
+    expect(() =>
+      SignalConflictSchema.parse({ signal: 6, reportedIlvl: 2, reportedNodeType: 'pr1' })
+    ).toThrow();
+  });
+
+  it('rejects unknown reportedNodeType', () => {
+    expect(() =>
+      SignalConflictSchema.parse({ signal: 2, reportedIlvl: 2, reportedNodeType: 'chapter' })
+    ).toThrow();
+  });
+
+  it('rejects non-integer reportedIlvl', () => {
+    expect(() =>
+      SignalConflictSchema.parse({ signal: 2, reportedIlvl: 1.5, reportedNodeType: 'pr1' })
+    ).toThrow();
+  });
+});
+
+describe('SpecNodeMetaSchema — conflicts', () => {
+  it('round-trips meta carrying conflicts', () => {
+    const meta = {
+      source: 'arcat',
+      conflicts: [
+        { signal: 2, reportedIlvl: 1, reportedNodeType: 'article' },
+        { signal: 5, reportedIlvl: 3, reportedNodeType: 'pr2' },
+      ],
+    };
+    const result = SpecNodeMetaSchema.parse(meta);
+    expect(result.conflicts).toHaveLength(2);
+    expect(result.conflicts?.[0]?.signal).toBe(2);
+    expect(result.conflicts?.[1]?.reportedNodeType).toBe('pr2');
+  });
+
+  it('meta without conflicts key parses with conflicts undefined', () => {
+    const result = SpecNodeMetaSchema.parse({ vanish: true });
+    expect(result.conflicts).toBeUndefined();
   });
 });

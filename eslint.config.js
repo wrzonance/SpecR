@@ -31,13 +31,15 @@ export default defineConfig(
   // In test files, vi.mocked(obj.method) is the standard pattern for mocking
   // instance methods. The method is always a vi.fn() at runtime, so the
   // unbound-method warning is a false positive here.
-  // describe() callbacks grow linearly with the number of cases — the 50-line
-  // function cap is a production-code guard, not meaningful for test suites.
+  // describe() callbacks and test suites grow linearly with the number of cases —
+  // the 50-line function cap and 400-line file cap are production-code guards, not
+  // meaningful for test suites.
   {
     files: ['src/**/*.test.ts'],
     rules: {
       '@typescript-eslint/unbound-method': 'off',
       'max-lines-per-function': 'off',
+      'max-lines': 'off',
       // Integration tests use console.warn/info for fixture diagnostics — not production code.
       'no-console': 'off',
     },

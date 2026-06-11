@@ -8,11 +8,25 @@ import {
 
 export type NodeType = z.infer<typeof NodeTypeSchema>;
 
+/**
+ * A signal disagreement recorded by the 5-signal DOCX inference engine: a losing
+ * signal that reported a different hierarchy level than the winning signal.
+ * Mirrors parser/docx/types.ts SignalConflict — kept structurally identical;
+ * the propagation site (inference.ts makeNode) is the single conversion point.
+ */
+export interface SignalConflict {
+  readonly signal: 1 | 2 | 3 | 4 | 5;
+  readonly reportedIlvl: number;
+  readonly reportedNodeType: NodeType;
+}
+
 export interface SpecNodeMeta {
   readonly vanish?: boolean;
   readonly source?: 'ufgs' | 'arcat' | 'cpi' | 'unknown';
   readonly revitParam?: string;
   readonly baseVersion?: number;
+  /** Inference signal disagreements. Absent === no conflicts (empty array never serialized). */
+  readonly conflicts?: readonly SignalConflict[];
 }
 
 export interface SpecNode {

@@ -34,7 +34,9 @@ describe('getSpecTree', () => {
                     type: 'pr1',
                     text: 'Coordinate work.',
                     children: [],
-                    meta: {},
+                    meta: {
+                      conflicts: [{ signal: 5, reportedIlvl: 1, reportedNodeType: 'article' }],
+                    },
                   },
                 ],
                 meta: {},
@@ -72,6 +74,21 @@ describe('getSpecTree', () => {
   it('returns empty references array when no refs exist', async () => {
     const result = await getSpecTree(treeSpecId);
     expect(result!.references).toEqual([]);
+  });
+
+  it('round-trips meta.conflicts on inner nodes (#56)', async () => {
+    const result = await getSpecTree(treeSpecId);
+    const pr1 = result!.tree.parts[0]!.children[0]!.children[0]!;
+    expect(pr1.meta.conflicts).toEqual([
+      { signal: 5, reportedIlvl: 1, reportedNodeType: 'article' },
+    ]);
+  });
+
+  it('omits meta.conflicts when the stored array is empty (#56)', async () => {
+    const result = await getSpecTree(treeSpecId);
+    const part = result!.tree.parts[0]!;
+    expect(part.meta.conflicts).toBeUndefined();
+    expect(Object.keys(part.meta)).not.toContain('conflicts');
   });
 });
 

@@ -319,6 +319,51 @@ describe('buildTree — Pass 2: edge cases and meta', () => {
   });
 });
 
+describe('buildTree — conflicts propagation (#56)', () => {
+  it('propagates ClassifiedParagraph.conflicts to SpecNode.meta.conflicts', () => {
+    const conflicted: ClassifiedParagraph = {
+      ...makeClassified('pr1', 2, 'A. text'),
+      conflicts: [
+        { signal: 2, reportedIlvl: 1, reportedNodeType: 'article' },
+        { signal: 5, reportedIlvl: 3, reportedNodeType: 'pr2' },
+      ],
+    };
+    const tree = buildTree(
+      [makeClassified('part', 0, 'PART 1'), makeClassified('article', 1, '1.1'), conflicted],
+      '01',
+      'T',
+      'arcat'
+    );
+    const node = tree.parts[0]?.children[0]?.children[0];
+    expect(node?.meta.conflicts).toHaveLength(2);
+    expect(node?.meta.conflicts?.[0]).toEqual({
+      signal: 2,
+      reportedIlvl: 1,
+      reportedNodeType: 'article',
+    });
+    expect(node?.meta.conflicts?.[1]?.reportedNodeType).toBe('pr2');
+  });
+
+  it('omits meta.conflicts entirely when the paragraph has no conflicts', () => {
+    const tree = buildTree([makeClassified('part', 0, 'PART 1')], '01', 'T', 'arcat');
+    expect(tree.parts[0]?.meta.conflicts).toBeUndefined();
+    expect(Object.keys(tree.parts[0]?.meta ?? {})).not.toContain('conflicts');
+  });
+
+  it('continuation nodes never carry conflicts', () => {
+    const cont: ClassifiedParagraph = {
+      paragraph: { text: 'cont text', isVanish: false },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      isVanish: false,
+    };
+    const tree = buildTree([makeClassified('part', 0, 'PART 1'), cont], '01', 'T', 'arcat');
+    expect(tree.parts[0]?.children[0]?.meta.conflicts).toBeUndefined();
+  });
+});
+
 describe('classifyParagraphs — numbering-generated PART headings (ARCAT regression)', () => {
   const specShaped = (): NumberingMap => ({
     ...emptyNumberingMap(),
