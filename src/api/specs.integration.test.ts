@@ -25,7 +25,9 @@ beforeAll(async () => {
   baseUrl = `http://localhost:${port}`;
 
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO specs (section, title, source) VALUES ($1, $2, $3) RETURNING id`,
+    `INSERT INTO specs (section, title, source, library_id)
+     VALUES ($1, $2, $3, (SELECT id FROM libraries WHERE name = 'UFGS Reference'))
+     RETURNING id`,
     ['27 21 00', 'Structured Cabling', 'ufgs']
   );
   const row = result.rows[0];

@@ -124,11 +124,11 @@ describe('migration 013 — section shape CHECK constraints', () => {
   it('db: specs.section CHECK accepts expanded shapes and the unknown sentinel', async () => {
     try {
       const r1 = await pool.query(
-        `INSERT INTO specs (section, title, source) VALUES ('99 88 77.10 20', 'Shape OK', 'arcat') RETURNING section`
+        `INSERT INTO specs (section, title, source, library_id) VALUES ('99 88 77.10 20', 'Shape OK', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master')) RETURNING section`
       );
       expect(r1.rows[0]).toMatchObject({ section: '99 88 77.10 20' });
       const r2 = await pool.query(
-        `INSERT INTO specs (section, title, source) VALUES ('unknown', 'Sentinel OK', 'arcat') RETURNING section`
+        `INSERT INTO specs (section, title, source, library_id) VALUES ('unknown', 'Sentinel OK', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master')) RETURNING section`
       );
       expect(r2.rows[0]).toMatchObject({ section: 'unknown' });
     } finally {
@@ -140,7 +140,7 @@ describe('migration 013 — section shape CHECK constraints', () => {
 
   it('db: specs.section CHECK rejects malformed sections', async () => {
     await expect(
-      pool.query(`INSERT INTO specs (section, title, source) VALUES ('99 8877', 'Bad', 'arcat')`)
+      pool.query(`INSERT INTO specs (section, title, source, library_id) VALUES ('99 8877', 'Bad', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master'))`)
     ).rejects.toThrow(/specs_section_shape_check/);
   });
 

@@ -9,7 +9,8 @@ const PR1_CONFLICTED_ID = 'b0000000-0000-0000-0000-000000000004';
 
 beforeAll(async () => {
   await pool.query(
-    `INSERT INTO specs (id, section, title, source) VALUES ($1, $2, $3, $4)
+    `INSERT INTO specs (id, section, title, source, library_id)
+     VALUES ($1, $2, $3, $4, (SELECT id FROM libraries WHERE name = 'Default Company Master'))
      ON CONFLICT (id) DO NOTHING`,
     [SPEC_ID, '99 99 00', 'Ancestors Test', 'arcat']
   );
@@ -102,7 +103,8 @@ describe('insertTree — conflicts (#56)', () => {
 
   it('persists meta.conflicts and defaults to [] when absent', async () => {
     await pool.query(
-      `INSERT INTO specs (id, section, title, source) VALUES ($1, '99 99 01', 'Conflicts Insert', 'arcat')
+      `INSERT INTO specs (id, section, title, source, library_id)
+       VALUES ($1, '99 99 01', 'Conflicts Insert', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master'))
        ON CONFLICT (id) DO NOTHING`,
       [INS_SPEC_ID]
     );

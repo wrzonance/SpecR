@@ -8,7 +8,8 @@ const PR1_ID = 'e3400000-0000-0000-0000-000000000003';
 
 beforeAll(async () => {
   await pool.query(
-    `INSERT INTO specs (id, section, title, source) VALUES ($1, $2, $3, $4)
+    `INSERT INTO specs (id, section, title, source, library_id)
+     VALUES ($1, $2, $3, $4, (SELECT id FROM libraries WHERE name = 'Default Company Master'))
      ON CONFLICT (id) DO NOTHING`,
     [SPEC_ID, '99 99 34', 'Versions Query Test', 'arcat']
   );
