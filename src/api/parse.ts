@@ -37,31 +37,32 @@ export const upload = multer({
   },
 });
 
-async function validateUpload(req: Request, ext: string): Promise<string | null> {
-  if (!ALLOWED_EXT.has(ext)) return 'unsupported file extension';
-  if (ext === '.txt') return null; // plaintext: no archive or XML validation needed
-  if (ext === '.docx' && req.file?.mimetype !== DOCX_MIME) return 'MIME type mismatch for .docx';
+type UploadValidation = { error: string } | { file: Express.Multer.File; ext: string };
+
+async function validateUpload(req: Request): Promise<UploadValidation> {
+  if (!req.file) return { error: 'file required' };
+  const file = req.file;
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (!ALLOWED_EXT.has(ext)) return { error: 'unsupported file extension' };
+  if (ext === '.txt') return { file, ext }; // plaintext: no archive or XML validation needed
+  if (ext === '.docx' && file.mimetype !== DOCX_MIME)
+    return { error: 'MIME type mismatch for .docx' };
   try {
-    if (ext === '.docx') await assertDocxSafe(req.file!.buffer);
-    else assertSecSafe(req.file!.buffer);
-    return null;
+    if (ext === '.docx') await assertDocxSafe(file.buffer);
+    else assertSecSafe(file.buffer);
+    return { file, ext };
   } catch (err) {
-    return err instanceof Error ? err.message : 'invalid file';
+    return { error: err instanceof Error ? err.message : 'invalid file' };
   }
 }
 
 export async function parseHandler(req: Request, res: Response): Promise<void> {
-  if (!req.file) {
-    res.status(400).json({ success: false, error: 'file required' });
+  const validation = await validateUpload(req);
+  if ('error' in validation) {
+    res.status(400).json({ success: false, error: validation.error });
     return;
   }
-
-  const ext = path.extname(req.file.originalname).toLowerCase();
-  const validationError = await validateUpload(req, ext);
-  if (validationError !== null) {
-    res.status(400).json({ success: false, error: validationError });
-    return;
-  }
+  const { file, ext } = validation;
 
   const bodyResult = ParseBodySchema.safeParse(req.body ?? {});
   if (!bodyResult.success) {
@@ -82,7 +83,7 @@ export async function parseHandler(req: Request, res: Response): Promise<void> {
 
   const jobId = createJob();
   // Pass buffer and ext, not the full file object, so the request closure can be GC'd
-  void processParseJob(jobId, req.file.buffer, ext, body);
+  void processParseJob(jobId, file.buffer, ext, body);
   res.status(202).json({ success: true, data: { jobId } });
 }
 

@@ -75,7 +75,7 @@ function registerSpecTools(server: McpServer): void {
     'get_spec',
     {
       description:
-        'Return the full spec paragraph tree with cross-reference resolution status. Use references[].isResolved to check if referenced specs are loaded.',
+        'Return the full spec paragraph tree with cross-reference resolution status. Use references[].isResolved to check if referenced specs are loaded. Nodes parsed from DOCX may carry meta.conflicts — inference signal disagreements ({signal, reportedIlvl, reportedNodeType}) indicating the hierarchy level was ambiguous; absent means no disagreement.',
       inputSchema: {
         specId: z.uuid().describe('Spec UUID (from search_library or list_sections)'),
       },
@@ -87,7 +87,7 @@ function registerSpecTools(server: McpServer): void {
     'get_paragraph',
     {
       description:
-        'Return a single paragraph with its full ancestor chain (root to immediate parent). Use to get context around a search_library result.',
+        'Return a single paragraph with its full ancestor chain (root to immediate parent). Use to get context around a search_library result. The node and each ancestor may carry conflicts — inference signal disagreements recorded at DOCX parse time; absent means the hierarchy was unambiguous.',
       inputSchema: {
         paragraphId: z.uuid().describe('Paragraph UUID (from search_library or get_spec)'),
       },

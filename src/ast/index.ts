@@ -1,5 +1,6 @@
 export type {
   NodeType,
+  SignalConflict,
   SpecNodeMeta,
   SpecNode,
   SpecTree,
@@ -8,6 +9,7 @@ export type {
 } from './types.js';
 export {
   NodeTypeSchema,
+  SignalConflictSchema,
   SpecNodeMetaSchema,
   SpecNodeSchema,
   SpecTreeSchema,

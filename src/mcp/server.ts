@@ -9,13 +9,10 @@ import { registerTools } from './tools.js';
 import { registerResources } from './resources.js';
 import { logger } from '../lib/logger.js';
 
-const mcpRateLimit = rateLimit({
-  windowMs: 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, error: 'too many MCP requests — please wait before retrying' },
-});
+// Default guards production; integration suites exceeding 20 calls inject a higher max
+// via registerMcpRoutes options (the limiter is otherwise shared module state that outlives
+// any single test app).
+const DEFAULT_MCP_RATE_LIMIT_MAX = 20;
 
 function createMcpServer(): McpServer {
   const server = new McpServer({ name: 'specr', version: '0.1.0' });
@@ -24,7 +21,17 @@ function createMcpServer(): McpServer {
   return server;
 }
 
-export function registerMcpRoutes(app: Express): void {
+export function registerMcpRoutes(
+  app: Express,
+  options?: { readonly rateLimitMax?: number }
+): void {
+  const mcpRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: options?.rateLimitMax ?? DEFAULT_MCP_RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: 'too many MCP requests — please wait before retrying' },
+  });
   app.post('/mcp', mcpRateLimit, json({ limit: '15mb' }), async (req, res) => {
     // AUTH HOOK: validate Authorization: Bearer <token> here before connecting transport.
     // Same token validation as REST middleware. Reject 401 if invalid.

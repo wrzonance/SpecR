@@ -850,6 +850,21 @@ components:
 
     # ── Specs ──────────────────────────────────────────────────────────────────
 
+    SignalConflict:
+      type: object
+      required: [signal, reportedIlvl, reportedNodeType]
+      properties:
+        signal:
+          type: integer
+          enum: [1, 2, 3, 4, 5]
+          description: The losing inference signal that disagreed with the winner
+        reportedIlvl:
+          type: integer
+          description: Normalized ilvl the losing signal reported (part=0 … pr5=6)
+        reportedNodeType:
+          type: string
+          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, note, continuation]
+
     SpecNode:
       type: object
       required: [id, type, text, children, meta]
@@ -880,6 +895,14 @@ components:
             baseVersion:
               type: integer
               minimum: 0
+            conflicts:
+              type: array
+              description: >-
+                DOCX inference signal disagreements for this paragraph. Present
+                only when non-empty — the hierarchy level was ambiguous and the
+                engine picked the highest-priority signal.
+              items:
+                $ref: '#/components/schemas/SignalConflict'
 
     SpecTree:
       type: object
