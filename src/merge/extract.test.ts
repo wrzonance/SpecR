@@ -184,4 +184,28 @@ describe('extractContentControls', () => {
     expect((err as MergeError).message).toBe('failed to parse word/document.xml');
     expect((err as MergeError).cause).toBeDefined();
   });
+
+  it('multiple paragraphs inside one sdt are concatenated with newline, not dropped', async () => {
+    // Regression: Word user pressing Enter inside a content control splits it into
+    // two w:p under one sdt. Previous Map.set was last-wins; now concatenates.
+    const body = sdt(U1, para(run('first para')) + para(run('second para'))) + para(run('tail'));
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('first para\nsecond para');
+    // tail is the third non-empty paragraph encountered (index 2 — two sdt paragraphs consumed 0 and 1)
+    expect(result.orphans).toEqual([{ text: 'tail', index: 2 }]);
+  });
+
+  // KNOWN AMBIGUITY: table-cell paragraphs are not generator output; they surface
+  // as individual orphans with document-order indexes (never silently dropped).
+  it('table cell paragraphs surface as orphans with document-order indexes', async () => {
+    const body =
+      `<w:tbl><w:tr><w:tc>${para(run('cell A'))}</w:tc><w:tc>${para(run('cell B'))}</w:tc></w:tr></w:tbl>` +
+      para(run('after table'));
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.orphans).toEqual([
+      { text: 'cell A', index: 0 },
+      { text: 'cell B', index: 1 },
+      { text: 'after table', index: 2 },
+    ]);
+  });
 });

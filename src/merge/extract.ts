@@ -148,6 +148,12 @@ function readSdtUuid(sdt: OrderedNode): string | undefined {
   return undefined;
 }
 
+/** Merge text into the controlled map: concatenate with '\n' if uuid already present. */
+function setControlledText(controlled: Map<string, string>, uuid: string, text: string): void {
+  const existing = controlled.get(uuid);
+  controlled.set(uuid, existing !== undefined ? `${existing}\n${text}` : text);
+}
+
 function visitParagraph(
   node: OrderedNode,
   uuid: string | undefined,
@@ -156,7 +162,7 @@ function visitParagraph(
 ): number {
   const text = visibleText(childrenOf(node, 'w:p'), { uuid, records: acc.records });
   if (!text.trim()) return index; // whitespace-only spacer paragraphs ignored
-  if (uuid !== undefined) acc.controlled.set(uuid, text);
+  if (uuid !== undefined) setControlledText(acc.controlled, uuid, text);
   else acc.orphans.push({ text, index });
   return index + 1;
 }
@@ -193,6 +199,8 @@ async function loadZip(buffer: Buffer): Promise<JSZip> {
 
 function parseDocumentXml(xml: string): readonly OrderedNode[] {
   try {
+    // Cast is safe: every downstream accessor (tagOf/childrenOf/attrStr) type-guards
+    // before accessing fields, so unexpected shapes degrade to empty output rather than throwing.
     return xmlParser.parse(xml) as OrderedNode[];
   } catch (err) {
     throw new MergeError('failed to parse word/document.xml', { cause: err });
