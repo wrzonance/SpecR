@@ -56,6 +56,7 @@ export type {
   AddSpecResult,
 } from './queries/projects.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
+export { getParagraphSnapshots } from './queries/versions.js';
 export type { ParagraphSearchResult, SpecSectionResult } from './queries/search.js';
 export {
   getTemplate,
