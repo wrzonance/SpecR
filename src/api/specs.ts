@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { findSpecById, updateSpec } from '../db/index.js';
+import { getSpecTree, updateSpec } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 
 export async function getSpecHandler(req: Request, res: Response): Promise<void> {
@@ -9,12 +9,12 @@ export async function getSpecHandler(req: Request, res: Response): Promise<void>
     return;
   }
   try {
-    const spec = await findSpecById(id);
-    if (!spec) {
+    const result = await getSpecTree(id);
+    if (!result) {
       res.status(404).json({ success: false, error: 'spec not found' });
       return;
     }
-    res.status(200).json({ success: true, data: spec });
+    res.status(200).json({ success: true, data: result.tree });
   } catch (err) {
     logger.error({ err }, 'get spec failed');
     res.status(500).json({ success: false, error: 'internal server error' });

@@ -31,6 +31,19 @@ beforeAll(async () => {
   const row = result.rows[0];
   if (!row) throw new Error('failed to insert test spec');
   testSpecId = row.id;
+
+  const partResult = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+     VALUES ($1, NULL, 'part', 'PART 1 - GENERAL', 0) RETURNING id`,
+    [testSpecId]
+  );
+  const partRow = partResult.rows[0];
+  if (!partRow) throw new Error('failed to insert test part paragraph');
+  await pool.query(
+    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+     VALUES ($1, $2, 'article', 'SUMMARY', 0)`,
+    [testSpecId, partRow.id]
+  );
 });
 
 afterAll(async () => {
@@ -60,6 +73,20 @@ describe('GET /specs/:id (integration)', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(res.status).toBe(404);
     expect(body['error']).toBe('spec not found');
+  });
+
+  it('regression #152: parsed spec returns reconstructed paragraph tree, not parts: []', async () => {
+    const res = await fetch(`${baseUrl}/specs/${testSpecId}`);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    const data = body['data'] as Record<string, unknown>;
+    const parts = data['parts'] as readonly Record<string, unknown>[];
+    expect(parts.length).toBe(1);
+    expect(parts[0]?.['type']).toBe('part');
+    expect(parts[0]?.['text']).toBe('PART 1 - GENERAL');
+    const children = parts[0]?.['children'] as readonly Record<string, unknown>[];
+    expect(children.length).toBe(1);
+    expect(children[0]?.['text']).toBe('SUMMARY');
   });
 });
 

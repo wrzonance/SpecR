@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response } from 'express';
 
 vi.mock('../db/index.js', () => ({
-  findSpecById: vi.fn(),
+  getSpecTree: vi.fn(),
   updateSpec: vi.fn(),
 }));
 
@@ -24,13 +24,24 @@ beforeEach(() => {
 });
 
 describe('getSpecHandler', () => {
-  it('returns 200 with SpecTree when spec exists', async () => {
-    const { findSpecById } = await import('../db/index.js');
-    vi.mocked(findSpecById).mockResolvedValueOnce({
-      id: 'abc',
-      section: '27 21 00',
-      title: 'Cabling',
-      parts: [],
+  it('returns 200 with reconstructed SpecTree when spec exists', async () => {
+    const { getSpecTree } = await import('../db/index.js');
+    vi.mocked(getSpecTree).mockResolvedValueOnce({
+      tree: {
+        id: 'abc',
+        section: '27 21 00',
+        title: 'Cabling',
+        parts: [
+          {
+            id: 'p1',
+            type: 'part',
+            text: 'PART 1 - GENERAL',
+            children: [],
+            meta: {},
+          },
+        ],
+      },
+      references: [],
     });
     const { getSpecHandler } = await import('./specs.js');
     const req = { params: { id: 'abc' } } as unknown as Request;
@@ -39,12 +50,15 @@ describe('getSpecHandler', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body['success']).toBe(true);
-    expect((body['data'] as Record<string, unknown>)['id']).toBe('abc');
+    const data = body['data'] as Record<string, unknown>;
+    expect(data['id']).toBe('abc');
+    // regression #152: handler must return the reconstructed tree, not parts: []
+    expect((data['parts'] as unknown[]).length).toBe(1);
   });
 
   it('returns 404 when spec not found', async () => {
-    const { findSpecById } = await import('../db/index.js');
-    vi.mocked(findSpecById).mockResolvedValueOnce(null);
+    const { getSpecTree } = await import('../db/index.js');
+    vi.mocked(getSpecTree).mockResolvedValueOnce(null);
     const { getSpecHandler } = await import('./specs.js');
     const req = { params: { id: 'missing' } } as unknown as Request;
     const res = makeRes();
@@ -55,8 +69,8 @@ describe('getSpecHandler', () => {
   });
 
   it('returns 500 on database error', async () => {
-    const { findSpecById } = await import('../db/index.js');
-    vi.mocked(findSpecById).mockRejectedValueOnce(new Error('db down'));
+    const { getSpecTree } = await import('../db/index.js');
+    vi.mocked(getSpecTree).mockRejectedValueOnce(new Error('db down'));
     const { getSpecHandler } = await import('./specs.js');
     const req = { params: { id: 'abc' } } as unknown as Request;
     const res = makeRes();
