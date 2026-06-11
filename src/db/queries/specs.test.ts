@@ -82,3 +82,44 @@ describe('updateSpec', () => {
     await expect(updateSpec('abc', {})).rejects.toBeInstanceOf(DatabaseError);
   });
 });
+
+describe('createSpec', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it('resolves the default library by source when libraryId is omitted', async () => {
+    const { pool } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query)
+      .mockResolvedValueOnce({ rows: [{ id: 'lib-ufgs' }] } as never) // library lookup
+      .mockResolvedValueOnce({ rows: [{ id: 'spec-1' }] } as never); // insert
+    const { createSpec } = await import('./specs.js');
+    const id = await createSpec({ section: '09 91 26', title: 'Paint', source: 'ufgs' });
+    expect(id).toBe('spec-1');
+    expect(vi.mocked(query).mock.calls[0]?.[1]).toEqual(['UFGS Reference']);
+    expect(vi.mocked(query).mock.calls[1]?.[1]).toEqual(['09 91 26', 'Paint', 'ufgs', 'lib-ufgs']);
+  });
+
+  it('uses an explicit libraryId without a lookup query', async () => {
+    const { pool } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockResolvedValueOnce({ rows: [{ id: 'spec-2' }] } as never);
+    const { createSpec } = await import('./specs.js');
+    const id = await createSpec({
+      section: '09 91 26',
+      title: 'Paint',
+      source: 'arcat',
+      libraryId: 'lib-explicit',
+    });
+    expect(id).toBe('spec-2');
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(query).mock.calls[0]?.[1]).toEqual([
+      '09 91 26',
+      'Paint',
+      'arcat',
+      'lib-explicit',
+    ]);
+  });
+});
