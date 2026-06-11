@@ -85,7 +85,9 @@ beforeAll(async () => {
                   meta: {},
                 },
               ],
-              meta: {},
+              meta: {
+                conflicts: [{ signal: 2, reportedIlvl: 2, reportedNodeType: 'pr1' }],
+              },
             },
           ],
           meta: {},
@@ -252,6 +254,65 @@ describe('tool: get_paragraph', () => {
     const b = body as Record<string, unknown>;
     const result = b['result'] as Record<string, unknown>;
     expect(result['isError']).toBe(true);
+  });
+});
+
+describe('tool: get_paragraph — conflicts (#56)', () => {
+  it('includes conflicts on a conflicted node', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_paragraph',
+      arguments: { paragraphId: '30000000-0000-4000-8000-000000000002' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as {
+      node: { id: string; conflicts?: unknown };
+    };
+    expect(data.node.conflicts).toEqual([{ signal: 2, reportedIlvl: 2, reportedNodeType: 'pr1' }]);
+  });
+
+  it('omits conflicts key for a clean node and its clean ancestors', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_paragraph',
+      arguments: { paragraphId: '30000000-0000-4000-8000-000000000003' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as {
+      node: Record<string, unknown>;
+      ancestors: Record<string, unknown>[];
+    };
+    expect(Object.keys(data.node)).not.toContain('conflicts');
+    // ancestor ...0002 IS conflicted — it must carry the field
+    expect(data.ancestors[1]!['conflicts']).toEqual([
+      { signal: 2, reportedIlvl: 2, reportedNodeType: 'pr1' },
+    ]);
+    // ancestor ...0001 (part) is clean — field absent
+    expect(Object.keys(data.ancestors[0]!)).not.toContain('conflicts');
+  });
+});
+
+describe('tool: get_spec — conflicts (#56)', () => {
+  it('exposes meta.conflicts on tree nodes', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_spec',
+      arguments: { specId: mcpSpecId },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as {
+      tree: {
+        parts: { meta: Record<string, unknown>; children: { meta: Record<string, unknown> }[] }[];
+      };
+    };
+    const article = data.tree.parts[0]!.children[0]!;
+    expect(article.meta['conflicts']).toEqual([
+      { signal: 2, reportedIlvl: 2, reportedNodeType: 'pr1' },
+    ]);
+    expect(Object.keys(data.tree.parts[0]!.meta)).not.toContain('conflicts');
   });
 });
 
