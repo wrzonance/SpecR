@@ -193,7 +193,7 @@ describe('computeDiff', () => {
     );
     expect(result.warnings).toEqual([
       '1 controlled paragraph(s) in the returned DOCX carry unknown UUIDs and were ignored',
-      'document contained 1 track-change records — diff treats them as accepted',
+      'document contained 1 track-change record — diff treats it as accepted',
     ]);
   });
 

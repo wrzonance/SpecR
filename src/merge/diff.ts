@@ -94,9 +94,9 @@ export function computeDiff(
   const unknownWarn = unknownUuidWarning(theirs.controlled, baseUuids);
   if (unknownWarn !== undefined) warnings.push(unknownWarn);
   if (theirs.trackChanges.present) {
-    warnings.push(
-      `document contained ${theirs.trackChanges.records.length} track-change records — diff treats them as accepted`
-    );
+    const count = theirs.trackChanges.records.length;
+    const phrase = count === 1 ? 'record — diff treats it' : 'records — diff treats them';
+    warnings.push(`document contained ${count} track-change ${phrase} as accepted`);
   }
 
   return { added, modified, deleted, conflicts, warnings };
