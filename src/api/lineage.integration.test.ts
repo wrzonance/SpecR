@@ -120,4 +120,12 @@ describe('GET /specs/:id/lineage (integration)', () => {
     expect(body['success']).toBe(false);
     expect(body['error']).toBe('spec not found');
   });
+
+  it('lineage: malformed spec id — 400 at the boundary, not a DB-cast 500', async () => {
+    const res = await fetch(`${baseUrl}/specs/not-a-uuid/lineage`);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(400);
+    expect(body['success']).toBe(false);
+    expect(body['error']).toBe('invalid spec id');
+  });
 });

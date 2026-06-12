@@ -231,6 +231,8 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/SpecLineage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
