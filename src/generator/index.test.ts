@@ -255,4 +255,33 @@ describe('generateDocx — style rules', () => {
     const plain = await getDocXml(await generateDocx(SYNTHETIC_TREE));
     expect(plain).not.toContain('Arial');
   });
+
+  it('note and continuation runs carry no run-style properties under template rules', async () => {
+    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE, ARIAL_RULES));
+
+    // Part run must carry Arial (confirms rules are applied for styled nodes)
+    expect(xml).toMatch(
+      /<w:r><w:rPr>.*?w:ascii="Arial".*?<\/w:rPr><w:t[^>]*>GENERAL<\/w:t><\/w:r>/s
+    );
+
+    // Note run: <w:r> followed directly by <w:t> — no <w:rPr> block before <w:t>
+    // The full run containing [NOTE] must be <w:r><w:t ...>[NOTE]...</w:t></w:r>
+    expect(xml).toMatch(/<w:r><w:t[^>]*>\[NOTE\] Verify local conditions\.<\/w:t><\/w:r>/);
+
+    // Continuation run: same — <w:r><w:t> with no intervening <w:rPr>
+    expect(xml).toMatch(/<w:r><w:t[^>]*>Continued text here\.<\/w:t><\/w:r>/);
+
+    // Belt-and-suspenders: Arial must not appear in either run's neighbourhood.
+    // Extract the raw run for [NOTE] and assert it lacks Arial.
+    const noteRunMatch = /<w:r>(<w:rPr>.*?<\/w:rPr>)?<w:t[^>]*>\[NOTE\][^<]*<\/w:t><\/w:r>/s.exec(
+      xml
+    );
+    expect(noteRunMatch).not.toBeNull();
+    expect(noteRunMatch?.[1]).toBeUndefined(); // no <w:rPr> captured
+
+    const contRunMatch =
+      /<w:r>(<w:rPr>.*?<\/w:rPr>)?<w:t[^>]*>Continued text here\.<\/w:t><\/w:r>/s.exec(xml);
+    expect(contRunMatch).not.toBeNull();
+    expect(contRunMatch?.[1]).toBeUndefined(); // no <w:rPr> captured
+  });
 });
