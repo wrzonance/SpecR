@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { pool } from '../index.js';
 import { createSpec, persistParsedSpec } from './specs.js';
+import type { OriginMeta } from './specs.js';
 import { insertTree } from './paragraphs.js';
 import { getSpecTree } from './specs.js';
 
@@ -206,3 +207,72 @@ describe('persistParsedSpec — library routing (#92)', () => {
     expect(r.rows[0]).toMatchObject({ n: 1 });
   });
 });
+
+describe('persistParsedSpec — lineage (#93)', () => {
+  afterEach(async () => {
+    await pool.query(`DELETE FROM specs WHERE section = '99 67 00'`);
+  });
+
+  const input = (originMeta?: OriginMeta) => ({
+    tree: {
+      id: '',
+      section: '99 67 00',
+      title: 'Lineage Test',
+      parts: [
+        {
+          id: '40000000-0000-0000-0000-000000000001',
+          type: 'part' as const,
+          text: 'GENERAL',
+          children: [],
+          meta: { source: 'arcat' as const },
+        },
+      ],
+    },
+    refs: [],
+    ...(originMeta ? { originMeta } : {}),
+  });
+
+  it('first persist lands at content_version 1; re-upsert bumps to 2', async () => {
+    const specId = await persistParsedSpec(input());
+    const r1 = await pool.query('SELECT content_version FROM specs WHERE id = $1', [specId]);
+    expect(r1.rows[0]).toMatchObject({ content_version: 1 });
+    await persistParsedSpec(input());
+    const r2 = await pool.query('SELECT content_version FROM specs WHERE id = $1', [specId]);
+    expect(r2.rows[0]).toMatchObject({ content_version: 2 });
+  });
+
+  it('stores origin_meta on insert and replaces it on re-upsert when provided', async () => {
+    const specId = await persistParsedSpec(
+      input({ filename: 'a.sec', sha256: 'aa11', loader: 'load_files' })
+    );
+    const r1 = await pool.query('SELECT origin_meta FROM specs WHERE id = $1', [specId]);
+    expect(r1.rows[0]).toMatchObject({
+      origin_meta: { filename: 'a.sec', sha256: 'aa11', loader: 'load_files' },
+    });
+    await persistParsedSpec(input({ filename: 'b.sec', sha256: 'bb22', loader: 'rest:parse' }));
+    const r2 = await pool.query('SELECT origin_meta FROM specs WHERE id = $1', [specId]);
+    expect(r2.rows[0]).toMatchObject({
+      origin_meta: { filename: 'b.sec', sha256: 'bb22', loader: 'rest:parse' },
+    });
+  });
+
+  it('re-upsert without originMeta preserves previously stored origin_meta', async () => {
+    const specId = await persistParsedSpec(
+      input({ filename: 'a.sec', sha256: 'aa11', loader: 'load_files' })
+    );
+    await persistParsedSpec(input());
+    const r = await pool.query('SELECT origin_meta FROM specs WHERE id = $1', [specId]);
+    expect(r.rows[0]).toMatchObject({
+      origin_meta: { filename: 'a.sec', sha256: 'aa11', loader: 'load_files' },
+    });
+  });
+
+  it('new specs carry no lineage: parent_spec_id and origin_version are null (#94 populates them)', async () => {
+    const specId = await persistParsedSpec(input());
+    const r = await pool.query('SELECT parent_spec_id, origin_version FROM specs WHERE id = $1', [
+      specId,
+    ]);
+    expect(r.rows[0]).toMatchObject({ parent_spec_id: null, origin_version: null });
+  });
+});
+
