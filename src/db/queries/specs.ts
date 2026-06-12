@@ -40,6 +40,13 @@ export interface UpdateSpecInput {
   readonly section?: string;
 }
 
+/** Ingest provenance recorded on specs.origin_meta (ADR-015 D2). */
+export interface OriginMeta {
+  readonly filename: string;
+  readonly sha256: string;
+  readonly loader: string;
+}
+
 export async function createSpec(input: CreateSpecInput, db: Queryable = pool): Promise<string> {
   try {
     const libraryId = input.libraryId ?? (await resolveDefaultLibraryId(input.source, db));
@@ -170,6 +177,10 @@ export async function updateSpec(id: string, input: UpdateSpecInput): Promise<Sp
       `UPDATE specs
        SET title = COALESCE($1, title),
            section = COALESCE($2, section),
+           content_version = content_version + CASE
+             WHEN title IS DISTINCT FROM COALESCE($1, title)
+               OR section IS DISTINCT FROM COALESCE($2, section)
+             THEN 1 ELSE 0 END,
            updated_at = now()
        WHERE id = $3
        RETURNING id, section, title`,
@@ -186,6 +197,7 @@ export async function updateSpec(id: string, input: UpdateSpecInput): Promise<Sp
 export async function persistParsedSpec(result: {
   readonly tree: SpecTree;
   readonly refs: readonly SecRef[];
+  readonly originMeta?: OriginMeta;
 }): Promise<string> {
   const client = await pool.connect();
   try {
@@ -195,12 +207,21 @@ export async function persistParsedSpec(result: {
     const source = result.tree.parts[0]?.meta.source ?? 'unknown';
     const libraryId = await resolveDefaultLibraryId(source, client);
     const res = await client.query<{ id: string }>(
-      `INSERT INTO specs (section, title, source, library_id)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO specs (section, title, source, library_id, origin_meta)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
        ON CONFLICT (section, source, library_id) WHERE library_id IS NOT NULL DO UPDATE
-         SET title = EXCLUDED.title, updated_at = now()
+         SET title = EXCLUDED.title,
+             updated_at = now(),
+             content_version = specs.content_version + 1,
+             origin_meta = COALESCE(EXCLUDED.origin_meta, specs.origin_meta)
        RETURNING id`,
-      [result.tree.section, result.tree.title, source, libraryId]
+      [
+        result.tree.section,
+        result.tree.title,
+        source,
+        libraryId,
+        result.originMeta ? JSON.stringify(result.originMeta) : null,
+      ]
     );
     const specId = res.rows[0]?.id;
     if (!specId) throw new DatabaseError('upsert spec returned no id');

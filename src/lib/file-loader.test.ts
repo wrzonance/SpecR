@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createHash } from 'node:crypto';
 
 vi.mock('../parser/index.js', () => ({ parse: vi.fn() }));
 vi.mock('../db/index.js', () => ({
@@ -181,5 +182,25 @@ describe('loadFiles()', () => {
     const okValues: boolean[] = [];
     await loadFiles(['/a/spec.sec'], { onProgress: (_d, _t, _f, ok) => okValues.push(ok) });
     expect(okValues).toEqual([false]);
+  });
+
+  it('passes origin_meta provenance (filename, sha256, loader) to persistParsedSpec (#93)', async () => {
+    vi.mocked(readFile).mockResolvedValue(mockBuf);
+    vi.mocked(parse).mockResolvedValue({
+      tree: mockTree,
+      refs: [],
+      sectionInference: metadataInference,
+    });
+    vi.mocked(persistParsedSpec).mockResolvedValue('spec-id-meta');
+    await loadFiles(['/a/b/spec.sec']);
+    expect(persistParsedSpec).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originMeta: {
+          filename: 'spec.sec',
+          sha256: createHash('sha256').update(mockBuf).digest('hex'),
+          loader: 'load_files',
+        },
+      })
+    );
   });
 });

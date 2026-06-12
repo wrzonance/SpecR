@@ -1,5 +1,6 @@
 // src/mcp/server.integration.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createHash } from 'node:crypto';
 import express from 'express';
 import type { Server } from 'http';
 import { pool, createSpec, insertTree } from '../db/index.js';
@@ -318,14 +319,15 @@ describe('tool: get_spec — conflicts (#56)', () => {
 });
 
 describe('tool: parse_document', () => {
+  // Inline minimal SEC — section 99 99 99 is not in the seed corpus, so no
+  // conflict with parallel tests that operate on seeded UFGS specs.
+  const minimalSec =
+    '<SEC><SCN>99 99 99</SCN><STL>MCP Test Section</STL>' +
+    '<PRT><TTL>PART 1 - GENERAL</TTL>' +
+    '<SPT><TTL>SUMMARY</TTL><TXT>Test paragraph content.</TXT></SPT>' +
+    '</PRT></SEC>';
+
   it('parses a valid base64-encoded SEC file and returns spec summary', async () => {
-    // Inline minimal SEC — section 99 99 99 is not in the seed corpus, so no
-    // conflict with parallel tests that operate on seeded UFGS specs.
-    const minimalSec =
-      '<SEC><SCN>99 99 99</SCN><STL>MCP Test Section</STL>' +
-      '<PRT><TTL>PART 1 - GENERAL</TTL>' +
-      '<SPT><TTL>SUMMARY</TTL><TXT>Test paragraph content.</TXT></SPT>' +
-      '</PRT></SEC>';
     const secBase64 = Buffer.from(minimalSec, 'utf-8').toString('base64');
 
     const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
@@ -345,6 +347,40 @@ describe('tool: parse_document', () => {
     expect(typeof data.specId).toBe('string');
     expect(data.nodeCount).toBeGreaterThan(0);
     parsedSpecId = data.specId;
+  });
+
+  it('records origin_meta provenance for the ingested file (#93)', async () => {
+    const r = await pool.query<{
+      origin_meta: { filename: string; sha256: string; loader: string } | null;
+    }>('SELECT origin_meta FROM specs WHERE id = $1', [parsedSpecId]);
+    expect(r.rows[0]?.origin_meta).toEqual({
+      filename: 'test.sec',
+      sha256: createHash('sha256').update(Buffer.from(minimalSec, 'utf-8')).digest('hex'),
+      loader: 'mcp:parse_document',
+    });
+  });
+
+  it('sanitizes path fragments from the caller-supplied filename — C:\\fakepath\\windows.sec → windows.sec', async () => {
+    // Distinct section (99 99 98) so the upsert does not collide with the spec
+    // created by the provenance test above.
+    const winSec = minimalSec.replace('99 99 99', '99 99 98');
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'parse_document',
+      arguments: {
+        filename: 'C:\\fakepath\\windows.sec',
+        contentBase64: Buffer.from(winSec, 'utf-8').toString('base64'),
+      },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    expect(result['isError'], content[0]?.text).not.toBe(true);
+    const data = JSON.parse(content[0]!.text) as { specId: string };
+    const r = await pool.query<{ origin_meta: { filename: string } | null }>(
+      'SELECT origin_meta FROM specs WHERE id = $1',
+      [data.specId]
+    );
+    expect(r.rows[0]?.origin_meta?.filename).toBe('windows.sec');
   });
 
   it('returns isError for invalid base64', async () => {

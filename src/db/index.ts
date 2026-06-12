@@ -36,6 +36,7 @@ export type {
   CreateSpecInput,
   SpecTreeResult,
   SpecReference,
+  OriginMeta,
 } from './queries/specs.js';
 export { insertTree, getParagraphWithAncestors } from './queries/paragraphs.js';
 export type { ParagraphRow, ParagraphWithAncestors } from './queries/paragraphs.js';

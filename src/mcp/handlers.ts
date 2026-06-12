@@ -9,12 +9,15 @@ import {
   persistParsedSpec,
   lookupSpecSectionTitle,
 } from '../db/index.js';
+import type { OriginMeta } from '../db/index.js';
 import { inferSectionMeta, computeTitleMatch } from '../lib/infer-section.js';
 import type { SectionInference } from '../lib/infer-section.js';
 import { parseSec, parseDocx, parseText, assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { generateDocx } from '../generator/index.js';
 import { logger } from '../lib/logger.js';
+import { sha256Hex } from '../lib/hash.js';
+import { sanitizeFilename } from '../lib/filename.js';
 
 type ToolError = {
   readonly isError: true;
@@ -196,6 +199,17 @@ async function dispatchParse(
   return { tree: await parseDocx(buf, noop), refs: [] };
 }
 
+function buildMcpOriginMeta(filename: string, contentBase64: string): OriginMeta {
+  return {
+    filename: sanitizeFilename(filename),
+    // hash the raw ingested bytes (base64-decoded), not decoded/transformed text;
+    // deliberate second decode — decodeSafeBuffer's .sec branch returns decoded
+    // text, not the raw bytes provenance needs
+    sha256: sha256Hex(Buffer.from(contentBase64, 'base64')),
+    loader: 'mcp:parse_document',
+  };
+}
+
 export async function handleParseDocument({
   filename,
   contentBase64,
@@ -213,7 +227,8 @@ export async function handleParseDocument({
     const rawOrErr = await dispatchParse(ext, bufOrErr);
     if (isToolError(rawOrErr)) return rawOrErr;
     const enriched = await enrichInferenceForMcp(rawOrErr.tree, rawOrErr.refs);
-    const specId = await persistParsedSpec(enriched);
+    const originMeta = buildMcpOriginMeta(filename, contentBase64);
+    const specId = await persistParsedSpec({ ...enriched, originMeta });
     const nodeCount = countNodes(enriched.tree.parts);
     const response: Record<string, unknown> = {
       specId,
