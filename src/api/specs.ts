@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { getSpecTree, updateSpec } from '../db/index.js';
+import { getSpecTree, updateSpec, getSpecLineage } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 
 export async function getSpecHandler(req: Request, res: Response): Promise<void> {
@@ -17,6 +17,25 @@ export async function getSpecHandler(req: Request, res: Response): Promise<void>
     res.status(200).json({ success: true, data: result.tree });
   } catch (err) {
     logger.error({ err }, 'get spec failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function getSpecLineageHandler(req: Request, res: Response): Promise<void> {
+  const id = req.params['id'];
+  if (!id || typeof id !== 'string') {
+    res.status(400).json({ success: false, error: 'missing spec id' });
+    return;
+  }
+  try {
+    const lineage = await getSpecLineage(id);
+    if (!lineage) {
+      res.status(404).json({ success: false, error: 'spec not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: lineage });
+  } catch (err) {
+    logger.error({ err }, 'get spec lineage failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }
