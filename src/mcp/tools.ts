@@ -13,6 +13,7 @@ import {
   handleGetParagraph,
   handleParseDocument,
   handleGenerateDocx,
+  handleGetSpecLineage,
 } from './handlers.js';
 
 type ToolError = {
@@ -93,6 +94,18 @@ function registerSpecTools(server: McpServer): void {
       },
     },
     handleGetParagraph
+  );
+
+  server.registerTool(
+    'get_spec_lineage',
+    {
+      description:
+        'Return the chain of custody for a spec (ADR-015 D6). Walks parent_spec_id from the spec to its root master: chain[0] is the requested spec, the last entry is the root. Per hop, behindBy = parent current contentVersion minus this copy originVersion (drift since clone; null on the root). scope is "library" for a master spec or "project" for a project-owned copy; name is the owning library or project name. originMeta is the root ingest provenance (filename, sha256, loader) or null.',
+      inputSchema: {
+        specId: z.uuid().describe('Spec UUID (from search_library, list_sections, or get_spec)'),
+      },
+    },
+    handleGetSpecLineage
   );
 }
 

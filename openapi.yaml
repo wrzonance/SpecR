@@ -198,6 +198,46 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/lineage:
+    get:
+      operationId: getSpecLineage
+      summary: Chain of custody for a spec
+      description: >
+        Walks `parent_spec_id` from the requested spec to the root library master,
+        returning every hop in leaf-first order (`chain[0]` = the requested spec,
+        last entry = the root).
+
+
+        `behindBy` for each hop = the parent's current `contentVersion` minus this
+        copy's `originVersion` (the version it was cloned from); null on the root
+        because the root has no parent to drift behind.
+
+
+        `originMeta` is the root's ingest provenance (`filename`, `sha256`, `loader`)
+        when the root was file-ingested; null otherwise.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Custody chain from requested spec to root
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecLineage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/generate:
     post:
       operationId: generateDocx
@@ -1267,6 +1307,65 @@ components:
           type: string
         section:
           type: string
+
+    LineageHop:
+      type: object
+      required: [specId, scope, name, contentVersion, originVersion, behindBy]
+      description: >
+        One node in the derivation chain. `originVersion` and `behindBy` are null
+        on the root (it has no parent to drift behind).
+      properties:
+        specId:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          enum: [library, project]
+          description: Whether this spec lives in a library or a project
+        name:
+          type: string
+          description: Library or project name that owns this spec
+        contentVersion:
+          type: integer
+          description: Current edit generation of this spec
+        originVersion:
+          type: [integer, 'null']
+          description: Content version of the parent this spec was cloned from; null on root
+        behindBy:
+          type: [integer, 'null']
+          description: >
+            Parent's current contentVersion minus this copy's originVersion —
+            how many parent edits this copy has not yet seen; null on root
+
+    SpecLineage:
+      type: object
+      required: [chain, originMeta]
+      properties:
+        chain:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/LineageHop'
+          description: >
+            Derivation chain, leaf-first. `chain[0]` is the requested spec;
+            the last entry is the root library master.
+        originMeta:
+          description: >
+            Ingest provenance of the chain root (filename, sha256, loader);
+            null when the root was not file-ingested.
+          oneOf:
+            - type: object
+              required: [filename, sha256, loader]
+              properties:
+                filename:
+                  type: string
+                sha256:
+                  type: string
+                  minLength: 64
+                  maxLength: 64
+                loader:
+                  type: string
+            - type: 'null'
 
     # ── Projects ───────────────────────────────────────────────────────────────
 
