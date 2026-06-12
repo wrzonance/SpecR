@@ -526,6 +526,138 @@ Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
 - Full-text search across paragraph libraries
 - DOCX cache layer — pre-generate + store DOCX on spec write, invalidate on paragraph change, locking to prevent stale reads (see issue #52)
 
+## Module Boundaries
+
+Each module in `src/` is a self-contained unit: a typed error class, a public API exported from its `index.ts`, no leaked internals. Modules import only from a sibling's `index.ts` barrel — never from its internal files.
+
+`lib/` is the one exception: it is not a module with a public API but a collection of leaf utilities (`errors.ts`, `logger.ts`, `env.ts`, …). It has no barrel — import the file you need directly, e.g. `import { logger } from '../lib/logger.js'`.
+
+```text
+parser/    ← knows about AST types; nothing about DB or API
+generator/ ← knows about AST types and dolanmiu/docx; nothing else
+merge/     ← knows about AST types and DB queries; nothing about parsing
+db/        ← knows about AST types and pg; nothing about domain logic
+api/       ← orchestrates all modules; owns HTTP concerns only
+mcp/       ← imports from db/index, generator/index, parser/index; no api/ internals
+lib/       ← format-agnostic utilities (errors, logging, encoding); usable by any module
+```
+
+```typescript
+// CORRECT — through the barrel
+import { parse } from '../parser/index.js'
+
+// WRONG — leaks internal structure
+import { buildNumberingMap } from '../parser/docx/numbering.js'
+```
+
+## Error Handling — Context Chains
+
+Every error carries the full "why" chain from origin to surface. The pattern:
+
+- One custom error class per module boundary, extending `SpecrError` (`src/lib/errors.ts`): `ParserError`, `GeneratorError`, `MergeError`.
+- `cause` chaining at every catch site where the caller adds meaning.
+- Zod for all external-input validation (request bodies, env vars, parsed XML/OOXML); chain the `ZodError` as `cause`.
+
+```typescript
+// src/lib/errors.ts
+export class SpecrError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = this.constructor.name
+  }
+}
+
+// src/parser/error.ts
+export class ParserError extends SpecrError {}
+
+// src/parser/docx/numbering.ts — correct context chaining
+function buildNumberingMap(xml: string): NumberingMap {
+  try {
+    return parseNumberingXml(xml)
+  } catch (err) {
+    throw new ParserError('failed to build numbering map from numbering.xml', { cause: err })
+  }
+}
+
+// Resulting chain:
+//   ParserError: DOCX parse failed
+//   Caused by: ParserError: failed to build numbering map from numbering.xml
+//   Caused by: Error: abstractNum id="3" references undefined numId
+```
+
+Anti-patterns rejected in review:
+
+```typescript
+} catch (_err) { throw new ParserError('failed') }   // swallows context
+function parse(input: any): any { ... }              // any across a boundary
+const node = map.get(id)!                            // non-null assertion in non-test code
+function buildMap(): Record<string, unknown> { ... } // untyped raw boundary
+```
+
+**API error surface:** all errors are caught by `src/api/middleware/error.ts` and mapped to `ApiResponse<never>` with the appropriate HTTP status — `ParserError` → 422, `MergeError` (conflict) → 409, unknown → 500. Stack traces never leave the process.
+
+## Complexity Controls (enforced)
+
+ESLint (`eslint.config.js`) — `error` severity, not warnings:
+
+```js
+complexity: ['error', 10],
+'sonarjs/cognitive-complexity': ['error', 10],
+'max-lines-per-function': ['error', { max: 50, skipBlankLines: true, skipComments: true }],
+'max-lines': ['error', { max: 400, skipBlankLines: true, skipComments: true }],
+'no-console': 'error',
+'@typescript-eslint/no-explicit-any': 'error',
+```
+
+Test files (`src/**/*.test.ts`) and `scripts/**/*.ts` relax the line/console caps (see config for the exact carve-outs). TypeScript strict mode plus `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `verbatimModuleSyntax` (`tsconfig.json`).
+
+## MCP Server
+
+`src/mcp/server.ts` exports `registerMcpRoutes(app: Express)`. One fresh `McpServer` + `StreamableHTTPServerTransport` is created per `POST /mcp` request (stateless, `sessionIdGenerator: undefined`). `registerTools(server)` and `registerResources(server)` wire all capabilities. `GET /mcp` and `DELETE /mcp` return 405 (stubs for a future stateful session upgrade).
+
+**Adding a tool** (inside `registerTools(server)` in `src/mcp/tools.ts`):
+
+```typescript
+server.registerTool('tool_name', {
+  description: 'What this tool does for an AI agent.',
+  inputSchema: { param: z.string().describe('param description') },
+}, async ({ param }) => {
+  try {
+    const result = await someQuery(param);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+  } catch (err) {
+    logger.error({ err }, 'mcp tool tool_name failed');
+    return { isError: true, content: [{ type: 'text' as const, text: 'Internal error' }] };
+  }
+});
+```
+
+Rules: import DB functions from `../db/index.js` only (no internal query-file imports); use `z.uuid()` (Zod v4), not `z.string().uuid()`; always return `{ isError: true, content: [...] }` on error — never throw from a tool handler; extract handlers if a body exceeds the 50-line `max-lines-per-function` cap.
+
+**Adding a resource:**
+
+```typescript
+// Static URI:
+server.registerResource('name', 'specr://path', { description: '...', mimeType: 'text/markdown' }, async (uri) => {
+  return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text: markdownString }] };
+});
+// Template URI:
+server.registerResource('name', new ResourceTemplate('specr://path/{id}', { list: undefined }), { ... }, async (uri, { id }) => { ... });
+```
+
+**Stateful session upgrade (Phase 5+):** change `sessionIdGenerator: undefined` → `sessionIdGenerator: () => randomUUID()` and add a `Map<sessionId, McpServer>` session store in the route handler. Tool/resource definitions are unchanged. **Auth hook:** the insertion point is marked in `server.ts`; add `Authorization: Bearer <token>` validation there in the same PR as REST auth.
+
+## Markdown Renderer
+
+`src/generator/markdown.ts` is a pure module (no I/O, no DB), shared between MCP resources and the future DOCX generator.
+
+- `renderMarkdown(tree: CsiTree): string` — full spec as Markdown.
+- `getLabel(type: NodeType, index: number, partNumber?: number): string` — the CSI label for any node type (`A.` / `1.` / `a.` / `1)` / `a)`, `PART N -`, `N.N`). Uses base-26 arithmetic for the `pr1` / `pr3` / `pr5` letter tiers so it handles >26 siblings correctly.
+- `note` nodes always render as `> **[NOTE]** text` regardless of `meta.vanish` — editorial notes are structural metadata for spec writers, not owner-facing content.
+- `meta.vanish` on non-note nodes → returns `''` (suppressed from output).
+
+When the DOCX generator (Phase 2b) needs numbering labels, import `getLabel` from here rather than reimplementing.
+
 ## File Structure
 
 ```
@@ -534,7 +666,7 @@ specr/
 │   ├── index.ts                 # Entry: Express, env validation, graceful shutdown
 │   ├── mcp/
 │   │   ├── server.ts            # registerMcpRoutes(app) — Streamable HTTP, stateless per-request McpServer
-│   │   ├── tools.ts             # registerTools(server): search_library, get_spec, list_sections
+│   │   ├── tools.ts             # registerTools(server): search_library, list_sections, get_spec, get_paragraph, parse_document, generate_docx, load_files
 │   │   └── resources.ts         # registerResources(server): specr://specs/{id}, specr://sections
 │   ├── api/
 │   ├── parser/
@@ -548,12 +680,7 @@ specr/
 │   │   └── index.ts             # barrel — public surface (MergeError, computeDiff, extractContentControls, types)
 │   ├── db/
 │   ├── ast/
-│   └── lib/
-│       ├── decode-text.ts        # Buffer → UTF-8 string, encoding-agnostic (chardet + iconv-lite)
-│       ├── errors.ts             # SpecrError base class
-│       ├── jobs.ts               # In-memory async job store (parse progress)
-│       ├── env.ts                # Zod env validation — exits process on invalid config
-│       └── logger.ts             # Structured logging (pino)
+│   └── lib/                     # Shared leaf utilities (errors, logger, env, encoding, jobs, section-number, …) — no barrel; imported per-file
 ├── tests/
 │   ├── fixtures/                # .SEC and .docx test files (binary, gitlfs candidate)
 │   ├── unit/                    # Unit tests — no DB, no I/O
@@ -571,7 +698,7 @@ specr/
 ├── package.json
 ├── pnpm-lock.yaml
 ├── tsconfig.json
-├── .eslintrc.json
+├── eslint.config.js
 ├── .prettierrc
 ├── .env.example
 ├── docker-compose.yml           # PostgreSQL for local dev + integration tests
@@ -583,40 +710,22 @@ specr/
 
 ## Key Dependencies
 
-```json
-{
-  "dependencies": {
-    "express": "^5",
-    "zod": "^3",
-    "docx": "^9",
-    "jszip": "^3",
-    "fast-xml-parser": "^5",
-    "pg": "^8",
-    "pino": "^9",
-    "multer": "^1",
-    "uuid": "^11",
-    "@modelcontextprotocol/sdk": "^1",
-    "chardet": "^2",
-    "iconv-lite": "^0.6"
-  },
-  "devDependencies": {
-    "typescript": "^5",
-    "@types/node": "^22",
-    "@types/express": "^5",
-    "@types/pg": "^8",
-    "@types/multer": "^1",
-    "@types/uuid": "^10",
-    "vitest": "^3",
-    "eslint": "^9",
-    "@typescript-eslint/eslint-plugin": "^8",
-    "@typescript-eslint/parser": "^8",
-    "eslint-plugin-sonarjs": "^3",
-    "prettier": "^3",
-    "ts-node-dev": "^2",
-    "depcheck": "^1"
-  }
-}
-```
+Versions live in `package.json` / `pnpm-lock.yaml` — the lockfile is the authority. What each key dependency is for:
+
+- `express` (v5) — HTTP server
+- `zod` (v4) — all external-input validation (request bodies, env, parsed XML/OOXML); note v4 idioms like `z.uuid()`
+- `docx` (dolanmiu) — DOCX generation
+- `jszip` / `yauzl` — OOXML zip reading and archive safety checks
+- `fast-xml-parser` — `.SEC` (SpecsIntact XML) and OOXML parsing
+- `pg` + `node-pg-migrate` — PostgreSQL driver + reversible TypeScript migrations
+- `pino` — structured logging
+- `multer` — multipart upload handling
+- `uuid` — content-control anchor and entity ids
+- `piscina` — worker-thread pool for CPU-bound parsing
+- `express-rate-limit` — rate limiting on public endpoints
+- `@modelcontextprotocol/sdk` — MCP server (Streamable HTTP)
+- `chardet` + `iconv-lite` — encoding detection / decoding
+- Dev: `typescript`, `vitest` (+ `@vitest/coverage-v8`), `eslint` 9 flat config with `typescript-eslint` + `eslint-plugin-sonarjs` + `eslint-config-prettier`, `prettier`, `tsx` (dev server), `@redocly/cli` (OpenAPI lint), `depcheck`
 
 ## Reference Materials
 
