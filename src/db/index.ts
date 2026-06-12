@@ -122,3 +122,5 @@ export {
   SnapshotValidationError,
 } from './queries/revisions.js';
 export type { RevisionSummary, RevisionSpecEntry, RevisionWithTrees } from './queries/revisions.js';
+export { getSpecLineage } from './queries/lineage.js';
+export type { SpecLineage, LineageHop, LineageScope } from './queries/lineage.js';
