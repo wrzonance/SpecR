@@ -6,6 +6,7 @@ export type {
   SpecTree,
   SecRef,
   ParagraphSnapshot,
+  StyleRule,
 } from './types.js';
 export {
   NodeTypeSchema,
@@ -41,5 +42,11 @@ export {
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
+  GenerateBodySchema,
 } from './schemas.js';
-export type { CreateTemplateBody, PatchTemplateBody, UpsertStyleRulesBody } from './schemas.js';
+export type {
+  CreateTemplateBody,
+  PatchTemplateBody,
+  UpsertStyleRulesBody,
+  GenerateBody,
+} from './schemas.js';

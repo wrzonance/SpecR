@@ -1,18 +1,13 @@
 import type { Pool, PoolClient } from 'pg';
 import { pool, DatabaseError } from '../index.js';
-import type { StyleNodeType, StyleProperties } from '../../ast/types.js';
+import type { StyleNodeType, StyleProperties, StyleRule } from '../../ast/types.js';
 import { STYLE_NODE_TYPES } from '../../ast/types.js';
 import { StylePropertiesSchema } from '../../ast/index.js';
 
 // Re-export the relocated symbols (local bindings) so existing importers
 // (db/index.ts barrel, integration tests) keep resolving them from this module.
-export type { StyleNodeType, StyleProperties };
+export type { StyleNodeType, StyleProperties, StyleRule };
 export { STYLE_NODE_TYPES };
-
-export interface StyleRule {
-  readonly nodeType: StyleNodeType;
-  readonly properties: StyleProperties;
-}
 
 export interface TemplateMeta {
   readonly id: string;

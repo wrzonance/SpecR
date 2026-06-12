@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { StylePropertiesSchema } from './schemas.js';
+import { StylePropertiesSchema, GenerateBodySchema } from './schemas.js';
 
 describe('StylePropertiesSchema (ADR-021 open style payload)', () => {
   it('parses a known OOXML-faithful definition unchanged', () => {
@@ -34,5 +34,24 @@ describe('StylePropertiesSchema (ADR-021 open style payload)', () => {
     // JSON.stringify at the DB boundary — reject it at parse instead.
     expect(() => StylePropertiesSchema.parse({ weird: 10n })).toThrow();
     expect(() => StylePropertiesSchema.parse({ pPr: { vendorFn: () => 1 } })).toThrow();
+  });
+});
+
+describe('GenerateBodySchema (generate request body)', () => {
+  it('accepts an empty body', () => {
+    expect(GenerateBodySchema.parse({})).toEqual({});
+  });
+
+  it('accepts a valid templateId UUID', () => {
+    const body = { templateId: '0a4d4567-1b2c-4d3e-9f00-abcdefabcdef' };
+    expect(GenerateBodySchema.parse(body)).toEqual(body);
+  });
+
+  it('rejects a non-UUID templateId', () => {
+    expect(() => GenerateBodySchema.parse({ templateId: 'not-a-uuid' })).toThrow();
+  });
+
+  it('rejects explicit undefined templateId (exactOptional)', () => {
+    expect(() => GenerateBodySchema.parse({ templateId: undefined })).toThrow();
   });
 });
