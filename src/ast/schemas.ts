@@ -265,3 +265,11 @@ export const UpsertStyleRulesBodySchema = z.object({
 });
 
 export type UpsertStyleRulesBody = z.infer<typeof UpsertStyleRulesBodySchema>;
+
+// ── Generate request body (#32) ──────────────────────────────────────────────
+
+export const GenerateBodySchema = z.object({
+  templateId: z.uuid().exactOptional(),
+});
+
+export type GenerateBody = z.infer<typeof GenerateBodySchema>;

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
 import { generateDocx } from './index.js';
 import type { SpecTree } from '../ast/types.js';
+import type { StyleRule } from '../ast/index.js';
 
 // Covers: part, article, pr1, pr2, note, continuation, vanish
 const SYNTHETIC_TREE: SpecTree = {
@@ -214,5 +215,88 @@ describe('generateDocx — content controls', () => {
     // Title paragraph is synthetic — no UUID tag
     const uuidMatches = xml.match(/specr-uuid-/g) ?? [];
     expect(uuidMatches.length).toBe(8);
+  });
+});
+
+const ARIAL_RULES: readonly StyleRule[] = [
+  {
+    nodeType: 'part',
+    properties: {
+      rPr: { rFonts: { ascii: 'Arial' }, sz: 24, b: true, caps: true },
+      pPr: { spacing: { before: 240, after: 240 }, ind: { left: 360 } },
+      numbering: { lvlText: 'SECTION %1 -' },
+    },
+  },
+];
+
+describe('generateDocx — style rules', () => {
+  it('applies font family and size to styled node runs', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE, ARIAL_RULES);
+    const xml = await getDocXml(buffer);
+    expect(xml).toContain('Arial');
+    expect(xml).toMatch(/w:sz[^/>]*w:val="24"/);
+  });
+
+  it('non-ascii rFonts slots (hAnsi/cs/eastAsia) survive into w:rFonts (regression: only ascii was forwarded)', async () => {
+    const rules: readonly StyleRule[] = [
+      {
+        nodeType: 'part',
+        properties: {
+          rPr: { rFonts: { hAnsi: 'Arial', cs: 'Courier New', eastAsia: 'MS Mincho' } },
+        },
+      },
+    ];
+    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE, rules));
+    expect(xml).toMatch(/w:rFonts[^/>]*w:hAnsi="Arial"/);
+    expect(xml).toMatch(/w:rFonts[^/>]*w:cs="Courier New"/);
+    expect(xml).toMatch(/w:rFonts[^/>]*w:eastAsia="MS Mincho"/);
+  });
+
+  it('applies paragraph spacing and indent', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE, ARIAL_RULES);
+    const xml = await getDocXml(buffer);
+    expect(xml).toMatch(/w:spacing[^/>]*w:before="240"/);
+    expect(xml).toMatch(/w:ind[^/>]*"360"/);
+  });
+
+  it('applies numbering lvlText override to numbering.xml', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE, ARIAL_RULES);
+    const zip = await JSZip.loadAsync(buffer);
+    const numbering = await zip.file('word/numbering.xml')?.async('string');
+    expect(numbering).toContain('SECTION %1 -');
+  });
+
+  it('no rules → no Arial anywhere (output unchanged)', async () => {
+    const plain = await getDocXml(await generateDocx(SYNTHETIC_TREE));
+    expect(plain).not.toContain('Arial');
+  });
+
+  it('note and continuation runs carry no run-style properties under template rules', async () => {
+    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE, ARIAL_RULES));
+
+    // Part run must carry Arial (confirms rules are applied for styled nodes)
+    expect(xml).toMatch(
+      /<w:r><w:rPr>.*?w:ascii="Arial".*?<\/w:rPr><w:t[^>]*>GENERAL<\/w:t><\/w:r>/s
+    );
+
+    // Note run: <w:r> followed directly by <w:t> — no <w:rPr> block before <w:t>
+    // The full run containing [NOTE] must be <w:r><w:t ...>[NOTE]...</w:t></w:r>
+    expect(xml).toMatch(/<w:r><w:t[^>]*>\[NOTE\] Verify local conditions\.<\/w:t><\/w:r>/);
+
+    // Continuation run: same — <w:r><w:t> with no intervening <w:rPr>
+    expect(xml).toMatch(/<w:r><w:t[^>]*>Continued text here\.<\/w:t><\/w:r>/);
+
+    // Belt-and-suspenders: Arial must not appear in either run's neighbourhood.
+    // Extract the raw run for [NOTE] and assert it lacks Arial.
+    const noteRunMatch = /<w:r>(<w:rPr>.*?<\/w:rPr>)?<w:t[^>]*>\[NOTE\][^<]*<\/w:t><\/w:r>/s.exec(
+      xml
+    );
+    expect(noteRunMatch).not.toBeNull();
+    expect(noteRunMatch?.[1]).toBeUndefined(); // no <w:rPr> captured
+
+    const contRunMatch =
+      /<w:r>(<w:rPr>.*?<\/w:rPr>)?<w:t[^>]*>Continued text here\.<\/w:t><\/w:r>/s.exec(xml);
+    expect(contRunMatch).not.toBeNull();
+    expect(contRunMatch?.[1]).toBeUndefined(); // no <w:rPr> captured
   });
 });

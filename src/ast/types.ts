@@ -91,6 +91,16 @@ export type ParagraphProperties = NonNullable<StyleProperties['pPr']>;
  */
 export type NumberingDef = NonNullable<StyleProperties['numbering']>;
 
+/**
+ * One per-NodeType style rule: the (nodeType, properties) pair stored in
+ * style_rules. Lives in ast/ (foundational layer) so generator/ can accept
+ * rules without importing db/ — mirrors the StyleNodeType relocation (#31).
+ */
+export interface StyleRule {
+  readonly nodeType: StyleNodeType;
+  readonly properties: StyleProperties;
+}
+
 // ── Merge (ADR-005) ─────────────────────────────────────────────────────────
 // ParagraphSnapshot is a pure data shape shared by db/ and merge/. It lives in
 // ast/ (the foundational layer) so db/ never imports from merge/ — that would

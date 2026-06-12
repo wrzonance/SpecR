@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../db/index.js', () => ({
   getSpecTree: vi.fn(),
+  getTemplate: vi.fn(),
+  getTemplateByName: vi.fn(),
 }));
 vi.mock('../generator/index.js', () => ({
   generateDocx: vi.fn(),

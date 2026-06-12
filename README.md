@@ -10,7 +10,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 
 ## Status
 
-**Active development — Phase 1c + 2b complete, Phase 2c next (2c-i DB schema already landed).**
+**Active development — Phase 1c + 2b + 2c complete, Phase 2d next.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -34,7 +34,9 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 2b-iii | MCP tools: `get_paragraph`, `parse_document`, `generate_docx` | ✅ Complete (PR #55) |
 | 2b-iv | Universal file loader: `load:files`, `seed:corpus`, `load_files` MCP tool | ✅ Complete (PR #60) |
 | 2c-i | Style template DB schema — `style_templates` + `style_rules` + default rules seed | ✅ Complete (PR #87) |
-| 2c | Firm style template engine (issue #20) | Planned |
+| 2c-ii | Template CRUD API over the JSONB style payload (ADR-021) + `POST /templates/import` DOCX style derivation | ✅ Complete (PRs #151, #156) |
+| 2c-iii | `templateId` wired through generator — template font/spacing/indent/numbering applied to generated DOCX; `UFGS-Default` applied when omitted | ✅ Complete (issue #32) |
+| 2c | Firm style template engine (issue #20) | ✅ Complete |
 | 2d | Library hierarchy + chain of custody — masters, project copies, packages, issuances — see [ADR-015](docs/adr/015-layered-spec-hierarchy-chain-of-custody.md) | Planned |
 | 2e | Project-manual publishing — assembly, cover/TOC, addenda — see [ADR-017](docs/adr/017-project-manual-publishing.md) | Planned |
 | 3 | Round-trip merge engine | Planned |
@@ -68,6 +70,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 ### Generator
 
 - `POST /specs/:id/generate` → streams DOCX buffer with 7-level CSI multilevel numbering
+- Optional `{ templateId }` body applies a style template's font/spacing/indent/numbering-format rules per CSI node type; omitted → seeded `UFGS-Default`; unknown id → 404 (issue #32)
 - Each paragraph wrapped in `w:sdt` content control with `specr-uuid-<id>` UUID tag — round-trip merge anchors per ADR-004. Phase 3 merge engine reads these tags to map owner-redlined paragraphs back to `paragraphs.id`.
 - Title paragraph intentionally bare (synthetic, no DB id) — Phase 3 merge skips unwrapped paragraphs.
 
@@ -77,7 +80,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - `POST /parse` — upload a `.docx` or `.sec` file; returns `202 { jobId }` immediately (async)
 - `GET /parse/jobs/:jobId` — poll parse progress: `{ status, progress: { stage, pct }, result?, error? }`
 - `GET /specs/:id` — retrieve a spec with its paragraph tree
-- `POST /specs/:id/generate` — generate DOCX from stored spec AST
+- `POST /specs/:id/generate` — generate DOCX from stored spec AST (optional `{ templateId }` style template)
 - `PATCH /specs/:id` — update spec metadata
 - `POST /projects` — create a project
 - `GET /projects/:id` — retrieve project with TOC
@@ -122,7 +125,6 @@ Configure in Claude Code by creating a `.mcp.json` in the repo root (gitignored)
 
 ## Not Yet Built
 
-- Style template engine — firm-specific fonts, spacing, numbering formats (Phase 2c, issue #20)
 - Round-trip merge engine (Phase 3)
 - Revit integration (Phase 4)
 - Web UI with progress bars, live preview, diff/merge review (Phase 5)
