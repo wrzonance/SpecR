@@ -7,7 +7,9 @@ import { createJob, updateJob, getJob, type ParseStage } from '../lib/jobs.js';
 import { parsePool } from '../lib/parse-pool.js';
 import type { WorkerOutput } from '../lib/parse-worker.js';
 import { persistParsedSpec } from '../db/index.js';
+import type { OriginMeta } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+import { sha256Hex } from '../lib/hash.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
 import { ParseWarningSchema, SecRefSchema } from '../ast/schemas.js';
 import { SectionNumberSchema, normalizeSectionNumber } from '../lib/section-number.js';
@@ -83,7 +85,7 @@ export async function parseHandler(req: Request, res: Response): Promise<void> {
 
   const jobId = createJob();
   // Pass buffer and ext, not the full file object, so the request closure can be GC'd
-  void processParseJob(jobId, file.buffer, ext, body);
+  void processParseJob(jobId, file.buffer, ext, body, file.originalname);
   res.status(202).json({ success: true, data: { jobId } });
 }
 
@@ -130,11 +132,16 @@ function jobErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'parse failed';
 }
 
+function buildOriginMeta(filename: string, buffer: Buffer): OriginMeta {
+  return { filename, sha256: sha256Hex(buffer), loader: 'rest:parse' };
+}
+
 async function processParseJob(
   jobId: string,
   buffer: Buffer,
   ext: string,
-  body: ParseBody
+  body: ParseBody,
+  filename: string
 ): Promise<void> {
   try {
     const onProgress = (stage: string, pct: number): void => {
@@ -154,7 +161,11 @@ async function processParseJob(
     };
 
     updateJob(jobId, { stage: 'persisting', pct: 90, status: 'running' });
-    const specId = await persistParsedSpec({ tree: finalTree, refs });
+    const specId = await persistParsedSpec({
+      tree: finalTree,
+      refs,
+      originMeta: buildOriginMeta(filename, buffer),
+    });
     const nodeCount = countNodes(finalTree.parts);
 
     updateJob(jobId, {

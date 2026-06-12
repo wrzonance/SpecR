@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import type { Request, Response } from 'express';
 
 vi.mock('../parser/index.js', () => ({
@@ -384,5 +385,29 @@ describe('processParseJob section-gate error message', () => {
         })
       );
     });
+  });
+});
+
+describe('processParseJob origin_meta provenance (#93)', () => {
+  it('passes filename, sha256 of upload bytes, and loader rest:parse to persistParsedSpec', async () => {
+    const { persistParsedSpec } = await import('../db/index.js');
+    const { parseHandler } = await import('./parse.js');
+    const buffer = Buffer.from('<?xml?>', 'utf-8');
+    const req = {
+      file: { originalname: 'spec.sec', mimetype: 'text/xml', buffer },
+      body: {},
+    } as unknown as Request;
+    await parseHandler(req, makeRes());
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(persistParsedSpec).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originMeta: {
+          filename: 'spec.sec',
+          sha256: createHash('sha256').update(buffer).digest('hex'),
+          loader: 'rest:parse',
+        },
+      })
+    );
   });
 });
