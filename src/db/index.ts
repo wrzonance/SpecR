@@ -116,3 +116,9 @@ export {
   SpecNotInProjectError,
 } from './queries/packages.js';
 export type { PackageSummary, PackageWithSpecs, PackageSpecEntry } from './queries/packages.js';
+export {
+  createPackageRevision,
+  getPackageRevision,
+  SnapshotValidationError,
+} from './queries/revisions.js';
+export type { RevisionSummary, RevisionSpecEntry, RevisionWithTrees } from './queries/revisions.js';

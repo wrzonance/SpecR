@@ -76,16 +76,6 @@ export async function findSpecById(id: string): Promise<SpecTree | null> {
   }
 }
 
-interface ParaRow {
-  readonly id: string;
-  readonly parent_id: string | null;
-  readonly node_type: string;
-  readonly text: string;
-  readonly position: number;
-  readonly vanish: boolean;
-  readonly conflicts: readonly SignalConflict[];
-}
-
 export interface SpecReference {
   readonly referenceText: string;
   readonly targetSection: string | null;
@@ -99,13 +89,26 @@ export interface SpecTreeResult {
   readonly references: readonly SpecReference[];
 }
 
-function buildNodeTree(rows: readonly ParaRow[]): readonly SpecNode[] {
-  const childrenByParent = new Map<string | null, ParaRow[]>();
+/** Paragraph row shape consumed by buildNodeTree (db-module internal). */
+export interface ParagraphTreeRow {
+  readonly id: string;
+  readonly parent_id: string | null;
+  readonly node_type: string;
+  readonly text: string;
+  readonly position: number;
+  readonly vanish: boolean;
+  readonly conflicts: readonly SignalConflict[];
+}
+
+/** Assemble flat paragraph rows into a SpecNode forest. Exported for reuse
+ *  inside the db module (revisions snapshotting) — not part of the barrel. */
+export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecNode[] {
+  const childrenByParent = new Map<string | null, ParagraphTreeRow[]>();
   for (const row of rows) {
     childrenByParent.set(row.parent_id, [...(childrenByParent.get(row.parent_id) ?? []), row]);
   }
 
-  function buildNode(row: ParaRow): SpecNode {
+  function buildNode(row: ParagraphTreeRow): SpecNode {
     const children = (childrenByParent.get(row.id) ?? [])
       .sort((a, b) => a.position - b.position)
       .map(buildNode);
@@ -133,7 +136,7 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
     const specRow = specResult.rows[0];
     if (!specRow) return null;
 
-    const paraResult = await pool.query<ParaRow>(
+    const paraResult = await pool.query<ParagraphTreeRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts
        FROM paragraphs WHERE spec_id = $1`,
       [id]

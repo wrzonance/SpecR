@@ -15,6 +15,7 @@ import {
   setPackageSpecsHandler,
   deletePackageHandler,
 } from './packages.js';
+import { createRevisionHandler, getRevisionHandler } from './revisions.js';
 import { validateBody } from './middleware/validate.js';
 import {
   PatchSpecBodySchema,
@@ -22,6 +23,7 @@ import {
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
+  CreateRevisionBodySchema,
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
@@ -65,6 +67,12 @@ router.post('/projects/:id/packages', validateBody(CreatePackageBodySchema), cre
 router.get('/projects/:id/packages', listPackagesHandler);
 router.put('/packages/:id/specs', validateBody(SetPackageSpecsBodySchema), setPackageSpecsHandler);
 router.delete('/packages/:id', deletePackageHandler);
+router.post(
+  '/packages/:id/revisions',
+  validateBody(CreateRevisionBodySchema),
+  createRevisionHandler
+);
+router.get('/revisions/:id', getRevisionHandler);
 router.post('/parse', parseRateLimit, upload.single('file'), parseHandler);
 router.get('/parse/jobs/:jobId', parseJobHandler);
 router.post('/templates/import', parseRateLimit, upload.single('file'), importTemplateHandler);

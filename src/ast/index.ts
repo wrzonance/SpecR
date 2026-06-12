@@ -19,12 +19,14 @@ export {
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
+  CreateRevisionBodySchema,
 } from './schemas.js';
 export type {
   CreateProjectBody,
   AddSectionToProjectBody,
   CreatePackageBody,
   SetPackageSpecsBody,
+  CreateRevisionBody,
 } from './schemas.js';
 export type {
   StyleNodeType,
