@@ -116,7 +116,15 @@ describe('POST /specs/:id/generate (integration)', () => {
   });
 });
 
-async function fetchDocXml(specId: string, body: Record<string, unknown>): Promise<string> {
+interface DocParts {
+  readonly documentXml: string;
+  readonly numberingXml: string;
+}
+
+// Identity comparison covers numbering.xml too — template numbering overrides
+// route through it, so a default-resolution regression could leave document.xml
+// unchanged while the numbering definitions diverge.
+async function fetchDocParts(specId: string, body: Record<string, unknown>): Promise<DocParts> {
   const res = await fetch(`${baseUrl}/specs/${specId}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -124,9 +132,14 @@ async function fetchDocXml(specId: string, body: Record<string, unknown>): Promi
   });
   if (res.status !== 200) throw new Error(`generate failed: ${res.status}`);
   const zip = await JSZip.loadAsync(Buffer.from(await res.arrayBuffer()));
-  const file = zip.file('word/document.xml');
-  if (!file) throw new Error('document.xml missing');
-  return file.async('string');
+  const documentFile = zip.file('word/document.xml');
+  const numberingFile = zip.file('word/numbering.xml');
+  if (!documentFile) throw new Error('document.xml missing');
+  if (!numberingFile) throw new Error('numbering.xml missing');
+  return {
+    documentXml: await documentFile.async('string'),
+    numberingXml: await numberingFile.async('string'),
+  };
 }
 
 describe('POST /specs/:id/generate — templateId (integration)', () => {
@@ -156,23 +169,24 @@ describe('POST /specs/:id/generate — templateId (integration)', () => {
     await deleteTemplate(customTemplateId);
   });
 
-  it('explicit default templateId → identical document.xml to no-template request', async () => {
-    const withDefault = await fetchDocXml(testSpecId, { templateId: defaultTemplateId });
-    const without = await fetchDocXml(testSpecId, {});
-    expect(withDefault).toBe(without);
+  it('explicit default templateId → identical document.xml + numbering.xml to no-template request', async () => {
+    const withDefault = await fetchDocParts(testSpecId, { templateId: defaultTemplateId });
+    const without = await fetchDocParts(testSpecId, {});
+    expect(withDefault.documentXml).toBe(without.documentXml);
+    expect(withDefault.numberingXml).toBe(without.numberingXml);
   });
 
   it('custom template font/spacing values appear in document.xml', async () => {
-    const xml = await fetchDocXml(testSpecId, { templateId: customTemplateId });
-    expect(xml).toContain('Arial');
-    expect(xml).toMatch(/w:sz[^/>]*w:val="28"/);
-    expect(xml).toMatch(/w:spacing[^/>]*w:before="480"/);
+    const { documentXml } = await fetchDocParts(testSpecId, { templateId: customTemplateId });
+    expect(documentXml).toContain('Arial');
+    expect(documentXml).toMatch(/w:sz[^/>]*w:val="28"/);
+    expect(documentXml).toMatch(/w:spacing[^/>]*w:before="480"/);
   });
 
   it('custom template output differs from default output', async () => {
-    const custom = await fetchDocXml(testSpecId, { templateId: customTemplateId });
-    const def = await fetchDocXml(testSpecId, {});
-    expect(custom).not.toBe(def);
+    const custom = await fetchDocParts(testSpecId, { templateId: customTemplateId });
+    const def = await fetchDocParts(testSpecId, {});
+    expect(custom.documentXml).not.toBe(def.documentXml);
   });
 
   it('unknown templateId → 404', async () => {
