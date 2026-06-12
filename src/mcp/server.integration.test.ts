@@ -1,5 +1,6 @@
 // src/mcp/server.integration.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createHash } from 'node:crypto';
 import express from 'express';
 import type { Server } from 'http';
 import { pool, createSpec, insertTree } from '../db/index.js';
@@ -318,14 +319,15 @@ describe('tool: get_spec — conflicts (#56)', () => {
 });
 
 describe('tool: parse_document', () => {
+  // Inline minimal SEC — section 99 99 99 is not in the seed corpus, so no
+  // conflict with parallel tests that operate on seeded UFGS specs.
+  const minimalSec =
+    '<SEC><SCN>99 99 99</SCN><STL>MCP Test Section</STL>' +
+    '<PRT><TTL>PART 1 - GENERAL</TTL>' +
+    '<SPT><TTL>SUMMARY</TTL><TXT>Test paragraph content.</TXT></SPT>' +
+    '</PRT></SEC>';
+
   it('parses a valid base64-encoded SEC file and returns spec summary', async () => {
-    // Inline minimal SEC — section 99 99 99 is not in the seed corpus, so no
-    // conflict with parallel tests that operate on seeded UFGS specs.
-    const minimalSec =
-      '<SEC><SCN>99 99 99</SCN><STL>MCP Test Section</STL>' +
-      '<PRT><TTL>PART 1 - GENERAL</TTL>' +
-      '<SPT><TTL>SUMMARY</TTL><TXT>Test paragraph content.</TXT></SPT>' +
-      '</PRT></SEC>';
     const secBase64 = Buffer.from(minimalSec, 'utf-8').toString('base64');
 
     const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
@@ -345,6 +347,17 @@ describe('tool: parse_document', () => {
     expect(typeof data.specId).toBe('string');
     expect(data.nodeCount).toBeGreaterThan(0);
     parsedSpecId = data.specId;
+  });
+
+  it('records origin_meta provenance for the ingested file (#93)', async () => {
+    const r = await pool.query<{
+      origin_meta: { filename: string; sha256: string; loader: string } | null;
+    }>('SELECT origin_meta FROM specs WHERE id = $1', [parsedSpecId]);
+    expect(r.rows[0]?.origin_meta).toEqual({
+      filename: 'test.sec',
+      sha256: createHash('sha256').update(Buffer.from(minimalSec, 'utf-8')).digest('hex'),
+      loader: 'mcp:parse_document',
+    });
   });
 
   it('returns isError for invalid base64', async () => {
