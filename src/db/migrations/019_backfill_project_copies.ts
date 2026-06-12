@@ -12,10 +12,15 @@ import type { MigrationBuilder } from 'node-pg-migrate';
 // resolve duplicates manually (precedent: migration 016 down).
 
 function seedProjectSources(pgm: MigrationBuilder): void {
+  // Only sourceless projects — a no-op guard on first run (nothing has sources
+  // before 019), and replay-safe after a down: projects that gained their own
+  // source lists post-019 are skipped instead of tripping the PK / priority
+  // unique constraints.
   pgm.sql(`
     INSERT INTO project_sources (project_id, library_id, priority)
     SELECT p.id, (SELECT id FROM libraries WHERE name = 'Default Company Master'), 1
     FROM projects p
+    WHERE NOT EXISTS (SELECT 1 FROM project_sources ps WHERE ps.project_id = p.id)
   `);
 }
 
@@ -129,9 +134,16 @@ export const down = (pgm: MigrationBuilder): void => {
       AND s.parent_spec_id IS NOT NULL
   `);
   pgm.sql(`DELETE FROM specs WHERE project_id IS NOT NULL`);
+  // Remove only the seeded shape — a sole default-company source at priority 1.
+  // Projects whose source lists diverged post-019 (any other row) are left
+  // intact rather than wiped; the guarded up() seed skips them on replay.
   pgm.sql(`
-    DELETE FROM project_sources
-    WHERE library_id = (SELECT id FROM libraries WHERE name = 'Default Company Master')
-      AND priority = 1
+    DELETE FROM project_sources ps
+    WHERE ps.library_id = (SELECT id FROM libraries WHERE name = 'Default Company Master')
+      AND ps.priority = 1
+      AND NOT EXISTS (
+        SELECT 1 FROM project_sources o
+        WHERE o.project_id = ps.project_id AND o.library_id <> ps.library_id
+      )
   `);
 };
