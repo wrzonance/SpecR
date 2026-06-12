@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse } from '../parser/index.js';
 import { persistParsedSpec, lookupSpecSectionTitle } from '../db/index.js';
+import type { OriginMeta } from '../db/index.js';
 import { computeTitleMatch } from './infer-section.js';
 import { logger } from './logger.js';
 import { sha256Hex } from './hash.js';
@@ -83,7 +84,7 @@ async function processFile(
   const buffer = await readFile(file);
   const result = await parse(buffer, file);
   if (dryRun) return;
-  const originMeta = {
+  const originMeta: OriginMeta = {
     filename: path.basename(file),
     sha256: sha256Hex(buffer),
     loader: 'load_files',

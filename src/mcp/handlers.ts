@@ -201,7 +201,9 @@ async function dispatchParse(
 function buildMcpOriginMeta(filename: string, contentBase64: string): OriginMeta {
   return {
     filename,
-    // hash the raw ingested bytes (base64-decoded), not decoded/transformed text
+    // hash the raw ingested bytes (base64-decoded), not decoded/transformed text;
+    // deliberate second decode — decodeSafeBuffer's .sec branch returns decoded
+    // text, not the raw bytes provenance needs
     sha256: sha256Hex(Buffer.from(contentBase64, 'base64')),
     loader: 'mcp:parse_document',
   };
