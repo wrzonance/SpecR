@@ -452,7 +452,9 @@ describe('tool: get_spec_lineage (#97)', () => {
     const proj = await pool.query<{ id: string }>(
       `INSERT INTO projects (name) VALUES ('Lineage Project (mcp #97)') RETURNING id`
     );
-    lineageProjectId = proj.rows[0]?.id ?? '';
+    const projId = proj.rows[0]?.id;
+    if (!projId) throw new Error('beforeAll: failed to insert lineage project');
+    lineageProjectId = projId;
     // Clone mcpSpecId — snapshot content_version at clone time so behindBy = 0
     const clone = await pool.query<{ id: string }>(
       `INSERT INTO specs (section, title, source, project_id, parent_spec_id,
@@ -461,7 +463,9 @@ describe('tool: get_spec_lineage (#97)', () => {
        FROM specs s WHERE s.id = $2 RETURNING id`,
       [lineageProjectId, mcpSpecId]
     );
-    lineageCloneId = clone.rows[0]?.id ?? '';
+    const cloneId = clone.rows[0]?.id;
+    if (!cloneId) throw new Error('beforeAll: failed to insert lineage clone');
+    lineageCloneId = cloneId;
   });
 
   afterAll(async () => {
@@ -492,6 +496,7 @@ describe('tool: get_spec_lineage (#97)', () => {
     // mcpSpecId content — so this is deterministically 0.
     expect(payload.chain[0]?.behindBy).toBe(0);
     expect(payload.chain[1]?.specId).toBe(mcpSpecId);
+    expect(payload.chain[1]?.scope).toBe('library');
     expect(payload.chain[1]?.behindBy).toBeNull();
   });
 
