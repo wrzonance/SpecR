@@ -315,7 +315,7 @@ CREATE TABLE project_specs (
 );
 
 -- Style templates: per-firm DOCX rendering rules
--- (Phase 2c-i — schema only; generator wiring lands in #32)
+-- (Phase 2c-i schema; applied by the generator via templateId — issue #32)
 CREATE TABLE style_templates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL UNIQUE,         -- 'UFGS-Default', 'Acme-Firm', ...
@@ -494,11 +494,11 @@ Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
 - **2b-ii** ✅ — `wrapWithControl()`, `SdtBlock extends FileChild`, `specr-uuid-<CsiNode.id>` tags in `w:sdtPr` as round-trip merge anchors per ADR-004 (PR #28). Uses `StringValueElement('w:tag', ...)` for idiomatic docx-native attribute injection. Title paragraph intentionally bare — synthetic, no DB id.
 - **2b-iii** ✅ — `get_paragraph(paragraphId)` → `{ node, ancestors[] }` ancestor chain via recursive CTE; `parse_document(filename, contentBase64)` → ingest DOCX/SEC via MCP with base64 encoding; `generate_docx(specId)` → on-demand base64 DOCX. (closes #29)
 
-**Phase 2c — Firm style template engine (issue #20):**
-- `style_templates` + `style_rules` DB tables; default CSI styles seeded at migration
-- Generator accepts `templateId?` (already in `POST /specs/:id/generate` body) — wired through to numbering + controls
-- Template import API: `POST /templates`, `POST /templates/:id/rules`
-- Prerequisite for Phase 5 live preview: generate DOCX → blob → client render
+**Phase 2c — Firm style template engine (issue #20):** ✅ Complete
+- ✅ `style_templates` + `style_rules` DB tables; default CSI styles seeded at migration (PR #87); JSONB `properties` payload per ADR-021 (migration 014)
+- ✅ `templateId?` in the `POST /specs/:id/generate` body resolves to template rules and is applied by `generateDocx` — per-NodeType font/spacing/indent on styled paragraphs, `numFmt`/`lvlText`/`start` overrides on the numbering definition. Omitted → seeded `UFGS-Default` (so an explicit default-template request is identical to a bare request); unknown id → 404 (issue #32)
+- ✅ Template import API: `POST /templates`, `POST /templates/:id/rules` CRUD (PR #156); `POST /templates/import` DOCX consensus derivation (PR #151)
+- ✅ Prerequisite for Phase 5 live preview: generate DOCX → blob → client render
 
 ### Phase 3: Merge Engine (Weeks 7–9)
 - UUID-based paragraph matching across round-trips
