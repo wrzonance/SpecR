@@ -1,9 +1,9 @@
 import { Pool } from 'pg';
 import { config } from '../lib/env.js';
-import { SpecrError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
+import { DatabaseError } from './errors.js';
 
-export class DatabaseError extends SpecrError {}
+export { DatabaseError } from './errors.js';
 
 export function createPool(): Pool {
   return new Pool({ connectionString: config.DATABASE_URL });
@@ -101,3 +101,9 @@ export {
   DEFAULT_COMPANY_LIBRARY,
 } from './queries/libraries.js';
 export type { Library, LibraryTier, CreateLibraryInput } from './queries/libraries.js';
+export {
+  addSectionToProject,
+  ProjectNotFoundError,
+  SectionUnresolvedError,
+} from './queries/derive.js';
+export type { AddSectionResult, SourceLibraryRef } from './queries/derive.js';
