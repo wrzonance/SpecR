@@ -103,7 +103,8 @@ export {
 export type { Library, LibraryTier, CreateLibraryInput } from './queries/libraries.js';
 export {
   addSectionToProject,
+  removeSectionFromProject,
   ProjectNotFoundError,
   SectionUnresolvedError,
 } from './queries/derive.js';
-export type { AddSectionResult, SourceLibraryRef } from './queries/derive.js';
+export type { AddSectionResult, SourceLibraryRef, RemoveSectionOutcome } from './queries/derive.js';

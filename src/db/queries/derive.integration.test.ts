@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { pool } from '../index.js';
-import { addSectionToProject, ProjectNotFoundError, SectionUnresolvedError } from './derive.js';
+import {
+  addSectionToProject,
+  removeSectionFromProject,
+  ProjectNotFoundError,
+  SectionUnresolvedError,
+} from './derive.js';
 import { getPgCode } from '../../lib/pg-errors.js';
 
 // ── SQL helpers (raw inserts — tests must not depend on the code under test) ──
@@ -302,5 +307,55 @@ describe('addSectionToProject — resolution', () => {
     await expect(
       addSectionToProject('00000000-0000-0000-0000-000000000000', '03 30 00', pool)
     ).rejects.toBeInstanceOf(ProjectNotFoundError);
+  });
+});
+
+describe('removeSectionFromProject', () => {
+  it('clean clone (content_version = 1) deletes freely: spec, paragraphs, TOC row gone; master intact', async () => {
+    const projectId = await newProject([companyLib]);
+    const { specId } = await addSectionToProject(projectId, '03 30 00', pool);
+    const outcome = await removeSectionFromProject(projectId, specId, false, pool);
+    expect(outcome).toBe('removed');
+    const counts = await pool.query<{ specs: string; paras: string; toc: string }>(
+      `SELECT
+         (SELECT COUNT(*) FROM specs WHERE id = $1) AS specs,
+         (SELECT COUNT(*) FROM paragraphs WHERE spec_id = $1) AS paras,
+         (SELECT COUNT(*) FROM project_specs WHERE spec_id = $1) AS toc`,
+      [specId]
+    );
+    expect(counts.rows[0]).toEqual({ specs: '0', paras: '0', toc: '0' });
+    const master = await pool.query(`SELECT 1 FROM specs WHERE id = $1`, [masterId]);
+    expect(master.rowCount).toBe(1);
+  });
+
+  it('edited clone (content_version > 1) → blocked without force; force=true deletes', async () => {
+    const projectId = await newProject([companyLib]);
+    const { specId } = await addSectionToProject(projectId, '03 30 00', pool);
+    await pool.query(`UPDATE specs SET content_version = 2 WHERE id = $1`, [specId]);
+    expect(await removeSectionFromProject(projectId, specId, false, pool)).toBe('edited');
+    // blocked removal left everything in place
+    const still = await pool.query(`SELECT 1 FROM project_specs WHERE spec_id = $1`, [specId]);
+    expect(still.rowCount).toBe(1);
+    expect(await removeSectionFromProject(projectId, specId, true, pool)).toBe('removed');
+  });
+
+  it('spec not owned by this project (a master id) → not-found', async () => {
+    const projectId = await newProject([companyLib]);
+    expect(await removeSectionFromProject(projectId, masterId, false, pool)).toBe('not-found');
+  });
+
+  it('broken-ref marking for other project specs that referenced the removed clone is preserved', async () => {
+    const projectId = await newProject([companyLib]);
+    const a = await addSectionToProject(projectId, '03 30 00', pool); // refs 09 91 00
+    const b = await addSectionToProject(projectId, '09 91 00', pool);
+    const outcome = await removeSectionFromProject(projectId, b.specId, false, pool);
+    expect(outcome).toBe('removed');
+    const ref = await pool.query<{ is_broken: boolean; target_spec_id: string | null }>(
+      `SELECT is_broken, target_spec_id FROM spec_references
+       WHERE source_spec_id = $1 AND target_type = 'section'`,
+      [a.specId]
+    );
+    expect(ref.rows[0]?.is_broken).toBe(true);
+    expect(ref.rows[0]?.target_spec_id).toBeNull(); // FK SET NULL on spec delete
   });
 });

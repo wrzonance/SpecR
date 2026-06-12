@@ -176,6 +176,82 @@ async function insertTocEntry(
   return row.position;
 }
 
+export type RemoveSectionOutcome = 'removed' | 'not-found' | 'edited';
+
+/** SELECT ... FOR UPDATE and apply the block-if-edited guard.
+ *  Returns null when the spec is not owned by this project. */
+async function guardRemoval(
+  projectId: string,
+  specId: string,
+  force: boolean,
+  client: PoolClient
+): Promise<RemoveSectionOutcome | null> {
+  const owned = await client.query<{ content_version: number }>(
+    `SELECT content_version FROM specs WHERE id = $2 AND project_id = $1 FOR UPDATE`,
+    [projectId, specId]
+  );
+  const row = owned.rows[0];
+  if (!row) return 'not-found';
+  if (row.content_version > 1 && !force) return 'edited';
+  return null;
+}
+
+/** Mark incoming refs from other project specs broken before the FK SET NULL fires. */
+async function markIncomingRefsBroken(
+  projectId: string,
+  specId: string,
+  client: PoolClient
+): Promise<void> {
+  await client.query(
+    `UPDATE spec_references sr SET is_broken = true
+     FROM project_specs ps
+     WHERE sr.target_spec_id = $2
+       AND sr.source_spec_id = ps.spec_id
+       AND ps.project_id = $1
+       AND sr.source_spec_id <> $2`,
+    [projectId, specId]
+  );
+}
+
+/** Delete a project-owned clone (TOC row, refs, paragraph tree). Edited clones
+ *  (content_version > 1) are blocked unless force — the caller maps 'edited'
+ *  to 409 and surfaces ?force=true. Incoming refs from the project's other
+ *  specs are marked broken first (target_spec_id then SET NULL by FK). */
+export async function removeSectionFromProject(
+  projectId: string,
+  specId: string,
+  force: boolean,
+  db: Pool = pool
+): Promise<RemoveSectionOutcome> {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const early = await guardRemoval(projectId, specId, force, client);
+    if (early !== null) {
+      await client.query('ROLLBACK');
+      return early;
+    }
+    await markIncomingRefsBroken(projectId, specId, client);
+    await client.query(`DELETE FROM project_specs WHERE project_id = $1 AND spec_id = $2`, [
+      projectId,
+      specId,
+    ]);
+    await client.query(`DELETE FROM specs WHERE id = $1`, [specId]);
+    await client.query('COMMIT');
+    logger.info({ projectId, specId, force }, 'removeSectionFromProject: clone deleted');
+    return 'removed';
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* best-effort */
+    }
+    throw new DatabaseError(`removeSectionFromProject: failed for spec ${specId}`, { cause: err });
+  } finally {
+    client.release();
+  }
+}
+
 /** Resolve a section through the project's source list and clone the winning
  *  master into a project-owned copy. One transaction; all-or-nothing. */
 export async function addSectionToProject(
