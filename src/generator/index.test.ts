@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
 import { generateDocx } from './index.js';
 import type { SpecTree } from '../ast/types.js';
+import type { StyleRule } from '../ast/index.js';
 
 // Covers: part, article, pr1, pr2, note, continuation, vanish
 const SYNTHETIC_TREE: SpecTree = {
@@ -214,5 +215,44 @@ describe('generateDocx — content controls', () => {
     // Title paragraph is synthetic — no UUID tag
     const uuidMatches = xml.match(/specr-uuid-/g) ?? [];
     expect(uuidMatches.length).toBe(8);
+  });
+});
+
+const ARIAL_RULES: readonly StyleRule[] = [
+  {
+    nodeType: 'part',
+    properties: {
+      rPr: { rFonts: { ascii: 'Arial' }, sz: 24, b: true, caps: true },
+      pPr: { spacing: { before: 240, after: 240 }, ind: { left: 360 } },
+      numbering: { lvlText: 'SECTION %1 -' },
+    },
+  },
+];
+
+describe('generateDocx — style rules', () => {
+  it('applies font family and size to styled node runs', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE, ARIAL_RULES);
+    const xml = await getDocXml(buffer);
+    expect(xml).toContain('Arial');
+    expect(xml).toMatch(/w:sz[^/>]*w:val="24"/);
+  });
+
+  it('applies paragraph spacing and indent', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE, ARIAL_RULES);
+    const xml = await getDocXml(buffer);
+    expect(xml).toMatch(/w:spacing[^/>]*w:before="240"/);
+    expect(xml).toMatch(/w:ind[^/>]*"360"/);
+  });
+
+  it('applies numbering lvlText override to numbering.xml', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE, ARIAL_RULES);
+    const zip = await JSZip.loadAsync(buffer);
+    const numbering = await zip.file('word/numbering.xml')?.async('string');
+    expect(numbering).toContain('SECTION %1 -');
+  });
+
+  it('no rules → no Arial anywhere (output unchanged)', async () => {
+    const plain = await getDocXml(await generateDocx(SYNTHETIC_TREE));
+    expect(plain).not.toContain('Arial');
   });
 });
