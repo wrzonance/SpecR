@@ -105,11 +105,12 @@ async function validateSourceLibraries(
   return ids.map((id) => {
     const lib = byId.get(id);
     if (!lib) {
-      throw new InvalidSourceLibraryError(`createProject: source library ${id} not found`);
+      // User-facing via the 422 surface — no internal function-name prefix.
+      throw new InvalidSourceLibraryError(`source library ${id} not found`);
     }
     if (lib.tier !== 'company' && lib.tier !== 'client') {
       throw new InvalidSourceLibraryError(
-        `createProject: library "${lib.name}" is ${lib.tier}-tier — project sources must be company or client masters`
+        `library "${lib.name}" is ${lib.tier}-tier — project sources must be company or client masters`
       );
     }
     return lib;

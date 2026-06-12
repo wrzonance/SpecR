@@ -59,8 +59,9 @@ async function resolveSection(
     if (proj.rowCount === 0) {
       throw new ProjectNotFoundError(`addSectionToProject: project ${projectId} not found`);
     }
+    // User-facing via the 422 surface — no internal function-name prefix.
     throw new SectionUnresolvedError(
-      `addSectionToProject: no source library of project ${projectId} holds section ${section}`
+      `no source library of project ${projectId} holds section ${section}`
     );
   }
   const shadowed = new Map<string, SourceLibraryRef>();
