@@ -27,13 +27,33 @@ describe('runStyleOptions', () => {
         smallCaps: false,
       })
     ).toEqual({
-      font: 'Arial',
+      font: { ascii: 'Arial' },
       size: 24,
       bold: true,
       italics: true,
       allCaps: true,
       smallCaps: false,
     });
+  });
+
+  it('preserves non-ascii rFonts slots (hAnsi/cs/eastAsia) in the font object', () => {
+    expect(
+      runStyleOptions({
+        rFonts: { ascii: 'Arial', hAnsi: 'Arial', cs: 'Courier New', eastAsia: 'MS Mincho' },
+      })
+    ).toEqual({
+      font: { ascii: 'Arial', hAnsi: 'Arial', cs: 'Courier New', eastAsia: 'MS Mincho' },
+    });
+  });
+
+  it('rFonts with only non-ascii slots still maps a font (regression: ascii-only slot dropped hAnsi/cs/eastAsia)', () => {
+    expect(runStyleOptions({ rFonts: { eastAsia: 'MS Mincho' } })).toEqual({
+      font: { eastAsia: 'MS Mincho' },
+    });
+  });
+
+  it('rFonts with no known slots (catchall-only keys) yields no font key', () => {
+    expect(runStyleOptions({ rFonts: { hint: 'eastAsia' } })).toEqual({});
   });
 
   it('omits keys absent from the payload (exactOptionalPropertyTypes-safe)', () => {

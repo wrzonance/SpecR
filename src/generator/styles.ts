@@ -39,8 +39,16 @@ const LINE_RULE: Record<'auto' | 'exact' | 'atLeast', DocxLineRule> = {
   atLeast: LineRuleType.AT_LEAST,
 };
 
+/** Mirrors docx IFontAttributesProperties — per-charset font slots from OOXML w:rFonts. */
+export interface RunFontOptions {
+  readonly ascii?: string;
+  readonly hAnsi?: string;
+  readonly cs?: string;
+  readonly eastAsia?: string;
+}
+
 export interface RunStyleOptions {
-  readonly font?: string;
+  readonly font?: RunFontOptions;
   /** Half-points — same unit as OOXML w:sz; docx TextRun size is also half-points. */
   readonly size?: number;
   readonly bold?: boolean;
@@ -49,17 +57,27 @@ export interface RunStyleOptions {
   readonly smallCaps?: boolean;
 }
 
+function fontOptions(rFonts: NonNullable<RunProperties['rFonts']>): RunFontOptions | undefined {
+  const out: { -readonly [K in keyof RunFontOptions]: RunFontOptions[K] } = {};
+  if (rFonts.ascii !== undefined) out.ascii = rFonts.ascii;
+  if (rFonts.hAnsi !== undefined) out.hAnsi = rFonts.hAnsi;
+  if (rFonts.cs !== undefined) out.cs = rFonts.cs;
+  if (rFonts.eastAsia !== undefined) out.eastAsia = rFonts.eastAsia;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function runStyleOptions(rPr: RunProperties | undefined): RunStyleOptions {
   if (!rPr) return {};
   const out: { -readonly [K in keyof RunStyleOptions]: RunStyleOptions[K] } = {};
-  if (rPr.rFonts?.ascii !== undefined) out.font = rPr.rFonts.ascii;
+  const font = rPr.rFonts === undefined ? undefined : fontOptions(rPr.rFonts);
+  if (font !== undefined) out.font = font;
   if (rPr.sz !== undefined) out.size = rPr.sz;
   if (rPr.b !== undefined) out.bold = rPr.b;
   if (rPr.i !== undefined) out.italics = rPr.i;
   if (rPr.caps !== undefined) out.allCaps = rPr.caps;
   if (rPr.smallCaps !== undefined) out.smallCaps = rPr.smallCaps;
   // Deliberately not mapped (out of scope for #32 — font/spacing/indent/numbering only):
-  // u, strike, color, highlight, rFonts.hAnsi / rFonts.cs / rFonts.eastAsia
+  // u, strike, color, highlight
   return out;
 }
 

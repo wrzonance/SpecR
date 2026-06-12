@@ -237,6 +237,21 @@ describe('generateDocx — style rules', () => {
     expect(xml).toMatch(/w:sz[^/>]*w:val="24"/);
   });
 
+  it('non-ascii rFonts slots (hAnsi/cs/eastAsia) survive into w:rFonts (regression: only ascii was forwarded)', async () => {
+    const rules: readonly StyleRule[] = [
+      {
+        nodeType: 'part',
+        properties: {
+          rPr: { rFonts: { hAnsi: 'Arial', cs: 'Courier New', eastAsia: 'MS Mincho' } },
+        },
+      },
+    ];
+    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE, rules));
+    expect(xml).toMatch(/w:rFonts[^/>]*w:hAnsi="Arial"/);
+    expect(xml).toMatch(/w:rFonts[^/>]*w:cs="Courier New"/);
+    expect(xml).toMatch(/w:rFonts[^/>]*w:eastAsia="MS Mincho"/);
+  });
+
   it('applies paragraph spacing and indent', async () => {
     const buffer = await generateDocx(SYNTHETIC_TREE, ARIAL_RULES);
     const xml = await getDocXml(buffer);
