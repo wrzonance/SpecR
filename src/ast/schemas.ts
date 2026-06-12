@@ -107,11 +107,12 @@ export const CreateProjectBodySchema = z.object({
 
 export type CreateProjectBody = z.infer<typeof CreateProjectBodySchema>;
 
-export const AddSpecToProjectBodySchema = z.object({
-  specId: z.uuid(),
+export const AddSectionToProjectBodySchema = z.object({
+  // Canonical expanded-shape section number (lib/section-number.ts, ADR-020).
+  section: SectionNumberSchema,
 });
 
-export type AddSpecToProjectBody = z.infer<typeof AddSpecToProjectBodySchema>;
+export type AddSectionToProjectBody = z.infer<typeof AddSectionToProjectBodySchema>;
 
 // ── Style properties (ADR-021): OOXML-faithful, OPEN (unknown JSON keys preserved) ──
 // StyleNodeType is the subset of NodeType that carries visual style —

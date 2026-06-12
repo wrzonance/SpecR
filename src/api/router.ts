@@ -5,15 +5,15 @@ import { getSpecHandler, updateSpecHandler } from './specs.js';
 import {
   createProjectHandler,
   getProjectHandler,
-  addSpecToProjectHandler,
-  removeSpecFromProjectHandler,
+  addSectionToProjectHandler,
+  removeSectionFromProjectHandler,
   getBrokenRefsHandler,
 } from './projects.js';
 import { validateBody } from './middleware/validate.js';
 import {
   PatchSpecBodySchema,
   CreateProjectBodySchema,
-  AddSpecToProjectBodySchema,
+  AddSectionToProjectBodySchema,
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
@@ -48,10 +48,10 @@ router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHan
 router.get('/projects/:id', getProjectHandler);
 router.post(
   '/projects/:id/specs',
-  validateBody(AddSpecToProjectBodySchema),
-  addSpecToProjectHandler
+  validateBody(AddSectionToProjectBodySchema),
+  addSectionToProjectHandler
 );
-router.delete('/projects/:id/specs/:specId', removeSpecFromProjectHandler);
+router.delete('/projects/:id/specs/:specId', removeSectionFromProjectHandler);
 router.get('/projects/:id/references/broken', getBrokenRefsHandler);
 router.post('/parse', parseRateLimit, upload.single('file'), parseHandler);
 router.get('/parse/jobs/:jobId', parseJobHandler);

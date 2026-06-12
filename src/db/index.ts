@@ -44,8 +44,6 @@ export { insertRefs } from './queries/refs.js';
 export {
   createProject,
   findProjectById,
-  addSpecToProject,
-  removeSpecFromProject,
   getBrokenRefs,
   InvalidSourceLibraryError,
 } from './queries/projects.js';
@@ -56,7 +54,6 @@ export type {
   ProjectSource,
   BrokenRef,
   CreateProjectInput,
-  AddSpecResult,
 } from './queries/projects.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
 export { getParagraphSnapshots } from './queries/versions.js';

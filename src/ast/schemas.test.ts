@@ -6,6 +6,7 @@ import {
   PatchSpecBodySchema,
   SignalConflictSchema,
   CreateProjectBodySchema,
+  AddSectionToProjectBodySchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -250,6 +251,22 @@ describe('CreateProjectBodySchema (issue #94)', () => {
   it('rejects non-uuid entries', () => {
     expect(
       CreateProjectBodySchema.safeParse({ name: 'P', sourceLibraryIds: ['nope'] }).success
+    ).toBe(false);
+  });
+});
+
+describe('AddSectionToProjectBodySchema (issue #94)', () => {
+  it('accepts a canonical section number', () => {
+    expect(AddSectionToProjectBodySchema.safeParse({ section: '03 30 00' }).success).toBe(true);
+  });
+  it('rejects a malformed section number', () => {
+    expect(AddSectionToProjectBodySchema.safeParse({ section: '3 30 00' }).success).toBe(false);
+  });
+  it('rejects a specId body (old contract)', () => {
+    expect(
+      AddSectionToProjectBodySchema.safeParse({
+        specId: '8f14e45f-ceea-4e07-8c65-3f0f1c6e1a01',
+      }).success
     ).toBe(false);
   });
 });

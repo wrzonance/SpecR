@@ -144,7 +144,7 @@ async function cloneRefs(
 }
 
 /** TOC row at max+1, plus project-scoped repair of broken refs that were
- *  waiting for this section (same repair CTE addSpecToProject used). */
+ *  waiting for this section (project-scoped broken-ref repair CTE). */
 async function insertTocEntry(
   projectId: string,
   cloneId: string,
