@@ -530,7 +530,9 @@ Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
 
 Each module in `src/` is a self-contained unit: a typed error class, a public API exported from its `index.ts`, no leaked internals. Modules import only from a sibling's `index.ts` barrel — never from its internal files.
 
-```
+`lib/` is the one exception: it is not a module with a public API but a collection of leaf utilities (`errors.ts`, `logger.ts`, `env.ts`, …). It has no barrel — import the file you need directly, e.g. `import { logger } from '../lib/logger.js'`.
+
+```text
 parser/    ← knows about AST types; nothing about DB or API
 generator/ ← knows about AST types and dolanmiu/docx; nothing else
 merge/     ← knows about AST types and DB queries; nothing about parsing
@@ -542,10 +544,10 @@ lib/       ← format-agnostic utilities (errors, logging, encoding); usable by 
 
 ```typescript
 // CORRECT — through the barrel
-import { parse } from '../parser'
+import { parse } from '../parser/index.js'
 
 // WRONG — leaks internal structure
-import { buildNumberingMap } from '../parser/docx/numbering'
+import { buildNumberingMap } from '../parser/docx/numbering.js'
 ```
 
 ## Error Handling — Context Chains
@@ -664,7 +666,7 @@ specr/
 │   ├── index.ts                 # Entry: Express, env validation, graceful shutdown
 │   ├── mcp/
 │   │   ├── server.ts            # registerMcpRoutes(app) — Streamable HTTP, stateless per-request McpServer
-│   │   ├── tools.ts             # registerTools(server): search_library, get_spec, list_sections
+│   │   ├── tools.ts             # registerTools(server): search_library, list_sections, get_spec, get_paragraph, parse_document, generate_docx, load_files
 │   │   └── resources.ts         # registerResources(server): specr://specs/{id}, specr://sections
 │   ├── api/
 │   ├── parser/
@@ -678,12 +680,7 @@ specr/
 │   │   └── index.ts             # barrel — public surface (MergeError, computeDiff, extractContentControls, types)
 │   ├── db/
 │   ├── ast/
-│   └── lib/
-│       ├── decode-text.ts        # Buffer → UTF-8 string, encoding-agnostic (chardet + iconv-lite)
-│       ├── errors.ts             # SpecrError base class
-│       ├── jobs.ts               # In-memory async job store (parse progress)
-│       ├── env.ts                # Zod env validation — exits process on invalid config
-│       └── logger.ts             # Structured logging (pino)
+│   └── lib/                     # Shared leaf utilities (errors, logger, env, encoding, jobs, section-number, …) — no barrel; imported per-file
 ├── tests/
 │   ├── fixtures/                # .SEC and .docx test files (binary, gitlfs candidate)
 │   ├── unit/                    # Unit tests — no DB, no I/O
@@ -701,7 +698,7 @@ specr/
 ├── package.json
 ├── pnpm-lock.yaml
 ├── tsconfig.json
-├── .eslintrc.json
+├── eslint.config.js
 ├── .prettierrc
 ├── .env.example
 ├── docker-compose.yml           # PostgreSQL for local dev + integration tests
@@ -713,40 +710,22 @@ specr/
 
 ## Key Dependencies
 
-```json
-{
-  "dependencies": {
-    "express": "^5",
-    "zod": "^3",
-    "docx": "^9",
-    "jszip": "^3",
-    "fast-xml-parser": "^5",
-    "pg": "^8",
-    "pino": "^9",
-    "multer": "^1",
-    "uuid": "^11",
-    "@modelcontextprotocol/sdk": "^1",
-    "chardet": "^2",
-    "iconv-lite": "^0.6"
-  },
-  "devDependencies": {
-    "typescript": "^5",
-    "@types/node": "^22",
-    "@types/express": "^5",
-    "@types/pg": "^8",
-    "@types/multer": "^1",
-    "@types/uuid": "^10",
-    "vitest": "^3",
-    "eslint": "^9",
-    "@typescript-eslint/eslint-plugin": "^8",
-    "@typescript-eslint/parser": "^8",
-    "eslint-plugin-sonarjs": "^3",
-    "prettier": "^3",
-    "ts-node-dev": "^2",
-    "depcheck": "^1"
-  }
-}
-```
+Versions live in `package.json` / `pnpm-lock.yaml` — the lockfile is the authority. What each key dependency is for:
+
+- `express` (v5) — HTTP server
+- `zod` (v4) — all external-input validation (request bodies, env, parsed XML/OOXML); note v4 idioms like `z.uuid()`
+- `docx` (dolanmiu) — DOCX generation
+- `jszip` / `yauzl` — OOXML zip reading and archive safety checks
+- `fast-xml-parser` — `.SEC` (SpecsIntact XML) and OOXML parsing
+- `pg` + `node-pg-migrate` — PostgreSQL driver + reversible TypeScript migrations
+- `pino` — structured logging
+- `multer` — multipart upload handling
+- `uuid` — content-control anchor and entity ids
+- `piscina` — worker-thread pool for CPU-bound parsing
+- `express-rate-limit` — rate limiting on public endpoints
+- `@modelcontextprotocol/sdk` — MCP server (Streamable HTTP)
+- `chardet` + `iconv-lite` — encoding detection / decoding
+- Dev: `typescript`, `vitest` (+ `@vitest/coverage-v8`), `eslint` 9 flat config with `typescript-eslint` + `eslint-plugin-sonarjs` + `eslint-config-prettier`, `prettier`, `tsx` (dev server), `@redocly/cli` (OpenAPI lint), `depcheck`
 
 ## Reference Materials
 

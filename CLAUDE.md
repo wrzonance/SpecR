@@ -8,7 +8,7 @@ Headless REST API for CSI MasterFormat specification automation: round-trip DOCX
 
 These tighten or replace the global defaults — they win where they differ.
 
-- **ESLint complexity is enforced, not advisory** (`eslint.config.js`): `complexity` = 10, `sonarjs/cognitive-complexity` = 10, `max-lines-per-function` = 50, `max-lines` = 400 (file cap is **400**, not the global 800), `no-console` = error, `@typescript-eslint/no-explicit-any` = error. Test files (`src/**/*.test.ts`) and `scripts/**` relax line/console caps — see the config for the exact exemptions.
+- **ESLint complexity is enforced, not advisory** (`eslint.config.js`): `complexity` = 10, `sonarjs/cognitive-complexity` = 10, `max-lines-per-function` = 50, `max-lines` = 400 (file cap is **400**, not the global 800), `no-console` = error, `@typescript-eslint/no-explicit-any` = error. Test files (`src/**/*.test.ts`) and `scripts/**/*.ts` relax line/console caps — see the config for the exact exemptions.
 - **TypeScript strict, plus** `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `verbatimModuleSyntax`. No `any`, no `as unknown as`, no type assertions across module boundaries, no non-null assertion (`!`) outside tests.
 - **Coverage is a DIAGNOSTIC, not a target.** No enforced percentage. Tests at module API boundaries beat tests on internals. Every bug-fix is pinned with a regression test whose name states the symptom, e.g. `'inference: CPI ilvl gap — Article at ilvl=3, not ilvl=1'`.
 - **OOXML ambiguity rule:** the inference engine has genuinely ambiguous cases. Document each one IN A TEST marked `// KNOWN AMBIGUITY: <description>` — never silently pick a behavior.
@@ -38,7 +38,7 @@ Anti-patterns rejected in review: swallowing context (`catch { throw new ParserE
 - **Generator** (`src/generator/`): AST → DOCX (dolanmiu/docx, full CSI multilevel numbering) with `w:sdt` UUID content controls as round-trip merge anchors. `markdown.ts` is a pure shared renderer (`renderMarkdown`, `getLabel`).
 - **Merge** (`src/merge/`): UUID-anchored, git-style 3-way diff (base/ours/theirs) + conflict detection.
 - **MCP** (`src/mcp/`): stateless Streamable HTTP at `POST /mcp` — one `McpServer` per request. Read-only tools/resources today.
-- **Module boundaries are hard:** modules import only from a sibling's `index.ts` barrel, never its internals (`import { parse } from '../parser'`, never `'../parser/docx/numbering'`). Per-module dependency rules live in `ARCHITECTURE.md` → "Module Boundaries". For MCP tool/resource patterns and the markdown renderer contract, see `ARCHITECTURE.md` → "MCP Server" and "Markdown Renderer".
+- **Module boundaries are hard:** modules import only from a sibling's `index.ts` barrel, never its internals (`import { parse } from '../parser/index.js'`, never `'../parser/docx/numbering.js'`). Per-module dependency rules live in `ARCHITECTURE.md` → "Module Boundaries". For MCP tool/resource patterns and the markdown renderer contract, see `ARCHITECTURE.md` → "MCP Server" and "Markdown Renderer".
 
 ## Build / test / lint
 
