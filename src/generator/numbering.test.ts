@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { LevelFormat } from 'docx';
 import { getNodeLevel, buildSpecNumberingConfig } from './numbering.js';
+import { buildRuleMap } from './styles.js';
 
 describe('getNodeLevel', () => {
   it('maps numbered NodeTypes to 0-indexed levels', () => {
@@ -77,5 +78,43 @@ describe('buildSpecNumberingConfig', () => {
     for (const lvl of config.levels) {
       expect(lvl.alignment).toBeDefined();
     }
+  });
+});
+
+describe('buildSpecNumberingConfig — template overrides', () => {
+  it('no rules → identical to default config', () => {
+    expect(buildSpecNumberingConfig(buildRuleMap([]))).toEqual(buildSpecNumberingConfig());
+  });
+
+  it('applies lvlText, numFmt, and start for the matching nodeType level', () => {
+    const rules = buildRuleMap([
+      {
+        nodeType: 'part',
+        properties: { numbering: { lvlText: 'SECTION %1 -', numFmt: 'upperRoman', start: 2 } },
+      },
+    ]);
+    const config = buildSpecNumberingConfig(rules);
+    const level0 = config.levels.find((l) => l.level === 0);
+    expect(level0).toMatchObject({ text: 'SECTION %1 -', format: 'upperRoman', start: 2 });
+    expect(config.levels.find((l) => l.level === 1)).toEqual(
+      buildSpecNumberingConfig().levels.find((l) => l.level === 1)
+    );
+  });
+
+  it('ignores unknown numFmt (keeps default format)', () => {
+    const rules = buildRuleMap([
+      { nodeType: 'article', properties: { numbering: { numFmt: 'klingon' } } },
+    ]);
+    const level1 = buildSpecNumberingConfig(rules).levels.find((l) => l.level === 1);
+    expect(level1?.format).toBe('decimal');
+  });
+
+  it('ignores template ilvl — level mapping stays generator-owned', () => {
+    const rules = buildRuleMap([
+      { nodeType: 'pr1', properties: { numbering: { ilvl: 5, lvlText: '%3:' } } },
+    ]);
+    const config = buildSpecNumberingConfig(rules);
+    expect(config.levels.find((l) => l.level === 2)?.text).toBe('%3:');
+    expect(config.levels.find((l) => l.level === 5)?.text).toBe('%6)');
   });
 });
