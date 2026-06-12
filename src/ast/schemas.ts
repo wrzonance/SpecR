@@ -137,6 +137,14 @@ export const SetPackageSpecsBodySchema = z.object({
 
 export type SetPackageSpecsBody = z.infer<typeof SetPackageSpecsBodySchema>;
 
+// Issuance label for an immutable package revision snapshot (ADR-015 D5):
+// '50% DD', '100% CD', 'Addendum 2'. Unique per package, enforced by the DB.
+export const CreateRevisionBodySchema = z.object({
+  label: z.string().check(z.minLength(1)),
+});
+
+export type CreateRevisionBody = z.infer<typeof CreateRevisionBodySchema>;
+
 // ── Style properties (ADR-021): OOXML-faithful, OPEN (unknown JSON keys preserved) ──
 // StyleNodeType is the subset of NodeType that carries visual style —
 // excludes the structural-only 'spec' | 'note' | 'continuation'.

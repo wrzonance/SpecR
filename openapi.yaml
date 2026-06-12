@@ -639,6 +639,98 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /packages/{id}/revisions:
+    post:
+      operationId: createPackageRevision
+      summary: Issue an immutable revision snapshot of a package (ADR-015 D5)
+      description: >
+        Freezes the full SpecTree of every member section as JSONB inside one
+        transaction — a reproducible point-in-time record of exactly what was
+        issued. Post-issuance edits never alter the stored trees.
+      tags: [packages]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Package UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label:
+                  type: string
+                  minLength: 1
+                  description: Issuance label, unique per package
+      responses:
+        '201':
+          description: Revision issued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RevisionSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Revision label already exists for this package
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation failed, or a member tree cannot be snapshotted losslessly
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /revisions/{id}:
+    get:
+      operationId: getRevision
+      summary: Read an issued revision's frozen trees (validated on read)
+      tags: [packages]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Revision UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Frozen trees in membership order
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RevisionWithTrees'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /templates:
     post:
       operationId: createTemplate
@@ -1330,6 +1422,59 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/PackageSpecEntry'
+
+    RevisionSummary:
+      type: object
+      required: [revisionId, packageId, label, issuedAt, specCount]
+      properties:
+        revisionId:
+          type: string
+          format: uuid
+        packageId:
+          type: string
+          format: uuid
+        label:
+          type: string
+          description: Issuance label, unique per package ('50% DD', '100% CD', 'Addendum 2')
+        issuedAt:
+          type: string
+          format: date-time
+        specCount:
+          type: integer
+          description: Number of member sections frozen in this revision
+
+    RevisionSpecEntry:
+      type: object
+      required: [specId, position, tree]
+      properties:
+        specId:
+          type: string
+          format: uuid
+        position:
+          type: integer
+          description: 1-based membership order at issuance
+        tree:
+          $ref: '#/components/schemas/SpecTree'
+
+    RevisionWithTrees:
+      type: object
+      required: [revisionId, packageId, label, issuedAt, specs]
+      properties:
+        revisionId:
+          type: string
+          format: uuid
+        packageId:
+          type: string
+          format: uuid
+        label:
+          type: string
+        issuedAt:
+          type: string
+          format: date-time
+        specs:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevisionSpecEntry'
 
     # ── Templates ──────────────────────────────────────────────────────────────
 
