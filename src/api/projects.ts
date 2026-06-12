@@ -12,7 +12,7 @@ import {
 } from '../db/index.js';
 import type { CreateProjectBody, AddSectionToProjectBody } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
-import { pgErrorToHttp } from '../lib/pg-errors.js';
+import { pgErrorToHttp, getPgCode } from '../lib/pg-errors.js';
 
 export async function createProjectHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -104,6 +104,15 @@ export async function removeSectionFromProjectHandler(req: Request, res: Respons
     }
     res.status(200).json({ success: true, data: { projectId, specId } });
   } catch (err) {
+    // package_specs.spec_id is ON DELETE RESTRICT (migration 020): the spec
+    // must leave its design packages before it can leave the project.
+    if (getPgCode(err) === '23503') {
+      res.status(409).json({
+        success: false,
+        error: 'section belongs to a design package — remove it from the package first',
+      });
+      return;
+    }
     logger.error({ err }, 'remove section from project failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }

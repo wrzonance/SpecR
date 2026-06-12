@@ -107,3 +107,12 @@ export {
   SectionUnresolvedError,
 } from './queries/derive.js';
 export type { AddSectionResult, SourceLibraryRef, RemoveSectionOutcome } from './queries/derive.js';
+export {
+  createPackage,
+  listPackages,
+  setPackageSpecs,
+  deletePackage,
+  PackageNotFoundError,
+  SpecNotInProjectError,
+} from './queries/packages.js';
+export type { PackageSummary, PackageWithSpecs, PackageSpecEntry } from './queries/packages.js';
