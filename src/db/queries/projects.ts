@@ -1,6 +1,7 @@
-import { DatabaseError } from '../index.js';
+import { DatabaseError } from '../errors.js';
 import type { Pool } from 'pg';
 import { logger } from '../../lib/logger.js';
+import type { LibraryTier } from './libraries.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -27,10 +28,34 @@ interface BrokenRefRow {
   readonly reference_text: string;
 }
 
+interface SourceLibRow {
+  readonly id: string;
+  readonly name: string;
+  readonly tier: LibraryTier;
+}
+
+interface ProjectSourceRow {
+  readonly library_id: string;
+  readonly name: string;
+  readonly tier: LibraryTier;
+  readonly priority: number;
+}
+
+/** A project source library is invalid (unknown id or non-master tier) → 422. */
+export class InvalidSourceLibraryError extends DatabaseError {}
+
+export interface ProjectSource {
+  readonly libraryId: string;
+  readonly name: string;
+  readonly tier: LibraryTier;
+  readonly priority: number;
+}
+
 export interface ProjectSummary {
   readonly projectId: string;
   readonly name: string;
   readonly description: string | null;
+  readonly sources: readonly ProjectSource[];
 }
 
 export interface ProjectTocEntry {
@@ -44,6 +69,7 @@ export interface ProjectWithToc {
   readonly projectId: string;
   readonly name: string;
   readonly description: string | null;
+  readonly sources: readonly ProjectSource[];
   readonly toc: readonly ProjectTocEntry[];
 }
 
@@ -58,6 +84,7 @@ export interface BrokenRef {
 export interface CreateProjectInput {
   readonly name: string;
   readonly description?: string;
+  readonly sourceLibraryIds: readonly string[];
 }
 
 export interface AddSpecResult {
@@ -65,22 +92,73 @@ export interface AddSpecResult {
   readonly position: number;
 }
 
+/** Sources must be company or client masters (ADR-015 D3) — reference-tier
+ *  content must first be derived into a company master. Returned in input
+ *  order (= priority order). */
+async function validateSourceLibraries(
+  ids: readonly string[],
+  pool: Queryable
+): Promise<readonly SourceLibRow[]> {
+  const res = await pool.query<SourceLibRow>(
+    `SELECT id, name, tier FROM libraries WHERE id = ANY($1::uuid[])`,
+    [ids]
+  );
+  const byId = new Map(res.rows.map((row) => [row.id, row]));
+  return ids.map((id) => {
+    const lib = byId.get(id);
+    if (!lib) {
+      throw new InvalidSourceLibraryError(`createProject: source library ${id} not found`);
+    }
+    if (lib.tier !== 'company' && lib.tier !== 'client') {
+      throw new InvalidSourceLibraryError(
+        `createProject: library "${lib.name}" is ${lib.tier}-tier — project sources must be company or client masters`
+      );
+    }
+    return lib;
+  });
+}
+
 export async function createProject(
   input: CreateProjectInput,
   pool: Queryable
 ): Promise<ProjectSummary> {
   try {
+    const libs = await validateSourceLibraries(input.sourceLibraryIds, pool);
     const result = await pool.query<ProjectRow>(
-      `INSERT INTO projects (name, description) VALUES ($1, $2) RETURNING id, name, description`,
-      [input.name, input.description ?? null]
+      `WITH proj AS (
+         INSERT INTO projects (name, description) VALUES ($1, $2)
+         RETURNING id, name, description
+       ),
+       src AS (
+         INSERT INTO project_sources (project_id, library_id, priority)
+         SELECT proj.id, u.lib_id, u.ord::int
+         FROM proj, unnest($3::uuid[]) WITH ORDINALITY AS u(lib_id, ord)
+       )
+       SELECT id, name, description FROM proj`,
+      [input.name, input.description ?? null, input.sourceLibraryIds]
     );
     const row = result.rows[0];
     if (!row) throw new DatabaseError('createProject: no row returned after insert');
-    return { projectId: row.id, name: row.name, description: row.description };
+    const sources = libs.map((lib, i) => ({
+      libraryId: lib.id,
+      name: lib.name,
+      tier: lib.tier,
+      priority: i + 1,
+    }));
+    return { projectId: row.id, name: row.name, description: row.description, sources };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError('createProject: insert failed', { cause: err });
   }
+}
+
+function mapSources(rows: readonly ProjectSourceRow[]): readonly ProjectSource[] {
+  return rows.map((row) => ({
+    libraryId: row.library_id,
+    name: row.name,
+    tier: row.tier,
+    priority: row.priority,
+  }));
 }
 
 export async function findProjectById(id: string, pool: Queryable): Promise<ProjectWithToc | null> {
@@ -104,6 +182,14 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
        ORDER BY ps.position`,
       [id]
     );
+    const srcRes = await pool.query<ProjectSourceRow>(
+      `SELECT ps.library_id, l.name, l.tier, ps.priority
+       FROM project_sources ps
+       JOIN libraries l ON l.id = ps.library_id
+       WHERE ps.project_id = $1
+       ORDER BY ps.priority`,
+      [id]
+    );
     return {
       projectId: project.id,
       name: project.name,
@@ -114,6 +200,7 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
         title: row.title,
         position: row.position,
       })),
+      sources: mapSources(srcRes.rows),
     };
   } catch (err) {
     throw new DatabaseError(`findProjectById: toc query failed for ${id}`, { cause: err });

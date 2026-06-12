@@ -11,6 +11,7 @@ vi.mock('../db/index.js', () => ({
       this.cause = options?.cause;
     }
   },
+  InvalidSourceLibraryError: class InvalidSourceLibraryError extends Error {},
   createProject: vi.fn(),
   findProjectById: vi.fn(),
   addSpecToProject: vi.fn(),
@@ -39,9 +40,10 @@ describe('createProjectHandler', () => {
       projectId: 'p1',
       name: 'Test',
       description: null,
+      sources: [],
     });
     const { createProjectHandler } = await import('./projects.js');
-    const req = { body: { name: 'Test' } } as unknown as Request;
+    const req = { body: { name: 'Test', sourceLibraryIds: ['lib-1'] } } as unknown as Request;
     const res = makeRes();
     await createProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(201);
@@ -50,11 +52,23 @@ describe('createProjectHandler', () => {
     expect((body['data'] as Record<string, unknown>)['projectId']).toBe('p1');
   });
 
+  it('returns 422 when a source library is invalid', async () => {
+    const { createProject, InvalidSourceLibraryError } = await import('../db/index.js');
+    vi.mocked(createProject).mockRejectedValueOnce(
+      new (InvalidSourceLibraryError as new (m: string) => Error)('bad tier')
+    );
+    const { createProjectHandler } = await import('./projects.js');
+    const req = { body: { name: 'Test', sourceLibraryIds: ['lib-ref'] } } as unknown as Request;
+    const res = makeRes();
+    await createProjectHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(422);
+  });
+
   it('returns 500 on database error', async () => {
     const { createProject } = await import('../db/index.js');
     vi.mocked(createProject).mockRejectedValueOnce(new Error('db down'));
     const { createProjectHandler } = await import('./projects.js');
-    const req = { body: { name: 'Test' } } as unknown as Request;
+    const req = { body: { name: 'Test', sourceLibraryIds: ['lib-1'] } } as unknown as Request;
     const res = makeRes();
     await createProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(500);
@@ -68,6 +82,7 @@ describe('getProjectHandler', () => {
       projectId: 'p1',
       name: 'Test',
       description: null,
+      sources: [],
       toc: [],
     });
     const { getProjectHandler } = await import('./projects.js');

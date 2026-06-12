@@ -5,6 +5,7 @@ import {
   addSpecToProject,
   removeSpecFromProject,
   getBrokenRefs,
+  InvalidSourceLibraryError,
   pool,
 } from '../db/index.js';
 import type { CreateProjectBody, AddSpecToProjectBody } from '../ast/index.js';
@@ -17,6 +18,10 @@ export async function createProjectHandler(req: Request, res: Response): Promise
     const project = await createProject(body, pool);
     res.status(201).json({ success: true, data: project });
   } catch (err) {
+    if (err instanceof InvalidSourceLibraryError) {
+      res.status(422).json({ success: false, error: err.message });
+      return;
+    }
     logger.error({ err }, 'create project failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }

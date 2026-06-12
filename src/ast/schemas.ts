@@ -88,6 +88,21 @@ export const PatchSpecBodySchema = z.object({
 export const CreateProjectBodySchema = z.object({
   name: z.string().check(z.minLength(1)),
   description: z.string().check(z.minLength(1)).exactOptional(),
+  // Ordered source list (priority = array order, 1-based). Required, min 1 —
+  // section-resolution is the only way to add specs, so a sourceless project
+  // would be a dead end (design doc #94).
+  sourceLibraryIds: z
+    .array(z.uuid())
+    .check(z.minLength(1))
+    .check((ctx) => {
+      if (new Set(ctx.value).size !== ctx.value.length) {
+        ctx.issues.push({
+          code: 'custom',
+          input: ctx.value,
+          message: 'sourceLibraryIds must not contain duplicates',
+        });
+      }
+    }),
 });
 
 export type CreateProjectBody = z.infer<typeof CreateProjectBodySchema>;

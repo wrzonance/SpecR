@@ -1,14 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// DatabaseError is imported by projects.ts from '../errors.js' (leaf module).
+// We must mock both '../errors.js' and '../index.js' with the SAME class so
+// instanceof checks inside projects.ts work against what the test asserts.
+class MockDatabaseError extends Error {
+  cause?: unknown;
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'DatabaseError';
+    this.cause = options?.cause;
+  }
+}
+
+vi.mock('../errors.js', () => ({ DatabaseError: MockDatabaseError }));
+
 vi.mock('../index.js', () => ({
-  DatabaseError: class DatabaseError extends Error {
-    cause?: unknown;
-    constructor(message: string, options?: ErrorOptions) {
-      super(message, options);
-      this.name = 'DatabaseError';
-      this.cause = options?.cause;
-    }
-  },
+  DatabaseError: MockDatabaseError,
   pool: { query: vi.fn() },
 }));
 
@@ -22,24 +29,60 @@ beforeEach(() => {
 });
 
 describe('createProject', () => {
-  it('returns ProjectSummary on success', async () => {
+  it('validates source tiers, inserts project + sources, returns sources in priority order', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query)
+      .mockResolvedValueOnce({
+        rows: [
+          { id: 'lib-client', name: 'Client M', tier: 'client' },
+          { id: 'lib-co', name: 'Co M', tier: 'company' },
+        ],
+        rowCount: 2,
+      } as never)
+      .mockResolvedValueOnce({
+        rows: [{ id: 'proj-1', name: 'Test Project', description: null }],
+        rowCount: 1,
+      } as never);
+    const { createProject } = await import('./projects.js');
+    const result = await createProject(
+      { name: 'Test Project', sourceLibraryIds: ['lib-client', 'lib-co'] },
+      pool
+    );
+    expect(result.projectId).toBe('proj-1');
+    expect(result.sources).toEqual([
+      { libraryId: 'lib-client', name: 'Client M', tier: 'client', priority: 1 },
+      { libraryId: 'lib-co', name: 'Co M', tier: 'company', priority: 2 },
+    ]);
+  });
+
+  it('rejects a reference-tier source library (ADR-015 D3)', async () => {
     const { pool } = await import('../index.js');
     vi.mocked(pool.query).mockResolvedValueOnce({
-      rows: [{ id: 'proj-1', name: 'Test Project', description: null }],
+      rows: [{ id: 'lib-ref', name: 'UFGS Reference', tier: 'reference' }],
       rowCount: 1,
     } as never);
-    const { createProject } = await import('./projects.js');
-    const result = await createProject({ name: 'Test Project' }, pool);
-    expect(result.projectId).toBe('proj-1');
-    expect(result.name).toBe('Test Project');
-    expect(result.description).toBeNull();
+    const { createProject, InvalidSourceLibraryError } = await import('./projects.js');
+    await expect(
+      createProject({ name: 'x', sourceLibraryIds: ['lib-ref'] }, pool)
+    ).rejects.toBeInstanceOf(InvalidSourceLibraryError);
+  });
+
+  it('rejects an unknown source library id', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
+    const { createProject, InvalidSourceLibraryError } = await import('./projects.js');
+    await expect(
+      createProject({ name: 'x', sourceLibraryIds: ['lib-missing'] }, pool)
+    ).rejects.toBeInstanceOf(InvalidSourceLibraryError);
   });
 
   it('throws DatabaseError on query failure', async () => {
     const { DatabaseError, pool } = await import('../index.js');
     vi.mocked(pool.query).mockRejectedValueOnce(new Error('db down'));
     const { createProject } = await import('./projects.js');
-    await expect(createProject({ name: 'x' }, pool)).rejects.toBeInstanceOf(DatabaseError);
+    await expect(
+      createProject({ name: 'x', sourceLibraryIds: ['lib-1'] }, pool)
+    ).rejects.toBeInstanceOf(DatabaseError);
   });
 });
 
@@ -65,6 +108,10 @@ describe('findProjectById', () => {
           { id: 'spec-2', section: '09 91 00', title: 'Painting', position: 2 },
         ],
         rowCount: 2,
+      } as never)
+      .mockResolvedValueOnce({
+        rows: [{ library_id: 'lib-1', name: 'Co M', tier: 'company', priority: 1 }],
+        rowCount: 1,
       } as never);
     const { findProjectById } = await import('./projects.js');
     const result = await findProjectById('proj-1', pool);
@@ -72,6 +119,9 @@ describe('findProjectById', () => {
     expect(result?.projectId).toBe('proj-1');
     expect(result?.toc).toHaveLength(2);
     expect(result?.toc[0]?.specId).toBe('spec-1');
+    expect(result?.sources).toEqual([
+      { libraryId: 'lib-1', name: 'Co M', tier: 'company', priority: 1 },
+    ]);
   });
 
   it('throws DatabaseError on query failure', async () => {

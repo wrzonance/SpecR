@@ -5,6 +5,7 @@ import {
   SpecTreeSchema,
   PatchSpecBodySchema,
   SignalConflictSchema,
+  CreateProjectBodySchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -219,5 +220,36 @@ describe('SpecNodeMetaSchema — conflicts', () => {
   it('meta without conflicts key parses with conflicts undefined', () => {
     const result = SpecNodeMetaSchema.parse({ vanish: true });
     expect(result.conflicts).toBeUndefined();
+  });
+});
+
+describe('CreateProjectBodySchema (issue #94)', () => {
+  const valid = {
+    name: 'P',
+    sourceLibraryIds: ['8f14e45f-ceea-4e07-8c65-3f0f1c6e1a01'],
+  };
+  it('accepts name + sourceLibraryIds', () => {
+    expect(CreateProjectBodySchema.safeParse(valid).success).toBe(true);
+  });
+  it('rejects missing sourceLibraryIds', () => {
+    expect(CreateProjectBodySchema.safeParse({ name: 'P' }).success).toBe(false);
+  });
+  it('rejects empty sourceLibraryIds', () => {
+    expect(CreateProjectBodySchema.safeParse({ name: 'P', sourceLibraryIds: [] }).success).toBe(
+      false
+    );
+  });
+  it('rejects duplicate sourceLibraryIds', () => {
+    expect(
+      CreateProjectBodySchema.safeParse({
+        name: 'P',
+        sourceLibraryIds: [valid.sourceLibraryIds[0], valid.sourceLibraryIds[0]],
+      }).success
+    ).toBe(false);
+  });
+  it('rejects non-uuid entries', () => {
+    expect(
+      CreateProjectBodySchema.safeParse({ name: 'P', sourceLibraryIds: ['nope'] }).success
+    ).toBe(false);
   });
 });

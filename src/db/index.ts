@@ -47,11 +47,13 @@ export {
   addSpecToProject,
   removeSpecFromProject,
   getBrokenRefs,
+  InvalidSourceLibraryError,
 } from './queries/projects.js';
 export type {
   ProjectSummary,
   ProjectWithToc,
   ProjectTocEntry,
+  ProjectSource,
   BrokenRef,
   CreateProjectInput,
   AddSpecResult,

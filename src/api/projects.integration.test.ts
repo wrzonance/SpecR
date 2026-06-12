@@ -63,6 +63,12 @@ async function insertRef(
   return row.id;
 }
 
+async function getLibraryId(name: string): Promise<string> {
+  const r = await pool.query<{ id: string }>(`SELECT id FROM libraries WHERE name = $1`, [name]);
+  if (!r.rows[0]) throw new Error(`library ${name} missing — run migrations`);
+  return r.rows[0].id;
+}
+
 let server: Server;
 let baseUrl: string;
 let testProjectId: string;
@@ -70,6 +76,8 @@ let specA: string;
 let specB: string;
 let refId: string;
 let reverseRefId: string;
+let companyId: string;
+let ufgsId: string;
 
 beforeAll(async () => {
   const app = express();
@@ -83,6 +91,10 @@ beforeAll(async () => {
   const address = server.address();
   const port = typeof address === 'object' && address !== null ? address.port : 3000;
   baseUrl = `http://localhost:${port}`;
+  [companyId, ufgsId] = await Promise.all([
+    getLibraryId('Default Company Master'),
+    getLibraryId('UFGS Reference'),
+  ]);
   [specA, specB] = await Promise.all([
     insertSpec('03 30 00', 'Concrete'),
     insertSpec('09 91 00', 'Painting'),
@@ -116,24 +128,28 @@ describe('POST /projects', () => {
     if (createdId) await pool.query('DELETE FROM projects WHERE id = $1', [createdId]);
   });
 
-  it('returns 201 with ProjectSummary', async () => {
+  it('returns 201 with ProjectSummary including sources', async () => {
     const res = await fetch(`${baseUrl}/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'New Project' }),
+      body: JSON.stringify({ name: 'New Project', sourceLibraryIds: [companyId] }),
     });
     const body = (await res.json()) as Record<string, unknown>;
     expect(res.status).toBe(201);
     const data = body['data'] as Record<string, unknown>;
     expect(typeof data['projectId']).toBe('string');
     createdId = data['projectId'] as string;
+    const sources = data['sources'] as Array<Record<string, unknown>>;
+    expect(Array.isArray(sources)).toBe(true);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.['libraryId']).toBe(companyId);
   });
 
   it('returns 422 for missing name', async () => {
     const res = await fetch(`${baseUrl}/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ sourceLibraryIds: [companyId] }),
     });
     expect(res.status).toBe(422);
   });
@@ -142,7 +158,37 @@ describe('POST /projects', () => {
     const res = await fetch(`${baseUrl}/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: '' }),
+      body: JSON.stringify({ name: '', sourceLibraryIds: [companyId] }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('returns 422 when sourceLibraryIds is missing', async () => {
+    const res = await fetch(`${baseUrl}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'X' }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('returns 422 when reference-tier library is used as source', async () => {
+    const res = await fetch(`${baseUrl}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'X', sourceLibraryIds: [ufgsId] }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('returns 422 for unknown library id', async () => {
+    const res = await fetch(`${baseUrl}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'X',
+        sourceLibraryIds: ['00000000-0000-0000-0000-000000000000'],
+      }),
     });
     expect(res.status).toBe(422);
   });
@@ -159,6 +205,8 @@ describe('GET /projects/:id', () => {
     expect(toc.length).toBe(2);
     expect(toc[0]?.['specId']).toBe(specA);
     expect(toc[1]?.['specId']).toBe(specB);
+    // testProjectId was inserted via raw SQL (no sources) — field must still be present
+    expect(data['sources']).toEqual([]);
   });
 
   it('returns 404 for unknown project', async () => {
