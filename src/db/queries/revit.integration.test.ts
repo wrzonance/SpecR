@@ -19,9 +19,9 @@ const INSTANCE_ID = 'revit-instance-data-outlet-a';
 
 beforeAll(async () => {
   await pool.query(
-    `INSERT INTO specs (id, section, title, source) VALUES
-       ($1, '27 11 00', 'Revit Test Spec A', 'arcat'),
-       ($2, '26 05 33', 'Revit Test Spec B', 'arcat')
+    `INSERT INTO specs (id, section, title, source, library_id) VALUES
+       ($1, '27 11 00', 'Revit Test Spec A', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master')),
+       ($2, '26 05 33', 'Revit Test Spec B', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master'))
      ON CONFLICT (id) DO NOTHING`,
     [SPEC_A, SPEC_B]
   );
@@ -251,8 +251,8 @@ describe('FK cascades', () => {
     const TEMP_SPEC = 'a0000000-0000-0000-0000-00000000d001';
     const TEMP_PARA = 'a0000000-0000-0000-0000-00000000d002';
     await pool.query(
-      `INSERT INTO specs (id, section, title, source)
-       VALUES ($1, '99 99 99', 'cascade test', 'arcat')`,
+      `INSERT INTO specs (id, section, title, source, library_id)
+       VALUES ($1, '99 99 99', 'cascade test', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master'))`,
       [TEMP_SPEC]
     );
     await pool.query(

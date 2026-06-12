@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { pool } from '../index.js';
-import { createSpec } from './specs.js';
+import { createSpec, persistParsedSpec } from './specs.js';
 import { insertTree } from './paragraphs.js';
 import { getSpecTree } from './specs.js';
 
@@ -124,11 +124,11 @@ describe('migration 013 — section shape CHECK constraints', () => {
   it('db: specs.section CHECK accepts expanded shapes and the unknown sentinel', async () => {
     try {
       const r1 = await pool.query(
-        `INSERT INTO specs (section, title, source) VALUES ('99 88 77.10 20', 'Shape OK', 'arcat') RETURNING section`
+        `INSERT INTO specs (section, title, source, library_id) VALUES ('99 88 77.10 20', 'Shape OK', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master')) RETURNING section`
       );
       expect(r1.rows[0]).toMatchObject({ section: '99 88 77.10 20' });
       const r2 = await pool.query(
-        `INSERT INTO specs (section, title, source) VALUES ('unknown', 'Sentinel OK', 'arcat') RETURNING section`
+        `INSERT INTO specs (section, title, source, library_id) VALUES ('unknown', 'Sentinel OK', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master')) RETURNING section`
       );
       expect(r2.rows[0]).toMatchObject({ section: 'unknown' });
     } finally {
@@ -140,7 +140,9 @@ describe('migration 013 — section shape CHECK constraints', () => {
 
   it('db: specs.section CHECK rejects malformed sections', async () => {
     await expect(
-      pool.query(`INSERT INTO specs (section, title, source) VALUES ('99 8877', 'Bad', 'arcat')`)
+      pool.query(
+        `INSERT INTO specs (section, title, source, library_id) VALUES ('99 8877', 'Bad', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master'))`
+      )
     ).rejects.toThrow(/specs_section_shape_check/);
   });
 
@@ -150,5 +152,57 @@ describe('migration 013 — section shape CHECK constraints', () => {
         `INSERT INTO spec_sections (section_number, title, division) VALUES ('unknown', 'Bad', 'un')`
       )
     ).rejects.toThrow(/spec_sections_section_number_shape_check/);
+  });
+});
+
+describe('persistParsedSpec — library routing (#92)', () => {
+  afterEach(async () => {
+    await pool.query(`DELETE FROM specs WHERE section = '99 66 00'`);
+  });
+
+  const inputFor = (source: 'ufgs' | 'arcat') => ({
+    tree: {
+      id: '',
+      section: '99 66 00',
+      title: 'Routing Test',
+      parts: [
+        {
+          id: '30000000-0000-0000-0000-000000000001',
+          type: 'part' as const,
+          text: 'GENERAL',
+          children: [],
+          meta: { source },
+        },
+      ],
+    },
+    refs: [],
+  });
+
+  it('routes source=ufgs into the UFGS Reference library', async () => {
+    const specId = await persistParsedSpec(inputFor('ufgs'));
+    const r = await pool.query<{ name: string }>(
+      `SELECT l.name FROM specs s JOIN libraries l ON l.id = s.library_id WHERE s.id = $1`,
+      [specId]
+    );
+    expect(r.rows[0]).toMatchObject({ name: 'UFGS Reference' });
+  });
+
+  it('routes non-ufgs sources into the Default Company Master library', async () => {
+    const specId = await persistParsedSpec(inputFor('arcat'));
+    const r = await pool.query<{ name: string }>(
+      `SELECT l.name FROM specs s JOIN libraries l ON l.id = s.library_id WHERE s.id = $1`,
+      [specId]
+    );
+    expect(r.rows[0]).toMatchObject({ name: 'Default Company Master' });
+  });
+
+  it('re-persisting the same (section, source) upserts within one library — no duplicate', async () => {
+    const first = await persistParsedSpec(inputFor('arcat'));
+    const second = await persistParsedSpec(inputFor('arcat'));
+    expect(second).toBe(first);
+    const r = await pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM specs WHERE section = '99 66 00'`
+    );
+    expect(r.rows[0]).toMatchObject({ n: 1 });
   });
 });

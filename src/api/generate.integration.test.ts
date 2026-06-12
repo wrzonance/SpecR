@@ -27,7 +27,9 @@ beforeAll(async () => {
 
   // Insert a spec with one part and one article for the round-trip smoke test
   const specRes = await pool.query<{ id: string }>(
-    `INSERT INTO specs (section, title, source) VALUES ($1, $2, $3) RETURNING id`,
+    `INSERT INTO specs (section, title, source, library_id)
+     VALUES ($1, $2, $3, (SELECT id FROM libraries WHERE name = 'UFGS Reference'))
+     RETURNING id`,
     ['27 13 23', 'Structured Cabling Generate Test', 'ufgs']
   );
   const specRow = specRes.rows[0];

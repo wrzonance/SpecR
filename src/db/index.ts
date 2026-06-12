@@ -90,3 +90,13 @@ export type {
   RevitDirection,
   RevitTransformType,
 } from './queries/revit.js';
+export {
+  createLibrary,
+  findLibraryById,
+  findLibraryByName,
+  listLibraries,
+  resolveDefaultLibraryId,
+  UFGS_REFERENCE_LIBRARY,
+  DEFAULT_COMPANY_LIBRARY,
+} from './queries/libraries.js';
+export type { Library, LibraryTier, CreateLibraryInput } from './queries/libraries.js';

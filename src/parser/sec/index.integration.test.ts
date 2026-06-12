@@ -17,8 +17,10 @@ async function loadFixture(
   const { tree, refs } = parseSec(xml);
 
   const r = await pool.query<{ id: string }>(
-    `INSERT INTO specs (section, title, source) VALUES ($1, $2, 'ufgs')
-     ON CONFLICT (section, source) DO UPDATE SET title = EXCLUDED.title, updated_at = now()
+    `INSERT INTO specs (section, title, source, library_id)
+     VALUES ($1, $2, 'ufgs', (SELECT id FROM libraries WHERE name = 'UFGS Reference'))
+     ON CONFLICT (section, source, library_id) WHERE library_id IS NOT NULL
+       DO UPDATE SET title = EXCLUDED.title, updated_at = now()
      RETURNING id`,
     [tree.section, tree.title]
   );
@@ -129,8 +131,10 @@ describe('integration: 27_10_00.SEC via Buffer + assertSecSafe (encoding fix)', 
     expectedNodeCount = countNodes(tree.parts);
 
     const r = await pool.query<{ id: string }>(
-      `INSERT INTO specs (section, title, source) VALUES ($1, $2, 'ufgs')
-       ON CONFLICT (section, source) DO UPDATE SET title = EXCLUDED.title, updated_at = now()
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ($1, $2, 'ufgs', (SELECT id FROM libraries WHERE name = 'UFGS Reference'))
+       ON CONFLICT (section, source, library_id) WHERE library_id IS NOT NULL
+         DO UPDATE SET title = EXCLUDED.title, updated_at = now()
        RETURNING id`,
       [tree.section, tree.title]
     );

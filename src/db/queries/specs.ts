@@ -3,6 +3,7 @@ import type { SignalConflict, SpecNode, SpecTree, NodeType, SecRef } from '../..
 import type { Pool } from 'pg';
 import { insertTree } from './paragraphs.js';
 import { insertRefs } from './refs.js';
+import { resolveDefaultLibraryId } from './libraries.js';
 
 interface SpecRow {
   readonly id: string;
@@ -24,6 +25,8 @@ export interface CreateSpecInput {
   readonly section: string;
   readonly title: string;
   readonly source: string;
+  /** Owning library. Omitted → resolved from source (ufgs → UFGS Reference, else Default Company Master). */
+  readonly libraryId?: string;
 }
 
 export interface SpecSummary {
@@ -39,9 +42,10 @@ export interface UpdateSpecInput {
 
 export async function createSpec(input: CreateSpecInput, db: Queryable = pool): Promise<string> {
   try {
+    const libraryId = input.libraryId ?? (await resolveDefaultLibraryId(input.source, db));
     const result = await db.query<{ id: string }>(
-      `INSERT INTO specs (section, title, source) VALUES ($1, $2, $3) RETURNING id`,
-      [input.section, input.title, input.source]
+      `INSERT INTO specs (section, title, source, library_id) VALUES ($1, $2, $3, $4) RETURNING id`,
+      [input.section, input.title, input.source, libraryId]
     );
     const row = result.rows[0];
     if (!row) throw new DatabaseError('createSpec: no row returned');
@@ -189,13 +193,14 @@ export async function persistParsedSpec(result: {
     // eslint-disable-next-line sonarjs/todo-tag
     // TODO: source should be a top-level SpecTree field — parts[0].meta.source is a stopgap
     const source = result.tree.parts[0]?.meta.source ?? 'unknown';
+    const libraryId = await resolveDefaultLibraryId(source, client);
     const res = await client.query<{ id: string }>(
-      `INSERT INTO specs (section, title, source)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (section, source) DO UPDATE
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (section, source, library_id) WHERE library_id IS NOT NULL DO UPDATE
          SET title = EXCLUDED.title, updated_at = now()
        RETURNING id`,
-      [result.tree.section, result.tree.title, source]
+      [result.tree.section, result.tree.title, source, libraryId]
     );
     const specId = res.rows[0]?.id;
     if (!specId) throw new DatabaseError('upsert spec returned no id');

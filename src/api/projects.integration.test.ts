@@ -7,7 +7,9 @@ import { pool } from '../db/index.js';
 
 async function insertSpec(section: string, title: string): Promise<string> {
   const r = await pool.query<{ id: string }>(
-    `INSERT INTO specs (section, title, source) VALUES ($1, $2, 'ufgs') RETURNING id`,
+    `INSERT INTO specs (section, title, source, library_id)
+     VALUES ($1, $2, 'ufgs', (SELECT id FROM libraries WHERE name = 'UFGS Reference'))
+     RETURNING id`,
     [section, title]
   );
   const row = r.rows[0];
