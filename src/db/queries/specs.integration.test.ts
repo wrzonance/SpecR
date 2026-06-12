@@ -167,7 +167,7 @@ describe('persistParsedSpec — library routing (#92)', () => {
       title: 'Routing Test',
       parts: [
         {
-          id: '20000000-0000-0000-0000-000000000001',
+          id: '30000000-0000-0000-0000-000000000001',
           type: 'part' as const,
           text: 'GENERAL',
           children: [],

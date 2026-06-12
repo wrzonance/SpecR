@@ -9,6 +9,9 @@ import {
   DEFAULT_COMPANY_LIBRARY,
 } from './libraries.js';
 
+// Namespaces reserved by this file: '99 77 %' spec sections, project
+// 'lib-xor-test-project', and every non-built-in library row.
+// Cleanup order is FK-safe: specs → projects → libraries.
 afterEach(async () => {
   await pool.query(`DELETE FROM specs WHERE section LIKE '99 77 %'`);
   await pool.query(`DELETE FROM projects WHERE name = 'lib-xor-test-project'`);
@@ -19,7 +22,7 @@ afterEach(async () => {
 });
 
 describe('migration 016 — backfill and built-ins', () => {
-  it('db: every existing spec has exactly one owner after backfill', async () => {
+  it('db: no spec is ownerless after backfill', async () => {
     const r = await pool.query<{ n: number }>(
       `SELECT COUNT(*)::int AS n FROM specs WHERE library_id IS NULL AND project_id IS NULL`
     );
