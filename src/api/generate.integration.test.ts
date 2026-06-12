@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
+import JSZip from 'jszip';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool } from '../db/index.js';
+import { pool, createTemplateWithRules, deleteTemplate } from '../db/index.js';
 
 let server: Server;
 let baseUrl: string;
@@ -112,5 +113,88 @@ describe('POST /specs/:id/generate (integration)', () => {
     expect(res.status).toBe(400);
     expect(body['success']).toBe(false);
     expect(typeof body['error']).toBe('string');
+  });
+});
+
+async function fetchDocXml(specId: string, body: Record<string, unknown>): Promise<string> {
+  const res = await fetch(`${baseUrl}/specs/${specId}/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.status !== 200) throw new Error(`generate failed: ${res.status}`);
+  const zip = await JSZip.loadAsync(Buffer.from(await res.arrayBuffer()));
+  const file = zip.file('word/document.xml');
+  if (!file) throw new Error('document.xml missing');
+  return file.async('string');
+}
+
+describe('POST /specs/:id/generate — templateId (integration)', () => {
+  let defaultTemplateId: string;
+  let customTemplateId: string;
+
+  beforeAll(async () => {
+    const r = await pool.query<{ id: string }>(
+      `SELECT id FROM style_templates WHERE name = 'UFGS-Default'`
+    );
+    const row = r.rows[0];
+    if (!row) throw new Error('UFGS-Default template missing — run migrations');
+    defaultTemplateId = row.id;
+    const custom = await createTemplateWithRules('Generate-Test-Custom', null, [
+      {
+        nodeType: 'part',
+        properties: {
+          rPr: { rFonts: { ascii: 'Arial' }, sz: 28 },
+          pPr: { spacing: { before: 480, after: 60 } },
+        },
+      },
+    ]);
+    customTemplateId = custom.id;
+  });
+
+  afterAll(async () => {
+    await deleteTemplate(customTemplateId);
+  });
+
+  it('explicit default templateId → identical document.xml to no-template request', async () => {
+    const withDefault = await fetchDocXml(testSpecId, { templateId: defaultTemplateId });
+    const without = await fetchDocXml(testSpecId, {});
+    expect(withDefault).toBe(without);
+  });
+
+  it('custom template font/spacing values appear in document.xml', async () => {
+    const xml = await fetchDocXml(testSpecId, { templateId: customTemplateId });
+    expect(xml).toContain('Arial');
+    expect(xml).toMatch(/w:sz[^/>]*w:val="28"/);
+    expect(xml).toMatch(/w:spacing[^/>]*w:before="480"/);
+  });
+
+  it('custom template output differs from default output', async () => {
+    const custom = await fetchDocXml(testSpecId, { templateId: customTemplateId });
+    const def = await fetchDocXml(testSpecId, {});
+    expect(custom).not.toBe(def);
+  });
+
+  it('unknown templateId → 404', async () => {
+    const res = await fetch(`${baseUrl}/specs/${testSpecId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateId: '00000000-0000-0000-0000-000000000000' }),
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(404);
+    expect(body['success']).toBe(false);
+    expect(String(body['error'])).toContain('template');
+  });
+
+  it('malformed (non-UUID) templateId → 400', async () => {
+    const res = await fetch(`${baseUrl}/specs/${testSpecId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateId: 'nope' }),
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(400);
+    expect(body['success']).toBe(false);
   });
 });
