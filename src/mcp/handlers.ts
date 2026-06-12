@@ -17,6 +17,7 @@ import { decodeTextBuffer } from '../lib/decode-text.js';
 import { generateDocx } from '../generator/index.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
+import { sanitizeFilename } from '../lib/filename.js';
 
 type ToolError = {
   readonly isError: true;
@@ -200,7 +201,7 @@ async function dispatchParse(
 
 function buildMcpOriginMeta(filename: string, contentBase64: string): OriginMeta {
   return {
-    filename,
+    filename: sanitizeFilename(filename),
     // hash the raw ingested bytes (base64-decoded), not decoded/transformed text;
     // deliberate second decode — decodeSafeBuffer's .sec branch returns decoded
     // text, not the raw bytes provenance needs

@@ -10,6 +10,7 @@ import { persistParsedSpec } from '../db/index.js';
 import type { OriginMeta } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
+import { sanitizeFilename } from '../lib/filename.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
 import { ParseWarningSchema, SecRefSchema } from '../ast/schemas.js';
 import { SectionNumberSchema, normalizeSectionNumber } from '../lib/section-number.js';
@@ -133,7 +134,7 @@ function jobErrorMessage(err: unknown): string {
 }
 
 function buildOriginMeta(filename: string, buffer: Buffer): OriginMeta {
-  return { filename, sha256: sha256Hex(buffer), loader: 'rest:parse' };
+  return { filename: sanitizeFilename(filename), sha256: sha256Hex(buffer), loader: 'rest:parse' };
 }
 
 async function processParseJob(

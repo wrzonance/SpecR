@@ -360,6 +360,29 @@ describe('tool: parse_document', () => {
     });
   });
 
+  it('sanitizes path fragments from the caller-supplied filename — C:\\fakepath\\windows.sec → windows.sec', async () => {
+    // Distinct section (99 99 98) so the upsert does not collide with the spec
+    // created by the provenance test above.
+    const winSec = minimalSec.replace('99 99 99', '99 99 98');
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'parse_document',
+      arguments: {
+        filename: 'C:\\fakepath\\windows.sec',
+        contentBase64: Buffer.from(winSec, 'utf-8').toString('base64'),
+      },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    expect(result['isError'], content[0]?.text).not.toBe(true);
+    const data = JSON.parse(content[0]!.text) as { specId: string };
+    const r = await pool.query<{ origin_meta: { filename: string } | null }>(
+      'SELECT origin_meta FROM specs WHERE id = $1',
+      [data.specId]
+    );
+    expect(r.rows[0]?.origin_meta?.filename).toBe('windows.sec');
+  });
+
   it('returns isError for invalid base64', async () => {
     const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
       name: 'parse_document',
