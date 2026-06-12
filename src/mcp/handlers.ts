@@ -8,6 +8,7 @@ import {
   getParagraphWithAncestors,
   persistParsedSpec,
   lookupSpecSectionTitle,
+  getSpecLineage,
 } from '../db/index.js';
 import type { OriginMeta } from '../db/index.js';
 import { inferSectionMeta, computeTitleMatch } from '../lib/infer-section.js';
@@ -246,6 +247,19 @@ export async function handleParseDocument({
   } catch (err) {
     logger.error({ err }, 'mcp tool parse_document failed');
     return toolError('Internal error — parse failed');
+  }
+}
+
+export async function handleGetSpecLineage({ specId }: { specId: string }): Promise<ToolResult> {
+  try {
+    const lineage = await getSpecLineage(specId);
+    if (!lineage) {
+      return toolError(`Spec not found: id=${specId}`);
+    }
+    return { content: [{ type: 'text' as const, text: JSON.stringify(lineage, null, 2) }] };
+  } catch (err) {
+    logger.error({ err }, 'mcp tool get_spec_lineage failed');
+    return toolError('Internal error — lineage retrieval failed');
   }
 }
 

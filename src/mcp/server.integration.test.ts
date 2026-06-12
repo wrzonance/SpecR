@@ -444,6 +444,67 @@ describe('GET /mcp', () => {
   });
 });
 
+describe('tool: get_spec_lineage (#97)', () => {
+  let lineageProjectId: string;
+  let lineageCloneId: string;
+
+  beforeAll(async () => {
+    const proj = await pool.query<{ id: string }>(
+      `INSERT INTO projects (name) VALUES ('Lineage Project (mcp #97)') RETURNING id`
+    );
+    lineageProjectId = proj.rows[0]?.id ?? '';
+    // Clone mcpSpecId — snapshot content_version at clone time so behindBy = 0
+    const clone = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, project_id, parent_spec_id,
+                          origin_version, content_version)
+       SELECT s.section, s.title, s.source, $1, s.id, s.content_version, 1
+       FROM specs s WHERE s.id = $2 RETURNING id`,
+      [lineageProjectId, mcpSpecId]
+    );
+    lineageCloneId = clone.rows[0]?.id ?? '';
+  });
+
+  afterAll(async () => {
+    // Delete clone first — parent FK constraint requires child deleted before parent
+    await pool.query('DELETE FROM specs WHERE id = $1', [lineageCloneId]);
+    await pool.query('DELETE FROM projects WHERE id = $1', [lineageProjectId]);
+    // mcpSpecId (root parent) is deleted by the file-level afterAll which runs after all describe-level afterAlls
+  });
+
+  it('returns the custody chain via tools/call', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_spec_lineage',
+      arguments: { specId: lineageCloneId },
+    });
+    const b = body as {
+      result: { isError?: boolean; content: { type: string; text: string }[] };
+    };
+    expect(b.result.isError).toBeUndefined();
+    const payload = JSON.parse(b.result.content[0]?.text ?? '{}') as {
+      chain: { specId: string; scope: string; behindBy: number | null }[];
+      originMeta: unknown;
+    };
+    expect(payload.chain).toHaveLength(2);
+    expect(payload.chain[0]?.specId).toBe(lineageCloneId);
+    expect(payload.chain[0]?.scope).toBe('project');
+    // behindBy = parent.content_version - clone.origin_version; clone snapshotted
+    // parent's content_version at beforeAll time, and no test in this suite mutates
+    // mcpSpecId content — so this is deterministically 0.
+    expect(payload.chain[0]?.behindBy).toBe(0);
+    expect(payload.chain[1]?.specId).toBe(mcpSpecId);
+    expect(payload.chain[1]?.behindBy).toBeNull();
+  });
+
+  it('returns isError for unknown UUID', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_spec_lineage',
+      arguments: { specId: '00000000-0000-0000-0000-000000000000' },
+    });
+    const b = body as { result: { isError?: boolean } };
+    expect(b.result.isError).toBe(true);
+  });
+});
+
 describe('load_files tool', () => {
   it('returns LoadResult JSON for a valid glob', async () => {
     const url = `${baseUrl}/mcp`;
