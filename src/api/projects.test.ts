@@ -11,10 +11,13 @@ vi.mock('../db/index.js', () => ({
       this.cause = options?.cause;
     }
   },
+  InvalidSourceLibraryError: class InvalidSourceLibraryError extends Error {},
+  ProjectNotFoundError: class ProjectNotFoundError extends Error {},
+  SectionUnresolvedError: class SectionUnresolvedError extends Error {},
   createProject: vi.fn(),
   findProjectById: vi.fn(),
-  addSpecToProject: vi.fn(),
-  removeSpecFromProject: vi.fn(),
+  addSectionToProject: vi.fn(),
+  removeSectionFromProject: vi.fn(),
   getBrokenRefs: vi.fn(),
 }));
 
@@ -39,9 +42,10 @@ describe('createProjectHandler', () => {
       projectId: 'p1',
       name: 'Test',
       description: null,
+      sources: [],
     });
     const { createProjectHandler } = await import('./projects.js');
-    const req = { body: { name: 'Test' } } as unknown as Request;
+    const req = { body: { name: 'Test', sourceLibraryIds: ['lib-1'] } } as unknown as Request;
     const res = makeRes();
     await createProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(201);
@@ -50,11 +54,23 @@ describe('createProjectHandler', () => {
     expect((body['data'] as Record<string, unknown>)['projectId']).toBe('p1');
   });
 
+  it('returns 422 when a source library is invalid', async () => {
+    const { createProject, InvalidSourceLibraryError } = await import('../db/index.js');
+    vi.mocked(createProject).mockRejectedValueOnce(
+      new (InvalidSourceLibraryError as new (m: string) => Error)('bad tier')
+    );
+    const { createProjectHandler } = await import('./projects.js');
+    const req = { body: { name: 'Test', sourceLibraryIds: ['lib-ref'] } } as unknown as Request;
+    const res = makeRes();
+    await createProjectHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(422);
+  });
+
   it('returns 500 on database error', async () => {
     const { createProject } = await import('../db/index.js');
     vi.mocked(createProject).mockRejectedValueOnce(new Error('db down'));
     const { createProjectHandler } = await import('./projects.js');
-    const req = { body: { name: 'Test' } } as unknown as Request;
+    const req = { body: { name: 'Test', sourceLibraryIds: ['lib-1'] } } as unknown as Request;
     const res = makeRes();
     await createProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(500);
@@ -68,6 +84,7 @@ describe('getProjectHandler', () => {
       projectId: 'p1',
       name: 'Test',
       description: null,
+      sources: [],
       toc: [],
     });
     const { getProjectHandler } = await import('./projects.js');
@@ -110,87 +127,118 @@ describe('getProjectHandler', () => {
   });
 });
 
-describe('addSpecToProjectHandler', () => {
-  it('returns 201 with AddSpecResult on success', async () => {
-    const { addSpecToProject } = await import('../db/index.js');
-    vi.mocked(addSpecToProject).mockResolvedValueOnce({ specId: 's1', position: 1 });
-    const { addSpecToProjectHandler } = await import('./projects.js');
-    const req = {
-      params: { id: 'p1' },
-      body: { specId: 's1' },
-    } as unknown as Request;
+describe('addSectionToProjectHandler', () => {
+  it('returns 201 with AddSectionResult on success', async () => {
+    const { addSectionToProject } = await import('../db/index.js');
+    vi.mocked(addSectionToProject).mockResolvedValueOnce({
+      specId: 'clone-1',
+      section: '03 30 00',
+      position: 1,
+      source: { libraryId: 'lib-1', name: 'Co M' },
+    });
+    const { addSectionToProjectHandler } = await import('./projects.js');
+    const req = { params: { id: 'p1' }, body: { section: '03 30 00' } } as unknown as Request;
     const res = makeRes();
-    await addSpecToProjectHandler(req, res as unknown as Response);
+    await addSectionToProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(201);
     const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect((body['data'] as Record<string, unknown>)['position']).toBe(1);
+    expect((body['data'] as Record<string, unknown>)['specId']).toBe('clone-1');
   });
 
-  it('returns 409 on duplicate spec (pg 23505)', async () => {
-    const { addSpecToProject, DatabaseError } = await import('../db/index.js');
-    const cause = Object.assign(new Error('unique'), { code: '23505' });
-    vi.mocked(addSpecToProject).mockRejectedValueOnce(
-      new (DatabaseError as new (m: string, o?: ErrorOptions) => Error)('dup', { cause })
+  it('returns 404 for unknown project (ProjectNotFoundError)', async () => {
+    const { addSectionToProject, ProjectNotFoundError } = await import('../db/index.js');
+    vi.mocked(addSectionToProject).mockRejectedValueOnce(
+      new (ProjectNotFoundError as new (m: string) => Error)('nope')
     );
-    const { addSpecToProjectHandler } = await import('./projects.js');
-    const req = { params: { id: 'p1' }, body: { specId: 's1' } } as unknown as Request;
+    const { addSectionToProjectHandler } = await import('./projects.js');
+    const req = { params: { id: 'p1' }, body: { section: '03 30 00' } } as unknown as Request;
     const res = makeRes();
-    await addSpecToProjectHandler(req, res as unknown as Response);
-    expect(res.status).toHaveBeenCalledWith(409);
-    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(body['error']).toBe('spec already in project');
-  });
-
-  it('returns 404 on FK violation (pg 23503)', async () => {
-    const { addSpecToProject, DatabaseError } = await import('../db/index.js');
-    const cause = Object.assign(new Error('fk'), { code: '23503' });
-    vi.mocked(addSpecToProject).mockRejectedValueOnce(
-      new (DatabaseError as new (m: string, o?: ErrorOptions) => Error)('fk', { cause })
-    );
-    const { addSpecToProjectHandler } = await import('./projects.js');
-    const req = { params: { id: 'p1' }, body: { specId: 's1' } } as unknown as Request;
-    const res = makeRes();
-    await addSpecToProjectHandler(req, res as unknown as Response);
+    await addSectionToProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(404);
   });
 
-  it('returns 400 when id param missing', async () => {
-    const { addSpecToProjectHandler } = await import('./projects.js');
-    const req = { params: {}, body: { specId: 's1' } } as unknown as Request;
+  it('returns 422 when no source holds the section (SectionUnresolvedError)', async () => {
+    const { addSectionToProject, SectionUnresolvedError } = await import('../db/index.js');
+    vi.mocked(addSectionToProject).mockRejectedValueOnce(
+      new (SectionUnresolvedError as new (m: string) => Error)('unresolved')
+    );
+    const { addSectionToProjectHandler } = await import('./projects.js');
+    const req = { params: { id: 'p1' }, body: { section: '99 99 99' } } as unknown as Request;
     const res = makeRes();
-    await addSpecToProjectHandler(req, res as unknown as Response);
+    await addSectionToProjectHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(422);
+  });
+
+  it('returns 409 on duplicate section (pg 23505)', async () => {
+    const { addSectionToProject, DatabaseError } = await import('../db/index.js');
+    const cause = Object.assign(new Error('unique'), { code: '23505' });
+    vi.mocked(addSectionToProject).mockRejectedValueOnce(
+      new (DatabaseError as new (m: string, o?: ErrorOptions) => Error)('dup', { cause })
+    );
+    const { addSectionToProjectHandler } = await import('./projects.js');
+    const req = { params: { id: 'p1' }, body: { section: '03 30 00' } } as unknown as Request;
+    const res = makeRes();
+    await addSectionToProjectHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(409);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['error']).toBe('section already in project');
+  });
+
+  it('returns 400 when id param missing', async () => {
+    const { addSectionToProjectHandler } = await import('./projects.js');
+    const req = { params: {}, body: { section: '03 30 00' } } as unknown as Request;
+    const res = makeRes();
+    await addSectionToProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(400);
   });
 });
 
-describe('removeSpecFromProjectHandler', () => {
-  it('returns 200 on successful removal', async () => {
-    const { removeSpecFromProject } = await import('../db/index.js');
-    vi.mocked(removeSpecFromProject).mockResolvedValueOnce(true);
-    const { removeSpecFromProjectHandler } = await import('./projects.js');
-    const req = { params: { id: 'p1', specId: 's1' } } as unknown as Request;
+describe('removeSectionFromProjectHandler', () => {
+  it('returns 200 on removed', async () => {
+    const { removeSectionFromProject } = await import('../db/index.js');
+    vi.mocked(removeSectionFromProject).mockResolvedValueOnce('removed');
+    const { removeSectionFromProjectHandler } = await import('./projects.js');
+    const req = { params: { id: 'p1', specId: 's1' }, query: {} } as unknown as Request;
     const res = makeRes();
-    await removeSpecFromProjectHandler(req, res as unknown as Response);
+    await removeSectionFromProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(200);
+    expect(vi.mocked(removeSectionFromProject)).toHaveBeenCalledWith('p1', 's1', false, {});
   });
 
-  it('returns 404 when spec not in project', async () => {
-    const { removeSpecFromProject } = await import('../db/index.js');
-    vi.mocked(removeSpecFromProject).mockResolvedValueOnce(false);
-    const { removeSpecFromProjectHandler } = await import('./projects.js');
-    const req = { params: { id: 'p1', specId: 's1' } } as unknown as Request;
+  it('returns 404 on not-found', async () => {
+    const { removeSectionFromProject } = await import('../db/index.js');
+    vi.mocked(removeSectionFromProject).mockResolvedValueOnce('not-found');
+    const { removeSectionFromProjectHandler } = await import('./projects.js');
+    const req = { params: { id: 'p1', specId: 's1' }, query: {} } as unknown as Request;
     const res = makeRes();
-    await removeSpecFromProjectHandler(req, res as unknown as Response);
+    await removeSectionFromProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(404);
-    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(body['error']).toBe('spec not in project');
+  });
+
+  it('returns 409 on edited without force; force=true is forwarded', async () => {
+    const { removeSectionFromProject } = await import('../db/index.js');
+    vi.mocked(removeSectionFromProject).mockResolvedValueOnce('edited');
+    const { removeSectionFromProjectHandler } = await import('./projects.js');
+    const req = { params: { id: 'p1', specId: 's1' }, query: {} } as unknown as Request;
+    const res = makeRes();
+    await removeSectionFromProjectHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(409);
+
+    vi.mocked(removeSectionFromProject).mockResolvedValueOnce('removed');
+    const req2 = {
+      params: { id: 'p1', specId: 's1' },
+      query: { force: 'true' },
+    } as unknown as Request;
+    const res2 = makeRes();
+    await removeSectionFromProjectHandler(req2, res2 as unknown as Response);
+    expect(vi.mocked(removeSectionFromProject)).toHaveBeenLastCalledWith('p1', 's1', true, {});
   });
 
   it('returns 400 when specId param missing', async () => {
-    const { removeSpecFromProjectHandler } = await import('./projects.js');
-    const req = { params: { id: 'p1' } } as unknown as Request;
+    const { removeSectionFromProjectHandler } = await import('./projects.js');
+    const req = { params: { id: 'p1' }, query: {} } as unknown as Request;
     const res = makeRes();
-    await removeSpecFromProjectHandler(req, res as unknown as Response);
+    await removeSectionFromProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(400);
   });
 });
@@ -205,6 +253,7 @@ describe('getBrokenRefsHandler', () => {
         sourceSpecSection: '03 30 00',
         targetSpecSection: '09 91 00',
         referenceText: 'See Section 09 91 00',
+        availableFrom: [],
       },
     ]);
     const { getBrokenRefsHandler } = await import('./projects.js');

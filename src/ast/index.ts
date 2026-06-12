@@ -16,9 +16,9 @@ export {
   SecRefSchema,
   PatchSpecBodySchema,
   CreateProjectBodySchema,
-  AddSpecToProjectBodySchema,
+  AddSectionToProjectBodySchema,
 } from './schemas.js';
-export type { CreateProjectBody, AddSpecToProjectBody } from './schemas.js';
+export type { CreateProjectBody, AddSectionToProjectBody } from './schemas.js';
 export type {
   StyleNodeType,
   StyleProperties,

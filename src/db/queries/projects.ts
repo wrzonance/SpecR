@@ -1,6 +1,6 @@
-import { DatabaseError } from '../index.js';
+import { DatabaseError } from '../errors.js';
 import type { Pool } from 'pg';
-import { logger } from '../../lib/logger.js';
+import type { LibraryTier } from './libraries.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -25,12 +25,37 @@ interface BrokenRefRow {
   readonly source_spec_section: string;
   readonly target_spec_section: string | null;
   readonly reference_text: string;
+  readonly available_from: readonly { libraryId: string; name: string }[] | null;
+}
+
+interface SourceLibRow {
+  readonly id: string;
+  readonly name: string;
+  readonly tier: LibraryTier;
+}
+
+interface ProjectSourceRow {
+  readonly library_id: string;
+  readonly name: string;
+  readonly tier: LibraryTier;
+  readonly priority: number;
+}
+
+/** A project source library is invalid (unknown id or non-master tier) → 422. */
+export class InvalidSourceLibraryError extends DatabaseError {}
+
+export interface ProjectSource {
+  readonly libraryId: string;
+  readonly name: string;
+  readonly tier: LibraryTier;
+  readonly priority: number;
 }
 
 export interface ProjectSummary {
   readonly projectId: string;
   readonly name: string;
   readonly description: string | null;
+  readonly sources: readonly ProjectSource[];
 }
 
 export interface ProjectTocEntry {
@@ -44,6 +69,7 @@ export interface ProjectWithToc {
   readonly projectId: string;
   readonly name: string;
   readonly description: string | null;
+  readonly sources: readonly ProjectSource[];
   readonly toc: readonly ProjectTocEntry[];
 }
 
@@ -53,16 +79,42 @@ export interface BrokenRef {
   readonly sourceSpecSection: string;
   readonly targetSpecSection: string | null;
   readonly referenceText: string;
+  /** Project source libraries that hold the missing target section — the
+   *  actionable "add this section" advisory (design doc #94). Priority order. */
+  readonly availableFrom: readonly { libraryId: string; name: string }[];
 }
 
 export interface CreateProjectInput {
   readonly name: string;
   readonly description?: string;
+  readonly sourceLibraryIds: readonly string[];
 }
 
-export interface AddSpecResult {
-  readonly specId: string;
-  readonly position: number;
+/** Sources must be company or client masters (ADR-015 D3) — reference-tier
+ *  content must first be derived into a company master. Returned in input
+ *  order (= priority order). */
+async function validateSourceLibraries(
+  ids: readonly string[],
+  pool: Queryable
+): Promise<readonly SourceLibRow[]> {
+  const res = await pool.query<SourceLibRow>(
+    `SELECT id, name, tier FROM libraries WHERE id = ANY($1::uuid[])`,
+    [ids]
+  );
+  const byId = new Map(res.rows.map((row) => [row.id, row]));
+  return ids.map((id) => {
+    const lib = byId.get(id);
+    if (!lib) {
+      // User-facing via the 422 surface — no internal function-name prefix.
+      throw new InvalidSourceLibraryError(`source library ${id} not found`);
+    }
+    if (lib.tier !== 'company' && lib.tier !== 'client') {
+      throw new InvalidSourceLibraryError(
+        `library "${lib.name}" is ${lib.tier}-tier — project sources must be company or client masters`
+      );
+    }
+    return lib;
+  });
 }
 
 export async function createProject(
@@ -70,17 +122,42 @@ export async function createProject(
   pool: Queryable
 ): Promise<ProjectSummary> {
   try {
+    const libs = await validateSourceLibraries(input.sourceLibraryIds, pool);
     const result = await pool.query<ProjectRow>(
-      `INSERT INTO projects (name, description) VALUES ($1, $2) RETURNING id, name, description`,
-      [input.name, input.description ?? null]
+      `WITH proj AS (
+         INSERT INTO projects (name, description) VALUES ($1, $2)
+         RETURNING id, name, description
+       ),
+       src AS (
+         INSERT INTO project_sources (project_id, library_id, priority)
+         SELECT proj.id, u.lib_id, u.ord::int
+         FROM proj, unnest($3::uuid[]) WITH ORDINALITY AS u(lib_id, ord)
+       )
+       SELECT id, name, description FROM proj`,
+      [input.name, input.description ?? null, input.sourceLibraryIds]
     );
     const row = result.rows[0];
     if (!row) throw new DatabaseError('createProject: no row returned after insert');
-    return { projectId: row.id, name: row.name, description: row.description };
+    const sources = libs.map((lib, i) => ({
+      libraryId: lib.id,
+      name: lib.name,
+      tier: lib.tier,
+      priority: i + 1,
+    }));
+    return { projectId: row.id, name: row.name, description: row.description, sources };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError('createProject: insert failed', { cause: err });
   }
+}
+
+function mapSources(rows: readonly ProjectSourceRow[]): readonly ProjectSource[] {
+  return rows.map((row) => ({
+    libraryId: row.library_id,
+    name: row.name,
+    tier: row.tier,
+    priority: row.priority,
+  }));
 }
 
 export async function findProjectById(id: string, pool: Queryable): Promise<ProjectWithToc | null> {
@@ -104,6 +181,14 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
        ORDER BY ps.position`,
       [id]
     );
+    const srcRes = await pool.query<ProjectSourceRow>(
+      `SELECT ps.library_id, l.name, l.tier, ps.priority
+       FROM project_sources ps
+       JOIN libraries l ON l.id = ps.library_id
+       WHERE ps.project_id = $1
+       ORDER BY ps.priority`,
+      [id]
+    );
     return {
       projectId: project.id,
       name: project.name,
@@ -114,80 +199,11 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
         title: row.title,
         position: row.position,
       })),
+      sources: mapSources(srcRes.rows),
     };
   } catch (err) {
     throw new DatabaseError(`findProjectById: toc query failed for ${id}`, { cause: err });
   }
-}
-
-export async function addSpecToProject(
-  projectId: string,
-  specId: string,
-  pool: Queryable
-): Promise<AddSpecResult> {
-  try {
-    const result = await pool.query<{ spec_id: string; position: number }>(
-      `WITH spec_section AS (
-         SELECT section FROM specs WHERE id = $2
-       ),
-       inserted AS (
-         INSERT INTO project_specs (project_id, spec_id, position)
-         SELECT $1, $2, COALESCE(MAX(position), 0) + 1 FROM project_specs WHERE project_id = $1
-         RETURNING spec_id, position
-       ),
-       repaired AS (
-         UPDATE spec_references sr
-         SET target_spec_id = $2, is_broken = false
-         FROM project_specs ps, spec_section ss
-         WHERE sr.target_spec_section = ss.section
-           AND sr.is_broken = true
-           AND sr.source_spec_id = ps.spec_id
-           AND ps.project_id = $1
-           AND EXISTS (SELECT 1 FROM inserted)
-       )
-       SELECT spec_id, position FROM inserted`,
-      [projectId, specId]
-    );
-    const row = result.rows[0];
-    if (!row) throw new DatabaseError('addSpecToProject: no row returned after insert');
-    logger.info({ projectId, specId, position: row.position }, 'addSpecToProject: spec added');
-    return { specId: row.spec_id, position: row.position };
-  } catch (err) {
-    if (err instanceof DatabaseError) throw err;
-    throw new DatabaseError(`addSpecToProject: failed for spec ${specId}`, { cause: err });
-  }
-}
-
-export async function removeSpecFromProject(
-  projectId: string,
-  specId: string,
-  pool: Queryable
-): Promise<boolean> {
-  try {
-    const result = await pool.query<{ deleted_count: number }>(
-      `WITH deleted AS (
-         DELETE FROM project_specs WHERE project_id = $1 AND spec_id = $2 RETURNING spec_id
-       ),
-       mark_broken AS (
-         UPDATE spec_references sr
-         SET is_broken = true
-         FROM project_specs ps
-         WHERE sr.target_spec_id = $2
-           AND sr.source_spec_id = ps.spec_id
-           AND ps.project_id = $1
-           AND sr.source_spec_id <> $2
-           AND EXISTS (SELECT 1 FROM deleted)
-       )
-       SELECT COUNT(*)::int AS deleted_count FROM deleted`,
-      [projectId, specId]
-    );
-    const count = result.rows[0]?.deleted_count ?? 0;
-    if (count === 0) return false;
-  } catch (err) {
-    throw new DatabaseError(`removeSpecFromProject: failed for spec ${specId}`, { cause: err });
-  }
-  logger.info({ projectId, specId }, 'removeSpecFromProject: spec removed, refs marked broken');
-  return true;
 }
 
 export async function getBrokenRefs(
@@ -197,7 +213,15 @@ export async function getBrokenRefs(
   try {
     const result = await pool.query<BrokenRefRow>(
       `SELECT sr.id, sr.source_spec_id, s.section AS source_spec_section,
-              sr.target_spec_section, sr.reference_text
+              sr.target_spec_section, sr.reference_text,
+              (SELECT json_agg(json_build_object('libraryId', l.id, 'name', l.name)
+                               ORDER BY pso.priority)
+               FROM project_sources pso
+               JOIN libraries l ON l.id = pso.library_id
+               WHERE pso.project_id = $1
+                 AND EXISTS (SELECT 1 FROM specs ms
+                             WHERE ms.library_id = pso.library_id
+                               AND ms.section = sr.target_spec_section)) AS available_from
        FROM spec_references sr
        JOIN specs s ON s.id = sr.source_spec_id
        JOIN project_specs ps ON ps.spec_id = sr.source_spec_id AND ps.project_id = $1
@@ -210,6 +234,7 @@ export async function getBrokenRefs(
       sourceSpecSection: row.source_spec_section,
       targetSpecSection: row.target_spec_section,
       referenceText: row.reference_text,
+      availableFrom: row.available_from ?? [],
     }));
   } catch (err) {
     throw new DatabaseError(`getBrokenRefs: query failed for project ${projectId}`, { cause: err });

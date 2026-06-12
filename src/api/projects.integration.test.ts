@@ -8,7 +8,7 @@ import { pool } from '../db/index.js';
 async function insertSpec(section: string, title: string): Promise<string> {
   const r = await pool.query<{ id: string }>(
     `INSERT INTO specs (section, title, source, library_id)
-     VALUES ($1, $2, 'ufgs', (SELECT id FROM libraries WHERE name = 'UFGS Reference'))
+     VALUES ($1, $2, 'unknown', (SELECT id FROM libraries WHERE name = 'Default Company Master'))
      RETURNING id`,
     [section, title]
   );
@@ -35,32 +35,10 @@ async function postJSON(path: string, body: unknown): Promise<Response> {
   });
 }
 
-async function insertParagraph(specId: string, text: string): Promise<string> {
-  const r = await pool.query<{ id: string }>(
-    `INSERT INTO paragraphs (spec_id, node_type, text, position) VALUES ($1, 'article', $2, 1) RETURNING id`,
-    [specId, text]
-  );
-  const row = r.rows[0];
-  if (!row) throw new Error('failed to insert paragraph');
-  return row.id;
-}
-
-async function insertRef(
-  sourceSpecId: string,
-  sourceParaId: string,
-  section: string,
-  targetSpecId: string,
-  text: string
-): Promise<string> {
-  const r = await pool.query<{ id: string }>(
-    `INSERT INTO spec_references
-       (source_spec_id, source_paragraph_id, target_type, target_spec_section, target_spec_id, reference_text)
-     VALUES ($1, $2, 'section', $3, $4, $5) RETURNING id`,
-    [sourceSpecId, sourceParaId, section, targetSpecId, text]
-  );
-  const row = r.rows[0];
-  if (!row) throw new Error('failed to insert ref');
-  return row.id;
+async function getLibraryId(name: string): Promise<string> {
+  const r = await pool.query<{ id: string }>(`SELECT id FROM libraries WHERE name = $1`, [name]);
+  if (!r.rows[0]) throw new Error(`library ${name} missing — run migrations`);
+  return r.rows[0].id;
 }
 
 let server: Server;
@@ -68,8 +46,10 @@ let baseUrl: string;
 let testProjectId: string;
 let specA: string;
 let specB: string;
-let refId: string;
-let reverseRefId: string;
+let companyId: string;
+let ufgsId: string;
+let companyLibId: string;
+const apiProjects: string[] = [];
 
 beforeAll(async () => {
   const app = express();
@@ -83,6 +63,11 @@ beforeAll(async () => {
   const address = server.address();
   const port = typeof address === 'object' && address !== null ? address.port : 3000;
   baseUrl = `http://localhost:${port}`;
+  [companyId, ufgsId] = await Promise.all([
+    getLibraryId('Default Company Master'),
+    getLibraryId('UFGS Reference'),
+  ]);
+  companyLibId = companyId;
   [specA, specB] = await Promise.all([
     insertSpec('03 30 00', 'Concrete'),
     insertSpec('09 91 00', 'Painting'),
@@ -92,17 +77,35 @@ beforeAll(async () => {
     `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1,$2,1),($1,$3,2)`,
     [testProjectId, specA, specB]
   );
-  const [paraAId, paraBId] = await Promise.all([
-    insertParagraph(specA, 'See Section 09 91 00'),
-    insertParagraph(specB, 'See Section 03 30 00'),
-  ]);
-  [refId, reverseRefId] = await Promise.all([
-    insertRef(specA, paraAId, '09 91 00', specB, 'See Section 09 91 00'),
-    insertRef(specB, paraBId, '03 30 00', specA, 'See Section 03 30 00'),
-  ]);
+  // Fixture for availableFrom advisory test: specA (03 30 00) has an outgoing
+  // ref to 09 91 00, which specB covers in the company master.
+  const paraRes = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, node_type, text, position)
+     VALUES ($1, 'article', 'See Section 09 91 00', 1) RETURNING id`,
+    [specA]
+  );
+  const paraId = paraRes.rows[0]?.id;
+  if (!paraId) throw new Error('failed to insert paragraph fixture');
+  await pool.query(
+    `INSERT INTO spec_references
+       (source_spec_id, source_paragraph_id, target_type, target_spec_section, reference_text)
+     VALUES ($1, $2, 'section', '09 91 00', 'See Section 09 91 00')`,
+    [specA, paraId]
+  );
 });
 
 afterAll(async () => {
+  // Cleanup order matters — project_specs.spec_id FK is RESTRICT, so project_specs
+  // rows must be removed before their referenced specs can be deleted.
+  // Clone specs (project_id = apiProject) also carry parent_spec_id → specA/specB,
+  // so clone specs must go before the master specs.
+  if (apiProjects.length > 0) {
+    await pool.query('DELETE FROM project_specs WHERE project_id = ANY($1)', [apiProjects]);
+    await pool.query('DELETE FROM specs WHERE project_id = ANY($1)', [apiProjects]);
+    await pool.query('DELETE FROM projects WHERE id = ANY($1)', [apiProjects]);
+  }
+  // testProjectId was inserted via raw SQL — deleting the project cascades its
+  // project_specs rows (project_id FK is CASCADE), unblocking specA/specB deletion.
   await pool.query('DELETE FROM projects WHERE id = $1', [testProjectId]);
   await pool.query('DELETE FROM specs WHERE id = ANY($1)', [[specA, specB]]);
   await new Promise<void>((resolve, reject) => {
@@ -116,24 +119,28 @@ describe('POST /projects', () => {
     if (createdId) await pool.query('DELETE FROM projects WHERE id = $1', [createdId]);
   });
 
-  it('returns 201 with ProjectSummary', async () => {
+  it('returns 201 with ProjectSummary including sources', async () => {
     const res = await fetch(`${baseUrl}/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'New Project' }),
+      body: JSON.stringify({ name: 'New Project', sourceLibraryIds: [companyId] }),
     });
     const body = (await res.json()) as Record<string, unknown>;
     expect(res.status).toBe(201);
     const data = body['data'] as Record<string, unknown>;
     expect(typeof data['projectId']).toBe('string');
     createdId = data['projectId'] as string;
+    const sources = data['sources'] as Array<Record<string, unknown>>;
+    expect(Array.isArray(sources)).toBe(true);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.['libraryId']).toBe(companyId);
   });
 
   it('returns 422 for missing name', async () => {
     const res = await fetch(`${baseUrl}/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ sourceLibraryIds: [companyId] }),
     });
     expect(res.status).toBe(422);
   });
@@ -142,7 +149,37 @@ describe('POST /projects', () => {
     const res = await fetch(`${baseUrl}/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: '' }),
+      body: JSON.stringify({ name: '', sourceLibraryIds: [companyId] }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('returns 422 when sourceLibraryIds is missing', async () => {
+    const res = await fetch(`${baseUrl}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'X' }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('returns 422 when reference-tier library is used as source', async () => {
+    const res = await fetch(`${baseUrl}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'X', sourceLibraryIds: [ufgsId] }),
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('returns 422 for unknown library id', async () => {
+    const res = await fetch(`${baseUrl}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'X',
+        sourceLibraryIds: ['00000000-0000-0000-0000-000000000000'],
+      }),
     });
     expect(res.status).toBe(422);
   });
@@ -159,6 +196,8 @@ describe('GET /projects/:id', () => {
     expect(toc.length).toBe(2);
     expect(toc[0]?.['specId']).toBe(specA);
     expect(toc[1]?.['specId']).toBe(specB);
+    // testProjectId was inserted via raw SQL (no sources) — field must still be present
+    expect(data['sources']).toEqual([]);
   });
 
   it('returns 404 for unknown project', async () => {
@@ -167,128 +206,108 @@ describe('GET /projects/:id', () => {
   });
 });
 
-describe('POST /projects/:id/specs (TOC add)', () => {
-  let addProjectId: string;
+describe('POST /projects/:id/specs (section-based copy-on-derive)', () => {
+  let projectId: string;
+  let cloneA: string;
+
   beforeAll(async () => {
-    addProjectId = await insertProject('TOC Add Test');
-  });
-  afterAll(async () => {
-    await pool.query('DELETE FROM projects WHERE id = $1', [addProjectId]);
+    const res = await postJSON('/projects', {
+      name: `Derive API ${Date.now()}`,
+      sourceLibraryIds: [companyLibId],
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    projectId = (body['data'] as Record<string, unknown>)['projectId'] as string;
+    apiProjects.push(projectId);
   });
 
-  it('adds specA at position 1', async () => {
-    const res = await postJSON(`/projects/${addProjectId}/specs`, { specId: specA });
+  it('adds a section: 201 with clone specId (not the master), source, position', async () => {
+    const res = await postJSON(`/projects/${projectId}/specs`, { section: '03 30 00' });
     expect(res.status).toBe(201);
     const d = ((await res.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
+    expect(d['specId']).not.toBe(specA);
+    expect(d['section']).toBe('03 30 00');
     expect(d['position']).toBe(1);
+    expect((d['source'] as Record<string, unknown>)['libraryId']).toBe(companyLibId);
+    cloneA = d['specId'] as string;
   });
 
-  it('adds specB at position 2', async () => {
-    const res = await postJSON(`/projects/${addProjectId}/specs`, { specId: specB });
-    expect(res.status).toBe(201);
-    const d = ((await res.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
-    expect(d['position']).toBe(2);
-  });
-
-  it('returns 409 on duplicate spec', async () => {
-    const res = await postJSON(`/projects/${addProjectId}/specs`, { specId: specA });
+  it('409 on duplicate section', async () => {
+    const res = await postJSON(`/projects/${projectId}/specs`, { section: '03 30 00' });
     expect(res.status).toBe(409);
   });
 
-  it('returns 422 for invalid specId', async () => {
-    const res = await postJSON(`/projects/${addProjectId}/specs`, { specId: 'not-a-uuid' });
+  it('422 when no source holds the section', async () => {
+    const res = await postJSON(`/projects/${projectId}/specs`, { section: '99 99 99' });
     expect(res.status).toBe(422);
   });
 
-  it('GET toc shows both specs in position order', async () => {
-    const res = await fetch(`${baseUrl}/projects/${addProjectId}`);
-    const toc = ((await res.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
-    const entries = toc['toc'] as Array<Record<string, unknown>>;
-    expect(entries[0]?.['specId']).toBe(specA);
-    expect(entries[1]?.['specId']).toBe(specB);
-  });
-});
-
-describe('DELETE from TOC (broken ref cascade)', () => {
-  it('ref starts non-broken', async () => {
-    const row = await pool.query<{ is_broken: boolean }>(
-      'SELECT is_broken FROM spec_references WHERE id = $1',
-      [refId]
-    );
-    expect(row.rows[0]?.is_broken).toBe(false);
+  it('422 for malformed section body', async () => {
+    const res = await postJSON(`/projects/${projectId}/specs`, { specId: specA });
+    expect(res.status).toBe(422);
   });
 
-  it('DELETE removes spec from TOC and marks ref broken', async () => {
-    const res = await fetch(`${baseUrl}/projects/${testProjectId}/specs/${specB}`, {
+  it('404 for unknown project', async () => {
+    const res = await postJSON(`/projects/00000000-0000-0000-0000-000000000000/specs`, {
+      section: '03 30 00',
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('DELETE clean clone returns 200 and deletes the copy, master survives', async () => {
+    const res = await fetch(`${baseUrl}/projects/${projectId}/specs/${cloneA}`, {
       method: 'DELETE',
     });
     expect(res.status).toBe(200);
-    const row = await pool.query<{ is_broken: boolean }>(
-      'SELECT is_broken FROM spec_references WHERE id = $1',
-      [refId]
-    );
-    expect(row.rows[0]?.is_broken).toBe(true);
+    const gone = await pool.query('SELECT 1 FROM specs WHERE id = $1', [cloneA]);
+    expect(gone.rowCount).toBe(0);
+    const master = await pool.query('SELECT 1 FROM specs WHERE id = $1', [specA]);
+    expect(master.rowCount).toBe(1);
   });
 
-  it("removed spec's own outgoing refs are not marked broken", async () => {
-    const row = await pool.query<{ is_broken: boolean }>(
-      'SELECT is_broken FROM spec_references WHERE id = $1',
-      [reverseRefId]
-    );
-    expect(row.rows[0]?.is_broken).toBe(false);
+  it('DELETE edited clone → 409; ?force=true → 200', async () => {
+    const add = await postJSON(`/projects/${projectId}/specs`, { section: '03 30 00' });
+    const d = ((await add.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
+    const cloneId = d['specId'] as string;
+    await pool.query('UPDATE specs SET content_version = 2 WHERE id = $1', [cloneId]);
+    const blocked = await fetch(`${baseUrl}/projects/${projectId}/specs/${cloneId}`, {
+      method: 'DELETE',
+    });
+    expect(blocked.status).toBe(409);
+    const forced = await fetch(`${baseUrl}/projects/${projectId}/specs/${cloneId}?force=true`, {
+      method: 'DELETE',
+    });
+    expect(forced.status).toBe(200);
   });
 
-  it('spec row still exists in library after TOC removal', async () => {
-    const res = await pool.query<{ id: string }>('SELECT id FROM specs WHERE id = $1', [specB]);
-    expect(res.rows[0]?.id).toBe(specB);
+  it('DELETE returns 404 when spec not owned by project', async () => {
+    const res = await fetch(`${baseUrl}/projects/${projectId}/specs/${specA}`, {
+      method: 'DELETE',
+    });
+    expect(res.status).toBe(404);
   });
+});
 
-  it('GET broken refs surfaces broken ref scoped to project', async () => {
-    const res = await fetch(`${baseUrl}/projects/${testProjectId}/references/broken`);
+describe('GET /projects/:id/references/broken — availableFrom advisory', () => {
+  it('broken ref lists the source libraries that hold the missing section', async () => {
+    const created = await postJSON('/projects', {
+      name: `Advisory ${Date.now()}`,
+      sourceLibraryIds: [companyLibId],
+    });
+    const pid = (
+      ((await created.json()) as Record<string, unknown>)['data'] as Record<string, unknown>
+    )['projectId'] as string;
+    apiProjects.push(pid);
+    // Clone 03 30 00 — master specA has an outgoing ref to 09 91 00 (specB in the
+    // company master). Since 09 91 00 is not yet in the project, the clone ref is
+    // is_broken=true; availableFrom should name the company master library.
+    await postJSON(`/projects/${pid}/specs`, { section: '03 30 00' });
+    const res = await fetch(`${baseUrl}/projects/${pid}/references/broken`);
     expect(res.status).toBe(200);
     const refs = ((await res.json()) as Record<string, unknown>)['data'] as Array<
       Record<string, unknown>
     >;
-    expect(refs.length).toBe(1);
-    expect(refs[0]?.['refId']).toBe(refId);
-    expect(refs[0]?.['targetSpecSection']).toBe('09 91 00');
-  });
-});
-
-describe('re-add to TOC (ref resolution)', () => {
-  it('re-adding specB clears is_broken and resolves target_spec_id', async () => {
-    const addRes = await postJSON(`/projects/${testProjectId}/specs`, { specId: specB });
-    expect(addRes.status).toBe(201);
-    const addData = ((await addRes.json()) as Record<string, unknown>)['data'] as Record<
-      string,
-      unknown
-    >;
-    expect(typeof addData['position']).toBe('number');
-    const row = await pool.query<{ is_broken: boolean; target_spec_id: string }>(
-      'SELECT is_broken, target_spec_id FROM spec_references WHERE id = $1',
-      [refId]
-    );
-    expect(row.rows[0]?.is_broken).toBe(false);
-    expect(row.rows[0]?.target_spec_id).toBe(specB);
-  });
-
-  it('GET broken refs empty after re-add', async () => {
-    const res = await fetch(`${baseUrl}/projects/${testProjectId}/references/broken`);
-    const refs = ((await res.json()) as Record<string, unknown>)['data'] as Array<
-      Record<string, unknown>
-    >;
-    expect(refs.find((r) => r['refId'] === refId)).toBeUndefined();
-  });
-});
-
-describe('DELETE /projects/:id/specs/:specId (not found)', () => {
-  it('returns 404 when spec not in project', async () => {
-    const res = await fetch(
-      `${baseUrl}/projects/${testProjectId}/specs/00000000-0000-0000-0000-000000000000`,
-      { method: 'DELETE' }
-    );
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(res.status).toBe(404);
-    expect(body['error']).toBe('spec not in project');
+    const ref = refs.find((r) => r['targetSpecSection'] === '09 91 00');
+    expect(ref).toBeDefined();
+    expect(ref?.['availableFrom']).toEqual([expect.objectContaining({ libraryId: companyLibId })]);
   });
 });

@@ -231,7 +231,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name]
+              required: [name, sourceLibraryIds]
               properties:
                 name:
                   type: string
@@ -239,6 +239,17 @@ paths:
                 description:
                   type: string
                   minLength: 1
+                sourceLibraryIds:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items:
+                    type: string
+                    format: uuid
+                  description: >
+                    Ordered source list — priority = array order (1-based). Each must be a
+                    company- or client-tier library (ADR-015 D3); no duplicates. Section
+                    resolution for POST /projects/{id}/specs walks this list.
       responses:
         '201':
           description: Project created
@@ -254,6 +265,12 @@ paths:
                         $ref: '#/components/schemas/ProjectSummary'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '422':
+          description: 'Validation failed, unknown library, or reference-tier source'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -284,8 +301,8 @@ paths:
 
   /projects/{id}/specs:
     post:
-      operationId: addSpecToProject
-      summary: Add a spec section to a project TOC
+      operationId: addSectionToProject
+      summary: Add a section to a project TOC (copy-on-derive clone)
       tags: [projects]
       parameters:
         - $ref: '#/components/parameters/ProjectId'
@@ -295,14 +312,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [specId]
+              required: [section]
               properties:
-                specId:
+                section:
                   type: string
-                  format: uuid
+                  pattern: '^\d{2} \d{2} \d{2}(\.\d{2}( \d{2})?)?$'
+                  description: CSI section number (expanded shape, ADR-020)
       responses:
         '201':
-          description: Spec added to project
+          description: Section cloned into project
           content:
             application/json:
               schema:
@@ -313,20 +331,50 @@ paths:
                     properties:
                       data:
                         type: object
-                        required: [specId, position]
+                        required: [specId, section, position, source]
                         properties:
                           specId:
                             type: string
                             format: uuid
+                            description: The project-owned clone's id (not the master's)
+                          section:
+                            type: string
                           position:
                             type: integer
-                            description: 1-based TOC position assigned to the spec
+                            description: 1-based TOC position assigned to the section
+                          source:
+                            type: object
+                            required: [libraryId, name]
+                            properties:
+                              libraryId:
+                                type: string
+                                format: uuid
+                              name:
+                                type: string
+                          shadowed:
+                            type: array
+                            description: Lower-priority sources that also hold this section
+                            items:
+                              type: object
+                              required: [libraryId, name]
+                              properties:
+                                libraryId:
+                                  type: string
+                                  format: uuid
+                                name:
+                                  type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 'Spec already in project — `{success: false, error: "spec already in project"}`'
+          description: 'Section already in project'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: 'Malformed section number, or no source library holds the section'
           content:
             application/json:
               schema:
@@ -336,8 +384,8 @@ paths:
 
   /projects/{id}/specs/{specId}:
     delete:
-      operationId: removeSpecFromProject
-      summary: Remove a spec from a project TOC (cascades dangling cross-references)
+      operationId: removeSectionFromProject
+      summary: Remove a project-owned section copy (blocked if edited, unless force)
       tags: [projects]
       parameters:
         - $ref: '#/components/parameters/ProjectId'
@@ -347,9 +395,16 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Delete the copy even if it has project edits (content_version > 1)
       responses:
         '200':
-          description: Spec removed (dangling cross-references marked broken)
+          description: Section copy removed (dangling cross-references marked broken)
           content:
             application/json:
               schema:
@@ -370,6 +425,12 @@ paths:
                             format: uuid
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: 'Section has project edits — repeat with ?force=true'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -941,7 +1002,7 @@ components:
 
     ProjectSummary:
       type: object
-      required: [projectId, name, description]
+      required: [projectId, name, description, sources]
       properties:
         projectId:
           type: string
@@ -950,10 +1011,28 @@ components:
           type: string
         description:
           type: [string, 'null']
+        sources:
+          type: array
+          description: Ordered source libraries (priority ascending)
+          items:
+            type: object
+            required: [libraryId, name, tier, priority]
+            properties:
+              libraryId:
+                type: string
+                format: uuid
+              name:
+                type: string
+              tier:
+                type: string
+                enum: [company, client]
+              priority:
+                type: integer
+                minimum: 1
 
     ProjectWithToc:
       type: object
-      required: [projectId, name, description, toc]
+      required: [projectId, name, description, sources, toc]
       properties:
         projectId:
           type: string
@@ -962,6 +1041,24 @@ components:
           type: string
         description:
           type: [string, 'null']
+        sources:
+          type: array
+          description: Ordered source libraries (priority ascending)
+          items:
+            type: object
+            required: [libraryId, name, tier, priority]
+            properties:
+              libraryId:
+                type: string
+                format: uuid
+              name:
+                type: string
+              tier:
+                type: string
+                enum: [company, client]
+              priority:
+                type: integer
+                minimum: 1
         toc:
           type: array
           items:
@@ -981,7 +1078,7 @@ components:
 
     BrokenRef:
       type: object
-      required: [refId, sourceSpecId, sourceSpecSection, targetSpecSection, referenceText]
+      required: [refId, sourceSpecId, sourceSpecSection, targetSpecSection, referenceText, availableFrom]
       properties:
         refId:
           type: string
@@ -997,6 +1094,20 @@ components:
           description: Section number the reference points at (as written in the source document)
         referenceText:
           type: string
+        availableFrom:
+          type: array
+          description: >
+            Project source libraries that hold the missing target section — an
+            actionable "add this section" advisory. Priority order.
+          items:
+            type: object
+            required: [libraryId, name]
+            properties:
+              libraryId:
+                type: string
+                format: uuid
+              name:
+                type: string
 
     # ── Templates ──────────────────────────────────────────────────────────────
 

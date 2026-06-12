@@ -1,9 +1,9 @@
 import { Pool } from 'pg';
 import { config } from '../lib/env.js';
-import { SpecrError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
+import { DatabaseError } from './errors.js';
 
-export class DatabaseError extends SpecrError {}
+export { DatabaseError } from './errors.js';
 
 export function createPool(): Pool {
   return new Pool({ connectionString: config.DATABASE_URL });
@@ -44,17 +44,16 @@ export { insertRefs } from './queries/refs.js';
 export {
   createProject,
   findProjectById,
-  addSpecToProject,
-  removeSpecFromProject,
   getBrokenRefs,
+  InvalidSourceLibraryError,
 } from './queries/projects.js';
 export type {
   ProjectSummary,
   ProjectWithToc,
   ProjectTocEntry,
+  ProjectSource,
   BrokenRef,
   CreateProjectInput,
-  AddSpecResult,
 } from './queries/projects.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
 export { getParagraphSnapshots } from './queries/versions.js';
@@ -101,3 +100,10 @@ export {
   DEFAULT_COMPANY_LIBRARY,
 } from './queries/libraries.js';
 export type { Library, LibraryTier, CreateLibraryInput } from './queries/libraries.js';
+export {
+  addSectionToProject,
+  removeSectionFromProject,
+  ProjectNotFoundError,
+  SectionUnresolvedError,
+} from './queries/derive.js';
+export type { AddSectionResult, SourceLibraryRef, RemoveSectionOutcome } from './queries/derive.js';
