@@ -177,10 +177,13 @@ async function insertTocEntry(
   return row.position;
 }
 
-export type RemoveSectionOutcome = 'removed' | 'not-found' | 'edited';
+export type RemoveSectionOutcome = 'removed' | 'not-found' | 'edited' | 'in-package';
 
-/** SELECT ... FOR UPDATE and apply the block-if-edited guard.
- *  Returns null when the spec is not owned by this project. */
+/** SELECT ... FOR UPDATE, apply the block-if-edited guard, then check package
+ *  membership (ADR-015 D4, migration 020). package_specs.spec_id is ON DELETE
+ *  RESTRICT so even a forced delete cannot proceed while the spec is in a
+ *  package — the check runs regardless of `force`.
+ *  Returns null when all guards pass (proceed to delete). */
 async function guardRemoval(
   projectId: string,
   specId: string,
@@ -194,6 +197,10 @@ async function guardRemoval(
   const row = owned.rows[0];
   if (!row) return 'not-found';
   if (row.content_version > 1 && !force) return 'edited';
+  const inPackage = await client.query('SELECT 1 FROM package_specs WHERE spec_id = $1 LIMIT 1', [
+    specId,
+  ]);
+  if ((inPackage.rowCount ?? 0) > 0) return 'in-package';
   return null;
 }
 

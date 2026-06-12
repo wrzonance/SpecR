@@ -234,6 +234,18 @@ describe('removeSectionFromProjectHandler', () => {
     expect(vi.mocked(removeSectionFromProject)).toHaveBeenLastCalledWith('p1', 's1', true, {});
   });
 
+  it('returns 409 on in-package (section belongs to a design package)', async () => {
+    const { removeSectionFromProject } = await import('../db/index.js');
+    vi.mocked(removeSectionFromProject).mockResolvedValueOnce('in-package');
+    const { removeSectionFromProjectHandler } = await import('./projects.js');
+    const req = { params: { id: 'p1', specId: 's1' }, query: {} } as unknown as Request;
+    const res = makeRes();
+    await removeSectionFromProjectHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(409);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['error']).toContain('package');
+  });
+
   it('returns 400 when specId param missing', async () => {
     const { removeSectionFromProjectHandler } = await import('./projects.js');
     const req = { params: { id: 'p1' }, query: {} } as unknown as Request;
