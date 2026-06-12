@@ -46,6 +46,7 @@ describe('paragraphStyleOptions', () => {
     expect(paragraphStyleOptions(undefined)).toEqual({});
   });
 
+  // lineRule and jc values equal their OOXML string keys today (identity coincidence — lookup is for type-safety)
   it('maps spacing before/after/line/lineRule', () => {
     expect(
       paragraphStyleOptions({ spacing: { before: 0, after: 120, line: 360, lineRule: 'auto' } })

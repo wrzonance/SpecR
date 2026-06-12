@@ -17,6 +17,8 @@ export function buildRuleMap(rules: readonly StyleRule[]): StyleRuleMap {
 type DocxAlignment = (typeof AlignmentType)[keyof typeof AlignmentType];
 type DocxLineRule = (typeof LineRuleType)[keyof typeof LineRuleType];
 
+// Every docx enum value currently equals its OOXML string key (e.g. AlignmentType.CENTER === 'center').
+// The lookup exists for type-safety and to survive any future divergence in the docx library.
 const ALIGNMENT: Record<
   'left' | 'center' | 'right' | 'both' | 'distribute' | 'start' | 'end',
   DocxAlignment
@@ -30,6 +32,7 @@ const ALIGNMENT: Record<
   end: AlignmentType.END,
 };
 
+// Same identity-coincidence as ALIGNMENT — LineRuleType values equal their OOXML string keys today.
 const LINE_RULE: Record<'auto' | 'exact' | 'atLeast', DocxLineRule> = {
   auto: LineRuleType.AUTO,
   exact: LineRuleType.EXACT,
@@ -55,17 +58,19 @@ export function runStyleOptions(rPr: RunProperties | undefined): RunStyleOptions
   if (rPr.i !== undefined) out.italics = rPr.i;
   if (rPr.caps !== undefined) out.allCaps = rPr.caps;
   if (rPr.smallCaps !== undefined) out.smallCaps = rPr.smallCaps;
+  // Deliberately not mapped (out of scope for #32 — font/spacing/indent/numbering only):
+  // u, strike, color, highlight, rFonts.hAnsi / rFonts.cs / rFonts.eastAsia
   return out;
 }
 
-interface SpacingOptions {
+export interface SpacingOptions {
   readonly before?: number;
   readonly after?: number;
   readonly line?: number;
   readonly lineRule?: DocxLineRule;
 }
 
-interface IndentOptions {
+export interface IndentOptions {
   readonly left?: number;
   readonly right?: number;
   readonly firstLine?: number;
