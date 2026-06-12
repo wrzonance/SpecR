@@ -111,9 +111,12 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // FK ordering: project_specs → spec_references → paragraphs → specs → projects → libraries.
+  // FK ordering: design_packages (→ package_specs ON CASCADE) must go before specs
+  // because package_specs.spec_id is ON DELETE RESTRICT.
+  // Then: project_specs → spec_references → paragraphs → specs → projects → libraries.
   // project_specs.spec_id has no ON DELETE CASCADE on the specs side, so specs must be
   // deleted after project_specs. specs.project_id has no CASCADE either.
+  await pool.query('DELETE FROM design_packages WHERE project_id = ANY($1)', [createdProjects]);
   await pool.query('DELETE FROM project_specs WHERE project_id = ANY($1)', [createdProjects]);
   await pool.query(
     'DELETE FROM spec_references WHERE source_spec_id IN (SELECT id FROM specs WHERE project_id = ANY($1))',
@@ -357,5 +360,26 @@ describe('removeSectionFromProject', () => {
     );
     expect(ref.rows[0]?.is_broken).toBe(true);
     expect(ref.rows[0]?.target_spec_id).toBeNull(); // FK SET NULL on spec delete
+  });
+
+  it('spec in a design package → in-package (regardless of force)', async () => {
+    const projectId = await newProject([companyLib]);
+    const { specId } = await addSectionToProject(projectId, '03 30 00', pool);
+    // raw insert: design package + membership — mirrors the packages.ts query layer
+    const pkg = await pool.query<{ id: string }>(
+      `INSERT INTO design_packages (project_id, name, position) VALUES ($1, $2, 1) RETURNING id`,
+      [projectId, `guard-test-${specId.slice(0, 8)}`]
+    );
+    const pkgId = pkg.rows[0]?.id;
+    if (!pkgId) throw new Error('package insert failed');
+    await pool.query(
+      `INSERT INTO package_specs (package_id, spec_id, position) VALUES ($1, $2, 1)`,
+      [pkgId, specId]
+    );
+    expect(await removeSectionFromProject(projectId, specId, false, pool)).toBe('in-package');
+    expect(await removeSectionFromProject(projectId, specId, true, pool)).toBe('in-package');
+    // cleanup: package cascades package_specs; spec can then be removed
+    await pool.query('DELETE FROM design_packages WHERE id = $1', [pkgId]);
+    expect(await removeSectionFromProject(projectId, specId, false, pool)).toBe('removed');
   });
 });

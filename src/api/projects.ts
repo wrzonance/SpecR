@@ -102,6 +102,13 @@ export async function removeSectionFromProjectHandler(req: Request, res: Respons
       });
       return;
     }
+    if (outcome === 'in-package') {
+      res.status(409).json({
+        success: false,
+        error: 'section belongs to a design package — remove it from the package first',
+      });
+      return;
+    }
     res.status(200).json({ success: true, data: { projectId, specId } });
   } catch (err) {
     logger.error({ err }, 'remove section from project failed');

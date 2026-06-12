@@ -17,8 +17,15 @@ export {
   PatchSpecBodySchema,
   CreateProjectBodySchema,
   AddSectionToProjectBodySchema,
+  CreatePackageBodySchema,
+  SetPackageSpecsBodySchema,
 } from './schemas.js';
-export type { CreateProjectBody, AddSectionToProjectBody } from './schemas.js';
+export type {
+  CreateProjectBody,
+  AddSectionToProjectBody,
+  CreatePackageBody,
+  SetPackageSpecsBody,
+} from './schemas.js';
 export type {
   StyleNodeType,
   StyleProperties,

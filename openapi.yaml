@@ -426,7 +426,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: 'Section has project edits — repeat with ?force=true'
+          description: 'Section has project edits (repeat with ?force=true) or belongs to a design package'
           content:
             application/json:
               schema:
@@ -456,6 +456,184 @@ paths:
                         type: array
                         items:
                           $ref: '#/components/schemas/BrokenRef'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/packages:
+    post:
+      operationId: createPackage
+      summary: Create a design package (named, ordered subset of the project TOC)
+      tags: [packages]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+      responses:
+        '201':
+          description: Package created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PackageSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Package name already exists in this project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      operationId: listPackages
+      summary: List a project's design packages with ordered membership
+      tags: [packages]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Package list with spec membership
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/PackageWithSpecs'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /packages/{id}/specs:
+    put:
+      operationId: setPackageSpecs
+      summary: Replace a package's ordered spec membership
+      tags: [packages]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Package UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [specIds]
+              properties:
+                specIds:
+                  type: array
+                  uniqueItems: true
+                  items:
+                    type: string
+                    format: uuid
+                  description: >
+                    Ordered list of spec UUIDs to assign to this package. Position
+                    within the package equals array order (1-based). An empty array
+                    clears the package. All specs must belong to the package's own
+                    project TOC (ADR-015 D4).
+      responses:
+        '200':
+          description: Package membership replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [packageId, specs]
+                        properties:
+                          packageId:
+                            type: string
+                            format: uuid
+                          specs:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/PackageSpecEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: 'Validation failed, or a spec is not in the package''s project TOC'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /packages/{id}:
+    delete:
+      operationId: deletePackage
+      summary: Delete a design package (membership rows cascade; specs survive)
+      tags: [packages]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Package UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Package deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [packageId]
+                        properties:
+                          packageId:
+                            type: string
+                            format: uuid
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -1108,6 +1286,50 @@ components:
                 format: uuid
               name:
                 type: string
+
+    # ── Packages ───────────────────────────────────────────────────────────────
+
+    PackageSummary:
+      type: object
+      required: [packageId, projectId, name, position]
+      properties:
+        packageId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        position:
+          type: integer
+          description: 1-based order of the package within its project
+
+    PackageSpecEntry:
+      type: object
+      required: [specId, section, title, position]
+      properties:
+        specId:
+          type: string
+          format: uuid
+        section:
+          type: string
+        title:
+          type: string
+        position:
+          type: integer
+          description: 1-based order of the spec within the package
+
+    PackageWithSpecs:
+      allOf:
+        - $ref: '#/components/schemas/PackageSummary'
+        - type: object
+          required: [specs]
+          properties:
+            specs:
+              type: array
+              items:
+                $ref: '#/components/schemas/PackageSpecEntry'
 
     # ── Templates ──────────────────────────────────────────────────────────────
 

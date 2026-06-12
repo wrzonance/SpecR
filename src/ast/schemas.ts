@@ -114,6 +114,29 @@ export const AddSectionToProjectBodySchema = z.object({
 
 export type AddSectionToProjectBody = z.infer<typeof AddSectionToProjectBodySchema>;
 
+export const CreatePackageBodySchema = z.object({
+  name: z.string().check(z.minLength(1)),
+});
+
+export type CreatePackageBody = z.infer<typeof CreatePackageBodySchema>;
+
+// Full-replacement ordered membership (position = array order, 1-based).
+// Empty array clears the package. Same-project restriction is enforced at
+// the query layer (ADR-015 D4, issue #95).
+export const SetPackageSpecsBodySchema = z.object({
+  specIds: z.array(z.uuid()).check((ctx) => {
+    if (new Set(ctx.value).size !== ctx.value.length) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        message: 'specIds must not contain duplicates',
+      });
+    }
+  }),
+});
+
+export type SetPackageSpecsBody = z.infer<typeof SetPackageSpecsBodySchema>;
+
 // ── Style properties (ADR-021): OOXML-faithful, OPEN (unknown JSON keys preserved) ──
 // StyleNodeType is the subset of NodeType that carries visual style —
 // excludes the structural-only 'spec' | 'note' | 'continuation'.

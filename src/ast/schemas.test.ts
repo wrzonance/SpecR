@@ -7,6 +7,8 @@ import {
   SignalConflictSchema,
   CreateProjectBodySchema,
   AddSectionToProjectBodySchema,
+  CreatePackageBodySchema,
+  SetPackageSpecsBodySchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -268,5 +270,31 @@ describe('AddSectionToProjectBodySchema (issue #94)', () => {
         specId: '8f14e45f-ceea-4e07-8c65-3f0f1c6e1a01',
       }).success
     ).toBe(false);
+  });
+});
+
+describe('CreatePackageBodySchema (issue #95)', () => {
+  it('accepts a non-empty name', () => {
+    expect(CreatePackageBodySchema.safeParse({ name: 'Early Steel Release' }).success).toBe(true);
+  });
+  it('rejects empty and missing name', () => {
+    expect(CreatePackageBodySchema.safeParse({ name: '' }).success).toBe(false);
+    expect(CreatePackageBodySchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('SetPackageSpecsBodySchema (issue #95)', () => {
+  const a = '11111111-1111-4111-8111-111111111111';
+  const b = '22222222-2222-4222-8222-222222222222';
+  it('accepts an ordered uuid array', () => {
+    expect(SetPackageSpecsBodySchema.safeParse({ specIds: [a, b] }).success).toBe(true);
+  });
+  it('accepts an empty array (clears the package)', () => {
+    expect(SetPackageSpecsBodySchema.safeParse({ specIds: [] }).success).toBe(true);
+  });
+  it('rejects duplicates, non-uuids, and missing specIds', () => {
+    expect(SetPackageSpecsBodySchema.safeParse({ specIds: [a, a] }).success).toBe(false);
+    expect(SetPackageSpecsBodySchema.safeParse({ specIds: ['nope'] }).success).toBe(false);
+    expect(SetPackageSpecsBodySchema.safeParse({}).success).toBe(false);
   });
 });

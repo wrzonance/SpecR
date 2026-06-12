@@ -9,11 +9,19 @@ import {
   removeSectionFromProjectHandler,
   getBrokenRefsHandler,
 } from './projects.js';
+import {
+  createPackageHandler,
+  listPackagesHandler,
+  setPackageSpecsHandler,
+  deletePackageHandler,
+} from './packages.js';
 import { validateBody } from './middleware/validate.js';
 import {
   PatchSpecBodySchema,
   CreateProjectBodySchema,
   AddSectionToProjectBodySchema,
+  CreatePackageBodySchema,
+  SetPackageSpecsBodySchema,
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
@@ -53,6 +61,10 @@ router.post(
 );
 router.delete('/projects/:id/specs/:specId', removeSectionFromProjectHandler);
 router.get('/projects/:id/references/broken', getBrokenRefsHandler);
+router.post('/projects/:id/packages', validateBody(CreatePackageBodySchema), createPackageHandler);
+router.get('/projects/:id/packages', listPackagesHandler);
+router.put('/packages/:id/specs', validateBody(SetPackageSpecsBodySchema), setPackageSpecsHandler);
+router.delete('/packages/:id', deletePackageHandler);
 router.post('/parse', parseRateLimit, upload.single('file'), parseHandler);
 router.get('/parse/jobs/:jobId', parseJobHandler);
 router.post('/templates/import', parseRateLimit, upload.single('file'), importTemplateHandler);
