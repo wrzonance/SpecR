@@ -8,6 +8,15 @@ const ORIGIN_META = {
   loader: 'test:lineage-fixture',
 };
 
+// Derived rows intentionally carry different meta from ORIGIN_META so that
+// 'derived spec also surfaces the root origin_meta' cannot pass by accident
+// if the implementation reads the leaf's meta instead of the root's.
+const DERIVED_META = {
+  filename: 'stale-copy.sec',
+  sha256: 'c'.repeat(64),
+  loader: 'test:derived-copy',
+};
+
 let companyLibId: string;
 let clientLibId: string;
 let projectId: string;
@@ -49,7 +58,7 @@ beforeAll(async () => {
     `INSERT INTO specs (section, title, source, library_id, parent_spec_id,
                         origin_version, content_version, origin_meta)
      VALUES ('27 21 97', 'Lineage Client Copy', 'docx', $1, $2, 3, 2, $3::jsonb) RETURNING id`,
-    [clientLibId, rootSpecId, JSON.stringify(ORIGIN_META)]
+    [clientLibId, rootSpecId, JSON.stringify(DERIVED_META)]
   );
   clientSpecId = client.rows[0]?.id ?? '';
 
@@ -58,7 +67,7 @@ beforeAll(async () => {
     `INSERT INTO specs (section, title, source, project_id, parent_spec_id,
                         origin_version, content_version, origin_meta)
      VALUES ('27 21 97', 'Lineage Project Copy', 'docx', $1, $2, 1, 4, $3::jsonb) RETURNING id`,
-    [projectId, clientSpecId, JSON.stringify(ORIGIN_META)]
+    [projectId, clientSpecId, JSON.stringify(DERIVED_META)]
   );
   projectSpecId = projSpec.rows[0]?.id ?? '';
 
@@ -135,5 +144,30 @@ describe('getSpecLineage (integration)', () => {
   it('returns null for unknown spec id', async () => {
     const lineage = await getSpecLineage('00000000-0000-0000-0000-000000000000');
     expect(lineage).toBeNull();
+  });
+
+  it('cycle guard: corrupt self-referencing parent terminates instead of looping', async () => {
+    // Simulate data corruption: close the cycle by pointing the root's parent at the leaf
+    // (root → client → project → root).  The CTE's path-array guard must terminate after
+    // visiting each node once rather than looping indefinitely.
+    await pool.query('UPDATE specs SET parent_spec_id = $1, origin_version = 1 WHERE id = $2', [
+      projectSpecId,
+      rootSpecId,
+    ]);
+    try {
+      const lineage = await getSpecLineage(projectSpecId);
+      // Walk terminates; chain is still leaf-first, all three nodes visited exactly once.
+      expect(lineage?.chain.map((h) => h.specId)).toEqual([
+        projectSpecId,
+        clientSpecId,
+        rootSpecId,
+      ]);
+    } finally {
+      // Restore root to no-parent so subsequent tests are unaffected.
+      await pool.query(
+        'UPDATE specs SET parent_spec_id = NULL, origin_version = NULL WHERE id = $1',
+        [rootSpecId]
+      );
+    }
   });
 });
