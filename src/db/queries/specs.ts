@@ -177,6 +177,10 @@ export async function updateSpec(id: string, input: UpdateSpecInput): Promise<Sp
       `UPDATE specs
        SET title = COALESCE($1, title),
            section = COALESCE($2, section),
+           content_version = content_version + CASE
+             WHEN title IS DISTINCT FROM COALESCE($1, title)
+               OR section IS DISTINCT FROM COALESCE($2, section)
+             THEN 1 ELSE 0 END,
            updated_at = now()
        WHERE id = $3
        RETURNING id, section, title`,

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { pool } from '../index.js';
-import { createSpec, persistParsedSpec } from './specs.js';
+import { createSpec, persistParsedSpec, updateSpec } from './specs.js';
 import type { OriginMeta } from './specs.js';
 import { insertTree } from './paragraphs.js';
 import { getSpecTree } from './specs.js';
@@ -276,3 +276,22 @@ describe('persistParsedSpec — lineage (#93)', () => {
   });
 });
 
+describe('updateSpec — content_version bump (#93)', () => {
+  it('bumps content_version when title changes; no-op update does not bump', async () => {
+    const id = await createSpec({ section: '99 00 00', title: 'V1', source: 'arcat' });
+    await updateSpec(id, { title: 'V2' });
+    const r1 = await pool.query('SELECT content_version FROM specs WHERE id = $1', [id]);
+    expect(r1.rows[0]).toMatchObject({ content_version: 2 });
+    await updateSpec(id, { title: 'V2' }); // same value — no content change
+    const r2 = await pool.query('SELECT content_version FROM specs WHERE id = $1', [id]);
+    expect(r2.rows[0]).toMatchObject({ content_version: 2 });
+  });
+
+  it('bumps content_version when section changes', async () => {
+    const id = await createSpec({ section: '99 00 00', title: 'V1', source: 'arcat' });
+    await updateSpec(id, { section: '99 00 10' });
+    const r = await pool.query('SELECT content_version FROM specs WHERE id = $1', [id]);
+    expect(r.rows[0]).toMatchObject({ content_version: 2 });
+    await pool.query(`DELETE FROM specs WHERE section = '99 00 10'`);
+  });
+});
