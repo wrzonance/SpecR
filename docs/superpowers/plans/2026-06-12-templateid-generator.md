@@ -18,7 +18,7 @@
 
 ---
 
-### Task 1: Relocate `StyleRule` to ast + add `GenerateBodySchema`
+## Task 1: Relocate `StyleRule` to ast + add `GenerateBodySchema`
 
 **Files:**
 - Modify: `src/ast/types.ts` (add `StyleRule` after `NumberingDef`)
@@ -84,7 +84,7 @@ export type GenerateBody = z.infer<typeof GenerateBodySchema>;
 - [ ] **Step 4: Run** `pnpm vitest run --project unit src/ast src/db` — expect PASS; `pnpm exec tsc --noEmit` clean.
 - [ ] **Step 5: Commit** `feat(ast): StyleRule shape + GenerateBodySchema for templateId wiring (#32)`
 
-### Task 2: `generator/styles.ts` — StyleProperties → docx options (pure)
+## Task 2: `generator/styles.ts` — StyleProperties → docx options (pure)
 
 **Files:**
 - Create: `src/generator/styles.ts`
@@ -271,7 +271,7 @@ export function paragraphStyleOptions(
 - [ ] **Step 4: Run** `pnpm vitest run --project unit src/generator/styles.test.ts` — PASS. `pnpm exec tsc --noEmit` clean.
 - [ ] **Step 5: Commit** `feat(generator): styles.ts — StyleProperties → docx run/paragraph options (#32)`
 
-### Task 3: numbering overrides from template rules
+## Task 3: numbering overrides from template rules
 
 **Files:**
 - Modify: `src/generator/numbering.ts`
@@ -386,7 +386,7 @@ Note: `NumberingDef` needs exporting from the ast barrel — already exported. C
 - [ ] **Step 4: Run** `pnpm vitest run --project unit src/generator` — PASS; `pnpm exec tsc --noEmit` clean.
 - [ ] **Step 5: Commit** `feat(generator): numbering format/lvlText/start overrides from template rules (#32)`
 
-### Task 4: `generateDocx` accepts style rules
+## Task 4: `generateDocx` accepts style rules
 
 **Files:**
 - Modify: `src/generator/index.ts`
@@ -535,7 +535,7 @@ export async function generateDocx(
 - [ ] **Step 4: Run** `pnpm vitest run --project unit src/generator` — PASS (all existing + new); `pnpm exec tsc --noEmit` clean. Verify the exact emitted attribute names (`w:ind w:left` vs `w:start`) by printing the xml once if an assertion fails; adjust regexes to the real serialization, never the implementation.
 - [ ] **Step 5: Commit** `feat(generator): generateDocx applies template style rules per paragraph (#32)`
 
-### Task 5: API handler — resolve templateId, 404 unknown, default fallback
+## Task 5: API handler — resolve templateId, 404 unknown, default fallback
 
 **Files:**
 - Modify: `src/api/generate.ts`
@@ -703,7 +703,7 @@ Note: `src/api/generate.test.ts` mocks `../db/index.js` with only `getSpecTree` 
 - [ ] **Step 4: Run** `pnpm vitest run --project unit src/api/generate.test.ts` PASS; integration suite PASS (migrate + seed first).
 - [ ] **Step 5: Commit** `feat(api): POST /specs/:id/generate resolves templateId → style rules; 404 unknown template (#32)`
 
-### Task 6: Docs — openapi.yaml, README, ARCHITECTURE
+## Task 6: Docs — openapi.yaml, README, ARCHITECTURE
 
 **Files:**
 - Modify: `openapi.yaml` (`/specs/{id}/generate` requestBody)
@@ -741,7 +741,7 @@ Change the `| 2c | Firm style template engine (issue #20) | Planned |` row statu
 - [ ] **Step 4:** `pnpm lint` clean.
 - [ ] **Step 5: Commit** `docs: Phase 2c-iii status, templateId in openapi generate body (#32)`
 
-### Task 7: Full verification + PR
+## Task 7: Full verification + PR
 
 - [ ] `pnpm lint` (eslint + tsc + prettier) — clean.
 - [ ] `pnpm test` — all unit tests pass.

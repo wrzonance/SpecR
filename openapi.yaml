@@ -217,7 +217,9 @@ paths:
                   format: uuid
                   description: >
                     Style template to apply (font, spacing, indent, numbering format).
-                    Omitted → the seeded UFGS-Default template is applied. Unknown id → 404.
+                    Omitted → the seeded UFGS-Default template is applied; if that template
+                    is absent (un-migrated database) the response is still 200 with an
+                    unstyled DOCX. Unknown id → 404.
       responses:
         '200':
           description: DOCX file stream
