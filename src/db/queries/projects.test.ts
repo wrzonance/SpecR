@@ -141,7 +141,7 @@ describe('getBrokenRefs', () => {
     expect(result).toHaveLength(0);
   });
 
-  it('returns mapped BrokenRef array', async () => {
+  it('returns mapped BrokenRef array with availableFrom advisory', async () => {
     const { pool } = await import('../index.js');
     vi.mocked(pool.query).mockResolvedValueOnce({
       rows: [
@@ -151,15 +151,23 @@ describe('getBrokenRefs', () => {
           source_spec_section: '03 30 00',
           target_spec_section: '09 91 00',
           reference_text: 'See Section 09 91 00',
+          available_from: [{ libraryId: 'lib-1', name: 'Co M' }],
+        },
+        {
+          id: 'ref-2',
+          source_spec_id: 'spec-1',
+          source_spec_section: '03 30 00',
+          target_spec_section: '99 99 99',
+          reference_text: 'See Section 99 99 99',
+          available_from: null,
         },
       ],
-      rowCount: 1,
+      rowCount: 2,
     } as never);
     const { getBrokenRefs } = await import('./projects.js');
     const result = await getBrokenRefs('proj-1', pool);
-    expect(result).toHaveLength(1);
-    expect(result[0]?.refId).toBe('ref-1');
-    expect(result[0]?.targetSpecSection).toBe('09 91 00');
+    expect(result[0]?.availableFrom).toEqual([{ libraryId: 'lib-1', name: 'Co M' }]);
+    expect(result[1]?.availableFrom).toEqual([]);
   });
 
   it('throws DatabaseError on query failure', async () => {

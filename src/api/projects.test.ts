@@ -253,6 +253,7 @@ describe('getBrokenRefsHandler', () => {
         sourceSpecSection: '03 30 00',
         targetSpecSection: '09 91 00',
         referenceText: 'See Section 09 91 00',
+        availableFrom: [],
       },
     ]);
     const { getBrokenRefsHandler } = await import('./projects.js');

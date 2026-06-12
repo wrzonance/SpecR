@@ -77,16 +77,37 @@ beforeAll(async () => {
     `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1,$2,1),($1,$3,2)`,
     [testProjectId, specA, specB]
   );
+  // Fixture for availableFrom advisory test: specA (03 30 00) has an outgoing
+  // ref to 09 91 00, which specB covers in the company master.
+  const paraRes = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, node_type, text, position)
+     VALUES ($1, 'article', 'See Section 09 91 00', 1) RETURNING id`,
+    [specA]
+  );
+  const paraId = paraRes.rows[0]?.id;
+  if (!paraId) throw new Error('failed to insert paragraph fixture');
+  await pool.query(
+    `INSERT INTO spec_references
+       (source_spec_id, source_paragraph_id, target_type, target_spec_section, reference_text)
+     VALUES ($1, $2, 'section', '09 91 00', 'See Section 09 91 00')`,
+    [specA, paraId]
+  );
 });
 
 afterAll(async () => {
-  await pool.query('DELETE FROM projects WHERE id = $1', [testProjectId]);
-  await pool.query('DELETE FROM specs WHERE id = ANY($1)', [[specA, specB]]);
+  // Cleanup order matters — project_specs.spec_id FK is RESTRICT, so project_specs
+  // rows must be removed before their referenced specs can be deleted.
+  // Clone specs (project_id = apiProject) also carry parent_spec_id → specA/specB,
+  // so clone specs must go before the master specs.
   if (apiProjects.length > 0) {
     await pool.query('DELETE FROM project_specs WHERE project_id = ANY($1)', [apiProjects]);
     await pool.query('DELETE FROM specs WHERE project_id = ANY($1)', [apiProjects]);
     await pool.query('DELETE FROM projects WHERE id = ANY($1)', [apiProjects]);
   }
+  // testProjectId was inserted via raw SQL — deleting the project cascades its
+  // project_specs rows (project_id FK is CASCADE), unblocking specA/specB deletion.
+  await pool.query('DELETE FROM projects WHERE id = $1', [testProjectId]);
+  await pool.query('DELETE FROM specs WHERE id = ANY($1)', [[specA, specB]]);
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err != null ? reject(err) : resolve()));
   });
@@ -263,5 +284,30 @@ describe('POST /projects/:id/specs (section-based copy-on-derive)', () => {
       method: 'DELETE',
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /projects/:id/references/broken — availableFrom advisory', () => {
+  it('broken ref lists the source libraries that hold the missing section', async () => {
+    const created = await postJSON('/projects', {
+      name: `Advisory ${Date.now()}`,
+      sourceLibraryIds: [companyLibId],
+    });
+    const pid = (
+      ((await created.json()) as Record<string, unknown>)['data'] as Record<string, unknown>
+    )['projectId'] as string;
+    apiProjects.push(pid);
+    // Clone 03 30 00 — master specA has an outgoing ref to 09 91 00 (specB in the
+    // company master). Since 09 91 00 is not yet in the project, the clone ref is
+    // is_broken=true; availableFrom should name the company master library.
+    await postJSON(`/projects/${pid}/specs`, { section: '03 30 00' });
+    const res = await fetch(`${baseUrl}/projects/${pid}/references/broken`);
+    expect(res.status).toBe(200);
+    const refs = ((await res.json()) as Record<string, unknown>)['data'] as Array<
+      Record<string, unknown>
+    >;
+    const ref = refs.find((r) => r['targetSpecSection'] === '09 91 00');
+    expect(ref).toBeDefined();
+    expect(ref?.['availableFrom']).toEqual([expect.objectContaining({ libraryId: companyLibId })]);
   });
 });
