@@ -46,7 +46,7 @@ export async function generateHandler(req: Request, res: Response): Promise<void
   }
   const bodyResult = GenerateBodySchema.safeParse(req.body ?? {});
   if (!bodyResult.success) {
-    res.status(400).json({ success: false, error: 'invalid body: templateId must be a UUID' });
+    res.status(400).json({ success: false, error: 'invalid generate request body' });
     return;
   }
   try {
@@ -60,7 +60,11 @@ export async function generateHandler(req: Request, res: Response): Promise<void
       res.status(404).json({ success: false, error: 'template not found' });
       return;
     }
-    const buffer = await generateDocx(result.tree, resolution.rules);
+    const options =
+      bodyResult.data.sectionNumberFormat === undefined
+        ? undefined
+        : { sectionNumberFormat: bodyResult.data.sectionNumberFormat };
+    const buffer = await generateDocx(result.tree, resolution.rules, options);
     const filename = safeFilename(result.tree.section, result.tree.title);
     res.setHeader('Content-Type', DOCX_MIME);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

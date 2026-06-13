@@ -148,6 +148,23 @@ describe('inferSectionMeta', () => {
     expect(result.inferredTitle).toBe('QUALITY CONTROL');
   });
 
+  it.each([
+    ['SECTION 099100 - PAINTING', '09 91 00', 'PAINTING'],
+    ['SECTION 09.91.00 - PAINTING', '09 91 00', 'PAINTING'],
+    ['SECTION 09 9100 - PAINTING', '09 91 00', 'PAINTING'],
+    ['SECTION 013201.00 10 - QUALITY CONTROL', '01 32 01.00 10', 'QUALITY CONTROL'],
+  ])('infer-section: keyword display variant %s normalizes', (text, section, title) => {
+    const result = inferSectionMeta(makeTree([{ text }]));
+    expect(result.method).toBe('content-high');
+    expect(result.inferredSection).toBe(section);
+    expect(result.inferredTitle).toBe(title);
+  });
+
+  it('infer-section: bare compact six-digit product-like number is not enough context', () => {
+    const result = inferSectionMeta(makeTree([{ text: '099100' }, { text: 'PAINTING' }]));
+    expect(result.confidence).toBe('none');
+  });
+
   it('infer-section: inline title extracted from suffixed header', () => {
     const tree = makeTree([{ text: 'SECTION 01 33 23.33 AVIATION FUEL DISTRIBUTION' }]);
     expect(inferSectionMeta(tree).inferredTitle).toBe('AVIATION FUEL DISTRIBUTION');

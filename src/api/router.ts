@@ -2,15 +2,19 @@ import { type Router as RouterType, Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { healthHandler } from './health.js';
 import {
+  deleteSpecHandler,
   getSpecHandler,
   getSpecLineageHandler,
-  updateSpecHandler,
-  listSpecsHandler,
   getSpecTreeHandler,
-  deleteSpecHandler,
+  listSpecsHandler,
+  updateSpecHandler,
 } from './specs.js';
 import { deleteParagraphHandler, updateParagraphHandler } from './paragraphs.js';
-import { deleteReferenceHandler } from './references.js';
+import {
+  deleteReferenceHandler,
+  getInboundReferencesHandler,
+  getOutboundReferencesHandler,
+} from './references.js';
 import {
   createProjectHandler,
   getProjectHandler,
@@ -19,6 +23,12 @@ import {
   removeSectionFromProjectHandler,
   getBrokenRefsHandler,
 } from './projects.js';
+import {
+  getLibraryDivisionGeneralSpecHandler,
+  setLibraryDivisionGeneralSpecHandler,
+  getProjectDivisionGeneralSpecHandler,
+  setProjectDivisionGeneralSpecHandler,
+} from './division-general.js';
 import {
   createPackageHandler,
   listPackagesHandler,
@@ -51,6 +61,7 @@ import {
   CreateRevisionBodySchema,
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
+  SetDivisionGeneralSpecBodySchema,
   UpsertStyleRulesBodySchema,
   UpdateParagraphBodySchema,
 } from '../ast/index.js';
@@ -110,6 +121,24 @@ router.put(
   validateBody(SetRequiredSectionsBodySchema),
   setProjectRequiredSectionsHandler
 );
+router.get(
+  '/libraries/:libraryId/divisions/:division/general-spec',
+  getLibraryDivisionGeneralSpecHandler
+);
+router.put(
+  '/libraries/:libraryId/divisions/:division/general-spec',
+  validateBody(SetDivisionGeneralSpecBodySchema),
+  setLibraryDivisionGeneralSpecHandler
+);
+router.get(
+  '/projects/:projectId/divisions/:division/general-spec',
+  getProjectDivisionGeneralSpecHandler
+);
+router.put(
+  '/projects/:projectId/divisions/:division/general-spec',
+  validateBody(SetDivisionGeneralSpecBodySchema),
+  setProjectDivisionGeneralSpecHandler
+);
 router.post(
   '/projects/:id/specs',
   validateBody(AddSectionToProjectBodySchema),
@@ -117,6 +146,8 @@ router.post(
 );
 router.delete('/projects/:id/specs/:specId', removeSectionFromProjectHandler);
 router.get('/projects/:id/references/broken', getBrokenRefsHandler);
+router.get('/projects/:id/references/inbound', getInboundReferencesHandler);
+router.get('/projects/:id/specs/:specId/references', getOutboundReferencesHandler);
 router.post('/projects/:id/packages', validateBody(CreatePackageBodySchema), createPackageHandler);
 router.get('/projects/:id/packages', listPackagesHandler);
 router.put('/packages/:id/specs', validateBody(SetPackageSpecsBodySchema), setPackageSpecsHandler);

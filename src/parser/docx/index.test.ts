@@ -182,6 +182,12 @@ describe('parseDocx — dc:subject section normalization (#gate)', () => {
     const tree = await parseDocx(buffer);
     expect(tree.section).toBe('26 00 13.10');
   });
+
+  it('normalizes a display-variant dc:subject section number', async () => {
+    const buffer = await makeDocx({ coreXml: coreWith('09.91.00') });
+    const tree = await parseDocx(buffer);
+    expect(tree.section).toBe('09 91 00');
+  });
 });
 
 // ── ARCAT-realistic end-to-end: numbering-generated PART prefixes, style-only
@@ -268,6 +274,18 @@ describe('parseDocx — ARCAT-realistic regression (21 11 00: 34 parts instead o
     expect(result.sectionInference.method).toBe('content-high');
     expect(result.tree.section).toBe('21 11 00');
     expect(result.tree.title).toBe('FIRE SPRINKLER FITTINGS AND VALVES');
+  });
+
+  it('parse() orchestrator normalizes compact SECTION display from DOCX content', async () => {
+    const buffer = await makeDocx({
+      documentXml: ARCAT_E2E_DOC.replace('SECTION 21 11 00', 'SECTION 099100 - PAINTING'),
+      stylesXml: ARCAT_E2E_STYLES,
+      numberingXml: ARCAT_E2E_NUMBERING,
+    });
+    const result = await parse(buffer, 'arcat-e2e.docx');
+    expect(result.sectionInference.method).toBe('content-high');
+    expect(result.tree.section).toBe('09 91 00');
+    expect(result.tree.title).toBe('PAINTING');
   });
 
   it('parseDocx alone leaves section unknown — inference belongs to the orchestrator', async () => {

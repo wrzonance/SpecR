@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import { pool } from '../index.js';
 import { DatabaseError } from '../errors.js';
 import { logger } from '../../lib/logger.js';
+import { reconcileProjectDivisionGeneralSpec } from './division-general.js';
 
 /** Copy-on-derive (ADR-015 D2/D3, issue #94): project sections are owned
  *  clones of master specs, resolved through the project's ordered source list.
@@ -275,6 +276,7 @@ export async function addSectionToProject(
     await cloneParagraphs(master.spec_id, cloneId, client);
     await cloneRefs(projectId, master.spec_id, cloneId, client);
     const position = await insertTocEntry(projectId, cloneId, section, client);
+    await reconcileProjectDivisionGeneralSpec(projectId, section, client);
     await client.query('COMMIT');
     logger.info(
       { projectId, section, cloneId, masterId: master.spec_id },

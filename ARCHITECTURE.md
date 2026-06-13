@@ -96,8 +96,11 @@ Clippit is the only open-source library that builds the actual parent/child para
 │                           │                                           │
 │                    ┌──────▼──────┐                                    │
 │                    │ PostgreSQL  │                                    │
+│                    │ libraries   │                                    │
 │                    │ paragraphs  │                                    │
 │                    │ specs       │                                    │
+│                    │ division    │                                    │
+│                    │ general     │                                    │
 │                    │ versions    │                                    │
 │                    └─────────────┘                                    │
 └──────────────────────────────────────────────────────────────────────┘
@@ -254,6 +257,10 @@ interface ApiResponse<T> {
 | POST | `/specs/:id/generate` | `{ templateId? }` | DOCX buffer (octet-stream) |
 | POST | `/specs/:id/diff` | multipart: `file` (edited .docx) | `{ added[], modified[], deleted[], conflicts[] }` |
 | POST | `/specs/:id/merge` | `{ accept: string[] }` (UUID list) | `{ applied: number, rejected: number }` |
+| GET | `/libraries/:libraryId/divisions/:division/general-spec` | — | `DivisionGeneralSpecResult` |
+| PUT | `/libraries/:libraryId/divisions/:division/general-spec` | `{ generalSpecId }` or `{ status: "not_applicable" }` | `DivisionGeneralSpecResult` |
+| GET | `/projects/:id/divisions/:division/general-spec` | — | `DivisionGeneralSpecResult` |
+| PUT | `/projects/:id/divisions/:division/general-spec` | `{ generalSpecId }` or `{ status: "not_applicable" }` | `DivisionGeneralSpecResult` |
 | POST | `/mcp` | MCP JSON-RPC request | MCP JSON-RPC response (Streamable HTTP transport) |
 | GET | `/mcp` | — | `405 Method Not Allowed` |
 | DELETE | `/mcp` | — | `405 Method Not Allowed` |
@@ -261,12 +268,28 @@ interface ApiResponse<T> {
 ## Database Schema (Overview)
 
 ```sql
+-- Library owners for reference, company, and client masters
+CREATE TABLE libraries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tier VARCHAR(20) NOT NULL,          -- 'reference' | 'company' | 'client'
+  name TEXT NOT NULL UNIQUE,
+  owner TEXT,
+  parent_library_id UUID REFERENCES libraries(id),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Specs
 CREATE TABLE specs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   section VARCHAR(20),  -- "27 21 00" | "26 00 13.10" | "01 32 01.00 10" (expanded shape, ADR-020)
   title TEXT,
   source VARCHAR(20),   -- 'ufgs' | 'arcat' | 'cpi' | 'unknown'
+  library_id UUID REFERENCES libraries(id), -- master owner; XOR with project_id
+  project_id UUID REFERENCES projects(id),  -- project working-copy owner
+  parent_spec_id UUID REFERENCES specs(id), -- copy provenance, not division context
+  origin_version INTEGER,
+  content_version INTEGER NOT NULL DEFAULT 1,
+  origin_meta JSONB,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -281,6 +304,7 @@ CREATE TABLE paragraphs (
   position INTEGER,      -- sibling order
   vanish BOOLEAN DEFAULT false,
   revit_param TEXT,
+  origin_paragraph_id UUID REFERENCES paragraphs(id) ON DELETE SET NULL,
   base_version INTEGER DEFAULT 1,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
@@ -312,6 +336,28 @@ CREATE TABLE project_specs (
   position   INTEGER NOT NULL,            -- TOC display order
   added_at   TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (project_id, spec_id)
+);
+
+-- Ordered source libraries for project copy-on-derive resolution
+CREATE TABLE project_sources (
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  library_id UUID REFERENCES libraries(id),
+  priority INTEGER NOT NULL,
+  PRIMARY KEY (project_id, library_id)
+);
+
+-- Division-general context, separate from spec copy provenance (ADR-023)
+CREATE TABLE division_general_specs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  library_id UUID REFERENCES libraries(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  division VARCHAR(2) NOT NULL,
+  general_spec_id UUID REFERENCES specs(id) ON DELETE CASCADE,
+  status VARCHAR(20) NOT NULL,           -- 'resolved' | 'not_applicable'
+  detection_method VARCHAR(30) NOT NULL, -- 'exact_section' | 'manual'
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- Style templates: per-firm DOCX rendering rules

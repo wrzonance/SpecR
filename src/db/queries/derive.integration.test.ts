@@ -80,6 +80,7 @@ beforeAll(async () => {
   companyLib = await insertLibrary('company', `Derive Co ${suffix}`);
   clientLib = await insertLibrary('client', `Derive Client ${suffix}`);
   masterId = await insertMaster(companyLib, '03 30 00', 'Concrete');
+  await insertMaster(companyLib, '03 00 00', 'Concrete General Requirements');
   // tree: part → article → pr1; plus an EMPTY-text pr1 (losslessness pin) and a
   // vanish+conflicts paragraph.
   const part = await insertParagraph(masterId, null, 'part', 'PART 1 GENERAL', 1);
@@ -304,6 +305,21 @@ describe('addSectionToProject — resolution', () => {
     await expect(addSectionToProject(projectId, '99 99 99', pool)).rejects.toBeInstanceOf(
       SectionUnresolvedError
     );
+  });
+
+  it('exact NN 00 00 clone establishes the project division general spec', async () => {
+    const projectId = await newProject([companyLib]);
+    const added = await addSectionToProject(projectId, '03 00 00', pool);
+    const result = await pool.query<{ general_spec_id: string; detection_method: string }>(
+      `SELECT general_spec_id, detection_method
+       FROM division_general_specs
+       WHERE project_id = $1 AND division = '03'`,
+      [projectId]
+    );
+    expect(result.rows[0]).toEqual({
+      general_spec_id: added.specId,
+      detection_method: 'exact_section',
+    });
   });
 
   it('unknown project → ProjectNotFoundError', async () => {

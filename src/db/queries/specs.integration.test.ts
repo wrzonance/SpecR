@@ -147,6 +147,30 @@ describe('migration 013 — section shape CHECK constraints', () => {
     ).rejects.toThrow(/specs_section_shape_check/);
   });
 
+  it.each(['998877', '99.88.77', '99 8877'])(
+    'db: specs.section CHECK rejects display variant %s',
+    async (section) => {
+      await expect(
+        pool.query(
+          `INSERT INTO specs (section, title, source, library_id) VALUES ($1, 'Bad', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master'))`,
+          [section]
+        )
+      ).rejects.toThrow(/specs_section_shape_check/);
+    }
+  );
+
+  it.each(['998877', '99.88.77', '99 8877'])(
+    'db: spec_sections.section_number CHECK rejects display variant %s',
+    async (section) => {
+      await expect(
+        pool.query(
+          `INSERT INTO spec_sections (section_number, title, division) VALUES ($1, 'Bad', '99')`,
+          [section]
+        )
+      ).rejects.toThrow(/spec_sections_section_number_shape_check/);
+    }
+  );
+
   it('db: spec_sections shape CHECK rejects the sentinel (catalog is canonical-only)', async () => {
     await expect(
       pool.query(
@@ -273,6 +297,43 @@ describe('persistParsedSpec — lineage (#93)', () => {
       specId,
     ]);
     expect(r.rows[0]).toMatchObject({ parent_spec_id: null, origin_version: null });
+  });
+});
+
+describe('persistParsedSpec — division general reconciliation', () => {
+  afterEach(async () => {
+    await pool.query(`DELETE FROM specs WHERE section = '98 00 00'`);
+  });
+
+  it('exact NN 00 00 ingest establishes the library division general spec', async () => {
+    const specId = await persistParsedSpec({
+      tree: {
+        id: '',
+        section: '98 00 00',
+        title: 'Division 98 General Requirements',
+        parts: [
+          {
+            id: '98000000-0000-0000-0000-000000000001',
+            type: 'part',
+            text: 'GENERAL',
+            children: [],
+            meta: { source: 'arcat' },
+          },
+        ],
+      },
+      refs: [],
+    });
+
+    const result = await pool.query<{ general_spec_id: string; detection_method: string }>(
+      `SELECT general_spec_id, detection_method
+       FROM division_general_specs
+       WHERE division = '98'
+         AND library_id = (SELECT id FROM libraries WHERE name = 'Default Company Master')`
+    );
+    expect(result.rows[0]).toEqual({
+      general_spec_id: specId,
+      detection_method: 'exact_section',
+    });
   });
 });
 

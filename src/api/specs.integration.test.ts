@@ -194,6 +194,17 @@ describe('PATCH /specs/:id (integration)', () => {
     expect(res.status).toBe(422);
   });
 
+  it('normalizes a display-variant section override before update', async () => {
+    const res = await fetch(`${baseUrl}/specs/${testSpecId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: '27.21.00' }),
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    expect((body['data'] as Record<string, unknown>)['section']).toBe('27 21 00');
+  });
+
   it('returns 404 for unknown UUID', async () => {
     const res = await fetch(`${baseUrl}/specs/00000000-0000-0000-0000-000000000000`, {
       method: 'PATCH',

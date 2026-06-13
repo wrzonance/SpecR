@@ -4,7 +4,7 @@ import type { SpecNode, SpecTree, NodeType, SecRef } from '../../ast/types.js';
 import { ParserError } from '../error.js';
 import type { NteNode, PrtNode, RefNode, SptNode } from './elements.js';
 import { decodeXmlEntities } from './entities.js';
-import { normalizeSectionNumber } from '../../lib/section-number.js';
+import { parseSectionNumberCandidate } from '../../lib/section-number.js';
 
 export type { SecRef };
 
@@ -53,6 +53,11 @@ function stripPartPrefix(raw: string): string {
   return raw.replace(/^PART\s+\d+\s+[-–]?\s*/i, '').trim();
 }
 
+function normalizeTaggedSection(raw: string): string | null {
+  const parsed = parseSectionNumberCandidate(raw, 'strong');
+  return parsed.ok ? parsed.canonical : null;
+}
+
 function toArray<T>(val: T | readonly T[] | undefined): readonly T[] {
   if (val === undefined) return [];
   return Array.isArray(val) ? (val as readonly T[]) : [val as T];
@@ -81,7 +86,7 @@ function pushSrfRefs(raw: string, nodeId: string, refs: SecRef[]): void {
       targetType: 'section',
       // Normalize-or-verbatim: a tagged ref is never rejected; exact-match
       // resolution simply won't find non-conforming targets.
-      targetSpecSection: normalizeSectionNumber(sec) ?? sec,
+      targetSpecSection: normalizeTaggedSection(sec) ?? sec,
       referenceText: stripTags(raw).slice(0, 200),
     });
   }
@@ -224,7 +229,7 @@ export function parseSec(xml: string): ParsedSec {
   const scnRaw = decodeXmlEntities(metadataString(sec, 'SCN') ?? '')
     .replace(/^SECTION\s+/i, '')
     .trim();
-  const section = scnRaw.length > 0 ? (normalizeSectionNumber(scnRaw) ?? scnRaw) : 'unknown';
+  const section = scnRaw.length > 0 ? (normalizeTaggedSection(scnRaw) ?? scnRaw) : 'unknown';
   const title = decodeXmlEntities(requireString(metadataString(sec, 'STL'), 'STL'));
 
   const refs: SecRef[] = [];

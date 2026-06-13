@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import type { SpecNode } from './types.js';
-import { SectionNumberSchema } from '../lib/section-number.js';
+import {
+  SectionNumberFormatSchema,
+  SectionNumberInputSchema,
+  SectionNumberSchema,
+} from '../lib/section-number.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -82,7 +86,7 @@ export const SpecTreeSchema = z.object({
 export const PatchSpecBodySchema = z.object({
   title: z.string().check(z.minLength(1)).exactOptional(),
   // PATCH must set a real section — the sentinel is not assignable by clients.
-  section: SectionNumberSchema.exactOptional(),
+  section: SectionNumberInputSchema.exactOptional(),
 });
 
 export const CreateProjectBodySchema = z.object({
@@ -125,11 +129,31 @@ export const SetProjectSourcesBodySchema = z.object({
 export type SetProjectSourcesBody = z.infer<typeof SetProjectSourcesBodySchema>;
 
 export const AddSectionToProjectBodySchema = z.object({
-  // Canonical expanded-shape section number (lib/section-number.ts, ADR-020).
-  section: SectionNumberSchema,
+  // Tolerant input; normalized before the query layer sees it.
+  section: SectionNumberInputSchema,
 });
 
 export type AddSectionToProjectBody = z.infer<typeof AddSectionToProjectBodySchema>;
+
+export const SetDivisionGeneralSpecBodySchema = z
+  .object({
+    generalSpecId: z.uuid().exactOptional(),
+    status: z.literal('not_applicable').exactOptional(),
+    notes: z.string().check(z.minLength(1)).exactOptional(),
+  })
+  .check((ctx) => {
+    const hasSpec = ctx.value.generalSpecId !== undefined;
+    const notApplicable = ctx.value.status === 'not_applicable';
+    if (hasSpec === notApplicable) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        message: 'provide either generalSpecId or status=not_applicable',
+      });
+    }
+  });
+
+export type SetDivisionGeneralSpecBody = z.infer<typeof SetDivisionGeneralSpecBodySchema>;
 
 export const CreatePackageBodySchema = z.object({
   name: z.string().check(z.minLength(1)),
@@ -315,6 +339,7 @@ export type UpsertStyleRulesBody = z.infer<typeof UpsertStyleRulesBodySchema>;
 
 export const GenerateBodySchema = z.object({
   templateId: z.uuid().exactOptional(),
+  sectionNumberFormat: SectionNumberFormatSchema.exactOptional(),
 });
 
 export type GenerateBody = z.infer<typeof GenerateBodySchema>;

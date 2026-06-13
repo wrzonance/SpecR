@@ -10,10 +10,15 @@ import {
   lookupSpecSectionTitle,
   getSpecLineage,
   getCoordinationReport,
+  findProjectById,
+  findProjectSpecIdsBySection,
+  getInboundReferences,
+  getOutboundReferences,
+  listProjects,
   PackageNotFoundError,
   pool,
 } from '../db/index.js';
-import type { OriginMeta } from '../db/index.js';
+import type { InboundReference, OriginMeta, OutboundReference } from '../db/index.js';
 import { inferSectionMeta, computeTitleMatch } from '../lib/infer-section.js';
 import type { SectionInference } from '../lib/infer-section.js';
 import { parseSec, parseDocx, parseText, assertDocxSafe, assertSecSafe } from '../parser/index.js';
@@ -22,6 +27,7 @@ import { generateDocx } from '../generator/index.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
+import { normalizeSectionNumber } from '../lib/section-number.js';
 
 type ToolError = {
   readonly isError: true;
@@ -29,6 +35,7 @@ type ToolError = {
 };
 type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
 type ToolResult = ToolError | ToolOk;
+type ReferenceDirection = 'from' | 'to' | 'both';
 
 export function toolError(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };
@@ -157,6 +164,83 @@ export async function handleListSections({
       isError: true,
       content: [{ type: 'text' as const, text: 'Internal error — section list failed' }],
     };
+  }
+}
+
+export async function handleListProjects(): Promise<ToolResult> {
+  try {
+    const projects = await listProjects(pool);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(projects, null, 2) }] };
+  } catch (err) {
+    logger.error({ err }, 'mcp tool list_projects failed');
+    return toolError('Internal error — project list failed');
+  }
+}
+
+function includesOutbound(direction: ReferenceDirection): boolean {
+  return direction === 'from' || direction === 'both';
+}
+
+function includesInbound(direction: ReferenceDirection): boolean {
+  return direction === 'to' || direction === 'both';
+}
+
+async function getOutboundForSection(
+  section: string,
+  projectId: string
+): Promise<readonly OutboundReference[]> {
+  const specIds = await findProjectSpecIdsBySection(section, projectId, pool);
+  const refs = await Promise.all(
+    specIds.map((specId) => getOutboundReferences(specId, projectId, pool))
+  );
+  return refs.flat();
+}
+
+function referencesResponse(
+  projectId: string,
+  section: string,
+  outbound: readonly OutboundReference[],
+  inbound: readonly InboundReference[]
+): ToolResult {
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify({ projectId, section, outbound, inbound }, null, 2),
+      },
+    ],
+  };
+}
+
+export async function handleGetReferences({
+  projectId,
+  section,
+  direction,
+}: {
+  projectId: string;
+  section: string;
+  direction: ReferenceDirection | undefined;
+}): Promise<ToolResult> {
+  const normalized = normalizeSectionNumber(section);
+  if (normalized === null) {
+    return toolError(`Malformed section number: ${section}`);
+  }
+  try {
+    const project = await findProjectById(projectId, pool);
+    if (!project) {
+      return toolError(`Project not found: id=${projectId}`);
+    }
+    const resolvedDirection = direction ?? 'both';
+    const outbound = includesOutbound(resolvedDirection)
+      ? await getOutboundForSection(normalized, projectId)
+      : [];
+    const inbound = includesInbound(resolvedDirection)
+      ? await getInboundReferences(normalized, projectId, pool)
+      : [];
+    return referencesResponse(projectId, normalized, outbound, inbound);
+  } catch (err) {
+    logger.error({ err }, 'mcp tool get_references failed');
+    return toolError('Internal error — reference retrieval failed');
   }
 }
 

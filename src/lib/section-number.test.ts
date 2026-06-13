@@ -3,7 +3,11 @@ import { describe, it, expect } from 'vitest';
 import {
   SECTION_NUMBER_RE,
   sectionNumberFragment,
+  sectionNumberCandidateFragment,
   normalizeSectionNumber,
+  parseSectionNumberCandidate,
+  formatSectionNumber,
+  formatSectionReferences,
   findSectionNumbers,
   SectionNumberSchema,
 } from './section-number.js';
@@ -51,6 +55,100 @@ describe('normalizeSectionNumber', () => {
     expect(normalizeSectionNumber('26 00 13.1')).toBeNull();
     expect(normalizeSectionNumber('')).toBeNull();
     expect(normalizeSectionNumber('unknown')).toBeNull();
+  });
+});
+
+describe('parseSectionNumberCandidate', () => {
+  it('passes canonical forms through', () => {
+    const result = parseSectionNumberCandidate('09 91 00', 'strong');
+    expect(result).toEqual({
+      ok: true,
+      canonical: '09 91 00',
+      inputFormat: 'canonical',
+      confidence: 'high',
+    });
+  });
+
+  it.each([
+    ['099100', '09 91 00', 'compact'],
+    ['09.91.00', '09 91 00', 'dots'],
+    ['09 9100', '09 91 00', 'spaced-compact'],
+  ])('normalizes strong-context base variant %s', (raw, canonical, inputFormat) => {
+    expect(parseSectionNumberCandidate(raw, 'strong')).toMatchObject({
+      ok: true,
+      canonical,
+      inputFormat,
+    });
+  });
+
+  it.each([
+    ['013201.00 10', '01 32 01.00 10', 'compact'],
+    ['01.32.01.00 10', '01 32 01.00 10', 'dots'],
+    ['01 3201.00 10', '01 32 01.00 10', 'spaced-compact'],
+    ['260013.10', '26 00 13.10', 'compact'],
+    ['26.00.13.10', '26 00 13.10', 'dots'],
+  ])('normalizes strong-context suffixed variant %s', (raw, canonical, inputFormat) => {
+    expect(parseSectionNumberCandidate(raw, 'strong')).toMatchObject({
+      ok: true,
+      canonical,
+      inputFormat,
+    });
+  });
+
+  it('keeps variants invalid in canonical-only context', () => {
+    expect(parseSectionNumberCandidate('099100')).toEqual({ ok: false, reason: 'not-canonical' });
+  });
+
+  it.each(['99100', '0991000', '09.910.0', '09 910', '0132010010'])(
+    'rejects invalid or ambiguous group lengths: %s',
+    (raw) => {
+      expect(parseSectionNumberCandidate(raw, 'strong').ok).toBe(false);
+    }
+  );
+});
+
+describe('sectionNumberCandidateFragment', () => {
+  it('embeds into a strong keyword scanner and captures variants as group 1', () => {
+    const re = new RegExp(String.raw`\bSECTION\s+${sectionNumberCandidateFragment()}`, 'i');
+    expect(re.exec('SECTION 099100 PAINTING')?.[1]).toBe('099100');
+    expect(re.exec('SECTION 09.91.00 PAINTING')?.[1]).toBe('09.91.00');
+    expect(re.exec('SECTION 09 9100 PAINTING')?.[1]).toBe('09 9100');
+    expect(re.exec('SECTION 013201.00 10 QUALITY')?.[1]).toBe('013201.00 10');
+  });
+});
+
+describe('formatSectionNumber', () => {
+  it.each([
+    ['09 91 00', 'canonical', '09 91 00'],
+    ['09 91 00', 'dots', '09.91.00'],
+    ['09 91 00', 'compact', '099100'],
+    ['01 32 01.00 10', 'dots', '01.32.01.00 10'],
+    ['01 32 01.00 10', 'compact', '013201.00 10'],
+  ] as const)('formats %s as %s', (canonical, format, expected) => {
+    expect(formatSectionNumber(canonical, format)).toBe(expected);
+  });
+
+  it('rejects noncanonical input instead of guessing', () => {
+    expect(() => formatSectionNumber('099100', 'dots')).toThrow(/canonical/);
+  });
+});
+
+describe('formatSectionReferences', () => {
+  it('formats confident Section-prefixed references', () => {
+    expect(formatSectionReferences('See Section 09 91 00 and SECTION 26 00 13.10.', 'dots')).toBe(
+      'See Section 09.91.00 and SECTION 26.00.13.10.'
+    );
+  });
+
+  it('normalizes display variants while preserving the Section keyword casing', () => {
+    expect(formatSectionReferences('See section 099100 for painting.', 'canonical')).toBe(
+      'See section 09 91 00 for painting.'
+    );
+  });
+
+  it('does not rewrite bare product or standards-like numbers', () => {
+    const text = 'Manufacturer Part No. 099100; ASME 123456; ASTM 123456.';
+    expect(formatSectionReferences(text, 'dots')).toBe(text);
   });
 });
 

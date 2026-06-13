@@ -15,6 +15,8 @@ import {
   handleGenerateDocx,
   handleGetSpecLineage,
   handleCoordinationReport,
+  handleListProjects,
+  handleGetReferences,
 } from './handlers.js';
 
 type ToolError = {
@@ -69,6 +71,40 @@ function registerLibraryTools(server: McpServer): void {
       inputSchema: { division: divisionSchema },
     },
     handleListSections
+  );
+}
+
+function registerProjectTools(server: McpServer): void {
+  server.registerTool(
+    'list_projects',
+    {
+      description: 'List projects (id, name) for use as the projectId argument to get_references.',
+      inputSchema: {},
+    },
+    handleListProjects
+  );
+
+  server.registerTool(
+    'get_references',
+    {
+      description:
+        'Within a project, return cross-references for a CSI section in both directions: ' +
+        'outbound (specs this section cites) and inbound (specs that cite it). ' +
+        'Read directly from the database — deterministic and complete, including inbound ' +
+        'references to sections not yet loaded. Requires a projectId (see list_projects).',
+      inputSchema: {
+        projectId: z.uuid().describe('Project UUID (from list_projects)'),
+        section: z
+          .string()
+          .min(1)
+          .describe('CSI section number, e.g. "09 91 00" (expanded shapes ok)'),
+        direction: z
+          .enum(['from', 'to', 'both'])
+          .optional()
+          .describe('"from" = specs this section cites; "to" = specs that cite it; default "both"'),
+      },
+    },
+    handleGetReferences
   );
 }
 
@@ -276,6 +312,7 @@ function registerLoaderTools(server: McpServer): void {
 
 export function registerTools(server: McpServer): void {
   registerLibraryTools(server);
+  registerProjectTools(server);
   registerSpecTools(server);
   registerParserTools(server);
   registerGeneratorTools(server);

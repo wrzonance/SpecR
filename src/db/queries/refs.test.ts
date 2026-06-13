@@ -160,3 +160,96 @@ describe('insertRefs — error handling', () => {
     await expect(insertRefs([ref], 'spec-uuid-1', pool)).rejects.toBeInstanceOf(DatabaseError);
   });
 });
+
+describe('reference traversal queries', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it('getInboundReferences maps rows and scopes by project + target section', async () => {
+    const { pool } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        {
+          source_spec_id: 'spec-1',
+          source_section: '03 30 00',
+          source_title: 'Concrete',
+          source_paragraph_id: 'para-1',
+          reference_text: 'See Section 09 91 00',
+          target_spec_id: 'target-1',
+          is_broken: false,
+        },
+      ],
+    } as never);
+
+    const { getInboundReferences } = await import('./refs.js');
+    const result = await getInboundReferences('09 91 00', 'project-1', pool);
+
+    expect(vi.mocked(query).mock.calls[0]?.[1]).toEqual(['09 91 00', 'project-1']);
+    expect(result).toEqual([
+      {
+        sourceSpecId: 'spec-1',
+        sourceSection: '03 30 00',
+        sourceTitle: 'Concrete',
+        sourceParagraphId: 'para-1',
+        referenceText: 'See Section 09 91 00',
+        isResolved: true,
+        isBroken: false,
+      },
+    ]);
+  });
+
+  it('getOutboundReferences maps unresolved refs and scopes by project + source spec', async () => {
+    const { pool } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        {
+          source_spec_id: 'spec-1',
+          reference_text: 'See Section 99 99 99',
+          target_spec_section: '99 99 99',
+          target_spec_id: null,
+          is_broken: true,
+        },
+      ],
+    } as never);
+
+    const { getOutboundReferences } = await import('./refs.js');
+    const result = await getOutboundReferences('spec-1', 'project-1', pool);
+
+    expect(vi.mocked(query).mock.calls[0]?.[1]).toEqual(['spec-1', 'project-1']);
+    expect(result).toEqual([
+      {
+        sourceSpecId: 'spec-1',
+        referenceText: 'See Section 99 99 99',
+        targetSection: '99 99 99',
+        targetSpecId: null,
+        isResolved: false,
+        isBroken: true,
+      },
+    ]);
+  });
+
+  it('findProjectSpecIdsBySection returns ordered ids from the query result', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [{ id: 'spec-a' }, { id: 'spec-b' }],
+    } as never);
+
+    const { findProjectSpecIdsBySection } = await import('./refs.js');
+    await expect(findProjectSpecIdsBySection('03 30 00', 'project-1', pool)).resolves.toEqual([
+      'spec-a',
+      'spec-b',
+    ]);
+  });
+
+  it('isSpecInProject returns false when no membership row exists', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [{ exists: false }] } as never);
+
+    const { isSpecInProject } = await import('./refs.js');
+    await expect(isSpecInProject('spec-1', 'project-1', pool)).resolves.toBe(false);
+  });
+});

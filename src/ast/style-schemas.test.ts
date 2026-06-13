@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { StylePropertiesSchema, GenerateBodySchema } from './schemas.js';
+import {
+  AddSectionToProjectBodySchema,
+  GenerateBodySchema,
+  PatchSpecBodySchema,
+  StylePropertiesSchema,
+} from './schemas.js';
 
 describe('StylePropertiesSchema (ADR-021 open style payload)', () => {
   it('parses a known OOXML-faithful definition unchanged', () => {
@@ -47,11 +52,40 @@ describe('GenerateBodySchema (generate request body)', () => {
     expect(GenerateBodySchema.parse(body)).toEqual(body);
   });
 
+  it('accepts sectionNumberFormat output policy', () => {
+    expect(GenerateBodySchema.parse({ sectionNumberFormat: 'dots' })).toEqual({
+      sectionNumberFormat: 'dots',
+    });
+  });
+
   it('rejects a non-UUID templateId', () => {
     expect(() => GenerateBodySchema.parse({ templateId: 'not-a-uuid' })).toThrow();
   });
 
+  it('rejects an unknown sectionNumberFormat', () => {
+    expect(() => GenerateBodySchema.parse({ sectionNumberFormat: 'slashes' })).toThrow();
+  });
+
   it('rejects explicit undefined templateId (exactOptional)', () => {
     expect(() => GenerateBodySchema.parse({ templateId: undefined })).toThrow();
+  });
+});
+
+describe('Section-number API input schemas', () => {
+  it('normalizes PATCH /specs section display variants', () => {
+    expect(PatchSpecBodySchema.parse({ section: '09.91.00' })).toEqual({
+      section: '09 91 00',
+    });
+  });
+
+  it('normalizes POST /projects/:id/specs section display variants', () => {
+    expect(AddSectionToProjectBodySchema.parse({ section: '099100' })).toEqual({
+      section: '09 91 00',
+    });
+  });
+
+  it('rejects malformed section input', () => {
+    expect(() => PatchSpecBodySchema.parse({ section: '09910' })).toThrow();
+    expect(() => AddSectionToProjectBodySchema.parse({ section: '09.910.0' })).toThrow();
   });
 });

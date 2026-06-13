@@ -139,6 +139,16 @@ describe('parseText — section extraction edge cases', () => {
     expect(result.tree.title).toBe('TELEVISION DISTRIBUTION');
   });
 
+  it.each([
+    ['SECTION 099100 - PAINTING', '09 91 00'],
+    ['SECTION 09.91.00 - PAINTING', '09 91 00'],
+    ['SECTION 09 9100 - PAINTING', '09 91 00'],
+    ['SECTION 013201.00 10 - QUALITY CONTROL', '01 32 01.00 10'],
+  ])('text parser: display variant header %s normalizes to canonical', (line, expected) => {
+    const result = parseText(`${line}\n\nPART 1 GENERAL\n`);
+    expect(result.tree.section).toBe(expected);
+  });
+
   it('text parser: agency-suffixed header with dash title', () => {
     const result = parseText('SECTION 01 32 01.00 10 - QUALITY CONTROL\n\nPART 1 GENERAL\n');
     expect(result.tree.section).toBe('01 32 01.00 10');

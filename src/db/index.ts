@@ -52,18 +52,28 @@ export type {
   ParagraphWithAncestors,
   UpdatedParagraph,
 } from './queries/paragraphs.js';
-export { insertRefs, deleteReference } from './queries/refs.js';
+export {
+  deleteReference,
+  insertRefs,
+  getInboundReferences,
+  getOutboundReferences,
+  findProjectSpecIdsBySection,
+  isSpecInProject,
+} from './queries/refs.js';
+export type { InboundReference, OutboundReference } from './queries/refs.js';
 export {
   createProject,
   setProjectSources,
   findProjectById,
   addSpecToProject,
   removeSpecFromProject,
+  listProjects,
   getBrokenRefs,
   InvalidSourceLibraryError,
 } from './queries/projects.js';
 export type {
   ProjectSummary,
+  ProjectListItem,
   ProjectWithToc,
   ProjectTocEntry,
   ProjectSource,
@@ -161,3 +171,24 @@ export {
 export type { RevisionSummary, RevisionSpecEntry, RevisionWithTrees } from './queries/revisions.js';
 export { getSpecLineage } from './queries/lineage.js';
 export type { SpecLineage, LineageHop, LineageScope } from './queries/lineage.js';
+export {
+  getLibraryDivisionGeneralSpec,
+  getProjectDivisionGeneralSpec,
+  setLibraryDivisionGeneralSpec,
+  setProjectDivisionGeneralSpec,
+  reconcileLibraryDivisionGeneralSpec,
+  reconcileProjectDivisionGeneralSpec,
+  DivisionGeneralOwnerNotFoundError,
+  DivisionGeneralSpecNotInScopeError,
+} from './queries/division-general.js';
+export type {
+  DivisionGeneralSpecResult,
+  DivisionGeneralSpecRef,
+  DivisionGeneralCandidate,
+  DivisionGeneralScope,
+  DivisionGeneralStatus,
+  DivisionGeneralMethod,
+  DivisionGeneralCandidateReason,
+  DivisionGeneralConfidence,
+  SetDivisionGeneralSpecInput,
+} from './queries/division-general.js';

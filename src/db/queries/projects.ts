@@ -13,6 +13,11 @@ interface ProjectRow {
   readonly description: string | null;
 }
 
+interface ProjectListRow {
+  readonly id: string;
+  readonly name: string;
+}
+
 interface TocRow {
   readonly id: string;
   readonly section: string;
@@ -50,6 +55,11 @@ export interface ProjectSource {
   readonly name: string;
   readonly tier: LibraryTier;
   readonly priority: number;
+}
+
+export interface ProjectListItem {
+  readonly id: string;
+  readonly name: string;
 }
 
 export interface ProjectSummary {
@@ -195,6 +205,17 @@ export async function setProjectSources(
     throw new DatabaseError(`setProjectSources: failed for project ${projectId}`, { cause: err });
   } finally {
     client.release();
+  }
+}
+
+export async function listProjects(pool: Queryable): Promise<readonly ProjectListItem[]> {
+  try {
+    const result = await pool.query<ProjectListRow>(
+      'SELECT id, name FROM projects ORDER BY name, id'
+    );
+    return result.rows.map((row) => ({ id: row.id, name: row.name }));
+  } catch (err) {
+    throw new DatabaseError('listProjects: query failed', { cause: err });
   }
 }
 

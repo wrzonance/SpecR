@@ -13,7 +13,7 @@ import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
 import { ParseWarningSchema, SecRefSchema } from '../ast/schemas.js';
-import { SectionNumberSchema, normalizeSectionNumber } from '../lib/section-number.js';
+import { SectionNumberSchema, parseSectionNumberCandidate } from '../lib/section-number.js';
 
 interface ParseBody {
   readonly section?: string;
@@ -75,15 +75,15 @@ export async function parseHandler(req: Request, res: Response): Promise<void> {
     return;
   }
   const rawBody: ParseBody = bodyResult.data;
-  const normalizedSection =
-    rawBody.section !== undefined ? normalizeSectionNumber(rawBody.section) : undefined;
-  if (rawBody.section !== undefined && normalizedSection === null) {
+  const parsedSection =
+    rawBody.section !== undefined ? parseSectionNumberCandidate(rawBody.section, 'strong') : null;
+  if (rawBody.section !== undefined && parsedSection?.ok !== true) {
     res.status(400).json({ success: false, error: 'invalid section override format' });
     return;
   }
   const body: ParseBody = {
     ...rawBody,
-    ...(normalizedSection != null ? { section: normalizedSection } : {}),
+    ...(parsedSection?.ok === true ? { section: parsedSection.canonical } : {}),
   };
 
   const jobId = createJob();
