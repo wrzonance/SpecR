@@ -1,6 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
 import { inferSectionMeta } from '../../lib/infer-section.js';
-import { normalizeSectionNumber, sectionNumberFragment } from '../../lib/section-number.js';
+import {
+  parseSectionNumberCandidate,
+  sectionNumberCandidateFragment,
+  sectionNumberFragment,
+} from '../../lib/section-number.js';
 import type {
   SpecNode,
   SpecNodeMeta,
@@ -40,7 +44,7 @@ const WARNING_SUGGESTIONS: Readonly<Record<ParseWarningType, string>> = {
 };
 
 const SECTION_EXTRACT_RE = new RegExp(
-  String.raw`SECTION\s+${sectionNumberFragment()}(?:\s*[-–—]\s*(.+))?`,
+  String.raw`SECTION\s+${sectionNumberCandidateFragment()}(?:\s*[-–—]\s*(.+))?`,
   'i'
 );
 const BARE_SECTION_RE = new RegExp(String.raw`^${sectionNumberFragment()}(?:\s*[-–—]\s*(.+))?`);
@@ -72,10 +76,10 @@ function extractSectionMeta(
     const trimmed = line.trim();
     const m = SECTION_EXTRACT_RE.exec(trimmed) ?? BARE_SECTION_RE.exec(trimmed);
     if (m !== null) {
-      const section = normalizeSectionNumber(m[1] ?? '');
-      if (section !== null) {
+      const parsed = parseSectionNumberCandidate(m[1] ?? '', 'strong');
+      if (parsed.ok) {
         return {
-          section,
+          section: parsed.canonical,
           title: (m[2] ?? '').trim() || 'unknown',
         };
       }

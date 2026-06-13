@@ -231,6 +231,28 @@ describe('POST /projects/:id/specs (section-based copy-on-derive)', () => {
     cloneA = d['specId'] as string;
   });
 
+  it('normalizes display-variant section body before cloning into the project', async () => {
+    const projectRes = await postJSON('/projects', {
+      name: `Derive Display ${Date.now()}`,
+      sourceLibraryIds: [companyLibId],
+    });
+    const projectBody = (await projectRes.json()) as Record<string, unknown>;
+    const displayProjectId = (projectBody['data'] as Record<string, unknown>)[
+      'projectId'
+    ] as string;
+    apiProjects.push(displayProjectId);
+
+    const res = await postJSON(`/projects/${displayProjectId}/specs`, { section: '099100' });
+    expect(res.status).toBe(201);
+    const d = ((await res.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
+    expect(d['section']).toBe('09 91 00');
+    const stored = await pool.query<{ section: string }>(
+      'SELECT section FROM specs WHERE id = $1',
+      [d['specId']]
+    );
+    expect(stored.rows[0]?.section).toBe('09 91 00');
+  });
+
   it('409 on duplicate section', async () => {
     const res = await postJSON(`/projects/${projectId}/specs`, { section: '03 30 00' });
     expect(res.status).toBe(409);

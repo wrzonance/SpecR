@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import type { SpecNode } from './types.js';
-import { SectionNumberSchema } from '../lib/section-number.js';
+import {
+  SectionNumberFormatSchema,
+  SectionNumberInputSchema,
+  SectionNumberSchema,
+} from '../lib/section-number.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -82,7 +86,7 @@ export const SpecTreeSchema = z.object({
 export const PatchSpecBodySchema = z.object({
   title: z.string().check(z.minLength(1)).exactOptional(),
   // PATCH must set a real section — the sentinel is not assignable by clients.
-  section: SectionNumberSchema.exactOptional(),
+  section: SectionNumberInputSchema.exactOptional(),
 });
 
 export const CreateProjectBodySchema = z.object({
@@ -108,8 +112,8 @@ export const CreateProjectBodySchema = z.object({
 export type CreateProjectBody = z.infer<typeof CreateProjectBodySchema>;
 
 export const AddSectionToProjectBodySchema = z.object({
-  // Canonical expanded-shape section number (lib/section-number.ts, ADR-020).
-  section: SectionNumberSchema,
+  // Tolerant input; normalized before the query layer sees it.
+  section: SectionNumberInputSchema,
 });
 
 export type AddSectionToProjectBody = z.infer<typeof AddSectionToProjectBodySchema>;
@@ -290,6 +294,7 @@ export type UpsertStyleRulesBody = z.infer<typeof UpsertStyleRulesBodySchema>;
 
 export const GenerateBodySchema = z.object({
   templateId: z.uuid().exactOptional(),
+  sectionNumberFormat: SectionNumberFormatSchema.exactOptional(),
 });
 
 export type GenerateBody = z.infer<typeof GenerateBodySchema>;

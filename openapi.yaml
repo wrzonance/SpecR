@@ -260,6 +260,19 @@ paths:
                     Omitted → the seeded UFGS-Default template is applied; if that template
                     is absent (un-migrated database) the response is still 200 with an
                     unstyled DOCX. Unknown id → 404.
+                sectionNumberFormat:
+                  type: string
+                  enum: [canonical, dots, compact]
+                  default: canonical
+                  description: >
+                    Presentation format for generated section numbers in the synthetic
+                    DOCX title and confidently identified Section references in paragraph
+                    text. Canonical emits "09 91 00", dots emits "09.91.00", and compact
+                    emits "099100". Stored AST and database values remain canonical.
+              examples:
+                dotted-section-numbers:
+                  value:
+                    sectionNumberFormat: dots
       responses:
         '200':
           description: DOCX file stream
