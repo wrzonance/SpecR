@@ -79,7 +79,9 @@ beforeAll(async () => {
     `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
     [`Division API Project ${suffix}`]
   );
-  projectId = project.rows[0]?.id ?? '';
+  const projectRow = project.rows[0];
+  if (projectRow === undefined) throw new Error('insertProject failed');
+  projectId = projectRow.id;
   projectExactSpecId = await insertSpec(
     { projectId },
     '27 00 00',
@@ -155,8 +157,16 @@ describe('division general REST API', () => {
     expect(res.status).toBe(422);
   });
 
-  it('PUT validates ambiguous or empty body at the API boundary', async () => {
+  it('PUT validates empty body at the API boundary', async () => {
     const res = await putJSON(`/libraries/${libraryId}/divisions/27/general-spec`, {});
+    expect(res.status).toBe(422);
+  });
+
+  it('PUT validates conflicting generalSpecId and status at the API boundary', async () => {
+    const res = await putJSON(`/libraries/${libraryId}/divisions/27/general-spec`, {
+      generalSpecId: candidateSpecId,
+      status: 'not_applicable',
+    });
     expect(res.status).toBe(422);
   });
 

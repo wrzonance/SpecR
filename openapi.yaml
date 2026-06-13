@@ -1607,20 +1607,30 @@ components:
             $ref: '#/components/schemas/DivisionGeneralCandidate'
 
     SetDivisionGeneralSpecBody:
-      type: object
       description: 'Provide exactly one of `generalSpecId` or `status: not_applicable`.'
-      properties:
-        generalSpecId:
-          type: string
-          format: uuid
-          description: Same-scope spec in the requested division to use as the general spec
-        status:
-          type: string
-          enum: [not_applicable]
-          description: Records that no in-scope general requirements spec is issued here
-        notes:
-          type: string
-          minLength: 1
+      oneOf:
+        - type: object
+          required: [generalSpecId]
+          additionalProperties: false
+          properties:
+            generalSpecId:
+              type: string
+              format: uuid
+              description: Same-scope spec in the requested division to use as the general spec
+            notes:
+              type: string
+              minLength: 1
+        - type: object
+          required: [status]
+          additionalProperties: false
+          properties:
+            status:
+              type: string
+              enum: [not_applicable]
+              description: Records that no in-scope general requirements spec is issued here
+            notes:
+              type: string
+              minLength: 1
 
     # ── Projects ───────────────────────────────────────────────────────────────
 
