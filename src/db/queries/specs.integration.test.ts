@@ -276,6 +276,43 @@ describe('persistParsedSpec — lineage (#93)', () => {
   });
 });
 
+describe('persistParsedSpec — division general reconciliation', () => {
+  afterEach(async () => {
+    await pool.query(`DELETE FROM specs WHERE section = '98 00 00'`);
+  });
+
+  it('exact NN 00 00 ingest establishes the library division general spec', async () => {
+    const specId = await persistParsedSpec({
+      tree: {
+        id: '',
+        section: '98 00 00',
+        title: 'Division 98 General Requirements',
+        parts: [
+          {
+            id: '98000000-0000-0000-0000-000000000001',
+            type: 'part',
+            text: 'GENERAL',
+            children: [],
+            meta: { source: 'arcat' },
+          },
+        ],
+      },
+      refs: [],
+    });
+
+    const result = await pool.query<{ general_spec_id: string; detection_method: string }>(
+      `SELECT general_spec_id, detection_method
+       FROM division_general_specs
+       WHERE division = '98'
+         AND library_id = (SELECT id FROM libraries WHERE name = 'Default Company Master')`
+    );
+    expect(result.rows[0]).toEqual({
+      general_spec_id: specId,
+      detection_method: 'exact_section',
+    });
+  });
+});
+
 describe('updateSpec — content_version bump (#93)', () => {
   it('bumps content_version when title changes; no-op update does not bump', async () => {
     const id = await createSpec({ section: '99 00 00', title: 'V1', source: 'arcat' });

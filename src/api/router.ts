@@ -10,6 +10,12 @@ import {
   getBrokenRefsHandler,
 } from './projects.js';
 import {
+  getLibraryDivisionGeneralSpecHandler,
+  setLibraryDivisionGeneralSpecHandler,
+  getProjectDivisionGeneralSpecHandler,
+  setProjectDivisionGeneralSpecHandler,
+} from './division-general.js';
+import {
   createPackageHandler,
   listPackagesHandler,
   setPackageSpecsHandler,
@@ -27,6 +33,7 @@ import {
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
+  SetDivisionGeneralSpecBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 import { generateHandler } from './generate.js';
@@ -57,6 +64,24 @@ router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler)
 router.post('/specs/:id/generate', generateHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects/:id', getProjectHandler);
+router.get(
+  '/libraries/:libraryId/divisions/:division/general-spec',
+  getLibraryDivisionGeneralSpecHandler
+);
+router.put(
+  '/libraries/:libraryId/divisions/:division/general-spec',
+  validateBody(SetDivisionGeneralSpecBodySchema),
+  setLibraryDivisionGeneralSpecHandler
+);
+router.get(
+  '/projects/:projectId/divisions/:division/general-spec',
+  getProjectDivisionGeneralSpecHandler
+);
+router.put(
+  '/projects/:projectId/divisions/:division/general-spec',
+  validateBody(SetDivisionGeneralSpecBodySchema),
+  setProjectDivisionGeneralSpecHandler
+);
 router.post(
   '/projects/:id/specs',
   validateBody(AddSectionToProjectBodySchema),

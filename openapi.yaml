@@ -354,6 +354,139 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /libraries/{libraryId}/divisions/{division}/general-spec:
+    get:
+      operationId: getLibraryDivisionGeneralSpec
+      summary: Get division general-spec status for a library
+      description: >
+        Returns the confirmed division-general spec when one exists. Only an exact
+        `NN 00 00` section is assigned automatically. If no exact section exists,
+        the response is `status: missing` and fallback matches are returned as
+        advisory candidates only.
+      tags: [libraries]
+      parameters:
+        - $ref: '#/components/parameters/LibraryId'
+        - $ref: '#/components/parameters/Division'
+      responses:
+        '200':
+          description: Division general-spec status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DivisionGeneralSpecResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: setLibraryDivisionGeneralSpec
+      summary: Manually set a library division general spec
+      description: >
+        Assigns a same-library spec in the requested division as the division
+        general spec, or records that this division has no in-scope general
+        requirements spec.
+      tags: [libraries]
+      parameters:
+        - $ref: '#/components/parameters/LibraryId'
+        - $ref: '#/components/parameters/Division'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetDivisionGeneralSpecBody'
+      responses:
+        '200':
+          description: Manual division-general decision stored
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DivisionGeneralSpecResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/divisions/{division}/general-spec:
+    get:
+      operationId: getProjectDivisionGeneralSpec
+      summary: Get division general-spec status for a project
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/Division'
+      responses:
+        '200':
+          description: Division general-spec status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DivisionGeneralSpecResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: setProjectDivisionGeneralSpec
+      summary: Manually set a project division general spec
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/Division'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetDivisionGeneralSpecBody'
+      responses:
+        '200':
+          description: Manual division-general decision stored
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DivisionGeneralSpecResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /projects/{id}/specs:
     post:
       operationId: addSectionToProject
@@ -650,7 +783,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: 'Validation failed, or a spec is not in the package''s project TOC'
+          description: "Validation failed, or a spec is not in the package's project TOC"
           content:
             application/json:
               schema:
@@ -1077,6 +1210,22 @@ components:
       schema:
         type: string
         format: uuid
+    LibraryId:
+      name: libraryId
+      in: path
+      required: true
+      description: Library UUID
+      schema:
+        type: string
+        format: uuid
+    Division:
+      name: division
+      in: path
+      required: true
+      description: Two-digit division number
+      schema:
+        type: string
+        pattern: '^\d{2}$'
     TemplateId:
       name: id
       in: path
@@ -1382,6 +1531,97 @@ components:
                   type: string
             - type: 'null'
 
+    DivisionGeneralSpecRef:
+      type: object
+      required: [specId, section, title]
+      properties:
+        specId:
+          type: string
+          format: uuid
+        section:
+          type: string
+        title:
+          type: string
+
+    DivisionGeneralCandidate:
+      allOf:
+        - $ref: '#/components/schemas/DivisionGeneralSpecRef'
+        - type: object
+          required: [rank, reason, confidence]
+          properties:
+            rank:
+              type: integer
+              minimum: 1
+            reason:
+              type: string
+              enum: [title_keyword, first_in_division]
+              description: Why this spec is listed as an advisory fallback candidate
+            confidence:
+              type: string
+              enum: [medium, low]
+
+    DivisionGeneralSpecResult:
+      type: object
+      required:
+        - scope
+        - ownerId
+        - division
+        - expectedSection
+        - status
+        - generalSpec
+        - detectionMethod
+        - notes
+        - message
+        - candidates
+      properties:
+        scope:
+          type: string
+          enum: [library, project]
+        ownerId:
+          type: string
+          format: uuid
+        division:
+          type: string
+          pattern: '^\d{2}$'
+        expectedSection:
+          type: string
+          description: Exact section number that would be assigned automatically, e.g. "27 00 00"
+        status:
+          type: string
+          enum: [resolved, missing, not_applicable]
+        generalSpec:
+          oneOf:
+            - $ref: '#/components/schemas/DivisionGeneralSpecRef'
+            - type: 'null'
+        detectionMethod:
+          type: [string, 'null']
+          enum: [exact_section, manual, null]
+        notes:
+          type: [string, 'null']
+        message:
+          type: string
+        candidates:
+          type: array
+          description: Advisory only; never treated as inherited until manually selected
+          items:
+            $ref: '#/components/schemas/DivisionGeneralCandidate'
+
+    SetDivisionGeneralSpecBody:
+      type: object
+      description: 'Provide exactly one of `generalSpecId` or `status: not_applicable`.'
+      properties:
+        generalSpecId:
+          type: string
+          format: uuid
+          description: Same-scope spec in the requested division to use as the general spec
+        status:
+          type: string
+          enum: [not_applicable]
+          description: Records that no in-scope general requirements spec is issued here
+        notes:
+          type: string
+          minLength: 1
+
     # ── Projects ───────────────────────────────────────────────────────────────
 
     ProjectSummary:
@@ -1462,7 +1702,8 @@ components:
 
     BrokenRef:
       type: object
-      required: [refId, sourceSpecId, sourceSpecSection, targetSpecSection, referenceText, availableFrom]
+      required:
+        [refId, sourceSpecId, sourceSpecSection, targetSpecSection, referenceText, availableFrom]
       properties:
         refId:
           type: string

@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { insertTree } from './paragraphs.js';
 import { insertRefs } from './refs.js';
 import { resolveDefaultLibraryId } from './libraries.js';
+import { reconcileLibraryDivisionGeneralSpec } from './division-general.js';
 
 interface SpecRow {
   readonly id: string;
@@ -235,6 +236,7 @@ export async function persistParsedSpec(result: {
     if (result.refs.length > 0) {
       await insertRefs(result.refs, specId, client);
     }
+    await reconcileLibraryDivisionGeneralSpec(libraryId, result.tree.section, client);
     await client.query('COMMIT');
     return specId;
   } catch (err) {

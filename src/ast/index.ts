@@ -18,6 +18,7 @@ export {
   PatchSpecBodySchema,
   CreateProjectBodySchema,
   AddSectionToProjectBodySchema,
+  SetDivisionGeneralSpecBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
   CreateRevisionBodySchema,
@@ -25,6 +26,7 @@ export {
 export type {
   CreateProjectBody,
   AddSectionToProjectBody,
+  SetDivisionGeneralSpecBody,
   CreatePackageBody,
   SetPackageSpecsBody,
   CreateRevisionBody,
