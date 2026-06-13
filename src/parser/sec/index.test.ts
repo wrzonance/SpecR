@@ -91,6 +91,11 @@ function countNodes(nodes: readonly SpecNode[]): number {
   return total;
 }
 
+function childNamed(parent: SpecNode | undefined, text: string): SpecNode | undefined {
+  if (parent === undefined) return undefined;
+  return parent.children.find((child) => child.text === text);
+}
+
 describe('parseSec — section and title', () => {
   it('extracts section number from SCN', () => {
     const { tree } = parseSec(MINIMAL);
@@ -232,6 +237,9 @@ describe('parseSec — SPT content nodes', () => {
   <PRT><TTL>PART 2 PRODUCTS</TTL>
     <SPT><TTL>HEADEND EQUIPMENT</TTL>
       <SPT><TTL>Headend Amplifiers</TTL>
+        <LST>Amplifier chassis</LST>
+        <ITM>Gain control</ITM>
+        <OLG><OLI>Factory test report</OLI></OLG>
         <SPT><TTL>Gain Controls</TTL></SPT>
       </SPT>
     </SPT>
@@ -239,12 +247,43 @@ describe('parseSec — SPT content nodes', () => {
 </SEC>`;
     const { tree } = parseSec(xml);
     const article = tree.parts[0]?.children[0];
-    const pr1 = article?.children.find((c) => c.text === 'Headend Amplifiers');
-    const pr2 = pr1?.children.find((c) => c.text === 'Gain Controls');
+    const pr1 = childNamed(article, 'Headend Amplifiers');
+    const pr2 = childNamed(pr1, 'Gain Controls');
+    const lst = childNamed(pr1, 'Amplifier chassis');
+    const itm = childNamed(pr1, 'Gain control');
+    const oli = childNamed(pr1, 'Factory test report');
 
     expect(article?.type).toBe('article');
     expect(pr1?.type).toBe('pr1');
     expect(pr2?.type).toBe('pr2');
+    expect(lst?.type).toBe('pr2');
+    expect(itm?.type).toBe('pr3');
+    expect(oli?.type).toBe('pr2');
+  });
+
+  it('regression: nested standard ref keeps the nested SPT as source node', () => {
+    const xml = `<?xml version="1.0"?>
+<SEC>
+  <SCN>SECTION 27 05 13.43</SCN>
+  <STL>TELEVISION DISTRIBUTION SYSTEM</STL>
+  <PRT><TTL>PART 2 PRODUCTS</TTL>
+    <SPT><TTL>HEADEND EQUIPMENT</TTL>
+      <SPT><TTL>Headend Amplifiers</TTL>
+        <REF>
+          <RID>ASTM D709</RID>
+          <RTL>Laminated Thermosetting Materials</RTL>
+        </REF>
+      </SPT>
+    </SPT>
+  </PRT>
+</SEC>`;
+    const { tree, refs } = parseSec(xml);
+    const article = tree.parts[0]?.children[0];
+    const pr1 = childNamed(article, 'Headend Amplifiers');
+    const standardRef = refs.find((r) => r.targetType === 'standard');
+
+    expect(pr1?.type).toBe('pr1');
+    expect(standardRef?.sourceNodeId).toBe(pr1?.id);
   });
 });
 

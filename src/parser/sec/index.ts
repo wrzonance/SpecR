@@ -123,9 +123,9 @@ function walkTextItems(
   }
 }
 
-function walkOlg(spt: SptNode, children: SpecNode[], refs: SecRef[]): void {
+function walkOlg(spt: SptNode, type: NodeType, children: SpecNode[], refs: SecRef[]): void {
   if (!spt.OLG) return;
-  walkTextItems(toArray(spt.OLG.OLI), 'pr1', children, refs);
+  walkTextItems(toArray(spt.OLG.OLI), type, children, refs);
 }
 
 function buildStandardRef(sourceNodeId: string, code: string, rtl: string): SecRef {
@@ -168,9 +168,9 @@ function walkSpt(spt: SptNode, refs: SecRef[], depth: number): SpecNode {
     children.push(...walkNte(nte));
   }
   walkTextItems(toArray(spt.TXT), 'continuation', children, refs);
-  walkTextItems(toArray(spt.LST), 'pr1', children, refs);
-  walkTextItems(toArray(spt.ITM), 'pr2', children, refs);
-  walkOlg(spt, children, refs);
+  walkTextItems(toArray(spt.LST), sptNodeType(depth + 1), children, refs);
+  walkTextItems(toArray(spt.ITM), sptNodeType(depth + 2), children, refs);
+  walkOlg(spt, sptNodeType(depth + 1), children, refs);
   for (const nested of toArray(spt.SPT)) {
     children.push(walkSpt(nested, refs, depth + 1));
   }
