@@ -5,6 +5,17 @@ import type { MigrationBuilder } from 'node-pg-migrate';
 // one confirmed division root per library/project scope when it is explicit.
 
 export const up = (pgm: MigrationBuilder): void => {
+  createDivisionGeneralSpecsTable(pgm);
+  addDivisionGeneralSpecsConstraints(pgm);
+  addDivisionGeneralSpecsIndexes(pgm);
+  backfillDivisionGeneralSpecs(pgm);
+};
+
+export const down = (pgm: MigrationBuilder): void => {
+  pgm.dropTable('division_general_specs');
+};
+
+const createDivisionGeneralSpecsTable = (pgm: MigrationBuilder): void => {
   pgm.createTable('division_general_specs', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
     library_id: { type: 'uuid', references: 'libraries', onDelete: 'CASCADE' },
@@ -17,7 +28,9 @@ export const up = (pgm: MigrationBuilder): void => {
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
+};
 
+const addDivisionGeneralSpecsConstraints = (pgm: MigrationBuilder): void => {
   pgm.addConstraint('division_general_specs', 'division_general_specs_owner_xor', {
     check: '(library_id IS NULL) <> (project_id IS NULL)',
   });
@@ -35,7 +48,9 @@ export const up = (pgm: MigrationBuilder): void => {
       "(status = 'resolved' AND general_spec_id IS NOT NULL) OR " +
       "(status = 'not_applicable' AND general_spec_id IS NULL)",
   });
+};
 
+const addDivisionGeneralSpecsIndexes = (pgm: MigrationBuilder): void => {
   pgm.createIndex('division_general_specs', ['library_id', 'division'], {
     name: 'division_general_specs_library_division_unique',
     unique: true,
@@ -49,7 +64,9 @@ export const up = (pgm: MigrationBuilder): void => {
   pgm.createIndex('division_general_specs', 'general_spec_id', {
     name: 'division_general_specs_general_spec_idx',
   });
+};
 
+const backfillDivisionGeneralSpecs = (pgm: MigrationBuilder): void => {
   pgm.sql(`
     INSERT INTO division_general_specs
       (library_id, division, general_spec_id, status, detection_method)
@@ -77,8 +94,4 @@ export const up = (pgm: MigrationBuilder): void => {
       ORDER BY project_id, substring(section FROM 1 FOR 2), created_at, id
     ) exact_project
   `);
-};
-
-export const down = (pgm: MigrationBuilder): void => {
-  pgm.dropTable('division_general_specs');
 };
