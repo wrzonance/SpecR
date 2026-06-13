@@ -89,6 +89,44 @@ const SYNTHETIC_TREE: SpecTree = {
   ],
 };
 
+const REF_TREE: SpecTree = {
+  id: '00000000-0000-0000-0000-000000000100',
+  section: '09 91 00',
+  title: 'Painting',
+  parts: [
+    {
+      id: '00000000-0000-0000-0000-000000000101',
+      type: 'part',
+      text: 'GENERAL',
+      meta: {},
+      children: [
+        {
+          id: '00000000-0000-0000-0000-000000000102',
+          type: 'article',
+          text: 'RELATED REQUIREMENTS',
+          meta: {},
+          children: [
+            {
+              id: '00000000-0000-0000-0000-000000000103',
+              type: 'pr1',
+              text: 'See Section 26 00 13.10 and Section 099100.',
+              meta: {},
+              children: [],
+            },
+            {
+              id: '00000000-0000-0000-0000-000000000104',
+              type: 'pr1',
+              text: 'Manufacturer Part No. 099100; ASME 123456.',
+              meta: {},
+              children: [],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 async function getDocXml(buffer: Buffer): Promise<string> {
   const zip = await JSZip.loadAsync(buffer);
   const file = zip.file('word/document.xml');
@@ -122,6 +160,7 @@ describe('generateDocx', () => {
   it('document.xml contains title paragraph', async () => {
     const buffer = await generateDocx(SYNTHETIC_TREE);
     const xml = await getDocXml(buffer);
+    expect(xml).toContain('SECTION 27 21 00');
     expect(xml).toContain('27 21 00');
     expect(xml).toContain('Structured Cabling');
   });
@@ -168,6 +207,26 @@ describe('generateDocx', () => {
     const buffer = await generateDocx(suffixedTree);
     const xml = await getDocXml(buffer);
     expect(xml).toContain('01 32 01.00 10');
+  });
+
+  it('generateDocx: dotted sectionNumberFormat applies to title and confident refs', async () => {
+    const buffer = await generateDocx(REF_TREE, undefined, { sectionNumberFormat: 'dots' });
+    const xml = await getDocXml(buffer);
+    expect(xml).toContain('SECTION 09.91.00');
+    expect(xml).toContain('See Section 26.00.13.10 and Section 09.91.00.');
+  });
+
+  it('generateDocx: compact sectionNumberFormat applies to title and confident refs', async () => {
+    const buffer = await generateDocx(REF_TREE, undefined, { sectionNumberFormat: 'compact' });
+    const xml = await getDocXml(buffer);
+    expect(xml).toContain('SECTION 099100');
+    expect(xml).toContain('See Section 260013.10 and Section 099100.');
+  });
+
+  it('generateDocx: output policy does not rewrite product or standards contexts', async () => {
+    const buffer = await generateDocx(REF_TREE, undefined, { sectionNumberFormat: 'dots' });
+    const xml = await getDocXml(buffer);
+    expect(xml).toContain('Manufacturer Part No. 099100; ASME 123456.');
   });
 });
 

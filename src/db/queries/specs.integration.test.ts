@@ -147,6 +147,30 @@ describe('migration 013 — section shape CHECK constraints', () => {
     ).rejects.toThrow(/specs_section_shape_check/);
   });
 
+  it.each(['998877', '99.88.77', '99 8877'])(
+    'db: specs.section CHECK rejects display variant %s',
+    async (section) => {
+      await expect(
+        pool.query(
+          `INSERT INTO specs (section, title, source, library_id) VALUES ($1, 'Bad', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master'))`,
+          [section]
+        )
+      ).rejects.toThrow(/specs_section_shape_check/);
+    }
+  );
+
+  it.each(['998877', '99.88.77', '99 8877'])(
+    'db: spec_sections.section_number CHECK rejects display variant %s',
+    async (section) => {
+      await expect(
+        pool.query(
+          `INSERT INTO spec_sections (section_number, title, division) VALUES ($1, 'Bad', '99')`,
+          [section]
+        )
+      ).rejects.toThrow(/spec_sections_section_number_shape_check/);
+    }
+  );
+
   it('db: spec_sections shape CHECK rejects the sentinel (catalog is canonical-only)', async () => {
     await expect(
       pool.query(

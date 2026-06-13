@@ -1,5 +1,9 @@
 import type { SpecTree, SpecNode } from '../ast/types.js';
-import { normalizeSectionNumber, sectionNumberFragment } from './section-number.js';
+import {
+  parseSectionNumberCandidate,
+  sectionNumberCandidateFragment,
+  sectionNumberFragment,
+} from './section-number.js';
 
 export interface SectionInference {
   readonly method: 'metadata' | 'content-high' | 'content-medium' | 'none';
@@ -11,9 +15,9 @@ export interface SectionInference {
   readonly titleMatch: 'exact' | 'close' | 'divergent' | 'unknown';
 }
 
-const KEYWORD_RE = new RegExp(String.raw`\bSECTION\s+${sectionNumberFragment()}`, 'i');
+const KEYWORD_RE = new RegExp(String.raw`\bSECTION\s+${sectionNumberCandidateFragment()}`, 'i');
 const INLINE_TITLE_RE = new RegExp(
-  String.raw`\bSECTION\s+${sectionNumberFragment()}(?:\s*[-–—]\s*|\s+)(\S.*)`,
+  String.raw`\bSECTION\s+${sectionNumberCandidateFragment()}(?:\s*[-–—]\s*|\s+)(\S.*)`,
   'i'
 );
 const BARE_NUM_RE = new RegExp(`^${sectionNumberFragment()}$`);
@@ -105,12 +109,12 @@ const NONE_RESULT: SectionInference = {
 function scanKeyword(nodes: readonly SpecNode[]): SectionInference | null {
   for (let i = 0; i < nodes.length; i++) {
     const m = KEYWORD_RE.exec(nodes[i]?.text ?? '');
-    const section = m === null ? null : normalizeSectionNumber(m[1] ?? '');
-    if (section !== null) {
+    const parsed = m === null ? null : parseSectionNumberCandidate(m[1] ?? '', 'strong');
+    if (parsed?.ok === true) {
       return {
         method: 'content-high',
         confidence: 'high',
-        inferredSection: section,
+        inferredSection: parsed.canonical,
         inferredTitle: findTitle(nodes, i),
         titleMatch: 'unknown',
       };
@@ -122,12 +126,12 @@ function scanKeyword(nodes: readonly SpecNode[]): SectionInference | null {
 function scanBareNumber(nodes: readonly SpecNode[]): SectionInference | null {
   for (let i = 0; i < nodes.length; i++) {
     const m = BARE_NUM_RE.exec((nodes[i]?.text ?? '').trim());
-    const section = m === null ? null : normalizeSectionNumber(m[1] ?? '');
-    if (section !== null) {
+    const parsed = m === null ? null : parseSectionNumberCandidate(m[1] ?? '', 'canonical');
+    if (parsed?.ok === true) {
       return {
         method: 'content-medium',
         confidence: 'medium',
-        inferredSection: section,
+        inferredSection: parsed.canonical,
         inferredTitle: findTitle(nodes, i),
         titleMatch: 'unknown',
       };

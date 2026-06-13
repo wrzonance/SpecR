@@ -164,4 +164,31 @@ describe('extractRefsFromTree', () => {
     const refs = extractRefsFromTree(tree);
     expect(refs.find((r) => r.targetType === 'section')?.targetSpecSection).toBe('26 00 13.10');
   });
+
+  it.each([
+    ['See Section 099100 for painting.', '09 91 00'],
+    ['See Section 09.91.00 for painting.', '09 91 00'],
+    ['See Section 09 9100 for painting.', '09 91 00'],
+    ['See Section 013201.00 10 for quality.', '01 32 01.00 10'],
+    ['See Section 01.32.01.00 10 for quality.', '01 32 01.00 10'],
+  ])('refs: strong Section context normalizes display variant %s', (text, expected) => {
+    const refs = extractRefsFromTree(makeTreeWithText(text));
+    expect(refs.find((r) => r.targetType === 'section')?.targetSpecSection).toBe(expected);
+  });
+
+  it.each(['ASME 123456', 'ASTM 123456', 'NFPA 70', 'UL 723'])(
+    'refs: standards context does not become a section ref: %s',
+    (text) => {
+      const refs = extractRefsFromTree(makeTreeWithText(text));
+      expect(refs.some((r) => r.targetType === 'section')).toBe(false);
+    }
+  );
+
+  it.each(['Manufacturer Part No. 099100', 'Model 099100', 'Catalog 099100', 'Product ID 099100'])(
+    'refs: product context does not become a section ref: %s',
+    (text) => {
+      const refs = extractRefsFromTree(makeTreeWithText(text));
+      expect(refs).toHaveLength(0);
+    }
+  );
 });

@@ -97,6 +97,18 @@ describe('parseSec — section and title', () => {
     expect(tree.section).toBe('27 10 00');
   });
 
+  it.each([
+    ['SECTION 099100', '09 91 00'],
+    ['SECTION 09.91.00', '09 91 00'],
+    ['SECTION 09 9100', '09 91 00'],
+    ['SECTION 013201.00 10', '01 32 01.00 10'],
+    ['SECTION 01.32.01.00 10', '01 32 01.00 10'],
+  ])('normalizes SCN display variant %s before AST validation', (scn, expected) => {
+    const xml = `<?xml version="1.0"?><SEC><SCN>${scn}</SCN><STL>TEST</STL></SEC>`;
+    const { tree } = parseSec(xml);
+    expect(tree.section).toBe(expected);
+  });
+
   it('extracts title from STL', () => {
     const { tree } = parseSec(MINIMAL);
     expect(tree.title).toBe('BUILDING TELECOMMUNICATIONS CABLING SYSTEM');
@@ -228,6 +240,25 @@ describe('parseSec — text extraction from mixed content', () => {
     const pr1 = tree.parts[0]?.children[0]?.children.find((c) => c.type === 'pr1');
     expect(pr1?.text).toContain('TELEVISION DISTRIBUTION SYSTEM');
     expect(pr1?.text).not.toContain('<SRF>');
+  });
+});
+
+describe('parseSec — SRF normalization', () => {
+  it.each([
+    ['099100', '09 91 00'],
+    ['09.91.00', '09 91 00'],
+    ['01.32.01.00 10', '01 32 01.00 10'],
+  ])('normalizes SRF display variant %s before ref resolution', (srf, expected) => {
+    const xml = `<?xml version="1.0"?>
+<SEC>
+  <SCN>SECTION 27 41 00</SCN>
+  <STL>AUDIO-VISUAL SYSTEMS</STL>
+  <PRT><TTL>PART 1 GENERAL</TTL><SPT><TTL>RELATED</TTL>
+    <TXT>Section <SRF>${srf}</SRF> applies.</TXT>
+  </SPT></PRT>
+</SEC>`;
+    const { refs } = parseSec(xml);
+    expect(refs.find((r) => r.targetType === 'section')?.targetSpecSection).toBe(expected);
   });
 });
 
