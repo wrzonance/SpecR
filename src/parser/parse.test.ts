@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('./sec/index.js', () => ({
   parseSec: vi.fn(),
-  assertSecSafe: vi.fn(),
+  assertSecSafe: vi.fn((buf: Buffer) =>
+    buf.toString('utf-8').replaceAll(String.fromCharCode(0x13), '')
+  ),
 }));
 vi.mock('./docx/index.js', () => ({
   parseDocx: vi.fn(),
@@ -13,9 +15,8 @@ vi.mock('../lib/decode-text.js', () => ({
 }));
 
 import { parse } from './index.js';
-import { parseSec } from './sec/index.js';
+import { assertSecSafe, parseSec } from './sec/index.js';
 import { parseDocx } from './docx/index.js';
-import { decodeTextBuffer } from '../lib/decode-text.js';
 import { ParserError } from './error.js';
 import type { SpecTree } from '../ast/types.js';
 
@@ -24,16 +25,22 @@ const mockTree: SpecTree = { id: 'spec-1', section: '27 10 00', title: 'Test', p
 beforeEach(() => vi.clearAllMocks());
 
 describe('parse() dispatcher', () => {
-  it('dispatches .sec to parseSec via decodeTextBuffer', async () => {
+  it('dispatches .sec to parseSec via assertSecSafe', async () => {
     vi.mocked(parseSec).mockReturnValue({ tree: mockTree, refs: [] });
     const buf = Buffer.from('<SEC/>');
     const result = await parse(buf, 'spec.SEC');
-    expect(decodeTextBuffer).toHaveBeenCalledWith(buf);
-    expect(parseSec).toHaveBeenCalled();
+    expect(assertSecSafe).toHaveBeenCalledWith(buf);
+    expect(parseSec).toHaveBeenCalledWith('<SEC/>');
     expect(result.tree).toBe(mockTree);
     expect(result.refs).toEqual([]);
     expect(result.sectionInference.method).toBe('metadata');
     expect(result.sectionInference.inferredSection).toBe('27 10 00');
+  });
+
+  it('regression: sanitizes dirty .sec buffers before parsing', async () => {
+    vi.mocked(parseSec).mockReturnValue({ tree: mockTree, refs: [] });
+    await parse(Buffer.from('<SEC>\x13</SEC>', 'utf-8'), 'spec.sec');
+    expect(parseSec).toHaveBeenCalledWith('<SEC></SEC>');
   });
 
   it('dispatches .docx to parseDocx', async () => {

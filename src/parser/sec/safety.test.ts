@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { assertSecSafe } from './safety.js';
+
+const PROJECT_ROOT = resolve(import.meta.dirname, '../../..');
 
 describe('assertSecSafe', () => {
   it('accepts windows-1252 bytes that fail strict UTF-8 validation', () => {
@@ -30,9 +34,27 @@ describe('assertSecSafe', () => {
     expect(() => assertSecSafe(buf)).toThrow('null byte');
   });
 
-  it('rejects buffer containing ASCII control characters', () => {
+  it('strips XML-unsafe ASCII control characters', () => {
     const buf = Buffer.from('<?xml version="1.0"?>\x07<SEC/>', 'utf-8');
-    expect(() => assertSecSafe(buf)).toThrow('control character');
+    expect(assertSecSafe(buf)).toBe('<?xml version="1.0"?><SEC/>');
+  });
+
+  it('regression: strips legacy DC3 controls from dirty SEC text', () => {
+    const buf = Buffer.from('<SEC><TXT>Dental Surgical Vacuum\x13</TXT></SEC>', 'utf-8');
+    expect(assertSecSafe(buf)).toBe('<SEC><TXT>Dental Surgical Vacuum</TXT></SEC>');
+  });
+
+  it('regression: reported UFGS files with DC3 controls are upload-safe', () => {
+    const filenames = [
+      'docs/references/UFGS/DIVISION_22/22_60_70.SEC',
+      'docs/references/UFGS/DIVISION_35/35_05_40.14_10.SEC',
+    ];
+
+    for (const filename of filenames) {
+      const sanitized = assertSecSafe(readFileSync(resolve(PROJECT_ROOT, filename)));
+      expect(sanitized).not.toContain('\x13');
+      expect(sanitized).toContain('<SCN>');
+    }
   });
 
   it('rejects buffer with a line exceeding 65536 characters', () => {

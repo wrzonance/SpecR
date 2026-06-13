@@ -112,9 +112,18 @@ describe('parseSec — section and title', () => {
     expect(tree.parts).toHaveLength(0);
   });
 
-  it('throws ParserError when SCN missing', () => {
-    const bad = `<?xml version="1.0"?><SEC><STL>Title</STL></SEC>`;
-    expect(() => parseSec(bad)).toThrow(ParserError);
+  it('regression: missing SCN yields unknown section for inference recovery', () => {
+    const xml = `<?xml version="1.0"?>
+<SEC>
+  <STL>Fallback Title</STL>
+  <PRT>
+    <TTL>PART 1 GENERAL</TTL>
+    <SPT><TTL>SECTION 26 09 33</TTL></SPT>
+  </PRT>
+</SEC>`;
+    const { tree } = parseSec(xml);
+    expect(tree.section).toBe('unknown');
+    expect(tree.title).toBe('Fallback Title');
   });
 
   it('throws ParserError when STL missing', () => {
@@ -335,6 +344,12 @@ describe('parseSec — SCN/SRF whitespace canonicalization', () => {
     const xml = `<?xml version="1.0"?><SEC><SCN>SECTION 26  00 13.10</SCN><STL>PANELBOARDS</STL></SEC>`;
     const { tree } = parseSec(xml);
     expect(tree.section).toBe('26 00 13.10');
+  });
+
+  it('regression: SCN decodes entity whitespace before stripping SECTION prefix', () => {
+    const xml = `<?xml version="1.0"?><SEC><SCN>SECTION&#160;26 09 33</SCN><STL>MOTOR CONTROLLERS</STL></SEC>`;
+    const { tree } = parseSec(xml);
+    expect(tree.section).toBe('26 09 33');
   });
 
   it('sec parser: SRF target normalizes NBSP separators to canonical form', () => {
