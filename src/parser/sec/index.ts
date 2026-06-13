@@ -194,11 +194,9 @@ export function parseSec(xml: string): ParsedSec {
   // never rejected here — exact-match linkage simply won't find
   // non-conforming sections (validation gates arrive with the API schema +
   // DB CHECK constraint work).
-  const scnRaw = decodeXmlEntities(
-    optionalString(sec['SCN'])
-      ?.replace(/^SECTION\s+/i, '')
-      .trim() ?? ''
-  );
+  const scnRaw = decodeXmlEntities(optionalString(sec['SCN']) ?? '')
+    .replace(/^SECTION\s+/i, '')
+    .trim();
   const section = scnRaw.length > 0 ? (normalizeSectionNumber(scnRaw) ?? scnRaw) : 'unknown';
   const title = decodeXmlEntities(requireString(sec['STL'], 'STL'));
 

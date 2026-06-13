@@ -346,6 +346,12 @@ describe('parseSec — SCN/SRF whitespace canonicalization', () => {
     expect(tree.section).toBe('26 00 13.10');
   });
 
+  it('regression: SCN decodes entity whitespace before stripping SECTION prefix', () => {
+    const xml = `<?xml version="1.0"?><SEC><SCN>SECTION&#160;26 09 33</SCN><STL>MOTOR CONTROLLERS</STL></SEC>`;
+    const { tree } = parseSec(xml);
+    expect(tree.section).toBe('26 09 33');
+  });
+
   it('sec parser: SRF target normalizes NBSP separators to canonical form', () => {
     // NBSP (U+00A0) separators -- written as escape sequences to avoid no-irregular-whitespace
     const nbsp = '\u00a0';
