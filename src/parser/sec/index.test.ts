@@ -112,9 +112,18 @@ describe('parseSec — section and title', () => {
     expect(tree.parts).toHaveLength(0);
   });
 
-  it('throws ParserError when SCN missing', () => {
-    const bad = `<?xml version="1.0"?><SEC><STL>Title</STL></SEC>`;
-    expect(() => parseSec(bad)).toThrow(ParserError);
+  it('regression: missing SCN yields unknown section for inference recovery', () => {
+    const xml = `<?xml version="1.0"?>
+<SEC>
+  <STL>Fallback Title</STL>
+  <PRT>
+    <TTL>PART 1 GENERAL</TTL>
+    <SPT><TTL>SECTION 26 09 33</TTL></SPT>
+  </PRT>
+</SEC>`;
+    const { tree } = parseSec(xml);
+    expect(tree.section).toBe('unknown');
+    expect(tree.title).toBe('Fallback Title');
   });
 
   it('throws ParserError when STL missing', () => {
