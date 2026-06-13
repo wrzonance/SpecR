@@ -9,6 +9,7 @@ import {
   removeSectionFromProjectHandler,
   getBrokenRefsHandler,
 } from './projects.js';
+import { getInboundReferencesHandler, getOutboundReferencesHandler } from './references.js';
 import {
   getLibraryDivisionGeneralSpecHandler,
   setLibraryDivisionGeneralSpecHandler,
@@ -89,6 +90,8 @@ router.post(
 );
 router.delete('/projects/:id/specs/:specId', removeSectionFromProjectHandler);
 router.get('/projects/:id/references/broken', getBrokenRefsHandler);
+router.get('/projects/:id/references/inbound', getInboundReferencesHandler);
+router.get('/projects/:id/specs/:specId/references', getOutboundReferencesHandler);
 router.post('/projects/:id/packages', validateBody(CreatePackageBodySchema), createPackageHandler);
 router.get('/projects/:id/packages', listPackagesHandler);
 router.put('/packages/:id/specs', validateBody(SetPackageSpecsBodySchema), setPackageSpecsHandler);

@@ -40,15 +40,24 @@ export type {
 } from './queries/specs.js';
 export { insertTree, getParagraphWithAncestors } from './queries/paragraphs.js';
 export type { ParagraphRow, ParagraphWithAncestors } from './queries/paragraphs.js';
-export { insertRefs } from './queries/refs.js';
+export {
+  insertRefs,
+  getInboundReferences,
+  getOutboundReferences,
+  findProjectSpecIdsBySection,
+  isSpecInProject,
+} from './queries/refs.js';
+export type { InboundReference, OutboundReference } from './queries/refs.js';
 export {
   createProject,
   findProjectById,
+  listProjects,
   getBrokenRefs,
   InvalidSourceLibraryError,
 } from './queries/projects.js';
 export type {
   ProjectSummary,
+  ProjectListItem,
   ProjectWithToc,
   ProjectTocEntry,
   ProjectSource,

@@ -622,6 +622,51 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /projects/{id}/specs/{specId}/references:
+    get:
+      operationId: getOutboundReferences
+      summary: List cross-references emitted by a project spec
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: specId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Project-scoped outbound reference list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId, specId, references]
+                        properties:
+                          projectId:
+                            type: string
+                            format: uuid
+                          specId:
+                            type: string
+                            format: uuid
+                          references:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/OutboundReference'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /projects/{id}/references/broken:
     get:
       operationId: getBrokenRefs
@@ -644,6 +689,50 @@ paths:
                         type: array
                         items:
                           $ref: '#/components/schemas/BrokenRef'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/references/inbound:
+    get:
+      operationId: getInboundReferences
+      summary: List project specs that reference a section
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: section
+          in: query
+          required: true
+          schema:
+            type: string
+          description: CSI section number, URL-encoded when it contains spaces
+      responses:
+        '200':
+          description: Project-scoped inbound reference list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId, section, references]
+                        properties:
+                          projectId:
+                            type: string
+                            format: uuid
+                          section:
+                            type: string
+                          references:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/InboundReference'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -1743,6 +1832,57 @@ components:
                 format: uuid
               name:
                 type: string
+
+    OutboundReference:
+      type: object
+      required: [sourceSpecId, referenceText, targetSection, targetSpecId, isResolved, isBroken]
+      properties:
+        sourceSpecId:
+          type: string
+          format: uuid
+        referenceText:
+          type: string
+        targetSection:
+          type: [string, 'null']
+          description: Section number this reference points at, if the reference targets a section
+        targetSpecId:
+          type: [string, 'null']
+          format: uuid
+        isResolved:
+          type: boolean
+        isBroken:
+          type: boolean
+
+    InboundReference:
+      type: object
+      required:
+        [
+          sourceSpecId,
+          sourceSection,
+          sourceTitle,
+          sourceParagraphId,
+          referenceText,
+          isResolved,
+          isBroken,
+        ]
+      properties:
+        sourceSpecId:
+          type: string
+          format: uuid
+        sourceSection:
+          type: string
+          description: CSI section number of the spec containing the reference
+        sourceTitle:
+          type: string
+        sourceParagraphId:
+          type: string
+          format: uuid
+        referenceText:
+          type: string
+        isResolved:
+          type: boolean
+        isBroken:
+          type: boolean
 
     # ── Packages ───────────────────────────────────────────────────────────────
 
