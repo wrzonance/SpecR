@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { parseSec } from './index.js';
 import { ParserError } from '../error.js';
@@ -124,6 +126,16 @@ describe('parseSec — section and title', () => {
     const { tree } = parseSec(xml);
     expect(tree.section).toBe('unknown');
     expect(tree.title).toBe('Fallback Title');
+  });
+
+  it('regression: 11_72_13.SEC reads SCN/STL from HL3 heading wrapper', () => {
+    const xml = readFileSync(
+      resolve(process.cwd(), 'docs/references/UFGS/DIVISION_11/11_72_13.SEC'),
+      'latin1'
+    );
+    const { tree } = parseSec(xml);
+    expect(tree.section).toBe('11 72 13');
+    expect(tree.title).toBe('MEDICAL EQUIPMENT, MISCELLANEOUS');
   });
 
   it('throws ParserError when STL missing', () => {
