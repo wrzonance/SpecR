@@ -10,6 +10,7 @@ let server: Server;
 let baseUrl: string;
 let mcpSpecId: string;
 let parsedSpecId: string | null = null;
+let coordinationProjectId: string;
 
 async function mcpCall(
   url: string,
@@ -100,17 +101,62 @@ beforeAll(async () => {
     pool
   );
 
+  const project = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name) VALUES ('MCP coordination project') RETURNING id`
+  );
+  coordinationProjectId = project.rows[0]?.id ?? '';
+  await pool.query(`INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`, [
+    coordinationProjectId,
+    mcpSpecId,
+  ]);
+  await pool.query(
+    `INSERT INTO required_sections (project_id, section, title, position)
+     VALUES ($1, '09 91 00', 'Painting', 1)`,
+    [coordinationProjectId]
+  );
+
   // Store for tests
   (global as Record<string, unknown>)['mcpTestSection'] = testSection;
 });
 
 afterAll(async () => {
+  await pool.query('DELETE FROM projects WHERE id = $1', [coordinationProjectId]);
   if (parsedSpecId) {
     await pool.query('DELETE FROM specs WHERE id = $1', [parsedSpecId]);
   }
   await pool.query('DELETE FROM specs WHERE id = $1', [mcpSpecId]);
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err != null ? reject(err) : resolve()));
+  });
+});
+
+describe('tool: coordination_report', () => {
+  it('returns project coordination report JSON', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'coordination_report',
+      arguments: { projectId: coordinationProjectId },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const report = JSON.parse(content[0]!.text) as {
+      projectId: string;
+      summary: { total: number; presentNotRequired: number; requiredNotPresent: number };
+    };
+    expect(report.projectId).toBe(coordinationProjectId);
+    expect(report.summary.total).toBe(2);
+    expect(report.summary.presentNotRequired).toBe(1);
+    expect(report.summary.requiredNotPresent).toBe(1);
+  });
+
+  it('returns isError for unknown project', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'coordination_report',
+      arguments: { projectId: '00000000-0000-0000-0000-000000000000' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
   });
 });
 

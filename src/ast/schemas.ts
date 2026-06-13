@@ -137,6 +137,26 @@ export const SetPackageSpecsBodySchema = z.object({
 
 export type SetPackageSpecsBody = z.infer<typeof SetPackageSpecsBodySchema>;
 
+const RequiredSectionInputSchema = z.object({
+  section: SectionNumberSchema,
+  title: z.string().check(z.minLength(1)).exactOptional(),
+});
+
+export const SetRequiredSectionsBodySchema = z.object({
+  sections: z.array(RequiredSectionInputSchema).check((ctx) => {
+    const sectionValues = ctx.value.map((item) => item.section);
+    if (new Set(sectionValues).size !== sectionValues.length) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        message: 'sections must not contain duplicate section values',
+      });
+    }
+  }),
+});
+
+export type SetRequiredSectionsBody = z.infer<typeof SetRequiredSectionsBodySchema>;
+
 // Issuance label for an immutable package revision snapshot (ADR-015 D5):
 // '50% DD', '100% CD', 'Addendum 2'. Unique per package, enforced by the DB.
 export const CreateRevisionBodySchema = z.object({

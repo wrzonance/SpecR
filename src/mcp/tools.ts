@@ -14,6 +14,7 @@ import {
   handleParseDocument,
   handleGenerateDocx,
   handleGetSpecLineage,
+  handleCoordinationReport,
 } from './handlers.js';
 
 type ToolError = {
@@ -142,6 +143,21 @@ function registerGeneratorTools(server: McpServer): void {
   );
 }
 
+function registerCoordinationTools(server: McpServer): void {
+  server.registerTool(
+    'coordination_report',
+    {
+      description:
+        'Return project coordination findings: present-but-not-required sections, required-but-absent sections, and dangling section references. Pass packageId to scope both present specs and authored requirements to that package.',
+      inputSchema: {
+        projectId: z.uuid().describe('Project UUID'),
+        packageId: z.uuid().optional().describe('Optional design package UUID for package scope'),
+      },
+    },
+    handleCoordinationReport
+  );
+}
+
 async function guardPath(fp: string, projectRoot: string): Promise<ToolError | null> {
   try {
     const root = await realpath(projectRoot);
@@ -263,5 +279,6 @@ export function registerTools(server: McpServer): void {
   registerSpecTools(server);
   registerParserTools(server);
   registerGeneratorTools(server);
+  registerCoordinationTools(server);
   registerLoaderTools(server);
 }

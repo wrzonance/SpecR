@@ -56,6 +56,8 @@ export { insertRefs, deleteReference } from './queries/refs.js';
 export {
   createProject,
   findProjectById,
+  addSpecToProject,
+  removeSpecFromProject,
   getBrokenRefs,
   InvalidSourceLibraryError,
 } from './queries/projects.js';
@@ -66,6 +68,7 @@ export type {
   ProjectSource,
   BrokenRef,
   CreateProjectInput,
+  AddSpecResult,
 } from './queries/projects.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
 export { getParagraphSnapshots } from './queries/versions.js';
@@ -128,6 +131,20 @@ export {
   SpecNotInProjectError,
 } from './queries/packages.js';
 export type { PackageSummary, PackageWithSpecs, PackageSpecEntry } from './queries/packages.js';
+export {
+  setProjectRequiredSections,
+  setPackageRequiredSections,
+  listProjectRequiredSections,
+  listPackageRequiredSections,
+  getCoordinationReport,
+} from './queries/coordination.js';
+export type {
+  RequiredSectionInput,
+  RequiredSectionEntry,
+  CoordinationFinding,
+  CoordinationReportSummary,
+  CoordinationReport,
+} from './queries/coordination.js';
 export {
   createPackageRevision,
   getPackageRevision,

@@ -20,6 +20,7 @@ export {
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
+  SetRequiredSectionsBodySchema,
   CreateRevisionBodySchema,
   UpdateParagraphBodySchema,
 } from './schemas.js';
@@ -28,6 +29,7 @@ export type {
   AddSectionToProjectBody,
   CreatePackageBody,
   SetPackageSpecsBody,
+  SetRequiredSectionsBody,
   CreateRevisionBody,
   UpdateParagraphBody,
 } from './schemas.js';

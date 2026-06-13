@@ -24,6 +24,13 @@ import {
   setPackageSpecsHandler,
   deletePackageHandler,
 } from './packages.js';
+import {
+  getCoordinationReportHandler,
+  getPackageRequiredSectionsHandler,
+  getProjectRequiredSectionsHandler,
+  setPackageRequiredSectionsHandler,
+  setProjectRequiredSectionsHandler,
+} from './coordination.js';
 import { createRevisionHandler, getRevisionHandler } from './revisions.js';
 import { validateBody } from './middleware/validate.js';
 import {
@@ -32,6 +39,7 @@ import {
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
+  SetRequiredSectionsBodySchema,
   CreateRevisionBodySchema,
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
@@ -78,6 +86,13 @@ router.delete('/specs/:id/references/:refId', deleteReferenceHandler);
 router.post('/specs/:id/generate', generateHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects/:id', getProjectHandler);
+router.get('/projects/:id/coordination-report', getCoordinationReportHandler);
+router.get('/projects/:id/required-sections', getProjectRequiredSectionsHandler);
+router.put(
+  '/projects/:id/required-sections',
+  validateBody(SetRequiredSectionsBodySchema),
+  setProjectRequiredSectionsHandler
+);
 router.post(
   '/projects/:id/specs',
   validateBody(AddSectionToProjectBodySchema),
@@ -88,6 +103,12 @@ router.get('/projects/:id/references/broken', getBrokenRefsHandler);
 router.post('/projects/:id/packages', validateBody(CreatePackageBodySchema), createPackageHandler);
 router.get('/projects/:id/packages', listPackagesHandler);
 router.put('/packages/:id/specs', validateBody(SetPackageSpecsBodySchema), setPackageSpecsHandler);
+router.get('/packages/:id/required-sections', getPackageRequiredSectionsHandler);
+router.put(
+  '/packages/:id/required-sections',
+  validateBody(SetRequiredSectionsBodySchema),
+  setPackageRequiredSectionsHandler
+);
 router.delete('/packages/:id', deletePackageHandler);
 router.post(
   '/packages/:id/revisions',
