@@ -132,6 +132,32 @@ describe('findProjectById', () => {
   });
 });
 
+describe('listProjects', () => {
+  it('returns project ids and names', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [
+        { id: 'project-a', name: 'Alpha' },
+        { id: 'project-b', name: 'Beta' },
+      ],
+      rowCount: 2,
+    } as never);
+    const { listProjects } = await import('./projects.js');
+    await expect(listProjects(pool)).resolves.toEqual([
+      { id: 'project-a', name: 'Alpha' },
+      { id: 'project-b', name: 'Beta' },
+    ]);
+    expect(vi.mocked(pool.query).mock.calls[0]?.[0]).toContain('ORDER BY name, id');
+  });
+
+  it('throws DatabaseError on list failure', async () => {
+    const { DatabaseError, pool } = await import('../index.js');
+    vi.mocked(pool.query).mockRejectedValueOnce(new Error('db down'));
+    const { listProjects } = await import('./projects.js');
+    await expect(listProjects(pool)).rejects.toBeInstanceOf(DatabaseError);
+  });
+});
+
 describe('getBrokenRefs', () => {
   it('returns empty array when no broken refs', async () => {
     const { pool } = await import('../index.js');

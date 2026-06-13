@@ -1,6 +1,6 @@
 // src/mcp/server.integration.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import express from 'express';
 import type { Server } from 'http';
 import { pool, createSpec, insertTree } from '../db/index.js';
@@ -9,6 +9,10 @@ import { registerMcpRoutes } from './server.js';
 let server: Server;
 let baseUrl: string;
 let mcpSpecId: string;
+let mcpProjectId: string;
+let mcpProjectName: string;
+let mcpTargetSpecId: string;
+let mcpTargetSection: string;
 let parsedSpecId: string | null = null;
 
 async function mcpCall(
@@ -100,11 +104,40 @@ beforeAll(async () => {
     pool
   );
 
+  const refSuffix = randomUUID().slice(0, 8);
+  mcpTargetSection = '09 91 00';
+  mcpTargetSpecId = await createSpec({
+    section: mcpTargetSection,
+    title: 'MCP Reference Target',
+    source: `mcp162_${refSuffix}`,
+  });
+  const project = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+    [`MCP Reference Project ${refSuffix}`]
+  );
+  const projectId = project.rows[0]?.id;
+  if (projectId === undefined) throw new Error('failed to insert MCP reference project');
+  mcpProjectId = projectId;
+  mcpProjectName = `MCP Reference Project ${refSuffix}`;
+  await pool.query(
+    `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1), ($1, $3, 2)`,
+    [mcpProjectId, mcpSpecId, mcpTargetSpecId]
+  );
+  await pool.query(
+    `INSERT INTO spec_references
+       (source_spec_id, source_paragraph_id, target_type, target_spec_section,
+        target_spec_id, reference_text)
+     VALUES ($1, '30000000-0000-4000-8000-000000000003', 'section', $2, $3, $4)`,
+    [mcpSpecId, mcpTargetSection, mcpTargetSpecId, 'MCP source cites painting']
+  );
+
   // Store for tests
   (global as Record<string, unknown>)['mcpTestSection'] = testSection;
 });
 
 afterAll(async () => {
+  await pool.query('DELETE FROM projects WHERE id = $1', [mcpProjectId]);
+  await pool.query('DELETE FROM specs WHERE id = $1', [mcpTargetSpecId]);
   if (parsedSpecId) {
     await pool.query('DELETE FROM specs WHERE id = $1', [parsedSpecId]);
   }
@@ -196,6 +229,79 @@ describe('tool: list_sections', () => {
     const loaded = sections.find((s) => s.section === testSection);
     expect(loaded).toBeDefined();
     expect(loaded!.inDatabase).toBe(true);
+  });
+});
+
+describe('tool: list_projects', () => {
+  it('returns project ids and names', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'list_projects',
+      arguments: {},
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const projects = JSON.parse(content[0]!.text) as { id: string; name: string }[];
+    expect(projects).toEqual(expect.arrayContaining([{ id: mcpProjectId, name: mcpProjectName }]));
+  });
+});
+
+describe('tool: get_references', () => {
+  it('returns project-scoped outbound and inbound arrays', async () => {
+    const testSection = (global as Record<string, unknown>)['mcpTestSection'] as string;
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_references',
+      arguments: { projectId: mcpProjectId, section: testSection },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as {
+      projectId: string;
+      section: string;
+      outbound: { targetSection: string | null }[];
+      inbound: unknown[];
+    };
+    expect(data.projectId).toBe(mcpProjectId);
+    expect(data.section).toBe(testSection);
+    expect(data.outbound).toEqual([expect.objectContaining({ targetSection: mcpTargetSection })]);
+    expect(data.inbound).toEqual([]);
+  });
+
+  it('direction=to narrows to inbound references', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_references',
+      arguments: { projectId: mcpProjectId, section: mcpTargetSection, direction: 'to' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as {
+      outbound: unknown[];
+      inbound: { sourceSpecId: string }[];
+    };
+    expect(data.outbound).toEqual([]);
+    expect(data.inbound).toEqual([expect.objectContaining({ sourceSpecId: mcpSpecId })]);
+  });
+
+  it('returns isError for malformed section', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_references',
+      arguments: { projectId: mcpProjectId, section: '9 91 00' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
+  });
+
+  it('returns isError for unknown project', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_references',
+      arguments: { projectId: '00000000-0000-0000-0000-000000000000', section: mcpTargetSection },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
   });
 });
 
