@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import {
   createProject,
+  setProjectSources,
   findProjectById,
   addSectionToProject,
   removeSectionFromProject,
@@ -10,7 +11,11 @@ import {
   SectionUnresolvedError,
   pool,
 } from '../db/index.js';
-import type { CreateProjectBody, AddSectionToProjectBody } from '../ast/index.js';
+import type {
+  CreateProjectBody,
+  SetProjectSourcesBody,
+  AddSectionToProjectBody,
+} from '../ast/index.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
 
@@ -44,6 +49,30 @@ export async function getProjectHandler(req: Request, res: Response): Promise<vo
     res.status(200).json({ success: true, data: project });
   } catch (err) {
     logger.error({ err }, 'get project failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function setProjectSourcesHandler(req: Request, res: Response): Promise<void> {
+  const id = req.params['id'];
+  if (!id || typeof id !== 'string') {
+    res.status(400).json({ success: false, error: 'missing project id' });
+    return;
+  }
+  try {
+    const body = req.body as SetProjectSourcesBody;
+    const sources = await setProjectSources(id, body.sourceLibraryIds, pool);
+    if (!sources) {
+      res.status(404).json({ success: false, error: 'project not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: { projectId: id, sources } });
+  } catch (err) {
+    if (err instanceof InvalidSourceLibraryError) {
+      res.status(422).json({ success: false, error: err.message });
+      return;
+    }
+    logger.error({ err }, 'set project sources failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }

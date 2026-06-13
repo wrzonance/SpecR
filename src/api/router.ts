@@ -14,6 +14,7 @@ import { deleteReferenceHandler } from './references.js';
 import {
   createProjectHandler,
   getProjectHandler,
+  setProjectSourcesHandler,
   addSectionToProjectHandler,
   removeSectionFromProjectHandler,
   getBrokenRefsHandler,
@@ -32,10 +33,17 @@ import {
   setProjectRequiredSectionsHandler,
 } from './coordination.js';
 import { createRevisionHandler, getRevisionHandler } from './revisions.js';
+import {
+  createClientLibraryHandler,
+  listLibrariesHandler,
+  listLibrarySpecsHandler,
+  renameLibraryHandler,
+} from './libraries.js';
 import { validateBody } from './middleware/validate.js';
 import {
   PatchSpecBodySchema,
   CreateProjectBodySchema,
+  SetProjectSourcesBodySchema,
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
@@ -69,6 +77,10 @@ const parseRateLimit = rateLimit({
 export const router: RouterType = Router();
 
 router.get('/health', healthHandler);
+router.get('/libraries', listLibrariesHandler);
+router.post('/libraries/clients', createClientLibraryHandler);
+router.patch('/libraries/:id', renameLibraryHandler);
+router.get('/libraries/:id/specs', listLibrarySpecsHandler);
 router.get('/specs', listSpecsHandler);
 router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
@@ -86,6 +98,11 @@ router.delete('/specs/:id/references/:refId', deleteReferenceHandler);
 router.post('/specs/:id/generate', generateHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects/:id', getProjectHandler);
+router.put(
+  '/projects/:id/sources',
+  validateBody(SetProjectSourcesBodySchema),
+  setProjectSourcesHandler
+);
 router.get('/projects/:id/coordination-report', getCoordinationReportHandler);
 router.get('/projects/:id/required-sections', getProjectRequiredSectionsHandler);
 router.put(
@@ -116,7 +133,8 @@ router.post(
   createRevisionHandler
 );
 router.get('/revisions/:id', getRevisionHandler);
-router.post('/parse', parseRateLimit, upload.single('file'), parseHandler);
+// Mockup fixture ingest is intentionally unlimited for stakeholder demos.
+router.post('/parse', upload.single('file'), parseHandler);
 router.get('/parse/jobs/:jobId', parseJobHandler);
 router.post('/templates/import', parseRateLimit, upload.single('file'), importTemplateHandler);
 router.post('/templates', validateBody(CreateTemplateBodySchema), createTemplateHandler);

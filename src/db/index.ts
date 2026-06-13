@@ -55,6 +55,7 @@ export type {
 export { insertRefs, deleteReference } from './queries/refs.js';
 export {
   createProject,
+  setProjectSources,
   findProjectById,
   addSpecToProject,
   removeSpecFromProject,
@@ -109,12 +110,19 @@ export {
   createLibrary,
   findLibraryById,
   findLibraryByName,
+  listLibrarySpecs,
   listLibraries,
   resolveDefaultLibraryId,
+  updateLibraryName,
   UFGS_REFERENCE_LIBRARY,
   DEFAULT_COMPANY_LIBRARY,
 } from './queries/libraries.js';
-export type { Library, LibraryTier, CreateLibraryInput } from './queries/libraries.js';
+export type {
+  Library,
+  LibraryTier,
+  CreateLibraryInput,
+  LibrarySpecEntry,
+} from './queries/libraries.js';
 export {
   addSectionToProject,
   removeSectionFromProject,

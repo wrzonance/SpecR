@@ -107,6 +107,23 @@ export const CreateProjectBodySchema = z.object({
 
 export type CreateProjectBody = z.infer<typeof CreateProjectBodySchema>;
 
+export const SetProjectSourcesBodySchema = z.object({
+  sourceLibraryIds: z
+    .array(z.uuid())
+    .check(z.minLength(1))
+    .check((ctx) => {
+      if (new Set(ctx.value).size !== ctx.value.length) {
+        ctx.issues.push({
+          code: 'custom',
+          input: ctx.value,
+          message: 'sourceLibraryIds must not contain duplicates',
+        });
+      }
+    }),
+});
+
+export type SetProjectSourcesBody = z.infer<typeof SetProjectSourcesBodySchema>;
+
 export const AddSectionToProjectBodySchema = z.object({
   // Canonical expanded-shape section number (lib/section-number.ts, ADR-020).
   section: SectionNumberSchema,

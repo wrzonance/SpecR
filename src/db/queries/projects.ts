@@ -1,5 +1,5 @@
-import { DatabaseError } from '../errors.js';
-import type { Pool } from 'pg';
+import { DatabaseError, pool } from '../index.js';
+import type { Pool, PoolClient } from 'pg';
 import type { LibraryTier } from './libraries.js';
 import { logger } from '../../lib/logger.js';
 
@@ -154,6 +154,47 @@ export async function createProject(
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError('createProject: insert failed', { cause: err });
+  }
+}
+
+export async function setProjectSources(
+  projectId: string,
+  sourceLibraryIds: readonly string[],
+  db: Pool = pool
+): Promise<readonly ProjectSource[] | null> {
+  const client: PoolClient = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const exists = await client.query('SELECT 1 FROM projects WHERE id = $1', [projectId]);
+    if (exists.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const libs = await validateSourceLibraries(sourceLibraryIds, client);
+    await client.query('DELETE FROM project_sources WHERE project_id = $1', [projectId]);
+    await client.query(
+      `INSERT INTO project_sources (project_id, library_id, priority)
+       SELECT $1, u.lib_id, u.ord::int
+       FROM unnest($2::uuid[]) WITH ORDINALITY AS u(lib_id, ord)`,
+      [projectId, sourceLibraryIds]
+    );
+    await client.query('COMMIT');
+    return libs.map((lib, i) => ({
+      libraryId: lib.id,
+      name: lib.name,
+      tier: lib.tier,
+      priority: i + 1,
+    }));
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* best-effort */
+    }
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`setProjectSources: failed for project ${projectId}`, { cause: err });
+  } finally {
+    client.release();
   }
 }
 

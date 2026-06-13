@@ -1,11 +1,12 @@
-// Drag-and-drop ingest: full-window drop target, sequential upload queue,
-// per-file parse-job progress, and polite backoff when the /parse rate
-// limit (10 uploads/min) pushes back.
+// Drag-and-drop ingest: full-window drop target, sequential upload queue, and
+// per-file parse-job progress.
 
-import { uploadSpec, waitForParseJob } from './api.js';
+import { listLibraries, uploadSpec, waitForParseJob } from './api.js';
+import { openChoice } from './modal.js';
 
 const ACCEPTED = new Set(['.sec', '.docx', '.txt']);
-const RATE_LIMIT_BACKOFF_MS = 15000;
+const DEFAULT_CONTEXT = { destination: 'project', source: 'master' };
+const COMPANY_MASTER_NAME = 'Default Company Master';
 
 function extOf(name) {
   const i = name.lastIndexOf('.');
@@ -17,7 +18,178 @@ function stageText(job) {
   return `${job.status}${pct}`;
 }
 
-export function initDropzone({ onSpecReady, onReject }) {
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function selectField(label, options) {
+  const wrap = el('label', 'modal-field');
+  wrap.appendChild(el('span', null, label));
+  const select = document.createElement('select');
+  for (const option of options) {
+    const opt = document.createElement('option');
+    opt.value = option.value;
+    opt.textContent = option.label;
+    select.appendChild(opt);
+  }
+  wrap.appendChild(select);
+  return { wrap, select };
+}
+
+async function loadLibraryChoices() {
+  const libraries = await listLibraries();
+  return {
+    company: libraries.find((lib) => lib.name === COMPANY_MASTER_NAME) || null,
+    clients: libraries
+      .filter((lib) => lib.tier === 'client')
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+async function pickClient() {
+  const { clients } = await loadLibraryChoices();
+  if (clients.length === 0) {
+    await openChoice({
+      title: 'No client masters',
+      body: 'Add a client in the Library tab first.',
+      choices: [{ label: 'Close', value: null, kind: 'primary' }],
+    });
+    return null;
+  }
+  const field = selectField(
+    'Client',
+    clients.map((client) => ({ value: client.id, label: client.name }))
+  );
+  const choice = await openChoice({
+    title: 'Select client master',
+    body: [field.wrap],
+    choices: [
+      { label: 'Cancel', value: null, kind: 'ghost' },
+      { label: 'Use Client', value: 'client', kind: 'primary' },
+    ],
+  });
+  if (!choice) return null;
+  const client = clients.find((lib) => lib.id === field.select.value);
+  return client ? { id: client.id, name: client.name } : null;
+}
+
+async function chooseLibraryContext() {
+  const library = await openChoice({
+    title: 'Add to library',
+    body: 'Choose where these uploaded fixtures should land.',
+    choices: [
+      { label: 'Cancel', value: null, kind: 'ghost' },
+      { label: 'Company Masters', value: 'company', kind: 'primary' },
+      { label: 'Client Master', value: 'client', kind: 'primary' },
+    ],
+  });
+  if (!library) return null;
+  const { company } = await loadLibraryChoices();
+  if (library === 'company') {
+    return {
+      destination: 'library',
+      library: 'company',
+      libraryId: company?.id,
+      libraryName: company?.name || 'Company Masters',
+    };
+  }
+  const client = await pickClient();
+  return client
+    ? { destination: 'library', library: 'client', libraryId: client.id, client: client.name }
+    : null;
+}
+
+async function chooseProjectContext() {
+  const source = await openChoice({
+    title: 'Add to project',
+    body: 'Choose which library source the project should pull from.',
+    choices: [
+      { label: 'Cancel', value: null, kind: 'ghost' },
+      { label: 'Master Library', value: 'master', kind: 'primary' },
+      { label: 'Client Library', value: 'client', kind: 'primary' },
+    ],
+  });
+  if (!source) return null;
+  const { company } = await loadLibraryChoices();
+  if (source === 'master') {
+    return { destination: 'project', source: 'master', libraryId: company?.id };
+  }
+  const client = await pickClient();
+  return client
+    ? { destination: 'project', source: 'client', libraryId: client.id, client: client.name }
+    : null;
+}
+
+async function chooseAddContext() {
+  const destination = await openChoice({
+    title: 'Add sections',
+    body: 'Choose whether these files should become library fixtures or project sections.',
+    choices: [
+      { label: 'Cancel', value: null, kind: 'ghost' },
+      { label: 'Add to Library', value: 'library', kind: 'primary' },
+      { label: 'Add to Project', value: 'project', kind: 'primary' },
+    ],
+  });
+  if (destination === 'library') return chooseLibraryContext();
+  if (destination === 'project') return chooseProjectContext();
+  return null;
+}
+
+function contextLabel(context) {
+  if (context.destination === 'library') {
+    return context.library === 'client'
+      ? `library / ${context.client}`
+      : `library / ${context.libraryName || 'company masters'}`;
+  }
+  return context.source === 'client' ? `project / ${context.client}` : 'project / master library';
+}
+
+function readEntryFile(entry) {
+  return new Promise((resolve, reject) => {
+    entry.file(resolve, reject);
+  });
+}
+
+function readDirectoryEntries(reader) {
+  return new Promise((resolve, reject) => {
+    reader.readEntries(resolve, reject);
+  });
+}
+
+async function filesFromEntry(entry) {
+  if (entry.isFile) return [await readEntryFile(entry)];
+  if (!entry.isDirectory) return [];
+  const reader = entry.createReader();
+  const files = [];
+  for (;;) {
+    const entries = await readDirectoryEntries(reader);
+    if (entries.length === 0) break;
+    const nested = await Promise.all(entries.map((child) => filesFromEntry(child)));
+    files.push(...nested.flat());
+  }
+  return files;
+}
+
+async function filesFromDataTransfer(dataTransfer) {
+  const items = [...(dataTransfer.items ?? [])];
+  if (items.length === 0) return [...dataTransfer.files];
+  const files = [];
+  for (const item of items) {
+    if (item.kind !== 'file') continue;
+    const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
+    if (entry) files.push(...(await filesFromEntry(entry)));
+    else {
+      const file = item.getAsFile();
+      if (file) files.push(file);
+    }
+  }
+  return files;
+}
+
+export function initDropzone({ onSpecReady, onReject, getDropContext }) {
   const veil = document.getElementById('drop-veil');
   const dock = document.getElementById('upload-dock');
   const list = document.getElementById('upload-list');
@@ -28,7 +200,7 @@ export function initDropzone({ onSpecReady, onReject }) {
   const queue = [];
   let working = false;
 
-  function makeItem(file) {
+  function makeItem(file, context) {
     const li = document.createElement('li');
     li.className = 'upload-item';
     const row = document.createElement('div');
@@ -38,7 +210,7 @@ export function initDropzone({ onSpecReady, onReject }) {
     name.textContent = file.name;
     const stage = document.createElement('span');
     stage.className = 'ui-stage';
-    stage.textContent = 'queued';
+    stage.textContent = `queued - ${contextLabel(context)}`;
     row.appendChild(name);
     row.appendChild(stage);
     const bar = document.createElement('div');
@@ -75,31 +247,22 @@ export function initDropzone({ onSpecReady, onReject }) {
     item.li.appendChild(hint);
   }
 
-  async function uploadWithBackoff(file, item) {
-    for (;;) {
-      try {
-        return await uploadSpec(file);
-      } catch (err) {
-        if (!err.rateLimited) throw err;
-        for (let left = RATE_LIMIT_BACKOFF_MS / 1000; left > 0; left -= 1) {
-          setStage(item, `rate limit — retry in ${left}s`);
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      }
-    }
-  }
-
   async function processOne(entry) {
-    const { file, item } = entry;
+    const { file, item, context } = entry;
     try {
       setStage(item, 'uploading', 8);
-      const { jobId } = await uploadWithBackoff(file, item);
+      const { jobId } = await uploadSpec(file, {
+        libraryId: context.libraryId,
+        importDestination: context.destination,
+        importLibrary: context.library || context.source,
+        importClient: context.client,
+      });
       const result = await waitForParseJob(jobId, (job) => {
         setStage(item, stageText(job), job.progress ? job.progress.pct : undefined);
       });
       item.li.classList.add('is-complete');
       setStage(item, `complete — ${result.nodeCount} nodes`, 100);
-      await onSpecReady(result);
+      await onSpecReady(result, context);
       setTimeout(() => {
         item.li.remove();
         if (list.children.length === 0) dock.hidden = true;
@@ -118,14 +281,18 @@ export function initDropzone({ onSpecReady, onReject }) {
     working = false;
   }
 
-  function accept(files) {
+  function accept(files, context = DEFAULT_CONTEXT) {
+    let rejected = 0;
     for (const file of files) {
       const ext = extOf(file.name);
       if (!ACCEPTED.has(ext)) {
-        onReject(`${file.name} — unsupported type (need .SEC, .DOCX, or .TXT)`);
+        rejected += 1;
         continue;
       }
-      queue.push({ file, item: makeItem(file) });
+      queue.push({ file, item: makeItem(file, context), context });
+    }
+    if (rejected > 0) {
+      onReject(`${rejected} unsupported file${rejected === 1 ? '' : 's'} skipped`);
     }
     void pump();
   }
@@ -145,15 +312,36 @@ export function initDropzone({ onSpecReady, onReject }) {
     event.preventDefault();
     dragDepth = 0;
     veil.hidden = true;
-    if (event.dataTransfer && event.dataTransfer.files.length > 0) {
-      accept([...event.dataTransfer.files]);
+    if (event.dataTransfer) {
+      void (async () => {
+        try {
+          const files = await filesFromDataTransfer(event.dataTransfer);
+          if (files.length > 0) accept(files, getDropContext?.() ?? DEFAULT_CONTEXT);
+        } catch (err) {
+          onReject(`could not read dropped folders: ${err.message}`);
+        }
+      })();
     }
   });
 
-  pickBtn.addEventListener('click', () => input.click());
-  addFab.addEventListener('click', () => input.click());
+  pickBtn.addEventListener('click', () => {
+    input.dataset.context = JSON.stringify(DEFAULT_CONTEXT);
+    input.click();
+  });
+  addFab.addEventListener('click', async () => {
+    try {
+      const context = await chooseAddContext();
+      if (!context) return;
+      input.dataset.context = JSON.stringify(context);
+      input.click();
+    } catch (err) {
+      onReject(`could not load libraries: ${err.message}`);
+    }
+  });
   input.addEventListener('change', () => {
-    if (input.files && input.files.length > 0) accept([...input.files]);
+    const context = input.dataset.context ? JSON.parse(input.dataset.context) : DEFAULT_CONTEXT;
+    if (input.files && input.files.length > 0) accept([...input.files], context);
+    delete input.dataset.context;
     input.value = '';
   });
 }

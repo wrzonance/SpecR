@@ -183,7 +183,12 @@ async function commitEdit({ node, ctx, input, save, cancel }) {
   cancel.disabled = true;
   // 'committed' → the board re-renders and discards this editor; otherwise the
   // user backed out of the warning, so re-enable and stay in edit mode.
-  const outcome = await ctx.onSaveParagraphEdit({ spec: ctx.spec, node, newText, removedRefs: removed });
+  const outcome = await ctx.onSaveParagraphEdit({
+    spec: ctx.spec,
+    node,
+    newText,
+    removedRefs: removed,
+  });
   if (outcome !== 'committed') {
     save.disabled = false;
     cancel.disabled = false;
@@ -483,6 +488,20 @@ export function renderSpecSheet(spec, ctx) {
       .map((w) => w.type + (w.suggestion ? ` — ${w.suggestion}` : ''))
       .join('\n');
     stats.appendChild(warn);
+  }
+  if (typeof actx.onAddSpecToToc === 'function') {
+    const addToToc = el('button', 'sheet-toc-add', 'ADD TO TOC');
+    addToToc.type = 'button';
+    addToToc.title = 'Add this section to the project TOC.';
+    addToToc.addEventListener('click', () => actx.onAddSpecToToc(spec));
+    stats.appendChild(addToToc);
+  }
+  if (typeof actx.onRemoveSpecFromProject === 'function') {
+    const remove = el('button', 'sheet-remove', 'DELETE');
+    remove.type = 'button';
+    remove.title = 'Remove this section from the project. The TOC is unchanged.';
+    remove.addEventListener('click', () => actx.onRemoveSpecFromProject(spec));
+    stats.appendChild(remove);
   }
   head.appendChild(stats);
   sheet.appendChild(head);

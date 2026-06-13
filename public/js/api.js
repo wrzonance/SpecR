@@ -47,17 +47,30 @@ export function getSpecTree(specId) {
   return getJson(`/specs/${encodeURIComponent(specId)}/tree`);
 }
 
+export function listLibraries() {
+  return getJson('/libraries');
+}
+
+export function createClientLibrary(name) {
+  return sendJson('POST', '/libraries/clients', { name });
+}
+
+export function renameLibrary(libraryId, name) {
+  return sendJson('PATCH', `/libraries/${enc(libraryId)}`, { name });
+}
+
+export function listLibrarySpecs(libraryId) {
+  return getJson(`/libraries/${enc(libraryId)}/specs`);
+}
+
 // Uploads one file to POST /parse. Resolves with { jobId }.
-// Throws { rateLimited: true } on 429 so callers can back off and retry.
-export async function uploadSpec(file) {
+export async function uploadSpec(file, fields = {}) {
   const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined && value !== null && value !== '') form.append(key, value);
+  }
   form.append('file', file, file.name);
   const res = await fetch('/parse', { method: 'POST', body: form });
-  if (res.status === 429) {
-    const err = new Error('rate limited');
-    err.rateLimited = true;
-    throw err;
-  }
   const body = await res.json();
   if (!res.ok || !body.success) {
     const err = new Error(body.error || `upload failed: ${res.status}`);
@@ -100,16 +113,23 @@ export function deleteSpec(specId) {
 
 // ── Project membership (backs the demo board's broken-ref cascade) ─────────
 
-export function createProject(name, description) {
-  return sendJson('POST', '/projects', description ? { name, description } : { name });
+export function createProject(name, description, sourceLibraryIds) {
+  const body = { name };
+  if (description) body.description = description;
+  if (sourceLibraryIds) body.sourceLibraryIds = sourceLibraryIds;
+  return sendJson('POST', '/projects', body);
 }
 
 export function getProject(projectId) {
   return getJson(`/projects/${enc(projectId)}`);
 }
 
-export function addSpecToProject(projectId, specId) {
-  return sendJson('POST', `/projects/${enc(projectId)}/specs`, { specId });
+export function setProjectSources(projectId, sourceLibraryIds) {
+  return sendJson('PUT', `/projects/${enc(projectId)}/sources`, { sourceLibraryIds });
+}
+
+export function addSpecToProject(projectId, section) {
+  return sendJson('POST', `/projects/${enc(projectId)}/specs`, { section });
 }
 
 export function removeSpecFromProject(projectId, specId) {
@@ -118,6 +138,19 @@ export function removeSpecFromProject(projectId, specId) {
 
 export function getBrokenRefs(projectId) {
   return getJson(`/projects/${enc(projectId)}/references/broken`);
+}
+
+export function getCoordinationReport(projectId, packageId) {
+  const qs = packageId ? `?packageId=${enc(packageId)}` : '';
+  return getJson(`/projects/${enc(projectId)}/coordination-report${qs}`);
+}
+
+export function getRequiredSections(projectId) {
+  return getJson(`/projects/${enc(projectId)}/required-sections`);
+}
+
+export function setRequiredSections(projectId, sections) {
+  return sendJson('PUT', `/projects/${enc(projectId)}/required-sections`, { sections });
 }
 
 // Polls a parse job until it completes or fails. Calls onProgress with the
