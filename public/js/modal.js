@@ -81,6 +81,99 @@ export function openChoice({ title, body, choices }) {
   });
 }
 
+export function openPicker({
+  title,
+  body,
+  items,
+  itemText,
+  renderItem,
+  searchLabel = 'Search',
+  searchPlaceholder = 'Search specifications',
+  emptyText = 'No items match.',
+}) {
+  return new Promise((resolve) => {
+    if (openVeil) openVeil.remove();
+
+    const veil = el('div', 'modal-veil');
+    const dialog = el('div', 'modal modal-picker');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.appendChild(el('h3', 'modal-title', title));
+    appendBody(dialog, body);
+
+    const field = el('label', 'modal-field');
+    field.appendChild(el('span', null, searchLabel));
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.autocomplete = 'off';
+    input.placeholder = searchPlaceholder;
+    field.appendChild(input);
+    dialog.appendChild(field);
+
+    const list = el('div', 'modal-pick-list');
+    dialog.appendChild(list);
+
+    const actions = el('div', 'modal-actions');
+    const cancel = el('button', 'modal-btn is-ghost', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => finish(null));
+    actions.appendChild(cancel);
+    dialog.appendChild(actions);
+    veil.appendChild(dialog);
+
+    const prevFocus = document.activeElement;
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(null);
+      }
+    };
+
+    function matches(item, query) {
+      if (!query) return true;
+      return itemText(item).toLowerCase().includes(query);
+    }
+
+    function render() {
+      const query = input.value.trim().toLowerCase();
+      const visible = items.filter((item) => matches(item, query));
+      list.replaceChildren();
+      if (visible.length === 0) {
+        list.appendChild(el('p', 'modal-pick-empty', emptyText));
+        return;
+      }
+      for (const item of visible) {
+        const row = el('button', 'modal-pick-row');
+        row.type = 'button';
+        const content = renderItem(item);
+        if (content instanceof Node) row.appendChild(content);
+        else row.textContent = String(content);
+        row.addEventListener('click', () => finish(item));
+        list.appendChild(row);
+      }
+    }
+
+    function finish(value) {
+      document.removeEventListener('keydown', onKey, true);
+      veil.remove();
+      if (openVeil === veil) openVeil = null;
+      if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus();
+      resolve(value);
+    }
+
+    input.addEventListener('input', render);
+    veil.addEventListener('mousedown', (event) => {
+      if (event.target === veil) finish(null);
+    });
+    document.addEventListener('keydown', onKey, true);
+
+    openVeil = veil;
+    document.body.appendChild(veil);
+    render();
+    input.focus();
+  });
+}
+
 function trapFocus(event, buttons) {
   if (buttons.length === 0) return;
   const first = buttons[0];

@@ -1,12 +1,10 @@
 // Drag-and-drop ingest: full-window drop target, sequential upload queue, and
 // per-file parse-job progress.
 
-import { listLibraries, uploadSpec, waitForParseJob } from './api.js';
-import { openChoice } from './modal.js';
+import { uploadSpec, waitForParseJob } from './api.js';
 
 const ACCEPTED = new Set(['.sec', '.docx', '.txt']);
 const DEFAULT_CONTEXT = { destination: 'project', source: 'master' };
-const COMPANY_MASTER_NAME = 'Default Company Master';
 
 function extOf(name) {
   const i = name.lastIndexOf('.');
@@ -23,119 +21,6 @@ function el(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
-}
-
-function selectField(label, options) {
-  const wrap = el('label', 'modal-field');
-  wrap.appendChild(el('span', null, label));
-  const select = document.createElement('select');
-  for (const option of options) {
-    const opt = document.createElement('option');
-    opt.value = option.value;
-    opt.textContent = option.label;
-    select.appendChild(opt);
-  }
-  wrap.appendChild(select);
-  return { wrap, select };
-}
-
-async function loadLibraryChoices() {
-  const libraries = await listLibraries();
-  return {
-    company: libraries.find((lib) => lib.name === COMPANY_MASTER_NAME) || null,
-    clients: libraries
-      .filter((lib) => lib.tier === 'client')
-      .sort((a, b) => a.name.localeCompare(b.name)),
-  };
-}
-
-async function pickClient() {
-  const { clients } = await loadLibraryChoices();
-  if (clients.length === 0) {
-    await openChoice({
-      title: 'No client masters',
-      body: 'Add a client in the Library tab first.',
-      choices: [{ label: 'Close', value: null, kind: 'primary' }],
-    });
-    return null;
-  }
-  const field = selectField(
-    'Client',
-    clients.map((client) => ({ value: client.id, label: client.name }))
-  );
-  const choice = await openChoice({
-    title: 'Select client master',
-    body: [field.wrap],
-    choices: [
-      { label: 'Cancel', value: null, kind: 'ghost' },
-      { label: 'Use Client', value: 'client', kind: 'primary' },
-    ],
-  });
-  if (!choice) return null;
-  const client = clients.find((lib) => lib.id === field.select.value);
-  return client ? { id: client.id, name: client.name } : null;
-}
-
-async function chooseLibraryContext() {
-  const library = await openChoice({
-    title: 'Add to library',
-    body: 'Choose where these uploaded fixtures should land.',
-    choices: [
-      { label: 'Cancel', value: null, kind: 'ghost' },
-      { label: 'Company Masters', value: 'company', kind: 'primary' },
-      { label: 'Client Master', value: 'client', kind: 'primary' },
-    ],
-  });
-  if (!library) return null;
-  const { company } = await loadLibraryChoices();
-  if (library === 'company') {
-    return {
-      destination: 'library',
-      library: 'company',
-      libraryId: company?.id,
-      libraryName: company?.name || 'Company Masters',
-    };
-  }
-  const client = await pickClient();
-  return client
-    ? { destination: 'library', library: 'client', libraryId: client.id, client: client.name }
-    : null;
-}
-
-async function chooseProjectContext() {
-  const source = await openChoice({
-    title: 'Add to project',
-    body: 'Choose which library source the project should pull from.',
-    choices: [
-      { label: 'Cancel', value: null, kind: 'ghost' },
-      { label: 'Master Library', value: 'master', kind: 'primary' },
-      { label: 'Client Library', value: 'client', kind: 'primary' },
-    ],
-  });
-  if (!source) return null;
-  const { company } = await loadLibraryChoices();
-  if (source === 'master') {
-    return { destination: 'project', source: 'master', libraryId: company?.id };
-  }
-  const client = await pickClient();
-  return client
-    ? { destination: 'project', source: 'client', libraryId: client.id, client: client.name }
-    : null;
-}
-
-async function chooseAddContext() {
-  const destination = await openChoice({
-    title: 'Add sections',
-    body: 'Choose whether these files should become library fixtures or project sections.',
-    choices: [
-      { label: 'Cancel', value: null, kind: 'ghost' },
-      { label: 'Add to Library', value: 'library', kind: 'primary' },
-      { label: 'Add to Project', value: 'project', kind: 'primary' },
-    ],
-  });
-  if (destination === 'library') return chooseLibraryContext();
-  if (destination === 'project') return chooseProjectContext();
-  return null;
 }
 
 function contextLabel(context) {
@@ -189,7 +74,7 @@ async function filesFromDataTransfer(dataTransfer) {
   return files;
 }
 
-export function initDropzone({ onSpecReady, onReject, getDropContext }) {
+export function initDropzone({ onSpecReady, onReject, getDropContext, onAddSectionsClick }) {
   const veil = document.getElementById('drop-veil');
   const dock = document.getElementById('upload-dock');
   const list = document.getElementById('upload-list');
@@ -297,6 +182,11 @@ export function initDropzone({ onSpecReady, onReject, getDropContext }) {
     void pump();
   }
 
+  function chooseFiles(context = DEFAULT_CONTEXT) {
+    input.dataset.context = JSON.stringify(context);
+    input.click();
+  }
+
   let dragDepth = 0;
   document.addEventListener('dragenter', (event) => {
     event.preventDefault();
@@ -325,18 +215,14 @@ export function initDropzone({ onSpecReady, onReject, getDropContext }) {
   });
 
   pickBtn.addEventListener('click', () => {
-    input.dataset.context = JSON.stringify(DEFAULT_CONTEXT);
-    input.click();
+    chooseFiles(DEFAULT_CONTEXT);
   });
   addFab.addEventListener('click', async () => {
-    try {
-      const context = await chooseAddContext();
-      if (!context) return;
-      input.dataset.context = JSON.stringify(context);
-      input.click();
-    } catch (err) {
-      onReject(`could not load libraries: ${err.message}`);
+    if (!onAddSectionsClick) {
+      chooseFiles(DEFAULT_CONTEXT);
+      return;
     }
+    await onAddSectionsClick({ chooseFiles, defaultContext: DEFAULT_CONTEXT });
   });
   input.addEventListener('change', () => {
     const context = input.dataset.context ? JSON.parse(input.dataset.context) : DEFAULT_CONTEXT;

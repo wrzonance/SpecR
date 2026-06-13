@@ -30,7 +30,7 @@ import { buildWebModel, renderWeb } from './web.js';
 import { renderCoordinationReport } from './coordination.js';
 import { initDropzone } from './dropzone.js';
 import { initRefPopover } from './popover.js';
-import { openConfirm, openChoice } from './modal.js';
+import { openConfirm, openChoice, openPicker } from './modal.js';
 
 const specs = new Map(); // specId -> { tree, references, warnings?, capabilities? }
 const PROJECT_KEY = 'specr-demo-project';
@@ -39,6 +39,7 @@ const PROJECT_CLIENT_KEY = 'specr-demo-project-client';
 let demoProjectId = null; // the hidden project every loaded section belongs to
 let currentView = 'map';
 let tocSections = [];
+const tocCollapsedDivisions = new Set();
 let libraries = [];
 let selectedLibraryId = null;
 let selectedLibrarySpecs = [];
@@ -253,8 +254,45 @@ function normalizeQuery(value) {
 function sortedTocLibrarySpecs(specsToSort = tocLibrarySpecs) {
   return [...specsToSort].sort((a, b) => {
     if (a.source !== b.source) return a.source === 'client' ? -1 : 1;
-    return a.section.localeCompare(b.section) || a.title.localeCompare(b.title);
+    return compareTocSections(a, b);
   });
+}
+
+function tocSectionSortParts(section) {
+  return section
+    .split(/[ .]+/)
+    .filter(Boolean)
+    .map((part) => Number(part));
+}
+
+function compareTocSections(a, b) {
+  const aParts = tocSectionSortParts(a.section);
+  const bParts = tocSectionSortParts(b.section);
+  const max = Math.max(aParts.length, bParts.length);
+  for (let index = 0; index < max; index += 1) {
+    const aPart = aParts[index] ?? -1;
+    const bPart = bParts[index] ?? -1;
+    if (aPart !== bPart) return aPart - bPart;
+  }
+  return a.section.localeCompare(b.section) || (a.title ?? '').localeCompare(b.title ?? '');
+}
+
+function sortedTocSections(sections = tocSections) {
+  return [...sections].sort(compareTocSections);
+}
+
+function tocDivision(section) {
+  return section.match(/^\d{2}/)?.[0] ?? '??';
+}
+
+function groupedTocSections() {
+  const groups = new Map();
+  sortedTocSections().forEach((entry, index) => {
+    const division = tocDivision(entry.section);
+    if (!groups.has(division)) groups.set(division, []);
+    groups.get(division).push({ entry, index });
+  });
+  return [...groups.entries()];
 }
 
 function updateTocHint() {
@@ -281,8 +319,38 @@ function renderTocBuilder() {
     updateTocHint();
     return;
   }
-  tocSections.forEach((entry, index) => list.appendChild(renderTocRow(entry, index)));
+  for (const [division, entries] of groupedTocSections()) {
+    list.appendChild(renderTocDivisionGroup(division, entries));
+  }
   updateTocHint();
+}
+
+function renderTocDivisionGroup(division, entries) {
+  const item = makeNode('li', 'toc-division');
+  const details = document.createElement('details');
+  details.className = 'toc-division-details';
+  details.open = !tocCollapsedDivisions.has(division);
+  details.addEventListener('toggle', () => {
+    if (details.open) tocCollapsedDivisions.delete(division);
+    else tocCollapsedDivisions.add(division);
+  });
+
+  const summary = makeNode('summary', 'toc-division-summary');
+  summary.appendChild(makeNode('span', 'toc-division-name', `Division ${division}`));
+  summary.appendChild(
+    makeNode(
+      'span',
+      'toc-division-count',
+      `${entries.length} section${entries.length === 1 ? '' : 's'}`
+    )
+  );
+  details.appendChild(summary);
+
+  const rows = makeNode('ol', 'toc-division-list');
+  for (const { entry, index } of entries) rows.appendChild(renderTocRow(entry, index));
+  details.appendChild(rows);
+  item.appendChild(details);
+  return item;
 }
 
 function renderTocRow(entry, index) {
@@ -290,11 +358,7 @@ function renderTocRow(entry, index) {
   row.appendChild(makeNode('span', 'toc-position', String(index + 1).padStart(2, '0')));
   row.appendChild(makeNode('span', 'toc-section-code', entry.section));
   row.appendChild(makeNode('span', 'toc-title-text', entry.title || 'Untitled section'));
-  row.appendChild(tocButton('UP', () => moveTocEntry(index, -1), index === 0));
-  row.appendChild(
-    tocButton('DOWN', () => moveTocEntry(index, 1), index === tocSections.length - 1)
-  );
-  row.appendChild(tocButton('REMOVE', () => removeTocEntry(index)));
+  row.appendChild(tocButton('REMOVE', () => removeTocEntry(entry.section)));
   return row;
 }
 
@@ -330,7 +394,10 @@ function addTocCandidate(candidate, { quiet = false } = {}) {
     if (!quiet) toast(`Section ${candidate.section} is already in the TOC`, 'warn');
     return false;
   }
-  tocSections = [...tocSections, { section: candidate.section, title: candidate.title }];
+  tocSections = sortedTocSections([
+    ...tocSections,
+    { section: candidate.section, title: candidate.title },
+  ]);
   setTocDirty(true);
   renderTocBuilder();
   return true;
@@ -412,18 +479,8 @@ function syncTocCounterpart(changedField) {
   }
 }
 
-function moveTocEntry(index, delta) {
-  const nextIndex = index + delta;
-  if (nextIndex < 0 || nextIndex >= tocSections.length) return;
-  const next = [...tocSections];
-  [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-  tocSections = next;
-  setTocDirty(true);
-  renderTocBuilder();
-}
-
-function removeTocEntry(index) {
-  tocSections = tocSections.filter((_, i) => i !== index);
+function removeTocEntry(section) {
+  tocSections = tocSections.filter((entry) => entry.section !== section);
   setTocDirty(true);
   renderTocBuilder();
 }
@@ -435,10 +492,12 @@ async function refreshTocBuilder() {
   }
   try {
     const result = await getRequiredSections(demoProjectId);
-    tocSections = (result.sections ?? []).map((entry) => ({
-      section: entry.section,
-      title: entry.title,
-    }));
+    tocSections = sortedTocSections(
+      (result.sections ?? []).map((entry) => ({
+        section: entry.section,
+        title: entry.title,
+      }))
+    );
     setTocDirty(false);
     renderTocBuilder();
   } catch (err) {
@@ -514,15 +573,17 @@ async function syncProjectSourcesToTocScope() {
 async function saveTocBuilder() {
   if (!demoProjectId) return;
   try {
-    const payload = tocSections.map((entry) => ({
+    const payload = sortedTocSections().map((entry) => ({
       section: entry.section,
       ...(entry.title ? { title: entry.title } : {}),
     }));
     const result = await setRequiredSections(demoProjectId, payload);
-    tocSections = (result.sections ?? []).map((entry) => ({
-      section: entry.section,
-      title: entry.title,
-    }));
+    tocSections = sortedTocSections(
+      (result.sections ?? []).map((entry) => ({
+        section: entry.section,
+        title: entry.title,
+      }))
+    );
     setTocDirty(false);
     renderTocBuilder();
     await refreshCoordination();
@@ -586,6 +647,112 @@ function clientLibraries() {
   return libraries
     .filter((lib) => lib.tier === 'client')
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function mapAddSourceLabel(library) {
+  return library.tier === 'client' ? `Client: ${library.name}` : 'Company Masters';
+}
+
+function mapAddSourceLibraries() {
+  return [companyMaster(), ...clientLibraries()].filter(Boolean);
+}
+
+async function chooseMapLibrarySource() {
+  if (libraries.length === 0) await refreshLibraryView();
+  const sources = mapAddSourceLibraries();
+  if (sources.length === 0) {
+    await openChoice({
+      title: 'Add from library',
+      body: 'No company or client libraries are available.',
+      choices: [{ label: 'Close', value: null, kind: 'primary' }],
+    });
+    return null;
+  }
+  const selectedId = await openChoice({
+    title: 'Add from library',
+    body: 'Choose a master source.',
+    choices: [
+      { label: 'Cancel', value: null, kind: 'ghost' },
+      ...sources.map((library) => ({
+        label: mapAddSourceLabel(library),
+        value: library.id,
+        kind: 'primary',
+      })),
+    ],
+  });
+  return sources.find((library) => library.id === selectedId) ?? null;
+}
+
+function renderMapLibrarySpecPick(spec) {
+  const row = makeNode('span', 'modal-spec-row');
+  row.appendChild(makeNode('span', 'modal-spec-section', spec.section));
+  row.appendChild(makeNode('span', 'modal-spec-title', spec.title || 'Untitled section'));
+  row.appendChild(makeNode('span', 'modal-spec-count', `${spec.nodeCount} nodes`));
+  return row;
+}
+
+async function pickMapLibrarySpec(library) {
+  const librarySpecs = sortedTocLibrarySpecs(await listLibrarySpecs(library.id));
+  if (librarySpecs.length === 0) {
+    await openChoice({
+      title: mapAddSourceLabel(library),
+      body: 'No specifications are loaded in this library.',
+      choices: [{ label: 'Close', value: null, kind: 'primary' }],
+    });
+    return null;
+  }
+  return openPicker({
+    title: mapAddSourceLabel(library),
+    body: `${librarySpecs.length} specifications available.`,
+    items: librarySpecs,
+    itemText: (spec) => `${spec.section} ${spec.title}`,
+    renderItem: renderMapLibrarySpecPick,
+    searchPlaceholder: 'Section or title',
+    emptyText: 'No specifications match.',
+  });
+}
+
+async function setProjectSourcesForMapLibrary(library) {
+  if (!demoProjectId) return;
+  const company = companyMaster();
+  const ids = [
+    library.id,
+    ...(company && company.id !== library.id ? [company.id] : []),
+  ];
+  await setProjectSources(demoProjectId, [...new Set(ids)]);
+}
+
+async function addMapSpecFromLibrary() {
+  if (!demoProjectId) {
+    toast('Project is unavailable', 'warn');
+    return;
+  }
+  const library = await chooseMapLibrarySource();
+  if (!library) return;
+  try {
+    const spec = await pickMapLibrarySpec(library);
+    if (!spec) return;
+    if (loadedSectionSet().has(spec.section)) {
+      toast(`Section ${spec.section} is already loaded on the project map`, 'warn');
+      navigateToSection(spec.section);
+      return;
+    }
+    await setProjectSourcesForMapLibrary(library);
+    const result = await addSpecToProject(demoProjectId, spec.section);
+    projectMembers.add(result.specId);
+    await addSpec(result.specId);
+    await reloadAllSpecs();
+    await syncProjectSourcesToTocScope();
+    renderBoard();
+    await refreshBrokenCount();
+    await refreshCoordination();
+    toast(
+      `Section ${spec.section} loaded from ${result.source?.name || library.name} - TOC unchanged`
+    );
+    navigateToSection(spec.section);
+  } catch (err) {
+    toast(`could not add library spec: ${err.message}`, 'err');
+  }
 }
 
 async function refreshLibraryView(preferredId = selectedLibraryId) {
@@ -1118,7 +1285,7 @@ async function removeSpecFromProjectIfPresent(specId) {
 async function addSpecsFromTocToProject() {
   if (!demoProjectId) return;
   const loaded = loadedSectionSet();
-  const missing = tocSections.filter((entry) => !loaded.has(entry.section));
+  const missing = sortedTocSections().filter((entry) => !loaded.has(entry.section));
   if (missing.length === 0) {
     toast('All TOC sections are already loaded on the project map');
     return;
@@ -1290,6 +1457,23 @@ async function onSpecReady(result, context = { destination: 'project' }) {
   navigateToSection(result.section);
 }
 
+async function onMapAddSectionsClick({ chooseFiles, defaultContext }) {
+  const action = await openChoice({
+    title: 'Add section',
+    body: 'Choose a project-map source.',
+    choices: [
+      { label: 'Cancel', value: null, kind: 'ghost' },
+      { label: 'Add from Library', value: 'library', kind: 'primary' },
+      { label: 'Upload Spec', value: 'upload', kind: 'primary' },
+    ],
+  });
+  if (action === 'library') {
+    await addMapSpecFromLibrary();
+  } else if (action === 'upload') {
+    chooseFiles(defaultContext);
+  }
+}
+
 function initMapActions() {
   document.getElementById('map-add-from-toc')?.addEventListener('click', () => {
     void addSpecsFromTocToProject();
@@ -1320,6 +1504,7 @@ async function boot() {
     onSpecReady,
     onReject: (message) => toast(message, 'err'),
     getDropContext: () => (currentView === 'library' ? selectedLibraryDropContext() : null),
+    onAddSectionsClick: onMapAddSectionsClick,
   });
   initRefPopover();
 
