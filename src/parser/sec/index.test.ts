@@ -209,6 +209,43 @@ describe('parseSec — SPT content nodes', () => {
     expect(ids.size).toBe(total);
     expect(total).toBeGreaterThan(0);
   });
+
+  it('regression: nested SPT under article — 27 05 13.43 Headend Amplifiers is pr1, not article', () => {
+    const xml = readFileSync(
+      resolve(process.cwd(), 'docs/references/UFGS/DIVISION_27/27_05_13.43.SEC'),
+      'latin1'
+    );
+    const { tree } = parseSec(xml);
+    const products = tree.parts.find((p) => p.text === 'PRODUCTS');
+    const headend = products?.children.find((c) => c.text === 'HEADEND EQUIPMENT');
+    const amplifiers = headend?.children.find((c) => c.text === 'Headend Amplifiers');
+
+    expect(headend?.type).toBe('article');
+    expect(amplifiers?.type).toBe('pr1');
+  });
+
+  it('maps nested SPT depth to CSI paragraph tiers', () => {
+    const xml = `<?xml version="1.0"?>
+<SEC>
+  <SCN>SECTION 27 05 13.43</SCN>
+  <STL>TELEVISION DISTRIBUTION SYSTEM</STL>
+  <PRT><TTL>PART 2 PRODUCTS</TTL>
+    <SPT><TTL>HEADEND EQUIPMENT</TTL>
+      <SPT><TTL>Headend Amplifiers</TTL>
+        <SPT><TTL>Gain Controls</TTL></SPT>
+      </SPT>
+    </SPT>
+  </PRT>
+</SEC>`;
+    const { tree } = parseSec(xml);
+    const article = tree.parts[0]?.children[0];
+    const pr1 = article?.children.find((c) => c.text === 'Headend Amplifiers');
+    const pr2 = pr1?.children.find((c) => c.text === 'Gain Controls');
+
+    expect(article?.type).toBe('article');
+    expect(pr1?.type).toBe('pr1');
+    expect(pr2?.type).toBe('pr2');
+  });
 });
 
 describe('parseSec — NTE / NPR notes', () => {

@@ -73,6 +73,23 @@ function makeNode(type: NodeType, text: string, children: SpecNode[], vanish?: b
   };
 }
 
+function sptNodeType(depth: number): NodeType {
+  switch (depth) {
+    case 0:
+      return 'article';
+    case 1:
+      return 'pr1';
+    case 2:
+      return 'pr2';
+    case 3:
+      return 'pr3';
+    case 4:
+      return 'pr4';
+    default:
+      return 'pr5';
+  }
+}
+
 function walkNte(nte: NteNode): SpecNode[] {
   return toArray(nte.NPR)
     .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
@@ -111,16 +128,16 @@ function walkOlg(spt: SptNode, children: SpecNode[], refs: SecRef[]): void {
   walkTextItems(toArray(spt.OLG.OLI), 'pr1', children, refs);
 }
 
-function buildStandardRef(articleId: string, code: string, rtl: string): SecRef {
+function buildStandardRef(sourceNodeId: string, code: string, rtl: string): SecRef {
   return {
-    sourceNodeId: articleId,
+    sourceNodeId,
     targetType: 'standard',
     standardCode: code,
     referenceText: rtl ? `${code} ${rtl}` : code,
   };
 }
 
-function pushRefsForRids(refs: SecRef[], articleId: string, ref: RefNode): void {
+function pushRefsForRids(refs: SecRef[], sourceNodeId: string, ref: RefNode): void {
   const rids = toArray(ref.RID);
   const rtls = ref.RTL ?? [];
   rids.forEach((rid, i) => {
@@ -129,17 +146,21 @@ function pushRefsForRids(refs: SecRef[], articleId: string, ref: RefNode): void 
     if (!code) return;
     const rtlEntry = rtls[i];
     const rtl = typeof rtlEntry === 'string' ? decodeXmlEntities(rtlEntry.trim()) : '';
-    refs.push(buildStandardRef(articleId, code, rtl));
+    refs.push(buildStandardRef(sourceNodeId, code, rtl));
   });
 }
 
-function pushStandardRefs(refs: SecRef[], articleId: string, refNodes: readonly RefNode[]): void {
+function pushStandardRefs(
+  refs: SecRef[],
+  sourceNodeId: string,
+  refNodes: readonly RefNode[]
+): void {
   for (const ref of refNodes) {
-    pushRefsForRids(refs, articleId, ref);
+    pushRefsForRids(refs, sourceNodeId, ref);
   }
 }
 
-function walkSpt(spt: SptNode, refs: SecRef[]): SpecNode {
+function walkSpt(spt: SptNode, refs: SecRef[], depth: number): SpecNode {
   const ttlRaw = typeof spt.TTL === 'string' ? spt.TTL : '';
   const children: SpecNode[] = [];
 
@@ -151,12 +172,12 @@ function walkSpt(spt: SptNode, refs: SecRef[]): SpecNode {
   walkTextItems(toArray(spt.ITM), 'pr2', children, refs);
   walkOlg(spt, children, refs);
   for (const nested of toArray(spt.SPT)) {
-    children.push(walkSpt(nested, refs));
+    children.push(walkSpt(nested, refs, depth + 1));
   }
 
-  const articleNode = makeNode('article', stripTags(ttlRaw) || 'UNTITLED', children);
-  pushStandardRefs(refs, articleNode.id, spt.REF ?? []);
-  return articleNode;
+  const node = makeNode(sptNodeType(depth), stripTags(ttlRaw) || 'UNTITLED', children);
+  pushStandardRefs(refs, node.id, spt.REF ?? []);
+  return node;
 }
 
 function walkPrt(prt: PrtNode, refs: SecRef[]): SpecNode {
@@ -167,7 +188,7 @@ function walkPrt(prt: PrtNode, refs: SecRef[]): SpecNode {
     partChildren.push(...walkNte(nte));
   }
   for (const spt of toArray(prt.SPT)) {
-    partChildren.push(walkSpt(spt, refs));
+    partChildren.push(walkSpt(spt, refs, 0));
   }
 
   return makeNode('part', stripPartPrefix(stripTags(ttlRaw)) || 'PART', partChildren);
