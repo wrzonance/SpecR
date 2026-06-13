@@ -173,6 +173,10 @@ function requireString(val: unknown, fieldName: string): string {
   return val.trim();
 }
 
+function optionalString(val: unknown): string | undefined {
+  return typeof val === 'string' && val.trim().length > 0 ? val.trim() : undefined;
+}
+
 export function parseSec(xml: string): ParsedSec {
   let root: unknown;
   try {
@@ -190,12 +194,10 @@ export function parseSec(xml: string): ParsedSec {
   // never rejected here — exact-match linkage simply won't find
   // non-conforming sections (validation gates arrive with the API schema +
   // DB CHECK constraint work).
-  const scnRaw = decodeXmlEntities(
-    requireString(sec['SCN'], 'SCN')
-      .replace(/^SECTION\s+/i, '')
-      .trim()
-  );
-  const section = normalizeSectionNumber(scnRaw) ?? scnRaw;
+  const scnRaw = decodeXmlEntities(optionalString(sec['SCN']) ?? '')
+    .replace(/^SECTION\s+/i, '')
+    .trim();
+  const section = scnRaw.length > 0 ? (normalizeSectionNumber(scnRaw) ?? scnRaw) : 'unknown';
   const title = decodeXmlEntities(requireString(sec['STL'], 'STL'));
 
   const refs: SecRef[] = [];

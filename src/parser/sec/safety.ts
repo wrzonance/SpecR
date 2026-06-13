@@ -5,13 +5,13 @@ import { decodeTextBuffer } from '../../lib/decode-text.js';
 // while accommodating real UFGS <REF> blocks that can exceed 8 KiB.
 const MAX_LINE_LENGTH = 65536;
 // eslint-disable-next-line no-control-regex
-const CONTROL_CHAR_RE = /[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+const XML_UNSAFE_CONTROL_CHAR_RE = /[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 
 export function assertSecSafe(buf: Buffer): string {
   const text = decodeTextBuffer(buf);
   if (text.includes('\0')) throw new ParserError('null byte in .sec file');
-  if (CONTROL_CHAR_RE.test(text)) throw new ParserError('control character in .sec file');
-  if (text.split('\n').some((line) => line.replace(/\r$/, '').length > MAX_LINE_LENGTH))
+  const sanitized = text.replace(XML_UNSAFE_CONTROL_CHAR_RE, '');
+  if (sanitized.split('\n').some((line) => line.replace(/\r$/, '').length > MAX_LINE_LENGTH))
     throw new ParserError('line too long in .sec file');
-  return text;
+  return sanitized;
 }

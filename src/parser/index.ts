@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { parseSec } from './sec/index.js';
+import { assertSecSafe, parseSec } from './sec/index.js';
 import { parseDocx } from './docx/index.js';
 import { parseText } from './text/index.js';
 import { extractRefsFromTree } from './refs/index.js';
@@ -44,7 +44,7 @@ function applyInference(tree: SpecTree, inference: SectionInference): SpecTree {
 export async function parse(buffer: Buffer, filename: string): Promise<ParseResult> {
   const ext = path.extname(filename).toLowerCase();
   if (ext === '.sec') {
-    const text = decodeTextBuffer(buffer);
+    const text = assertSecSafe(buffer);
     const { tree, refs } = parseSec(text);
     const sectionInference = inferSectionMeta(tree);
     return { tree: applyInference(tree, sectionInference), refs, sectionInference };
