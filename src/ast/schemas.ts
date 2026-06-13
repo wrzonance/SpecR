@@ -114,6 +114,26 @@ export const AddSectionToProjectBodySchema = z.object({
 
 export type AddSectionToProjectBody = z.infer<typeof AddSectionToProjectBodySchema>;
 
+export const SetDivisionGeneralSpecBodySchema = z
+  .object({
+    generalSpecId: z.uuid().exactOptional(),
+    status: z.literal('not_applicable').exactOptional(),
+    notes: z.string().check(z.minLength(1)).exactOptional(),
+  })
+  .check((ctx) => {
+    const hasSpec = ctx.value.generalSpecId !== undefined;
+    const notApplicable = ctx.value.status === 'not_applicable';
+    if (hasSpec === notApplicable) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        message: 'provide either generalSpecId or status=not_applicable',
+      });
+    }
+  });
+
+export type SetDivisionGeneralSpecBody = z.infer<typeof SetDivisionGeneralSpecBodySchema>;
+
 export const CreatePackageBodySchema = z.object({
   name: z.string().check(z.minLength(1)),
 });

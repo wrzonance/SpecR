@@ -124,3 +124,24 @@ export {
 export type { RevisionSummary, RevisionSpecEntry, RevisionWithTrees } from './queries/revisions.js';
 export { getSpecLineage } from './queries/lineage.js';
 export type { SpecLineage, LineageHop, LineageScope } from './queries/lineage.js';
+export {
+  getLibraryDivisionGeneralSpec,
+  getProjectDivisionGeneralSpec,
+  setLibraryDivisionGeneralSpec,
+  setProjectDivisionGeneralSpec,
+  reconcileLibraryDivisionGeneralSpec,
+  reconcileProjectDivisionGeneralSpec,
+  DivisionGeneralOwnerNotFoundError,
+  DivisionGeneralSpecNotInScopeError,
+} from './queries/division-general.js';
+export type {
+  DivisionGeneralSpecResult,
+  DivisionGeneralSpecRef,
+  DivisionGeneralCandidate,
+  DivisionGeneralScope,
+  DivisionGeneralStatus,
+  DivisionGeneralMethod,
+  DivisionGeneralCandidateReason,
+  DivisionGeneralConfidence,
+  SetDivisionGeneralSpecInput,
+} from './queries/division-general.js';
