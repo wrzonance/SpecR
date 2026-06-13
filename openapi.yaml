@@ -269,10 +269,10 @@ paths:
                     DOCX title and confidently identified Section references in paragraph
                     text. Canonical emits "09 91 00", dots emits "09.91.00", and compact
                     emits "099100". Stored AST and database values remain canonical.
-              examples:
-                dotted-section-numbers:
-                  value:
-                    sectionNumberFormat: dots
+            examples:
+              dotted-section-numbers:
+                value:
+                  sectionNumberFormat: dots
       responses:
         '200':
           description: DOCX file stream
