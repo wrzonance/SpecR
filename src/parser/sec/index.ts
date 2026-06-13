@@ -28,6 +28,8 @@ const xmlParser = new XMLParser({
   processEntities: false,
 });
 
+const HEADING_TAGS = ['HL1', 'HL2', 'HL3', 'HL4', 'HL5', 'HL6'] as const;
+
 // Split on '<' then drop the tag token (everything up to and including '>') from each piece.
 // Avoids regex backtracking concerns while preserving inter-tag text. Entities decode AFTER
 // tag-stripping — stopNodes return raw XML, so &amp; etc. are still escaped here (the
@@ -177,6 +179,31 @@ function optionalString(val: unknown): string | undefined {
   return typeof val === 'string' && val.trim().length > 0 ? val.trim() : undefined;
 }
 
+function asRecord(val: unknown): Record<string, unknown> | undefined {
+  return typeof val === 'object' && val !== null && !Array.isArray(val)
+    ? (val as Record<string, unknown>)
+    : undefined;
+}
+
+function metadataString(
+  sec: Record<string, unknown>,
+  fieldName: 'SCN' | 'STL'
+): string | undefined {
+  const direct = optionalString(sec[fieldName]);
+  if (direct !== undefined) return direct;
+
+  for (const tag of HEADING_TAGS) {
+    const wrapped = toArray(sec[tag]);
+    for (const candidate of wrapped) {
+      const nested = asRecord(candidate);
+      const value = nested === undefined ? undefined : optionalString(nested[fieldName]);
+      if (value !== undefined) return value;
+    }
+  }
+
+  return undefined;
+}
+
 export function parseSec(xml: string): ParsedSec {
   let root: unknown;
   try {
@@ -194,11 +221,11 @@ export function parseSec(xml: string): ParsedSec {
   // never rejected here — exact-match linkage simply won't find
   // non-conforming sections (validation gates arrive with the API schema +
   // DB CHECK constraint work).
-  const scnRaw = decodeXmlEntities(optionalString(sec['SCN']) ?? '')
+  const scnRaw = decodeXmlEntities(metadataString(sec, 'SCN') ?? '')
     .replace(/^SECTION\s+/i, '')
     .trim();
   const section = scnRaw.length > 0 ? (normalizeSectionNumber(scnRaw) ?? scnRaw) : 'unknown';
-  const title = decodeXmlEntities(requireString(sec['STL'], 'STL'));
+  const title = decodeXmlEntities(requireString(metadataString(sec, 'STL'), 'STL'));
 
   const refs: SecRef[] = [];
   const parts = toArray(sec['PRT'] as readonly PrtNode[] | undefined).map((prt) =>
