@@ -18,6 +18,12 @@ function svgEl(tag, attrs) {
   return node;
 }
 
+function sectionLabel(section, callbacks) {
+  return typeof callbacks.displaySection === 'function'
+    ? callbacks.displaySection(section)
+    : section;
+}
+
 // specs: Map<specId, { tree, references }>
 // Returns { nodes: [{section, status, refCount}], edges: [{from, to, count, status}] }
 export function buildWebModel(specs) {
@@ -115,8 +121,8 @@ export function renderWeb(canvas, model, callbacks) {
     });
     const label =
       edge.count > 1
-        ? `${edge.from} cites ${edge.to} (${edge.count} references)`
-        : `${edge.from} cites ${edge.to}`;
+        ? `${sectionLabel(edge.from, callbacks)} cites ${sectionLabel(edge.to, callbacks)} (${edge.count} references)`
+        : `${sectionLabel(edge.from, callbacks)} cites ${sectionLabel(edge.to, callbacks)}`;
     path.appendChild(svgEl('title', {})).textContent = label;
     path.addEventListener('click', () => {
       if (edge.status === 'loaded' && callbacks.onNavigate) callbacks.onNavigate(edge.to);
@@ -143,7 +149,7 @@ export function renderWeb(canvas, model, callbacks) {
 
     group.appendChild(svgEl('circle', { cx: x, cy: baseline, r: 8 }));
     const label = svgEl('text', { x, y: baseline + 24 });
-    label.textContent = node.section;
+    label.textContent = sectionLabel(node.section, callbacks);
     group.appendChild(label);
 
     if (node.status !== 'loaded') {

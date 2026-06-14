@@ -18,6 +18,8 @@ import {
 import {
   createProjectHandler,
   getProjectHandler,
+  listProjectsHandler,
+  patchProjectHandler,
   setProjectSourcesHandler,
   addSectionToProjectHandler,
   removeSectionFromProjectHandler,
@@ -53,6 +55,7 @@ import { validateBody } from './middleware/validate.js';
 import {
   PatchSpecBodySchema,
   CreateProjectBodySchema,
+  PatchProjectBodySchema,
   SetProjectSourcesBodySchema,
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
@@ -107,8 +110,10 @@ router.patch(
 );
 router.delete('/specs/:id/references/:refId', deleteReferenceHandler);
 router.post('/specs/:id/generate', generateHandler);
+router.get('/projects', listProjectsHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects/:id', getProjectHandler);
+router.patch('/projects/:id', validateBody(PatchProjectBodySchema), patchProjectHandler);
 router.put(
   '/projects/:id/sources',
   validateBody(SetProjectSourcesBodySchema),

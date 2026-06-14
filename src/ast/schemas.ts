@@ -111,6 +111,23 @@ export const CreateProjectBodySchema = z.object({
 
 export type CreateProjectBody = z.infer<typeof CreateProjectBodySchema>;
 
+export const PatchProjectBodySchema = z
+  .object({
+    name: z.string().check(z.minLength(1)).exactOptional(),
+    sectionNumberFormat: SectionNumberFormatSchema.exactOptional(),
+  })
+  .check((ctx) => {
+    if (ctx.value.name === undefined && ctx.value.sectionNumberFormat === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        message: 'provide at least one project setting',
+      });
+    }
+  });
+
+export type PatchProjectBody = z.infer<typeof PatchProjectBodySchema>;
+
 export const SetProjectSourcesBodySchema = z.object({
   sourceLibraryIds: z
     .array(z.uuid())

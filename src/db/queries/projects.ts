@@ -1,6 +1,7 @@
 import { DatabaseError, pool } from '../index.js';
 import type { Pool, PoolClient } from 'pg';
 import type { LibraryTier } from './libraries.js';
+import type { SectionNumberFormat } from '../../lib/section-number.js';
 import { logger } from '../../lib/logger.js';
 
 interface Queryable {
@@ -11,11 +12,13 @@ interface ProjectRow {
   readonly id: string;
   readonly name: string;
   readonly description: string | null;
+  readonly section_number_format: SectionNumberFormat;
 }
 
 interface ProjectListRow {
   readonly id: string;
   readonly name: string;
+  readonly section_number_format: SectionNumberFormat;
 }
 
 interface TocRow {
@@ -60,12 +63,14 @@ export interface ProjectSource {
 export interface ProjectListItem {
   readonly id: string;
   readonly name: string;
+  readonly sectionNumberFormat: SectionNumberFormat;
 }
 
 export interface ProjectSummary {
   readonly projectId: string;
   readonly name: string;
   readonly description: string | null;
+  readonly sectionNumberFormat: SectionNumberFormat;
   readonly sources: readonly ProjectSource[];
 }
 
@@ -80,6 +85,7 @@ export interface ProjectWithToc {
   readonly projectId: string;
   readonly name: string;
   readonly description: string | null;
+  readonly sectionNumberFormat: SectionNumberFormat;
   readonly sources: readonly ProjectSource[];
   readonly toc: readonly ProjectTocEntry[];
 }
@@ -99,6 +105,11 @@ export interface CreateProjectInput {
   readonly name: string;
   readonly description?: string;
   readonly sourceLibraryIds: readonly string[];
+}
+
+export interface UpdateProjectInput {
+  readonly name?: string;
+  readonly sectionNumberFormat?: SectionNumberFormat;
 }
 
 export interface AddSpecResult {
@@ -142,14 +153,14 @@ export async function createProject(
     const result = await pool.query<ProjectRow>(
       `WITH proj AS (
          INSERT INTO projects (name, description) VALUES ($1, $2)
-         RETURNING id, name, description
+         RETURNING id, name, description, section_number_format
        ),
        src AS (
          INSERT INTO project_sources (project_id, library_id, priority)
          SELECT proj.id, u.lib_id, u.ord::int
          FROM proj, unnest($3::uuid[]) WITH ORDINALITY AS u(lib_id, ord)
        )
-       SELECT id, name, description FROM proj`,
+       SELECT id, name, description, section_number_format FROM proj`,
       [input.name, input.description ?? null, input.sourceLibraryIds]
     );
     const row = result.rows[0];
@@ -160,7 +171,13 @@ export async function createProject(
       tier: lib.tier,
       priority: i + 1,
     }));
-    return { projectId: row.id, name: row.name, description: row.description, sources };
+    return {
+      projectId: row.id,
+      name: row.name,
+      description: row.description,
+      sectionNumberFormat: row.section_number_format,
+      sources,
+    };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError('createProject: insert failed', { cause: err });
@@ -211,11 +228,52 @@ export async function setProjectSources(
 export async function listProjects(pool: Queryable): Promise<readonly ProjectListItem[]> {
   try {
     const result = await pool.query<ProjectListRow>(
-      'SELECT id, name FROM projects ORDER BY name, id'
+      'SELECT id, name, section_number_format FROM projects ORDER BY name, id'
     );
-    return result.rows.map((row) => ({ id: row.id, name: row.name }));
+    return result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      sectionNumberFormat: row.section_number_format,
+    }));
   } catch (err) {
     throw new DatabaseError('listProjects: query failed', { cause: err });
+  }
+}
+
+export async function updateProject(
+  projectId: string,
+  input: UpdateProjectInput,
+  pool: Queryable
+): Promise<ProjectSummary | null> {
+  try {
+    const result = await pool.query<ProjectRow>(
+      `UPDATE projects
+       SET name = COALESCE($2, name),
+           section_number_format = COALESCE($3, section_number_format),
+           updated_at = now()
+       WHERE id = $1
+       RETURNING id, name, description, section_number_format`,
+      [projectId, input.name ?? null, input.sectionNumberFormat ?? null]
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    const sourceRows = await pool.query<ProjectSourceRow>(
+      `SELECT ps.library_id, l.name, l.tier, ps.priority
+       FROM project_sources ps
+       JOIN libraries l ON l.id = ps.library_id
+       WHERE ps.project_id = $1
+       ORDER BY ps.priority`,
+      [projectId]
+    );
+    return {
+      projectId: row.id,
+      name: row.name,
+      description: row.description,
+      sectionNumberFormat: row.section_number_format,
+      sources: mapSources(sourceRows.rows),
+    };
+  } catch (err) {
+    throw new DatabaseError(`updateProject: failed for project ${projectId}`, { cause: err });
   }
 }
 
@@ -232,7 +290,7 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
   let project: ProjectRow | undefined;
   try {
     const res = await pool.query<ProjectRow>(
-      'SELECT id, name, description FROM projects WHERE id = $1',
+      'SELECT id, name, description, section_number_format FROM projects WHERE id = $1',
       [id]
     );
     project = res.rows[0];
@@ -261,6 +319,7 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
       projectId: project.id,
       name: project.name,
       description: project.description,
+      sectionNumberFormat: project.section_number_format,
       toc: tocRes.rows.map((row) => ({
         specId: row.id,
         section: row.section,

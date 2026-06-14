@@ -4,12 +4,13 @@
 
 import { getLabel } from './labels.js';
 
-// Matches CSI section numbers, including UFGS dotted variants (09 67 23.13).
+// Matches CSI section numbers, including UFGS agency variants (01 32 01.00 10).
 // Whitespace-tolerant: Word text routinely separates the digit groups with
 // non-breaking spaces or doubled spaces (\s covers   in JS). The server
 // extractor normalizes those at ingest, so the stored targetSection has single
 // spaces — matched text must be normalized the same way before lookups.
-const SECTION_PATTERN = /\b\d{2}\s{1,3}\d{2}\s{1,3}\d{2}(?:\.\d{2})?\b/g;
+const SECTION_PATTERN =
+  /(?<![\d.])\d{2}\s+\d{2}\s+\d{2}(?:\.\d{2}(?!\d)(?:[^\S\r\n]+\d{2}(?!\d))?)?(?!\d)/g;
 
 function normalizeSection(text) {
   return text.replace(/\s+/g, ' ');
@@ -20,6 +21,10 @@ function el(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+function sectionLabel(section, ctx) {
+  return typeof ctx.displaySection === 'function' ? ctx.displaySection(section) : section;
 }
 
 // Splits node text and turns known section numbers into clickable links.
@@ -34,23 +39,23 @@ function linkifyText(text, ctx) {
     if (!status) continue;
     frag.appendChild(document.createTextNode(text.slice(last, match.index)));
     // display the original text verbatim; navigate/walk by normalized section
-    const link = el('button', 'ref-link', match[0]);
+    const link = el('button', 'ref-link', sectionLabel(section, ctx));
     link.type = 'button';
     link.dataset.section = section;
     if (status === 'loaded') {
-      link.title = `Jump to Section ${section}`;
+      link.title = `Jump to Section ${sectionLabel(section, ctx)}`;
       link.addEventListener('click', () => ctx.onNavigate(section));
     } else if (status === 'library') {
       link.classList.add('is-library');
-      link.title = `Section ${section} is in the SpecR library but not loaded here`;
+      link.title = `Section ${sectionLabel(section, ctx)} is in the SpecR library but not loaded here`;
       link.addEventListener('click', () => ctx.onLibraryRef(section));
     } else {
       link.classList.add('is-unresolved');
-      link.title = `Section ${section} — unresolved (not in library)`;
+      link.title = `Section ${sectionLabel(section, ctx)} — unresolved (not in library)`;
     }
     if (ctx.brokenSections && ctx.brokenSections.has(section)) {
       link.classList.add('is-broken');
-      link.title = `Section ${section} — broken reference (target removed from project)`;
+      link.title = `Section ${sectionLabel(section, ctx)} — broken reference (target removed from project)`;
     }
     frag.appendChild(link);
     last = match.index + match[0].length;
@@ -340,9 +345,9 @@ function makeSectionChip(section, count, ctx, sheet, walkState) {
 
   const walk = el('button', 'ref-walk');
   walk.type = 'button';
-  walk.title = `Walk to each citation of Section ${section} in this spec`;
+  walk.title = `Walk to each citation of Section ${sectionLabel(section, ctx)} in this spec`;
   walk.appendChild(el('span', 'dot'));
-  walk.appendChild(document.createTextNode(section));
+  walk.appendChild(document.createTextNode(sectionLabel(section, ctx)));
   const pos = el('span', 'walk-pos', count > 1 ? `×${count}` : '');
   walk.appendChild(pos);
   walk.addEventListener('click', () => {
@@ -370,7 +375,7 @@ function makeSectionChip(section, count, ctx, sheet, walkState) {
     const jump = el('button', 'ref-jump', '↗');
     jump.type = 'button';
     if (status === 'loaded') {
-      jump.title = `Jump to Section ${section}`;
+      jump.title = `Jump to Section ${sectionLabel(section, ctx)}`;
       jump.addEventListener('click', () => ctx.onNavigate(section));
     } else {
       jump.title = 'In SpecR library — drop the file to load it here';
@@ -382,7 +387,7 @@ function makeSectionChip(section, count, ctx, sheet, walkState) {
   }
   if (broken) {
     const flag = el('span', 'chip-broken', '⚠ BROKEN');
-    flag.title = `Section ${section} — the server marked this citation broken (target removed from the project)`;
+    flag.title = `Section ${sectionLabel(section, ctx)} — the server marked this citation broken (target removed from the project)`;
     chip.appendChild(flag);
   }
   return chip;
@@ -473,7 +478,9 @@ export function renderSpecSheet(spec, ctx) {
   sheet.id = `sheet-${tree.id}`;
 
   const head = el('header', 'sheet-head');
-  head.appendChild(el('span', 'sheet-section', tree.section || '—'));
+  head.appendChild(
+    el('span', 'sheet-section', tree.section ? sectionLabel(tree.section, actx) : '—')
+  );
   head.appendChild(el('h2', 'sheet-title', tree.title || 'Untitled Section'));
 
   const stats = el('div', 'sheet-stats');

@@ -40,7 +40,14 @@ describe('createProject', () => {
         rowCount: 2,
       } as never)
       .mockResolvedValueOnce({
-        rows: [{ id: 'proj-1', name: 'Test Project', description: null }],
+        rows: [
+          {
+            id: 'proj-1',
+            name: 'Test Project',
+            description: null,
+            section_number_format: 'canonical',
+          },
+        ],
         rowCount: 1,
       } as never);
     const { createProject } = await import('./projects.js');
@@ -49,6 +56,7 @@ describe('createProject', () => {
       pool
     );
     expect(result.projectId).toBe('proj-1');
+    expect(result.sectionNumberFormat).toBe('canonical');
     expect(result.sources).toEqual([
       { libraryId: 'lib-client', name: 'Client M', tier: 'client', priority: 1 },
       { libraryId: 'lib-co', name: 'Co M', tier: 'company', priority: 2 },
@@ -99,7 +107,14 @@ describe('findProjectById', () => {
     const { pool } = await import('../index.js');
     vi.mocked(pool.query)
       .mockResolvedValueOnce({
-        rows: [{ id: 'proj-1', name: 'My Project', description: 'desc' }],
+        rows: [
+          {
+            id: 'proj-1',
+            name: 'My Project',
+            description: 'desc',
+            section_number_format: 'dots',
+          },
+        ],
         rowCount: 1,
       } as never)
       .mockResolvedValueOnce({
@@ -117,6 +132,7 @@ describe('findProjectById', () => {
     const result = await findProjectById('proj-1', pool);
     expect(result).not.toBeNull();
     expect(result?.projectId).toBe('proj-1');
+    expect(result?.sectionNumberFormat).toBe('dots');
     expect(result?.toc).toHaveLength(2);
     expect(result?.toc[0]?.specId).toBe('spec-1');
     expect(result?.sources).toEqual([
@@ -133,19 +149,19 @@ describe('findProjectById', () => {
 });
 
 describe('listProjects', () => {
-  it('returns project ids and names', async () => {
+  it('returns project ids, names, and section-number formats', async () => {
     const { pool } = await import('../index.js');
     vi.mocked(pool.query).mockResolvedValueOnce({
       rows: [
-        { id: 'project-a', name: 'Alpha' },
-        { id: 'project-b', name: 'Beta' },
+        { id: 'project-a', name: 'Alpha', section_number_format: 'canonical' },
+        { id: 'project-b', name: 'Beta', section_number_format: 'dots' },
       ],
       rowCount: 2,
     } as never);
     const { listProjects } = await import('./projects.js');
     await expect(listProjects(pool)).resolves.toEqual([
-      { id: 'project-a', name: 'Alpha' },
-      { id: 'project-b', name: 'Beta' },
+      { id: 'project-a', name: 'Alpha', sectionNumberFormat: 'canonical' },
+      { id: 'project-b', name: 'Beta', sectionNumberFormat: 'dots' },
     ]);
     expect(vi.mocked(pool.query).mock.calls[0]?.[0]).toContain('ORDER BY name, id');
   });
@@ -155,6 +171,54 @@ describe('listProjects', () => {
     vi.mocked(pool.query).mockRejectedValueOnce(new Error('db down'));
     const { listProjects } = await import('./projects.js');
     await expect(listProjects(pool)).rejects.toBeInstanceOf(DatabaseError);
+  });
+});
+
+describe('updateProject', () => {
+  it('updates name and section-number format and returns sources', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query)
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'proj-1',
+            name: 'Renamed',
+            description: null,
+            section_number_format: 'compact',
+          },
+        ],
+        rowCount: 1,
+      } as never)
+      .mockResolvedValueOnce({
+        rows: [{ library_id: 'lib-1', name: 'Co M', tier: 'company', priority: 1 }],
+        rowCount: 1,
+      } as never);
+    const { updateProject } = await import('./projects.js');
+    await expect(
+      updateProject('proj-1', { name: 'Renamed', sectionNumberFormat: 'compact' }, pool)
+    ).resolves.toEqual({
+      projectId: 'proj-1',
+      name: 'Renamed',
+      description: null,
+      sectionNumberFormat: 'compact',
+      sources: [{ libraryId: 'lib-1', name: 'Co M', tier: 'company', priority: 1 }],
+    });
+  });
+
+  it('returns null when the project does not exist', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
+    const { updateProject } = await import('./projects.js');
+    await expect(updateProject('missing', { name: 'Missing' }, pool)).resolves.toBeNull();
+  });
+
+  it('throws DatabaseError on update failure', async () => {
+    const { DatabaseError, pool } = await import('../index.js');
+    vi.mocked(pool.query).mockRejectedValueOnce(new Error('db down'));
+    const { updateProject } = await import('./projects.js');
+    await expect(updateProject('proj-1', { name: 'x' }, pool)).rejects.toBeInstanceOf(
+      DatabaseError
+    );
   });
 });
 

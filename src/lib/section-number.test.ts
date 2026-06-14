@@ -200,6 +200,12 @@ describe('findSectionNumbers', () => {
     expect(found[0]?.index).toBe(4);
   });
 
+  it('finds UFGS agency-suffix section citations', () => {
+    const text = 'Maintain the register per Section 01 45 00.15 10 RMS CM.';
+    const found = findSectionNumbers(text);
+    expect(found.map((f) => f.value)).toEqual(['01 45 00.15 10']);
+  });
+
   it('returns empty array when nothing matches', () => {
     expect(findSectionNumbers('no numbers here')).toEqual([]);
   });

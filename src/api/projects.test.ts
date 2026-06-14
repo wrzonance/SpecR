@@ -15,7 +15,10 @@ vi.mock('../db/index.js', () => ({
   ProjectNotFoundError: class ProjectNotFoundError extends Error {},
   SectionUnresolvedError: class SectionUnresolvedError extends Error {},
   createProject: vi.fn(),
+  listProjects: vi.fn(),
   findProjectById: vi.fn(),
+  updateProject: vi.fn(),
+  setProjectSources: vi.fn(),
   addSectionToProject: vi.fn(),
   removeSectionFromProject: vi.fn(),
   getBrokenRefs: vi.fn(),
@@ -42,6 +45,7 @@ describe('createProjectHandler', () => {
       projectId: 'p1',
       name: 'Test',
       description: null,
+      sectionNumberFormat: 'canonical',
       sources: [],
     });
     const { createProjectHandler } = await import('./projects.js');
@@ -84,6 +88,7 @@ describe('getProjectHandler', () => {
       projectId: 'p1',
       name: 'Test',
       description: null,
+      sectionNumberFormat: 'canonical',
       sources: [],
       toc: [],
     });
@@ -124,6 +129,79 @@ describe('getProjectHandler', () => {
     const res = makeRes();
     await getProjectHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(500);
+  });
+});
+
+describe('listProjectsHandler', () => {
+  it('returns 200 with project summaries', async () => {
+    const { listProjects } = await import('../db/index.js');
+    vi.mocked(listProjects).mockResolvedValueOnce([
+      { id: 'p1', name: 'Alpha', sectionNumberFormat: 'canonical' },
+      { id: 'p2', name: 'Beta', sectionNumberFormat: 'dots' },
+    ]);
+    const { listProjectsHandler } = await import('./projects.js');
+    const res = makeRes();
+    await listProjectsHandler({} as Request, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(200);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['success']).toBe(true);
+    expect(body['data']).toEqual([
+      { id: 'p1', name: 'Alpha', sectionNumberFormat: 'canonical' },
+      { id: 'p2', name: 'Beta', sectionNumberFormat: 'dots' },
+    ]);
+  });
+
+  it('returns 500 on database error', async () => {
+    const { listProjects } = await import('../db/index.js');
+    vi.mocked(listProjects).mockRejectedValueOnce(new Error('db down'));
+    const { listProjectsHandler } = await import('./projects.js');
+    const res = makeRes();
+    await listProjectsHandler({} as Request, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
+});
+
+describe('patchProjectHandler', () => {
+  it('returns 200 with updated project settings', async () => {
+    const { updateProject } = await import('../db/index.js');
+    vi.mocked(updateProject).mockResolvedValueOnce({
+      projectId: 'p1',
+      name: 'Renamed',
+      description: null,
+      sectionNumberFormat: 'dots',
+      sources: [],
+    });
+    const { patchProjectHandler } = await import('./projects.js');
+    const req = {
+      params: { id: 'p1' },
+      body: { name: 'Renamed', sectionNumberFormat: 'dots' },
+    } as unknown as Request;
+    const res = makeRes();
+    await patchProjectHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(vi.mocked(updateProject)).toHaveBeenCalledWith(
+      'p1',
+      { name: 'Renamed', sectionNumberFormat: 'dots' },
+      {}
+    );
+  });
+
+  it('returns 404 when project is missing', async () => {
+    const { updateProject } = await import('../db/index.js');
+    vi.mocked(updateProject).mockResolvedValueOnce(null);
+    const { patchProjectHandler } = await import('./projects.js');
+    const req = { params: { id: 'p1' }, body: { name: 'Missing' } } as unknown as Request;
+    const res = makeRes();
+    await patchProjectHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('returns 400 when id param missing', async () => {
+    const { patchProjectHandler } = await import('./projects.js');
+    const req = { params: {}, body: { name: 'Missing' } } as unknown as Request;
+    const res = makeRes();
+    await patchProjectHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(400);
   });
 });
 

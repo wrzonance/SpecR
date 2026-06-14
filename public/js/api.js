@@ -120,8 +120,16 @@ export function createProject(name, description, sourceLibraryIds) {
   return sendJson('POST', '/projects', body);
 }
 
+export function listProjects() {
+  return getJson('/projects');
+}
+
 export function getProject(projectId) {
   return getJson(`/projects/${enc(projectId)}`);
+}
+
+export function patchProject(projectId, patch) {
+  return sendJson('PATCH', `/projects/${enc(projectId)}`, patch);
 }
 
 export function setProjectSources(projectId, sourceLibraryIds) {

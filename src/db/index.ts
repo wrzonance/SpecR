@@ -65,6 +65,7 @@ export {
   createProject,
   setProjectSources,
   findProjectById,
+  updateProject,
   addSpecToProject,
   removeSpecFromProject,
   listProjects,
@@ -79,6 +80,7 @@ export type {
   ProjectSource,
   BrokenRef,
   CreateProjectInput,
+  UpdateProjectInput,
   AddSpecResult,
 } from './queries/projects.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';

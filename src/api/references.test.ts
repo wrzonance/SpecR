@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 
 vi.mock('../db/index.js', () => ({
   pool: {},
+  deleteReference: vi.fn(),
   findProjectById: vi.fn(),
   getInboundReferences: vi.fn(),
   getOutboundReferences: vi.fn(),
@@ -68,6 +69,7 @@ describe('getOutboundReferencesHandler', () => {
       projectId: PROJECT_ID,
       name: 'Project',
       description: null,
+      sectionNumberFormat: 'canonical',
       sources: [],
       toc: [],
     });

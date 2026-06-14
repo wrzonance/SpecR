@@ -17,6 +17,7 @@ export {
   SecRefSchema,
   PatchSpecBodySchema,
   CreateProjectBodySchema,
+  PatchProjectBodySchema,
   SetProjectSourcesBodySchema,
   AddSectionToProjectBodySchema,
   SetDivisionGeneralSpecBodySchema,
@@ -28,6 +29,7 @@ export {
 } from './schemas.js';
 export type {
   CreateProjectBody,
+  PatchProjectBody,
   SetProjectSourcesBody,
   AddSectionToProjectBody,
   SetDivisionGeneralSpecBody,

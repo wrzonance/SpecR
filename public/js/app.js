@@ -12,7 +12,9 @@ import {
   deleteReference,
   deleteSpec,
   createProject,
+  listProjects,
   getProject,
+  patchProject,
   setProjectSources,
   listLibraries,
   createClientLibrary,
@@ -33,17 +35,19 @@ import { initRefPopover } from './popover.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
 
 const specs = new Map(); // specId -> { tree, references, warnings?, capabilities? }
-const PROJECT_KEY = 'specr-demo-project';
+const ACTIVE_PROJECT_KEY = 'specr-active-project';
+const LEGACY_PROJECT_KEY = 'specr-demo-project';
 const LIBRARY_ONLY_KEY = 'specr-library-only-specs';
-const PROJECT_CLIENT_KEY = 'specr-demo-project-client';
-let demoProjectId = null; // the hidden project every loaded section belongs to
+let activeProjectId = null;
+let activeProject = null;
+let projects = [];
 let currentView = 'map';
 let tocSections = [];
 const tocCollapsedDivisions = new Set();
 let libraries = [];
 let selectedLibraryId = null;
 let selectedLibrarySpecs = [];
-let projectClientLibraryId = null;
+let projectClientLibraryIds = [];
 let tocLibrarySpecs = [];
 const board = document.getElementById('spec-board');
 const emptyState = document.getElementById('empty-state');
@@ -111,49 +115,309 @@ function updateAddFabVisibility() {
   if (add) add.hidden = currentView !== 'map';
 }
 
-// ── Demo project ────────────────────────────────────────────────────────────
-// The board has no visible "project", but every loaded section quietly joins
-// one hidden project so the server's broken-reference cascade can span the
-// whole board. The id is cached in localStorage and re-created if the DB resets.
+// ── Active project ─────────────────────────────────────────────────────────
 
-const projectMembers = new Set(); // spec ids known to be in the demo project
+const projectMembers = new Set(); // spec ids known to be in the active project
+const SECTION_PARTS_RE = /^(\d{2}) (\d{2}) (\d{2})(\.\d{2})?( \d{2})?$/;
 
-async function ensureDemoProject() {
-  const saved = localStorage.getItem(PROJECT_KEY);
-  if (saved) {
-    try {
-      const project = await getProject(saved);
-      demoProjectId = saved;
-      for (const entry of project.toc ?? []) projectMembers.add(entry.specId);
-      return;
-    } catch {
-      // stale id (database was reset) — fall through and make a fresh project
-    }
-  }
-  try {
-    const libraries = await listLibraries();
-    const company = libraries.find((lib) => lib.name === 'Default Company Master');
-    if (!company) throw new Error('Default Company Master library not found');
-    const project = await createProject(
-      'SpecR Demo Board',
-      'Auto-managed membership for the linkage console demo',
-      [company.id]
-    );
-    demoProjectId = project.projectId;
-    localStorage.setItem(PROJECT_KEY, demoProjectId);
-  } catch (err) {
-    demoProjectId = null;
-    toast(`could not create demo project — broken-ref cascade disabled: ${err.message}`, 'warn');
+function savedProjectId() {
+  return localStorage.getItem(ACTIVE_PROJECT_KEY) || localStorage.getItem(LEGACY_PROJECT_KEY);
+}
+
+function rememberProject(projectId) {
+  localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
+  localStorage.setItem(LEGACY_PROJECT_KEY, projectId);
+}
+
+function activeProjectName() {
+  return (
+    activeProject?.name ||
+    projects.find((project) => project.id === activeProjectId)?.name ||
+    'Project'
+  );
+}
+
+function activeSectionNumberFormat() {
+  return (
+    activeProject?.sectionNumberFormat ||
+    projects.find((project) => project.id === activeProjectId)?.sectionNumberFormat ||
+    'canonical'
+  );
+}
+
+function displaySection(section) {
+  const match = SECTION_PARTS_RE.exec(section);
+  if (!match) return section;
+  const first = match[1] || '';
+  const second = match[2] || '';
+  const third = match[3] || '';
+  const suffix = match[4] || '';
+  const agency = match[5] || '';
+  switch (activeSectionNumberFormat()) {
+    case 'dots':
+      return `${first}.${second}.${third}${suffix}${agency}`;
+    case 'compact':
+      return `${first}${second}${third}${suffix}${agency}`;
+    default:
+      return section;
   }
 }
 
+function defaultProjectSourceIds() {
+  const company = companyMaster();
+  return company ? [company.id] : [];
+}
+
+function projectClientSourceIds(project = activeProject) {
+  return (project?.sources ?? [])
+    .filter((source) => source.tier === 'client')
+    .map((source) => source.libraryId);
+}
+
+function projectSourceIds() {
+  const company = companyMaster();
+  return [...new Set([...projectClientLibraryIds, ...(company ? [company.id] : [])])];
+}
+
+function projectSourceLabel() {
+  const clientCount = projectClientLibraryIds.length;
+  if (clientCount === 0) return 'Company Masters';
+  return `${clientCount} Client Master${clientCount === 1 ? '' : 's'} + Company Masters`;
+}
+
+async function refreshProjectList(preferredId = activeProjectId) {
+  projects = await listProjects();
+  const saved = preferredId || savedProjectId();
+  if (saved && projects.some((project) => project.id === saved)) {
+    activeProjectId = saved;
+  } else {
+    activeProjectId = projects[0]?.id || null;
+  }
+  renderProjectControls();
+}
+
+async function createDefaultProject() {
+  const sourceIds = defaultProjectSourceIds();
+  if (sourceIds.length === 0) throw new Error('Default Company Master library not found');
+  const project = await createProject(
+    'SpecR Demo Board',
+    'Auto-managed membership for the linkage console demo',
+    sourceIds
+  );
+  activeProjectId = project.projectId;
+  rememberProject(activeProjectId);
+  await refreshProjectList(activeProjectId);
+}
+
+async function ensureActiveProject() {
+  try {
+    await refreshProjectList();
+    if (!activeProjectId) await createDefaultProject();
+    if (activeProjectId) rememberProject(activeProjectId);
+  } catch (err) {
+    activeProjectId = null;
+    activeProject = null;
+    toast(`could not initialize project workspace: ${err.message}`, 'warn');
+  }
+}
+
+function renderProjectControls() {
+  const select = document.getElementById('project-select');
+  const rename = document.getElementById('project-rename');
+  const format = document.getElementById('project-format-pill');
+  const source = document.getElementById('project-source-pill');
+  if (select) {
+    select.replaceChildren();
+    for (const project of projects) {
+      const opt = document.createElement('option');
+      opt.value = project.id;
+      opt.textContent = project.name;
+      opt.selected = project.id === activeProjectId;
+      select.appendChild(opt);
+    }
+    select.disabled = projects.length === 0;
+  }
+  if (rename) rename.disabled = !activeProjectId;
+  if (format) format.textContent = displaySection('09 91 00');
+  if (source) source.textContent = projectSourceLabel();
+  renderProjectSettings();
+}
+
+function renderProjectSettings() {
+  const name = document.getElementById('project-name-input');
+  const format = document.getElementById('project-number-format');
+  const hint = document.getElementById('settings-hint');
+  if (name) name.value = activeProjectName();
+  if (format) format.value = activeSectionNumberFormat();
+  if (hint) hint.textContent = `${activeProjectName()} · ${projectSourceLabel()}`;
+  renderProjectSourceList();
+}
+
+function renderProjectSourceList() {
+  const list = document.getElementById('project-source-list');
+  if (!list) return;
+  list.replaceChildren();
+  const company = companyMaster();
+  if (company) {
+    const companyRow = renderSourceRow(company, true, true);
+    list.appendChild(companyRow);
+  }
+  const clients = clientLibraries();
+  if (clients.length === 0) {
+    list.appendChild(makeNode('p', 'library-empty', 'No client libraries yet.'));
+    return;
+  }
+  for (const client of clients) {
+    list.appendChild(renderSourceRow(client, projectClientLibraryIds.includes(client.id), false));
+  }
+}
+
+function renderSourceRow(library, checked, disabled) {
+  const label = makeNode('label', 'source-row');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.value = library.id;
+  input.checked = checked;
+  input.disabled = disabled;
+  input.dataset.projectSource = library.id;
+  label.appendChild(input);
+  label.appendChild(makeNode('span', 'source-name', library.name));
+  label.appendChild(
+    makeNode('span', 'source-tier', library.tier === 'client' ? 'CLIENT' : 'COMPANY')
+  );
+  return label;
+}
+
+function checkedProjectClientIds() {
+  return [...document.querySelectorAll('[data-project-source]')]
+    .filter((input) => input instanceof HTMLInputElement && input.checked && !input.disabled)
+    .map((input) => input.value);
+}
+
+async function switchProject(projectId) {
+  if (!projectId || projectId === activeProjectId) return;
+  activeProjectId = projectId;
+  rememberProject(projectId);
+  await loadActiveProjectWorkspace();
+  toast(`Switched to ${activeProjectName()}`);
+}
+
+async function createProjectFromUi() {
+  const name = await modalText({
+    title: 'New project',
+    label: 'Project name',
+    value: '',
+    confirmLabel: 'Create',
+  });
+  if (!name) return;
+  try {
+    const project = await createProject(
+      name,
+      'Mockup project workspace',
+      defaultProjectSourceIds()
+    );
+    activeProjectId = project.projectId;
+    rememberProject(activeProjectId);
+    await refreshProjectList(project.projectId);
+    await loadActiveProjectWorkspace();
+    toast(`Project ${project.name} added`);
+  } catch (err) {
+    toast(`project add failed: ${err.message}`, 'err');
+  }
+}
+
+async function renameActiveProject() {
+  if (!activeProjectId) return;
+  const name = await modalText({
+    title: 'Rename project',
+    label: 'Project name',
+    value: activeProjectName(),
+    confirmLabel: 'Rename',
+  });
+  if (!name || name === activeProjectName()) return;
+  try {
+    await patchProject(activeProjectId, { name });
+    await refreshProjectList(activeProjectId);
+    activeProject = await getProject(activeProjectId);
+    renderProjectControls();
+    toast(`Project renamed to ${name}`);
+  } catch (err) {
+    toast(`rename failed: ${err.message}`, 'err');
+  }
+}
+
+async function saveProjectSettings() {
+  if (!activeProjectId) return;
+  const name = document.getElementById('project-name-input')?.value.trim() || activeProjectName();
+  const sectionNumberFormat =
+    document.getElementById('project-number-format')?.value || activeSectionNumberFormat();
+  projectClientLibraryIds = checkedProjectClientIds();
+  try {
+    await patchProject(activeProjectId, { name, sectionNumberFormat });
+    await syncProjectSourcesToTocScope();
+    await refreshProjectList(activeProjectId);
+    activeProject = await getProject(activeProjectId);
+    projectClientLibraryIds = projectClientSourceIds(activeProject);
+    renderProjectControls();
+    await refreshTocClientScope();
+    await refreshTocLibrarySpecs();
+    renderBoard();
+    await refreshBrokenCount();
+    await refreshCoordination();
+    toast('Project settings saved');
+  } catch (err) {
+    toast(`settings save failed: ${err.message}`, 'err');
+  }
+}
+
+async function loadActiveProjectWorkspace() {
+  specs.clear();
+  projectMembers.clear();
+  tocSections = [];
+  try {
+    activeProject = activeProjectId ? await getProject(activeProjectId) : null;
+    projectClientLibraryIds = projectClientSourceIds(activeProject);
+    if (activeProject && (activeProject.sources ?? []).length === 0) {
+      await syncProjectSourcesToTocScope();
+      activeProject = await getProject(activeProjectId);
+      projectClientLibraryIds = projectClientSourceIds(activeProject);
+    }
+    renderProjectControls();
+    await refreshTocClientScope();
+    await refreshTocLibrarySpecs();
+    await refreshTocBuilder();
+    await restoreProjectSpecs(activeProject);
+  } catch (err) {
+    toast(`could not load project: ${err.message}`, 'warn');
+  }
+  renderBoard();
+  await refreshBrokenCount();
+  await refreshCoordination();
+}
+
+function initProjectManager() {
+  document.getElementById('project-select')?.addEventListener('change', (event) => {
+    void switchProject(event.target.value);
+  });
+  document.getElementById('project-add')?.addEventListener('click', () => {
+    void createProjectFromUi();
+  });
+  document.getElementById('project-rename')?.addEventListener('click', () => {
+    void renameActiveProject();
+  });
+  document.getElementById('project-settings-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void saveProjectSettings();
+  });
+}
+
 async function joinProject(specId) {
-  if (!demoProjectId || projectMembers.has(specId)) return specId;
+  if (!activeProjectId || projectMembers.has(specId)) return specId;
   const spec = specs.get(specId);
   const section = spec?.tree?.section;
   if (!section) return specId;
   try {
-    const result = await addSpecToProject(demoProjectId, section);
+    const result = await addSpecToProject(activeProjectId, section);
     projectMembers.add(result.specId);
     if (result.specId !== specId) {
       specs.delete(specId);
@@ -162,7 +426,7 @@ async function joinProject(specId) {
     return result.specId;
   } catch (err) {
     if (err.status === 409) {
-      const project = await getProject(demoProjectId);
+      const project = await getProject(activeProjectId);
       const existing = (project.toc ?? []).find((entry) => entry.section === section);
       if (existing) {
         projectMembers.add(existing.specId);
@@ -173,7 +437,7 @@ async function joinProject(specId) {
         return existing.specId;
       }
     } else {
-      console.warn(`SpecR: could not add ${section} to demo project`, err);
+      console.warn(`SpecR: could not add ${section} to active project`, err);
     }
   }
   return specId;
@@ -183,9 +447,9 @@ async function joinProject(specId) {
 async function refreshBrokenCount() {
   const cell = document.getElementById('broken-cell');
   const out = document.getElementById('broken-count');
-  if (!demoProjectId) return 0;
+  if (!activeProjectId) return 0;
   try {
-    const broken = await getBrokenRefs(demoProjectId);
+    const broken = await getBrokenRefs(activeProjectId);
     if (out) out.textContent = String(broken.length);
     if (cell) cell.classList.toggle('is-broken', broken.length > 0);
     return broken.length;
@@ -197,9 +461,9 @@ async function refreshBrokenCount() {
 async function refreshCoordination() {
   const cell = document.getElementById('coord-cell');
   const out = document.getElementById('coord-count');
-  if (!demoProjectId) return null;
+  if (!activeProjectId) return null;
   try {
-    const report = await getCoordinationReport(demoProjectId);
+    const report = await getCoordinationReport(activeProjectId);
     if (out) out.textContent = String(report.summary.total);
     if (cell) cell.classList.toggle('is-broken', report.summary.total > 0);
     if (coordBody) renderCoordinationReport(coordBody, report, { onNavigate: navigateToSection });
@@ -209,6 +473,14 @@ async function refreshCoordination() {
     console.warn('SpecR: could not refresh coordination report', err);
     return null;
   }
+}
+
+async function refreshDiagnostics() {
+  const [brokenCount, coordinationCount] = await Promise.all([
+    refreshBrokenCount(),
+    refreshCoordination(),
+  ]);
+  return { brokenCount, coordinationCount };
 }
 
 // ── State refresh ───────────────────────────────────────────────────────────
@@ -299,8 +571,8 @@ function updateTocHint() {
   const hint = document.getElementById('toc-hint');
   if (!hint) return;
   const dirty = hint.dataset.dirty === 'true';
-  hint.textContent = demoProjectId
-    ? `${tocSections.length} required section${tocSections.length === 1 ? '' : 's'}${dirty ? ' - unsaved' : ''}`
+  hint.textContent = activeProjectId
+    ? `${activeProjectName()} · ${tocSections.length} required section${tocSections.length === 1 ? '' : 's'}${dirty ? ' - unsaved' : ''}`
     : 'project unavailable';
 }
 
@@ -356,7 +628,7 @@ function renderTocDivisionGroup(division, entries) {
 function renderTocRow(entry, index) {
   const row = makeNode('li', 'toc-row');
   row.appendChild(makeNode('span', 'toc-position', String(index + 1).padStart(2, '0')));
-  row.appendChild(makeNode('span', 'toc-section-code', entry.section));
+  row.appendChild(makeNode('span', 'toc-section-code', displaySection(entry.section)));
   row.appendChild(makeNode('span', 'toc-title-text', entry.title || 'Untitled section'));
   row.appendChild(tocButton('REMOVE', () => removeTocEntry(entry.section)));
   return row;
@@ -456,7 +728,7 @@ function renderTocCandidates() {
 function renderTocCandidate(candidate) {
   const btn = makeNode('button', 'toc-candidate');
   btn.type = 'button';
-  btn.appendChild(makeNode('span', 'toc-candidate-section', candidate.section));
+  btn.appendChild(makeNode('span', 'toc-candidate-section', displaySection(candidate.section)));
   btn.appendChild(makeNode('span', 'toc-candidate-title', candidate.title || 'Untitled section'));
   btn.appendChild(makeNode('span', 'toc-candidate-source', tocSpecSource(candidate)));
   btn.addEventListener('click', () => selectTocCandidate(candidate));
@@ -486,12 +758,12 @@ function removeTocEntry(section) {
 }
 
 async function refreshTocBuilder() {
-  if (!demoProjectId) {
+  if (!activeProjectId) {
     renderTocBuilder();
     return;
   }
   try {
-    const result = await getRequiredSections(demoProjectId);
+    const result = await getRequiredSections(activeProjectId);
     tocSections = sortedTocSections(
       (result.sections ?? []).map((entry) => ({
         section: entry.section,
@@ -506,44 +778,31 @@ async function refreshTocBuilder() {
 }
 
 async function refreshTocClientScope() {
-  const select = document.getElementById('toc-client-select');
-  if (!select) return;
-  const clients = clientLibraries();
-  const saved = localStorage.getItem(PROJECT_CLIENT_KEY);
-  projectClientLibraryId =
-    saved && clients.some((client) => client.id === saved) ? saved : clients[0]?.id || null;
-  if (projectClientLibraryId) localStorage.setItem(PROJECT_CLIENT_KEY, projectClientLibraryId);
-  select.replaceChildren();
-  if (clients.length === 0) {
-    const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = 'No client selected';
-    select.appendChild(opt);
-    select.disabled = true;
-    return;
-  }
-  select.disabled = false;
-  for (const client of clients) {
-    const opt = document.createElement('option');
-    opt.value = client.id;
-    opt.textContent = client.name;
-    opt.selected = client.id === projectClientLibraryId;
-    select.appendChild(opt);
-  }
+  const summary = document.getElementById('toc-source-summary');
+  if (summary) summary.textContent = projectSourceLabel();
 }
 
 async function refreshTocLibrarySpecs() {
   const company = companyMaster();
-  const selectedClient = libraries.find((lib) => lib.id === projectClientLibraryId) ?? null;
+  const selectedClients = projectClientLibraryIds
+    .map((id) => libraries.find((lib) => lib.id === id))
+    .filter(Boolean);
   const companySpecs = company ? await listLibrarySpecs(company.id) : [];
-  const clientSpecs = selectedClient ? await listLibrarySpecs(selectedClient.id) : [];
+  const clientSpecGroups = await Promise.all(
+    selectedClients.map(async (client) => ({
+      client,
+      specs: await listLibrarySpecs(client.id),
+    }))
+  );
   tocLibrarySpecs = [
-    ...clientSpecs.map((spec) => ({
-      ...spec,
-      source: 'client',
-      libraryId: selectedClient.id,
-      clientName: selectedClient.name,
-    })),
+    ...clientSpecGroups.flatMap(({ client, specs }) =>
+      specs.map((spec) => ({
+        ...spec,
+        source: 'client',
+        libraryId: client.id,
+        clientName: client.name,
+      }))
+    ),
     ...companySpecs.map((spec) => ({
       ...spec,
       source: 'company',
@@ -555,29 +814,25 @@ async function refreshTocLibrarySpecs() {
 }
 
 async function syncProjectSourcesToTocScope() {
-  if (!demoProjectId) return;
-  const company = companyMaster();
-  const ids = [
-    ...(projectClientLibraryId ? [projectClientLibraryId] : []),
-    ...(company ? [company.id] : []),
-  ];
-  const uniqueIds = [...new Set(ids)];
+  if (!activeProjectId) return;
+  const uniqueIds = projectSourceIds();
   if (uniqueIds.length === 0) return;
   try {
-    await setProjectSources(demoProjectId, uniqueIds);
+    const result = await setProjectSources(activeProjectId, uniqueIds);
+    if (activeProject) activeProject = { ...activeProject, sources: result.sources ?? [] };
   } catch (err) {
     toast(`could not update project source libraries: ${err.message}`, 'warn');
   }
 }
 
-async function saveTocBuilder() {
-  if (!demoProjectId) return;
+async function saveTocBuilder({ toastMessage = 'TOC saved' } = {}) {
+  if (!activeProjectId) return;
   try {
     const payload = sortedTocSections().map((entry) => ({
       section: entry.section,
       ...(entry.title ? { title: entry.title } : {}),
     }));
-    const result = await setRequiredSections(demoProjectId, payload);
+    const result = await setRequiredSections(activeProjectId, payload);
     tocSections = sortedTocSections(
       (result.sections ?? []).map((entry) => ({
         section: entry.section,
@@ -586,8 +841,8 @@ async function saveTocBuilder() {
     );
     setTocDirty(false);
     renderTocBuilder();
-    await refreshCoordination();
-    toast('TOC saved');
+    await refreshDiagnostics();
+    if (toastMessage) toast(toastMessage);
   } catch (err) {
     toast(`TOC save failed: ${err.message}`, 'err');
   }
@@ -613,14 +868,6 @@ function initTocBuilder() {
   title?.addEventListener('input', () => {
     syncTocCounterpart('title');
     renderTocCandidates();
-  });
-  document.getElementById('toc-client-select')?.addEventListener('change', (event) => {
-    projectClientLibraryId = event.target.value || null;
-    if (projectClientLibraryId) localStorage.setItem(PROJECT_CLIENT_KEY, projectClientLibraryId);
-    void (async () => {
-      await refreshTocLibrarySpecs();
-      await syncProjectSourcesToTocScope();
-    })();
   });
   document.getElementById('toc-add-loaded')?.addEventListener('click', () => {
     addLoadedSpecsToToc();
@@ -713,17 +960,16 @@ async function pickMapLibrarySpec(library) {
 }
 
 async function setProjectSourcesForMapLibrary(library) {
-  if (!demoProjectId) return;
-  const company = companyMaster();
-  const ids = [
-    library.id,
-    ...(company && company.id !== library.id ? [company.id] : []),
-  ];
-  await setProjectSources(demoProjectId, [...new Set(ids)]);
+  if (!activeProjectId) return;
+  if (library.tier === 'client' && !projectClientLibraryIds.includes(library.id)) {
+    projectClientLibraryIds = [...projectClientLibraryIds, library.id];
+  }
+  await syncProjectSourcesToTocScope();
+  renderProjectControls();
 }
 
 async function addMapSpecFromLibrary() {
-  if (!demoProjectId) {
+  if (!activeProjectId) {
     toast('Project is unavailable', 'warn');
     return;
   }
@@ -738,7 +984,7 @@ async function addMapSpecFromLibrary() {
       return;
     }
     await setProjectSourcesForMapLibrary(library);
-    const result = await addSpecToProject(demoProjectId, spec.section);
+    const result = await addSpecToProject(activeProjectId, spec.section);
     projectMembers.add(result.specId);
     await addSpec(result.specId);
     await reloadAllSpecs();
@@ -901,6 +1147,7 @@ async function addClientLibrary(name) {
   try {
     const library = await createClientLibrary(clean);
     await refreshLibraryView(library.id);
+    renderProjectControls();
     await refreshTocClientScope();
     await refreshTocLibrarySpecs();
     await syncProjectSourcesToTocScope();
@@ -923,6 +1170,7 @@ async function renameSelectedClient() {
   try {
     const renamed = await renameLibrary(library.id, name);
     await refreshLibraryView(renamed.id);
+    renderProjectControls();
     await refreshTocClientScope();
     await refreshTocLibrarySpecs();
     await syncProjectSourcesToTocScope();
@@ -981,17 +1229,16 @@ function selectedLibraryDropContext() {
   };
 }
 
-async function restoreProjectSpecs() {
-  if (!demoProjectId) return;
+async function restoreProjectSpecs(project = activeProject) {
+  if (!activeProjectId || !project) return;
   try {
-    const project = await getProject(demoProjectId);
     const toc = project.toc ?? [];
     const settled = await Promise.allSettled(toc.map((entry) => addSpec(entry.specId)));
     const restored = settled.filter((r) => r.status === 'fulfilled').length;
     const failed = settled.length - restored;
     for (const entry of toc) projectMembers.add(entry.specId);
     if (restored > 0) {
-      toast(`${restored} project section${restored === 1 ? '' : 's'} restored`);
+      toast(`${restored} ${activeProjectName()} section${restored === 1 ? '' : 's'} restored`);
     }
     if (failed > 0) {
       toast(`${failed} project section${failed === 1 ? '' : 's'} failed to restore`, 'warn');
@@ -1199,9 +1446,9 @@ async function commitTextEdit(specId, nodeId, newText, removedRefs, alsoRemoveSp
 async function removeTargetSpecs(removedRefs, ownSpecId) {
   const targetIds = removableTargetIds(removedRefs, ownSpecId);
   for (const targetId of targetIds) {
-    if (demoProjectId) {
+    if (activeProjectId) {
       try {
-        await removeSpecFromProject(demoProjectId, targetId);
+        await removeSpecFromProject(activeProjectId, targetId);
       } catch (err) {
         console.warn(`SpecR: could not remove ${targetId} from project`, err);
       }
@@ -1255,7 +1502,9 @@ async function onRemoveSpecFromProject(spec) {
   });
   if (!ok) return;
   try {
-    const removedFromProject = demoProjectId ? await removeSpecFromProjectIfPresent(specId) : false;
+    const removedFromProject = activeProjectId
+      ? await removeSpecFromProjectIfPresent(specId)
+      : false;
     projectMembers.delete(specId);
     specs.delete(specId);
     await reloadAllSpecs();
@@ -1274,7 +1523,7 @@ async function onRemoveSpecFromProject(spec) {
 
 async function removeSpecFromProjectIfPresent(specId) {
   try {
-    await removeSpecFromProject(demoProjectId, specId);
+    await removeSpecFromProject(activeProjectId, specId);
     return true;
   } catch (err) {
     if (err.message === 'spec not in project') return false;
@@ -1283,7 +1532,7 @@ async function removeSpecFromProjectIfPresent(specId) {
 }
 
 async function addSpecsFromTocToProject() {
-  if (!demoProjectId) return;
+  if (!activeProjectId) return;
   const loaded = loadedSectionSet();
   const missing = sortedTocSections().filter((entry) => !loaded.has(entry.section));
   if (missing.length === 0) {
@@ -1294,7 +1543,7 @@ async function addSpecsFromTocToProject() {
   let failed = 0;
   for (const entry of missing) {
     try {
-      const result = await addSpecToProject(demoProjectId, entry.section);
+      const result = await addSpecToProject(activeProjectId, entry.section);
       projectMembers.add(result.specId);
       await addSpec(result.specId);
       added += 1;
@@ -1312,8 +1561,15 @@ async function addSpecsFromTocToProject() {
     toast(`${failed} TOC section${failed === 1 ? '' : 's'} could not be loaded`, 'warn');
 }
 
-function updateLoadedSpecsToToc() {
-  addLoadedSpecsToToc();
+async function updateLoadedSpecsToToc() {
+  const added = addLoadedSpecsToToc();
+  if (added === 0) {
+    await refreshDiagnostics();
+    return;
+  }
+  await saveTocBuilder({
+    toastMessage: `${added} loaded section${added === 1 ? '' : 's'} synced to TOC and diagnostics`,
+  });
 }
 
 function onAddSpecToToc(spec) {
@@ -1374,6 +1630,7 @@ function onLibraryRef(section) {
 }
 
 const sheetCtx = {
+  displaySection,
   statusFor,
   onNavigate: navigateToSection,
   onLibraryRef,
@@ -1397,6 +1654,7 @@ function refreshWeb() {
   const model = buildWebModel(specs);
   renderWeb(webCanvas, model, {
     onNavigate: navigateToSection,
+    displaySection,
   });
   const loaded = model.nodes.filter((n) => n.status === 'loaded').length;
   const ghosts = model.nodes.length - loaded;
@@ -1442,7 +1700,7 @@ async function onSpecReady(result, context = { destination: 'project' }) {
     warnings: result.warnings,
     capabilities: result.capabilities,
   });
-  // Join the demo project — re-adding a previously-removed section also heals
+  // Join the active project — re-adding a previously-removed section also heals
   // any references the server had marked broken, so reload + recount.
   await joinProject(result.specId);
   await reloadAllSpecs();
@@ -1478,12 +1736,15 @@ function initMapActions() {
   document.getElementById('map-add-from-toc')?.addEventListener('click', () => {
     void addSpecsFromTocToProject();
   });
-  document.getElementById('map-update-toc')?.addEventListener('click', updateLoadedSpecsToToc);
+  document.getElementById('map-update-toc')?.addEventListener('click', () => {
+    void updateLoadedSpecsToToc();
+  });
 }
 
 async function boot() {
   document.getElementById('tb-date').textContent = new Date().toISOString().slice(0, 10);
   initNavigation();
+  initProjectManager();
   initTocBuilder();
   initLibraryManager();
   initMapActions();
@@ -1508,18 +1769,10 @@ async function boot() {
   });
   initRefPopover();
 
-  await ensureDemoProject();
   await ensureDemoClientLibraries();
   await refreshLibraryView();
-  await refreshTocClientScope();
-  await refreshTocLibrarySpecs();
-  await syncProjectSourcesToTocScope();
-  await refreshTocBuilder();
-  await restoreProjectSpecs();
-
-  renderBoard();
-  await refreshBrokenCount();
-  await refreshCoordination();
+  await ensureActiveProject();
+  await loadActiveProjectWorkspace();
 }
 
 void boot();
