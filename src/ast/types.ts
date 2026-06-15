@@ -20,6 +20,16 @@ export interface SignalConflict {
   readonly reportedNodeType: NodeType;
 }
 
+export interface SourceCommentFact {
+  readonly author: string;
+  readonly text: string;
+  readonly anchor: readonly [number, number];
+}
+
+export interface SourceFacts {
+  readonly comments?: readonly SourceCommentFact[];
+}
+
 export interface SpecNodeMeta {
   readonly vanish?: boolean;
   readonly source?: 'ufgs' | 'arcat' | 'cpi' | 'unknown';
@@ -27,6 +37,7 @@ export interface SpecNodeMeta {
   readonly baseVersion?: number;
   /** Inference signal disagreements. Absent === no conflicts (empty array never serialized). */
   readonly conflicts?: readonly SignalConflict[];
+  readonly sourceFacts?: SourceFacts;
 }
 
 export interface SpecNode {

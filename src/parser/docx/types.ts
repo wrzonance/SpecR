@@ -1,5 +1,7 @@
 // OOXML intermediate types — normalized shapes used across the DOCX parser pipeline.
 
+import type { NodeType, SourceFacts } from '../../ast/types.js';
+
 // ─── numbering.xml ────────────────────────────────────────────────────────────
 
 export interface AbstractNumLevel {
@@ -78,11 +80,10 @@ export interface DocxParagraph {
   readonly leftIndent?: number; // twips (1/1440 inch)
   readonly outlineLvl?: number;
   readonly isVanish: boolean;
+  readonly sourceFacts?: SourceFacts;
 }
 
 // ─── inference.ts output ──────────────────────────────────────────────────────
-
-import type { NodeType } from '../../ast/types.js';
 
 export interface SignalConflict {
   readonly signal: 1 | 2 | 3 | 4 | 5;

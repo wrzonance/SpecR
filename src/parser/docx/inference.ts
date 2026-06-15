@@ -197,13 +197,19 @@ interface StackEntry {
   readonly children: SpecNode[];
 }
 
+function sourceFactsMeta(cp: ClassifiedParagraph): {
+  readonly sourceFacts?: NonNullable<DocxParagraph['sourceFacts']>;
+} {
+  return cp.paragraph.sourceFacts ? { sourceFacts: cp.paragraph.sourceFacts } : {};
+}
+
 function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode {
   return {
     id: uuidv4(),
     type: cp.isVanish ? 'note' : 'continuation',
     text: cp.paragraph.text,
     children: [],
-    meta: { source, ...(cp.isVanish ? { vanish: true } : {}) },
+    meta: { source, ...(cp.isVanish ? { vanish: true } : {}), ...sourceFactsMeta(cp) },
   };
 }
 
@@ -217,6 +223,7 @@ function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source)
       source,
       ...(cp.isVanish ? { vanish: true as const } : {}),
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
+      ...sourceFactsMeta(cp),
     },
   };
 }
