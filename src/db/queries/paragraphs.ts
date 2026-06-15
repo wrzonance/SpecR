@@ -1,6 +1,6 @@
 import { pool, DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
-import type { SignalConflict, SpecNode, SpecTree } from '../../ast/types.js';
+import type { SignalConflict, SourceFacts, SpecNode, SpecTree } from '../../ast/index.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -16,6 +16,11 @@ interface FlatRow {
   readonly position: number;
   readonly vanish: boolean;
   readonly conflicts: readonly SignalConflict[];
+  readonly sourceFacts: SourceFacts;
+}
+
+function hasSourceFacts(sourceFacts: SourceFacts): boolean {
+  return Object.keys(sourceFacts).length > 0;
 }
 
 function flattenDfs(
@@ -34,6 +39,7 @@ function flattenDfs(
       position: idx + 1,
       vanish: node.meta.vanish ?? false,
       conflicts: node.meta.conflicts ?? [],
+      sourceFacts: node.meta.sourceFacts ?? {},
     });
     flattenDfs(node.children, specId, node.id, rows);
   });
@@ -51,8 +57,9 @@ export async function insertTree(tree: SpecTree, specId: string, pool: Queryable
   for (const row of rows) {
     try {
       await pool.query(
-        `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position, vanish, conflicts)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+        `INSERT INTO paragraphs
+           (id, spec_id, parent_id, node_type, text, position, vanish, conflicts, source_facts)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)`,
         [
           row.id,
           row.specId,
@@ -62,6 +69,7 @@ export async function insertTree(tree: SpecTree, specId: string, pool: Queryable
           row.position,
           row.vanish,
           JSON.stringify(row.conflicts),
+          JSON.stringify(row.sourceFacts),
         ]
       );
     } catch (err) {
@@ -78,6 +86,8 @@ export interface ParagraphRow {
   readonly vanish: boolean;
   /** Inference signal disagreements (#56). Present only when non-empty. */
   readonly conflicts?: readonly SignalConflict[];
+  /** Parser source facts (#131). Present only when non-empty. */
+  readonly sourceFacts?: SourceFacts;
 }
 
 export interface ParagraphWithAncestors {
@@ -91,6 +101,7 @@ interface ChainRow {
   readonly text: string;
   readonly vanish: boolean;
   readonly conflicts: readonly SignalConflict[];
+  readonly sourceFacts: SourceFacts;
   readonly depth: number;
 }
 
@@ -101,6 +112,7 @@ function toParagraphRow(r: ChainRow): ParagraphRow {
     text: r.text,
     vanish: r.vanish,
     ...(r.conflicts.length > 0 ? { conflicts: r.conflicts } : {}),
+    ...(hasSourceFacts(r.sourceFacts) ? { sourceFacts: r.sourceFacts } : {}),
   };
 }
 
@@ -110,14 +122,16 @@ export async function getParagraphWithAncestors(
   try {
     const result = await pool.query<ChainRow>(
       `WITH RECURSIVE chain AS (
-         SELECT id, node_type, text, vanish, conflicts, parent_id, 0 AS depth
+         SELECT id, node_type, text, vanish, conflicts, source_facts, parent_id, 0 AS depth
          FROM paragraphs WHERE id = $1
          UNION ALL
-         SELECT p.id, p.node_type, p.text, p.vanish, p.conflicts, p.parent_id, c.depth + 1
+         SELECT p.id, p.node_type, p.text, p.vanish, p.conflicts, p.source_facts,
+                p.parent_id, c.depth + 1
          FROM paragraphs p JOIN chain c ON p.id = c.parent_id
          WHERE c.depth + 1 < 10
        )
-       SELECT id, node_type AS "nodeType", text, vanish, conflicts, depth
+       SELECT id, node_type AS "nodeType", text, vanish, conflicts,
+              source_facts AS "sourceFacts", depth
        FROM chain ORDER BY depth DESC`,
       [id]
     );

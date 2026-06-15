@@ -1,5 +1,12 @@
 import { pool, DatabaseError } from '../index.js';
-import type { SignalConflict, SpecNode, SpecTree, NodeType, SecRef } from '../../ast/index.js';
+import type {
+  SignalConflict,
+  SourceFacts,
+  SpecNode,
+  SpecTree,
+  NodeType,
+  SecRef,
+} from '../../ast/index.js';
 import type { Pool } from 'pg';
 import { insertTree } from './paragraphs.js';
 import { insertRefs } from './refs.js';
@@ -99,6 +106,11 @@ export interface ParagraphTreeRow {
   readonly position: number;
   readonly vanish: boolean;
   readonly conflicts: readonly SignalConflict[];
+  readonly source_facts: SourceFacts;
+}
+
+function hasSourceFacts(sourceFacts: SourceFacts): boolean {
+  return Object.keys(sourceFacts).length > 0;
 }
 
 /** Assemble flat paragraph rows into a SpecNode forest. Exported for reuse
@@ -121,6 +133,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
       meta: {
         ...(row.vanish ? { vanish: true } : {}),
         ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
+        ...(hasSourceFacts(row.source_facts) ? { sourceFacts: row.source_facts } : {}),
       },
     };
   }
@@ -138,7 +151,7 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
     if (!specRow) return null;
 
     const paraResult = await pool.query<ParagraphTreeRow>(
-      `SELECT id, parent_id, node_type, text, position, vanish, conflicts
+      `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts
        FROM paragraphs WHERE spec_id = $1`,
       [id]
     );

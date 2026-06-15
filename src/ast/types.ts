@@ -39,9 +39,12 @@ export interface SourceChoiceTokenFact {
 }
 
 export interface SourceFacts {
+  readonly [key: string]: unknown;
   readonly comments?: readonly SourceCommentFact[];
   readonly colors?: readonly SourceColorFact[];
   readonly choiceTokens?: readonly SourceChoiceTokenFact[];
+  readonly banner?: string;
+  readonly vanish?: true;
 }
 
 export interface SpecNodeMeta {

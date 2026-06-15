@@ -37,12 +37,22 @@ async function insertParagraph(
   nodeType: string,
   text: string,
   position: number,
-  extra?: { vanish?: boolean; conflicts?: string }
+  extra?: { vanish?: boolean; conflicts?: string; sourceFacts?: string }
 ): Promise<string> {
   const r = await pool.query<{ id: string }>(
-    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, vanish, conflicts)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) RETURNING id`,
-    [specId, parentId, nodeType, text, position, extra?.vanish ?? false, extra?.conflicts ?? '[]']
+    `INSERT INTO paragraphs
+       (spec_id, parent_id, node_type, text, position, vanish, conflicts, source_facts)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb) RETURNING id`,
+    [
+      specId,
+      parentId,
+      nodeType,
+      text,
+      position,
+      extra?.vanish ?? false,
+      extra?.conflicts ?? '[]',
+      extra?.sourceFacts ?? '{}',
+    ]
   );
   if (!r.rows[0]) throw new Error('insertParagraph failed');
   return r.rows[0].id;
@@ -88,6 +98,7 @@ beforeAll(async () => {
   const pr1 = await insertParagraph(masterId, article, 'pr1', 'Section includes concrete.', 1, {
     vanish: true,
     conflicts: '[{"signal":2,"reportedIlvl":1,"reportedNodeType":"pr2"}]',
+    sourceFacts: '{"comments":[{"author":"Specifier","text":"Verify mix.","anchor":[0,7]}]}',
   });
   const empty = await insertParagraph(masterId, article, 'pr1', '', 2);
   masterParaIds = [part, article, pr1, empty];
@@ -197,7 +208,8 @@ describe('addSectionToProject — clone correctness', () => {
              AND c.node_type = m.node_type AND c.text = m.text
              AND c.position = m.position AND c.vanish = m.vanish
              AND c.base_version = m.base_version
-             AND c.conflicts::text = m.conflicts::text) AS matched,
+             AND c.conflicts::text = m.conflicts::text
+             AND c.source_facts::text = m.source_facts::text) AS matched,
          (SELECT COUNT(*) FROM paragraphs c
             JOIN paragraphs m ON m.id = c.origin_paragraph_id
             LEFT JOIN paragraphs cp ON cp.id = c.parent_id

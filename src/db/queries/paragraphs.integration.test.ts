@@ -6,6 +6,13 @@ const PART_ID = 'b0000000-0000-0000-0000-000000000001';
 const ART_ID = 'b0000000-0000-0000-0000-000000000002';
 const PR1_ID = 'b0000000-0000-0000-0000-000000000003';
 const PR1_CONFLICTED_ID = 'b0000000-0000-0000-0000-000000000004';
+const PR1_FACTS_ID = 'b0000000-0000-0000-0000-000000000005';
+
+const SOURCE_FACTS = {
+  comments: [{ author: 'Specifier', text: 'Check mounting height.', anchor: [0, 10] }],
+  colors: [{ color: '0000FF', coverage: 0.5, spans: [[0, 10]] }],
+  reviewer: { severity: 'info', count: 1 },
+} as const;
 
 beforeAll(async () => {
   await pool.query(
@@ -38,6 +45,11 @@ beforeAll(async () => {
       ART_ID,
       JSON.stringify([{ signal: 2, reportedIlvl: 1, reportedNodeType: 'article' }]),
     ]
+  );
+  await pool.query(
+    `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position, source_facts)
+     VALUES ($1,$2,$3,'pr1','Source fact paragraph.',3,$4::jsonb) ON CONFLICT (id) DO NOTHING`,
+    [PR1_FACTS_ID, SPEC_ID, ART_ID, JSON.stringify(SOURCE_FACTS)]
   );
 });
 
@@ -88,6 +100,24 @@ describe('getParagraphWithAncestors — conflicts (#56)', () => {
     expect(Object.keys(result!.node)).not.toContain('conflicts');
     for (const ancestor of result!.ancestors) {
       expect(ancestor.conflicts).toBeUndefined();
+    }
+  });
+});
+
+describe('getParagraphWithAncestors — source facts (#131)', () => {
+  it('returns source facts on the target node when populated', async () => {
+    const result = await getParagraphWithAncestors(PR1_FACTS_ID);
+    expect(result).not.toBeNull();
+    expect(result!.node.sourceFacts).toEqual(SOURCE_FACTS);
+  });
+
+  it('omits sourceFacts on nodes and ancestors when empty', async () => {
+    const result = await getParagraphWithAncestors(PR1_ID);
+    expect(result).not.toBeNull();
+    expect(result!.node.sourceFacts).toBeUndefined();
+    expect(Object.keys(result!.node)).not.toContain('sourceFacts');
+    for (const ancestor of result!.ancestors) {
+      expect(ancestor.sourceFacts).toBeUndefined();
     }
   });
 });
@@ -154,5 +184,62 @@ describe('insertTree — conflicts (#56)', () => {
       [INS_PART_ID]
     );
     expect(clean.rows[0]!.conflicts).toEqual([]);
+  });
+});
+
+describe('insertTree — source facts (#131)', () => {
+  const INS_SPEC_ID = 'b0000000-0000-0000-0000-00000000f131';
+  const INS_PART_ID = 'b0000000-0000-0000-0000-00000000f132';
+  const INS_FACTS_ID = 'b0000000-0000-0000-0000-00000000f133';
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [INS_SPEC_ID]);
+  });
+
+  it('persists meta.sourceFacts and defaults to {} when absent', async () => {
+    await pool.query(
+      `INSERT INTO specs (id, section, title, source, library_id)
+       VALUES ($1, '99 99 02', 'Source Facts Insert', 'arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master'))
+       ON CONFLICT (id) DO NOTHING`,
+      [INS_SPEC_ID]
+    );
+    await insertTree(
+      {
+        id: INS_SPEC_ID,
+        section: '99 99 02',
+        title: 'Source Facts Insert',
+        parts: [
+          {
+            id: INS_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            children: [
+              {
+                id: INS_FACTS_ID,
+                type: 'article',
+                text: 'COLORED HEADING',
+                children: [],
+                meta: { sourceFacts: SOURCE_FACTS },
+              },
+            ],
+            meta: {},
+          },
+        ],
+      },
+      INS_SPEC_ID,
+      pool
+    );
+
+    const withFacts = await pool.query<{ sourceFacts: unknown }>(
+      'SELECT source_facts AS "sourceFacts" FROM paragraphs WHERE id = $1',
+      [INS_FACTS_ID]
+    );
+    expect(withFacts.rows[0]!.sourceFacts).toEqual(SOURCE_FACTS);
+
+    const clean = await pool.query<{ sourceFacts: unknown }>(
+      'SELECT source_facts AS "sourceFacts" FROM paragraphs WHERE id = $1',
+      [INS_PART_ID]
+    );
+    expect(clean.rows[0]!.sourceFacts).toEqual({});
   });
 });

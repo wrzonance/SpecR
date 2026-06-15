@@ -25,22 +25,41 @@ export const SignalConflictSchema = z.object({
   reportedNodeType: NodeTypeSchema,
 });
 
+// Catchall for unknown JSONB-backed keys: preserve only JSON-safe values.
+const JsonValue = z.json();
+
+const SourceTextSpanSchema = z.tuple([
+  z.number().int().nonnegative(),
+  z.number().int().nonnegative(),
+]);
+
 export const SourceCommentFactSchema = z.object({
   author: z.string(),
   text: z.string(),
-  anchor: z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]),
+  anchor: SourceTextSpanSchema,
 });
 
 export const SourceColorFactSchema = z.object({
   color: z.string(),
   coverage: z.number().min(0).max(1),
-  spans: z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()])),
+  spans: z.array(SourceTextSpanSchema),
 });
 
-export const SourceFactsSchema = z.object({
-  comments: z.array(SourceCommentFactSchema).exactOptional(),
-  colors: z.array(SourceColorFactSchema).exactOptional(),
+export const SourceChoiceTokenFactSchema = z.object({
+  kind: z.enum(['angle', 'bracket']),
+  options: z.array(z.string()),
+  span: SourceTextSpanSchema,
 });
+
+export const SourceFactsSchema = z
+  .object({
+    colors: z.array(SourceColorFactSchema).exactOptional(),
+    comments: z.array(SourceCommentFactSchema).exactOptional(),
+    choiceTokens: z.array(SourceChoiceTokenFactSchema).exactOptional(),
+    banner: z.string().exactOptional(),
+    vanish: z.literal(true).exactOptional(),
+  })
+  .catchall(JsonValue);
 
 export const SpecNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
@@ -198,9 +217,6 @@ export type CreateRevisionBody = z.infer<typeof CreateRevisionBodySchema>;
 // function, symbol) is rejected at parse rather than silently dropped or thrown
 // on JSON.stringify at the DB boundary.
 export const StyleNodeTypeSchema = z.enum(['part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5']);
-
-// Catchall for unknown keys: any JSON value (string|number|boolean|null|array|object).
-const JsonValue = z.json();
 
 const RunPropertiesSchema = z
   .object({

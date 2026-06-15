@@ -5,6 +5,7 @@ import {
   SpecTreeSchema,
   PatchSpecBodySchema,
   SignalConflictSchema,
+  SourceFactsSchema,
   CreateProjectBodySchema,
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
@@ -239,6 +240,25 @@ describe('SpecNodeMetaSchema — conflicts', () => {
   it('meta without conflicts key parses with conflicts undefined', () => {
     const result = SpecNodeMetaSchema.parse({ vanish: true });
     expect(result.conflicts).toBeUndefined();
+  });
+});
+
+describe('SourceFactsSchema', () => {
+  it('accepts known source fact keys and preserves unknown JSON keys', () => {
+    const facts = {
+      comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19] }],
+      colors: [{ color: '0000FF', coverage: 0.82, spans: [[12, 96]] }],
+      choiceTokens: [{ kind: 'bracket', options: ['Provide mockup.'], span: [20, 37] }],
+      banner: 'MASTER NOTE',
+      vanish: true,
+      reviewer: { severity: 'info', count: 2, tags: ['coordination'] },
+    };
+
+    expect(SourceFactsSchema.parse(facts)).toEqual(facts);
+  });
+
+  it('rejects non-JSON unknown fact values', () => {
+    expect(SourceFactsSchema.safeParse({ reviewer: 1n }).success).toBe(false);
   });
 });
 

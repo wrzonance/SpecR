@@ -1502,6 +1502,81 @@ components:
           type: string
           enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, note, continuation]
 
+    SourceTextSpan:
+      type: array
+      minItems: 2
+      maxItems: 2
+      prefixItems:
+        - type: integer
+          minimum: 0
+        - type: integer
+          minimum: 0
+
+    SourceCommentFact:
+      type: object
+      required: [author, text, anchor]
+      properties:
+        author:
+          type: string
+        text:
+          type: string
+        anchor:
+          $ref: '#/components/schemas/SourceTextSpan'
+
+    SourceColorFact:
+      type: object
+      required: [color, coverage, spans]
+      properties:
+        color:
+          type: string
+        coverage:
+          type: number
+          minimum: 0
+          maximum: 1
+        spans:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceTextSpan'
+
+    SourceChoiceTokenFact:
+      type: object
+      required: [kind, options, span]
+      properties:
+        kind:
+          type: string
+          enum: [angle, bracket]
+        options:
+          type: array
+          items:
+            type: string
+        span:
+          $ref: '#/components/schemas/SourceTextSpan'
+
+    SourceFacts:
+      type: object
+      description: >-
+        Parser source facts for this paragraph. Present only when non-empty;
+        unknown JSON keys are preserved for forward-compatible fact producers.
+      additionalProperties: true
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceCommentFact'
+        colors:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceColorFact'
+        choiceTokens:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceChoiceTokenFact'
+        banner:
+          type: string
+        vanish:
+          type: boolean
+          const: true
+
     SpecNode:
       type: object
       required: [id, type, text, children, meta]
@@ -1540,6 +1615,8 @@ components:
                 engine picked the highest-priority signal.
               items:
                 $ref: '#/components/schemas/SignalConflict'
+            sourceFacts:
+              $ref: '#/components/schemas/SourceFacts'
 
     SpecTree:
       type: object
