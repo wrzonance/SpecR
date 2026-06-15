@@ -31,8 +31,15 @@ export const SourceCommentFactSchema = z.object({
   anchor: z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]),
 });
 
+export const SourceColorFactSchema = z.object({
+  color: z.string(),
+  coverage: z.number().min(0).max(1),
+  spans: z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()])),
+});
+
 export const SourceFactsSchema = z.object({
   comments: z.array(SourceCommentFactSchema).exactOptional(),
+  colors: z.array(SourceColorFactSchema).exactOptional(),
 });
 
 export const SpecNodeMetaSchema = z.object({
