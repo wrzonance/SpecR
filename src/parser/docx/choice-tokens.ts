@@ -20,6 +20,11 @@ interface SegmentResult {
   readonly nextIndex: number;
 }
 
+interface ClosingDelimiter {
+  readonly closeIndex: number;
+  readonly nested: boolean;
+}
+
 const DELIMITERS: readonly Delimiters[] = [
   { kind: 'angle', open: '<', close: '>' },
   { kind: 'bracket', open: '[', close: ']' },
@@ -35,22 +40,36 @@ function isAmbiguousBracketOption(option: string): boolean {
   return SECTION_REF_PATTERN.test(option.trim());
 }
 
-function hasNestedDelimiter(
+function findClosingDelimiter(
   text: string,
   delimiters: Delimiters,
-  start: number,
-  end: number
-): boolean {
-  return text.slice(start + 1, end).includes(delimiters.open);
+  start: number
+): ClosingDelimiter | null {
+  let depth = 0;
+  let nested = false;
+  for (let i = start + 1; i < text.length; i += 1) {
+    const char = text[i];
+    if (char === delimiters.open) {
+      depth += 1;
+      nested = true;
+      continue;
+    }
+    if (char === delimiters.close) {
+      if (depth === 0) return { closeIndex: i, nested };
+      depth -= 1;
+    }
+  }
+  return null;
 }
 
 function parseSegmentAt(text: string, index: number): SegmentResult {
   const delimiters = delimitersAt(text, index);
   if (!delimiters) return { nextIndex: index + 1 };
 
-  const closeIndex = text.indexOf(delimiters.close, index + 1);
-  if (closeIndex === -1) return { nextIndex: index + 1 };
-  if (hasNestedDelimiter(text, delimiters, index, closeIndex)) {
+  const closing = findClosingDelimiter(text, delimiters, index);
+  if (!closing) return { nextIndex: index + 1 };
+  const { closeIndex } = closing;
+  if (closing.nested) {
     return { nextIndex: closeIndex + 1 };
   }
 
@@ -85,6 +104,7 @@ function groupToFact(group: readonly Segment[]): SourceChoiceTokenFact | null {
   const first = group[0];
   const last = group.at(-1);
   if (!first || !last) return null;
+  if (first.kind === 'angle' && group.length < 2) return null;
   return {
     kind: first.kind,
     options: group.map((segment) => segment.option),

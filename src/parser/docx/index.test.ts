@@ -387,6 +387,11 @@ describe('parseDocx — source facts: choice tokens (#130)', () => {
     ]);
   });
 
+  it('ignores a lone angle segment because angle choices require adjacent options', async () => {
+    const node = await parseChoiceNode('&lt;aluminum&gt;', '<aluminum>');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+
   it('groups adjacent bracket options into one pick-one candidate', async () => {
     const node = await parseChoiceNode('[red][blue]');
     expect(sourceChoiceTokens(node)).toEqual([
@@ -409,6 +414,12 @@ describe('parseDocx — source facts: choice tokens (#130)', () => {
   it('skips nested brackets as ambiguous', async () => {
     // KNOWN AMBIGUITY: nested brackets can be tailoring choices or literal bracketed text.
     const node = await parseChoiceNode('[outer [inner]]');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+
+  it('skips nested adjacent brackets without emitting an inner candidate', async () => {
+    // KNOWN AMBIGUITY: adjacent nested brackets can be tailoring choices or literal text.
+    const node = await parseChoiceNode('[[a][b]]');
     expect(sourceChoiceTokens(node)).toBeUndefined();
   });
 
