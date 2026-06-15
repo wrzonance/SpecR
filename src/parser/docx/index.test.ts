@@ -77,15 +77,32 @@ interface CommentFact {
   readonly anchor: readonly [number, number];
 }
 
+interface ColorFact {
+  readonly color: string;
+  readonly coverage: number;
+  readonly spans: readonly (readonly [number, number])[];
+}
+
+interface TestSourceFacts {
+  readonly comments?: readonly CommentFact[];
+  readonly colors?: readonly ColorFact[];
+}
+
 function allNodes(nodes: readonly SpecNode[]): readonly SpecNode[] {
   return nodes.flatMap((n) => [n, ...allNodes(n.children)]);
 }
 
+function sourceFacts(node: SpecNode | undefined): TestSourceFacts | undefined {
+  const meta = node?.meta as { readonly sourceFacts?: TestSourceFacts };
+  return meta.sourceFacts;
+}
+
 function sourceComments(node: SpecNode | undefined): readonly CommentFact[] | undefined {
-  const meta = node?.meta as {
-    readonly sourceFacts?: { readonly comments?: readonly CommentFact[] };
-  };
-  return meta.sourceFacts?.comments;
+  return sourceFacts(node)?.comments;
+}
+
+function sourceColors(node: SpecNode | undefined): readonly ColorFact[] | undefined {
+  return sourceFacts(node)?.colors;
 }
 
 function findNode(nodes: readonly SpecNode[], text: string): SpecNode | undefined {
@@ -261,6 +278,78 @@ describe('parseDocx — source facts: comments (#128)', () => {
   it('malformed comments.xml throws ParserError instead of silently dropping comments', async () => {
     const buffer = await makeDocx({ commentsXml: '<w:comments><w:comment' });
     await expect(parseDocx(buffer)).rejects.toThrow('failed to parse word/comments.xml');
+  });
+});
+
+describe('parseDocx — source facts: run colors (#129)', () => {
+  function colorRun(color: string, text: string): string {
+    return `<w:r><w:rPr><w:color w:val="${color}"/></w:rPr><w:t>${text}</w:t></w:r>`;
+  }
+
+  function highlightRun(highlight: string, text: string): string {
+    return `<w:r><w:rPr><w:highlight w:val="${highlight}"/></w:rPr><w:t>${text}</w:t></w:r>`;
+  }
+
+  function colorDoc(paragraphs: string): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>${paragraphs}</w:body>
+</w:document>`;
+  }
+
+  it('records a blue phrase with exact span and coverage', async () => {
+    const documentXml = colorDoc(
+      `<w:p><w:r><w:t>Alpha </w:t></w:r>${colorRun('0000FF', 'blue')}<w:r><w:t> end</w:t></w:r></w:p>`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+    const node = findNode(tree.parts, 'Alpha blue end');
+    const colors = sourceColors(node);
+
+    expect(colors).toHaveLength(1);
+    expect(colors?.[0]?.color).toBe('0000FF');
+    expect(colors?.[0]?.spans).toEqual([[6, 10]]);
+    expect(colors?.[0]?.coverage).toBeCloseTo(4 / 14);
+  });
+
+  it('records a fully blue paragraph with coverage 1.0', async () => {
+    const documentXml = colorDoc(`<w:p>${colorRun('0000FF', 'Fully blue.')}</w:p>`);
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+    const colors = sourceColors(findNode(tree.parts, 'Fully blue.'));
+
+    expect(colors).toEqual([{ color: '0000FF', coverage: 1, spans: [[0, 11]] }]);
+  });
+
+  it('omits black and auto-only run colors', async () => {
+    const documentXml = colorDoc(
+      `<w:p>${colorRun('000000', 'Black text.')}</w:p><w:p>${colorRun('auto', 'Auto text.')}</w:p>`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+
+    expect(sourceColors(findNode(tree.parts, 'Black text.'))).toBeUndefined();
+    expect(sourceColors(findNode(tree.parts, 'Auto text.'))).toBeUndefined();
+  });
+
+  it('records one source fact per distinct run color', async () => {
+    const documentXml = colorDoc(
+      `<w:p>${colorRun('FF0000', 'Red')}<w:r><w:t> </w:t></w:r>${colorRun('0000FF', 'Blue')}</w:p>`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+    const colors = sourceColors(findNode(tree.parts, 'Red Blue'));
+
+    expect(colors).toEqual([
+      { color: 'FF0000', coverage: 3 / 8, spans: [[0, 3]] },
+      { color: '0000FF', coverage: 4 / 8, spans: [[4, 8]] },
+    ]);
+  });
+
+  it('records highlight as a highlight-prefixed color fact', async () => {
+    const documentXml = colorDoc(
+      `<w:p><w:r><w:t>Use </w:t></w:r>${highlightRun('yellow', 'highlight')}<w:r><w:t>.</w:t></w:r></w:p>`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+    const colors = sourceColors(findNode(tree.parts, 'Use highlight.'));
+
+    expect(colors).toEqual([{ color: 'highlight:yellow', coverage: 9 / 14, spans: [[4, 13]] }]);
   });
 });
 
