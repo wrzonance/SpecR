@@ -1,0 +1,207 @@
+import { randomUUID } from 'node:crypto';
+import express from 'express';
+import type { Server } from 'http';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createSpec, insertTree, pool } from '../db/index.js';
+import type { DiffResult } from '../merge/index.js';
+import { router } from './router.js';
+import { errorHandler } from './middleware/error.js';
+
+const ORIGINAL_TEXT = 'Provide copper patch panels.';
+const REVISED_TEXT = 'Provide fiber patch panels.';
+
+let server: Server;
+let baseUrl: string;
+const cleanupIds: string[] = [];
+
+interface ApiResponse<T> {
+  readonly success: boolean;
+  readonly data?: T;
+  readonly error?: string;
+}
+
+interface MergeResult {
+  readonly applied: number;
+  readonly rejected: number;
+}
+
+interface SpecFixture {
+  readonly specId: string;
+  readonly paragraphId: string;
+}
+
+async function createSpecFixture(): Promise<SpecFixture> {
+  const partId = randomUUID();
+  const articleId = randomUUID();
+  const paragraphId = randomUUID();
+  const specId = await createSpec({
+    section: '27 16 00',
+    title: 'Merge Integration Spec',
+    source: `d36_${randomUUID().slice(0, 8)}`,
+  });
+  cleanupIds.push(specId);
+  await insertTree(
+    {
+      id: specId,
+      section: '27 16 00',
+      title: 'Merge Integration Spec',
+      parts: [
+        {
+          id: partId,
+          type: 'part',
+          text: 'GENERAL',
+          meta: {},
+          children: [
+            {
+              id: articleId,
+              type: 'article',
+              text: 'SUMMARY',
+              meta: {},
+              children: [
+                {
+                  id: paragraphId,
+                  type: 'pr1',
+                  text: ORIGINAL_TEXT,
+                  meta: {},
+                  children: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    specId,
+    pool
+  );
+  return { specId, paragraphId };
+}
+
+function diffFor(paragraphId: string): DiffResult {
+  return {
+    added: [],
+    modified: [
+      {
+        uuid: paragraphId,
+        base: ORIGINAL_TEXT,
+        theirs: REVISED_TEXT,
+        ours: ORIGINAL_TEXT,
+      },
+    ],
+    deleted: [],
+    conflicts: [],
+    warnings: [],
+  };
+}
+
+async function postMerge(
+  specId: string,
+  body: Record<string, unknown>
+): Promise<{ readonly status: number; readonly body: ApiResponse<MergeResult> }> {
+  const res = await fetch(`${baseUrl}/specs/${specId}/merge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: (await res.json()) as ApiResponse<MergeResult> };
+}
+
+async function paragraphState(paragraphId: string): Promise<{
+  readonly text: string;
+  readonly baseVersion: number;
+  readonly versionCount: number;
+}> {
+  const result = await pool.query<{
+    text: string;
+    base_version: number;
+    version_count: string;
+  }>(
+    `SELECT p.text, p.base_version, COUNT(v.id) AS version_count
+     FROM paragraphs p
+     LEFT JOIN paragraph_versions v ON v.paragraph_id = p.id
+     WHERE p.id = $1
+     GROUP BY p.id`,
+    [paragraphId]
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('paragraph missing');
+  return {
+    text: row.text,
+    baseVersion: row.base_version,
+    versionCount: Number.parseInt(row.version_count, 10),
+  };
+}
+
+beforeAll(async () => {
+  const app = express();
+  app.disable('x-powered-by');
+  app.use(express.json());
+  app.use(router);
+  app.use(errorHandler);
+  await new Promise<void>((resolve) => {
+    server = app.listen(0, () => resolve());
+  });
+  const address = server.address();
+  const port = typeof address === 'object' && address !== null ? address.port : 3000;
+  baseUrl = `http://localhost:${port}`;
+});
+
+afterAll(async () => {
+  for (const id of cleanupIds) {
+    await pool.query('DELETE FROM specs WHERE id = $1', [id]);
+  }
+  await new Promise<void>((resolve, reject) => {
+    server.close((err) => (err != null ? reject(err) : resolve()));
+  });
+});
+
+describe('POST /specs/:id/merge (integration)', () => {
+  it('accepting one UUID updates text, increments base_version, and inserts a snapshot', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    const { status, body } = await postMerge(specId, {
+      accept: [paragraphId],
+      diff: diffFor(paragraphId),
+    });
+    const state = await paragraphState(paragraphId);
+
+    expect(status).toBe(200);
+    expect(body.data).toEqual({ applied: 1, rejected: 0 });
+    expect(state).toEqual({ text: REVISED_TEXT, baseVersion: 2, versionCount: 1 });
+  });
+
+  it('empty accept rejects all diff entries without changing the database', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    const { status, body } = await postMerge(specId, { accept: [], diff: diffFor(paragraphId) });
+    const state = await paragraphState(paragraphId);
+
+    expect(status).toBe(200);
+    expect(body.data).toEqual({ applied: 0, rejected: 1 });
+    expect(state).toEqual({ text: ORIGINAL_TEXT, baseVersion: 1, versionCount: 0 });
+  });
+
+  it('unknown accepted UUID returns 400 with a descriptive error', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    const unknown = randomUUID();
+    const { status, body } = await postMerge(specId, {
+      accept: [unknown],
+      diff: diffFor(paragraphId),
+    });
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain(unknown);
+  });
+
+  it('applying the same accepted UUID twice is a no-op on the second call', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    const diff = diffFor(paragraphId);
+    const first = await postMerge(specId, { accept: [paragraphId], diff });
+    const second = await postMerge(specId, { accept: [paragraphId], diff });
+    const state = await paragraphState(paragraphId);
+
+    expect(first.body.data).toEqual({ applied: 1, rejected: 0 });
+    expect(second.status).toBe(200);
+    expect(second.body.data).toEqual({ applied: 0, rejected: 0 });
+    expect(state).toEqual({ text: REVISED_TEXT, baseVersion: 2, versionCount: 1 });
+  });
+});
