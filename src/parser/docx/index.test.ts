@@ -83,9 +83,16 @@ interface ColorFact {
   readonly spans: readonly (readonly [number, number])[];
 }
 
+interface ChoiceTokenFact {
+  readonly kind: 'angle' | 'bracket';
+  readonly options: readonly string[];
+  readonly span: readonly [number, number];
+}
+
 interface TestSourceFacts {
   readonly comments?: readonly CommentFact[];
   readonly colors?: readonly ColorFact[];
+  readonly choiceTokens?: readonly ChoiceTokenFact[];
 }
 
 function allNodes(nodes: readonly SpecNode[]): readonly SpecNode[] {
@@ -103,6 +110,10 @@ function sourceComments(node: SpecNode | undefined): readonly CommentFact[] | un
 
 function sourceColors(node: SpecNode | undefined): readonly ColorFact[] | undefined {
   return sourceFacts(node)?.colors;
+}
+
+function sourceChoiceTokens(node: SpecNode | undefined): readonly ChoiceTokenFact[] | undefined {
+  return sourceFacts(node)?.choiceTokens;
 }
 
 function findNode(nodes: readonly SpecNode[], text: string): SpecNode | undefined {
@@ -350,6 +361,72 @@ describe('parseDocx — source facts: run colors (#129)', () => {
     const colors = sourceColors(findNode(tree.parts, 'Use highlight.'));
 
     expect(colors).toEqual([{ color: 'highlight:yellow', coverage: 9 / 14, spans: [[4, 13]] }]);
+  });
+});
+
+describe('parseDocx — source facts: choice tokens (#130)', () => {
+  function choiceDoc(text: string): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body>
+</w:document>`;
+  }
+
+  async function parseChoiceNode(
+    xmlText: string,
+    parsedText = xmlText
+  ): Promise<SpecNode | undefined> {
+    const tree = await parseDocx(await makeDocx({ documentXml: choiceDoc(xmlText) }));
+    return findNode(tree.parts, parsedText);
+  }
+
+  it('groups adjacent angle options into one pick-one candidate', async () => {
+    const node = await parseChoiceNode('&lt;aluminum&gt;&lt;steel&gt;', '<aluminum><steel>');
+    expect(sourceChoiceTokens(node)).toEqual([
+      { kind: 'angle', options: ['aluminum', 'steel'], span: [0, 17] },
+    ]);
+  });
+
+  it('ignores a lone angle segment because angle choices require adjacent options', async () => {
+    const node = await parseChoiceNode('&lt;aluminum&gt;', '<aluminum>');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+
+  it('groups adjacent bracket options into one pick-one candidate', async () => {
+    const node = await parseChoiceNode('[red][blue]');
+    expect(sourceChoiceTokens(node)).toEqual([
+      { kind: 'bracket', options: ['red', 'blue'], span: [0, 11] },
+    ]);
+  });
+
+  it('records a lone bracketed segment as a single-option keep-delete candidate', async () => {
+    const node = await parseChoiceNode('[Provide mockup.]');
+    expect(sourceChoiceTokens(node)).toEqual([
+      { kind: 'bracket', options: ['Provide mockup.'], span: [0, 17] },
+    ]);
+  });
+
+  it('ignores unclosed delimiters without error', async () => {
+    const node = await parseChoiceNode('Use [unclosed option here.');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+
+  it('skips nested brackets as ambiguous', async () => {
+    // KNOWN AMBIGUITY: nested brackets can be tailoring choices or literal bracketed text.
+    const node = await parseChoiceNode('[outer [inner]]');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+
+  it('skips nested adjacent brackets without emitting an inner candidate', async () => {
+    // KNOWN AMBIGUITY: adjacent nested brackets can be tailoring choices or literal text.
+    const node = await parseChoiceNode('[[a][b]]');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+
+  it('skips section-reference-like brackets as ambiguous', async () => {
+    // KNOWN AMBIGUITY: [Section 09 91 26] looks like a CSI cross-reference, not a choice.
+    const node = await parseChoiceNode('[Section 09 91 26]');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
   });
 });
 

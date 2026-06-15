@@ -1,7 +1,13 @@
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
+import { scanChoiceTokens } from './choice-tokens.js';
 import { asRecord, extractAttrStr } from './xml-utils.js';
-import type { SourceColorFact, SourceCommentFact, SourceFacts } from '../../ast/types.js';
+import type {
+  SourceChoiceTokenFact,
+  SourceColorFact,
+  SourceCommentFact,
+  SourceFacts,
+} from '../../ast/types.js';
 import type { DocxComment } from './comments.js';
 
 const orderedXmlParser = new XMLParser({
@@ -290,12 +296,14 @@ function colorFactsForParagraph(paragraph: InlineParagraph): readonly SourceColo
 
 function makeSourceFacts(
   comments: readonly SourceCommentFact[],
-  colors: readonly SourceColorFact[]
+  colors: readonly SourceColorFact[],
+  choiceTokens: readonly SourceChoiceTokenFact[]
 ): SourceFacts | undefined {
-  if (comments.length === 0 && colors.length === 0) return undefined;
+  if (comments.length === 0 && colors.length === 0 && choiceTokens.length === 0) return undefined;
   return {
     ...(comments.length > 0 ? { comments } : {}),
     ...(colors.length > 0 ? { colors } : {}),
+    ...(choiceTokens.length > 0 ? { choiceTokens } : {}),
   };
 }
 
@@ -319,7 +327,11 @@ function buildSourceFactsByParagraph(
   });
 
   return paragraphs.map((paragraph, index) =>
-    makeSourceFacts(buckets[index] ?? [], colorFactsForParagraph(paragraph))
+    makeSourceFacts(
+      buckets[index] ?? [],
+      colorFactsForParagraph(paragraph),
+      scanChoiceTokens(paragraph.text)
+    )
   );
 }
 

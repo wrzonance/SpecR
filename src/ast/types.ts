@@ -32,9 +32,16 @@ export interface SourceColorFact {
   readonly spans: readonly (readonly [number, number])[];
 }
 
+export interface SourceChoiceTokenFact {
+  readonly kind: 'angle' | 'bracket';
+  readonly options: readonly string[];
+  readonly span: readonly [number, number];
+}
+
 export interface SourceFacts {
   readonly comments?: readonly SourceCommentFact[];
   readonly colors?: readonly SourceColorFact[];
+  readonly choiceTokens?: readonly SourceChoiceTokenFact[];
 }
 
 export interface SpecNodeMeta {
