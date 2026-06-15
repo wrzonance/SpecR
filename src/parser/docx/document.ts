@@ -1,9 +1,11 @@
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
-import { asRecord, extractAttrStr, getAttrVal, getAttrNumVal, toArray } from './xml-utils.js';
-import type { SourceCommentFact, SourceFacts } from '../../ast/types.js';
+import { extractAttrStr, getAttrVal, getAttrNumVal, toArray } from './xml-utils.js';
+import { parseParagraphSources } from './source-facts.js';
+import type { SourceFacts } from '../../ast/types.js';
 import type { DocxComment } from './comments.js';
 import type { DocxParagraph, NumberingMap } from './types.js';
+import type { ParagraphSource } from './source-facts.js';
 
 // Entity audit (issue #22): fxp v5 does not resolve custom or recursive entity declarations
 // — undefined/recursive &refs; are returned verbatim, not expanded (no billion-laughs risk).
@@ -24,47 +26,6 @@ const xmlParser = new XMLParser({
   parseTagValue: false,
   isArray: (name) => ['w:p', 'w:r', 'w:hyperlink'].includes(name),
 });
-
-const orderedXmlParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-  textNodeName: '#text',
-  processEntities: true,
-  trimValues: false,
-  parseTagValue: false,
-  preserveOrder: true,
-});
-
-type MarkerKind = 'start' | 'end' | 'reference';
-
-interface CommentMarker {
-  readonly id: string;
-  readonly kind: MarkerKind;
-  readonly offset: number;
-}
-
-interface InlineParagraph {
-  readonly text: string;
-  readonly markers: readonly CommentMarker[];
-}
-
-interface InlineState {
-  text: string;
-  readonly markers: CommentMarker[];
-}
-
-interface ActiveComment {
-  readonly paragraphIndex: number;
-  readonly offset: number;
-}
-
-interface CommentFactContext {
-  readonly buckets: readonly SourceCommentFact[][];
-  readonly paragraphs: readonly InlineParagraph[];
-  readonly commentsById: ReadonlyMap<string, DocxComment>;
-  readonly active: Map<string, ActiveComment>;
-  readonly attached: Set<string>;
-}
 
 interface ParagraphFields {
   readonly styleId: string | undefined;
@@ -95,182 +56,6 @@ function extractText(para: Record<string, unknown>): string {
     toArray<Record<string, unknown>>(h['w:r'] as readonly Record<string, unknown>[] | undefined)
   );
   return [...directRuns, ...linkRuns].map(extractRunText).join('');
-}
-
-function childNodes(record: Record<string, unknown>, key: string): readonly unknown[] {
-  const value = record[key];
-  return Array.isArray(value) ? value : [];
-}
-
-function elementName(record: Record<string, unknown>): string | null {
-  return Object.keys(record).find((key) => key !== ':@' && key !== '#text') ?? null;
-}
-
-function markerId(record: Record<string, unknown>): string {
-  const attrs = asRecord(record[':@']);
-  return attrs ? extractAttrStr(attrs, '@_w:id') : '';
-}
-
-function markerKind(name: string): MarkerKind | null {
-  if (name === 'w:commentRangeStart') return 'start';
-  if (name === 'w:commentRangeEnd') return 'end';
-  if (name === 'w:commentReference') return 'reference';
-  return null;
-}
-
-function appendMarker(name: string, record: Record<string, unknown>, state: InlineState): void {
-  const kind = markerKind(name);
-  const id = markerId(record);
-  if (kind && id) {
-    state.markers.push({ id, kind, offset: state.text.length });
-  }
-}
-
-function collectInline(nodes: readonly unknown[], state: InlineState): void {
-  for (const raw of nodes) {
-    const record = asRecord(raw);
-    if (!record) continue;
-    const text = record['#text'];
-    if (typeof text === 'string') {
-      state.text += text;
-      continue;
-    }
-    const name = elementName(record);
-    if (!name) continue;
-    appendMarker(name, record, state);
-    collectInline(childNodes(record, name), state);
-  }
-}
-
-function inlineParagraph(children: readonly unknown[]): InlineParagraph {
-  const state: InlineState = { text: '', markers: [] };
-  collectInline(children, state);
-  return { text: state.text, markers: state.markers };
-}
-
-function findElementChildren(nodes: readonly unknown[], tag: string): readonly unknown[] {
-  for (const raw of nodes) {
-    const record = asRecord(raw);
-    if (!record) continue;
-    const children = childNodes(record, tag);
-    if (children.length > 0) return children;
-  }
-  return [];
-}
-
-function extractOrderedParagraphs(parsed: unknown): readonly InlineParagraph[] {
-  const root = Array.isArray(parsed) ? parsed : [];
-  const document = findElementChildren(root, 'w:document');
-  const body = findElementChildren(document, 'w:body');
-  return body.flatMap((raw) => {
-    const record = asRecord(raw);
-    if (!record || !('w:p' in record)) return [];
-    return [inlineParagraph(childNodes(record, 'w:p'))];
-  });
-}
-
-function appendFact(
-  buckets: readonly SourceCommentFact[][],
-  index: number,
-  fact: SourceCommentFact
-): void {
-  const bucket = buckets[index];
-  if (bucket) bucket.push(fact);
-}
-
-function appendRangeFacts(
-  buckets: readonly SourceCommentFact[][],
-  paragraphs: readonly InlineParagraph[],
-  comment: DocxComment,
-  start: ActiveComment,
-  end: ActiveComment
-): void {
-  for (let index = start.paragraphIndex; index <= end.paragraphIndex; index += 1) {
-    const paragraph = paragraphs[index];
-    if (!paragraph) continue;
-    const anchorStart = index === start.paragraphIndex ? start.offset : 0;
-    const anchorEnd = index === end.paragraphIndex ? end.offset : paragraph.text.length;
-    appendFact(buckets, index, {
-      author: comment.author,
-      text: comment.text,
-      anchor: [anchorStart, anchorEnd],
-    });
-  }
-}
-
-function handleStartMarker(
-  marker: CommentMarker,
-  paragraphIndex: number,
-  context: CommentFactContext
-): void {
-  if (marker.kind !== 'start') return;
-  context.active.set(marker.id, { paragraphIndex, offset: marker.offset });
-}
-
-function handleEndMarker(
-  marker: CommentMarker,
-  paragraphIndex: number,
-  context: CommentFactContext
-): void {
-  if (marker.kind !== 'end') return;
-  const start = context.active.get(marker.id);
-  const comment = context.commentsById.get(marker.id);
-  if (start && comment) {
-    appendRangeFacts(context.buckets, context.paragraphs, comment, start, {
-      paragraphIndex,
-      offset: marker.offset,
-    });
-    context.attached.add(marker.id);
-  }
-  context.active.delete(marker.id);
-}
-
-function handleReferenceMarker(
-  marker: CommentMarker,
-  paragraphIndex: number,
-  context: CommentFactContext
-): void {
-  if (marker.kind !== 'reference' || context.attached.has(marker.id)) return;
-  const comment = context.commentsById.get(marker.id);
-  if (!comment) return;
-  appendFact(context.buckets, paragraphIndex, {
-    author: comment.author,
-    text: comment.text,
-    anchor: [marker.offset, marker.offset],
-  });
-}
-
-function handleMarker(
-  marker: CommentMarker,
-  paragraphIndex: number,
-  context: CommentFactContext
-): void {
-  handleStartMarker(marker, paragraphIndex, context);
-  handleEndMarker(marker, paragraphIndex, context);
-  handleReferenceMarker(marker, paragraphIndex, context);
-}
-
-function buildSourceFactsByParagraph(
-  paragraphs: readonly InlineParagraph[],
-  commentsById: ReadonlyMap<string, DocxComment>
-): readonly (SourceFacts | undefined)[] {
-  if (commentsById.size === 0) return [];
-  const buckets = paragraphs.map((): SourceCommentFact[] => []);
-  const context: CommentFactContext = {
-    buckets,
-    paragraphs,
-    commentsById,
-    active: new Map(),
-    attached: new Set(),
-  };
-
-  paragraphs.forEach((paragraph, paragraphIndex) => {
-    for (const marker of paragraph.markers) {
-      handleMarker(marker, paragraphIndex, context);
-    }
-  });
-
-  return buckets.map((comments) => (comments.length > 0 ? { comments } : undefined));
 }
 
 interface NumPrResult {
@@ -337,8 +122,7 @@ function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxP
 function parseParagraph(
   raw: Record<string, unknown>,
   numberingMap: NumberingMap,
-  inline: InlineParagraph | undefined,
-  sourceFacts: SourceFacts | undefined
+  source: ParagraphSource | undefined
 ): DocxParagraph {
   const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
   const styleVal = pPr ? getAttrVal(pPr['w:pStyle']) : '';
@@ -347,10 +131,17 @@ function parseParagraph(
   const leftIndent = resolveLeftIndent(pPr);
   const outlineLvl = resolveOutlineLvl(pPr);
   const para: DocxParagraph = {
-    text: inline?.text ?? extractText(raw),
+    text: source?.text ?? extractText(raw),
     isVanish: resolveIsVanish(pPr),
   };
-  return addParagraphFields(para, { styleId, numId, ilvl, leftIndent, outlineLvl, sourceFacts });
+  return addParagraphFields(para, {
+    styleId,
+    numId,
+    ilvl,
+    leftIndent,
+    outlineLvl,
+    sourceFacts: source?.sourceFacts,
+  });
 }
 
 export function parseDocument(
@@ -359,10 +150,8 @@ export function parseDocument(
   commentsById: ReadonlyMap<string, DocxComment> = new Map()
 ): DocxParagraph[] {
   let parsed: unknown;
-  let orderedParsed: unknown;
   try {
     parsed = xmlParser.parse(xml);
-    orderedParsed = orderedXmlParser.parse(xml);
   } catch (err) {
     throw new ParserError('failed to parse word/document.xml', { cause: err });
   }
@@ -373,11 +162,8 @@ export function parseDocument(
   const body = doc?.['w:body'] as Record<string, unknown> | undefined;
   if (!body) throw new ParserError('word/document.xml missing w:body element');
 
-  const inlineParagraphs = extractOrderedParagraphs(orderedParsed);
-  const sourceFactsByParagraph = buildSourceFactsByParagraph(inlineParagraphs, commentsById);
+  const paragraphSources = parseParagraphSources(xml, commentsById);
   return toArray<Record<string, unknown>>(
     body['w:p'] as readonly Record<string, unknown>[] | undefined
-  ).map((p, index) =>
-    parseParagraph(p, numberingMap, inlineParagraphs[index], sourceFactsByParagraph[index])
-  );
+  ).map((p, index) => parseParagraph(p, numberingMap, paragraphSources[index]));
 }

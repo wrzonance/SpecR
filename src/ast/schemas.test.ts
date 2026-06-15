@@ -142,15 +142,27 @@ describe('SpecNodeMetaSchema', () => {
       baseVersion: 1,
       sourceFacts: {
         comments: [{ author: 'Reviewer', text: 'Check this.', anchor: [0, 4] }],
+        colors: [{ color: '0000FF', coverage: 0.5, spans: [[6, 10]] }],
       },
     });
     expect(result.vanish).toBe(true);
     expect(result.source).toBe('ufgs');
     expect(result.sourceFacts?.comments?.[0]?.text).toBe('Check this.');
+    expect(result.sourceFacts?.colors?.[0]?.color).toBe('0000FF');
   });
 
   it('rejects unknown source value', () => {
     expect(() => SpecNodeMetaSchema.parse({ source: 'unknown-vendor' })).toThrow();
+  });
+
+  it('rejects invalid source color coverage', () => {
+    expect(() =>
+      SpecNodeMetaSchema.parse({
+        sourceFacts: {
+          colors: [{ color: '0000FF', coverage: 1.1, spans: [[6, 10]] }],
+        },
+      })
+    ).toThrow();
   });
 });
 

@@ -26,8 +26,15 @@ export interface SourceCommentFact {
   readonly anchor: readonly [number, number];
 }
 
+export interface SourceColorFact {
+  readonly color: string;
+  readonly coverage: number;
+  readonly spans: readonly (readonly [number, number])[];
+}
+
 export interface SourceFacts {
   readonly comments?: readonly SourceCommentFact[];
+  readonly colors?: readonly SourceColorFact[];
 }
 
 export interface SpecNodeMeta {
