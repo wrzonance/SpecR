@@ -22,6 +22,7 @@ import type { SectionInference } from '../lib/infer-section.js';
 import { parseSec, parseDocx, parseText, assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { generateDocx } from '../generator/index.js';
+import { computeSpecDiff } from '../merge/index.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
@@ -34,6 +35,7 @@ type ToolError = {
 type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
 type ToolResult = ToolError | ToolOk;
 type ReferenceDirection = 'from' | 'to' | 'both';
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 export function toolError(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };
@@ -51,7 +53,6 @@ async function decodeSafeBuffer(
   ext: string,
   contentBase64: string
 ): Promise<Buffer | string | ToolError> {
-  const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
   if (!BASE64_RE.test(contentBase64)) {
     return toolError('contentBase64 is not valid base64');
   }
@@ -376,5 +377,50 @@ export async function handleGenerateDocx({ specId }: { specId: string }): Promis
   } catch (err) {
     logger.error({ err }, 'mcp tool generate_docx failed');
     return toolError('Internal error — DOCX generation failed');
+  }
+}
+
+async function decodeDocxBuffer(contentBase64: string): Promise<Buffer | ToolError> {
+  if (!BASE64_RE.test(contentBase64)) return toolError('contentBase64 is not valid base64');
+  const estimatedBytes = Math.ceil((contentBase64.length * 3) / 4);
+  if (estimatedBytes > 10 * 1024 * 1024) {
+    return toolError('Content exceeds 10 MB decoded limit');
+  }
+  const buf = Buffer.from(contentBase64, 'base64');
+  try {
+    await assertDocxSafe(buf);
+    return buf;
+  } catch (err) {
+    logger.warn({ err }, 'mcp diff DOCX rejected');
+    return toolError('invalid DOCX file');
+  }
+}
+
+async function resolveDiffDocx(
+  specId: string,
+  contentBase64: string | undefined
+): Promise<Buffer | ToolError> {
+  if (contentBase64 !== undefined) return decodeDocxBuffer(contentBase64);
+  const result = await getSpecTree(specId);
+  if (!result) return toolError(`Spec not found: id=${specId}`);
+  return generateDocx(result.tree);
+}
+
+export async function handleGetSpecDiff({
+  specId,
+  contentBase64,
+}: {
+  specId: string;
+  contentBase64: string | undefined;
+}): Promise<ToolResult> {
+  try {
+    const buffer = await resolveDiffDocx(specId, contentBase64);
+    if (isToolError(buffer)) return buffer;
+    const diff = await computeSpecDiff(specId, buffer);
+    if (!diff) return toolError(`Spec not found: id=${specId}`);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(diff, null, 2) }] };
+  } catch (err) {
+    logger.error({ err }, 'mcp tool get_spec_diff failed');
+    return toolError('Internal error — diff failed');
   }
 }

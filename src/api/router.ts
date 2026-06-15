@@ -38,6 +38,7 @@ import {
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 import { generateHandler } from './generate.js';
+import { diffHandler } from './diff.js';
 import { importTemplateHandler } from './templates.js';
 import {
   createTemplateHandler,
@@ -63,6 +64,7 @@ router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.post('/specs/:id/generate', generateHandler);
+router.post('/specs/:id/diff', upload.single('file'), diffHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects/:id', getProjectHandler);
 router.get(

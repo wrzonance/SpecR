@@ -3,7 +3,9 @@ import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Variables } from '@modelcontextprotocol/sdk/shared/uriTemplate.js';
 import { getSpecTree, listSpecSections } from '../db/index.js';
+import { generateDocx } from '../generator/index.js';
 import { renderMarkdown } from '../generator/markdown.js';
+import { computeSpecDiff } from '../merge/index.js';
 import { logger } from '../lib/logger.js';
 
 async function handleSpecTree(uri: URL, { id }: Variables) {
@@ -49,6 +51,34 @@ async function handleCsiSections(uri: URL) {
   }
 }
 
+async function handleSpecDiff(uri: URL, { id }: Variables) {
+  try {
+    const rawId = Array.isArray(id) ? id[0] : id;
+    if (typeof rawId !== 'string') {
+      return { contents: [{ uri: uri.href, mimeType: 'text/plain', text: 'Invalid spec id' }] };
+    }
+    const result = await getSpecTree(rawId);
+    if (!result) {
+      return {
+        contents: [{ uri: uri.href, mimeType: 'text/plain', text: `Spec not found: id=${rawId}` }],
+      };
+    }
+    const diff = await computeSpecDiff(rawId, await generateDocx(result.tree));
+    return {
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: 'application/json',
+          text: JSON.stringify(diff, null, 2),
+        },
+      ],
+    };
+  } catch (err) {
+    logger.error({ err }, 'mcp resource spec-diff failed');
+    return { contents: [{ uri: uri.href, mimeType: 'text/plain', text: 'Internal error' }] };
+  }
+}
+
 export function registerResources(server: McpServer): void {
   server.registerResource(
     'spec-tree',
@@ -70,5 +100,16 @@ export function registerResources(server: McpServer): void {
       mimeType: 'text/markdown',
     },
     handleCsiSections
+  );
+
+  server.registerResource(
+    'spec-diff',
+    new ResourceTemplate('specr://specs/{id}/diff', { list: undefined }),
+    {
+      description:
+        'Current generated-DOCX 3-way diff for a spec as JSON. Edited DOCX review uses the get_spec_diff tool with contentBase64.',
+      mimeType: 'application/json',
+    },
+    handleSpecDiff
   );
 }
