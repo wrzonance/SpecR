@@ -4,6 +4,7 @@ import { ParserError } from '../error.js';
 import { buildNumberingMap, emptyNumberingMap, withArticleIlvl } from './numbering.js';
 import { buildStyleMap } from './styles.js';
 import { parseDocument } from './document.js';
+import { parseCommentsXml } from './comments.js';
 import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
 import type { SpecTree, StyleProperties } from '../../ast/types.js';
 import type { NumberingMap, StyleMap, ClassifiedParagraph } from './types.js';
@@ -68,6 +69,7 @@ async function extractEntries(zip: JSZip): Promise<{
   numberingXml: string | null;
   stylesXml: string | null;
   documentXml: string | null;
+  commentsXml: string | null;
   coreXml: string | null;
   themeXml: string | null;
 }> {
@@ -78,20 +80,22 @@ async function extractEntries(zip: JSZip): Promise<{
   // NOTE: Strict discovery of the theme part should follow the officeDocument→theme
   // relationship in word/_rels/document.xml.rels; reading theme1.xml by convention
   // is an adequate approximation for spec-import use-cases.
-  const [numberingXml, stylesXml, documentXml, coreXml, themeXml] = await Promise.all([
+  const [numberingXml, stylesXml, documentXml, commentsXml, coreXml, themeXml] = await Promise.all([
     read('word/numbering.xml'),
     read('word/styles.xml'),
     read('word/document.xml'),
+    read('word/comments.xml'),
     read('docProps/core.xml'),
     read('word/theme/theme1.xml'),
   ]);
-  return { numberingXml, stylesXml, documentXml, coreXml, themeXml };
+  return { numberingXml, stylesXml, documentXml, commentsXml, coreXml, themeXml };
 }
 
 interface ValidEntries {
   readonly numberingXml: string | null;
   readonly stylesXml: string;
   readonly documentXml: string;
+  readonly commentsXml: string | null;
   readonly coreXml: string | null;
 }
 
@@ -131,6 +135,7 @@ function buildClassification(
     readonly numberingXml: string | null;
     readonly stylesXml: string;
     readonly documentXml: string;
+    readonly commentsXml?: string | null;
   },
   onProgress?: (stage: string, pct: number) => void
 ): Classification {
@@ -146,7 +151,8 @@ function buildClassification(
   const resolvedNumberingMap = withArticleIlvl(numberingMap, articleIlvl);
 
   onProgress?.('document', 55);
-  const paragraphs = parseDocument(entries.documentXml, resolvedNumberingMap);
+  const commentsById = entries.commentsXml ? parseCommentsXml(entries.commentsXml) : new Map();
+  const paragraphs = parseDocument(entries.documentXml, resolvedNumberingMap, commentsById);
 
   if (paragraphs.length === 0) {
     throw new ParserError('document contains no paragraphs');
@@ -214,10 +220,10 @@ export async function parseDocx(
   }
 
   onProgress?.('extracting', 10);
-  const { numberingXml, stylesXml, documentXml, coreXml } = await extractEntries(zip);
+  const { numberingXml, stylesXml, documentXml, commentsXml, coreXml } = await extractEntries(zip);
 
   if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
   if (!documentXml) throw new ParserError('DOCX missing word/document.xml');
 
-  return runPipeline({ numberingXml, stylesXml, documentXml, coreXml }, onProgress);
+  return runPipeline({ numberingXml, stylesXml, documentXml, commentsXml, coreXml }, onProgress);
 }

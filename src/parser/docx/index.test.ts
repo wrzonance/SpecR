@@ -38,6 +38,7 @@ async function makeDocx(opts: {
   documentXml?: string;
   stylesXml?: string;
   numberingXml?: string;
+  commentsXml?: string;
   coreXml?: string;
   omitDocument?: boolean;
   omitStyles?: boolean;
@@ -46,6 +47,7 @@ async function makeDocx(opts: {
   if (!opts.omitStyles) zip.file('word/styles.xml', opts.stylesXml ?? MINIMAL_STYLES);
   if (!opts.omitDocument) zip.file('word/document.xml', opts.documentXml ?? MINIMAL_DOC);
   if (opts.numberingXml) zip.file('word/numbering.xml', opts.numberingXml);
+  if (opts.commentsXml) zip.file('word/comments.xml', opts.commentsXml);
   if (opts.coreXml) zip.file('docProps/core.xml', opts.coreXml);
   return zip.generateAsync({ type: 'nodebuffer' });
 }
@@ -67,6 +69,27 @@ const CORE_XML = `<?xml version="1.0"?>
 
 function flatTypes(nodes: readonly SpecNode[]): string[] {
   return [...nodes.flatMap((n) => [n.type, ...flatTypes(n.children)])];
+}
+
+interface CommentFact {
+  readonly author: string;
+  readonly text: string;
+  readonly anchor: readonly [number, number];
+}
+
+function allNodes(nodes: readonly SpecNode[]): readonly SpecNode[] {
+  return nodes.flatMap((n) => [n, ...allNodes(n.children)]);
+}
+
+function sourceComments(node: SpecNode | undefined): readonly CommentFact[] | undefined {
+  const meta = node?.meta as {
+    readonly sourceFacts?: { readonly comments?: readonly CommentFact[] };
+  };
+  return meta.sourceFacts?.comments;
+}
+
+function findNode(nodes: readonly SpecNode[], text: string): SpecNode | undefined {
+  return allNodes(nodes).find((n) => n.text === text);
 }
 
 describe('parseDocx — happy path', () => {
@@ -152,6 +175,92 @@ describe('parseDocx — error handling', () => {
     const tree = await parseDocx(buffer);
     expect(tree.section).toBe('unknown');
     expect(tree.title).toBe('unknown');
+  });
+});
+
+describe('parseDocx — source facts: comments (#128)', () => {
+  const commentsXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="0" w:author="Jane Specifier">
+    <w:p><w:r><w:t>Use approved product list.</w:t></w:r></w:p>
+  </w:comment>
+  <w:comment w:id="1" w:author="Alex Reviewer">
+    <w:p><w:r><w:t>Coordinate with owner.</w:t></w:r></w:p>
+  </w:comment>
+  <w:comment w:id="2" w:author="Jane Specifier">
+    <w:p><w:r><w:t>Spans paragraphs.</w:t></w:r></w:p>
+  </w:comment>
+</w:comments>`;
+
+  it('attaches two comments on different paragraphs exactly', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Alpha </w:t></w:r><w:commentRangeStart w:id="0"/><w:r><w:t>target</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r><w:r><w:t> one.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Beta </w:t></w:r><w:commentRangeStart w:id="1"/><w:r><w:t>target</w:t></w:r><w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r><w:r><w:t> two.</w:t></w:r></w:p>
+  </w:body>
+</w:document>`;
+    const tree = await parseDocx(await makeDocx({ documentXml, commentsXml }));
+    const first = findNode(tree.parts, 'Alpha target one.');
+    const second = findNode(tree.parts, 'Beta target two.');
+
+    expect(sourceComments(first)).toEqual([
+      { author: 'Jane Specifier', text: 'Use approved product list.', anchor: [6, 12] },
+    ]);
+    expect(sourceComments(second)).toEqual([
+      { author: 'Alex Reviewer', text: 'Coordinate with owner.', anchor: [5, 11] },
+    ]);
+  });
+
+  it('keeps comment facts aligned when the document contains an empty paragraph', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Alpha text.</w:t></w:r></w:p>
+    <w:p/>
+    <w:p><w:r><w:t>Beta </w:t></w:r><w:commentRangeStart w:id="1"/><w:r><w:t>target</w:t></w:r><w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r><w:r><w:t> text.</w:t></w:r></w:p>
+  </w:body>
+</w:document>`;
+    const tree = await parseDocx(await makeDocx({ documentXml, commentsXml }));
+    const alpha = findNode(tree.parts, 'Alpha text.');
+    const beta = findNode(tree.parts, 'Beta target text.');
+
+    expect(sourceComments(alpha)).toBeUndefined();
+    expect(sourceComments(beta)).toEqual([
+      { author: 'Alex Reviewer', text: 'Coordinate with owner.', anchor: [5, 11] },
+    ]);
+  });
+
+  it('clips a spanning comment to each covered paragraph anchor', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Alpha </w:t></w:r><w:commentRangeStart w:id="2"/><w:r><w:t>covered</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Beta</w:t></w:r><w:commentRangeEnd w:id="2"/><w:r><w:commentReference w:id="2"/></w:r><w:r><w:t> tail</w:t></w:r></w:p>
+  </w:body>
+</w:document>`;
+    const tree = await parseDocx(await makeDocx({ documentXml, commentsXml }));
+    const first = findNode(tree.parts, 'Alpha covered');
+    const second = findNode(tree.parts, 'Beta tail');
+
+    // Spanning comments are represented as one fact per covered paragraph,
+    // clipped to each paragraph's local flattened text span.
+    expect(sourceComments(first)).toEqual([
+      { author: 'Jane Specifier', text: 'Spans paragraphs.', anchor: [6, 13] },
+    ]);
+    expect(sourceComments(second)).toEqual([
+      { author: 'Jane Specifier', text: 'Spans paragraphs.', anchor: [0, 4] },
+    ]);
+  });
+
+  it('omits sourceFacts when comments.xml is absent', async () => {
+    const tree = await parseDocx(await makeDocx({ documentXml: MINIMAL_DOC }));
+    expect(allNodes(tree.parts).every((n) => sourceComments(n) === undefined)).toBe(true);
+  });
+
+  it('malformed comments.xml throws ParserError instead of silently dropping comments', async () => {
+    const buffer = await makeDocx({ commentsXml: '<w:comments><w:comment' });
+    await expect(parseDocx(buffer)).rejects.toThrow('failed to parse word/comments.xml');
   });
 });
 
