@@ -212,6 +212,25 @@ describe('parseDocx — source facts: comments (#128)', () => {
     ]);
   });
 
+  it('keeps comment facts aligned when the document contains an empty paragraph', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Alpha text.</w:t></w:r></w:p>
+    <w:p/>
+    <w:p><w:r><w:t>Beta </w:t></w:r><w:commentRangeStart w:id="1"/><w:r><w:t>target</w:t></w:r><w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r><w:r><w:t> text.</w:t></w:r></w:p>
+  </w:body>
+</w:document>`;
+    const tree = await parseDocx(await makeDocx({ documentXml, commentsXml }));
+    const alpha = findNode(tree.parts, 'Alpha text.');
+    const beta = findNode(tree.parts, 'Beta target text.');
+
+    expect(sourceComments(alpha)).toBeUndefined();
+    expect(sourceComments(beta)).toEqual([
+      { author: 'Alex Reviewer', text: 'Coordinate with owner.', anchor: [5, 11] },
+    ]);
+  });
+
   it('clips a spanning comment to each covered paragraph anchor', async () => {
     const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">

@@ -164,8 +164,8 @@ function extractOrderedParagraphs(parsed: unknown): readonly InlineParagraph[] {
   const body = findElementChildren(document, 'w:body');
   return body.flatMap((raw) => {
     const record = asRecord(raw);
-    const children = record ? childNodes(record, 'w:p') : [];
-    return children.length > 0 ? [inlineParagraph(children)] : [];
+    if (!record || !('w:p' in record)) return [];
+    return [inlineParagraph(childNodes(record, 'w:p'))];
   });
 }
 

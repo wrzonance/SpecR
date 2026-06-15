@@ -140,9 +140,13 @@ describe('SpecNodeMetaSchema', () => {
       source: 'ufgs',
       revitParam: 'Manufacturer',
       baseVersion: 1,
+      sourceFacts: {
+        comments: [{ author: 'Reviewer', text: 'Check this.', anchor: [0, 4] }],
+      },
     });
     expect(result.vanish).toBe(true);
     expect(result.source).toBe('ufgs');
+    expect(result.sourceFacts?.comments?.[0]?.text).toBe('Check this.');
   });
 
   it('rejects unknown source value', () => {

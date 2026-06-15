@@ -25,12 +25,23 @@ export const SignalConflictSchema = z.object({
   reportedNodeType: NodeTypeSchema,
 });
 
+export const SourceCommentFactSchema = z.object({
+  author: z.string(),
+  text: z.string(),
+  anchor: z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]),
+});
+
+export const SourceFactsSchema = z.object({
+  comments: z.array(SourceCommentFactSchema).exactOptional(),
+});
+
 export const SpecNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
   source: z.enum(['ufgs', 'arcat', 'cpi', 'unknown']).exactOptional(),
   revitParam: z.string().exactOptional(),
   baseVersion: z.number().int().nonnegative().exactOptional(),
   conflicts: z.array(SignalConflictSchema).exactOptional(),
+  sourceFacts: SourceFactsSchema.exactOptional(),
 });
 
 export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>
