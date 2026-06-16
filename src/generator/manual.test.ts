@@ -129,7 +129,7 @@ describe('generateManual', () => {
 
   it('emits a TOC field code before the first section', async () => {
     const xml = await getDocXml(await generateManual([SECTION_A, SECTION_B], META));
-    const tocMatch = xml.match(/instrText[^>]*>TOC .*\\o &quot;1-1&quot;/);
+    const tocMatch = /instrText[^>]*>TOC .*\\o &quot;1-1&quot;/.exec(xml);
     expect(tocMatch).not.toBeNull();
     expect(xml.search(/instrText[^>]*>TOC/)).toBeLessThan(xml.indexOf('SECTION 03 30 00'));
   });
