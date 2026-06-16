@@ -1,4 +1,4 @@
-import { AlignmentType, HeadingLevel, PageBreak, Paragraph, TableOfContents, TextRun } from 'docx';
+import { AlignmentType, PageBreak, Paragraph, TableOfContents, TextRun } from 'docx';
 import type { FileChild } from 'docx';
 import type { StyleRule } from '../ast/index.js';
 import { buildRuleMap, runStyleOptions, type StyleRuleMap } from './styles.js';
@@ -43,9 +43,13 @@ function coverParagraphs(meta: ManualMeta, rules?: StyleRuleMap): Paragraph[] {
  */
 export function buildFrontMatter(meta: ManualMeta, styleRules?: readonly StyleRule[]): FileChild[] {
   const rules = styleRules !== undefined ? buildRuleMap(styleRules) : undefined;
+  // The TOC title is deliberately NOT styled Heading1: the TOC field collects
+  // Heading1 paragraphs (\o "1-1"), so a Heading1 title would list itself as an
+  // entry, breaking the one-entry-per-section contract. Center + bold gives it
+  // heading-like prominence without entering the document outline.
   const tocHeading = new Paragraph({
-    heading: HeadingLevel.HEADING_1,
-    children: [new TextRun(TOC_TITLE)],
+    alignment: AlignmentType.CENTER,
+    children: [new TextRun({ text: TOC_TITLE, bold: true })],
   });
   const toc = new TableOfContents(TOC_TITLE, {
     hyperlink: true,

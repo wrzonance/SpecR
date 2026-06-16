@@ -139,9 +139,11 @@ describe('generateManual', () => {
     // Section titles carry "SECTION <number>"; assert they appear in TOC order.
     const titles = [...xml.matchAll(/SECTION (\d\d \d\d \d\d)/g)].map((m) => m[1]);
     expect(titles).toEqual(['03 30 00', '09 91 00']);
-    // Heading1 paragraphs = the two section titles + the "Table of Contents" heading.
+    // Heading1 paragraphs = the two section titles only. The "Table of Contents"
+    // label is intentionally NOT Heading1, so the TOC field (\o "1-1") yields one
+    // entry per section and never lists its own title.
     const h1 = [...xml.matchAll(/<w:pStyle w:val="Heading1"\/>/g)].length;
-    expect(h1).toBe(3);
+    expect(h1).toBe(2);
   });
 
   it('throws GeneratorError when no sections are supplied', async () => {

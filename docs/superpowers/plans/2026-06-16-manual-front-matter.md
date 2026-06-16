@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Cover page + TOC field builder (`front-matter.ts`)
+## Task 1: Cover page + TOC field builder (`front-matter.ts`)
 
 **Files:**
 - Create: `src/generator/front-matter.ts`
@@ -154,7 +154,7 @@ git commit -m "feat(generator): cover page + TOC field builder for manual front 
 
 ---
 
-### Task 2: Section titles become Heading1; `generateManual` prepends front matter
+## Task 2: Section titles become Heading1; `generateManual` prepends front matter
 
 **Files:**
 - Modify: `src/generator/index.ts` (`buildSectionChildren`, `generateManual`)
@@ -292,7 +292,7 @@ git commit -m "feat(generator): prepend cover + TOC front matter to generateManu
 
 ---
 
-### Task 3: Wire the API handler to pass project metadata
+## Task 3: Wire the API handler to pass project metadata
 
 **Files:**
 - Modify: `src/api/generate.ts` (`generateManualHandler`)
