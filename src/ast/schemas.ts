@@ -161,8 +161,12 @@ export const PatchSpecBodySchema = z.object({
 
 // Individual paragraph update (ADR-009 / #47). Empty text is rejected so the
 // Revit add-in (#48) can never blank a paragraph by pushing an empty value.
+// `expectedVersion` is the optimistic-concurrency precondition (ADR-018 D1):
+// the spec content_version the caller read. Optional for backward compatibility
+// — when present, a stale value is rejected 409 with the current version.
 export const UpdateParagraphBodySchema = z.object({
   text: z.string().check(z.minLength(1)),
+  expectedVersion: z.number().int().min(1).exactOptional(),
 });
 
 export type UpdateParagraphBody = z.infer<typeof UpdateParagraphBodySchema>;

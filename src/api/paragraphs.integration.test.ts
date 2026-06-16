@@ -175,3 +175,73 @@ describe('PATCH /specs/:id/paragraphs/:nodeId (integration)', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('PATCH paragraph — optimistic concurrency + edit gate (ADR-018)', () => {
+  async function specVersion(id: string): Promise<number> {
+    const r = await pool.query<{ content_version: number }>(
+      'SELECT content_version FROM specs WHERE id = $1',
+      [id]
+    );
+    return r.rows[0]?.content_version ?? 0;
+  }
+
+  it('bumps specs.content_version on a successful write', async () => {
+    const before = await specVersion(specId);
+    const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${nodeId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Provide bonded cabling.' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await specVersion(specId)).toBe(before + 1);
+  });
+
+  it('accepts a matching expectedVersion', async () => {
+    const version = await specVersion(specId);
+    const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${nodeId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Provide tested cabling.', expectedVersion: version }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects a stale expectedVersion with 409 and the current version in the body', async () => {
+    const version = await specVersion(specId);
+    const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${nodeId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'doomed edit', expectedVersion: version - 1 }),
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { success: boolean; currentVersion: number };
+    expect(body.success).toBe(false);
+    expect(body.currentVersion).toBe(version);
+  });
+
+  it('rejects writes to an archived spec with 409', async () => {
+    const archived = await insertSpec('99 96 00', 'Archived Spec');
+    const para = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version)
+       VALUES ($1, NULL, 'pr1', 'Original.', 0, 1) RETURNING id`,
+      [archived]
+    );
+    const archivedNode = para.rows[0]!.id;
+    await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [archived]);
+    try {
+      const res = await fetch(`${baseUrl}/specs/${archived}/paragraphs/${archivedNode}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'edit on archived' }),
+      });
+      expect(res.status).toBe(409);
+      const after = await pool.query<{ text: string }>(
+        'SELECT text FROM paragraphs WHERE id = $1',
+        [archivedNode]
+      );
+      expect(after.rows[0]?.text).toBe('Original.');
+    } finally {
+      await pool.query('DELETE FROM specs WHERE id = $1', [archived]);
+    }
+  });
+});
