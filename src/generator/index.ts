@@ -1,5 +1,6 @@
-import { Document, Paragraph, TextRun, Packer } from 'docx';
+import { Document, Paragraph, TextRun, Packer, HeadingLevel } from 'docx';
 import { wrapWithControl, SdtBlock } from './controls.js';
+import { buildFrontMatter, type ManualMeta } from './front-matter.js';
 import type { SpecNode, SpecTree, StyleProperties, StyleRule } from '../ast/index.js';
 import { GeneratorError } from './error.js';
 import { buildSpecNumberingConfig, getNodeLevel } from './numbering.js';
@@ -55,6 +56,13 @@ function plainParagraph(text: string): Paragraph {
   return new Paragraph({ children: [new TextRun(text)] });
 }
 
+// Section titles are Heading1 so the manual's Word TOC field (headingStyleRange
+// '1-1') resolves exactly one entry per section. Harmless in single-section
+// output, which carries no TOC.
+function titleParagraph(text: string): Paragraph {
+  return new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(text)] });
+}
+
 function displaySection(section: string, format: SectionNumberFormat): string {
   const canonical = normalizeSectionNumber(section);
   return canonical === null ? section : formatSectionNumber(canonical, format);
@@ -94,7 +102,7 @@ function collectParagraphs(
 // Build one section's paragraph list: synthetic title (no anchor) + anchored body.
 function buildSectionChildren(tree: SpecTree, ctx: SectionContext): (Paragraph | SdtBlock)[] {
   const children: (Paragraph | SdtBlock)[] = [
-    plainParagraph(`SECTION ${displaySection(tree.section, ctx.format)} — ${tree.title}`),
+    titleParagraph(`SECTION ${displaySection(tree.section, ctx.format)} — ${tree.title}`),
   ];
   collectParagraphs(tree.parts, children, ctx);
   return children;
@@ -135,9 +143,15 @@ export async function generateDocx(
  * dolanmiu/docx numbering is document-scoped, so per-section restart requires a
  * distinct numbering reference (→ distinct abstractNum) per section. Every
  * paragraph keeps its `w:sdt` UUID anchor so a redlined manual can round-trip.
+ *
+ * The manual opens with a front-matter OOXML section — a cover page (project
+ * `meta`, style-template applied) and a Word TOC field over the Heading1 section
+ * titles (ADR-017 D1). Word computes the TOC entries + pagination on open; SpecR
+ * emits the field + headings (structure), never page numbers.
  */
 export async function generateManual(
   trees: readonly SpecTree[],
+  meta: ManualMeta,
   styleRules?: readonly StyleRule[],
   options?: GenerateDocxOptions
 ): Promise<Buffer> {
@@ -147,6 +161,7 @@ export async function generateManual(
   try {
     const rules = styleRules !== undefined ? buildRuleMap(styleRules) : undefined;
     const format = options?.sectionNumberFormat ?? 'canonical';
+    const frontMatter = buildFrontMatter(meta, styleRules);
     const sections = trees.map((tree, i) => {
       const reference = `${SPEC_NUM_REF}-${i}`;
       return {
@@ -156,7 +171,10 @@ export async function generateManual(
     });
     const doc = new Document({
       numbering: { config: sections.map((s) => buildSpecNumberingConfig(rules, s.reference)) },
-      sections: sections.map((s) => ({ properties: {}, children: s.children })),
+      sections: [
+        { properties: {}, children: frontMatter },
+        ...sections.map((s) => ({ properties: {}, children: s.children })),
+      ],
     });
     return await Packer.toBuffer(doc);
   } catch (err) {
