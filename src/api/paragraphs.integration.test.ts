@@ -136,4 +136,13 @@ describe('PATCH /specs/:id/paragraphs/:nodeId (integration)', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it('returns 400 for an invalid specId', async () => {
+    const res = await fetch(`${baseUrl}/specs/not-a-uuid/paragraphs/${nodeId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'valid text' }),
+    });
+    expect(res.status).toBe(400);
+  });
 });
