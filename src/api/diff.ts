@@ -14,7 +14,7 @@ type UploadValidation =
 async function validateDocxUpload(req: Request): Promise<UploadValidation> {
   if (!req.file) return { ok: false, status: 400, error: 'DOCX file required' };
   const ext = path.extname(req.file.originalname).toLowerCase();
-  if (ext !== '.docx' || req.file.mimetype !== DOCX_MIME) {
+  if (ext !== '.docx' && req.file.mimetype !== DOCX_MIME) {
     return { ok: false, status: 422, error: 'DOCX file required' };
   }
   try {

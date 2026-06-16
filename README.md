@@ -10,7 +10,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 
 ## Status
 
-**Active development — Phase 1c + 2b + 2c complete, Phase 2d next.**
+**Active development — Phase 1c + 2b + 2c complete, Phase 3 (round-trip merge) in progress.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|

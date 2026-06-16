@@ -22,7 +22,7 @@ import type { SectionInference } from '../lib/infer-section.js';
 import { parseSec, parseDocx, parseText, assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { generateDocx } from '../generator/index.js';
-import { computeSpecDiff } from '../merge/index.js';
+import { computeSpecDiff, MergeError } from '../merge/index.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
@@ -420,6 +420,9 @@ export async function handleGetSpecDiff({
     if (!diff) return toolError(`Spec not found: id=${specId}`);
     return { content: [{ type: 'text' as const, text: JSON.stringify(diff, null, 2) }] };
   } catch (err) {
+    if (err instanceof MergeError) {
+      return toolError(err.message);
+    }
     logger.error({ err }, 'mcp tool get_spec_diff failed');
     return toolError('Internal error — diff failed');
   }

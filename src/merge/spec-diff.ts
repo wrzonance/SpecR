@@ -11,17 +11,18 @@ function generatedTitleText(tree: SpecTree): string {
   return `SECTION ${section} — ${tree.title}`;
 }
 
-function isGeneratedTitleOrphan(
-  orphan: { readonly text: string; readonly index: number },
-  tree: SpecTree
-): boolean {
-  return orphan.index === 0 && orphan.text === generatedTitleText(tree);
-}
-
 function withoutGeneratedTitle(theirs: ExtractResult, tree: SpecTree): ExtractResult {
+  const generated = generatedTitleText(tree);
+  let removed = false;
   return {
     ...theirs,
-    orphans: theirs.orphans.filter((orphan) => !isGeneratedTitleOrphan(orphan, tree)),
+    orphans: theirs.orphans.filter((orphan) => {
+      if (!removed && orphan.text === generated) {
+        removed = true;
+        return false;
+      }
+      return true;
+    }),
   };
 }
 

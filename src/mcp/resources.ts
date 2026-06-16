@@ -64,6 +64,11 @@ async function handleSpecDiff(uri: URL, { id }: Variables) {
       };
     }
     const diff = await computeSpecDiff(rawId, await generateDocx(result.tree));
+    if (!diff) {
+      return {
+        contents: [{ uri: uri.href, mimeType: 'text/plain', text: `Spec not found: id=${rawId}` }],
+      };
+    }
     return {
       contents: [
         {
