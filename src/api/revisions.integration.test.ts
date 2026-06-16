@@ -158,6 +158,27 @@ describe('POST /packages/:id/revisions', () => {
     const res = await json('POST', `/packages/${pkgFull}/revisions`, { label: '' });
     expect(res.status).toBe(422);
   });
+
+  it('issuance flips member specs lifecycle_state to issued (ADR-018 D3)', async () => {
+    async function lifecycle(id: string): Promise<string> {
+      const r = await pool.query<{ lifecycle_state: string }>(
+        'SELECT lifecycle_state FROM specs WHERE id = $1',
+        [id]
+      );
+      return r.rows[0]!.lifecycle_state;
+    }
+    // Archive one member first: issuance must never reactivate an archived spec.
+    await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [hvac1]);
+
+    const res = await json('POST', `/packages/${pkgFull}/revisions`, { label: 'Issuance Hook' });
+    expect(res.status).toBe(201);
+
+    expect(await lifecycle(steel1)).toBe('issued'); // draft → issued
+    expect(await lifecycle(hvac1)).toBe('archived'); // archived stays archived
+
+    // Restore so later tests in the file see a clean draft member.
+    await pool.query(`UPDATE specs SET lifecycle_state = 'draft' WHERE id = $1`, [hvac1]);
+  });
 });
 
 describe('GET /revisions/:id', () => {

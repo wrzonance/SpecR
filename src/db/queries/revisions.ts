@@ -13,7 +13,8 @@ import { PackageNotFoundError } from './packages.js';
  *  REPEATABLE READ transaction, so all trees come from a single consistent
  *  point-in-time view. Trees are Zod-validated at write (never freeze a
  *  snapshot that cannot round-trip) and again at read (tamper/drift guard).
- *  The lifecycle_state='issued' hook is deferred to ADR-018. */
+ *  Issuing also flips each draft member spec to lifecycle_state='issued'
+ *  (ADR-018 D3 hook — see markMembersIssued). */
 
 interface Queryable {
   query: Pool['query'];
@@ -133,6 +134,19 @@ async function insertSnapshotRows(
   }
 }
 
+/** ADR-018 D3 issuance hook: a spec that participates in a package revision
+ *  becomes 'issued'. Only 'draft' specs flip — 'issued' stays issued, and
+ *  'archived' is never reactivated by issuance. Editing of an issued spec stays
+ *  allowed (the snapshot is the immutable thing); the state is advisory. */
+async function markMembersIssued(specIds: readonly string[], client: PoolClient): Promise<void> {
+  if (specIds.length === 0) return;
+  await client.query(
+    `UPDATE specs SET lifecycle_state = 'issued', updated_at = now()
+     WHERE id = ANY($1) AND lifecycle_state = 'draft'`,
+    [specIds]
+  );
+}
+
 /** Issue a revision: snapshot the package's full membership in one
  *  transaction. Duplicate label surfaces as a unique violation (→ 409). */
 export async function createPackageRevision(
@@ -153,6 +167,10 @@ export async function createPackageRevision(
     if (!row) throw new DatabaseError('createPackageRevision: no row returned after insert');
     const entries = await snapshotMemberTrees(packageId, client);
     await insertSnapshotRows(row.id, entries, client);
+    await markMembersIssued(
+      entries.map((e) => e.specId),
+      client
+    );
     await client.query('COMMIT');
     logger.info(
       { packageId, revisionId: row.id, label, specCount: entries.length },
