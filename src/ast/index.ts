@@ -1,6 +1,7 @@
 export type {
   NodeType,
   SignalConflict,
+  SourceFacts,
   SpecNodeMeta,
   SpecNode,
   SpecTree,
@@ -11,6 +12,7 @@ export type {
 export {
   NodeTypeSchema,
   SignalConflictSchema,
+  SourceFactsSchema,
   SpecNodeMetaSchema,
   SpecNodeSchema,
   SpecTreeSchema,

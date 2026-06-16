@@ -5,6 +5,12 @@ import type { OriginMeta } from './specs.js';
 import { insertTree } from './paragraphs.js';
 import { getSpecTree } from './specs.js';
 
+const SOURCE_FACTS = {
+  comments: [{ author: 'Specifier', text: 'Verify finish.', anchor: [11, 15] }],
+  colors: [{ color: 'highlight:yellow', coverage: 0.25, spans: [[11, 15]] }],
+  reviewer: { severity: 'coordination', count: 2 },
+} as const;
+
 afterEach(async () => {
   await pool.query("DELETE FROM specs WHERE section = '99 00 00'");
 });
@@ -37,6 +43,7 @@ describe('getSpecTree', () => {
                     children: [],
                     meta: {
                       conflicts: [{ signal: 5, reportedIlvl: 1, reportedNodeType: 'article' }],
+                      sourceFacts: SOURCE_FACTS,
                     },
                   },
                 ],
@@ -90,6 +97,19 @@ describe('getSpecTree', () => {
     const part = result!.tree.parts[0]!;
     expect(part.meta.conflicts).toBeUndefined();
     expect(Object.keys(part.meta)).not.toContain('conflicts');
+  });
+
+  it('round-trips meta.sourceFacts on inner nodes (#131)', async () => {
+    const result = await getSpecTree(treeSpecId);
+    const pr1 = result!.tree.parts[0]!.children[0]!.children[0]!;
+    expect(pr1.meta.sourceFacts).toEqual(SOURCE_FACTS);
+  });
+
+  it('omits meta.sourceFacts when the stored object is empty (#131)', async () => {
+    const result = await getSpecTree(treeSpecId);
+    const part = result!.tree.parts[0]!;
+    expect(part.meta.sourceFacts).toBeUndefined();
+    expect(Object.keys(part.meta)).not.toContain('sourceFacts');
   });
 });
 
