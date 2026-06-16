@@ -209,6 +209,8 @@ afterAll(async () => {
 
 describe('Phase 3 DOCX round trip (integration)', () => {
   it('parses SEC, generates DOCX, preserves content-control UUID, diffs, merges, and reads back accepted text', async () => {
+    // KNOWN AMBIGUITY: Real editors may strip or rewrite w:sdt/w:tag anchors;
+    // CI validates only the preserved-anchor path.
     // Phase 3 assumes ordinary Microsoft Word and LibreOffice text edits preserve
     // the surrounding w:sdt/w:tag anchors. This deterministic CI edit mutates only
     // one w:t node and leaves those content controls intact.
