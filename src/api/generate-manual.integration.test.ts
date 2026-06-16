@@ -6,11 +6,11 @@ import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool } from '../db/index.js';
 
-let server: Server;
-let baseUrl: string;
-let projectId: string;
-let specA: string;
-let specB: string;
+let server: Server | undefined;
+let baseUrl = '';
+let projectId = '';
+let specA = '';
+let specB = '';
 
 async function insertSpec(section: string, title: string): Promise<string> {
   const res = await pool.query<{ id: string }>(
@@ -46,10 +46,11 @@ beforeAll(async () => {
   app.use(express.json());
   app.use(router);
   app.use(errorHandler);
-  await new Promise<void>((resolve) => {
-    server = app.listen(0, () => resolve());
+  const activeServer = await new Promise<Server>((resolve) => {
+    const listeningServer = app.listen(0, () => resolve(listeningServer));
   });
-  const address = server.address();
+  server = activeServer;
+  const address = activeServer.address();
   const port = typeof address === 'object' && address !== null ? address.port : 3000;
   baseUrl = `http://localhost:${port}`;
 
@@ -71,11 +72,19 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (projectId) await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
-  await pool.query('DELETE FROM specs WHERE id = ANY($1)', [[specA, specB]]);
-  await new Promise<void>((resolve, reject) => {
-    server.close((err) => (err != null ? reject(err) : resolve()));
-  });
+  if (projectId) {
+    await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+  }
+  const specIds = [specA, specB].filter((id) => id.length > 0);
+  if (specIds.length > 0) {
+    await pool.query('DELETE FROM specs WHERE id = ANY($1)', [specIds]);
+  }
+  const activeServer = server;
+  if (activeServer) {
+    await new Promise<void>((resolve, reject) => {
+      activeServer.close((err) => (err != null ? reject(err) : resolve()));
+    });
+  }
 });
 
 async function getDocXml(buffer: Buffer): Promise<string> {
@@ -110,6 +119,10 @@ describe('POST /projects/:id/generate — manual assembly (integration)', () => 
     // Per-section numbering restart: each section uses a distinct numId instance.
     const distinctNumIds = new Set([...xml.matchAll(/<w:numId w:val="(\d+)"/g)].map((m) => m[1]));
     expect(distinctNumIds.size).toBe(2);
+
+    // Manual assembly must emit section boundaries in OOXML.
+    const sectPrCount = (xml.match(/<w:sectPr\b/g) ?? []).length;
+    expect(sectPrCount).toBeGreaterThanOrEqual(2);
 
     // Every emitted paragraph keeps its UUID anchor (2 parts + 2 articles = 4).
     expect((xml.match(/specr-uuid-/g) ?? []).length).toBe(4);

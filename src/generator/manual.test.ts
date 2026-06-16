@@ -93,9 +93,8 @@ describe('generateManual', () => {
   });
 
   it('numbering restarts per section: each section uses a distinct numbering instance', async () => {
-    // Word computes the displayed "PART 1" at open time, so the literal label is
-    // not in document.xml. The mechanism that guarantees the restart is a distinct
-    // numId (→ distinct abstractNum) per section; assert that structural property.
+    // KNOWN AMBIGUITY: Word computes the displayed "PART 1" at open time; this
+    // test asserts the distinct numId/abstractNum structure that guarantees restart.
     const xml = await getDocXml(await generateManual([SECTION_A, SECTION_B]));
     const numIds = [...xml.matchAll(/<w:numId w:val="(\d+)"/g)].map((m) => m[1]);
     const distinct = new Set(numIds);
