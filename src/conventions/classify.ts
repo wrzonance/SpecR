@@ -25,44 +25,73 @@ import type { ClassificationEvidence, ClassifyResult, ParagraphClassification } 
  */
 export function classify(tree: SpecTree, rules: ConventionRules): ClassifyResult {
   const out: ParagraphClassification[] = [];
-  // Compile noteBanners once here, not per node — a large tree would otherwise
-  // recompile the same patterns thousands of times.
-  const noteBanners = compilePatterns(rules.noteBanners);
-  for (const part of tree.parts) collectNode(part, rules, noteBanners, out);
+  // Compile the rule lookups once here, not per node — a large tree would
+  // otherwise recompile regexes and rebuild Set/Map structures thousands of times.
+  const compiled = compileRules(rules);
+  for (const part of tree.parts) collectNode(part, rules, compiled, out);
   return out;
+}
+
+// Per-classify lookups derived from the rule profile, built once and reused
+// across every node so each rung is a cheap lookup rather than a rescan.
+interface CompiledRules {
+  readonly noteBanners: readonly (RegExp | null)[];
+  readonly enabledChoiceKinds: ReadonlySet<SourceChoiceTokenFact['kind']>;
+  readonly colorMeanings: ReadonlyMap<string, Editability>;
+}
+
+function compileRules(rules: ConventionRules): CompiledRules {
+  return {
+    noteBanners: compilePatterns(rules.noteBanners),
+    enabledChoiceKinds: new Set((rules.choiceTokens ?? []).map((t) => t.kind)),
+    colorMeanings: buildColorMeanings(rules.colorMeanings),
+  };
+}
+
+// First mapping for a color wins, matching the prior `Array.find` semantics.
+function buildColorMeanings(
+  meanings: ConventionRules['colorMeanings']
+): ReadonlyMap<string, Editability> {
+  const map = new Map<string, Editability>();
+  for (const m of meanings ?? []) if (!map.has(m.color)) map.set(m.color, m.meaning);
+  return map;
 }
 
 // Pre-order walk: a node is classified before its children (document order).
 function collectNode(
   node: SpecNode,
   rules: ConventionRules,
-  noteBanners: readonly (RegExp | null)[],
+  compiled: CompiledRules,
   out: ParagraphClassification[]
 ): void {
-  out.push(classifyNode(node, rules, noteBanners));
-  for (const child of node.children) collectNode(child, rules, noteBanners, out);
+  out.push(classifyNode(node, rules, compiled));
+  for (const child of node.children) collectNode(child, rules, compiled, out);
 }
 
 /** Verdict for one node: first matching rung wins; default closes the ladder. */
 function classifyNode(
   node: SpecNode,
   rules: ConventionRules,
-  noteBanners: readonly (RegExp | null)[]
+  compiled: CompiledRules
 ): ParagraphClassification {
   const facts: SourceFacts = node.meta.sourceFacts ?? {};
   const verdict =
-    noteRung(node.text, facts, noteBanners) ??
+    noteRung(node.text, facts, compiled.noteBanners) ??
     commentRung(facts, rules) ??
-    choiceRung(facts, rules) ??
-    colorRung(facts, rules) ??
+    choiceRung(facts, compiled.enabledChoiceKinds) ??
+    colorRung(facts, compiled.colorMeanings) ??
     defaultRung(rules);
   return { nodeId: node.id, ...verdict };
 }
 
+// At least one evidence entry — every rung records why it fired, so the
+// public `ParagraphClassification.evidence` contract ("never empty") holds.
+type Evidence = readonly [ClassificationEvidence, ...ClassificationEvidence[]];
+
 interface RungVerdict {
   readonly editability: Editability;
   readonly confidence: number;
-  readonly evidence: readonly ClassificationEvidence[];
+  readonly evidence: Evidence;
 }
 
 // ── Rung 1: note ──────────────────────────────────────────────────────────────
@@ -85,7 +114,7 @@ function noteRung(
   return null;
 }
 
-function note(confidence: number, evidence: readonly ClassificationEvidence[]): RungVerdict {
+function note(confidence: number, evidence: Evidence): RungVerdict {
   return { editability: 'note', confidence, evidence };
 }
 
@@ -135,8 +164,10 @@ function commentRung(facts: SourceFacts, rules: ConventionRules): RungVerdict | 
 // A choice-token candidate only means "choice" when the profile enables its kind
 // (AC). Confidence is fixed: presence of an enabled token is a binary signal.
 
-function choiceRung(facts: SourceFacts, rules: ConventionRules): RungVerdict | null {
-  const enabled = new Set((rules.choiceTokens ?? []).map((t) => t.kind));
+function choiceRung(
+  facts: SourceFacts,
+  enabled: ReadonlySet<SourceChoiceTokenFact['kind']>
+): RungVerdict | null {
   if (enabled.size === 0 || facts.choiceTokens === undefined) return null;
   const hit = findEnabledToken(facts.choiceTokens, enabled);
   if (hit === null) return null;
@@ -163,9 +194,11 @@ function findEnabledToken(
 // without a mapped meaning does NOT fire this rung (AC — it falls through to
 // default). Confidence scales with that color's coverage (full vs sparse).
 
-function colorRung(facts: SourceFacts, rules: ConventionRules): RungVerdict | null {
-  const meanings = rules.colorMeanings;
-  if (meanings === undefined || facts.colors === undefined) return null;
+function colorRung(
+  facts: SourceFacts,
+  meanings: ReadonlyMap<string, Editability>
+): RungVerdict | null {
+  if (meanings.size === 0 || facts.colors === undefined) return null;
   const best = bestMappedColor(facts.colors, meanings);
   if (best === null) return null;
   return {
@@ -184,13 +217,13 @@ interface MappedColor {
 // The mapped color with the greatest coverage; ties resolve to first occurrence.
 function bestMappedColor(
   colors: readonly SourceColorFact[],
-  meanings: NonNullable<ConventionRules['colorMeanings']>
+  meanings: ReadonlyMap<string, Editability>
 ): MappedColor | null {
   let best: MappedColor | null = null;
   for (let i = 0; i < colors.length; i++) {
     const color = colors[i];
     if (color === undefined) continue;
-    const meaning = meanings.find((m) => m.color === color.color)?.meaning;
+    const meaning = meanings.get(color.color);
     if (meaning === undefined) continue;
     if (best === null || color.coverage > best.color.coverage) {
       best = { color, index: i, meaning };

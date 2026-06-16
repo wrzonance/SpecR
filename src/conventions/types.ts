@@ -27,8 +27,8 @@ export interface ParagraphClassification {
   readonly editability: Editability;
   /** 0..1 — signal strength (e.g. full-paragraph color = high, sparse = low). */
   readonly confidence: number;
-  /** Ordered why-chain: the deciding rung first; never empty. */
-  readonly evidence: readonly ClassificationEvidence[];
+  /** Ordered why-chain: the deciding rung first; never empty (≥1 entry). */
+  readonly evidence: readonly [ClassificationEvidence, ...ClassificationEvidence[]];
 }
 
 /** One classification per paragraph node, in document order (pre-order tree walk). */

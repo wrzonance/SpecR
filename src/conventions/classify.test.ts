@@ -111,6 +111,26 @@ describe('classify — color meanings rung', () => {
     expect(out.editability).toBe('editable');
     expect(out.evidence[0]?.rule).toBe(`colorMeanings[${BLUE}]`);
   });
+
+  it('color: equal-coverage tie resolves to first occurrence in colors[]', () => {
+    const rulesTwo: ConventionRules = {
+      colorMeanings: [
+        { color: 'FF0000', meaning: 'choice' },
+        { color: BLUE, meaning: 'editable' },
+      ],
+      defaultEditability: 'locked',
+    };
+    const facts: SourceFacts = {
+      colors: [
+        { color: 'FF0000', coverage: 0.5, spans: [[0, 5]] },
+        { color: BLUE, coverage: 0.5, spans: [[5, 10]] },
+      ],
+    };
+    const out = classifyOne(facts, rulesTwo);
+    expect(out.editability).toBe('choice');
+    expect(out.evidence[0]?.rule).toBe('colorMeanings[FF0000]');
+    expect(out.evidence[0]?.fact).toBe('colors[0]');
+  });
 });
 
 // ── Rung 3: choice tokens ─────────────────────────────────────────────────────
