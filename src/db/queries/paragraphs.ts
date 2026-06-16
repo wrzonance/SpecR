@@ -221,6 +221,7 @@ async function fetchSubtreeNode(
        SELECT p.id, p.parent_id, p.node_type, p.text, p.position, p.vanish,
               p.conflicts, p.source_facts
        FROM paragraphs p JOIN subtree s ON p.parent_id = s.id
+       WHERE p.spec_id = $2
      )
      SELECT id, parent_id AS "parentId", node_type AS "nodeType", text, position,
             vanish, conflicts, source_facts AS "sourceFacts"

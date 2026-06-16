@@ -89,6 +89,35 @@ describe('PATCH /specs/:id/paragraphs/:nodeId (integration)', () => {
     expect(after.rows[0]?.base_version).toBe(beforeVersion + 1);
   });
 
+  it('subtree leak — cross-spec child parented to node is excluded from response', async () => {
+    // A malformed row in another spec points its parent_id at our node. The
+    // recursive subtree fetch must stay scoped to the target spec and never
+    // surface this foreign node (parent_id has no same-spec DB constraint).
+    const foreign = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version)
+       VALUES ($1, $2, 'pr2', 'Foreign leak node.', 0, 1) RETURNING id`,
+      [otherSpecId, nodeId]
+    );
+    const foreignId = foreign.rows[0]?.id;
+    if (!foreignId) throw new Error('failed to insert cross-spec child');
+
+    try {
+      const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${nodeId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Provide Category 6A cabling.' }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { children: { id: string }[] };
+      };
+      const ids = body.data.children.map((child) => child.id);
+      expect(ids).not.toContain(foreignId);
+    } finally {
+      await pool.query('DELETE FROM paragraphs WHERE id = $1', [foreignId]);
+    }
+  });
+
   it('returns 404 for an unknown nodeId', async () => {
     const unknown = '00000000-0000-0000-0000-000000000000';
     const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${unknown}`, {
