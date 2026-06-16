@@ -19,7 +19,7 @@ export interface GenerateDocxOptions {
 }
 
 function noteParagraph(text: string): Paragraph {
-  return new Paragraph({ children: [new TextRun(`[NOTE] ${text}`)] });
+  return new Paragraph({ children: [new TextRun(text)] });
 }
 
 function numberedParagraph(text: string, level: number, props?: StyleProperties): Paragraph {
