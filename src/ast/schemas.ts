@@ -94,6 +94,22 @@ export const ConventionRulesSchema = z
 export type Editability = z.infer<typeof EditabilitySchema>;
 export type ConventionRules = z.infer<typeof ConventionRulesSchema>;
 
+// Convention profile CRUD bodies (O-10). Structural-only: noteBanners regex
+// length/ReDoS bounds are enforced at the WRITE boundary (query layer), which
+// maps an unsafe pattern to 422 — never in this open shape schema.
+export const PutConventionBodySchema = z.object({
+  name: z.string().check(z.minLength(1)),
+  rules: ConventionRulesSchema.exactOptional(),
+});
+
+export type PutConventionBody = z.infer<typeof PutConventionBodySchema>;
+
+export const CloneConventionBodySchema = z.object({
+  sourceId: z.uuid(),
+});
+
+export type CloneConventionBody = z.infer<typeof CloneConventionBodySchema>;
+
 export const SpecNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
   source: z.enum(['ufgs', 'arcat', 'cpi', 'unknown']).exactOptional(),

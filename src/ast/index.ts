@@ -46,6 +46,8 @@ export { STYLE_NODE_TYPES } from './types.js';
 export { StyleNodeTypeSchema, StylePropertiesSchema } from './schemas.js';
 export { EditabilitySchema, ConventionRulesSchema } from './schemas.js';
 export type { Editability, ConventionRules } from './schemas.js';
+export { PutConventionBodySchema, CloneConventionBodySchema } from './schemas.js';
+export type { PutConventionBody, CloneConventionBody } from './schemas.js';
 export {
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
