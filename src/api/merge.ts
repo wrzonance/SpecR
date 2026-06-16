@@ -25,7 +25,7 @@ const DiffResultSchema = z.object({
   warnings: z.array(z.string()),
 });
 
-const MergeBodySchema = z.object({
+const MergeBodySchema = z.strictObject({
   accept: z.array(z.uuid()),
   diff: DiffResultSchema,
 });

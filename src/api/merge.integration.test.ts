@@ -192,6 +192,19 @@ describe('POST /specs/:id/merge (integration)', () => {
     expect(body.error).toContain(unknown);
   });
 
+  it('merge: unknown body property rejected with 400 — strict schema matches OpenAPI additionalProperties:false', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    const { status, body } = await postMerge(specId, {
+      accept: [],
+      diff: diffFor(paragraphId),
+      unexpected: 'extra',
+    });
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toBe('invalid merge request body');
+  });
+
   it('applying the same accepted UUID twice is a no-op on the second call', async () => {
     const { specId, paragraphId } = await createSpecFixture();
     const diff = diffFor(paragraphId);
