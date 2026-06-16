@@ -12,7 +12,7 @@ import { errorHandler } from './middleware/error.js';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const EDIT_SUFFIX = ' Round-trip acceptance edit.';
 
-let server: Server;
+let server: Server | undefined;
 let baseUrl: string;
 const cleanupIds: string[] = [];
 
@@ -193,6 +193,7 @@ beforeAll(async () => {
   await new Promise<void>((resolveServer) => {
     server = app.listen(0, () => resolveServer());
   });
+  if (server === undefined) throw new Error('server failed to start');
   const address = server.address();
   const port = typeof address === 'object' && address !== null ? address.port : 3000;
   baseUrl = `http://localhost:${port}`;
@@ -202,8 +203,10 @@ afterAll(async () => {
   for (const id of cleanupIds) {
     await pool.query('DELETE FROM specs WHERE id = $1', [id]);
   }
+  if (server === undefined) return;
+  const runningServer = server;
   await new Promise<void>((resolveServer, reject) => {
-    server.close((err) => (err != null ? reject(err) : resolveServer()));
+    runningServer.close((err) => (err != null ? reject(err) : resolveServer()));
   });
 });
 
