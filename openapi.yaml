@@ -2802,9 +2802,8 @@ components:
           type: string
           format: uuid
         libraryId:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
           description: Owning library, or null for a built-in industry default
         name:
           type: string
