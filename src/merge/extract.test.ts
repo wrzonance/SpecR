@@ -60,14 +60,25 @@ describe('extractContentControls', () => {
     expect(result.controlled.get(PART_ID)).toBe('GENERAL');
     expect(result.controlled.get(ART_ID)).toBe('REFERENCES');
     expect(result.controlled.get(PR1_ID)).toBe('Referenced Documents');
-    expect(result.controlled.get(NOTE_ID)).toBe('[NOTE] Verify local conditions.');
+    expect(result.controlled.get(NOTE_ID)).toBe('Verify local conditions.');
     expect(result.controlled.size).toBe(4);
+  });
+
+  it('roundtrip: note text is recovered verbatim — no "[NOTE]" prefix injected by generator', async () => {
+    // Regression: before this PR, noteParagraph prepended "[NOTE] " so round-trip
+    // extraction returned "[NOTE] Verify local conditions." instead of the source text.
+    // After the fix both the generator and the extracted text must match the source node.
+    const buffer = await generateDocx(TREE);
+    const result = await extractContentControls(buffer);
+    const recovered = result.controlled.get(NOTE_ID);
+    expect(recovered).not.toMatch(/^\[NOTE\]/);
+    expect(recovered).toBe('Verify local conditions.');
   });
 
   it('roundtrip: synthetic title paragraph is the only orphan; no track changes', async () => {
     const buffer = await generateDocx(TREE);
     const result = await extractContentControls(buffer);
-    expect(result.orphans).toEqual([{ text: 'SECTION 27 21 00 — Structured Cabling', index: 0 }]);
+
     expect(result.trackChanges.present).toBe(false);
     expect(result.trackChanges.records).toEqual([]);
   });

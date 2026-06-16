@@ -165,11 +165,107 @@ describe('generateDocx', () => {
     expect(xml).toContain('Structured Cabling');
   });
 
-  it('document.xml contains note with [NOTE] prefix', async () => {
+  it('document.xml contains note text verbatim for round-trip diff stability', async () => {
     const buffer = await generateDocx(SYNTHETIC_TREE);
     const xml = await getDocXml(buffer);
-    expect(xml).toContain('[NOTE]');
+    expect(xml).not.toContain('[NOTE]');
     expect(xml).toContain('Verify local conditions.');
+  });
+
+  it('note text that already starts with "[NOTE]" is not double-prefixed', async () => {
+    // Regression: old noteParagraph prepended "[NOTE] " unconditionally.
+    // After the fix it emits the text verbatim, so a node whose text happens to
+    // begin with "[NOTE]" must not have a second prefix injected.
+    const tree: SpecTree = {
+      id: '00000000-0000-0000-0000-000000000001',
+      section: '01 00 00',
+      title: 'Test',
+      parts: [
+        {
+          id: '00000000-0000-0000-0000-000000000002',
+          type: 'part',
+          text: 'GENERAL',
+          meta: {},
+          children: [
+            {
+              id: '00000000-0000-0000-0000-000000000003',
+              type: 'note',
+              text: '[NOTE] Pre-labelled note from source.',
+              meta: {},
+              children: [],
+            },
+          ],
+        },
+      ],
+    };
+    const xml = await getDocXml(await generateDocx(tree));
+    // Must appear exactly once, not as "[NOTE] [NOTE] Pre-labelled..."
+    expect(xml).toContain('[NOTE] Pre-labelled note from source.');
+    expect(xml).not.toContain('[NOTE] [NOTE]');
+  });
+
+  it('note with regex-special characters in text is emitted verbatim', async () => {
+    const tree: SpecTree = {
+      id: '00000000-0000-0000-0000-000000000001',
+      section: '01 00 00',
+      title: 'Test',
+      parts: [
+        {
+          id: '00000000-0000-0000-0000-000000000002',
+          type: 'part',
+          text: 'GENERAL',
+          meta: {},
+          children: [
+            {
+              id: '00000000-0000-0000-0000-000000000003',
+              type: 'note',
+              text: 'Comply with ASTM C150 (Type I/II) and 3.2.1.',
+              meta: {},
+              children: [],
+            },
+          ],
+        },
+      ],
+    };
+    const xml = await getDocXml(await generateDocx(tree));
+    expect(xml).toContain('Comply with ASTM C150 (Type I/II) and 3.2.1.');
+    expect(xml).not.toContain('[NOTE]');
+  });
+
+  it('multiple note nodes in the same tree are all emitted verbatim — none get a [NOTE] prefix', async () => {
+    const tree: SpecTree = {
+      id: '00000000-0000-0000-0000-000000000001',
+      section: '01 00 00',
+      title: 'Multi-Note Test',
+      parts: [
+        {
+          id: '00000000-0000-0000-0000-000000000002',
+          type: 'part',
+          text: 'GENERAL',
+          meta: {},
+          children: [
+            {
+              id: '00000000-0000-0000-0000-000000000003',
+              type: 'note',
+              text: 'First note text.',
+              meta: {},
+              children: [],
+            },
+            {
+              id: '00000000-0000-0000-0000-000000000004',
+              type: 'note',
+              text: 'Second note text.',
+              meta: {},
+              children: [],
+            },
+          ],
+        },
+      ],
+    };
+    const xml = await getDocXml(await generateDocx(tree));
+    expect(xml).not.toContain('[NOTE]');
+    expect(xml).toContain('First note text.');
+    expect(xml).toContain('Second note text.');
   });
 
   it('document.xml contains continuation text', async () => {
@@ -339,17 +435,15 @@ describe('generateDocx — style rules', () => {
     );
 
     // Note run: <w:r> followed directly by <w:t> — no <w:rPr> block before <w:t>
-    // The full run containing [NOTE] must be <w:r><w:t ...>[NOTE]...</w:t></w:r>
-    expect(xml).toMatch(/<w:r><w:t[^>]*>\[NOTE\] Verify local conditions\.<\/w:t><\/w:r>/);
+    expect(xml).toMatch(/<w:r><w:t[^>]*>Verify local conditions\.<\/w:t><\/w:r>/);
 
     // Continuation run: same — <w:r><w:t> with no intervening <w:rPr>
     expect(xml).toMatch(/<w:r><w:t[^>]*>Continued text here\.<\/w:t><\/w:r>/);
 
     // Belt-and-suspenders: Arial must not appear in either run's neighbourhood.
-    // Extract the raw run for [NOTE] and assert it lacks Arial.
-    const noteRunMatch = /<w:r>(<w:rPr>.*?<\/w:rPr>)?<w:t[^>]*>\[NOTE\][^<]*<\/w:t><\/w:r>/s.exec(
-      xml
-    );
+    // Extract the raw note run and assert it lacks Arial.
+    const noteRunMatch =
+      /<w:r>(<w:rPr>.*?<\/w:rPr>)?<w:t[^>]*>Verify local conditions\.<\/w:t><\/w:r>/s.exec(xml);
     expect(noteRunMatch).not.toBeNull();
     expect(noteRunMatch?.[1]).toBeUndefined(); // no <w:rPr> captured
 
