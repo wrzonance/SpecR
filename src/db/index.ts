@@ -131,6 +131,17 @@ export {
   SnapshotValidationError,
 } from './queries/revisions.js';
 export type { RevisionSummary, RevisionSpecEntry, RevisionWithTrees } from './queries/revisions.js';
+export {
+  insertConvention,
+  updateConventionRules,
+  findConventionById,
+  getBuiltInConvention,
+  getConventionForLibrary,
+  BUILT_IN_CONVENTION_NAME,
+  ConventionValidationError,
+  ConventionNotFoundError,
+} from './queries/conventions.js';
+export type { EditingConvention, CreateConventionInput } from './queries/conventions.js';
 export { getSpecLineage } from './queries/lineage.js';
 export type { SpecLineage, LineageHop, LineageScope } from './queries/lineage.js';
 export {

@@ -61,6 +61,39 @@ export const SourceFactsSchema = z
   })
   .catchall(JsonValue);
 
+// ── Editing conventions (ADR-022 D3) — library-scoped editability rulesets ──
+// The closed four-value editability vocabulary (ADR-022 D1). Reused by the
+// classification engine (O-6) and per-paragraph classification storage (O-7).
+export const EditabilitySchema = z.enum(['locked', 'editable', 'choice', 'note']);
+
+// All convention sub-objects use `.catchall(JsonValue)` so unknown rule keys are
+// preserved (ADR-022 D5 — open schema, capture-never-reject for round-trip).
+const ColorMeaningSchema = z
+  .object({ color: z.string(), meaning: EditabilitySchema })
+  .catchall(JsonValue);
+
+const ConventionChoiceTokenSchema = z
+  .object({ kind: z.enum(['angle', 'bracket']) })
+  .catchall(JsonValue);
+
+const CommentPolicySchema = z.object({ treatAs: EditabilitySchema }).catchall(JsonValue);
+
+// `noteBanners` are user-supplied regex SOURCES (strings). Shape-only here; their
+// length/ReDoS safety is bounded at the WRITE boundary (ADR-022 D5 exception),
+// never in this open read schema. See src/lib/regex-safety.ts.
+export const ConventionRulesSchema = z
+  .object({
+    colorMeanings: z.array(ColorMeaningSchema).exactOptional(),
+    choiceTokens: z.array(ConventionChoiceTokenSchema).exactOptional(),
+    noteBanners: z.array(z.string()).exactOptional(),
+    comments: CommentPolicySchema.exactOptional(),
+    defaultEditability: EditabilitySchema.exactOptional(),
+  })
+  .catchall(JsonValue);
+
+export type Editability = z.infer<typeof EditabilitySchema>;
+export type ConventionRules = z.infer<typeof ConventionRulesSchema>;
+
 export const SpecNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
   source: z.enum(['ufgs', 'arcat', 'cpi', 'unknown']).exactOptional(),
