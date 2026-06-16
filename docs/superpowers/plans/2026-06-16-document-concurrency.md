@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Migration 025 — lifecycle_state, external_state, spec_locks
+## Task 1: Migration 025 — lifecycle_state, external_state, spec_locks
 
 **Files:**
 - Create: `src/db/migrations/025_document_concurrency.ts`
@@ -21,7 +21,7 @@
 - [ ] Reversible `down`: drop table, drop columns + constraints.
 - [ ] Verify: `pnpm migrate && pnpm migrate:down && pnpm migrate`.
 
-### Task 2: Lock queries (`src/db/queries/locks.ts`)
+## Task 2: Lock queries (`src/db/queries/locks.ts`)
 
 **Files:**
 - Create: `src/db/queries/locks.ts`, `src/db/queries/locks.integration.test.ts`
@@ -39,7 +39,7 @@ API:
 - [ ] Test: second holder after expiry → acquired (steal).
 - [ ] Test: release by non-holder → released:false; by holder → true.
 
-### Task 3: Edit-gate query (`src/db/queries/edit-gate.ts`)
+## Task 3: Edit-gate query (`src/db/queries/edit-gate.ts`)
 
 **Files:**
 - Create: `src/db/queries/edit-gate.ts`, `.integration.test.ts`
@@ -52,7 +52,7 @@ API:
 - [ ] Test: draft + editable, expectedVersion matches → ok.
 - [ ] Test: stale expectedVersion → StaleVersionError with currentVersion.
 
-### Task 4: Wire precondition + gate into paragraph PATCH
+## Task 4: Wire precondition + gate into paragraph PATCH
 
 **Files:**
 - Modify: `src/ast/schemas.ts` (UpdateParagraphBodySchema += expectedVersion), `src/db/queries/paragraphs.ts` (updateParagraphText calls gate, bumps specs.content_version), `src/api/paragraphs.ts` (map StaleVersionError→409, forbidden→409).
@@ -61,7 +61,7 @@ API:
 - [ ] Test: archived spec PATCH → 409/403 forbidden.
 - [ ] Test: matching version PATCH → 200 and content_version increments.
 
-### Task 5: Wire precondition + gate into merge
+## Task 5: Wire precondition + gate into merge
 
 **Files:**
 - Modify: `src/api/merge.ts` (MergeBodySchema += optional expectedVersion; gate + version check inside the txn; bump content_version on success).
@@ -69,14 +69,14 @@ API:
 - [ ] Test (integration): merge with stale version → 409.
 - [ ] Test: merge on archived spec → 409.
 
-### Task 6: Issuance hook — createPackageRevision flips lifecycle to issued
+## Task 6: Issuance hook — createPackageRevision flips lifecycle to issued
 
 **Files:**
 - Modify: `src/db/queries/revisions.ts` (after snapshot insert, UPDATE specs SET lifecycle_state='issued' for member spec_ids where lifecycle_state='draft').
 
 - [ ] Test (integration): issuing a revision sets member specs.lifecycle_state='issued'; already-archived specs unaffected.
 
-### Task 7: Lock REST endpoints
+## Task 7: Lock REST endpoints
 
 **Files:**
 - Create: `src/api/locks.ts`, `src/api/locks.integration.test.ts`
@@ -88,7 +88,7 @@ API:
 
 - [ ] Test: full acquire/held/release cycle over REST.
 
-### Task 8: openapi.yaml + ADR note
+## Task 8: openapi.yaml + ADR note
 
 **Files:**
 - Modify: `openapi.yaml` (expectedVersion on paragraph PATCH + merge; 409 stale/forbidden; lock endpoints; lifecycle_state in spec schema).
