@@ -1,6 +1,6 @@
 # ADR-010: Expose MCP Server Alongside REST API
 
-## Status: Accepted — implemented Phase 2a (2026-05-12)
+## Status: Accepted — implemented Phase 2a (2026-05-12); stateful sessions added Phase 5h (2026-06-16, #45)
 
 ## Context
 
@@ -120,6 +120,33 @@ new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() })
 ```
 
 Tool and resource definitions in `tools.ts` / `resources.ts` are unchanged by this upgrade.
+
+### Stateful sessions implemented (Phase 5h, 2026-06-16, #45)
+
+The upgrade sketched above is now in place, with one refinement the SDK forced: a
+`StreamableHTTPServerTransport` binds **exactly one session per instance** once
+`sessionIdGenerator` is set — it mints the id on `initialize`, then validates every later
+request's `mcp-session-id` header against its own id. So the session store keys on the
+**transport-minted id** and holds the whole `{ server, transport }` pair, not a bare
+`McpServer`. The store (`src/mcp/sessions.ts`, `McpSessionStore`) registers and removes
+entries through the transport's `onsessioninitialized` / `onsessionclosed` callbacks rather
+than the route handler reaching into the Map directly.
+
+`POST /mcp` routes three ways:
+
+1. `mcp-session-id` header matches a live session → reuse its transport (404 if the id is
+   unknown or expired).
+2. No header **and** the body is an `initialize` request → mint a stateful session via
+   `store.createStateful(createMcpServer)`, connect, and serve.
+3. Otherwise (no header, non-`initialize`) → the original stateless path: a fresh transport
+   with `sessionIdGenerator: undefined`, disposed on response `finish`. This keeps every
+   existing stateless client and the prior integration suite working unchanged.
+
+`DELETE /mcp` terminates the session named by `mcp-session-id` (400 if the header is absent,
+404 if the id is unknown, 204 on success), closing the transport + server and dropping the
+Map entry. `GET /mcp` remains a 405 stub — server→client SSE streaming is a later Phase 5
+slice. Verified by integration tests in `src/mcp/server.integration.test.ts` (`stateful
+sessions (#45)`).
 
 ### Auth
 

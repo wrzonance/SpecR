@@ -2,11 +2,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { json } from 'express';
-import type { Express } from 'express';
+import type { Express, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { registerTools } from './tools.js';
 import { registerResources } from './resources.js';
+import { McpSessionStore, connectSession } from './sessions.js';
 import { logger } from '../lib/logger.js';
 
 // Default guards production; integration suites exceeding 20 calls inject a higher max
@@ -21,10 +23,58 @@ function createMcpServer(): McpServer {
   return server;
 }
 
+/** Per-request stateless transport: fresh instance, disposed when the response finishes. */
+async function handleStateless(req: Request, res: Response): Promise<void> {
+  // Omit sessionIdGenerator entirely to enable stateless mode (exactOptionalPropertyTypes).
+  // Cast to Transport to satisfy strict SDK types — onclose optionality mismatch in SDK v1.
+  const transport = new StreamableHTTPServerTransport({});
+  const server = createMcpServer();
+  await server.connect(transport as Transport);
+  res.on('finish', () => {
+    void (async (): Promise<void> => {
+      const results = await Promise.allSettled([transport.close(), server.close()]);
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          logger.warn({ err: result.reason }, 'mcp transport cleanup failed');
+        }
+      }
+    })();
+  });
+  await transport.handleRequest(req, res, req.body);
+}
+
+/**
+ * Route a POST /mcp request. Three paths:
+ *  1. `mcp-session-id` header matches a live session → reuse its transport.
+ *  2. No header + `initialize` body → mint a stateful session (store owns its lifecycle).
+ *  3. Otherwise → stateless, fresh per request (the legacy default).
+ */
+async function handlePost(store: McpSessionStore, req: Request, res: Response): Promise<void> {
+  const sessionId = req.headers['mcp-session-id'];
+  if (typeof sessionId === 'string') {
+    const session = store.get(sessionId);
+    if (session === undefined) {
+      res.status(404).json({ success: false, error: 'unknown or expired MCP session' });
+      return;
+    }
+    await session.transport.handleRequest(req, res, req.body);
+    return;
+  }
+  if (isInitializeRequest(req.body)) {
+    const session = store.createStateful(createMcpServer);
+    await connectSession(session);
+    await session.transport.handleRequest(req, res, req.body);
+    return;
+  }
+  await handleStateless(req, res);
+}
+
 export function registerMcpRoutes(
   app: Express,
   options?: { readonly rateLimitMax?: number }
 ): void {
+  // One session store per registration — outlives individual requests, scoped to this app.
+  const sessions = new McpSessionStore();
   const mcpRateLimit = rateLimit({
     windowMs: 60 * 1000,
     max: options?.rateLimitMax ?? DEFAULT_MCP_RATE_LIMIT_MAX,
@@ -37,23 +87,7 @@ export function registerMcpRoutes(
     // Same token validation as REST middleware. Reject 401 if invalid.
     // Write tools especially depend on this gate — add when REST auth is implemented.
     try {
-      // Omit sessionIdGenerator entirely to enable stateless mode (exactOptionalPropertyTypes).
-      // Cast to Transport to satisfy strict SDK types — onclose optionality mismatch in SDK v1.
-      const transport = new StreamableHTTPServerTransport({});
-      const server = createMcpServer();
-      await server.connect(transport as Transport);
-      const cleanup = async (): Promise<void> => {
-        const results = await Promise.allSettled([transport.close(), server.close()]);
-        for (const result of results) {
-          if (result.status === 'rejected') {
-            logger.warn({ err: result.reason }, 'mcp transport cleanup failed');
-          }
-        }
-      };
-      res.on('finish', () => {
-        void cleanup();
-      });
-      await transport.handleRequest(req, res, req.body);
+      await handlePost(sessions, req, res);
     } catch (err) {
       logger.error({ err }, 'mcp request failed');
       if (!res.headersSent) {
@@ -62,13 +96,33 @@ export function registerMcpRoutes(
     }
   });
 
-  // GET /mcp and DELETE /mcp: stubs for stateful session upgrade (Phase 5+).
-  // In stateless mode these are unused — clients only POST.
+  // GET /mcp: SSE streams (server→client notifications) are not exposed yet — Phase 5
+  // streaming will wire this to a live session. Until then it is a 405 stub.
   app.get('/mcp', (_req, res) => {
-    res.status(405).json({ success: false, error: 'stateless mode: SSE streams not supported' });
+    res.status(405).json({ success: false, error: 'SSE streams not supported' });
   });
 
-  app.delete('/mcp', (_req, res) => {
-    res.status(405).json({ success: false, error: 'stateless mode: no sessions to terminate' });
+  // DELETE /mcp: terminate the session named by the mcp-session-id header.
+  app.delete('/mcp', (req, res) => {
+    const sessionId = req.headers['mcp-session-id'];
+    if (typeof sessionId !== 'string') {
+      res.status(400).json({ success: false, error: 'mcp-session-id header required' });
+      return;
+    }
+    void (async (): Promise<void> => {
+      try {
+        const terminated = await sessions.delete(sessionId);
+        if (!terminated) {
+          res.status(404).json({ success: false, error: 'unknown or expired MCP session' });
+          return;
+        }
+        res.status(204).end();
+      } catch (err) {
+        logger.error({ err }, 'mcp session termination failed');
+        if (!res.headersSent) {
+          res.status(500).json({ success: false, error: 'internal server error' });
+        }
+      }
+    })();
   });
 }
