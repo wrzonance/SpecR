@@ -44,6 +44,11 @@ describe('assertSecSafe', () => {
     expect(assertSecSafe(buf)).toBe('<SEC><TXT>Dental Surgical Vacuum</TXT></SEC>');
   });
 
+  // This is the only test that runs full-buffer charset detection (chardet) over
+  // real ~500 KB UFGS files. The work itself is ~130 ms, but under the parallel
+  // coverage suite on a 2-core CI runner, CPU contention inflates its wall-clock
+  // past the default 5 s timeout (observed 5.16 s in CI, 2.47 s pinned to 2 cores
+  // locally). Give it generous headroom — the code is fast; the runner is starved.
   it('regression: reported UFGS files with DC3 controls are upload-safe', () => {
     const filenames = [
       'docs/references/UFGS/DIVISION_22/22_60_70.SEC',
@@ -55,7 +60,7 @@ describe('assertSecSafe', () => {
       expect(sanitized).not.toContain('\x13');
       expect(sanitized).toContain('<SCN>');
     }
-  });
+  }, 20_000);
 
   it('rejects buffer with a line exceeding 65536 characters', () => {
     const longLine = 'A'.repeat(65537);
