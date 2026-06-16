@@ -334,6 +334,47 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/merge:
+    post:
+      operationId: mergeSpecDiff
+      summary: Apply accepted changes from a spec diff
+      description: >
+        Submit accepted change UUIDs along with the `DiffResult` previously
+        returned by `/specs/{id}/diff`. Accepted modified/conflict entries update
+        `paragraphs.text`, insert a `paragraph_versions` snapshot for the new
+        base version, and increment `paragraphs.base_version`. Rejected entries
+        are discarded by omission.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeRequest'
+      responses:
+        '200':
+          description: Merge apply summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MergeResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /projects:
     post:
       operationId: createProject
@@ -1755,6 +1796,33 @@ components:
           type: array
           items:
             type: string
+
+    MergeRequest:
+      type: object
+      required: [accept, diff]
+      additionalProperties: false
+      properties:
+        accept:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: UUIDs from `diff.modified` or `diff.conflicts` to apply
+        diff:
+          $ref: '#/components/schemas/DiffResult'
+
+    MergeResult:
+      type: object
+      required: [applied, rejected]
+      properties:
+        applied:
+          type: integer
+          minimum: 0
+          description: Number of paragraph rows changed
+        rejected:
+          type: integer
+          minimum: 0
+          description: Number of diff entries omitted from `accept`
 
     LineageHop:
       type: object

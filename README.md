@@ -39,7 +39,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 2c | Firm style template engine (issue #20) | ✅ Complete |
 | 2d | Library hierarchy + chain of custody — masters, project copies, packages, issuances — see [ADR-015](docs/adr/015-layered-spec-hierarchy-chain-of-custody.md) | Planned |
 | 2e | Project-manual publishing — assembly, cover/TOC, addenda — see [ADR-017](docs/adr/017-project-manual-publishing.md) | Planned |
-| 3 | Round-trip merge engine | In progress — diff API complete |
+| 3 | Round-trip merge engine | In progress — diff + merge APIs complete |
 | 4a | Revit parameter mapping schema + migrations | ✅ Complete (PR #86) |
 | 4 | Revit integration | Planned |
 | 5 | Web UI | Planned |
@@ -74,6 +74,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - Each paragraph wrapped in `w:sdt` content control with `specr-uuid-<id>` UUID tag — round-trip merge anchors per ADR-004. Phase 3 merge engine reads these tags to map owner-redlined paragraphs back to `paragraphs.id`.
 - Title paragraph intentionally bare (synthetic, no DB id) — Phase 3 merge skips unwrapped paragraphs.
 - `POST /specs/:id/diff` accepts a returned DOCX and emits a 3-way diff keyed by content-control UUIDs.
+- `POST /specs/:id/merge` accepts selected UUIDs plus the diff payload and applies accepted text changes.
 
 ### API
 
@@ -83,6 +84,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - `GET /specs/:id` — retrieve a spec with its paragraph tree
 - `POST /specs/:id/generate` — generate DOCX from stored spec AST (optional `{ templateId }` style template)
 - `POST /specs/:id/diff` — upload an edited DOCX and return `{ added, modified, deleted, conflicts, warnings }`
+- `POST /specs/:id/merge` — apply accepted UUIDs from a `DiffResult`, bumping paragraph base versions
 - `PATCH /specs/:id` — update spec metadata
 - `POST /projects` — create a project
 - `GET /projects/:id` — retrieve project with TOC
@@ -129,7 +131,7 @@ Configure in Claude Code by creating a `.mcp.json` in the repo root (gitignored)
 
 ## Not Yet Built
 
-- Merge-apply endpoint (Phase 3)
+- End-to-end round-trip acceptance test (Phase 3)
 - Revit integration (Phase 4)
 - Web UI with progress bars, live preview, diff/merge review (Phase 5)
 - MCP write tools (`add_paragraph`, `update_paragraph`, etc.) — Phase 5
