@@ -100,6 +100,11 @@ describe('PATCH /specs/:id/paragraphs/:nodeId (integration)', () => {
   });
 
   it('returns 403 when the nodeId belongs to a different spec', async () => {
+    const before = await pool.query<{ text: string }>('SELECT text FROM paragraphs WHERE id = $1', [
+      nodeId,
+    ]);
+    const beforeText = before.rows[0]?.text;
+
     const res = await fetch(`${baseUrl}/specs/${otherSpecId}/paragraphs/${nodeId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
@@ -111,7 +116,7 @@ describe('PATCH /specs/:id/paragraphs/:nodeId (integration)', () => {
       'SELECT text FROM paragraphs WHERE id = $1',
       [nodeId]
     );
-    expect(unchanged.rows[0]?.text).toBe('Provide Category 6A cabling.');
+    expect(unchanged.rows[0]?.text).toBe(beforeText);
   });
 
   it('returns 400 for empty text', async () => {

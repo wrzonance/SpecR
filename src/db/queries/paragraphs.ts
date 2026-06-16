@@ -1,5 +1,6 @@
 import { pool, DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
+import { NodeTypeSchema } from '../../ast/index.js';
 import type { NodeType, SignalConflict, SourceFacts, SpecNode, SpecTree } from '../../ast/index.js';
 
 interface Queryable {
@@ -159,6 +160,19 @@ interface SubtreeRow {
   readonly sourceFacts: SourceFacts;
 }
 
+/** Validate a raw DB `node_type` string against the canonical AST enum before it
+ *  crosses into a `SpecNode`. Guards against drift between the DB CHECK and the
+ *  AST type without a cross-boundary assertion. */
+function parseNodeType(nodeType: string): NodeType {
+  const parsed = NodeTypeSchema.safeParse(nodeType);
+  if (!parsed.success) {
+    throw new DatabaseError(`buildSubtree: unexpected node_type "${nodeType}"`, {
+      cause: parsed.error,
+    });
+  }
+  return parsed.data;
+}
+
 /** Assemble subtree rows (a node plus all its descendants) into one SpecNode
  *  rooted at `rootId`. Mirrors buildNodeTree's meta shaping (specs.ts) but roots
  *  at a non-null parent rather than the forest roots. */
@@ -172,7 +186,7 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
 
   const build = (row: SubtreeRow): SpecNode => ({
     id: row.id,
-    type: row.nodeType as NodeType,
+    type: parseNodeType(row.nodeType),
     text: row.text,
     children: (childrenByParent.get(row.id) ?? [])
       .sort((a, b) => a.position - b.position)
