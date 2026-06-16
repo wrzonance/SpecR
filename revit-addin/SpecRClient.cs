@@ -54,7 +54,11 @@ namespace SpecRAddin
                 throw new SpecRClientException($"invalid SpecR base URL: '{origin}'");
             }
 
-            _http = new HttpClient { BaseAddress = uri };
+            _http = new HttpClient
+            {
+                BaseAddress = uri,
+                Timeout = TimeSpan.FromSeconds(30),
+            };
             var settings = new RefitSettings(
                 new SystemTextJsonContentSerializer(
                     new JsonSerializerOptions
