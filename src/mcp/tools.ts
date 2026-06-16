@@ -14,6 +14,7 @@ import {
   handleParseDocument,
   handleGenerateDocx,
   handleGetSpecLineage,
+  handleGetSpecDiff,
   handleListProjects,
   handleGetReferences,
 } from './handlers.js';
@@ -142,6 +143,22 @@ function registerSpecTools(server: McpServer): void {
       },
     },
     handleGetSpecLineage
+  );
+
+  server.registerTool(
+    'get_spec_diff',
+    {
+      description:
+        'Return the 3-way merge diff for a returned DOCX. Pass contentBase64 for the edited DOCX bytes; when omitted, the tool diffs a freshly generated DOCX and should return an empty diff for a clean spec.',
+      inputSchema: {
+        specId: z.uuid().describe('Spec UUID to diff'),
+        contentBase64: z
+          .string()
+          .optional()
+          .describe('Base64-encoded returned DOCX content (max 10 MB decoded)'),
+      },
+    },
+    handleGetSpecDiff
   );
 }
 

@@ -60,7 +60,7 @@ describe('extractContentControls', () => {
     expect(result.controlled.get(PART_ID)).toBe('GENERAL');
     expect(result.controlled.get(ART_ID)).toBe('REFERENCES');
     expect(result.controlled.get(PR1_ID)).toBe('Referenced Documents');
-    expect(result.controlled.get(NOTE_ID)).toBe('[NOTE] Verify local conditions.');
+    expect(result.controlled.get(NOTE_ID)).toBe('Verify local conditions.');
     expect(result.controlled.size).toBe(4);
   });
 

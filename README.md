@@ -10,7 +10,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 
 ## Status
 
-**Active development — Phase 1c + 2b + 2c complete, Phase 2d next.**
+**Active development — Phase 1c + 2b + 2c complete, Phase 3 (round-trip merge) in progress.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -39,7 +39,7 @@ The target: In a Web UI, a spec writer connects a Revit model, sees their Part 2
 | 2c | Firm style template engine (issue #20) | ✅ Complete |
 | 2d | Library hierarchy + chain of custody — masters, project copies, packages, issuances — see [ADR-015](docs/adr/015-layered-spec-hierarchy-chain-of-custody.md) | Planned |
 | 2e | Project-manual publishing — assembly, cover/TOC, addenda — see [ADR-017](docs/adr/017-project-manual-publishing.md) | Planned |
-| 3 | Round-trip merge engine | Planned |
+| 3 | Round-trip merge engine | ✅ Complete (issues #35–#37) |
 | 4a | Revit parameter mapping schema + migrations | ✅ Complete (PR #86) |
 | 4 | Revit integration | Planned |
 | 5 | Web UI | Planned |
@@ -73,6 +73,8 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - Optional `{ templateId }` body applies a style template's font/spacing/indent/numbering-format rules per CSI node type; omitted → seeded `UFGS-Default`; unknown id → 404 (issue #32)
 - Each paragraph wrapped in `w:sdt` content control with `specr-uuid-<id>` UUID tag — round-trip merge anchors per ADR-004. Phase 3 merge engine reads these tags to map owner-redlined paragraphs back to `paragraphs.id`.
 - Title paragraph intentionally bare (synthetic, no DB id) — Phase 3 merge skips unwrapped paragraphs.
+- `POST /specs/:id/diff` accepts a returned DOCX and emits a 3-way diff keyed by content-control UUIDs.
+- `POST /specs/:id/merge` accepts selected UUIDs plus the diff payload and applies accepted text changes.
 
 ### API
 
@@ -81,6 +83,8 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - `GET /parse/jobs/:jobId` — poll parse progress: `{ status, progress: { stage, pct }, result?, error? }`
 - `GET /specs/:id` — retrieve a spec with its paragraph tree
 - `POST /specs/:id/generate` — generate DOCX from stored spec AST (optional `{ templateId }` style template)
+- `POST /specs/:id/diff` — upload an edited DOCX and return `{ added, modified, deleted, conflicts, warnings }`
+- `POST /specs/:id/merge` — apply accepted UUIDs from a `DiffResult`, bumping paragraph base versions
 - `PATCH /specs/:id` — update spec metadata
 - `POST /projects` — create a project
 - `GET /projects/:id` — retrieve project with TOC
@@ -102,12 +106,14 @@ The async `POST /parse` pattern (202 + poll) is intentional — inference over l
 - `POST /mcp` — MCP JSON-RPC endpoint (Streamable HTTP, stateless, integrated into Express). Rate-limited via `express-rate-limit` (DoS hardening; `parse_document` and `generate_docx` are CPU/memory-bound and require the gate). (PR #69)
 - **Tool: `search_library(query, division?, limit?)`** — ILIKE paragraph search with optional CSI division filter. Returns `{ paragraphId, text, nodeType, specId, specSection, specTitle }[]`
 - **Tool: `get_spec(specId)`** — full spec tree + cross-reference resolution. Returns `{ tree: SpecTree, references: SpecReference[] }` where each reference has `isResolved: boolean` (whether target spec is loaded in DB). DOCX-parsed nodes may carry `meta.conflicts` — inference signal disagreements for trust calibration (#56)
+- **Tool: `get_spec_diff(specId, contentBase64?)`** — returns the same `DiffResult` shape as `POST /specs/:id/diff`. Pass edited DOCX bytes as base64; omitting content generates the current DOCX and returns a clean baseline diff.
 - **Tool: `list_sections(division?)`** — CSI MasterFormat section index with `inDatabase` flag
 - **Tool: `get_paragraph(paragraphId)`** — returns `{ node, ancestors }` for a single paragraph. `node` and each ancestor are `{ id, nodeType, text, vanish, conflicts? }` — `conflicts` present only when the DOCX inference engine recorded signal disagreements. Ancestors ordered root → immediate parent.
 - **Tool: `parse_document(filename, contentBase64)`** — base64-decode a DOCX or SEC file, parse it, insert into the database, return `{ specId, section, title, nodeCount }`. Max 10 MB decoded. Encoding-transparent for `.sec` files.
 - **Tool: `generate_docx(specId)`** — generate DOCX from a stored spec, returned as base64 in `{ specId, section, title, sizeBytes, contentBase64 }`. Each paragraph wrapped in `w:sdt` UUID content control. On-demand from current DB state — not cached.
 - **Tool: `load_files(glob?, paths?, dry_run?)`** — bulk-load specs from a glob pattern or file path list. Accepts `.SEC` and `.docx` formats. Returns `{ total, succeeded, failed, errors[] }`. Idempotent — re-loading an existing spec updates it.
 - **Resource: `specr://specs/{id}`** — full spec as LLM-readable Markdown. Note/vanish nodes rendered as `> **[NOTE]**` blockquotes (editor instructions visible to spec writer, hidden from published output)
+- **Resource: `specr://specs/{id}/diff`** — JSON `DiffResult` for a freshly generated current DOCX; edited DOCX review uses the `get_spec_diff` tool.
 - **Resource: `specr://sections`** — full CSI section index as Markdown table with loaded (✓) flag
 
 Configure in Claude Code by creating a `.mcp.json` in the repo root (gitignored) pointing at `http://localhost:3000/mcp` while `pnpm dev` is running.
@@ -125,7 +131,6 @@ Configure in Claude Code by creating a `.mcp.json` in the repo root (gitignored)
 
 ## Not Yet Built
 
-- Round-trip merge engine (Phase 3)
 - Revit integration (Phase 4)
 - Web UI with progress bars, live preview, diff/merge review (Phase 5)
 - MCP write tools (`add_paragraph`, `update_paragraph`, etc.) — Phase 5

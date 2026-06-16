@@ -256,7 +256,7 @@ interface ApiResponse<T> {
 | PATCH | `/specs/:id` | `{ title?, section? }` | `{ specId, title, section }` |
 | POST | `/specs/:id/generate` | `{ templateId? }` | DOCX buffer (octet-stream) |
 | POST | `/specs/:id/diff` | multipart: `file` (edited .docx) | `{ added[], modified[], deleted[], conflicts[] }` |
-| POST | `/specs/:id/merge` | `{ accept: string[] }` (UUID list) | `{ applied: number, rejected: number }` |
+| POST | `/specs/:id/merge` | `{ accept: string[], diff: DiffResult }` | `{ applied: number, rejected: number }` |
 | GET | `/libraries/:libraryId/divisions/:division/general-spec` | — | `DivisionGeneralSpecResult` |
 | PUT | `/libraries/:libraryId/divisions/:division/general-spec` | `{ generalSpecId }` or `{ status: "not_applicable" }` | `DivisionGeneralSpecResult` |
 | GET | `/projects/:id/divisions/:division/general-spec` | — | `DivisionGeneralSpecResult` |
@@ -546,12 +546,12 @@ Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
 - ✅ Template import API: `POST /templates`, `POST /templates/:id/rules` CRUD (PR #156); `POST /templates/import` DOCX consensus derivation (PR #151)
 - ✅ Prerequisite for Phase 5 live preview: generate DOCX → blob → client render
 
-### Phase 3: Merge Engine (Weeks 7–9)
+### Phase 3: Merge Engine (Weeks 7–9) — ✅ Complete
 - UUID-based paragraph matching across round-trips
 - 3-way diff algorithm (base + theirs + ours)
 - Conflict detection
 - `POST /specs/:id/diff` and `POST /specs/:id/merge` endpoints
-- End-to-end test: parse → generate → manually edit → diff → merge → verify
+- End-to-end test: parse → generate → edit returned DOCX text → diff → merge → verify
 
 ### Phase 4: Revit Integration (Weeks 10–12)
 - Revit parameter → CSI paragraph mapping schema
