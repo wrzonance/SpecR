@@ -227,3 +227,16 @@ pnpm migrate      # Run pending DB migrations
 - `docs/references/UFGS/` — Unified Facilities Guide Specifications (666 `.SEC` files, public domain)
 - `docs/references/ARCAT/README.md` — Download instructions for ARCAT guide specs (copyrighted, not included)
 - `docs/references/MANUFACTURER_CPI/README.md` — Download instructions for Chatsworth Products Inc. (CPI) telecom equipment manufacturer specs (copyrighted, not included)
+
+## Revit Add-In
+
+A separate C#/.NET Revit add-in lives in [`revit-addin/`](revit-addin/README.md). It
+connects Revit to a running SpecR instance through the REST API (Phase 4). The
+Phase 4c scaffold registers a **SpecR** ribbon tab with a **Health Check** button
+and ships a typed REST client (Refit) generated against `openapi.yaml`.
+
+- **Toolchain:** independent of this repo's pnpm/TypeScript setup — build with
+  `dotnet build` from `revit-addin/`. Targets the Revit 2024 runtime (.NET
+  Framework 4.8).
+- **Setup, build, and manual-load steps:** see [`revit-addin/README.md`](revit-addin/README.md).
+

@@ -555,7 +555,7 @@ Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
 
 ### Phase 4: Revit Integration (Weeks 10–12)
 - Revit parameter → CSI paragraph mapping schema
-- Revit add-in (C#/.NET) calling SpecR API directly
+- Revit add-in (C#/.NET) calling SpecR API directly — **separate C# solution in `revit-addin/`** (own `dotnet` toolchain, independent of the pnpm/TS build). Phase 4c scaffold: `IExternalApplication` ribbon registration + typed Refit REST client against `openapi.yaml` (`SpecRClient.GetSpecAsync`/`GetHealthAsync`). Targets the Revit 2024 runtime (.NET Framework 4.8). See `revit-addin/README.md`.
 - Part 2 auto-population from Revit model data
 - Revit change detection → show spec diffs
 
