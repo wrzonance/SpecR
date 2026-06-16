@@ -37,6 +37,28 @@ describe('safeFilename', () => {
   });
 });
 
+describe('manualFilename', () => {
+  it('generate: spaces become dashes and dotted-suffix chars drop', async () => {
+    const { manualFilename } = await import('./generate.js');
+    expect(manualFilename('Acme HQ Renovation')).toBe('Acme-HQ-Renovation-manual.docx');
+  });
+
+  it('generate: empty / symbol-only name falls back to "project"', async () => {
+    const { manualFilename } = await import('./generate.js');
+    expect(manualFilename('')).toBe('project-manual.docx');
+    expect(manualFilename('@@@')).toBe('project-manual.docx');
+  });
+
+  it('generate: trailing dash from 80-char truncation is trimmed', async () => {
+    // The space lands at index 79, becoming a dash that slice(0,80) keeps at the
+    // boundary. Trimming must run AFTER the slice or that dash survives into the
+    // filename (would yield "A…A--manual.docx").
+    const { manualFilename } = await import('./generate.js');
+    const name = `${'A'.repeat(79)} extra`;
+    expect(manualFilename(name)).toBe(`${'A'.repeat(79)}-manual.docx`);
+  });
+});
+
 describe('generateHandler', () => {
   it('passes sectionNumberFormat to generateDocx', async () => {
     const { getSpecTree, getTemplateByName } = await import('../db/index.js');

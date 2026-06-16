@@ -86,8 +86,8 @@ export function manualFilename(projectName: string): string {
     projectName
       .replace(/[^a-zA-Z0-9-]/g, '-')
       .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 80) || 'project';
+      .slice(0, 80)
+      .replace(/^-|-$/g, '') || 'project';
   return `${base}-manual.docx`;
 }
 
