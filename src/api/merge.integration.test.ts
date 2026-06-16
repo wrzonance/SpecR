@@ -218,3 +218,41 @@ describe('POST /specs/:id/merge (integration)', () => {
     expect(state).toEqual({ text: REVISED_TEXT, baseVersion: 2, versionCount: 1 });
   });
 });
+
+describe('POST /specs/:id/merge — concurrency + edit gate (ADR-018)', () => {
+  it('bumps specs.content_version on an applied merge', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    await postMerge(specId, { accept: [paragraphId], diff: diffFor(paragraphId) });
+    const r = await pool.query<{ content_version: number }>(
+      'SELECT content_version FROM specs WHERE id = $1',
+      [specId]
+    );
+    expect(r.rows[0]?.content_version).toBe(2); // 1 at create → 2 after merge
+  });
+
+  it('rejects a stale expectedVersion with 409 and the current version', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    const { status, body } = await postMerge(specId, {
+      accept: [paragraphId],
+      diff: diffFor(paragraphId),
+      expectedVersion: 99,
+    });
+    expect(status).toBe(409);
+    const withVersion = body as unknown as { currentVersion: number };
+    expect(withVersion.currentVersion).toBe(1);
+    const state = await paragraphState(paragraphId);
+    expect(state.text).toBe(ORIGINAL_TEXT); // unchanged — rolled back
+  });
+
+  it('rejects a merge on an archived spec with 409', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [specId]);
+    const { status } = await postMerge(specId, {
+      accept: [paragraphId],
+      diff: diffFor(paragraphId),
+    });
+    expect(status).toBe(409);
+    const state = await paragraphState(paragraphId);
+    expect(state.text).toBe(ORIGINAL_TEXT);
+  });
+});

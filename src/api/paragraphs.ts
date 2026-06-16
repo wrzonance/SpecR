@@ -1,34 +1,9 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { UpdateParagraphBodySchema } from '../ast/index.js';
-import {
-  updateParagraphText,
-  SpecNotFoundError,
-  SpecWriteForbiddenError,
-  StaleVersionError,
-} from '../db/index.js';
+import { updateParagraphText } from '../db/index.js';
+import { gateErrorResponse } from './edit-gate-response.js';
 import { logger } from '../lib/logger.js';
-
-/** Map an edit-gate error to its HTTP response, or null if not a gate error.
- *  Stale version → 409 with the current version so the client can refetch and
- *  retry; forbidden (archived / upstream-locked) → 409; missing spec → 404. */
-function gateErrorResponse(
-  err: unknown
-): { readonly status: number; readonly body: Record<string, unknown> } | null {
-  if (err instanceof StaleVersionError) {
-    return {
-      status: 409,
-      body: { success: false, error: err.message, currentVersion: err.currentVersion },
-    };
-  }
-  if (err instanceof SpecWriteForbiddenError) {
-    return { status: 409, body: { success: false, error: err.message } };
-  }
-  if (err instanceof SpecNotFoundError) {
-    return { status: 404, body: { success: false, error: 'spec not found' } };
-  }
-  return null;
-}
 
 /**
  * PATCH /specs/:id/paragraphs/:nodeId — update a single paragraph's text by UUID
