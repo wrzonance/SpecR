@@ -25,21 +25,33 @@ import type { ClassificationEvidence, ClassifyResult, ParagraphClassification } 
  */
 export function classify(tree: SpecTree, rules: ConventionRules): ClassifyResult {
   const out: ParagraphClassification[] = [];
-  for (const part of tree.parts) collectNode(part, rules, out);
+  // Compile noteBanners once here, not per node — a large tree would otherwise
+  // recompile the same patterns thousands of times.
+  const noteBanners = compilePatterns(rules.noteBanners);
+  for (const part of tree.parts) collectNode(part, rules, noteBanners, out);
   return out;
 }
 
 // Pre-order walk: a node is classified before its children (document order).
-function collectNode(node: SpecNode, rules: ConventionRules, out: ParagraphClassification[]): void {
-  out.push(classifyNode(node, rules));
-  for (const child of node.children) collectNode(child, rules, out);
+function collectNode(
+  node: SpecNode,
+  rules: ConventionRules,
+  noteBanners: readonly (RegExp | null)[],
+  out: ParagraphClassification[]
+): void {
+  out.push(classifyNode(node, rules, noteBanners));
+  for (const child of node.children) collectNode(child, rules, noteBanners, out);
 }
 
 /** Verdict for one node: first matching rung wins; default closes the ladder. */
-function classifyNode(node: SpecNode, rules: ConventionRules): ParagraphClassification {
+function classifyNode(
+  node: SpecNode,
+  rules: ConventionRules,
+  noteBanners: readonly (RegExp | null)[]
+): ParagraphClassification {
   const facts: SourceFacts = node.meta.sourceFacts ?? {};
   const verdict =
-    noteRung(node.text, facts, rules) ??
+    noteRung(node.text, facts, noteBanners) ??
     commentRung(facts, rules) ??
     choiceRung(facts, rules) ??
     colorRung(facts, rules) ??
@@ -58,11 +70,15 @@ interface RungVerdict {
 // regex matched against the paragraph text. Banner facts/text are why a paragraph
 // is a specifier note regardless of any color it also carries (AC: banner wins).
 
-function noteRung(text: string, facts: SourceFacts, rules: ConventionRules): RungVerdict | null {
+function noteRung(
+  text: string,
+  facts: SourceFacts,
+  noteBanners: readonly (RegExp | null)[]
+): RungVerdict | null {
   if (typeof facts.banner === 'string') {
     return note(1, [{ rule: 'banner', fact: 'banner' }]);
   }
-  const index = matchNoteBanner(text, rules.noteBanners);
+  const index = matchNoteBanner(text, noteBanners);
   if (index !== null) {
     return note(0.9, [{ rule: `noteBanners[${index}]` }]);
   }
@@ -73,14 +89,22 @@ function note(confidence: number, evidence: readonly ClassificationEvidence[]): 
   return { editability: 'note', confidence, evidence };
 }
 
-// Returns the index of the first noteBanners pattern that matches, or null.
-// Invalid regex sources are skipped (they are bounded/validated at the CRUD
-// write boundary per ADR-022 D5; here we stay pure and never throw).
-function matchNoteBanner(text: string, patterns: readonly string[] | undefined): number | null {
-  if (patterns === undefined) return null;
+// Compiles each noteBanners source once. Invalid regex sources become `null`
+// holes — kept (not filtered) so an index into this array still lines up with
+// the original `rules.noteBanners[i]` that the evidence references. Invalid
+// sources are bounded/validated at the CRUD write boundary per ADR-022 D5;
+// here we stay pure and never throw.
+function compilePatterns(patterns: readonly string[] | undefined): readonly (RegExp | null)[] {
+  if (patterns === undefined) return [];
+  return patterns.map((source) => tryCompile(source));
+}
+
+// Returns the index of the first compiled noteBanners pattern that matches, or
+// null. Null holes (invalid sources) are skipped.
+function matchNoteBanner(text: string, patterns: readonly (RegExp | null)[]): number | null {
   for (let i = 0; i < patterns.length; i++) {
-    const compiled = tryCompile(patterns[i]);
-    if (compiled !== null && compiled.test(text)) return i;
+    const compiled = patterns[i];
+    if (compiled != null && compiled.test(text)) return i;
   }
   return null;
 }
