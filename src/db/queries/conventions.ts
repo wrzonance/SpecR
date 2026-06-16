@@ -163,9 +163,11 @@ export async function listBuiltInConventions(
 }
 
 /**
- * Create or replace a library's own convention profile (PUT semantics). Updates
- * name + rules of the existing profile when present, else inserts a new one.
- * Rules are shape-validated and noteBanners regexes are bounded before storage.
+ * Create or replace a library's own convention profile (PUT semantics). One row
+ * per library, enforced by the partial unique index on library_id (migration
+ * 025); the write is a single atomic upsert so concurrent PUTs converge instead
+ * of racing. Rules are shape-validated and noteBanners regexes are bounded
+ * before storage.
  */
 export async function upsertLibraryConvention(
   libraryId: string,
@@ -175,24 +177,17 @@ export async function upsertLibraryConvention(
 ): Promise<EditingConvention> {
   const validated = validateRules(rules);
   try {
-    const existing = await db.query<ConventionRow>(
-      `SELECT id FROM editing_conventions WHERE library_id = $1 ORDER BY created_at LIMIT 1`,
-      [libraryId]
+    // Atomic upsert: the partial unique index on library_id (migration 025) is
+    // the conflict target, so two concurrent PUTs for the same library both
+    // resolve to the one row rather than racing into a unique-violation 500.
+    const result = await db.query<ConventionRow>(
+      `INSERT INTO editing_conventions (library_id, name, rules)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (library_id) WHERE library_id IS NOT NULL
+       DO UPDATE SET name = EXCLUDED.name, rules = EXCLUDED.rules, updated_at = now()
+       RETURNING ${COLUMNS}`,
+      [libraryId, name, JSON.stringify(validated)]
     );
-    const existingId = existing.rows[0]?.id;
-    const result = existingId
-      ? await db.query<ConventionRow>(
-          `UPDATE editing_conventions SET name = $2, rules = $3, updated_at = now()
-           WHERE id = $1
-           RETURNING ${COLUMNS}`,
-          [existingId, name, JSON.stringify(validated)]
-        )
-      : await db.query<ConventionRow>(
-          `INSERT INTO editing_conventions (library_id, name, rules)
-           VALUES ($1, $2, $3)
-           RETURNING ${COLUMNS}`,
-          [libraryId, name, JSON.stringify(validated)]
-        );
     const row = result.rows[0];
     if (!row) throw new DatabaseError('upsertLibraryConvention: no row returned');
     return mapRow(row);

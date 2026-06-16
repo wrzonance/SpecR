@@ -156,6 +156,28 @@ describe('PUT /libraries/:id/conventions', () => {
     expect(replacedJson.data.rules).toEqual({ defaultEditability: 'editable' });
   });
 
+  // Regression: check-then-act upsert raced two concurrent PUTs into a unique
+  // violation surfacing as 500. The atomic ON CONFLICT path (migration 025)
+  // converges them on one row.
+  it('200 — concurrent PUTs for one library converge without a 500', async () => {
+    const libraryId = await makeLibrary();
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, i) =>
+        put(`/libraries/${libraryId}/conventions`, {
+          name: `Race ${i}`,
+          rules: { defaultEditability: 'editable' },
+        })
+      )
+    );
+    for (const res of results) expect(res.status).toBe(200);
+
+    const rows = await pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM editing_conventions WHERE library_id = $1`,
+      [libraryId]
+    );
+    expect(rows.rows[0]?.n).toBe('1'); // a single profile, not one per request
+  });
+
   it('200 — round-trips unknown rule keys unchanged (open schema)', async () => {
     const libraryId = await makeLibrary();
     const rules = {
