@@ -25,7 +25,9 @@ export async function acquireLockHandler(req: Request, res: Response): Promise<v
   if (specId === null) return;
   const body = AcquireLockBodySchema.safeParse(req.body);
   if (!body.success) {
-    res.status(400).json({ success: false, error: 'holder is required' });
+    // Covers both a missing/empty holder and an out-of-range/typed ttlSeconds —
+    // a holder-only message would be wrong for the latter.
+    res.status(400).json({ success: false, error: 'invalid lock request body' });
     return;
   }
   try {

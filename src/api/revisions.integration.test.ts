@@ -169,15 +169,17 @@ describe('POST /packages/:id/revisions', () => {
     }
     // Archive one member first: issuance must never reactivate an archived spec.
     await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [hvac1]);
+    try {
+      const res = await json('POST', `/packages/${pkgFull}/revisions`, { label: 'Issuance Hook' });
+      expect(res.status).toBe(201);
 
-    const res = await json('POST', `/packages/${pkgFull}/revisions`, { label: 'Issuance Hook' });
-    expect(res.status).toBe(201);
-
-    expect(await lifecycle(steel1)).toBe('issued'); // draft → issued
-    expect(await lifecycle(hvac1)).toBe('archived'); // archived stays archived
-
-    // Restore so later tests in the file see a clean draft member.
-    await pool.query(`UPDATE specs SET lifecycle_state = 'draft' WHERE id = $1`, [hvac1]);
+      expect(await lifecycle(steel1)).toBe('issued'); // draft → issued
+      expect(await lifecycle(hvac1)).toBe('archived'); // archived stays archived
+    } finally {
+      // Restore so later tests in the file see a clean draft member, even if an
+      // assertion above throws.
+      await pool.query(`UPDATE specs SET lifecycle_state = 'draft' WHERE id = $1`, [hvac1]);
+    }
   });
 });
 

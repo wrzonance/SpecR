@@ -86,10 +86,16 @@ export async function mergeHandler(req: Request, res: Response): Promise<void> {
       bodyResult.data.diff,
       client
     );
-    await client.query(
-      `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
-      [idResult.data]
-    );
+    // Only advance the optimistic-concurrency token when content actually
+    // changed. A no-op merge (applied === 0) must not bump content_version, or
+    // it would invalidate every client's precondition and trigger avoidable
+    // 409s on the next write.
+    if (result.applied > 0) {
+      await client.query(
+        `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
+        [idResult.data]
+      );
+    }
     await client.query('COMMIT');
     res.status(200).json({ success: true, data: result });
   } catch (err) {

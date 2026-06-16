@@ -469,12 +469,17 @@ paths:
                     properties:
                       data:
                         type: object
-                        required: [locked]
+                        required: [locked, lock]
                         properties:
                           locked:
                             type: boolean
                           lock:
-                            $ref: '#/components/schemas/LockState'
+                            description: >
+                              The live lock when held, or null when the spec is
+                              unlocked (or its lock has expired).
+                            oneOf:
+                              - $ref: '#/components/schemas/LockState'
+                              - type: 'null'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':

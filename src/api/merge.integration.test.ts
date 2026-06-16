@@ -230,6 +230,21 @@ describe('POST /specs/:id/merge — concurrency + edit gate (ADR-018)', () => {
     expect(r.rows[0]?.content_version).toBe(2); // 1 at create → 2 after merge
   });
 
+  it('merge no-op (applied=0) does NOT bump content_version', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    // Empty accept → every diff entry is rejected → applied=0. A no-op merge
+    // must not advance the optimistic token or it would invalidate clients'
+    // preconditions and trigger avoidable 409s.
+    const { status, body } = await postMerge(specId, { accept: [], diff: diffFor(paragraphId) });
+    expect(status).toBe(200);
+    expect(body.data).toEqual({ applied: 0, rejected: 1 });
+    const r = await pool.query<{ content_version: number }>(
+      'SELECT content_version FROM specs WHERE id = $1',
+      [specId]
+    );
+    expect(r.rows[0]?.content_version).toBe(1); // unchanged at create value
+  });
+
   it('rejects a stale expectedVersion with 409 and the current version', async () => {
     const { specId, paragraphId } = await createSpecFixture();
     const { status, body } = await postMerge(specId, {

@@ -211,7 +211,10 @@ describe('PATCH paragraph — optimistic concurrency + edit gate (ADR-018)', () 
     const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${nodeId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text: 'doomed edit', expectedVersion: version - 1 }),
+      // version + 1 is a guaranteed-stale mismatch that always passes schema
+      // validation (min 1). version - 1 could be 0 on an isolated run and 400
+      // on the schema rather than exercising the 409 stale-version path.
+      body: JSON.stringify({ text: 'doomed edit', expectedVersion: version + 1 }),
     });
     expect(res.status).toBe(409);
     const body = (await res.json()) as { success: boolean; currentVersion: number };
