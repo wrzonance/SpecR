@@ -454,6 +454,61 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /projects/{id}/generate:
+    post:
+      operationId: generateManual
+      summary: Assemble a project manual DOCX from all TOC sections
+      description: >
+        Renders every section in the project's TOC (MasterFormat / position order)
+        into a single DOCX manual (ADR-017 D1). Each section is its own OOXML
+        section with an independent numbering instance, so multilevel numbering
+        restarts at PART 1 per section. Every paragraph keeps its `w:sdt` UUID
+        anchor for round-trip. v1 draft mode renders live from `project_specs`;
+        cover/TOC page, issuance/addenda, and PDF are out of scope.
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                templateId:
+                  type: string
+                  format: uuid
+                  description: >
+                    Style template applied to every section. Omitted → the seeded
+                    UFGS-Default template; absent default → unstyled 200. Unknown id → 404.
+                sectionNumberFormat:
+                  type: string
+                  enum: [canonical, dots, compact]
+                  default: canonical
+                  description: >
+                    Presentation format for generated section numbers in each
+                    section title and confidently identified Section references.
+      responses:
+        '200':
+          description: DOCX manual file stream
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Project has no sections to assemble
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /libraries/{libraryId}/divisions/{division}/general-spec:
     get:
       operationId: getLibraryDivisionGeneralSpec

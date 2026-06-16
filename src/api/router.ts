@@ -37,7 +37,7 @@ import {
   SetDivisionGeneralSpecBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
-import { generateHandler } from './generate.js';
+import { generateHandler, generateManualHandler } from './generate.js';
 import { diffHandler } from './diff.js';
 import { mergeHandler } from './merge.js';
 import { importTemplateHandler } from './templates.js';
@@ -69,6 +69,7 @@ router.post('/specs/:id/diff', upload.single('file'), diffHandler);
 router.post('/specs/:id/merge', mergeHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects/:id', getProjectHandler);
+router.post('/projects/:id/generate', generateManualHandler);
 router.get(
   '/libraries/:libraryId/divisions/:division/general-spec',
   getLibraryDivisionGeneralSpecHandler

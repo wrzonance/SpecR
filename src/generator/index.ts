@@ -18,13 +18,34 @@ export interface GenerateDocxOptions {
   readonly sectionNumberFormat?: SectionNumberFormat;
 }
 
+// Per-section rendering context. `reference` selects the numbering instance so a
+// manual can give each section its own (per-section restart, ADR-017).
+interface SectionContext {
+  readonly format: SectionNumberFormat;
+  readonly reference: string;
+  readonly rules?: StyleRuleMap;
+}
+
+function sectionContext(
+  format: SectionNumberFormat,
+  reference: string,
+  rules?: StyleRuleMap
+): SectionContext {
+  return { format, reference, ...(rules !== undefined ? { rules } : {}) };
+}
+
 function noteParagraph(text: string): Paragraph {
   return new Paragraph({ children: [new TextRun(text)] });
 }
 
-function numberedParagraph(text: string, level: number, props?: StyleProperties): Paragraph {
+function numberedParagraph(
+  text: string,
+  level: number,
+  reference: string,
+  props?: StyleProperties
+): Paragraph {
   return new Paragraph({
-    numbering: { reference: SPEC_NUM_REF, level },
+    numbering: { reference, level },
     children: [new TextRun({ text, ...runStyleOptions(props?.rPr) })],
     ...paragraphStyleOptions(props?.pPr),
   });
@@ -39,13 +60,8 @@ function displaySection(section: string, format: SectionNumberFormat): string {
   return canonical === null ? section : formatSectionNumber(canonical, format);
 }
 
-function emitNode(
-  node: SpecNode,
-  out: (Paragraph | SdtBlock)[],
-  format: SectionNumberFormat,
-  rules?: StyleRuleMap
-): boolean {
-  const text = formatSectionReferences(node.text, format);
+function emitNode(node: SpecNode, out: (Paragraph | SdtBlock)[], ctx: SectionContext): boolean {
+  const text = formatSectionReferences(node.text, ctx.format);
   if (node.type === 'note') {
     out.push(wrapWithControl(noteParagraph(text), node.id));
     return true;
@@ -59,7 +75,8 @@ function emitNode(
   // All unknown types fall through: getNodeLevel returns null, no paragraph emitted.
   const level = getNodeLevel(node.type);
   if (level !== null) {
-    out.push(wrapWithControl(numberedParagraph(text, level, rules?.get(node.type)), node.id));
+    const para = numberedParagraph(text, level, ctx.reference, ctx.rules?.get(node.type));
+    out.push(wrapWithControl(para, node.id));
   }
   return true;
 }
@@ -67,12 +84,20 @@ function emitNode(
 function collectParagraphs(
   nodes: readonly SpecNode[],
   out: (Paragraph | SdtBlock)[],
-  format: SectionNumberFormat,
-  rules?: StyleRuleMap
+  ctx: SectionContext
 ): void {
   for (const node of nodes) {
-    if (emitNode(node, out, format, rules)) collectParagraphs(node.children, out, format, rules);
+    if (emitNode(node, out, ctx)) collectParagraphs(node.children, out, ctx);
   }
+}
+
+// Build one section's paragraph list: synthetic title (no anchor) + anchored body.
+function buildSectionChildren(tree: SpecTree, ctx: SectionContext): (Paragraph | SdtBlock)[] {
+  const children: (Paragraph | SdtBlock)[] = [
+    plainParagraph(`SECTION ${displaySection(tree.section, ctx.format)} — ${tree.title}`),
+  ];
+  collectParagraphs(tree.parts, children, ctx);
+  return children;
 }
 
 /**
@@ -88,21 +113,54 @@ export async function generateDocx(
 ): Promise<Buffer> {
   try {
     const rules = styleRules !== undefined ? buildRuleMap(styleRules) : undefined;
-    const sectionNumberFormat = options?.sectionNumberFormat ?? 'canonical';
-    // Title paragraph is synthetic — no SpecNode.id, not a round-trip anchor
-    const children: (Paragraph | SdtBlock)[] = [
-      plainParagraph(
-        `SECTION ${displaySection(tree.section, sectionNumberFormat)} — ${tree.title}`
-      ),
-    ];
-    collectParagraphs(tree.parts, children, sectionNumberFormat, rules);
+    const format = options?.sectionNumberFormat ?? 'canonical';
+    const ctx = sectionContext(format, SPEC_NUM_REF, rules);
+    const children = buildSectionChildren(tree, ctx);
     const doc = new Document({
-      numbering: { config: [buildSpecNumberingConfig(rules)] },
+      numbering: { config: [buildSpecNumberingConfig(rules, SPEC_NUM_REF)] },
       sections: [{ properties: {}, children }],
     });
     return await Packer.toBuffer(doc);
   } catch (err) {
     if (err instanceof GeneratorError) throw err;
     throw new GeneratorError('DOCX generation failed', { cause: err });
+  }
+}
+
+/**
+ * Assemble an ordered list of section trees into a single project-manual DOCX
+ * (ADR-017 D1). Each section gets its own OOXML section (a section break between
+ * them) and its own numbering instance, so multilevel numbering restarts at
+ * PART 1 in every section — the documented sharp edge (ADR-017 Consequences):
+ * dolanmiu/docx numbering is document-scoped, so per-section restart requires a
+ * distinct numbering reference (→ distinct abstractNum) per section. Every
+ * paragraph keeps its `w:sdt` UUID anchor so a redlined manual can round-trip.
+ */
+export async function generateManual(
+  trees: readonly SpecTree[],
+  styleRules?: readonly StyleRule[],
+  options?: GenerateDocxOptions
+): Promise<Buffer> {
+  if (trees.length === 0) {
+    throw new GeneratorError('cannot generate a manual with no sections');
+  }
+  try {
+    const rules = styleRules !== undefined ? buildRuleMap(styleRules) : undefined;
+    const format = options?.sectionNumberFormat ?? 'canonical';
+    const sections = trees.map((tree, i) => {
+      const reference = `${SPEC_NUM_REF}-${i}`;
+      return {
+        reference,
+        children: buildSectionChildren(tree, sectionContext(format, reference, rules)),
+      };
+    });
+    const doc = new Document({
+      numbering: { config: sections.map((s) => buildSpecNumberingConfig(rules, s.reference)) },
+      sections: sections.map((s) => ({ properties: {}, children: s.children })),
+    });
+    return await Packer.toBuffer(doc);
+  } catch (err) {
+    if (err instanceof GeneratorError) throw err;
+    throw new GeneratorError('DOCX manual generation failed', { cause: err });
   }
 }
