@@ -1,6 +1,7 @@
 import { pool, DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
-import type { SignalConflict, SourceFacts, SpecNode, SpecTree } from '../../ast/index.js';
+import { NodeTypeSchema } from '../../ast/index.js';
+import type { NodeType, SignalConflict, SourceFacts, SpecNode, SpecTree } from '../../ast/index.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -145,5 +146,143 @@ export async function getParagraphWithAncestors(
     };
   } catch (err) {
     throw new DatabaseError('getParagraphWithAncestors failed', { cause: err });
+  }
+}
+
+interface SubtreeRow {
+  readonly id: string;
+  readonly parentId: string | null;
+  readonly nodeType: string;
+  readonly text: string;
+  readonly position: number;
+  readonly vanish: boolean;
+  readonly conflicts: readonly SignalConflict[];
+  readonly sourceFacts: SourceFacts;
+}
+
+/** Validate a raw DB `node_type` string against the canonical AST enum before it
+ *  crosses into a `SpecNode`. Guards against drift between the DB CHECK and the
+ *  AST type without a cross-boundary assertion. */
+function parseNodeType(nodeType: string): NodeType {
+  const parsed = NodeTypeSchema.safeParse(nodeType);
+  if (!parsed.success) {
+    throw new DatabaseError(`buildSubtree: unexpected node_type "${nodeType}"`, {
+      cause: parsed.error,
+    });
+  }
+  return parsed.data;
+}
+
+/** Assemble subtree rows (a node plus all its descendants) into one SpecNode
+ *  rooted at `rootId`. Mirrors buildNodeTree's meta shaping (specs.ts) but roots
+ *  at a non-null parent rather than the forest roots. */
+function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | null {
+  const childrenByParent = new Map<string | null, SubtreeRow[]>();
+  for (const row of rows) {
+    childrenByParent.set(row.parentId, [...(childrenByParent.get(row.parentId) ?? []), row]);
+  }
+  const root = rows.find((r) => r.id === rootId);
+  if (!root) return null;
+
+  const build = (row: SubtreeRow): SpecNode => ({
+    id: row.id,
+    type: parseNodeType(row.nodeType),
+    text: row.text,
+    children: (childrenByParent.get(row.id) ?? [])
+      .sort((a, b) => a.position - b.position)
+      .map(build),
+    meta: {
+      ...(row.vanish ? { vanish: true } : {}),
+      ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
+      ...(hasSourceFacts(row.sourceFacts) ? { sourceFacts: row.sourceFacts } : {}),
+    },
+  });
+
+  return build(root);
+}
+
+/** Outcome of {@link updateParagraphText}: the spec/node pairing is validated
+ *  before any write so the API can map `not-found` → 404 and `wrong-spec` → 403. */
+export type UpdateParagraphResult =
+  | { readonly status: 'updated'; readonly node: SpecNode }
+  | { readonly status: 'not-found' }
+  | { readonly status: 'wrong-spec' };
+
+async function fetchSubtreeNode(
+  db: Queryable,
+  specId: string,
+  nodeId: string
+): Promise<SpecNode | null> {
+  const result = await db.query<SubtreeRow>(
+    `WITH RECURSIVE subtree AS (
+       SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts
+       FROM paragraphs WHERE id = $1 AND spec_id = $2
+       UNION ALL
+       SELECT p.id, p.parent_id, p.node_type, p.text, p.position, p.vanish,
+              p.conflicts, p.source_facts
+       FROM paragraphs p JOIN subtree s ON p.parent_id = s.id
+       WHERE p.spec_id = $2
+     )
+     SELECT id, parent_id AS "parentId", node_type AS "nodeType", text, position,
+            vanish, conflicts, source_facts AS "sourceFacts"
+     FROM subtree`,
+    [nodeId, specId]
+  );
+  return buildSubtree(result.rows, nodeId);
+}
+
+/**
+ * Update a single paragraph's text by UUID, bumping `base_version` and
+ * `updated_at` (ADR-009, #47). The (specId, nodeId) pair is verified under a row
+ * lock before the write so a node that exists but belongs to another spec is
+ * reported as `wrong-spec`, never silently edited.
+ */
+export async function updateParagraphText(
+  specId: string,
+  nodeId: string,
+  text: string
+): Promise<UpdateParagraphResult> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const owner = await client.query<{ spec_id: string }>(
+      `SELECT spec_id FROM paragraphs WHERE id = $1 FOR UPDATE`,
+      [nodeId]
+    );
+    const ownerRow = owner.rows[0];
+    if (!ownerRow) {
+      await client.query('ROLLBACK');
+      return { status: 'not-found' };
+    }
+    if (ownerRow.spec_id !== specId) {
+      await client.query('ROLLBACK');
+      return { status: 'wrong-spec' };
+    }
+
+    await client.query(
+      `UPDATE paragraphs
+       SET text = $2, base_version = base_version + 1, updated_at = now()
+       WHERE id = $1`,
+      [nodeId, text]
+    );
+
+    const node = await fetchSubtreeNode(client, specId, nodeId);
+    if (!node) {
+      await client.query('ROLLBACK');
+      throw new DatabaseError('updateParagraphText: updated node vanished mid-transaction');
+    }
+
+    await client.query('COMMIT');
+    return { status: 'updated', node };
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* best-effort */
+    }
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError('updateParagraphText failed', { cause: err });
+  } finally {
+    client.release();
   }
 }

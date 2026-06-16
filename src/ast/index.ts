@@ -18,6 +18,7 @@ export {
   SpecTreeSchema,
   SecRefSchema,
   PatchSpecBodySchema,
+  UpdateParagraphBodySchema,
   CreateProjectBodySchema,
   AddSectionToProjectBodySchema,
   SetDivisionGeneralSpecBodySchema,
@@ -26,6 +27,7 @@ export {
   CreateRevisionBodySchema,
 } from './schemas.js';
 export type {
+  UpdateParagraphBody,
   CreateProjectBody,
   AddSectionToProjectBody,
   SetDivisionGeneralSpecBody,

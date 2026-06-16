@@ -159,6 +159,14 @@ export const PatchSpecBodySchema = z.object({
   section: SectionNumberInputSchema.exactOptional(),
 });
 
+// Individual paragraph update (ADR-009 / #47). Empty text is rejected so the
+// Revit add-in (#48) can never blank a paragraph by pushing an empty value.
+export const UpdateParagraphBodySchema = z.object({
+  text: z.string().check(z.minLength(1)),
+});
+
+export type UpdateParagraphBody = z.infer<typeof UpdateParagraphBodySchema>;
+
 export const CreateProjectBodySchema = z.object({
   name: z.string().check(z.minLength(1)),
   description: z.string().check(z.minLength(1)).exactOptional(),
