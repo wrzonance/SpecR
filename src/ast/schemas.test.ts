@@ -10,6 +10,8 @@ import {
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
+  ConventionRulesSchema,
+  EditabilitySchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -332,5 +334,52 @@ describe('SetPackageSpecsBodySchema (issue #95)', () => {
     expect(SetPackageSpecsBodySchema.safeParse({ specIds: [a, a] }).success).toBe(false);
     expect(SetPackageSpecsBodySchema.safeParse({ specIds: ['nope'] }).success).toBe(false);
     expect(SetPackageSpecsBodySchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('ConventionRulesSchema (ADR-022 D3/D5)', () => {
+  const FULL_RULES = {
+    colorMeanings: [{ color: '0000FF', meaning: 'editable' }],
+    choiceTokens: [{ kind: 'angle' }, { kind: 'bracket' }],
+    noteBanners: ['^NOTES? TO (?:THE )?SPEC(?:IFIER)?S?'],
+    comments: { treatAs: 'note' },
+    defaultEditability: 'locked',
+  };
+
+  it('accepts the full design-doc ruleset and round-trips it identically', () => {
+    const parsed = ConventionRulesSchema.parse(FULL_RULES);
+    expect(parsed).toEqual(FULL_RULES);
+  });
+
+  it('accepts an empty ruleset — every field is optional', () => {
+    expect(ConventionRulesSchema.parse({})).toEqual({});
+  });
+
+  it('preserves unknown keys via catchall (capture-never-reject)', () => {
+    const withUnknown = { defaultEditability: 'locked', futureKnob: { weight: 3 } };
+    expect(ConventionRulesSchema.parse(withUnknown)).toEqual(withUnknown);
+  });
+
+  it('preserves unknown keys nested inside a known sub-object', () => {
+    const input = { colorMeanings: [{ color: 'FF0000', meaning: 'note', note: 'vendor red' }] };
+    expect(ConventionRulesSchema.parse(input)).toEqual(input);
+  });
+
+  it('rejects an editability value outside the closed vocabulary', () => {
+    expect(ConventionRulesSchema.safeParse({ defaultEditability: 'frozen' }).success).toBe(false);
+    expect(
+      ConventionRulesSchema.safeParse({ colorMeanings: [{ color: '0000FF', meaning: 'maybe' }] })
+        .success
+    ).toBe(false);
+  });
+
+  it('rejects an unknown choice-token kind', () => {
+    expect(ConventionRulesSchema.safeParse({ choiceTokens: [{ kind: 'curly' }] }).success).toBe(
+      false
+    );
+  });
+
+  it('EditabilitySchema is the closed four-value vocabulary', () => {
+    expect(EditabilitySchema.options).toEqual(['locked', 'editable', 'choice', 'note']);
   });
 });
