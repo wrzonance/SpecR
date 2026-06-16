@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { healthHandler } from './health.js';
 import { getSpecHandler, getSpecLineageHandler, updateSpecHandler } from './specs.js';
 import { updateParagraphHandler } from './paragraphs.js';
+import { acquireLockHandler, releaseLockHandler, getLockHandler } from './locks.js';
 import {
   createProjectHandler,
   getProjectHandler,
@@ -66,6 +67,9 @@ router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
+router.get('/specs/:id/lock', getLockHandler);
+router.put('/specs/:id/lock', acquireLockHandler);
+router.delete('/specs/:id/lock', releaseLockHandler);
 router.post('/specs/:id/generate', generateHandler);
 router.post('/specs/:id/diff', upload.single('file'), diffHandler);
 router.post('/specs/:id/merge', mergeHandler);

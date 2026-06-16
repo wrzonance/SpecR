@@ -171,6 +171,23 @@ export const UpdateParagraphBodySchema = z.object({
 
 export type UpdateParagraphBody = z.infer<typeof UpdateParagraphBodySchema>;
 
+// Advisory soft-lock acquire/release (ADR-018 D2). `holder` is a caller-supplied
+// identity label until auth (#43) supplies an authenticated one. `ttlSeconds`
+// caps at 1 hour so a single acquire can never wedge a spec for an unreasonable
+// time before it is stealable; omitted → server default (15 min).
+export const AcquireLockBodySchema = z.object({
+  holder: z.string().check(z.minLength(1)),
+  ttlSeconds: z.number().int().min(1).max(3600).exactOptional(),
+});
+
+export type AcquireLockBody = z.infer<typeof AcquireLockBodySchema>;
+
+export const ReleaseLockBodySchema = z.object({
+  holder: z.string().check(z.minLength(1)),
+});
+
+export type ReleaseLockBody = z.infer<typeof ReleaseLockBodySchema>;
+
 export const CreateProjectBodySchema = z.object({
   name: z.string().check(z.minLength(1)),
   description: z.string().check(z.minLength(1)).exactOptional(),

@@ -25,6 +25,8 @@ export {
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
   CreateRevisionBodySchema,
+  AcquireLockBodySchema,
+  ReleaseLockBodySchema,
 } from './schemas.js';
 export type {
   UpdateParagraphBody,
@@ -34,6 +36,8 @@ export type {
   CreatePackageBody,
   SetPackageSpecsBody,
   CreateRevisionBody,
+  AcquireLockBody,
+  ReleaseLockBody,
 } from './schemas.js';
 export type {
   StyleNodeType,
