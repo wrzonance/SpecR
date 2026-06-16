@@ -188,6 +188,7 @@ describe('generateManualHandler', () => {
         expect.objectContaining({ section: '03 30 00' }),
         expect.objectContaining({ section: '09 91 00' }),
       ],
+      { name: 'Acme HQ', description: null },
       undefined,
       undefined
     );

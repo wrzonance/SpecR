@@ -126,6 +126,14 @@ describe('POST /projects/:id/generate — manual assembly (integration)', () => 
 
     // Every emitted paragraph keeps its UUID anchor (2 parts + 2 articles = 4).
     expect((xml.match(/specr-uuid-/g) ?? []).length).toBe(4);
+
+    // Front matter (ADR-017 D1): cover carries the project name, ahead of a TOC
+    // field code, both before the first section.
+    expect(xml).toContain('Manual Assembly Integration Test');
+    expect(/instrText[^>]*>TOC .*\\o &quot;1-1&quot;/.exec(xml)).not.toBeNull();
+    expect(xml.indexOf('Manual Assembly Integration Test')).toBeLessThan(
+      xml.indexOf('SECTION 03 30 00')
+    );
   });
 
   it('returns 404 for an unknown project UUID', async () => {
