@@ -75,8 +75,14 @@ function applyOverride(level: ILevelsOptions, num: NumberingDef | undefined): IL
   };
 }
 
-export function buildSpecNumberingConfig(rules?: StyleRuleMap): {
-  reference: 'spec-numbering';
+// `reference` is parameterized so a multi-section manual can register one
+// distinct numbering instance per section — the per-section restart sharp edge
+// (ADR-017 Consequences). Single-section generation keeps the 'spec-numbering' default.
+export function buildSpecNumberingConfig(
+  rules?: StyleRuleMap,
+  reference = 'spec-numbering'
+): {
+  reference: string;
   levels: ILevelsOptions[];
 } {
   const levels = defaultLevels().map((level, i) => {
@@ -86,5 +92,5 @@ export function buildSpecNumberingConfig(rules?: StyleRuleMap): {
       nodeType !== undefined ? rules?.get(nodeType)?.numbering : undefined
     );
   });
-  return { reference: 'spec-numbering', levels };
+  return { reference, levels };
 }

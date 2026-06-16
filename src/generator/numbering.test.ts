@@ -27,6 +27,13 @@ describe('buildSpecNumberingConfig', () => {
     expect(config.reference).toBe('spec-numbering');
   });
 
+  it('honors a custom reference (per-section manual numbering instance)', () => {
+    const config = buildSpecNumberingConfig(undefined, 'spec-numbering-2');
+    expect(config.reference).toBe('spec-numbering-2');
+    // Levels are identical to the default — only the reference differs.
+    expect(config.levels).toEqual(buildSpecNumberingConfig().levels);
+  });
+
   it('returns exactly 7 levels', () => {
     const config = buildSpecNumberingConfig();
     expect(config.levels).toHaveLength(7);
