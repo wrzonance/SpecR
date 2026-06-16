@@ -38,8 +38,16 @@ export type {
   SpecReference,
   OriginMeta,
 } from './queries/specs.js';
-export { insertTree, getParagraphWithAncestors } from './queries/paragraphs.js';
-export type { ParagraphRow, ParagraphWithAncestors } from './queries/paragraphs.js';
+export {
+  insertTree,
+  getParagraphWithAncestors,
+  updateParagraphText,
+} from './queries/paragraphs.js';
+export type {
+  ParagraphRow,
+  ParagraphWithAncestors,
+  UpdateParagraphResult,
+} from './queries/paragraphs.js';
 export {
   insertRefs,
   getInboundReferences,

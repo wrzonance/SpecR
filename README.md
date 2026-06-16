@@ -86,6 +86,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - `POST /specs/:id/diff` — upload an edited DOCX and return `{ added, modified, deleted, conflicts, warnings }`
 - `POST /specs/:id/merge` — apply accepted UUIDs from a `DiffResult`, bumping paragraph base versions
 - `PATCH /specs/:id` — update spec metadata
+- `PATCH /specs/:id/paragraphs/:nodeId` — update one paragraph's text by UUID (bumps `base_version`)
 - `POST /projects` — create a project
 - `GET /projects/:id` — retrieve project with TOC
 - `POST /projects/:id/specs` — add a spec section to a project TOC

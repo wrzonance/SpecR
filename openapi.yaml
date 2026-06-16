@@ -198,6 +198,53 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/paragraphs/{nodeId}:
+    patch:
+      operationId: updateParagraph
+      summary: Update a single paragraph's text by UUID
+      description: >
+        Replaces one paragraph's text in place (ADR-009), bumping its
+        `base_version`. The Revit add-in pushes model-parameter changes here
+        without replacing the whole spec. The node must belong to the spec in the
+        path; otherwise the request is rejected with 403.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  description: New paragraph text (must be non-empty).
+      responses:
+        '200':
+          description: Updated paragraph node (with its subtree)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecNode'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/lineage:
     get:
       operationId: getSpecLineage
@@ -1446,6 +1493,14 @@ components:
       schema:
         type: string
         format: uuid
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      description: Paragraph (node) UUID
+      schema:
+        type: string
+        format: uuid
     ProjectId:
       name: id
       in: path
@@ -1482,6 +1537,12 @@ components:
   responses:
     BadRequest:
       description: Bad request — validation error or unsupported file type
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Forbidden — the resource exists but does not belong to the parent in the path
       content:
         application/json:
           schema:

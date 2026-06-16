@@ -2,6 +2,7 @@ import { type Router as RouterType, Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { healthHandler } from './health.js';
 import { getSpecHandler, getSpecLineageHandler, updateSpecHandler } from './specs.js';
+import { updateParagraphHandler } from './paragraphs.js';
 import {
   createProjectHandler,
   getProjectHandler,
@@ -64,6 +65,7 @@ router.get('/health', healthHandler);
 router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
+router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
 router.post('/specs/:id/generate', generateHandler);
 router.post('/specs/:id/diff', upload.single('file'), diffHandler);
 router.post('/specs/:id/merge', mergeHandler);
