@@ -1,6 +1,16 @@
 # ADR-018: Document Concurrency and State Model
 
-## Status: Proposed (not yet scheduled — targets Phase 5 multi-user)
+## Status: Accepted (implemented in #107)
+
+> **Implementation note (#107).** The composed edit gate (D3) reads
+> `external_state`, which ADR-014 D5 places in core but schedules for Phase 7.
+> To avoid the gate referencing a non-existent column, migration 025 adds the
+> single `external_state` column now (closed enum, default `editable`), and the
+> gate reads it. The rest of the ADR-014 external linkage (`external_provider` /
+> `external_id` / `external_metadata` / `external_synced_at`) and the connector
+> that *populates* `external_state` remain Phase 7 — core still never branches on
+> a provider name. Advisory-lock `holder` is a caller-supplied label until auth
+> (#43); meaningful for visibility, not enforcement, until then.
 
 ## Context
 
