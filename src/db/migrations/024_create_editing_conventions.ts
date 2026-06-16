@@ -33,12 +33,14 @@ export const up = (pgm: MigrationBuilder): void => {
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
 
-  // Keep the built-in default a singleton so the fallback lookup is deterministic.
-  pgm.createIndex('editing_conventions', ['name'], {
-    name: 'editing_conventions_builtin_unique',
-    unique: true,
-    where: 'library_id IS NULL',
-  });
+  // Enforce a true singleton for the built-in default (library_id IS NULL) so the
+  // fallback lookup is deterministic. Indexing the constant expression — rather than
+  // `name` — admits at most one built-in row regardless of its name.
+  pgm.sql(`
+    CREATE UNIQUE INDEX editing_conventions_builtin_singleton
+    ON editing_conventions ((library_id IS NULL))
+    WHERE library_id IS NULL
+  `);
 
   // Escape single quotes defensively — values are static and quote-free today.
   const rulesLiteral = JSON.stringify(INDUSTRY_DEFAULT_RULES).replace(/'/g, "''");

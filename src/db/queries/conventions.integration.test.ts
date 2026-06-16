@@ -51,6 +51,17 @@ describe('migration 024 — built-in Industry Default seed', () => {
     expect(matches('SPECIFIER NOTES')).toBe(true);
     expect(matches('PART 1 GENERAL')).toBe(false);
   });
+
+  it('db: built-in convention is a true singleton — a second library_id IS NULL row is rejected', async () => {
+    // The partial unique index on (library_id IS NULL) admits at most one built-in
+    // row regardless of name, so the deterministic fallback read can never tie.
+    await expect(
+      pool.query(
+        `INSERT INTO editing_conventions (library_id, name, rules)
+         VALUES (NULL, 'Second Built-In', '{}'::jsonb)`
+      )
+    ).rejects.toThrow(/editing_conventions_builtin_singleton|unique/i);
+  });
 });
 
 describe('editing_conventions — round-trip and library fallback', () => {
