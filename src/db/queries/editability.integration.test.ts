@@ -110,7 +110,7 @@ describe('editability storage (O-7 / #134)', () => {
     expect(pr1.meta.editability).toBeUndefined();
   });
 
-  it('override survives reclassify', async () => {
+  it('editability: override survives reclassification with new machine verdict', async () => {
     await storeClassifications(specId, FIRST);
     await setEditabilityOverride(PR1_ID, 'note');
     // Re-run the engine with a DIFFERENT machine verdict.

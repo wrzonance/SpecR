@@ -131,12 +131,15 @@ function deriveEditability(
   classification: unknown,
   override: unknown
 ): SpecNodeEditability | undefined {
-  if (classification === null || classification === undefined) return undefined;
-  const machine = ClassificationSchema.parse(classification);
+  // Validate the override first so a malformed payload fails loud at the DB
+  // boundary even on an unclassified row — the early return must not let a
+  // corrupt override slip through silently (#205 review).
   const overrideValue =
     override === null || override === undefined
       ? undefined
       : OverrideSchema.parse(override).editability;
+  if (classification === null || classification === undefined) return undefined;
+  const machine = ClassificationSchema.parse(classification);
   return {
     value: overrideValue ?? machine.editability,
     confidence: machine.confidence,
