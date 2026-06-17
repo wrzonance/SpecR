@@ -7,10 +7,11 @@ allowBuilds:
   esbuild: true
   protobufjs: false
 
-# Security overrides — dev-only transitive deps flagged by Dependabot. None ship
-# in dist/ or run in prod (esbuild is a vitest/tsx test-runner internal, not a
-# dev server we run; dompurify's issue is in redoc's docs preview). Pinned for a
-# clean `pnpm audit` on developer machines. See issue #200.
+# Security overrides — force patched versions of transitive deps flagged by
+# Dependabot. None of these vulnerable code paths are reachable in SpecR today
+# (no hono middleware is imported; qs.stringify is never called; the dev tools
+# never ship in dist/ or run in prod), but we pin the patched versions for
+# defense-in-depth and a clean `pnpm audit`. See issues #198 (runtime) and #200.
 # Residuals (dev-only, not reachable; deferred):
 #   - vite #9/#10 (Windows-only, vite *dev server* which we never run — vite is
 #     only vitest's internal transform engine). Bumping vite forces a full
@@ -18,6 +19,8 @@ allowBuilds:
 #     deprecation; handled in a dedicated follow-up, not here.
 #   - depcheck's js-yaml@3.x — a different major the 4.2.0 fix doesn't apply to.
 overrides:
+  hono@<4.12.25: '>=4.12.25'    # runtime, via @modelcontextprotocol/sdk → @hono/node-server
+  qs@<6.15.2: '>=6.15.2'        # runtime, via express → body-parser (CVE-2026-8723)
   esbuild@<0.28.1: '>=0.28.1'   # GHSA-gv7w-rqvm-qjhr (high), -g7r4-m6w7-qqqr
   dompurify@<3.4.9: '>=3.4.9'   # GHSA-vxr8-fq34-vvx9
   js-yaml@4.1.1: '>=4.2.0'      # GHSA-h67p-54hq-rp68 (eslint's 4.x consumer)
