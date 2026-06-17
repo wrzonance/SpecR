@@ -68,7 +68,7 @@ Expected: no advisories; confirm all three are MIT in their `package.json`. If `
 
 Run:
 ```bash
-node --input-type=module -e "import Ajv2020 from 'ajv/dist/2020'; import addFormats from 'ajv-formats'; import \$RefParser from '@apidevtools/json-schema-ref-parser'; const a=new Ajv2020({strict:false}); addFormats(a); const s=await \$RefParser.dereference('openapi.yaml'); console.log('OK', typeof a.compile, !!s.paths)"
+node --input-type=module -e "import Ajv2020 from 'ajv/dist/2020.js'; import addFormats from 'ajv-formats'; import \$RefParser from '@apidevtools/json-schema-ref-parser'; const a=new Ajv2020({strict:false}); addFormats(a); const s=await \$RefParser.dereference('openapi.yaml'); console.log('OK', typeof a.compile, !!s.paths)"
 ```
 Expected: `OK function true` (proves the default-import shapes and that `dereference` parses the YAML).
 
@@ -152,7 +152,7 @@ Create `src/test-utils/contract/validate-response.ts`:
 import { fileURLToPath } from 'node:url'
 import type { Router } from 'express'
 import $RefParser from '@apidevtools/json-schema-ref-parser'
-import Ajv2020 from 'ajv/dist/2020'
+import Ajv2020 from 'ajv/dist/2020.js'
 import type { AnySchemaObject, ValidateFunction } from 'ajv'
 import addFormats from 'ajv-formats'
 import { z } from 'zod'
