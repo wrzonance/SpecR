@@ -550,6 +550,87 @@ describe('GET /mcp', () => {
   });
 });
 
+describe('stateful sessions (#45)', () => {
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream',
+  };
+
+  // initialize WITHOUT a session header mints a stateful session; the server
+  // returns the new id in the mcp-session-id response header.
+  async function openSession(): Promise<{ sessionId: string }> {
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'session-test', version: '1.0' },
+        },
+      }),
+    });
+    const sessionId = res.headers.get('mcp-session-id');
+    expect(sessionId, 'initialize must mint a session id').toBeTruthy();
+    return { sessionId: sessionId as string };
+  }
+
+  it('routes a follow-up request with the same mcp-session-id to the same server', async () => {
+    const { sessionId } = await openSession();
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { ...headers, 'mcp-session-id': sessionId },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+    });
+    // A stateful, initialized session echoes its id and serves the request (not a 400).
+    expect(res.status).toBe(200);
+    expect(res.headers.get('mcp-session-id')).toBe(sessionId);
+  });
+
+  it('DELETE with a live session id returns 204 and terminates it', async () => {
+    const { sessionId } = await openSession();
+    const del = await fetch(`${baseUrl}/mcp`, {
+      method: 'DELETE',
+      headers: { 'mcp-session-id': sessionId },
+    });
+    expect(del.status).toBe(204);
+    // After deletion the session id no longer maps to a transport — a follow-up
+    // is treated as an unknown session and rejected by the SDK (404).
+    const after = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { ...headers, 'mcp-session-id': sessionId },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }),
+    });
+    expect(after.status).toBe(404);
+  });
+
+  it('DELETE without a session header returns 400', async () => {
+    const res = await fetch(`${baseUrl}/mcp`, { method: 'DELETE' });
+    expect(res.status).toBe(400);
+  });
+
+  it('DELETE with an unknown session id returns 404', async () => {
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: 'DELETE',
+      headers: { 'mcp-session-id': '00000000-0000-4000-8000-000000000000' },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('stateless client (no session id) gets no session header — fresh instance per request', async () => {
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/list', params: {} }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('mcp-session-id')).toBeNull();
+  });
+});
+
 describe('tool: get_spec_lineage (#97)', () => {
   let lineageProjectId: string;
   let lineageCloneId: string;

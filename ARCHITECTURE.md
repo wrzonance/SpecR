@@ -67,9 +67,9 @@ Clippit is the only open-source library that builds the actual parent/child para
 │                                                                        │
 │  REST API (Express)         MCP (Streamable HTTP, same process)        │
 │  ─────────────────          ────────────────────────────────           │
-│  POST /parse                POST /mcp  ← stateless per-request        │
+│  POST /parse                POST /mcp  ← stateless or session         │
 │  GET  /specs/:id            GET  /mcp  (405 stub)                     │
-│  POST /specs/:id/generate   DELETE /mcp (405 stub)                    │
+│  POST /specs/:id/generate   DELETE /mcp (terminates a session)        │
 │  POST /specs/:id/diff       tools: search_library, get_spec           │
 │  POST /specs/:id/merge             list_sections                       │
 │                             resources: specr://specs/{id} (Markdown)  │
@@ -531,8 +531,8 @@ Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
 - MCP tools (read-only Phase 2a scope): `search_library(query, division?, limit?)`, `get_spec(specId)` → `{ tree: CsiTree, references: SpecReference[] }` (each reference includes `isResolved: boolean`), `list_sections(division?)`
 - MCP resources: `specr://specs/{id}` (Markdown), `specr://sections` (Markdown table)
 - Auth: none for Phase 2. Auth hook comment in `src/mcp/server.ts`; auth added in same PR as REST auth (future).
-- **Stateful session upgrade path (Phase 5+):** change `sessionIdGenerator: undefined` → `sessionIdGenerator: () => randomUUID()` + session Map in the route handler. Tool/resource definitions unchanged.
-- Deferred to later phases: `get_paragraph`, `parse_document`, write tools, stateful sessions, MCP prompts
+- **Stateful sessions (Phase 5h, #45):** `POST /mcp` now also serves optional stateful sessions. An `initialize` with no `mcp-session-id` header mints a session (`sessionIdGenerator: () => randomUUID()`); the session's transport+server pair is kept in a `McpSessionStore` (`src/mcp/sessions.ts`) keyed by the minted id, and reused for later requests carrying that header. `DELETE /mcp` closes and removes a session. Stateless callers (no header) still get a fresh transport per request. Tool/resource definitions unchanged.
+- Deferred to later phases: write tools, MCP prompts, GET /mcp SSE streaming
 
 **Phase 2b — Core DOCX generator:** ✅ Complete (PR #26, PR #28)
 
@@ -659,7 +659,7 @@ Test files (`src/**/*.test.ts`) and `scripts/**/*.ts` relax the line/console cap
 
 ## MCP Server
 
-`src/mcp/server.ts` exports `registerMcpRoutes(app: Express)`. One fresh `McpServer` + `StreamableHTTPServerTransport` is created per `POST /mcp` request (stateless, `sessionIdGenerator: undefined`). `registerTools(server)` and `registerResources(server)` wire all capabilities. `GET /mcp` and `DELETE /mcp` return 405 (stubs for a future stateful session upgrade).
+`src/mcp/server.ts` exports `registerMcpRoutes(app: Express)`. `POST /mcp` supports both transport modes. A stateless caller (no `mcp-session-id` header, non-`initialize` body) gets a fresh `McpServer` + stateless `StreamableHTTPServerTransport` (`sessionIdGenerator: undefined`) per request, disposed on response finish. An `initialize` with no session header mints a stateful session: a transport with `sessionIdGenerator: () => randomUUID()` whose pair is held in an `McpSessionStore` (`src/mcp/sessions.ts`) keyed by the minted id and reused for every later request carrying that `mcp-session-id`. `registerTools(server)` and `registerResources(server)` wire all capabilities in both modes. `GET /mcp` returns 405 (SSE streaming not yet exposed). `DELETE /mcp` terminates the session named by `mcp-session-id` (400 if absent, 404 if unknown, 204 on success).
 
 **Adding a tool** (inside `registerTools(server)` in `src/mcp/tools.ts`):
 
@@ -691,7 +691,7 @@ server.registerResource('name', 'specr://path', { description: '...', mimeType: 
 server.registerResource('name', new ResourceTemplate('specr://path/{id}', { list: undefined }), { ... }, async (uri, { id }) => { ... });
 ```
 
-**Stateful session upgrade (Phase 5+):** change `sessionIdGenerator: undefined` → `sessionIdGenerator: () => randomUUID()` and add a `Map<sessionId, McpServer>` session store in the route handler. Tool/resource definitions are unchanged. **Auth hook:** the insertion point is marked in `server.ts`; add `Authorization: Bearer <token>` validation there in the same PR as REST auth.
+**Stateful sessions (Phase 5h, #45):** implemented via `McpSessionStore` (`src/mcp/sessions.ts`), which owns the `Map<sessionId, { server, transport }>` and the session lifecycle (`createStateful`, `get`, `delete`). The SDK transport binds one session per instance, so a session is one long-lived transport+server pair keyed by the id the transport mints on `initialize`; the store registers/removes itself via the transport's `onsessioninitialized` / `onsessionclosed` callbacks. Tool/resource definitions are unchanged. **Auth hook:** the insertion point is marked in `server.ts`; add `Authorization: Bearer <token>` validation there in the same PR as REST auth.
 
 ## Markdown Renderer
 
@@ -711,7 +711,8 @@ specr/
 ├── src/                         # All TypeScript source
 │   ├── index.ts                 # Entry: Express, env validation, graceful shutdown
 │   ├── mcp/
-│   │   ├── server.ts            # registerMcpRoutes(app) — Streamable HTTP, stateless per-request McpServer
+│   │   ├── server.ts            # registerMcpRoutes(app) — Streamable HTTP routing: stateless + stateful sessions
+│   │   ├── sessions.ts          # McpSessionStore — stateful session lifecycle (Map keyed by minted session id)
 │   │   ├── tools.ts             # registerTools(server): search_library, list_sections, get_spec, get_paragraph, parse_document, generate_docx, load_files
 │   │   └── resources.ts         # registerResources(server): specr://specs/{id}, specr://sections
 │   ├── api/
