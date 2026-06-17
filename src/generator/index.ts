@@ -13,6 +13,8 @@ import {
   type SectionNumberFormat,
 } from '../lib/section-number.js';
 
+export { generateSec } from './sec/index.js';
+
 const SPEC_NUM_REF = 'spec-numbering' as const;
 
 export interface GenerateDocxOptions {
