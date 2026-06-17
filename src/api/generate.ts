@@ -126,7 +126,8 @@ export async function generateManualHandler(req: Request, res: Response): Promis
     }
     const trees = await collectSectionTrees(project.toc);
     const options = generateOptions(bodyResult.data.sectionNumberFormat);
-    const buffer = await generateManual(trees, resolution.rules, options);
+    const meta = { name: project.name, description: project.description };
+    const buffer = await generateManual(trees, meta, resolution.rules, options);
     res.setHeader('Content-Type', DOCX_MIME);
     res.setHeader('Content-Disposition', `attachment; filename="${manualFilename(project.name)}"`);
     res.send(buffer);

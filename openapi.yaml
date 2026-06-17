@@ -510,8 +510,11 @@ paths:
         into a single DOCX manual (ADR-017 D1). Each section is its own OOXML
         section with an independent numbering instance, so multilevel numbering
         restarts at PART 1 per section. Every paragraph keeps its `w:sdt` UUID
-        anchor for round-trip. v1 draft mode renders live from `project_specs`;
-        cover/TOC page, issuance/addenda, and PDF are out of scope.
+        anchor for round-trip. The manual opens with a cover page (project name +
+        description, style-template applied) and a Word TOC field over the section
+        headings — Word computes the TOC entries and pagination on open; SpecR emits
+        the field, not page numbers. v1 draft mode renders live from `project_specs`;
+        issuance/addenda and PDF are out of scope.
       tags: [projects]
       parameters:
         - $ref: '#/components/parameters/ProjectId'
