@@ -50,6 +50,12 @@ import {
   deleteTemplateHandler,
   upsertTemplateRulesHandler,
 } from './templates-crud.js';
+import {
+  listConventionsHandler,
+  getLibraryConventionHandler,
+  putLibraryConventionHandler,
+  cloneLibraryConventionHandler,
+} from './conventions.js';
 
 const parseRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
@@ -122,3 +128,7 @@ router.post(
   validateBody(UpsertStyleRulesBodySchema),
   upsertTemplateRulesHandler
 );
+router.get('/conventions', listConventionsHandler);
+router.get('/libraries/:id/conventions', getLibraryConventionHandler);
+router.put('/libraries/:id/conventions', putLibraryConventionHandler);
+router.post('/libraries/:id/conventions/clone', cloneLibraryConventionHandler);

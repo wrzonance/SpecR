@@ -99,6 +99,10 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - `DELETE /templates/:id` — delete a template and cascade-remove its rules (204)
 - `POST /templates/:id/rules` — bulk-upsert style rules (transactional; one invalid rule rolls back all)
 - `POST /templates/import` — derive a firm style template from a source-of-truth DOCX
+- `GET /conventions` — list the built-in editing-convention profiles (read-only industry defaults)
+- `GET /libraries/:id/conventions` — the library's convention profile, or the inherited built-in flagged `meta.inherited: true`
+- `PUT /libraries/:id/conventions` — create/replace the library's convention profile (`{ name, rules? }`; malformed rules → 400, unsafe `noteBanners` regex → 422)
+- `POST /libraries/:id/conventions/clone` — clone a built-in or another library's profile (`{ sourceId }`) into a new library profile (201)
 
 The async `POST /parse` pattern (202 + poll) is intentional — inference over large DOCX files takes measurable time, and the job endpoint is designed for Phase 5 Web UI progress bars without further backend changes.
 
