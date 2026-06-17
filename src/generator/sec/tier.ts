@@ -1,9 +1,9 @@
-import type { NodeType } from '../../ast/types.js';
+import type { NodeType } from '../../ast/index.js';
 
 // CSI paragraph tier as the SEC parser assigns it: an article is the depth-0
 // SPT, and each deeper SPT (or a +1/+2 LST/ITM offset) increments the tier.
 // `walkSpt` saturates at pr5, so tiers run 0 (article) … 5 (pr5).
-const TIER: Readonly<Record<string, number>> = {
+const TIER: Readonly<Partial<Record<NodeType, number>>> = {
   article: 0,
   pr1: 1,
   pr2: 2,

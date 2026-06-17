@@ -1,4 +1,4 @@
-import type { SpecNode, SpecTree, SecRef } from '../../ast/types.js';
+import type { SpecNode, SpecTree, SecRef } from '../../ast/index.js';
 import { GeneratorError } from '../error.js';
 import { encodeXmlEntities } from './entities.js';
 import { tierOf } from './tier.js';
