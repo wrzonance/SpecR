@@ -43,7 +43,7 @@
 
   <!-- Typed REST client + JSON. Pinned versions; bump via the lockfile, never blind. -->
   <ItemGroup>
-    <PackageReference Include="Refit" Version="6.3.2" />
+    <PackageReference Include="Refit" Version="7.2.22" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 
