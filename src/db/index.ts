@@ -152,6 +152,11 @@ export {
   ConventionNotFoundError,
 } from './queries/conventions.js';
 export type { EditingConvention, CreateConventionInput } from './queries/conventions.js';
+export {
+  storeClassifications,
+  setEditabilityOverride,
+  clearEditabilityOverride,
+} from './queries/editability.js';
 export { getSpecLineage } from './queries/lineage.js';
 export type { SpecLineage, LineageHop, LineageScope } from './queries/lineage.js';
 export { acquireLock, releaseLock, getLock, DEFAULT_LOCK_TTL_SECONDS } from './queries/locks.js';

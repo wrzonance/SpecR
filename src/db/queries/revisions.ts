@@ -101,7 +101,8 @@ async function snapshotMemberTrees(
   const entries: RevisionSpecEntry[] = [];
   for (const member of members.rows) {
     const paras = await client.query<ParagraphTreeRow>(
-      `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts
+      `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
+              classification, editability_override
        FROM paragraphs WHERE spec_id = $1`,
       [member.spec_id]
     );

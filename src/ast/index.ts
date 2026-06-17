@@ -11,6 +11,7 @@ export type {
   SecRef,
   ParagraphSnapshot,
   StyleRule,
+  SpecNodeEditability,
 } from './types.js';
 export {
   NodeTypeSchema,
@@ -51,8 +52,13 @@ export type {
 } from './types.js';
 export { STYLE_NODE_TYPES } from './types.js';
 export { StyleNodeTypeSchema, StylePropertiesSchema } from './schemas.js';
-export { EditabilitySchema, ConventionRulesSchema } from './schemas.js';
-export type { Editability, ConventionRules } from './schemas.js';
+export {
+  EditabilitySchema,
+  ConventionRulesSchema,
+  ClassificationEvidenceSchema,
+  SpecNodeEditabilitySchema,
+} from './schemas.js';
+export type { Editability, ConventionRules, ClassificationEvidence } from './schemas.js';
 export { PutConventionBodySchema, CloneConventionBodySchema } from './schemas.js';
 export type { PutConventionBody, CloneConventionBody } from './schemas.js';
 export {
