@@ -2,10 +2,9 @@
 
 - **Status:** Approved (design) — ready for implementation planning
 - **Date:** 2026-06-17
-- **Revised:** 2026-06-17 — incorporates the nine findings from
-  `2026-06-17-live-api-docs-design-adversarial-review.md` (CI-gated publish, bidirectional
-  route↔spec coverage, scoped truth claims, declared dependencies, Scalar asset pipeline,
-  corrected mixed-content rationale, Pages permissions, helper location, PR re-sequencing).
+- **Revised:** 2026-06-17 — incorporates nine adversarial-review findings: CI-gated publish,
+  bidirectional route↔spec coverage, scoped truth claims, declared dependencies, Scalar asset
+  pipeline, corrected mixed-content rationale, Pages permissions, helper location, PR re-sequencing.
 - **Author:** Claude Opus 4.8 (with thewrz)
 - **Topic:** A navigable, interactive, continuously-verified API reference for SpecR, published
   from `openapi.yaml`.
