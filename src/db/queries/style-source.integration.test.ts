@@ -62,7 +62,7 @@ describe('getSpecStyleSource', () => {
 
   it('returns { templateId, templateName } after assignment', async () => {
     const specId = await makeSpec();
-    const templateId = await makeTemplate(`ss-get-${Date.now()}`);
+    const templateId = await makeTemplate(`ss-get-${randomUUID().slice(0, 8)}`);
     await setSpecStyleSource(specId, templateId);
 
     const source = await getSpecStyleSource(specId);
@@ -75,7 +75,7 @@ describe('getSpecStyleSource', () => {
 
 describe('setSpecStyleSource', () => {
   it('returns false for a non-existent spec', async () => {
-    const templateId = await makeTemplate(`ss-set-missing-spec-${Date.now()}`);
+    const templateId = await makeTemplate(`ss-set-missing-spec-${randomUUID().slice(0, 8)}`);
     expect(await setSpecStyleSource('00000000-0000-0000-0000-000000000000', templateId)).toBe(
       false
     );
@@ -83,8 +83,8 @@ describe('setSpecStyleSource', () => {
 
   it('re-assign replaces the previous template', async () => {
     const specId = await makeSpec();
-    const first = await makeTemplate(`ss-replace-a-${Date.now()}`);
-    const second = await makeTemplate(`ss-replace-b-${Date.now()}`);
+    const first = await makeTemplate(`ss-replace-a-${randomUUID().slice(0, 8)}`);
+    const second = await makeTemplate(`ss-replace-b-${randomUUID().slice(0, 8)}`);
 
     await setSpecStyleSource(specId, first);
     await setSpecStyleSource(specId, second);
@@ -96,7 +96,7 @@ describe('setSpecStyleSource', () => {
 describe('clearSpecStyleSource', () => {
   it('clears an existing assignment', async () => {
     const specId = await makeSpec();
-    const templateId = await makeTemplate(`ss-clear-${Date.now()}`);
+    const templateId = await makeTemplate(`ss-clear-${randomUUID().slice(0, 8)}`);
     await setSpecStyleSource(specId, templateId);
 
     expect(await clearSpecStyleSource(specId)).toBe(true);
@@ -115,7 +115,7 @@ describe('clearSpecStyleSource', () => {
 
 describe('countSpecsUsingTemplate', () => {
   it('counts specs referencing a template', async () => {
-    const templateId = await makeTemplate(`ss-count-${Date.now()}`);
+    const templateId = await makeTemplate(`ss-count-${randomUUID().slice(0, 8)}`);
     expect(await countSpecsUsingTemplate(templateId)).toBe(0);
 
     const specA = await makeSpec();

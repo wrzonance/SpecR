@@ -232,12 +232,12 @@ describe('tool: get_spec', () => {
     );
     const templateId = tmpl.rows[0]?.id;
     if (templateId === undefined) throw new Error('failed to insert style template');
-    await pool.query(`UPDATE specs SET style_template_id = $2 WHERE id = $1`, [
-      mcpSpecId,
-      templateId,
-    ]);
 
     try {
+      await pool.query(`UPDATE specs SET style_template_id = $2 WHERE id = $1`, [
+        mcpSpecId,
+        templateId,
+      ]);
       const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
         name: 'get_spec',
         arguments: { specId: mcpSpecId },

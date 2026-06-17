@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Request, Response } from 'express';
 import { getTemplate, setSpecStyleSource, clearSpecStyleSource } from '../db/index.js';
 import type { SetStyleSourceBody } from '../ast/index.js';
+import { getPgCode } from '../lib/pg-errors.js';
 import { logger } from '../lib/logger.js';
 
 const UUID_SCHEMA = z.uuid();
@@ -36,6 +37,13 @@ export async function setStyleSourceHandler(req: Request, res: Response): Promis
     }
     res.status(200).json({ success: true, data: { templateId, templateName: template.name } });
   } catch (err) {
+    // Race: the template can be deleted between the existence pre-check and the
+    // UPDATE, surfacing as a 23503 FK violation. Map it to the same 404 as the
+    // pre-check rather than leaking a 500.
+    if (getPgCode(err) === '23503') {
+      res.status(404).json({ success: false, error: 'template not found' });
+      return;
+    }
     logger.error({ err }, 'set style source failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }

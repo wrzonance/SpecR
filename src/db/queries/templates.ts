@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { pool, DatabaseError, countSpecsUsingTemplate } from '../index.js';
+import { getPgCode } from '../../lib/pg-errors.js';
 import type { StyleNodeType, StyleProperties, StyleRule } from '../../ast/types.js';
 import { STYLE_NODE_TYPES } from '../../ast/types.js';
 import { StylePropertiesSchema } from '../../ast/index.js';
@@ -246,8 +247,20 @@ export async function deleteTemplate(id: string): Promise<DeleteTemplateResult> 
     if ((result.rowCount ?? 0) === 1) return { deleted: true };
     return { deleted: false, reason: 'not_found' };
   } catch (err) {
-    if (err instanceof DatabaseError) throw err;
-    throw new DatabaseError('failed to delete template', { cause: err });
+    const dbErr =
+      err instanceof DatabaseError
+        ? err
+        : new DatabaseError('failed to delete template', { cause: err });
+    // RESTRICT race: a spec assigned to this template between the pre-check and
+    // the DELETE makes Postgres reject the delete with a 23503 FK violation —
+    // the authoritative in_use signal. (A SELECT … FOR UPDATE on the template
+    // row would NOT close this: the concurrent assign UPDATEs `specs`, not the
+    // locked row.) Re-count for the message.
+    if (getPgCode(dbErr) === '23503') {
+      const inUseBy = await countSpecsUsingTemplate(id);
+      return { deleted: false, reason: 'in_use', inUseBy };
+    }
+    throw dbErr;
   }
 }
 

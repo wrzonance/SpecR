@@ -79,6 +79,9 @@ async function makeSpec(sourcePrefix = 'ufgs'): Promise<string> {
 async function makeTemplate(name: string): Promise<string> {
   createdTemplateNames.push(name);
   const result = await post('/templates', { name });
+  if (!result.ok) {
+    throw new Error(`failed to create template (${result.status}): ${await result.text()}`);
+  }
   const json = (await result.json()) as { data: { id: string } };
   return json.data.id;
 }
@@ -90,7 +93,7 @@ const UNKNOWN_UUID = '00000000-0000-0000-0000-000000000000';
 describe('POST /specs/:id/style-source', () => {
   it('assigns → GET /specs/:id reports styleSource { templateId, templateName }', async () => {
     const specId = await makeSpec();
-    const name = `ss-assign-${Date.now()}`;
+    const name = `ss-assign-${randomUUID().slice(0, 8)}`;
     const templateId = await makeTemplate(name);
 
     const res = await post(`/specs/${specId}/style-source`, { templateId });
@@ -106,7 +109,7 @@ describe('POST /specs/:id/style-source', () => {
   });
 
   it('unknown spec → 404', async () => {
-    const templateId = await makeTemplate(`ss-unknown-spec-${Date.now()}`);
+    const templateId = await makeTemplate(`ss-unknown-spec-${randomUUID().slice(0, 8)}`);
     const res = await post(`/specs/${UNKNOWN_UUID}/style-source`, { templateId });
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: string };
@@ -123,8 +126,8 @@ describe('POST /specs/:id/style-source', () => {
 
   it('re-assign replaces the previous template', async () => {
     const specId = await makeSpec();
-    const firstId = await makeTemplate(`ss-reassign-a-${Date.now()}`);
-    const secondName = `ss-reassign-b-${Date.now()}`;
+    const firstId = await makeTemplate(`ss-reassign-a-${randomUUID().slice(0, 8)}`);
+    const secondName = `ss-reassign-b-${randomUUID().slice(0, 8)}`;
     const secondId = await makeTemplate(secondName);
 
     await post(`/specs/${specId}/style-source`, { templateId: firstId });
@@ -142,7 +145,7 @@ describe('POST /specs/:id/style-source', () => {
 
   it('works on a DOCX-imported spec', async () => {
     const specId = await makeSpec('arcat');
-    const name = `ss-docx-${Date.now()}`;
+    const name = `ss-docx-${randomUUID().slice(0, 8)}`;
     const templateId = await makeTemplate(name);
 
     const res = await post(`/specs/${specId}/style-source`, { templateId });
@@ -150,7 +153,7 @@ describe('POST /specs/:id/style-source', () => {
   });
 
   it('400 — non-uuid spec id', async () => {
-    const templateId = await makeTemplate(`ss-bad-id-${Date.now()}`);
+    const templateId = await makeTemplate(`ss-bad-id-${randomUUID().slice(0, 8)}`);
     const res = await post('/specs/not-a-uuid/style-source', { templateId });
     expect(res.status).toBe(400);
   });
@@ -167,7 +170,7 @@ describe('POST /specs/:id/style-source', () => {
 describe('DELETE /specs/:id/style-source', () => {
   it('clears → GET reports styleSource: null', async () => {
     const specId = await makeSpec();
-    const templateId = await makeTemplate(`ss-clear-${Date.now()}`);
+    const templateId = await makeTemplate(`ss-clear-${randomUUID().slice(0, 8)}`);
     await post(`/specs/${specId}/style-source`, { templateId });
 
     const res = await del(`/specs/${specId}/style-source`);
@@ -196,7 +199,7 @@ describe('DELETE /specs/:id/style-source', () => {
 describe('DELETE /templates/:id while referenced', () => {
   it('409, template still exists', async () => {
     const specId = await makeSpec();
-    const name = `ss-restrict-${Date.now()}`;
+    const name = `ss-restrict-${randomUUID().slice(0, 8)}`;
     const templateId = await makeTemplate(name);
     await post(`/specs/${specId}/style-source`, { templateId });
 
@@ -212,7 +215,7 @@ describe('DELETE /templates/:id while referenced', () => {
 
   it('204 once the reference is cleared', async () => {
     const specId = await makeSpec();
-    const templateId = await makeTemplate(`ss-restrict-then-delete-${Date.now()}`);
+    const templateId = await makeTemplate(`ss-restrict-then-delete-${randomUUID().slice(0, 8)}`);
     await post(`/specs/${specId}/style-source`, { templateId });
     await del(`/specs/${specId}/style-source`);
 
