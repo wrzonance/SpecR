@@ -204,9 +204,17 @@ paths:
       summary: Update a single paragraph's text by UUID
       description: >
         Replaces one paragraph's text in place (ADR-009), bumping its
-        `base_version`. The Revit add-in pushes model-parameter changes here
-        without replacing the whole spec. The node must belong to the spec in the
-        path; otherwise the request is rejected with 403.
+        `base_version` and the spec's `contentVersion`. The Revit add-in pushes
+        model-parameter changes here without replacing the whole spec. The node
+        must belong to the spec in the path; otherwise the request is rejected
+        with 403.
+
+
+        Optimistic concurrency (ADR-018): supply `expectedVersion` (the spec
+        `contentVersion` you read) to make the write conditional — a stale value
+        is rejected 409 with the current version, so a concurrent edit is never
+        silently clobbered. The composed edit gate also rejects writes to an
+        archived spec or one locked upstream in a DMS (409).
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -223,6 +231,12 @@ paths:
                   type: string
                   minLength: 1
                   description: New paragraph text (must be non-empty).
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+                  description: >
+                    Optional optimistic-concurrency precondition — the spec
+                    `contentVersion` the caller read. Stale → 409.
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -242,6 +256,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/WriteConflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -390,7 +406,14 @@ paths:
         returned by `/specs/{id}/diff`. Accepted modified/conflict entries update
         `paragraphs.text`, insert a `paragraph_versions` snapshot for the new
         base version, and increment `paragraphs.base_version`. Rejected entries
-        are discarded by omission.
+        are discarded by omission. A successful merge bumps the spec's
+        `contentVersion`.
+
+
+        Optimistic concurrency (ADR-018): supply `expectedVersion` to make the
+        merge conditional on the spec being at that `contentVersion` — stale →
+        409 with the current version. The composed edit gate also rejects a merge
+        on an archived spec or one locked upstream (409).
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -417,6 +440,140 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/WriteConflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/lock:
+    get:
+      operationId: getSpecLock
+      summary: Current advisory lock on a spec
+      description: >
+        Returns the live advisory lock (ADR-018 D2) or `{ locked: false }` when
+        none is held. An expired lock reads as free. Advisory only — a lock never
+        blocks a write on its own; the edit gate governs writes.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Lock state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [locked, lock]
+                        properties:
+                          locked:
+                            type: boolean
+                          lock:
+                            description: >
+                              The live lock when held, or null when the spec is
+                              unlocked (or its lock has expired).
+                            oneOf:
+                              - $ref: '#/components/schemas/LockState'
+                              - type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: acquireSpecLock
+      summary: Acquire (or refresh / steal-after-expiry) an advisory lock
+      description: >
+        Acquires the soft lock for `holder`. Succeeds when the spec is free, the
+        caller already holds it (refresh), or the existing lock has expired
+        (steal). A live lock held by another caller is refused with 409 and the
+        blocking holder. There is no unlock ceremony — abandoned locks expire.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder]
+              properties:
+                holder:
+                  type: string
+                  minLength: 1
+                  description: Caller identity label (authenticated identity once #43 lands).
+                ttlSeconds:
+                  type: integer
+                  minimum: 1
+                  maximum: 3600
+                  description: Lock lifetime in seconds (default 900 / 15 min).
+      responses:
+        '200':
+          description: Lock acquired
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LockState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: A live lock is held by another caller
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      holder:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: releaseSpecLock
+      summary: Release an advisory lock
+      description: >
+        Releases the lock only if `holder` matches the current holder. A release
+        by a non-holder (or when no lock is held) is refused with 409.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder]
+              properties:
+                holder:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: Lock released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
         '500':
@@ -1720,6 +1877,21 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    WriteConflict:
+      description: >
+        Write rejected by the concurrency / edit gate (ADR-018): a stale
+        `expectedVersion`, an archived spec, or a spec locked upstream. On a
+        stale version the current version travels back as `currentVersion`.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - type: object
+                properties:
+                  currentVersion:
+                    type: integer
+                    description: Present on a stale-version conflict — the spec's current contentVersion.
     UnprocessableEntity:
       description: Unprocessable — file parsed but semantically unusable
       content:
@@ -2087,6 +2259,27 @@ components:
           description: UUIDs from `diff.modified` or `diff.conflicts` to apply
         diff:
           $ref: '#/components/schemas/DiffResult'
+        expectedVersion:
+          type: integer
+          minimum: 1
+          description: >
+            Optional optimistic-concurrency precondition (ADR-018) — the spec
+            `contentVersion` the redline was diffed against. Stale → 409.
+
+    LockState:
+      type: object
+      required: [holder, acquiredAt, expiresAt]
+      description: An advisory soft lock on a spec (ADR-018 D2).
+      properties:
+        holder:
+          type: string
+          description: Caller identity label holding the lock.
+        acquiredAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
 
     MergeResult:
       type: object

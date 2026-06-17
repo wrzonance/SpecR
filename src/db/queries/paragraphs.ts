@@ -1,5 +1,6 @@
 import { pool, DatabaseError } from '../index.js';
-import type { Pool } from 'pg';
+import { assertSpecWritable } from './edit-gate.js';
+import type { Pool, PoolClient } from 'pg';
 import { NodeTypeSchema } from '../../ast/index.js';
 import type { NodeType, SignalConflict, SourceFacts, SpecNode, SpecTree } from '../../ast/index.js';
 
@@ -236,44 +237,62 @@ async function fetchSubtreeNode(
  * `updated_at` (ADR-009, #47). The (specId, nodeId) pair is verified under a row
  * lock before the write so a node that exists but belongs to another spec is
  * reported as `wrong-spec`, never silently edited.
+ *
+ * The write passes the composed edit gate first (ADR-018): the spec must be
+ * writable (lifecycle + external state) and, when `expectedVersion` is given,
+ * at that version — a stale value throws `StaleVersionError` rather than
+ * clobbering a concurrent edit. A successful write bumps `specs.content_version`
+ * so the next optimistic precondition sees the change.
  */
+/** In-transaction body of {@link updateParagraphText}: gate → ownership check →
+ *  write paragraph + bump specs.content_version. On a non-'updated' outcome the
+ *  caller rolls back; on 'updated' the caller commits. */
+async function applyParagraphUpdate(
+  client: PoolClient,
+  specId: string,
+  nodeId: string,
+  text: string,
+  expectedVersion?: number
+): Promise<UpdateParagraphResult> {
+  // Gate first: row-locks the spec and validates lifecycle/external/version
+  // before any paragraph write. Throws typed errors (forbidden / stale).
+  await assertSpecWritable(client, specId, expectedVersion);
+
+  const owner = await client.query<{ spec_id: string }>(
+    `SELECT spec_id FROM paragraphs WHERE id = $1 FOR UPDATE`,
+    [nodeId]
+  );
+  const ownerRow = owner.rows[0];
+  if (!ownerRow) return { status: 'not-found' };
+  if (ownerRow.spec_id !== specId) return { status: 'wrong-spec' };
+
+  await client.query(
+    `UPDATE paragraphs SET text = $2, base_version = base_version + 1, updated_at = now()
+     WHERE id = $1`,
+    [nodeId, text]
+  );
+  await client.query(
+    `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
+    [specId]
+  );
+
+  const node = await fetchSubtreeNode(client, specId, nodeId);
+  if (!node) throw new DatabaseError('updateParagraphText: updated node vanished mid-transaction');
+  return { status: 'updated', node };
+}
+
 export async function updateParagraphText(
   specId: string,
   nodeId: string,
-  text: string
+  text: string,
+  expectedVersion?: number
 ): Promise<UpdateParagraphResult> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const owner = await client.query<{ spec_id: string }>(
-      `SELECT spec_id FROM paragraphs WHERE id = $1 FOR UPDATE`,
-      [nodeId]
-    );
-    const ownerRow = owner.rows[0];
-    if (!ownerRow) {
-      await client.query('ROLLBACK');
-      return { status: 'not-found' };
-    }
-    if (ownerRow.spec_id !== specId) {
-      await client.query('ROLLBACK');
-      return { status: 'wrong-spec' };
-    }
-
-    await client.query(
-      `UPDATE paragraphs
-       SET text = $2, base_version = base_version + 1, updated_at = now()
-       WHERE id = $1`,
-      [nodeId, text]
-    );
-
-    const node = await fetchSubtreeNode(client, specId, nodeId);
-    if (!node) {
-      await client.query('ROLLBACK');
-      throw new DatabaseError('updateParagraphText: updated node vanished mid-transaction');
-    }
-
-    await client.query('COMMIT');
-    return { status: 'updated', node };
+    const result = await applyParagraphUpdate(client, specId, nodeId, text, expectedVersion);
+    await client.query(result.status === 'updated' ? 'COMMIT' : 'ROLLBACK');
+    return result;
   } catch (err) {
     try {
       await client.query('ROLLBACK');

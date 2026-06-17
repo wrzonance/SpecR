@@ -177,11 +177,32 @@ export const PatchSpecBodySchema = z.object({
 
 // Individual paragraph update (ADR-009 / #47). Empty text is rejected so the
 // Revit add-in (#48) can never blank a paragraph by pushing an empty value.
+// `expectedVersion` is the optimistic-concurrency precondition (ADR-018 D1):
+// the spec content_version the caller read. Optional for backward compatibility
+// — when present, a stale value is rejected 409 with the current version.
 export const UpdateParagraphBodySchema = z.object({
   text: z.string().check(z.minLength(1)),
+  expectedVersion: z.number().int().min(1).exactOptional(),
 });
 
 export type UpdateParagraphBody = z.infer<typeof UpdateParagraphBodySchema>;
+
+// Advisory soft-lock acquire/release (ADR-018 D2). `holder` is a caller-supplied
+// identity label until auth (#43) supplies an authenticated one. `ttlSeconds`
+// caps at 1 hour so a single acquire can never wedge a spec for an unreasonable
+// time before it is stealable; omitted → server default (15 min).
+export const AcquireLockBodySchema = z.object({
+  holder: z.string().check(z.minLength(1)),
+  ttlSeconds: z.number().int().min(1).max(3600).exactOptional(),
+});
+
+export type AcquireLockBody = z.infer<typeof AcquireLockBodySchema>;
+
+export const ReleaseLockBodySchema = z.object({
+  holder: z.string().check(z.minLength(1)),
+});
+
+export type ReleaseLockBody = z.infer<typeof ReleaseLockBodySchema>;
 
 export const CreateProjectBodySchema = z.object({
   name: z.string().check(z.minLength(1)),

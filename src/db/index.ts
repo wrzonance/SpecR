@@ -154,6 +154,14 @@ export {
 export type { EditingConvention, CreateConventionInput } from './queries/conventions.js';
 export { getSpecLineage } from './queries/lineage.js';
 export type { SpecLineage, LineageHop, LineageScope } from './queries/lineage.js';
+export { acquireLock, releaseLock, getLock, DEFAULT_LOCK_TTL_SECONDS } from './queries/locks.js';
+export type { LockState, AcquireLockResult } from './queries/locks.js';
+export {
+  assertSpecWritable,
+  SpecNotFoundError,
+  SpecWriteForbiddenError,
+  StaleVersionError,
+} from './queries/edit-gate.js';
 export {
   getLibraryDivisionGeneralSpec,
   getProjectDivisionGeneralSpec,
