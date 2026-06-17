@@ -17,7 +17,7 @@ interface AjvConstructor {
   new (opts: { strict: boolean; allErrors: boolean }): AjvInstance;
 }
 interface AjvPlugin {
-  (ajv: AjvInstance, opts?: unknown): AjvInstance;
+  (ajv: AjvInstance): AjvInstance;
 }
 
 const Ajv2020 = (require('ajv/dist/2020.js') as { default: AjvConstructor }).default;
@@ -43,7 +43,7 @@ const ajv: AjvInstance = addFormats(new Ajv2020({ strict: false, allErrors: true
 const validators = new WeakMap<object, ValidateFunction>();
 
 function normalizePath(path: string): string {
-  return path.replace(/:\w+/g, '{}').replace(/\{\w+\}/g, '{}');
+  return path.replace(/:\w+/g, '{}').replace(/\{[\w.-]+\}/g, '{}');
 }
 
 let specPromise: Promise<OpenApiDoc> | null = null;
