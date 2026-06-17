@@ -5,6 +5,7 @@ vi.mock('../db/index.js', () => ({
   searchParagraphs: vi.fn(),
   listSpecSections: vi.fn(),
   getSpecTree: vi.fn(),
+  getSpecStyleSource: vi.fn(),
   getParagraphWithAncestors: vi.fn(),
   persistParsedSpec: vi.fn(),
   lookupSpecSectionTitle: vi.fn(),

@@ -81,7 +81,9 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - `GET /health` — liveness check
 - `POST /parse` — upload a `.docx` or `.sec` file; returns `202 { jobId }` immediately (async)
 - `GET /parse/jobs/:jobId` — poll parse progress: `{ status, progress: { stage, pct }, result?, error? }`
-- `GET /specs/:id` — retrieve a spec with its paragraph tree
+- `GET /specs/:id` — retrieve a spec with its paragraph tree (includes `styleSource: { templateId, templateName } | null`)
+- `POST /specs/:id/style-source` — assign a style template to the spec (`{ templateId }`; replaces existing; unknown spec/template → 404)
+- `DELETE /specs/:id/style-source` — clear the spec's style template (idempotent; falls back to generator defaults)
 - `POST /specs/:id/generate` — generate DOCX from stored spec AST (optional `{ templateId }` style template)
 - `POST /specs/:id/diff` — upload an edited DOCX and return `{ added, modified, deleted, conflicts, warnings }`
 - `POST /specs/:id/merge` — apply accepted UUIDs from a `DiffResult`, bumping paragraph base versions
@@ -96,7 +98,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and [`docs/r
 - `GET /templates` — list all templates (metadata only)
 - `GET /templates/:id` — retrieve a template with its style rules
 - `PATCH /templates/:id` — update template name and/or owner (`owner: null` clears it)
-- `DELETE /templates/:id` — delete a template and cascade-remove its rules (204)
+- `DELETE /templates/:id` — delete a template and cascade-remove its rules (204; 409 if any spec uses it as its style source)
 - `POST /templates/:id/rules` — bulk-upsert style rules (transactional; one invalid rule rolls back all)
 - `POST /templates/import` — derive a firm style template from a source-of-truth DOCX
 - `GET /conventions` — list the built-in editing-convention profiles (read-only industry defaults)

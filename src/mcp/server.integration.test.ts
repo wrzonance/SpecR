@@ -212,6 +212,46 @@ describe('tool: get_spec', () => {
     const result = b['result'] as Record<string, unknown>;
     expect(result['isError']).toBe(true);
   });
+
+  it('surfaces styleSource: null when no template is assigned (#138)', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'get_spec',
+      arguments: { specId: mcpSpecId },
+    });
+    const result = (body as Record<string, unknown>)['result'] as Record<string, unknown>;
+    const content = result['content'] as { text: string }[];
+    const data = JSON.parse(content[0]!.text) as Record<string, unknown>;
+    expect(data['styleSource']).toBeNull();
+  });
+
+  it('surfaces styleSource { templateId, templateName } when assigned (#138)', async () => {
+    const tmplName = `mcp-style-source-${randomUUID().slice(0, 8)}`;
+    const tmpl = await pool.query<{ id: string }>(
+      `INSERT INTO style_templates (name) VALUES ($1) RETURNING id`,
+      [tmplName]
+    );
+    const templateId = tmpl.rows[0]?.id;
+    if (templateId === undefined) throw new Error('failed to insert style template');
+
+    try {
+      await pool.query(`UPDATE specs SET style_template_id = $2 WHERE id = $1`, [
+        mcpSpecId,
+        templateId,
+      ]);
+      const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+        name: 'get_spec',
+        arguments: { specId: mcpSpecId },
+      });
+      const result = (body as Record<string, unknown>)['result'] as Record<string, unknown>;
+      const content = result['content'] as { text: string }[];
+      const data = JSON.parse(content[0]!.text) as Record<string, unknown>;
+      expect(data['styleSource']).toEqual({ templateId, templateName: tmplName });
+    } finally {
+      // Clear the reference (RESTRICT) before dropping the template.
+      await pool.query(`UPDATE specs SET style_template_id = NULL WHERE id = $1`, [mcpSpecId]);
+      await pool.query(`DELETE FROM style_templates WHERE id = $1`, [templateId]);
+    }
+  });
 });
 
 describe('tool: list_sections', () => {
