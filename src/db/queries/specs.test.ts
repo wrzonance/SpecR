@@ -123,3 +123,31 @@ describe('createSpec', () => {
     ]);
   });
 });
+
+describe('buildNodeTree editability derivation', () => {
+  const baseRow = {
+    id: 'pr-1',
+    parent_id: null,
+    node_type: 'paragraph',
+    text: 'x',
+    position: 0,
+    vanish: false,
+    conflicts: [],
+    source_facts: {},
+    classification: null,
+    editability_override: null,
+  } as const;
+
+  it('editability: corrupt override fails loud even when classification is null', async () => {
+    const { buildNodeTree } = await import('./specs.js');
+    // An unclassified row (classification: null) with a malformed override must
+    // throw at the DB boundary, not silently drop the corrupt payload (#205).
+    expect(() => buildNodeTree([{ ...baseRow, editability_override: { bogus: true } }])).toThrow();
+  });
+
+  it('editability: unclassified row with no override omits meta.editability', async () => {
+    const { buildNodeTree } = await import('./specs.js');
+    const [node] = buildNodeTree([{ ...baseRow }]);
+    expect(node?.meta.editability).toBeUndefined();
+  });
+});

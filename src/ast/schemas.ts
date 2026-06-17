@@ -66,6 +66,20 @@ export const SourceFactsSchema = z
 // classification engine (O-6) and per-paragraph classification storage (O-7).
 export const EditabilitySchema = z.enum(['locked', 'editable', 'choice', 'note']);
 
+// One why-chain entry for an editability verdict (ADR-022 D4). Mirrors the
+// `ClassificationEvidence` interface in conventions/types.ts. CLOSED (.strict()):
+// this is our own engine output, not captured external data — a malformed entry
+// is engine drift and must be rejected at the boundary, never silently kept.
+export const ClassificationEvidenceSchema = z
+  .object({
+    rule: z.string().check(z.minLength(1)),
+    fact: z.string().check(z.minLength(1)).exactOptional(),
+    detail: z.string().check(z.minLength(1)).exactOptional(),
+  })
+  .strict();
+
+export type ClassificationEvidence = z.infer<typeof ClassificationEvidenceSchema>;
+
 // All convention sub-objects use `.catchall(JsonValue)` so unknown rule keys are
 // preserved (ADR-022 D5 — open schema, capture-never-reject for round-trip).
 const ColorMeaningSchema = z
@@ -110,6 +124,17 @@ export const CloneConventionBodySchema = z.object({
 
 export type CloneConventionBody = z.infer<typeof CloneConventionBodySchema>;
 
+// Effective editability surfaced on a classified paragraph (#134 / O-7). `value`
+// is the effective verdict (override ?? machine); `confidence`/`evidence` are the
+// machine's why-chain (kept readable even under an override, for the O-15
+// machine-vs-human badge); `override` is present only when a human override exists.
+export const SpecNodeEditabilitySchema = z.object({
+  value: EditabilitySchema,
+  confidence: z.number().min(0).max(1),
+  evidence: z.array(ClassificationEvidenceSchema).check(z.minLength(1)),
+  override: EditabilitySchema.exactOptional(),
+});
+
 export const SpecNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
   source: z.enum(['ufgs', 'arcat', 'cpi', 'unknown']).exactOptional(),
@@ -117,6 +142,7 @@ export const SpecNodeMetaSchema = z.object({
   baseVersion: z.number().int().nonnegative().exactOptional(),
   conflicts: z.array(SignalConflictSchema).exactOptional(),
   sourceFacts: SourceFactsSchema.exactOptional(),
+  editability: SpecNodeEditabilitySchema.exactOptional(),
 });
 
 export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>

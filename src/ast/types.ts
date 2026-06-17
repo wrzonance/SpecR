@@ -4,6 +4,7 @@ import {
   SecRefSchema,
   StyleNodeTypeSchema,
   StylePropertiesSchema,
+  SpecNodeEditabilitySchema,
 } from './schemas.js';
 
 export type NodeType = z.infer<typeof NodeTypeSchema>;
@@ -47,6 +48,14 @@ export interface SourceFacts {
   readonly vanish?: true;
 }
 
+/**
+ * Effective editability surfaced on a classified paragraph (#134 / O-7). The
+ * machine's `value`/`confidence`/`evidence` stay readable even when a human
+ * `override` is present, so a UI can show what was overridden (O-15 badge).
+ * Absent === the paragraph has not been classified.
+ */
+export type SpecNodeEditability = z.infer<typeof SpecNodeEditabilitySchema>;
+
 export interface SpecNodeMeta {
   readonly vanish?: boolean;
   readonly source?: 'ufgs' | 'arcat' | 'cpi' | 'unknown';
@@ -55,6 +64,8 @@ export interface SpecNodeMeta {
   /** Inference signal disagreements. Absent === no conflicts (empty array never serialized). */
   readonly conflicts?: readonly SignalConflict[];
   readonly sourceFacts?: SourceFacts;
+  /** Effective editability + machine why-chain. Absent === not yet classified. */
+  readonly editability?: SpecNodeEditability;
 }
 
 export interface SpecNode {
