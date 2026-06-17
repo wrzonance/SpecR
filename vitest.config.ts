@@ -18,6 +18,7 @@ export default defineConfig({
         'src/api/router.ts', // pure wiring, no branch logic
         'src/db/migrations/**', // run by migration CLI, not test suite
         'src/db/seed.ts', // CLI script — run directly, not by test suite
+        'src/test-utils/**', // test helpers — not production code
       ],
     },
     projects: [
