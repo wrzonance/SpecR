@@ -6,3 +6,18 @@ allowBuilds:
   core-js: false
   esbuild: true
   protobufjs: false
+
+# Security overrides — dev-only transitive deps flagged by Dependabot. None ship
+# in dist/ or run in prod (esbuild is a vitest/tsx test-runner internal, not a
+# dev server we run; dompurify's issue is in redoc's docs preview). Pinned for a
+# clean `pnpm audit` on developer machines. See issue #200.
+# Residuals (dev-only, not reachable; deferred):
+#   - vite #9/#10 (Windows-only, vite *dev server* which we never run — vite is
+#     only vitest's internal transform engine). Bumping vite forces a full
+#     lockfile regen that also drifts fast-xml-parser into an XMLValidator
+#     deprecation; handled in a dedicated follow-up, not here.
+#   - depcheck's js-yaml@3.x — a different major the 4.2.0 fix doesn't apply to.
+overrides:
+  esbuild@<0.28.1: '>=0.28.1'   # GHSA-gv7w-rqvm-qjhr (high), -g7r4-m6w7-qqqr
+  dompurify@<3.4.9: '>=3.4.9'   # GHSA-vxr8-fq34-vvx9
+  js-yaml@4.1.1: '>=4.2.0'      # GHSA-h67p-54hq-rp68 (eslint's 4.x consumer)
