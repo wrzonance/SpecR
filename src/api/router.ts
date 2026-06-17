@@ -2,6 +2,7 @@ import { type Router as RouterType, Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { healthHandler } from './health.js';
 import { getSpecHandler, getSpecLineageHandler, updateSpecHandler } from './specs.js';
+import { setStyleSourceHandler, clearStyleSourceHandler } from './style-source.js';
 import { updateParagraphHandler } from './paragraphs.js';
 import { acquireLockHandler, releaseLockHandler, getLockHandler } from './locks.js';
 import {
@@ -36,6 +37,7 @@ import {
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
+  SetStyleSourceBodySchema,
   SetDivisionGeneralSpecBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
@@ -76,6 +78,12 @@ router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
 router.get('/specs/:id/lock', getLockHandler);
 router.put('/specs/:id/lock', acquireLockHandler);
 router.delete('/specs/:id/lock', releaseLockHandler);
+router.post(
+  '/specs/:id/style-source',
+  validateBody(SetStyleSourceBodySchema),
+  setStyleSourceHandler
+);
+router.delete('/specs/:id/style-source', clearStyleSourceHandler);
 router.post('/specs/:id/generate', generateHandler);
 router.post('/specs/:id/diff', upload.single('file'), diffHandler);
 router.post('/specs/:id/merge', mergeHandler);

@@ -301,6 +301,88 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/style-source:
+    post:
+      operationId: setSpecStyleSource
+      summary: Assign a style template to a spec (manual style-source pick)
+      description: >
+        Associates an existing style template (#30/#31) with the spec so the
+        generator can render it with a real house style (#138). One template per
+        spec; re-assigning replaces the previous template. `.SEC`/`.txt`/PDF
+        masters carry no adopted visual style, so this is the narrowest useful
+        slice of #125's style sources. Both the spec and the template must
+        already exist — either missing → 404 (pre-checked, never via the FK error).
+        A template assigned to any spec cannot be deleted (DELETE /templates/{id}
+        → 409).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateId]
+              properties:
+                templateId:
+                  type: string
+                  format: uuid
+                  description: Style template to associate with the spec.
+      responses:
+        '200':
+          description: Style source assigned
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StyleSource'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: clearSpecStyleSource
+      summary: Clear a spec's style template (fall back to generator defaults)
+      description: >
+        Removes the spec→template association (#138). Idempotent — clearing an
+        already-unset association is still 200. The spec must exist (unknown → 404).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Style source cleared (styleSource is null)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [styleSource]
+                        properties:
+                          styleSource:
+                            type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/generate:
     post:
       operationId: generateDocx
@@ -1656,6 +1738,11 @@ paths:
     delete:
       operationId: deleteTemplate
       summary: Delete a style template and all its rules
+      description: >
+        A template assigned to any spec as its style source cannot be deleted
+        (ON DELETE RESTRICT, #138) — the request returns 409 with the count of
+        referencing specs. Clear the association on those specs first
+        (DELETE /specs/{id}/style-source).
       tags: [templates]
       parameters:
         - $ref: '#/components/parameters/TemplateId'
@@ -1666,6 +1753,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -2170,10 +2259,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SpecNode'
+        styleSource:
+          description: >
+            Manually assigned style template (#138), or null when none is set.
+            Only present on GET /specs/{id}.
+          oneOf:
+            - $ref: '#/components/schemas/StyleSource'
+            - type: 'null'
         warnings:
           type: array
           items:
             $ref: '#/components/schemas/ParseWarning'
+
+    StyleSource:
+      type: object
+      required: [templateId, templateName]
+      properties:
+        templateId:
+          type: string
+          format: uuid
+        templateName:
+          type: string
 
     SpecSummary:
       type: object

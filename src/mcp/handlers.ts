@@ -5,6 +5,7 @@ import {
   searchParagraphs,
   listSpecSections,
   getSpecTree,
+  getSpecStyleSource,
   getParagraphWithAncestors,
   persistParsedSpec,
   lookupSpecSectionTitle,
@@ -129,21 +130,15 @@ export async function handleSearchLibrary({
 export async function handleGetSpec({ specId }: { specId: string }): Promise<ToolResult> {
   try {
     const result = await getSpecTree(specId);
-    if (!result) {
-      return {
-        isError: true,
-        content: [{ type: 'text' as const, text: `Spec not found: id=${specId}` }],
-      };
-    }
-    return {
-      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-    };
+    if (!result) return toolError(`Spec not found: id=${specId}`);
+    // Surface the manual style-source pick (#138) alongside the tree:
+    // { templateId, templateName } | null.
+    const styleSource = await getSpecStyleSource(specId);
+    const text = JSON.stringify({ ...result, styleSource }, null, 2);
+    return { content: [{ type: 'text' as const, text }] };
   } catch (err) {
     logger.error({ err }, 'mcp tool get_spec failed');
-    return {
-      isError: true,
-      content: [{ type: 'text' as const, text: 'Internal error — spec retrieval failed' }],
-    };
+    return toolError('Internal error — spec retrieval failed');
   }
 }
 

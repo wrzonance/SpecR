@@ -98,12 +98,20 @@ export async function deleteTemplateHandler(req: Request, res: Response): Promis
   const id = parseId(req, res);
   if (!id) return;
   try {
-    const deleted = await deleteTemplate(id);
-    if (!deleted) {
-      res.status(404).json({ success: false, error: 'template not found' });
+    const result = await deleteTemplate(id);
+    if (result.deleted) {
+      res.status(204).send();
       return;
     }
-    res.status(204).send();
+    if (result.reason === 'in_use') {
+      // RESTRICT enforcement (#138): a referenced template cannot be deleted.
+      res.status(409).json({
+        success: false,
+        error: `template in use by ${result.inUseBy ?? 0} spec(s)`,
+      });
+      return;
+    }
+    res.status(404).json({ success: false, error: 'template not found' });
   } catch (err) {
     logger.error({ err }, 'delete template failed');
     res.status(500).json({ success: false, error: 'internal server error' });

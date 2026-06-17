@@ -4,6 +4,8 @@ import type { Request, Response } from 'express';
 vi.mock('../db/index.js', () => ({
   getSpecTree: vi.fn(),
   updateSpec: vi.fn(),
+  getSpecLineage: vi.fn(),
+  getSpecStyleSource: vi.fn(),
 }));
 
 vi.mock('../lib/logger.js', () => ({
@@ -24,8 +26,8 @@ beforeEach(() => {
 });
 
 describe('getSpecHandler', () => {
-  it('returns 200 with reconstructed SpecTree when spec exists', async () => {
-    const { getSpecTree } = await import('../db/index.js');
+  it('returns 200 with reconstructed SpecTree and styleSource when spec exists', async () => {
+    const { getSpecTree, getSpecStyleSource } = await import('../db/index.js');
     vi.mocked(getSpecTree).mockResolvedValueOnce({
       tree: {
         id: 'abc',
@@ -43,6 +45,10 @@ describe('getSpecHandler', () => {
       },
       references: [],
     });
+    vi.mocked(getSpecStyleSource).mockResolvedValueOnce({
+      templateId: 'tpl-1',
+      templateName: 'House Style',
+    });
     const { getSpecHandler } = await import('./specs.js');
     const req = { params: { id: 'abc' } } as unknown as Request;
     const res = makeRes();
@@ -54,6 +60,24 @@ describe('getSpecHandler', () => {
     expect(data['id']).toBe('abc');
     // regression #152: handler must return the reconstructed tree, not parts: []
     expect((data['parts'] as unknown[]).length).toBe(1);
+    // #138: style-source association surfaces as a sibling field on the tree
+    expect(data['styleSource']).toEqual({ templateId: 'tpl-1', templateName: 'House Style' });
+  });
+
+  it('returns 200 with styleSource: null when spec has no style template', async () => {
+    const { getSpecTree, getSpecStyleSource } = await import('../db/index.js');
+    vi.mocked(getSpecTree).mockResolvedValueOnce({
+      tree: { id: 'abc', section: '27 21 00', title: 'Cabling', parts: [] },
+      references: [],
+    });
+    vi.mocked(getSpecStyleSource).mockResolvedValueOnce(null);
+    const { getSpecHandler } = await import('./specs.js');
+    const req = { params: { id: 'abc' } } as unknown as Request;
+    const res = makeRes();
+    await getSpecHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(200);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect((body['data'] as Record<string, unknown>)['styleSource']).toBeNull();
   });
 
   it('returns 404 when spec not found', async () => {

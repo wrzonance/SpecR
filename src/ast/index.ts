@@ -59,11 +59,13 @@ export {
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
+  SetStyleSourceBodySchema,
   GenerateBodySchema,
 } from './schemas.js';
 export type {
   CreateTemplateBody,
   PatchTemplateBody,
   UpsertStyleRulesBody,
+  SetStyleSourceBody,
   GenerateBody,
 } from './schemas.js';

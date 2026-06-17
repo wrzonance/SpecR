@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
-import { pool, DatabaseError } from '../index.js';
+import { pool, DatabaseError, countSpecsUsingTemplate } from '../index.js';
 import type { StyleNodeType, StyleProperties, StyleRule } from '../../ast/types.js';
 import { STYLE_NODE_TYPES } from '../../ast/types.js';
 import { StylePropertiesSchema } from '../../ast/index.js';
@@ -226,11 +226,27 @@ export async function updateTemplateMeta(
   }
 }
 
-export async function deleteTemplate(id: string): Promise<boolean> {
+// Discriminated outcome so the handler maps each case to the right status:
+// not_found → 404, in_use → 409 (RESTRICT enforcement), deleted → 204.
+export type DeleteTemplateResult =
+  | { readonly deleted: true }
+  | { readonly deleted: false; readonly reason: 'not_found' | 'in_use'; readonly inUseBy?: number };
+
+/**
+ * Delete a template, enforcing the ON DELETE RESTRICT contract via an explicit
+ * reference-count pre-check (issue #138). A template referenced by any spec is
+ * NOT deletable — the pre-check yields a clear 409 message and sidesteps the
+ * pg 23503 ambiguity (the same code means 404 on assign, 409 on delete).
+ */
+export async function deleteTemplate(id: string): Promise<DeleteTemplateResult> {
   try {
+    const inUseBy = await countSpecsUsingTemplate(id);
+    if (inUseBy > 0) return { deleted: false, reason: 'in_use', inUseBy };
     const result = await pool.query(`DELETE FROM style_templates WHERE id = $1`, [id]);
-    return (result.rowCount ?? 0) === 1;
+    if ((result.rowCount ?? 0) === 1) return { deleted: true };
+    return { deleted: false, reason: 'not_found' };
   } catch (err) {
+    if (err instanceof DatabaseError) throw err;
     throw new DatabaseError('failed to delete template', { cause: err });
   }
 }
