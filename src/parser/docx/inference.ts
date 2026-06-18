@@ -15,7 +15,7 @@ import type {
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
 
-// Canonical normalized ilvl: part=0, article=1, pr1=2, pr2=3, pr3=4, pr4=5, pr5=6
+// Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
 const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
   part: 0,
   article: 1,
@@ -24,6 +24,8 @@ const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
   pr3: 4,
   pr4: 5,
   pr5: 6,
+  pr6: 7,
+  pr7: 8,
 };
 
 const NODE_TYPES_BY_ILVL: readonly NodeType[] = [
@@ -34,6 +36,8 @@ const NODE_TYPES_BY_ILVL: readonly NodeType[] = [
   'pr3',
   'pr4',
   'pr5',
+  'pr6',
+  'pr7',
 ];
 
 function toNormalizedIlvl(nodeType: NodeType): number {

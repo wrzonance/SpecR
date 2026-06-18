@@ -10,7 +10,9 @@ describe('ilvlToNodeType', () => {
     it('maps ilvl 4 to pr3', () => expect(ilvlToNodeType(4, 1)).toBe('pr3'));
     it('maps ilvl 5 to pr4', () => expect(ilvlToNodeType(5, 1)).toBe('pr4'));
     it('maps ilvl 6 to pr5', () => expect(ilvlToNodeType(6, 1)).toBe('pr5'));
-    it('maps ilvl 7+ to continuation', () => expect(ilvlToNodeType(7, 1)).toBe('continuation'));
+    it('maps ilvl 7 to pr6', () => expect(ilvlToNodeType(7, 1)).toBe('pr6'));
+    it('maps ilvl 8 to pr7', () => expect(ilvlToNodeType(8, 1)).toBe('pr7'));
+    it('maps ilvl 9+ to continuation', () => expect(ilvlToNodeType(9, 1)).toBe('continuation'));
   });
 
   describe('CPI-style (articleIlvl=3)', () => {
@@ -23,16 +25,18 @@ describe('ilvlToNodeType', () => {
     it('maps ilvl 4 to pr1', () => expect(ilvlToNodeType(4, 3)).toBe('pr1'));
     it('maps ilvl 5 to pr2', () => expect(ilvlToNodeType(5, 3)).toBe('pr2'));
     it('maps ilvl 8 to pr5', () => expect(ilvlToNodeType(8, 3)).toBe('pr5'));
-    it('maps ilvl 9+ to continuation', () => expect(ilvlToNodeType(9, 3)).toBe('continuation'));
+    it('maps ilvl 9 to pr6', () => expect(ilvlToNodeType(9, 3)).toBe('pr6'));
+    it('maps ilvl 10 to pr7', () => expect(ilvlToNodeType(10, 3)).toBe('pr7'));
+    it('maps ilvl 11+ to continuation', () => expect(ilvlToNodeType(11, 3)).toBe('continuation'));
   });
 });
 
 describe('ilvl maps — documentation completeness', () => {
-  it('ARCAT_ILVL_MAP covers part through pr5', () => {
+  it('ARCAT_ILVL_MAP covers part through pr7', () => {
     const types = ARCAT_ILVL_MAP.map((r) => r.nodeType);
     expect(types).toContain('part');
     expect(types).toContain('article');
-    expect(types).toContain('pr5');
+    expect(types).toContain('pr7');
   });
 
   it('CPI_ILVL_MAP article rule has description mentioning reserved levels', () => {

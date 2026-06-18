@@ -13,25 +13,20 @@ function alphaLabel(index: number, upper: boolean): string {
 }
 
 export function getLabel(type: NodeType, index: number, partNumber = 1): string {
-  switch (type) {
-    case 'part':
-      return `PART ${index + 1} -`;
-    case 'article':
-      return `${partNumber}.${index + 1}`;
-    case 'pr1':
-      return `${alphaLabel(index, true)}.`;
-    case 'pr2':
-      return `${index + 1}.`;
-    case 'pr3':
-      return `${alphaLabel(index, false)}.`;
-    case 'pr4':
-      return `${index + 1})`;
-    case 'pr5':
-      return `${alphaLabel(index, false)})`;
-    default:
-      return '';
-  }
+  if (type === 'part') return `PART ${index + 1} -`;
+  if (type === 'article') return `${partNumber}.${index + 1}`;
+  return PR_LABELS[type]?.(index) ?? '';
 }
+
+const PR_LABELS: Partial<Record<NodeType, (index: number) => string>> = {
+  pr1: (index) => `${alphaLabel(index, true)}.`,
+  pr2: (index) => `${index + 1}.`,
+  pr3: (index) => `${alphaLabel(index, false)}.`,
+  pr4: (index) => `${index + 1})`,
+  pr5: (index) => `${alphaLabel(index, false)})`,
+  pr6: (index) => `${index + 1})`,
+  pr7: (index) => `${alphaLabel(index, false)})`,
+};
 
 const INDENT = '   ';
 

@@ -93,7 +93,7 @@ export interface SignalConflict {
 
 export interface ClassifiedParagraph {
   readonly paragraph: DocxParagraph;
-  // Canonical normalized ilvl: part=0, article=1, pr1=2, pr2=3, pr3=4, pr4=5, pr5=6
+  // Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
   readonly resolvedIlvl: number;
   readonly nodeType: NodeType;
   readonly signalUsed: 1 | 2 | 3 | 4 | 5;

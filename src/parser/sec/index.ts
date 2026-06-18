@@ -85,8 +85,12 @@ function sptNodeType(depth: number): NodeType {
       return 'pr3';
     case 4:
       return 'pr4';
-    default:
+    case 5:
       return 'pr5';
+    case 6:
+      return 'pr6';
+    default:
+      return 'pr7';
   }
 }
 

@@ -19,6 +19,10 @@ export function getNodeLevel(type: NodeType): number | null {
       return 5;
     case 'pr5':
       return 6;
+    case 'pr6':
+      return 7;
+    case 'pr7':
+      return 8;
     default:
       return null;
   }
@@ -33,6 +37,8 @@ const LEVEL_NODE_TYPES: readonly StyleNodeType[] = [
   'pr3',
   'pr4',
   'pr5',
+  'pr6',
+  'pr7',
 ];
 
 type DocxLevelFormat = (typeof LevelFormat)[keyof typeof LevelFormat];
@@ -59,6 +65,8 @@ function defaultLevels(): ILevelsOptions[] {
     { level: 4, format: LevelFormat.LOWER_LETTER, text: '%5.', alignment: AlignmentType.START },
     { level: 5, format: LevelFormat.DECIMAL, text: '%6)', alignment: AlignmentType.START },
     { level: 6, format: LevelFormat.LOWER_LETTER, text: '%7)', alignment: AlignmentType.START },
+    { level: 7, format: LevelFormat.DECIMAL, text: '%8)', alignment: AlignmentType.START },
+    { level: 8, format: LevelFormat.LOWER_LETTER, text: '%9)', alignment: AlignmentType.START },
   ];
 }
 

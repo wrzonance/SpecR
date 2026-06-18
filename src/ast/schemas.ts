@@ -15,6 +15,8 @@ export const NodeTypeSchema = z.enum([
   'pr3',
   'pr4',
   'pr5',
+  'pr6',
+  'pr7',
   'note',
   'continuation',
 ]);
@@ -320,7 +322,17 @@ export type CreateRevisionBody = z.infer<typeof CreateRevisionBodySchema>;
 // but only as JSON values, matching the JSONB column. A non-JSON value (BigInt,
 // function, symbol) is rejected at parse rather than silently dropped or thrown
 // on JSON.stringify at the DB boundary.
-export const StyleNodeTypeSchema = z.enum(['part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5']);
+export const StyleNodeTypeSchema = z.enum([
+  'part',
+  'article',
+  'pr1',
+  'pr2',
+  'pr3',
+  'pr4',
+  'pr5',
+  'pr6',
+  'pr7',
+]);
 
 const RunPropertiesSchema = z
   .object({

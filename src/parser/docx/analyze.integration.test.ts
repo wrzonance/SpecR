@@ -12,7 +12,7 @@ describe.skipIf(!existsSync(FIXTURE))('analyzeDocxStyles — real DOCX fixture',
     expect(classified.length).toBeGreaterThan(0);
     expect(effectiveStyles.size).toBeGreaterThan(0);
     const styleable = classified.filter((c) =>
-      ['part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5'].includes(c.nodeType)
+      ['part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5', 'pr6', 'pr7'].includes(c.nodeType)
     );
     expect(styleable.length).toBeGreaterThan(0);
   });

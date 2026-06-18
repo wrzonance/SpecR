@@ -96,6 +96,10 @@ function childNamed(parent: SpecNode | undefined, text: string): SpecNode | unde
   return parent.children.find((child) => child.text === text);
 }
 
+function flattenTypes(nodes: readonly SpecNode[]): string[] {
+  return nodes.flatMap((node) => [node.type, ...flattenTypes(node.children)]);
+}
+
 describe('parseSec — section and title', () => {
   it('extracts section number from SCN', () => {
     const { tree } = parseSec(MINIMAL);
@@ -259,6 +263,51 @@ describe('parseSec — SPT content nodes', () => {
     expect(lst?.type).toBe('pr2');
     expect(itm?.type).toBe('pr3');
     expect(oli?.type).toBe('pr2');
+  });
+
+  it('maps deep SEC list items to pr6 before the pr7 cap', () => {
+    const xml = `<?xml version="1.0"?>
+<SEC>
+  <SCN>SECTION 01 57 19</SCN>
+  <STL>TEMPORARY ENVIRONMENTAL CONTROLS</STL>
+  <PRT><TTL>PART 1 GENERAL</TTL>
+    <SPT><TTL>Article</TTL>
+      <SPT><TTL>Tier 1</TTL>
+        <SPT><TTL>Tier 2</TTL>
+          <SPT><TTL>Tier 3</TTL>
+            <SPT><TTL>Tier 4</TTL>
+              <SPT><TTL>Tier 5</TTL>
+                <OLG><OLI>Tier 6 ordered item</OLI></OLG>
+              </SPT>
+            </SPT>
+          </SPT>
+        </SPT>
+      </SPT>
+    </SPT>
+  </PRT>
+</SEC>`;
+    const { tree } = parseSec(xml);
+    const article = tree.parts[0]?.children[0];
+    const pr1 = childNamed(article, 'Tier 1');
+    const pr2 = childNamed(pr1, 'Tier 2');
+    const pr3 = childNamed(pr2, 'Tier 3');
+    const pr4 = childNamed(pr3, 'Tier 4');
+    const pr5 = childNamed(pr4, 'Tier 5');
+    const pr6 = childNamed(pr5, 'Tier 6 ordered item');
+
+    expect(pr5?.type).toBe('pr5');
+    expect(pr6?.type).toBe('pr6');
+  });
+
+  it('regression: deep valid SEC fixture contains pr6 environmental-control items', () => {
+    const xml = readFileSync(
+      resolve(process.cwd(), 'tests/fixtures/sec/deep-nesting.SEC'),
+      'latin1'
+    );
+    const { tree } = parseSec(xml);
+    const allTypes = flattenTypes(tree.parts);
+
+    expect(allTypes).toContain('pr6');
   });
 
   it('regression: nested standard ref keeps the nested SPT as source node', () => {

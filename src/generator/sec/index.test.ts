@@ -191,7 +191,7 @@ describe('generateSec — known inversion ambiguity', () => {
 });
 
 describe('generateSec — real UFGS fixture round-trip', () => {
-  it.each(['27_41_00.SEC', '27_10_00.SEC'])(
+  it.each(['27_41_00.SEC', '27_10_00.SEC', 'deep-nesting.SEC'])(
     'parse → generate → re-parse yields an identical tree for %s',
     (file) => {
       const xml = readFileSync(join(process.cwd(), 'tests/fixtures/sec', file), 'latin1');

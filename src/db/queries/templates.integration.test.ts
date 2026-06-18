@@ -35,15 +35,15 @@ describe('getTemplateByName — UFGS-Default seed', () => {
     expect(tpl!.owner).toBeNull();
   });
 
-  it('contains exactly 7 style rules (one per NodeType)', async () => {
+  it('contains exactly 9 style rules (one per styleable NodeType)', async () => {
     const tpl = await getTemplateByName('UFGS-Default');
-    expect(tpl!.rules).toHaveLength(7);
+    expect(tpl!.rules).toHaveLength(9);
   });
 
   it('contains each NodeType exactly once', async () => {
     const tpl = await getTemplateByName('UFGS-Default');
     const types = tpl!.rules.map((r) => r.nodeType).sort((a, b) => a.localeCompare(b));
-    expect(types).toEqual(['article', 'part', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5']);
+    expect(types).toEqual(['article', 'part', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5', 'pr6', 'pr7']);
   });
 
   it('part rule carries UFGS-extracted values in the JSONB payload', async () => {
@@ -85,7 +85,7 @@ describe('getTemplate', () => {
     const byId = await getTemplate(byName!.id);
     expect(byId).not.toBeNull();
     expect(byId!.id).toBe(byName!.id);
-    expect(byId!.rules).toHaveLength(7);
+    expect(byId!.rules).toHaveLength(9);
   });
 });
 

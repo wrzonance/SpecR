@@ -12,6 +12,8 @@ describe('getNodeLevel', () => {
     expect(getNodeLevel('pr3')).toBe(4);
     expect(getNodeLevel('pr4')).toBe(5);
     expect(getNodeLevel('pr5')).toBe(6);
+    expect(getNodeLevel('pr6')).toBe(7);
+    expect(getNodeLevel('pr7')).toBe(8);
   });
 
   it('returns null for unnumbered types', () => {
@@ -34,9 +36,9 @@ describe('buildSpecNumberingConfig', () => {
     expect(config.levels).toEqual(buildSpecNumberingConfig().levels);
   });
 
-  it('returns exactly 7 levels', () => {
+  it('returns exactly 9 levels', () => {
     const config = buildSpecNumberingConfig();
-    expect(config.levels).toHaveLength(7);
+    expect(config.levels).toHaveLength(9);
   });
 
   it('level 0 is DECIMAL with PART %1 - text (part heading)', () => {
@@ -78,6 +80,14 @@ describe('buildSpecNumberingConfig', () => {
     const config = buildSpecNumberingConfig();
     expect(config.levels[6]?.format).toBe(LevelFormat.LOWER_LETTER);
     expect(config.levels[6]?.text).toBe('%7)');
+  });
+
+  it('levels 7 and 8 reuse the final CSI paren pair for pr6/pr7', () => {
+    const config = buildSpecNumberingConfig();
+    expect(config.levels[7]?.format).toBe(LevelFormat.DECIMAL);
+    expect(config.levels[7]?.text).toBe('%8)');
+    expect(config.levels[8]?.format).toBe(LevelFormat.LOWER_LETTER);
+    expect(config.levels[8]?.text).toBe('%9)');
   });
 
   it('all levels have alignment defined', () => {

@@ -2,7 +2,7 @@ import type { NodeType } from '../../ast/index.js';
 
 // CSI paragraph tier as the SEC parser assigns it: an article is the depth-0
 // SPT, and each deeper SPT (or a +1/+2 LST/ITM offset) increments the tier.
-// `walkSpt` saturates at pr5, so tiers run 0 (article) … 5 (pr5).
+// `walkSpt` saturates at pr7, so tiers run 0 (article) … 7 (pr7).
 const TIER: Readonly<Partial<Record<NodeType, number>>> = {
   article: 0,
   pr1: 1,
@@ -10,6 +10,8 @@ const TIER: Readonly<Partial<Record<NodeType, number>>> = {
   pr3: 3,
   pr4: 4,
   pr5: 5,
+  pr6: 6,
+  pr7: 7,
 };
 
 // Returns the SEC nesting tier for a structural node type, or null for the
