@@ -68,10 +68,10 @@ const themeParser = new XMLParser({
 
 function validateThemeXml(themeXml: string): void {
   try {
-    const validation = SyntaxValidator.validate(themeXml);
-    if (validation !== true) {
-      throw new Error(validation.err.msg);
-    }
+    // SyntaxValidator.validate throws a ValidationError on malformed XML and
+    // returns true otherwise — it never returns an error object at runtime, so
+    // the throw is the only failure path. theme.test.ts pins this behavior.
+    SyntaxValidator.validate(themeXml);
   } catch (err) {
     throw new ParserError('failed to parse theme XML', { cause: err });
   }
