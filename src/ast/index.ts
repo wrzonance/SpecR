@@ -90,3 +90,8 @@ export type {
   SetStyleSourceBody,
 } from './schemas.js';
 export type { GenerateBody } from './generate-schemas.js';
+export {
+  HeaderFooterCompositionSchema,
+  HeaderFooterFieldKindSchema,
+} from './header-footer-schemas.js';
+export type { HeaderFooterComposition, HeaderFooterFieldKind } from './header-footer-schemas.js';

@@ -28,9 +28,13 @@ generateManual(project, package?, revision?)
   → TOC (Word TOC field over section headings — Word computes page numbers on open;
      SpecR does not paginate)
   → for each section in order: existing per-section emitters,
-     OOXML section break, per-section headers/footers (section number + issuance label)
+     OOXML section break
   → single DOCX buffer
 ```
+
+Running headers/footers are intentionally not hardcoded in this assembly engine. Their
+composition resolves from the header/footer data foundation (#208) across client →
+project → package → revision, and DOCX Header/Footer wiring is a later renderer sprint.
 
 ### D2 — Drafts render live; issuances render from snapshots
 
@@ -67,9 +71,10 @@ mapping.
   is a cheap variant on the same engine — backlog.
 - PDF output is out of scope (firms print to PDF from Word); see ADR-019 for the scope
   posture.
-- Revision nomenclature is data, not a rendering enum. Manual headers/footers and
-  addendum covers use the resolved revision identity from ADR-025; client/project naming
-  differences are handled by the nomenclature profile, not hardcoded in the generator.
+- Revision nomenclature is data, not a rendering enum. Covers and the future
+  header/footer renderer use the resolved revision identity from ADR-025; client/project
+  naming differences are handled by the nomenclature profile and header/footer data, not
+  hardcoded in the generator.
 
 ## Related
 
