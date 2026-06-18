@@ -33,6 +33,7 @@ export {
   RevisionNomenclatureTypesSchema,
   PutRevisionNomenclatureBodySchema,
   CloneRevisionNomenclatureBodySchema,
+  RevisionDateSchema,
   RevisionAttributesSchema,
   AcquireLockBodySchema,
   ReleaseLockBodySchema,

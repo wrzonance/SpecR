@@ -127,7 +127,7 @@ export type CloneConventionBody = z.infer<typeof CloneConventionBodySchema>;
 // ── Revision nomenclature profiles (ADR-025 / #209) ──────────────────────────
 // Project-scoped, user-defined taxonomy and templates. Every nested object stays
 // open so future dashboard/header-footer keys round-trip through JSONB.
-const RevisionDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const RevisionDateSchema = z.iso.date();
 
 const RevisionTypeFormatSchema = z
   .object({
@@ -374,16 +374,20 @@ export type SetPackageSpecsBody = z.infer<typeof SetPackageSpecsBodySchema>;
 // Immutable package revision snapshot (ADR-015 D5 + ADR-025). The legacy label
 // body remains accepted; structured writes use a profile-defined type plus an
 // open attributes bag.
-const LegacyCreateRevisionBodySchema = z.object({
-  label: z.string().check(z.minLength(1)),
-});
+const LegacyCreateRevisionBodySchema = z
+  .object({
+    label: z.string().check(z.minLength(1)),
+  })
+  .strict();
 
-const StructuredCreateRevisionBodySchema = z.object({
-  type: z.string().check(z.minLength(1)),
-  date: RevisionDateSchema.exactOptional(),
-  sortOrder: z.number().int().positive().exactOptional(),
-  attributes: RevisionAttributesSchema.exactOptional(),
-});
+const StructuredCreateRevisionBodySchema = z
+  .object({
+    type: z.string().check(z.minLength(1)),
+    date: RevisionDateSchema.exactOptional(),
+    sortOrder: z.number().int().positive().exactOptional(),
+    attributes: RevisionAttributesSchema.exactOptional(),
+  })
+  .strict();
 
 export const CreateRevisionBodySchema = z.union([
   LegacyCreateRevisionBodySchema,

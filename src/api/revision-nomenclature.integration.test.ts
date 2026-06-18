@@ -103,7 +103,6 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err != null ? reject(err) : resolve()));
   });
-  await pool.end();
 });
 
 describe('revision nomenclature profile API', () => {
@@ -277,6 +276,31 @@ describe('package revision nomenclature', () => {
     const res = await request('POST', `/packages/${packageId}/revisions`, {
       type: 'asi',
       attributes: { number: 1 },
+    });
+
+    expect(res.status).toBe(422);
+  });
+
+  it('rejects invalid calendar dates before the database insert', async () => {
+    const projectId = await makeProject();
+    const packageId = await makePackage(projectId);
+    const res = await request('POST', `/packages/${packageId}/revisions`, {
+      type: 'addendum',
+      date: '2026-99-99',
+      attributes: { number: 1 },
+    });
+
+    expect(res.status).toBe(422);
+  });
+
+  it('rejects mixed legacy and structured revision payloads', async () => {
+    const projectId = await makeProject();
+    const packageId = await makePackage(projectId);
+    const res = await request('POST', `/packages/${packageId}/revisions`, {
+      label: 'Addendum 99',
+      type: 'addendum',
+      date: '2026-06-18',
+      attributes: { number: 99 },
     });
 
     expect(res.status).toBe(422);

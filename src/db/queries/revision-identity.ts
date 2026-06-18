@@ -1,4 +1,4 @@
-import { RevisionAttributesSchema } from '../../ast/index.js';
+import { RevisionAttributesSchema, RevisionDateSchema } from '../../ast/index.js';
 import type { RevisionAttributes, RevisionNomenclatureType } from '../../ast/index.js';
 import { DatabaseError } from '../errors.js';
 import type { RevisionNomenclatureProfile } from './revision-nomenclature.js';
@@ -16,7 +16,7 @@ export interface CreatePackageRevisionInput {
 export interface RevisionIdentityDraft {
   readonly label: string;
   readonly type: string;
-  readonly date?: string;
+  readonly date: string;
   readonly sortOrder?: number;
   readonly attributes: RevisionAttributes;
   readonly number: string | null;
@@ -26,8 +26,6 @@ export interface RevisionDisplayIdentity {
   readonly displayName: string;
   readonly number: string | null;
 }
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function scalarToString(value: unknown): string | null {
   if (typeof value === 'string') return value;
@@ -83,7 +81,7 @@ function fieldKindValid(kind: string, value: unknown): boolean {
   if (kind === 'integer') return typeof value === 'number' && Number.isInteger(value);
   if (kind === 'number') return typeof value === 'number';
   if (kind === 'string') return typeof value === 'string';
-  if (kind === 'date') return typeof value === 'string' && DATE_RE.test(value);
+  if (kind === 'date') return RevisionDateSchema.safeParse(value).success;
   if (kind === 'boolean') return typeof value === 'boolean';
   return true;
 }
@@ -121,9 +119,15 @@ function legacyIdentity(label: string): RevisionIdentityDraft {
   if (numbered) {
     const type = numbered[1]?.toLowerCase() ?? 'issuance';
     const number = Number(numbered[2]);
-    return { label, type, attributes: { number }, number: String(number) };
+    return { label, type, date: todayIsoDate(), attributes: { number }, number: String(number) };
   }
-  return { label, type: 'issuance', attributes: { title: label }, number: null };
+  return {
+    label,
+    type: 'issuance',
+    date: todayIsoDate(),
+    attributes: { title: label },
+    number: null,
+  };
 }
 
 function displayIdentity(
@@ -154,12 +158,12 @@ export function createRevisionIdentityDraft(
   const draft: RevisionIdentityDraft = {
     label: identity.displayName,
     type: definition.key,
+    date,
     attributes,
     number: identity.number,
   };
   return {
     ...draft,
-    ...(input.date !== undefined ? { date: input.date } : {}),
     ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
   };
 }

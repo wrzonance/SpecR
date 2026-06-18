@@ -246,17 +246,10 @@ async function insertRevisionRow(
   const rev = await client.query<RevisionRow>(
     `INSERT INTO package_revisions
       (package_id, label, revision_type, revision_date, sort_order, attributes)
-     VALUES ($1, $2, $3, COALESCE($4::date, current_date), $5, $6::jsonb)
+     VALUES ($1, $2, $3, $4::date, $5, $6::jsonb)
      RETURNING id, package_id, label, revision_type, revision_date,
                sort_order, attributes, issued_at`,
-    [
-      packageId,
-      draft.label,
-      draft.type,
-      draft.date ?? null,
-      sortOrder,
-      JSON.stringify(draft.attributes),
-    ]
+    [packageId, draft.label, draft.type, draft.date, sortOrder, JSON.stringify(draft.attributes)]
   );
   const row = rev.rows[0];
   if (!row) throw new DatabaseError('createPackageRevision: no row returned after insert');
