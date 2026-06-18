@@ -66,7 +66,7 @@ docker compose up -d postgres        # postgres:16, db/user/pass all "specr", :5
 # native: Arch `sudo pacman -S postgresql` · Ubuntu `sudo apt install postgresql libpq-dev`
 ```
 
-CI sequence (the order matters): `pnpm migrate → pnpm seed → pnpm test → pnpm test:integration`. **`pnpm seed` is required before integration tests** — `listSpecSections` and the MCP `list_sections` tool depend on seeded `spec_sections` data. `DATABASE_URL` comes from `.env` (see `.env.example`).
+CI sequence (the order matters): `pnpm migrate → pnpm seed → pnpm test → pnpm test:integration`. **`pnpm seed` is required before integration tests** — `listSpecSections` and the MCP `list_sections` tool depend on seeded `spec_sections` data. `DATABASE_URL` comes from `.env` (see `.env.example`). The `dev`, `start`, `migrate`/`migrate:down`, `seed`, and `load:files` scripts **auto-load `.env`** (Node's `--env-file-if-exists` for the `node`/`tsx` ones; node-pg-migrate's `--envPath` for migrate) — so no inline env is needed locally. Real shell/CI env vars take precedence over the file, and a missing `.env` still fails fast at the Zod check. Test runners are intentionally excluded.
 
 ## Conventions
 

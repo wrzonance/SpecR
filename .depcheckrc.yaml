@@ -1,0 +1,8 @@
+# depcheck config. These devDependencies are real but invisible to static
+# analysis — they run via a CLI bin or are loaded at runtime, never `import`ed
+# from src/. Listing them keeps `pnpm exec depcheck` (release.yml) green.
+ignores:
+  - "@redocly/cli" # `redocly` bin — openapi.yaml lint (lint script + CI)
+  - depcheck # this tool itself
+  - pino-pretty # loaded by pino at runtime as a transport (src/lib/logger.ts)
+  - dotenv # loaded by node-pg-migrate at runtime (migrate/migrate:down --envPath .env)
