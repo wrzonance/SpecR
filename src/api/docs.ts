@@ -28,11 +28,14 @@ export function registerDocsRoutes(app: Express): void {
     res
       .type('application/javascript')
       .sendFile(join(SCALAR_DIR, SCALAR_STANDALONE), (err: Error) => {
-        if (err) {
+        if (!err || res.headersSent) return;
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
           res
             .status(404)
             .type('text/plain')
             .send('Scalar bundle not found — run: pnpm vendor:scalar');
+        } else {
+          res.status(500).type('text/plain').send('failed to serve Scalar bundle');
         }
       });
   });
