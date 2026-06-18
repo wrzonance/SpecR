@@ -11,12 +11,9 @@ allowBuilds:
 # Dependabot. None of these vulnerable code paths are reachable in SpecR today
 # (no hono middleware is imported; qs.stringify is never called; the dev tools
 # never ship in dist/ or run in prod), but we pin the patched versions for
-# defense-in-depth and a clean `pnpm audit`. See issues #198 (runtime) and #200.
+# defense-in-depth and a clean `pnpm audit`. See issues #198 (runtime), #200,
+# and #203.
 # Residuals (dev-only, not reachable; deferred):
-#   - vite #9/#10 (Windows-only, vite *dev server* which we never run — vite is
-#     only vitest's internal transform engine). Bumping vite forces a full
-#     lockfile regen that also drifts fast-xml-parser into an XMLValidator
-#     deprecation; handled in a dedicated follow-up, not here.
 #   - depcheck's js-yaml@3.x — a different major the 4.2.0 fix doesn't apply to.
 overrides:
   hono@<4.12.25: '>=4.12.25'    # runtime, via @modelcontextprotocol/sdk → @hono/node-server
@@ -24,3 +21,4 @@ overrides:
   esbuild@<0.28.1: '>=0.28.1'   # GHSA-gv7w-rqvm-qjhr (high), -g7r4-m6w7-qqqr
   dompurify@<3.4.9: '>=3.4.9'   # GHSA-vxr8-fq34-vvx9
   js-yaml@4.1.1: '>=4.2.0'      # GHSA-h67p-54hq-rp68 (eslint's 4.x consumer)
+  vite: ^8.0.16                 # GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3
