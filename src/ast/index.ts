@@ -81,12 +81,12 @@ export {
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
   SetStyleSourceBodySchema,
-  GenerateBodySchema,
 } from './schemas.js';
+export { GenerateBodySchema } from './generate-schemas.js';
 export type {
   CreateTemplateBody,
   PatchTemplateBody,
   UpsertStyleRulesBody,
   SetStyleSourceBody,
-  GenerateBody,
 } from './schemas.js';
+export type { GenerateBody } from './generate-schemas.js';

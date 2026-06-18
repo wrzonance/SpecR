@@ -43,7 +43,7 @@ import {
   CloneRevisionNomenclatureBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
-import { generateHandler, generateManualHandler } from './generate.js';
+import { generateHandler, generateManualHandler, generateRevisionHandler } from './generate.js';
 import { diffHandler } from './diff.js';
 import { mergeHandler } from './merge.js';
 import { importTemplateHandler } from './templates.js';
@@ -136,6 +136,7 @@ router.post(
   createRevisionHandler
 );
 router.get('/revisions/:id', getRevisionHandler);
+router.post('/revisions/:id/generate', generateRevisionHandler);
 router.post('/parse', parseRateLimit, upload.single('file'), parseHandler);
 router.get('/parse/jobs/:jobId', parseJobHandler);
 router.post('/templates/import', parseRateLimit, upload.single('file'), importTemplateHandler);

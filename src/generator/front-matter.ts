@@ -4,9 +4,26 @@ import type { StyleRule } from '../ast/index.js';
 import { buildRuleMap, runStyleOptions, type StyleRuleMap } from './styles.js';
 
 /** Project identity rendered on the manual cover (ADR-017 D1). */
+export interface ManualSectionListing {
+  readonly section: string;
+  readonly title: string;
+}
+
+export interface ManualRevisionMeta {
+  readonly displayName: string;
+  readonly date: string;
+  readonly packageName: string;
+}
+
+export interface ManualAddendumMeta {
+  readonly affectedSections: readonly ManualSectionListing[];
+}
+
 export interface ManualMeta {
   readonly name: string;
   readonly description: string | null;
+  readonly revision?: ManualRevisionMeta;
+  readonly addendum?: ManualAddendumMeta;
 }
 
 // '1-1' = build TOC entries from Heading1 only, so the field yields exactly one
@@ -23,12 +40,33 @@ function coverTitle(name: string, rules?: StyleRuleMap): Paragraph {
   });
 }
 
+function centeredText(text: string, bold = false): Paragraph {
+  return new Paragraph({
+    alignment: AlignmentType.CENTER,
+    children: [new TextRun({ text, bold })],
+  });
+}
+
+function affectedSections(sections: readonly ManualSectionListing[]): Paragraph[] {
+  if (sections.length === 0) return [];
+  return [
+    centeredText('Affected Sections', true),
+    ...sections.map((section) => centeredText(`${section.section} - ${section.title}`)),
+  ];
+}
+
 function coverParagraphs(meta: ManualMeta, rules?: StyleRuleMap): Paragraph[] {
   const cover: Paragraph[] = [coverTitle(meta.name, rules)];
   if (meta.description !== null && meta.description !== '') {
-    cover.push(
-      new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun(meta.description)] })
-    );
+    cover.push(centeredText(meta.description));
+  }
+  if (meta.revision !== undefined) {
+    cover.push(centeredText(meta.revision.packageName));
+    cover.push(centeredText(meta.revision.displayName, true));
+    cover.push(centeredText(meta.revision.date));
+  }
+  if (meta.addendum !== undefined) {
+    cover.push(...affectedSections(meta.addendum.affectedSections));
   }
   cover.push(new Paragraph({ children: [new PageBreak()] }));
   return cover;

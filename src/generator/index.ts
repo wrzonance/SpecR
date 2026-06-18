@@ -14,6 +14,7 @@ import {
 } from '../lib/section-number.js';
 
 export { generateSec } from './sec/index.js';
+export type { ManualMeta, ManualSectionListing } from './front-matter.js';
 
 const SPEC_NUM_REF = 'spec-numbering' as const;
 

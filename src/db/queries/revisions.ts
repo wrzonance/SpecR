@@ -63,6 +63,23 @@ export interface RevisionWithTrees {
   readonly specs: readonly RevisionSpecEntry[];
 }
 
+export interface RevisionManualData {
+  readonly revision: RevisionWithTrees;
+  readonly project: {
+    readonly name: string;
+    readonly description: string | null;
+  };
+  readonly designPackage: {
+    readonly packageId: string;
+    readonly name: string;
+  };
+}
+
+export interface RevisionAddendumManualData extends RevisionManualData {
+  readonly baseRevisionId: string;
+  readonly changedSpecs: readonly RevisionSpecEntry[];
+}
+
 interface RevisionRow {
   readonly id: string;
   readonly package_id: string;
@@ -90,6 +107,15 @@ interface SnapshotRow {
   readonly position: number;
   readonly tree: unknown;
 }
+
+interface RevisionContextRow {
+  readonly package_id: string;
+  readonly package_name: string;
+  readonly project_name: string;
+  readonly project_description: string | null;
+}
+
+export class RevisionComparisonError extends DatabaseError {}
 
 function validateTree(candidate: unknown, specId: string): SpecTree {
   const parsed = SpecTreeSchema.safeParse(candidate);
@@ -235,6 +261,22 @@ async function profileForPackage(
   return row ? getRevisionNomenclatureForProject(row.project_id, db) : null;
 }
 
+async function getRevisionContext(
+  revisionId: string,
+  db: Queryable
+): Promise<RevisionContextRow | null> {
+  const result = await db.query<RevisionContextRow>(
+    `SELECT pr.package_id, dp.name AS package_name, p.name AS project_name,
+            p.description AS project_description
+     FROM package_revisions pr
+     JOIN design_packages dp ON dp.id = pr.package_id
+     JOIN projects p ON p.id = dp.project_id
+     WHERE pr.id = $1`,
+    [revisionId]
+  );
+  return result.rows[0] ?? null;
+}
+
 async function insertRevisionRow(
   packageId: string,
   input: string | CreatePackageRevisionInput,
@@ -328,4 +370,56 @@ export async function getPackageRevision(
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError(`getPackageRevision: query failed for ${revisionId}`, { cause: err });
   }
+}
+
+function treeFingerprint(tree: SpecTree): string {
+  return JSON.stringify(SpecTreeSchema.parse(tree));
+}
+
+function changedSpecs(
+  target: readonly RevisionSpecEntry[],
+  base: readonly RevisionSpecEntry[]
+): readonly RevisionSpecEntry[] {
+  const baseBySpecId = new Map(base.map((entry) => [entry.specId, treeFingerprint(entry.tree)]));
+  return target.filter((entry) => baseBySpecId.get(entry.specId) !== treeFingerprint(entry.tree));
+}
+
+export async function getPackageRevisionManualData(
+  revisionId: string,
+  db: Queryable = pool
+): Promise<RevisionManualData | null> {
+  try {
+    const context = await getRevisionContext(revisionId, db);
+    if (context === null) return null;
+    const revision = await getPackageRevision(revisionId, db);
+    if (revision === null) return null;
+    return {
+      revision,
+      project: { name: context.project_name, description: context.project_description },
+      designPackage: { packageId: context.package_id, name: context.package_name },
+    };
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`getPackageRevisionManualData: query failed for ${revisionId}`, {
+      cause: err,
+    });
+  }
+}
+
+export async function getPackageRevisionAddendumManualData(
+  revisionId: string,
+  baseRevisionId: string,
+  db: Queryable = pool
+): Promise<RevisionAddendumManualData | null> {
+  const target = await getPackageRevisionManualData(revisionId, db);
+  const base = await getPackageRevisionManualData(baseRevisionId, db);
+  if (target === null || base === null) return null;
+  if (target.designPackage.packageId !== base.designPackage.packageId) {
+    throw new RevisionComparisonError('addendum base revision belongs to a different package');
+  }
+  return {
+    ...target,
+    baseRevisionId,
+    changedSpecs: changedSpecs(target.revision.specs, base.revision.specs),
+  };
 }

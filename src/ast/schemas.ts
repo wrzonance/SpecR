@@ -1,10 +1,6 @@
 import { z } from 'zod';
 import type { SpecNode } from './types.js';
-import {
-  SectionNumberFormatSchema,
-  SectionNumberInputSchema,
-  SectionNumberSchema,
-} from '../lib/section-number.js';
+import { SectionNumberInputSchema, SectionNumberSchema } from '../lib/section-number.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -431,20 +427,8 @@ export const UpsertStyleRulesBodySchema = z.object({
 });
 
 export type UpsertStyleRulesBody = z.infer<typeof UpsertStyleRulesBodySchema>;
-
-// ── Style-source assignment (#138) ────────────────────────────────────────────
-
 export const SetStyleSourceBodySchema = z.object({
   templateId: z.uuid(),
 });
 
 export type SetStyleSourceBody = z.infer<typeof SetStyleSourceBodySchema>;
-
-// ── Generate request body (#32) ──────────────────────────────────────────────
-
-export const GenerateBodySchema = z.object({
-  templateId: z.uuid().exactOptional(),
-  sectionNumberFormat: SectionNumberFormatSchema.exactOptional(),
-});
-
-export type GenerateBody = z.infer<typeof GenerateBodySchema>;
