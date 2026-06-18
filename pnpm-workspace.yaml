@@ -13,12 +13,14 @@ allowBuilds:
 # never ship in dist/ or run in prod), but we pin the patched versions for
 # defense-in-depth and a clean `pnpm audit`. See issues #198 (runtime), #200,
 # and #203.
-# Residuals (dev-only, not reachable; deferred):
-#   - depcheck's js-yaml@3.x — a different major the 4.2.0 fix doesn't apply to.
+# Residuals (dev-only, not reachable):
+#   - depcheck's js-yaml@3.x (Dependabot #11) — no 3.x backport for the 4.2.0 fix
+#     and latest depcheck still pins ^3.14.1; dismissed as tolerable_risk
+#     (depcheck runs only in release.yml on the repo's own trusted config).
 overrides:
   hono@<4.12.25: '>=4.12.25'    # runtime, via @modelcontextprotocol/sdk → @hono/node-server
   qs@<6.15.2: '>=6.15.2'        # runtime, via express → body-parser (CVE-2026-8723)
   esbuild@<0.28.1: '>=0.28.1'   # GHSA-gv7w-rqvm-qjhr (high), -g7r4-m6w7-qqqr
-  dompurify@<3.4.9: '>=3.4.9'   # GHSA-vxr8-fq34-vvx9
+  dompurify@<3.4.11: '>=3.4.11' # GHSA-vxr8-fq34-vvx9, GHSA-cmwh-pvxp-8882 (≤3.4.10)
   js-yaml@4.1.1: '>=4.2.0'      # GHSA-h67p-54hq-rp68 (eslint's 4.x consumer)
   vite: ^8.0.16                 # GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3
