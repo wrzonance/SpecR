@@ -31,6 +31,10 @@ describe('getLabel', () => {
     expect(getLabel('pr5', 0)).toBe('a)');
     expect(getLabel('pr5', 1)).toBe('b)');
   });
+  it('labels pr6/pr7 with repeated paren tiers', () => {
+    expect(getLabel('pr6', 0)).toBe('1)');
+    expect(getLabel('pr7', 1)).toBe('b)');
+  });
   it('returns empty for non-numbered types', () => {
     expect(getLabel('spec', 0)).toBe('');
     expect(getLabel('note', 0)).toBe('');

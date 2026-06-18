@@ -193,8 +193,14 @@ Universal across all spec sources — the one thing you can count on:
 | PR3 | Third tier | 4 | 6 | `<TXT>` depth 3 | `a. text` |
 | PR4 | Fourth tier | 5 | 7 | `<TXT>` depth 4 | `1) text` |
 | PR5 | Fifth tier | 6 | 8 | `<TXT>` depth 5 | `a) text` |
+| PR6 | Sixth tier (deep extension) | 7 | 9 | `<TXT>` depth 6 | `1) text` |
+| PR7 | Seventh tier (deep extension) | 8 | 10 | `<TXT>` depth 7 | `a) text` |
 
 Note: CPI files reserve ilvl 1-2 for Schedule/PDS (rarely used) — so the same logical CSI Article level maps to different ilvl values depending on which template authored the document. The inference engine normalizes this.
+
+Note: CSI does not define PR6/PR7 labels. SpecR caps DOCX output at Word's nine
+numbering levels and repeats the final CSI paren pair (`1)` / `a)`) at deeper
+indent levels. See ADR-027.
 
 **Conflict persistence (#56):** when multiple signals fire and disagree, the losing signals are recorded as `{ signal, reportedIlvl, reportedNodeType }` and persisted to `paragraphs.conflicts` (JSONB, `NOT NULL DEFAULT '[]'`). They surface as `meta.conflicts` on tree nodes (`get_spec` MCP tool and the shared `getSpecTree` query) and as a top-level `conflicts` field on the node and each ancestor returned by the `get_paragraph` MCP tool — empty arrays are omitted on the wire. This makes inference ambiguity transparent to agents and the future UI instead of silently picking a winner.
 
@@ -212,6 +218,8 @@ type NodeType =
   | 'pr3'         // a. text
   | 'pr4'         // 1) text
   | 'pr5'         // a) text
+  | 'pr6'         // deep extension: 1) text
+  | 'pr7'         // deep extension: a) text
   | 'note'        // specifier note (hidden in output)
   | 'continuation' // unnumbered continuation paragraph
 
@@ -373,7 +381,7 @@ CREATE TABLE style_templates (
 CREATE TABLE style_rules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   template_id UUID NOT NULL REFERENCES style_templates(id) ON DELETE CASCADE,
-  node_type VARCHAR(20) NOT NULL,    -- 'part' | 'article' | 'pr1'..'pr5'
+  node_type VARCHAR(20) NOT NULL,    -- 'part' | 'article' | 'pr1'..'pr7'
   font_family TEXT,
   font_size_half_pt INTEGER,         -- OOXML native unit (20 = 10pt)
   bold BOOLEAN NOT NULL DEFAULT false,
@@ -698,7 +706,7 @@ server.registerResource('name', new ResourceTemplate('specr://path/{id}', { list
 `src/generator/markdown.ts` is a pure module (no I/O, no DB), shared between MCP resources and the future DOCX generator.
 
 - `renderMarkdown(tree: CsiTree): string` — full spec as Markdown.
-- `getLabel(type: NodeType, index: number, partNumber?: number): string` — the CSI label for any node type (`A.` / `1.` / `a.` / `1)` / `a)`, `PART N -`, `N.N`). Uses base-26 arithmetic for the `pr1` / `pr3` / `pr5` letter tiers so it handles >26 siblings correctly.
+- `getLabel(type: NodeType, index: number, partNumber?: number): string` — the CSI label for any node type (`A.` / `1.` / `a.` / `1)` / `a)`, repeated `1)` / `a)` for PR6/PR7, `PART N -`, `N.N`). Uses base-26 arithmetic for the `pr1` / `pr3` / `pr5` / `pr7` letter tiers so it handles >26 siblings correctly.
 - `note` nodes always render as `> **[NOTE]** text` regardless of `meta.vanish` — editorial notes are structural metadata for spec writers, not owner-facing content.
 - `meta.vanish` on non-note nodes → returns `''` (suppressed from output).
 

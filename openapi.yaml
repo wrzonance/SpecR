@@ -2283,10 +2283,10 @@ components:
           description: The losing inference signal that disagreed with the winner
         reportedIlvl:
           type: integer
-          description: Normalized ilvl the losing signal reported (part=0 … pr5=6)
+          description: Normalized ilvl the losing signal reported (part=0 … pr7=8)
         reportedNodeType:
           type: string
-          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, note, continuation]
+          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation]
 
     SourceTextSpan:
       type: array
@@ -2372,7 +2372,7 @@ components:
           format: uuid
         type:
           type: string
-          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, note, continuation]
+          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation]
         text:
           type: string
         children:
@@ -3085,11 +3085,11 @@ components:
 
     StyleNodeType:
       type: string
-      enum: [part, article, pr1, pr2, pr3, pr4, pr5]
+      enum: [part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7]
       description: >
-        CSI paragraph role. Maps to the seven structural levels: `part` (PART 1 –
-        GENERAL), `article` (1.1 REFERENCES), `pr1`–`pr5` (A. / 1. / a. / 1) / a)
-        paragraph tiers).
+        CSI paragraph role. Maps to the nine generator levels: `part` (PART 1 –
+        GENERAL), `article` (1.1 REFERENCES), `pr1`–`pr7` (A. / 1. / a. / 1) /
+        a), then repeated 1) / a) paragraph tiers).
 
     StyleRule:
       type: object
@@ -3231,7 +3231,7 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/StyleRule'
-              description: One rule per NodeType (7 max)
+              description: One rule per styleable NodeType (9 max)
 
     DerivationReport:
       type: object

@@ -23,6 +23,8 @@ const VALID_NODE_TYPES = [
   'pr3',
   'pr4',
   'pr5',
+  'pr6',
+  'pr7',
   'note',
   'continuation',
 ] as const;

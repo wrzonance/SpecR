@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="windows-1252"?>
+<SEC>
+  <SCN>SECTION 01 57 19</SCN>
+  <STL>TEMPORARY ENVIRONMENTAL CONTROLS</STL>
+  <PRT><TTL>PART 1 GENERAL</TTL>
+    <SPT><TTL>SPECIAL ENVIRONMENTAL REQUIREMENTS</TTL>
+      <SPT><TTL>Mid-Atlantic</TTL>
+        <SPT><TTL>Virginia</TTL>
+          <SPT><TTL>Hazardous Waste Requirements for Virginia Installations</TTL>
+            <SPT><TTL>Waste Management - Disposal by the Contractor</TTL>
+              <SPT><TTL>Contractor Site Custodian</TTL>
+                <OLG>
+                  <OLI>Designate a Site Custodian and an Alternate for waste management.</OLI>
+                  <OLI>Train personnel in hazardous waste management procedures.</OLI>
+                </OLG>
+              </SPT>
+            </SPT>
+          </SPT>
+        </SPT>
+      </SPT>
+    </SPT>
+  </PRT>
+</SEC>
