@@ -140,10 +140,13 @@ describe('GET /specs/:id/tree (integration)', () => {
     const data = body['data'] as Record<string, unknown>;
     const tree = data['tree'] as Record<string, unknown>;
     expect(tree['id']).toBe(testSpecId);
+    // testSpecId is seeded with a baseline 'PART 1 - GENERAL' part in the file's
+    // top-level beforeAll, so locate this block's own 'GENERAL' part by text
+    // rather than assuming it is the only/first part.
     const parts = tree['parts'] as readonly Record<string, unknown>[];
-    expect(parts).toHaveLength(1);
-    expect(parts[0]?.['type']).toBe('part');
-    expect(parts[0]?.['text']).toBe('GENERAL');
+    const generalPart = parts.find((p) => p['text'] === 'GENERAL');
+    expect(generalPart).toBeDefined();
+    expect(generalPart?.['type']).toBe('part');
     const references = data['references'] as readonly Record<string, unknown>[];
     expect(references).toHaveLength(1);
     expect(references[0]?.['targetSection']).toBe('09 22 00');

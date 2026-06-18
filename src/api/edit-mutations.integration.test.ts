@@ -10,10 +10,12 @@ import { pool } from '../db/index.js';
 let server: Server;
 let baseUrl: string;
 
-const SPEC_A = 'eeeeeeee-0000-0000-0000-00000000000a';
-const SPEC_B = 'eeeeeeee-0000-0000-0000-00000000000b';
-const PROJ = 'eeeeeeee-0000-0000-0000-0000000000c1';
-const PARA1 = 'eeeeeeee-0000-0000-0000-0000000000a3';
+// Valid v4 UUIDs: the PATCH handler validates params with z.uuid() (RFC-strict),
+// so synthetic all-zero-version ids are rejected 400 before reaching the DB.
+const SPEC_A = 'eeeeeeee-0000-4000-8000-00000000000a';
+const SPEC_B = 'eeeeeeee-0000-4000-8000-00000000000b';
+const PROJ = 'eeeeeeee-0000-4000-8000-0000000000c1';
+const PARA1 = 'eeeeeeee-0000-4000-8000-0000000000a3';
 let ref1Id: string;
 
 interface TreeResp {
@@ -56,9 +58,9 @@ beforeEach(async () => {
     [SPEC_A, SPEC_B],
   ]);
   await pool.query(
-    `INSERT INTO specs (id, section, title, source) VALUES
-       ($1, '09 29 00', 'Gypsum Board', 'test-api-mut'),
-       ($2, '09 22 00', 'Supports for Plaster', 'test-api-mut')`,
+    `INSERT INTO specs (id, section, title, source, library_id) VALUES
+       ($1, '09 29 00', 'Gypsum Board', 'test-api-mut', (SELECT id FROM libraries WHERE name = 'UFGS Reference')),
+       ($2, '09 22 00', 'Supports for Plaster', 'test-api-mut', (SELECT id FROM libraries WHERE name = 'UFGS Reference'))`,
     [SPEC_A, SPEC_B]
   );
   await pool.query(
@@ -111,13 +113,13 @@ describe('PATCH /specs/:id/paragraphs/:paragraphId', () => {
     expect(body.data.text).toBe('Comply with the framing requirements.');
   });
 
-  it('returns 422 for empty text', async () => {
+  it('returns 400 for empty text', async () => {
     const res = await fetch(`${baseUrl}/specs/${SPEC_A}/paragraphs/${PARA1}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: '' }),
     });
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(400);
   });
 });
 

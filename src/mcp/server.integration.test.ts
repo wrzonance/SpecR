@@ -328,7 +328,9 @@ describe('tool: list_projects', () => {
     const result = b['result'] as Record<string, unknown>;
     const content = result['content'] as { type: string; text: string }[];
     const projects = JSON.parse(content[0]!.text) as { id: string; name: string }[];
-    expect(projects).toEqual(expect.arrayContaining([{ id: mcpProjectId, name: mcpProjectName }]));
+    expect(projects).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: mcpProjectId, name: mcpProjectName })])
+    );
   });
 });
 

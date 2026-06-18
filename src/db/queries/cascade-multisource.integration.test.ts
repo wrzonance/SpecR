@@ -21,10 +21,10 @@ beforeEach(async () => {
   await pool.query(`DELETE FROM projects WHERE id = $1`, [PROJ]);
   await pool.query(`DELETE FROM specs WHERE source IN ('tc-ufgs','tc-arcat')`);
   await pool.query(
-    `INSERT INTO specs (id, section, title, source) VALUES
-       ($1, '07 92 00', 'Joint Sealants (UFGS)', 'tc-ufgs'),
-       ($2, '07 92 00', 'Joint Sealants (ARCAT)', 'tc-arcat'),
-       ($3, '09 29 00', 'Gypsum Board', 'tc-ufgs')`,
+    `INSERT INTO specs (id, section, title, source, library_id) VALUES
+       ($1, '07 92 00', 'Joint Sealants (UFGS)', 'tc-ufgs', (SELECT id FROM libraries WHERE name = 'UFGS Reference')),
+       ($2, '07 92 00', 'Joint Sealants (ARCAT)', 'tc-arcat', (SELECT id FROM libraries WHERE name = 'Default Company Master')),
+       ($3, '09 29 00', 'Gypsum Board', 'tc-ufgs', (SELECT id FROM libraries WHERE name = 'UFGS Reference'))`,
     [UFGS, ARCAT, CITER]
   );
   await pool.query(`INSERT INTO projects (id, name) VALUES ($1, 'Multi-source cascade')`, [PROJ]);

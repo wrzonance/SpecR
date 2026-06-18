@@ -60,9 +60,9 @@ beforeEach(async () => {
     [SPEC_A, SPEC_B],
   ]);
   await pool.query(
-    `INSERT INTO specs (id, section, title, source) VALUES
-       ($1, '09 29 00', 'Gypsum Board', 'test-mut'),
-       ($2, '09 22 00', 'Supports for Plaster', 'test-mut')`,
+    `INSERT INTO specs (id, section, title, source, library_id) VALUES
+       ($1, '09 29 00', 'Gypsum Board', 'test-mut', (SELECT id FROM libraries WHERE name = 'UFGS Reference')),
+       ($2, '09 22 00', 'Supports for Plaster', 'test-mut', (SELECT id FROM libraries WHERE name = 'UFGS Reference'))`,
     [SPEC_A, SPEC_B]
   );
   await insertPara(PART, null, 'part', 'GENERAL', 1);
