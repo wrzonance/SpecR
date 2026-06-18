@@ -216,3 +216,19 @@ export type {
   DivisionGeneralConfidence,
   SetDivisionGeneralSpecInput,
 } from './queries/division-general.js';
+export {
+  upsertHeaderFooterConfig,
+  findHeaderFooterConfig,
+  deleteHeaderFooterConfig,
+  resolveHeaderFooterConfig,
+  HeaderFooterValidationError,
+  HeaderFooterScopeError,
+} from './queries/header-footer.js';
+export type {
+  HeaderFooterScopeInput,
+  HeaderFooterScope,
+  HeaderFooterConfig,
+  ResolveHeaderFooterConfigInput,
+  HeaderFooterResolutionContext,
+  ResolvedHeaderFooterConfig,
+} from './queries/header-footer.js';
