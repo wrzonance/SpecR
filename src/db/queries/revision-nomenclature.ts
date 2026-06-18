@@ -5,9 +5,6 @@ import type { RevisionNomenclatureTypes } from '../../ast/index.js';
 
 export const BUILT_IN_REVISION_NOMENCLATURE_NAME = 'SpecR Default Revision Nomenclature';
 
-/** Raised when an update targets a profile id that does not exist. */
-export class RevisionNomenclatureNotFoundError extends DatabaseError {}
-
 export interface RevisionNomenclatureProfile {
   readonly id: string;
   readonly projectId: string | null;

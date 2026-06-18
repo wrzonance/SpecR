@@ -43,6 +43,9 @@ const DEFAULT_TYPES = [
   },
 ];
 
+// pgm.sql() takes no bind parameters, so the seed INSERT below inlines a literal.
+// This escaper is ONLY safe because it is fed a build-time constant (DEFAULT_TYPES);
+// never route user-supplied data through it — use a parameterized query instead.
 const escapedJson = (value: unknown): string => JSON.stringify(value).replace(/'/g, "''");
 
 function createProfileTable(pgm: MigrationBuilder): void {

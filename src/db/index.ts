@@ -162,7 +162,6 @@ export {
   upsertProjectRevisionNomenclature,
   deleteProjectRevisionNomenclature,
   BUILT_IN_REVISION_NOMENCLATURE_NAME,
-  RevisionNomenclatureNotFoundError,
 } from './queries/revision-nomenclature.js';
 export type { RevisionNomenclatureProfile } from './queries/revision-nomenclature.js';
 export {
