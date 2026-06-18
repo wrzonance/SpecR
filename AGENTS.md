@@ -73,7 +73,7 @@ CI sequence (the order matters): `pnpm migrate → pnpm seed → pnpm test → p
 - No `console.*` in `src/` (outside test/scripts) — use the pino logger at `src/lib/logger.ts`.
 - DB migrations are always reversible (paired up + down); migration files are the schema of record, not test targets.
 - `src/lib/env.ts` validates env with Zod and exits the process on invalid config — fail fast at boot.
-- `openapi.yaml` is the authoritative API contract; keep it in sync when endpoints change.
+- **`openapi.yaml` is the live, authoritative API contract — adhere to it.** It is hand-authored truth (ADR-026), now rendered as-is at `/docs` (Scalar) and served at `GET /openapi.yaml`, **and CI-enforced** by the contract gate (`src/api/contract.integration.test.ts`): bidirectional route↔spec coverage + response-schema validation. Any endpoint change (path, method, request/response shape, or status) **must update `openapi.yaml` in the same PR** — otherwise `/docs` renders something the code doesn't do and CI goes red three ways (undocumented route, documented-but-unrouted op, or a response that no longer matches its schema). Code conforms to the spec, not the reverse.
 - The 666-file UFGS `.SEC` corpus is seed/proof-of-concept data, not the product. The product is the inference engine and round-trip fidelity — don't let library content drive scope.
 
 ## Gotchas
