@@ -43,7 +43,7 @@ describe('GET /docs (Scalar reference)', () => {
     const res = await fetch(`${baseUrl}/docs`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toMatch(/text\/html/);
-    expect(await res.text()).toContain('createApiReference');
+    expect(await res.text()).toContain("createApiReference('#app', { url: '/openapi.yaml' })");
   });
 
   it('serves the vendored bundle as JavaScript', async () => {

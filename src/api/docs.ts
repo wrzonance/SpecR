@@ -25,7 +25,16 @@ export function registerDocsRoutes(app: Express): void {
     res.type('html').send(PAGE);
   });
   app.get('/docs/scalar.js', (_req: Request, res: Response) => {
-    res.type('application/javascript').sendFile(join(SCALAR_DIR, SCALAR_STANDALONE));
+    res
+      .type('application/javascript')
+      .sendFile(join(SCALAR_DIR, SCALAR_STANDALONE), (err: Error) => {
+        if (err) {
+          res
+            .status(404)
+            .type('text/plain')
+            .send('Scalar bundle not found — run: pnpm vendor:scalar');
+        }
+      });
   });
   app.get('/openapi.yaml', (_req: Request, res: Response) => {
     res.type('text/yaml').sendFile(OPENAPI_PATH);
