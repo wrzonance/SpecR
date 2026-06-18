@@ -1,7 +1,7 @@
 /* ───────────────────────────────────────────────────────────────────────────
    SpecR — Section Linkage Console
-   Aesthetic: drafting-room blueprint. Deep prussian ink field with a fine
-   technical grid; spec content sits on warm vellum sheets like pinned drawings.
+   Aesthetic: drafting-room blueprint. Deep prussian ink field
+   spec content sits on warm vellum sheets like pinned drawings.
    ─────────────────────────────────────────────────────────────────────────── */
 
 :root {
@@ -50,6 +50,7 @@ body {
   inset: 0;
   pointer-events: none;
   z-index: 0;
+  /* grid removed for now
   background-image:
     linear-gradient(var(--line-faint) 1px, transparent 1px),
     linear-gradient(90deg, var(--line-faint) 1px, transparent 1px),
@@ -61,6 +62,7 @@ body {
     12px 12px,
     12px 12px;
   mask-image: radial-gradient(ellipse at 50% 0%, black 30%, rgba(0, 0, 0, 0.55) 100%);
+  */
 }
 
 /* ── Masthead / drawing title block ─────────────────────────────────────── */
