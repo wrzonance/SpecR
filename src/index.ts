@@ -5,6 +5,7 @@ import { pool } from './db/index.js';
 import { router } from './api/router.js';
 import { errorHandler } from './api/middleware/error.js';
 import { registerMcpRoutes } from './mcp/server.js';
+import { registerDocsRoutes } from './api/docs.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -17,6 +18,7 @@ app.use((req, res, next) => {
 });
 app.use(router);
 registerMcpRoutes(app);
+registerDocsRoutes(app);
 app.use(errorHandler);
 
 const server = app.listen(config.PORT, () => {

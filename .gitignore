@@ -49,3 +49,6 @@ tmp/
 *.tmp
 .worktrees
 .superpowers/
+
+# Vendored CDN assets (produced by pnpm vendor:scalar; never committed)
+public/

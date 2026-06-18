@@ -8,6 +8,8 @@
     "pnpm": ">=11.0.0"
   },
   "scripts": {
+    "vendor:scalar": "tsx scripts/vendor-scalar.ts",
+    "predev": "pnpm vendor:scalar",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
