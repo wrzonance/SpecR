@@ -50,13 +50,5 @@ tmp/
 .worktrees
 .superpowers/
 
-# Windows one-click bootstrap runtime (portable Node + PostgreSQL + data)
-.specr-runtime/
-
-# Playwright MCP verification artifacts
-.playwright-mcp/
-
-# Vendored CDN assets (produced by pnpm vendor:scalar; never committed).
-# Narrowed to the vendored dir so the committed mockup SPA (public/js, public/css,
-# public/index.html) stays tracked.
-public/scalar/
+# Vendored CDN assets (produced by pnpm vendor:scalar; never committed)
+public/

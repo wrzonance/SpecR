@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   AddSectionToProjectBodySchema,
-  PatchProjectBodySchema,
   PatchSpecBodySchema,
   StylePropertiesSchema,
 } from './schemas.js';
@@ -40,19 +39,6 @@ describe('StylePropertiesSchema (ADR-021 open style payload)', () => {
     // JSON.stringify at the DB boundary — reject it at parse instead.
     expect(() => StylePropertiesSchema.parse({ weird: 10n })).toThrow();
     expect(() => StylePropertiesSchema.parse({ pPr: { vendorFn: () => 1 } })).toThrow();
-  });
-});
-
-describe('PatchProjectBodySchema', () => {
-  it('accepts project rename and section-number format settings', () => {
-    expect(
-      PatchProjectBodySchema.parse({ name: 'Courthouse', sectionNumberFormat: 'compact' })
-    ).toEqual({ name: 'Courthouse', sectionNumberFormat: 'compact' });
-  });
-
-  it('rejects empty project settings and unknown section-number formats', () => {
-    expect(() => PatchProjectBodySchema.parse({})).toThrow();
-    expect(() => PatchProjectBodySchema.parse({ sectionNumberFormat: 'slashes' })).toThrow();
   });
 });
 

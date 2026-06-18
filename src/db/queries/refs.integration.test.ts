@@ -150,8 +150,8 @@ describe('project-scoped reference traversal', () => {
     const projects = await listProjects(pool);
     expect(projects).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: projectA, name: `Ref Traversal A ${suffix}` }),
-        expect.objectContaining({ id: projectB, name: `Ref Traversal B ${suffix}` }),
+        { id: projectA, name: `Ref Traversal A ${suffix}` },
+        { id: projectB, name: `Ref Traversal B ${suffix}` },
       ])
     );
   });

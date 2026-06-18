@@ -37,26 +37,6 @@ describe('env validation — defaults and coercion', () => {
     expect(config.PORT).toBe(3000);
   });
 
-  it('defaults HOST to loopback so the demo server is never LAN-exposed by accident', async () => {
-    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
-    process.env['NODE_ENV'] = 'test';
-    delete process.env['HOST'];
-
-    const { config } = await import('./env.js');
-
-    expect(config.HOST).toBe('127.0.0.1');
-  });
-
-  it('accepts an explicit HOST for opt-in LAN exposure', async () => {
-    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
-    process.env['NODE_ENV'] = 'test';
-    process.env['HOST'] = '0.0.0.0';
-
-    const { config } = await import('./env.js');
-
-    expect(config.HOST).toBe('0.0.0.0');
-  });
-
   it('defaults LOG_LEVEL to info when not set', async () => {
     process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
     process.env['NODE_ENV'] = 'test';

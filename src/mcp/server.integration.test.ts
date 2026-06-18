@@ -14,7 +14,6 @@ let mcpProjectName: string;
 let mcpTargetSpecId: string;
 let mcpTargetSection: string;
 let parsedSpecId: string | null = null;
-let coordinationProjectId: string;
 
 async function mcpCall(
   url: string,
@@ -105,20 +104,6 @@ beforeAll(async () => {
     pool
   );
 
-  const coordinationProject = await pool.query<{ id: string }>(
-    `INSERT INTO projects (name) VALUES ('MCP coordination project') RETURNING id`
-  );
-  coordinationProjectId = coordinationProject.rows[0]?.id ?? '';
-  await pool.query(`INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`, [
-    coordinationProjectId,
-    mcpSpecId,
-  ]);
-  await pool.query(
-    `INSERT INTO required_sections (project_id, section, title, position)
-     VALUES ($1, '09 91 00', 'Painting', 1)`,
-    [coordinationProjectId]
-  );
-
   const refSuffix = randomUUID().slice(0, 8);
   mcpTargetSection = '09 91 00';
   mcpTargetSpecId = await createSpec({
@@ -140,9 +125,9 @@ beforeAll(async () => {
   );
   await pool.query(
     `INSERT INTO spec_references
-     (source_spec_id, source_paragraph_id, target_type, target_spec_section,
-      target_spec_id, reference_text)
-    VALUES ($1, '30000000-0000-4000-8000-000000000003', 'section', $2, $3, $4)`,
+       (source_spec_id, source_paragraph_id, target_type, target_spec_section,
+        target_spec_id, reference_text)
+     VALUES ($1, '30000000-0000-4000-8000-000000000003', 'section', $2, $3, $4)`,
     [mcpSpecId, mcpTargetSection, mcpTargetSpecId, 'MCP source cites painting']
   );
 
@@ -151,7 +136,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool.query('DELETE FROM projects WHERE id = $1', [coordinationProjectId]);
   await pool.query('DELETE FROM projects WHERE id = $1', [mcpProjectId]);
   await pool.query('DELETE FROM specs WHERE id = $1', [mcpTargetSpecId]);
   if (parsedSpecId) {
@@ -160,36 +144,6 @@ afterAll(async () => {
   await pool.query('DELETE FROM specs WHERE id = $1', [mcpSpecId]);
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err != null ? reject(err) : resolve()));
-  });
-});
-
-describe('tool: coordination_report', () => {
-  it('returns project coordination report JSON', async () => {
-    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
-      name: 'coordination_report',
-      arguments: { projectId: coordinationProjectId },
-    });
-    const b = body as Record<string, unknown>;
-    const result = b['result'] as Record<string, unknown>;
-    const content = result['content'] as { type: string; text: string }[];
-    const report = JSON.parse(content[0]!.text) as {
-      projectId: string;
-      summary: { total: number; presentNotRequired: number; requiredNotPresent: number };
-    };
-    expect(report.projectId).toBe(coordinationProjectId);
-    expect(report.summary.total).toBe(2);
-    expect(report.summary.presentNotRequired).toBe(1);
-    expect(report.summary.requiredNotPresent).toBe(1);
-  });
-
-  it('returns isError for unknown project', async () => {
-    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
-      name: 'coordination_report',
-      arguments: { projectId: '00000000-0000-0000-0000-000000000000' },
-    });
-    const b = body as Record<string, unknown>;
-    const result = b['result'] as Record<string, unknown>;
-    expect(result['isError']).toBe(true);
   });
 });
 
@@ -328,9 +282,7 @@ describe('tool: list_projects', () => {
     const result = b['result'] as Record<string, unknown>;
     const content = result['content'] as { type: string; text: string }[];
     const projects = JSON.parse(content[0]!.text) as { id: string; name: string }[];
-    expect(projects).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: mcpProjectId, name: mcpProjectName })])
-    );
+    expect(projects).toEqual(expect.arrayContaining([{ id: mcpProjectId, name: mcpProjectName }]));
   });
 });
 

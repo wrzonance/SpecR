@@ -6,8 +6,6 @@ vi.mock('../db/index.js', () => ({
   updateSpec: vi.fn(),
   getSpecLineage: vi.fn(),
   getSpecStyleSource: vi.fn(),
-  listSpecs: vi.fn(),
-  deleteSpec: vi.fn(),
 }));
 
 vi.mock('../lib/logger.js', () => ({
@@ -112,130 +110,6 @@ describe('getSpecHandler', () => {
     expect(res.status).toHaveBeenCalledWith(400);
     const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body['error']).toBe('missing spec id');
-  });
-});
-
-describe('listSpecsHandler', () => {
-  it('returns 200 with spec list entries', async () => {
-    const { listSpecs } = await import('../db/index.js');
-    vi.mocked(listSpecs).mockResolvedValueOnce([
-      { specId: 'abc', section: '09 29 00', title: 'Gypsum Board', nodeCount: 42 },
-      { specId: 'def', section: '09 22 00', title: 'Supports for Plaster', nodeCount: 17 },
-    ]);
-    const { listSpecsHandler } = await import('./specs.js');
-    const req = {} as unknown as Request;
-    const res = makeRes();
-    await listSpecsHandler(req, res as unknown as Response);
-    expect(res.status).toHaveBeenCalledWith(200);
-    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(body['success']).toBe(true);
-    const data = body['data'] as readonly Record<string, unknown>[];
-    expect(data).toHaveLength(2);
-    expect(data[0]?.['specId']).toBe('abc');
-    expect(data[0]?.['nodeCount']).toBe(42);
-  });
-
-  it('returns 200 with empty array when no specs exist', async () => {
-    const { listSpecs } = await import('../db/index.js');
-    vi.mocked(listSpecs).mockResolvedValueOnce([]);
-    const { listSpecsHandler } = await import('./specs.js');
-    const req = {} as unknown as Request;
-    const res = makeRes();
-    await listSpecsHandler(req, res as unknown as Response);
-    expect(res.status).toHaveBeenCalledWith(200);
-    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(body['data']).toEqual([]);
-  });
-
-  it('returns 500 on database error', async () => {
-    const { listSpecs } = await import('../db/index.js');
-    vi.mocked(listSpecs).mockRejectedValueOnce(new Error('db down'));
-    const { listSpecsHandler } = await import('./specs.js');
-    const req = {} as unknown as Request;
-    const res = makeRes();
-    await listSpecsHandler(req, res as unknown as Response);
-    expect(res.status).toHaveBeenCalledWith(500);
-    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(body['error']).toBe('internal server error');
-  });
-});
-
-describe('getSpecTreeHandler', () => {
-  it('returns 200 with tree and references when spec exists', async () => {
-    const { getSpecTree } = await import('../db/index.js');
-    vi.mocked(getSpecTree).mockResolvedValueOnce({
-      tree: {
-        id: 'abc',
-        section: '09 29 00',
-        title: 'Gypsum Board',
-        parts: [
-          {
-            id: 'p1',
-            type: 'part',
-            text: 'GENERAL',
-            children: [],
-            meta: {},
-          },
-        ],
-      },
-      references: [
-        {
-          id: 'ref-1',
-          sourceParagraphId: 'p1',
-          referenceText: '09 22 00',
-          targetSection: '09 22 00',
-          targetSpecId: 'def',
-          isResolved: true,
-          isBroken: false,
-        },
-      ],
-    });
-    const { getSpecTreeHandler } = await import('./specs.js');
-    const req = { params: { id: 'abc' } } as unknown as Request;
-    const res = makeRes();
-    await getSpecTreeHandler(req, res as unknown as Response);
-    expect(res.status).toHaveBeenCalledWith(200);
-    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(body['success']).toBe(true);
-    const data = body['data'] as Record<string, unknown>;
-    const tree = data['tree'] as Record<string, unknown>;
-    expect(tree['id']).toBe('abc');
-    expect((tree['parts'] as unknown[]).length).toBe(1);
-    const refs = data['references'] as readonly Record<string, unknown>[];
-    expect(refs[0]?.['targetSection']).toBe('09 22 00');
-    expect(refs[0]?.['isResolved']).toBe(true);
-  });
-
-  it('returns 404 when spec not found', async () => {
-    const { getSpecTree } = await import('../db/index.js');
-    vi.mocked(getSpecTree).mockResolvedValueOnce(null);
-    const { getSpecTreeHandler } = await import('./specs.js');
-    const req = { params: { id: 'missing' } } as unknown as Request;
-    const res = makeRes();
-    await getSpecTreeHandler(req, res as unknown as Response);
-    expect(res.status).toHaveBeenCalledWith(404);
-    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(body['error']).toBe('spec not found');
-  });
-
-  it('returns 400 when id param is missing', async () => {
-    const { getSpecTreeHandler } = await import('./specs.js');
-    const req = { params: {} } as unknown as Request;
-    const res = makeRes();
-    await getSpecTreeHandler(req, res as unknown as Response);
-    expect(res.status).toHaveBeenCalledWith(400);
-    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(body['error']).toBe('missing spec id');
-  });
-
-  it('returns 500 on database error', async () => {
-    const { getSpecTree } = await import('../db/index.js');
-    vi.mocked(getSpecTree).mockRejectedValueOnce(new Error('db down'));
-    const { getSpecTreeHandler } = await import('./specs.js');
-    const req = { params: { id: 'abc' } } as unknown as Request;
-    const res = makeRes();
-    await getSpecTreeHandler(req, res as unknown as Response);
-    expect(res.status).toHaveBeenCalledWith(500);
   });
 });
 

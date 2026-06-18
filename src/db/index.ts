@@ -28,9 +28,7 @@ export {
   updateSpec,
   createSpec,
   getSpecTree,
-  listSpecs,
   persistParsedSpec,
-  deleteSpec,
 } from './queries/specs.js';
 export type {
   SpecSummary,
@@ -39,12 +37,10 @@ export type {
   SpecTreeResult,
   SpecReference,
   OriginMeta,
-  SpecListEntry,
 } from './queries/specs.js';
 export {
   insertTree,
   getParagraphWithAncestors,
-  deleteParagraph,
   updateParagraphText,
 } from './queries/paragraphs.js';
 export type {
@@ -53,7 +49,6 @@ export type {
   UpdateParagraphResult,
 } from './queries/paragraphs.js';
 export {
-  deleteReference,
   insertRefs,
   getInboundReferences,
   getOutboundReferences,
@@ -63,11 +58,7 @@ export {
 export type { InboundReference, OutboundReference } from './queries/refs.js';
 export {
   createProject,
-  setProjectSources,
   findProjectById,
-  updateProject,
-  addSpecToProject,
-  removeSpecFromProject,
   listProjects,
   getBrokenRefs,
   InvalidSourceLibraryError,
@@ -80,8 +71,6 @@ export type {
   ProjectSource,
   BrokenRef,
   CreateProjectInput,
-  UpdateProjectInput,
-  AddSpecResult,
 } from './queries/projects.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
 export { getParagraphSnapshots, getCurrentParagraphSnapshots } from './queries/versions.js';
@@ -123,19 +112,12 @@ export {
   createLibrary,
   findLibraryById,
   findLibraryByName,
-  listLibrarySpecs,
   listLibraries,
   resolveDefaultLibraryId,
-  updateLibraryName,
   UFGS_REFERENCE_LIBRARY,
   DEFAULT_COMPANY_LIBRARY,
 } from './queries/libraries.js';
-export type {
-  Library,
-  LibraryTier,
-  CreateLibraryInput,
-  LibrarySpecEntry,
-} from './queries/libraries.js';
+export type { Library, LibraryTier, CreateLibraryInput } from './queries/libraries.js';
 export {
   addSectionToProject,
   removeSectionFromProject,
@@ -152,20 +134,6 @@ export {
   SpecNotInProjectError,
 } from './queries/packages.js';
 export type { PackageSummary, PackageWithSpecs, PackageSpecEntry } from './queries/packages.js';
-export {
-  setProjectRequiredSections,
-  setPackageRequiredSections,
-  listProjectRequiredSections,
-  listPackageRequiredSections,
-  getCoordinationReport,
-} from './queries/coordination.js';
-export type {
-  RequiredSectionInput,
-  RequiredSectionEntry,
-  CoordinationFinding,
-  CoordinationReportSummary,
-  CoordinationReport,
-} from './queries/coordination.js';
 export {
   createPackageRevision,
   getPackageRevision,

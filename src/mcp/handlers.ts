@@ -34,7 +34,7 @@ type ToolError = {
   readonly content: { readonly type: 'text'; readonly text: string }[];
 };
 type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
-export type ToolResult = ToolError | ToolOk;
+type ToolResult = ToolError | ToolOk;
 type ReferenceDirection = 'from' | 'to' | 'both';
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 

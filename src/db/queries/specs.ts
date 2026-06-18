@@ -73,40 +73,6 @@ export async function createSpec(input: CreateSpecInput, db: Queryable = pool): 
   }
 }
 
-export interface SpecListEntry {
-  readonly specId: string;
-  readonly section: string;
-  readonly title: string;
-  readonly nodeCount: number;
-}
-
-interface SpecListRow {
-  readonly id: string;
-  readonly section: string | null;
-  readonly title: string | null;
-  readonly node_count: string;
-}
-
-export async function listSpecs(): Promise<readonly SpecListEntry[]> {
-  try {
-    const result = await pool.query<SpecListRow>(
-      `SELECT s.id, s.section, s.title, COUNT(p.id) AS node_count
-       FROM specs s
-       LEFT JOIN paragraphs p ON p.spec_id = s.id
-       GROUP BY s.id, s.section, s.title
-       ORDER BY s.section`
-    );
-    return result.rows.map((row) => ({
-      specId: row.id,
-      section: row.section ?? '',
-      title: row.title ?? '',
-      nodeCount: Number(row.node_count),
-    }));
-  } catch (err) {
-    throw new DatabaseError('failed to list specs', { cause: err });
-  }
-}
-
 export async function findSpecById(id: string): Promise<SpecTree | null> {
   try {
     const result = await pool.query<SpecRow>('SELECT id, section, title FROM specs WHERE id = $1', [
@@ -121,11 +87,6 @@ export async function findSpecById(id: string): Promise<SpecTree | null> {
 }
 
 export interface SpecReference {
-  // Stable identity of the spec_references row — lets clients delete one
-  // specific reference, and lets the editor map a citation back to the
-  // paragraph that contains it (source_paragraph_id) for removal detection.
-  readonly id: string;
-  readonly sourceParagraphId: string;
   readonly referenceText: string;
   readonly targetSection: string | null;
   readonly targetSpecId: string | null;
@@ -234,14 +195,12 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
     );
 
     const refResult = await pool.query<{
-      id: string;
-      source_paragraph_id: string;
       reference_text: string;
       target_spec_section: string | null;
       target_spec_id: string | null;
       is_broken: boolean;
     }>(
-      `SELECT id, source_paragraph_id, reference_text, target_spec_section, target_spec_id, is_broken
+      `SELECT reference_text, target_spec_section, target_spec_id, is_broken
        FROM spec_references WHERE source_spec_id = $1`,
       [id]
     );
@@ -254,8 +213,6 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
     };
 
     const references: readonly SpecReference[] = refResult.rows.map((row) => ({
-      id: row.id,
-      sourceParagraphId: row.source_paragraph_id,
       referenceText: row.reference_text,
       targetSection: row.target_spec_section,
       targetSpecId: row.target_spec_id,
@@ -292,31 +249,10 @@ export async function updateSpec(id: string, input: UpdateSpecInput): Promise<Sp
   }
 }
 
-// Hard-deletes a spec. Cascades (per schema) to its paragraphs, their
-// spec_references and paragraph_versions, and any spec_references whose
-// SOURCE is this spec. References from OTHER specs that pointed here have
-// target_spec_id set NULL (ON DELETE SET NULL) — their is_broken flag is the
-// caller's concern (removeSpecFromProject sets it before this runs).
-// Throws a DatabaseError wrapping pg 23503 if the spec is still a member of a
-// project (project_specs.spec_id is ON DELETE RESTRICT). Returns false when no
-// spec matched the id.
-export async function deleteSpec(id: string): Promise<boolean> {
-  try {
-    const result = await pool.query<{ id: string }>(
-      `DELETE FROM specs WHERE id = $1 RETURNING id`,
-      [id]
-    );
-    return result.rows.length > 0;
-  } catch (err) {
-    throw new DatabaseError('failed to delete spec', { cause: err });
-  }
-}
-
 export async function persistParsedSpec(result: {
   readonly tree: SpecTree;
   readonly refs: readonly SecRef[];
   readonly originMeta?: OriginMeta;
-  readonly libraryId?: string;
 }): Promise<string> {
   const client = await pool.connect();
   try {
@@ -324,7 +260,7 @@ export async function persistParsedSpec(result: {
     // eslint-disable-next-line sonarjs/todo-tag
     // TODO: source should be a top-level SpecTree field — parts[0].meta.source is a stopgap
     const source = result.tree.parts[0]?.meta.source ?? 'unknown';
-    const libraryId = result.libraryId ?? (await resolveDefaultLibraryId(source, client));
+    const libraryId = await resolveDefaultLibraryId(source, client);
     const res = await client.query<{ id: string }>(
       `INSERT INTO specs (section, title, source, library_id, origin_meta)
        VALUES ($1, $2, $3, $4, $5::jsonb)

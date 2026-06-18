@@ -35,14 +35,6 @@ async function postJSON(path: string, body: unknown): Promise<Response> {
   });
 }
 
-async function patchJSON(path: string, body: unknown): Promise<Response> {
-  return fetch(`${baseUrl}${path}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-}
-
 async function getLibraryId(name: string): Promise<string> {
   const r = await pool.query<{ id: string }>(`SELECT id FROM libraries WHERE name = $1`, [name]);
   if (!r.rows[0]) throw new Error(`library ${name} missing — run migrations`);
@@ -193,24 +185,6 @@ describe('POST /projects', () => {
   });
 });
 
-describe('GET /projects', () => {
-  it('returns project ids, names, and section-number formats', async () => {
-    const res = await fetch(`${baseUrl}/projects`);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(res.status).toBe(200);
-    const projects = body['data'] as Array<Record<string, unknown>>;
-    expect(projects).toEqual(
-      expect.arrayContaining([
-        {
-          id: testProjectId,
-          name: 'Phase 1b Integration Test',
-          sectionNumberFormat: 'canonical',
-        },
-      ])
-    );
-  });
-});
-
 describe('GET /projects/:id', () => {
   it('returns 200 with toc containing both specs in position order', async () => {
     const res = await fetch(`${baseUrl}/projects/${testProjectId}`);
@@ -218,7 +192,6 @@ describe('GET /projects/:id', () => {
     expect(res.status).toBe(200);
     const data = body['data'] as Record<string, unknown>;
     expect(data['projectId']).toBe(testProjectId);
-    expect(data['sectionNumberFormat']).toBe('canonical');
     const toc = data['toc'] as Array<Record<string, unknown>>;
     expect(toc.length).toBe(2);
     expect(toc[0]?.['specId']).toBe(specA);
@@ -229,43 +202,6 @@ describe('GET /projects/:id', () => {
 
   it('returns 404 for unknown project', async () => {
     const res = await fetch(`${baseUrl}/projects/00000000-0000-0000-0000-000000000000`);
-    expect(res.status).toBe(404);
-  });
-});
-
-describe('PATCH /projects/:id', () => {
-  it('renames the project and stores section-number format', async () => {
-    const res = await patchJSON(`/projects/${testProjectId}`, {
-      name: 'Phase 1b Integration Test Renamed',
-      sectionNumberFormat: 'dots',
-    });
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(res.status).toBe(200);
-    const data = body['data'] as Record<string, unknown>;
-    expect(data['name']).toBe('Phase 1b Integration Test Renamed');
-    expect(data['sectionNumberFormat']).toBe('dots');
-
-    const stored = await pool.query<{ name: string; section_number_format: string }>(
-      'SELECT name, section_number_format FROM projects WHERE id = $1',
-      [testProjectId]
-    );
-    expect(stored.rows[0]).toEqual({
-      name: 'Phase 1b Integration Test Renamed',
-      section_number_format: 'dots',
-    });
-  });
-
-  it('rejects unknown section-number format', async () => {
-    const res = await patchJSON(`/projects/${testProjectId}`, {
-      sectionNumberFormat: 'slashes',
-    });
-    expect(res.status).toBe(422);
-  });
-
-  it('returns 404 for unknown project', async () => {
-    const res = await patchJSON('/projects/00000000-0000-0000-0000-000000000000', {
-      name: 'Missing',
-    });
     expect(res.status).toBe(404);
   });
 });

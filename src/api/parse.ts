@@ -18,7 +18,6 @@ import { SectionNumberSchema, parseSectionNumberCandidate } from '../lib/section
 interface ParseBody {
   readonly section?: string;
   readonly title?: string;
-  readonly libraryId?: string;
 }
 
 // Multipart text fields from multer. Non-strict (unknown keys stripped) to
@@ -26,7 +25,6 @@ interface ParseBody {
 const ParseBodySchema = z.object({
   section: z.string().exactOptional(),
   title: z.string().exactOptional(),
-  libraryId: z.uuid().exactOptional(),
 });
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -168,7 +166,6 @@ async function processParseJob(
       tree: finalTree,
       refs,
       originMeta: buildOriginMeta(filename, buffer),
-      ...(body.libraryId ? { libraryId: body.libraryId } : {}),
     });
     const nodeCount = countNodes(finalTree.parts);
 

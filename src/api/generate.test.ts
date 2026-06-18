@@ -131,7 +131,6 @@ describe('generateManualHandler', () => {
       projectId: PROJECT_ID,
       name: 'Empty',
       description: null,
-      sectionNumberFormat: 'canonical',
       sources: [],
       toc: [],
     });
@@ -151,7 +150,6 @@ describe('generateManualHandler', () => {
       projectId: PROJECT_ID,
       name: 'Acme HQ',
       description: null,
-      sectionNumberFormat: 'canonical',
       sources: [],
       toc: [
         {

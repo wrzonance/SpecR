@@ -1,10 +1,6 @@
 import { z } from 'zod';
 import type { SpecNode } from './types.js';
-import {
-  SectionNumberFormatSchema,
-  SectionNumberInputSchema,
-  SectionNumberSchema,
-} from '../lib/section-number.js';
+import { SectionNumberInputSchema, SectionNumberSchema } from '../lib/section-number.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -254,40 +250,6 @@ export const CreateProjectBodySchema = z.object({
 
 export type CreateProjectBody = z.infer<typeof CreateProjectBodySchema>;
 
-export const PatchProjectBodySchema = z
-  .object({
-    name: z.string().check(z.minLength(1)).exactOptional(),
-    sectionNumberFormat: SectionNumberFormatSchema.exactOptional(),
-  })
-  .check((ctx) => {
-    if (ctx.value.name === undefined && ctx.value.sectionNumberFormat === undefined) {
-      ctx.issues.push({
-        code: 'custom',
-        input: ctx.value,
-        message: 'provide at least one project setting',
-      });
-    }
-  });
-
-export type PatchProjectBody = z.infer<typeof PatchProjectBodySchema>;
-
-export const SetProjectSourcesBodySchema = z.object({
-  sourceLibraryIds: z
-    .array(z.uuid())
-    .check(z.minLength(1))
-    .check((ctx) => {
-      if (new Set(ctx.value).size !== ctx.value.length) {
-        ctx.issues.push({
-          code: 'custom',
-          input: ctx.value,
-          message: 'sourceLibraryIds must not contain duplicates',
-        });
-      }
-    }),
-});
-
-export type SetProjectSourcesBody = z.infer<typeof SetProjectSourcesBodySchema>;
-
 export const AddSectionToProjectBodySchema = z.object({
   // Tolerant input; normalized before the query layer sees it.
   section: SectionNumberInputSchema,
@@ -337,29 +299,6 @@ export const SetPackageSpecsBodySchema = z.object({
 });
 
 export type SetPackageSpecsBody = z.infer<typeof SetPackageSpecsBodySchema>;
-
-// Required-section coordination targets (#102). A project/package declares which
-// CSI sections it must contain; the coordination report flags absent or extra
-// sections. Section values are canonical-shape and must be unique within a set.
-const RequiredSectionInputSchema = z.object({
-  section: SectionNumberSchema,
-  title: z.string().check(z.minLength(1)).exactOptional(),
-});
-
-export const SetRequiredSectionsBodySchema = z.object({
-  sections: z.array(RequiredSectionInputSchema).check((ctx) => {
-    const sectionValues = ctx.value.map((item) => item.section);
-    if (new Set(sectionValues).size !== sectionValues.length) {
-      ctx.issues.push({
-        code: 'custom',
-        input: ctx.value,
-        message: 'sections must not contain duplicate section values',
-      });
-    }
-  }),
-});
-
-export type SetRequiredSectionsBody = z.infer<typeof SetRequiredSectionsBodySchema>;
 
 // ── Style properties (ADR-021): OOXML-faithful, OPEN (unknown JSON keys preserved) ──
 // StyleNodeType is the subset of NodeType that carries visual style —

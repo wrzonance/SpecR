@@ -24,13 +24,6 @@ export interface CreateLibraryInput {
   readonly parentLibraryId?: string;
 }
 
-export interface LibrarySpecEntry {
-  readonly specId: string;
-  readonly section: string;
-  readonly title: string;
-  readonly nodeCount: number;
-}
-
 interface LibraryRow {
   readonly id: string;
   readonly tier: LibraryTier;
@@ -38,13 +31,6 @@ interface LibraryRow {
   readonly owner: string | null;
   readonly parent_library_id: string | null;
   readonly created_at: Date;
-}
-
-interface LibrarySpecRow {
-  readonly id: string;
-  readonly section: string | null;
-  readonly title: string | null;
-  readonly node_count: string;
 }
 
 interface Queryable {
@@ -121,52 +107,6 @@ export async function listLibraries(db: Queryable = pool): Promise<readonly Libr
     return result.rows.map(mapLibraryRow);
   } catch (err) {
     throw new DatabaseError('listLibraries: query failed', { cause: err });
-  }
-}
-
-export async function updateLibraryName(
-  id: string,
-  name: string,
-  db: Queryable = pool
-): Promise<Library | null> {
-  try {
-    const result = await db.query<LibraryRow>(
-      `UPDATE libraries SET name = $1, owner = CASE WHEN tier = 'client' THEN $1 ELSE owner END
-       WHERE id = $2
-       RETURNING ${LIBRARY_COLUMNS}`,
-      [name, id]
-    );
-    const row = result.rows[0];
-    return row ? mapLibraryRow(row) : null;
-  } catch (err) {
-    throw new DatabaseError(`updateLibraryName: query failed for ${id}`, { cause: err });
-  }
-}
-
-export async function listLibrarySpecs(
-  libraryId: string,
-  db: Queryable = pool
-): Promise<readonly LibrarySpecEntry[] | null> {
-  try {
-    const lib = await db.query('SELECT 1 FROM libraries WHERE id = $1', [libraryId]);
-    if (lib.rowCount === 0) return null;
-    const result = await db.query<LibrarySpecRow>(
-      `SELECT s.id, s.section, s.title, COUNT(p.id) AS node_count
-       FROM specs s
-       LEFT JOIN paragraphs p ON p.spec_id = s.id
-       WHERE s.library_id = $1
-       GROUP BY s.id, s.section, s.title
-       ORDER BY s.section, s.title`,
-      [libraryId]
-    );
-    return result.rows.map((row) => ({
-      specId: row.id,
-      section: row.section ?? '',
-      title: row.title ?? '',
-      nodeCount: Number(row.node_count),
-    }));
-  } catch (err) {
-    throw new DatabaseError(`listLibrarySpecs: query failed for ${libraryId}`, { cause: err });
   }
 }
 

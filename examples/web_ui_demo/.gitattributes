@@ -4,6 +4,3 @@
 
 # Shell entry points need LF everywhere, even on Windows checkouts
 *.sh text eol=lf
-
-# UFGS reference fixtures are latin1/CP1252 — never normalize
-docs/references/UFGS/** -text

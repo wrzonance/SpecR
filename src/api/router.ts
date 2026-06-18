@@ -1,32 +1,18 @@
 import { type Router as RouterType, Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { healthHandler } from './health.js';
-import {
-  deleteSpecHandler,
-  getSpecHandler,
-  getSpecLineageHandler,
-  getSpecTreeHandler,
-  listSpecsHandler,
-  updateSpecHandler,
-} from './specs.js';
+import { getSpecHandler, getSpecLineageHandler, updateSpecHandler } from './specs.js';
 import { setStyleSourceHandler, clearStyleSourceHandler } from './style-source.js';
-import { deleteParagraphHandler, updateParagraphHandler } from './paragraphs.js';
+import { updateParagraphHandler } from './paragraphs.js';
 import { acquireLockHandler, releaseLockHandler, getLockHandler } from './locks.js';
-import {
-  deleteReferenceHandler,
-  getInboundReferencesHandler,
-  getOutboundReferencesHandler,
-} from './references.js';
 import {
   createProjectHandler,
   getProjectHandler,
-  listProjectsHandler,
-  patchProjectHandler,
-  setProjectSourcesHandler,
   addSectionToProjectHandler,
   removeSectionFromProjectHandler,
   getBrokenRefsHandler,
 } from './projects.js';
+import { getInboundReferencesHandler, getOutboundReferencesHandler } from './references.js';
 import {
   getLibraryDivisionGeneralSpecHandler,
   setLibraryDivisionGeneralSpecHandler,
@@ -39,36 +25,20 @@ import {
   setPackageSpecsHandler,
   deletePackageHandler,
 } from './packages.js';
-import {
-  getCoordinationReportHandler,
-  getPackageRequiredSectionsHandler,
-  getProjectRequiredSectionsHandler,
-  setPackageRequiredSectionsHandler,
-  setProjectRequiredSectionsHandler,
-} from './coordination.js';
 import { createRevisionHandler, getRevisionHandler } from './revisions.js';
-import {
-  createClientLibraryHandler,
-  listLibrariesHandler,
-  listLibrarySpecsHandler,
-  renameLibraryHandler,
-} from './libraries.js';
 import { validateBody } from './middleware/validate.js';
 import {
   PatchSpecBodySchema,
   CreateProjectBodySchema,
-  PatchProjectBodySchema,
-  SetProjectSourcesBodySchema,
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
-  SetRequiredSectionsBodySchema,
   CreateRevisionBodySchema,
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
-  SetDivisionGeneralSpecBodySchema,
   UpsertStyleRulesBodySchema,
   SetStyleSourceBodySchema,
+  SetDivisionGeneralSpecBodySchema,
   PutRevisionNomenclatureBodySchema,
   CloneRevisionNomenclatureBodySchema,
 } from '../ast/index.js';
@@ -110,20 +80,10 @@ const parseRateLimit = rateLimit({
 export const router: RouterType = Router();
 
 router.get('/health', healthHandler);
-router.get('/libraries', listLibrariesHandler);
-router.post('/libraries/clients', createClientLibraryHandler);
-router.patch('/libraries/:id', renameLibraryHandler);
-router.get('/libraries/:id/specs', listLibrarySpecsHandler);
-router.get('/specs', listSpecsHandler);
 router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
-router.get('/specs/:id/tree', getSpecTreeHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
-// Demo edit mutations (mockup): delete a spec, delete/edit a paragraph, delete a reference.
-router.delete('/specs/:id', deleteSpecHandler);
-router.delete('/specs/:id/paragraphs/:paragraphId', deleteParagraphHandler);
 router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
-router.delete('/specs/:id/references/:refId', deleteReferenceHandler);
 router.get('/specs/:id/lock', getLockHandler);
 router.put('/specs/:id/lock', acquireLockHandler);
 router.delete('/specs/:id/lock', releaseLockHandler);
@@ -136,23 +96,9 @@ router.delete('/specs/:id/style-source', clearStyleSourceHandler);
 router.post('/specs/:id/generate', generateHandler);
 router.post('/specs/:id/diff', upload.single('file'), diffHandler);
 router.post('/specs/:id/merge', mergeHandler);
-router.get('/projects', listProjectsHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects/:id', getProjectHandler);
 router.post('/projects/:id/generate', generateManualHandler);
-router.patch('/projects/:id', validateBody(PatchProjectBodySchema), patchProjectHandler);
-router.put(
-  '/projects/:id/sources',
-  validateBody(SetProjectSourcesBodySchema),
-  setProjectSourcesHandler
-);
-router.get('/projects/:id/coordination-report', getCoordinationReportHandler);
-router.get('/projects/:id/required-sections', getProjectRequiredSectionsHandler);
-router.put(
-  '/projects/:id/required-sections',
-  validateBody(SetRequiredSectionsBodySchema),
-  setProjectRequiredSectionsHandler
-);
 router.get(
   '/libraries/:libraryId/divisions/:division/general-spec',
   getLibraryDivisionGeneralSpecHandler
@@ -183,12 +129,6 @@ router.get('/projects/:id/specs/:specId/references', getOutboundReferencesHandle
 router.post('/projects/:id/packages', validateBody(CreatePackageBodySchema), createPackageHandler);
 router.get('/projects/:id/packages', listPackagesHandler);
 router.put('/packages/:id/specs', validateBody(SetPackageSpecsBodySchema), setPackageSpecsHandler);
-router.get('/packages/:id/required-sections', getPackageRequiredSectionsHandler);
-router.put(
-  '/packages/:id/required-sections',
-  validateBody(SetRequiredSectionsBodySchema),
-  setPackageRequiredSectionsHandler
-);
 router.delete('/packages/:id', deletePackageHandler);
 router.post(
   '/packages/:id/revisions',
@@ -197,8 +137,7 @@ router.post(
 );
 router.get('/revisions/:id', getRevisionHandler);
 router.post('/revisions/:id/generate', generateRevisionHandler);
-// Mockup fixture ingest is intentionally unlimited for stakeholder demos.
-router.post('/parse', upload.single('file'), parseHandler);
+router.post('/parse', parseRateLimit, upload.single('file'), parseHandler);
 router.get('/parse/jobs/:jobId', parseJobHandler);
 router.post('/templates/import', parseRateLimit, upload.single('file'), importTemplateHandler);
 router.post('/templates', validateBody(CreateTemplateBodySchema), createTemplateHandler);

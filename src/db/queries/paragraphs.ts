@@ -150,23 +150,6 @@ export async function getParagraphWithAncestors(
   }
 }
 
-// Deletes one paragraph (scoped to its spec for safety). Per the schema, this
-// CASCADES to the paragraph's child paragraphs, its spec_references
-// (source_paragraph_id), its paragraph_versions, and its revit mappings — so
-// "delete the paragraph that contains a citation" removes the citation too,
-// deterministically, in a single statement. Returns false if nothing matched.
-export async function deleteParagraph(id: string, specId: string): Promise<boolean> {
-  try {
-    const result = await pool.query<{ id: string }>(
-      `DELETE FROM paragraphs WHERE id = $1 AND spec_id = $2 RETURNING id`,
-      [id, specId]
-    );
-    return result.rows.length > 0;
-  } catch (err) {
-    throw new DatabaseError(`deleteParagraph: failed for ${id}`, { cause: err });
-  }
-}
-
 interface SubtreeRow {
   readonly id: string;
   readonly parentId: string | null;

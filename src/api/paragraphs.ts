@@ -1,36 +1,9 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { UpdateParagraphBodySchema } from '../ast/index.js';
-import { deleteParagraph, updateParagraphText } from '../db/index.js';
+import { updateParagraphText } from '../db/index.js';
 import { gateErrorResponse } from './edit-gate-response.js';
 import { logger } from '../lib/logger.js';
-
-// DELETE /specs/:id/paragraphs/:paragraphId
-// Removes a paragraph; the schema cascade also drops any references it contained
-// and any descendant paragraphs (Feature A: "delete the paragraph + its citation").
-export async function deleteParagraphHandler(req: Request, res: Response): Promise<void> {
-  const specId = req.params['id'];
-  const paragraphId = req.params['paragraphId'];
-  if (!specId || typeof specId !== 'string') {
-    res.status(400).json({ success: false, error: 'missing spec id' });
-    return;
-  }
-  if (!paragraphId || typeof paragraphId !== 'string') {
-    res.status(400).json({ success: false, error: 'missing paragraph id' });
-    return;
-  }
-  try {
-    const removed = await deleteParagraph(paragraphId, specId);
-    if (!removed) {
-      res.status(404).json({ success: false, error: 'paragraph not found' });
-      return;
-    }
-    res.status(200).json({ success: true, data: { specId, paragraphId } });
-  } catch (err) {
-    logger.error({ err }, 'delete paragraph failed');
-    res.status(500).json({ success: false, error: 'internal server error' });
-  }
-}
 
 /**
  * PATCH /specs/:id/paragraphs/:nodeId — update a single paragraph's text by UUID

@@ -662,28 +662,6 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /projects:
-    get:
-      operationId: listProjects
-      summary: List projects
-      tags: [projects]
-      responses:
-        '200':
-          description: Projects ordered by name
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/SuccessResponse'
-                  - type: object
-                    required: [data]
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/ProjectListItem'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
     post:
       operationId: createProject
       summary: Create a project
@@ -759,47 +737,6 @@ paths:
                         $ref: '#/components/schemas/ProjectWithToc'
         '404':
           $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-    patch:
-      operationId: patchProject
-      summary: Update project settings
-      tags: [projects]
-      parameters:
-        - $ref: '#/components/parameters/ProjectId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              minProperties: 1
-              properties:
-                name:
-                  type: string
-                  minLength: 1
-                sectionNumberFormat:
-                  type: string
-                  enum: [canonical, dots, compact]
-                  description: Project default presentation format for section numbers
-      responses:
-        '200':
-          description: Project updated
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/SuccessResponse'
-                  - type: object
-                    required: [data]
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/ProjectSummary'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -2858,22 +2795,9 @@ components:
 
     # ── Projects ───────────────────────────────────────────────────────────────
 
-    ProjectListItem:
-      type: object
-      required: [id, name, sectionNumberFormat]
-      properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        sectionNumberFormat:
-          type: string
-          enum: [canonical, dots, compact]
-
     ProjectSummary:
       type: object
-      required: [projectId, name, description, sectionNumberFormat, sources]
+      required: [projectId, name, description, sources]
       properties:
         projectId:
           type: string
@@ -2882,9 +2806,6 @@ components:
           type: string
         description:
           type: [string, 'null']
-        sectionNumberFormat:
-          type: string
-          enum: [canonical, dots, compact]
         sources:
           type: array
           description: Ordered source libraries (priority ascending)
@@ -2906,7 +2827,7 @@ components:
 
     ProjectWithToc:
       type: object
-      required: [projectId, name, description, sectionNumberFormat, sources, toc]
+      required: [projectId, name, description, sources, toc]
       properties:
         projectId:
           type: string
@@ -2915,9 +2836,6 @@ components:
           type: string
         description:
           type: [string, 'null']
-        sectionNumberFormat:
-          type: string
-          enum: [canonical, dots, compact]
         sources:
           type: array
           description: Ordered source libraries (priority ascending)
