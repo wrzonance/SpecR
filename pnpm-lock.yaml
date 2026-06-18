@@ -104,6 +104,9 @@ importers:
       depcheck:
         specifier: ^1.0.0
         version: 1.4.7
+      dotenv:
+        specifier: ^16.4.7
+        version: 16.4.7
       eslint:
         specifier: ^9.0.0
         version: 9.39.4
