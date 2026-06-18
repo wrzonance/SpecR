@@ -29,6 +29,18 @@ describe('ilvlToNodeType', () => {
     it('maps ilvl 10 to pr7', () => expect(ilvlToNodeType(10, 3)).toBe('pr7'));
     it('maps ilvl 11+ to continuation', () => expect(ilvlToNodeType(11, 3)).toBe('continuation'));
   });
+
+  // KNOWN AMBIGUITY: Word numbering caps at nine levels, so the AST sequence ends
+  // at pr7. DOCX ilvls past the sequence all map to 'continuation' — distinct
+  // source depths collapse to one type, so the original ilvl is not recoverable
+  // on round-trip. ADR-027 records this as deliberately lossy.
+  describe('KNOWN AMBIGUITY: ilvls beyond pr7 collapse to continuation (lossy)', () => {
+    it('ARCAT-style: ilvl 9, 10, 11 all collapse to continuation', () => {
+      expect(ilvlToNodeType(9, 1)).toBe('continuation');
+      expect(ilvlToNodeType(10, 1)).toBe('continuation');
+      expect(ilvlToNodeType(11, 1)).toBe('continuation');
+    });
+  });
 });
 
 describe('ilvl maps — documentation completeness', () => {

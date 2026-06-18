@@ -299,6 +299,57 @@ describe('parseSec — SPT content nodes', () => {
     expect(pr6?.type).toBe('pr6');
   });
 
+  // KNOWN AMBIGUITY: .SEC imposes no nesting cap, but the AST / Word numbering
+  // model stops at pr7. SPT depths >= 7 all saturate to pr7 (sptNodeType default
+  // branch), so distinct source depths collapse to a single type and the original
+  // depth is not recoverable on round-trip. ADR-027 records this as deliberately
+  // lossy until a future inference-conflict workflow handles deeper tiers.
+  it('KNOWN AMBIGUITY: SEC SPT depths beyond pr7 saturate to pr7 (lossy)', () => {
+    const xml = `<?xml version="1.0"?>
+<SEC>
+  <SCN>SECTION 01 57 19</SCN>
+  <STL>TEMPORARY ENVIRONMENTAL CONTROLS</STL>
+  <PRT><TTL>PART 1 GENERAL</TTL>
+    <SPT><TTL>Article</TTL>
+      <SPT><TTL>Tier 1</TTL>
+        <SPT><TTL>Tier 2</TTL>
+          <SPT><TTL>Tier 3</TTL>
+            <SPT><TTL>Tier 4</TTL>
+              <SPT><TTL>Tier 5</TTL>
+                <SPT><TTL>Tier 6</TTL>
+                  <SPT><TTL>Tier 7</TTL>
+                    <SPT><TTL>Tier 8</TTL>
+                      <SPT><TTL>Tier 9</TTL></SPT>
+                    </SPT>
+                  </SPT>
+                </SPT>
+              </SPT>
+            </SPT>
+          </SPT>
+        </SPT>
+      </SPT>
+    </SPT>
+  </PRT>
+</SEC>`;
+    const { tree } = parseSec(xml);
+    const article = tree.parts[0]?.children[0];
+    const pr1 = childNamed(article, 'Tier 1');
+    const pr2 = childNamed(pr1, 'Tier 2');
+    const pr3 = childNamed(pr2, 'Tier 3');
+    const pr4 = childNamed(pr3, 'Tier 4');
+    const pr5 = childNamed(pr4, 'Tier 5');
+    const pr6 = childNamed(pr5, 'Tier 6');
+    const depth7 = childNamed(pr6, 'Tier 7');
+    const depth8 = childNamed(depth7, 'Tier 8');
+    const depth9 = childNamed(depth8, 'Tier 9');
+
+    expect(pr6?.type).toBe('pr6');
+    // depth 7 is the last distinct tier; 8 and 9 collapse onto it (lossy)
+    expect(depth7?.type).toBe('pr7');
+    expect(depth8?.type).toBe('pr7');
+    expect(depth9?.type).toBe('pr7');
+  });
+
   it('regression: deep valid SEC fixture contains pr6 environmental-control items', () => {
     const xml = readFileSync(
       resolve(process.cwd(), 'tests/fixtures/sec/deep-nesting.SEC'),
