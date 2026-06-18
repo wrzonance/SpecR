@@ -126,75 +126,6 @@ export const CloneConventionBodySchema = z.object({
 
 export type CloneConventionBody = z.infer<typeof CloneConventionBodySchema>;
 
-// ── Revision nomenclature profiles (ADR-025 / #209) ──────────────────────────
-// Project-scoped, user-defined taxonomy and templates. Every nested object stays
-// open so future dashboard/header-footer keys round-trip through JSONB.
-export const RevisionDateSchema = z.iso.date();
-
-const RevisionTypeFormatSchema = z
-  .object({
-    displayName: z.string().check(z.minLength(1)).exactOptional(),
-    number: z.string().check(z.minLength(1)).exactOptional(),
-  })
-  .catchall(JsonValue);
-
-const RevisionTypeFieldSchema = z
-  .object({
-    key: z.string().check(z.minLength(1)),
-    kind: z.enum(['string', 'integer', 'number', 'date', 'boolean', 'json']).exactOptional(),
-    required: z.boolean().exactOptional(),
-    sequence: z.string().check(z.minLength(1)).exactOptional(),
-  })
-  .catchall(JsonValue);
-
-export const RevisionNomenclatureTypeSchema = z
-  .object({
-    key: z.string().check(z.minLength(1)),
-    name: z.string().check(z.minLength(1)).exactOptional(),
-    format: RevisionTypeFormatSchema.exactOptional(),
-    fields: z.array(RevisionTypeFieldSchema).exactOptional(),
-  })
-  .catchall(JsonValue);
-
-export const RevisionNomenclatureTypesSchema = z
-  .array(RevisionNomenclatureTypeSchema)
-  .check((ctx) => {
-    const keys = ctx.value.map((type) => type.key);
-    if (new Set(keys).size !== keys.length) {
-      ctx.issues.push({
-        code: 'custom',
-        input: ctx.value,
-        message: 'revision type keys must not contain duplicates',
-      });
-    }
-  });
-
-export type RevisionNomenclatureType = z.infer<typeof RevisionNomenclatureTypeSchema>;
-export type RevisionNomenclatureTypes = z.infer<typeof RevisionNomenclatureTypesSchema>;
-
-export const PutRevisionNomenclatureBodySchema = z.object({
-  name: z.string().check(z.minLength(1)),
-  types: RevisionNomenclatureTypesSchema,
-});
-
-export type PutRevisionNomenclatureBody = z.infer<typeof PutRevisionNomenclatureBodySchema>;
-
-export const CloneRevisionNomenclatureBodySchema = z.object({
-  sourceId: z.uuid(),
-});
-
-export type CloneRevisionNomenclatureBody = z.infer<typeof CloneRevisionNomenclatureBodySchema>;
-
-export const RevisionAttributesSchema = z
-  .object({
-    number: z.union([z.string().check(z.minLength(1)), z.number()]).exactOptional(),
-    title: z.string().check(z.minLength(1)).exactOptional(),
-    phase: z.string().check(z.minLength(1)).exactOptional(),
-  })
-  .catchall(JsonValue);
-
-export type RevisionAttributes = z.infer<typeof RevisionAttributesSchema>;
-
 // Effective editability surfaced on a classified paragraph (#134 / O-7). `value`
 // is the effective verdict (override ?? machine); `confidence`/`evidence` are the
 // machine's why-chain (kept readable even under an override, for the O-15
@@ -372,31 +303,6 @@ export const SetPackageSpecsBodySchema = z.object({
 });
 
 export type SetPackageSpecsBody = z.infer<typeof SetPackageSpecsBodySchema>;
-
-// Immutable package revision snapshot (ADR-015 D5 + ADR-025). The legacy label
-// body remains accepted; structured writes use a profile-defined type plus an
-// open attributes bag.
-const LegacyCreateRevisionBodySchema = z
-  .object({
-    label: z.string().check(z.minLength(1)),
-  })
-  .strict();
-
-const StructuredCreateRevisionBodySchema = z
-  .object({
-    type: z.string().check(z.minLength(1)),
-    date: RevisionDateSchema.exactOptional(),
-    sortOrder: z.number().int().positive().exactOptional(),
-    attributes: RevisionAttributesSchema.exactOptional(),
-  })
-  .strict();
-
-export const CreateRevisionBodySchema = z.union([
-  LegacyCreateRevisionBodySchema,
-  StructuredCreateRevisionBodySchema,
-]);
-
-export type CreateRevisionBody = z.infer<typeof CreateRevisionBodySchema>;
 
 // ── Style properties (ADR-021): OOXML-faithful, OPEN (unknown JSON keys preserved) ──
 // StyleNodeType is the subset of NodeType that carries visual style —

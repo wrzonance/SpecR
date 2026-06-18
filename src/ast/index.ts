@@ -28,13 +28,6 @@ export {
   SetDivisionGeneralSpecBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
-  CreateRevisionBodySchema,
-  RevisionNomenclatureTypeSchema,
-  RevisionNomenclatureTypesSchema,
-  PutRevisionNomenclatureBodySchema,
-  CloneRevisionNomenclatureBodySchema,
-  RevisionDateSchema,
-  RevisionAttributesSchema,
   AcquireLockBodySchema,
   ReleaseLockBodySchema,
 } from './schemas.js';
@@ -45,15 +38,26 @@ export type {
   SetDivisionGeneralSpecBody,
   CreatePackageBody,
   SetPackageSpecsBody,
-  CreateRevisionBody,
+  AcquireLockBody,
+  ReleaseLockBody,
+} from './schemas.js';
+export {
+  RevisionDateSchema,
+  RevisionNomenclatureTypeSchema,
+  RevisionNomenclatureTypesSchema,
+  PutRevisionNomenclatureBodySchema,
+  CloneRevisionNomenclatureBodySchema,
+  RevisionAttributesSchema,
+  CreateRevisionBodySchema,
+} from './revision-schemas.js';
+export type {
   RevisionNomenclatureType,
   RevisionNomenclatureTypes,
   PutRevisionNomenclatureBody,
   CloneRevisionNomenclatureBody,
   RevisionAttributes,
-  AcquireLockBody,
-  ReleaseLockBody,
-} from './schemas.js';
+  CreateRevisionBody,
+} from './revision-schemas.js';
 export type {
   StyleNodeType,
   StyleProperties,
