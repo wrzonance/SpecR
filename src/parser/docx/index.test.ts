@@ -38,6 +38,7 @@ async function makeDocx(opts: {
   documentXml?: string;
   stylesXml?: string;
   numberingXml?: string;
+  commentsXml?: string;
   coreXml?: string;
   omitDocument?: boolean;
   omitStyles?: boolean;
@@ -46,6 +47,7 @@ async function makeDocx(opts: {
   if (!opts.omitStyles) zip.file('word/styles.xml', opts.stylesXml ?? MINIMAL_STYLES);
   if (!opts.omitDocument) zip.file('word/document.xml', opts.documentXml ?? MINIMAL_DOC);
   if (opts.numberingXml) zip.file('word/numbering.xml', opts.numberingXml);
+  if (opts.commentsXml) zip.file('word/comments.xml', opts.commentsXml);
   if (opts.coreXml) zip.file('docProps/core.xml', opts.coreXml);
   return zip.generateAsync({ type: 'nodebuffer' });
 }
@@ -67,6 +69,55 @@ const CORE_XML = `<?xml version="1.0"?>
 
 function flatTypes(nodes: readonly SpecNode[]): string[] {
   return [...nodes.flatMap((n) => [n.type, ...flatTypes(n.children)])];
+}
+
+interface CommentFact {
+  readonly author: string;
+  readonly text: string;
+  readonly anchor: readonly [number, number];
+}
+
+interface ColorFact {
+  readonly color: string;
+  readonly coverage: number;
+  readonly spans: readonly (readonly [number, number])[];
+}
+
+interface ChoiceTokenFact {
+  readonly kind: 'angle' | 'bracket';
+  readonly options: readonly string[];
+  readonly span: readonly [number, number];
+}
+
+interface TestSourceFacts {
+  readonly comments?: readonly CommentFact[];
+  readonly colors?: readonly ColorFact[];
+  readonly choiceTokens?: readonly ChoiceTokenFact[];
+}
+
+function allNodes(nodes: readonly SpecNode[]): readonly SpecNode[] {
+  return nodes.flatMap((n) => [n, ...allNodes(n.children)]);
+}
+
+function sourceFacts(node: SpecNode | undefined): TestSourceFacts | undefined {
+  const meta = node?.meta as { readonly sourceFacts?: TestSourceFacts };
+  return meta.sourceFacts;
+}
+
+function sourceComments(node: SpecNode | undefined): readonly CommentFact[] | undefined {
+  return sourceFacts(node)?.comments;
+}
+
+function sourceColors(node: SpecNode | undefined): readonly ColorFact[] | undefined {
+  return sourceFacts(node)?.colors;
+}
+
+function sourceChoiceTokens(node: SpecNode | undefined): readonly ChoiceTokenFact[] | undefined {
+  return sourceFacts(node)?.choiceTokens;
+}
+
+function findNode(nodes: readonly SpecNode[], text: string): SpecNode | undefined {
+  return allNodes(nodes).find((n) => n.text === text);
 }
 
 describe('parseDocx — happy path', () => {
@@ -152,6 +203,230 @@ describe('parseDocx — error handling', () => {
     const tree = await parseDocx(buffer);
     expect(tree.section).toBe('unknown');
     expect(tree.title).toBe('unknown');
+  });
+});
+
+describe('parseDocx — source facts: comments (#128)', () => {
+  const commentsXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="0" w:author="Jane Specifier">
+    <w:p><w:r><w:t>Use approved product list.</w:t></w:r></w:p>
+  </w:comment>
+  <w:comment w:id="1" w:author="Alex Reviewer">
+    <w:p><w:r><w:t>Coordinate with owner.</w:t></w:r></w:p>
+  </w:comment>
+  <w:comment w:id="2" w:author="Jane Specifier">
+    <w:p><w:r><w:t>Spans paragraphs.</w:t></w:r></w:p>
+  </w:comment>
+</w:comments>`;
+
+  it('attaches two comments on different paragraphs exactly', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Alpha </w:t></w:r><w:commentRangeStart w:id="0"/><w:r><w:t>target</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r><w:r><w:t> one.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Beta </w:t></w:r><w:commentRangeStart w:id="1"/><w:r><w:t>target</w:t></w:r><w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r><w:r><w:t> two.</w:t></w:r></w:p>
+  </w:body>
+</w:document>`;
+    const tree = await parseDocx(await makeDocx({ documentXml, commentsXml }));
+    const first = findNode(tree.parts, 'Alpha target one.');
+    const second = findNode(tree.parts, 'Beta target two.');
+
+    expect(sourceComments(first)).toEqual([
+      { author: 'Jane Specifier', text: 'Use approved product list.', anchor: [6, 12] },
+    ]);
+    expect(sourceComments(second)).toEqual([
+      { author: 'Alex Reviewer', text: 'Coordinate with owner.', anchor: [5, 11] },
+    ]);
+  });
+
+  it('keeps comment facts aligned when the document contains an empty paragraph', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Alpha text.</w:t></w:r></w:p>
+    <w:p/>
+    <w:p><w:r><w:t>Beta </w:t></w:r><w:commentRangeStart w:id="1"/><w:r><w:t>target</w:t></w:r><w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r><w:r><w:t> text.</w:t></w:r></w:p>
+  </w:body>
+</w:document>`;
+    const tree = await parseDocx(await makeDocx({ documentXml, commentsXml }));
+    const alpha = findNode(tree.parts, 'Alpha text.');
+    const beta = findNode(tree.parts, 'Beta target text.');
+
+    expect(sourceComments(alpha)).toBeUndefined();
+    expect(sourceComments(beta)).toEqual([
+      { author: 'Alex Reviewer', text: 'Coordinate with owner.', anchor: [5, 11] },
+    ]);
+  });
+
+  it('clips a spanning comment to each covered paragraph anchor', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Alpha </w:t></w:r><w:commentRangeStart w:id="2"/><w:r><w:t>covered</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Beta</w:t></w:r><w:commentRangeEnd w:id="2"/><w:r><w:commentReference w:id="2"/></w:r><w:r><w:t> tail</w:t></w:r></w:p>
+  </w:body>
+</w:document>`;
+    const tree = await parseDocx(await makeDocx({ documentXml, commentsXml }));
+    const first = findNode(tree.parts, 'Alpha covered');
+    const second = findNode(tree.parts, 'Beta tail');
+
+    // Spanning comments are represented as one fact per covered paragraph,
+    // clipped to each paragraph's local flattened text span.
+    expect(sourceComments(first)).toEqual([
+      { author: 'Jane Specifier', text: 'Spans paragraphs.', anchor: [6, 13] },
+    ]);
+    expect(sourceComments(second)).toEqual([
+      { author: 'Jane Specifier', text: 'Spans paragraphs.', anchor: [0, 4] },
+    ]);
+  });
+
+  it('omits sourceFacts when comments.xml is absent', async () => {
+    const tree = await parseDocx(await makeDocx({ documentXml: MINIMAL_DOC }));
+    expect(allNodes(tree.parts).every((n) => sourceComments(n) === undefined)).toBe(true);
+  });
+
+  it('malformed comments.xml throws ParserError instead of silently dropping comments', async () => {
+    const buffer = await makeDocx({ commentsXml: '<w:comments><w:comment' });
+    await expect(parseDocx(buffer)).rejects.toThrow('failed to parse word/comments.xml');
+  });
+});
+
+describe('parseDocx — source facts: run colors (#129)', () => {
+  function colorRun(color: string, text: string): string {
+    return `<w:r><w:rPr><w:color w:val="${color}"/></w:rPr><w:t>${text}</w:t></w:r>`;
+  }
+
+  function highlightRun(highlight: string, text: string): string {
+    return `<w:r><w:rPr><w:highlight w:val="${highlight}"/></w:rPr><w:t>${text}</w:t></w:r>`;
+  }
+
+  function colorDoc(paragraphs: string): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>${paragraphs}</w:body>
+</w:document>`;
+  }
+
+  it('records a blue phrase with exact span and coverage', async () => {
+    const documentXml = colorDoc(
+      `<w:p><w:r><w:t>Alpha </w:t></w:r>${colorRun('0000FF', 'blue')}<w:r><w:t> end</w:t></w:r></w:p>`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+    const node = findNode(tree.parts, 'Alpha blue end');
+    const colors = sourceColors(node);
+
+    expect(colors).toHaveLength(1);
+    expect(colors?.[0]?.color).toBe('0000FF');
+    expect(colors?.[0]?.spans).toEqual([[6, 10]]);
+    expect(colors?.[0]?.coverage).toBeCloseTo(4 / 14);
+  });
+
+  it('records a fully blue paragraph with coverage 1.0', async () => {
+    const documentXml = colorDoc(`<w:p>${colorRun('0000FF', 'Fully blue.')}</w:p>`);
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+    const colors = sourceColors(findNode(tree.parts, 'Fully blue.'));
+
+    expect(colors).toEqual([{ color: '0000FF', coverage: 1, spans: [[0, 11]] }]);
+  });
+
+  it('omits black and auto-only run colors', async () => {
+    const documentXml = colorDoc(
+      `<w:p>${colorRun('000000', 'Black text.')}</w:p><w:p>${colorRun('auto', 'Auto text.')}</w:p>`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+
+    expect(sourceColors(findNode(tree.parts, 'Black text.'))).toBeUndefined();
+    expect(sourceColors(findNode(tree.parts, 'Auto text.'))).toBeUndefined();
+  });
+
+  it('records one source fact per distinct run color', async () => {
+    const documentXml = colorDoc(
+      `<w:p>${colorRun('FF0000', 'Red')}<w:r><w:t> </w:t></w:r>${colorRun('0000FF', 'Blue')}</w:p>`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+    const colors = sourceColors(findNode(tree.parts, 'Red Blue'));
+
+    expect(colors).toEqual([
+      { color: 'FF0000', coverage: 3 / 8, spans: [[0, 3]] },
+      { color: '0000FF', coverage: 4 / 8, spans: [[4, 8]] },
+    ]);
+  });
+
+  it('records highlight as a highlight-prefixed color fact', async () => {
+    const documentXml = colorDoc(
+      `<w:p><w:r><w:t>Use </w:t></w:r>${highlightRun('yellow', 'highlight')}<w:r><w:t>.</w:t></w:r></w:p>`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+    const colors = sourceColors(findNode(tree.parts, 'Use highlight.'));
+
+    expect(colors).toEqual([{ color: 'highlight:yellow', coverage: 9 / 14, spans: [[4, 13]] }]);
+  });
+});
+
+describe('parseDocx — source facts: choice tokens (#130)', () => {
+  function choiceDoc(text: string): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body>
+</w:document>`;
+  }
+
+  async function parseChoiceNode(
+    xmlText: string,
+    parsedText = xmlText
+  ): Promise<SpecNode | undefined> {
+    const tree = await parseDocx(await makeDocx({ documentXml: choiceDoc(xmlText) }));
+    return findNode(tree.parts, parsedText);
+  }
+
+  it('groups adjacent angle options into one pick-one candidate', async () => {
+    const node = await parseChoiceNode('&lt;aluminum&gt;&lt;steel&gt;', '<aluminum><steel>');
+    expect(sourceChoiceTokens(node)).toEqual([
+      { kind: 'angle', options: ['aluminum', 'steel'], span: [0, 17] },
+    ]);
+  });
+
+  it('ignores a lone angle segment because angle choices require adjacent options', async () => {
+    const node = await parseChoiceNode('&lt;aluminum&gt;', '<aluminum>');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+
+  it('groups adjacent bracket options into one pick-one candidate', async () => {
+    const node = await parseChoiceNode('[red][blue]');
+    expect(sourceChoiceTokens(node)).toEqual([
+      { kind: 'bracket', options: ['red', 'blue'], span: [0, 11] },
+    ]);
+  });
+
+  it('records a lone bracketed segment as a single-option keep-delete candidate', async () => {
+    const node = await parseChoiceNode('[Provide mockup.]');
+    expect(sourceChoiceTokens(node)).toEqual([
+      { kind: 'bracket', options: ['Provide mockup.'], span: [0, 17] },
+    ]);
+  });
+
+  it('ignores unclosed delimiters without error', async () => {
+    const node = await parseChoiceNode('Use [unclosed option here.');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+
+  it('skips nested brackets as ambiguous', async () => {
+    // KNOWN AMBIGUITY: nested brackets can be tailoring choices or literal bracketed text.
+    const node = await parseChoiceNode('[outer [inner]]');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+
+  it('skips nested adjacent brackets without emitting an inner candidate', async () => {
+    // KNOWN AMBIGUITY: adjacent nested brackets can be tailoring choices or literal text.
+    const node = await parseChoiceNode('[[a][b]]');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+
+  it('skips section-reference-like brackets as ambiguous', async () => {
+    // KNOWN AMBIGUITY: [Section 09 91 26] looks like a CSI cross-reference, not a choice.
+    const node = await parseChoiceNode('[Section 09 91 26]');
+    expect(sourceChoiceTokens(node)).toBeUndefined();
   });
 });
 

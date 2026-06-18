@@ -15,6 +15,8 @@ export const NodeTypeSchema = z.enum([
   'pr3',
   'pr4',
   'pr5',
+  'pr6',
+  'pr7',
   'note',
   'continuation',
 ]);
@@ -25,12 +27,124 @@ export const SignalConflictSchema = z.object({
   reportedNodeType: NodeTypeSchema,
 });
 
+// Catchall for unknown JSONB-backed keys: preserve only JSON-safe values.
+const JsonValue = z.json();
+
+const SourceTextSpanSchema = z.tuple([
+  z.number().int().nonnegative(),
+  z.number().int().nonnegative(),
+]);
+
+export const SourceCommentFactSchema = z.object({
+  author: z.string(),
+  text: z.string(),
+  anchor: SourceTextSpanSchema,
+});
+
+export const SourceColorFactSchema = z.object({
+  color: z.string(),
+  coverage: z.number().min(0).max(1),
+  spans: z.array(SourceTextSpanSchema),
+});
+
+export const SourceChoiceTokenFactSchema = z.object({
+  kind: z.enum(['angle', 'bracket']),
+  options: z.array(z.string()),
+  span: SourceTextSpanSchema,
+});
+
+export const SourceFactsSchema = z
+  .object({
+    colors: z.array(SourceColorFactSchema).exactOptional(),
+    comments: z.array(SourceCommentFactSchema).exactOptional(),
+    choiceTokens: z.array(SourceChoiceTokenFactSchema).exactOptional(),
+    banner: z.string().exactOptional(),
+    vanish: z.literal(true).exactOptional(),
+  })
+  .catchall(JsonValue);
+
+// ── Editing conventions (ADR-022 D3) — library-scoped editability rulesets ──
+// The closed four-value editability vocabulary (ADR-022 D1). Reused by the
+// classification engine (O-6) and per-paragraph classification storage (O-7).
+export const EditabilitySchema = z.enum(['locked', 'editable', 'choice', 'note']);
+
+// One why-chain entry for an editability verdict (ADR-022 D4). Mirrors the
+// `ClassificationEvidence` interface in conventions/types.ts. CLOSED (.strict()):
+// this is our own engine output, not captured external data — a malformed entry
+// is engine drift and must be rejected at the boundary, never silently kept.
+export const ClassificationEvidenceSchema = z
+  .object({
+    rule: z.string().check(z.minLength(1)),
+    fact: z.string().check(z.minLength(1)).exactOptional(),
+    detail: z.string().check(z.minLength(1)).exactOptional(),
+  })
+  .strict();
+
+export type ClassificationEvidence = z.infer<typeof ClassificationEvidenceSchema>;
+
+// All convention sub-objects use `.catchall(JsonValue)` so unknown rule keys are
+// preserved (ADR-022 D5 — open schema, capture-never-reject for round-trip).
+const ColorMeaningSchema = z
+  .object({ color: z.string(), meaning: EditabilitySchema })
+  .catchall(JsonValue);
+
+const ConventionChoiceTokenSchema = z
+  .object({ kind: z.enum(['angle', 'bracket']) })
+  .catchall(JsonValue);
+
+const CommentPolicySchema = z.object({ treatAs: EditabilitySchema }).catchall(JsonValue);
+
+// `noteBanners` are user-supplied regex SOURCES (strings). Shape-only here; their
+// length/ReDoS safety is bounded at the WRITE boundary (ADR-022 D5 exception),
+// never in this open read schema. See src/lib/regex-safety.ts.
+export const ConventionRulesSchema = z
+  .object({
+    colorMeanings: z.array(ColorMeaningSchema).exactOptional(),
+    choiceTokens: z.array(ConventionChoiceTokenSchema).exactOptional(),
+    noteBanners: z.array(z.string()).exactOptional(),
+    comments: CommentPolicySchema.exactOptional(),
+    defaultEditability: EditabilitySchema.exactOptional(),
+  })
+  .catchall(JsonValue);
+
+export type Editability = z.infer<typeof EditabilitySchema>;
+export type ConventionRules = z.infer<typeof ConventionRulesSchema>;
+
+// Convention profile CRUD bodies (O-10). Structural-only: noteBanners regex
+// length/ReDoS bounds are enforced at the WRITE boundary (query layer), which
+// maps an unsafe pattern to 422 — never in this open shape schema.
+export const PutConventionBodySchema = z.object({
+  name: z.string().check(z.minLength(1)),
+  rules: ConventionRulesSchema.exactOptional(),
+});
+
+export type PutConventionBody = z.infer<typeof PutConventionBodySchema>;
+
+export const CloneConventionBodySchema = z.object({
+  sourceId: z.uuid(),
+});
+
+export type CloneConventionBody = z.infer<typeof CloneConventionBodySchema>;
+
+// Effective editability surfaced on a classified paragraph (#134 / O-7). `value`
+// is the effective verdict (override ?? machine); `confidence`/`evidence` are the
+// machine's why-chain (kept readable even under an override, for the O-15
+// machine-vs-human badge); `override` is present only when a human override exists.
+export const SpecNodeEditabilitySchema = z.object({
+  value: EditabilitySchema,
+  confidence: z.number().min(0).max(1),
+  evidence: z.array(ClassificationEvidenceSchema).check(z.minLength(1)),
+  override: EditabilitySchema.exactOptional(),
+});
+
 export const SpecNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
   source: z.enum(['ufgs', 'arcat', 'cpi', 'unknown']).exactOptional(),
   revitParam: z.string().exactOptional(),
   baseVersion: z.number().int().nonnegative().exactOptional(),
   conflicts: z.array(SignalConflictSchema).exactOptional(),
+  sourceFacts: SourceFactsSchema.exactOptional(),
+  editability: SpecNodeEditabilitySchema.exactOptional(),
 });
 
 export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>
@@ -88,6 +202,35 @@ export const PatchSpecBodySchema = z.object({
   // PATCH must set a real section — the sentinel is not assignable by clients.
   section: SectionNumberInputSchema.exactOptional(),
 });
+
+// Individual paragraph update (ADR-009 / #47). Empty text is rejected so the
+// Revit add-in (#48) can never blank a paragraph by pushing an empty value.
+// `expectedVersion` is the optimistic-concurrency precondition (ADR-018 D1):
+// the spec content_version the caller read. Optional for backward compatibility
+// — when present, a stale value is rejected 409 with the current version.
+export const UpdateParagraphBodySchema = z.object({
+  text: z.string().check(z.minLength(1)),
+  expectedVersion: z.number().int().min(1).exactOptional(),
+});
+
+export type UpdateParagraphBody = z.infer<typeof UpdateParagraphBodySchema>;
+
+// Advisory soft-lock acquire/release (ADR-018 D2). `holder` is a caller-supplied
+// identity label until auth (#43) supplies an authenticated one. `ttlSeconds`
+// caps at 1 hour so a single acquire can never wedge a spec for an unreasonable
+// time before it is stealable; omitted → server default (15 min).
+export const AcquireLockBodySchema = z.object({
+  holder: z.string().check(z.minLength(1)),
+  ttlSeconds: z.number().int().min(1).max(3600).exactOptional(),
+});
+
+export type AcquireLockBody = z.infer<typeof AcquireLockBodySchema>;
+
+export const ReleaseLockBodySchema = z.object({
+  holder: z.string().check(z.minLength(1)),
+});
+
+export type ReleaseLockBody = z.infer<typeof ReleaseLockBodySchema>;
 
 export const CreateProjectBodySchema = z.object({
   name: z.string().check(z.minLength(1)),
@@ -195,6 +338,9 @@ export const SetPackageSpecsBodySchema = z.object({
 
 export type SetPackageSpecsBody = z.infer<typeof SetPackageSpecsBodySchema>;
 
+// Required-section coordination targets (#102). A project/package declares which
+// CSI sections it must contain; the coordination report flags absent or extra
+// sections. Section values are canonical-shape and must be unique within a set.
 const RequiredSectionInputSchema = z.object({
   section: SectionNumberSchema,
   title: z.string().check(z.minLength(1)).exactOptional(),
@@ -215,22 +361,6 @@ export const SetRequiredSectionsBodySchema = z.object({
 
 export type SetRequiredSectionsBody = z.infer<typeof SetRequiredSectionsBodySchema>;
 
-// Issuance label for an immutable package revision snapshot (ADR-015 D5):
-// '50% DD', '100% CD', 'Addendum 2'. Unique per package, enforced by the DB.
-export const CreateRevisionBodySchema = z.object({
-  label: z.string().check(z.minLength(1)),
-});
-
-export type CreateRevisionBody = z.infer<typeof CreateRevisionBodySchema>;
-
-// Body for PATCH /specs/:id/paragraphs/:paragraphId — the inline editor sends
-// the full replacement body text for one paragraph.
-export const UpdateParagraphBodySchema = z.object({
-  text: z.string().check(z.minLength(1)),
-});
-
-export type UpdateParagraphBody = z.infer<typeof UpdateParagraphBodySchema>;
-
 // ── Style properties (ADR-021): OOXML-faithful, OPEN (unknown JSON keys preserved) ──
 // StyleNodeType is the subset of NodeType that carries visual style —
 // excludes the structural-only 'spec' | 'note' | 'continuation'.
@@ -241,10 +371,17 @@ export type UpdateParagraphBody = z.infer<typeof UpdateParagraphBodySchema>;
 // but only as JSON values, matching the JSONB column. A non-JSON value (BigInt,
 // function, symbol) is rejected at parse rather than silently dropped or thrown
 // on JSON.stringify at the DB boundary.
-export const StyleNodeTypeSchema = z.enum(['part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5']);
-
-// Catchall for unknown keys: any JSON value (string|number|boolean|null|array|object).
-const JsonValue = z.json();
+export const StyleNodeTypeSchema = z.enum([
+  'part',
+  'article',
+  'pr1',
+  'pr2',
+  'pr3',
+  'pr4',
+  'pr5',
+  'pr6',
+  'pr7',
+]);
 
 const RunPropertiesSchema = z
   .object({
@@ -351,12 +488,8 @@ export const UpsertStyleRulesBodySchema = z.object({
 });
 
 export type UpsertStyleRulesBody = z.infer<typeof UpsertStyleRulesBodySchema>;
-
-// ── Generate request body (#32) ──────────────────────────────────────────────
-
-export const GenerateBodySchema = z.object({
-  templateId: z.uuid().exactOptional(),
-  sectionNumberFormat: SectionNumberFormatSchema.exactOptional(),
+export const SetStyleSourceBodySchema = z.object({
+  templateId: z.uuid(),
 });
 
-export type GenerateBody = z.infer<typeof GenerateBodySchema>;
+export type SetStyleSourceBody = z.infer<typeof SetStyleSourceBodySchema>;

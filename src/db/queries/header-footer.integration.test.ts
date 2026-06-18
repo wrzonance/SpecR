@@ -1,0 +1,236 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { pool } from '../index.js';
+import { createLibrary } from './libraries.js';
+import {
+  deleteHeaderFooterConfig,
+  findHeaderFooterConfig,
+  HeaderFooterScopeError,
+  HeaderFooterValidationError,
+  resolveHeaderFooterConfig,
+  upsertHeaderFooterConfig,
+} from './header-footer.js';
+
+const TEST_PREFIX = 'hf-test-';
+
+interface ScopeFixture {
+  readonly clientLibraryId: string;
+  readonly companyLibraryId: string;
+  readonly projectId: string;
+  readonly packageId: string;
+  readonly revisionId: string;
+}
+
+async function insertProject(): Promise<string> {
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name, description) VALUES ($1, $2) RETURNING id`,
+    [`${TEST_PREFIX}project-${Date.now()}`, 'Header/footer composition test']
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('insertProject: no project id returned');
+  return row.id;
+}
+
+async function insertPackage(projectId: string): Promise<string> {
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO design_packages (project_id, name, position)
+     VALUES ($1, $2, 1) RETURNING id`,
+    [projectId, `${TEST_PREFIX}package-${Date.now()}`]
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('insertPackage: no package id returned');
+  return row.id;
+}
+
+async function insertRevision(packageId: string): Promise<string> {
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO package_revisions
+       (package_id, label, revision_type, revision_date, sort_order, attributes)
+     VALUES ($1, 'Addendum 1', 'addendum', '2026-06-18'::date, 1, '{"number":1}'::jsonb)
+     RETURNING id`,
+    [packageId]
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('insertRevision: no revision id returned');
+  return row.id;
+}
+
+async function makeScopeFixture(): Promise<ScopeFixture> {
+  const company = await createLibrary({
+    tier: 'company',
+    name: `${TEST_PREFIX}company-${Date.now()}`,
+  });
+  const client = await createLibrary({
+    tier: 'client',
+    name: `${TEST_PREFIX}client-${Date.now()}`,
+    parentLibraryId: company.id,
+  });
+  const projectId = await insertProject();
+  await pool.query(
+    `INSERT INTO project_sources (project_id, library_id, priority)
+     VALUES ($1, $2, 1), ($1, $3, 2)`,
+    [projectId, client.id, company.id]
+  );
+  const packageId = await insertPackage(projectId);
+  const revisionId = await insertRevision(packageId);
+  return {
+    clientLibraryId: client.id,
+    companyLibraryId: company.id,
+    projectId,
+    packageId,
+    revisionId,
+  };
+}
+
+afterEach(async () => {
+  await pool.query(`DELETE FROM header_footer_configs`);
+  await pool.query(
+    `DELETE FROM package_revisions
+     WHERE package_id IN (SELECT id FROM design_packages WHERE name LIKE $1)`,
+    [`${TEST_PREFIX}%`]
+  );
+  await pool.query(`DELETE FROM design_packages WHERE name LIKE $1`, [`${TEST_PREFIX}%`]);
+  await pool.query(`DELETE FROM projects WHERE name LIKE $1`, [`${TEST_PREFIX}%`]);
+  await pool.query(`DELETE FROM libraries WHERE name LIKE $1`, [`${TEST_PREFIX}%`]);
+});
+
+describe('header_footer_configs query surface', () => {
+  it('upsert/find/delete round-trips an open composition payload at a client scope', async () => {
+    const fixture = await makeScopeFixture();
+    const config = {
+      header: {
+        left: { content: [{ kind: 'clientName' }] },
+        center: { content: [{ kind: 'projectNumber', fallback: 'name' }] },
+        style: { fontFamily: 'Arial', fontSizeHalfPt: 18, clientToken: 'acme' },
+        ruleLine: { enabled: true, widthTwips: 8, futureRule: { colorMode: 'theme' } },
+      },
+      footer: {
+        right: { content: [{ kind: 'pageNumber', label: 'Page' }] },
+      },
+      vendorExtension: { layoutPreset: 'client-a' },
+    };
+
+    const created = await upsertHeaderFooterConfig(
+      { clientLibraryId: fixture.clientLibraryId },
+      config
+    );
+    const found = await findHeaderFooterConfig({ clientLibraryId: fixture.clientLibraryId });
+
+    expect(found?.id).toBe(created.id);
+    expect(found?.config).toEqual(config);
+    expect(found?.scope).toEqual({ kind: 'client', clientLibraryId: fixture.clientLibraryId });
+
+    await expect(
+      deleteHeaderFooterConfig({ clientLibraryId: fixture.clientLibraryId })
+    ).resolves.toBe(true);
+    await expect(
+      findHeaderFooterConfig({ clientLibraryId: fixture.clientLibraryId })
+    ).resolves.toBe(null);
+  });
+
+  it('resolves client → project → package → revision configs with deep object overrides', async () => {
+    const fixture = await makeScopeFixture();
+    await upsertHeaderFooterConfig(
+      { clientLibraryId: fixture.clientLibraryId },
+      {
+        header: {
+          left: { content: [{ kind: 'clientName' }] },
+          center: { content: [{ kind: 'projectName' }] },
+          style: { fontFamily: 'Arial', fontSizeHalfPt: 18 },
+          ruleLine: { enabled: true, color: '111111' },
+        },
+        footer: {
+          left: { content: [{ kind: 'projectNumber' }] },
+          right: { content: [{ kind: 'pageNumber' }] },
+        },
+      }
+    );
+    await upsertHeaderFooterConfig(
+      { projectId: fixture.projectId },
+      {
+        header: {
+          center: {
+            content: [
+              { kind: 'sectionNumber' },
+              { kind: 'literal', text: ' - ' },
+              { kind: 'sectionTitle' },
+            ],
+          },
+          style: { fontSizeHalfPt: 20 },
+        },
+      }
+    );
+    await upsertHeaderFooterConfig(
+      { packageId: fixture.packageId },
+      {
+        footer: {
+          left: { content: [{ kind: 'packageName' }] },
+          right: { content: [{ kind: 'pageNumber', format: 'PAGE {page}' }] },
+        },
+      }
+    );
+    await upsertHeaderFooterConfig(
+      { revisionId: fixture.revisionId },
+      {
+        header: {
+          right: { content: [{ kind: 'revisionLabel' }] },
+          style: { fontFamily: 'Aptos' },
+        },
+        footer: {
+          left: { content: [{ kind: 'revisionName' }] },
+        },
+      }
+    );
+
+    const resolved = await resolveHeaderFooterConfig({ revisionId: fixture.revisionId });
+
+    expect(resolved?.context).toEqual({
+      clientLibraryId: fixture.clientLibraryId,
+      projectId: fixture.projectId,
+      packageId: fixture.packageId,
+      revisionId: fixture.revisionId,
+    });
+    expect(resolved?.layers.map((layer) => layer.scope.kind)).toEqual([
+      'client',
+      'project',
+      'package',
+      'revision',
+    ]);
+    expect(resolved?.config).toEqual({
+      header: {
+        left: { content: [{ kind: 'clientName' }] },
+        center: {
+          content: [
+            { kind: 'sectionNumber' },
+            { kind: 'literal', text: ' - ' },
+            { kind: 'sectionTitle' },
+          ],
+        },
+        right: { content: [{ kind: 'revisionLabel' }] },
+        style: { fontFamily: 'Aptos', fontSizeHalfPt: 20 },
+        ruleLine: { enabled: true, color: '111111' },
+      },
+      footer: {
+        left: { content: [{ kind: 'revisionName' }] },
+        right: { content: [{ kind: 'pageNumber', format: 'PAGE {page}' }] },
+      },
+    });
+  });
+
+  it('rejects invalid composition fields and non-client library scopes at the write boundary', async () => {
+    const fixture = await makeScopeFixture();
+
+    await expect(
+      upsertHeaderFooterConfig(
+        { clientLibraryId: fixture.clientLibraryId },
+        { footer: { right: { content: [{ kind: 'pageCounter' }] } } }
+      )
+    ).rejects.toBeInstanceOf(HeaderFooterValidationError);
+
+    await expect(
+      upsertHeaderFooterConfig(
+        { clientLibraryId: fixture.companyLibraryId },
+        { header: { left: { content: [{ kind: 'clientName' }] } } }
+      )
+    ).rejects.toBeInstanceOf(HeaderFooterScopeError);
+  });
+});

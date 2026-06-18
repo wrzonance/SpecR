@@ -4,7 +4,8 @@
 // NOTE: Strict discovery should follow the officeDocument→theme relationship in
 // word/_rels/document.xml.rels; reading theme1.xml by convention is an
 // adequate approximation for spec-import use-cases (themeFontLang is out of scope).
-import { XMLParser, XMLValidator } from 'fast-xml-parser';
+import { XMLParser } from 'fast-xml-parser';
+import { SyntaxValidator } from 'fast-xml-validator';
 import { ParserError } from '../error.js';
 import { asRecord, extractAttrStr, compact } from './xml-utils.js';
 
@@ -65,6 +66,17 @@ const themeParser = new XMLParser({
   processEntities: true,
 });
 
+function validateThemeXml(themeXml: string): void {
+  try {
+    // SyntaxValidator.validate throws a ValidationError on malformed XML and
+    // returns true otherwise — it never returns an error object at runtime, so
+    // the throw is the only failure path. theme.test.ts pins this behavior.
+    SyntaxValidator.validate(themeXml);
+  } catch (err) {
+    throw new ParserError('failed to parse theme XML', { cause: err });
+  }
+}
+
 function typeface(el: Record<string, unknown> | undefined): string | undefined {
   if (!el) return undefined;
   const v = extractAttrStr(el, '@_typeface');
@@ -87,22 +99,18 @@ function parseFontSlot(fontEl: Record<string, unknown> | undefined): ThemeFontSl
  * Throws ParserError when the XML is structurally invalid (e.g. mismatched tags).
  */
 export function parseThemeFonts(themeXml: string): ThemeFonts {
-  // Unlike numbering/styles parsing (which rely on fxp throwing), the theme part is
-  // optional + externally authored, and fxp is lenient on malformed XML — pre-validate
-  // so broken theme XML surfaces as a clear ParserError instead of silent garbage.
-  const valid = XMLValidator.validate(themeXml);
-  if (valid !== true) {
-    throw new ParserError(
-      `failed to parse theme XML: ${(valid as { err: { msg: string } }).err.msg}`
-    );
-  }
+  // Unlike numbering/styles parsing, the theme part is optional + externally
+  // authored, so keep validation enabled and surface broken XML with context.
+  validateThemeXml(themeXml);
+
   let parsed: unknown;
   try {
     parsed = themeParser.parse(themeXml);
   } catch (err) {
     throw new ParserError('failed to parse theme XML', { cause: err });
   }
-  const root = asRecord((parsed as Record<string, unknown>)['a:theme']);
+  const parsedRoot = asRecord(parsed);
+  const root = parsedRoot ? asRecord(parsedRoot['a:theme']) : undefined;
   if (!root) return EMPTY_THEME_FONTS;
   const elements = asRecord(root['a:themeElements']);
   if (!elements) return EMPTY_THEME_FONTS;

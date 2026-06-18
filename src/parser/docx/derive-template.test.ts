@@ -226,7 +226,7 @@ describe('deriveTemplate — skipped NodeTypes', () => {
     expect(rules[0]?.nodeType).toBe('pr1');
   });
 
-  it('skippedNodeTypes contains the other six styleable types', () => {
+  it('skippedNodeTypes contains the other styleable types', () => {
     const { report } = deriveTemplate(classified, effectiveStyles);
     const expected = STYLE_NODE_TYPES.filter((t) => t !== 'pr1');
     const cmp = (a: string, b: string) => a.localeCompare(b);

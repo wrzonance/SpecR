@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    SpecR Revit add-in (Phase 4c scaffold).
+
+    Targets the Revit 2024 runtime (.NET Framework 4.8). Revit 2025+ moved to
+    .NET 8 — see README.md "Targeting other Revit versions" for the multi-target
+    upgrade path. The Revit API assemblies are referenced from the local install
+    and are NOT copied to the output (Private=false): Revit loads its own copies
+    at runtime, and copying them causes load conflicts.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>SpecRAddin</AssemblyName>
+    <RootNamespace>SpecRAddin</RootNamespace>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
+    <Platforms>x64</Platforms>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+
+    <!-- Override on the command line to point at a different Revit install, e.g.
+         dotnet build -p:RevitVersion=2025 -p:RevitApiDir="C:\Program Files\Autodesk\Revit 2025" -->
+    <RevitVersion Condition=" '$(RevitVersion)' == '' ">2024</RevitVersion>
+    <RevitApiDir Condition=" '$(RevitApiDir)' == '' ">C:\Program Files\Autodesk\Revit $(RevitVersion)</RevitApiDir>
+  </PropertyGroup>
+
+  <!-- Revit API — provided by the host process, never copied to output. -->
+  <ItemGroup>
+    <Reference Include="RevitAPI">
+      <HintPath>$(RevitApiDir)\RevitAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>$(RevitApiDir)\RevitAPIUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Typed REST client + JSON. Pinned versions; bump via the lockfile, never blind. -->
+  <ItemGroup>
+    <PackageReference Include="Refit" Version="7.2.22" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <!-- Deploy the manifest next to the assembly for local install convenience. -->
+  <ItemGroup>
+    <None Update="SpecRAddin.addin">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

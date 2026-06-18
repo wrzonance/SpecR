@@ -5,10 +5,13 @@ import {
   SpecTreeSchema,
   PatchSpecBodySchema,
   SignalConflictSchema,
+  SourceFactsSchema,
   CreateProjectBodySchema,
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
+  ConventionRulesSchema,
+  EditabilitySchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -20,6 +23,8 @@ const VALID_NODE_TYPES = [
   'pr3',
   'pr4',
   'pr5',
+  'pr6',
+  'pr7',
   'note',
   'continuation',
 ] as const;
@@ -140,13 +145,29 @@ describe('SpecNodeMetaSchema', () => {
       source: 'ufgs',
       revitParam: 'Manufacturer',
       baseVersion: 1,
+      sourceFacts: {
+        comments: [{ author: 'Reviewer', text: 'Check this.', anchor: [0, 4] }],
+        colors: [{ color: '0000FF', coverage: 0.5, spans: [[6, 10]] }],
+      },
     });
     expect(result.vanish).toBe(true);
     expect(result.source).toBe('ufgs');
+    expect(result.sourceFacts?.comments?.[0]?.text).toBe('Check this.');
+    expect(result.sourceFacts?.colors?.[0]?.color).toBe('0000FF');
   });
 
   it('rejects unknown source value', () => {
     expect(() => SpecNodeMetaSchema.parse({ source: 'unknown-vendor' })).toThrow();
+  });
+
+  it('rejects invalid source color coverage', () => {
+    expect(() =>
+      SpecNodeMetaSchema.parse({
+        sourceFacts: {
+          colors: [{ color: '0000FF', coverage: 1.1, spans: [[6, 10]] }],
+        },
+      })
+    ).toThrow();
   });
 });
 
@@ -226,6 +247,25 @@ describe('SpecNodeMetaSchema — conflicts', () => {
   });
 });
 
+describe('SourceFactsSchema', () => {
+  it('accepts known source fact keys and preserves unknown JSON keys', () => {
+    const facts = {
+      comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19] }],
+      colors: [{ color: '0000FF', coverage: 0.82, spans: [[12, 96]] }],
+      choiceTokens: [{ kind: 'bracket', options: ['Provide mockup.'], span: [20, 37] }],
+      banner: 'MASTER NOTE',
+      vanish: true,
+      reviewer: { severity: 'info', count: 2, tags: ['coordination'] },
+    };
+
+    expect(SourceFactsSchema.parse(facts)).toEqual(facts);
+  });
+
+  it('rejects non-JSON unknown fact values', () => {
+    expect(SourceFactsSchema.safeParse({ reviewer: 1n }).success).toBe(false);
+  });
+});
+
 describe('CreateProjectBodySchema (issue #94)', () => {
   const valid = {
     name: 'P',
@@ -296,5 +336,52 @@ describe('SetPackageSpecsBodySchema (issue #95)', () => {
     expect(SetPackageSpecsBodySchema.safeParse({ specIds: [a, a] }).success).toBe(false);
     expect(SetPackageSpecsBodySchema.safeParse({ specIds: ['nope'] }).success).toBe(false);
     expect(SetPackageSpecsBodySchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('ConventionRulesSchema (ADR-022 D3/D5)', () => {
+  const FULL_RULES = {
+    colorMeanings: [{ color: '0000FF', meaning: 'editable' }],
+    choiceTokens: [{ kind: 'angle' }, { kind: 'bracket' }],
+    noteBanners: ['^NOTES? TO (?:THE )?SPEC(?:IFIER)?S?'],
+    comments: { treatAs: 'note' },
+    defaultEditability: 'locked',
+  };
+
+  it('accepts the full design-doc ruleset and round-trips it identically', () => {
+    const parsed = ConventionRulesSchema.parse(FULL_RULES);
+    expect(parsed).toEqual(FULL_RULES);
+  });
+
+  it('accepts an empty ruleset — every field is optional', () => {
+    expect(ConventionRulesSchema.parse({})).toEqual({});
+  });
+
+  it('preserves unknown keys via catchall (capture-never-reject)', () => {
+    const withUnknown = { defaultEditability: 'locked', futureKnob: { weight: 3 } };
+    expect(ConventionRulesSchema.parse(withUnknown)).toEqual(withUnknown);
+  });
+
+  it('preserves unknown keys nested inside a known sub-object', () => {
+    const input = { colorMeanings: [{ color: 'FF0000', meaning: 'note', note: 'vendor red' }] };
+    expect(ConventionRulesSchema.parse(input)).toEqual(input);
+  });
+
+  it('rejects an editability value outside the closed vocabulary', () => {
+    expect(ConventionRulesSchema.safeParse({ defaultEditability: 'frozen' }).success).toBe(false);
+    expect(
+      ConventionRulesSchema.safeParse({ colorMeanings: [{ color: '0000FF', meaning: 'maybe' }] })
+        .success
+    ).toBe(false);
+  });
+
+  it('rejects an unknown choice-token kind', () => {
+    expect(ConventionRulesSchema.safeParse({ choiceTokens: [{ kind: 'curly' }] }).success).toBe(
+      false
+    );
+  });
+
+  it('EditabilitySchema is the closed four-value vocabulary', () => {
+    expect(EditabilitySchema.options).toEqual(['locked', 'editable', 'choice', 'note']);
   });
 });

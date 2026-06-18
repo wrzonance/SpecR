@@ -339,8 +339,18 @@ describe('POST /templates/import', () => {
     expect(Array.isArray(body.data.template.rules)).toBe(true);
     expect(body.data.template.rules.length).toBeGreaterThan(0);
 
-    // Every nodeType in the rules must be one of the 7 valid StyleNodeTypes
-    const validNodeTypes = new Set(['part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5']);
+    // Every nodeType in the rules must be one of the 9 valid StyleNodeTypes
+    const validNodeTypes = new Set([
+      'part',
+      'article',
+      'pr1',
+      'pr2',
+      'pr3',
+      'pr4',
+      'pr5',
+      'pr6',
+      'pr7',
+    ]);
     for (const rule of body.data.template.rules) {
       expect(validNodeTypes.has(rule.nodeType)).toBe(true);
     }

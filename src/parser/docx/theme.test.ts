@@ -55,6 +55,26 @@ describe('parseThemeFonts', () => {
     expect(() => parseThemeFonts('<<< not xml >>>')).toThrow(ParserError);
   });
 
+  it('chains parser validation cause when theme XML is malformed', () => {
+    let caught: unknown;
+
+    try {
+      parseThemeFonts('<a:theme><a:themeElements></a:theme>');
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(ParserError);
+    if (!(caught instanceof ParserError)) {
+      throw new Error('expected ParserError');
+    }
+    expect(caught.cause).toBeInstanceOf(Error);
+    if (!(caught.cause instanceof Error)) {
+      throw new Error('expected chained Error cause');
+    }
+    expect(caught.cause.message).toContain("Expected closing tag 'a:themeElements'");
+  });
+
   it('returns empty ThemeFonts when only majorFont is present', () => {
     const xml = `<?xml version="1.0"?>
     <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">

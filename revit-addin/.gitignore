@@ -1,0 +1,14 @@
+# .NET build output
+bin/
+obj/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+
+# Restore artifacts
+project.assets.json
+*.nuget.props
+*.nuget.targets

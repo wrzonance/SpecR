@@ -50,7 +50,7 @@ export {
 export type {
   ParagraphRow,
   ParagraphWithAncestors,
-  UpdatedParagraph,
+  UpdateParagraphResult,
 } from './queries/paragraphs.js';
 export {
   deleteReference,
@@ -84,7 +84,7 @@ export type {
   AddSpecResult,
 } from './queries/projects.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
-export { getParagraphSnapshots } from './queries/versions.js';
+export { getParagraphSnapshots, getCurrentParagraphSnapshots } from './queries/versions.js';
 export type { ParagraphSearchResult, SpecSectionResult } from './queries/search.js';
 export {
   getTemplate,
@@ -104,6 +104,7 @@ export type {
   Template,
   TemplateMeta,
   StyleProperties,
+  DeleteTemplateResult,
 } from './queries/templates.js';
 export {
   upsertMapping,
@@ -168,11 +169,64 @@ export type {
 export {
   createPackageRevision,
   getPackageRevision,
+  getPackageRevisionManualData,
+  getPackageRevisionAddendumManualData,
   SnapshotValidationError,
+  RevisionNomenclatureValidationError,
+  RevisionComparisonError,
 } from './queries/revisions.js';
-export type { RevisionSummary, RevisionSpecEntry, RevisionWithTrees } from './queries/revisions.js';
+export type {
+  RevisionSummary,
+  RevisionSpecEntry,
+  RevisionWithTrees,
+  RevisionManualData,
+  RevisionAddendumManualData,
+} from './queries/revisions.js';
+export {
+  insertConvention,
+  updateConventionRules,
+  findConventionById,
+  getBuiltInConvention,
+  listBuiltInConventions,
+  getConventionForLibrary,
+  upsertLibraryConvention,
+  BUILT_IN_CONVENTION_NAME,
+  ConventionValidationError,
+  ConventionNotFoundError,
+} from './queries/conventions.js';
+export type { EditingConvention, CreateConventionInput } from './queries/conventions.js';
+export {
+  listRevisionNomenclatureProfiles,
+  findRevisionNomenclatureProfileById,
+  getBuiltInRevisionNomenclature,
+  getRevisionNomenclatureForProject,
+  upsertProjectRevisionNomenclature,
+  deleteProjectRevisionNomenclature,
+  BUILT_IN_REVISION_NOMENCLATURE_NAME,
+} from './queries/revision-nomenclature.js';
+export type { RevisionNomenclatureProfile } from './queries/revision-nomenclature.js';
+export {
+  storeClassifications,
+  setEditabilityOverride,
+  clearEditabilityOverride,
+} from './queries/editability.js';
 export { getSpecLineage } from './queries/lineage.js';
 export type { SpecLineage, LineageHop, LineageScope } from './queries/lineage.js';
+export {
+  getSpecStyleSource,
+  setSpecStyleSource,
+  clearSpecStyleSource,
+  countSpecsUsingTemplate,
+} from './queries/style-source.js';
+export type { SpecStyleSource } from './queries/style-source.js';
+export { acquireLock, releaseLock, getLock, DEFAULT_LOCK_TTL_SECONDS } from './queries/locks.js';
+export type { LockState, AcquireLockResult } from './queries/locks.js';
+export {
+  assertSpecWritable,
+  SpecNotFoundError,
+  SpecWriteForbiddenError,
+  StaleVersionError,
+} from './queries/edit-gate.js';
 export {
   getLibraryDivisionGeneralSpec,
   getProjectDivisionGeneralSpec,
@@ -194,3 +248,19 @@ export type {
   DivisionGeneralConfidence,
   SetDivisionGeneralSpecInput,
 } from './queries/division-general.js';
+export {
+  upsertHeaderFooterConfig,
+  findHeaderFooterConfig,
+  deleteHeaderFooterConfig,
+  resolveHeaderFooterConfig,
+  HeaderFooterValidationError,
+  HeaderFooterScopeError,
+} from './queries/header-footer.js';
+export type {
+  HeaderFooterScopeInput,
+  HeaderFooterScope,
+  HeaderFooterConfig,
+  ResolveHeaderFooterConfigInput,
+  HeaderFooterResolutionContext,
+  ResolvedHeaderFooterConfig,
+} from './queries/header-footer.js';

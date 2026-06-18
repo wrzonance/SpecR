@@ -62,6 +62,18 @@ export const ARCAT_ILVL_MAP: readonly IlvlSignalRule[] = [
     nodeType: 'pr5',
     description: 'ARCAT PR5 fifth paragraph tier (ilvl 6 → a) text)',
   },
+  {
+    id: 'arcat-pr6',
+    ilvl: 7,
+    nodeType: 'pr6',
+    description: 'ARCAT PR6 sixth paragraph tier (ilvl 7 → repeated 1) text)',
+  },
+  {
+    id: 'arcat-pr7',
+    ilvl: 8,
+    nodeType: 'pr7',
+    description: 'ARCAT PR7 seventh paragraph tier (ilvl 8 → repeated a) text)',
+  },
 ];
 
 // CPI (Chatsworth Products Inc.) manufacturer specs: ilvl 1-2 reserved for Schedule/PDS.
@@ -109,11 +121,32 @@ export const CPI_ILVL_MAP: readonly IlvlSignalRule[] = [
     nodeType: 'pr5',
     description: 'CPI PR5 fifth paragraph tier (ilvl 8 → a) text)',
   },
+  {
+    id: 'cpi-pr6',
+    ilvl: 9,
+    nodeType: 'pr6',
+    description: 'CPI PR6 sixth paragraph tier (ilvl 9 → repeated 1) text)',
+  },
+  {
+    id: 'cpi-pr7',
+    ilvl: 10,
+    nodeType: 'pr7',
+    description: 'CPI PR7 seventh paragraph tier (ilvl 10 → repeated a) text)',
+  },
 ];
 
 // ─── ilvl → NodeType resolution ──────────────────────────────────────────────
 
-const NODE_TYPE_SEQUENCE: readonly NodeType[] = ['article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5'];
+const NODE_TYPE_SEQUENCE: readonly NodeType[] = [
+  'article',
+  'pr1',
+  'pr2',
+  'pr3',
+  'pr4',
+  'pr5',
+  'pr6',
+  'pr7',
+];
 
 /**
  * Map a raw OOXML ilvl to a canonical CSI NodeType.

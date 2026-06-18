@@ -66,14 +66,14 @@ docker compose up -d postgres        # postgres:16, db/user/pass all "specr", :5
 # native: Arch `sudo pacman -S postgresql` · Ubuntu `sudo apt install postgresql libpq-dev`
 ```
 
-CI sequence (the order matters): `pnpm migrate → pnpm seed → pnpm test → pnpm test:integration`. **`pnpm seed` is required before integration tests** — `listSpecSections` and the MCP `list_sections` tool depend on seeded `spec_sections` data. `DATABASE_URL` comes from `.env` (see `.env.example`).
+CI sequence (the order matters): `pnpm migrate → pnpm seed → pnpm test → pnpm test:integration`. **`pnpm seed` is required before integration tests** — `listSpecSections` and the MCP `list_sections` tool depend on seeded `spec_sections` data. `DATABASE_URL` comes from `.env` (see `.env.example`). The `dev`, `start`, `migrate`/`migrate:down`, `seed`, and `load:files` scripts **auto-load `.env`** (Node's `--env-file-if-exists` for the `node`/`tsx` ones; node-pg-migrate's `--envPath` for migrate) — so no inline env is needed locally. Real shell/CI env vars take precedence over the file, and a missing `.env` still fails fast at the Zod check. Test runners are intentionally excluded.
 
 ## Conventions
 
 - No `console.*` in `src/` (outside test/scripts) — use the pino logger at `src/lib/logger.ts`.
 - DB migrations are always reversible (paired up + down); migration files are the schema of record, not test targets.
 - `src/lib/env.ts` validates env with Zod and exits the process on invalid config — fail fast at boot.
-- `openapi.yaml` is the authoritative API contract; keep it in sync when endpoints change.
+- **`openapi.yaml` is the live, authoritative API contract — adhere to it.** It is hand-authored truth (ADR-026), now rendered as-is at `/docs` (Scalar) and served at `GET /openapi.yaml`, **and CI-enforced** by the contract gate (`src/api/contract.integration.test.ts`): bidirectional route↔spec coverage + response-schema validation. Any endpoint change (path, method, request/response shape, or status) **must update `openapi.yaml` in the same PR** — otherwise `/docs` renders something the code doesn't do and CI goes red three ways (undocumented route, documented-but-unrouted op, or a response that no longer matches its schema). Code conforms to the spec, not the reverse.
 - The 666-file UFGS `.SEC` corpus is seed/proof-of-concept data, not the product. The product is the inference engine and round-trip fidelity — don't let library content drive scope.
 
 ## Gotchas

@@ -198,6 +198,69 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/paragraphs/{nodeId}:
+    patch:
+      operationId: updateParagraph
+      summary: Update a single paragraph's text by UUID
+      description: >
+        Replaces one paragraph's text in place (ADR-009), bumping its
+        `base_version` and the spec's `contentVersion`. The Revit add-in pushes
+        model-parameter changes here without replacing the whole spec. The node
+        must belong to the spec in the path; otherwise the request is rejected
+        with 403.
+
+
+        Optimistic concurrency (ADR-018): supply `expectedVersion` (the spec
+        `contentVersion` you read) to make the write conditional — a stale value
+        is rejected 409 with the current version, so a concurrent edit is never
+        silently clobbered. The composed edit gate also rejects writes to an
+        archived spec or one locked upstream in a DMS (409).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  description: New paragraph text (must be non-empty).
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+                  description: >
+                    Optional optimistic-concurrency precondition — the spec
+                    `contentVersion` the caller read. Stale → 409.
+      responses:
+        '200':
+          description: Updated paragraph node (with its subtree)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecNode'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/WriteConflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/lineage:
     get:
       operationId: getSpecLineage
@@ -231,6 +294,88 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/SpecLineage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/style-source:
+    post:
+      operationId: setSpecStyleSource
+      summary: Assign a style template to a spec (manual style-source pick)
+      description: >
+        Associates an existing style template (#30/#31) with the spec so the
+        generator can render it with a real house style (#138). One template per
+        spec; re-assigning replaces the previous template. `.SEC`/`.txt`/PDF
+        masters carry no adopted visual style, so this is the narrowest useful
+        slice of #125's style sources. Both the spec and the template must
+        already exist — either missing → 404 (pre-checked, never via the FK error).
+        A template assigned to any spec cannot be deleted (DELETE /templates/{id}
+        → 409).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateId]
+              properties:
+                templateId:
+                  type: string
+                  format: uuid
+                  description: Style template to associate with the spec.
+      responses:
+        '200':
+          description: Style source assigned
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StyleSource'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: clearSpecStyleSource
+      summary: Clear a spec's style template (fall back to generator defaults)
+      description: >
+        Removes the spec→template association (#138). Idempotent — clearing an
+        already-unset association is still 200. The spec must exist (unknown → 404).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Style source cleared (styleSource is null)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [styleSource]
+                        properties:
+                          styleSource:
+                            type: 'null'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -285,6 +430,234 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/diff:
+    post:
+      operationId: diffSpecDocx
+      summary: Diff a returned DOCX against stored spec state
+      description: >
+        Upload an edited DOCX generated by SpecR. The response is a UUID-keyed
+        3-way diff: base snapshot, current DB state (`ours`), and returned DOCX
+        content (`theirs`). The synthetic title paragraph is ignored because it
+        is not a persisted AST node.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Returned SpecR-generated DOCX. Max 10 MB.
+      responses:
+        '200':
+          description: Structured merge diff
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DiffResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/merge:
+    post:
+      operationId: mergeSpecDiff
+      summary: Apply accepted changes from a spec diff
+      description: >
+        Submit accepted change UUIDs along with the `DiffResult` previously
+        returned by `/specs/{id}/diff`. Accepted modified/conflict entries update
+        `paragraphs.text`, insert a `paragraph_versions` snapshot for the new
+        base version, and increment `paragraphs.base_version`. Rejected entries
+        are discarded by omission. A successful merge bumps the spec's
+        `contentVersion`.
+
+
+        Optimistic concurrency (ADR-018): supply `expectedVersion` to make the
+        merge conditional on the spec being at that `contentVersion` — stale →
+        409 with the current version. The composed edit gate also rejects a merge
+        on an archived spec or one locked upstream (409).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeRequest'
+      responses:
+        '200':
+          description: Merge apply summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MergeResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/WriteConflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/lock:
+    get:
+      operationId: getSpecLock
+      summary: Current advisory lock on a spec
+      description: >
+        Returns the live advisory lock (ADR-018 D2) or `{ locked: false }` when
+        none is held. An expired lock reads as free. Advisory only — a lock never
+        blocks a write on its own; the edit gate governs writes.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Lock state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [locked, lock]
+                        properties:
+                          locked:
+                            type: boolean
+                          lock:
+                            description: >
+                              The live lock when held, or null when the spec is
+                              unlocked (or its lock has expired).
+                            oneOf:
+                              - $ref: '#/components/schemas/LockState'
+                              - type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: acquireSpecLock
+      summary: Acquire (or refresh / steal-after-expiry) an advisory lock
+      description: >
+        Acquires the soft lock for `holder`. Succeeds when the spec is free, the
+        caller already holds it (refresh), or the existing lock has expired
+        (steal). A live lock held by another caller is refused with 409 and the
+        blocking holder. There is no unlock ceremony — abandoned locks expire.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder]
+              properties:
+                holder:
+                  type: string
+                  minLength: 1
+                  description: Caller identity label (authenticated identity once #43 lands).
+                ttlSeconds:
+                  type: integer
+                  minimum: 1
+                  maximum: 3600
+                  description: Lock lifetime in seconds (default 900 / 15 min).
+      responses:
+        '200':
+          description: Lock acquired
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LockState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: A live lock is held by another caller
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      holder:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: releaseSpecLock
+      summary: Release an advisory lock
+      description: >
+        Releases the lock only if `holder` matches the current holder. A release
+        by a non-holder (or when no lock is held) is refused with 409.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [holder]
+              properties:
+                holder:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: Lock released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -430,6 +803,65 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /projects/{id}/generate:
+    post:
+      operationId: generateManual
+      summary: Assemble a project manual DOCX from all TOC sections
+      description: >
+        Renders every section in the project's TOC (MasterFormat / position order)
+        into a single DOCX manual (ADR-017 D1). Each section is its own OOXML
+        section with an independent numbering instance, so multilevel numbering
+        restarts at PART 1 per section. Every paragraph keeps its `w:sdt` UUID
+        anchor for round-trip. The manual opens with a cover page (project name +
+        description, style-template applied) and a Word TOC field over the section
+        headings — Word computes the TOC entries and pagination on open; SpecR emits
+        the field, not page numbers. This route renders the live draft from
+        `project_specs`; issued and addendum manuals render from frozen package
+        revisions via `POST /revisions/{id}/generate`.
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                templateId:
+                  type: string
+                  format: uuid
+                  description: >
+                    Style template applied to every section. Omitted → the seeded
+                    UFGS-Default template; absent default → unstyled 200. Unknown id → 404.
+                sectionNumberFormat:
+                  type: string
+                  enum: [canonical, dots, compact]
+                  default: canonical
+                  description: >
+                    Presentation format for generated section numbers in each
+                    section title and confidently identified Section references.
+      responses:
+        '200':
+          description: DOCX manual file stream
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Project has no sections to assemble
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /libraries/{libraryId}/divisions/{division}/general-spec:
     get:
       operationId: getLibraryDivisionGeneralSpec
@@ -498,6 +930,317 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /conventions:
+    get:
+      operationId: listConventions
+      summary: List built-in editing-convention profiles
+      description: >
+        Returns the read-only built-in (industry default) convention profiles.
+        Built-ins (`libraryId: null`) cannot be written through the API.
+      tags: [conventions]
+      responses:
+        '200':
+          description: Built-in convention profiles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/EditingConvention'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /libraries/{id}/conventions:
+    get:
+      operationId: getLibraryConvention
+      summary: Get a library's convention profile (or inherited built-in)
+      description: >
+        Returns the library's own convention profile, or the inherited built-in
+        industry default when the library has no profile of its own. The
+        `meta.inherited` flag is `true` when the returned profile is the
+        fallback built-in (`data.libraryId` is then `null`).
+      tags: [conventions]
+      parameters:
+        - $ref: '#/components/parameters/ConventionLibraryId'
+      responses:
+        '200':
+          description: Resolved convention profile with fallback flag
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data, meta]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/EditingConvention'
+                      meta:
+                        type: object
+                        required: [inherited]
+                        properties:
+                          inherited:
+                            type: boolean
+                            description: True when the profile is the inherited built-in default
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: putLibraryConvention
+      summary: Create or replace a library's convention profile
+      description: >
+        Upserts the library's convention profile. Rules are shape-validated
+        (malformed rules → 400). User-supplied `noteBanners` regexes are bounded
+        for length and ReDoS safety at the write boundary (unsafe pattern → 422).
+        Unknown rule keys round-trip unchanged (open schema).
+      tags: [conventions]
+      parameters:
+        - $ref: '#/components/parameters/ConventionLibraryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutConventionBody'
+      responses:
+        '200':
+          description: Convention profile created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/EditingConvention'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Unsafe or oversized `noteBanners` regex
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /libraries/{id}/conventions/clone:
+    post:
+      operationId: cloneLibraryConvention
+      summary: Clone a convention profile into a library
+      description: >
+        Clones a source profile (a built-in or another library's profile,
+        identified by `sourceId`) into the target library, creating or replacing
+        the target library's own profile.
+      tags: [conventions]
+      parameters:
+        - $ref: '#/components/parameters/ConventionLibraryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloneConventionBody'
+      responses:
+        '201':
+          description: Convention profile cloned into the library
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/EditingConvention'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Unsafe or oversized `noteBanners` regex in the source profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /revision-nomenclature-profiles:
+    get:
+      operationId: listRevisionNomenclatureProfiles
+      summary: List revision nomenclature profiles
+      description: >
+        Returns built-in and project-scoped revision nomenclature profiles. Built-ins
+        (`projectId: null`) provide default issuance/addendum/bulletin/CCD types.
+      tags: [revision-nomenclature]
+      responses:
+        '200':
+          description: Revision nomenclature profiles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RevisionNomenclatureProfile'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/revision-nomenclature:
+    get:
+      operationId: getProjectRevisionNomenclature
+      summary: Get a project's revision nomenclature profile
+      description: >
+        Returns the project's own revision nomenclature profile, or the inherited
+        built-in default when the project has no profile. `meta.inherited` is true
+        when `data.projectId` is null.
+      tags: [revision-nomenclature]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Resolved revision nomenclature profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data, meta]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RevisionNomenclatureProfile'
+                      meta:
+                        type: object
+                        required: [inherited]
+                        properties:
+                          inherited:
+                            type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: putProjectRevisionNomenclature
+      summary: Create or replace a project's revision nomenclature profile
+      tags: [revision-nomenclature]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutRevisionNomenclatureBody'
+      responses:
+        '200':
+          description: Project profile created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RevisionNomenclatureProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteProjectRevisionNomenclature
+      summary: Delete a project's revision nomenclature override
+      tags: [revision-nomenclature]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project override deleted; future reads inherit the built-in
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId]
+                        properties:
+                          projectId:
+                            type: string
+                            format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/revision-nomenclature/clone:
+    post:
+      operationId: cloneProjectRevisionNomenclature
+      summary: Clone a revision nomenclature profile into a project
+      tags: [revision-nomenclature]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloneRevisionNomenclatureBody'
+      responses:
+        '201':
+          description: Revision nomenclature profile cloned into the project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RevisionNomenclatureProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1014,13 +1757,9 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [label]
-              properties:
-                label:
-                  type: string
-                  minLength: 1
-                  description: Issuance label, unique per package
+              oneOf:
+                - $ref: '#/components/schemas/CreateRevisionLegacyBody'
+                - $ref: '#/components/schemas/CreateRevisionStructuredBody'
       responses:
         '201':
           description: Revision issued
@@ -1039,7 +1778,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Revision label already exists for this package
+          description: Revision label or sort order already exists for this package
           content:
             application/json:
               schema:
@@ -1081,6 +1820,77 @@ paths:
                         $ref: '#/components/schemas/RevisionWithTrees'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /revisions/{id}/generate:
+    post:
+      operationId: generateRevisionManual
+      summary: Render an issued manual DOCX from frozen package revision snapshots
+      description: >
+        Renders the target package revision from `package_revision_specs.tree`, not
+        live paragraph rows, so old issuances remain reproducible after database
+        edits. When `baseRevisionId` is supplied, addendum mode compares the
+        target and base revision snapshots by section-level AST equality and
+        emits only sections whose frozen trees differ, under an addendum cover
+        listing the affected sections. Running DOCX headers/footers are reserved
+        for the header/footer foundation work; this endpoint renders revision
+        identity on the cover/front matter only.
+      tags: [packages]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target revision UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                templateId:
+                  type: string
+                  format: uuid
+                  description: >
+                    Style template applied to every rendered section. Omitted →
+                    the seeded UFGS-Default template; absent default → unstyled
+                    200. Unknown id → 404.
+                sectionNumberFormat:
+                  type: string
+                  enum: [canonical, dots, compact]
+                  default: canonical
+                  description: >
+                    Presentation format for generated section numbers in each
+                    section title and confidently identified Section references.
+                baseRevisionId:
+                  type: string
+                  format: uuid
+                  description: >
+                    Base revision for addendum mode. Must belong to the same
+                    package as the target revision. Omit to render the full
+                    issued manual.
+      responses:
+        '200':
+          description: DOCX manual file stream
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Invalid addendum comparison, or no changed sections to render
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1220,6 +2030,11 @@ paths:
     delete:
       operationId: deleteTemplate
       summary: Delete a style template and all its rules
+      description: >
+        A template assigned to any spec as its style source cannot be deleted
+        (ON DELETE RESTRICT, #138) — the request returns 409 with the count of
+        referencing specs. Clear the association on those specs first
+        (DELETE /specs/{id}/style-source).
       tags: [templates]
       parameters:
         - $ref: '#/components/parameters/TemplateId'
@@ -1230,6 +2045,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: Template is in use by one or more specs as a style source and cannot be deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1367,6 +2188,14 @@ components:
       schema:
         type: string
         format: uuid
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      description: Paragraph (node) UUID
+      schema:
+        type: string
+        format: uuid
     ProjectId:
       name: id
       in: path
@@ -1399,10 +2228,24 @@ components:
       schema:
         type: string
         format: uuid
+    ConventionLibraryId:
+      name: id
+      in: path
+      required: true
+      description: Library UUID
+      schema:
+        type: string
+        format: uuid
 
   responses:
     BadRequest:
       description: Bad request — validation error or unsupported file type
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Forbidden — the resource exists but does not belong to the parent in the path
       content:
         application/json:
           schema:
@@ -1419,6 +2262,21 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    WriteConflict:
+      description: >
+        Write rejected by the concurrency / edit gate (ADR-018): a stale
+        `expectedVersion`, an archived spec, or a spec locked upstream. On a
+        stale version the current version travels back as `currentVersion`.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - type: object
+                properties:
+                  currentVersion:
+                    type: integer
+                    description: Present on a stale-version conflict — the spec's current contentVersion.
     UnprocessableEntity:
       description: Unprocessable — file parsed but semantically unusable
       content:
@@ -1560,10 +2418,85 @@ components:
           description: The losing inference signal that disagreed with the winner
         reportedIlvl:
           type: integer
-          description: Normalized ilvl the losing signal reported (part=0 … pr5=6)
+          description: Normalized ilvl the losing signal reported (part=0 … pr7=8)
         reportedNodeType:
           type: string
-          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, note, continuation]
+          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation]
+
+    SourceTextSpan:
+      type: array
+      minItems: 2
+      maxItems: 2
+      prefixItems:
+        - type: integer
+          minimum: 0
+        - type: integer
+          minimum: 0
+
+    SourceCommentFact:
+      type: object
+      required: [author, text, anchor]
+      properties:
+        author:
+          type: string
+        text:
+          type: string
+        anchor:
+          $ref: '#/components/schemas/SourceTextSpan'
+
+    SourceColorFact:
+      type: object
+      required: [color, coverage, spans]
+      properties:
+        color:
+          type: string
+        coverage:
+          type: number
+          minimum: 0
+          maximum: 1
+        spans:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceTextSpan'
+
+    SourceChoiceTokenFact:
+      type: object
+      required: [kind, options, span]
+      properties:
+        kind:
+          type: string
+          enum: [angle, bracket]
+        options:
+          type: array
+          items:
+            type: string
+        span:
+          $ref: '#/components/schemas/SourceTextSpan'
+
+    SourceFacts:
+      type: object
+      description: >-
+        Parser source facts for this paragraph. Present only when non-empty;
+        unknown JSON keys are preserved for forward-compatible fact producers.
+      additionalProperties: true
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceCommentFact'
+        colors:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceColorFact'
+        choiceTokens:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceChoiceTokenFact'
+        banner:
+          type: string
+        vanish:
+          type: boolean
+          const: true
 
     SpecNode:
       type: object
@@ -1574,7 +2507,7 @@ components:
           format: uuid
         type:
           type: string
-          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, note, continuation]
+          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation]
         text:
           type: string
         children:
@@ -1603,6 +2536,8 @@ components:
                 engine picked the highest-priority signal.
               items:
                 $ref: '#/components/schemas/SignalConflict'
+            sourceFacts:
+              $ref: '#/components/schemas/SourceFacts'
 
     SpecTree:
       type: object
@@ -1620,10 +2555,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SpecNode'
+        styleSource:
+          description: >
+            Manually assigned style template (#138), or null when none is set.
+            Only present on GET /specs/{id}.
+          oneOf:
+            - $ref: '#/components/schemas/StyleSource'
+            - type: 'null'
         warnings:
           type: array
           items:
             $ref: '#/components/schemas/ParseWarning'
+
+    StyleSource:
+      type: object
+      required: [templateId, templateName]
+      properties:
+        templateId:
+          type: string
+          format: uuid
+        templateName:
+          type: string
 
     SpecSummary:
       type: object
@@ -1636,6 +2588,113 @@ components:
           type: string
         section:
           type: string
+
+    ParagraphDiff:
+      type: object
+      required: [uuid, text, index]
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: Synthesized UUID for a paragraph added outside known controls
+        text:
+          type: string
+        index:
+          type: integer
+          minimum: 0
+          description: Document-order index in the returned DOCX
+
+    ModifiedDiff:
+      type: object
+      required: [uuid, base, theirs, ours]
+      properties:
+        uuid:
+          type: string
+          format: uuid
+        base:
+          type: string
+          description: Base snapshot text
+        theirs:
+          type: string
+          description: Returned DOCX text
+        ours:
+          type: string
+          description: Current DB text
+
+    DiffResult:
+      type: object
+      required: [added, modified, deleted, conflicts, warnings]
+      properties:
+        added:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParagraphDiff'
+        modified:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModifiedDiff'
+        deleted:
+          type: array
+          items:
+            type: string
+            format: uuid
+        conflicts:
+          type: array
+          description: Same shape as modified; present when ours and theirs both changed
+          items:
+            $ref: '#/components/schemas/ModifiedDiff'
+        warnings:
+          type: array
+          items:
+            type: string
+
+    MergeRequest:
+      type: object
+      required: [accept, diff]
+      additionalProperties: false
+      properties:
+        accept:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: UUIDs from `diff.modified` or `diff.conflicts` to apply
+        diff:
+          $ref: '#/components/schemas/DiffResult'
+        expectedVersion:
+          type: integer
+          minimum: 1
+          description: >
+            Optional optimistic-concurrency precondition (ADR-018) — the spec
+            `contentVersion` the redline was diffed against. Stale → 409.
+
+    LockState:
+      type: object
+      required: [holder, acquiredAt, expiresAt]
+      description: An advisory soft lock on a spec (ADR-018 D2).
+      properties:
+        holder:
+          type: string
+          description: Caller identity label holding the lock.
+        acquiredAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+
+    MergeResult:
+      type: object
+      required: [applied, rejected]
+      properties:
+        applied:
+          type: integer
+          minimum: 0
+          description: Number of paragraph rows changed
+        rejected:
+          type: integer
+          minimum: 0
+          description: Number of diff entries omitted from `accept`
 
     LineageHop:
       type: object
@@ -2023,9 +3082,64 @@ components:
               items:
                 $ref: '#/components/schemas/PackageSpecEntry'
 
+    RevisionAttributes:
+      type: object
+      description: >
+        Open JSONB attributes for a profile-defined revision type. Known common
+        keys include `number`, `title`, and `phase`; unknown keys are preserved.
+      additionalProperties: true
+      properties:
+        number:
+          oneOf:
+            - type: string
+            - type: number
+        title:
+          type: string
+        phase:
+          type: string
+
+    CreateRevisionLegacyBody:
+      type: object
+      required: [label]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          description: Legacy freeform label; still accepted for backward compatibility
+
+    CreateRevisionStructuredBody:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          minLength: 1
+          description: String key defined by the resolved revision nomenclature profile
+        date:
+          type: string
+          format: date
+        sortOrder:
+          type: integer
+          minimum: 1
+        attributes:
+          $ref: '#/components/schemas/RevisionAttributes'
+
     RevisionSummary:
       type: object
-      required: [revisionId, packageId, label, issuedAt, specCount]
+      required:
+        [
+          revisionId,
+          packageId,
+          label,
+          displayName,
+          type,
+          date,
+          sortOrder,
+          number,
+          attributes,
+          issuedAt,
+          specCount,
+        ]
       properties:
         revisionId:
           type: string
@@ -2035,7 +3149,25 @@ components:
           format: uuid
         label:
           type: string
-          description: Issuance label, unique per package ('50% DD', '100% CD', 'Addendum 2')
+          description: Backward-compatible display label, unique per package
+        displayName:
+          type: string
+          description: Profile-rendered display name; #102 consumes this directly
+        type:
+          type: string
+          description: Profile-defined revision type key
+        date:
+          type: string
+          format: date
+        sortOrder:
+          type: integer
+          minimum: 1
+          description: Queryable ordering key within the package
+        number:
+          type: [string, 'null']
+          description: Profile-rendered revision number, or null when not applicable
+        attributes:
+          $ref: '#/components/schemas/RevisionAttributes'
         issuedAt:
           type: string
           format: date-time
@@ -2058,7 +3190,20 @@ components:
 
     RevisionWithTrees:
       type: object
-      required: [revisionId, packageId, label, issuedAt, specs]
+      required:
+        [
+          revisionId,
+          packageId,
+          label,
+          displayName,
+          type,
+          date,
+          sortOrder,
+          number,
+          attributes,
+          issuedAt,
+          specs,
+        ]
       properties:
         revisionId:
           type: string
@@ -2068,6 +3213,20 @@ components:
           format: uuid
         label:
           type: string
+        displayName:
+          type: string
+        type:
+          type: string
+        date:
+          type: string
+          format: date
+        sortOrder:
+          type: integer
+          minimum: 1
+        number:
+          type: [string, 'null']
+        attributes:
+          $ref: '#/components/schemas/RevisionAttributes'
         issuedAt:
           type: string
           format: date-time
@@ -2080,11 +3239,11 @@ components:
 
     StyleNodeType:
       type: string
-      enum: [part, article, pr1, pr2, pr3, pr4, pr5]
+      enum: [part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7]
       description: >
-        CSI paragraph role. Maps to the seven structural levels: `part` (PART 1 –
-        GENERAL), `article` (1.1 REFERENCES), `pr1`–`pr5` (A. / 1. / a. / 1) / a)
-        paragraph tiers).
+        CSI paragraph role. Maps to the nine generator levels: `part` (PART 1 –
+        GENERAL), `article` (1.1 REFERENCES), `pr1`–`pr7` (A. / 1. / a. / 1) /
+        a), then repeated 1) / a) paragraph tiers).
 
     StyleRule:
       type: object
@@ -2226,7 +3385,7 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/StyleRule'
-              description: One rule per NodeType (7 max)
+              description: One rule per styleable NodeType (9 max)
 
     DerivationReport:
       type: object
@@ -2319,3 +3478,161 @@ components:
               count:
                 type: integer
                 description: Number of voters that carried this value
+
+    # ── Editing conventions (ADR-022 O-10) ──────────────────────────────────────
+
+    ConventionRules:
+      type: object
+      description: >
+        Open editing-convention ruleset. The named keys below are recognised;
+        unknown keys are preserved verbatim (round-trip). `noteBanners` are
+        user-supplied regex SOURCES bounded for safety at the write boundary.
+      additionalProperties: true
+      properties:
+        colorMeanings:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        choiceTokens:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        noteBanners:
+          type: array
+          items:
+            type: string
+          description: Regex sources matching note/specifier banners
+        comments:
+          type: object
+          additionalProperties: true
+        defaultEditability:
+          type: string
+          enum: [locked, editable, choice, note]
+
+    EditingConvention:
+      type: object
+      required: [id, libraryId, name, rules, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        libraryId:
+          type: [string, 'null']
+          format: uuid
+          description: Owning library, or null for a built-in industry default
+        name:
+          type: string
+        rules:
+          $ref: '#/components/schemas/ConventionRules'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PutConventionBody:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        rules:
+          $ref: '#/components/schemas/ConventionRules'
+
+    CloneConventionBody:
+      type: object
+      required: [sourceId]
+      properties:
+        sourceId:
+          type: string
+          format: uuid
+          description: A built-in or another library's convention profile id
+
+    # ── Revision nomenclature profiles (ADR-025 / #209) ───────────────────────
+
+    RevisionNomenclatureType:
+      type: object
+      required: [key]
+      additionalProperties: true
+      properties:
+        key:
+          type: string
+          minLength: 1
+        name:
+          type: string
+        format:
+          type: object
+          additionalProperties: true
+          properties:
+            displayName:
+              type: string
+              description: Template using `{attributeKey}` placeholders
+            number:
+              type: string
+              description: Template for the rendered revision number
+        fields:
+          type: array
+          items:
+            type: object
+            required: [key]
+            additionalProperties: true
+            properties:
+              key:
+                type: string
+                minLength: 1
+              kind:
+                type: string
+                enum: [string, integer, number, date, boolean, json]
+              required:
+                type: boolean
+              sequence:
+                type: string
+
+    RevisionNomenclatureProfile:
+      type: object
+      required: [id, projectId, name, types, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: [string, 'null']
+          format: uuid
+          description: Owning project, or null for a built-in default
+        name:
+          type: string
+        types:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevisionNomenclatureType'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PutRevisionNomenclatureBody:
+      type: object
+      required: [name, types]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        types:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevisionNomenclatureType'
+
+    CloneRevisionNomenclatureBody:
+      type: object
+      required: [sourceId]
+      properties:
+        sourceId:
+          type: string
+          format: uuid
+          description: A built-in or another project's revision nomenclature profile id

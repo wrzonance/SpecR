@@ -5,17 +5,16 @@ import {
   searchParagraphs,
   listSpecSections,
   getSpecTree,
+  getSpecStyleSource,
   getParagraphWithAncestors,
   persistParsedSpec,
   lookupSpecSectionTitle,
   getSpecLineage,
-  getCoordinationReport,
   findProjectById,
   findProjectSpecIdsBySection,
   getInboundReferences,
   getOutboundReferences,
   listProjects,
-  PackageNotFoundError,
   pool,
 } from '../db/index.js';
 import type { InboundReference, OriginMeta, OutboundReference } from '../db/index.js';
@@ -24,6 +23,7 @@ import type { SectionInference } from '../lib/infer-section.js';
 import { parseSec, parseDocx, parseText, assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { generateDocx } from '../generator/index.js';
+import { computeSpecDiff, MergeError } from '../merge/index.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
@@ -34,8 +34,9 @@ type ToolError = {
   readonly content: { readonly type: 'text'; readonly text: string }[];
 };
 type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
-type ToolResult = ToolError | ToolOk;
+export type ToolResult = ToolError | ToolOk;
 type ReferenceDirection = 'from' | 'to' | 'both';
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 export function toolError(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };
@@ -53,7 +54,6 @@ async function decodeSafeBuffer(
   ext: string,
   contentBase64: string
 ): Promise<Buffer | string | ToolError> {
-  const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
   if (!BASE64_RE.test(contentBase64)) {
     return toolError('contentBase64 is not valid base64');
   }
@@ -130,21 +130,15 @@ export async function handleSearchLibrary({
 export async function handleGetSpec({ specId }: { specId: string }): Promise<ToolResult> {
   try {
     const result = await getSpecTree(specId);
-    if (!result) {
-      return {
-        isError: true,
-        content: [{ type: 'text' as const, text: `Spec not found: id=${specId}` }],
-      };
-    }
-    return {
-      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-    };
+    if (!result) return toolError(`Spec not found: id=${specId}`);
+    // Surface the manual style-source pick (#138) alongside the tree:
+    // { templateId, templateName } | null.
+    const styleSource = await getSpecStyleSource(specId);
+    const text = JSON.stringify({ ...result, styleSource }, null, 2);
+    return { content: [{ type: 'text' as const, text }] };
   } catch (err) {
     logger.error({ err }, 'mcp tool get_spec failed');
-    return {
-      isError: true,
-      content: [{ type: 'text' as const, text: 'Internal error — spec retrieval failed' }],
-    };
+    return toolError('Internal error — spec retrieval failed');
   }
 }
 
@@ -350,28 +344,6 @@ export async function handleGetSpecLineage({ specId }: { specId: string }): Prom
   }
 }
 
-export async function handleCoordinationReport({
-  projectId,
-  packageId,
-}: {
-  projectId: string;
-  packageId: string | undefined;
-}): Promise<ToolResult> {
-  try {
-    const report = await getCoordinationReport(projectId, packageId, pool);
-    if (!report) {
-      return toolError(`Project not found: id=${projectId}`);
-    }
-    return { content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }] };
-  } catch (err) {
-    if (err instanceof PackageNotFoundError) {
-      return toolError(`Package not found: id=${packageId}`);
-    }
-    logger.error({ err }, 'mcp tool coordination_report failed');
-    return toolError('Internal error — coordination report failed');
-  }
-}
-
 export async function handleGenerateDocx({ specId }: { specId: string }): Promise<ToolResult> {
   try {
     const result = await getSpecTree(specId);
@@ -400,5 +372,53 @@ export async function handleGenerateDocx({ specId }: { specId: string }): Promis
   } catch (err) {
     logger.error({ err }, 'mcp tool generate_docx failed');
     return toolError('Internal error — DOCX generation failed');
+  }
+}
+
+async function decodeDocxBuffer(contentBase64: string): Promise<Buffer | ToolError> {
+  if (!BASE64_RE.test(contentBase64)) return toolError('contentBase64 is not valid base64');
+  const estimatedBytes = Math.ceil((contentBase64.length * 3) / 4);
+  if (estimatedBytes > 10 * 1024 * 1024) {
+    return toolError('Content exceeds 10 MB decoded limit');
+  }
+  const buf = Buffer.from(contentBase64, 'base64');
+  try {
+    await assertDocxSafe(buf);
+    return buf;
+  } catch (err) {
+    logger.warn({ err }, 'mcp diff DOCX rejected');
+    return toolError('invalid DOCX file');
+  }
+}
+
+async function resolveDiffDocx(
+  specId: string,
+  contentBase64: string | undefined
+): Promise<Buffer | ToolError> {
+  if (contentBase64 !== undefined) return decodeDocxBuffer(contentBase64);
+  const result = await getSpecTree(specId);
+  if (!result) return toolError(`Spec not found: id=${specId}`);
+  return generateDocx(result.tree);
+}
+
+export async function handleGetSpecDiff({
+  specId,
+  contentBase64,
+}: {
+  specId: string;
+  contentBase64: string | undefined;
+}): Promise<ToolResult> {
+  try {
+    const buffer = await resolveDiffDocx(specId, contentBase64);
+    if (isToolError(buffer)) return buffer;
+    const diff = await computeSpecDiff(specId, buffer);
+    if (!diff) return toolError(`Spec not found: id=${specId}`);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(diff, null, 2) }] };
+  } catch (err) {
+    if (err instanceof MergeError) {
+      return toolError(err.message);
+    }
+    logger.error({ err }, 'mcp tool get_spec_diff failed');
+    return toolError('Internal error — diff failed');
   }
 }

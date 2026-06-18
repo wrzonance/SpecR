@@ -8,9 +8,11 @@
     "pnpm": ">=11.0.0"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "vendor:scalar": "tsx scripts/vendor-scalar.ts",
+    "predev": "pnpm vendor:scalar",
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node --env-file-if-exists=.env dist/index.js",
     "lint": "eslint src/ && tsc --noEmit && prettier --check src/",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
@@ -18,10 +20,10 @@
     "test:integration": "vitest run --project integration",
     "test:watch": "vitest --project unit",
     "test:coverage": "vitest run --coverage",
-    "migrate": "node-pg-migrate --tsx --migrations-dir src/db/migrations up",
-    "migrate:down": "node-pg-migrate --tsx --migrations-dir src/db/migrations down 1",
-    "seed": "tsx src/db/seed.ts",
-    "load:files": "tsx scripts/load-files.ts",
+    "migrate": "node-pg-migrate --tsx --migrations-dir src/db/migrations --envPath .env up",
+    "migrate:down": "node-pg-migrate --tsx --migrations-dir src/db/migrations --envPath .env down 1",
+    "seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
+    "load:files": "tsx --env-file-if-exists=.env scripts/load-files.ts",
     "seed:corpus": "pnpm load:files 'docs/references/UFGS/**/*.SEC' 'docs/references/UFGS/**/*.sec'"
   },
   "dependencies": {
@@ -31,6 +33,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.1",
     "fast-xml-parser": "^5.0.0",
+    "fast-xml-validator": "^1.1.1",
     "iconv-lite": "^0.7.2",
     "jszip": "^3.10.0",
     "multer": "^2.1.1",
@@ -47,6 +50,7 @@
     ]
   },
   "devDependencies": {
+    "@apidevtools/json-schema-ref-parser": "^15.3.6",
     "@eslint/js": "latest",
     "@redocly/cli": "^2.32.0",
     "@types/express": "^5.0.6",
@@ -56,7 +60,10 @@
     "@types/uuid": "^10.0.0",
     "@types/yauzl": "^2.10.3",
     "@vitest/coverage-v8": "^4.1.5",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "depcheck": "^1.0.0",
+    "dotenv": "^16.4.7",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-sonarjs": "^4.0.3",

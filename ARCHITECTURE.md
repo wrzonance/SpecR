@@ -67,9 +67,9 @@ Clippit is the only open-source library that builds the actual parent/child para
 │                                                                        │
 │  REST API (Express)         MCP (Streamable HTTP, same process)        │
 │  ─────────────────          ────────────────────────────────           │
-│  POST /parse                POST /mcp  ← stateless per-request        │
+│  POST /parse                POST /mcp  ← stateless or session         │
 │  GET  /specs/:id            GET  /mcp  (405 stub)                     │
-│  POST /specs/:id/generate   DELETE /mcp (405 stub)                    │
+│  POST /specs/:id/generate   DELETE /mcp (terminates a session)        │
 │  POST /specs/:id/diff       tools: search_library, get_spec           │
 │  POST /specs/:id/merge             list_sections                       │
 │                             resources: specr://specs/{id} (Markdown)  │
@@ -193,8 +193,14 @@ Universal across all spec sources — the one thing you can count on:
 | PR3 | Third tier | 4 | 6 | `<TXT>` depth 3 | `a. text` |
 | PR4 | Fourth tier | 5 | 7 | `<TXT>` depth 4 | `1) text` |
 | PR5 | Fifth tier | 6 | 8 | `<TXT>` depth 5 | `a) text` |
+| PR6 | Sixth tier (deep extension) | 7 | 9 | `<TXT>` depth 6 | `1) text` |
+| PR7 | Seventh tier (deep extension) | 8 | 10 | `<TXT>` depth 7 | `a) text` |
 
 Note: CPI files reserve ilvl 1-2 for Schedule/PDS (rarely used) — so the same logical CSI Article level maps to different ilvl values depending on which template authored the document. The inference engine normalizes this.
+
+Note: CSI does not define PR6/PR7 labels. SpecR caps DOCX output at Word's nine
+numbering levels and repeats the final CSI paren pair (`1)` / `a)`) at deeper
+indent levels. See ADR-027.
 
 **Conflict persistence (#56):** when multiple signals fire and disagree, the losing signals are recorded as `{ signal, reportedIlvl, reportedNodeType }` and persisted to `paragraphs.conflicts` (JSONB, `NOT NULL DEFAULT '[]'`). They surface as `meta.conflicts` on tree nodes (`get_spec` MCP tool and the shared `getSpecTree` query) and as a top-level `conflicts` field on the node and each ancestor returned by the `get_paragraph` MCP tool — empty arrays are omitted on the wire. This makes inference ambiguity transparent to agents and the future UI instead of silently picking a winner.
 
@@ -212,6 +218,8 @@ type NodeType =
   | 'pr3'         // a. text
   | 'pr4'         // 1) text
   | 'pr5'         // a) text
+  | 'pr6'         // deep extension: 1) text
+  | 'pr7'         // deep extension: a) text
   | 'note'        // specifier note (hidden in output)
   | 'continuation' // unnumbered continuation paragraph
 
@@ -256,7 +264,7 @@ interface ApiResponse<T> {
 | PATCH | `/specs/:id` | `{ title?, section? }` | `{ specId, title, section }` |
 | POST | `/specs/:id/generate` | `{ templateId? }` | DOCX buffer (octet-stream) |
 | POST | `/specs/:id/diff` | multipart: `file` (edited .docx) | `{ added[], modified[], deleted[], conflicts[] }` |
-| POST | `/specs/:id/merge` | `{ accept: string[] }` (UUID list) | `{ applied: number, rejected: number }` |
+| POST | `/specs/:id/merge` | `{ accept: string[], diff: DiffResult }` | `{ applied: number, rejected: number }` |
 | GET | `/libraries/:libraryId/divisions/:division/general-spec` | — | `DivisionGeneralSpecResult` |
 | PUT | `/libraries/:libraryId/divisions/:division/general-spec` | `{ generalSpecId }` or `{ status: "not_applicable" }` | `DivisionGeneralSpecResult` |
 | GET | `/projects/:id/divisions/:division/general-spec` | — | `DivisionGeneralSpecResult` |
@@ -373,7 +381,7 @@ CREATE TABLE style_templates (
 CREATE TABLE style_rules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   template_id UUID NOT NULL REFERENCES style_templates(id) ON DELETE CASCADE,
-  node_type VARCHAR(20) NOT NULL,    -- 'part' | 'article' | 'pr1'..'pr5'
+  node_type VARCHAR(20) NOT NULL,    -- 'part' | 'article' | 'pr1'..'pr7'
   font_family TEXT,
   font_size_half_pt INTEGER,         -- OOXML native unit (20 = 10pt)
   bold BOOLEAN NOT NULL DEFAULT false,
@@ -531,8 +539,8 @@ Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
 - MCP tools (read-only Phase 2a scope): `search_library(query, division?, limit?)`, `get_spec(specId)` → `{ tree: CsiTree, references: SpecReference[] }` (each reference includes `isResolved: boolean`), `list_sections(division?)`
 - MCP resources: `specr://specs/{id}` (Markdown), `specr://sections` (Markdown table)
 - Auth: none for Phase 2. Auth hook comment in `src/mcp/server.ts`; auth added in same PR as REST auth (future).
-- **Stateful session upgrade path (Phase 5+):** change `sessionIdGenerator: undefined` → `sessionIdGenerator: () => randomUUID()` + session Map in the route handler. Tool/resource definitions unchanged.
-- Deferred to later phases: `get_paragraph`, `parse_document`, write tools, stateful sessions, MCP prompts
+- **Stateful sessions (Phase 5h, #45):** `POST /mcp` now also serves optional stateful sessions. An `initialize` with no `mcp-session-id` header mints a session (`sessionIdGenerator: () => randomUUID()`); the session's transport+server pair is kept in a `McpSessionStore` (`src/mcp/sessions.ts`) keyed by the minted id, and reused for later requests carrying that header. `DELETE /mcp` closes and removes a session. Stateless callers (no header) still get a fresh transport per request. Tool/resource definitions unchanged.
+- Deferred to later phases: write tools, MCP prompts, GET /mcp SSE streaming
 
 **Phase 2b — Core DOCX generator:** ✅ Complete (PR #26, PR #28)
 
@@ -546,16 +554,16 @@ Sub-MVP 1c-iii — DOCX cross-reference extraction (follow-up):
 - ✅ Template import API: `POST /templates`, `POST /templates/:id/rules` CRUD (PR #156); `POST /templates/import` DOCX consensus derivation (PR #151)
 - ✅ Prerequisite for Phase 5 live preview: generate DOCX → blob → client render
 
-### Phase 3: Merge Engine (Weeks 7–9)
+### Phase 3: Merge Engine (Weeks 7–9) — ✅ Complete
 - UUID-based paragraph matching across round-trips
 - 3-way diff algorithm (base + theirs + ours)
 - Conflict detection
 - `POST /specs/:id/diff` and `POST /specs/:id/merge` endpoints
-- End-to-end test: parse → generate → manually edit → diff → merge → verify
+- End-to-end test: parse → generate → edit returned DOCX text → diff → merge → verify
 
 ### Phase 4: Revit Integration (Weeks 10–12)
 - Revit parameter → CSI paragraph mapping schema
-- Revit add-in (C#/.NET) calling SpecR API directly
+- Revit add-in (C#/.NET) calling SpecR API directly — **separate C# solution in `revit-addin/`** (own `dotnet` toolchain, independent of the pnpm/TS build). Phase 4c scaffold: `IExternalApplication` ribbon registration + typed Refit REST client against `openapi.yaml` (`SpecRClient.GetSpecAsync`/`GetHealthAsync`). Targets the Revit 2024 runtime (.NET Framework 4.8). See `revit-addin/README.md`.
 - Part 2 auto-population from Revit model data
 - Revit change detection → show spec diffs
 
@@ -659,7 +667,7 @@ Test files (`src/**/*.test.ts`) and `scripts/**/*.ts` relax the line/console cap
 
 ## MCP Server
 
-`src/mcp/server.ts` exports `registerMcpRoutes(app: Express)`. One fresh `McpServer` + `StreamableHTTPServerTransport` is created per `POST /mcp` request (stateless, `sessionIdGenerator: undefined`). `registerTools(server)` and `registerResources(server)` wire all capabilities. `GET /mcp` and `DELETE /mcp` return 405 (stubs for a future stateful session upgrade).
+`src/mcp/server.ts` exports `registerMcpRoutes(app: Express)`. `POST /mcp` supports both transport modes. A stateless caller (no `mcp-session-id` header, non-`initialize` body) gets a fresh `McpServer` + stateless `StreamableHTTPServerTransport` (`sessionIdGenerator: undefined`) per request, disposed on response finish. An `initialize` with no session header mints a stateful session: a transport with `sessionIdGenerator: () => randomUUID()` whose pair is held in an `McpSessionStore` (`src/mcp/sessions.ts`) keyed by the minted id and reused for every later request carrying that `mcp-session-id`. `registerTools(server)` and `registerResources(server)` wire all capabilities in both modes. `GET /mcp` returns 405 (SSE streaming not yet exposed). `DELETE /mcp` terminates the session named by `mcp-session-id` (400 if absent, 404 if unknown, 204 on success).
 
 **Adding a tool** (inside `registerTools(server)` in `src/mcp/tools.ts`):
 
@@ -691,14 +699,14 @@ server.registerResource('name', 'specr://path', { description: '...', mimeType: 
 server.registerResource('name', new ResourceTemplate('specr://path/{id}', { list: undefined }), { ... }, async (uri, { id }) => { ... });
 ```
 
-**Stateful session upgrade (Phase 5+):** change `sessionIdGenerator: undefined` → `sessionIdGenerator: () => randomUUID()` and add a `Map<sessionId, McpServer>` session store in the route handler. Tool/resource definitions are unchanged. **Auth hook:** the insertion point is marked in `server.ts`; add `Authorization: Bearer <token>` validation there in the same PR as REST auth.
+**Stateful sessions (Phase 5h, #45):** implemented via `McpSessionStore` (`src/mcp/sessions.ts`), which owns the `Map<sessionId, { server, transport }>` and the session lifecycle (`createStateful`, `get`, `delete`). The SDK transport binds one session per instance, so a session is one long-lived transport+server pair keyed by the id the transport mints on `initialize`; the store registers/removes itself via the transport's `onsessioninitialized` / `onsessionclosed` callbacks. Tool/resource definitions are unchanged. **Auth hook:** the insertion point is marked in `server.ts`; add `Authorization: Bearer <token>` validation there in the same PR as REST auth.
 
 ## Markdown Renderer
 
 `src/generator/markdown.ts` is a pure module (no I/O, no DB), shared between MCP resources and the future DOCX generator.
 
 - `renderMarkdown(tree: CsiTree): string` — full spec as Markdown.
-- `getLabel(type: NodeType, index: number, partNumber?: number): string` — the CSI label for any node type (`A.` / `1.` / `a.` / `1)` / `a)`, `PART N -`, `N.N`). Uses base-26 arithmetic for the `pr1` / `pr3` / `pr5` letter tiers so it handles >26 siblings correctly.
+- `getLabel(type: NodeType, index: number, partNumber?: number): string` — the CSI label for any node type (`A.` / `1.` / `a.` / `1)` / `a)`, repeated `1)` / `a)` for PR6/PR7, `PART N -`, `N.N`). Uses base-26 arithmetic for the `pr1` / `pr3` / `pr5` / `pr7` letter tiers so it handles >26 siblings correctly.
 - `note` nodes always render as `> **[NOTE]** text` regardless of `meta.vanish` — editorial notes are structural metadata for spec writers, not owner-facing content.
 - `meta.vanish` on non-note nodes → returns `''` (suppressed from output).
 
@@ -711,7 +719,8 @@ specr/
 ├── src/                         # All TypeScript source
 │   ├── index.ts                 # Entry: Express, env validation, graceful shutdown
 │   ├── mcp/
-│   │   ├── server.ts            # registerMcpRoutes(app) — Streamable HTTP, stateless per-request McpServer
+│   │   ├── server.ts            # registerMcpRoutes(app) — Streamable HTTP routing: stateless + stateful sessions
+│   │   ├── sessions.ts          # McpSessionStore — stateful session lifecycle (Map keyed by minted session id)
 │   │   ├── tools.ts             # registerTools(server): search_library, list_sections, get_spec, get_paragraph, parse_document, generate_docx, load_files
 │   │   └── resources.ts         # registerResources(server): specr://specs/{id}, specr://sections
 │   ├── api/

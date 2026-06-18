@@ -131,10 +131,11 @@ describe('deleteParagraph', () => {
 
 describe('updateParagraphText', () => {
   it('replaces the body text and leaves references untouched', async () => {
-    const updated = await updateParagraphText(PARA1, SPEC_A, 'Comply with framing requirements.');
-    expect(updated).not.toBeNull();
-    expect(updated!.id).toBe(PARA1);
-    expect(updated!.text).toBe('Comply with framing requirements.');
+    const result = await updateParagraphText(SPEC_A, PARA1, 'Comply with framing requirements.');
+    expect(result.status).toBe('updated');
+    if (result.status !== 'updated') throw new Error('expected updated status');
+    expect(result.node.id).toBe(PARA1);
+    expect(result.node.text).toBe('Comply with framing requirements.');
 
     const tree = await getSpecTree(SPEC_A);
     const para = findNode(tree!.tree.parts, PARA1);
@@ -143,9 +144,9 @@ describe('updateParagraphText', () => {
     expect(tree!.references.some((r) => r.id === ref1Id)).toBe(true);
   });
 
-  it('returns null for the wrong spec id', async () => {
-    const updated = await updateParagraphText(PARA1, SPEC_B, 'nope');
-    expect(updated).toBeNull();
+  it('reports wrong-spec when the paragraph belongs to another spec', async () => {
+    const result = await updateParagraphText(SPEC_B, PARA1, 'nope');
+    expect(result.status).toBe('wrong-spec');
   });
 });
 

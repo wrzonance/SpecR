@@ -36,6 +36,7 @@ The merge algorithm:
 ## Consequences
 
 - **Known risk:** Content control survival rate across different Word versions, LibreOffice, and Google Docs is unknown. This is the single highest-risk assumption in the MVP. We must test this with real editing workflows across Word 2016, Word 365, LibreOffice 24.x, and Google Docs before claiming the merge engine is reliable. See `docs/research-executive-summary.md` § "Open Questions."
+- **Phase 3 acceptance status:** CI now tests the round-trip engine with a SpecR-generated DOCX whose `word/document.xml` is edited through JSZip by changing one `w:t` text node while preserving the surrounding `w:sdt/w:tag` anchor. This proves parse → generate → diff → merge when anchors survive. Application survival remains a manual matrix: Word 2016 (not yet certified), Word 365 (not yet certified), LibreOffice 24.x (not yet certified), Google Docs (not yet certified).
 - `w:lock: sdtContentLocked` prevents editors from accidentally breaking the structure, but the entire control can be deleted (which we interpret as paragraph deletion — correct behavior).
 - Paragraphs pasted from outside SpecR-generated documents will not have UUID tags. The merge engine treats these as additions — correct behavior.
 - If content controls are stripped by an application (e.g., a PDF converter that round-trips back to DOCX), the merge falls back to position-based heuristics with lower confidence. This is a degraded mode, not a failure mode.

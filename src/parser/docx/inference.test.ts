@@ -60,6 +60,20 @@ describe('classifyParagraphs — signal 1 (numId+ilvl)', () => {
     expect(result[0]?.signalUsed).toBe(4);
     expect(result[0]?.nodeType).toBe('pr1');
   });
+
+  it('ARCAT-style ilvl=7 and ilvl=8 map to pr6/pr7 before Word depth cap', () => {
+    const result = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 7, text: 'Nested option' }),
+        makePara({ numId: 1, ilvl: 8, text: 'Nested sub-option' }),
+        makePara({ numId: 1, ilvl: 9, text: 'Past Word depth' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result.map((r) => r.nodeType)).toEqual(['pr6', 'pr7', 'continuation']);
+    expect(result.map((r) => r.resolvedIlvl)).toEqual([7, 8, 8]);
+  });
 });
 
 describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {

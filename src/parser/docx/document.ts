@@ -1,7 +1,11 @@
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { extractAttrStr, getAttrVal, getAttrNumVal, toArray } from './xml-utils.js';
+import { parseParagraphSources } from './source-facts.js';
+import type { SourceFacts } from '../../ast/types.js';
+import type { DocxComment } from './comments.js';
 import type { DocxParagraph, NumberingMap } from './types.js';
+import type { ParagraphSource } from './source-facts.js';
 
 // Entity audit (issue #22): fxp v5 does not resolve custom or recursive entity declarations
 // — undefined/recursive &refs; are returned verbatim, not expanded (no billion-laughs risk).
@@ -22,6 +26,15 @@ const xmlParser = new XMLParser({
   parseTagValue: false,
   isArray: (name) => ['w:p', 'w:r', 'w:hyperlink'].includes(name),
 });
+
+interface ParagraphFields {
+  readonly styleId: string | undefined;
+  readonly numId: number | undefined;
+  readonly ilvl: number | undefined;
+  readonly leftIndent: number | undefined;
+  readonly outlineLvl: number | undefined;
+  readonly sourceFacts: SourceFacts | undefined;
+}
 
 function extractRunText(run: Record<string, unknown>): string {
   const t = run['w:t'];
@@ -94,7 +107,23 @@ function resolveIsVanish(pPr: Record<string, unknown> | undefined): boolean {
   return 'w:vanish' in (raw as Record<string, unknown>);
 }
 
-function parseParagraph(raw: Record<string, unknown>, numberingMap: NumberingMap): DocxParagraph {
+function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxParagraph {
+  return {
+    ...base,
+    ...(fields.styleId !== undefined ? { styleId: fields.styleId } : {}),
+    ...(fields.numId !== undefined ? { numId: fields.numId } : {}),
+    ...(fields.ilvl !== undefined ? { ilvl: fields.ilvl } : {}),
+    ...(fields.leftIndent !== undefined ? { leftIndent: fields.leftIndent } : {}),
+    ...(fields.outlineLvl !== undefined ? { outlineLvl: fields.outlineLvl } : {}),
+    ...(fields.sourceFacts !== undefined ? { sourceFacts: fields.sourceFacts } : {}),
+  };
+}
+
+function parseParagraph(
+  raw: Record<string, unknown>,
+  numberingMap: NumberingMap,
+  source: ParagraphSource | undefined
+): DocxParagraph {
   const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
   const styleVal = pPr ? getAttrVal(pPr['w:pStyle']) : '';
   const styleId = styleVal || undefined;
@@ -102,20 +131,24 @@ function parseParagraph(raw: Record<string, unknown>, numberingMap: NumberingMap
   const leftIndent = resolveLeftIndent(pPr);
   const outlineLvl = resolveOutlineLvl(pPr);
   const para: DocxParagraph = {
-    text: extractText(raw),
+    text: source?.text ?? extractText(raw),
     isVanish: resolveIsVanish(pPr),
   };
-  return {
-    ...para,
-    ...(styleId !== undefined ? { styleId } : {}),
-    ...(numId !== undefined ? { numId } : {}),
-    ...(ilvl !== undefined ? { ilvl } : {}),
-    ...(leftIndent !== undefined ? { leftIndent } : {}),
-    ...(outlineLvl !== undefined ? { outlineLvl } : {}),
-  };
+  return addParagraphFields(para, {
+    styleId,
+    numId,
+    ilvl,
+    leftIndent,
+    outlineLvl,
+    sourceFacts: source?.sourceFacts,
+  });
 }
 
-export function parseDocument(xml: string, numberingMap: NumberingMap): DocxParagraph[] {
+export function parseDocument(
+  xml: string,
+  numberingMap: NumberingMap,
+  commentsById: ReadonlyMap<string, DocxComment> = new Map()
+): DocxParagraph[] {
   let parsed: unknown;
   try {
     parsed = xmlParser.parse(xml);
@@ -129,7 +162,8 @@ export function parseDocument(xml: string, numberingMap: NumberingMap): DocxPara
   const body = doc?.['w:body'] as Record<string, unknown> | undefined;
   if (!body) throw new ParserError('word/document.xml missing w:body element');
 
+  const paragraphSources = parseParagraphSources(xml, commentsById);
   return toArray<Record<string, unknown>>(
     body['w:p'] as readonly Record<string, unknown>[] | undefined
-  ).map((p) => parseParagraph(p, numberingMap));
+  ).map((p, index) => parseParagraph(p, numberingMap, paragraphSources[index]));
 }

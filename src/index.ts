@@ -7,6 +7,7 @@ import { pool } from './db/index.js';
 import { router } from './api/router.js';
 import { errorHandler } from './api/middleware/error.js';
 import { registerMcpRoutes } from './mcp/server.js';
+import { registerDocsRoutes } from './api/docs.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -22,6 +23,7 @@ const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 app.use(express.static(publicDir));
 app.use(router);
 registerMcpRoutes(app);
+registerDocsRoutes(app);
 app.use(errorHandler);
 
 const server = app.listen(config.PORT, config.HOST, () => {

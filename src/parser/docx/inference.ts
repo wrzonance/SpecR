@@ -15,7 +15,7 @@ import type {
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
 
-// Canonical normalized ilvl: part=0, article=1, pr1=2, pr2=3, pr3=4, pr4=5, pr5=6
+// Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
 const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
   part: 0,
   article: 1,
@@ -24,6 +24,8 @@ const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
   pr3: 4,
   pr4: 5,
   pr5: 6,
+  pr6: 7,
+  pr7: 8,
 };
 
 const NODE_TYPES_BY_ILVL: readonly NodeType[] = [
@@ -34,6 +36,8 @@ const NODE_TYPES_BY_ILVL: readonly NodeType[] = [
   'pr3',
   'pr4',
   'pr5',
+  'pr6',
+  'pr7',
 ];
 
 function toNormalizedIlvl(nodeType: NodeType): number {
@@ -197,13 +201,19 @@ interface StackEntry {
   readonly children: SpecNode[];
 }
 
+function sourceFactsMeta(cp: ClassifiedParagraph): {
+  readonly sourceFacts?: NonNullable<DocxParagraph['sourceFacts']>;
+} {
+  return cp.paragraph.sourceFacts ? { sourceFacts: cp.paragraph.sourceFacts } : {};
+}
+
 function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode {
   return {
     id: uuidv4(),
     type: cp.isVanish ? 'note' : 'continuation',
     text: cp.paragraph.text,
     children: [],
-    meta: { source, ...(cp.isVanish ? { vanish: true } : {}) },
+    meta: { source, ...(cp.isVanish ? { vanish: true } : {}), ...sourceFactsMeta(cp) },
   };
 }
 
@@ -217,6 +227,7 @@ function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source)
       source,
       ...(cp.isVanish ? { vanish: true as const } : {}),
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
+      ...sourceFactsMeta(cp),
     },
   };
 }

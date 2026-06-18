@@ -40,6 +40,11 @@ export function isPartHeading(text: string): boolean {
 // "SPECIFIER NOTES:", "NOTES TO SPEC WRITER", with arbitrary decoration
 // (asterisks, dashes, brackets, hashes) around the phrase. Strip decoration
 // and collapse whitespace, then match the phrase variants at the start.
+//
+// These two patterns are mirrored verbatim into the 'Industry Default' editing
+// convention seed (migration 024, ADR-022 D3) so banner detection can move from
+// this hardcoded path to the data-driven classifier (O-6) with no behavior
+// change. Keep the two copies in sync until the classifier supersedes this.
 const NOTE_TO_SPECIFIER_PATTERN = /^NOTES? TO (?:THE )?SPEC(?:IFIER|S| WRITER)?S?\b/;
 const SPECIFIER_NOTES_PATTERN = /^SPEC(?:IFIER)?S? NOTES?\b/;
 

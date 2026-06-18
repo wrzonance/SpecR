@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   AddSectionToProjectBodySchema,
-  GenerateBodySchema,
   PatchProjectBodySchema,
   PatchSpecBodySchema,
   StylePropertiesSchema,
 } from './schemas.js';
+import { GenerateBodySchema } from './generate-schemas.js';
 
 describe('StylePropertiesSchema (ADR-021 open style payload)', () => {
   it('parses a known OOXML-faithful definition unchanged', () => {

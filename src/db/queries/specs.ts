@@ -1,10 +1,19 @@
 import { pool, DatabaseError } from '../index.js';
-import type { SignalConflict, SpecNode, SpecTree, NodeType, SecRef } from '../../ast/index.js';
+import type {
+  SignalConflict,
+  SourceFacts,
+  SpecNode,
+  SpecNodeEditability,
+  SpecTree,
+  NodeType,
+  SecRef,
+} from '../../ast/index.js';
 import type { Pool } from 'pg';
 import { insertTree } from './paragraphs.js';
 import { insertRefs } from './refs.js';
 import { resolveDefaultLibraryId } from './libraries.js';
 import { reconcileLibraryDivisionGeneralSpec } from './division-general.js';
+import { ClassificationSchema, OverrideSchema } from './editability.js';
 
 interface SpecRow {
   readonly id: string;
@@ -129,7 +138,9 @@ export interface SpecTreeResult {
   readonly references: readonly SpecReference[];
 }
 
-/** Paragraph row shape consumed by buildNodeTree (db-module internal). */
+/** Paragraph row shape consumed by buildNodeTree (db-module internal).
+ *  `classification` / `editability_override` are raw JSONB (validated, not
+ *  trusted, in buildNodeTree); NULL until the paragraph is classified. */
 export interface ParagraphTreeRow {
   readonly id: string;
   readonly parent_id: string | null;
@@ -138,6 +149,42 @@ export interface ParagraphTreeRow {
   readonly position: number;
   readonly vanish: boolean;
   readonly conflicts: readonly SignalConflict[];
+  readonly source_facts: SourceFacts;
+  readonly classification: unknown;
+  readonly editability_override: unknown;
+}
+
+function hasSourceFacts(sourceFacts: SourceFacts): boolean {
+  return Object.keys(sourceFacts).length > 0;
+}
+
+/**
+ * Derive the effective `meta.editability` from the two raw JSONB columns,
+ * validating both via the closed schemas (a corrupt row is a loud DatabaseError,
+ * never a silent drop). Returns undefined when the paragraph is unclassified, so
+ * the field is omitted entirely (mirrors the conflicts/sourceFacts omit-when-empty
+ * pattern). Effective `value` = override ?? machine; the machine's verdict stays
+ * readable so a UI can show what was overridden (#134 §5).
+ */
+function deriveEditability(
+  classification: unknown,
+  override: unknown
+): SpecNodeEditability | undefined {
+  // Validate the override first so a malformed payload fails loud at the DB
+  // boundary even on an unclassified row — the early return must not let a
+  // corrupt override slip through silently (#205 review).
+  const overrideValue =
+    override === null || override === undefined
+      ? undefined
+      : OverrideSchema.parse(override).editability;
+  if (classification === null || classification === undefined) return undefined;
+  const machine = ClassificationSchema.parse(classification);
+  return {
+    value: overrideValue ?? machine.editability,
+    confidence: machine.confidence,
+    evidence: machine.evidence,
+    ...(overrideValue !== undefined ? { override: overrideValue } : {}),
+  };
 }
 
 /** Assemble flat paragraph rows into a SpecNode forest. Exported for reuse
@@ -152,6 +199,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
     const children = (childrenByParent.get(row.id) ?? [])
       .sort((a, b) => a.position - b.position)
       .map(buildNode);
+    const editability = deriveEditability(row.classification, row.editability_override);
     return {
       id: row.id,
       type: row.node_type as NodeType,
@@ -160,6 +208,8 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
       meta: {
         ...(row.vanish ? { vanish: true } : {}),
         ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
+        ...(hasSourceFacts(row.source_facts) ? { sourceFacts: row.source_facts } : {}),
+        ...(editability ? { editability } : {}),
       },
     };
   }
@@ -177,7 +227,8 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
     if (!specRow) return null;
 
     const paraResult = await pool.query<ParagraphTreeRow>(
-      `SELECT id, parent_id, node_type, text, position, vanish, conflicts
+      `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
+              classification, editability_override
        FROM paragraphs WHERE spec_id = $1`,
       [id]
     );

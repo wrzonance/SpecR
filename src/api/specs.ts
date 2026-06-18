@@ -1,6 +1,13 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { getSpecTree, updateSpec, getSpecLineage, listSpecs, deleteSpec } from '../db/index.js';
+import {
+  getSpecTree,
+  updateSpec,
+  getSpecLineage,
+  listSpecs,
+  deleteSpec,
+  getSpecStyleSource,
+} from '../db/index.js';
 import { getPgCode } from './pg-error.js';
 import { logger } from '../lib/logger.js';
 
@@ -45,7 +52,11 @@ export async function getSpecHandler(req: Request, res: Response): Promise<void>
       res.status(404).json({ success: false, error: 'spec not found' });
       return;
     }
-    res.status(200).json({ success: true, data: result.tree });
+    // Merge the style-source association in as a sibling field (#138). A separate
+    // query keeps getSpecTree untouched (owned by a parallel PR); styleSource is
+    // { templateId, templateName } | null.
+    const styleSource = await getSpecStyleSource(id);
+    res.status(200).json({ success: true, data: { ...result.tree, styleSource } });
   } catch (err) {
     logger.error({ err }, 'get spec failed');
     res.status(500).json({ success: false, error: 'internal server error' });

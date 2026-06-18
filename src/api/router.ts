@@ -9,7 +9,9 @@ import {
   listSpecsHandler,
   updateSpecHandler,
 } from './specs.js';
+import { setStyleSourceHandler, clearStyleSourceHandler } from './style-source.js';
 import { deleteParagraphHandler, updateParagraphHandler } from './paragraphs.js';
+import { acquireLockHandler, releaseLockHandler, getLockHandler } from './locks.js';
 import {
   deleteReferenceHandler,
   getInboundReferencesHandler,
@@ -66,10 +68,14 @@ import {
   PatchTemplateBodySchema,
   SetDivisionGeneralSpecBodySchema,
   UpsertStyleRulesBodySchema,
-  UpdateParagraphBodySchema,
+  SetStyleSourceBodySchema,
+  PutRevisionNomenclatureBodySchema,
+  CloneRevisionNomenclatureBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
-import { generateHandler } from './generate.js';
+import { generateHandler, generateManualHandler, generateRevisionHandler } from './generate.js';
+import { diffHandler } from './diff.js';
+import { mergeHandler } from './merge.js';
 import { importTemplateHandler } from './templates.js';
 import {
   createTemplateHandler,
@@ -79,6 +85,19 @@ import {
   deleteTemplateHandler,
   upsertTemplateRulesHandler,
 } from './templates-crud.js';
+import {
+  listConventionsHandler,
+  getLibraryConventionHandler,
+  putLibraryConventionHandler,
+  cloneLibraryConventionHandler,
+} from './conventions.js';
+import {
+  listRevisionNomenclatureProfilesHandler,
+  getProjectRevisionNomenclatureHandler,
+  putProjectRevisionNomenclatureHandler,
+  cloneProjectRevisionNomenclatureHandler,
+  deleteProjectRevisionNomenclatureHandler,
+} from './revision-nomenclature.js';
 
 const parseRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
@@ -103,16 +122,24 @@ router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler)
 // Demo edit mutations (mockup): delete a spec, delete/edit a paragraph, delete a reference.
 router.delete('/specs/:id', deleteSpecHandler);
 router.delete('/specs/:id/paragraphs/:paragraphId', deleteParagraphHandler);
-router.patch(
-  '/specs/:id/paragraphs/:paragraphId',
-  validateBody(UpdateParagraphBodySchema),
-  updateParagraphHandler
-);
+router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
 router.delete('/specs/:id/references/:refId', deleteReferenceHandler);
+router.get('/specs/:id/lock', getLockHandler);
+router.put('/specs/:id/lock', acquireLockHandler);
+router.delete('/specs/:id/lock', releaseLockHandler);
+router.post(
+  '/specs/:id/style-source',
+  validateBody(SetStyleSourceBodySchema),
+  setStyleSourceHandler
+);
+router.delete('/specs/:id/style-source', clearStyleSourceHandler);
 router.post('/specs/:id/generate', generateHandler);
+router.post('/specs/:id/diff', upload.single('file'), diffHandler);
+router.post('/specs/:id/merge', mergeHandler);
 router.get('/projects', listProjectsHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects/:id', getProjectHandler);
+router.post('/projects/:id/generate', generateManualHandler);
 router.patch('/projects/:id', validateBody(PatchProjectBodySchema), patchProjectHandler);
 router.put(
   '/projects/:id/sources',
@@ -169,6 +196,7 @@ router.post(
   createRevisionHandler
 );
 router.get('/revisions/:id', getRevisionHandler);
+router.post('/revisions/:id/generate', generateRevisionHandler);
 // Mockup fixture ingest is intentionally unlimited for stakeholder demos.
 router.post('/parse', upload.single('file'), parseHandler);
 router.get('/parse/jobs/:jobId', parseJobHandler);
@@ -183,3 +211,20 @@ router.post(
   validateBody(UpsertStyleRulesBodySchema),
   upsertTemplateRulesHandler
 );
+router.get('/conventions', listConventionsHandler);
+router.get('/libraries/:id/conventions', getLibraryConventionHandler);
+router.put('/libraries/:id/conventions', putLibraryConventionHandler);
+router.post('/libraries/:id/conventions/clone', cloneLibraryConventionHandler);
+router.get('/revision-nomenclature-profiles', listRevisionNomenclatureProfilesHandler);
+router.get('/projects/:id/revision-nomenclature', getProjectRevisionNomenclatureHandler);
+router.put(
+  '/projects/:id/revision-nomenclature',
+  validateBody(PutRevisionNomenclatureBodySchema),
+  putProjectRevisionNomenclatureHandler
+);
+router.post(
+  '/projects/:id/revision-nomenclature/clone',
+  validateBody(CloneRevisionNomenclatureBodySchema),
+  cloneProjectRevisionNomenclatureHandler
+);
+router.delete('/projects/:id/revision-nomenclature', deleteProjectRevisionNomenclatureHandler);

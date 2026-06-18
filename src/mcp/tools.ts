@@ -14,10 +14,11 @@ import {
   handleParseDocument,
   handleGenerateDocx,
   handleGetSpecLineage,
-  handleCoordinationReport,
+  handleGetSpecDiff,
   handleListProjects,
   handleGetReferences,
 } from './handlers.js';
+import { handleCoordinationReport } from './coordination-handler.js';
 
 type ToolError = {
   readonly isError: true;
@@ -113,7 +114,7 @@ function registerSpecTools(server: McpServer): void {
     'get_spec',
     {
       description:
-        'Return the full spec paragraph tree with cross-reference resolution status. Use references[].isResolved to check if referenced specs are loaded. Nodes parsed from DOCX may carry meta.conflicts — inference signal disagreements ({signal, reportedIlvl, reportedNodeType}) indicating the hierarchy level was ambiguous; absent means no disagreement.',
+        'Return the full spec paragraph tree with cross-reference resolution status. Use references[].isResolved to check if referenced specs are loaded. Nodes parsed from DOCX may carry meta.conflicts — inference signal disagreements ({signal, reportedIlvl, reportedNodeType}) indicating the hierarchy level was ambiguous; absent means no disagreement. styleSource is the manually assigned style template ({templateId, templateName}) or null when none is set.',
       inputSchema: {
         specId: z.uuid().describe('Spec UUID (from search_library or list_sections)'),
       },
@@ -143,6 +144,22 @@ function registerSpecTools(server: McpServer): void {
       },
     },
     handleGetSpecLineage
+  );
+
+  server.registerTool(
+    'get_spec_diff',
+    {
+      description:
+        'Return the 3-way merge diff for a returned DOCX. Pass contentBase64 for the edited DOCX bytes; when omitted, the tool diffs a freshly generated DOCX and should return an empty diff for a clean spec.',
+      inputSchema: {
+        specId: z.uuid().describe('Spec UUID to diff'),
+        contentBase64: z
+          .string()
+          .optional()
+          .describe('Base64-encoded returned DOCX content (max 10 MB decoded)'),
+      },
+    },
+    handleGetSpecDiff
   );
 }
 
