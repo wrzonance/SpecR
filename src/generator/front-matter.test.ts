@@ -45,4 +45,36 @@ describe('buildFrontMatter', () => {
     // Half-point size 56 from the template surfaces on the cover title run.
     expect(xml).toContain('w:val="56"');
   });
+
+  it('renders revision identity on the cover/front matter', async () => {
+    const xml = await renderToXml(
+      buildFrontMatter({
+        name: 'Acme Tower',
+        description: null,
+        revision: { displayName: '100% CD', date: '2026-06-17', packageName: 'CD Set' },
+      })
+    );
+    expect(xml).toContain('CD Set');
+    expect(xml).toContain('100% CD');
+    expect(xml).toContain('2026-06-17');
+  });
+
+  it('renders addendum affected sections on the cover/front matter', async () => {
+    const xml = await renderToXml(
+      buildFrontMatter({
+        name: 'Acme Tower',
+        description: null,
+        revision: { displayName: 'Addendum 1', date: '2026-06-18', packageName: 'CD Set' },
+        addendum: {
+          affectedSections: [
+            { section: '09 91 00', title: 'Painting' },
+            { section: '23 09 23', title: 'Direct Digital Control' },
+          ],
+        },
+      })
+    );
+    expect(xml).toContain('Affected Sections');
+    expect(xml).toContain('09 91 00 - Painting');
+    expect(xml).toContain('23 09 23 - Direct Digital Control');
+  });
 });

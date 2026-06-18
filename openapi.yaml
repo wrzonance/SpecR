@@ -752,8 +752,9 @@ paths:
         anchor for round-trip. The manual opens with a cover page (project name +
         description, style-template applied) and a Word TOC field over the section
         headings — Word computes the TOC entries and pagination on open; SpecR emits
-        the field, not page numbers. v1 draft mode renders live from `project_specs`;
-        issuance/addenda and PDF are out of scope.
+        the field, not page numbers. This route renders the live draft from
+        `project_specs`; issued and addendum manuals render from frozen package
+        revisions via `POST /revisions/{id}/generate`.
       tags: [projects]
       parameters:
         - $ref: '#/components/parameters/ProjectId'
@@ -1756,6 +1757,77 @@ paths:
                         $ref: '#/components/schemas/RevisionWithTrees'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /revisions/{id}/generate:
+    post:
+      operationId: generateRevisionManual
+      summary: Render an issued manual DOCX from frozen package revision snapshots
+      description: >
+        Renders the target package revision from `package_revision_specs.tree`, not
+        live paragraph rows, so old issuances remain reproducible after database
+        edits. When `baseRevisionId` is supplied, addendum mode compares the
+        target and base revision snapshots by section-level AST equality and
+        emits only sections whose frozen trees differ, under an addendum cover
+        listing the affected sections. Running DOCX headers/footers are reserved
+        for the header/footer foundation work; this endpoint renders revision
+        identity on the cover/front matter only.
+      tags: [packages]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target revision UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                templateId:
+                  type: string
+                  format: uuid
+                  description: >
+                    Style template applied to every rendered section. Omitted →
+                    the seeded UFGS-Default template; absent default → unstyled
+                    200. Unknown id → 404.
+                sectionNumberFormat:
+                  type: string
+                  enum: [canonical, dots, compact]
+                  default: canonical
+                  description: >
+                    Presentation format for generated section numbers in each
+                    section title and confidently identified Section references.
+                baseRevisionId:
+                  type: string
+                  format: uuid
+                  description: >
+                    Base revision for addendum mode. Must belong to the same
+                    package as the target revision. Omit to render the full
+                    issued manual.
+      responses:
+        '200':
+          description: DOCX manual file stream
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Invalid addendum comparison, or no changed sections to render
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
 

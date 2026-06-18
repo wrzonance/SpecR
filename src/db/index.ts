@@ -137,10 +137,19 @@ export type { PackageSummary, PackageWithSpecs, PackageSpecEntry } from './queri
 export {
   createPackageRevision,
   getPackageRevision,
+  getPackageRevisionManualData,
+  getPackageRevisionAddendumManualData,
   SnapshotValidationError,
   RevisionNomenclatureValidationError,
+  RevisionComparisonError,
 } from './queries/revisions.js';
-export type { RevisionSummary, RevisionSpecEntry, RevisionWithTrees } from './queries/revisions.js';
+export type {
+  RevisionSummary,
+  RevisionSpecEntry,
+  RevisionWithTrees,
+  RevisionManualData,
+  RevisionAddendumManualData,
+} from './queries/revisions.js';
 export {
   insertConvention,
   updateConventionRules,
