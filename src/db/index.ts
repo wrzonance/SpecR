@@ -138,6 +138,7 @@ export {
   createPackageRevision,
   getPackageRevision,
   SnapshotValidationError,
+  RevisionNomenclatureValidationError,
 } from './queries/revisions.js';
 export type { RevisionSummary, RevisionSpecEntry, RevisionWithTrees } from './queries/revisions.js';
 export {
@@ -153,6 +154,16 @@ export {
   ConventionNotFoundError,
 } from './queries/conventions.js';
 export type { EditingConvention, CreateConventionInput } from './queries/conventions.js';
+export {
+  listRevisionNomenclatureProfiles,
+  findRevisionNomenclatureProfileById,
+  getBuiltInRevisionNomenclature,
+  getRevisionNomenclatureForProject,
+  upsertProjectRevisionNomenclature,
+  deleteProjectRevisionNomenclature,
+  BUILT_IN_REVISION_NOMENCLATURE_NAME,
+} from './queries/revision-nomenclature.js';
+export type { RevisionNomenclatureProfile } from './queries/revision-nomenclature.js';
 export {
   storeClassifications,
   setEditabilityOverride,

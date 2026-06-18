@@ -39,6 +39,8 @@ import {
   UpsertStyleRulesBodySchema,
   SetStyleSourceBodySchema,
   SetDivisionGeneralSpecBodySchema,
+  PutRevisionNomenclatureBodySchema,
+  CloneRevisionNomenclatureBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 import { generateHandler, generateManualHandler } from './generate.js';
@@ -59,6 +61,13 @@ import {
   putLibraryConventionHandler,
   cloneLibraryConventionHandler,
 } from './conventions.js';
+import {
+  listRevisionNomenclatureProfilesHandler,
+  getProjectRevisionNomenclatureHandler,
+  putProjectRevisionNomenclatureHandler,
+  cloneProjectRevisionNomenclatureHandler,
+  deleteProjectRevisionNomenclatureHandler,
+} from './revision-nomenclature.js';
 
 const parseRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
@@ -144,3 +153,16 @@ router.get('/conventions', listConventionsHandler);
 router.get('/libraries/:id/conventions', getLibraryConventionHandler);
 router.put('/libraries/:id/conventions', putLibraryConventionHandler);
 router.post('/libraries/:id/conventions/clone', cloneLibraryConventionHandler);
+router.get('/revision-nomenclature-profiles', listRevisionNomenclatureProfilesHandler);
+router.get('/projects/:id/revision-nomenclature', getProjectRevisionNomenclatureHandler);
+router.put(
+  '/projects/:id/revision-nomenclature',
+  validateBody(PutRevisionNomenclatureBodySchema),
+  putProjectRevisionNomenclatureHandler
+);
+router.post(
+  '/projects/:id/revision-nomenclature/clone',
+  validateBody(CloneRevisionNomenclatureBodySchema),
+  cloneProjectRevisionNomenclatureHandler
+);
+router.delete('/projects/:id/revision-nomenclature', deleteProjectRevisionNomenclatureHandler);
