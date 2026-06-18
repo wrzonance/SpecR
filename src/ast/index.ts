@@ -29,6 +29,11 @@ export {
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
   CreateRevisionBodySchema,
+  RevisionNomenclatureTypeSchema,
+  RevisionNomenclatureTypesSchema,
+  PutRevisionNomenclatureBodySchema,
+  CloneRevisionNomenclatureBodySchema,
+  RevisionAttributesSchema,
   AcquireLockBodySchema,
   ReleaseLockBodySchema,
 } from './schemas.js';
@@ -40,6 +45,11 @@ export type {
   CreatePackageBody,
   SetPackageSpecsBody,
   CreateRevisionBody,
+  RevisionNomenclatureType,
+  RevisionNomenclatureTypes,
+  PutRevisionNomenclatureBody,
+  CloneRevisionNomenclatureBody,
+  RevisionAttributes,
   AcquireLockBody,
   ReleaseLockBody,
 } from './schemas.js';

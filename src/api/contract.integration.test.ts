@@ -10,12 +10,22 @@ import {
   successJsonOps,
   loadSpec,
 } from '../test-utils/contract/validate-response.js';
+import { pool } from '../db/index.js';
 
 // MCP is registered separately (not on `router`); exclude defensively.
 const EXCLUDE = new Set(['post /mcp', 'get /mcp', 'delete /mcp']);
 
 // Response bodies asserted in this file.
-const RESPONSE_COVERED = new Set(['get /health', 'get /conventions', 'get /templates']);
+const RESPONSE_COVERED = new Set([
+  'delete /projects/{}/revision-nomenclature',
+  'get /health',
+  'get /conventions',
+  'get /projects/{}/revision-nomenclature',
+  'get /revision-nomenclature-profiles',
+  'get /templates',
+  'post /projects/{}/revision-nomenclature/clone',
+  'put /projects/{}/revision-nomenclature',
+]);
 
 // Documented JSON ops not yet response-verified (burned down in PR2…N).
 const RESPONSE_ALLOWLIST = new Set([
@@ -61,6 +71,7 @@ const RESPONSE_ALLOWLIST = new Set([
 
 let server: Server;
 let baseUrl: string;
+let projectId: string;
 
 beforeAll(async () => {
   const app = express();
@@ -74,9 +85,17 @@ beforeAll(async () => {
   const address = server.address();
   const port = typeof address === 'object' && address !== null ? address.port : 3000;
   baseUrl = `http://localhost:${port}`;
+  const project = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+    [`contract-revision-nomenclature-${Date.now()}`]
+  );
+  const row = project.rows[0];
+  if (!row) throw new Error('failed to create contract project');
+  projectId = row.id;
 });
 
 afterAll(async () => {
+  if (projectId) await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
   });
@@ -123,5 +142,45 @@ describe('response contract (covered endpoints)', () => {
     const res = await fetch(`${baseUrl}/templates`);
     expect(res.status).toBe(200);
     await assertResponse('get', '/templates', 200, await res.json());
+  });
+
+  it('revision nomenclature endpoints match their documented 2xx schemas', async () => {
+    const list = await fetch(`${baseUrl}/revision-nomenclature-profiles`);
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as unknown;
+    await assertResponse('get', '/revision-nomenclature-profiles', 200, listBody);
+
+    const sourceId = (listBody as { data: readonly { id: string }[] }).data[0]?.id;
+    if (!sourceId) throw new Error('revision nomenclature built-in missing');
+    const get = await fetch(`${baseUrl}/projects/${projectId}/revision-nomenclature`);
+    expect(get.status).toBe(200);
+    await assertResponse('get', '/projects/{id}/revision-nomenclature', 200, await get.json());
+
+    const put = await fetch(`${baseUrl}/projects/${projectId}/revision-nomenclature`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Contract', types: [{ key: 'addendum' }] }),
+    });
+    expect(put.status).toBe(200);
+    await assertResponse('put', '/projects/{id}/revision-nomenclature', 200, await put.json());
+
+    const clone = await fetch(`${baseUrl}/projects/${projectId}/revision-nomenclature/clone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceId }),
+    });
+    expect(clone.status).toBe(201);
+    await assertResponse(
+      'post',
+      '/projects/{id}/revision-nomenclature/clone',
+      201,
+      await clone.json()
+    );
+
+    const del = await fetch(`${baseUrl}/projects/${projectId}/revision-nomenclature`, {
+      method: 'DELETE',
+    });
+    expect(del.status).toBe(200);
+    await assertResponse('delete', '/projects/{id}/revision-nomenclature', 200, await del.json());
   });
 });

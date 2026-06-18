@@ -2,11 +2,16 @@ import type { Pool, PoolClient } from 'pg';
 import { pool } from '../index.js';
 import { DatabaseError } from '../errors.js';
 import { logger } from '../../lib/logger.js';
-import { SpecTreeSchema } from '../../ast/index.js';
-import type { SpecTree } from '../../ast/index.js';
+import { RevisionAttributesSchema, SpecTreeSchema } from '../../ast/index.js';
+import type { RevisionAttributes, SpecTree } from '../../ast/index.js';
 import { buildNodeTree } from './specs.js';
 import type { ParagraphTreeRow } from './specs.js';
 import { PackageNotFoundError } from './packages.js';
+import { getRevisionNomenclatureForProject } from './revision-nomenclature.js';
+import type { RevisionNomenclatureProfile } from './revision-nomenclature.js';
+import { createRevisionIdentityDraft, getRevisionDisplayIdentity } from './revision-identity.js';
+import type { CreatePackageRevisionInput } from './revision-identity.js';
+export { RevisionNomenclatureValidationError } from './revision-identity.js';
 
 /** Package revisions (ADR-015 D5, issue #96): immutable issuance snapshots.
  *  Issuing freezes every member section's full SpecTree as JSONB inside one
@@ -28,6 +33,12 @@ export interface RevisionSummary {
   readonly revisionId: string;
   readonly packageId: string;
   readonly label: string;
+  readonly displayName: string;
+  readonly type: string;
+  readonly date: string;
+  readonly sortOrder: number;
+  readonly number: string | null;
+  readonly attributes: RevisionAttributes;
   readonly issuedAt: string;
   readonly specCount: number;
 }
@@ -42,6 +53,12 @@ export interface RevisionWithTrees {
   readonly revisionId: string;
   readonly packageId: string;
   readonly label: string;
+  readonly displayName: string;
+  readonly type: string;
+  readonly date: string;
+  readonly sortOrder: number;
+  readonly number: string | null;
+  readonly attributes: RevisionAttributes;
   readonly issuedAt: string;
   readonly specs: readonly RevisionSpecEntry[];
 }
@@ -50,7 +67,15 @@ interface RevisionRow {
   readonly id: string;
   readonly package_id: string;
   readonly label: string;
+  readonly revision_type: string;
+  readonly revision_date: string;
+  readonly sort_order: number;
+  readonly attributes: unknown;
   readonly issued_at: Date;
+}
+
+interface PackageRow {
+  readonly project_id: string;
 }
 
 interface MemberRow {
@@ -78,13 +103,16 @@ function validateTree(candidate: unknown, specId: string): SpecTree {
   return parsed.data;
 }
 
-async function lockPackage(packageId: string, client: PoolClient): Promise<void> {
-  const res = await client.query('SELECT 1 FROM design_packages WHERE id = $1 FOR UPDATE', [
-    packageId,
-  ]);
-  if (res.rowCount === 0) {
+async function lockPackage(packageId: string, client: PoolClient): Promise<PackageRow> {
+  const res = await client.query<PackageRow>(
+    'SELECT project_id FROM design_packages WHERE id = $1 FOR UPDATE',
+    [packageId]
+  );
+  const row = res.rows[0];
+  if (!row) {
     throw new PackageNotFoundError(`createPackageRevision: package ${packageId} not found`);
   }
+  return row;
 }
 
 /** Freeze every member section's tree, in membership order. */
@@ -148,24 +176,107 @@ async function markMembersIssued(specIds: readonly string[], client: PoolClient)
   );
 }
 
+async function nextSortOrder(packageId: string, client: PoolClient): Promise<number> {
+  const result = await client.query<{ next_sort_order: number }>(
+    `SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_sort_order
+     FROM package_revisions WHERE package_id = $1`,
+    [packageId]
+  );
+  return result.rows[0]?.next_sort_order ?? 1;
+}
+
+function revisionDateString(value: string | Date): string {
+  if (typeof value === 'string') return value;
+  return value.toISOString().slice(0, 10);
+}
+
+function parseAttributes(candidate: unknown): RevisionAttributes {
+  return RevisionAttributesSchema.parse(candidate);
+}
+
+function mapSummary(
+  row: RevisionRow,
+  profile: RevisionNomenclatureProfile | null,
+  specCount: number
+): RevisionSummary {
+  const date = revisionDateString(row.revision_date);
+  const attributes = parseAttributes(row.attributes);
+  const display = getRevisionDisplayIdentity(
+    row.revision_type,
+    attributes,
+    profile,
+    row.label,
+    date
+  );
+  return {
+    revisionId: row.id,
+    packageId: row.package_id,
+    label: row.label,
+    displayName: display.displayName,
+    type: row.revision_type,
+    date,
+    sortOrder: row.sort_order,
+    number: display.number,
+    attributes,
+    issuedAt: row.issued_at.toISOString(),
+    specCount,
+  };
+}
+
+async function profileForPackage(
+  packageId: string,
+  db: Queryable
+): Promise<RevisionNomenclatureProfile | null> {
+  const result = await db.query<PackageRow>(
+    'SELECT project_id FROM design_packages WHERE id = $1',
+    [packageId]
+  );
+  const row = result.rows[0];
+  return row ? getRevisionNomenclatureForProject(row.project_id, db) : null;
+}
+
+async function insertRevisionRow(
+  packageId: string,
+  input: string | CreatePackageRevisionInput,
+  profile: RevisionNomenclatureProfile,
+  client: PoolClient
+): Promise<RevisionRow> {
+  const draft = createRevisionIdentityDraft(input, profile);
+  const sortOrder = draft.sortOrder ?? (await nextSortOrder(packageId, client));
+  const rev = await client.query<RevisionRow>(
+    `INSERT INTO package_revisions
+      (package_id, label, revision_type, revision_date, sort_order, attributes)
+     VALUES ($1, $2, $3, COALESCE($4::date, current_date), $5, $6::jsonb)
+     RETURNING id, package_id, label, revision_type, revision_date,
+               sort_order, attributes, issued_at`,
+    [
+      packageId,
+      draft.label,
+      draft.type,
+      draft.date ?? null,
+      sortOrder,
+      JSON.stringify(draft.attributes),
+    ]
+  );
+  const row = rev.rows[0];
+  if (!row) throw new DatabaseError('createPackageRevision: no row returned after insert');
+  return row;
+}
+
 /** Issue a revision: snapshot the package's full membership in one
  *  transaction. Duplicate label surfaces as a unique violation (→ 409). */
 export async function createPackageRevision(
   packageId: string,
-  label: string,
+  input: string | CreatePackageRevisionInput,
   db: Pool = pool
 ): Promise<RevisionSummary> {
   const client = await db.connect();
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
-    await lockPackage(packageId, client);
-    const rev = await client.query<RevisionRow>(
-      `INSERT INTO package_revisions (package_id, label)
-       VALUES ($1, $2) RETURNING id, package_id, label, issued_at`,
-      [packageId, label]
-    );
-    const row = rev.rows[0];
-    if (!row) throw new DatabaseError('createPackageRevision: no row returned after insert');
+    const locked = await lockPackage(packageId, client);
+    const profile = await getRevisionNomenclatureForProject(locked.project_id, client);
+    if (!profile) throw new DatabaseError('createPackageRevision: no nomenclature profile');
+    const row = await insertRevisionRow(packageId, input, profile, client);
     const entries = await snapshotMemberTrees(packageId, client);
     await insertSnapshotRows(row.id, entries, client);
     await markMembersIssued(
@@ -174,16 +285,10 @@ export async function createPackageRevision(
     );
     await client.query('COMMIT');
     logger.info(
-      { packageId, revisionId: row.id, label, specCount: entries.length },
+      { packageId, revisionId: row.id, label: row.label, specCount: entries.length },
       'createPackageRevision: revision issued'
     );
-    return {
-      revisionId: row.id,
-      packageId: row.package_id,
-      label: row.label,
-      issuedAt: row.issued_at.toISOString(),
-      specCount: entries.length,
-    };
+    return mapSummary(row, profile, entries.length);
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -207,11 +312,14 @@ export async function getPackageRevision(
 ): Promise<RevisionWithTrees | null> {
   try {
     const rev = await db.query<RevisionRow>(
-      'SELECT id, package_id, label, issued_at FROM package_revisions WHERE id = $1',
+      `SELECT id, package_id, label, revision_type, revision_date,
+              sort_order, attributes, issued_at
+       FROM package_revisions WHERE id = $1`,
       [revisionId]
     );
     const row = rev.rows[0];
     if (!row) return null;
+    const profile = await profileForPackage(row.package_id, db);
     const snaps = await db.query<SnapshotRow>(
       `SELECT spec_id, position, tree FROM package_revision_specs
        WHERE revision_id = $1 ORDER BY position`,
@@ -222,13 +330,7 @@ export async function getPackageRevision(
       position: snap.position,
       tree: validateTree(snap.tree, snap.spec_id),
     }));
-    return {
-      revisionId: row.id,
-      packageId: row.package_id,
-      label: row.label,
-      issuedAt: row.issued_at.toISOString(),
-      specs,
-    };
+    return { ...mapSummary(row, profile, specs.length), specs };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError(`getPackageRevision: query failed for ${revisionId}`, { cause: err });

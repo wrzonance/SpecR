@@ -1019,6 +1019,165 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /revision-nomenclature-profiles:
+    get:
+      operationId: listRevisionNomenclatureProfiles
+      summary: List revision nomenclature profiles
+      description: >
+        Returns built-in and project-scoped revision nomenclature profiles. Built-ins
+        (`projectId: null`) provide default issuance/addendum/bulletin/CCD types.
+      tags: [revision-nomenclature]
+      responses:
+        '200':
+          description: Revision nomenclature profiles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RevisionNomenclatureProfile'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/revision-nomenclature:
+    get:
+      operationId: getProjectRevisionNomenclature
+      summary: Get a project's revision nomenclature profile
+      description: >
+        Returns the project's own revision nomenclature profile, or the inherited
+        built-in default when the project has no profile. `meta.inherited` is true
+        when `data.projectId` is null.
+      tags: [revision-nomenclature]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Resolved revision nomenclature profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data, meta]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RevisionNomenclatureProfile'
+                      meta:
+                        type: object
+                        required: [inherited]
+                        properties:
+                          inherited:
+                            type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: putProjectRevisionNomenclature
+      summary: Create or replace a project's revision nomenclature profile
+      tags: [revision-nomenclature]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutRevisionNomenclatureBody'
+      responses:
+        '200':
+          description: Project profile created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RevisionNomenclatureProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteProjectRevisionNomenclature
+      summary: Delete a project's revision nomenclature override
+      tags: [revision-nomenclature]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project override deleted; future reads inherit the built-in
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId]
+                        properties:
+                          projectId:
+                            type: string
+                            format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/revision-nomenclature/clone:
+    post:
+      operationId: cloneProjectRevisionNomenclature
+      summary: Clone a revision nomenclature profile into a project
+      tags: [revision-nomenclature]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloneRevisionNomenclatureBody'
+      responses:
+        '201':
+          description: Revision nomenclature profile cloned into the project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RevisionNomenclatureProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /projects/{id}/divisions/{division}/general-spec:
     get:
       operationId: getProjectDivisionGeneralSpec
@@ -1532,13 +1691,9 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [label]
-              properties:
-                label:
-                  type: string
-                  minLength: 1
-                  description: Issuance label, unique per package
+              oneOf:
+                - $ref: '#/components/schemas/CreateRevisionLegacyBody'
+                - $ref: '#/components/schemas/CreateRevisionStructuredBody'
       responses:
         '201':
           description: Revision issued
@@ -1557,7 +1712,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Revision label already exists for this package
+          description: Revision label or sort order already exists for this package
           content:
             application/json:
               schema:
@@ -2771,9 +2926,64 @@ components:
               items:
                 $ref: '#/components/schemas/PackageSpecEntry'
 
+    RevisionAttributes:
+      type: object
+      description: >
+        Open JSONB attributes for a profile-defined revision type. Known common
+        keys include `number`, `title`, and `phase`; unknown keys are preserved.
+      additionalProperties: true
+      properties:
+        number:
+          oneOf:
+            - type: string
+            - type: number
+        title:
+          type: string
+        phase:
+          type: string
+
+    CreateRevisionLegacyBody:
+      type: object
+      required: [label]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          description: Legacy freeform label; still accepted for backward compatibility
+
+    CreateRevisionStructuredBody:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          minLength: 1
+          description: String key defined by the resolved revision nomenclature profile
+        date:
+          type: string
+          format: date
+        sortOrder:
+          type: integer
+          minimum: 1
+        attributes:
+          $ref: '#/components/schemas/RevisionAttributes'
+
     RevisionSummary:
       type: object
-      required: [revisionId, packageId, label, issuedAt, specCount]
+      required:
+        [
+          revisionId,
+          packageId,
+          label,
+          displayName,
+          type,
+          date,
+          sortOrder,
+          number,
+          attributes,
+          issuedAt,
+          specCount,
+        ]
       properties:
         revisionId:
           type: string
@@ -2783,7 +2993,25 @@ components:
           format: uuid
         label:
           type: string
-          description: Issuance label, unique per package ('50% DD', '100% CD', 'Addendum 2')
+          description: Backward-compatible display label, unique per package
+        displayName:
+          type: string
+          description: Profile-rendered display name; #102 consumes this directly
+        type:
+          type: string
+          description: Profile-defined revision type key
+        date:
+          type: string
+          format: date
+        sortOrder:
+          type: integer
+          minimum: 1
+          description: Queryable ordering key within the package
+        number:
+          type: [string, 'null']
+          description: Profile-rendered revision number, or null when not applicable
+        attributes:
+          $ref: '#/components/schemas/RevisionAttributes'
         issuedAt:
           type: string
           format: date-time
@@ -2806,7 +3034,20 @@ components:
 
     RevisionWithTrees:
       type: object
-      required: [revisionId, packageId, label, issuedAt, specs]
+      required:
+        [
+          revisionId,
+          packageId,
+          label,
+          displayName,
+          type,
+          date,
+          sortOrder,
+          number,
+          attributes,
+          issuedAt,
+          specs,
+        ]
       properties:
         revisionId:
           type: string
@@ -2816,6 +3057,20 @@ components:
           format: uuid
         label:
           type: string
+        displayName:
+          type: string
+        type:
+          type: string
+        date:
+          type: string
+          format: date
+        sortOrder:
+          type: integer
+          minimum: 1
+        number:
+          type: [string, 'null']
+        attributes:
+          $ref: '#/components/schemas/RevisionAttributes'
         issuedAt:
           type: string
           format: date-time
@@ -3140,3 +3395,88 @@ components:
           type: string
           format: uuid
           description: A built-in or another library's convention profile id
+
+    # ── Revision nomenclature profiles (ADR-025 / #209) ───────────────────────
+
+    RevisionNomenclatureType:
+      type: object
+      required: [key]
+      additionalProperties: true
+      properties:
+        key:
+          type: string
+          minLength: 1
+        name:
+          type: string
+        format:
+          type: object
+          additionalProperties: true
+          properties:
+            displayName:
+              type: string
+              description: Template using `{attributeKey}` placeholders
+            number:
+              type: string
+              description: Template for the rendered revision number
+        fields:
+          type: array
+          items:
+            type: object
+            required: [key]
+            additionalProperties: true
+            properties:
+              key:
+                type: string
+                minLength: 1
+              kind:
+                type: string
+                enum: [string, integer, number, date, boolean, json]
+              required:
+                type: boolean
+              sequence:
+                type: string
+
+    RevisionNomenclatureProfile:
+      type: object
+      required: [id, projectId, name, types, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: [string, 'null']
+          format: uuid
+          description: Owning project, or null for a built-in default
+        name:
+          type: string
+        types:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevisionNomenclatureType'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PutRevisionNomenclatureBody:
+      type: object
+      required: [name, types]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        types:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevisionNomenclatureType'
+
+    CloneRevisionNomenclatureBody:
+      type: object
+      required: [sourceId]
+      properties:
+        sourceId:
+          type: string
+          format: uuid
+          description: A built-in or another project's revision nomenclature profile id

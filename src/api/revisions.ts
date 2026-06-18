@@ -3,6 +3,7 @@ import {
   createPackageRevision,
   getPackageRevision,
   PackageNotFoundError,
+  RevisionNomenclatureValidationError,
   SnapshotValidationError,
   pool,
 } from '../db/index.js';
@@ -20,7 +21,7 @@ export async function createRevisionHandler(req: Request, res: Response): Promis
   }
   try {
     const body = req.body as CreateRevisionBody;
-    const revision = await createPackageRevision(id, body.label, pool);
+    const revision = await createPackageRevision(id, body, pool);
     res.status(201).json({ success: true, data: revision });
   } catch (err) {
     if (err instanceof PackageNotFoundError) {
@@ -31,8 +32,12 @@ export async function createRevisionHandler(req: Request, res: Response): Promis
       res.status(422).json({ success: false, error: err.message });
       return;
     }
+    if (err instanceof RevisionNomenclatureValidationError) {
+      res.status(422).json({ success: false, error: err.message });
+      return;
+    }
     const mapped = pgErrorToHttp(err, {
-      '23505': 'revision label already exists for this package',
+      '23505': 'revision already exists for this package',
     });
     if (mapped) {
       res.status(mapped.status).json({ success: false, error: mapped.error });
