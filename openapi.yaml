@@ -896,6 +896,71 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /libraries:
+    get:
+      operationId: listLibraries
+      summary: List all libraries
+      description: >
+        Returns every library (reference, company, and client tiers), ordered by
+        tier then name. The seeded built-in reference and company masters are
+        always present.
+      tags: [libraries]
+      responses:
+        '200':
+          description: All libraries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Library'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /libraries/{id}/specs:
+    get:
+      operationId: listLibrarySpecs
+      summary: List the specs owned by a library
+      description: >
+        Returns the specs owned by the library, each with its paragraph node
+        count, ordered by section.
+      tags: [libraries]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Library UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Specs owned by the library
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/LibrarySpec'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /libraries/{id}/conventions:
     get:
       operationId: getLibraryConvention
@@ -3428,6 +3493,43 @@ components:
         defaultEditability:
           type: string
           enum: [locked, editable, choice, note]
+
+    Library:
+      type: object
+      required: [id, tier, name, owner, parentLibraryId, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tier:
+          type: string
+          enum: [reference, company, client]
+        name:
+          type: string
+        owner:
+          type: [string, 'null']
+        parentLibraryId:
+          type: [string, 'null']
+          format: uuid
+          description: Parent library (e.g. a client master's company parent), or null
+        createdAt:
+          type: string
+          format: date-time
+
+    LibrarySpec:
+      type: object
+      required: [specId, section, title, nodeCount]
+      properties:
+        specId:
+          type: string
+          format: uuid
+        section:
+          type: string
+        title:
+          type: string
+        nodeCount:
+          type: integer
+          description: Number of paragraph nodes in the spec's tree
 
     EditingConvention:
       type: object

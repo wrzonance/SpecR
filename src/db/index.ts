@@ -113,11 +113,12 @@ export {
   findLibraryById,
   findLibraryByName,
   listLibraries,
+  listLibrarySpecs,
   resolveDefaultLibraryId,
   UFGS_REFERENCE_LIBRARY,
   DEFAULT_COMPANY_LIBRARY,
 } from './queries/libraries.js';
-export type { Library, LibraryTier, CreateLibraryInput } from './queries/libraries.js';
+export type { Library, LibraryTier, CreateLibraryInput, LibrarySpec } from './queries/libraries.js';
 export {
   addSectionToProject,
   removeSectionFromProject,

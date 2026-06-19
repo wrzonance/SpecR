@@ -20,6 +20,8 @@ const RESPONSE_COVERED = new Set([
   'delete /projects/{}/revision-nomenclature',
   'get /health',
   'get /conventions',
+  'get /libraries',
+  'get /libraries/{}/specs',
   'get /projects/{}/revision-nomenclature',
   'get /revision-nomenclature-profiles',
   'get /templates',
@@ -182,5 +184,18 @@ describe('response contract (covered endpoints)', () => {
     });
     expect(del.status).toBe(200);
     await assertResponse('delete', '/projects/{id}/revision-nomenclature', 200, await del.json());
+  });
+
+  it('library read endpoints match their documented 200 schemas', async () => {
+    const list = await fetch(`${baseUrl}/libraries`);
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as unknown;
+    await assertResponse('get', '/libraries', 200, listBody);
+
+    const libraryId = (listBody as { data: readonly { id: string }[] }).data[0]?.id;
+    if (!libraryId) throw new Error('no seeded library to read specs from');
+    const specs = await fetch(`${baseUrl}/libraries/${libraryId}/specs`);
+    expect(specs.status).toBe(200);
+    await assertResponse('get', '/libraries/{id}/specs', 200, await specs.json());
   });
 });
