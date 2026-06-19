@@ -24,6 +24,15 @@ export interface CreateLibraryInput {
   readonly parentLibraryId?: string;
 }
 
+// A spec owned by a library, with its paragraph count — the shape a library
+// browser lists (GET /libraries/:id/specs).
+export interface LibrarySpec {
+  readonly specId: string;
+  readonly section: string;
+  readonly title: string;
+  readonly nodeCount: number;
+}
+
 interface LibraryRow {
   readonly id: string;
   readonly tier: LibraryTier;
@@ -134,6 +143,44 @@ export async function resolveDefaultLibraryId(
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError(`resolveDefaultLibraryId: lookup failed for source "${source}"`, {
+      cause: err,
+    });
+  }
+}
+
+interface LibrarySpecRow {
+  readonly id: string;
+  readonly section: string;
+  readonly title: string;
+  readonly node_count: number;
+}
+
+/**
+ * Lists the specs owned by a library with each spec's paragraph node count,
+ * ordered by section. The library's existence is the caller's concern (404).
+ */
+export async function listLibrarySpecs(
+  libraryId: string,
+  db: Queryable = pool
+): Promise<readonly LibrarySpec[]> {
+  try {
+    const result = await db.query<LibrarySpecRow>(
+      `SELECT s.id, s.section, s.title, COUNT(p.id)::int AS node_count
+         FROM specs s
+         LEFT JOIN paragraphs p ON p.spec_id = s.id
+        WHERE s.library_id = $1
+        GROUP BY s.id, s.section, s.title
+        ORDER BY s.section`,
+      [libraryId]
+    );
+    return result.rows.map((row) => ({
+      specId: row.id,
+      section: row.section,
+      title: row.title,
+      nodeCount: row.node_count,
+    }));
+  } catch (err) {
+    throw new DatabaseError(`listLibrarySpecs: query failed for library ${libraryId}`, {
       cause: err,
     });
   }

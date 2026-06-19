@@ -61,6 +61,7 @@ import {
   putLibraryConventionHandler,
   cloneLibraryConventionHandler,
 } from './conventions.js';
+import { listLibrariesHandler, listLibrarySpecsHandler } from './libraries.js';
 import {
   listRevisionNomenclatureProfilesHandler,
   getProjectRevisionNomenclatureHandler,
@@ -151,6 +152,8 @@ router.post(
   upsertTemplateRulesHandler
 );
 router.get('/conventions', listConventionsHandler);
+router.get('/libraries', listLibrariesHandler);
+router.get('/libraries/:id/specs', listLibrarySpecsHandler);
 router.get('/libraries/:id/conventions', getLibraryConventionHandler);
 router.put('/libraries/:id/conventions', putLibraryConventionHandler);
 router.post('/libraries/:id/conventions/clone', cloneLibraryConventionHandler);
