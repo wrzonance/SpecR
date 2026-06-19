@@ -44,6 +44,21 @@ $api = Start-Process -FilePath 'node' -ArgumentList 'dist/index.js' -WorkingDire
 
 try {
     Write-Host ''
+    Write-Host "==> Waiting for the SpecR API on http://127.0.0.1:$ApiPort" -ForegroundColor Cyan
+    $ready = $false
+    for ($i = 0; $i -lt 60; $i++) {
+        try {
+            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$ApiPort/health" -UseBasicParsing -TimeoutSec 2
+            if ($resp.StatusCode -eq 200) { $ready = $true; break }
+        }
+        catch {}
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not $ready) {
+        throw "SpecR API did not become ready on port $ApiPort after ~30s"
+    }
+
+    Write-Host ''
     Write-Host "==> Starting web UI demo from $ExampleRoot" -ForegroundColor Cyan
     Write-Host "    API:  http://127.0.0.1:$ApiPort"
     Write-Host "    Demo: http://127.0.0.1:$WebPort"
