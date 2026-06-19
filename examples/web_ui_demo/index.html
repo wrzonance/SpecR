@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SpecR — Section Linkage Console</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230e2a3a'/%3E%3Cpath d='M6 22 Q 16 6 26 22' stroke='%2369c7e4' stroke-width='2' fill='none'/%3E%3Ccircle cx='6' cy='22' r='3' fill='%23ffb224'/%3E%3Ccircle cx='26' cy='22' r='3' fill='%23ffb224'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;600;700;800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <div id="grid-overlay" aria-hidden="true"></div>
+
+    <header class="masthead">
+      <div class="masthead-brand">
+        <h1 class="brand-mark">Spec<span class="brand-r">R</span></h1>
+        <p class="brand-sub">SECTION LINKAGE CONSOLE</p>
+      </div>
+      <div class="title-block" role="presentation">
+        <div class="tb-cell">
+          <span class="tb-key">PROJECT</span><span class="tb-val">HIERARCHY + CROSS-REF DEMO</span>
+        </div>
+        <div class="tb-cell">
+          <span class="tb-key">DATE</span><span class="tb-val" id="tb-date"></span>
+        </div>
+        <div class="tb-cell">
+          <span class="tb-key">ENGINE</span><span class="tb-val">MULTI-SIGNAL INFERENCE</span>
+        </div>
+        <div class="tb-cell"><span class="tb-key">SCALE</span><span class="tb-val">NTS</span></div>
+        <div class="tb-cell tb-health">
+          <span class="tb-key">API</span><span class="tb-val" id="health-dot">●&nbsp;CHECKING</span>
+        </div>
+        <div class="tb-cell tb-broken" id="broken-cell">
+          <span class="tb-key">BROKEN REFS</span><span class="tb-val" id="broken-count">0</span>
+        </div>
+        <div class="tb-cell tb-broken" id="coord-cell">
+          <span class="tb-key">COORD</span><span class="tb-val" id="coord-count">0</span>
+        </div>
+      </div>
+    </header>
+
+    <nav class="view-nav" aria-label="Workspace views">
+      <button class="view-tab" type="button" data-view="toc">TOC</button>
+      <button class="view-tab is-active" type="button" data-view="map">Project Spec Map</button>
+      <button class="view-tab" type="button" data-view="settings">Project Settings</button>
+      <button class="view-tab" type="button" data-view="library">Library</button>
+      <button class="view-tab" type="button" data-view="report">Report</button>
+    </nav>
+
+    <section class="project-bar" aria-label="Active project controls">
+      <label class="project-picker">
+        <span>ACTIVE PROJECT</span>
+        <select id="project-select"></select>
+      </label>
+      <button class="toc-btn is-primary" id="project-add" type="button">New Project</button>
+      <button class="toc-btn" id="project-rename" type="button">Rename</button>
+      <div class="project-pills" aria-live="polite">
+        <span class="project-pill" id="project-format-pill">09 91 00</span>
+        <span class="project-pill" id="project-source-pill">Company Masters</span>
+      </div>
+    </section>
+
+    <section class="app-view" id="view-toc" data-view-panel="toc" hidden>
+      <div class="toc-builder">
+        <div class="band-rule">
+          <h2 class="band-title">TABLE OF CONTENTS BUILDER</h2>
+          <p class="band-hint" id="toc-hint">author the required section list for this project</p>
+        </div>
+        <div class="toc-shell">
+          <div class="toc-client-scope">
+            <span>PROJECT SOURCES</span>
+            <div class="toc-source-summary" id="toc-source-summary">Company Masters</div>
+          </div>
+          <form class="toc-add" id="toc-add-form">
+            <label>
+              <span>SECTION</span>
+              <input
+                id="toc-section-input"
+                type="text"
+                inputmode="numeric"
+                placeholder="09 29 00"
+                autocomplete="off"
+              />
+            </label>
+            <label>
+              <span>SECTION NAME</span>
+              <input
+                id="toc-title-input"
+                type="text"
+                placeholder="Gypsum Board"
+                autocomplete="off"
+              />
+            </label>
+            <button class="toc-btn is-primary" type="submit">Add</button>
+          </form>
+          <div class="toc-columns">
+            <section class="toc-panel">
+              <div class="toc-panel-head">
+                <h3>AVAILABLE SPECS</h3>
+              </div>
+              <div class="toc-candidates" id="toc-candidates"></div>
+            </section>
+            <section class="toc-panel">
+              <div class="toc-panel-head">
+                <h3>PROJECT TOC</h3>
+                <div class="toc-actions">
+                  <button class="toc-btn" id="toc-add-loaded" type="button">
+                    Add Loaded Sections
+                  </button>
+                  <button class="toc-btn" id="toc-clear" type="button">Clear</button>
+                  <button class="toc-btn is-primary" id="toc-save" type="button">Save TOC</button>
+                </div>
+              </div>
+              <ol class="toc-list" id="toc-list"></ol>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="app-view is-active" id="view-map" data-view-panel="map">
+      <section class="ref-web" id="ref-web-section">
+        <div class="band-rule">
+          <h2 class="band-title">REFERENCE WEB</h2>
+          <p class="band-hint" id="web-hint">arcs draw as sections cite one another</p>
+        </div>
+        <div id="ref-web-canvas" class="ref-web-canvas"></div>
+      </section>
+      <section class="map-actions" aria-label="Project spec map actions">
+        <button class="toc-btn is-primary" id="map-add-from-toc" type="button">
+          Add Specs From TOC
+        </button>
+        <button class="toc-btn" id="map-update-toc" type="button">
+          Update Loaded Specs To TOC
+        </button>
+      </section>
+
+      <main id="spec-board" class="spec-board">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-reticle" aria-hidden="true">
+            <span class="ret-h"></span><span class="ret-v"></span>
+          </div>
+          <h2>DROP SPEC SECTIONS ANYWHERE</h2>
+          <p>
+            Drag in <code>.SEC</code> (UFGS / SpecsIntact), <code>.DOCX</code>, or
+            <code>.TXT</code> files — SpecR parses each into its canonical CSI hierarchy and
+            extracts every <em>Section&nbsp;XX&nbsp;XX&nbsp;XX</em> cross-reference.
+          </p>
+          <p class="empty-tip">
+            Try the interlinked set under <code>docs/references/UFGS/</code>:
+            <code>09_29_00</code> cites <code>09_22_00</code>, <code>07_92_00</code>,
+            <code>05_40_00</code> &amp; <code>01_33_00</code> — drop them together and watch the web
+            knit itself.
+          </p>
+          <button class="pick-btn" id="pick-btn" type="button">— OR BROWSE FOR FILES —</button>
+        </div>
+      </main>
+    </section>
+
+    <section class="app-view" id="view-settings" data-view-panel="settings" hidden>
+      <div class="project-settings">
+        <div class="band-rule">
+          <h2 class="band-title">PROJECT SETTINGS</h2>
+          <p class="band-hint" id="settings-hint">active project configuration</p>
+        </div>
+        <div class="settings-shell">
+          <section class="settings-panel">
+            <div class="settings-panel-head">
+              <h3>PROJECT</h3>
+            </div>
+            <form class="settings-form" id="project-settings-form">
+              <label>
+                <span>PROJECT NAME</span>
+                <input id="project-name-input" type="text" autocomplete="off" />
+              </label>
+              <label>
+                <span>SECTION NUMBERING</span>
+                <select id="project-number-format">
+                  <option value="canonical">09 91 00</option>
+                  <option value="dots">09.91.00</option>
+                  <option value="compact">099100</option>
+                </select>
+              </label>
+              <button class="toc-btn is-primary" type="submit">Save Settings</button>
+            </form>
+          </section>
+          <section class="settings-panel">
+            <div class="settings-panel-head">
+              <h3>CLIENT LIBRARIES</h3>
+            </div>
+            <div class="source-list" id="project-source-list"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="app-view" id="view-library" data-view-panel="library" hidden>
+      <div class="library-workspace">
+        <div class="band-rule">
+          <h2 class="band-title">LIBRARY</h2>
+          <p class="band-hint" id="library-hint">company masters and client masters</p>
+        </div>
+        <div class="library-shell">
+          <aside class="library-sidebar">
+            <button class="library-master" id="company-master-btn" type="button">
+              Company Masters
+            </button>
+            <form class="client-add" id="client-add-form">
+              <input id="client-name-input" type="text" placeholder="New client" />
+              <button type="submit">Add</button>
+            </form>
+            <div class="client-list" id="client-list"></div>
+          </aside>
+          <section class="library-detail">
+            <div class="library-detail-head">
+              <div>
+                <p class="library-kicker" id="library-kicker">SELECTED LIBRARY</p>
+                <h2 id="library-title">Company Masters</h2>
+                <p class="library-drop-hint">Drop fixture files or folders here.</p>
+              </div>
+              <div class="library-actions">
+                <button class="toc-btn" id="library-rename" type="button">Rename</button>
+                <button class="toc-btn is-primary" id="library-add-specs" type="button">
+                  Add Specs
+                </button>
+              </div>
+            </div>
+            <div class="library-tree" id="library-tree"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="app-view" id="view-report" data-view-panel="report" hidden>
+      <section class="coord-report" id="coord-report" aria-labelledby="coord-title">
+        <div class="band-rule">
+          <h2 class="band-title" id="coord-title">COORDINATION REPORT</h2>
+          <p class="band-hint" id="coord-hint">
+            loaded sections compared with authored requirements
+          </p>
+        </div>
+        <div id="coord-report-body" class="coord-report-body"></div>
+      </section>
+    </section>
+
+    <input type="file" id="file-input" multiple accept=".sec,.SEC,.docx,.txt" hidden />
+
+    <button class="add-fab" id="add-fab" type="button" hidden>+ ADD SECTION</button>
+
+    <aside class="upload-dock" id="upload-dock" hidden>
+      <h3 class="dock-title">INGEST QUEUE</h3>
+      <ul id="upload-list" class="upload-list"></ul>
+    </aside>
+
+    <div class="drop-veil" id="drop-veil" hidden>
+      <div class="veil-frame">
+        <span class="corner c-tl"></span><span class="corner c-tr"></span>
+        <span class="corner c-bl"></span><span class="corner c-br"></span>
+        <p class="veil-text">RELEASE&nbsp;TO&nbsp;INGEST</p>
+      </div>
+    </div>
+
+    <div id="toast-rack" class="toast-rack" aria-live="polite"></div>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
