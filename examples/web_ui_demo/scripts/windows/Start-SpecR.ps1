@@ -11,8 +11,35 @@ else {
 }
 
 $RepoRoot = Resolve-Path (Join-Path $ExampleRoot '..\..')
-$ApiPort = if ($env:SPECR_PORT) { $env:SPECR_PORT } else { '3000' }
-$WebPort = if ($env:SPECR_WEB_PORT) { $env:SPECR_WEB_PORT } else { '3001' }
+
+# True when the port can be bound — mirrors what the API/demo servers do, so the
+# result matches whether they will actually be able to listen.
+function Test-PortFree([int]$Port) {
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, $Port)
+    try { $listener.Start(); $listener.Stop(); return $true }
+    catch { return $false }
+}
+
+# First free port at or after $Start, skipping $Avoid (so the web port never
+# lands on the API port). Other dev servers commonly squat 3000+, so we hunt
+# for a free port instead of failing on a conflict.
+function Find-FreePort([int]$Start, [int]$Avoid = -1) {
+    for ($p = $Start; $p -le ($Start + 50); $p++) {
+        if ($p -ne $Avoid -and (Test-PortFree $p)) { return $p }
+    }
+    throw "no free port found at or after $Start"
+}
+
+$ApiPortWanted = if ($env:SPECR_PORT) { [int]$env:SPECR_PORT } else { 3000 }
+$WebPortWanted = if ($env:SPECR_WEB_PORT) { [int]$env:SPECR_WEB_PORT } else { 3001 }
+$ApiPort = Find-FreePort $ApiPortWanted
+$WebPort = Find-FreePort $WebPortWanted $ApiPort
+if ($ApiPort -ne $ApiPortWanted) {
+    Write-Host "==> Port $ApiPortWanted busy; using $ApiPort for the SpecR API" -ForegroundColor Yellow
+}
+if ($WebPort -ne $WebPortWanted) {
+    Write-Host "==> Port $WebPortWanted busy; using $WebPort for the web UI demo" -ForegroundColor Yellow
+}
 $DatabaseUrl = if ($env:DATABASE_URL) {
     $env:DATABASE_URL
 }

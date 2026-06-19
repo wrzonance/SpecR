@@ -3,10 +3,41 @@ set -Eeuo pipefail
 
 EXAMPLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$EXAMPLE_ROOT/../.." && pwd)"
-API_PORT="${SPECR_PORT:-3000}"
-WEB_PORT="${SPECR_WEB_PORT:-3001}"
 DATABASE_URL_CHOSEN="${DATABASE_URL:-postgres://specr:specr@localhost:5432/specr}"
 API_PID=""
+
+# True (0) when the port can be bound. Asks Node to bind it — the same operation
+# the API/demo servers perform — which is more reliable than /dev/tcp (often
+# compiled out) or ss/lsof/nc (not always installed); Node is already required.
+port_is_free() {
+  node -e 'const s=require("net").createServer();s.once("error",()=>process.exit(1));s.once("listening",()=>s.close(()=>process.exit(0)));s.listen(Number(process.argv[1]),"0.0.0.0");' "$1" 2>/dev/null
+}
+
+# Prints the first free port at or after $1, skipping the optional $2 (so the
+# web port never lands on the API port). Other dev servers commonly squat 3000+,
+# so we hunt for a free port instead of failing on a conflict.
+find_free_port() {
+  local port="$1" avoid="${2:-}" limit
+  limit=$((port + 50))
+  while [[ "$port" -le "$limit" ]]; do
+    if [[ "$port" != "$avoid" ]] && port_is_free "$port"; then
+      printf '%s' "$port"
+      return 0
+    fi
+    port=$((port + 1))
+  done
+  printf 'no free port found at or after %s\n' "$1" >&2
+  return 1
+}
+
+API_PORT_WANTED="${SPECR_PORT:-3000}"
+WEB_PORT_WANTED="${SPECR_WEB_PORT:-3001}"
+API_PORT="$(find_free_port "$API_PORT_WANTED")"
+WEB_PORT="$(find_free_port "$WEB_PORT_WANTED" "$API_PORT")"
+[[ "$API_PORT" == "$API_PORT_WANTED" ]] ||
+  printf '==> Port %s busy; using %s for the SpecR API\n' "$API_PORT_WANTED" "$API_PORT"
+[[ "$WEB_PORT" == "$WEB_PORT_WANTED" ]] ||
+  printf '==> Port %s busy; using %s for the web UI demo\n' "$WEB_PORT_WANTED" "$WEB_PORT"
 
 cleanup() {
   if [[ -n "$API_PID" ]]; then
