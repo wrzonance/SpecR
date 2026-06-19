@@ -7,6 +7,7 @@ import { updateParagraphHandler } from './paragraphs.js';
 import { acquireLockHandler, releaseLockHandler, getLockHandler } from './locks.js';
 import {
   createProjectHandler,
+  listProjectsHandler,
   getProjectHandler,
   addSectionToProjectHandler,
   removeSectionFromProjectHandler,
@@ -98,6 +99,7 @@ router.post('/specs/:id/generate', generateHandler);
 router.post('/specs/:id/diff', upload.single('file'), diffHandler);
 router.post('/specs/:id/merge', mergeHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
+router.get('/projects', listProjectsHandler);
 router.get('/projects/:id', getProjectHandler);
 router.post('/projects/:id/generate', generateManualHandler);
 router.get(

@@ -206,6 +206,26 @@ describe('GET /projects/:id', () => {
   });
 });
 
+describe('GET /projects', () => {
+  it('returns 200 listing projects as {id, name}, including the test project', async () => {
+    const res = await fetch(`${baseUrl}/projects`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      success: boolean;
+      data: Array<{ id: string; name: string }>;
+    };
+    expect(body.success).toBe(true);
+    expect(Array.isArray(body.data)).toBe(true);
+    const mine = body.data.find((p) => p.id === testProjectId);
+    expect(mine).toBeDefined();
+    expect(mine?.name).toBe('Phase 1b Integration Test');
+    for (const p of body.data) {
+      expect(typeof p.id).toBe('string');
+      expect(typeof p.name).toBe('string');
+    }
+  });
+});
+
 describe('POST /projects/:id/specs (section-based copy-on-derive)', () => {
   let projectId: string;
   let cloneA: string;
