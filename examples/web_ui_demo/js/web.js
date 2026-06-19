@@ -10,6 +10,11 @@ const BASELINE_PAD = 46;
 const SIDE_PAD = 70;
 const MIN_ARC = 26;
 
+// When the same (from → to) citation appears more than once, the most severe
+// status wins the arc colour: a single broken reference must not be masked by an
+// earlier resolved one.
+const STATUS_RANK = { unresolved: 0, library: 1, loaded: 2, broken: 3 };
+
 function svgEl(tag, attrs) {
   const node = document.createElementNS(SVG_NS, tag);
   for (const [key, value] of Object.entries(attrs || {})) {
@@ -58,6 +63,7 @@ export function buildWebModel(specs) {
       const existing = edgeMap.get(key);
       if (existing) {
         existing.count += 1;
+        if (STATUS_RANK[status] > STATUS_RANK[existing.status]) existing.status = status;
       } else {
         edgeMap.set(key, { from, to, count: 1, status });
       }

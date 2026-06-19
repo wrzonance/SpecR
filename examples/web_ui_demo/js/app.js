@@ -1435,8 +1435,16 @@ async function commitTextEdit(specId, nodeId, newText, removedRefs, alsoRemoveSp
     announceEdit(removedRefs, alsoRemoveSpec, brokenCount);
     return 'committed';
   } catch (err) {
+    // updateParagraph commits before the per-reference deletes, so a later
+    // failure can leave the server partially mutated. Resync the board to the
+    // real server state rather than retrying on top of half-applied changes
+    // (which would re-delete already-removed references).
+    await reloadAllSpecs();
+    renderBoard();
+    await refreshBrokenCount();
+    await refreshCoordination();
     toast(`save failed: ${err.message}`, 'err');
-    return 'cancelled'; // keep the editor open so the user can retry
+    return 'cancelled';
   }
 }
 

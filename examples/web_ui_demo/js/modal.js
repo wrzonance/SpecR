@@ -26,12 +26,16 @@ function appendBody(dialog, body) {
 }
 
 let openVeil = null; // only one modal at a time
+// Closes whatever modal is currently open by running its own finish(null), so
+// its keydown listener is removed and its promise resolves. Removing the veil
+// directly would orphan both.
+let closeOpenModal = null;
 
 // choices: [{ label, value, kind }] where kind ∈ 'primary' | 'danger' | 'ghost'.
 // Resolves with the chosen value, or null on Esc / backdrop / close.
 export function openChoice({ title, body, choices }) {
   return new Promise((resolve) => {
-    if (openVeil) openVeil.remove();
+    if (closeOpenModal) closeOpenModal();
 
     const veil = el('div', 'modal-veil');
     const dialog = el('div', 'modal');
@@ -64,7 +68,10 @@ export function openChoice({ title, body, choices }) {
     function finish(value) {
       document.removeEventListener('keydown', onKey, true);
       veil.remove();
-      if (openVeil === veil) openVeil = null;
+      if (openVeil === veil) {
+        openVeil = null;
+        closeOpenModal = null;
+      }
       if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus();
       resolve(value);
     }
@@ -75,6 +82,7 @@ export function openChoice({ title, body, choices }) {
     document.addEventListener('keydown', onKey, true);
 
     openVeil = veil;
+    closeOpenModal = () => finish(null);
     document.body.appendChild(veil);
     const primary = buttons.find((b) => b.classList.contains('is-primary')) || buttons[0];
     if (primary) primary.focus();
@@ -92,7 +100,7 @@ export function openPicker({
   emptyText = 'No items match.',
 }) {
   return new Promise((resolve) => {
-    if (openVeil) openVeil.remove();
+    if (closeOpenModal) closeOpenModal();
 
     const veil = el('div', 'modal-veil');
     const dialog = el('div', 'modal modal-picker');
@@ -156,7 +164,10 @@ export function openPicker({
     function finish(value) {
       document.removeEventListener('keydown', onKey, true);
       veil.remove();
-      if (openVeil === veil) openVeil = null;
+      if (openVeil === veil) {
+        openVeil = null;
+        closeOpenModal = null;
+      }
       if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus();
       resolve(value);
     }
@@ -168,6 +179,7 @@ export function openPicker({
     document.addEventListener('keydown', onKey, true);
 
     openVeil = veil;
+    closeOpenModal = () => finish(null);
     document.body.appendChild(veil);
     render();
     input.focus();

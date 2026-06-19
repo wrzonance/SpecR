@@ -79,7 +79,14 @@ async function proxyApi(req, res, url) {
 }
 
 async function serveStatic(req, res, url) {
-  const pathname = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+  } catch {
+    // decodeURIComponent throws URIError on malformed escapes (e.g. "%ZZ").
+    sendJson(res, 400, { success: false, error: 'malformed request path' });
+    return;
+  }
   const resolved = resolve(ROOT, `.${pathname}`);
   const rootWithSep = ROOT.endsWith(sep) ? ROOT : `${ROOT}${sep}`;
   if (!resolved.startsWith(rootWithSep)) {
