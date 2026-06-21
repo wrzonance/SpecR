@@ -4,7 +4,13 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool, createLibrary, createSpec, insertTree } from '../db/index.js';
+import {
+  pool,
+  createLibrary,
+  createSpec,
+  insertTree,
+  DEFAULT_COMPANY_LIBRARY,
+} from '../db/index.js';
 
 // ─── Test setup ───────────────────────────────────────────────────────────────
 
@@ -65,8 +71,10 @@ async function patch(path: string, body: unknown): Promise<Response> {
 // The seeded company-tier master (Default Company Master).
 async function companyMasterId(): Promise<string> {
   const res = await get('/libraries');
-  const json = (await res.json()) as { data: { id: string; tier: string }[] };
-  const company = json.data.find((l) => l.tier === 'company');
+  const json = (await res.json()) as { data: { id: string; tier: string; name: string }[] };
+  // Match by name too: "default parent resolves by name" is the actual contract,
+  // so a stray extra company-tier library must not satisfy this lookup.
+  const company = json.data.find((l) => l.tier === 'company' && l.name === DEFAULT_COMPANY_LIBRARY);
   if (!company) throw new Error('seeded company master missing — run migrations');
   return company.id;
 }

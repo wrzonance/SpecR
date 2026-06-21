@@ -80,6 +80,10 @@ async function resolveClientParent(
     res.status(500).json({ success: false, error: 'default company library missing' });
     return null;
   }
+  if (company.tier !== 'company') {
+    res.status(500).json({ success: false, error: 'default company library misconfigured' });
+    return null;
+  }
   return company;
 }
 
