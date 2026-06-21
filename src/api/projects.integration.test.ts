@@ -429,4 +429,14 @@ describe('PUT /projects/:id/sources', () => {
     const res = await putSources(pid, []);
     expect(res.status).toBe(400);
   });
+
+  it('400 — duplicate sourceLibraryIds', async () => {
+    const res = await putSources(pid, [companyId, companyId]);
+    expect(res.status).toBe(400);
+  });
+
+  it('400 — malformed project id (not a UUID)', async () => {
+    const res = await putSources('not-a-uuid', [companyId]);
+    expect(res.status).toBe(400);
+  });
 });

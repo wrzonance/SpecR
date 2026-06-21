@@ -58,11 +58,12 @@ export async function listProjectsHandler(_req: Request, res: Response): Promise
 }
 
 export async function setProjectSourcesHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing project id' });
+  const parsedId = z.uuid().safeParse(req.params['id']);
+  if (!parsedId.success) {
+    res.status(400).json({ success: false, error: 'invalid project id' });
     return;
   }
+  const id = parsedId.data;
   const parsed = SetProjectSourcesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({

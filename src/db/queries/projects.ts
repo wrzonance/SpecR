@@ -1,5 +1,5 @@
 import { DatabaseError } from '../errors.js';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type { LibraryTier } from './libraries.js';
 
 interface Queryable {
@@ -173,9 +173,13 @@ export async function setProjectSources(
   sourceLibraryIds: readonly string[],
   pool: Pool
 ): Promise<readonly ProjectSource[]> {
-  const libs = await validateSourceLibraries(sourceLibraryIds, pool);
-  const client = await pool.connect();
+  // validation + connect live inside the try so every failure path (incl. a
+  // failed connect) goes through one DatabaseError surface. InvalidSourceLibraryError
+  // extends DatabaseError, so it still re-throws unwrapped → 422 at the handler.
+  let client: PoolClient | null = null;
   try {
+    const libs = await validateSourceLibraries(sourceLibraryIds, pool);
+    client = await pool.connect();
     await client.query('BEGIN');
     await client.query('DELETE FROM project_sources WHERE project_id = $1', [projectId]);
     await client.query(
@@ -192,15 +196,17 @@ export async function setProjectSources(
       priority: i + 1,
     }));
   } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      /* best-effort */
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        /* best-effort */
+      }
     }
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError(`setProjectSources: replace failed for ${projectId}`, { cause: err });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 
