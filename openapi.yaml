@@ -762,6 +762,81 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /projects/{id}/sources:
+    put:
+      operationId: setProjectSources
+      summary: Replace a project's source libraries
+      description: >
+        Replaces the project's ordered source-library list (priority = array
+        order). Each must be a company- or client-tier library (ADR-015 D3); no
+        duplicates. Re-ordering does not re-resolve already-derived specs.
+      tags: [projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceLibraryIds]
+              properties:
+                sourceLibraryIds:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Updated project sources
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId, sources]
+                        properties:
+                          projectId:
+                            type: string
+                            format: uuid
+                          sources:
+                            type: array
+                            items:
+                              type: object
+                              required: [libraryId, name, tier, priority]
+                              properties:
+                                libraryId:
+                                  type: string
+                                  format: uuid
+                                name:
+                                  type: string
+                                tier:
+                                  type: string
+                                  enum: [company, client]
+                                priority:
+                                  type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /projects/{id}/generate:
     post:
       operationId: generateManual

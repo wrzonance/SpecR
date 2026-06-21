@@ -161,6 +161,49 @@ export async function createProject(
   }
 }
 
+/**
+ * Replaces a project's ordered source-library list (priority = array order).
+ * Sources are validated (company/client tier, ADR-015 D3) before a transactional
+ * delete+reinsert — the two `project_sources` unique constraints rule out a
+ * single-statement CTE. Returns the new sources. Re-ordering does NOT re-resolve
+ * already-derived specs (copies are immutable, ADR-015 D2).
+ */
+export async function setProjectSources(
+  projectId: string,
+  sourceLibraryIds: readonly string[],
+  pool: Pool
+): Promise<readonly ProjectSource[]> {
+  const libs = await validateSourceLibraries(sourceLibraryIds, pool);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM project_sources WHERE project_id = $1', [projectId]);
+    await client.query(
+      `INSERT INTO project_sources (project_id, library_id, priority)
+       SELECT $1, u.lib_id, u.ord::int
+       FROM unnest($2::uuid[]) WITH ORDINALITY AS u(lib_id, ord)`,
+      [projectId, sourceLibraryIds]
+    );
+    await client.query('COMMIT');
+    return libs.map((lib, i) => ({
+      libraryId: lib.id,
+      name: lib.name,
+      tier: lib.tier,
+      priority: i + 1,
+    }));
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* best-effort */
+    }
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`setProjectSources: replace failed for ${projectId}`, { cause: err });
+  } finally {
+    client.release();
+  }
+}
+
 export async function listProjects(pool: Queryable): Promise<readonly ProjectListItem[]> {
   try {
     const result = await pool.query<ProjectListRow>(
