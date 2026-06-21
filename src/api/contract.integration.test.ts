@@ -22,6 +22,7 @@ const RESPONSE_COVERED = new Set([
   'get /conventions',
   'get /libraries',
   'get /libraries/{}/specs',
+  'get /projects',
   'get /projects/{}/revision-nomenclature',
   'get /revision-nomenclature-profiles',
   'get /templates',
@@ -197,5 +198,11 @@ describe('response contract (covered endpoints)', () => {
     const specs = await fetch(`${baseUrl}/libraries/${libraryId}/specs`);
     expect(specs.status).toBe(200);
     await assertResponse('get', '/libraries/{id}/specs', 200, await specs.json());
+  });
+
+  it('GET /projects matches its documented 200 schema', async () => {
+    const res = await fetch(`${baseUrl}/projects`);
+    expect(res.status).toBe(200);
+    await assertResponse('get', '/projects', 200, await res.json());
   });
 });

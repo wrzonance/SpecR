@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import {
   createProject,
   findProjectById,
+  listProjects,
   addSectionToProject,
   removeSectionFromProject,
   getBrokenRefs,
@@ -25,6 +26,16 @@ export async function createProjectHandler(req: Request, res: Response): Promise
       return;
     }
     logger.error({ err }, 'create project failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function listProjectsHandler(_req: Request, res: Response): Promise<void> {
+  try {
+    const projects = await listProjects(pool);
+    res.status(200).json({ success: true, data: projects });
+  } catch (err) {
+    logger.error({ err }, 'list projects failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }

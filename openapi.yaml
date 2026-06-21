@@ -662,6 +662,28 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /projects:
+    get:
+      operationId: listProjects
+      summary: List all projects
+      description: Returns every project as an id/name summary, ordered by name.
+      tags: [projects]
+      responses:
+        '200':
+          description: All projects
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ProjectListItem'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     post:
       operationId: createProject
       summary: Create a project
@@ -2859,6 +2881,16 @@ components:
               minLength: 1
 
     # ── Projects ───────────────────────────────────────────────────────────────
+
+    ProjectListItem:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
 
     ProjectSummary:
       type: object
