@@ -7,9 +7,9 @@
 import {
   checkHealth,
   getSpecTree,
+  getOutboundReferences,
   deleteParagraph,
   updateParagraph,
-  deleteReference,
   deleteSpec,
   createProject,
   listProjects,
@@ -28,6 +28,7 @@ import {
   setRequiredSections,
 } from './api.js';
 import { renderSpecSheet } from './tree.js';
+import { API_FEATURES } from './features.js';
 import { buildWebModel, renderWeb } from './web.js';
 import { renderCoordinationReport } from './coordination.js';
 import { initDropzone } from './dropzone.js';
@@ -328,6 +329,10 @@ async function createProjectFromUi() {
 
 async function renameActiveProject() {
   if (!activeProjectId) return;
+  if (!API_FEATURES.projectSettings) {
+    toast('Project rename is not available in this API build', 'warn');
+    return;
+  }
   const name = await modalText({
     title: 'Rename project',
     label: 'Project name',
@@ -348,6 +353,10 @@ async function renameActiveProject() {
 
 async function saveProjectSettings() {
   if (!activeProjectId) return;
+  if (!API_FEATURES.projectSettings) {
+    toast('Project settings are not available in this API build', 'warn');
+    return;
+  }
   const name = document.getElementById('project-name-input')?.value.trim() || activeProjectName();
   const sectionNumberFormat =
     document.getElementById('project-number-format')?.value || activeSectionNumberFormat();
@@ -462,6 +471,10 @@ async function refreshCoordination() {
   const cell = document.getElementById('coord-cell');
   const out = document.getElementById('coord-count');
   if (!activeProjectId) return null;
+  if (!API_FEATURES.coordination) {
+    if (coordBody) renderCoordinationReport(coordBody, null);
+    return null;
+  }
   try {
     const report = await getCoordinationReport(activeProjectId);
     if (out) out.textContent = String(report.summary.total);
@@ -485,9 +498,22 @@ async function refreshDiagnostics() {
 
 // ── State refresh ───────────────────────────────────────────────────────────
 
+// Per-spec outbound references are project-scoped (ADR-024) — the single-spec
+// read no longer bundles them, so fetch them for project specs to feed the web's
+// arcs. Library-only specs (404 "spec not in project") simply have none.
+async function loadSpecReferences(specId) {
+  if (!activeProjectId) return [];
+  try {
+    return await getOutboundReferences(activeProjectId, specId);
+  } catch {
+    return [];
+  }
+}
+
 async function reloadSpec(specId) {
   const data = await getSpecTree(specId);
-  specs.set(specId, { ...specs.get(specId), ...data });
+  const references = await loadSpecReferences(specId);
+  specs.set(specId, { ...specs.get(specId), ...data, references });
 }
 
 // Re-fetch every loaded spec. Needed after a remove-from-project, which marks
@@ -762,6 +788,10 @@ async function refreshTocBuilder() {
     renderTocBuilder();
     return;
   }
+  if (!API_FEATURES.coordination) {
+    renderTocBuilder();
+    return;
+  }
   try {
     const result = await getRequiredSections(activeProjectId);
     tocSections = sortedTocSections(
@@ -815,6 +845,7 @@ async function refreshTocLibrarySpecs() {
 
 async function syncProjectSourcesToTocScope() {
   if (!activeProjectId) return;
+  if (!API_FEATURES.projectSources) return;
   const uniqueIds = projectSourceIds();
   if (uniqueIds.length === 0) return;
   try {
@@ -827,6 +858,10 @@ async function syncProjectSourcesToTocScope() {
 
 async function saveTocBuilder({ toastMessage = 'TOC saved' } = {}) {
   if (!activeProjectId) return;
+  if (!API_FEATURES.coordination) {
+    toast('TOC required-sections are not available in this API build', 'warn');
+    return;
+  }
   try {
     const payload = sortedTocSections().map((entry) => ({
       section: entry.section,
@@ -1016,6 +1051,7 @@ async function refreshLibraryView(preferredId = selectedLibraryId) {
 }
 
 async function ensureDemoClientLibraries() {
+  if (!API_FEATURES.libraryWrites) return; // creating client libraries needs POST /libraries/clients
   try {
     const existing = await listLibraries();
     const existingNames = new Set(
@@ -1142,6 +1178,10 @@ function renderLibrarySpecRow(spec) {
 }
 
 async function addClientLibrary(name) {
+  if (!API_FEATURES.libraryWrites) {
+    toast('Creating client libraries is not available in this API build', 'warn');
+    return;
+  }
   const clean = name.trim();
   if (!clean) return;
   try {
@@ -1158,6 +1198,10 @@ async function addClientLibrary(name) {
 }
 
 async function renameSelectedClient() {
+  if (!API_FEATURES.libraryWrites) {
+    toast('Renaming libraries is not available in this API build', 'warn');
+    return;
+  }
   const library = selectedLibrary();
   if (!library || library.tier !== 'client') return;
   const name = await modalText({
@@ -1181,6 +1225,10 @@ async function renameSelectedClient() {
 }
 
 async function removeSpecFromLibrary(spec) {
+  if (!API_FEATURES.specDelete) {
+    toast('Deleting library specs is not available in this API build', 'warn');
+    return;
+  }
   const ok = await openConfirm({
     title: 'Remove library specification',
     body: [
@@ -1320,6 +1368,10 @@ function removableTargetIds(removedRefs, ownSpecId) {
 
 // Feature A — delete a paragraph (and, by cascade, any reference it contains).
 async function onDeleteParagraph(spec, node) {
+  if (!API_FEATURES.paragraphDelete) {
+    toast('Deleting paragraphs is not available in this API build', 'warn');
+    return;
+  }
   const specId = spec.tree.id;
   // Deleting a paragraph cascades to its whole subtree on the server, so count
   // references and nested items across the subtree — not just this node.
@@ -1424,9 +1476,10 @@ function buildRemovalBody(removedRefs, ownSpecId) {
 async function commitTextEdit(specId, nodeId, newText, removedRefs, alsoRemoveSpec = false) {
   try {
     await updateParagraph(specId, nodeId, newText);
-    for (const ref of removedRefs) {
-      await deleteReference(specId, ref.id);
-    }
+    // The paragraph PATCH re-derives this spec's references server-side, so the
+    // edited-out citations drop automatically — no explicit per-reference delete
+    // (DELETE /specs/:id/references/:refId isn't part of main's API; refs are
+    // derived from text, not independently deletable).
     if (alsoRemoveSpec) await removeTargetSpecs(removedRefs, specId);
     await reloadAllSpecs();
     renderBoard();
@@ -1467,10 +1520,16 @@ async function removeTargetSpecs(removedRefs, ownSpecId) {
     specs.delete(targetId);
     // Best-effort hard delete from the library too — may 409 if the spec is
     // still pinned to another project; that's fine, the sheet is already gone.
-    try {
-      await deleteSpec(targetId);
-    } catch (err) {
-      console.warn(`SpecR: ${targetId} left the project but was not deleted from the library`, err);
+    // DELETE /specs/:id isn't on main yet (gated), so skip the library purge.
+    if (API_FEATURES.specDelete) {
+      try {
+        await deleteSpec(targetId);
+      } catch (err) {
+        console.warn(
+          `SpecR: ${targetId} left the project but was not deleted from the library`,
+          err
+        );
+      }
     }
   }
 }
@@ -1688,7 +1747,8 @@ function renderBoard() {
 
 async function addSpec(specId, extras = {}) {
   const data = await getSpecTree(specId);
-  specs.set(specId, { ...data, ...extras });
+  const references = await loadSpecReferences(specId);
+  specs.set(specId, { ...data, ...extras, references });
   renderBoard();
 }
 
