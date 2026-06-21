@@ -43,8 +43,12 @@ export function listSpecs() {
   return getJson('/specs');
 }
 
-export function getSpecTree(specId) {
-  return getJson(`/specs/${encodeURIComponent(specId)}/tree`);
+// GET /specs/:id returns the tree fields spread (+ styleSource); adapt to the
+// { tree, references } shape the board state expects. Per-spec references are
+// project-scoped (ADR-024) and fetched separately via getOutboundReferences.
+export async function getSpecTree(specId) {
+  const tree = await getJson(`/specs/${encodeURIComponent(specId)}`);
+  return { tree, references: [] };
 }
 
 export function listLibraries() {
@@ -146,6 +150,14 @@ export function removeSpecFromProject(projectId, specId) {
 
 export function getBrokenRefs(projectId) {
   return getJson(`/projects/${enc(projectId)}/references/broken`);
+}
+
+// Outbound cross-references for one project spec (project-scoped, ADR-024).
+// Returns the references array already in the web model's shape
+// ({ targetSection, targetSpecId, isBroken, ... }).
+export async function getOutboundReferences(projectId, specId) {
+  const data = await getJson(`/projects/${enc(projectId)}/specs/${enc(specId)}/references`);
+  return data.references;
 }
 
 export function getCoordinationReport(projectId, packageId) {
