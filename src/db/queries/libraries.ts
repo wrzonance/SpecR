@@ -185,3 +185,26 @@ export async function listLibrarySpecs(
     });
   }
 }
+
+/**
+ * Renames a library (name only; owner/tier/parent unchanged). Returns the
+ * updated row, or null if no library has that id. A duplicate name surfaces as
+ * a PG 23505 the caller maps to 409.
+ */
+export async function updateLibraryName(
+  id: string,
+  name: string,
+  db: Queryable = pool
+): Promise<Library | null> {
+  try {
+    const result = await db.query<LibraryRow>(
+      `UPDATE libraries SET name = $2 WHERE id = $1 RETURNING ${LIBRARY_COLUMNS}`,
+      [id, name]
+    );
+    const row = result.rows[0];
+    return row ? mapLibraryRow(row) : null;
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`updateLibraryName: update failed for ${id}`, { cause: err });
+  }
+}
