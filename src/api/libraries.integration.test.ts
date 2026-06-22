@@ -4,7 +4,13 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool, createLibrary, createSpec, insertTree } from '../db/index.js';
+import {
+  pool,
+  createLibrary,
+  createSpec,
+  insertTree,
+  DEFAULT_COMPANY_LIBRARY,
+} from '../db/index.js';
 
 // ─── Test setup ───────────────────────────────────────────────────────────────
 
@@ -44,6 +50,39 @@ afterEach(async () => {
 
 async function get(path: string): Promise<Response> {
   return fetch(`${baseUrl}${path}`);
+}
+
+async function post(path: string, body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+async function patch(path: string, body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+// The seeded company-tier master (Default Company Master).
+async function companyMasterId(): Promise<string> {
+  const res = await get('/libraries');
+  const json = (await res.json()) as { data: { id: string; tier: string; name: string }[] };
+  // Match by name too: "default parent resolves by name" is the actual contract,
+  // so a stray extra company-tier library must not satisfy this lookup.
+  const company = json.data.find((l) => l.tier === 'company' && l.name === DEFAULT_COMPANY_LIBRARY);
+  if (!company) throw new Error('seeded company master missing — run migrations');
+  return company.id;
+}
+
+let writeCounter = 0;
+function clientName(): string {
+  writeCounter += 1;
+  return `lib-api-write-${Date.now()}-${writeCounter}`;
 }
 
 let libCounter = 0;
@@ -166,5 +205,99 @@ describe('GET /libraries/:id/specs', () => {
   it('400 — malformed library id', async () => {
     const res = await get('/libraries/not-a-uuid/specs');
     expect(res.status).toBe(400);
+  });
+});
+
+// ─── POST /libraries/clients ─────────────────────────────────────────────────────
+
+describe('POST /libraries/clients', () => {
+  it('201 — creates a client library parented to the company master by default', async () => {
+    const name = clientName();
+    const res = await post('/libraries/clients', { name });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as Ok<Library>;
+    expect(json.data).toMatchObject({ tier: 'client', name, owner: name });
+    expect(json.data.parentLibraryId).toBe(await companyMasterId());
+  });
+
+  it('201 — accepts an explicit company-tier parent', async () => {
+    const parent = await companyMasterId();
+    const res = await post('/libraries/clients', { name: clientName(), parentLibraryId: parent });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as Ok<Library>;
+    expect(json.data.parentLibraryId).toBe(parent);
+  });
+
+  it('400 — missing name', async () => {
+    const res = await post('/libraries/clients', {});
+    expect(res.status).toBe(400);
+  });
+
+  it('404 — unknown explicit parent', async () => {
+    const res = await post('/libraries/clients', {
+      name: clientName(),
+      parentLibraryId: MISSING_UUID,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('422 — explicit parent is not company-tier', async () => {
+    const clientParent = await makeLibrary(); // a client-tier library
+    const res = await post('/libraries/clients', {
+      name: clientName(),
+      parentLibraryId: clientParent,
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('409 — duplicate name', async () => {
+    const name = clientName();
+    expect((await post('/libraries/clients', { name })).status).toBe(201);
+    expect((await post('/libraries/clients', { name })).status).toBe(409);
+  });
+});
+
+// ─── PATCH /libraries/:id (rename) ───────────────────────────────────────────────
+
+describe('PATCH /libraries/:id', () => {
+  it('200 — renames a client library; owner is unchanged', async () => {
+    const created = await post('/libraries/clients', { name: clientName() });
+    const lib = ((await created.json()) as Ok<Library>).data;
+    const newName = clientName();
+    const res = await patch(`/libraries/${lib.id}`, { name: newName });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Ok<Library>;
+    expect(json.data.name).toBe(newName);
+    expect(json.data.owner).toBe(lib.owner); // owner immutable (§8)
+  });
+
+  it('400 — malformed library id', async () => {
+    const res = await patch('/libraries/not-a-uuid', { name: clientName() });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 — missing name', async () => {
+    const id = await makeLibrary();
+    const res = await patch(`/libraries/${id}`, {});
+    expect(res.status).toBe(400);
+  });
+
+  it('404 — unknown library', async () => {
+    const res = await patch(`/libraries/${MISSING_UUID}`, { name: clientName() });
+    expect(res.status).toBe(404);
+  });
+
+  it('422 — cannot rename a non-client (built-in) library', async () => {
+    const res = await patch(`/libraries/${await companyMasterId()}`, { name: clientName() });
+    expect(res.status).toBe(422);
+  });
+
+  it('409 — rename to an existing name', async () => {
+    const taken = clientName();
+    await post('/libraries/clients', { name: taken });
+    const other = await post('/libraries/clients', { name: clientName() });
+    const otherId = ((await other.json()) as Ok<Library>).data.id;
+    const res = await patch(`/libraries/${otherId}`, { name: taken });
+    expect(res.status).toBe(409);
   });
 });

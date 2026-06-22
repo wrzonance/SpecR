@@ -114,6 +114,7 @@ export {
   findLibraryByName,
   listLibraries,
   listLibrarySpecs,
+  updateLibraryName,
   resolveDefaultLibraryId,
   UFGS_REFERENCE_LIBRARY,
   DEFAULT_COMPANY_LIBRARY,

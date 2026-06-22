@@ -945,6 +945,105 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /libraries/clients:
+    post:
+      operationId: createClientLibrary
+      summary: Create a client-tier library
+      description: >
+        Creates a client library under a company-tier parent (the seeded Default
+        Company Master when no parent is given). The library's owner is set to its
+        name.
+      tags: [libraries]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                parentLibraryId:
+                  type: string
+                  format: uuid
+                  description: Company-tier parent; defaults to the Default Company Master
+      responses:
+        '201':
+          description: Client library created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Library'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /libraries/{id}:
+    patch:
+      operationId: renameLibrary
+      summary: Rename a client library
+      description: >
+        Renames a client-tier library (name only; owner unchanged). Built-in
+        reference and company libraries cannot be renamed.
+      tags: [libraries]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Library UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: Renamed library
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Library'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /libraries/{id}/specs:
     get:
       operationId: listLibrarySpecs
