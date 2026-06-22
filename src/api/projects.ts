@@ -1,8 +1,10 @@
+import { z } from 'zod';
 import type { Request, Response } from 'express';
 import {
   createProject,
   findProjectById,
   listProjects,
+  setProjectSources,
   addSectionToProject,
   removeSectionFromProject,
   getBrokenRefs,
@@ -14,6 +16,21 @@ import {
 import type { CreateProjectBody, AddSectionToProjectBody } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
+
+const SetProjectSourcesBody = z.object({
+  sourceLibraryIds: z
+    .array(z.uuid())
+    .check(z.minLength(1))
+    .check((ctx) => {
+      if (new Set(ctx.value).size !== ctx.value.length) {
+        ctx.issues.push({
+          code: 'custom',
+          input: ctx.value,
+          message: 'sourceLibraryIds must not contain duplicates',
+        });
+      }
+    }),
+});
 
 export async function createProjectHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -36,6 +53,44 @@ export async function listProjectsHandler(_req: Request, res: Response): Promise
     res.status(200).json({ success: true, data: projects });
   } catch (err) {
     logger.error({ err }, 'list projects failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function setProjectSourcesHandler(req: Request, res: Response): Promise<void> {
+  const parsedId = z.uuid().safeParse(req.params['id']);
+  if (!parsedId.success) {
+    res.status(400).json({ success: false, error: 'invalid project id' });
+    return;
+  }
+  const id = parsedId.data;
+  const parsed = SetProjectSourcesBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      success: false,
+      error: 'sourceLibraryIds must be a non-empty array of unique UUIDs',
+    });
+    return;
+  }
+  try {
+    const project = await findProjectById(id, pool);
+    if (!project) {
+      res.status(404).json({ success: false, error: 'project not found' });
+      return;
+    }
+    const sources = await setProjectSources(id, parsed.data.sourceLibraryIds, pool);
+    res.status(200).json({ success: true, data: { projectId: id, sources } });
+  } catch (err) {
+    if (err instanceof InvalidSourceLibraryError) {
+      res.status(422).json({ success: false, error: err.message });
+      return;
+    }
+    const mapped = pgErrorToHttp(err);
+    if (mapped) {
+      res.status(mapped.status).json({ success: false, error: mapped.error });
+      return;
+    }
+    logger.error({ err }, 'set project sources failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }

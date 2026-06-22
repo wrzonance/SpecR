@@ -3,7 +3,7 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool } from '../db/index.js';
+import { pool, createLibrary } from '../db/index.js';
 
 async function insertSpec(section: string, title: string): Promise<string> {
   const r = await pool.query<{ id: string }>(
@@ -360,5 +360,83 @@ describe('GET /projects/:id/references/broken — availableFrom advisory', () =>
     const ref = refs.find((r) => r['targetSpecSection'] === '09 91 00');
     expect(ref).toBeDefined();
     expect(ref?.['availableFrom']).toEqual([expect.objectContaining({ libraryId: companyLibId })]);
+  });
+});
+
+describe('PUT /projects/:id/sources', () => {
+  let pid: string;
+  let clientLibId: string;
+
+  beforeAll(async () => {
+    const created = await postJSON('/projects', {
+      name: `Sources ${Date.now()}`,
+      sourceLibraryIds: [companyId],
+    });
+    pid = (((await created.json()) as Record<string, unknown>)['data'] as Record<string, unknown>)[
+      'projectId'
+    ] as string;
+    apiProjects.push(pid);
+    const lib = await createLibrary({ tier: 'client', name: `sources-api-${Date.now()}` });
+    clientLibId = lib.id;
+  });
+
+  afterAll(async () => {
+    // The client lib is FK-referenced by project_sources (RESTRICT) — clear those
+    // rows before deleting it. The project itself is cleaned by the top-level afterAll.
+    await pool.query('DELETE FROM project_sources WHERE library_id = $1', [clientLibId]);
+    await pool.query('DELETE FROM libraries WHERE id = $1', [clientLibId]);
+  });
+
+  async function putSources(projectId: string, ids: string[]): Promise<Response> {
+    return fetch(`${baseUrl}/projects/${projectId}/sources`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceLibraryIds: ids }),
+    });
+  }
+
+  it('200 — replaces the ordered source list and persists it', async () => {
+    const res = await putSources(pid, [clientLibId, companyId]);
+    expect(res.status).toBe(200);
+    const data = ((await res.json()) as Record<string, unknown>)['data'] as {
+      projectId: string;
+      sources: Array<{ libraryId: string; priority: number }>;
+    };
+    expect(data.projectId).toBe(pid);
+    expect(data.sources.map((s) => s.libraryId)).toEqual([clientLibId, companyId]);
+    expect(data.sources.map((s) => s.priority)).toEqual([1, 2]);
+    // Persisted: GET /projects/:id reflects the new order.
+    const proj = await fetch(`${baseUrl}/projects/${pid}`);
+    const sources = (
+      ((await proj.json()) as Record<string, unknown>)['data'] as {
+        sources: Array<{ libraryId: string }>;
+      }
+    ).sources;
+    expect(sources.map((s) => s.libraryId)).toEqual([clientLibId, companyId]);
+  });
+
+  it('404 — unknown project', async () => {
+    const res = await putSources('00000000-0000-0000-0000-000000000000', [companyId]);
+    expect(res.status).toBe(404);
+  });
+
+  it('422 — reference-tier source rejected', async () => {
+    const res = await putSources(pid, [ufgsId]);
+    expect(res.status).toBe(422);
+  });
+
+  it('400 — empty sourceLibraryIds', async () => {
+    const res = await putSources(pid, []);
+    expect(res.status).toBe(400);
+  });
+
+  it('400 — duplicate sourceLibraryIds', async () => {
+    const res = await putSources(pid, [companyId, companyId]);
+    expect(res.status).toBe(400);
+  });
+
+  it('400 — malformed project id (not a UUID)', async () => {
+    const res = await putSources('not-a-uuid', [companyId]);
+    expect(res.status).toBe(400);
   });
 });

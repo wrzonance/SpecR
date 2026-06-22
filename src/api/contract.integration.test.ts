@@ -71,6 +71,7 @@ const RESPONSE_ALLOWLIST = new Set([
   'put /libraries/{}/divisions/{}/general-spec',
   'put /packages/{}/specs',
   'put /projects/{}/divisions/{}/general-spec',
+  'put /projects/{}/sources',
   'put /specs/{}/lock',
 ]);
 

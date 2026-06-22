@@ -1,5 +1,5 @@
 import { DatabaseError } from '../errors.js';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type { LibraryTier } from './libraries.js';
 
 interface Queryable {
@@ -158,6 +158,55 @@ export async function createProject(
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError('createProject: insert failed', { cause: err });
+  }
+}
+
+/**
+ * Replaces a project's ordered source-library list (priority = array order).
+ * Sources are validated (company/client tier, ADR-015 D3) before a transactional
+ * delete+reinsert — the two `project_sources` unique constraints rule out a
+ * single-statement CTE. Returns the new sources. Re-ordering does NOT re-resolve
+ * already-derived specs (copies are immutable, ADR-015 D2).
+ */
+export async function setProjectSources(
+  projectId: string,
+  sourceLibraryIds: readonly string[],
+  pool: Pool
+): Promise<readonly ProjectSource[]> {
+  // validation + connect live inside the try so every failure path (incl. a
+  // failed connect) goes through one DatabaseError surface. InvalidSourceLibraryError
+  // extends DatabaseError, so it still re-throws unwrapped → 422 at the handler.
+  let client: PoolClient | null = null;
+  try {
+    const libs = await validateSourceLibraries(sourceLibraryIds, pool);
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await client.query('DELETE FROM project_sources WHERE project_id = $1', [projectId]);
+    await client.query(
+      `INSERT INTO project_sources (project_id, library_id, priority)
+       SELECT $1, u.lib_id, u.ord::int
+       FROM unnest($2::uuid[]) WITH ORDINALITY AS u(lib_id, ord)`,
+      [projectId, sourceLibraryIds]
+    );
+    await client.query('COMMIT');
+    return libs.map((lib, i) => ({
+      libraryId: lib.id,
+      name: lib.name,
+      tier: lib.tier,
+      priority: i + 1,
+    }));
+  } catch (err) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`setProjectSources: replace failed for ${projectId}`, { cause: err });
+  } finally {
+    if (client) client.release();
   }
 }
 
