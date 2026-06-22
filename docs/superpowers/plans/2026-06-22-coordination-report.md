@@ -60,6 +60,7 @@ import { PackageNotFoundError } from './packages.js';
 
 const suffix = randomUUID().slice(0, 8);
 const projectIds: string[] = [];
+const specIds: string[] = [];
 
 async function newProject(name: string): Promise<string> {
   const r = await pool.query<{ id: string }>(
@@ -71,6 +72,10 @@ async function newProject(name: string): Promise<string> {
   projectIds.push(id);
   return id;
 }
+// Inserts a LIBRARY master (library_id set ⇒ project_id NULL by the
+// (library_id IS NULL) <> (project_id IS NULL) CHECK), so it never references a
+// project. Track the id and delete it in afterAll — specs.project_id is RESTRICT
+// and library specs are not cascaded by project deletion (mirrors refs.integration.test.ts).
 async function newSpec(section: string, title: string): Promise<string> {
   const r = await pool.query<{ id: string }>(
     `INSERT INTO specs (section, title, source, library_id)
@@ -80,6 +85,7 @@ async function newSpec(section: string, title: string): Promise<string> {
   );
   const id = r.rows[0]?.id;
   if (id === undefined) throw new Error(`newSpec: no id for ${section}`);
+  specIds.push(id);
   return id;
 }
 async function addProjectSpec(projectId: string, specId: string, position: number): Promise<void> {
@@ -134,7 +140,10 @@ function ofType<T extends Finding['type']>(
 }
 
 afterAll(async () => {
-  for (const id of projectIds) await pool.query(`DELETE FROM projects WHERE id = $1`, [id]);
+  // Projects first (cascades project_specs/package_specs/required_sections/design_packages),
+  // then the library specs we created (cascades their paragraphs + spec_references).
+  await pool.query(`DELETE FROM projects WHERE id = ANY($1::uuid[])`, [projectIds]);
+  await pool.query(`DELETE FROM specs WHERE id = ANY($1::uuid[])`, [specIds]);
 });
 
 describe('getCoordinationReport', () => {
@@ -497,6 +506,7 @@ import { setRequiredSections } from '../db/queries/required-sections.js';
 let server: Server;
 let baseUrl: string;
 let projectId: string;
+let specId: string;
 const suffix = randomUUID().slice(0, 8);
 
 async function req(method: string, path: string): Promise<{ status: number; body: unknown }> {
@@ -527,15 +537,18 @@ beforeAll(async () => {
      RETURNING id`,
     [`coordapi_${suffix}`]
   );
+  specId = spec.rows[0]!.id;
   await pool.query(`INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`, [
     projectId,
-    spec.rows[0]!.id,
+    specId,
   ]);
   await setRequiredSections({ kind: 'baseline', projectId }, [{ section: '07 92 00' }]);
 });
 
 afterAll(async () => {
+  // Project first (cascades project_specs + required_sections), then the library spec.
   await pool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+  await pool.query(`DELETE FROM specs WHERE id = $1`, [specId]);
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
