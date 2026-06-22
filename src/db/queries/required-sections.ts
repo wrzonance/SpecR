@@ -63,6 +63,20 @@ async function assertScopeExists(scope: RequiredScope, db: Queryable): Promise<v
   }
 }
 
+// Serialize concurrent writers on one scope: lock the parent row (project for
+// the baseline, design_packages for a package) FOR UPDATE so the check-then-act
+// in set/seed is atomic — a second writer blocks until the first commits.
+async function lockScope(scope: RequiredScope, client: PoolClient): Promise<void> {
+  if (scope.kind === 'package') {
+    await client.query(
+      `SELECT 1 FROM design_packages WHERE id = $1 AND project_id = $2 FOR UPDATE`,
+      [scope.packageId, scope.projectId]
+    );
+    return;
+  }
+  await client.query(`SELECT 1 FROM projects WHERE id = $1 FOR UPDATE`, [scope.projectId]);
+}
+
 async function readScope(scope: RequiredScope, db: Queryable): Promise<readonly RequiredSection[]> {
   const result = await db.query<Row>(
     `SELECT ${SELECT_COLS} FROM required_sections
@@ -98,6 +112,7 @@ export async function setRequiredSections(
     client = await db.connect();
     await client.query('BEGIN');
     await assertScopeExists(scope, client);
+    await lockScope(scope, client);
     await client.query(
       `DELETE FROM required_sections WHERE project_id = $1 AND package_id IS NOT DISTINCT FROM $2`,
       [scope.projectId, packageId(scope)]
@@ -131,6 +146,26 @@ function validateSeedForScope(scope: RequiredScope, seed: SeedSource): void {
   if (scope.kind === 'baseline' && seed.from !== 'toc') {
     throw new RequiredSectionsInvalidSeedError(
       `baseline can only be seeded from 'toc', not '${seed.from}'`
+    );
+  }
+}
+
+// A from:'package' seed names a source package; reject an unknown/cross-project
+// source up front (otherwise the copy SELECT just matches zero rows and the seed
+// silently "succeeds" empty, hiding invalid input).
+async function assertSeedSourceExists(
+  scope: RequiredScope,
+  seed: SeedSource,
+  client: PoolClient
+): Promise<void> {
+  if (seed.from !== 'package') return;
+  const src = await client.query(
+    `SELECT 1 FROM design_packages WHERE id = $1 AND project_id = $2`,
+    [seed.packageId, scope.projectId]
+  );
+  if ((src.rowCount ?? 0) === 0) {
+    throw new RequiredSectionsInvalidSeedError(
+      `seed source package ${seed.packageId} not found in project ${scope.projectId}`
     );
   }
 }
@@ -171,6 +206,8 @@ export async function seedRequiredSections(
     client = await db.connect();
     await client.query('BEGIN');
     await assertScopeExists(scope, client);
+    await lockScope(scope, client);
+    await assertSeedSourceExists(scope, seed, client);
     const existing = await client.query(
       `SELECT 1 FROM required_sections WHERE project_id = $1 AND package_id IS NOT DISTINCT FROM $2 LIMIT 1`,
       [scope.projectId, packageId(scope)]

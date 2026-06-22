@@ -5,6 +5,7 @@ import {
   setRequiredSections,
   seedRequiredSections,
   RequiredSectionsSeedConflictError,
+  RequiredSectionsInvalidSeedError,
   type RequiredScope,
   type RequiredSectionInput,
 } from './required-sections.js';
@@ -123,5 +124,16 @@ describe('required_sections query layer', () => {
     await setRequiredSections(sourcePkg, [{ section: '07 92 00', title: 'Joint Sealants' }]);
     const targetAfterMutation = await listRequiredSections(targetPkg);
     expect(targetAfterMutation.map((r) => r.section)).toEqual(['03 30 00', '05 12 00']);
+  });
+
+  it('seed: rejects a from:package source that is not a package in the project', async () => {
+    const targetPkgId = await newPackage(projectId, 'target-bad-source');
+    const targetPkg: RequiredScope = { kind: 'package', projectId, packageId: targetPkgId };
+    await expect(
+      seedRequiredSections(targetPkg, {
+        from: 'package',
+        packageId: '00000000-0000-4000-8000-000000000000',
+      })
+    ).rejects.toBeInstanceOf(RequiredSectionsInvalidSeedError);
   });
 });
