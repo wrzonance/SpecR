@@ -2689,6 +2689,10 @@ components:
               required: [packageId]
               properties:
                 packageId: { type: string, format: uuid }
+      # sections and seedFrom are mutually exclusive (server returns 422 if both
+      # are present); neither is allowed too (an empty PUT clears the scope).
+      not:
+        required: [sections, seedFrom]
 
     # ── Parse ──────────────────────────────────────────────────────────────────
 
