@@ -81,6 +81,15 @@ describe('required-sections API', () => {
     expect(
       (seeded.body as { data: Array<{ section: string }> }).data.map((r) => r.section)
     ).toEqual(['03 30 00', '09 91 00']);
+
+    const listed = await req(
+      'GET',
+      `/projects/${projectId}/packages/${packageId}/required-sections`
+    );
+    expect(listed.status).toBe(200);
+    expect(
+      (listed.body as { data: Array<{ section: string }> }).data.map((r) => r.section)
+    ).toEqual(['03 30 00', '09 91 00']);
   });
 
   it('rejects sections + seedFrom together with 422', async () => {
@@ -131,5 +140,13 @@ describe('required-sections API', () => {
         })
       ).status
     ).toBe(404);
+  });
+
+  it('409 when seeding a scope that already has required sections', async () => {
+    await req('PUT', `/projects/${projectId}/required-sections`, {
+      sections: [{ section: '03 30 00' }],
+    });
+    const res = await req('PUT', `/projects/${projectId}/required-sections`, { seedFrom: 'toc' });
+    expect(res.status).toBe(409);
   });
 });
