@@ -235,3 +235,18 @@ export type {
   HeaderFooterResolutionContext,
   ResolvedHeaderFooterConfig,
 } from './queries/header-footer.js';
+export {
+  listRequiredSections,
+  setRequiredSections,
+  seedRequiredSections,
+  RequiredSectionsProjectNotFoundError,
+  RequiredSectionsPackageNotFoundError,
+  RequiredSectionsSeedConflictError,
+  RequiredSectionsInvalidSeedError,
+} from './queries/required-sections.js';
+export type {
+  RequiredSection,
+  RequiredSectionInput,
+  RequiredScope,
+  SeedSource,
+} from './queries/required-sections.js';

@@ -95,3 +95,5 @@ export {
   HeaderFooterFieldKindSchema,
 } from './header-footer-schemas.js';
 export type { HeaderFooterComposition, HeaderFooterFieldKind } from './header-footer-schemas.js';
+export { RequiredSectionsBodySchema } from './required-sections-schemas.js';
+export type { RequiredSectionsBody } from './required-sections-schemas.js';

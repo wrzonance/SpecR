@@ -2374,6 +2374,139 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /projects/{id}/required-sections:
+    get:
+      operationId: listBaselineRequiredSections
+      summary: List a project's baseline required sections
+      tags: [projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Baseline required-section list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/RequiredSection' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: putBaselineRequiredSections
+      summary: Replace (or seed) a project's baseline required sections
+      description: >
+        `sections` and `seedFrom` are mutually exclusive. `seedFrom: toc` copies
+        the project's TOC into an empty baseline. Re-replacing renumbers position.
+      tags: [projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequiredSectionsBody' }
+      responses:
+        '200':
+          description: Updated baseline required-section list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/RequiredSection' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /projects/{id}/packages/{packageId}/required-sections:
+    get:
+      operationId: listPackageRequiredSections
+      summary: List a design package's required sections
+      tags: [projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: packageId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Package required-section list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/RequiredSection' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: putPackageRequiredSections
+      summary: Replace (or seed) a design package's required sections
+      description: >
+        `sections` and `seedFrom` are mutually exclusive. `seedFrom: baseline`
+        copies the project baseline; `seedFrom: toc` copies the project TOC;
+        `seedFrom: {packageId}` copies another package. Re-replacing renumbers position.
+      tags: [projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: packageId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequiredSectionsBody' }
+      responses:
+        '200':
+          description: Updated package required-section list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/RequiredSection' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
 # ─── Components ───────────────────────────────────────────────────────────────
 
 components:
@@ -2516,6 +2649,50 @@ components:
           enum: [false]
         error:
           type: string
+
+    # ── Required Sections ──────────────────────────────────────────────────────
+
+    RequiredSection:
+      type: object
+      required: [id, section, title, position]
+      properties:
+        id: { type: string, format: uuid }
+        section:
+          type: string
+          description: Canonical CSI section number (ADR-020 expanded shape).
+        title: { type: [string, 'null'] }
+        position: { type: integer, minimum: 1 }
+
+    RequiredSectionsBody:
+      type: object
+      description: >
+        Provide either `sections` (explicit list) or `seedFrom` (copy an existing
+        baseline/TOC/package) — not both.
+      properties:
+        sections:
+          type: array
+          items:
+            type: object
+            required: [section]
+            properties:
+              section:
+                type: string
+                description: Canonical CSI section number.
+              title:
+                type: string
+                minLength: 1
+        seedFrom:
+          oneOf:
+            - type: string
+              enum: [baseline, toc]
+            - type: object
+              required: [packageId]
+              properties:
+                packageId: { type: string, format: uuid }
+      # sections and seedFrom are mutually exclusive (server returns 422 if both
+      # are present); neither is allowed too (an empty PUT clears the scope).
+      not:
+        required: [sections, seedFrom]
 
     # ── Parse ──────────────────────────────────────────────────────────────────
 
