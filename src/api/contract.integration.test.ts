@@ -73,6 +73,10 @@ const RESPONSE_ALLOWLIST = new Set([
   'put /projects/{}/divisions/{}/general-spec',
   'put /projects/{}/sources',
   'put /specs/{}/lock',
+  'get /projects/{}/required-sections',
+  'put /projects/{}/required-sections',
+  'get /projects/{}/packages/{}/required-sections',
+  'put /projects/{}/packages/{}/required-sections',
 ]);
 
 let server: Server;
