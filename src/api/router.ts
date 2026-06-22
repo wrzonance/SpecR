@@ -43,6 +43,7 @@ import {
   SetDivisionGeneralSpecBodySchema,
   PutRevisionNomenclatureBodySchema,
   CloneRevisionNomenclatureBodySchema,
+  RequiredSectionsBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 import { generateHandler, generateManualHandler, generateRevisionHandler } from './generate.js';
@@ -76,6 +77,12 @@ import {
   cloneProjectRevisionNomenclatureHandler,
   deleteProjectRevisionNomenclatureHandler,
 } from './revision-nomenclature.js';
+import {
+  listBaselineRequiredSectionsHandler,
+  putBaselineRequiredSectionsHandler,
+  listPackageRequiredSectionsHandler,
+  putPackageRequiredSectionsHandler,
+} from './required-sections.js';
 
 const parseRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
@@ -181,3 +188,18 @@ router.post(
   cloneProjectRevisionNomenclatureHandler
 );
 router.delete('/projects/:id/revision-nomenclature', deleteProjectRevisionNomenclatureHandler);
+router.get('/projects/:id/required-sections', listBaselineRequiredSectionsHandler);
+router.put(
+  '/projects/:id/required-sections',
+  validateBody(RequiredSectionsBodySchema),
+  putBaselineRequiredSectionsHandler
+);
+router.get(
+  '/projects/:id/packages/:packageId/required-sections',
+  listPackageRequiredSectionsHandler
+);
+router.put(
+  '/projects/:id/packages/:packageId/required-sections',
+  validateBody(RequiredSectionsBodySchema),
+  putPackageRequiredSectionsHandler
+);
