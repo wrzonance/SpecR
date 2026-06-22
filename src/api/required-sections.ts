@@ -9,6 +9,7 @@ import {
   RequiredSectionsSeedConflictError,
   RequiredSectionsInvalidSeedError,
   pool,
+  type RequiredSection,
   type RequiredScope,
   type SeedSource,
 } from '../db/index.js';
@@ -22,7 +23,10 @@ function seedSourceFrom(seedFrom: NonNullable<RequiredSectionsBody['seedFrom']>)
   return { from: 'package', packageId: seedFrom.packageId };
 }
 
-async function applyBody(scope: RequiredScope, body: RequiredSectionsBody) {
+async function applyBody(
+  scope: RequiredScope,
+  body: RequiredSectionsBody
+): Promise<readonly RequiredSection[]> {
   if (body.seedFrom !== undefined)
     return seedRequiredSections(scope, seedSourceFrom(body.seedFrom), pool);
   return setRequiredSections(scope, body.sections ?? [], pool);

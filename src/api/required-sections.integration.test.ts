@@ -104,4 +104,32 @@ describe('required-sections API', () => {
       (await req('GET', `/projects/11111111-1111-4111-8111-111111111111/required-sections`)).status
     ).toBe(404);
   });
+
+  it('400 on malformed package id in GET package route', async () => {
+    expect(
+      (await req('GET', `/projects/${projectId}/packages/not-a-uuid/required-sections`)).status
+    ).toBe(400);
+  });
+
+  it('404 on valid but unknown package id in PUT package route', async () => {
+    expect(
+      (
+        await req(
+          'PUT',
+          `/projects/${projectId}/packages/a1b2c3d4-e5f6-4789-abcd-ef0123456789/required-sections`,
+          { sections: [{ section: '03 30 00' }] }
+        )
+      ).status
+    ).toBe(404);
+  });
+
+  it('404 on valid but unknown project id in PUT baseline route', async () => {
+    expect(
+      (
+        await req('PUT', `/projects/a1b2c3d4-e5f6-4789-abcd-ef0123456789/required-sections`, {
+          sections: [{ section: '03 30 00' }],
+        })
+      ).status
+    ).toBe(404);
+  });
 });

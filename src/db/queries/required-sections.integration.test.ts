@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { pool } from '../index.js';
 import {
   listRequiredSections,
@@ -29,6 +29,9 @@ const baseline = (): RequiredScope => ({ kind: 'baseline', projectId });
 
 beforeAll(async () => {
   projectId = await newProject('req-sections-it');
+});
+afterAll(async () => {
+  await pool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
 });
 afterEach(async () => {
   await pool.query(`DELETE FROM required_sections WHERE project_id = $1`, [projectId]);
