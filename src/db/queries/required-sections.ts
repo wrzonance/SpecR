@@ -95,9 +95,9 @@ export async function setRequiredSections(
 ): Promise<readonly RequiredSection[]> {
   let client: PoolClient | null = null;
   try {
-    await assertScopeExists(scope, db);
     client = await db.connect();
     await client.query('BEGIN');
+    await assertScopeExists(scope, client);
     await client.query(
       `DELETE FROM required_sections WHERE project_id = $1 AND package_id IS NOT DISTINCT FROM $2`,
       [scope.projectId, packageId(scope)]
@@ -115,7 +115,7 @@ export async function setRequiredSections(
       ]
     );
     await client.query('COMMIT');
-    return await readScope(scope, db);
+    return await readScope(scope, client);
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => undefined);
     if (err instanceof DatabaseError) throw err;
@@ -140,7 +140,8 @@ async function seedRows(scope: RequiredScope, seed: SeedSource, client: PoolClie
   if (seed.from === 'toc') {
     await client.query(
       `INSERT INTO required_sections (project_id, package_id, section, title, position)
-       SELECT $1, $2, s.section, s.title, ps.position
+       SELECT $1, $2, s.section, s.title,
+              ROW_NUMBER() OVER (ORDER BY ps.position)::int
        FROM project_specs ps JOIN specs s ON s.id = ps.spec_id
        WHERE ps.project_id = $1 AND s.section ~ '^\\d{2} \\d{2} \\d{2}(\\.\\d{2}( \\d{2})?)?$'
        ORDER BY ps.position`,
@@ -167,9 +168,9 @@ export async function seedRequiredSections(
   let client: PoolClient | null = null;
   try {
     validateSeedForScope(scope, seed);
-    await assertScopeExists(scope, db);
     client = await db.connect();
     await client.query('BEGIN');
+    await assertScopeExists(scope, client);
     const existing = await client.query(
       `SELECT 1 FROM required_sections WHERE project_id = $1 AND package_id IS NOT DISTINCT FROM $2 LIMIT 1`,
       [scope.projectId, packageId(scope)]
@@ -181,7 +182,7 @@ export async function seedRequiredSections(
     }
     await seedRows(scope, seed, client);
     await client.query('COMMIT');
-    return await readScope(scope, db);
+    return await readScope(scope, client);
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => undefined);
     if (err instanceof DatabaseError) throw err;

@@ -6,6 +6,7 @@ import {
   seedRequiredSections,
   RequiredSectionsSeedConflictError,
   type RequiredScope,
+  type RequiredSectionInput,
 } from './required-sections.js';
 
 async function newProject(name: string): Promise<string> {
@@ -89,5 +90,35 @@ describe('required_sections query layer', () => {
         [projectId]
       )
     ).rejects.toMatchObject({ code: '23505' });
+  });
+
+  // KNOWN INVARIANT (ADR-015 D2): a package seeded from another package is a snapshot —
+  // later mutations to the source package MUST NOT propagate into the seeded target.
+  it('seed: package copies another package as an independent snapshot', async () => {
+    const sourcePkgId = await newPackage(projectId, 'source-pkg');
+    const targetPkgId = await newPackage(projectId, 'target-pkg');
+    const sourcePkg: RequiredScope = { kind: 'package', projectId, packageId: sourcePkgId };
+    const targetPkg: RequiredScope = { kind: 'package', projectId, packageId: targetPkgId };
+
+    const sourceEntries: readonly RequiredSectionInput[] = [
+      { section: '03 30 00', title: 'Cast-in-Place Concrete' },
+      { section: '05 12 00', title: 'Structural Steel Framing' },
+    ];
+    await setRequiredSections(sourcePkg, sourceEntries);
+
+    const seeded = await seedRequiredSections(targetPkg, {
+      from: 'package',
+      packageId: sourcePkgId,
+    });
+
+    expect(seeded.map((r) => [r.section, r.position, r.title])).toEqual([
+      ['03 30 00', 1, 'Cast-in-Place Concrete'],
+      ['05 12 00', 2, 'Structural Steel Framing'],
+    ]);
+
+    // Mutate source; target must remain unchanged (snapshot independence)
+    await setRequiredSections(sourcePkg, [{ section: '07 92 00', title: 'Joint Sealants' }]);
+    const targetAfterMutation = await listRequiredSections(targetPkg);
+    expect(targetAfterMutation.map((r) => r.section)).toEqual(['03 30 00', '05 12 00']);
   });
 });
