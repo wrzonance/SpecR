@@ -2660,7 +2660,7 @@ components:
         section:
           type: string
           description: Canonical CSI section number (ADR-020 expanded shape).
-        title: { type: string, nullable: true }
+        title: { type: [string, 'null'] }
         position: { type: integer, minimum: 1 }
 
     RequiredSectionsBody:
