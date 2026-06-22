@@ -7,10 +7,10 @@
 export const API_FEATURES = {
   listSpecsGlobal: false, // GET /specs (intentionally never added — use scoped listing)
   libraries: true, // GET /libraries, GET /libraries/:id/specs            (landed #227)
-  libraryWrites: false, // POST /libraries/clients, PATCH /libraries/:id       (Phase 3)
+  libraryWrites: true, // POST /libraries/clients, PATCH /libraries/:id        (landed #233)
   projectsList: true, // GET /projects                                       (landed #229)
   projectSettings: false, // PATCH /projects/:id                                 (Phase 4)
-  projectSources: false, // PUT /projects/:id/sources                           (Phase 3)
+  projectSources: true, // PUT /projects/:id/sources                            (landed #235)
   specDelete: false, // DELETE /specs/:id                                   (Phase 4)
   paragraphDelete: false, // DELETE /specs/:id/paragraphs/:nodeId               (Phase 4)
   coordination: false, // coordination-report + required-sections            (Phase 4)
