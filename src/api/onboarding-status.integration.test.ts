@@ -117,7 +117,10 @@ async function importDocx(libraryId: string): Promise<string> {
   const docx = readFileSync(resolve('tests/fixtures/libreoffice/csi-spec-sample.docx'));
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(docx)], { type: DOCX_MIME }), 'sample.docx');
-  const imp = await fetch(`${baseUrl}/libraries/${libraryId}/import`, { method: 'POST', body: form });
+  const imp = await fetch(`${baseUrl}/libraries/${libraryId}/import`, {
+    method: 'POST',
+    body: form,
+  });
   expect(imp.status).toBe(202);
   const jobId = ((await imp.json()) as { data: { jobId: string } }).data.jobId;
   const deadline = Date.now() + 40_000;

@@ -27,7 +27,9 @@ export async function getSpecHandler(req: Request, res: Response): Promise<void>
     // same way: 'review' | 'active'.
     const styleSource = await getSpecStyleSource(id);
     const onboardingStatus = await getOnboardingStatus(id);
-    res.status(200).json({ success: true, data: { ...result.tree, styleSource, onboardingStatus } });
+    res
+      .status(200)
+      .json({ success: true, data: { ...result.tree, styleSource, onboardingStatus } });
   } catch (err) {
     logger.error({ err }, 'get spec failed');
     res.status(500).json({ success: false, error: 'internal server error' });
