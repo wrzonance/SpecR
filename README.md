@@ -58,6 +58,30 @@ The canonical contract is [openapi.yaml](openapi.yaml). Key groups:
   profiles
 - MCP: `POST /mcp`
 
+### MCP tools
+
+The Streamable HTTP server at `POST /mcp` exposes these tools (all stateless,
+read-or-correct over `db/index.js` queries, rate-limited by the shared `/mcp`
+limiter):
+
+| Tool | Purpose |
+| --- | --- |
+| `search_library` | Full-text search the paragraph library |
+| `list_sections` | List CSI sections with an `inDatabase` flag |
+| `get_spec` | Full spec tree + reference resolution + style/onboarding status |
+| `get_paragraph` | One paragraph with its ancestor chain |
+| `get_spec_lineage` | Chain of custody for a spec (ADR-015) |
+| `get_spec_diff` | 3-way merge diff for a returned DOCX |
+| `parse_document` | Parse and store a base64 DOCX/SEC/TXT |
+| `generate_docx` | Generate DOCX from a stored spec |
+| `load_files` | Bulk-load specs by glob or paths |
+| `list_projects` / `get_references` | Project list and per-section cross-references |
+| `coordination_report` | Project errors-and-omissions report |
+| `review_editability` | Per-paragraph editability + confidence + evidence (low-confidence filter) |
+| `get_onboarding_report` | Spec onboarding report (editability summary, style source, status) |
+| `set_editability_override` / `clear_editability_override` | Apply or remove a human editability override |
+| `reclassify_spec` | Re-run classification; returns the before/after diff |
+
 ## Quick Start
 
 ```bash

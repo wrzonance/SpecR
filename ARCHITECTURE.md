@@ -721,7 +721,9 @@ specr/
 │   ├── mcp/
 │   │   ├── server.ts            # registerMcpRoutes(app) — Streamable HTTP routing: stateless + stateful sessions
 │   │   ├── sessions.ts          # McpSessionStore — stateful session lifecycle (Map keyed by minted session id)
-│   │   ├── tools.ts             # registerTools(server): search_library, list_sections, get_spec, get_paragraph, parse_document, generate_docx, load_files
+│   │   ├── tools.ts             # registerTools(server): search_library, list_sections, get_spec, get_paragraph, parse_document, generate_docx, load_files, coordination_report
+│   │   ├── onboarding-tools.ts  # registerOnboardingTools(server): review_editability, get_onboarding_report, set_/clear_editability_override, reclassify_spec (#140)
+│   │   ├── onboarding-handlers.ts # handlers for the onboarding tools — thin adapters over the shared db/index.js queries (single source with REST)
 │   │   └── resources.ts         # registerResources(server): specr://specs/{id}, specr://sections
 │   ├── api/
 │   ├── parser/
