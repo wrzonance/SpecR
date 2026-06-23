@@ -1419,6 +1419,97 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /libraries/import/jobs/{jobId}:
+    get:
+      operationId: getOnboardingJob
+      summary: Poll a library-onboarding job
+      tags: [libraries]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Onboarding job status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/OnboardingJob'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /libraries/{id}/import:
+    post:
+      operationId: importLibraryMaster
+      summary: Onboard a master document into a library (async)
+      description: >
+        Upload a `.docx`, `.sec`, or `.txt` master document into the target
+        ADR-015 library. Returns 202 with a `jobId`; poll
+        `/libraries/import/jobs/{jobId}` for progress and the onboarding report.
+        The pipeline parses (capturing source facts), persists the spec into the
+        library, derives a style template (DOCX only), and classifies editability
+        using the library's convention profile or the built-in default. Source
+        bytes are discarded after parse (ADR-021). Rate-limited to 10 requests
+        per IP per minute (shared with `POST /parse`).
+      tags: [libraries]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Library UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Master document (.docx, .sec, or .txt). Max 10 MB.
+      responses:
+        '202':
+          description: Onboarding job accepted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [jobId]
+                        properties:
+                          jobId:
+                            type: string
+                            format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /libraries/{id}/conventions:
     get:
       operationId: getLibraryConvention
@@ -3158,6 +3249,91 @@ components:
           description: 'Source location hint (e.g. "line 12: <text>")'
         suggestion:
           type: string
+
+    # ── Onboarding (O-8) ─────────────────────────────────────────────────────────
+
+    OnboardingStage:
+      type: string
+      enum: [queued, running, parsing, persisting, deriving-style, classifying, complete, failed]
+
+    EditabilityValue:
+      type: string
+      enum: [locked, editable, choice, note]
+
+    EditabilitySummary:
+      type: object
+      required: [counts, lowConfidence]
+      properties:
+        counts:
+          type: object
+          required: [locked, editable, choice, note]
+          properties:
+            locked: { type: integer }
+            editable: { type: integer }
+            choice: { type: integer }
+            note: { type: integer }
+        lowConfidence:
+          type: array
+          description: Classified paragraphs below the machine-confidence review threshold.
+          items:
+            type: object
+            required: [nodeId, value, confidence]
+            properties:
+              nodeId: { type: string, format: uuid }
+              value: { $ref: '#/components/schemas/EditabilityValue' }
+              confidence: { type: number, minimum: 0, maximum: 1 }
+
+    OnboardingReport:
+      type: object
+      required: [styleDerivation, styleSourceNeeded, editability, parseWarnings]
+      properties:
+        styleDerivation:
+          oneOf:
+            - $ref: '#/components/schemas/DerivationReport'
+            - type: 'null'
+          description: WT-3 consensus style derivation audit; null for non-DOCX masters.
+        styleSourceNeeded:
+          type: boolean
+          description: True when no style template was derived (non-DOCX) — assign via O-12.
+        editability:
+          $ref: '#/components/schemas/EditabilitySummary'
+        parseWarnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParseWarning'
+
+    OnboardingJobResult:
+      type: object
+      required: [specId, section, title, libraryId, templateId, report]
+      properties:
+        specId: { type: string, format: uuid }
+        section: { type: string }
+        title: { type: string }
+        libraryId: { type: string, format: uuid }
+        templateId:
+          type: [string, 'null']
+          description: Derived style template id (DOCX) or null (non-DOCX).
+        report:
+          $ref: '#/components/schemas/OnboardingReport'
+
+    OnboardingJob:
+      type: object
+      required: [jobId, status, progress, expiresAt]
+      properties:
+        jobId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/OnboardingStage' }
+        progress:
+          type: object
+          required: [stage, pct]
+          properties:
+            stage: { $ref: '#/components/schemas/OnboardingStage' }
+            pct: { type: number, minimum: 0, maximum: 100 }
+        result:
+          $ref: '#/components/schemas/OnboardingJobResult'
+        error: { type: string }
+        expiresAt:
+          type: integer
+          description: Job record expiry as a Unix epoch timestamp in milliseconds.
 
     # ── Specs ──────────────────────────────────────────────────────────────────
 

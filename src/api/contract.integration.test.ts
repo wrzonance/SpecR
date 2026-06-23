@@ -38,6 +38,8 @@ const RESPONSE_ALLOWLIST = new Set([
   'delete /specs/{}/style-source',
   'get /libraries/{}/conventions',
   'get /libraries/{}/divisions/{}/general-spec',
+  'get /libraries/import/jobs/{}',
+  'post /libraries/{}/import',
   'get /parse/jobs/{}',
   'get /projects/{}',
   'get /projects/{}/divisions/{}/general-spec',
