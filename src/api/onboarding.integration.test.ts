@@ -134,6 +134,52 @@ describe('POST /libraries/:id/import (O-8)', () => {
     expect(job.result?.templateId).toBeNull();
   }, 40_000);
 
+  it('re-import: editing a DOCX master updates the style template + report shows styleSourceNeeded:false', async () => {
+    const lib = await createLibrary({ tier: 'company', name: 'lib-onboard-reimport', owner: 'o' });
+    const docx = readFileSync(resolve('tests/fixtures/libreoffice/csi-spec-sample.docx'));
+
+    // First import → derives + links a style template.
+    const firstJob = await waitForJob(await importFile(lib.id, docx, 'sample.docx', DOCX_MIME));
+    expect(firstJob.status, firstJob.error).toBe('complete');
+    const templateId = firstJob.result?.templateId;
+    expect(templateId).not.toBeNull();
+    if (!templateId) throw new Error('first import produced no template');
+
+    // Simulate an out-of-date template: blow away the derived rules. A correct
+    // re-import must restore them from the fresh derivation, not leave them empty.
+    await pool.query(`DELETE FROM style_rules WHERE template_id = $1`, [templateId]);
+    const empty = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM style_rules WHERE template_id = $1`,
+      [templateId]
+    );
+    expect(parseInt(empty.rows[0]?.count ?? '0', 10)).toBe(0);
+
+    // Re-import the SAME master into the SAME library → same specId (ON CONFLICT
+    // upsert) → same deterministic template name. The report must still reflect a
+    // present, current style source — never falsely flag styleSourceNeeded.
+    const secondJob = await waitForJob(await importFile(lib.id, docx, 'sample.docx', DOCX_MIME));
+    expect(secondJob.status, secondJob.error).toBe('complete');
+    const r = secondJob.result;
+    if (!r) throw new Error('re-import produced no result');
+    expect(r.report.styleSourceNeeded).toBe(false);
+    expect(r.templateId).toBe(templateId); // same upserted template, not a new one
+    expect(r.report.styleDerivation).not.toBeNull();
+
+    // The spec's style source still resolves to the current template …
+    const spec = await pool.query<{ style_template_id: string | null }>(
+      `SELECT style_template_id FROM specs WHERE id = $1`,
+      [r.specId]
+    );
+    expect(spec.rows[0]?.style_template_id).toBe(templateId);
+
+    // … and its rules were refreshed (restored from the fresh derivation).
+    const refreshed = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM style_rules WHERE template_id = $1`,
+      [templateId]
+    );
+    expect(parseInt(refreshed.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
+  }, 60_000);
+
   it('unknown library → 404', async () => {
     const docx = readFileSync(resolve('tests/fixtures/libreoffice/csi-spec-sample.docx'));
     const form = new FormData();

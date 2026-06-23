@@ -11,11 +11,13 @@ import {
   findLibraryById,
   persistParsedSpec,
   createTemplateWithRules,
+  getTemplateByName,
+  bulkUpsertTemplateRules,
   setSpecStyleSource,
   reclassifySpec,
   getSpecTree,
 } from '../db/index.js';
-import type { OriginMeta } from '../db/index.js';
+import type { OriginMeta, StyleRule } from '../db/index.js';
 import {
   createOnboardingJob,
   updateOnboardingJob,
@@ -140,10 +142,37 @@ async function runParseAndPersist(
   return { specId, tree };
 }
 
+// Persist the derived rules under the deterministic per-spec template name,
+// idempotently: re-importing the same master upserts the spec (same id → same
+// name), so a pre-existing template must be REFRESHED to the latest rules, not
+// abandoned. Returns the live template id. Tries create first; a 23505 from a
+// concurrent first-import is the fallback into the refresh path.
+async function upsertOnboardedTemplate(
+  specId: string,
+  name: string,
+  rules: readonly StyleRule[]
+): Promise<string> {
+  const existing = await getTemplateByName(name);
+  if (existing) {
+    await bulkUpsertTemplateRules(existing.id, rules);
+    return existing.id;
+  }
+  try {
+    const template = await createTemplateWithRules(name, null, rules);
+    return template.id;
+  } catch (err) {
+    // Lost a create race: another import inserted the row first. Refresh it.
+    if (!pgErrorToHttp(err, { '23505': 'dup' })) throw err;
+    const raced = await getTemplateByName(name);
+    if (!raced) throw err;
+    await bulkUpsertTemplateRules(raced.id, rules);
+    return raced.id;
+  }
+}
+
 // DOCX-only: derive a consensus style template (WT-3) and link it to the spec.
-// Non-DOCX → nulls (the report then flags styleSourceNeeded). A duplicate
-// template name on re-import (23505) is non-fatal — the derivation report still
-// surfaces; any other DB error fails the job loudly.
+// Non-DOCX → nulls (the report then flags styleSourceNeeded). Re-import is
+// idempotent-correct: the spec keeps ONE current template with refreshed rules.
 async function deriveStyleIfDocx(
   jobId: string,
   buffer: Buffer,
@@ -156,15 +185,9 @@ async function deriveStyleIfDocx(
   const analysis = await analyzeDocxStyles(buffer);
   const { rules, report } = deriveTemplate(analysis.classified, analysis.effectiveStyles);
   if (rules.length === 0) return { templateId: null, report };
-  const name = `onboarded:${specId}:${section}`;
-  try {
-    const template = await createTemplateWithRules(name, null, rules);
-    await setSpecStyleSource(specId, template.id);
-    return { templateId: template.id, report };
-  } catch (err) {
-    if (pgErrorToHttp(err, { '23505': 'dup' })) return { templateId: null, report };
-    throw err;
-  }
+  const templateId = await upsertOnboardedTemplate(specId, `onboarded:${specId}:${section}`, rules);
+  await setSpecStyleSource(specId, templateId);
+  return { templateId, report };
 }
 
 // Classify editability against the library's convention profile (or the built-in
