@@ -250,3 +250,5 @@ export type {
   RequiredScope,
   SeedSource,
 } from './queries/required-sections.js';
+export { getCoordinationReport } from './queries/coordination.js';
+export type { Finding, CoordinationSummary, CoordinationReport } from './queries/coordination.js';
