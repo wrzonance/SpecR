@@ -84,6 +84,7 @@ import {
   putPackageRequiredSectionsHandler,
 } from './required-sections.js';
 import { getCoordinationReportHandler } from './coordination.js';
+import { patchEditabilityHandler, reclassifyHandler, acceptAsNoteHandler } from './editability.js';
 import {
   createAssociationHandler,
   listAssociationsHandler,
@@ -105,6 +106,9 @@ router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
+router.patch('/specs/:id/paragraphs/:nodeId/editability', patchEditabilityHandler);
+router.post('/specs/:id/reclassify', reclassifyHandler);
+router.post('/specs/:id/paragraphs/:nodeId/comments/:index/accept-as-note', acceptAsNoteHandler);
 router.get('/specs/:id/lock', getLockHandler);
 router.put('/specs/:id/lock', acquireLockHandler);
 router.delete('/specs/:id/lock', releaseLockHandler);
