@@ -4273,16 +4273,21 @@ components:
       description: >
         Request body for associating external content with a paragraph.
         Either a url, or both externalProvider and externalId, must be provided.
+        externalProvider and externalId are both-or-neither — a lone one of the
+        pair is rejected (422) even when a url is present.
+      dependentRequired:
+        externalProvider: [externalId]
+        externalId: [externalProvider]
       properties:
         label:
           type: string
           minLength: 1
         externalProvider:
           type: string
-          description: DMS connector identity. Required together with externalId when url is absent.
+          description: DMS connector identity. Always paired with externalId (both-or-neither).
         externalId:
           type: string
-          description: Document identifier within the DMS. Required together with externalProvider when url is absent.
+          description: Document identifier within the DMS. Always paired with externalProvider (both-or-neither).
         url:
           type: string
           format: uri

@@ -91,6 +91,44 @@ describe('paragraph_associations query layer', () => {
     expect(await deleteAssociation(paragraphId, a.id)).toBe(false);
   });
 
+  // Regression (#242 review): the identity CHECK forbids a half-filled DMS pair
+  // even when url is present — a raw INSERT (bypassing Zod) must be rejected at
+  // the DB layer too. pg 23514 = check_violation.
+  it('rejects a half-filled DMS pair at the DB CHECK even with a url present', async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO paragraph_associations (paragraph_id, spec_id, label, url, external_provider)
+         VALUES ($1, $2, 'half pair', 'https://e.com/h.pdf', 'projectwise')`,
+        [paragraphId, specId]
+      )
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
+  // Regression (#242 review): if the paragraph is deleted between resolveSpecId
+  // and the INSERT, the FK violation (pg 23503) must surface as the same typed
+  // not-found error (→ 404) as the resolveSpecId miss, not a generic 500. A stub
+  // db returns a spec_id for the SELECT, then runs the real INSERT for a
+  // paragraph_id that no longer exists so the FK fires.
+  it('maps an FK race (paragraph deleted before INSERT) to AssociationParagraphNotFoundError', async () => {
+    const ghostParagraphId = '11111111-1111-1111-1111-111111111111';
+    let call = 0;
+    const racingDb = {
+      query: (text: string, params?: readonly unknown[]): Promise<unknown> => {
+        call += 1;
+        // First call is resolveSpecId's SELECT — pretend the paragraph still
+        // exists and resolves to the real spec.
+        if (call === 1) return Promise.resolve({ rows: [{ spec_id: specId }] });
+        // Second call is the INSERT — run it for real; the ghost paragraph_id has
+        // no row, so the FK constraint rejects it with pg 23503.
+        return pool.query(text, params as unknown[]);
+      },
+    } as unknown as typeof pool;
+
+    await expect(
+      createAssociation(ghostParagraphId, { label: 'race', url: 'https://e.com/r.pdf' }, racingDb)
+    ).rejects.toBeInstanceOf(AssociationParagraphNotFoundError);
+  });
+
   it('groups associations by paragraph for a spec — label is preserved', async () => {
     await createAssociation(paragraphId, { label: 'one', url: 'https://e.com/1.pdf' });
     const map = await listAssociationsForSpec(specId);

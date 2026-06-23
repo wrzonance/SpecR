@@ -20,6 +20,15 @@ export const CreateAssociationBodySchema = z
     const { url, externalProvider, externalId } = ctx.value;
     const hasDmsPair = externalProvider !== undefined && externalId !== undefined;
     const hasUrl = url !== undefined;
+    // The DMS pair is both-or-neither, independent of url: a lone externalProvider
+    // or externalId is an unusable half-identity, even alongside a url (#242).
+    if ((externalProvider !== undefined) !== (externalId !== undefined)) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        message: 'externalProvider and externalId must be provided together',
+      });
+    }
     if (!hasDmsPair && !hasUrl) {
       ctx.issues.push({
         code: 'custom',

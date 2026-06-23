@@ -75,6 +75,22 @@ describe('paragraph associations REST', () => {
     expect(res.status).toBe(400);
   });
 
+  // Regression (#242 review): a half-filled DMS pair must be rejected at the API
+  // boundary even when a url is present — externalProvider without externalId is
+  // an unusable identity that previously slipped through to a stored row.
+  it('rejects a half-filled DMS pair even with a url (400)', async () => {
+    const res = await fetch(base(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        label: 'half pair + url',
+        url: 'https://e.com/x.pdf',
+        externalProvider: 'projectwise',
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('404s when the paragraph does not belong to the spec', async () => {
     const otherSpec = await pool.query<{ id: string }>(
       `INSERT INTO specs (section, title, source, library_id)

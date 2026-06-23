@@ -20,10 +20,13 @@ export const up = (pgm: MigrationBuilder): void => {
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
 
-  // At least one identity present: the DMS pair OR a url. content_hash is
-  // optional provenance alongside either.
+  // Identity rule (#242): the DMS pair is both-or-neither — a lone
+  // external_provider or external_id is an unusable half-identity, even alongside
+  // a url. AND at least one complete identity (the DMS pair or a url) is present.
   pgm.addConstraint('paragraph_associations', 'paragraph_associations_identity_check', {
-    check: '(external_provider IS NOT NULL AND external_id IS NOT NULL) OR url IS NOT NULL',
+    check:
+      '(external_provider IS NULL) = (external_id IS NULL) ' +
+      'AND ((external_provider IS NOT NULL AND external_id IS NOT NULL) OR url IS NOT NULL)',
   });
   // Label must be non-empty — a blank caption is meaningless.
   pgm.addConstraint('paragraph_associations', 'paragraph_associations_label_check', {
