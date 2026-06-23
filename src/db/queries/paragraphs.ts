@@ -2,7 +2,15 @@ import { pool, DatabaseError } from '../index.js';
 import { assertSpecWritable } from './edit-gate.js';
 import type { Pool, PoolClient } from 'pg';
 import { NodeTypeSchema } from '../../ast/index.js';
-import type { NodeType, SignalConflict, SourceFacts, SpecNode, SpecTree } from '../../ast/index.js';
+import type {
+  NodeType,
+  ParagraphAssociation,
+  SignalConflict,
+  SourceFacts,
+  SpecNode,
+  SpecTree,
+} from '../../ast/index.js';
+import { listAssociationsForParagraph } from './associations.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -90,6 +98,8 @@ export interface ParagraphRow {
   readonly conflicts?: readonly SignalConflict[];
   /** Parser source facts (#131). Present only when non-empty. */
   readonly sourceFacts?: SourceFacts;
+  /** External content associations (#109). Present only when non-empty. */
+  readonly associations?: readonly ParagraphAssociation[];
 }
 
 export interface ParagraphWithAncestors {
@@ -141,8 +151,10 @@ export async function getParagraphWithAncestors(
     const rows = result.rows;
     const node = rows[rows.length - 1]!;
     const ancestors = rows.slice(0, -1);
+    const associations = await listAssociationsForParagraph(id);
+    const nodeRow = toParagraphRow(node);
     return {
-      node: toParagraphRow(node),
+      node: associations.length > 0 ? { ...nodeRow, associations } : nodeRow,
       ancestors: ancestors.map(toParagraphRow),
     };
   } catch (err) {

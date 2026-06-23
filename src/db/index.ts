@@ -252,3 +252,11 @@ export type {
 } from './queries/required-sections.js';
 export { getCoordinationReport } from './queries/coordination.js';
 export type { Finding, CoordinationSummary, CoordinationReport } from './queries/coordination.js';
+export {
+  createAssociation,
+  listAssociationsForParagraph,
+  listAssociationsForSpec,
+  deleteAssociation,
+  AssociationParagraphNotFoundError,
+} from './queries/associations.js';
+export type { CreateAssociationInput } from './queries/associations.js';

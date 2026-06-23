@@ -1,5 +1,6 @@
 import { pool, DatabaseError } from '../index.js';
 import type {
+  ParagraphAssociation,
   SignalConflict,
   SourceFacts,
   SpecNode,
@@ -14,6 +15,7 @@ import { insertRefs } from './refs.js';
 import { resolveDefaultLibraryId } from './libraries.js';
 import { reconcileLibraryDivisionGeneralSpec } from './division-general.js';
 import { ClassificationSchema, OverrideSchema } from './editability.js';
+import { listAssociationsForSpec } from './associations.js';
 
 interface SpecRow {
   readonly id: string;
@@ -178,6 +180,24 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
   return (childrenByParent.get(null) ?? []).sort((a, b) => a.position - b.position).map(buildNode);
 }
 
+function attachAssociations(
+  nodes: readonly SpecNode[],
+  byParagraph: ReadonlyMap<string, readonly ParagraphAssociation[]>
+): readonly SpecNode[] {
+  return nodes.map((node) => {
+    const associations = byParagraph.get(node.id);
+    const children = attachAssociations(node.children, byParagraph);
+    return {
+      ...node,
+      children,
+      meta: {
+        ...node.meta,
+        ...(associations !== undefined && associations.length > 0 ? { associations } : {}),
+      },
+    };
+  });
+}
+
 export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
   try {
     const specResult = await pool.query<SpecRow>(
@@ -205,11 +225,12 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
       [id]
     );
 
+    const associationMap = await listAssociationsForSpec(id);
     const tree: SpecTree = {
       id: specRow.id,
       section: specRow.section ?? '',
       title: specRow.title ?? '',
-      parts: buildNodeTree(paraResult.rows),
+      parts: attachAssociations(buildNodeTree(paraResult.rows), associationMap),
     };
 
     const references: readonly SpecReference[] = refResult.rows.map((row) => ({
