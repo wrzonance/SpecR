@@ -268,6 +268,23 @@ describe('acceptCommentAsNote', () => {
     await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [a.rows[0]!.id]);
   });
 
+  it('returns wrong-spec — not already-accepted — for a wrong-spec caller on an already-accepted node (no cross-spec leak)', async () => {
+    // Accept a comment on a node owned by specId → a note now exists.
+    const anchor = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Owned anchor', 40, $2::jsonb) RETURNING id`,
+      [specId, JSON.stringify({ comments: [{ author: 'A', text: 'leak me', anchor: [0, 4] }] })]
+    );
+    const anchorId = anchor.rows[0]!.id;
+    expect((await acceptCommentAsNote(specId, anchorId, 0)).status).toBe('created');
+    // A wrong-spec caller must be rejected with wrong-spec BEFORE the idempotent
+    // fast path — never handed back 'already-accepted' + the noteId, which would
+    // leak the existence and id of a note on a node it does not own.
+    const leak = await acceptCommentAsNote(otherSpecId, anchorId, 0);
+    expect(leak.status).toBe('wrong-spec');
+    await pool.query(`DELETE FROM paragraphs WHERE spec_id = $1 AND id <> $2`, [specId, nodeId]);
+  });
+
   it('a successful accept bumps the spec content_version by 1', async () => {
     const anchor = await pool.query<{ id: string }>(
       `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)

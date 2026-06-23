@@ -303,6 +303,18 @@ async function runAccept(
   nodeId: string,
   index: number
 ): Promise<AcceptNoteOutcome> {
+  // Ownership gate (non-locking) BEFORE the fast path: a wrong (specId, nodeId)
+  // pair must surface as not-found/wrong-spec, never an 'already-accepted' +
+  // noteId that leaks the existence/id of a note the caller does not own. The
+  // plain SELECT takes no lock, so it stays off the write path's lock order.
+  const owner = await client.query<{ spec_id: string }>(
+    `SELECT spec_id FROM paragraphs WHERE id = $1`,
+    [nodeId]
+  );
+  const owned = owner.rows[0];
+  if (!owned) return { status: 'not-found' };
+  if (owned.spec_id !== specId) return { status: 'wrong-spec' };
+
   // Fast no-op path: if the comment was already accepted, return the stored
   // noteId WITHOUT requiring writability — a retry writes nothing, and the
   // client (e.g. recovering from a timed-out first request) needs the id back
