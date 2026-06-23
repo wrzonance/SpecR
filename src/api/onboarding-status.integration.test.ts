@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool, createLibrary } from '../db/index.js';
 
 const MISSING_ID = '00000000-0000-0000-0000-000000000000';
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 let server: Server;
 let baseUrl: string;
@@ -106,4 +109,59 @@ describe('POST /specs/:id/finalize and /reopen', () => {
     const body = (await get.json()) as { data: { onboardingStatus: string } };
     expect(body.data.onboardingStatus).toBe('review');
   });
+});
+
+// Import a real DOCX through the O-8 onboarding pipeline so the spec has
+// paragraphs + source_facts (reclassify needs them), and return its spec id.
+async function importDocx(libraryId: string): Promise<string> {
+  const docx = readFileSync(resolve('tests/fixtures/libreoffice/csi-spec-sample.docx'));
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(docx)], { type: DOCX_MIME }), 'sample.docx');
+  const imp = await fetch(`${baseUrl}/libraries/${libraryId}/import`, { method: 'POST', body: form });
+  expect(imp.status).toBe(202);
+  const jobId = ((await imp.json()) as { data: { jobId: string } }).data.jobId;
+  const deadline = Date.now() + 40_000;
+  while (Date.now() < deadline) {
+    const j = await fetch(`${baseUrl}/libraries/import/jobs/${jobId}`);
+    const jb = (await j.json()) as { data: { status: string; result?: { specId: string } } };
+    if (jb.data.status === 'complete') {
+      const specId = jb.data.result?.specId;
+      if (!specId) throw new Error('import completed without a specId');
+      return specId;
+    }
+    if (jb.data.status === 'failed') throw new Error('onboarding import failed');
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error('onboarding import did not finish');
+}
+
+describe('flexibility: an active (finalized) spec still accepts loop edits (#139)', () => {
+  it('reclassify (#136), conventions (#137), style-source (#138) all work post-finalize', async () => {
+    const lib = await createLibrary({ tier: 'company', name: 'lib-fapi-flex', owner: 'o' });
+    const specId = await importDocx(lib.id);
+
+    // Finalize → active. 'active' must NOT seal the spec.
+    const fin = await fetch(`${baseUrl}/specs/${specId}/finalize`, { method: 'POST' });
+    expect(fin.status).toBe(200);
+
+    // #136 reclassify still works on the active spec.
+    const recl = await fetch(`${baseUrl}/specs/${specId}/reclassify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preview: true }),
+    });
+    expect(recl.status).toBe(200);
+
+    // #137 library conventions still writable.
+    const conv = await fetch(`${baseUrl}/libraries/${lib.id}/conventions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Flex', rules: {} }),
+    });
+    expect(conv.status).toBe(200);
+
+    // #138 style-source still clearable on the active spec (200 if set, 404 if not).
+    const clear = await fetch(`${baseUrl}/specs/${specId}/style-source`, { method: 'DELETE' });
+    expect([200, 404]).toContain(clear.status);
+  }, 60_000);
 });
