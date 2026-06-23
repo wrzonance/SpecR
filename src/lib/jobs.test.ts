@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { createJob, updateJob, getJob } from './jobs.js';
+import {
+  createJob,
+  updateJob,
+  getJob,
+  createOnboardingJob,
+  updateOnboardingJob,
+  getOnboardingJob,
+} from './jobs.js';
 
 describe('jobs', () => {
   it('createJob returns a UUID string', () => {
@@ -47,5 +54,49 @@ describe('jobs', () => {
 
   it('updateJob on unknown jobId is a no-op', () => {
     expect(() => updateJob('nonexistent', { status: 'running' })).not.toThrow();
+  });
+});
+
+describe('onboarding job lifecycle (O-8)', () => {
+  it('creates queued, advances stage, then completes with a result', () => {
+    const jobId = createOnboardingJob();
+    expect(getOnboardingJob(jobId)?.status).toBe('queued');
+
+    updateOnboardingJob(jobId, { status: 'running', stage: 'parsing', pct: 20 });
+    expect(getOnboardingJob(jobId)?.progress.stage).toBe('parsing');
+
+    updateOnboardingJob(jobId, {
+      status: 'complete',
+      stage: 'complete',
+      pct: 100,
+      result: {
+        specId: 's1',
+        section: '09 91 26',
+        title: 'Painting',
+        libraryId: 'lib1',
+        templateId: null,
+        report: {
+          styleDerivation: null,
+          styleSourceNeeded: true,
+          editability: {
+            counts: { locked: 0, editable: 0, choice: 0, note: 0 },
+            lowConfidence: [],
+          },
+          parseWarnings: [],
+        },
+      },
+    });
+    const done = getOnboardingJob(jobId);
+    expect(done?.status).toBe('complete');
+    expect(done?.result?.report.styleSourceNeeded).toBe(true);
+  });
+
+  it('returns undefined for an unknown onboarding job id', () => {
+    expect(getOnboardingJob('nope')).toBeUndefined();
+  });
+
+  it('onboarding store is separate from the parse-job store', () => {
+    const parseId = createJob();
+    expect(getOnboardingJob(parseId)).toBeUndefined();
   });
 });
