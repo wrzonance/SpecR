@@ -10,6 +10,7 @@ import {
   ConventionValidationError,
 } from '../db/index.js';
 import type { OwnershipResult, AcceptNoteOutcome } from '../db/index.js';
+import { gateErrorResponse } from './edit-gate-response.js';
 import { logger } from '../lib/logger.js';
 
 // Validate the two UUID params; reply 400 and return null on a malformed id.
@@ -142,6 +143,13 @@ export async function acceptAsNoteHandler(req: Request, res: Response): Promise<
     const outcome = await acceptCommentAsNote(ids.specId, ids.nodeId, index.data);
     sendAcceptOutcome(outcome, res);
   } catch (err) {
+    // The note insert passes the composed edit gate (ADR-018): an archived or
+    // upstream-locked spec → 409, mirroring every other content-write handler.
+    const gate = gateErrorResponse(err);
+    if (gate) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
     logger.error({ err }, 'accept-as-note failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }

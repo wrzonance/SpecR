@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { pool } from '../index.js';
 import { ConventionValidationError } from './conventions.js';
+import { SpecWriteForbiddenError } from './edit-gate.js';
 import {
   setSpecEditabilityOverride,
   clearSpecEditabilityOverride,
@@ -204,5 +205,63 @@ describe('acceptCommentAsNote', () => {
     const out = await acceptCommentAsNote(otherSpecId, a.rows[0]!.id, 0);
     expect(out.status).toBe('wrong-spec');
     await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [a.rows[0]!.id]);
+  });
+
+  it('a successful accept bumps the spec content_version by 1', async () => {
+    const anchor = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Versioned anchor', 30, $2::jsonb) RETURNING id`,
+      [specId, JSON.stringify({ comments: [{ author: 'A', text: 'note me', anchor: [0, 4] }] })]
+    );
+    const anchorId = anchor.rows[0]!.id;
+    const before = await pool.query<{ content_version: number }>(
+      `SELECT content_version FROM specs WHERE id = $1`,
+      [specId]
+    );
+    const created = await acceptCommentAsNote(specId, anchorId, 0);
+    expect(created.status).toBe('created');
+    const after = await pool.query<{ content_version: number }>(
+      `SELECT content_version FROM specs WHERE id = $1`,
+      [specId]
+    );
+    expect(after.rows[0]!.content_version).toBe(before.rows[0]!.content_version + 1);
+    // The idempotent repeat is a no-op write — it must NOT bump the version again.
+    const repeat = await acceptCommentAsNote(specId, anchorId, 0);
+    expect(repeat.status).toBe('already-accepted');
+    const afterRepeat = await pool.query<{ content_version: number }>(
+      `SELECT content_version FROM specs WHERE id = $1`,
+      [specId]
+    );
+    expect(afterRepeat.rows[0]!.content_version).toBe(after.rows[0]!.content_version);
+    await pool.query(`DELETE FROM paragraphs WHERE spec_id = $1 AND id <> $2`, [specId, nodeId]);
+  });
+
+  it('rejects accept-as-note on an archived spec (write gate)', async () => {
+    // Clear any leftover gated row from a prior failed run so the
+    // (section, source, library_id) unique constraint never collides.
+    await pool.query(`DELETE FROM specs WHERE section = '00 00 09' AND title = 'gated'`);
+    const gated = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id) VALUES ('00 00 09', 'gated', 'arcat', $1) RETURNING id`,
+      [libraryId]
+    );
+    const gatedSpec = gated.rows[0]!.id;
+    const anchor = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Gated anchor', 1, $2::jsonb) RETURNING id`,
+      [gatedSpec, JSON.stringify({ comments: [{ author: 'A', text: 'x', anchor: [0, 1] }] })]
+    );
+    await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [gatedSpec]);
+    // The composed edit gate (ADR-018) throws SpecWriteForbiddenError on an
+    // archived spec — the same contract every content write obeys.
+    await expect(acceptCommentAsNote(gatedSpec, anchor.rows[0]!.id, 0)).rejects.toBeInstanceOf(
+      SpecWriteForbiddenError
+    );
+    // The write rolled back — no note was inserted.
+    const notes = await pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM paragraphs WHERE spec_id = $1 AND node_type = 'note'`,
+      [gatedSpec]
+    );
+    expect(notes.rows[0]!.n).toBe(0);
+    await pool.query(`DELETE FROM specs WHERE id = $1`, [gatedSpec]);
   });
 });

@@ -378,6 +378,11 @@ paths:
         as a `note` paragraph immediately after the anchor (ADR-022 D4 — never a
         silent tree mutation). Repeating the call returns 409 with the existing
         note's id (idempotent contract). The node must belong to the spec (else 403).
+
+
+        Materializing a note is a content write: it passes the composed edit gate
+        (ADR-018) and bumps the spec's `contentVersion`. Accepting against an
+        archived or upstream-locked spec is rejected with 409.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -414,7 +419,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Comment already accepted — the existing note's id travels back as `noteId`.
+          description: >
+            Either the comment was already accepted (the existing note's id
+            travels back as `noteId`), or the spec is archived / upstream-locked
+            and rejected by the edit gate (no `noteId`).
           content:
             application/json:
               schema:

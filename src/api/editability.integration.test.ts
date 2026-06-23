@@ -255,4 +255,30 @@ describe('POST .../comments/:index/accept-as-note', () => {
     );
     expect(r.status).toBe(422);
   });
+
+  it('409 (write gate) when the spec is archived', async () => {
+    const libRow = await pool.query<{ id: string }>(
+      `SELECT id FROM libraries WHERE name = 'Default Company Master' LIMIT 1`
+    );
+    await pool.query(`DELETE FROM specs WHERE section = '99 99 96' AND title = 'Archived Accept'`);
+    const gated = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ('99 99 96', 'Archived Accept', 'arcat', $1) RETURNING id`,
+      [libRow.rows[0]!.id]
+    );
+    const gatedSpec = gated.rows[0]!.id;
+    const a = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Anchor', 1, $2::jsonb) RETURNING id`,
+      [gatedSpec, JSON.stringify({ comments: [{ author: 'A', text: 'x', anchor: [0, 1] }] })]
+    );
+    await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [gatedSpec]);
+    const r = await req(
+      'POST',
+      `/specs/${gatedSpec}/paragraphs/${a.rows[0]!.id}/comments/0/accept-as-note`
+    );
+    expect(r.status).toBe(409);
+    expect((r.body as { success: boolean }).success).toBe(false);
+    await pool.query(`DELETE FROM specs WHERE id = $1`, [gatedSpec]);
+  });
 });

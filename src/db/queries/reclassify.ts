@@ -10,6 +10,7 @@ import { getSpecTree } from './specs.js';
 import { getConventionForLibrary, ConventionValidationError } from './conventions.js';
 import { checkRegexPatterns } from '../../lib/regex-safety.js';
 import { classify } from '../../conventions/index.js';
+import { assertSpecWritable } from './edit-gate.js';
 import { SourceFactsSchema } from '../../ast/index.js';
 import type { PoolClient } from 'pg';
 import type { ConventionRules, Editability } from '../../ast/index.js';
@@ -256,6 +257,13 @@ async function insertNoteSibling(
   );
   const row = inserted.rows[0];
   if (!row) throw new DatabaseError('acceptCommentAsNote: insert returned no row');
+  // Materializing a note mutates the tree — bump content_version so project-copy
+  // clean/edited detection (which keys on it) sees the change (mirrors
+  // updateParagraphText). The idempotent repeat path rolls back, so it never reaches here.
+  await client.query(
+    `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
+    [specId]
+  );
   return row.id;
 }
 
@@ -272,6 +280,11 @@ async function runAccept(
   const anchor = anchorRes.rows[0];
   if (!anchor) return { status: 'not-found' };
   if (anchor.spec_id !== specId) return { status: 'wrong-spec' };
+
+  // Gate the spec for writability before any mutation (ADR-018), row-locking it
+  // — the same precondition every content write obeys. An archived or
+  // upstream-locked spec throws SpecWriteForbiddenError → 409, never a silent write.
+  await assertSpecWritable(client, specId);
 
   const text = commentTextAt(anchor.source_facts, index);
   if (text === null) return { status: 'no-comment' };
