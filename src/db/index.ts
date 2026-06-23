@@ -38,6 +38,8 @@ export type {
   SpecReference,
   OriginMeta,
 } from './queries/specs.js';
+export { getOnboardingStatus, finalizeOnboarding, reopenOnboarding } from './queries/onboarding.js';
+export type { OnboardingStatus, FinalizeOutcome, ReopenOutcome } from './queries/onboarding.js';
 export {
   insertTree,
   getParagraphWithAncestors,
@@ -161,6 +163,7 @@ export {
   listBuiltInConventions,
   getConventionForLibrary,
   upsertLibraryConvention,
+  seedLibraryConventionIfAbsent,
   BUILT_IN_CONVENTION_NAME,
   ConventionValidationError,
   ConventionNotFoundError,

@@ -6,6 +6,7 @@ import {
   listSpecSections,
   getSpecTree,
   getSpecStyleSource,
+  getOnboardingStatus,
   getParagraphWithAncestors,
   persistParsedSpec,
   lookupSpecSectionTitle,
@@ -132,9 +133,10 @@ export async function handleGetSpec({ specId }: { specId: string }): Promise<Too
     const result = await getSpecTree(specId);
     if (!result) return toolError(`Spec not found: id=${specId}`);
     // Surface the manual style-source pick (#138) alongside the tree:
-    // { templateId, templateName } | null.
+    // { templateId, templateName } | null. onboardingStatus (#139): 'review' | 'active'.
     const styleSource = await getSpecStyleSource(specId);
-    const text = JSON.stringify({ ...result, styleSource }, null, 2);
+    const onboardingStatus = await getOnboardingStatus(specId);
+    const text = JSON.stringify({ ...result, styleSource, onboardingStatus }, null, 2);
     return { content: [{ type: 'text' as const, text }] };
   } catch (err) {
     logger.error({ err }, 'mcp tool get_spec failed');
