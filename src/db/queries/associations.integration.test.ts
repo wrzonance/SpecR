@@ -7,6 +7,8 @@ import {
   deleteAssociation,
   AssociationParagraphNotFoundError,
 } from './associations.js';
+import { getSpecTree } from './specs.js';
+import { getParagraphWithAncestors } from './paragraphs.js';
 
 let specId: string;
 let paragraphId: string;
@@ -87,5 +89,35 @@ describe('paragraph_associations query layer', () => {
     const a = await createAssociation(paragraphId, { label: 'd', url: 'https://e.com/d.pdf' });
     expect(await deleteAssociation(paragraphId, a.id)).toBe(true);
     expect(await deleteAssociation(paragraphId, a.id)).toBe(false);
+  });
+
+  it('groups associations by paragraph for a spec — label is preserved', async () => {
+    await createAssociation(paragraphId, { label: 'one', url: 'https://e.com/1.pdf' });
+    const map = await listAssociationsForSpec(specId);
+    expect(map.get(paragraphId)).toHaveLength(1);
+    expect(map.get(paragraphId)?.[0]?.label).toBe('one');
+  });
+});
+
+describe('associations surface in reads', () => {
+  it('getSpecTree attaches meta.associations to the owning node', async () => {
+    const a = await createAssociation(paragraphId, {
+      label: 'tree link',
+      url: 'https://example.com/t.pdf',
+    });
+    const result = await getSpecTree(specId);
+    const node = result!.tree.parts.find((n) => n.id === paragraphId);
+    expect(node?.meta.associations).toHaveLength(1);
+    expect(node?.meta.associations?.[0]?.id).toBe(a.id);
+  });
+
+  it('getParagraphWithAncestors attaches associations to the node', async () => {
+    const a = await createAssociation(paragraphId, {
+      label: 'para link',
+      url: 'https://example.com/p.pdf',
+    });
+    const result = await getParagraphWithAncestors(paragraphId);
+    expect(result?.node.associations).toHaveLength(1);
+    expect(result?.node.associations?.[0]?.id).toBe(a.id);
   });
 });
