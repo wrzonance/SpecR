@@ -56,6 +56,22 @@ export interface SourceFacts {
  */
 export type SpecNodeEditability = z.infer<typeof SpecNodeEditabilitySchema>;
 
+// External content association surfaced on a paragraph (#109). Link + provenance
+// only — never the licensed bytes (ADR-019). Keyed on the paragraph's w:sdt UUID.
+export interface ParagraphAssociation {
+  readonly id: string;
+  readonly label: string;
+  /** DMS connector identity (ADR-014 D5). Present together with externalId or absent. */
+  readonly externalProvider?: string;
+  readonly externalId?: string;
+  /** Direct URL provenance for firms without a DMS connector. */
+  readonly url?: string;
+  /** sha256 hex of the referenced bytes, when known. */
+  readonly contentHash?: string;
+  readonly externalMetadata: Record<string, unknown>;
+  readonly createdAt: string;
+}
+
 export interface SpecNodeMeta {
   readonly vanish?: boolean;
   readonly source?: 'ufgs' | 'arcat' | 'cpi' | 'unknown';
@@ -66,6 +82,8 @@ export interface SpecNodeMeta {
   readonly sourceFacts?: SourceFacts;
   /** Effective editability + machine why-chain. Absent === not yet classified. */
   readonly editability?: SpecNodeEditability;
+  /** External content links (#109). Absent === none. */
+  readonly associations?: readonly ParagraphAssociation[];
 }
 
 export interface SpecNode {
