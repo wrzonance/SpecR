@@ -85,6 +85,11 @@ import {
 } from './required-sections.js';
 import { getCoordinationReportHandler } from './coordination.js';
 import { patchEditabilityHandler, reclassifyHandler, acceptAsNoteHandler } from './editability.js';
+import {
+  createAssociationHandler,
+  listAssociationsHandler,
+  deleteAssociationHandler,
+} from './associations.js';
 
 const parseRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
@@ -208,4 +213,10 @@ router.put(
   '/projects/:id/packages/:packageId/required-sections',
   validateBody(RequiredSectionsBodySchema),
   putPackageRequiredSectionsHandler
+);
+router.get('/specs/:id/paragraphs/:nodeId/associations', listAssociationsHandler);
+router.post('/specs/:id/paragraphs/:nodeId/associations', createAssociationHandler);
+router.delete(
+  '/specs/:id/paragraphs/:nodeId/associations/:associationId',
+  deleteAssociationHandler
 );

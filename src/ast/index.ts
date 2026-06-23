@@ -99,3 +99,6 @@ export {
 export type { HeaderFooterComposition, HeaderFooterFieldKind } from './header-footer-schemas.js';
 export { RequiredSectionsBodySchema } from './required-sections-schemas.js';
 export type { RequiredSectionsBody } from './required-sections-schemas.js';
+export { CreateAssociationBodySchema } from './association-schemas.js';
+export type { CreateAssociationBody } from './association-schemas.js';
+export type { ParagraphAssociation } from './types.js';

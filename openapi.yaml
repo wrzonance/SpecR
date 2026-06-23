@@ -438,6 +438,91 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/paragraphs/{nodeId}/associations:
+    get:
+      operationId: listAssociations
+      summary: List external content associations for a paragraph
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: List of paragraph associations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ParagraphAssociation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createAssociation
+      summary: Associate external content with a paragraph
+      description: >
+        Links a DMS document or direct URL to a paragraph. Either a complete DMS
+        pair (externalProvider + externalId) or a url must be provided.
+        Only link + provenance is stored — never the licensed bytes (ADR-019).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAssociation'
+      responses:
+        '201':
+          description: Association created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ParagraphAssociation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/paragraphs/{nodeId}/associations/{associationId}:
+    delete:
+      operationId: deleteAssociation
+      summary: Remove an external content association from a paragraph
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+        - $ref: '#/components/parameters/AssociationId'
+      responses:
+        '204':
+          description: Association deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/lineage:
     get:
       operationId: getSpecLineage
@@ -2775,6 +2860,14 @@ components:
         type: string
         format: uuid
 
+    AssociationId:
+      name: associationId
+      in: path
+      required: true
+      description: Paragraph association UUID
+      schema:
+        type: string
+        format: uuid
   responses:
     BadRequest:
       description: Bad request — validation error or unsupported file type
@@ -2953,7 +3046,16 @@ components:
         title: { type: string }
     FindingDanglingRef:
       type: object
-      required: [type, refId, sourceSpecId, sourceSpecSection, targetSpecSection, referenceText, availableFrom]
+      required:
+        [
+          type,
+          refId,
+          sourceSpecId,
+          sourceSpecSection,
+          targetSpecSection,
+          referenceText,
+          availableFrom,
+        ]
       properties:
         type: { type: string, enum: [dangling_ref] }
         refId: { type: string, format: uuid }
@@ -3191,6 +3293,13 @@ components:
               $ref: '#/components/schemas/SourceFacts'
             editability:
               $ref: '#/components/schemas/SpecNodeEditability'
+            associations:
+              type: array
+              description: >-
+                External content links for this paragraph (#109). Present only
+                when the paragraph has one or more associations.
+              items:
+                $ref: '#/components/schemas/ParagraphAssociation'
 
     SpecTree:
       type: object
@@ -4381,3 +4490,68 @@ components:
           type: string
           format: uuid
           description: A built-in or another project's revision nomenclature profile id
+
+    ParagraphAssociation:
+      type: object
+      required: [id, label, externalMetadata, createdAt]
+      description: External content link associated with a paragraph node (#109).
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+          minLength: 1
+        externalProvider:
+          type: string
+          description: DMS connector identity (ADR-014 D5). Present together with externalId or absent.
+        externalId:
+          type: string
+          description: Document identifier within the DMS. Present together with externalProvider or absent.
+        url:
+          type: string
+          format: uri
+          description: Direct URL provenance for firms without a DMS connector.
+        contentHash:
+          type: string
+          description: sha256 hex digest of the referenced bytes, when known.
+        externalMetadata:
+          type: object
+          additionalProperties: true
+          description: Arbitrary provider-specific metadata (empty object when none supplied).
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateAssociation:
+      type: object
+      required: [label]
+      description: >
+        Request body for associating external content with a paragraph.
+        Either a url, or both externalProvider and externalId, must be provided.
+        externalProvider and externalId are both-or-neither — a lone one of the
+        pair is rejected (422) even when a url is present.
+      dependentRequired:
+        externalProvider: [externalId]
+        externalId: [externalProvider]
+      properties:
+        label:
+          type: string
+          minLength: 1
+        externalProvider:
+          type: string
+          description: DMS connector identity. Always paired with externalId (both-or-neither).
+        externalId:
+          type: string
+          description: Document identifier within the DMS. Always paired with externalProvider (both-or-neither).
+        url:
+          type: string
+          format: uri
+          description: Direct URL. Required when externalProvider/externalId are absent.
+        contentHash:
+          type: string
+          description: sha256 hex digest of the referenced bytes.
+        externalMetadata:
+          type: object
+          additionalProperties: true
+          description: Arbitrary provider-specific metadata.

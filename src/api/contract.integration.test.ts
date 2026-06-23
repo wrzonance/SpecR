@@ -81,6 +81,8 @@ const RESPONSE_ALLOWLIST = new Set([
   'patch /specs/{}/paragraphs/{}/editability',
   'post /specs/{}/reclassify',
   'post /specs/{}/paragraphs/{}/comments/{}/accept-as-note',
+  'get /specs/{}/paragraphs/{}/associations',
+  'post /specs/{}/paragraphs/{}/associations',
 ]);
 
 let server: Server;
