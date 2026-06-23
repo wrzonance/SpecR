@@ -274,6 +274,8 @@ export async function persistParsedSpec(result: {
   readonly tree: SpecTree;
   readonly refs: readonly SecRef[];
   readonly originMeta?: OriginMeta;
+  /** Explicit owning library (O-8 onboarding). Omitted → resolved from source. */
+  readonly libraryId?: string;
 }): Promise<string> {
   const client = await pool.connect();
   try {
@@ -281,7 +283,7 @@ export async function persistParsedSpec(result: {
     // eslint-disable-next-line sonarjs/todo-tag
     // TODO: source should be a top-level SpecTree field — parts[0].meta.source is a stopgap
     const source = result.tree.parts[0]?.meta.source ?? 'unknown';
-    const libraryId = await resolveDefaultLibraryId(source, client);
+    const libraryId = result.libraryId ?? (await resolveDefaultLibraryId(source, client));
     const res = await client.query<{ id: string }>(
       `INSERT INTO specs (section, title, source, library_id, origin_meta)
        VALUES ($1, $2, $3, $4, $5::jsonb)
