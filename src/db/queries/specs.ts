@@ -285,8 +285,11 @@ export async function persistParsedSpec(result: {
     const source = result.tree.parts[0]?.meta.source ?? 'unknown';
     const libraryId = result.libraryId ?? (await resolveDefaultLibraryId(source, client));
     const res = await client.query<{ id: string }>(
-      `INSERT INTO specs (section, title, source, library_id, origin_meta)
-       VALUES ($1, $2, $3, $4, $5::jsonb)
+      // New imports land at onboarding_status 'review' (O-8/#135 → O-11/#139):
+      // they await a human's first-pass review. On re-import (ON CONFLICT) the
+      // status is intentionally NOT reset — a prior finalize stands.
+      `INSERT INTO specs (section, title, source, library_id, origin_meta, onboarding_status)
+       VALUES ($1, $2, $3, $4, $5::jsonb, 'review')
        ON CONFLICT (section, source, library_id) WHERE library_id IS NOT NULL DO UPDATE
          SET title = EXCLUDED.title,
              updated_at = now(),
