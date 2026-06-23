@@ -200,6 +200,21 @@ describe('POST /specs/:id/reclassify', () => {
     const r = await req('POST', `/specs/${reclSpecId}/reclassify`, {});
     expect(r.status).toBe(200);
   });
+
+  it('422 for request-supplied noteBanners with a catastrophic regex (ReDoS guard)', async () => {
+    const r = await req('POST', `/specs/${reclSpecId}/reclassify`, {
+      rules: { noteBanners: ['(a+)+$'] },
+    });
+    expect(r.status).toBe(422);
+    expect((r.body as { success: boolean }).success).toBe(false);
+  });
+
+  it('no request body resolves the stored profile — not 400', async () => {
+    // A truly bodyless POST yields req.body === undefined; the handler must
+    // treat it as "resolve the library profile", not reject it as malformed.
+    const res = await fetch(`${baseUrl}/specs/${reclSpecId}/reclassify`, { method: 'POST' });
+    expect(res.status).toBe(200);
+  });
 });
 
 describe('POST .../comments/:index/accept-as-note', () => {

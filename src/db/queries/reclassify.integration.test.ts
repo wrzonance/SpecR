@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { pool } from '../index.js';
+import { ConventionValidationError } from './conventions.js';
 import {
   setSpecEditabilityOverride,
   clearSpecEditabilityOverride,
@@ -122,6 +123,29 @@ describe('reclassifySpec', () => {
   it('returns not-found for an unknown spec', async () => {
     const out = await reclassifySpec('00000000-0000-0000-0000-000000000000', { rules: {} });
     expect(out.status).toBe('not-found');
+  });
+
+  it('rejects request-supplied noteBanners with a catastrophic regex before classifying', async () => {
+    // A paragraph that classify() would otherwise visit; if the engine ran the
+    // unsafe pattern over this text it would backtrack catastrophically.
+    const p = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position)
+       VALUES ($1, 'pr1', ${"'aaaaaaaaaaaaaaaaaaaaaaaaaaX'"}, 1) RETURNING id`,
+      [specId]
+    );
+    const node = p.rows[0]!.id;
+    // The same regex-safety guard the convention CRUD path enforces must apply
+    // to request-supplied rules — the engine must never see the unsafe pattern.
+    await expect(
+      reclassifySpec(specId, { rules: { noteBanners: ['(a+)+$'] } })
+    ).rejects.toBeInstanceOf(ConventionValidationError);
+    // No classification was written — classify() was never reached.
+    const row = await pool.query<{ classification: unknown }>(
+      `SELECT classification FROM paragraphs WHERE id = $1`,
+      [node]
+    );
+    expect(row.rows[0]!.classification).toBeNull();
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [node]);
   });
 });
 

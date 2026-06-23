@@ -7,7 +7,8 @@ import {
   storeClassifications,
 } from './editability.js';
 import { getSpecTree } from './specs.js';
-import { getConventionForLibrary } from './conventions.js';
+import { getConventionForLibrary, ConventionValidationError } from './conventions.js';
+import { checkRegexPatterns } from '../../lib/regex-safety.js';
 import { classify } from '../../conventions/index.js';
 import { SourceFactsSchema } from '../../ast/index.js';
 import type { PoolClient } from 'pg';
@@ -107,11 +108,25 @@ async function checkOwnership(
   return null;
 }
 
+// Request-supplied rules carry user regexes (noteBanners) that bypass the
+// convention CRUD write boundary, so bound them here exactly as
+// upsertLibraryConvention does — an unsafe pattern must be rejected before
+// classify() ever runs it over the document (ADR-022 D5, ReDoS guard).
+function validateRequestRules(rules: ConventionRules): ConventionRules {
+  const safety = checkRegexPatterns(rules.noteBanners ?? []);
+  if (!safety.safe) {
+    throw new ConventionValidationError(`unsafe noteBanners regex: ${safety.reason}`);
+  }
+  return rules;
+}
+
 async function resolveRules(
   specId: string,
   opts: { rules?: ConventionRules }
 ): Promise<ConventionRules | null> {
-  if (opts.rules !== undefined) return opts.rules;
+  // Library-resolved rules were already bounded at write time; only
+  // request-supplied rules need validation here.
+  if (opts.rules !== undefined) return validateRequestRules(opts.rules);
   const lib = await pool.query<{ library_id: string | null }>(
     `SELECT library_id FROM specs WHERE id = $1`,
     [specId]

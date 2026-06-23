@@ -7,6 +7,7 @@ import {
   clearSpecEditabilityOverride,
   reclassifySpec,
   acceptCommentAsNote,
+  ConventionValidationError,
 } from '../db/index.js';
 import type { OwnershipResult, AcceptNoteOutcome } from '../db/index.js';
 import { logger } from '../lib/logger.js';
@@ -70,7 +71,9 @@ export async function reclassifyHandler(req: Request, res: Response): Promise<vo
     res.status(400).json({ success: false, error: 'invalid spec id' });
     return;
   }
-  const body = ReclassifyBodySchema.safeParse(req.body);
+  // A bodyless POST (req.body === undefined) is valid: omitting `rules` means
+  // "resolve the stored library profile". Default to {} so it is not a 400.
+  const body = ReclassifyBodySchema.safeParse(req.body ?? {});
   if (!body.success) {
     res.status(400).json({ success: false, error: 'malformed reclassify body' });
     return;
@@ -92,6 +95,12 @@ export async function reclassifyHandler(req: Request, res: Response): Promise<vo
     }
     res.status(200).json({ success: true, data: outcome.report });
   } catch (err) {
+    // Request-supplied rules carrying an unsafe regex are rejected at the
+    // DB boundary (ADR-022 D5) — map to 422, same as the convention CRUD path.
+    if (err instanceof ConventionValidationError) {
+      res.status(422).json({ success: false, error: err.message });
+      return;
+    }
     logger.error({ err }, 'reclassify failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
