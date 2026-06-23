@@ -12,6 +12,8 @@ import {
   SetPackageSpecsBodySchema,
   ConventionRulesSchema,
   EditabilitySchema,
+  PatchEditabilityBodySchema,
+  ReclassifyBodySchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -383,5 +385,37 @@ describe('ConventionRulesSchema (ADR-022 D3/D5)', () => {
 
   it('EditabilitySchema is the closed four-value vocabulary', () => {
     expect(EditabilitySchema.options).toEqual(['locked', 'editable', 'choice', 'note']);
+  });
+});
+
+describe('PatchEditabilityBodySchema (O-9 / #136)', () => {
+  it('accepts a closed editability value', () => {
+    expect(PatchEditabilityBodySchema.parse({ editability: 'note' })).toEqual({
+      editability: 'note',
+    });
+  });
+  it('accepts explicit null to clear the override', () => {
+    expect(PatchEditabilityBodySchema.parse({ editability: null })).toEqual({ editability: null });
+  });
+  it('rejects an out-of-vocabulary value', () => {
+    expect(PatchEditabilityBodySchema.safeParse({ editability: 'frozen' }).success).toBe(false);
+  });
+  it('rejects a missing editability key', () => {
+    expect(PatchEditabilityBodySchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('ReclassifyBodySchema (O-9 / #136)', () => {
+  it('accepts an empty body (resolve the library profile)', () => {
+    expect(ReclassifyBodySchema.parse({})).toEqual({});
+  });
+  it('accepts candidate rules and a preview flag', () => {
+    const body = { rules: { defaultEditability: 'editable' }, preview: true };
+    expect(ReclassifyBodySchema.parse(body)).toEqual(body);
+  });
+  it('rejects malformed rules (bad enum)', () => {
+    expect(
+      ReclassifyBodySchema.safeParse({ rules: { defaultEditability: 'frozen' } }).success
+    ).toBe(false);
   });
 });

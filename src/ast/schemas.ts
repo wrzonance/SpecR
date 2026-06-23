@@ -133,6 +133,26 @@ export const SpecNodeEditabilitySchema = z.object({
   override: EditabilitySchema.exactOptional(),
 });
 
+// ── O-9 / #136 request bodies ────────────────────────────────────────────────
+// Set the human override (closed enum) or clear it (explicit null). ADR-022 D2:
+// override is a distinct field; clearing must be expressible in one call.
+export const PatchEditabilityBodySchema = z.object({
+  editability: EditabilitySchema.nullable(),
+});
+
+export type PatchEditabilityBody = z.infer<typeof PatchEditabilityBodySchema>;
+
+// Reclassify input. `rules` (optional) supplies candidate rules for a preview;
+// omitted → resolve the spec's library convention profile. `preview: true`
+// computes the diff without persisting (preview-before-save). The rules schema
+// is the open ADR-022 D5 ruleset — unknown keys preserved.
+export const ReclassifyBodySchema = z.object({
+  rules: ConventionRulesSchema.exactOptional(),
+  preview: z.boolean().exactOptional(),
+});
+
+export type ReclassifyBody = z.infer<typeof ReclassifyBodySchema>;
+
 export const SpecNodeMetaSchema = z.object({
   vanish: z.boolean().exactOptional(),
   source: z.enum(['ufgs', 'arcat', 'cpi', 'unknown']).exactOptional(),
