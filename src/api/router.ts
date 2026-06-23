@@ -71,6 +71,7 @@ import {
   renameLibraryHandler,
 } from './libraries.js';
 import { importLibraryHandler, importJobHandler } from './onboarding.js';
+import { finalizeSpecHandler, reopenSpecHandler } from './onboarding-status.js';
 import {
   listRevisionNomenclatureProfilesHandler,
   getProjectRevisionNomenclatureHandler,
@@ -109,6 +110,8 @@ router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler)
 router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
 router.patch('/specs/:id/paragraphs/:nodeId/editability', patchEditabilityHandler);
 router.post('/specs/:id/reclassify', reclassifyHandler);
+router.post('/specs/:id/finalize', finalizeSpecHandler);
+router.post('/specs/:id/reopen', reopenSpecHandler);
 router.post('/specs/:id/paragraphs/:nodeId/comments/:index/accept-as-note', acceptAsNoteHandler);
 router.get('/specs/:id/lock', getLockHandler);
 router.put('/specs/:id/lock', acquireLockHandler);
