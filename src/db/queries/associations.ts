@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import type { ParagraphAssociation } from '../../ast/index.js';
+import { getPgCode } from '../../lib/pg-errors.js';
 import { logger } from '../../lib/logger.js';
 
 interface Queryable {
@@ -58,6 +59,24 @@ async function resolveSpecId(paragraphId: string, db: Queryable): Promise<string
   return row.spec_id;
 }
 
+/** Map a createAssociation failure to its typed error. A FK violation (pg 23503)
+ *  means the paragraph was deleted between resolveSpecId and the INSERT — surface
+ *  it as the same not-found (→ 404) as the resolveSpecId miss, not a generic 500
+ *  (#242 review). resolveSpecId's own not-found and other DatabaseErrors pass
+ *  through unchanged. */
+function toCreateAssociationError(paragraphId: string, err: unknown): DatabaseError {
+  if (err instanceof AssociationParagraphNotFoundError) return err;
+  const wrapped = new DatabaseError(`createAssociation failed for paragraph ${paragraphId}`, {
+    cause: err,
+  });
+  if (getPgCode(wrapped) === '23503') {
+    return new AssociationParagraphNotFoundError(`paragraph ${paragraphId} not found`, {
+      cause: err,
+    });
+  }
+  return err instanceof DatabaseError ? err : wrapped;
+}
+
 export async function createAssociation(
   paragraphId: string,
   input: CreateAssociationInput,
@@ -86,10 +105,7 @@ export async function createAssociation(
     logger.info({ paragraphId, associationId: row.id }, 'association created');
     return mapRow(row);
   } catch (err) {
-    if (err instanceof DatabaseError) throw err;
-    throw new DatabaseError(`createAssociation failed for paragraph ${paragraphId}`, {
-      cause: err,
-    });
+    throw toCreateAssociationError(paragraphId, err);
   }
 }
 
