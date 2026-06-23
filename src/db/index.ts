@@ -181,8 +181,17 @@ export {
   setEditabilityOverride,
   clearEditabilityOverride,
 } from './queries/editability.js';
-export { setSpecEditabilityOverride, clearSpecEditabilityOverride } from './queries/reclassify.js';
-export type { OwnershipResult } from './queries/reclassify.js';
+export {
+  setSpecEditabilityOverride,
+  clearSpecEditabilityOverride,
+  reclassifySpec,
+} from './queries/reclassify.js';
+export type {
+  OwnershipResult,
+  EditabilityDiffEntry,
+  ReclassifyReport,
+  ReclassifyOutcome,
+} from './queries/reclassify.js';
 export { getSpecLineage } from './queries/lineage.js';
 export type { SpecLineage, LineageHop, LineageScope } from './queries/lineage.js';
 export {

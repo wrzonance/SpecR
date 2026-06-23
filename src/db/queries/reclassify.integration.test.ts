@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { pool } from '../index.js';
-import { setSpecEditabilityOverride, clearSpecEditabilityOverride } from './reclassify.js';
+import {
+  setSpecEditabilityOverride,
+  clearSpecEditabilityOverride,
+  reclassifySpec,
+} from './reclassify.js';
 
 let specId: string;
 let otherSpecId: string;
@@ -69,5 +73,53 @@ describe('clearSpecEditabilityOverride', () => {
       [nodeId]
     );
     expect(row.rows[0]!.editability_override).toBeNull();
+  });
+});
+
+describe('reclassifySpec', () => {
+  it('classifies stored facts from a banner — no source document', async () => {
+    // paragraph whose source_facts carry a captured banner fact → note
+    const p = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'NOTES TO SPECIFIER', 1, $2::jsonb) RETURNING id`,
+      [specId, JSON.stringify({ banner: 'NOTES TO SPECIFIER' })]
+    );
+    const bannerNode = p.rows[0]!.id;
+    const out = await reclassifySpec(specId, { rules: {} });
+    expect(out.status).toBe('ok');
+    if (out.status !== 'ok') throw new Error('expected ok');
+    const entry = out.report.entries.find((e) => e.nodeId === bannerNode);
+    expect(entry?.after).toBe('note');
+    // persisted: a fresh read shows the stored classification
+    const row = await pool.query<{ classification: { editability: string } }>(
+      `SELECT classification FROM paragraphs WHERE id = $1`,
+      [bannerNode]
+    );
+    expect(row.rows[0]!.classification.editability).toBe('note');
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [bannerNode]);
+  });
+
+  it('preview does not persist', async () => {
+    const p = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Preview para', 1, $2::jsonb) RETURNING id`,
+      [specId, JSON.stringify({ banner: 'NOTES TO SPECIFIER' })]
+    );
+    const previewNode = p.rows[0]!.id;
+    const out = await reclassifySpec(specId, { rules: {}, preview: true });
+    expect(out.status).toBe('ok');
+    if (out.status !== 'ok') throw new Error('expected ok');
+    expect(out.report.persisted).toBe(false);
+    const row = await pool.query<{ classification: unknown }>(
+      `SELECT classification FROM paragraphs WHERE id = $1`,
+      [previewNode]
+    );
+    expect(row.rows[0]!.classification).toBeNull();
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [previewNode]);
+  });
+
+  it('returns not-found for an unknown spec', async () => {
+    const out = await reclassifySpec('00000000-0000-0000-0000-000000000000', { rules: {} });
+    expect(out.status).toBe('not-found');
   });
 });
