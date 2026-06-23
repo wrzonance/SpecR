@@ -79,6 +79,8 @@ const RESPONSE_ALLOWLIST = new Set([
   'put /projects/{}/packages/{}/required-sections',
   'get /projects/{}/coordination-report',
   'patch /specs/{}/paragraphs/{}/editability',
+  'post /specs/{}/reclassify',
+  'post /specs/{}/paragraphs/{}/comments/{}/accept-as-note',
 ]);
 
 let server: Server;

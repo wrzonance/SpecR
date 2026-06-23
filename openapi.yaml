@@ -320,6 +320,116 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/reclassify:
+    post:
+      operationId: reclassifySpec
+      summary: Re-run editability classification over stored source facts
+      description: >
+        Re-classifies every paragraph from its persisted `source_facts` (ADR-022 D4)
+        with no source document — the architectural point of the substrate. Supply
+        `rules` to preview candidate conventions; omit them to resolve the spec's
+        library convention profile (built-in default fallback). `preview: true`
+        computes the diff without persisting. Standing human overrides are never
+        touched; the report flags where the fresh machine verdict now disagrees with
+        an override (ADR-022 D2).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rules:
+                  $ref: '#/components/schemas/ConventionRules'
+                preview:
+                  type: boolean
+                  description: Compute the diff without persisting (preview-before-save).
+      responses:
+        '200':
+          description: Before/after classification diff report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ReclassifyReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/paragraphs/{nodeId}/comments/{index}/accept-as-note:
+    post:
+      operationId: acceptCommentAsNote
+      summary: Materialize a margin comment as a note node
+      description: >
+        Inserts the margin comment at `index` (captured in `source_facts.comments`)
+        as a `note` paragraph immediately after the anchor (ADR-022 D4 — never a
+        silent tree mutation). Repeating the call returns 409 with the existing
+        note's id (idempotent contract). The node must belong to the spec (else 403).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+          description: Zero-based index into the anchor's source_facts.comments.
+      responses:
+        '201':
+          description: Note node created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [noteId]
+                        properties:
+                          noteId:
+                            type: string
+                            format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Comment already accepted — the existing note's id travels back as `noteId`.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      noteId:
+                        type: string
+                        format: uuid
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/lineage:
     get:
       operationId: getSpecLineage
@@ -3071,6 +3181,8 @@ components:
                 $ref: '#/components/schemas/SignalConflict'
             sourceFacts:
               $ref: '#/components/schemas/SourceFacts'
+            editability:
+              $ref: '#/components/schemas/SpecNodeEditability'
 
     SpecTree:
       type: object
@@ -4002,6 +4114,70 @@ components:
               count:
                 type: integer
                 description: Number of voters that carried this value
+
+    # ── Editability classification (ADR-022) ────────────────────────────────────
+
+    SpecNodeEditability:
+      type: object
+      required: [value, confidence, evidence]
+      properties:
+        value:
+          type: string
+          enum: [locked, editable, choice, note]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        evidence:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        override:
+          type: string
+          enum: [locked, editable, choice, note]
+
+    ReclassifyReport:
+      type: object
+      required: [specId, persisted, total, changed, entries]
+      properties:
+        specId:
+          type: string
+          format: uuid
+        persisted:
+          type: boolean
+          description: false on a preview pass (diff computed, nothing written).
+        total:
+          type: integer
+          minimum: 0
+        changed:
+          type: integer
+          minimum: 0
+          description: Entries whose machine value changed from before to after.
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/EditabilityDiffEntry'
+
+    EditabilityDiffEntry:
+      type: object
+      required: [nodeId, before, after, overrideDisagrees]
+      properties:
+        nodeId:
+          type: string
+          format: uuid
+        before:
+          oneOf:
+            - type: string
+              enum: [locked, editable, choice, note]
+            - type: 'null'
+          description: Machine classification before this pass (null = was unclassified).
+        after:
+          type: string
+          enum: [locked, editable, choice, note]
+        overrideDisagrees:
+          type: boolean
+          description: A standing human override now differs from the fresh machine verdict.
 
     # ── Editing conventions (ADR-022 O-10) ──────────────────────────────────────
 
