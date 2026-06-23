@@ -116,8 +116,43 @@ describe('associations surface in reads', () => {
       label: 'para link',
       url: 'https://example.com/p.pdf',
     });
+    // Seed a child paragraph so ancestors is non-empty and the isolation
+    // assertion below is meaningful (not a vacuous empty-array pass).
+    const child = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, $2, 'paragraph', 'Child paragraph.', 2) RETURNING id`,
+      [specId, paragraphId]
+    );
+    const childId = child.rows[0]!.id;
+    const result = await getParagraphWithAncestors(childId);
+    // The child has no associations; the parent (ancestor) carries one —
+    // confirm the ancestor does NOT carry associations (leaf-only contract).
+    expect(result?.node.associations).toBeUndefined();
+    expect(result?.ancestors.every((anc) => !('associations' in anc))).toBe(true);
+    // Verify the parent-paragraph associations are still queryable directly.
+    const parentResult = await getParagraphWithAncestors(paragraphId);
+    expect(parentResult?.node.associations).toHaveLength(1);
+    expect(parentResult?.node.associations?.[0]?.id).toBe(a.id);
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [childId]);
+  });
+});
+
+describe('associations survive spec regeneration (keyed on paragraph UUID)', () => {
+  it('keeps the association attached after the paragraph text + spec version change', async () => {
+    const a = await createAssociation(paragraphId, {
+      label: 'survives regen',
+      url: 'https://example.com/keep.pdf',
+    });
+    // Simulate a regenerate/merge: text rewritten, spec content_version bumped,
+    // but the paragraph UUID (the w:sdt anchor) is preserved.
+    await pool.query(
+      `UPDATE paragraphs SET text = 'Regenerated text', base_version = base_version + 1 WHERE id = $1`,
+      [paragraphId]
+    );
+    await pool.query(`UPDATE specs SET content_version = content_version + 1 WHERE id = $1`, [
+      specId,
+    ]);
     const result = await getParagraphWithAncestors(paragraphId);
-    expect(result?.node.associations).toHaveLength(1);
-    expect(result?.node.associations?.[0]?.id).toBe(a.id);
+    expect(result?.node.associations?.map((x) => x.id)).toContain(a.id);
   });
 });
