@@ -40,7 +40,10 @@ describe('summarizeEditability', () => {
   it('counts effective values across the whole tree and flags low-confidence nodes', () => {
     const summary = summarizeEditability(tree);
     expect(summary.counts).toEqual({ locked: 1, editable: 2, choice: 0, note: 1 });
-    expect(summary.lowConfidence.map((e) => e.nodeId).sort()).toEqual(['b', 'd']);
+    expect(summary.lowConfidence.map((e) => e.nodeId).sort((a, b) => a.localeCompare(b))).toEqual([
+      'b',
+      'd',
+    ]);
     expect(summary.lowConfidence.every((e) => e.confidence < LOW_CONFIDENCE_THRESHOLD)).toBe(true);
   });
 
