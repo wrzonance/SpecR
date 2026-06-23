@@ -369,6 +369,83 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/finalize:
+    post:
+      operationId: finalizeSpec
+      summary: Finalize onboarding (review → active)
+      description: >
+        Marks a human as having reviewed the machine's first pass: flips
+        `onboardingStatus` from `review` to `active` (ADR-022 D6). Also snapshots
+        the spec's resolved convention rules into its library's OWN convention
+        profile, so the next import from that library self-classifies against them
+        instead of falling back to the built-in default. `active` does NOT seal the
+        spec — corrections (#136), reclassify, conventions (#137) and style-source
+        (#138) endpoints keep working. Idempotent: finalizing an already-active spec
+        returns 200 unchanged.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Onboarding finalized (or already active)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [onboardingStatus]
+                        properties:
+                          onboardingStatus:
+                            type: string
+                            enum: [active]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/reopen:
+    post:
+      operationId: reopenSpec
+      summary: Reopen onboarding (active → review)
+      description: >
+        Flips `onboardingStatus` from `active` back to `review` (ADR-022 D6).
+        Purely informational — no endpoint behavior gates on it. Reopening an
+        already-`review` spec returns 200 unchanged.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Onboarding reopened (or already in review)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [onboardingStatus]
+                        properties:
+                          onboardingStatus:
+                            type: string
+                            enum: [review]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/paragraphs/{nodeId}/comments/{index}/accept-as-note:
     post:
       operationId: acceptCommentAsNote
@@ -3500,6 +3577,12 @@ components:
           oneOf:
             - $ref: '#/components/schemas/StyleSource'
             - type: 'null'
+        onboardingStatus:
+          description: >
+            Whether a human has reviewed the machine's first pass (ADR-022 D6).
+            Only present on GET /specs/{id}.
+          type: string
+          enum: [review, active]
         warnings:
           type: array
           items:
