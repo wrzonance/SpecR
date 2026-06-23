@@ -200,6 +200,40 @@ export async function upsertLibraryConvention(
 }
 
 /**
+ * Seed a library's own convention profile ONLY when it has none — insert-only
+ * (ON CONFLICT DO NOTHING), the read-modify-write-safe sibling of
+ * upsertLibraryConvention (#139). Used by onboarding finalize to snapshot the
+ * resolved rules into the library: if a profile already exists (or a concurrent
+ * PUT created one), the user's edit is left intact rather than overwritten with
+ * built-in defaults. Returns true when a row was inserted, false when one was
+ * already present. Pass the transaction client so the seed is atomic with the
+ * finalize flip.
+ */
+export async function seedLibraryConventionIfAbsent(
+  libraryId: string,
+  name: string,
+  rules: ConventionRules,
+  db: Queryable = pool
+): Promise<boolean> {
+  const validated = validateRules(rules);
+  try {
+    const result = await db.query<{ id: string }>(
+      `INSERT INTO editing_conventions (library_id, name, rules)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (library_id) WHERE library_id IS NOT NULL DO NOTHING
+       RETURNING id`,
+      [libraryId, name, JSON.stringify(validated)]
+    );
+    return (result.rowCount ?? 0) > 0;
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`seedLibraryConventionIfAbsent: failed for library ${libraryId}`, {
+      cause: err,
+    });
+  }
+}
+
+/**
  * Load the convention profile for a library, falling back to the built-in
  * industry default when the library has no profile of its own (ADR-022 D3).
  */

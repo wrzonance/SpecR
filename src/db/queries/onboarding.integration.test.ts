@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { pool } from '../index.js';
 import { getOnboardingStatus, finalizeOnboarding, reopenOnboarding } from './onboarding.js';
 import { createLibrary } from './libraries.js';
-import { getConventionForLibrary } from './conventions.js';
+import { getConventionForLibrary, upsertLibraryConvention } from './conventions.js';
 
 const MISSING_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -61,6 +61,62 @@ describe('onboarding status transitions', () => {
     expect(afterOwn.rowCount).toBe(1);
     const resolved = await getConventionForLibrary(lib.id);
     expect(resolved?.libraryId).toBe(lib.id);
+  });
+
+  it('finalize: insert-only snapshot — existing library profile is left untouched', async () => {
+    // Finding 2 regression (Codex P2): a library that ALREADY owns a convention
+    // profile must keep its rules AND not be rewritten at all through finalize —
+    // the snapshot is seed-only (ON CONFLICT DO NOTHING), never a DO UPDATE. We
+    // assert updated_at is byte-for-byte unchanged: a REPLACE-style upsert would
+    // bump it (and, under the documented race, clobber the user's rules).
+    const lib = await createLibrary({ tier: 'company', name: 'lib-fin-keep', owner: 'o' });
+    const distinctive = { noteBanners: ['^FIRM-SPECIFIC BANNER$'] };
+    await upsertLibraryConvention(lib.id, 'Firm Profile', distinctive);
+    const before = await pool.query<{ updated_at: Date; rules: unknown }>(
+      `SELECT updated_at, rules FROM editing_conventions WHERE library_id = $1`,
+      [lib.id]
+    );
+    const specId = await makeSpec(lib.id, 'review');
+
+    const out = await finalizeOnboarding(specId);
+    expect(out.status).toBe('finalized');
+
+    // The library still owns exactly one profile, untouched: same updated_at,
+    // same rules, same name.
+    const after = await pool.query<{ updated_at: Date; rules: unknown }>(
+      `SELECT updated_at, rules FROM editing_conventions WHERE library_id = $1`,
+      [lib.id]
+    );
+    expect(after.rowCount).toBe(1);
+    expect(after.rows[0]?.updated_at).toEqual(before.rows[0]?.updated_at);
+    const resolved = await getConventionForLibrary(lib.id);
+    expect(resolved?.name).toBe('Firm Profile');
+    expect(resolved?.rules.noteBanners).toEqual(['^FIRM-SPECIFIC BANNER$']);
+  });
+
+  it('finalize: snapshot-creates — a library with no profile gains one from the resolved rules', async () => {
+    const lib = await createLibrary({ tier: 'company', name: 'lib-fin-seed', owner: 'o' });
+    const specId = await makeSpec(lib.id, 'review');
+    const builtIn = await getConventionForLibrary(lib.id); // resolves to built-in default
+    expect(builtIn?.libraryId).toBeNull();
+
+    const out = await finalizeOnboarding(specId);
+    expect(out.status).toBe('finalized');
+
+    const resolved = await getConventionForLibrary(lib.id);
+    expect(resolved?.libraryId).toBe(lib.id);
+    expect(resolved?.rules).toEqual(builtIn?.rules);
+  });
+
+  it('finalize: delete-then-finalize returns not-found, never a false success', async () => {
+    // Finding 1 regression (CodeRabbit Major): the SELECT … FOR UPDATE + UPDATE
+    // run in one transaction, so a spec deleted before finalize cannot yield a
+    // 0-row UPDATE reported as 'finalized'.
+    const lib = await createLibrary({ tier: 'company', name: 'lib-fin-del', owner: 'o' });
+    const specId = await makeSpec(lib.id, 'review');
+    await pool.query(`DELETE FROM specs WHERE id = $1`, [specId]);
+    expect((await finalizeOnboarding(specId)).status).toBe('not-found');
+    expect((await reopenOnboarding(specId)).status).toBe('not-found');
   });
 
   it('finalize on an already-active spec is an idempotent no-op', async () => {

@@ -163,6 +163,7 @@ export {
   listBuiltInConventions,
   getConventionForLibrary,
   upsertLibraryConvention,
+  seedLibraryConventionIfAbsent,
   BUILT_IN_CONVENTION_NAME,
   ConventionValidationError,
   ConventionNotFoundError,
