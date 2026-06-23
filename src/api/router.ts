@@ -84,6 +84,7 @@ import {
   putPackageRequiredSectionsHandler,
 } from './required-sections.js';
 import { getCoordinationReportHandler } from './coordination.js';
+import { patchEditabilityHandler } from './editability.js';
 
 const parseRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
@@ -100,6 +101,7 @@ router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
+router.patch('/specs/:id/paragraphs/:nodeId/editability', patchEditabilityHandler);
 router.get('/specs/:id/lock', getLockHandler);
 router.put('/specs/:id/lock', acquireLockHandler);
 router.delete('/specs/:id/lock', releaseLockHandler);

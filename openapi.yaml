@@ -261,6 +261,65 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/paragraphs/{nodeId}/editability:
+    patch:
+      operationId: patchEditability
+      summary: Set or clear a paragraph's human editability override
+      description: >
+        Records the reviewer's correction as the paragraph's `editability_override`
+        (ADR-022 D2), stored beside — never merged into — the machine classification.
+        `editability: null` clears the override so the effective value falls back to
+        the machine verdict. The node must belong to the spec in the path (else 403).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [editability]
+              properties:
+                editability:
+                  oneOf:
+                    - type: string
+                      enum: [locked, editable, choice, note]
+                    - type: 'null'
+                  description: Override value, or null to clear it.
+      responses:
+        '200':
+          description: Override applied (or cleared)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [nodeId, editability]
+                        properties:
+                          nodeId:
+                            type: string
+                            format: uuid
+                          editability:
+                            oneOf:
+                              - type: string
+                                enum: [locked, editable, choice, note]
+                              - type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/lineage:
     get:
       operationId: getSpecLineage
