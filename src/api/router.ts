@@ -70,6 +70,7 @@ import {
   createClientLibraryHandler,
   renameLibraryHandler,
 } from './libraries.js';
+import { importLibraryHandler, importJobHandler } from './onboarding.js';
 import {
   listRevisionNomenclatureProfilesHandler,
   getProjectRevisionNomenclatureHandler,
@@ -181,6 +182,10 @@ router.post(
 router.get('/conventions', listConventionsHandler);
 router.get('/libraries', listLibrariesHandler);
 router.post('/libraries/clients', createClientLibraryHandler);
+// Literal `/libraries/import/jobs/:jobId` is 3 segments, so it never collides
+// with the 2-segment `/libraries/:id/...` routes below (#135 / O-8).
+router.get('/libraries/import/jobs/:jobId', importJobHandler);
+router.post('/libraries/:id/import', parseRateLimit, upload.single('file'), importLibraryHandler);
 router.get('/libraries/:id/specs', listLibrarySpecsHandler);
 router.patch('/libraries/:id', renameLibraryHandler);
 router.get('/libraries/:id/conventions', getLibraryConventionHandler);

@@ -5,15 +5,14 @@ import type { Request, Response } from 'express';
 import { assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { createJob, updateJob, getJob, type ParseStage } from '../lib/jobs.js';
 import { parsePool } from '../lib/parse-pool.js';
-import type { WorkerOutput } from '../lib/parse-worker.js';
+import { workerOutputSchema, type WorkerOutput } from '../lib/parse-worker.js';
 import { persistParsedSpec } from '../db/index.js';
 import type { OriginMeta } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
-import { ParseWarningSchema, SecRefSchema } from '../ast/schemas.js';
-import { SectionNumberSchema, parseSectionNumberCandidate } from '../lib/section-number.js';
+import { parseSectionNumberCandidate } from '../lib/section-number.js';
 
 interface ParseBody {
   readonly section?: string;
@@ -107,18 +106,6 @@ export function parseJobHandler(req: Request, res: Response): void {
 function countNodes(nodes: readonly SpecNode[]): number {
   return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
 }
-
-const workerOutputSchema = z.object({
-  tree: z.object({
-    id: z.string(),
-    section: z.union([SectionNumberSchema, z.literal('unknown')]),
-    title: z.string(),
-    parts: z.array(z.unknown()),
-    warnings: z.array(ParseWarningSchema).optional(),
-  }),
-  refs: z.array(SecRefSchema).default([]),
-  capabilities: z.array(z.string()).optional(),
-});
 
 const SECTION_GATE_MESSAGE =
   'parsed section number is not a valid CSI section (expected NN NN NN[.NN[ NN]])';

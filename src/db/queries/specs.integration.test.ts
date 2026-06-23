@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { pool } from '../index.js';
+import { randomUUID } from 'node:crypto';
+import { pool, createLibrary } from '../index.js';
 import { createSpec, persistParsedSpec, updateSpec } from './specs.js';
 import type { OriginMeta } from './specs.js';
 import { insertTree } from './paragraphs.js';
@@ -374,5 +375,46 @@ describe('updateSpec — content_version bump (#93)', () => {
     const r = await pool.query('SELECT content_version FROM specs WHERE id = $1', [id]);
     expect(r.rows[0]).toMatchObject({ content_version: 2 });
     await pool.query(`DELETE FROM specs WHERE section = '99 00 10'`);
+  });
+});
+
+describe('persistParsedSpec — explicit libraryId target (O-8)', () => {
+  const TEST_LIB = 'lib-persist-target-test';
+
+  afterEach(async () => {
+    await pool.query(
+      `DELETE FROM specs WHERE library_id IN (SELECT id FROM libraries WHERE name = $1)`,
+      [TEST_LIB]
+    );
+    await pool.query(`DELETE FROM libraries WHERE name = $1`, [TEST_LIB]);
+  });
+
+  it('persists the spec into the supplied library, not the source-derived one', async () => {
+    const lib = await createLibrary({ tier: 'company', name: TEST_LIB, owner: TEST_LIB });
+    // A 'ufgs' source would normally route to the UFGS Reference library — the
+    // explicit libraryId must win. Random paragraph id so reruns never collide.
+    const specId = await persistParsedSpec({
+      tree: {
+        id: 'placeholder',
+        section: '09 91 26',
+        title: 'Interior Painting',
+        parts: [
+          {
+            id: randomUUID(),
+            type: 'part',
+            text: 'PART 1 GENERAL',
+            children: [],
+            meta: { source: 'ufgs' },
+          },
+        ],
+      },
+      refs: [],
+      libraryId: lib.id,
+    });
+    const row = await pool.query<{ library_id: string }>(
+      `SELECT library_id FROM specs WHERE id = $1`,
+      [specId]
+    );
+    expect(row.rows[0]?.library_id).toBe(lib.id);
   });
 });

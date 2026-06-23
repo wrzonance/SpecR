@@ -1,0 +1,94 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Request, Response } from 'express';
+
+// Mock only process-edge collaborators; the REAL workerOutputSchema
+// (src/lib/parse-worker.ts) stays in play so the boundary validation it provides
+// is exercised, not stubbed.
+vi.mock('../parser/index.js', () => ({
+  assertDocxSafe: vi.fn().mockResolvedValue(undefined),
+  assertSecSafe: vi.fn(),
+  analyzeDocxStyles: vi.fn(),
+  deriveTemplate: vi.fn(),
+}));
+vi.mock('../lib/parse-pool.js', () => ({
+  parsePool: { run: vi.fn() },
+}));
+vi.mock('../lib/jobs.js', () => ({
+  createOnboardingJob: vi.fn().mockReturnValue('onboard-job-id'),
+  updateOnboardingJob: vi.fn(),
+  getOnboardingJob: vi.fn(),
+}));
+vi.mock('../db/index.js', () => ({
+  findLibraryById: vi.fn().mockResolvedValue({ id: 'lib-1', tier: 'company', name: 'L' }),
+  persistParsedSpec: vi.fn().mockResolvedValue('spec-1'),
+  createTemplateWithRules: vi.fn(),
+  getTemplateByName: vi.fn(),
+  bulkUpsertTemplateRules: vi.fn(),
+  setSpecStyleSource: vi.fn(),
+  reclassifySpec: vi.fn(),
+  getSpecTree: vi.fn(),
+}));
+vi.mock('../lib/logger.js', () => ({
+  logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
+}));
+
+function makeRes(): Response {
+  return {
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn().mockReturnThis(),
+  } as unknown as Response;
+}
+
+function secReq(): Request {
+  return {
+    params: { id: '11111111-1111-4111-8111-111111111111' },
+    file: { originalname: 'master.sec', mimetype: 'text/xml', buffer: Buffer.from('<?xml?>') },
+  } as unknown as Request;
+}
+
+beforeEach(() => {
+  vi.resetModules();
+  vi.clearAllMocks();
+});
+
+describe('importLibraryHandler — boundary + failure contract', () => {
+  it('fails the job with stage:"failed" when worker output is malformed (boundary validation)', async () => {
+    const { parsePool } = await import('../lib/parse-pool.js');
+    const { updateOnboardingJob } = await import('../lib/jobs.js');
+    // Malformed: no `tree` → workerOutputSchema.parse throws a ZodError that the
+    // pipeline's catch turns into a clean, terminal failure (not an uncaught cast).
+    vi.mocked(parsePool.run).mockResolvedValueOnce({ refs: [] });
+
+    const { importLibraryHandler } = await import('./onboarding.js');
+    const res = makeRes();
+    await importLibraryHandler(secReq(), res);
+    expect(res.status).toHaveBeenCalledWith(202);
+
+    await vi.waitFor(() => {
+      expect(updateOnboardingJob).toHaveBeenCalledWith(
+        'onboard-job-id',
+        expect.objectContaining({ status: 'failed', stage: 'failed' })
+      );
+    });
+    // The failure carries a non-empty error message (cause-chained, not swallowed).
+    const failCall = vi
+      .mocked(updateOnboardingJob)
+      .mock.calls.find((c) => c[1].status === 'failed');
+    expect(typeof failCall?.[1].error).toBe('string');
+    expect(failCall?.[1].error?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('returns 404 without scheduling a job when the library is unknown', async () => {
+    const { findLibraryById, persistParsedSpec } = await import('../db/index.js');
+    vi.mocked(findLibraryById).mockResolvedValueOnce(null);
+    const { createOnboardingJob } = await import('../lib/jobs.js');
+
+    const { importLibraryHandler } = await import('./onboarding.js');
+    const res = makeRes();
+    await importLibraryHandler(secReq(), res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(createOnboardingJob).not.toHaveBeenCalled();
+    expect(persistParsedSpec).not.toHaveBeenCalled();
+  });
+});
