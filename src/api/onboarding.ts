@@ -27,13 +27,13 @@ import {
   type OnboardingJobResult,
 } from '../lib/jobs.js';
 import { parsePool } from '../lib/parse-pool.js';
-import type { WorkerOutput } from '../lib/parse-worker.js';
+import { workerOutputSchema, type WorkerOutput } from '../lib/parse-worker.js';
 import { summarizeEditability } from './onboarding-report.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
-import type { SpecTree } from '../ast/types.js';
+import type { SpecTree } from '../ast/index.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const ALLOWED_EXT = new Set(['.docx', '.sec', '.txt']);
@@ -130,8 +130,11 @@ async function runParseAndPersist(
   filename: string
 ): Promise<{ specId: string; tree: SpecTree }> {
   progress(jobId, 'parsing', 20);
+  // The worker runs in another thread — validate its structured-clone return at
+  // the boundary (Zod), mirroring parse.ts. A malformed payload throws a ZodError
+  // that processOnboardingJob turns into a clean, cause-chained job failure.
   const workerRaw: unknown = await parsePool.run({ buffer, ext });
-  const { tree, refs } = workerRaw as WorkerOutput;
+  const { tree, refs } = workerOutputSchema.parse(workerRaw) as WorkerOutput;
   progress(jobId, 'persisting', 50);
   const specId = await persistParsedSpec({
     tree,
@@ -233,6 +236,13 @@ async function processOnboardingJob(
     updateOnboardingJob(jobId, { status: 'complete', stage: 'complete', pct: 100, result });
   } catch (err) {
     logger.error({ err, jobId }, 'onboarding job failed');
-    updateOnboardingJob(jobId, { status: 'failed', error: jobErrorMessage(err) });
+    // Set the terminal stage too, so a polling client never sees status:'failed'
+    // stranded on the last running stage (e.g. 'deriving-style').
+    updateOnboardingJob(jobId, {
+      status: 'failed',
+      stage: 'failed',
+      pct: 100,
+      error: jobErrorMessage(err),
+    });
   }
 }

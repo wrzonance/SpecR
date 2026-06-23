@@ -1,7 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { DerivationReport } from '../parser/index.js';
-import type { ParseWarning } from '../ast/types.js';
-import type { Editability } from '../ast/index.js';
+import type { ParseWarning, Editability } from '../ast/index.js';
 
 export type ParseStage =
   | 'queued'

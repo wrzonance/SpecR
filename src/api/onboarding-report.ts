@@ -1,5 +1,4 @@
-import type { SpecTree, SpecNode } from '../ast/types.js';
-import type { Editability } from '../ast/index.js';
+import type { SpecTree, SpecNode, Editability } from '../ast/index.js';
 import type { EditabilitySummary } from '../lib/jobs.js';
 
 /** Below this machine confidence, a classification is surfaced for human review. */
