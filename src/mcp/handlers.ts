@@ -422,3 +422,5 @@ export async function handleGetSpecDiff({
     return toolError('Internal error — diff failed');
   }
 }
+
+export { handleCoordinationReport } from './coordination-handler.js';
