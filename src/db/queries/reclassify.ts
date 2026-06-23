@@ -1,10 +1,16 @@
 import { pool, DatabaseError } from '../index.js';
-import { setEditabilityOverride, clearEditabilityOverride } from './editability.js';
-import { ClassificationSchema, OverrideSchema } from './editability.js';
+import {
+  setEditabilityOverride,
+  clearEditabilityOverride,
+  ClassificationSchema,
+  OverrideSchema,
+  storeClassifications,
+} from './editability.js';
 import { getSpecTree } from './specs.js';
 import { getConventionForLibrary } from './conventions.js';
-import { storeClassifications } from './editability.js';
 import { classify } from '../../conventions/index.js';
+import { SourceFactsSchema } from '../../ast/index.js';
+import type { PoolClient } from 'pg';
 import type { ConventionRules, Editability } from '../../ast/index.js';
 import type { ClassifyResult } from '../../conventions/index.js';
 
@@ -173,5 +179,115 @@ export async function clearSpecEditabilityOverride(
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError('clearSpecEditabilityOverride failed', { cause: err });
+  }
+}
+
+// ── acceptCommentAsNote ────────────────────────────────────────────────────
+
+export type AcceptNoteOutcome =
+  | { readonly status: 'created'; readonly noteId: string }
+  | { readonly status: 'already-accepted'; readonly noteId: string }
+  | { readonly status: 'not-found' }
+  | { readonly status: 'wrong-spec' }
+  | { readonly status: 'no-comment' };
+
+interface AnchorRow {
+  readonly spec_id: string;
+  readonly parent_id: string | null;
+  readonly position: number;
+  readonly source_facts: unknown;
+}
+
+function commentTextAt(sourceFacts: unknown, index: number): string | null {
+  const facts = SourceFactsSchema.parse(sourceFacts);
+  const comment = facts.comments?.[index];
+  return comment ? comment.text : null;
+}
+
+async function findExistingNote(
+  client: PoolClient,
+  parentId: string | null,
+  anchorId: string,
+  index: number
+): Promise<string | null> {
+  const existing = await client.query<{ id: string }>(
+    `SELECT id FROM paragraphs
+     WHERE node_type = 'note'
+       AND parent_id IS NOT DISTINCT FROM $1
+       AND source_facts #> '{acceptedComment}' = $2::jsonb`,
+    [parentId, JSON.stringify({ anchorNodeId: anchorId, index })]
+  );
+  return existing.rows[0]?.id ?? null;
+}
+
+async function insertNoteSibling(
+  client: PoolClient,
+  anchor: AnchorRow,
+  specId: string,
+  anchorId: string,
+  index: number,
+  text: string
+): Promise<string> {
+  await client.query(
+    `UPDATE paragraphs SET position = position + 1
+     WHERE spec_id = $1 AND parent_id IS NOT DISTINCT FROM $2 AND position > $3`,
+    [specId, anchor.parent_id, anchor.position]
+  );
+  const facts = JSON.stringify({ acceptedComment: { anchorNodeId: anchorId, index } });
+  const inserted = await client.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, source_facts)
+     VALUES ($1, $2, 'note', $3, $4, $5::jsonb) RETURNING id`,
+    [specId, anchor.parent_id, text, anchor.position + 1, facts]
+  );
+  const row = inserted.rows[0];
+  if (!row) throw new DatabaseError('acceptCommentAsNote: insert returned no row');
+  return row.id;
+}
+
+async function runAccept(
+  client: PoolClient,
+  specId: string,
+  nodeId: string,
+  index: number
+): Promise<AcceptNoteOutcome> {
+  const anchorRes = await client.query<AnchorRow>(
+    `SELECT spec_id, parent_id, position, source_facts FROM paragraphs WHERE id = $1 FOR UPDATE`,
+    [nodeId]
+  );
+  const anchor = anchorRes.rows[0];
+  if (!anchor) return { status: 'not-found' };
+  if (anchor.spec_id !== specId) return { status: 'wrong-spec' };
+
+  const text = commentTextAt(anchor.source_facts, index);
+  if (text === null) return { status: 'no-comment' };
+
+  const existing = await findExistingNote(client, anchor.parent_id, nodeId, index);
+  if (existing) return { status: 'already-accepted', noteId: existing };
+
+  const noteId = await insertNoteSibling(client, anchor, specId, nodeId, index, text);
+  return { status: 'created', noteId };
+}
+
+export async function acceptCommentAsNote(
+  specId: string,
+  nodeId: string,
+  index: number
+): Promise<AcceptNoteOutcome> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const outcome = await runAccept(client, specId, nodeId, index);
+    await client.query(outcome.status === 'created' ? 'COMMIT' : 'ROLLBACK');
+    return outcome;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* best-effort */
+    }
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError('acceptCommentAsNote failed', { cause: err });
+  } finally {
+    client.release();
   }
 }

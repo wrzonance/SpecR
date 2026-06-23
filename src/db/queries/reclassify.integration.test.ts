@@ -4,6 +4,7 @@ import {
   setSpecEditabilityOverride,
   clearSpecEditabilityOverride,
   reclassifySpec,
+  acceptCommentAsNote,
 } from './reclassify.js';
 
 let specId: string;
@@ -121,5 +122,63 @@ describe('reclassifySpec', () => {
   it('returns not-found for an unknown spec', async () => {
     const out = await reclassifySpec('00000000-0000-0000-0000-000000000000', { rules: {} });
     expect(out.status).toBe('not-found');
+  });
+});
+
+describe('acceptCommentAsNote', () => {
+  it('inserts a note adjacent to the anchor; repeat is 409 (already-accepted)', async () => {
+    const anchor = await pool.query<{ id: string; position: number }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Anchor para', 10, $2::jsonb) RETURNING id, position`,
+      [
+        specId,
+        JSON.stringify({ comments: [{ author: 'JDoe', text: 'Verify w/ owner', anchor: [0, 5] }] }),
+      ]
+    );
+    const anchorId = anchor.rows[0]!.id;
+
+    const first = await acceptCommentAsNote(specId, anchorId, 0);
+    expect(first.status).toBe('created');
+    if (first.status !== 'created') throw new Error('expected created');
+
+    // the note exists, is a sibling, text matches, positioned right after anchor
+    const note = await pool.query<{
+      node_type: string;
+      text: string;
+      position: number;
+      parent_id: string | null;
+    }>(`SELECT node_type, text, position, parent_id FROM paragraphs WHERE id = $1`, [first.noteId]);
+    expect(note.rows[0]!.node_type).toBe('note');
+    expect(note.rows[0]!.text).toBe('Verify w/ owner');
+    expect(note.rows[0]!.position).toBe(11);
+
+    const second = await acceptCommentAsNote(specId, anchorId, 0);
+    expect(second.status).toBe('already-accepted');
+    if (second.status === 'already-accepted') expect(second.noteId).toBe(first.noteId);
+
+    await pool.query(`DELETE FROM paragraphs WHERE id = ANY($1::uuid[])`, [
+      [anchorId, first.noteId],
+    ]);
+  });
+
+  it('returns no-comment for an out-of-range index', async () => {
+    const anchor = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'No comments', 20, '{}'::jsonb) RETURNING id`,
+      [specId]
+    );
+    const out = await acceptCommentAsNote(specId, anchor.rows[0]!.id, 0);
+    expect(out.status).toBe('no-comment');
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [anchor.rows[0]!.id]);
+  });
+
+  it('returns wrong-spec when the anchor belongs to another spec', async () => {
+    const a = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position) VALUES ($1, 'pr1', 'x', 1) RETURNING id`,
+      [specId]
+    );
+    const out = await acceptCommentAsNote(otherSpecId, a.rows[0]!.id, 0);
+    expect(out.status).toBe('wrong-spec');
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [a.rows[0]!.id]);
   });
 });
