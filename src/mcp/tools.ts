@@ -17,6 +17,7 @@ import {
   handleGetSpecDiff,
   handleListProjects,
   handleGetReferences,
+  handleCoordinationReport,
 } from './handlers.js';
 
 type ToolError = {
@@ -286,6 +287,23 @@ async function handleLoadFiles({
   }
 }
 
+function registerCoordinationTools(server: McpServer): void {
+  server.registerTool(
+    'coordination_report',
+    {
+      description:
+        'Project errors-and-omissions report: required-but-absent sections, ' +
+        'present-but-not-required specs, and dangling cross-references. Optional ' +
+        'packageId scopes to one design package. Requires a projectId (see list_projects).',
+      inputSchema: {
+        projectId: z.uuid().describe('Project UUID (from list_projects)'),
+        packageId: z.uuid().optional().describe('Optional design-package UUID to scope the report'),
+      },
+    },
+    handleCoordinationReport
+  );
+}
+
 function registerLoaderTools(server: McpServer): void {
   server.registerTool(
     'load_files',
@@ -318,4 +336,5 @@ export function registerTools(server: McpServer): void {
   registerParserTools(server);
   registerGeneratorTools(server);
   registerLoaderTools(server);
+  registerCoordinationTools(server);
 }

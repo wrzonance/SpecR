@@ -2507,6 +2507,36 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
+  /projects/{id}/coordination-report:
+    get:
+      operationId: getCoordinationReport
+      summary: Project coordination report — required/present/reference findings
+      tags: [projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: packageId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Coordination report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/CoordinationReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
 # ─── Components ───────────────────────────────────────────────────────────────
 
 components:
@@ -2693,6 +2723,75 @@ components:
       # are present); neither is allowed too (an empty PUT clears the scope).
       not:
         required: [sections, seedFrom]
+
+    # ── Coordination Report ────────────────────────────────────────────────────
+
+    CoordinationReport:
+      type: object
+      required: [projectId, packageId, findings, summary, notes]
+      properties:
+        projectId: { type: string, format: uuid }
+        packageId: { type: [string, 'null'], format: uuid }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/CoordinationFinding' }
+        summary: { $ref: '#/components/schemas/CoordinationSummary' }
+        notes:
+          type: array
+          items: { type: string }
+    CoordinationSummary:
+      type: object
+      required: [requiredNotPresent, presentNotRequired, danglingRef, total]
+      properties:
+        requiredNotPresent: { type: integer }
+        presentNotRequired: { type: integer }
+        danglingRef: { type: integer }
+        total: { type: integer }
+    CoordinationFinding:
+      oneOf:
+        - $ref: '#/components/schemas/FindingRequiredNotPresent'
+        - $ref: '#/components/schemas/FindingPresentNotRequired'
+        - $ref: '#/components/schemas/FindingDanglingRef'
+      discriminator:
+        propertyName: type
+        mapping:
+          required_not_present: '#/components/schemas/FindingRequiredNotPresent'
+          present_not_required: '#/components/schemas/FindingPresentNotRequired'
+          dangling_ref: '#/components/schemas/FindingDanglingRef'
+    FindingRequiredNotPresent:
+      type: object
+      required: [type, section, title, requiredId]
+      properties:
+        type: { type: string, enum: [required_not_present] }
+        section: { type: string }
+        title: { type: [string, 'null'] }
+        requiredId: { type: string, format: uuid }
+    FindingPresentNotRequired:
+      type: object
+      required: [type, section, specId, title]
+      properties:
+        type: { type: string, enum: [present_not_required] }
+        section: { type: string }
+        specId: { type: string, format: uuid }
+        title: { type: string }
+    FindingDanglingRef:
+      type: object
+      required: [type, refId, sourceSpecId, sourceSpecSection, targetSpecSection, referenceText, availableFrom]
+      properties:
+        type: { type: string, enum: [dangling_ref] }
+        refId: { type: string, format: uuid }
+        sourceSpecId: { type: string, format: uuid }
+        sourceSpecSection: { type: string }
+        targetSpecSection: { type: string }
+        referenceText: { type: string }
+        availableFrom:
+          type: array
+          items:
+            type: object
+            required: [libraryId, name]
+            properties:
+              libraryId: { type: string, format: uuid }
+              name: { type: string }
 
     # ── Parse ──────────────────────────────────────────────────────────────────
 
