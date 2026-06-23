@@ -230,6 +230,26 @@ function commentTextAt(sourceFacts: unknown, index: number): string | null {
   return comment ? comment.text : null;
 }
 
+// The materialized note for a given (anchor, index), matched on provenance
+// alone — `anchorNodeId` is a globally-unique paragraph PK, so it identifies the
+// note without the parent_id and without locking the anchor. This is the
+// fast/no-op path: an already-accepted comment writes nothing, so it must not
+// require writability. The in-lock `findExistingNote` below stays the
+// authoritative race check on the write path.
+async function findExistingNoteByProvenance(
+  client: PoolClient,
+  anchorId: string,
+  index: number
+): Promise<string | null> {
+  const existing = await client.query<{ id: string }>(
+    `SELECT id FROM paragraphs
+     WHERE node_type = 'note'
+       AND source_facts #> '{acceptedComment}' = $1::jsonb`,
+    [JSON.stringify({ anchorNodeId: anchorId, index })]
+  );
+  return existing.rows[0]?.id ?? null;
+}
+
 async function findExistingNote(
   client: PoolClient,
   parentId: string | null,
@@ -283,10 +303,19 @@ async function runAccept(
   nodeId: string,
   index: number
 ): Promise<AcceptNoteOutcome> {
-  // LOCK ORDER (invariant): the spec row is gated/locked BEFORE the paragraph
-  // FOR UPDATE — identical to updateParagraphText. Both write paths must take
-  // the spec lock first, then the paragraph lock; inverting it here would let a
-  // concurrent paragraph PATCH and accept-as-note deadlock holding one lock each.
+  // Fast no-op path: if the comment was already accepted, return the stored
+  // noteId WITHOUT requiring writability — a retry writes nothing, and the
+  // client (e.g. recovering from a timed-out first request) needs the id back
+  // even on an archived/locked spec. Provenance alone identifies the note, so
+  // this takes no lock and stays off the write path's lock-order entirely.
+  const accepted = await findExistingNoteByProvenance(client, nodeId, index);
+  if (accepted) return { status: 'already-accepted', noteId: accepted };
+
+  // WRITE PATH. LOCK ORDER (invariant): the spec row is gated/locked BEFORE the
+  // paragraph FOR UPDATE — identical to updateParagraphText. Both write paths
+  // must take the spec lock first, then the paragraph lock; inverting it here
+  // would let a concurrent paragraph PATCH and accept-as-note deadlock holding
+  // one lock each.
   await assertSpecWritable(client, specId);
 
   const anchorRes = await client.query<AnchorRow>(

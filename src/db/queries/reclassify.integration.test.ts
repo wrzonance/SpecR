@@ -218,6 +218,35 @@ describe('acceptCommentAsNote', () => {
     ]);
   });
 
+  it('idempotent retry returns the noteId even when the spec is now archived', async () => {
+    // Clear any leftover from a prior failed run (project_id not ON DELETE CASCADE).
+    await pool.query(`DELETE FROM specs WHERE section = '00 00 07' AND title = 'archived-retry'`);
+    const s = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id) VALUES ('00 00 07', 'archived-retry', 'arcat', $1) RETURNING id`,
+      [libraryId]
+    );
+    const archSpec = s.rows[0]!.id;
+    const anchor = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Anchor', 1, $2::jsonb) RETURNING id`,
+      [archSpec, JSON.stringify({ comments: [{ author: 'A', text: 'note me', anchor: [0, 4] }] })]
+    );
+    const anchorId = anchor.rows[0]!.id;
+    const first = await acceptCommentAsNote(archSpec, anchorId, 0);
+    expect(first.status).toBe('created');
+    if (first.status !== 'created') throw new Error('expected created');
+
+    // Now archive the spec. A retry writes nothing (note already exists), so it
+    // must NOT require writability — it returns the documented idempotent 409 +
+    // the SAME noteId, never a generic gate error.
+    await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [archSpec]);
+    const retry = await acceptCommentAsNote(archSpec, anchorId, 0);
+    expect(retry.status).toBe('already-accepted');
+    if (retry.status === 'already-accepted') expect(retry.noteId).toBe(first.noteId);
+
+    await pool.query(`DELETE FROM specs WHERE id = $1`, [archSpec]);
+  });
+
   it('returns no-comment for an out-of-range index', async () => {
     const anchor = await pool.query<{ id: string }>(
       `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
