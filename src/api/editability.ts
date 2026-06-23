@@ -72,9 +72,10 @@ export async function reclassifyHandler(req: Request, res: Response): Promise<vo
     res.status(400).json({ success: false, error: 'invalid spec id' });
     return;
   }
-  // A bodyless POST (req.body === undefined) is valid: omitting `rules` means
-  // "resolve the stored library profile". Default to {} so it is not a 400.
-  const body = ReclassifyBodySchema.safeParse(req.body ?? {});
+  // Only a truly absent body (undefined) means "omit rules → resolve the stored
+  // profile". An explicit non-object payload (e.g. JSON `null`) must fall through
+  // to the schema and be rejected — never coerced to {} and silently run.
+  const body = ReclassifyBodySchema.safeParse(req.body === undefined ? {} : req.body);
   if (!body.success) {
     res.status(400).json({ success: false, error: 'malformed reclassify body' });
     return;

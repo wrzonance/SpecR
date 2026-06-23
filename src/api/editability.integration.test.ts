@@ -216,6 +216,21 @@ describe('POST /specs/:id/reclassify', () => {
     expect(res.status).toBe(200);
   });
 
+  it('explicit JSON null body is 400, not treated as bodyless', async () => {
+    // User-visible contract: only a truly absent body means "resolve the stored
+    // profile"; a literal `null` is rejected with 400. (Mechanically, strict
+    // body-parser rejects the bare `null` at parse time; the handler's
+    // `req.body === undefined ? {} : req.body` guard — unit-tested via
+    // ReclassifyBodySchema.safeParse(null) — is the in-handler safety net that
+    // keeps a `null` body from ever coercing to {} should it reach the handler.)
+    const res = await fetch(`${baseUrl}/specs/${reclSpecId}/reclassify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'null',
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('bodyless reclassify on a project copy (library_id NULL) uses the built-in default — not 422', async () => {
     await pool.query(`DELETE FROM specs WHERE title = 'api project copy' AND section = '99 99 95'`);
     await pool.query(`DELETE FROM projects WHERE name = 'recl-api-builtin'`);
@@ -305,5 +320,41 @@ describe('POST .../comments/:index/accept-as-note', () => {
     expect(r.status).toBe(409);
     expect((r.body as { success: boolean }).success).toBe(false);
     await pool.query(`DELETE FROM specs WHERE id = $1`, [gatedSpec]);
+  });
+
+  it('retry after the spec is archived still returns 409 + the SAME noteId (idempotent, not a gate error)', async () => {
+    const libRow = await pool.query<{ id: string }>(
+      `SELECT id FROM libraries WHERE name = 'Default Company Master' LIMIT 1`
+    );
+    await pool.query(`DELETE FROM specs WHERE section = '99 99 94' AND title = 'Retry Archived'`);
+    const s = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ('99 99 94', 'Retry Archived', 'arcat', $1) RETURNING id`,
+      [libRow.rows[0]!.id]
+    );
+    const archSpec = s.rows[0]!.id;
+    const a = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Anchor', 1, $2::jsonb) RETURNING id`,
+      [archSpec, JSON.stringify({ comments: [{ author: 'A', text: 'note me', anchor: [0, 4] }] })]
+    );
+    const anchor = a.rows[0]!.id;
+    const first = await req(
+      'POST',
+      `/specs/${archSpec}/paragraphs/${anchor}/comments/0/accept-as-note`
+    );
+    expect(first.status).toBe(201);
+    const noteId = (first.body as { data: { noteId: string } }).data.noteId;
+
+    // Archive, then retry the SAME accept — a no-op write must NOT require
+    // writability; it returns the documented idempotent 409 + the same noteId.
+    await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [archSpec]);
+    const retry = await req(
+      'POST',
+      `/specs/${archSpec}/paragraphs/${anchor}/comments/0/accept-as-note`
+    );
+    expect(retry.status).toBe(409);
+    expect((retry.body as { noteId: string }).noteId).toBe(noteId);
+    await pool.query(`DELETE FROM specs WHERE id = $1`, [archSpec]);
   });
 });

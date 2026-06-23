@@ -418,4 +418,9 @@ describe('ReclassifyBodySchema (O-9 / #136)', () => {
       ReclassifyBodySchema.safeParse({ rules: { defaultEditability: 'frozen' } }).success
     ).toBe(false);
   });
+  it('rejects a null body (the handler coerces only undefined → {}, not null)', () => {
+    // The reclassify handler maps `undefined` (truly bodyless) to {} but passes
+    // an explicit `null` straight to this schema, which must reject it → 400.
+    expect(ReclassifyBodySchema.safeParse(null).success).toBe(false);
+  });
 });
