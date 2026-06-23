@@ -7,7 +7,11 @@ import {
   storeClassifications,
 } from './editability.js';
 import { getSpecTree } from './specs.js';
-import { getConventionForLibrary, ConventionValidationError } from './conventions.js';
+import {
+  getConventionForLibrary,
+  getBuiltInConvention,
+  ConventionValidationError,
+} from './conventions.js';
 import { checkRegexPatterns } from '../../lib/regex-safety.js';
 import { classify } from '../../conventions/index.js';
 import { assertSpecWritable } from './edit-gate.js';
@@ -133,8 +137,14 @@ async function resolveRules(
     [specId]
   );
   const libraryId = lib.rows[0]?.library_id;
-  if (!libraryId) return null;
-  const convention = await getConventionForLibrary(libraryId);
+  // Library specs resolve their profile (which itself falls back to the built-in
+  // default); project working copies own by project_id and have library_id NULL,
+  // so they resolve straight to the built-in default. Either way classification
+  // is "library profile OR built-in default" (ADR-022 D3 / #132) — never null
+  // just because there is no library convention.
+  const convention = libraryId
+    ? await getConventionForLibrary(libraryId)
+    : await getBuiltInConvention();
   return convention ? convention.rules : null;
 }
 
@@ -273,6 +283,12 @@ async function runAccept(
   nodeId: string,
   index: number
 ): Promise<AcceptNoteOutcome> {
+  // LOCK ORDER (invariant): the spec row is gated/locked BEFORE the paragraph
+  // FOR UPDATE — identical to updateParagraphText. Both write paths must take
+  // the spec lock first, then the paragraph lock; inverting it here would let a
+  // concurrent paragraph PATCH and accept-as-note deadlock holding one lock each.
+  await assertSpecWritable(client, specId);
+
   const anchorRes = await client.query<AnchorRow>(
     `SELECT spec_id, parent_id, position, source_facts FROM paragraphs WHERE id = $1 FOR UPDATE`,
     [nodeId]
@@ -280,11 +296,6 @@ async function runAccept(
   const anchor = anchorRes.rows[0];
   if (!anchor) return { status: 'not-found' };
   if (anchor.spec_id !== specId) return { status: 'wrong-spec' };
-
-  // Gate the spec for writability before any mutation (ADR-018), row-locking it
-  // — the same precondition every content write obeys. An archived or
-  // upstream-locked spec throws SpecWriteForbiddenError → 409, never a silent write.
-  await assertSpecWritable(client, specId);
 
   const text = commentTextAt(anchor.source_facts, index);
   if (text === null) return { status: 'no-comment' };

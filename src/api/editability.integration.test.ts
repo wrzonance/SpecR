@@ -215,6 +215,31 @@ describe('POST /specs/:id/reclassify', () => {
     const res = await fetch(`${baseUrl}/specs/${reclSpecId}/reclassify`, { method: 'POST' });
     expect(res.status).toBe(200);
   });
+
+  it('bodyless reclassify on a project copy (library_id NULL) uses the built-in default — not 422', async () => {
+    await pool.query(`DELETE FROM specs WHERE title = 'api project copy' AND section = '99 99 95'`);
+    await pool.query(`DELETE FROM projects WHERE name = 'recl-api-builtin'`);
+    const proj = await pool.query<{ id: string }>(
+      `INSERT INTO projects (name) VALUES ('recl-api-builtin') RETURNING id`
+    );
+    const projectId = proj.rows[0]!.id;
+    const copy = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, project_id)
+       VALUES ('99 99 95', 'api project copy', 'arcat', $1) RETURNING id`,
+      [projectId]
+    );
+    const copyId = copy.rows[0]!.id;
+    await pool.query(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'NOTES TO SPECIFIER', 1, $2::jsonb)`,
+      [copyId, JSON.stringify({ banner: 'NOTES TO SPECIFIER' })]
+    );
+    const res = await fetch(`${baseUrl}/specs/${copyId}/reclassify`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    // specs.project_id is not ON DELETE CASCADE — copy before project.
+    await pool.query(`DELETE FROM specs WHERE id = $1`, [copyId]);
+    await pool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+  });
 });
 
 describe('POST .../comments/:index/accept-as-note', () => {

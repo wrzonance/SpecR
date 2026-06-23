@@ -126,6 +126,38 @@ describe('reclassifySpec', () => {
     expect(out.status).toBe('not-found');
   });
 
+  it('bodyless reclassify on a project copy (library_id NULL) uses the built-in default', async () => {
+    // A project working copy owns by project_id, not library_id (owner-XOR).
+    // With no request rules and no library convention, reclassify must fall back
+    // to the built-in Industry Default — not return no-convention.
+    // Clear any leftover from a prior failed run (specs.project_id is not
+    // ON DELETE CASCADE, so a failed cleanup can orphan the copy + project).
+    await pool.query(`DELETE FROM specs WHERE title = 'project copy' AND section = '00 00 08'`);
+    await pool.query(`DELETE FROM projects WHERE name = 'recl-builtin-fallback'`);
+    const proj = await pool.query<{ id: string }>(
+      `INSERT INTO projects (name) VALUES ('recl-builtin-fallback') RETURNING id`
+    );
+    const projectId = proj.rows[0]!.id;
+    const copy = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, project_id) VALUES ('00 00 08', 'project copy', 'arcat', $1) RETURNING id`,
+      [projectId]
+    );
+    const copyId = copy.rows[0]!.id;
+    const p = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'NOTES TO SPECIFIER', 1, $2::jsonb) RETURNING id`,
+      [copyId, JSON.stringify({ banner: 'NOTES TO SPECIFIER' })]
+    );
+    const bannerNode = p.rows[0]!.id;
+    const out = await reclassifySpec(copyId, {});
+    expect(out.status).toBe('ok');
+    if (out.status !== 'ok') throw new Error('expected ok');
+    expect(out.report.entries.find((e) => e.nodeId === bannerNode)?.after).toBe('note');
+    // specs.project_id is not ON DELETE CASCADE — delete the copy before the project.
+    await pool.query(`DELETE FROM specs WHERE id = $1`, [copyId]);
+    await pool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+  });
+
   it('rejects request-supplied noteBanners with a catastrophic regex before classifying', async () => {
     // A paragraph that classify() would otherwise visit; if the engine ran the
     // unsafe pattern over this text it would backtrack catastrophically.
