@@ -116,6 +116,75 @@ describe('POST /specs/:id/generate (integration)', () => {
   });
 });
 
+async function specDocXml(specId: string, body: Record<string, unknown>): Promise<string> {
+  const res = await fetch(`${baseUrl}/specs/${specId}/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.status !== 200) throw new Error(`generate failed: ${res.status}`);
+  const zip = await JSZip.loadAsync(Buffer.from(await res.arrayBuffer()));
+  const file = zip.file('word/document.xml');
+  if (!file) throw new Error('document.xml missing');
+  return file.async('string');
+}
+
+async function attachSpecToProject(name: string, specId: string, format: string): Promise<string> {
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name, section_number_format) VALUES ($1, $2) RETURNING id`,
+    [name, format]
+  );
+  const id = res.rows[0]?.id;
+  if (!id) throw new Error(`failed to insert project ${name}`);
+  await pool.query(`INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`, [
+    id,
+    specId,
+  ]);
+  return id;
+}
+
+describe('POST /specs/:id/generate — project default fallback (#267)', () => {
+  it("falls back to the spec's sole project section_number_format when the body omits it", async () => {
+    const projectId = await attachSpecToProject('Spec Fallback Project', testSpecId, 'dots');
+    try {
+      const xml = await specDocXml(testSpecId, {});
+      expect(xml).toContain('SECTION 27.13.23');
+      expect(xml).not.toContain('SECTION 27 13 23');
+    } finally {
+      await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+    }
+  });
+
+  it('request sectionNumberFormat still wins over the project default', async () => {
+    const projectId = await attachSpecToProject('Spec Override Project', testSpecId, 'dots');
+    try {
+      const xml = await specDocXml(testSpecId, { sectionNumberFormat: 'canonical' });
+      expect(xml).toContain('SECTION 27 13 23');
+      expect(xml).not.toContain('SECTION 27.13.23');
+    } finally {
+      await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+    }
+  });
+
+  it('belongs to two projects (ambiguous) → canonical, not an arbitrary project default', async () => {
+    const p1 = await attachSpecToProject('Ambiguous A', testSpecId, 'dots');
+    const p2 = await attachSpecToProject('Ambiguous B', testSpecId, 'compact');
+    try {
+      const xml = await specDocXml(testSpecId, {});
+      expect(xml).toContain('SECTION 27 13 23');
+      expect(xml).not.toContain('SECTION 27.13.23');
+      expect(xml).not.toContain('SECTION 271323');
+    } finally {
+      await pool.query('DELETE FROM projects WHERE id = ANY($1)', [[p1, p2]]);
+    }
+  });
+
+  it('orphan spec (no project) → canonical', async () => {
+    const xml = await specDocXml(testSpecId, {});
+    expect(xml).toContain('SECTION 27 13 23');
+  });
+});
+
 interface DocParts {
   readonly documentXml: string;
   readonly numberingXml: string;

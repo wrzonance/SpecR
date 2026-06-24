@@ -295,8 +295,10 @@ function registerCoordinationTools(server: McpServer): void {
     {
       description:
         'Project errors-and-omissions report: required-but-absent sections, ' +
-        'present-but-not-required specs, and dangling cross-references. Optional ' +
-        'packageId scopes to one design package. Requires a projectId (see list_projects).',
+        'present-but-not-required specs, and dangling cross-references. Each ' +
+        'dangling_ref pinpoints the source paragraph (sourceParagraphId) and a ' +
+        'snippet of the reference in context. Optional packageId scopes to one ' +
+        'design package. Requires a projectId (see list_projects).',
       inputSchema: {
         projectId: z.uuid().describe('Project UUID (from list_projects)'),
         packageId: z.uuid().optional().describe('Optional design-package UUID to scope the report'),

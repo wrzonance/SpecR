@@ -10,6 +10,7 @@ import type {
   NodeType,
   SecRef,
 } from '../../ast/index.js';
+import { deriveArticleRole } from '../../ast/index.js';
 import type { Pool } from 'pg';
 import { insertTree } from './paragraphs.js';
 import { insertRefs } from './refs.js';
@@ -167,6 +168,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
     // Normalize through the schema so legacy comment facts gain the backfilled
     // `closed` flag before they reach the API response (#262).
     const sourceFacts = parseSourceFacts(row.source_facts);
+    const articleRole = row.node_type === 'article' ? deriveArticleRole(row.text) : undefined;
     return {
       id: row.id,
       type: row.node_type as NodeType,
@@ -177,6 +179,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
         ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
         ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
         ...(editability ? { editability } : {}),
+        ...(articleRole !== undefined ? { articleRole } : {}),
       },
     };
   }

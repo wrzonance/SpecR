@@ -8,6 +8,7 @@ import {
   getTemplate,
   getTemplateByName,
   findProjectById,
+  findSoleProjectSectionNumberFormat,
   getPackageRevisionManualData,
   getPackageRevisionAddendumManualData,
   RevisionComparisonError,
@@ -88,7 +89,13 @@ export async function generateHandler(req: Request, res: Response): Promise<void
       res.status(404).json({ success: false, error: 'template not found' });
       return;
     }
-    const options = generateOptions(bodyResult.data.sectionNumberFormat);
+    // Request body wins; otherwise fall back to the format of the spec's sole
+    // owning project (issue #267). Null (orphan or multi-project) → canonical.
+    const format =
+      bodyResult.data.sectionNumberFormat ??
+      (await findSoleProjectSectionNumberFormat(idResult.data, pool)) ??
+      undefined;
+    const options = generateOptions(format);
     const buffer = await generateDocx(result.tree, resolution.rules, options);
     const filename = safeFilename(result.tree.section, result.tree.title);
     res.setHeader('Content-Type', DOCX_MIME);
@@ -215,7 +222,10 @@ export async function generateManualHandler(req: Request, res: Response): Promis
       return;
     }
     const trees = await collectSectionTrees(project.toc);
-    const options = generateOptions(bodyResult.data.sectionNumberFormat);
+    // Request body wins; otherwise fall back to the project's stored default
+    // (issue #267). findProjectById already carries section_number_format.
+    const format = bodyResult.data.sectionNumberFormat ?? project.sectionNumberFormat;
+    const options = generateOptions(format);
     const meta = { name: project.name, description: project.description };
     const buffer = await generateManual(trees, meta, resolution.rules, options);
     res.setHeader('Content-Type', DOCX_MIME);

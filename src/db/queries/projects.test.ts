@@ -132,6 +132,63 @@ describe('findProjectById', () => {
   });
 });
 
+describe('findSoleProjectSectionNumberFormat', () => {
+  it('returns the format when the spec belongs to exactly one project', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [{ section_number_format: 'dots' }],
+      rowCount: 1,
+    } as never);
+    const { findSoleProjectSectionNumberFormat } = await import('./projects.js');
+    const result = await findSoleProjectSectionNumberFormat('spec-1', pool);
+    expect(result).toBe('dots');
+  });
+
+  it('returns null when the spec belongs to no project', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
+    const { findSoleProjectSectionNumberFormat } = await import('./projects.js');
+    const result = await findSoleProjectSectionNumberFormat('spec-orphan', pool);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when the spec belongs to multiple projects (ambiguous)', async () => {
+    // Two distinct project rows → no unambiguous owner; the caller falls
+    // through to the canonical default rather than picking arbitrarily.
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [
+        { id: 'proj-1', section_number_format: 'dots' },
+        { id: 'proj-2', section_number_format: 'compact' },
+      ],
+      rowCount: 2,
+    } as never);
+    const { findSoleProjectSectionNumberFormat } = await import('./projects.js');
+    const result = await findSoleProjectSectionNumberFormat('spec-shared', pool);
+    expect(result).toBeNull();
+  });
+
+  it('normalizes an out-of-range stored value to canonical', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [{ section_number_format: 'garbage' }],
+      rowCount: 1,
+    } as never);
+    const { findSoleProjectSectionNumberFormat } = await import('./projects.js');
+    const result = await findSoleProjectSectionNumberFormat('spec-1', pool);
+    expect(result).toBe('canonical');
+  });
+
+  it('throws DatabaseError on query failure', async () => {
+    const { DatabaseError, pool } = await import('../index.js');
+    vi.mocked(pool.query).mockRejectedValueOnce(new Error('db down'));
+    const { findSoleProjectSectionNumberFormat } = await import('./projects.js');
+    await expect(findSoleProjectSectionNumberFormat('spec-1', pool)).rejects.toBeInstanceOf(
+      DatabaseError
+    );
+  });
+});
+
 describe('listProjects', () => {
   it('returns project ids and names', async () => {
     const { pool } = await import('../index.js');
@@ -175,6 +232,8 @@ describe('getBrokenRefs', () => {
           id: 'ref-1',
           source_spec_id: 'spec-1',
           source_spec_section: '03 30 00',
+          source_paragraph_id: 'para-1',
+          source_paragraph_text: 'Coordinate finishes with See Section 09 91 00 as scheduled.',
           target_spec_section: '09 91 00',
           reference_text: 'See Section 09 91 00',
           available_from: [{ libraryId: 'lib-1', name: 'Co M' }],
@@ -183,6 +242,8 @@ describe('getBrokenRefs', () => {
           id: 'ref-2',
           source_spec_id: 'spec-1',
           source_spec_section: '03 30 00',
+          source_paragraph_id: 'para-2',
+          source_paragraph_text: 'See Section 99 99 99',
           target_spec_section: '99 99 99',
           reference_text: 'See Section 99 99 99',
           available_from: null,
@@ -194,6 +255,9 @@ describe('getBrokenRefs', () => {
     const result = await getBrokenRefs('proj-1', pool);
     expect(result[0]?.availableFrom).toEqual([{ libraryId: 'lib-1', name: 'Co M' }]);
     expect(result[1]?.availableFrom).toEqual([]);
+    // Paragraph-level locator (#260): id threaded through, snippet built from text.
+    expect(result[0]?.sourceParagraphId).toBe('para-1');
+    expect(result[0]?.snippet).toContain('See Section 09 91 00');
   });
 
   it('throws DatabaseError on query failure', async () => {

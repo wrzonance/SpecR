@@ -41,6 +41,25 @@ const ARCAT_FIXTURES = [
 
 // Files are copyrighted and gitignored — tests skip automatically in CI.
 describe.skipIf(!FIXTURES_AVAILABLE)('ARCAT fixture parsing', () => {
+  it('classifies standard article roles (REFERENCES at minimum)', async () => {
+    // NOTE: 07_21_00ksp.docx is expected to contain a References article.
+    // If CI reports "references not found", swap to another fixture from ARCAT_FIXTURES
+    // that is confirmed to carry a REFERENCES heading.
+    const buffer = readFileSync(resolve(ARCAT_DIR, '07_21_00ksp.docx'));
+    const { tree } = await parse(buffer, '07_21_00ksp.docx');
+    const roles = allNodes(tree.parts)
+      .filter((n) => n.type === 'article')
+      .map((n) => n.meta.articleRole)
+      .filter((r): r is NonNullable<typeof r> => r !== undefined);
+    // ARCAT sections reliably carry a References article; assert role tagging fired.
+    expect(roles).toContain('references');
+    // No non-article node should ever carry a role.
+    const badlyTagged = allNodes(tree.parts).filter(
+      (n) => n.type !== 'article' && n.meta.articleRole !== undefined
+    );
+    expect(badlyTagged).toEqual([]);
+  });
+
   for (const fixture of ARCAT_FIXTURES) {
     it(`${fixture}: parses with source=arcat`, async () => {
       const buffer = readFileSync(resolve(ARCAT_DIR, fixture));

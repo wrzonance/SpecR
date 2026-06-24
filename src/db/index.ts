@@ -61,6 +61,7 @@ export type { InboundReference, OutboundReference } from './queries/refs.js';
 export {
   createProject,
   findProjectById,
+  findSoleProjectSectionNumberFormat,
   listProjects,
   setProjectSources,
   updateProject,

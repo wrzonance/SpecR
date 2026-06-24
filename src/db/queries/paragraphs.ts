@@ -1,7 +1,7 @@
 import { pool, DatabaseError } from '../index.js';
 import { assertSpecWritable } from './edit-gate.js';
 import type { Pool, PoolClient } from 'pg';
-import { NodeTypeSchema, parseSourceFacts } from '../../ast/index.js';
+import { NodeTypeSchema, parseSourceFacts, deriveArticleRole } from '../../ast/index.js';
 import type {
   NodeType,
   ParagraphAssociation,
@@ -204,6 +204,7 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
     // Normalize through the schema so legacy comment facts gain the backfilled
     // `closed` flag before they reach the API response (#262).
     const sourceFacts = parseSourceFacts(row.sourceFacts);
+    const articleRole = row.nodeType === 'article' ? deriveArticleRole(row.text) : undefined;
     return {
       id: row.id,
       type: parseNodeType(row.nodeType),
@@ -215,6 +216,7 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
         ...(row.vanish ? { vanish: true } : {}),
         ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
         ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
+        ...(articleRole !== undefined ? { articleRole } : {}),
       },
     };
   };
