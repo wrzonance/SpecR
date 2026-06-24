@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
@@ -437,6 +438,67 @@ describe('PUT /projects/:id/sources', () => {
 
   it('400 — malformed project id (not a UUID)', async () => {
     const res = await putSources('not-a-uuid', [companyId]);
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('PATCH /projects/:id', () => {
+  it('renames a project', async () => {
+    const createRes = await fetch(`${baseUrl}/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Original Name', sourceLibraryIds: [companyId] }),
+    });
+    const created = (await createRes.json()) as Record<string, unknown>;
+    const data = created['data'] as Record<string, unknown>;
+    const id = (data['projectId'] ?? data['id']) as string;
+    apiProjects.push(id);
+
+    const res = await fetch(`${baseUrl}/projects/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Renamed Project' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['success']).toBe(true);
+    const bodyData = body['data'] as Record<string, unknown>;
+    expect(bodyData).toMatchObject({ projectId: id, name: 'Renamed Project' });
+  });
+
+  it('404s an unknown project', async () => {
+    const res = await fetch(`${baseUrl}/projects/${randomUUID()}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'x' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('400s a malformed (non-UUID) project id', async () => {
+    const res = await fetch(`${baseUrl}/projects/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'x' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400s an empty name', async () => {
+    const createRes = await fetch(`${baseUrl}/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'P', sourceLibraryIds: [companyId] }),
+    });
+    const created = (await createRes.json()) as Record<string, unknown>;
+    const data = created['data'] as Record<string, unknown>;
+    const id = (data['projectId'] ?? data['id']) as string;
+    apiProjects.push(id);
+    const res = await fetch(`${baseUrl}/projects/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '' }),
+    });
     expect(res.status).toBe(400);
   });
 });

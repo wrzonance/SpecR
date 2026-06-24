@@ -63,6 +63,7 @@ export {
   findProjectById,
   listProjects,
   setProjectSources,
+  updateProjectName,
   getBrokenRefs,
   InvalidSourceLibraryError,
 } from './queries/projects.js';
