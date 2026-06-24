@@ -31,7 +31,7 @@ describe('parse() dispatcher', () => {
     const result = await parse(buf, 'spec.SEC');
     expect(assertSecSafe).toHaveBeenCalledWith(buf);
     expect(parseSec).toHaveBeenCalledWith('<SEC/>');
-    expect(result.tree).toStrictEqual(mockTree);
+    expect(result.tree).toBe(mockTree);
     expect(result.refs).toEqual([]);
     expect(result.sectionInference.method).toBe('metadata');
     expect(result.sectionInference.inferredSection).toBe('27 10 00');
@@ -48,7 +48,7 @@ describe('parse() dispatcher', () => {
     const buf = Buffer.from('PK...');
     const result = await parse(buf, 'spec.docx');
     expect(parseDocx).toHaveBeenCalledWith(buf, expect.any(Function));
-    expect(result.tree).toStrictEqual(mockTree);
+    expect(result.tree).toBe(mockTree);
     expect(result.refs).toEqual([]);
     expect(result.sectionInference.method).toBe('metadata');
   });

@@ -34,7 +34,8 @@ export interface ParseResult {
 }
 
 function withArticleRoles(tree: SpecTree): SpecTree {
-  return { ...tree, parts: tagArticleRoles(tree.parts) };
+  const parts = tagArticleRoles(tree.parts);
+  return parts === tree.parts ? tree : { ...tree, parts };
 }
 
 function applyInference(tree: SpecTree, inference: SectionInference): SpecTree {

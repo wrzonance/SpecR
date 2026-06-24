@@ -59,7 +59,7 @@ export function deriveArticleRole(text: string): ArticleRole | undefined {
 /** Deep, immutable: set meta.articleRole on every `article` node whose heading
  *  resolves to a role. Non-article nodes (note/continuation/part/pr*) untouched. */
 export function tagArticleRoles(nodes: readonly SpecNode[]): readonly SpecNode[] {
-  return nodes.map((node) => {
+  const result = nodes.map((node) => {
     const children = tagArticleRoles(node.children);
     if (node.type !== 'article') {
       return children === node.children ? node : { ...node, children };
@@ -70,4 +70,6 @@ export function tagArticleRoles(nodes: readonly SpecNode[]): readonly SpecNode[]
     }
     return { ...node, children, meta: { ...node.meta, articleRole: role } };
   });
+  // Identity-preserve the array when no node was replaced (no-op → same ref).
+  return result.every((n, i) => n === nodes[i]) ? nodes : result;
 }
