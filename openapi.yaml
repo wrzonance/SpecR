@@ -3705,6 +3705,22 @@ components:
                 when the paragraph has one or more associations.
               items:
                 $ref: '#/components/schemas/ParagraphAssociation'
+            articleRole:
+              type: string
+              description: >-
+                Semantic CSI role of this article, derived from its heading
+                (ADR-033). Present only on `article` nodes whose heading matches
+                a recognized CSI role; absent for unknown/non-standard articles
+                and all non-article nodes.
+              enum:
+                - summary
+                - references
+                - definitions
+                - related-sections
+                - submittals
+                - quality-assurance
+                - delivery-storage-handling
+                - warranty
 
     SpecTree:
       type: object

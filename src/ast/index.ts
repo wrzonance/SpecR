@@ -12,6 +12,7 @@ export type {
   ParagraphSnapshot,
   StyleRule,
   SpecNodeEditability,
+  ArticleRole,
 } from './types.js';
 export {
   NodeTypeSchema,
@@ -31,7 +32,9 @@ export {
   SetPackageSpecsBodySchema,
   AcquireLockBodySchema,
   ReleaseLockBodySchema,
+  ArticleRoleSchema,
 } from './schemas.js';
+export { deriveArticleRole, tagArticleRoles, ARTICLE_ROLE_RULES } from './article-role.js';
 export type {
   UpdateParagraphBody,
   CreateProjectBody,

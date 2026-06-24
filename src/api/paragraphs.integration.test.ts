@@ -89,6 +89,35 @@ describe('PATCH /specs/:id/paragraphs/:nodeId (integration)', () => {
     expect(after.rows[0]?.base_version).toBe(beforeVersion + 1);
   });
 
+  it('articleRole — PATCH response derives the role for an edited article heading (ADR-033)', async () => {
+    // Regression: buildSubtree (the PATCH response path) must mirror buildNodeTree
+    // and derive meta.articleRole, so editing an article heading to a recognized
+    // CSI title surfaces the role immediately — not only after a full-tree refetch.
+    const article = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version)
+       VALUES ($1, NULL, 'article', 'PLACEHOLDER', 0, 1) RETURNING id`,
+      [specId]
+    );
+    const articleId = article.rows[0]?.id;
+    if (!articleId) throw new Error('failed to insert test article');
+
+    try {
+      const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${articleId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: '1.2 REFERENCES' }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { type: string; meta: { articleRole?: string } };
+      };
+      expect(body.data.type).toBe('article');
+      expect(body.data.meta.articleRole).toBe('references');
+    } finally {
+      await pool.query('DELETE FROM paragraphs WHERE id = $1', [articleId]);
+    }
+  });
+
   it('subtree leak — cross-spec child parented to node is excluded from response', async () => {
     // A malformed row in another spec points its parent_id at our node. The
     // recursive subtree fetch must stay scoped to the target spec and never

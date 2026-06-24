@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseDocx } from './index.js';
+import { parse } from '../index.js';
 import type { SpecNode } from '../../ast/types.js';
 
 const CPI_DIR = resolve('docs/references/MANUFACTURER_CPI');
@@ -71,5 +72,17 @@ describe.skipIf(!FIXTURES_AVAILABLE)('CPI fixture parsing', () => {
     const pr1s = nodes.filter((n) => n.type === 'pr1').length;
     // In a correctly-parsed CPI file, continuation paragraphs significantly outnumber pr1
     expect(continuations).toBeGreaterThan(pr1s);
+  });
+
+  it('classifies roles despite the CPI ilvl offset', async () => {
+    const buffer = readFileSync(resolve(CPI_DIR, 'CPI_BUSBAR_CSIMFS.docx'));
+    const { tree } = await parse(buffer, 'CPI_BUSBAR_CSIMFS.docx');
+    const articleRoles = allNodes(tree.parts)
+      .filter((n) => n.type === 'article')
+      .map((n) => n.meta.articleRole);
+    // The CPI offset is normalized into node_type='article' before role
+    // derivation, so a known CPI heading still classifies. At least one
+    // recognized role must be present (regression guard for the offset path).
+    expect(articleRoles.some((r) => r !== undefined)).toBe(true);
   });
 });

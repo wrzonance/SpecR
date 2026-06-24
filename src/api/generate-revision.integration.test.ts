@@ -191,4 +191,51 @@ describe('POST /revisions/:id/generate', () => {
     expect(xml).not.toContain('<w:headerReference');
     expect(xml).not.toContain('<w:footerReference');
   });
+
+  // Regression (ADR-033 / Codex P2): the article-role deriver added meta.articleRole
+  // to article nodes in buildNodeTree. A base revision frozen BEFORE that change has
+  // no articleRole key in its snapshot JSON, so comparing it against a target frozen
+  // AFTER must NOT flag otherwise-identical sections as changed. The fingerprint must
+  // strip the derived field. Here we simulate the pre-change base by stripping
+  // articleRole from the stored base snapshot, then re-run addendum diffing.
+  it('addendum: a derived articleRole added since the base snapshot does not flag unchanged sections', async () => {
+    // The 'SUMMARY' article in every fixture tree now carries articleRole='summary'
+    // in fresh snapshots. Strip it from the base revision's stored trees to mimic a
+    // snapshot frozen before the deriver existed.
+    const baseSnaps = await pool.query<{ spec_id: string; tree: SpecTree }>(
+      `SELECT spec_id, tree FROM package_revision_specs WHERE revision_id = $1`,
+      [baseRevisionId]
+    );
+    const stripRole = (nodes: readonly SpecNode[]): SpecNode[] =>
+      nodes.map((n) => {
+        const meta = { ...n.meta };
+        delete (meta as { articleRole?: unknown }).articleRole;
+        return { ...n, meta, children: stripRole(n.children) };
+      });
+    let strippedAny = false;
+    for (const snap of baseSnaps.rows) {
+      const before = JSON.stringify(snap.tree);
+      const legacy = { ...snap.tree, parts: stripRole(snap.tree.parts) };
+      if (JSON.stringify(legacy) !== before) strippedAny = true;
+      await pool.query(
+        `UPDATE package_revision_specs SET tree = $1::jsonb WHERE revision_id = $2 AND spec_id = $3`,
+        [JSON.stringify(legacy), baseRevisionId, snap.spec_id]
+      );
+    }
+    // Guard: the fixture must actually contain a role-bearing article, else the test
+    // would pass vacuously and never exercise the regression.
+    expect(strippedAny).toBe(true);
+
+    const res = await json('POST', `/revisions/${addendumRevisionId}/generate`, {
+      baseRevisionId,
+    });
+    expect(res.status).toBe(200);
+    const xml = await getDocXml(Buffer.from(await res.arrayBuffer()));
+    // Only the genuinely-edited painting section is affected — the unchanged
+    // concrete/controls sections must NOT reappear just because their base snapshot
+    // lacks the derived articleRole the target now has.
+    expect(xml).toContain('09 91 00 - Painting');
+    expect(xml).not.toContain('SECTION 03 30 00');
+    expect(xml).not.toContain('SECTION 23 09 23');
+  });
 });
