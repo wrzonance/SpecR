@@ -86,6 +86,8 @@ describe('getProjectHandler', () => {
       description: null,
       sources: [],
       toc: [],
+      deletedAt: null,
+      deletedBy: null,
     });
     const { getProjectHandler } = await import('./projects.js');
     const req = { params: { id: 'p1' } } as unknown as Request;

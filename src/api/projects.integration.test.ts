@@ -442,6 +442,131 @@ describe('PUT /projects/:id/sources', () => {
   });
 });
 
+describe('DELETE /projects/:id (soft-delete) + POST /projects/:id/restore', () => {
+  async function freshProject(): Promise<string> {
+    const id = await insertProject(`soft-delete ${randomUUID()}`);
+    apiProjects.push(id);
+    return id;
+  }
+
+  async function deleteProject(id: string, body: unknown): Promise<Response> {
+    return fetch(`${baseUrl}/projects/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('soft-deletes: 200 with {projectId, deletedAt, deletedBy}, hidden from list, still GET-able', async () => {
+    const id = await freshProject();
+    const res = await deleteProject(id, { deletedBy: 'alice@firm.example' });
+    expect(res.status).toBe(200);
+    const data = ((await res.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
+    expect(data['projectId']).toBe(id);
+    expect(typeof data['deletedAt']).toBe('string');
+    expect(data['deletedBy']).toBe('alice@firm.example');
+
+    // Disappears from GET /projects.
+    const list = await fetch(`${baseUrl}/projects`);
+    const listBody = (await list.json()) as { data: Array<{ id: string }> };
+    expect(listBody.data.find((p) => p.id === id)).toBeUndefined();
+
+    // Still GET-able by id, with the tombstone surfaced.
+    const got = await fetch(`${baseUrl}/projects/${id}`);
+    expect(got.status).toBe(200);
+    const proj = ((await got.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
+    expect(proj['projectId']).toBe(id);
+    expect(proj['deletedAt']).toBe(data['deletedAt']);
+    expect(proj['deletedBy']).toBe('alice@firm.example');
+  });
+
+  it('restore: 200 + reappears in GET /projects, tombstone cleared on GET /projects/:id', async () => {
+    const id = await freshProject();
+    await deleteProject(id, { deletedBy: 'bob' });
+
+    const res = await fetch(`${baseUrl}/projects/${id}/restore`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    const data = ((await res.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
+    expect(data['projectId']).toBe(id);
+
+    const list = await fetch(`${baseUrl}/projects`);
+    const listBody = (await list.json()) as { data: Array<{ id: string }> };
+    expect(listBody.data.find((p) => p.id === id)).toBeDefined();
+
+    const got = await fetch(`${baseUrl}/projects/${id}`);
+    const proj = ((await got.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
+    expect(proj['deletedAt']).toBeNull();
+    expect(proj['deletedBy']).toBeNull();
+  });
+
+  it('active project surfaces deletedAt/deletedBy as null on GET /projects/:id', async () => {
+    const id = await freshProject();
+    const got = await fetch(`${baseUrl}/projects/${id}`);
+    const proj = ((await got.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
+    expect(proj['deletedAt']).toBeNull();
+    expect(proj['deletedBy']).toBeNull();
+  });
+
+  it('re-delete is idempotent: returns the original deletedAt/deletedBy unchanged', async () => {
+    const id = await freshProject();
+    const first = await deleteProject(id, { deletedBy: 'first-actor' });
+    const firstData = ((await first.json()) as Record<string, unknown>)['data'] as Record<
+      string,
+      unknown
+    >;
+
+    // A second delete by a different actor must NOT overwrite the original tombstone.
+    const second = await deleteProject(id, { deletedBy: 'second-actor' });
+    expect(second.status).toBe(200);
+    const secondData = ((await second.json()) as Record<string, unknown>)['data'] as Record<
+      string,
+      unknown
+    >;
+    expect(secondData['deletedAt']).toBe(firstData['deletedAt']);
+    expect(secondData['deletedBy']).toBe('first-actor');
+  });
+
+  it('restore is idempotent on a non-deleted project: 200', async () => {
+    const id = await freshProject();
+    const res = await fetch(`${baseUrl}/projects/${id}/restore`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    const data = ((await res.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
+    expect(data['projectId']).toBe(id);
+  });
+
+  it('400 — missing deletedBy', async () => {
+    const id = await freshProject();
+    const res = await deleteProject(id, {});
+    expect(res.status).toBe(400);
+  });
+
+  it('400 — empty deletedBy', async () => {
+    const id = await freshProject();
+    const res = await deleteProject(id, { deletedBy: '' });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 — malformed (non-UUID) project id on delete', async () => {
+    const res = await deleteProject('not-a-uuid', { deletedBy: 'alice' });
+    expect(res.status).toBe(400);
+  });
+
+  it('404 — delete unknown project', async () => {
+    const res = await deleteProject(randomUUID(), { deletedBy: 'alice' });
+    expect(res.status).toBe(404);
+  });
+
+  it('400 — malformed (non-UUID) project id on restore', async () => {
+    const res = await fetch(`${baseUrl}/projects/not-a-uuid/restore`, { method: 'POST' });
+    expect(res.status).toBe(400);
+  });
+
+  it('404 — restore unknown project', async () => {
+    const res = await fetch(`${baseUrl}/projects/${randomUUID()}/restore`, { method: 'POST' });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('PATCH /projects/:id', () => {
   it('renames a project', async () => {
     const createRes = await fetch(`${baseUrl}/projects`, {
