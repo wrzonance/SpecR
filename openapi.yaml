@@ -746,13 +746,14 @@ paths:
                     unstyled DOCX. Unknown id → 404.
                 sectionNumberFormat:
                   type: string
-                  enum: [canonical, dots, compact]
+                  enum: [canonical, dots, compact, spaced-compact]
                   default: canonical
                   description: >
                     Presentation format for generated section numbers in the synthetic
                     DOCX title and confidently identified Section references in paragraph
-                    text. Canonical emits "09 91 00", dots emits "09.91.00", and compact
-                    emits "099100". Stored AST and database values remain canonical.
+                    text. Canonical emits "09 91 00", dots emits "09.91.00", compact
+                    emits "099100", and spaced-compact emits "09 9100". Stored AST and
+                    database values remain canonical.
             examples:
               dotted-section-numbers:
                 value:
@@ -1101,11 +1102,13 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
     patch:
-      operationId: renameProject
-      summary: Rename a project
+      operationId: patchProject
+      summary: Update project settings
       description: >
-        Updates a project's name. The name must be non-empty. There is no
-        uniqueness constraint on project names, so there is no 409 path.
+        Updates a project's mutable settings. At least one of `name` or
+        `sectionNumberFormat` must be provided. The name must be non-empty.
+        There is no uniqueness constraint on project names, so there is no 409
+        path.
       tags: [projects]
       parameters:
         - $ref: '#/components/parameters/ProjectId'
@@ -1115,14 +1118,22 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name]
+              anyOf:
+                - required: [name]
+                - required: [sectionNumberFormat]
               properties:
                 name:
                   type: string
                   minLength: 1
+                sectionNumberFormat:
+                  type: string
+                  enum: [canonical, dots, compact, spaced-compact]
+                  description: >
+                    Default section-number display format for generate requests
+                    on this project.
       responses:
         '200':
-          description: Renamed project
+          description: Updated project settings
           content:
             application/json:
               schema:
@@ -1133,13 +1144,16 @@ paths:
                     properties:
                       data:
                         type: object
-                        required: [projectId, name]
+                        required: [projectId, name, sectionNumberFormat]
                         properties:
                           projectId:
                             type: string
                             format: uuid
                           name:
                             type: string
+                          sectionNumberFormat:
+                            type: string
+                            enum: [canonical, dots, compact, spaced-compact]
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -1347,7 +1361,7 @@ paths:
                     UFGS-Default template; absent default → unstyled 200. Unknown id → 404.
                 sectionNumberFormat:
                   type: string
-                  enum: [canonical, dots, compact]
+                  enum: [canonical, dots, compact, spaced-compact]
                   default: canonical
                   description: >
                     Presentation format for generated section numbers in each
@@ -2627,7 +2641,7 @@ paths:
                     200. Unknown id → 404.
                 sectionNumberFormat:
                   type: string
-                  enum: [canonical, dots, compact]
+                  enum: [canonical, dots, compact, spaced-compact]
                   default: canonical
                   description: >
                     Presentation format for generated section numbers in each
@@ -4059,7 +4073,7 @@ components:
 
     ProjectWithToc:
       type: object
-      required: [projectId, name, description, sources, toc, deletedAt, deletedBy]
+      required: [projectId, name, description, sources, toc, deletedAt, deletedBy, sectionNumberFormat]
       properties:
         projectId:
           type: string
@@ -4113,6 +4127,12 @@ components:
           description: >
             Caller-supplied actor that soft-deleted the project (ADR-031). `null`
             while active.
+        sectionNumberFormat:
+          type: string
+          enum: [canonical, dots, compact, spaced-compact]
+          description: >
+            Default section-number display format for generate requests on this
+            project. Defaults to `canonical` ("09 91 00").
 
     BrokenRef:
       type: object

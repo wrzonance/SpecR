@@ -181,7 +181,19 @@
                 <span>PROJECT NAME</span>
                 <input id="project-name-input" type="text" autocomplete="off" />
               </label>
-              <button class="toc-btn is-primary" type="submit">Save Settings</button>
+              <label>
+                <span>SECTION NUMBER FORMAT</span>
+                <select id="project-format-select">
+                  <option value="canonical">NN NN NN.NN</option>
+                  <option value="compact">NNNNNN.NN</option>
+                  <option value="spaced-compact">NN NNNN.NN</option>
+                  <option value="dots">NN.NN.NN.NN</option>
+                </select>
+              </label>
+              <div class="settings-actions">
+                <button class="toc-btn is-primary" type="submit">Save Settings</button>
+                <button class="toc-btn is-danger" type="button" id="project-delete-btn">Delete Project</button>
+              </div>
             </form>
           </section>
           <section class="settings-panel">

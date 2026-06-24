@@ -135,6 +135,7 @@ describe('generateManualHandler', () => {
       toc: [],
       deletedAt: null,
       deletedBy: null,
+      sectionNumberFormat: 'canonical',
     });
     const { generateManualHandler } = await import('./generate.js');
     const res = mockRes();
@@ -169,6 +170,7 @@ describe('generateManualHandler', () => {
       ],
       deletedAt: null,
       deletedBy: null,
+      sectionNumberFormat: 'canonical',
     });
     vi.mocked(getSpecTree)
       .mockResolvedValueOnce({

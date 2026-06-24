@@ -165,6 +165,14 @@ export function getCoordinationReport(projectId, packageId) {
   return getJson(`/projects/${enc(projectId)}/coordination-report${qs}`);
 }
 
+export function deleteProject(projectId, deletedBy) {
+  return sendJson('DELETE', `/projects/${enc(projectId)}`, { deletedBy });
+}
+
+export function restoreProject(projectId) {
+  return sendJson('POST', `/projects/${enc(projectId)}/restore`);
+}
+
 export function getRequiredSections(projectId) {
   return getJson(`/projects/${enc(projectId)}/required-sections`);
 }

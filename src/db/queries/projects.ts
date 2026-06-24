@@ -1,6 +1,8 @@
 import { DatabaseError } from '../errors.js';
 import type { Pool, PoolClient } from 'pg';
 import type { LibraryTier } from './libraries.js';
+import { SECTION_NUMBER_FORMATS } from '../../lib/section-number.js';
+import type { SectionNumberFormat } from '../../lib/section-number.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -12,6 +14,7 @@ interface ProjectRow {
   readonly description: string | null;
   readonly deleted_at: Date | null;
   readonly deleted_by: string | null;
+  readonly section_number_format: string;
 }
 
 interface ProjectListRow {
@@ -24,15 +27,6 @@ interface TocRow {
   readonly section: string;
   readonly title: string;
   readonly position: number;
-}
-
-interface BrokenRefRow {
-  readonly id: string;
-  readonly source_spec_id: string;
-  readonly source_spec_section: string;
-  readonly target_spec_section: string | null;
-  readonly reference_text: string;
-  readonly available_from: readonly { libraryId: string; name: string }[] | null;
 }
 
 interface SourceLibRow {
@@ -87,6 +81,8 @@ export interface ProjectWithToc {
   readonly deletedAt: string | null;
   /** Caller-supplied actor that soft-deleted the project. NULL when active. */
   readonly deletedBy: string | null;
+  /** Default section-number display format for generate requests. */
+  readonly sectionNumberFormat: SectionNumberFormat;
 }
 
 /** Result of a soft-delete (ADR-031) — the persisted tombstone. Idempotent:
@@ -95,17 +91,6 @@ export interface ProjectTombstone {
   readonly projectId: string;
   readonly deletedAt: string;
   readonly deletedBy: string;
-}
-
-export interface BrokenRef {
-  readonly refId: string;
-  readonly sourceSpecId: string;
-  readonly sourceSpecSection: string;
-  readonly targetSpecSection: string | null;
-  readonly referenceText: string;
-  /** Project source libraries that hold the missing target section — the
-   *  actionable "add this section" advisory (design doc #94). Priority order. */
-  readonly availableFrom: readonly { libraryId: string; name: string }[];
 }
 
 export interface CreateProjectInput {
@@ -246,13 +231,57 @@ function mapSources(rows: readonly ProjectSourceRow[]): readonly ProjectSource[]
   }));
 }
 
+function parseSectionNumberFormat(raw: string): SectionNumberFormat {
+  return (SECTION_NUMBER_FORMATS as readonly string[]).includes(raw)
+    ? (raw as SectionNumberFormat)
+    : 'canonical';
+}
+
+async function fetchProjectTocAndSources(
+  project: ProjectRow,
+  id: string,
+  pool: Queryable
+): Promise<ProjectWithToc> {
+  const tocRes = await pool.query<TocRow>(
+    `SELECT s.id, s.section, s.title, ps.position
+     FROM project_specs ps
+     JOIN specs s ON s.id = ps.spec_id
+     WHERE ps.project_id = $1
+     ORDER BY ps.position`,
+    [id]
+  );
+  const srcRes = await pool.query<ProjectSourceRow>(
+    `SELECT ps.library_id, l.name, l.tier, ps.priority
+     FROM project_sources ps
+     JOIN libraries l ON l.id = ps.library_id
+     WHERE ps.project_id = $1
+     ORDER BY ps.priority`,
+    [id]
+  );
+  return {
+    projectId: project.id,
+    name: project.name,
+    description: project.description,
+    toc: tocRes.rows.map((row) => ({
+      specId: row.id,
+      section: row.section,
+      title: row.title,
+      position: row.position,
+    })),
+    sources: mapSources(srcRes.rows),
+    deletedAt: project.deleted_at ? project.deleted_at.toISOString() : null,
+    deletedBy: project.deleted_by,
+    sectionNumberFormat: parseSectionNumberFormat(project.section_number_format),
+  };
+}
+
 export async function findProjectById(id: string, pool: Queryable): Promise<ProjectWithToc | null> {
   let project: ProjectRow | undefined;
   try {
     // A soft-deleted project (ADR-031) is still returned here — only listings
     // hide it — so lineage/history and a restore decision still resolve.
     const res = await pool.query<ProjectRow>(
-      'SELECT id, name, description, deleted_at, deleted_by FROM projects WHERE id = $1',
+      'SELECT id, name, description, deleted_at, deleted_by, section_number_format FROM projects WHERE id = $1',
       [id]
     );
     project = res.rows[0];
@@ -261,55 +290,60 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
   }
   if (!project) return null;
   try {
-    const tocRes = await pool.query<TocRow>(
-      `SELECT s.id, s.section, s.title, ps.position
-       FROM project_specs ps
-       JOIN specs s ON s.id = ps.spec_id
-       WHERE ps.project_id = $1
-       ORDER BY ps.position`,
-      [id]
-    );
-    const srcRes = await pool.query<ProjectSourceRow>(
-      `SELECT ps.library_id, l.name, l.tier, ps.priority
-       FROM project_sources ps
-       JOIN libraries l ON l.id = ps.library_id
-       WHERE ps.project_id = $1
-       ORDER BY ps.priority`,
-      [id]
-    );
-    return {
-      projectId: project.id,
-      name: project.name,
-      description: project.description,
-      toc: tocRes.rows.map((row) => ({
-        specId: row.id,
-        section: row.section,
-        title: row.title,
-        position: row.position,
-      })),
-      sources: mapSources(srcRes.rows),
-      deletedAt: project.deleted_at ? project.deleted_at.toISOString() : null,
-      deletedBy: project.deleted_by,
-    };
+    return await fetchProjectTocAndSources(project, id, pool);
   } catch (err) {
     throw new DatabaseError(`findProjectById: toc query failed for ${id}`, { cause: err });
   }
 }
 
-export async function updateProjectName(
+export interface UpdateProjectInput {
+  readonly name?: string;
+  readonly sectionNumberFormat?: SectionNumberFormat;
+}
+
+export interface UpdateProjectResult {
+  readonly id: string;
+  readonly name: string;
+  readonly sectionNumberFormat: SectionNumberFormat;
+}
+
+/**
+ * Partial update of a project's mutable settings. At least one field must be
+ * provided; only provided fields are SET. Returns null when the project does
+ * not exist (→ 404 at the handler).
+ */
+export async function updateProject(
   id: string,
-  name: string,
+  input: UpdateProjectInput,
   pool: Queryable
-): Promise<{ id: string; name: string } | null> {
+): Promise<UpdateProjectResult | null> {
+  const setClauses: string[] = ['updated_at = now()'];
+  const params: string[] = [id];
+  if (input.name !== undefined) {
+    params.push(input.name);
+    setClauses.push(`name = $${params.length}`);
+  }
+  if (input.sectionNumberFormat !== undefined) {
+    params.push(input.sectionNumberFormat);
+    setClauses.push(`section_number_format = $${params.length}`);
+  }
+  const sql = `UPDATE projects SET ${setClauses.join(', ')} WHERE id = $1 RETURNING id, name, section_number_format`;
   try {
-    const { rows } = await pool.query<{ id: string; name: string }>(
-      `UPDATE projects SET name = $2, updated_at = now() WHERE id = $1 RETURNING id, name`,
-      [id, name]
-    );
-    return rows[0] ?? null;
+    const { rows } = await pool.query<{
+      id: string;
+      name: string;
+      section_number_format: string;
+    }>(sql, params);
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      name: row.name,
+      sectionNumberFormat: parseSectionNumberFormat(row.section_number_format),
+    };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
-    throw new DatabaseError(`updateProjectName: update failed for ${id}`, { cause: err });
+    throw new DatabaseError(`updateProject: update failed for ${id}`, { cause: err });
   }
 }
 
@@ -373,40 +407,5 @@ export async function restoreProject(
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError(`restoreProject: update failed for ${id}`, { cause: err });
-  }
-}
-
-export async function getBrokenRefs(
-  projectId: string,
-  pool: Queryable
-): Promise<readonly BrokenRef[]> {
-  try {
-    const result = await pool.query<BrokenRefRow>(
-      `SELECT sr.id, sr.source_spec_id, s.section AS source_spec_section,
-              sr.target_spec_section, sr.reference_text,
-              (SELECT json_agg(json_build_object('libraryId', l.id, 'name', l.name)
-                               ORDER BY pso.priority)
-               FROM project_sources pso
-               JOIN libraries l ON l.id = pso.library_id
-               WHERE pso.project_id = $1
-                 AND EXISTS (SELECT 1 FROM specs ms
-                             WHERE ms.library_id = pso.library_id
-                               AND ms.section = sr.target_spec_section)) AS available_from
-       FROM spec_references sr
-       JOIN specs s ON s.id = sr.source_spec_id
-       JOIN project_specs ps ON ps.spec_id = sr.source_spec_id AND ps.project_id = $1
-       WHERE sr.is_broken = true`,
-      [projectId]
-    );
-    return result.rows.map((row) => ({
-      refId: row.id,
-      sourceSpecId: row.source_spec_id,
-      sourceSpecSection: row.source_spec_section,
-      targetSpecSection: row.target_spec_section,
-      referenceText: row.reference_text,
-      availableFrom: row.available_from ?? [],
-    }));
-  } catch (err) {
-    throw new DatabaseError(`getBrokenRefs: query failed for project ${projectId}`, { cause: err });
   }
 }

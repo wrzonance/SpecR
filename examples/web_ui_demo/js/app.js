@@ -26,6 +26,7 @@ import {
   getCoordinationReport,
   getRequiredSections,
   setRequiredSections,
+  deleteProject,
 } from './api.js';
 import { renderSpecSheet } from './tree.js';
 import { API_FEATURES } from './features.js';
@@ -159,6 +160,8 @@ function displaySection(section) {
       return `${first}.${second}.${third}${suffix}${agency}`;
     case 'compact':
       return `${first}${second}${third}${suffix}${agency}`;
+    case 'spaced-compact':
+      return `${first} ${second}${third}${suffix}${agency}`;
     default:
       return section;
   }
@@ -246,8 +249,10 @@ function renderProjectControls() {
 
 function renderProjectSettings() {
   const name = document.getElementById('project-name-input');
+  const formatSelect = document.getElementById('project-format-select');
   const hint = document.getElementById('settings-hint');
   if (name) name.value = activeProjectName();
+  if (formatSelect) formatSelect.value = activeSectionNumberFormat();
   if (hint) hint.textContent = `${activeProjectName()} · ${projectSourceLabel()}`;
   renderProjectSourceList();
 }
@@ -356,9 +361,11 @@ async function saveProjectSettings() {
     return;
   }
   const name = document.getElementById('project-name-input')?.value.trim() || activeProjectName();
+  const formatSelect = document.getElementById('project-format-select');
+  const sectionNumberFormat = formatSelect?.value || activeSectionNumberFormat();
   projectClientLibraryIds = checkedProjectClientIds();
   try {
-    await patchProject(activeProjectId, { name });
+    await patchProject(activeProjectId, { name, sectionNumberFormat });
     await syncProjectSourcesToTocScope();
     await refreshProjectList(activeProjectId);
     activeProject = await getProject(activeProjectId);
@@ -400,6 +407,61 @@ async function loadActiveProjectWorkspace() {
   await refreshCoordination();
 }
 
+async function deleteActiveProject() {
+  if (!activeProjectId) return;
+  const ok = await openConfirm({
+    title: 'Delete project',
+    body: [
+      { text: `Delete "${activeProjectName()}"?`, kind: 'strong' },
+      {
+        text: 'The project is soft-deleted and hidden from the list. You can restore it later.',
+        kind: 'muted',
+      },
+    ],
+    confirmLabel: 'Delete project',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await deleteProject(activeProjectId, 'demo-user');
+    const deletedId = activeProjectId;
+    activeProjectId = null;
+    activeProject = null;
+    await refreshProjectList();
+    if (activeProjectId) rememberProject(activeProjectId);
+    // loadActiveProjectWorkspace clears specs/members/board when no project
+    // remains, and loads the next project's workspace otherwise.
+    await loadActiveProjectWorkspace();
+    toast(`Project deleted`, 'warn');
+    const undoMsg = document.createElement('span');
+    undoMsg.textContent = ' ';
+    const undoBtn = document.createElement('button');
+    undoBtn.textContent = 'Undo';
+    undoBtn.style.cssText = 'margin-left:6px;text-decoration:underline;background:none;border:none;color:inherit;cursor:pointer;';
+    undoBtn.addEventListener('click', async () => {
+      try {
+        const { restoreProject: restore } = await import('./api.js');
+        await restore(deletedId);
+        await refreshProjectList(deletedId);
+        rememberProject(deletedId);
+        // switchProject would early-return (id is already active after refresh),
+        // so load the restored workspace directly.
+        await loadActiveProjectWorkspace();
+        toast('Project restored');
+      } catch (err) {
+        toast(`restore failed: ${err.message}`, 'err');
+      }
+    });
+    const rack = document.getElementById('toast-rack');
+    if (rack) {
+      const node = rack.lastElementChild;
+      if (node) { node.appendChild(undoMsg); node.appendChild(undoBtn); }
+    }
+  } catch (err) {
+    toast(`delete failed: ${err.message}`, 'err');
+  }
+}
+
 function initProjectManager() {
   document.getElementById('project-select')?.addEventListener('change', (event) => {
     void switchProject(event.target.value);
@@ -413,6 +475,9 @@ function initProjectManager() {
   document.getElementById('project-settings-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     void saveProjectSettings();
+  });
+  document.getElementById('project-delete-btn')?.addEventListener('click', () => {
+    void deleteActiveProject();
   });
 }
 

@@ -88,6 +88,7 @@ describe('getProjectHandler', () => {
       toc: [],
       deletedAt: null,
       deletedBy: null,
+      sectionNumberFormat: 'canonical',
     });
     const { getProjectHandler } = await import('./projects.js');
     const req = { params: { id: 'p1' } } as unknown as Request;

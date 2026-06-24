@@ -5,7 +5,7 @@ import {
   findProjectById,
   listProjects,
   setProjectSources,
-  updateProjectName,
+  updateProject,
   softDeleteProject,
   restoreProject,
   addSectionToProject,
@@ -19,6 +19,7 @@ import {
 import type { CreateProjectBody, AddSectionToProjectBody } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
+import { SectionNumberFormatSchema } from '../lib/section-number.js';
 
 const SetProjectSourcesBody = z.object({
   sourceLibraryIds: z
@@ -35,7 +36,20 @@ const SetProjectSourcesBody = z.object({
     }),
 });
 
-const PatchProjectBody = z.object({ name: z.string().check(z.minLength(1)) });
+const PatchProjectBody = z
+  .object({
+    name: z.string().check(z.minLength(1)).optional(),
+    sectionNumberFormat: SectionNumberFormatSchema.optional(),
+  })
+  .check((ctx) => {
+    if (ctx.value.name === undefined && ctx.value.sectionNumberFormat === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        message: 'at least one of name or sectionNumberFormat is required',
+      });
+    }
+  });
 
 // Soft-delete audit (ADR-031): the actor is caller-supplied free text — there is
 // no user/auth model yet (#43). When auth lands this is populated from the session.
@@ -215,16 +229,32 @@ export async function patchProjectHandler(req: Request, res: Response): Promise<
   const id = parsedId.data;
   const parsed = PatchProjectBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ success: false, error: 'name is required' });
+    res.status(400).json({
+      success: false,
+      error: 'at least one of name or sectionNumberFormat is required',
+    });
     return;
   }
   try {
-    const updated = await updateProjectName(id, parsed.data.name, pool);
+    const patch = {
+      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+      ...(parsed.data.sectionNumberFormat !== undefined
+        ? { sectionNumberFormat: parsed.data.sectionNumberFormat }
+        : {}),
+    };
+    const updated = await updateProject(id, patch, pool);
     if (!updated) {
       res.status(404).json({ success: false, error: 'project not found' });
       return;
     }
-    res.status(200).json({ success: true, data: { projectId: updated.id, name: updated.name } });
+    res.status(200).json({
+      success: true,
+      data: {
+        projectId: updated.id,
+        name: updated.name,
+        sectionNumberFormat: updated.sectionNumberFormat,
+      },
+    });
   } catch (err) {
     logger.error({ err }, 'patch project failed');
     res.status(500).json({ success: false, error: 'internal server error' });

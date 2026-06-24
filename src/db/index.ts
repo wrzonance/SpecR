@@ -63,10 +63,9 @@ export {
   findProjectById,
   listProjects,
   setProjectSources,
-  updateProjectName,
+  updateProject,
   softDeleteProject,
   restoreProject,
-  getBrokenRefs,
   InvalidSourceLibraryError,
 } from './queries/projects.js';
 export type {
@@ -76,9 +75,12 @@ export type {
   ProjectTocEntry,
   ProjectSource,
   ProjectTombstone,
-  BrokenRef,
   CreateProjectInput,
+  UpdateProjectInput,
+  UpdateProjectResult,
 } from './queries/projects.js';
+export { getBrokenRefs } from './queries/project-refs.js';
+export type { BrokenRef } from './queries/project-refs.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
 export { getParagraphSnapshots, getCurrentParagraphSnapshots } from './queries/versions.js';
 export type { ParagraphSearchResult, SpecSectionResult } from './queries/search.js';
