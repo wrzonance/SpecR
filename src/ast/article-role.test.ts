@@ -36,6 +36,16 @@ describe('deriveArticleRole — canonical CSI headings', () => {
     expect(deriveArticleRole('References')).toBe('references');
   });
 
+  it('strips the numbering prefix even behind incidental leading whitespace', () => {
+    // The prefix regex is ^-anchored; normalizeHeading trims before stripping so
+    // a leading space ("  1.1 REFERENCES") does not block the strip and leave an
+    // unmatchable "1.1 REFERENCES" behind.
+    expect(deriveArticleRole('  1.1 REFERENCES')).toBe('references');
+    expect(deriveArticleRole('\t1.02 SUBMITTALS')).toBe('submittals');
+    // The 3D anchor still holds with leading whitespace — never strips into a role.
+    expect(deriveArticleRole('  3D MODELING')).toBeUndefined();
+  });
+
   it('accepts documented variants', () => {
     expect(deriveArticleRole('RELATED REQUIREMENTS')).toBe('related-sections');
     expect(deriveArticleRole('REFERENCE STANDARDS')).toBe('references');

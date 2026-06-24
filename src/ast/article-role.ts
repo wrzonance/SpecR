@@ -51,7 +51,11 @@ const LOOKUP: ReadonlyMap<string, ArticleRole> = new Map(
 const NUMBER_PREFIX_RE = /^\d+(?:\.\d+)*(?:\s*[-–—.)]\s*|\s+)/;
 
 function normalizeHeading(text: string): string {
-  return text.replace(NUMBER_PREFIX_RE, '').trim().replace(/\s+/g, ' ').toUpperCase();
+  // Trim FIRST so the ^-anchored prefix strip survives incidental leading
+  // whitespace ("  1.1 REFERENCES" → "REFERENCES"); the second trim drops any
+  // space the prefix terminator left behind. The "3D MODELING" anchor is
+  // unaffected — the terminator requirement lives in the regex, not the order.
+  return text.trim().replace(NUMBER_PREFIX_RE, '').replace(/\s+/g, ' ').trim().toUpperCase();
 }
 
 /** Resolve a CSI article role from its heading text, or undefined if unknown. */
