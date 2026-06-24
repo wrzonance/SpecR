@@ -6,6 +6,7 @@ import { extractRefsFromTree } from './refs/index.js';
 import { ParserError } from './error.js';
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { inferSectionMeta } from '../lib/infer-section.js';
+import { tagArticleRoles } from '../ast/index.js';
 import type { SpecTree, SecRef } from '../ast/types.js';
 import type { SectionInference } from '../lib/infer-section.js';
 
@@ -32,6 +33,10 @@ export interface ParseResult {
   readonly capabilities?: readonly string[];
 }
 
+function withArticleRoles(tree: SpecTree): SpecTree {
+  return { ...tree, parts: tagArticleRoles(tree.parts) };
+}
+
 function applyInference(tree: SpecTree, inference: SectionInference): SpecTree {
   if (inference.method === 'metadata' || inference.confidence === 'none') return tree;
   const section =
@@ -47,13 +52,13 @@ export async function parse(buffer: Buffer, filename: string): Promise<ParseResu
     const text = assertSecSafe(buffer);
     const { tree, refs } = parseSec(text);
     const sectionInference = inferSectionMeta(tree);
-    return { tree: applyInference(tree, sectionInference), refs, sectionInference };
+    return { tree: withArticleRoles(applyInference(tree, sectionInference)), refs, sectionInference };
   }
   if (ext === '.docx') {
     const noop = (_stage: string, _pct: number): void => {};
     const tree = await parseDocx(buffer, noop);
     const sectionInference = inferSectionMeta(tree);
-    const finalTree = applyInference(tree, sectionInference);
+    const finalTree = withArticleRoles(applyInference(tree, sectionInference));
     const refs = extractRefsFromTree(finalTree);
     return { tree: finalTree, refs, sectionInference };
   }
@@ -61,7 +66,7 @@ export async function parse(buffer: Buffer, filename: string): Promise<ParseResu
     const text = decodeTextBuffer(buffer);
     const { tree, refs, capabilities } = parseText(text);
     const sectionInference = inferSectionMeta(tree);
-    return { tree, refs, sectionInference, capabilities };
+    return { tree: withArticleRoles(tree), refs, sectionInference, capabilities };
   }
   throw new ParserError(`unsupported format: ${ext}`);
 }
