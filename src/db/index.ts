@@ -64,6 +64,8 @@ export {
   listProjects,
   setProjectSources,
   updateProjectName,
+  softDeleteProject,
+  restoreProject,
   getBrokenRefs,
   InvalidSourceLibraryError,
 } from './queries/projects.js';
@@ -73,6 +75,7 @@ export type {
   ProjectWithToc,
   ProjectTocEntry,
   ProjectSource,
+  ProjectTombstone,
   BrokenRef,
   CreateProjectInput,
 } from './queries/projects.js';

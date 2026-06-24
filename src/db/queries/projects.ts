@@ -10,6 +10,8 @@ interface ProjectRow {
   readonly id: string;
   readonly name: string;
   readonly description: string | null;
+  readonly deleted_at: Date | null;
+  readonly deleted_by: string | null;
 }
 
 interface ProjectListRow {
@@ -81,6 +83,18 @@ export interface ProjectWithToc {
   readonly description: string | null;
   readonly sources: readonly ProjectSource[];
   readonly toc: readonly ProjectTocEntry[];
+  /** Soft-delete tombstone (ADR-031). NULL on an active project. ISO-8601. */
+  readonly deletedAt: string | null;
+  /** Caller-supplied actor that soft-deleted the project. NULL when active. */
+  readonly deletedBy: string | null;
+}
+
+/** Result of a soft-delete (ADR-031) — the persisted tombstone. Idempotent:
+ *  re-deleting returns the EXISTING values, never overwriting them. */
+export interface ProjectTombstone {
+  readonly projectId: string;
+  readonly deletedAt: string;
+  readonly deletedBy: string;
 }
 
 export interface BrokenRef {
@@ -212,8 +226,10 @@ export async function setProjectSources(
 
 export async function listProjects(pool: Queryable): Promise<readonly ProjectListItem[]> {
   try {
+    // Soft-deleted projects (ADR-031) are hidden from the listing — they remain
+    // GET-able by id (with the tombstone surfaced) and reversible via restore.
     const result = await pool.query<ProjectListRow>(
-      'SELECT id, name FROM projects ORDER BY name, id'
+      'SELECT id, name FROM projects WHERE deleted_at IS NULL ORDER BY name, id'
     );
     return result.rows.map((row) => ({ id: row.id, name: row.name }));
   } catch (err) {
@@ -233,8 +249,10 @@ function mapSources(rows: readonly ProjectSourceRow[]): readonly ProjectSource[]
 export async function findProjectById(id: string, pool: Queryable): Promise<ProjectWithToc | null> {
   let project: ProjectRow | undefined;
   try {
+    // A soft-deleted project (ADR-031) is still returned here — only listings
+    // hide it — so lineage/history and a restore decision still resolve.
     const res = await pool.query<ProjectRow>(
-      'SELECT id, name, description FROM projects WHERE id = $1',
+      'SELECT id, name, description, deleted_at, deleted_by FROM projects WHERE id = $1',
       [id]
     );
     project = res.rows[0];
@@ -270,6 +288,8 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
         position: row.position,
       })),
       sources: mapSources(srcRes.rows),
+      deletedAt: project.deleted_at ? project.deleted_at.toISOString() : null,
+      deletedBy: project.deleted_by,
     };
   } catch (err) {
     throw new DatabaseError(`findProjectById: toc query failed for ${id}`, { cause: err });
@@ -290,6 +310,69 @@ export async function updateProjectName(
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError(`updateProjectName: update failed for ${id}`, { cause: err });
+  }
+}
+
+/**
+ * Soft-delete a project (ADR-031): tombstone it with `deleted_at = now()` and
+ * the caller-supplied `deleted_by` actor. **Idempotent** — `COALESCE` preserves
+ * an existing tombstone, so re-deleting an already-deleted project returns the
+ * ORIGINAL who/when, never overwriting them. Returns null when the project does
+ * not exist (→ 404 at the handler).
+ */
+export async function softDeleteProject(
+  id: string,
+  deletedBy: string,
+  pool: Queryable
+): Promise<ProjectTombstone | null> {
+  try {
+    const { rows } = await pool.query<{ deleted_at: Date; deleted_by: string }>(
+      `UPDATE projects
+       SET deleted_at = COALESCE(deleted_at, now()),
+           deleted_by = COALESCE(deleted_by, $2),
+           updated_at = CASE WHEN deleted_at IS NULL THEN now() ELSE updated_at END
+       WHERE id = $1
+       RETURNING deleted_at, deleted_by`,
+      [id, deletedBy]
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      projectId: id,
+      deletedAt: row.deleted_at.toISOString(),
+      deletedBy: row.deleted_by,
+    };
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`softDeleteProject: update failed for ${id}`, { cause: err });
+  }
+}
+
+/**
+ * Restore a soft-deleted project (ADR-031): clear the tombstone. **Idempotent** —
+ * restoring an already-active project is a no-op that still returns 200. Returns
+ * null when the project does not exist (→ 404 at the handler).
+ */
+export async function restoreProject(
+  id: string,
+  pool: Queryable
+): Promise<{ projectId: string } | null> {
+  try {
+    const { rows } = await pool.query<{ id: string }>(
+      `UPDATE projects
+       SET deleted_at = NULL,
+           deleted_by = NULL,
+           updated_at = CASE WHEN deleted_at IS NOT NULL THEN now() ELSE updated_at END
+       WHERE id = $1
+       RETURNING id`,
+      [id]
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return { projectId: row.id };
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`restoreProject: update failed for ${id}`, { cause: err });
   }
 }
 

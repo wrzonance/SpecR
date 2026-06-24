@@ -1146,6 +1146,98 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteProject
+      summary: Soft-delete (withdraw) a project
+      description: >
+        Soft-deletes a project (ADR-031): tombstones it with `deleted_at` + the
+        caller-supplied `deletedBy` actor. The project is hidden from
+        `GET /projects` but remains retrievable by id (with the tombstone
+        surfaced) and reversible via `POST /projects/{id}/restore`. Idempotent —
+        re-deleting an already-deleted project returns its EXISTING
+        `deletedAt`/`deletedBy`, never overwriting them.
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deletedBy]
+              properties:
+                deletedBy:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Free-text actor recorded in the audit tombstone — there is no
+                    user model yet (#43). When auth lands this is the session user.
+      responses:
+        '200':
+          description: Project soft-deleted (or already was)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId, deletedAt, deletedBy]
+                        properties:
+                          projectId:
+                            type: string
+                            format: uuid
+                          deletedAt:
+                            type: string
+                            format: date-time
+                          deletedBy:
+                            type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{id}/restore:
+    post:
+      operationId: restoreProject
+      summary: Restore a soft-deleted project
+      description: >
+        Clears a project's soft-delete tombstone (ADR-031), making it active and
+        visible in `GET /projects` again. Idempotent — restoring a project that
+        is not deleted is a 200 no-op.
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project restored (or was already active)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId]
+                        properties:
+                          projectId:
+                            type: string
+                            format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /projects/{id}/sources:
     put:
@@ -3967,7 +4059,7 @@ components:
 
     ProjectWithToc:
       type: object
-      required: [projectId, name, description, sources, toc]
+      required: [projectId, name, description, sources, toc, deletedAt, deletedBy]
       properties:
         projectId:
           type: string
@@ -4010,6 +4102,17 @@ components:
               position:
                 type: integer
                 description: 1-based TOC ordering
+        deletedAt:
+          type: [string, 'null']
+          format: date-time
+          description: >
+            Soft-delete tombstone (ADR-031). `null` on an active project; an
+            ISO-8601 timestamp once soft-deleted.
+        deletedBy:
+          type: [string, 'null']
+          description: >
+            Caller-supplied actor that soft-deleted the project (ADR-031). `null`
+            while active.
 
     BrokenRef:
       type: object

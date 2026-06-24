@@ -11,6 +11,8 @@ import {
   getProjectHandler,
   setProjectSourcesHandler,
   patchProjectHandler,
+  deleteProjectHandler,
+  restoreProjectHandler,
   addSectionToProjectHandler,
   removeSectionFromProjectHandler,
   getBrokenRefsHandler,
@@ -130,6 +132,8 @@ router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHan
 router.get('/projects', listProjectsHandler);
 router.get('/projects/:id', getProjectHandler);
 router.patch('/projects/:id', patchProjectHandler);
+router.delete('/projects/:id', deleteProjectHandler);
+router.post('/projects/:id/restore', restoreProjectHandler);
 router.put('/projects/:id/sources', setProjectSourcesHandler);
 router.post('/projects/:id/generate', generateManualHandler);
 router.get(

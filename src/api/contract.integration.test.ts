@@ -88,6 +88,8 @@ const RESPONSE_ALLOWLIST = new Set([
   'get /specs/{}/paragraphs/{}/associations',
   'post /specs/{}/paragraphs/{}/associations',
   'patch /projects/{}',
+  'delete /projects/{}',
+  'post /projects/{}/restore',
 ]);
 
 let server: Server;

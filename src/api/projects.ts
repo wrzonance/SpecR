@@ -6,6 +6,8 @@ import {
   listProjects,
   setProjectSources,
   updateProjectName,
+  softDeleteProject,
+  restoreProject,
   addSectionToProject,
   removeSectionFromProject,
   getBrokenRefs,
@@ -34,6 +36,10 @@ const SetProjectSourcesBody = z.object({
 });
 
 const PatchProjectBody = z.object({ name: z.string().check(z.minLength(1)) });
+
+// Soft-delete audit (ADR-031): the actor is caller-supplied free text — there is
+// no user/auth model yet (#43). When auth lands this is populated from the session.
+const DeleteProjectBody = z.object({ deletedBy: z.string().check(z.minLength(1)) });
 
 export async function createProjectHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -221,6 +227,52 @@ export async function patchProjectHandler(req: Request, res: Response): Promise<
     res.status(200).json({ success: true, data: { projectId: updated.id, name: updated.name } });
   } catch (err) {
     logger.error({ err }, 'patch project failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function deleteProjectHandler(req: Request, res: Response): Promise<void> {
+  const parsedId = z.uuid().safeParse(req.params['id']);
+  if (!parsedId.success) {
+    res.status(400).json({ success: false, error: 'invalid project id' });
+    return;
+  }
+  const parsed = DeleteProjectBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: 'deletedBy is required' });
+    return;
+  }
+  try {
+    // Idempotent: re-deleting returns the EXISTING tombstone (ADR-031), so the
+    // original who/when is never clobbered by a later delete.
+    const tombstone = await softDeleteProject(parsedId.data, parsed.data.deletedBy, pool);
+    if (!tombstone) {
+      res.status(404).json({ success: false, error: 'project not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: tombstone });
+  } catch (err) {
+    logger.error({ err }, 'delete project failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function restoreProjectHandler(req: Request, res: Response): Promise<void> {
+  const parsedId = z.uuid().safeParse(req.params['id']);
+  if (!parsedId.success) {
+    res.status(400).json({ success: false, error: 'invalid project id' });
+    return;
+  }
+  try {
+    // Idempotent: restoring a non-deleted project is a 200 no-op (ADR-031).
+    const restored = await restoreProject(parsedId.data, pool);
+    if (!restored) {
+      res.status(404).json({ success: false, error: 'project not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: restored });
+  } catch (err) {
+    logger.error({ err }, 'restore project failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }
