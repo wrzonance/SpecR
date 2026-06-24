@@ -19,6 +19,7 @@ import {
   handleGetReferences,
   handleCoordinationReport,
 } from './handlers.js';
+import { registerOnboardingTools } from './onboarding-tools.js';
 
 type ToolError = {
   readonly isError: true;
@@ -337,4 +338,5 @@ export function registerTools(server: McpServer): void {
   registerGeneratorTools(server);
   registerLoaderTools(server);
   registerCoordinationTools(server);
+  registerOnboardingTools(server);
 }
