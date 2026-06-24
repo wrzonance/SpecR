@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { SpecNode } from './types.js';
+import type { SpecNode, SourceFacts } from './types.js';
 import { SectionNumberInputSchema, SectionNumberSchema } from '../lib/section-number.js';
 import { textEndsWithClosed } from './comment-closure.js';
 
@@ -69,6 +69,18 @@ export const SourceFactsSchema = z
     vanish: z.literal(true).exactOptional(),
   })
   .catchall(JsonValue);
+
+/**
+ * Normalize raw `source_facts` JSONB read from the DB into the canonical shape
+ * before it reaches an API response (#262). Crucially this backfills the
+ * comment `closed` flag for legacy facts persisted before the field existed —
+ * read paths that pass the raw JSONB through verbatim would otherwise emit
+ * comment objects missing `closed`, violating the OpenAPI contract that now
+ * requires it. A corrupt row fails loud here, never a silent drop.
+ */
+export function parseSourceFacts(raw: unknown): SourceFacts {
+  return SourceFactsSchema.parse(raw ?? {});
+}
 
 // ── Editing conventions (ADR-022 D3) — library-scoped editability rulesets ──
 // The closed four-value editability vocabulary (ADR-022 D1). Reused by the

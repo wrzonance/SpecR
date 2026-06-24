@@ -17,6 +17,7 @@ export {
   NodeTypeSchema,
   SignalConflictSchema,
   SourceFactsSchema,
+  parseSourceFacts,
   SpecNodeMetaSchema,
   SpecNodeSchema,
   SpecTreeSchema,

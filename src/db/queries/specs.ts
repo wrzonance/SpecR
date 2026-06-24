@@ -1,4 +1,5 @@
 import { pool, DatabaseError } from '../index.js';
+import { parseSourceFacts } from '../../ast/index.js';
 import type {
   ParagraphAssociation,
   SignalConflict,
@@ -163,6 +164,9 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
       .sort((a, b) => a.position - b.position)
       .map(buildNode);
     const editability = deriveEditability(row.classification, row.editability_override);
+    // Normalize through the schema so legacy comment facts gain the backfilled
+    // `closed` flag before they reach the API response (#262).
+    const sourceFacts = parseSourceFacts(row.source_facts);
     return {
       id: row.id,
       type: row.node_type as NodeType,
@@ -171,7 +175,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
       meta: {
         ...(row.vanish ? { vanish: true } : {}),
         ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
-        ...(hasSourceFacts(row.source_facts) ? { sourceFacts: row.source_facts } : {}),
+        ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
         ...(editability ? { editability } : {}),
       },
     };
