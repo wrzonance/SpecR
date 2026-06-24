@@ -266,6 +266,8 @@ describe('getBrokenRefsHandler', () => {
         refId: 'r1',
         sourceSpecId: 's1',
         sourceSpecSection: '03 30 00',
+        sourceParagraphId: 'para-1',
+        snippet: '…coordinate with See Section 09 91 00 for finishes…',
         targetSpecSection: '09 91 00',
         referenceText: 'See Section 09 91 00',
         availableFrom: [],

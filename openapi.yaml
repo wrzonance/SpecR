@@ -3374,6 +3374,8 @@ components:
           refId,
           sourceSpecId,
           sourceSpecSection,
+          sourceParagraphId,
+          snippet,
           targetSpecSection,
           referenceText,
           availableFrom,
@@ -3383,6 +3385,13 @@ components:
         refId: { type: string, format: uuid }
         sourceSpecId: { type: string, format: uuid }
         sourceSpecSection: { type: string }
+        sourceParagraphId:
+          type: string
+          format: uuid
+          description: Paragraph the dangling reference sits in — the paragraph-level locator
+        snippet:
+          type: string
+          description: Short excerpt of that paragraph, centred on the matched reference
         targetSpecSection: { type: string }
         referenceText: { type: string }
         availableFrom:
@@ -4155,7 +4164,16 @@ components:
     BrokenRef:
       type: object
       required:
-        [refId, sourceSpecId, sourceSpecSection, targetSpecSection, referenceText, availableFrom]
+        [
+          refId,
+          sourceSpecId,
+          sourceSpecSection,
+          sourceParagraphId,
+          snippet,
+          targetSpecSection,
+          referenceText,
+          availableFrom,
+        ]
       properties:
         refId:
           type: string
@@ -4166,6 +4184,13 @@ components:
         sourceSpecSection:
           type: string
           description: CSI section number of the spec containing the reference
+        sourceParagraphId:
+          type: string
+          format: uuid
+          description: Paragraph the reference sits in — the paragraph-level locator
+        snippet:
+          type: string
+          description: Short excerpt of that paragraph, centred on the matched reference
         targetSpecSection:
           type: [string, 'null']
           description: Section number the reference points at (as written in the source document)
