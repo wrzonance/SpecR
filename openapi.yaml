@@ -1100,6 +1100,52 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: renameProject
+      summary: Rename a project
+      description: >
+        Updates a project's name. The name must be non-empty. There is no
+        uniqueness constraint on project names, so there is no 409 path.
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: Renamed project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId, name]
+                        properties:
+                          projectId:
+                            type: string
+                            format: uuid
+                          name:
+                            type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /projects/{id}/sources:
     put:

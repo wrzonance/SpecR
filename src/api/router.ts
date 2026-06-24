@@ -10,6 +10,7 @@ import {
   listProjectsHandler,
   getProjectHandler,
   setProjectSourcesHandler,
+  patchProjectHandler,
   addSectionToProjectHandler,
   removeSectionFromProjectHandler,
   getBrokenRefsHandler,
@@ -128,6 +129,7 @@ router.post('/specs/:id/merge', mergeHandler);
 router.post('/projects', validateBody(CreateProjectBodySchema), createProjectHandler);
 router.get('/projects', listProjectsHandler);
 router.get('/projects/:id', getProjectHandler);
+router.patch('/projects/:id', patchProjectHandler);
 router.put('/projects/:id/sources', setProjectSourcesHandler);
 router.post('/projects/:id/generate', generateManualHandler);
 router.get(

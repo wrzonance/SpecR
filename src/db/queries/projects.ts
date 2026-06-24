@@ -276,6 +276,18 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
   }
 }
 
+export async function updateProjectName(
+  id: string,
+  name: string,
+  pool: Queryable
+): Promise<{ id: string; name: string } | null> {
+  const { rows } = await pool.query<{ id: string; name: string }>(
+    `UPDATE projects SET name = $2, updated_at = now() WHERE id = $1 RETURNING id, name`,
+    [id, name]
+  );
+  return rows[0] ?? null;
+}
+
 export async function getBrokenRefs(
   projectId: string,
   pool: Queryable

@@ -5,6 +5,7 @@ import {
   findProjectById,
   listProjects,
   setProjectSources,
+  updateProjectName,
   addSectionToProject,
   removeSectionFromProject,
   getBrokenRefs,
@@ -31,6 +32,8 @@ const SetProjectSourcesBody = z.object({
       }
     }),
 });
+
+const PatchProjectBody = z.object({ name: z.string().check(z.minLength(1)) });
 
 export async function createProjectHandler(req: Request, res: Response): Promise<void> {
   try {
@@ -193,6 +196,30 @@ export async function getBrokenRefsHandler(req: Request, res: Response): Promise
     res.status(200).json({ success: true, data: refs });
   } catch (err) {
     logger.error({ err }, 'get broken refs failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function patchProjectHandler(req: Request, res: Response): Promise<void> {
+  const id = req.params['id'];
+  if (!id || typeof id !== 'string') {
+    res.status(400).json({ success: false, error: 'missing project id' });
+    return;
+  }
+  const parsed = PatchProjectBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: 'name is required' });
+    return;
+  }
+  try {
+    const updated = await updateProjectName(id, parsed.data.name, pool);
+    if (!updated) {
+      res.status(404).json({ success: false, error: 'project not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: { projectId: updated.id, name: updated.name } });
+  } catch (err) {
+    logger.error({ err }, 'patch project failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }
