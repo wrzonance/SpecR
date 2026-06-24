@@ -11,19 +11,18 @@ import { z } from 'zod';
 export const SECTION_NUMBER_RE = /^\d{2} \d{2} \d{2}(?:\.\d{2}(?: \d{2})?)?$/;
 const CANONICAL_PARTS_RE = /^(\d{2}) (\d{2}) (\d{2})(?:\.(\d{2})(?: (\d{2}))?)?$/;
 
-export const SECTION_NUMBER_FORMATS = ['canonical', 'dots', 'compact'] as const;
+export const SECTION_NUMBER_FORMATS = ['canonical', 'dots', 'compact', 'spaced-compact'] as const;
 export type SectionNumberFormat = (typeof SECTION_NUMBER_FORMATS)[number];
 export const SectionNumberFormatSchema = z.enum(SECTION_NUMBER_FORMATS);
 
 export type SectionNumberParseContext = 'canonical' | 'strong';
-export type SectionNumberInputFormat = SectionNumberFormat | 'spaced-compact';
 export type SectionNumberParseFailureReason = 'empty' | 'not-canonical' | 'invalid-format';
 
 export type SectionNumberParseResult =
   | {
       readonly ok: true;
       readonly canonical: string;
-      readonly inputFormat: SectionNumberInputFormat;
+      readonly inputFormat: SectionNumberFormat;
       readonly confidence: 'high';
     }
   | {
@@ -95,7 +94,7 @@ function canonicalFromParts(
 
 function variantFromMatch(
   match: RegExpExecArray,
-  inputFormat: SectionNumberInputFormat
+  inputFormat: SectionNumberFormat
 ): SectionNumberParseResult | null {
   const first = match[1];
   const second = match[2];
@@ -111,7 +110,7 @@ function variantFromMatch(
 
 function parseStrongVariant(collapsed: string): SectionNumberParseResult | null {
   const patterns: readonly {
-    readonly inputFormat: SectionNumberInputFormat;
+    readonly inputFormat: SectionNumberFormat;
     readonly pattern: RegExp;
   }[] = [
     { inputFormat: 'dots', pattern: DOTS_RE },
@@ -170,6 +169,8 @@ export function formatSectionNumber(canonical: string, format: SectionNumberForm
       return `${first}.${second}.${third}${suffix}${agency}`;
     case 'compact':
       return `${first}${second}${third}${suffix}${agency}`;
+    case 'spaced-compact':
+      return `${first} ${second}${third}${suffix}${agency}`;
   }
   const exhaustive: never = format;
   return exhaustive;

@@ -122,8 +122,10 @@ describe('formatSectionNumber', () => {
     ['09 91 00', 'canonical', '09 91 00'],
     ['09 91 00', 'dots', '09.91.00'],
     ['09 91 00', 'compact', '099100'],
+    ['09 91 00', 'spaced-compact', '09 9100'],
     ['01 32 01.00 10', 'dots', '01.32.01.00 10'],
     ['01 32 01.00 10', 'compact', '013201.00 10'],
+    ['01 32 01.00 10', 'spaced-compact', '01 3201.00 10'],
   ] as const)('formats %s as %s', (canonical, format, expected) => {
     expect(formatSectionNumber(canonical, format)).toBe(expected);
   });
@@ -149,6 +151,12 @@ describe('formatSectionReferences', () => {
   it('does not rewrite bare product or standards-like numbers', () => {
     const text = 'Manufacturer Part No. 099100; ASME 123456; ASTM 123456.';
     expect(formatSectionReferences(text, 'dots')).toBe(text);
+  });
+
+  it('formats Section references to spaced-compact', () => {
+    expect(formatSectionReferences('See Section 09 91 00 for painting.', 'spaced-compact')).toBe(
+      'See Section 09 9100 for painting.'
+    );
   });
 });
 
