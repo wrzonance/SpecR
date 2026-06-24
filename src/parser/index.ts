@@ -53,7 +53,11 @@ export async function parse(buffer: Buffer, filename: string): Promise<ParseResu
     const text = assertSecSafe(buffer);
     const { tree, refs } = parseSec(text);
     const sectionInference = inferSectionMeta(tree);
-    return { tree: withArticleRoles(applyInference(tree, sectionInference)), refs, sectionInference };
+    return {
+      tree: withArticleRoles(applyInference(tree, sectionInference)),
+      refs,
+      sectionInference,
+    };
   }
   if (ext === '.docx') {
     const noop = (_stage: string, _pct: number): void => {};

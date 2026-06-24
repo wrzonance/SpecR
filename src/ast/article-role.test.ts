@@ -15,9 +15,7 @@ describe('deriveArticleRole — canonical CSI headings', () => {
     expect(deriveArticleRole('QUALITY ASSURANCE')).toBe('quality-assurance');
     expect(deriveArticleRole('DEFINITIONS')).toBe('definitions');
     expect(deriveArticleRole('WARRANTY')).toBe('warranty');
-    expect(deriveArticleRole('DELIVERY, STORAGE AND HANDLING')).toBe(
-      'delivery-storage-handling'
-    );
+    expect(deriveArticleRole('DELIVERY, STORAGE AND HANDLING')).toBe('delivery-storage-handling');
   });
 
   it('tolerates a leading CSI numbering prefix (ARCAT "1.1 X" form)', () => {
