@@ -8,7 +8,7 @@ import {
   type RequiredScope,
   type RequiredSection,
 } from './required-sections.js';
-import { getBrokenRefs, type BrokenRef } from './projects.js';
+import { getBrokenRefs, type BrokenRef } from './project-refs.js';
 
 interface Queryable {
   query: Pool['query'];

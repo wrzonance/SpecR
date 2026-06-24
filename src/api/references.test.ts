@@ -72,6 +72,7 @@ describe('getOutboundReferencesHandler', () => {
       toc: [],
       deletedAt: null,
       deletedBy: null,
+      sectionNumberFormat: 'canonical',
     });
     vi.mocked(db.isSpecInProject).mockResolvedValueOnce(false);
     const { getOutboundReferencesHandler } = await import('./references.js');

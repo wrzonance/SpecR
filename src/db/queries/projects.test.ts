@@ -162,7 +162,7 @@ describe('getBrokenRefs', () => {
   it('returns empty array when no broken refs', async () => {
     const { pool } = await import('../index.js');
     vi.mocked(pool.query).mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
-    const { getBrokenRefs } = await import('./projects.js');
+    const { getBrokenRefs } = await import('./project-refs.js');
     const result = await getBrokenRefs('proj-1', pool);
     expect(result).toHaveLength(0);
   });
@@ -190,7 +190,7 @@ describe('getBrokenRefs', () => {
       ],
       rowCount: 2,
     } as never);
-    const { getBrokenRefs } = await import('./projects.js');
+    const { getBrokenRefs } = await import('./project-refs.js');
     const result = await getBrokenRefs('proj-1', pool);
     expect(result[0]?.availableFrom).toEqual([{ libraryId: 'lib-1', name: 'Co M' }]);
     expect(result[1]?.availableFrom).toEqual([]);
@@ -199,7 +199,7 @@ describe('getBrokenRefs', () => {
   it('throws DatabaseError on query failure', async () => {
     const { DatabaseError, pool } = await import('../index.js');
     vi.mocked(pool.query).mockRejectedValueOnce(new Error('db down'));
-    const { getBrokenRefs } = await import('./projects.js');
+    const { getBrokenRefs } = await import('./project-refs.js');
     await expect(getBrokenRefs('proj-1', pool)).rejects.toBeInstanceOf(DatabaseError);
   });
 });

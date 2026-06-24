@@ -626,4 +626,41 @@ describe('PATCH /projects/:id', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it('persists sectionNumberFormat and GET /projects/:id returns it', async () => {
+    const createRes = await fetch(`${baseUrl}/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Format Test', sourceLibraryIds: [companyId] }),
+    });
+    const created = (await createRes.json()) as Record<string, unknown>;
+    const data = created['data'] as Record<string, unknown>;
+    const id = (data['projectId'] ?? data['id']) as string;
+    apiProjects.push(id);
+
+    const patchRes = await fetch(`${baseUrl}/projects/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sectionNumberFormat: 'spaced-compact' }),
+    });
+    expect(patchRes.status).toBe(200);
+    const patchBody = (await patchRes.json()) as Record<string, unknown>;
+    const patchData = patchBody['data'] as Record<string, unknown>;
+    expect(patchData['sectionNumberFormat']).toBe('spaced-compact');
+
+    const getRes = await fetch(`${baseUrl}/projects/${id}`);
+    expect(getRes.status).toBe(200);
+    const getBody = (await getRes.json()) as Record<string, unknown>;
+    const getData = getBody['data'] as Record<string, unknown>;
+    expect(getData['sectionNumberFormat']).toBe('spaced-compact');
+  });
+
+  it('400s when neither name nor sectionNumberFormat is provided', async () => {
+    const res = await fetch(`${baseUrl}/projects/${testProjectId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
 });
