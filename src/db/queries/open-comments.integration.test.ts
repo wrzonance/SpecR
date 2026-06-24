@@ -64,6 +64,28 @@ const openComment = (author: string, text: string): SourceFacts => ({
 const closedComment = (author: string, text: string): SourceFacts => ({
   comments: [{ author, text, anchor: [0, 4], closed: true }],
 });
+// A comment fact persisted before #262 — the `closed` key is genuinely absent
+// (it did not exist yet). Typed without `closed` on purpose to model the stored
+// JSONB, then written as raw JSON. The read path must backfill closure from the
+// text suffix, so a legacy comment whose text ends in "Closed" reads as closed.
+interface LegacyCommentFact {
+  readonly author: string;
+  readonly text: string;
+  readonly anchor: readonly [number, number];
+}
+async function addLegacyParagraph(
+  specId: string,
+  text: string,
+  comments: readonly LegacyCommentFact[]
+): Promise<string> {
+  const id = randomUUID();
+  await pool.query(
+    `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position, source_facts)
+     VALUES ($1, $2, NULL, 'pr1', $3, $4, $5::jsonb)`,
+    [id, specId, text, ++paraCounter, JSON.stringify({ comments })]
+  );
+  return id;
+}
 
 afterAll(async () => {
   for (const id of projectIds) await pool.query('DELETE FROM projects WHERE id = $1', [id]);
@@ -98,6 +120,23 @@ describe('getOpenCommentsReport — spec scope (#262)', () => {
     const report = await getOpenCommentsReport({ kind: 'spec', specId });
     expect(report.openComments).toEqual([]);
     expect(report.summary).toEqual({ open: 0, total: 1 });
+  });
+
+  it('open-comments: legacy comment (no `closed` key) ending "Closed" is treated as closed, not open', async () => {
+    // Reproduces the upgrade-path bug: a comment persisted before #262 has no
+    // `closed` flag. Without read-time backfill it would be reported as open even
+    // though its text already records the closure. (Strike-out closure on legacy
+    // comments is unrecoverable — strike was never stored — and is not asserted.)
+    const specId = await newSpec('09 90 00', 'Coatings');
+    await addLegacyParagraph(specId, 'Legacy closed.', [
+      { author: 'Owner', text: 'Use approved product. Closed', anchor: [0, 4] },
+    ]);
+    const openParaId = await addParagraph(specId, 'Open.', openComment('Alex', 'Verify.'));
+
+    const report = await getOpenCommentsReport({ kind: 'spec', specId });
+
+    expect(report.summary).toEqual({ open: 1, total: 2 });
+    expect(report.openComments.map((c) => c.paragraphId)).toEqual([openParaId]);
   });
 
   it('ignores paragraphs with no comment facts', async () => {
