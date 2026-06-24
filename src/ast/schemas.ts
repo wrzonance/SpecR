@@ -17,6 +17,19 @@ export const NodeTypeSchema = z.enum([
   'continuation',
 ]);
 
+// Closed enum of recognized CSI article roles (ADR-033). Kebab-case values are
+// stable identifiers consumed by coordination checks — not display labels.
+export const ArticleRoleSchema = z.enum([
+  'summary',
+  'references',
+  'definitions',
+  'related-sections',
+  'submittals',
+  'quality-assurance',
+  'delivery-storage-handling',
+  'warranty',
+]);
+
 export const SignalConflictSchema = z.object({
   signal: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
   reportedIlvl: z.number().int(),
@@ -161,6 +174,7 @@ export const SpecNodeMetaSchema = z.object({
   conflicts: z.array(SignalConflictSchema).exactOptional(),
   sourceFacts: SourceFactsSchema.exactOptional(),
   editability: SpecNodeEditabilitySchema.exactOptional(),
+  articleRole: ArticleRoleSchema.exactOptional(),
 });
 
 export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>

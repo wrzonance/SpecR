@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   NodeTypeSchema,
+  ArticleRoleSchema,
   SecRefSchema,
   StyleNodeTypeSchema,
   StylePropertiesSchema,
@@ -8,6 +9,8 @@ import {
 } from './schemas.js';
 
 export type NodeType = z.infer<typeof NodeTypeSchema>;
+
+export type ArticleRole = z.infer<typeof ArticleRoleSchema>;
 
 /**
  * A signal disagreement recorded by the 5-signal DOCX inference engine: a losing
@@ -84,6 +87,8 @@ export interface SpecNodeMeta {
   readonly editability?: SpecNodeEditability;
   /** External content links (#109). Absent === none. */
   readonly associations?: readonly ParagraphAssociation[];
+  /** Semantic CSI role of this article (ADR-033). Absent === unknown/non-article. */
+  readonly articleRole?: ArticleRole;
 }
 
 export interface SpecNode {
