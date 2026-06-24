@@ -43,12 +43,16 @@ const LOOKUP: ReadonlyMap<string, ArticleRole> = new Map(
   ARTICLE_ROLE_RULES.flatMap((rule) => rule.titles.map((t) => [t, rule.role] as const))
 );
 
-// Leading CSI numbering prefix: "1.1", "1.02", "1.1.1", terminated by a separator
-// or whitespace. Stripped before lookup so "1.1 REFERENCES" === "REFERENCES". The
-// terminator is required so a digit-run glued to a letter ("3D MODELING") is NOT
-// treated as a prefix — safe-by-construction rather than safe only because no role
-// title currently begins after a digit.
-const NUMBER_PREFIX_RE = /^\d+(?:\.\d+)*(?:\s*[-–—.)]\s*|\s+)/;
+// Leading CSI *article* number: "1.1", "1.02", "1.1.1", terminated by a separator
+// or whitespace. Stripped before lookup so "1.1 REFERENCES" === "REFERENCES". Two
+// guards keep this from over-stripping into a wrong role (ADR-033's "absent rather
+// than wrong" contract):
+//   - At least one dotted group is REQUIRED ((?:\.\d+)+, not *), so a bare integer
+//     or year ("1 REFERENCES", "2024 REFERENCES") is NOT a CSI article number and
+//     is left intact — those headings derive no role rather than a wrong one.
+//   - A terminator is required, so a digit-run glued to a letter ("3D MODELING")
+//     is never treated as a prefix.
+const NUMBER_PREFIX_RE = /^\d+(?:\.\d+)+(?:\s*[-–—.)]\s*|\s+)/;
 
 function normalizeHeading(text: string): string {
   // Trim FIRST so the ^-anchored prefix strip survives incidental leading

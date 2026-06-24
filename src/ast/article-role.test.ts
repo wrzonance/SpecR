@@ -66,6 +66,19 @@ describe('deriveArticleRole — canonical CSI headings', () => {
     expect(deriveArticleRole('2024 REQUIREMENTS')).toBeUndefined();
   });
 
+  it('prefix strip: only a dotted CSI article number is stripped — a bare integer/year before a real title is not (never a wrong role)', () => {
+    // CSI article numbers are dotted ("1.1", "1.02"); a bare integer or year is
+    // NOT one. Stripping it would expose a role for a non-CSI heading, violating
+    // the "absent rather than wrong" contract. "2024 REFERENCES"/"1 REFERENCES"
+    // must derive NO role even though "REFERENCES" alone would.
+    expect(deriveArticleRole('2024 REFERENCES')).toBeUndefined();
+    expect(deriveArticleRole('1 REFERENCES')).toBeUndefined();
+    expect(deriveArticleRole('1 SUMMARY')).toBeUndefined();
+    // The dotted CSI forms still classify.
+    expect(deriveArticleRole('1.1 REFERENCES')).toBe('references');
+    expect(deriveArticleRole('1.1.1 REFERENCES')).toBe('references');
+  });
+
   // KNOWN AMBIGUITY: "REFERENCES" as a sub-list heading inside another article
   // (e.g. a manufacturer's reference drawings) reads identically to the PART-1
   // References article. The deriver classifies on heading text alone and cannot
