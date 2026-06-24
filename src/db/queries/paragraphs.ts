@@ -1,7 +1,7 @@
 import { pool, DatabaseError } from '../index.js';
 import { assertSpecWritable } from './edit-gate.js';
 import type { Pool, PoolClient } from 'pg';
-import { NodeTypeSchema } from '../../ast/index.js';
+import { NodeTypeSchema, deriveArticleRole } from '../../ast/index.js';
 import type {
   NodeType,
   ParagraphAssociation,
@@ -197,19 +197,23 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
   const root = rows.find((r) => r.id === rootId);
   if (!root) return null;
 
-  const build = (row: SubtreeRow): SpecNode => ({
-    id: row.id,
-    type: parseNodeType(row.nodeType),
-    text: row.text,
-    children: (childrenByParent.get(row.id) ?? [])
-      .sort((a, b) => a.position - b.position)
-      .map(build),
-    meta: {
-      ...(row.vanish ? { vanish: true } : {}),
-      ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
-      ...(hasSourceFacts(row.sourceFacts) ? { sourceFacts: row.sourceFacts } : {}),
-    },
-  });
+  const build = (row: SubtreeRow): SpecNode => {
+    const articleRole = row.nodeType === 'article' ? deriveArticleRole(row.text) : undefined;
+    return {
+      id: row.id,
+      type: parseNodeType(row.nodeType),
+      text: row.text,
+      children: (childrenByParent.get(row.id) ?? [])
+        .sort((a, b) => a.position - b.position)
+        .map(build),
+      meta: {
+        ...(row.vanish ? { vanish: true } : {}),
+        ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
+        ...(hasSourceFacts(row.sourceFacts) ? { sourceFacts: row.sourceFacts } : {}),
+        ...(articleRole !== undefined ? { articleRole } : {}),
+      },
+    };
+  };
 
   return build(root);
 }
