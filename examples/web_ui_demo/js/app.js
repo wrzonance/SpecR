@@ -428,15 +428,10 @@ async function deleteActiveProject() {
     activeProjectId = null;
     activeProject = null;
     await refreshProjectList();
-    if (!activeProjectId && projects.length > 0) {
-      activeProjectId = projects[0].id;
-      rememberProject(activeProjectId);
-      await loadActiveProjectWorkspace();
-    } else if (activeProjectId) {
-      await loadActiveProjectWorkspace();
-    } else {
-      renderProjectControls();
-    }
+    if (activeProjectId) rememberProject(activeProjectId);
+    // loadActiveProjectWorkspace clears specs/members/board when no project
+    // remains, and loads the next project's workspace otherwise.
+    await loadActiveProjectWorkspace();
     toast(`Project deleted`, 'warn');
     const undoMsg = document.createElement('span');
     undoMsg.textContent = ' ';
@@ -448,7 +443,10 @@ async function deleteActiveProject() {
         const { restoreProject: restore } = await import('./api.js');
         await restore(deletedId);
         await refreshProjectList(deletedId);
-        await switchProject(deletedId);
+        rememberProject(deletedId);
+        // switchProject would early-return (id is already active after refresh),
+        // so load the restored workspace directly.
+        await loadActiveProjectWorkspace();
         toast('Project restored');
       } catch (err) {
         toast(`restore failed: ${err.message}`, 'err');

@@ -1118,6 +1118,9 @@ paths:
           application/json:
             schema:
               type: object
+              anyOf:
+                - required: [name]
+                - required: [sectionNumberFormat]
               properties:
                 name:
                   type: string
