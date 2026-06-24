@@ -66,7 +66,8 @@ async function assertScope(scope: OpenCommentsScope, client: Queryable): Promise
     return;
   }
   const r = await client.query(`SELECT 1 FROM projects WHERE id = $1`, [scope.projectId]);
-  if ((r.rowCount ?? 0) === 0) throw new ProjectNotFoundError(`project ${scope.projectId} not found`);
+  if ((r.rowCount ?? 0) === 0)
+    throw new ProjectNotFoundError(`project ${scope.projectId} not found`);
 }
 
 async function readParagraphFacts(

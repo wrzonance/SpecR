@@ -13,9 +13,10 @@ let specCounter = 0;
 let paraCounter = 0;
 
 async function newProject(name: string): Promise<string> {
-  const r = await pool.query<{ id: string }>(`INSERT INTO projects (name) VALUES ($1) RETURNING id`, [
-    `${name}-${suffix}`,
-  ]);
+  const r = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+    [`${name}-${suffix}`]
+  );
   const id = r.rows[0]?.id;
   if (id === undefined) throw new Error('newProject: no id');
   projectIds.push(id);
@@ -51,11 +52,10 @@ async function addParagraph(
 }
 
 async function addProjectSpec(projectId: string, specId: string, position: number): Promise<void> {
-  await pool.query(`INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, $3)`, [
-    projectId,
-    specId,
-    position,
-  ]);
+  await pool.query(
+    `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, $3)`,
+    [projectId, specId, position]
+  );
 }
 
 const openComment = (author: string, text: string): SourceFacts => ({
@@ -132,10 +132,7 @@ describe('getOpenCommentsReport — project scope (#262)', () => {
     expect(report.summary).toEqual({ open: 2, total: 3 });
     // ORDER BY s.section — 08 11 00 precedes 26 05 00.
     expect(report.openComments.map((c) => c.specSection)).toEqual(['08 11 00', '26 05 00']);
-    expect(report.openComments.map((c) => c.text)).toEqual([
-      'Confirm finish.',
-      'Confirm load.',
-    ]);
+    expect(report.openComments.map((c) => c.text)).toEqual(['Confirm finish.', 'Confirm load.']);
   });
 
   it('throws ProjectNotFoundError for an unknown project', async () => {

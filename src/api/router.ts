@@ -89,6 +89,7 @@ import {
   putPackageRequiredSectionsHandler,
 } from './required-sections.js';
 import { getCoordinationReportHandler } from './coordination.js';
+import { getSpecOpenCommentsHandler, getProjectOpenCommentsHandler } from './open-comments.js';
 import { patchEditabilityHandler, reclassifyHandler, acceptAsNoteHandler } from './editability.js';
 import {
   createAssociationHandler,
@@ -108,6 +109,7 @@ export const router: RouterType = Router();
 
 router.get('/health', healthHandler);
 router.get('/specs/:id', getSpecHandler);
+router.get('/specs/:id/open-comments', getSpecOpenCommentsHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
@@ -162,6 +164,7 @@ router.post(
 router.delete('/projects/:id/specs/:specId', removeSectionFromProjectHandler);
 router.get('/projects/:id/references/broken', getBrokenRefsHandler);
 router.get('/projects/:id/coordination-report', getCoordinationReportHandler);
+router.get('/projects/:id/open-comments', getProjectOpenCommentsHandler);
 router.get('/projects/:id/references/inbound', getInboundReferencesHandler);
 router.get('/projects/:id/specs/:specId/references', getOutboundReferencesHandler);
 router.post('/projects/:id/packages', validateBody(CreatePackageBodySchema), createPackageHandler);

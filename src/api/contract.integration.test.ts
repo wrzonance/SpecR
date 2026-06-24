@@ -80,6 +80,8 @@ const RESPONSE_ALLOWLIST = new Set([
   'get /projects/{}/packages/{}/required-sections',
   'put /projects/{}/packages/{}/required-sections',
   'get /projects/{}/coordination-report',
+  'get /specs/{}/open-comments',
+  'get /projects/{}/open-comments',
   'patch /specs/{}/paragraphs/{}/editability',
   'post /specs/{}/reclassify',
   'post /specs/{}/finalize',

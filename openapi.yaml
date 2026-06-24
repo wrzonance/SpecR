@@ -3119,6 +3119,62 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /specs/{id}/open-comments:
+    get:
+      operationId: getSpecOpenComments
+      summary: Open (unclosed) Word comments in a spec
+      description: >
+        Lists the review comments in the spec that are NOT resolved (#256 C1) — the
+        direct answer to "have all comments been closed?". A comment is closed when
+        its runs are struck through OR its text ends in "Closed" (case/whitespace
+        tolerant); everything else is reported here. A comment spanning N paragraphs
+        surfaces once per covered paragraph.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Open-comments report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/OpenCommentsReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/open-comments:
+    get:
+      operationId: getProjectOpenComments
+      summary: Open (unclosed) Word comments across a project
+      description: >
+        Aggregates the unresolved review comments across every spec in the project,
+        sorted by section (#256 C1). A comment is closed when its runs are struck
+        through OR its text ends in "Closed"; everything else is reported here.
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Open-comments report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/OpenCommentsReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
 # ─── Components ───────────────────────────────────────────────────────────────
 
 components:
@@ -3392,6 +3448,50 @@ components:
               libraryId: { type: string, format: uuid }
               name: { type: string }
 
+    # ── Open comments (#262) ─────────────────────────────────────────────────────
+
+    OpenCommentsScope:
+      oneOf:
+        - type: object
+          required: [kind, specId]
+          properties:
+            kind: { type: string, enum: [spec] }
+            specId: { type: string, format: uuid }
+        - type: object
+          required: [kind, projectId]
+          properties:
+            kind: { type: string, enum: [project] }
+            projectId: { type: string, format: uuid }
+      discriminator:
+        propertyName: kind
+    OpenComment:
+      type: object
+      required: [specId, specSection, paragraphId, author, text, anchor]
+      properties:
+        specId: { type: string, format: uuid }
+        specSection: { type: string }
+        paragraphId: { type: string, format: uuid }
+        author: { type: string }
+        text: { type: string }
+        anchor: { $ref: '#/components/schemas/SourceTextSpan' }
+    OpenCommentsSummary:
+      type: object
+      required: [open, total]
+      properties:
+        open: { type: integer }
+        total:
+          type: integer
+          description: Total comment occurrences in scope (open + closed).
+    OpenCommentsReport:
+      type: object
+      required: [scope, openComments, summary]
+      properties:
+        scope: { $ref: '#/components/schemas/OpenCommentsScope' }
+        openComments:
+          type: array
+          items: { $ref: '#/components/schemas/OpenComment' }
+        summary: { $ref: '#/components/schemas/OpenCommentsSummary' }
+
     # ── Parse ──────────────────────────────────────────────────────────────────
 
     ParseStage:
@@ -3593,7 +3693,7 @@ components:
 
     SourceCommentFact:
       type: object
-      required: [author, text, anchor]
+      required: [author, text, anchor, closed]
       properties:
         author:
           type: string
@@ -3601,6 +3701,12 @@ components:
           type: string
         anchor:
           $ref: '#/components/schemas/SourceTextSpan'
+        closed:
+          type: boolean
+          description: >
+            True when the comment is resolved (#262): its runs are struck through
+            OR its text ends in "Closed". Defaults false for facts persisted before
+            this field existed.
 
     SourceColorFact:
       type: object
