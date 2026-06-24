@@ -7,7 +7,7 @@ import { insertTree } from './paragraphs.js';
 import { getSpecTree } from './specs.js';
 
 const SOURCE_FACTS = {
-  comments: [{ author: 'Specifier', text: 'Verify finish.', anchor: [11, 15] }],
+  comments: [{ author: 'Specifier', text: 'Verify finish.', anchor: [11, 15], closed: false }],
   colors: [{ color: 'highlight:yellow', coverage: 0.25, spans: [[11, 15]] }],
   reviewer: { severity: 'coordination', count: 2 },
 } as const;
@@ -111,6 +111,23 @@ describe('getSpecTree', () => {
     const part = result!.tree.parts[0]!;
     expect(part.meta.sourceFacts).toBeUndefined();
     expect(Object.keys(part.meta)).not.toContain('sourceFacts');
+  });
+
+  it('backfills closed=true for a legacy suffix-closed comment fact (#262)', async () => {
+    // Simulate a comment fact persisted before #262 — JSONB with no `closed`
+    // key, text ending in "Closed". The read path must normalize it through the
+    // schema so the API response honors the contract (closed is required) and
+    // reports the comment as closed, not open.
+    const legacyFacts = {
+      comments: [{ author: 'Owner', text: 'Use approved product. Closed', anchor: [0, 12] }],
+    };
+    await pool.query(`UPDATE paragraphs SET source_facts = $1 WHERE id = $2`, [
+      JSON.stringify(legacyFacts),
+      '10000000-0000-0000-0000-000000000003',
+    ]);
+    const result = await getSpecTree(treeSpecId);
+    const pr1 = result!.tree.parts[0]!.children[0]!.children[0]!;
+    expect(pr1.meta.sourceFacts?.comments?.[0]?.closed).toBe(true);
   });
 });
 

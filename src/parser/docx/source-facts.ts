@@ -1,6 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { scanChoiceTokens } from './choice-tokens.js';
+import { isCommentClosed } from './comment-closure.js';
 import { asRecord, extractAttrStr } from './xml-utils.js';
 import type {
   SourceChoiceTokenFact,
@@ -199,6 +200,7 @@ function appendRangeFacts(
   start: ActiveComment,
   end: ActiveComment
 ): void {
+  const closed = isCommentClosed(comment);
   for (let index = start.paragraphIndex; index <= end.paragraphIndex; index += 1) {
     const paragraph = paragraphs[index];
     if (!paragraph) continue;
@@ -209,6 +211,7 @@ function appendRangeFacts(
         index === start.paragraphIndex ? start.offset : 0,
         index === end.paragraphIndex ? end.offset : paragraph.text.length,
       ],
+      closed,
     });
   }
 }
@@ -252,6 +255,7 @@ function handleReferenceMarker(
     author: comment.author,
     text: comment.text,
     anchor: [marker.offset, marker.offset],
+    closed: isCommentClosed(comment),
   });
 }
 

@@ -18,6 +18,7 @@ export {
   NodeTypeSchema,
   SignalConflictSchema,
   SourceFactsSchema,
+  parseSourceFacts,
   SpecNodeMetaSchema,
   SpecNodeSchema,
   SpecTreeSchema,
@@ -107,3 +108,4 @@ export { CreateAssociationBodySchema } from './association-schemas.js';
 export type { CreateAssociationBody } from './association-schemas.js';
 export type { ParagraphAssociation } from './types.js';
 export type { ParseWarning, ParseWarningType } from './types.js';
+export { textEndsWithClosed } from './comment-closure.js';

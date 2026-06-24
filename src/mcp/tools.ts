@@ -18,6 +18,7 @@ import {
   handleListProjects,
   handleGetReferences,
   handleCoordinationReport,
+  handleOpenCommentsReport,
 } from './handlers.js';
 import { registerOnboardingTools } from './onboarding-tools.js';
 
@@ -307,6 +308,27 @@ function registerCoordinationTools(server: McpServer): void {
   );
 }
 
+function registerOpenCommentsTools(server: McpServer): void {
+  server.registerTool(
+    'open_comments_report',
+    {
+      description:
+        'List the OPEN (unresolved) Word review comments in a spec or project — the ' +
+        'direct answer to "have all comments been closed?" (#256 C1). A comment is ' +
+        'closed when its runs are struck through OR its text ends in "Closed". Provide ' +
+        'exactly one of specId (see get_spec) or projectId (see list_projects).',
+      inputSchema: {
+        specId: z.uuid().optional().describe('Spec UUID — report open comments in one spec'),
+        projectId: z
+          .uuid()
+          .optional()
+          .describe('Project UUID — aggregate open comments across the project'),
+      },
+    },
+    handleOpenCommentsReport
+  );
+}
+
 function registerLoaderTools(server: McpServer): void {
   server.registerTool(
     'load_files',
@@ -340,5 +362,6 @@ export function registerTools(server: McpServer): void {
   registerGeneratorTools(server);
   registerLoaderTools(server);
   registerCoordinationTools(server);
+  registerOpenCommentsTools(server);
   registerOnboardingTools(server);
 }

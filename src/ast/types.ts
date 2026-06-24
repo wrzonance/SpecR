@@ -28,6 +28,12 @@ export interface SourceCommentFact {
   readonly author: string;
   readonly text: string;
   readonly anchor: readonly [number, number];
+  /**
+   * True when the comment is resolved per #256 C1 closure signals (#262): the
+   * comment runs are struck through, OR the text ends in "Closed". The
+   * open-comments report lists the comments where this is false.
+   */
+  readonly closed: boolean;
 }
 
 export interface SourceColorFact {

@@ -1,7 +1,7 @@
 import { pool, DatabaseError } from '../index.js';
 import { assertSpecWritable } from './edit-gate.js';
 import type { Pool, PoolClient } from 'pg';
-import { NodeTypeSchema, deriveArticleRole } from '../../ast/index.js';
+import { NodeTypeSchema, parseSourceFacts, deriveArticleRole } from '../../ast/index.js';
 import type {
   NodeType,
   ParagraphAssociation,
@@ -118,13 +118,16 @@ interface ChainRow {
 }
 
 function toParagraphRow(r: ChainRow): ParagraphRow {
+  // Normalize through the schema so legacy comment facts gain the backfilled
+  // `closed` flag before they reach the API response (#262).
+  const sourceFacts = parseSourceFacts(r.sourceFacts);
   return {
     id: r.id,
     nodeType: r.nodeType,
     text: r.text,
     vanish: r.vanish,
     ...(r.conflicts.length > 0 ? { conflicts: r.conflicts } : {}),
-    ...(hasSourceFacts(r.sourceFacts) ? { sourceFacts: r.sourceFacts } : {}),
+    ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
   };
 }
 
@@ -198,6 +201,9 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
   if (!root) return null;
 
   const build = (row: SubtreeRow): SpecNode => {
+    // Normalize through the schema so legacy comment facts gain the backfilled
+    // `closed` flag before they reach the API response (#262).
+    const sourceFacts = parseSourceFacts(row.sourceFacts);
     const articleRole = row.nodeType === 'article' ? deriveArticleRole(row.text) : undefined;
     return {
       id: row.id,
@@ -209,7 +215,7 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
       meta: {
         ...(row.vanish ? { vanish: true } : {}),
         ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
-        ...(hasSourceFacts(row.sourceFacts) ? { sourceFacts: row.sourceFacts } : {}),
+        ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
         ...(articleRole !== undefined ? { articleRole } : {}),
       },
     };

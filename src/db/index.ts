@@ -275,6 +275,13 @@ export type {
 } from './queries/required-sections.js';
 export { getCoordinationReport } from './queries/coordination.js';
 export type { Finding, CoordinationSummary, CoordinationReport } from './queries/coordination.js';
+export { getOpenCommentsReport } from './queries/open-comments.js';
+export type {
+  OpenComment,
+  OpenCommentsScope,
+  OpenCommentsSummary,
+  OpenCommentsReport,
+} from './queries/open-comments.js';
 export {
   createAssociation,
   listAssociationsForParagraph,

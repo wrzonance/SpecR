@@ -252,7 +252,7 @@ describe('SpecNodeMetaSchema — conflicts', () => {
 describe('SourceFactsSchema', () => {
   it('accepts known source fact keys and preserves unknown JSON keys', () => {
     const facts = {
-      comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19] }],
+      comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19], closed: false }],
       colors: [{ color: '0000FF', coverage: 0.82, spans: [[12, 96]] }],
       choiceTokens: [{ kind: 'bracket', options: ['Provide mockup.'], span: [20, 37] }],
       banner: 'MASTER NOTE',
@@ -261,6 +261,30 @@ describe('SourceFactsSchema', () => {
     };
 
     expect(SourceFactsSchema.parse(facts)).toEqual(facts);
+  });
+
+  it('defaults comment.closed to false for facts persisted before #262', () => {
+    const parsed = SourceFactsSchema.parse({
+      comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19] }],
+    });
+    expect(parsed.comments?.[0]?.closed).toBe(false);
+  });
+
+  it('legacy suffix-closed: backfills closed=true for a pre-#262 fact whose text ends in "Closed"', () => {
+    // Comments persisted between #183 and #262 carry no `closed` flag. The only
+    // closure signal recoverable from stored text is the trailing "Closed", so
+    // the schema must read such a legacy fact as closed — not default it to open.
+    const parsed = SourceFactsSchema.parse({
+      comments: [{ author: 'Owner', text: 'Use approved product. Closed', anchor: [4, 28] }],
+    });
+    expect(parsed.comments?.[0]?.closed).toBe(true);
+  });
+
+  it('preserves comment.closed = true', () => {
+    const parsed = SourceFactsSchema.parse({
+      comments: [{ author: 'Specifier', text: 'Done Closed', anchor: [4, 19], closed: true }],
+    });
+    expect(parsed.comments?.[0]?.closed).toBe(true);
   });
 
   it('rejects non-JSON unknown fact values', () => {

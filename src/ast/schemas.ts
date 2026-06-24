@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import type { SpecNode } from './types.js';
+import type { SpecNode, SourceFacts } from './types.js';
 import { SectionNumberInputSchema, SectionNumberSchema } from '../lib/section-number.js';
+import { textEndsWithClosed } from './comment-closure.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -44,11 +45,21 @@ const SourceTextSpanSchema = z.tuple([
   z.number().int().nonnegative(),
 ]);
 
-export const SourceCommentFactSchema = z.object({
-  author: z.string(),
-  text: z.string(),
-  anchor: SourceTextSpanSchema,
-});
+export const SourceCommentFactSchema = z
+  .object({
+    author: z.string(),
+    text: z.string(),
+    anchor: SourceTextSpanSchema,
+    // Closure state (#262). Optional for forward-compat: comments persisted before
+    // this field existed (between #183 and #262) carry no `closed` flag.
+    closed: z.boolean().optional(),
+  })
+  // Backfill the missing flag for legacy facts from the one closure signal that
+  // survives in stored data — the trailing "Closed" suffix. (The strike-out
+  // signal is parse-time-only and unrecoverable, so legacy struck-but-not-
+  // suffixed comments still read as open.) New facts always carry an explicit
+  // `closed`, so this only changes the absent case.
+  .transform((c) => ({ ...c, closed: c.closed ?? textEndsWithClosed(c.text) }));
 
 export const SourceColorFactSchema = z.object({
   color: z.string(),
@@ -71,6 +82,18 @@ export const SourceFactsSchema = z
     vanish: z.literal(true).exactOptional(),
   })
   .catchall(JsonValue);
+
+/**
+ * Normalize raw `source_facts` JSONB read from the DB into the canonical shape
+ * before it reaches an API response (#262). Crucially this backfills the
+ * comment `closed` flag for legacy facts persisted before the field existed —
+ * read paths that pass the raw JSONB through verbatim would otherwise emit
+ * comment objects missing `closed`, violating the OpenAPI contract that now
+ * requires it. A corrupt row fails loud here, never a silent drop.
+ */
+export function parseSourceFacts(raw: unknown): SourceFacts {
+  return SourceFactsSchema.parse(raw ?? {});
+}
 
 // ── Editing conventions (ADR-022 D3) — library-scoped editability rulesets ──
 // The closed four-value editability vocabulary (ADR-022 D1). Reused by the
