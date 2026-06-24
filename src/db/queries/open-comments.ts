@@ -81,8 +81,10 @@ async function readParagraphFacts(
 }
 
 // Split one paragraph's comment facts into open occurrences + a total count.
-// source_facts is validated through SourceFactsSchema so a row written before the
-// closed field existed still yields closed === false (the schema default).
+// source_facts is validated through SourceFactsSchema, which backfills the closed
+// flag for rows written before that field existed: a legacy comment whose text
+// ends in "Closed" reads as closed; everything else reads as open. (The strike-out
+// signal is parse-time-only and unrecoverable from stored facts.)
 function splitComments(row: ParagraphFactsRow): {
   readonly open: readonly OpenComment[];
   readonly total: number;

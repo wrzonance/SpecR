@@ -270,6 +270,16 @@ describe('SourceFactsSchema', () => {
     expect(parsed.comments?.[0]?.closed).toBe(false);
   });
 
+  it('legacy suffix-closed: backfills closed=true for a pre-#262 fact whose text ends in "Closed"', () => {
+    // Comments persisted between #183 and #262 carry no `closed` flag. The only
+    // closure signal recoverable from stored text is the trailing "Closed", so
+    // the schema must read such a legacy fact as closed — not default it to open.
+    const parsed = SourceFactsSchema.parse({
+      comments: [{ author: 'Owner', text: 'Use approved product. Closed', anchor: [4, 28] }],
+    });
+    expect(parsed.comments?.[0]?.closed).toBe(true);
+  });
+
   it('preserves comment.closed = true', () => {
     const parsed = SourceFactsSchema.parse({
       comments: [{ author: 'Specifier', text: 'Done Closed', anchor: [4, 19], closed: true }],

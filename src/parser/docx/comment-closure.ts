@@ -4,15 +4,13 @@
 //   2. the word "Closed" at the END of the comment text.
 // Only a trailing "Closed" counts — see the KNOWN AMBIGUITY test for why a
 // mid-sentence "Closed" is deliberately not treated as a closure marker.
+//
+// The text-suffix predicate lives in `ast` (textEndsWithClosed) so the
+// SourceFactsSchema can apply the same rule when backfilling legacy facts that
+// predate the stored `closed` flag. Re-exported here for parser-local callers.
+import { textEndsWithClosed } from '../../ast/index.js';
 
-// Matches a final "Closed" token, case-insensitively, tolerating trailing
-// whitespace and a single trailing period (e.g. "… Closed", "… closed.").
-// `\bclosed` requires a word boundary so "enclosed" does not match.
-const CLOSED_SUFFIX = /\bclosed\.?\s*$/i;
-
-export function textEndsWithClosed(text: string): boolean {
-  return CLOSED_SUFFIX.test(text);
-}
+export { textEndsWithClosed };
 
 export interface ClosureSignals {
   readonly text: string;
