@@ -50,4 +50,27 @@ describe('parseCommentsXml — strike capture (#262)', () => {
       expect(parseCommentsXml(xml).get('0')?.struck).toBe(false);
     }
   });
+
+  it('flags a comment struck with double strikethrough (w:dstrike) as struck', () => {
+    // Word emits w:dstrike (not w:strike) for double strikethrough; it is the
+    // same closure signal, so a comment resolved this way must read as struck.
+    const xml = commentsDoc(
+      `<w:comment w:id="0" w:author="Jane">
+        <w:p><w:r><w:rPr><w:dstrike/></w:rPr><w:t>Resolved upstream.</w:t></w:r></w:p>
+      </w:comment>`
+    );
+    const comment = parseCommentsXml(xml).get('0');
+    expect(comment).toEqual({ author: 'Jane', text: 'Resolved upstream.', struck: true });
+  });
+
+  it('treats w:dstrike with val="0"/"false"/"off" as not struck (OOXML toggle off)', () => {
+    for (const off of ['0', 'false', 'off']) {
+      const xml = commentsDoc(
+        `<w:comment w:id="0" w:author="Jane">
+          <w:p><w:r><w:rPr><w:dstrike w:val="${off}"/></w:rPr><w:t>Open.</w:t></w:r></w:p>
+        </w:comment>`
+      );
+      expect(parseCommentsXml(xml).get('0')?.struck).toBe(false);
+    }
+  });
 });
