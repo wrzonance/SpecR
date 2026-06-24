@@ -136,6 +136,52 @@ describe('POST /projects/:id/generate — manual assembly (integration)', () => 
     );
   });
 
+  it("generate: honors the project's saved section_number_format when the body omits it (#267)", async () => {
+    // Persist a non-default format on the project, then generate with an empty
+    // body — the saved 'dots' default must flow through to the rendered titles.
+    await pool.query(`UPDATE projects SET section_number_format = 'dots' WHERE id = $1`, [
+      projectId,
+    ]);
+    try {
+      const res = await fetch(`${baseUrl}/projects/${projectId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      expect(res.status).toBe(200);
+      const xml = await getDocXml(Buffer.from(await res.arrayBuffer()));
+      expect(xml).toContain('SECTION 03.30.00');
+      expect(xml).toContain('SECTION 09.91.00');
+      expect(xml).not.toContain('SECTION 03 30 00');
+    } finally {
+      await pool.query(`UPDATE projects SET section_number_format = 'canonical' WHERE id = $1`, [
+        projectId,
+      ]);
+    }
+  });
+
+  it('generate: request sectionNumberFormat still wins over the project default (#267)', async () => {
+    await pool.query(`UPDATE projects SET section_number_format = 'dots' WHERE id = $1`, [
+      projectId,
+    ]);
+    try {
+      const res = await fetch(`${baseUrl}/projects/${projectId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sectionNumberFormat: 'canonical' }),
+      });
+      expect(res.status).toBe(200);
+      const xml = await getDocXml(Buffer.from(await res.arrayBuffer()));
+      // Body 'canonical' overrides the project's 'dots'.
+      expect(xml).toContain('SECTION 03 30 00');
+      expect(xml).not.toContain('SECTION 03.30.00');
+    } finally {
+      await pool.query(`UPDATE projects SET section_number_format = 'canonical' WHERE id = $1`, [
+        projectId,
+      ]);
+    }
+  });
+
   it('returns 404 for an unknown project UUID', async () => {
     const res = await fetch(`${baseUrl}/projects/00000000-0000-0000-0000-000000000000/generate`, {
       method: 'POST',

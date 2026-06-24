@@ -6,6 +6,7 @@ vi.mock('../db/index.js', () => ({
   getTemplate: vi.fn(),
   getTemplateByName: vi.fn(),
   findProjectById: vi.fn(),
+  findSoleProjectSectionNumberFormat: vi.fn(),
   pool: {},
 }));
 vi.mock('../generator/index.js', () => ({
@@ -59,40 +60,73 @@ describe('manualFilename', () => {
   });
 });
 
+const SPEC_ID = '0a4d4567-1b2c-4d3e-9f00-abcdefabcdef';
+
+async function setupSpecGenerate(): Promise<void> {
+  const { getSpecTree, getTemplateByName } = await import('../db/index.js');
+  const { generateDocx } = await import('../generator/index.js');
+  vi.mocked(getSpecTree).mockResolvedValueOnce({
+    tree: { id: SPEC_ID, section: '09 91 00', title: 'Painting', parts: [] },
+    references: [],
+  });
+  vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
+  vi.mocked(generateDocx).mockResolvedValueOnce(Buffer.from('docx'));
+}
+
 describe('generateHandler', () => {
-  it('passes sectionNumberFormat to generateDocx', async () => {
-    const { getSpecTree, getTemplateByName } = await import('../db/index.js');
-    const { generateDocx } = await import('../generator/index.js');
-    vi.mocked(getSpecTree).mockResolvedValueOnce({
-      tree: {
-        id: '0a4d4567-1b2c-4d3e-9f00-abcdefabcdef',
-        section: '09 91 00',
-        title: 'Painting',
-        parts: [],
-      },
-      references: [],
-    });
-    vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
-    vi.mocked(generateDocx).mockResolvedValueOnce(Buffer.from('docx'));
+  it('generate: request sectionNumberFormat wins; no project lookup is made', async () => {
+    const { generateDocx, findSoleProjectSectionNumberFormat } = await loadSpecMocks();
     const { generateHandler } = await import('./generate.js');
-    const req = {
-      params: { id: '0a4d4567-1b2c-4d3e-9f00-abcdefabcdef' },
-      body: { sectionNumberFormat: 'dots' },
-    } as unknown as Request;
-    const res = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn().mockReturnThis(),
-      setHeader: vi.fn(),
-      send: vi.fn(),
-    } as unknown as Response;
-    await generateHandler(req, res);
+    await generateHandler(
+      { params: { id: SPEC_ID }, body: { sectionNumberFormat: 'dots' } } as unknown as Request,
+      mockRes()
+    );
+    // Body present → the `??` short-circuits, sparing the DB a useless query.
+    expect(findSoleProjectSectionNumberFormat).not.toHaveBeenCalled();
     expect(generateDocx).toHaveBeenCalledWith(
       expect.objectContaining({ section: '09 91 00' }),
       undefined,
       { sectionNumberFormat: 'dots' }
     );
   });
+
+  it("generate: falls back to the spec's sole project default when body omits the format", async () => {
+    const { generateDocx, findSoleProjectSectionNumberFormat } = await loadSpecMocks();
+    vi.mocked(findSoleProjectSectionNumberFormat).mockResolvedValueOnce('dots');
+    const { generateHandler } = await import('./generate.js');
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, mockRes());
+    expect(findSoleProjectSectionNumberFormat).toHaveBeenCalledWith(SPEC_ID, expect.anything());
+    expect(generateDocx).toHaveBeenCalledWith(
+      expect.objectContaining({ section: '09 91 00' }),
+      undefined,
+      { sectionNumberFormat: 'dots' }
+    );
+  });
+
+  it('generate: no project default and no body format → canonical (undefined options)', async () => {
+    const { generateDocx, findSoleProjectSectionNumberFormat } = await loadSpecMocks();
+    vi.mocked(findSoleProjectSectionNumberFormat).mockResolvedValueOnce(null);
+    const { generateHandler } = await import('./generate.js');
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, mockRes());
+    expect(generateDocx).toHaveBeenCalledWith(
+      expect.objectContaining({ section: '09 91 00' }),
+      undefined,
+      undefined
+    );
+  });
 });
+
+async function loadSpecMocks(): Promise<{
+  generateDocx: Awaited<typeof import('../generator/index.js')>['generateDocx'];
+  findSoleProjectSectionNumberFormat: Awaited<
+    typeof import('../db/index.js')
+  >['findSoleProjectSectionNumberFormat'];
+}> {
+  await setupSpecGenerate();
+  const { generateDocx } = await import('../generator/index.js');
+  const { findSoleProjectSectionNumberFormat } = await import('../db/index.js');
+  return { generateDocx, findSoleProjectSectionNumberFormat };
+}
 
 function mockRes(): Response {
   return {
@@ -196,12 +230,88 @@ describe('generateManualHandler', () => {
       ],
       { name: 'Acme HQ', description: null },
       undefined,
-      undefined
+      // Body omits the format → the project's stored "canonical" default applies.
+      { sectionNumberFormat: 'canonical' }
     );
     expect(res.send).toHaveBeenCalledWith(Buffer.from('manual'));
     expect(res.setHeader).toHaveBeenCalledWith(
       'Content-Disposition',
       expect.stringContaining('.docx')
     );
+  });
+
+  it('generate: falls back to the project default when body omits the format', async () => {
+    const { findProjectById, getSpecTree, getTemplateByName } = await import('../db/index.js');
+    const { generateManual } = await import('../generator/index.js');
+    vi.mocked(findProjectById).mockResolvedValueOnce({
+      projectId: PROJECT_ID,
+      name: 'Acme HQ',
+      description: null,
+      sources: [],
+      toc: [
+        {
+          specId: 'aaaaaaaa-0000-4000-8000-000000000001',
+          section: '03 30 00',
+          title: 'A',
+          position: 1,
+        },
+      ],
+      deletedAt: null,
+      deletedBy: null,
+      sectionNumberFormat: 'dots',
+    });
+    vi.mocked(getSpecTree).mockResolvedValueOnce({
+      tree: { id: 'a', section: '03 30 00', title: 'A', parts: [] },
+      references: [],
+    });
+    vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
+    vi.mocked(generateManual).mockResolvedValueOnce(Buffer.from('manual'));
+    const { generateManualHandler } = await import('./generate.js');
+    await generateManualHandler(
+      { params: { id: PROJECT_ID }, body: {} } as unknown as Request,
+      mockRes()
+    );
+    expect(generateManual).toHaveBeenCalledWith(expect.any(Array), expect.any(Object), undefined, {
+      sectionNumberFormat: 'dots',
+    });
+  });
+
+  it('generate: request sectionNumberFormat wins over the project default', async () => {
+    const { findProjectById, getSpecTree, getTemplateByName } = await import('../db/index.js');
+    const { generateManual } = await import('../generator/index.js');
+    vi.mocked(findProjectById).mockResolvedValueOnce({
+      projectId: PROJECT_ID,
+      name: 'Acme HQ',
+      description: null,
+      sources: [],
+      toc: [
+        {
+          specId: 'aaaaaaaa-0000-4000-8000-000000000001',
+          section: '03 30 00',
+          title: 'A',
+          position: 1,
+        },
+      ],
+      deletedAt: null,
+      deletedBy: null,
+      sectionNumberFormat: 'dots',
+    });
+    vi.mocked(getSpecTree).mockResolvedValueOnce({
+      tree: { id: 'a', section: '03 30 00', title: 'A', parts: [] },
+      references: [],
+    });
+    vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
+    vi.mocked(generateManual).mockResolvedValueOnce(Buffer.from('manual'));
+    const { generateManualHandler } = await import('./generate.js');
+    await generateManualHandler(
+      {
+        params: { id: PROJECT_ID },
+        body: { sectionNumberFormat: 'compact' },
+      } as unknown as Request,
+      mockRes()
+    );
+    expect(generateManual).toHaveBeenCalledWith(expect.any(Array), expect.any(Object), undefined, {
+      sectionNumberFormat: 'compact',
+    });
   });
 });

@@ -747,13 +747,14 @@ paths:
                 sectionNumberFormat:
                   type: string
                   enum: [canonical, dots, compact, spaced-compact]
-                  default: canonical
                   description: >
                     Presentation format for generated section numbers in the synthetic
                     DOCX title and confidently identified Section references in paragraph
                     text. Canonical emits "09 91 00", dots emits "09.91.00", compact
                     emits "099100", and spaced-compact emits "09 9100". Stored AST and
-                    database values remain canonical.
+                    database values remain canonical. Omitted → falls back to the stored
+                    default of the spec's sole owning project; if the spec belongs to no
+                    project (or several), the canonical format applies.
             examples:
               dotted-section-numbers:
                 value:
@@ -1362,10 +1363,11 @@ paths:
                 sectionNumberFormat:
                   type: string
                   enum: [canonical, dots, compact, spaced-compact]
-                  default: canonical
                   description: >
                     Presentation format for generated section numbers in each
                     section title and confidently identified Section references.
+                    Omitted → falls back to the project's stored
+                    `sectionNumberFormat` default (canonical when unset).
       responses:
         '200':
           description: DOCX manual file stream
