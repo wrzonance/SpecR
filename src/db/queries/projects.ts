@@ -330,7 +330,7 @@ export async function softDeleteProject(
       `UPDATE projects
        SET deleted_at = COALESCE(deleted_at, now()),
            deleted_by = COALESCE(deleted_by, $2),
-           updated_at = now()
+           updated_at = CASE WHEN deleted_at IS NULL THEN now() ELSE updated_at END
        WHERE id = $1
        RETURNING deleted_at, deleted_by`,
       [id, deletedBy]
