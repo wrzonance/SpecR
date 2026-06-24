@@ -49,6 +49,13 @@ describe('deriveArticleRole — canonical CSI headings', () => {
     expect(deriveArticleRole('1.7 MAINTENANCE')).toBeUndefined();
   });
 
+  it('prefix strip: a digit glued to a letter is not a numbering prefix (3D ≠ "D…")', () => {
+    // The numbering-prefix strip requires a separator or whitespace terminator,
+    // so "3D" / "2024" tokens stay intact and never accidentally expose a role.
+    expect(deriveArticleRole('3D MODELING')).toBeUndefined();
+    expect(deriveArticleRole('2024 REQUIREMENTS')).toBeUndefined();
+  });
+
   // KNOWN AMBIGUITY: "REFERENCES" as a sub-list heading inside another article
   // (e.g. a manufacturer's reference drawings) reads identically to the PART-1
   // References article. The deriver classifies on heading text alone and cannot

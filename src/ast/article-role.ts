@@ -43,9 +43,12 @@ const LOOKUP: ReadonlyMap<string, ArticleRole> = new Map(
   ARTICLE_ROLE_RULES.flatMap((rule) => rule.titles.map((t) => [t, rule.role] as const))
 );
 
-// Leading CSI numbering prefix: "1.1", "1.02", "1.1.1", optionally trailed by a
-// separator. Stripped before lookup so "1.1 REFERENCES" === "REFERENCES".
-const NUMBER_PREFIX_RE = /^\d+(?:\.\d+)*\s*[-–—.)]?\s*/;
+// Leading CSI numbering prefix: "1.1", "1.02", "1.1.1", terminated by a separator
+// or whitespace. Stripped before lookup so "1.1 REFERENCES" === "REFERENCES". The
+// terminator is required so a digit-run glued to a letter ("3D MODELING") is NOT
+// treated as a prefix — safe-by-construction rather than safe only because no role
+// title currently begins after a digit.
+const NUMBER_PREFIX_RE = /^\d+(?:\.\d+)*(?:\s*[-–—.)]\s*|\s+)/;
 
 function normalizeHeading(text: string): string {
   return text.replace(NUMBER_PREFIX_RE, '').trim().replace(/\s+/g, ' ').toUpperCase();
