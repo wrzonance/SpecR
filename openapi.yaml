@@ -3716,8 +3716,9 @@ components:
           type: boolean
           description: >
             True when the comment is resolved (#262): its runs are struck through
-            OR its text ends in "Closed". Defaults false for facts persisted before
-            this field existed.
+            OR its text ends in "Closed". For facts persisted before this field
+            existed, it is derived from the trailing "Closed" suffix (the strike
+            signal is unrecoverable, so such legacy facts read as open).
 
     SourceColorFact:
       type: object
