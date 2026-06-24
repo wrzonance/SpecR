@@ -246,10 +246,8 @@ function renderProjectControls() {
 
 function renderProjectSettings() {
   const name = document.getElementById('project-name-input');
-  const format = document.getElementById('project-number-format');
   const hint = document.getElementById('settings-hint');
   if (name) name.value = activeProjectName();
-  if (format) format.value = activeSectionNumberFormat();
   if (hint) hint.textContent = `${activeProjectName()} · ${projectSourceLabel()}`;
   renderProjectSourceList();
 }
@@ -358,11 +356,9 @@ async function saveProjectSettings() {
     return;
   }
   const name = document.getElementById('project-name-input')?.value.trim() || activeProjectName();
-  const sectionNumberFormat =
-    document.getElementById('project-number-format')?.value || activeSectionNumberFormat();
   projectClientLibraryIds = checkedProjectClientIds();
   try {
-    await patchProject(activeProjectId, { name, sectionNumberFormat });
+    await patchProject(activeProjectId, { name });
     await syncProjectSourcesToTocScope();
     await refreshProjectList(activeProjectId);
     activeProject = await getProject(activeProjectId);

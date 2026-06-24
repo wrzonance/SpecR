@@ -9,7 +9,7 @@ export const API_FEATURES = {
   libraries: true, // GET /libraries, GET /libraries/:id/specs            (landed #227)
   libraryWrites: true, // POST /libraries/clients, PATCH /libraries/:id        (landed #233)
   projectsList: true, // GET /projects                                       (landed #229)
-  projectSettings: false, // PATCH /projects/:id                                 (Phase 4)
+  projectSettings: true, // PATCH /projects/:id {name}                          (landed)
   projectSources: true, // PUT /projects/:id/sources                            (landed #235)
   specDelete: false, // DELETE /specs/:id                                   (Phase 4)
   paragraphDelete: false, // DELETE /specs/:id/paragraphs/:nodeId               (Phase 4)
