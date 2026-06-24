@@ -791,7 +791,7 @@ async function refreshTocBuilder() {
   try {
     const result = await getRequiredSections(activeProjectId);
     tocSections = sortedTocSections(
-      (result.sections ?? []).map((entry) => ({
+      (result ?? []).map((entry) => ({
         section: entry.section,
         title: entry.title,
       }))
@@ -865,7 +865,7 @@ async function saveTocBuilder({ toastMessage = 'TOC saved' } = {}) {
     }));
     const result = await setRequiredSections(activeProjectId, payload);
     tocSections = sortedTocSections(
-      (result.sections ?? []).map((entry) => ({
+      (result ?? []).map((entry) => ({
         section: entry.section,
         title: entry.title,
       }))
