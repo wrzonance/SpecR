@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Implement task-by-task via TDD. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** Add 5 MCP tools so AI agents can drive the onboarding loop (report, review, correct, reclassify) over `POST /mcp`, each reusing the exact same `db/index.js` queries the REST handlers use.
+**Goal:** Add 5 MCP tools so AI agents can drive the onboarding loop (report, review, correct, reclassify) over `POST /mcp`, each reusing the same `db/index.js` queries the REST handlers use.
 
 **Architecture:** New handlers live in `src/mcp/onboarding-handlers.ts` (keeps `handlers.ts` and `tools.ts` under the 400-line cap). `tools.ts` imports and registers them. Each handler is a thin adapter: validate via Zod at the tool boundary, call the shared query, return `{ content }` or `{ isError }`. No new logic — single source with REST.
 

@@ -61,8 +61,8 @@ The canonical contract is [openapi.yaml](openapi.yaml). Key groups:
 ### MCP tools
 
 The Streamable HTTP server at `POST /mcp` exposes these tools (all stateless,
-read-or-correct over `db/index.js` queries, rate-limited by the shared `/mcp`
-limiter):
+reading or correcting via `db/index.js` queries, rate-limited by the shared
+`/mcp` limiter):
 
 | Tool | Purpose |
 | --- | --- |
