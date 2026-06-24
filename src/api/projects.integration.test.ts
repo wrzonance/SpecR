@@ -475,6 +475,15 @@ describe('PATCH /projects/:id', () => {
     expect(res.status).toBe(404);
   });
 
+  it('400s a malformed (non-UUID) project id', async () => {
+    const res = await fetch(`${baseUrl}/projects/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'x' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('400s an empty name', async () => {
     const createRes = await fetch(`${baseUrl}/projects`, {
       method: 'POST',

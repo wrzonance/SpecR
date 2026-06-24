@@ -281,11 +281,16 @@ export async function updateProjectName(
   name: string,
   pool: Queryable
 ): Promise<{ id: string; name: string } | null> {
-  const { rows } = await pool.query<{ id: string; name: string }>(
-    `UPDATE projects SET name = $2, updated_at = now() WHERE id = $1 RETURNING id, name`,
-    [id, name]
-  );
-  return rows[0] ?? null;
+  try {
+    const { rows } = await pool.query<{ id: string; name: string }>(
+      `UPDATE projects SET name = $2, updated_at = now() WHERE id = $1 RETURNING id, name`,
+      [id, name]
+    );
+    return rows[0] ?? null;
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`updateProjectName: update failed for ${id}`, { cause: err });
+  }
 }
 
 export async function getBrokenRefs(
