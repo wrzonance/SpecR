@@ -102,3 +102,13 @@ describe('tagArticleRoles — immutable tree transform', () => {
     expect(out[0]?.meta.articleRole).toBe('references');
   });
 });
+
+import * as astBarrel from './index.js';
+
+describe('ast barrel re-exports', () => {
+  it('exposes the deriver and tree transform', () => {
+    expect(typeof astBarrel.deriveArticleRole).toBe('function');
+    expect(typeof astBarrel.tagArticleRoles).toBe('function');
+    expect(Array.isArray(astBarrel.ARTICLE_ROLE_RULES)).toBe(true);
+  });
+});
