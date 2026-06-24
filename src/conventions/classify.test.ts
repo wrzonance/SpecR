@@ -170,7 +170,7 @@ describe('classify — choice rung', () => {
 
 describe('classify — comment policy rung', () => {
   const commentFacts: SourceFacts = {
-    comments: [{ author: 'JDoe', text: 'Verify with owner', anchor: [0, 4] }],
+    comments: [{ author: 'JDoe', text: 'Verify with owner', anchor: [0, 4], closed: false }],
   };
 
   it('comment + comments.treatAs=note → note', () => {
@@ -230,7 +230,7 @@ describe('classify — note rung (highest precedence)', () => {
   it('banner outranks comment policy', () => {
     const facts: SourceFacts = {
       banner: 'NOTES TO SPECIFIER',
-      comments: [{ author: 'A', text: 'x', anchor: [0, 1] }],
+      comments: [{ author: 'A', text: 'x', anchor: [0, 1], closed: false }],
     };
     const out = classifyOne(facts, { comments: { treatAs: 'editable' } });
     expect(out.editability).toBe('note');

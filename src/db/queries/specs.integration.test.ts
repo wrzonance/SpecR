@@ -7,7 +7,7 @@ import { insertTree } from './paragraphs.js';
 import { getSpecTree } from './specs.js';
 
 const SOURCE_FACTS = {
-  comments: [{ author: 'Specifier', text: 'Verify finish.', anchor: [11, 15] }],
+  comments: [{ author: 'Specifier', text: 'Verify finish.', anchor: [11, 15], closed: false }],
   colors: [{ color: 'highlight:yellow', coverage: 0.25, spans: [[11, 15]] }],
   reviewer: { severity: 'coordination', count: 2 },
 } as const;

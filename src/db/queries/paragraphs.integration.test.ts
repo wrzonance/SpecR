@@ -9,7 +9,9 @@ const PR1_CONFLICTED_ID = 'b0000000-0000-0000-0000-000000000004';
 const PR1_FACTS_ID = 'b0000000-0000-0000-0000-000000000005';
 
 const SOURCE_FACTS = {
-  comments: [{ author: 'Specifier', text: 'Check mounting height.', anchor: [0, 10] }],
+  comments: [
+    { author: 'Specifier', text: 'Check mounting height.', anchor: [0, 10], closed: false },
+  ],
   colors: [{ color: '0000FF', coverage: 0.5, spans: [[0, 10]] }],
   reviewer: { severity: 'info', count: 1 },
 } as const;

@@ -75,6 +75,7 @@ interface CommentFact {
   readonly author: string;
   readonly text: string;
   readonly anchor: readonly [number, number];
+  readonly closed: boolean;
 }
 
 interface ColorFact {
@@ -233,10 +234,15 @@ describe('parseDocx — source facts: comments (#128)', () => {
     const second = findNode(tree.parts, 'Beta target two.');
 
     expect(sourceComments(first)).toEqual([
-      { author: 'Jane Specifier', text: 'Use approved product list.', anchor: [6, 12] },
+      {
+        author: 'Jane Specifier',
+        text: 'Use approved product list.',
+        anchor: [6, 12],
+        closed: false,
+      },
     ]);
     expect(sourceComments(second)).toEqual([
-      { author: 'Alex Reviewer', text: 'Coordinate with owner.', anchor: [5, 11] },
+      { author: 'Alex Reviewer', text: 'Coordinate with owner.', anchor: [5, 11], closed: false },
     ]);
   });
 
@@ -255,7 +261,7 @@ describe('parseDocx — source facts: comments (#128)', () => {
 
     expect(sourceComments(alpha)).toBeUndefined();
     expect(sourceComments(beta)).toEqual([
-      { author: 'Alex Reviewer', text: 'Coordinate with owner.', anchor: [5, 11] },
+      { author: 'Alex Reviewer', text: 'Coordinate with owner.', anchor: [5, 11], closed: false },
     ]);
   });
 
@@ -274,10 +280,10 @@ describe('parseDocx — source facts: comments (#128)', () => {
     // Spanning comments are represented as one fact per covered paragraph,
     // clipped to each paragraph's local flattened text span.
     expect(sourceComments(first)).toEqual([
-      { author: 'Jane Specifier', text: 'Spans paragraphs.', anchor: [6, 13] },
+      { author: 'Jane Specifier', text: 'Spans paragraphs.', anchor: [6, 13], closed: false },
     ]);
     expect(sourceComments(second)).toEqual([
-      { author: 'Jane Specifier', text: 'Spans paragraphs.', anchor: [0, 4] },
+      { author: 'Jane Specifier', text: 'Spans paragraphs.', anchor: [0, 4], closed: false },
     ]);
   });
 
@@ -289,6 +295,37 @@ describe('parseDocx — source facts: comments (#128)', () => {
   it('malformed comments.xml throws ParserError instead of silently dropping comments', async () => {
     const buffer = await makeDocx({ commentsXml: '<w:comments><w:comment' });
     await expect(parseDocx(buffer)).rejects.toThrow('failed to parse word/comments.xml');
+  });
+
+  it('marks closed=true for a struck-through comment and a "Closed"-suffixed comment (#262)', async () => {
+    const closureComments = `<?xml version="1.0" encoding="UTF-8"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="0" w:author="Jane Specifier">
+    <w:p><w:r><w:rPr><w:strike/></w:rPr><w:t>Resolved upstream.</w:t></w:r></w:p>
+  </w:comment>
+  <w:comment w:id="1" w:author="Alex Reviewer">
+    <w:p><w:r><w:t>Coordinate with owner. Closed</w:t></w:r></w:p>
+  </w:comment>
+  <w:comment w:id="2" w:author="Pat Author">
+    <w:p><w:r><w:t>Still open question.</w:t></w:r></w:p>
+  </w:comment>
+</w:comments>`;
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Struck </w:t></w:r><w:commentRangeStart w:id="0"/><w:r><w:t>target</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p>
+    <w:p><w:r><w:t>Suffix </w:t></w:r><w:commentRangeStart w:id="1"/><w:r><w:t>target</w:t></w:r><w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r></w:p>
+    <w:p><w:r><w:t>Open </w:t></w:r><w:commentRangeStart w:id="2"/><w:r><w:t>target</w:t></w:r><w:commentRangeEnd w:id="2"/><w:r><w:commentReference w:id="2"/></w:r></w:p>
+  </w:body>
+</w:document>`;
+    const tree = await parseDocx(await makeDocx({ documentXml, commentsXml: closureComments }));
+    const struck = sourceComments(findNode(tree.parts, 'Struck target'))?.[0];
+    const suffix = sourceComments(findNode(tree.parts, 'Suffix target'))?.[0];
+    const open = sourceComments(findNode(tree.parts, 'Open target'))?.[0];
+
+    expect(struck?.closed).toBe(true);
+    expect(suffix?.closed).toBe(true);
+    expect(open?.closed).toBe(false);
   });
 });
 

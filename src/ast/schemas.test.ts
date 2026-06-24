@@ -252,7 +252,7 @@ describe('SpecNodeMetaSchema — conflicts', () => {
 describe('SourceFactsSchema', () => {
   it('accepts known source fact keys and preserves unknown JSON keys', () => {
     const facts = {
-      comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19] }],
+      comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19], closed: false }],
       colors: [{ color: '0000FF', coverage: 0.82, spans: [[12, 96]] }],
       choiceTokens: [{ kind: 'bracket', options: ['Provide mockup.'], span: [20, 37] }],
       banner: 'MASTER NOTE',
@@ -261,6 +261,20 @@ describe('SourceFactsSchema', () => {
     };
 
     expect(SourceFactsSchema.parse(facts)).toEqual(facts);
+  });
+
+  it('defaults comment.closed to false for facts persisted before #262', () => {
+    const parsed = SourceFactsSchema.parse({
+      comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19] }],
+    });
+    expect(parsed.comments?.[0]?.closed).toBe(false);
+  });
+
+  it('preserves comment.closed = true', () => {
+    const parsed = SourceFactsSchema.parse({
+      comments: [{ author: 'Specifier', text: 'Done Closed', anchor: [4, 19], closed: true }],
+    });
+    expect(parsed.comments?.[0]?.closed).toBe(true);
   });
 
   it('rejects non-JSON unknown fact values', () => {

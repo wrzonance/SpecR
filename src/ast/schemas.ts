@@ -35,6 +35,9 @@ export const SourceCommentFactSchema = z.object({
   author: z.string(),
   text: z.string(),
   anchor: SourceTextSpanSchema,
+  // Closure state (#262). Defaulted for forward-compat: comments persisted before
+  // this field existed parse as open (closed === false) rather than failing.
+  closed: z.boolean().default(false),
 });
 
 export const SourceColorFactSchema = z.object({
