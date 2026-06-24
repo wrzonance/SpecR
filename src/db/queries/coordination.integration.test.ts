@@ -61,15 +61,19 @@ async function addPackageSpec(packageId: string, specId: string, position: numbe
   );
 }
 // A section-targeted ref; is_broken = (the target section has no spec in the project).
+// `paragraphText` defaults to the bare referenceText (the common case); pass a
+// longer sentence to exercise snippet windowing. Returns the paragraph id so a
+// test can assert the dangling_ref finding's paragraph-level locator (#260).
 async function addRef(
   sourceSpecId: string,
   targetSection: string,
   referenceText: string,
-  targetSpecId: string | null
-): Promise<void> {
+  targetSpecId: string | null,
+  paragraphText: string = referenceText
+): Promise<string> {
   const p = await pool.query<{ id: string }>(
     `INSERT INTO paragraphs (spec_id, node_type, text, position) VALUES ($1, 'pr1', $2, 1) RETURNING id`,
-    [sourceSpecId, referenceText]
+    [sourceSpecId, paragraphText]
   );
   const paragraphId = p.rows[0]?.id;
   if (paragraphId === undefined) throw new Error('addRef: no paragraph id');
@@ -80,6 +84,7 @@ async function addRef(
      VALUES ($1, $2, 'section', $3, $4, $5, $6)`,
     [sourceSpecId, paragraphId, targetSection, targetSpecId, referenceText, targetSpecId === null]
   );
+  return paragraphId;
 }
 // Narrowing filter: ofType(fs, 'dangling_ref') is typed to the dangling variant,
 // so variant-specific fields (.targetSpecSection, .section, .specId) typecheck.
@@ -131,6 +136,29 @@ describe('getCoordinationReport', () => {
       total: 3,
     });
     expect(report.notes).toEqual([]);
+  });
+
+  it('dangling_ref carries the source paragraph id and a snippet of the ref in context (#260)', async () => {
+    const projectId = await newProject('coord-locator');
+    const specA = await newSpec('03 30 00', 'Concrete');
+    await addProjectSpec(projectId, specA, 1);
+    const longText =
+      'Coordinate the work of this Section with the requirements of ' +
+      'Section 07 84 00 Firestopping, which is not included in this project ' +
+      'and must be provided under a separate contract by the Owner.';
+    const paragraphId = await addRef(specA, '07 84 00', 'Section 07 84 00', null, longText);
+
+    const report = await getCoordinationReport(projectId, undefined);
+    const dangling = ofType(report.findings, 'dangling_ref');
+
+    expect(dangling).toHaveLength(1);
+    const finding = dangling[0];
+    if (finding === undefined) throw new Error('expected a dangling_ref finding');
+    expect(finding.sourceParagraphId).toBe(paragraphId);
+    expect(finding.snippet).toContain('Section 07 84 00');
+    // Windowed: shorter than the full paragraph, ends with an ellipsis.
+    expect(finding.snippet.length).toBeLessThan(longText.length);
+    expect(finding.snippet.endsWith('…')).toBe(true);
   });
 
   it('suppresses present_not_required and emits a note when the required list is empty', async () => {

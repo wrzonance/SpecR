@@ -32,6 +32,8 @@ export type Finding =
       readonly refId: string;
       readonly sourceSpecId: string;
       readonly sourceSpecSection: string;
+      readonly sourceParagraphId: string;
+      readonly snippet: string;
       readonly targetSpecSection: string;
       readonly referenceText: string;
       readonly availableFrom: readonly { readonly libraryId: string; readonly name: string }[];
@@ -120,6 +122,8 @@ function toDangling(
     refId: b.refId,
     sourceSpecId: b.sourceSpecId,
     sourceSpecSection: b.sourceSpecSection,
+    sourceParagraphId: b.sourceParagraphId,
+    snippet: b.snippet,
     targetSpecSection: target,
     referenceText: b.referenceText,
     availableFrom: b.availableFrom,
