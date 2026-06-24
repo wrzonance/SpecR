@@ -9,6 +9,7 @@ import type {
   NodeType,
   SecRef,
 } from '../../ast/index.js';
+import { deriveArticleRole } from '../../ast/index.js';
 import type { Pool } from 'pg';
 import { insertTree } from './paragraphs.js';
 import { insertRefs } from './refs.js';
@@ -163,6 +164,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
       .sort((a, b) => a.position - b.position)
       .map(buildNode);
     const editability = deriveEditability(row.classification, row.editability_override);
+    const articleRole = row.node_type === 'article' ? deriveArticleRole(row.text) : undefined;
     return {
       id: row.id,
       type: row.node_type as NodeType,
@@ -173,6 +175,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
         ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
         ...(hasSourceFacts(row.source_facts) ? { sourceFacts: row.source_facts } : {}),
         ...(editability ? { editability } : {}),
+        ...(articleRole !== undefined ? { articleRole } : {}),
       },
     };
   }

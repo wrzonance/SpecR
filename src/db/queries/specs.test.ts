@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { buildNodeTree, type ParagraphTreeRow } from './specs.js';
 
 vi.mock('../index.js', () => {
   const query = vi.fn();
@@ -149,5 +150,41 @@ describe('buildNodeTree editability derivation', () => {
     const { buildNodeTree } = await import('./specs.js');
     const [node] = buildNodeTree([{ ...baseRow }]);
     expect(node?.meta.editability).toBeUndefined();
+  });
+});
+
+function row(
+  p: Partial<ParagraphTreeRow> & Pick<ParagraphTreeRow, 'id' | 'node_type' | 'text'>
+): ParagraphTreeRow {
+  return {
+    parent_id: null,
+    position: 0,
+    vanish: false,
+    conflicts: [],
+    source_facts: {},
+    classification: null,
+    editability_override: null,
+    ...p,
+  };
+}
+
+describe('buildNodeTree derives meta.articleRole', () => {
+  it('tags an article row whose text is a known CSI heading', () => {
+    const nodes = buildNodeTree([row({ id: 'a', node_type: 'article', text: 'REFERENCES' })]);
+    expect(nodes[0]?.meta.articleRole).toBe('references');
+  });
+
+  it('tolerates a retained numbering prefix on the stored text', () => {
+    const nodes = buildNodeTree([row({ id: 'a', node_type: 'article', text: '1.1 SUBMITTALS' })]);
+    expect(nodes[0]?.meta.articleRole).toBe('submittals');
+  });
+
+  it('omits the role on unknown headings and on non-article rows', () => {
+    const nodes = buildNodeTree([
+      row({ id: 'a', node_type: 'article', text: 'SYSTEM DESCRIPTION' }),
+      row({ id: 'n', node_type: 'note', text: 'REFERENCES' }),
+    ]);
+    expect(nodes[0]?.meta.articleRole).toBeUndefined();
+    expect(nodes[1]?.meta.articleRole).toBeUndefined();
   });
 });
