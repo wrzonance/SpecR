@@ -360,7 +360,9 @@ export async function restoreProject(
   try {
     const { rows } = await pool.query<{ id: string }>(
       `UPDATE projects
-       SET deleted_at = NULL, deleted_by = NULL, updated_at = now()
+       SET deleted_at = NULL,
+           deleted_by = NULL,
+           updated_at = CASE WHEN deleted_at IS NOT NULL THEN now() ELSE updated_at END
        WHERE id = $1
        RETURNING id`,
       [id]
