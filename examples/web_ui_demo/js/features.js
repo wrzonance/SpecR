@@ -13,5 +13,5 @@ export const API_FEATURES = {
   projectSources: true, // PUT /projects/:id/sources                            (landed #235)
   specDelete: false, // DELETE /specs/:id                                   (Phase 4)
   paragraphDelete: false, // DELETE /specs/:id/paragraphs/:nodeId               (Phase 4)
-  coordination: false, // coordination-report + required-sections            (Phase 4)
+  coordination: true, // coordination-report + required-sections            (landed #239/#241)
 };
