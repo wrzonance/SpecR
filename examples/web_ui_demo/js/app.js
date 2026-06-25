@@ -9,6 +9,7 @@ import {
   getSpecTree,
   getOutboundReferences,
   deleteParagraph,
+  setParagraphRemoved,
   updateParagraph,
   deleteSpec,
   createProject,
@@ -24,6 +25,7 @@ import {
   removeSpecFromProject,
   getBrokenRefs,
   getCoordinationReport,
+  getProjectOpenComments,
   getRequiredSections,
   setRequiredSections,
   deleteProject,
@@ -32,6 +34,7 @@ import { renderSpecSheet } from './tree.js';
 import { API_FEATURES } from './features.js';
 import { buildWebModel, renderWeb } from './web.js';
 import { renderCoordinationReport } from './coordination.js';
+import { renderOpenComments } from './open-comments.js';
 import { initDropzone } from './dropzone.js';
 import { initRefPopover } from './popover.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
@@ -56,6 +59,7 @@ const emptyState = document.getElementById('empty-state');
 const webCanvas = document.getElementById('ref-web-canvas');
 const webHint = document.getElementById('web-hint');
 const coordBody = document.getElementById('coord-report-body');
+const openCommentsBody = document.getElementById('open-comments-body');
 
 const COMPANY_MASTER_NAME = 'Default Company Master';
 const DEMO_CLIENT_NAMES = ['Alameda Civic Partners', 'Northbank Health', 'Vireo Schools'];
@@ -376,6 +380,7 @@ async function saveProjectSettings() {
     renderBoard();
     await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     toast('Project settings saved');
   } catch (err) {
     toast(`settings save failed: ${err.message}`, 'err');
@@ -405,6 +410,7 @@ async function loadActiveProjectWorkspace() {
   renderBoard();
   await refreshBrokenCount();
   await refreshCoordination();
+  await refreshOpenComments();
 }
 
 async function deleteActiveProject() {
@@ -549,12 +555,42 @@ async function refreshCoordination() {
   }
 }
 
+// Pulls the project-scoped open-comments report (#272) and paints both the
+// masthead OPEN CMTS cell and the Report-view panel. Mirrors refreshCoordination:
+// degrades to an "unavailable" panel when the flag is off and never throws.
+async function refreshOpenComments() {
+  const cell = document.getElementById('comments-cell');
+  const out = document.getElementById('comments-count');
+  if (!activeProjectId) return null;
+  if (!API_FEATURES.openComments) {
+    if (openCommentsBody) renderOpenComments(openCommentsBody, null);
+    return null;
+  }
+  try {
+    const report = await getProjectOpenComments(activeProjectId);
+    if (out) out.textContent = String(report.summary.open);
+    if (cell) cell.classList.toggle('is-broken', report.summary.open > 0);
+    if (openCommentsBody) {
+      renderOpenComments(openCommentsBody, report, {
+        onNavigate: navigateToSection,
+        displaySection,
+      });
+    }
+    return report.summary.open;
+  } catch (err) {
+    if (openCommentsBody) renderOpenComments(openCommentsBody, null);
+    console.warn('SpecR: could not refresh open comments', err);
+    return null;
+  }
+}
+
 async function refreshDiagnostics() {
-  const [brokenCount, coordinationCount] = await Promise.all([
+  const [brokenCount, coordinationCount, openComments] = await Promise.all([
     refreshBrokenCount(),
     refreshCoordination(),
+    refreshOpenComments(),
   ]);
-  return { brokenCount, coordinationCount };
+  return { brokenCount, coordinationCount, openComments };
 }
 
 // ── State refresh ───────────────────────────────────────────────────────────
@@ -1088,6 +1124,7 @@ async function addMapSpecFromLibrary() {
     renderBoard();
     await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     toast(
       `Section ${spec.section} loaded from ${result.source?.name || library.name} - TOC unchanged`
     );
@@ -1312,6 +1349,7 @@ async function removeSpecFromLibrary(spec) {
     await refreshTocLibrarySpecs();
     renderBoard();
     await refreshCoordination();
+    await refreshOpenComments();
     toast(`Section ${spec.section} removed from library`);
   } catch (err) {
     toast(`remove failed: ${err.message}`, 'err');
@@ -1427,6 +1465,34 @@ function removableTargetIds(removedRefs, ownSpecId) {
   return [...ids];
 }
 
+// Reversible soft removal (#251) — toggle a body paragraph's vanish flag. The
+// server keeps the row, its subtree, and any references intact; the node simply
+// re-renders greyed with a VANISH tag (removed) or normally (restored), and the
+// Restore affordance flips. Structural/note nodes are rejected 422 — surface
+// that as a clear warning rather than a generic failure.
+async function onToggleParagraphRemoval(spec, node, removed) {
+  if (!API_FEATURES.paragraphRemoval) {
+    toast('Paragraph removal is not available in this API build', 'warn');
+    return;
+  }
+  const specId = spec.tree.id;
+  try {
+    await setParagraphRemoved(specId, node.id, removed);
+    await reloadSpec(specId);
+    renderBoard();
+    await refreshBrokenCount();
+    await refreshCoordination();
+    await refreshOpenComments();
+    toast(removed ? 'Paragraph removed — hidden from owner renders' : 'Paragraph restored');
+  } catch (err) {
+    if (err.status === 422) {
+      toast('Only body paragraphs can be removed — this node type cannot', 'warn');
+      return;
+    }
+    toast(`${removed ? 'remove' : 'restore'} failed: ${err.message}`, 'err');
+  }
+}
+
 // Feature A — delete a paragraph (and, by cascade, any reference it contains).
 async function onDeleteParagraph(spec, node) {
   if (!API_FEATURES.paragraphDelete) {
@@ -1468,6 +1534,7 @@ async function onDeleteParagraph(spec, node) {
     renderBoard();
     await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     toast(
       contained.length > 0
         ? `Paragraph deleted — ${contained.length} reference${contained.length === 1 ? '' : 's'} removed`
@@ -1546,6 +1613,7 @@ async function commitTextEdit(specId, nodeId, newText, removedRefs, alsoRemoveSp
     renderBoard();
     const brokenCount = await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     announceEdit(removedRefs, alsoRemoveSpec, brokenCount);
     return 'committed';
   } catch (err) {
@@ -1557,6 +1625,7 @@ async function commitTextEdit(specId, nodeId, newText, removedRefs, alsoRemoveSp
     renderBoard();
     await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     toast(`save failed: ${err.message}`, 'err');
     return 'cancelled';
   }
@@ -1639,6 +1708,7 @@ async function onRemoveSpecFromProject(spec) {
     renderBoard();
     const brokenCount = await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     const action = removedFromProject ? 'removed from project' : 'removed from map';
     toast(
       `Section ${spec.tree.section} ${action} — TOC unchanged${brokenCount ? `, ${brokenCount} broken refs` : ''}`,
@@ -1684,6 +1754,7 @@ async function addSpecsFromTocToProject() {
   renderBoard();
   await refreshBrokenCount();
   await refreshCoordination();
+  await refreshOpenComments();
   if (added > 0) toast(`${added} TOC section${added === 1 ? '' : 's'} loaded on the map`);
   if (failed > 0)
     toast(`${failed} TOC section${failed === 1 ? '' : 's'} could not be loaded`, 'warn');
@@ -1769,10 +1840,13 @@ const sheetCtx = {
         : `${section} was extracted at ingest but its text isn't in the body verbatim`,
       'warn'
     ),
-  // Edit affordances (presence of onDeleteParagraph flips on the per-paragraph
-  // ✎/✕ controls inside tree.js).
-  onDeleteParagraph,
+  // Per-paragraph affordances (tree.js renders one button per wired callback):
+  //   ✎ edit    — always on (text editing has no capability flag)
+  //   ⊘/↩ remove — only when paragraphRemoval is served (#251, soft + reversible)
+  //   ✕ delete   — only when paragraphDelete is served (Phase 4 hard delete)
   onSaveParagraphEdit,
+  ...(API_FEATURES.paragraphRemoval ? { onToggleParagraphRemoval } : {}),
+  ...(API_FEATURES.paragraphDelete ? { onDeleteParagraph } : {}),
   onRemoveSpecFromProject,
   onAddSpecToToc,
   toast,
@@ -1836,6 +1910,7 @@ async function onSpecReady(result, context = { destination: 'project' }) {
   renderBoard();
   await refreshBrokenCount();
   await refreshCoordination();
+  await refreshOpenComments();
   toast(
     isNew
       ? `Section ${result.section} loaded — ${result.nodeCount} nodes inferred`

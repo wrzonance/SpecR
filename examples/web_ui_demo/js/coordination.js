@@ -67,9 +67,32 @@ function renderReferenceFinding(finding, ctx, shape) {
   return row;
 }
 
+// Dangling cross-reference (#269): source section cites a target outside scope.
+// The finding now carries a paragraph-level locator (sourceParagraphId) and a
+// snippet — a short excerpt of the citing paragraph centred on the reference —
+// so the reviewer sees WHERE and HOW the dangling citation reads, not just that
+// it exists. The section button navigates to the source sheet (section-level);
+// the snippet supplies the in-paragraph context.
+function renderDanglingRef(finding, ctx) {
+  const row = el('li', `coord-finding is-${finding.type}`);
+  const head = el('div', 'coord-finding-head');
+  head.appendChild(sectionButton(finding.sourceSpecSection, ctx));
+  head.appendChild(el('span', 'coord-arrow', 'cites'));
+  head.appendChild(el('span', 'coord-target', finding.targetSpecSection || 'unknown'));
+  head.appendChild(el('span', 'coord-text', finding.referenceText));
+  row.appendChild(head);
+  if (finding.snippet) {
+    const snippet = el('p', 'coord-snippet', finding.snippet);
+    snippet.title = 'Excerpt of the citing paragraph (centred on the reference)';
+    row.appendChild(snippet);
+  }
+  return row;
+}
+
 function renderFinding(finding, ctx) {
   const reference = REFERENCE_FINDINGS[finding.type];
   if (reference) return renderReferenceFinding(finding, ctx, reference);
+  if (finding.type === 'dangling_ref') return renderDanglingRef(finding, ctx);
 
   const row = el('li', `coord-finding is-${finding.type}`);
   if (finding.type === 'present_not_required') {

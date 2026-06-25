@@ -105,6 +105,15 @@ export function updateParagraph(specId, paragraphId, text) {
   return sendJson('PATCH', `/specs/${enc(specId)}/paragraphs/${enc(paragraphId)}`, { text });
 }
 
+// Soft, reversible paragraph removal (#251). `removed: true` sets the node's
+// vanish flag (suppressed from owner-facing renders); `false` restores it. The
+// subtree and any contained references stay intact. Only body paragraphs
+// (pr1–pr7 / continuation) are removable — a part/article/note rejects 422.
+// Resolves with the updated SpecNode subtree.
+export function setParagraphRemoved(specId, nodeId, removed) {
+  return sendJson('PATCH', `/specs/${enc(specId)}/paragraphs/${enc(nodeId)}/removal`, { removed });
+}
+
 // Deletes one cross-reference, leaving its paragraph in place.
 export function deleteReference(specId, refId) {
   return sendJson('DELETE', `/specs/${enc(specId)}/references/${enc(refId)}`);
@@ -171,6 +180,19 @@ export function deleteProject(projectId, deletedBy) {
 
 export function restoreProject(projectId) {
   return sendJson('POST', `/projects/${enc(projectId)}/restore`);
+}
+
+// Unresolved review comments for one spec (#262). Resolves with the
+// OpenCommentsReport: { scope, openComments: [{ specSection, author, text, … }],
+// summary: { open, total } }.
+export function getOpenComments(specId) {
+  return getJson(`/specs/${enc(specId)}/open-comments`);
+}
+
+// Unresolved review comments across every spec in a project (#272). Same
+// OpenCommentsReport shape, scoped to the project.
+export function getProjectOpenComments(projectId) {
+  return getJson(`/projects/${enc(projectId)}/open-comments`);
 }
 
 export function getRequiredSections(projectId) {

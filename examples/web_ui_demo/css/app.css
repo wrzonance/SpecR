@@ -1060,6 +1060,92 @@ body {
   color: var(--line-dim);
 }
 
+/* Dangling-ref finding (#269): the section→target head row sits above a
+   snippet excerpt of the citing paragraph. Stack instead of inline-wrap. */
+.coord-finding.is-dangling_ref {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+}
+
+.coord-finding-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.coord-snippet {
+  margin: 0;
+  padding: 0.3rem 0.55rem;
+  border-left: 2px solid var(--line-dim);
+  background: rgba(8, 23, 34, 0.45);
+  font-size: 0.82rem;
+  font-style: italic;
+  color: rgba(246, 240, 227, 0.74);
+  overflow-wrap: anywhere;
+}
+
+/* ── Open review comments (#262/#272) ──────────────────────────────────────
+   Reuses the coordination summary/section vocabulary; adds a per-section
+   grouped comment list. The report panel reuses .coord-report wrappers. */
+#open-comments-report {
+  margin-top: 1.4rem;
+}
+
+.oc-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.oc-group {
+  border: 1px solid var(--line-dim);
+  background: rgba(8, 23, 34, 0.38);
+}
+
+.oc-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px dashed var(--line-dim);
+}
+
+.oc-group-count {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  color: var(--amber);
+}
+
+.oc-comment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.oc-comment-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.oc-author {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--line);
+}
+
+.oc-text {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  color: rgba(246, 240, 227, 0.86);
+  overflow-wrap: anywhere;
+}
+
 /* ── Spec board ─────────────────────────────────────────────────────────── */
 
 .spec-board {
@@ -1376,6 +1462,22 @@ body {
   display: none;
 }
 
+/* ADR-033 article-role chip — sits on the article heading bar (on vellum). */
+.article-role {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #1d567f;
+  border: 1px solid rgba(47, 111, 163, 0.45);
+  background: rgba(47, 111, 163, 0.08);
+  padding: 0.05rem 0.4rem;
+  border-radius: 2px;
+  align-self: center;
+}
+
 .node-label {
   font-family: var(--mono);
   font-size: 0.78em;
@@ -1403,7 +1505,11 @@ body {
   min-width: 0;
 }
 
-.tree-node.is-vanish {
+/* Dim only the paragraph's own text/children, not the whole row — the action
+   row stays full-strength so the Restore (↩) affordance is legible on a removed
+   node. (Opacity creates a stacking context; dimming the row would cap the
+   actions' opacity too.) */
+.tree-node.is-vanish > .node-text {
   opacity: 0.45;
 }
 
@@ -2098,6 +2204,22 @@ body {
   color: #1d567f;
   border-color: #1d567f;
   background: rgba(47, 111, 163, 0.12);
+}
+/* Soft, reversible removal (#251): amber to read as "suppressed, not destroyed",
+   distinct from the red hard-delete. Restore (↩) flips to a green affordance. */
+.para-removal:hover {
+  color: #7a4f00;
+  border-color: var(--amber);
+  background: rgba(255, 178, 36, 0.18);
+}
+.para-removal.is-restore {
+  color: #1f6b3a;
+  border-color: rgba(31, 107, 58, 0.5);
+}
+.para-removal.is-restore:hover {
+  color: var(--vellum);
+  border-color: #1f6b3a;
+  background: #1f6b3a;
 }
 .para-del:hover {
   color: var(--vellum);

@@ -12,6 +12,8 @@ export const API_FEATURES = {
   projectSettings: true, // PATCH /projects/:id {name}                          (landed)
   projectSources: true, // PUT /projects/:id/sources                            (landed #235)
   specDelete: false, // DELETE /specs/:id                                   (Phase 4)
-  paragraphDelete: false, // DELETE /specs/:id/paragraphs/:nodeId               (Phase 4)
+  paragraphDelete: false, // DELETE /specs/:id/paragraphs/:nodeId               (Phase 4, hard delete)
+  paragraphRemoval: true, // PATCH /specs/:id/paragraphs/:nodeId/removal        (landed #251 — soft, reversible)
+  openComments: true, // GET /specs|projects/:id/open-comments              (landed #262/#272)
   coordination: true, // coordination-report + required-sections            (landed #239/#241)
 };
