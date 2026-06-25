@@ -3509,7 +3509,7 @@ components:
         type: { type: string, enum: [standard_cited_not_listed] }
         sourceSpecId: { type: string, format: uuid }
         sourceSpecSection: { type: string }
-        standardCode: { type: string, description: Normalized "ORG identifier", e.g. ASTM E814 }
+        standardCode: { type: string, description: 'Normalized "ORG identifier", e.g. ASTM E814' }
 
     # ── Open comments (#262) ─────────────────────────────────────────────────────
 
