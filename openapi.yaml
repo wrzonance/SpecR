@@ -3500,6 +3500,8 @@ components:
           productWithoutSubmittalType,
           submittalTypeWithoutProduct,
           productMissingDatasheet,
+          impliedRelatedSection,
+          umbrellaNotCalledOut,
           total,
         ]
       properties:
@@ -3512,6 +3514,8 @@ components:
         productWithoutSubmittalType: { type: integer }
         submittalTypeWithoutProduct: { type: integer }
         productMissingDatasheet: { type: integer }
+        impliedRelatedSection: { type: integer }
+        umbrellaNotCalledOut: { type: integer }
         total: { type: integer }
     CoordinationFinding:
       oneOf:
@@ -3524,6 +3528,8 @@ components:
         - $ref: '#/components/schemas/FindingProductWithoutSubmittalType'
         - $ref: '#/components/schemas/FindingSubmittalTypeWithoutProduct'
         - $ref: '#/components/schemas/FindingProductMissingDatasheet'
+        - $ref: '#/components/schemas/FindingImpliedRelatedSection'
+        - $ref: '#/components/schemas/FindingUmbrellaNotCalledOut'
       discriminator:
         propertyName: type
         mapping:
@@ -3536,6 +3542,8 @@ components:
           product_without_submittal_type: '#/components/schemas/FindingProductWithoutSubmittalType'
           submittal_type_without_product: '#/components/schemas/FindingSubmittalTypeWithoutProduct'
           product_missing_datasheet: '#/components/schemas/FindingProductMissingDatasheet'
+          implied_related_section: '#/components/schemas/FindingImpliedRelatedSection'
+          umbrella_not_called_out: '#/components/schemas/FindingUmbrellaNotCalledOut'
     FindingRequiredNotPresent:
       type: object
       required: [type, section, title, requiredId]
@@ -3622,6 +3630,59 @@ components:
         sourceSpecId: { type: string, format: uuid }
         sourceSpecSection: { type: string }
         standardCode: { type: string, description: 'Normalized "ORG identifier", e.g. ASTM E814' }
+    FindingImpliedRelatedSection:
+      type: object
+      description: >
+        Advisory suggestion: this spec body contains a distinctive keyword from an
+        in-scope section title, but that section is not already listed in this
+        spec's Related Sections article. Suppressed for own-section, already-listed,
+        generic, and overly common title keywords.
+      required:
+        [
+          type,
+          sourceSpecId,
+          sourceSpecSection,
+          sourceParagraphId,
+          impliedSection,
+          impliedTitle,
+          matchedKeyword,
+          confidence,
+        ]
+      properties:
+        type: { type: string, enum: [implied_related_section] }
+        sourceSpecId: { type: string, format: uuid }
+        sourceSpecSection: { type: string }
+        sourceParagraphId:
+          type: string
+          format: uuid
+          description: Paragraph whose body text matched the implied section title keyword
+        impliedSection:
+          type: string
+          description: Canonical CSI section number suggested for Related Sections
+        impliedTitle: { type: string }
+        matchedKeyword:
+          type: string
+          description: Normalized title keyword found in the source paragraph
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+    FindingUmbrellaNotCalledOut:
+      type: object
+      description: >
+        A Division 26/27/28 subordinate section does not cite its division umbrella
+        section (`DD 00 00`). Divisions outside the registry are skipped and
+        reported in coordination report notes.
+      required: [type, sourceSpecId, sourceSpecSection, umbrellaSpecSection]
+      properties:
+        type: { type: string, enum: [umbrella_not_called_out] }
+        sourceSpecId: { type: string, format: uuid }
+        sourceSpecSection:
+          type: string
+          description: Subordinate section missing the umbrella call-out.
+        umbrellaSpecSection:
+          type: string
+          description: Expected division umbrella section number, e.g. `26 00 00`.
 
     FindingProductWithoutSubmittalType:
       type: object

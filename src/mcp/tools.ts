@@ -302,7 +302,8 @@ function registerCoordinationTools(server: McpServer): void {
         'reference consistency: related_listed_not_cited (a Related Sections ' +
         'entry never cited), related_cited_not_listed (a section cited in the ' +
         'body but not listed), and standard_cited_not_listed (a standard cited ' +
-        'but absent from References). Optional packageId scopes to one design ' +
+        'but absent from References). Also suggests implied_related_section ' +
+        'when a body keyword matches an unlisted in-scope section title. Optional packageId scopes to one design ' +
         'package. Requires a projectId (see list_projects).',
       inputSchema: {
         projectId: z.uuid().describe('Project UUID (from list_projects)'),

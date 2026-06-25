@@ -12,10 +12,18 @@ import { getBrokenRefs, type BrokenRef } from './project-refs.js';
 import {
   classifyScopedRefs,
   buildReferenceConsistencyFindings,
+  type ClassifiedRef,
   type ReferenceConsistencyFinding,
 } from './article-refs.js';
 import { getSubmittalRegister } from './submittal-register.js';
 import type { SubmittalFinding } from '../../submittals/index.js';
+import { readImpliedRelatedFindings } from './coordination-implied.js';
+import type { ImpliedRelatedSectionFinding } from '../../coordination/index.js';
+import {
+  buildUmbrellaCalloutFindings,
+  type UmbrellaNotCalledOutFinding,
+  type UmbrellaCalloutResult,
+} from './umbrella-callouts.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -63,7 +71,9 @@ export type Finding =
       readonly sourceSpecSection: string;
       readonly standardCode: string;
     }
-  | SubmittalFinding;
+  | SubmittalFinding
+  | ImpliedRelatedSectionFinding
+  | UmbrellaNotCalledOutFinding;
 
 export interface CoordinationSummary {
   readonly requiredNotPresent: number;
@@ -75,6 +85,8 @@ export interface CoordinationSummary {
   readonly productWithoutSubmittalType: number;
   readonly submittalTypeWithoutProduct: number;
   readonly productMissingDatasheet: number;
+  readonly impliedRelatedSection: number;
+  readonly umbrellaNotCalledOut: number;
   readonly total: number;
 }
 
@@ -175,7 +187,9 @@ function buildFindings(
   present: readonly PresentSpec[],
   broken: readonly BrokenRef[],
   referenceFindings: readonly Finding[],
-  submittalFindings: readonly SubmittalFinding[]
+  submittalFindings: readonly SubmittalFinding[],
+  impliedFindings: readonly Finding[],
+  umbrellaResult: UmbrellaCalloutResult
 ): { readonly findings: readonly Finding[]; readonly notes: readonly string[] } {
   const requiredSections = new Set(required.map((r) => r.section));
   const presentSections = new Set(present.map((p) => p.section));
@@ -214,8 +228,10 @@ function buildFindings(
       ...danglingRef,
       ...referenceFindings,
       ...submittalFindings,
+      ...impliedFindings,
+      ...umbrellaResult.findings,
     ],
-    notes: empty ? [EMPTY_REQUIRED_NOTE] : [],
+    notes: [...(empty ? [EMPTY_REQUIRED_NOTE] : []), ...umbrellaResult.notes],
   };
 }
 
@@ -231,7 +247,60 @@ function summarize(findings: readonly Finding[]): CoordinationSummary {
     productWithoutSubmittalType: count('product_without_submittal_type'),
     submittalTypeWithoutProduct: count('submittal_type_without_product'),
     productMissingDatasheet: count('product_missing_datasheet'),
+    impliedRelatedSection: count('implied_related_section'),
+    umbrellaNotCalledOut: count('umbrella_not_called_out'),
     total: findings.length,
+  };
+}
+
+function sectionRefs(
+  classified: readonly ClassifiedRef[]
+): readonly { readonly sourceSpecId: string; readonly value: string }[] {
+  return classified.filter((ref) => ref.targetType === 'section');
+}
+
+async function assembleCoordinationReport(
+  projectId: string,
+  packageId: string | undefined,
+  client: PoolClient
+): Promise<CoordinationReport> {
+  await assertScope(projectId, packageId, client);
+  const required = await listRequiredSections(requiredScope(projectId, packageId), client);
+  const present = await readPresent(projectId, packageId, client);
+  const broken = await getBrokenRefs(projectId, client);
+  const classified = await classifyScopedRefs(
+    present.map((p) => p.specId),
+    client
+  );
+  const impliedFindings = await readImpliedRelatedFindings(
+    projectId,
+    packageId,
+    present,
+    classified,
+    client
+  );
+  await client.query('COMMIT');
+  const referenceFindings = buildReferenceConsistencyFindings(classified).map(toReferenceFinding);
+  const umbrellaResult = buildUmbrellaCalloutFindings(present, sectionRefs(classified));
+  const submittals = await getSubmittalRegister(
+    projectId,
+    present.map((p) => p.specId)
+  );
+  const { findings, notes } = buildFindings(
+    required,
+    present,
+    broken,
+    referenceFindings,
+    submittals.findings,
+    impliedFindings,
+    umbrellaResult
+  );
+  return {
+    projectId,
+    packageId: packageId ?? null,
+    findings,
+    summary: summarize(findings),
+    notes,
   };
 }
 
@@ -244,34 +313,7 @@ export async function getCoordinationReport(
   try {
     client = await db.connect();
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY');
-    await assertScope(projectId, packageId, client);
-    const required = await listRequiredSections(requiredScope(projectId, packageId), client);
-    const present = await readPresent(projectId, packageId, client);
-    const broken = await getBrokenRefs(projectId, client);
-    const classified = await classifyScopedRefs(
-      present.map((p) => p.specId),
-      client
-    );
-    await client.query('COMMIT');
-    const referenceFindings = buildReferenceConsistencyFindings(classified).map(toReferenceFinding);
-    const submittals = await getSubmittalRegister(
-      projectId,
-      present.map((p) => p.specId)
-    );
-    const { findings, notes } = buildFindings(
-      required,
-      present,
-      broken,
-      referenceFindings,
-      submittals.findings
-    );
-    return {
-      projectId,
-      packageId: packageId ?? null,
-      findings,
-      summary: summarize(findings),
-      notes,
-    };
+    return await assembleCoordinationReport(projectId, packageId, client);
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => undefined);
     if (err instanceof DatabaseError) throw err;
