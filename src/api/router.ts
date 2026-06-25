@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { healthHandler } from './health.js';
 import { getSpecHandler, getSpecLineageHandler, updateSpecHandler } from './specs.js';
 import { setStyleSourceHandler, clearStyleSourceHandler } from './style-source.js';
-import { updateParagraphHandler } from './paragraphs.js';
+import { updateParagraphHandler, removeParagraphHandler } from './paragraphs.js';
 import { acquireLockHandler, releaseLockHandler, getLockHandler } from './locks.js';
 import {
   createProjectHandler,
@@ -113,6 +113,7 @@ router.get('/specs/:id/open-comments', getSpecOpenCommentsHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
+router.patch('/specs/:id/paragraphs/:nodeId/removal', removeParagraphHandler);
 router.patch('/specs/:id/paragraphs/:nodeId/editability', patchEditabilityHandler);
 router.post('/specs/:id/reclassify', reclassifyHandler);
 router.post('/specs/:id/finalize', finalizeSpecHandler);

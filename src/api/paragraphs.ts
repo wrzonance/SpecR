@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { UpdateParagraphBodySchema } from '../ast/index.js';
-import { updateParagraphText } from '../db/index.js';
+import { UpdateParagraphBodySchema, PatchRemovalBodySchema } from '../ast/index.js';
+import { updateParagraphText, setParagraphVanish } from '../db/index.js';
 import { gateErrorResponse } from './edit-gate-response.js';
 import { logger } from '../lib/logger.js';
 
@@ -53,6 +53,55 @@ export async function updateParagraphHandler(req: Request, res: Response): Promi
       return;
     }
     logger.error({ err }, 'update paragraph failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+/**
+ * PATCH /specs/:id/paragraphs/:nodeId/removal — the editability program's
+ * reversible removal (#251, ADR-022). `{ removed: true }` sets `meta.vanish`
+ * (suppress render, keep the row + subtree + contained refs); `false` reverses
+ * it. Passes the composed edit gate (ADR-018): archived/upstream-locked → 409.
+ * A separate sub-route from the text-replacement PATCH — removal is a lifecycle
+ * action, not a text edit, and must not require a non-empty `text`.
+ */
+export async function removeParagraphHandler(req: Request, res: Response): Promise<void> {
+  const specId = z.uuid().safeParse(req.params['id']);
+  if (!specId.success) {
+    res.status(400).json({ success: false, error: 'invalid spec id' });
+    return;
+  }
+  const nodeId = z.uuid().safeParse(req.params['nodeId']);
+  if (!nodeId.success) {
+    res.status(400).json({ success: false, error: 'invalid node id' });
+    return;
+  }
+  const body = PatchRemovalBodySchema.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ success: false, error: 'removed must be a boolean' });
+    return;
+  }
+
+  try {
+    const result = await setParagraphVanish(specId.data, nodeId.data, body.data.removed);
+    switch (result.status) {
+      case 'not-found':
+        res.status(404).json({ success: false, error: 'paragraph not found' });
+        return;
+      case 'wrong-spec':
+        res.status(403).json({ success: false, error: 'paragraph does not belong to this spec' });
+        return;
+      case 'updated':
+        res.status(200).json({ success: true, data: result.node });
+        return;
+    }
+  } catch (err) {
+    const gate = gateErrorResponse(err);
+    if (gate) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
+    logger.error({ err }, 'remove paragraph failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }
