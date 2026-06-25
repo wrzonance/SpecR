@@ -204,6 +204,35 @@ describe('POST /specs/:id/diff (integration)', () => {
   });
 });
 
+describe('soft-removal is not a hard deletion in the diff (#251/#276)', () => {
+  async function setRemoved(removed: boolean): Promise<void> {
+    const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${paragraphId}/removal`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ removed }),
+    });
+    expect(res.status).toBe(200);
+  }
+
+  // Remove a paragraph via the /removal endpoint, then diff the freshly generated
+  // DOCX. The generator omits the vanished node, and the merge snapshots now omit
+  // it too — so it must NOT surface in diff.deleted (that was the false-hard-delete
+  // bug). Restore afterward so sibling tests see the original tree.
+  it('a removed paragraph does NOT appear in diff.deleted', async () => {
+    await setRemoved(true);
+    try {
+      const { status, body } = await postDiff(await fetchGeneratedDocx());
+      expect(status).toBe(200);
+      expect(body.data?.deleted).not.toContain(paragraphId);
+      expect(body.data?.deleted).toEqual([]);
+      expect(body.data?.added).toEqual([]);
+      expect(body.data?.modified).toEqual([]);
+    } finally {
+      await setRemoved(false); // restore for other tests
+    }
+  });
+});
+
 describe('tool: get_spec_diff', () => {
   it('returns the same DiffResult shape as REST for an edited DOCX', async () => {
     const edited = await updateDocumentXml(await fetchGeneratedDocx(), replaceParagraphText);
