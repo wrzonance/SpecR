@@ -43,8 +43,12 @@ const CLASSIFY_SQL = `
     SELECT r.ref_id, p.id, p.parent_id, p.node_type, p.text, 0 AS depth
     FROM refs r JOIN paragraphs p ON p.id = r.source_paragraph_id
     UNION ALL
+    -- depth cap is a cycle guard: paragraphs is application-built and acyclic,
+    -- but a corrupt parent_id loop would otherwise recurse unbounded. CSI trees
+    -- are only a handful deep, so 100 is far above any legitimate chain.
     SELECT a.ref_id, p.id, p.parent_id, p.node_type, p.text, a.depth + 1
     FROM ancestry a JOIN paragraphs p ON p.id = a.parent_id
+    WHERE a.depth < 100
   ),
   nearest_article AS (
     SELECT DISTINCT ON (ref_id) ref_id, text AS article_text
@@ -93,12 +97,15 @@ export interface ReferenceConsistencyFinding {
   readonly value: string;
 }
 
+// Mutable accumulators: the Sets are filled in place by `place()` and never
+// escape `buildReferenceConsistencyFindings`, so they are deliberately not
+// `readonly` — only the spec section, which is fixed at creation, is.
 interface SpecBuckets {
   readonly sourceSpecSection: string;
-  readonly listedSections: Set<string>;
-  readonly citedSections: Set<string>;
-  readonly listedStandards: Set<string>;
-  readonly citedStandards: Set<string>;
+  listedSections: Set<string>;
+  citedSections: Set<string>;
+  listedStandards: Set<string>;
+  citedStandards: Set<string>;
 }
 
 function emptyBuckets(sourceSpecSection: string): SpecBuckets {

@@ -252,6 +252,35 @@ describe('getCoordinationReport', () => {
     expect(report.summary.standardCitedNotListed).toBe(1);
   });
 
+  it('#259 healthy case: a section both listed under Related Sections AND cited in the body yields no A2/A3', async () => {
+    const projectId = await newProject('coord-healthy');
+    const spec = await newSpec('08 11 13', 'Hollow Metal Doors');
+    await addProjectSpec(projectId, spec, 1);
+    const related = await newArticle(spec, '1.1 RELATED SECTIONS', 1);
+    // listed under Related Sections
+    await addClassifiedRef({
+      specId: spec,
+      parentId: related,
+      text: 'Section 07 84 00',
+      targetType: 'section',
+      value: '07 84 00',
+    });
+    // AND cited in the body — the coordinated, healthy case
+    await addClassifiedRef({
+      specId: spec,
+      parentId: null,
+      text: 'Seal the head joint per Section 07 84 00',
+      targetType: 'section',
+      value: '07 84 00',
+    });
+
+    const report = await getCoordinationReport(projectId, undefined);
+    expect(ofType(report.findings, 'related_listed_not_cited')).toHaveLength(0);
+    expect(ofType(report.findings, 'related_cited_not_listed')).toHaveLength(0);
+    expect(report.summary.relatedListedNotCited).toBe(0);
+    expect(report.summary.relatedCitedNotListed).toBe(0);
+  });
+
   it('dangling_ref carries the source paragraph id and a snippet of the ref in context (#260)', async () => {
     const projectId = await newProject('coord-locator');
     const specA = await newSpec('03 30 00', 'Concrete');
