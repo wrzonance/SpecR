@@ -327,3 +327,79 @@ export async function updateParagraphText(
     client.release();
   }
 }
+
+/** Outcome of {@link setParagraphVanish}: the (specId, nodeId) pairing is
+ *  validated before the write so the API maps `not-found` → 404 and
+ *  `wrong-spec` → 403 (mirrors updateParagraphText). */
+export type SetVanishResult =
+  | { readonly status: 'updated'; readonly node: SpecNode }
+  | { readonly status: 'not-found' }
+  | { readonly status: 'wrong-spec' };
+
+/** In-transaction body of {@link setParagraphVanish}: gate → ownership check →
+ *  write vanish + bump specs.content_version. The caller commits on 'updated',
+ *  rolls back otherwise. */
+async function applyVanish(
+  client: PoolClient,
+  specId: string,
+  nodeId: string,
+  vanish: boolean
+): Promise<SetVanishResult> {
+  // Gate first: row-locks the spec and validates lifecycle/external state
+  // before any paragraph write. Throws typed errors (forbidden).
+  await assertSpecWritable(client, specId);
+
+  const owner = await client.query<{ spec_id: string }>(
+    `SELECT spec_id FROM paragraphs WHERE id = $1 FOR UPDATE`,
+    [nodeId]
+  );
+  const ownerRow = owner.rows[0];
+  if (!ownerRow) return { status: 'not-found' };
+  if (ownerRow.spec_id !== specId) return { status: 'wrong-spec' };
+
+  await client.query(
+    `UPDATE paragraphs SET vanish = $2, base_version = base_version + 1, updated_at = now()
+     WHERE id = $1`,
+    [nodeId, vanish]
+  );
+  await client.query(
+    `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
+    [specId]
+  );
+
+  const node = await fetchSubtreeNode(client, specId, nodeId);
+  if (!node) throw new DatabaseError('setParagraphVanish: updated node vanished mid-transaction');
+  return { status: 'updated', node };
+}
+
+/**
+ * Set or clear a paragraph's `vanish` flag by UUID — the editability program's
+ * reversible removal (#251, ADR-022). `vanish: true` suppresses the node from
+ * every render while keeping the row, its subtree, and contained refs intact;
+ * `false` reverses it. Passes the composed edit gate (ADR-018) and verifies the
+ * (specId, nodeId) pairing under a row lock, so removal is authorized exactly
+ * like any other content write. A successful write bumps `specs.content_version`.
+ */
+export async function setParagraphVanish(
+  specId: string,
+  nodeId: string,
+  vanish: boolean
+): Promise<SetVanishResult> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await applyVanish(client, specId, nodeId, vanish);
+    await client.query(result.status === 'updated' ? 'COMMIT' : 'ROLLBACK');
+    return result;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* best-effort */
+    }
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError('setParagraphVanish failed', { cause: err });
+  } finally {
+    client.release();
+  }
+}

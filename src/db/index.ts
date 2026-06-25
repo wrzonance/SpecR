@@ -44,11 +44,13 @@ export {
   insertTree,
   getParagraphWithAncestors,
   updateParagraphText,
+  setParagraphVanish,
 } from './queries/paragraphs.js';
 export type {
   ParagraphRow,
   ParagraphWithAncestors,
   UpdateParagraphResult,
+  SetVanishResult,
 } from './queries/paragraphs.js';
 export {
   insertRefs,

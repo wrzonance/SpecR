@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { pool, getParagraphWithAncestors, insertTree } from '../index.js';
+import { pool, getParagraphWithAncestors, insertTree, setParagraphVanish } from '../index.js';
 
 const SPEC_ID = 'b0000000-0000-0000-0000-000000000000';
 const PART_ID = 'b0000000-0000-0000-0000-000000000001';
@@ -243,5 +243,81 @@ describe('insertTree — source facts (#131)', () => {
       [INS_PART_ID]
     );
     expect(clean.rows[0]!.sourceFacts).toEqual({});
+  });
+});
+
+describe('setParagraphVanish — reversible paragraph removal (#251)', () => {
+  let specId: string;
+  let nodeId: string;
+  let otherSpecId: string;
+
+  beforeAll(async () => {
+    const lib = await pool.query<{ id: string }>(
+      `SELECT id FROM libraries WHERE name = 'Default Company Master' LIMIT 1`
+    );
+    const libraryId = lib.rows[0]!.id;
+    const spec = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ('99 99 81', 'Vanish DB Test', 'arcat', $1) RETURNING id`,
+      [libraryId]
+    );
+    specId = spec.rows[0]!.id;
+    const node = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, NULL, 'pr1', 'Removable paragraph.', 1) RETURNING id`,
+      [specId]
+    );
+    nodeId = node.rows[0]!.id;
+    const other = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ('99 99 80', 'Vanish DB Other', 'arcat', $1) RETURNING id`,
+      [libraryId]
+    );
+    otherSpecId = other.rows[0]!.id;
+  });
+
+  afterAll(async () => {
+    await pool.query(`DELETE FROM specs WHERE id = ANY($1::uuid[])`, [[specId, otherSpecId]]);
+  });
+
+  it('vanishes a paragraph (reversible removal), returning the updated node', async () => {
+    const r = await setParagraphVanish(specId, nodeId, true);
+    expect(r.status).toBe('updated');
+    if (r.status === 'updated') expect(r.node.meta.vanish).toBe(true);
+    const row = await pool.query<{ vanish: boolean }>(
+      `SELECT vanish FROM paragraphs WHERE id = $1`,
+      [nodeId]
+    );
+    expect(row.rows[0]!.vanish).toBe(true);
+  });
+
+  it('un-vanishes a paragraph (reverses removal)', async () => {
+    await setParagraphVanish(specId, nodeId, true);
+    const r = await setParagraphVanish(specId, nodeId, false);
+    expect(r.status).toBe('updated');
+    if (r.status === 'updated') expect(r.node.meta.vanish).toBeUndefined();
+  });
+
+  it('returns not-found for an unknown node', async () => {
+    const r = await setParagraphVanish(specId, '00000000-0000-0000-0000-000000000000', true);
+    expect(r.status).toBe('not-found');
+  });
+
+  it('returns wrong-spec when the node belongs to another spec', async () => {
+    const r = await setParagraphVanish(otherSpecId, nodeId, true);
+    expect(r.status).toBe('wrong-spec');
+  });
+
+  it('bumps specs.content_version on a successful vanish', async () => {
+    const before = await pool.query<{ content_version: number }>(
+      `SELECT content_version FROM specs WHERE id = $1`,
+      [specId]
+    );
+    await setParagraphVanish(specId, nodeId, true);
+    const after = await pool.query<{ content_version: number }>(
+      `SELECT content_version FROM specs WHERE id = $1`,
+      [specId]
+    );
+    expect(after.rows[0]!.content_version).toBeGreaterThan(before.rows[0]!.content_version);
   });
 });
