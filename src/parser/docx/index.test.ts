@@ -156,6 +156,20 @@ describe('parseDocx — happy path', () => {
       'complete',
     ]);
   });
+
+  it('hidden preamble does not pollute the hierarchy root', async () => {
+    const doc = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+    <w:p><w:pPr><w:rPr><w:vanish/></w:rPr></w:pPr><w:r><w:rPr><w:vanish/></w:rPr><w:t>SPECIFICATION PROCESSING FORM</w:t></w:r></w:p>
+    <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
+    <w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>SUMMARY</w:t></w:r></w:p>
+  </w:body></w:document>`;
+    const tree = await parseDocx(
+      await makeDocx({ documentXml: doc, numberingXml: STRUCTURED_NUMBERING })
+    );
+    // The hidden form is retained as a vanish node but is NOT a root-continuation warning.
+    expect((tree.warnings ?? []).some((w) => w.type === 'root-continuation')).toBe(false);
+    expect(tree.parts.filter((n) => n.type === 'part')).toHaveLength(1);
+  });
 });
 
 describe('parseDocx — error handling', () => {

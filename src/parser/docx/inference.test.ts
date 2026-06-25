@@ -165,14 +165,14 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
     expect(result[0]?.signalUsed).toBe(3);
   });
 
-  it('vanish paragraph: isVanish propagated from DocxParagraph', () => {
+  it('vanish paragraph: isVanish propagated and classified as continuation', () => {
     const result = classifyParagraphs(
       [makePara({ numId: 1, ilvl: 0, isVanish: true, text: 'PART 1 – GENERAL' })],
       numMap(1),
       emptyStyleMap()
     );
     expect(result[0]?.isVanish).toBe(true);
-    expect(result[0]?.nodeType).toBe('part');
+    expect(result[0]?.nodeType).toBe('continuation');
   });
 });
 
