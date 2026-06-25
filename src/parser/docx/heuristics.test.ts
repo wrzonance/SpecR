@@ -64,13 +64,17 @@ describe('isPartHeading', () => {
     expect(isPartHeading('part 2 PRODUCTS')).toBe(true);
   });
 
-  it('detects bare canonical CSI part names (mixed case + surrounding spaces)', () => {
-    expect(isPartHeading('GENERAL')).toBe(true);
-    expect(isPartHeading('  Products  ')).toBe(true);
-    expect(isPartHeading('execution')).toBe(true);
+  // P2 (Codex review): bare canonical names must NOT be promoted on text alone —
+  // a generic numbered-list item "GENERAL" at ilvl=0 would otherwise become a
+  // spurious PART. The real CPI bare-name case is gated on numbering evidence
+  // (specShapedNumIds via the "PART %1" lvlText), not this text guard.
+  it('does NOT promote a bare canonical part name without numbering evidence', () => {
+    expect(isPartHeading('GENERAL')).toBe(false);
+    expect(isPartHeading('  Products  ')).toBe(false);
+    expect(isPartHeading('execution')).toBe(false);
   });
 
-  it('rejects bare names that merely start with a canonical part word', () => {
+  it('rejects body text that merely starts with a canonical part word', () => {
     expect(isPartHeading('GENERAL REQUIREMENTS')).toBe(false);
     expect(isPartHeading('General notes')).toBe(false);
     expect(isPartHeading('PRODUCT DATA')).toBe(false);
