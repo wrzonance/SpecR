@@ -358,3 +358,64 @@ describe('POST .../comments/:index/accept-as-note', () => {
     await pool.query(`DELETE FROM specs WHERE id = $1`, [archSpec]);
   });
 });
+
+describe('PATCH /specs/:id/paragraphs/:nodeId/removal', () => {
+  it('removes a paragraph via vanish and returns 200 with vanish:true', async () => {
+    const r = await req('PATCH', `/specs/${specId}/paragraphs/${nodeId}/removal`, {
+      removed: true,
+    });
+    expect(r.status).toBe(200);
+    expect((r.body as { success: boolean }).success).toBe(true);
+    expect((r.body as { data: { meta: { vanish?: boolean } } }).data.meta.vanish).toBe(true);
+  });
+
+  it('reverses removal (un-vanish) with removed:false', async () => {
+    await req('PATCH', `/specs/${specId}/paragraphs/${nodeId}/removal`, { removed: true });
+    const r = await req('PATCH', `/specs/${specId}/paragraphs/${nodeId}/removal`, {
+      removed: false,
+    });
+    expect(r.status).toBe(200);
+    expect((r.body as { data: { meta: { vanish?: boolean } } }).data.meta.vanish).toBeUndefined();
+  });
+
+  it('rejects a non-boolean removed flag with 400', async () => {
+    const r = await req('PATCH', `/specs/${specId}/paragraphs/${nodeId}/removal`, {
+      removed: 'yes',
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('404 for an unknown node', async () => {
+    const r = await req(
+      'PATCH',
+      `/specs/${specId}/paragraphs/00000000-0000-0000-0000-000000000000/removal`,
+      { removed: true }
+    );
+    expect(r.status).toBe(404);
+  });
+
+  it('403 when the node belongs to another spec', async () => {
+    const r = await req('PATCH', `/specs/${otherSpecId}/paragraphs/${nodeId}/removal`, {
+      removed: true,
+    });
+    expect(r.status).toBe(403);
+  });
+
+  it('422 for a note node the renderers cannot suppress', async () => {
+    const noteRow = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, NULL, 'note', 'Editorial note.', 99) RETURNING id`,
+      [specId]
+    );
+    const noteId = noteRow.rows[0]!.id;
+    const r = await req('PATCH', `/specs/${specId}/paragraphs/${noteId}/removal`, {
+      removed: true,
+    });
+    expect(r.status).toBe(422);
+    const row = await pool.query<{ vanish: boolean }>(
+      `SELECT vanish FROM paragraphs WHERE id = $1`,
+      [noteId]
+    );
+    expect(row.rows[0]!.vanish).toBe(false); // flag never written
+  });
+});

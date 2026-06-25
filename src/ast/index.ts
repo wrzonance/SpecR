@@ -81,8 +81,12 @@ export {
 export type { Editability, ConventionRules, ClassificationEvidence } from './schemas.js';
 export { PutConventionBodySchema, CloneConventionBodySchema } from './schemas.js';
 export type { PutConventionBody, CloneConventionBody } from './schemas.js';
-export { PatchEditabilityBodySchema, ReclassifyBodySchema } from './schemas.js';
-export type { PatchEditabilityBody, ReclassifyBody } from './schemas.js';
+export {
+  PatchEditabilityBodySchema,
+  PatchRemovalBodySchema,
+  ReclassifyBodySchema,
+} from './schemas.js';
+export type { PatchEditabilityBody, PatchRemovalBody, ReclassifyBody } from './schemas.js';
 export {
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,

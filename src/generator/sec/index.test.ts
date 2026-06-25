@@ -113,6 +113,54 @@ describe('generateSec — entity and note round-trip', () => {
     expect(note?.meta.vanish).toBe(true);
     expect(note?.text).toContain('O&M data');
   });
+
+  // KNOWN LIMITATION (#278, from #251): the SEC generator does NOT encode
+  // owner-removal. A body paragraph removed via the /removal endpoint (meta.vanish)
+  // is written as an ordinary <LST>/<SPT>/<TXT> with no marker, so vanish is LOST on
+  // a SEC round-trip and the removed text reappears. Removal is honored only in the
+  // owner-facing DOCX/Markdown renders; in SEC the `vanish` flag already means
+  // "specifier note" (the parser sets it for <NTE>), so the two uses collide.
+  // This is latent — there is no .SEC export endpoint today (generateSec is a
+  // parser round-trip utility), so removed content cannot leak to a user via SEC.
+  // When a SEC export ships, #278 must filter or encode owner-removed nodes.
+  // This test pins the *current* behavior so the regression is explicit, not silent.
+  it('KNOWN LIMITATION (#278): owner-removal (vanish) is NOT preserved across a SEC round-trip', () => {
+    const tree: SpecTree = {
+      id: 't1',
+      section: '27 10 00',
+      title: 'BUILDING TELECOMMUNICATIONS CABLING SYSTEM',
+      parts: [
+        {
+          id: 'p1',
+          type: 'part',
+          text: 'GENERAL',
+          children: [
+            {
+              id: 's1',
+              type: 'article',
+              text: 'SUMMARY',
+              children: [
+                {
+                  id: 'r1',
+                  type: 'pr1',
+                  text: 'Removed paragraph.',
+                  children: [],
+                  meta: { vanish: true },
+                },
+              ],
+              meta: {},
+            },
+          ],
+          meta: {},
+        },
+      ],
+    };
+    const after = parseSec(generateSec(tree)).tree;
+    const reparsed = after.parts[0]?.children[0]?.children[0];
+    expect(reparsed?.text).toBe('Removed paragraph.');
+    // vanish is lost on the body paragraph — documents the #278 gap, not desired.
+    expect(reparsed?.meta.vanish).toBeUndefined();
+  });
 });
 
 describe('generateSec — standard reference round-trip', () => {
