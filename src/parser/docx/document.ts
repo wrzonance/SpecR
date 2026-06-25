@@ -115,19 +115,36 @@ function runIsVanish(
   return false;
 }
 
+// Runs nest inside hyperlinks, tracked-change wrappers (w:ins/w:del), and content
+// controls (w:sdt) — the same wrappers parseParagraphSources walks to extract text,
+// and the wrapper SpecR's own generator emits (w:sdt UUID anchors). Collect runs at
+// any depth so a fully-hidden wrapped paragraph is still detected (Codex #295). Skip
+// w:rPr/w:pPr — property elements carry the paragraph mark, not content runs.
+function collectRuns(value: unknown, acc: Record<string, unknown>[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectRuns(item, acc);
+    return;
+  }
+  if (value === null || typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'w:rPr' || key === 'w:pPr') continue;
+    if (key === 'w:r') {
+      acc.push(
+        ...toArray<Record<string, unknown>>(child as readonly Record<string, unknown>[] | undefined)
+      );
+      continue;
+    }
+    collectRuns(child, acc);
+  }
+}
+
 function allTextRunsVanish(
   raw: Record<string, unknown>,
   vanishCharStyleIds: ReadonlySet<string>
 ): boolean {
-  const directRuns = toArray<Record<string, unknown>>(
-    raw['w:r'] as readonly Record<string, unknown>[] | undefined
-  );
-  const linkRuns = toArray<Record<string, unknown>>(
-    raw['w:hyperlink'] as readonly Record<string, unknown>[] | undefined
-  ).flatMap((h) =>
-    toArray<Record<string, unknown>>(h['w:r'] as readonly Record<string, unknown>[] | undefined)
-  );
-  const textRuns = [...directRuns, ...linkRuns].filter((r) => extractRunText(r).length > 0);
+  const runs: Record<string, unknown>[] = [];
+  collectRuns(raw, runs);
+  const textRuns = runs.filter((r) => extractRunText(r).length > 0);
   if (textRuns.length === 0) return false;
   return textRuns.every((r) => runIsVanish(r, vanishCharStyleIds));
 }

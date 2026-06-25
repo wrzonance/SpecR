@@ -144,6 +144,18 @@ describe('parseDocument — pPr field extraction', () => {
   </w:body></w:document>`;
     expect(parseDocument(xml, emptyNumberingMap(), styles)[0]?.isVanish).toBe(false);
   });
+
+  it('detects vanish when runs are wrapped in an OOXML container (w:sdt) (Codex #295)', () => {
+    // SpecR's own generator wraps runs in w:sdt UUID anchors; a fully-hidden wrapped
+    // paragraph must still be detected as hidden, not misread as visible.
+    const styles = buildStyleMap(
+      `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>`
+    );
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+    <w:p><w:sdt><w:sdtContent><w:r><w:rPr><w:vanish/></w:rPr><w:t>wrapped hidden</w:t></w:r></w:sdtContent></w:sdt></w:p>
+  </w:body></w:document>`;
+    expect(parseDocument(xml, emptyNumberingMap(), styles)[0]?.isVanish).toBe(true);
+  });
 });
 
 describe('parseDocument — numbering inheritance', () => {
