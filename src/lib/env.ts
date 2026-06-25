@@ -5,6 +5,7 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   NODE_ENV: z.enum(['development', 'test', 'production']),
   LOG_LEVEL: z.string().default('info'),
+  OCR_MIN_CHARS_PER_PAGE: z.coerce.number().int().positive().default(16),
 });
 
 const result = schema.safeParse(process.env);

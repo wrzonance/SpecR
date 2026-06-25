@@ -4,7 +4,7 @@
   "description": "Headless REST API for round-trip automation of CSI MasterFormat®-compatible specification documents (UFGS, generic DOCX). Independent project; not affiliated with CSI.",
   "type": "module",
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=22.13.0",
     "pnpm": ">=11.0.0"
   },
   "scripts": {
@@ -37,9 +37,11 @@
     "iconv-lite": "^0.7.2",
     "jszip": "^3.10.0",
     "multer": "^2.1.1",
+    "pdfjs-dist": "^6.0.227",
     "pg": "^8.20.0",
     "pino": "^10.3.1",
     "piscina": "^5.1.4",
+    "unpdf": "^1.6.2",
     "uuid": "^11.0.0",
     "yauzl": "^3.3.0",
     "zod": "^4.4.3"

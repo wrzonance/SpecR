@@ -102,6 +102,7 @@ import {
 const parseRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
   max: 10, // 10 uploads per IP per minute
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'too many requests — please wait before uploading again' },

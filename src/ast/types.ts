@@ -109,7 +109,9 @@ export type ParseWarningType =
   | 'root-continuation'
   | 'empty-part'
   | 'no-structure-found'
-  | 'unusual-part-count';
+  | 'unusual-part-count'
+  | 'pdf-needs-ocr'
+  | 'pdf-degraded-extraction';
 
 export interface ParseWarning {
   readonly type: ParseWarningType;

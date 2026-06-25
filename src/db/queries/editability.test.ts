@@ -1,4 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('../index.js', () => ({
+  pool: {
+    connect: vi.fn(),
+    query: vi.fn(),
+  },
+  DatabaseError: class DatabaseError extends Error {},
+}));
+
 import { ClassificationSchema, OverrideSchema } from './editability.js';
 
 // The DB-boundary editability schemas are CLOSED (.strict()): the payloads are

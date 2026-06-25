@@ -7,6 +7,15 @@ vi.mock('../parser/index.js', () => ({
   parseDocx: vi.fn().mockResolvedValue({ id: '', section: '27 21 00', title: 'T', parts: [] }),
   assertDocxSafe: vi.fn().mockResolvedValue(undefined),
   assertSecSafe: vi.fn(),
+  assertPdfSafe: vi.fn((buf: Buffer) => {
+    const magic = Buffer.from('%PDF-', 'utf-8');
+    if (!buf.subarray(0, magic.length).equals(magic)) {
+      throw new Error('invalid PDF: missing %PDF- signature');
+    }
+  }),
+}));
+vi.mock('../lib/env.js', () => ({
+  config: { OCR_MIN_CHARS_PER_PAGE: 16 },
 }));
 vi.mock('../lib/parse-pool.js', () => ({
   parsePool: {
@@ -53,7 +62,11 @@ describe('parseHandler', () => {
   it('returns 400 for unsupported file extension', async () => {
     const { parseHandler } = await import('./parse.js');
     const req = {
-      file: { originalname: 'test.pdf', mimetype: 'application/pdf', buffer: Buffer.alloc(4) },
+      file: {
+        originalname: 'test.xyz',
+        mimetype: 'application/octet-stream',
+        buffer: Buffer.alloc(4),
+      },
       body: {},
     } as unknown as Request;
     const res = makeRes();
@@ -80,6 +93,49 @@ describe('parseHandler', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ error: 'MIME type mismatch for .docx' })
     );
+  });
+
+  it('returns 400 and does NOT create a job when .pdf lacks a PDF signature', async () => {
+    const { assertPdfSafe } = await import('../parser/index.js');
+    const { createJob } = await import('../lib/jobs.js');
+    const { parseHandler } = await import('./parse.js');
+    const buffer = Buffer.from('not a pdf', 'utf-8');
+    const req = {
+      file: {
+        originalname: 'spec.pdf',
+        mimetype: 'application/pdf',
+        buffer,
+      },
+      body: {},
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'invalid PDF: missing %PDF- signature' })
+    );
+    expect(assertPdfSafe).toHaveBeenCalledWith(buffer);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('returns 202 for a valid .pdf upload after safety validation', async () => {
+    const { assertPdfSafe } = await import('../parser/index.js');
+    const { createJob } = await import('../lib/jobs.js');
+    vi.mocked(createJob).mockReturnValue('pdf-job-id');
+    const { parseHandler } = await import('./parse.js');
+    const buffer = Buffer.from('%PDF-1.7\n', 'utf-8');
+    const req = {
+      file: {
+        originalname: 'spec.pdf',
+        mimetype: 'application/pdf',
+        buffer,
+      },
+      body: {},
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(assertPdfSafe).toHaveBeenCalledWith(buffer);
   });
 
   it('returns 400 and does NOT create a job when assertDocxSafe rejects', async () => {
