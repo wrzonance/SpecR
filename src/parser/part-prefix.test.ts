@@ -67,6 +67,22 @@ describe('rebaseSourceFacts (Codex review: keep fact offsets valid after prefix 
     expect(rebaseSourceFacts(facts, 9, 9).colors).toBeUndefined();
   });
 
+  it('keeps a zero-length (point) comment anchor sitting after the prefix (w:commentReference)', () => {
+    // A point comment at the start of "EXECUTION" → anchor [9,9]; after removing
+    // "PART 3 - " it must shift to [0,0], not be dropped as if it were prefix-only.
+    const facts: SourceFacts = {
+      comments: [{ author: 'A', text: 'point', anchor: [9, 9], closed: false }],
+    };
+    expect(rebaseSourceFacts(facts, 9, 9).comments?.[0]?.anchor).toEqual([0, 0]);
+  });
+
+  it('drops a zero-length comment anchor that lay inside the stripped prefix', () => {
+    const facts: SourceFacts = {
+      comments: [{ author: 'A', text: 'point', anchor: [3, 3], closed: false }],
+    };
+    expect(rebaseSourceFacts(facts, 9, 9).comments).toBeUndefined();
+  });
+
   it('preserves non-positional facts (banner, vanish) and is a no-op when nothing removed', () => {
     const facts: SourceFacts = { banner: 'NOTE TO SPECIFIER', vanish: true };
     expect(rebaseSourceFacts(facts, 0, 5)).toBe(facts);

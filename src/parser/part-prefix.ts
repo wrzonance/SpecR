@@ -37,10 +37,13 @@ export function planPartStrip(text: string): { text: string; removed: number } |
 type Range = readonly [number, number];
 
 // Shift a [start, end] range left by `removed`, clamped into [0, newLen]. Returns
-// null when the range collapses (it lay entirely within the stripped prefix).
+// null when the range lies entirely within the stripped prefix. A point anchor
+// (zero-length range, e.g. a w:commentReference) survives iff it sits at or after
+// the cut; a span survives iff any of its extent remains after the cut.
 function shiftRange(range: Range, removed: number, newLen: number): Range | null {
   const start = Math.min(Math.max(range[0] - removed, 0), newLen);
   const end = Math.min(Math.max(range[1] - removed, 0), newLen);
+  if (range[0] === range[1]) return range[0] >= removed ? [start, end] : null;
   return end > start ? [start, end] : null;
 }
 
