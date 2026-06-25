@@ -157,7 +157,11 @@ describe('parseDocx — happy path', () => {
     ]);
   });
 
-  it('hidden preamble does not pollute the hierarchy root', async () => {
+  // Flatten a tree to every node (depth-first) — used to assert hidden retention.
+  const allNodes = (nodes: readonly SpecNode[]): SpecNode[] =>
+    nodes.flatMap((n) => [n, ...allNodes(n.children)]);
+
+  it('hidden preamble does not pollute the root yet is retained (ARCAT path)', async () => {
     const doc = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
     <w:p><w:pPr><w:rPr><w:vanish/></w:rPr></w:pPr><w:r><w:rPr><w:vanish/></w:rPr><w:t>SPECIFICATION PROCESSING FORM</w:t></w:r></w:p>
     <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
@@ -166,9 +170,34 @@ describe('parseDocx — happy path', () => {
     const tree = await parseDocx(
       await makeDocx({ documentXml: doc, numberingXml: STRUCTURED_NUMBERING })
     );
-    // The hidden form is retained as a vanish node but is NOT a root-continuation warning.
+    // The hidden form is excluded from structural inference …
     expect((tree.warnings ?? []).some((w) => w.type === 'root-continuation')).toBe(false);
     expect(tree.parts.filter((n) => n.type === 'part')).toHaveLength(1);
+    // … but RETAINED in the tree (would fail if vanished paragraphs were dropped).
+    const hidden = allNodes(tree.parts).find((n) =>
+      n.text.includes('SPECIFICATION PROCESSING FORM')
+    );
+    expect(hidden?.meta.vanish).toBe(true);
+  });
+
+  it('hidden preamble excluded + retained on the CPI path (ilvl offset)', async () => {
+    // CPI-authored DOCX: PRT/ART styles, Article reserved at ilvl=3 (Schedule/PDS at 1–2).
+    const cpiStyles = `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:style w:styleId="PRT" w:type="paragraph"><w:name w:val="PRT"/></w:style>
+      <w:style w:styleId="ART" w:type="paragraph"><w:name w:val="ART"/><w:pPr><w:numPr><w:ilvl w:val="3"/><w:numId w:val="1"/></w:numPr></w:pPr></w:style>
+    </w:styles>`;
+    const doc = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+    <w:p><w:pPr><w:rPr><w:vanish/></w:rPr></w:pPr><w:r><w:rPr><w:vanish/></w:rPr><w:t>PROJECT SPEC SIGN-OFF</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="PRT"/></w:pPr><w:r><w:t>PART 1 - GENERAL</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="ART"/><w:numPr><w:ilvl w:val="3"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>SUMMARY</w:t></w:r></w:p>
+  </w:body></w:document>`;
+    const tree = await parseDocx(
+      await makeDocx({ documentXml: doc, stylesXml: cpiStyles, numberingXml: STRUCTURED_NUMBERING })
+    );
+    expect((tree.warnings ?? []).some((w) => w.type === 'root-continuation')).toBe(false);
+    expect(tree.parts.filter((n) => n.type === 'part')).toHaveLength(1);
+    const hidden = allNodes(tree.parts).find((n) => n.text.includes('PROJECT SPEC SIGN-OFF'));
+    expect(hidden?.meta.vanish).toBe(true);
   });
 });
 

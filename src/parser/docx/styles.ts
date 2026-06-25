@@ -115,14 +115,48 @@ function resolveVanishChain(
   return style.basedOn ? resolveVanishChain(style.basedOn, styles, depth + 1) : false;
 }
 
-function characterStyleVanishIds(root: Record<string, unknown>): Set<string> {
-  const ids = new Set<string>();
+interface CharStyleInfo {
+  readonly basedOn?: string;
+  readonly isVanish: boolean;
+}
+
+function parseCharacterStyles(root: Record<string, unknown>): Map<string, CharStyleInfo> {
+  const styles = new Map<string, CharStyleInfo>();
   for (const raw of toArray(root['w:style'] as readonly unknown[] | undefined)) {
     const rec = asRecord(raw);
     if (!rec || extractAttrStr(rec, '@_w:type') !== 'character') continue;
     const styleId = extractAttrStr(rec, '@_w:styleId');
+    if (!styleId) continue;
     const rPr = asRecord(rec['w:rPr']);
-    if (styleId && rPr !== undefined && 'w:vanish' in rPr) ids.add(styleId);
+    const basedOn = getAttrVal(rec['w:basedOn']);
+    styles.set(styleId, {
+      ...(basedOn ? { basedOn } : {}),
+      isVanish: rPr !== undefined && 'w:vanish' in rPr,
+    });
+  }
+  return styles;
+}
+
+function resolveCharVanishChain(
+  styleId: string,
+  styles: ReadonlyMap<string, CharStyleInfo>,
+  depth: number
+): boolean {
+  if (depth > MAX_BASED_ON_DEPTH) return false;
+  const style = styles.get(styleId);
+  if (!style) return false;
+  if (style.isVanish) return true;
+  return style.basedOn ? resolveCharVanishChain(style.basedOn, styles, depth + 1) : false;
+}
+
+// Character-style vanish must follow basedOn chains just like paragraph styles
+// (CodeRabbit #295): a run styled ChildHide→basedOn→BaseHide is hidden even
+// though only BaseHide carries w:vanish directly.
+function characterStyleVanishIds(root: Record<string, unknown>): Set<string> {
+  const styles = parseCharacterStyles(root);
+  const ids = new Set<string>();
+  for (const styleId of styles.keys()) {
+    if (resolveCharVanishChain(styleId, styles, 0)) ids.add(styleId);
   }
   return ids;
 }

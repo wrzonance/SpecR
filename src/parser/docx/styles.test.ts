@@ -235,4 +235,14 @@ describe('vanish resolution', () => {
     expect(m.vanishCharStyleIds.has('HideChar')).toBe(true);
     expect(m.vanishStyleIds.has('HideChar')).toBe(false);
   });
+
+  it('inherits character-style vanish through the basedOn chain (CodeRabbit #295)', () => {
+    const xml = `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:style w:styleId="BaseHide" w:type="character"><w:name w:val="BaseHide"/><w:rPr><w:vanish/></w:rPr></w:style>
+      <w:style w:styleId="ChildHide" w:type="character"><w:name w:val="ChildHide"/><w:basedOn w:val="BaseHide"/></w:style>
+    </w:styles>`;
+    const m = buildStyleMap(xml);
+    expect(m.vanishCharStyleIds.has('ChildHide')).toBe(true);
+    expect(m.vanishCharStyleIds.has('BaseHide')).toBe(true);
+  });
 });
