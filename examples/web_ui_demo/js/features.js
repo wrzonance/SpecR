@@ -16,4 +16,5 @@ export const API_FEATURES = {
   paragraphRemoval: true, // PATCH /specs/:id/paragraphs/:nodeId/removal        (landed #251 — soft, reversible)
   openComments: true, // GET /specs|projects/:id/open-comments              (landed #262/#272)
   coordination: true, // coordination-report + required-sections            (landed #239/#241)
+  umbrellaCallout: true, // umbrella_not_called_out coordination finding (landed #264)
 };

@@ -1,3 +1,5 @@
+import { API_FEATURES } from './features.js';
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -36,6 +38,12 @@ const GROUPS = [
     title: 'STANDARD CITED, NOT IN REFERENCES',
     empty: 'Every standard cited in a body is also listed under References.',
   },
+  {
+    type: 'umbrella_not_called_out',
+    title: 'UMBRELLA NOT CALLED OUT',
+    empty: 'Every subordinate section references its division umbrella.',
+    flag: 'umbrellaCallout',
+  },
 ];
 
 function sectionButton(section, ctx) {
@@ -48,7 +56,12 @@ function sectionButton(section, ctx) {
 function findingSection(finding) {
   if (finding.type === 'dangling_ref') return finding.targetSpecSection;
   if (finding.type === 'standard_cited_not_listed') return finding.sourceSpecSection;
+  if (finding.type === 'umbrella_not_called_out') return finding.sourceSpecSection;
   return finding.section;
+}
+
+function visibleGroups() {
+  return GROUPS.filter((group) => !group.flag || API_FEATURES[group.flag]);
 }
 
 // The #259 article<->body consistency findings: source spec section, the
@@ -89,10 +102,19 @@ function renderDanglingRef(finding, ctx) {
   return row;
 }
 
+function renderUmbrellaNotCalledOut(finding, ctx) {
+  const row = el('li', `coord-finding is-${finding.type}`);
+  row.appendChild(sectionButton(finding.sourceSpecSection, ctx));
+  row.appendChild(el('span', 'coord-arrow', 'missing call-out →'));
+  row.appendChild(el('span', 'coord-target', finding.umbrellaSpecSection || 'unknown'));
+  return row;
+}
+
 function renderFinding(finding, ctx) {
   const reference = REFERENCE_FINDINGS[finding.type];
   if (reference) return renderReferenceFinding(finding, ctx, reference);
   if (finding.type === 'dangling_ref') return renderDanglingRef(finding, ctx);
+  if (finding.type === 'umbrella_not_called_out') return renderUmbrellaNotCalledOut(finding, ctx);
 
   const row = el('li', `coord-finding is-${finding.type}`);
   if (finding.type === 'present_not_required') {
@@ -162,6 +184,11 @@ export function renderCoordinationReport(container, report, ctx = {}) {
   summary.appendChild(
     el('span', 'coord-chip', `${report.summary.standardCitedNotListed} STD CITED NOT LISTED`)
   );
+  if (API_FEATURES.umbrellaCallout) {
+    summary.appendChild(
+      el('span', 'coord-chip', `${report.summary.umbrellaNotCalledOut || 0} UMBRELLA CALLOUTS`)
+    );
+  }
   container.appendChild(summary);
 
   if (report.notes.length > 0) {
@@ -170,5 +197,5 @@ export function renderCoordinationReport(container, report, ctx = {}) {
     container.appendChild(notes);
   }
 
-  for (const group of GROUPS) container.appendChild(renderGroup(report, group, ctx));
+  for (const group of visibleGroups()) container.appendChild(renderGroup(report, group, ctx));
 }

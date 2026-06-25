@@ -3460,6 +3460,7 @@ components:
           relatedListedNotCited,
           relatedCitedNotListed,
           standardCitedNotListed,
+          umbrellaNotCalledOut,
           total,
         ]
       properties:
@@ -3469,6 +3470,7 @@ components:
         relatedListedNotCited: { type: integer }
         relatedCitedNotListed: { type: integer }
         standardCitedNotListed: { type: integer }
+        umbrellaNotCalledOut: { type: integer }
         total: { type: integer }
     CoordinationFinding:
       oneOf:
@@ -3478,6 +3480,7 @@ components:
         - $ref: '#/components/schemas/FindingRelatedListedNotCited'
         - $ref: '#/components/schemas/FindingRelatedCitedNotListed'
         - $ref: '#/components/schemas/FindingStandardCitedNotListed'
+        - $ref: '#/components/schemas/FindingUmbrellaNotCalledOut'
       discriminator:
         propertyName: type
         mapping:
@@ -3487,6 +3490,7 @@ components:
           related_listed_not_cited: '#/components/schemas/FindingRelatedListedNotCited'
           related_cited_not_listed: '#/components/schemas/FindingRelatedCitedNotListed'
           standard_cited_not_listed: '#/components/schemas/FindingStandardCitedNotListed'
+          umbrella_not_called_out: '#/components/schemas/FindingUmbrellaNotCalledOut'
     FindingRequiredNotPresent:
       type: object
       required: [type, section, title, requiredId]
@@ -3573,6 +3577,22 @@ components:
         sourceSpecId: { type: string, format: uuid }
         sourceSpecSection: { type: string }
         standardCode: { type: string, description: 'Normalized "ORG identifier", e.g. ASTM E814' }
+    FindingUmbrellaNotCalledOut:
+      type: object
+      description: >
+        A Division 26/27/28 subordinate section does not cite its division umbrella
+        section (`DD 00 00`). Divisions outside the registry are skipped and
+        reported in coordination report notes.
+      required: [type, sourceSpecId, sourceSpecSection, umbrellaSpecSection]
+      properties:
+        type: { type: string, enum: [umbrella_not_called_out] }
+        sourceSpecId: { type: string, format: uuid }
+        sourceSpecSection:
+          type: string
+          description: Subordinate section missing the umbrella call-out.
+        umbrellaSpecSection:
+          type: string
+          description: Expected division umbrella section number, e.g. `26 00 00`.
 
     # ── Open comments (#262) ─────────────────────────────────────────────────────
 
