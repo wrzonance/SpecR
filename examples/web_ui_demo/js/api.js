@@ -174,6 +174,10 @@ export function getCoordinationReport(projectId, packageId) {
   return getJson(`/projects/${enc(projectId)}/coordination-report${qs}`);
 }
 
+export function getSubmittalRegister(projectId, specIds) {
+  return sendJson('POST', `/projects/${enc(projectId)}/submittal-register`, { specIds });
+}
+
 export function deleteProject(projectId, deletedBy) {
   return sendJson('DELETE', `/projects/${enc(projectId)}`, { deletedBy });
 }

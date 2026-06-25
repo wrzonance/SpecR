@@ -110,6 +110,8 @@ export { RequiredSectionsBodySchema } from './required-sections-schemas.js';
 export type { RequiredSectionsBody } from './required-sections-schemas.js';
 export { CreateAssociationBodySchema } from './association-schemas.js';
 export type { CreateAssociationBody } from './association-schemas.js';
+export { SubmittalRegisterBodySchema } from './submittal-register-schemas.js';
+export type { SubmittalRegisterBody } from './submittal-register-schemas.js';
 export type { ParagraphAssociation } from './types.js';
 export type { ParseWarning, ParseWarningType } from './types.js';
 export { textEndsWithClosed } from './comment-closure.js';

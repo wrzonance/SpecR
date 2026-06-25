@@ -18,6 +18,7 @@ import {
   handleListProjects,
   handleGetReferences,
   handleCoordinationReport,
+  handleSubmittalRegister,
   handleOpenCommentsReport,
 } from './handlers.js';
 import { registerOnboardingTools } from './onboarding-tools.js';
@@ -313,6 +314,23 @@ function registerCoordinationTools(server: McpServer): void {
   );
 }
 
+function registerSubmittalTools(server: McpServer): void {
+  server.registerTool(
+    'submittal_register',
+    {
+      description:
+        'Build a product-driven submittal register for selected project specs. ' +
+        'Rows come from PART 2 product candidates, required submittal types come ' +
+        'from the PART 1 Submittals article, and datasheet links come from paragraph associations.',
+      inputSchema: {
+        projectId: z.uuid().describe('Project UUID (from list_projects)'),
+        specIds: z.array(z.uuid()).describe('Selected project spec UUIDs to include'),
+      },
+    },
+    handleSubmittalRegister
+  );
+}
+
 function registerOpenCommentsTools(server: McpServer): void {
   server.registerTool(
     'open_comments_report',
@@ -367,6 +385,7 @@ export function registerTools(server: McpServer): void {
   registerGeneratorTools(server);
   registerLoaderTools(server);
   registerCoordinationTools(server);
+  registerSubmittalTools(server);
   registerOpenCommentsTools(server);
   registerOnboardingTools(server);
 }

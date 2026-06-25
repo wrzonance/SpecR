@@ -15,11 +15,14 @@ import {
   type ClassifiedRef,
   type ReferenceConsistencyFinding,
 } from './article-refs.js';
+import { getSubmittalRegister } from './submittal-register.js';
+import type { SubmittalFinding } from '../../submittals/index.js';
 import { readImpliedRelatedFindings } from './coordination-implied.js';
 import type { ImpliedRelatedSectionFinding } from '../../coordination/index.js';
 import {
   buildUmbrellaCalloutFindings,
   type UmbrellaNotCalledOutFinding,
+  type UmbrellaCalloutResult,
 } from './umbrella-callouts.js';
 
 interface Queryable {
@@ -68,6 +71,7 @@ export type Finding =
       readonly sourceSpecSection: string;
       readonly standardCode: string;
     }
+  | SubmittalFinding
   | ImpliedRelatedSectionFinding
   | UmbrellaNotCalledOutFinding;
 
@@ -78,6 +82,9 @@ export interface CoordinationSummary {
   readonly relatedListedNotCited: number;
   readonly relatedCitedNotListed: number;
   readonly standardCitedNotListed: number;
+  readonly productWithoutSubmittalType: number;
+  readonly submittalTypeWithoutProduct: number;
+  readonly productMissingDatasheet: number;
   readonly impliedRelatedSection: number;
   readonly umbrellaNotCalledOut: number;
   readonly total: number;
@@ -180,11 +187,9 @@ function buildFindings(
   present: readonly PresentSpec[],
   broken: readonly BrokenRef[],
   referenceFindings: readonly Finding[],
+  submittalFindings: readonly SubmittalFinding[],
   impliedFindings: readonly Finding[],
-  umbrellaResult: {
-    readonly findings: readonly UmbrellaNotCalledOutFinding[];
-    readonly notes: readonly string[];
-  }
+  umbrellaResult: UmbrellaCalloutResult
 ): { readonly findings: readonly Finding[]; readonly notes: readonly string[] } {
   const requiredSections = new Set(required.map((r) => r.section));
   const presentSections = new Set(present.map((p) => p.section));
@@ -222,6 +227,7 @@ function buildFindings(
       ...presentNotRequired,
       ...danglingRef,
       ...referenceFindings,
+      ...submittalFindings,
       ...impliedFindings,
       ...umbrellaResult.findings,
     ],
@@ -238,6 +244,9 @@ function summarize(findings: readonly Finding[]): CoordinationSummary {
     relatedListedNotCited: count('related_listed_not_cited'),
     relatedCitedNotListed: count('related_cited_not_listed'),
     standardCitedNotListed: count('standard_cited_not_listed'),
+    productWithoutSubmittalType: count('product_without_submittal_type'),
+    submittalTypeWithoutProduct: count('submittal_type_without_product'),
+    productMissingDatasheet: count('product_missing_datasheet'),
     impliedRelatedSection: count('implied_related_section'),
     umbrellaNotCalledOut: count('umbrella_not_called_out'),
     total: findings.length,
@@ -273,11 +282,16 @@ async function assembleCoordinationReport(
   await client.query('COMMIT');
   const referenceFindings = buildReferenceConsistencyFindings(classified).map(toReferenceFinding);
   const umbrellaResult = buildUmbrellaCalloutFindings(present, sectionRefs(classified));
+  const submittals = await getSubmittalRegister(
+    projectId,
+    present.map((p) => p.specId)
+  );
   const { findings, notes } = buildFindings(
     required,
     present,
     broken,
     referenceFindings,
+    submittals.findings,
     impliedFindings,
     umbrellaResult
   );

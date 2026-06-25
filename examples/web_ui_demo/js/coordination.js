@@ -7,7 +7,7 @@ function el(tag, className, text) {
   return node;
 }
 
-const GROUPS = [
+const BASE_GROUPS = [
   {
     type: 'present_not_required',
     title: 'PRESENT, NOT REQUIRED',
@@ -51,6 +51,26 @@ const GROUPS = [
     flag: 'umbrellaCallout',
   },
 ];
+
+const SUBMITTAL_GROUPS = [
+  {
+    type: 'product_without_submittal_type',
+    title: 'PRODUCT WITHOUT SUBMITTAL TYPE',
+    empty: 'Every specified product has at least one required submittal type.',
+  },
+  {
+    type: 'submittal_type_without_product',
+    title: 'SUBMITTAL TYPE WITHOUT PRODUCT',
+    empty: 'Every required submittal type has a Part 2 product candidate.',
+  },
+  {
+    type: 'product_missing_datasheet',
+    title: 'PRODUCT MISSING DATASHEET',
+    empty: 'Every specified product has a datasheet association.',
+  },
+];
+
+const GROUPS = API_FEATURES.submittalRegister ? [...BASE_GROUPS, ...SUBMITTAL_GROUPS] : BASE_GROUPS;
 
 function sectionButton(section, ctx) {
   const btn = el('button', 'coord-section', section);
@@ -149,17 +169,31 @@ function renderFinding(finding, ctx) {
     row.appendChild(el('span', 'coord-text', finding.title || 'Required section has no title'));
     return row;
   }
+  if (finding.type === 'product_without_submittal_type') {
+    row.appendChild(sectionButton(finding.sourceSpecSection, ctx));
+    row.appendChild(el('span', 'coord-arrow', 'specifies'));
+    row.appendChild(el('span', 'coord-target', finding.productName));
+    row.appendChild(el('span', 'coord-text', 'No required submittal type'));
+    return row;
+  }
+  if (finding.type === 'submittal_type_without_product') {
+    row.appendChild(sectionButton(finding.sourceSpecSection, ctx));
+    row.appendChild(el('span', 'coord-arrow', 'requires'));
+    row.appendChild(el('span', 'coord-target', finding.submittalType));
+    row.appendChild(el('span', 'coord-text', 'No Part 2 product'));
+    return row;
+  }
+  if (finding.type === 'product_missing_datasheet') {
+    row.appendChild(sectionButton(finding.sourceSpecSection, ctx));
+    row.appendChild(el('span', 'coord-arrow', 'missing datasheet'));
+    row.appendChild(el('span', 'coord-target', finding.productName));
+    return row;
+  }
   row.appendChild(sectionButton(finding.sourceSpecSection, ctx));
   row.appendChild(el('span', 'coord-arrow', 'cites'));
   row.appendChild(el('span', 'coord-target', finding.targetSpecSection || 'unknown'));
   row.appendChild(el('span', 'coord-text', finding.referenceText));
   return row;
-}
-
-function visibleGroups() {
-  return GROUPS.filter(
-    (group) => group.type !== 'implied_related_section' || API_FEATURES.impliedRelated
-  );
 }
 
 function renderGroup(report, group, ctx) {
@@ -212,6 +246,14 @@ export function renderCoordinationReport(container, report, ctx = {}) {
   summary.appendChild(
     el('span', 'coord-chip', `${report.summary.standardCitedNotListed} STD CITED NOT LISTED`)
   );
+  if (API_FEATURES.submittalRegister) {
+    summary.appendChild(
+      el('span', 'coord-chip', `${report.summary.productMissingDatasheet ?? 0} NO DATASHEET`)
+    );
+    summary.appendChild(
+      el('span', 'coord-chip', `${report.summary.productWithoutSubmittalType ?? 0} PRODUCT NO TYPE`)
+    );
+  }
   if (API_FEATURES.impliedRelated) {
     summary.appendChild(
       el('span', 'coord-chip', `${report.summary.impliedRelatedSection || 0} IMPLIED RELATED`)
