@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { pool, getParagraphSnapshots } from '../index.js';
+import { pool, getParagraphSnapshots, getCurrentParagraphSnapshots } from '../index.js';
 
 const SPEC_ID = 'e3400000-0000-0000-0000-000000000000';
 const PART_ID = 'e3400000-0000-0000-0000-000000000001';
@@ -68,5 +68,54 @@ describe('getParagraphSnapshots', () => {
     const pr1 = rows.find((r) => r.uuid === PR1_ID);
     // base_version is still 1 → the v1 snapshot wins; v2 row is invisible
     expect(pr1).toEqual({ uuid: PR1_ID, text: 'Snapshot pr1 text.', baseVersion: 1 });
+  });
+});
+
+// #251/#276: owner-removed body paragraphs are omitted from the generated DOCX, so
+// they must be omitted from the merge snapshots too — otherwise the diff path
+// (computeSpecDiff) reports them as a false hard deletion. A vanished NOTE, by
+// contrast, is still rendered (controlled in the DOCX) and must remain.
+describe('merge snapshots exclude owner-removed body paragraphs (#251/#276)', () => {
+  const SNAP_SPEC = 'e3400000-0000-0000-0000-0000000000a0';
+  const KEPT = 'e3400000-0000-0000-0000-0000000000a1';
+  const REMOVED = 'e3400000-0000-0000-0000-0000000000a2';
+  const VANISHED_NOTE = 'e3400000-0000-0000-0000-0000000000a3';
+
+  beforeAll(async () => {
+    await pool.query(
+      `INSERT INTO specs (id, section, title, source, library_id)
+       VALUES ($1, '99 99 35', 'Snapshot Vanish Test', 'arcat',
+               (SELECT id FROM libraries WHERE name = 'Default Company Master'))
+       ON CONFLICT (id) DO NOTHING`,
+      [SNAP_SPEC]
+    );
+    await pool.query(
+      `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position, vanish)
+       VALUES ($1, $4, NULL, 'pr1', 'Kept paragraph.', 1, false),
+              ($2, $4, NULL, 'pr1', 'Removed paragraph.', 2, true),
+              ($3, $4, NULL, 'note', 'Editorial note.', 3, true)
+       ON CONFLICT (id) DO NOTHING`,
+      [KEPT, REMOVED, VANISHED_NOTE, SNAP_SPEC]
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [SNAP_SPEC]);
+  });
+
+  it('getParagraphSnapshots omits the removed body paragraph but keeps the vanished note', async () => {
+    const rows = await getParagraphSnapshots(SNAP_SPEC);
+    const ids = rows.map((r) => r.uuid);
+    expect(ids).toContain(KEPT);
+    expect(ids).toContain(VANISHED_NOTE); // rendered → stays
+    expect(ids).not.toContain(REMOVED); // owner-removed → excluded
+  });
+
+  it('getCurrentParagraphSnapshots omits the removed body paragraph but keeps the vanished note', async () => {
+    const rows = await getCurrentParagraphSnapshots(SNAP_SPEC);
+    const ids = rows.map((r) => r.uuid);
+    expect(ids).toContain(KEPT);
+    expect(ids).toContain(VANISHED_NOTE);
+    expect(ids).not.toContain(REMOVED);
   });
 });
