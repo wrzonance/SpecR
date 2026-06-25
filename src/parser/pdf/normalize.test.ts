@@ -53,4 +53,37 @@ describe('normalizePdfText', () => {
       ['PART 1 - GENERAL', '1.1 SCOPE', 'PART 2 - PRODUCTS', '2.1 MATERIALS'].join('\n')
     );
   });
+
+  it('keeps one repeated SECTION header while stripping section-page footers', () => {
+    const pages = [
+      page(1, [
+        item('SECTION 07 84 00 - FIRESTOPPING', 72, 770),
+        item('PART 1 - GENERAL', 72, 724),
+        item('1.1 SUMMARY', 72, 700),
+        item('07 84 00-1', 280, 28),
+      ]),
+      page(2, [
+        item('SECTION 07 84 00 - FIRESTOPPING', 72, 770),
+        item('PART 2 - PRODUCTS', 72, 724),
+        item('2.1 MATERIALS', 72, 700),
+        item('07 84 00-2', 280, 28),
+      ]),
+    ];
+
+    const normalized = normalizePdfText(pages);
+    const lines = normalized.split('\n');
+
+    expect(normalized).toBe(
+      [
+        'SECTION 07 84 00 - FIRESTOPPING',
+        'PART 1 - GENERAL',
+        '1.1 SUMMARY',
+        'PART 2 - PRODUCTS',
+        '2.1 MATERIALS',
+      ].join('\n')
+    );
+    expect(lines.filter((line) => line === 'SECTION 07 84 00 - FIRESTOPPING')).toHaveLength(1);
+    expect(lines).not.toContain('07 84 00-1');
+    expect(lines).not.toContain('07 84 00-2');
+  });
 });

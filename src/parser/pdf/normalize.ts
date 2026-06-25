@@ -1,3 +1,5 @@
+import { parseSectionNumberCandidate, sectionNumberFragment } from '../../lib/section-number.js';
+
 export interface PdfTextItem {
   readonly str: string;
   readonly x: number;
@@ -34,6 +36,15 @@ const LINE_Y_TOLERANCE = 3;
 const MIN_COLUMN_GAP = 120;
 const FURNITURE_PAGE_MIN = 2;
 const FURNITURE_BAND_RATIO = 0.1;
+const SECTION_HEADING_RE = new RegExp(
+  String.raw`^SECTION\s+${sectionNumberFragment()}(?:\s*[-–—]\s*(.*))?$`,
+  'i'
+);
+const BARE_SECTION_HEADING_RE = new RegExp(
+  String.raw`^${sectionNumberFragment()}\s*[-–—]\s*(.+)$`,
+  'i'
+);
+const TEXTUAL_TITLE_RE = /[A-Za-z]/;
 
 function comparePosition(a: PdfTextItem, b: PdfTextItem): number {
   const yDelta = b.y - a.y;
@@ -127,6 +138,43 @@ function repeatedFurnitureKeys(lines: readonly PdfLine[]): ReadonlySet<string> {
   );
 }
 
+function isSectionNumber(raw: string | undefined): boolean {
+  if (raw === undefined) return false;
+  return parseSectionNumberCandidate(raw, 'strong').ok;
+}
+
+function hasOptionalTitle(title: string | undefined): boolean {
+  return title === undefined || TEXTUAL_TITLE_RE.test(title);
+}
+
+function isKeywordSectionHeading(text: string): boolean {
+  const match = SECTION_HEADING_RE.exec(text.trim());
+  return match !== null && isSectionNumber(match[1]) && hasOptionalTitle(match[2]);
+}
+
+function isBareSectionHeading(text: string): boolean {
+  const match = BARE_SECTION_HEADING_RE.exec(text.trim());
+  return match !== null && isSectionNumber(match[1]) && TEXTUAL_TITLE_RE.test(match[2] ?? '');
+}
+
+function isSectionHeading(text: string): boolean {
+  return isKeywordSectionHeading(text) || isBareSectionHeading(text);
+}
+
+function filterContentLines(
+  lines: readonly PdfLine[],
+  furniture: ReadonlySet<string>
+): readonly PdfLine[] {
+  const keptSectionKeys = new Set<string>();
+  return lines.filter((line) => {
+    const key = furnitureKey(line);
+    if (!furniture.has(key)) return true;
+    if (!isSectionHeading(line.text) || keptSectionKeys.has(key)) return false;
+    keptSectionKeys.add(key);
+    return true;
+  });
+}
+
 function columnSplit(lines: readonly PdfLine[]): number | null {
   const xs = [...new Set(lines.map((line) => Math.round(line.x)))].sort((a, b) => a - b);
   const gaps = xs
@@ -170,7 +218,7 @@ function joinHyphenatedLines(lines: readonly string[]): string {
 export function normalizePdfText(pages: readonly PdfPageText[]): string {
   const lines = pages.flatMap(pageLines);
   const furniture = repeatedFurnitureKeys(lines);
-  const contentLines = lines.filter((line) => !furniture.has(furnitureKey(line)));
+  const contentLines = filterContentLines(lines, furniture);
   const orderedLines = pages.flatMap((page) =>
     orderPageLines(contentLines.filter((line) => line.pageNumber === page.pageNumber))
   );
