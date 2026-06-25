@@ -39,6 +39,12 @@ const GROUPS = [
     empty: 'Every standard cited in a body is also listed under References.',
   },
   {
+    type: 'implied_related_section',
+    title: 'IMPLIED RELATED SECTION (NOT LISTED)',
+    empty: 'No body concept implies an unlisted Related Section.',
+    flag: 'impliedRelated',
+  },
+  {
     type: 'umbrella_not_called_out',
     title: 'UMBRELLA NOT CALLED OUT',
     empty: 'Every subordinate section references its division umbrella.',
@@ -56,6 +62,7 @@ function sectionButton(section, ctx) {
 function findingSection(finding) {
   if (finding.type === 'dangling_ref') return finding.targetSpecSection;
   if (finding.type === 'standard_cited_not_listed') return finding.sourceSpecSection;
+  if (finding.type === 'implied_related_section') return finding.impliedSection;
   if (finding.type === 'umbrella_not_called_out') return finding.sourceSpecSection;
   return finding.section;
 }
@@ -102,6 +109,18 @@ function renderDanglingRef(finding, ctx) {
   return row;
 }
 
+function renderImpliedRelatedSection(finding, ctx) {
+  const row = el('li', `coord-finding is-${finding.type}`);
+  row.appendChild(sectionButton(finding.sourceSpecSection, ctx));
+  row.appendChild(el('span', 'coord-arrow', 'mentions'));
+  row.appendChild(el('span', 'coord-target', finding.matchedKeyword || 'unknown'));
+  row.appendChild(el('span', 'coord-arrow', 'implies'));
+  row.appendChild(
+    el('span', 'coord-text', `${finding.impliedSection} ${finding.impliedTitle}`.trim())
+  );
+  return row;
+}
+
 function renderUmbrellaNotCalledOut(finding, ctx) {
   const row = el('li', `coord-finding is-${finding.type}`);
   row.appendChild(sectionButton(finding.sourceSpecSection, ctx));
@@ -114,6 +133,9 @@ function renderFinding(finding, ctx) {
   const reference = REFERENCE_FINDINGS[finding.type];
   if (reference) return renderReferenceFinding(finding, ctx, reference);
   if (finding.type === 'dangling_ref') return renderDanglingRef(finding, ctx);
+  if (finding.type === 'implied_related_section') {
+    return renderImpliedRelatedSection(finding, ctx);
+  }
   if (finding.type === 'umbrella_not_called_out') return renderUmbrellaNotCalledOut(finding, ctx);
 
   const row = el('li', `coord-finding is-${finding.type}`);
@@ -132,6 +154,12 @@ function renderFinding(finding, ctx) {
   row.appendChild(el('span', 'coord-target', finding.targetSpecSection || 'unknown'));
   row.appendChild(el('span', 'coord-text', finding.referenceText));
   return row;
+}
+
+function visibleGroups() {
+  return GROUPS.filter(
+    (group) => group.type !== 'implied_related_section' || API_FEATURES.impliedRelated
+  );
 }
 
 function renderGroup(report, group, ctx) {
@@ -184,6 +212,11 @@ export function renderCoordinationReport(container, report, ctx = {}) {
   summary.appendChild(
     el('span', 'coord-chip', `${report.summary.standardCitedNotListed} STD CITED NOT LISTED`)
   );
+  if (API_FEATURES.impliedRelated) {
+    summary.appendChild(
+      el('span', 'coord-chip', `${report.summary.impliedRelatedSection || 0} IMPLIED RELATED`)
+    );
+  }
   if (API_FEATURES.umbrellaCallout) {
     summary.appendChild(
       el('span', 'coord-chip', `${report.summary.umbrellaNotCalledOut || 0} UMBRELLA CALLOUTS`)

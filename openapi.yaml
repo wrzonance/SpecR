@@ -3460,6 +3460,7 @@ components:
           relatedListedNotCited,
           relatedCitedNotListed,
           standardCitedNotListed,
+          impliedRelatedSection,
           umbrellaNotCalledOut,
           total,
         ]
@@ -3470,6 +3471,7 @@ components:
         relatedListedNotCited: { type: integer }
         relatedCitedNotListed: { type: integer }
         standardCitedNotListed: { type: integer }
+        impliedRelatedSection: { type: integer }
         umbrellaNotCalledOut: { type: integer }
         total: { type: integer }
     CoordinationFinding:
@@ -3480,6 +3482,7 @@ components:
         - $ref: '#/components/schemas/FindingRelatedListedNotCited'
         - $ref: '#/components/schemas/FindingRelatedCitedNotListed'
         - $ref: '#/components/schemas/FindingStandardCitedNotListed'
+        - $ref: '#/components/schemas/FindingImpliedRelatedSection'
         - $ref: '#/components/schemas/FindingUmbrellaNotCalledOut'
       discriminator:
         propertyName: type
@@ -3490,6 +3493,7 @@ components:
           related_listed_not_cited: '#/components/schemas/FindingRelatedListedNotCited'
           related_cited_not_listed: '#/components/schemas/FindingRelatedCitedNotListed'
           standard_cited_not_listed: '#/components/schemas/FindingStandardCitedNotListed'
+          implied_related_section: '#/components/schemas/FindingImpliedRelatedSection'
           umbrella_not_called_out: '#/components/schemas/FindingUmbrellaNotCalledOut'
     FindingRequiredNotPresent:
       type: object
@@ -3577,6 +3581,43 @@ components:
         sourceSpecId: { type: string, format: uuid }
         sourceSpecSection: { type: string }
         standardCode: { type: string, description: 'Normalized "ORG identifier", e.g. ASTM E814' }
+    FindingImpliedRelatedSection:
+      type: object
+      description: >
+        Advisory suggestion: this spec body contains a distinctive keyword from an
+        in-scope section title, but that section is not already listed in this
+        spec's Related Sections article. Suppressed for own-section, already-listed,
+        generic, and overly common title keywords.
+      required:
+        [
+          type,
+          sourceSpecId,
+          sourceSpecSection,
+          sourceParagraphId,
+          impliedSection,
+          impliedTitle,
+          matchedKeyword,
+          confidence,
+        ]
+      properties:
+        type: { type: string, enum: [implied_related_section] }
+        sourceSpecId: { type: string, format: uuid }
+        sourceSpecSection: { type: string }
+        sourceParagraphId:
+          type: string
+          format: uuid
+          description: Paragraph whose body text matched the implied section title keyword
+        impliedSection:
+          type: string
+          description: Canonical CSI section number suggested for Related Sections
+        impliedTitle: { type: string }
+        matchedKeyword:
+          type: string
+          description: Normalized title keyword found in the source paragraph
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
     FindingUmbrellaNotCalledOut:
       type: object
       description: >
