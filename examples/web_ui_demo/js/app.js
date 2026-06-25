@@ -25,6 +25,7 @@ import {
   removeSpecFromProject,
   getBrokenRefs,
   getCoordinationReport,
+  getSubmittalRegister,
   getProjectOpenComments,
   getRequiredSections,
   setRequiredSections,
@@ -35,6 +36,7 @@ import { API_FEATURES } from './features.js';
 import { buildWebModel, renderWeb } from './web.js';
 import { renderCoordinationReport } from './coordination.js';
 import { renderOpenComments } from './open-comments.js';
+import { renderSubmittalRegister } from './submittal.js';
 import { initDropzone } from './dropzone.js';
 import { initRefPopover } from './popover.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
@@ -60,6 +62,7 @@ const webCanvas = document.getElementById('ref-web-canvas');
 const webHint = document.getElementById('web-hint');
 const coordBody = document.getElementById('coord-report-body');
 const openCommentsBody = document.getElementById('open-comments-body');
+const submittalRegisterBody = document.getElementById('submittal-register-body');
 
 const COMPANY_MASTER_NAME = 'Default Company Master';
 const DEMO_CLIENT_NAMES = ['Alameda Civic Partners', 'Northbank Health', 'Vireo Schools'];
@@ -381,6 +384,7 @@ async function saveProjectSettings() {
     await refreshBrokenCount();
     await refreshCoordination();
     await refreshOpenComments();
+    await refreshSubmittalRegister();
     toast('Project settings saved');
   } catch (err) {
     toast(`settings save failed: ${err.message}`, 'err');
@@ -411,6 +415,7 @@ async function loadActiveProjectWorkspace() {
   await refreshBrokenCount();
   await refreshCoordination();
   await refreshOpenComments();
+  await refreshSubmittalRegister();
 }
 
 async function deleteActiveProject() {
@@ -555,6 +560,32 @@ async function refreshCoordination() {
   }
 }
 
+function selectedSubmittalSpecIds() {
+  return [...specs.keys()].filter((specId) => projectMembers.has(specId));
+}
+
+async function refreshSubmittalRegister() {
+  if (!activeProjectId) return null;
+  if (!API_FEATURES.submittalRegister) {
+    if (submittalRegisterBody) renderSubmittalRegister(submittalRegisterBody, null);
+    return null;
+  }
+  try {
+    const report = await getSubmittalRegister(activeProjectId, selectedSubmittalSpecIds());
+    if (submittalRegisterBody) {
+      renderSubmittalRegister(submittalRegisterBody, report, {
+        onNavigate: navigateToSection,
+        displaySection,
+      });
+    }
+    return report.summary.rows;
+  } catch (err) {
+    if (submittalRegisterBody) renderSubmittalRegister(submittalRegisterBody, null);
+    console.warn('SpecR: could not refresh submittal register', err);
+    return null;
+  }
+}
+
 // Pulls the project-scoped open-comments report (#272) and paints both the
 // masthead OPEN CMTS cell and the Report-view panel. Mirrors refreshCoordination:
 // degrades to an "unavailable" panel when the flag is off and never throws.
@@ -585,12 +616,13 @@ async function refreshOpenComments() {
 }
 
 async function refreshDiagnostics() {
-  const [brokenCount, coordinationCount, openComments] = await Promise.all([
+  const [brokenCount, coordinationCount, openComments, submittalRows] = await Promise.all([
     refreshBrokenCount(),
     refreshCoordination(),
     refreshOpenComments(),
+    refreshSubmittalRegister(),
   ]);
-  return { brokenCount, coordinationCount, openComments };
+  return { brokenCount, coordinationCount, openComments, submittalRows };
 }
 
 // ── State refresh ───────────────────────────────────────────────────────────
@@ -1709,6 +1741,7 @@ async function onRemoveSpecFromProject(spec) {
     const brokenCount = await refreshBrokenCount();
     await refreshCoordination();
     await refreshOpenComments();
+    await refreshSubmittalRegister();
     const action = removedFromProject ? 'removed from project' : 'removed from map';
     toast(
       `Section ${spec.tree.section} ${action} — TOC unchanged${brokenCount ? `, ${brokenCount} broken refs` : ''}`,
@@ -1755,6 +1788,7 @@ async function addSpecsFromTocToProject() {
   await refreshBrokenCount();
   await refreshCoordination();
   await refreshOpenComments();
+  await refreshSubmittalRegister();
   if (added > 0) toast(`${added} TOC section${added === 1 ? '' : 's'} loaded on the map`);
   if (failed > 0)
     toast(`${failed} TOC section${failed === 1 ? '' : 's'} could not be loaded`, 'warn');
@@ -1911,6 +1945,7 @@ async function onSpecReady(result, context = { destination: 'project' }) {
   await refreshBrokenCount();
   await refreshCoordination();
   await refreshOpenComments();
+  await refreshSubmittalRegister();
   toast(
     isNew
       ? `Section ${result.section} loaded — ${result.nodeCount} nodes inferred`

@@ -47,6 +47,7 @@ import {
   PutRevisionNomenclatureBodySchema,
   CloneRevisionNomenclatureBodySchema,
   RequiredSectionsBodySchema,
+  SubmittalRegisterBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 import { generateHandler, generateManualHandler, generateRevisionHandler } from './generate.js';
@@ -89,6 +90,7 @@ import {
   putPackageRequiredSectionsHandler,
 } from './required-sections.js';
 import { getCoordinationReportHandler } from './coordination.js';
+import { postSubmittalRegisterHandler } from './submittal-register.js';
 import { getSpecOpenCommentsHandler, getProjectOpenCommentsHandler } from './open-comments.js';
 import { patchEditabilityHandler, reclassifyHandler, acceptAsNoteHandler } from './editability.js';
 import {
@@ -165,6 +167,11 @@ router.post(
 router.delete('/projects/:id/specs/:specId', removeSectionFromProjectHandler);
 router.get('/projects/:id/references/broken', getBrokenRefsHandler);
 router.get('/projects/:id/coordination-report', getCoordinationReportHandler);
+router.post(
+  '/projects/:id/submittal-register',
+  validateBody(SubmittalRegisterBodySchema),
+  postSubmittalRegisterHandler
+);
 router.get('/projects/:id/open-comments', getProjectOpenCommentsHandler);
 router.get('/projects/:id/references/inbound', getInboundReferencesHandler);
 router.get('/projects/:id/specs/:specId/references', getOutboundReferencesHandler);

@@ -3184,6 +3184,43 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /projects/{id}/submittal-register:
+    post:
+      operationId: postSubmittalRegister
+      summary: Product-driven submittal register for selected project specs
+      description: >
+        Builds a PM-facing register from selected project specs. Rows are driven by
+        PART 2 - PRODUCTS product candidates; required submittal types come from
+        each spec's PART 1 Submittals article; datasheet evidence comes from
+        paragraph associations.
+      tags: [projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmittalRegisterBody' }
+      responses:
+        '200':
+          description: Product-driven submittal register
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/SubmittalRegister' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
   /specs/{id}/open-comments:
     get:
       operationId: getSpecOpenComments
@@ -3460,6 +3497,9 @@ components:
           relatedListedNotCited,
           relatedCitedNotListed,
           standardCitedNotListed,
+          productWithoutSubmittalType,
+          submittalTypeWithoutProduct,
+          productMissingDatasheet,
           total,
         ]
       properties:
@@ -3469,6 +3509,9 @@ components:
         relatedListedNotCited: { type: integer }
         relatedCitedNotListed: { type: integer }
         standardCitedNotListed: { type: integer }
+        productWithoutSubmittalType: { type: integer }
+        submittalTypeWithoutProduct: { type: integer }
+        productMissingDatasheet: { type: integer }
         total: { type: integer }
     CoordinationFinding:
       oneOf:
@@ -3478,6 +3521,9 @@ components:
         - $ref: '#/components/schemas/FindingRelatedListedNotCited'
         - $ref: '#/components/schemas/FindingRelatedCitedNotListed'
         - $ref: '#/components/schemas/FindingStandardCitedNotListed'
+        - $ref: '#/components/schemas/FindingProductWithoutSubmittalType'
+        - $ref: '#/components/schemas/FindingSubmittalTypeWithoutProduct'
+        - $ref: '#/components/schemas/FindingProductMissingDatasheet'
       discriminator:
         propertyName: type
         mapping:
@@ -3487,6 +3533,9 @@ components:
           related_listed_not_cited: '#/components/schemas/FindingRelatedListedNotCited'
           related_cited_not_listed: '#/components/schemas/FindingRelatedCitedNotListed'
           standard_cited_not_listed: '#/components/schemas/FindingStandardCitedNotListed'
+          product_without_submittal_type: '#/components/schemas/FindingProductWithoutSubmittalType'
+          submittal_type_without_product: '#/components/schemas/FindingSubmittalTypeWithoutProduct'
+          product_missing_datasheet: '#/components/schemas/FindingProductMissingDatasheet'
     FindingRequiredNotPresent:
       type: object
       required: [type, section, title, requiredId]
@@ -3573,6 +3622,123 @@ components:
         sourceSpecId: { type: string, format: uuid }
         sourceSpecSection: { type: string }
         standardCode: { type: string, description: 'Normalized "ORG identifier", e.g. ASTM E814' }
+
+    FindingProductWithoutSubmittalType:
+      type: object
+      description: >
+        A PART 2 product was specified, but the spec's PART 1 Submittals article
+        yielded no recognized required submittal type for the product register.
+      required: [type, specId, sourceSpecSection, productName, sourceParagraphId]
+      properties:
+        type: { type: string, enum: [product_without_submittal_type] }
+        specId: { type: string, format: uuid }
+        sourceSpecSection: { type: string }
+        productName: { type: string }
+        sourceParagraphId: { type: string, format: uuid }
+    FindingSubmittalTypeWithoutProduct:
+      type: object
+      description: >
+        A PART 1 Submittals article requires a submittal type, but no PART 2
+        product candidate exists in that selected spec.
+      required: [type, specId, sourceSpecSection, submittalType]
+      properties:
+        type: { type: string, enum: [submittal_type_without_product] }
+        specId: { type: string, format: uuid }
+        sourceSpecSection: { type: string }
+        submittalType: { type: string }
+    FindingProductMissingDatasheet:
+      type: object
+      description: >
+        A PART 2 product is present but has no paragraph association that can
+        serve as product-data/datasheet evidence.
+      required: [type, specId, sourceSpecSection, productName, sourceParagraphId]
+      properties:
+        type: { type: string, enum: [product_missing_datasheet] }
+        specId: { type: string, format: uuid }
+        sourceSpecSection: { type: string }
+        productName: { type: string }
+        sourceParagraphId: { type: string, format: uuid }
+
+    # ── Submittal Register (#263) ───────────────────────────────────────────────
+
+    SubmittalRegisterBody:
+      type: object
+      required: [specIds]
+      properties:
+        specIds:
+          type: array
+          description: Project spec UUIDs selected for the register. Empty array is valid.
+          items: { type: string, format: uuid }
+          uniqueItems: true
+    SubmittalRegister:
+      type: object
+      required: [projectId, specIds, rows, findings, summary, notes]
+      properties:
+        projectId: { type: string, format: uuid }
+        specIds:
+          type: array
+          items: { type: string, format: uuid }
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/SubmittalRegisterRow' }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/SubmittalRegisterFinding' }
+        summary: { $ref: '#/components/schemas/SubmittalRegisterSummary' }
+        notes:
+          type: array
+          items: { type: string }
+    SubmittalRegisterRow:
+      type: object
+      required: [productName, requiredSubmittalTypes, datasheets, datasheetStatus, sources]
+      properties:
+        productName: { type: string }
+        requiredSubmittalTypes:
+          type: array
+          items: { type: string }
+        datasheets:
+          type: array
+          items: { $ref: '#/components/schemas/ParagraphAssociation' }
+        datasheetStatus: { type: string, enum: [present, missing] }
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/SubmittalRegisterSource' }
+    SubmittalRegisterSource:
+      type: object
+      required: [specId, section, title, paragraphId, paragraphText]
+      properties:
+        specId: { type: string, format: uuid }
+        section: { type: string }
+        title: { type: string }
+        paragraphId: { type: string, format: uuid }
+        paragraphText: { type: string }
+    SubmittalRegisterFinding:
+      oneOf:
+        - $ref: '#/components/schemas/FindingProductWithoutSubmittalType'
+        - $ref: '#/components/schemas/FindingSubmittalTypeWithoutProduct'
+        - $ref: '#/components/schemas/FindingProductMissingDatasheet'
+      discriminator:
+        propertyName: type
+        mapping:
+          product_without_submittal_type: '#/components/schemas/FindingProductWithoutSubmittalType'
+          submittal_type_without_product: '#/components/schemas/FindingSubmittalTypeWithoutProduct'
+          product_missing_datasheet: '#/components/schemas/FindingProductMissingDatasheet'
+    SubmittalRegisterSummary:
+      type: object
+      required:
+        [
+          rows,
+          productWithoutSubmittalType,
+          submittalTypeWithoutProduct,
+          productMissingDatasheet,
+          totalFindings,
+        ]
+      properties:
+        rows: { type: integer }
+        productWithoutSubmittalType: { type: integer }
+        submittalTypeWithoutProduct: { type: integer }
+        productMissingDatasheet: { type: integer }
+        totalFindings: { type: integer }
 
     # ── Open comments (#262) ─────────────────────────────────────────────────────
 

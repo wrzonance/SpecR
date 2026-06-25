@@ -14,6 +14,8 @@ import {
   buildReferenceConsistencyFindings,
   type ReferenceConsistencyFinding,
 } from './article-refs.js';
+import { getSubmittalRegister } from './submittal-register.js';
+import type { SubmittalFinding } from '../../submittals/index.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -60,7 +62,8 @@ export type Finding =
       readonly sourceSpecId: string;
       readonly sourceSpecSection: string;
       readonly standardCode: string;
-    };
+    }
+  | SubmittalFinding;
 
 export interface CoordinationSummary {
   readonly requiredNotPresent: number;
@@ -69,6 +72,9 @@ export interface CoordinationSummary {
   readonly relatedListedNotCited: number;
   readonly relatedCitedNotListed: number;
   readonly standardCitedNotListed: number;
+  readonly productWithoutSubmittalType: number;
+  readonly submittalTypeWithoutProduct: number;
+  readonly productMissingDatasheet: number;
   readonly total: number;
 }
 
@@ -168,7 +174,8 @@ function buildFindings(
   required: readonly RequiredSection[],
   present: readonly PresentSpec[],
   broken: readonly BrokenRef[],
-  referenceFindings: readonly Finding[]
+  referenceFindings: readonly Finding[],
+  submittalFindings: readonly SubmittalFinding[]
 ): { readonly findings: readonly Finding[]; readonly notes: readonly string[] } {
   const requiredSections = new Set(required.map((r) => r.section));
   const presentSections = new Set(present.map((p) => p.section));
@@ -201,7 +208,13 @@ function buildFindings(
   });
 
   return {
-    findings: [...requiredNotPresent, ...presentNotRequired, ...danglingRef, ...referenceFindings],
+    findings: [
+      ...requiredNotPresent,
+      ...presentNotRequired,
+      ...danglingRef,
+      ...referenceFindings,
+      ...submittalFindings,
+    ],
     notes: empty ? [EMPTY_REQUIRED_NOTE] : [],
   };
 }
@@ -215,6 +228,9 @@ function summarize(findings: readonly Finding[]): CoordinationSummary {
     relatedListedNotCited: count('related_listed_not_cited'),
     relatedCitedNotListed: count('related_cited_not_listed'),
     standardCitedNotListed: count('standard_cited_not_listed'),
+    productWithoutSubmittalType: count('product_without_submittal_type'),
+    submittalTypeWithoutProduct: count('submittal_type_without_product'),
+    productMissingDatasheet: count('product_missing_datasheet'),
     total: findings.length,
   };
 }
@@ -238,7 +254,17 @@ export async function getCoordinationReport(
     );
     await client.query('COMMIT');
     const referenceFindings = buildReferenceConsistencyFindings(classified).map(toReferenceFinding);
-    const { findings, notes } = buildFindings(required, present, broken, referenceFindings);
+    const submittals = await getSubmittalRegister(
+      projectId,
+      present.map((p) => p.specId)
+    );
+    const { findings, notes } = buildFindings(
+      required,
+      present,
+      broken,
+      referenceFindings,
+      submittals.findings
+    );
     return {
       projectId,
       packageId: packageId ?? null,

@@ -426,4 +426,5 @@ export async function handleGetSpecDiff({
 }
 
 export { handleCoordinationReport } from './coordination-handler.js';
+export { handleSubmittalRegister } from './submittal-register-handler.js';
 export { handleOpenCommentsReport } from './open-comments-handler.js';

@@ -277,6 +277,12 @@ export type {
 } from './queries/required-sections.js';
 export { getCoordinationReport } from './queries/coordination.js';
 export type { Finding, CoordinationSummary, CoordinationReport } from './queries/coordination.js';
+export {
+  getSubmittalRegister,
+  SubmittalRegisterProjectNotFoundError,
+  SubmittalRegisterSpecNotInProjectError,
+} from './queries/submittal-register.js';
+export type { ProjectSubmittalRegister } from './queries/submittal-register.js';
 export { getOpenCommentsReport } from './queries/open-comments.js';
 export type {
   OpenComment,
