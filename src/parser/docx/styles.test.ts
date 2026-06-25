@@ -210,3 +210,39 @@ describe('buildStyleMap — edge cases', () => {
     expect(() => buildStyleMap('<unclosed')).toThrow(ParserError);
   });
 });
+
+describe('vanish resolution', () => {
+  it('marks a paragraph style vanish when its own rPr has w:vanish', () => {
+    const xml = `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:style w:styleId="Hidden" w:type="paragraph"><w:name w:val="Hidden"/><w:rPr><w:vanish/></w:rPr></w:style>
+    </w:styles>`;
+    expect(buildStyleMap(xml).vanishStyleIds.has('Hidden')).toBe(true);
+  });
+
+  it('inherits vanish through the basedOn chain', () => {
+    const xml = `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:style w:styleId="Base" w:type="paragraph"><w:name w:val="Base"/><w:rPr><w:vanish/></w:rPr></w:style>
+      <w:style w:styleId="Child" w:type="paragraph"><w:name w:val="Child"/><w:basedOn w:val="Base"/></w:style>
+    </w:styles>`;
+    expect(buildStyleMap(xml).vanishStyleIds.has('Child')).toBe(true);
+  });
+
+  it('captures character-style vanish into vanishCharStyleIds', () => {
+    const xml = `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:style w:styleId="HideChar" w:type="character"><w:name w:val="HideChar"/><w:rPr><w:vanish/></w:rPr></w:style>
+    </w:styles>`;
+    const m = buildStyleMap(xml);
+    expect(m.vanishCharStyleIds.has('HideChar')).toBe(true);
+    expect(m.vanishStyleIds.has('HideChar')).toBe(false);
+  });
+
+  it('inherits character-style vanish through the basedOn chain (CodeRabbit #295)', () => {
+    const xml = `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:style w:styleId="BaseHide" w:type="character"><w:name w:val="BaseHide"/><w:rPr><w:vanish/></w:rPr></w:style>
+      <w:style w:styleId="ChildHide" w:type="character"><w:name w:val="ChildHide"/><w:basedOn w:val="BaseHide"/></w:style>
+    </w:styles>`;
+    const m = buildStyleMap(xml);
+    expect(m.vanishCharStyleIds.has('ChildHide')).toBe(true);
+    expect(m.vanishCharStyleIds.has('BaseHide')).toBe(true);
+  });
+});

@@ -5,7 +5,12 @@ import type { ClassifiedParagraph, DocxParagraph, NumberingMap, StyleMap } from 
 import type { NodeType } from '../../ast/types.js';
 
 function emptyStyleMap(): StyleMap {
-  return { styles: new Map(), resolvedNumPr: new Map() };
+  return {
+    styles: new Map(),
+    resolvedNumPr: new Map(),
+    vanishStyleIds: new Set(),
+    vanishCharStyleIds: new Set(),
+  };
 }
 
 function makePara(overrides: Partial<DocxParagraph> = {}): DocxParagraph {
@@ -81,6 +86,8 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['Heading1', { styleId: 'Heading1', name: 'heading 1' }]]),
       resolvedNumPr: new Map([['Heading1', { numId: 1, ilvl: 0 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
     };
     const result = classifyParagraphs(
       [makePara({ styleId: 'Heading1', text: 'PART 1' })],
@@ -95,6 +102,8 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', suppressesNumbering: true }]]),
       resolvedNumPr: new Map([['PR1lc', { numId: 1, ilvl: 4 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
     };
     const result = classifyParagraphs(
       [makePara({ styleId: 'PR1lc', text: 'Continuation text here.' })],
@@ -109,6 +118,8 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['Heading2', { styleId: 'Heading2', name: 'heading 2' }]]),
       resolvedNumPr: new Map([['Heading2', { numId: 1, ilvl: 1 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
     };
     const result = classifyParagraphs(
       [makePara({ numId: 1, ilvl: 2, styleId: 'Heading2' })],
@@ -154,14 +165,14 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
     expect(result[0]?.signalUsed).toBe(3);
   });
 
-  it('vanish paragraph: isVanish propagated from DocxParagraph', () => {
+  it('vanish paragraph: isVanish propagated and classified as continuation', () => {
     const result = classifyParagraphs(
       [makePara({ numId: 1, ilvl: 0, isVanish: true, text: 'PART 1 – GENERAL' })],
       numMap(1),
       emptyStyleMap()
     );
     expect(result[0]?.isVanish).toBe(true);
-    expect(result[0]?.nodeType).toBe('part');
+    expect(result[0]?.nodeType).toBe('continuation');
   });
 });
 
@@ -173,6 +184,8 @@ describe('classifyParagraphs — CPI regressions', () => {
         ['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', suppressesNumbering: true, basedOn: 'PR1' }],
       ]),
       resolvedNumPr: new Map([['PR1', { numId: 2, ilvl: 4 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
     };
     const result = classifyParagraphs(
       [makePara({ styleId: 'PR1lc', text: 'This continues the paragraph above.' })],

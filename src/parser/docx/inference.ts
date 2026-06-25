@@ -146,8 +146,8 @@ function classifyOne(
   styleMap: StyleMap,
   prevNonContIlvl: number
 ): ClassifiedParagraph {
-  // specifier notes render as vanish notes — SEC NTE/NPR parity
-  if (isNoteParagraph(para, styleMap)) {
+  // Hidden + specifier-note paragraphs render as vanish notes — never structural.
+  if (para.isVanish || isNoteParagraph(para, styleMap)) {
     return continuationResult(para, prevNonContIlvl, true);
   }
 
@@ -264,8 +264,9 @@ function partCountWarning(partCount: number): ParseWarning | null {
 // silently — 21 11 00agf.docx produced 34 roots with zero warnings.
 export function auditTreeStructure(roots: readonly SpecNode[]): ParseWarning[] {
   const warnings: ParseWarning[] = [];
-  const partCount = roots.filter((n) => n.type === 'part').length;
-  const junkRoots = roots.filter((n) => n.type !== 'part');
+  const visible = roots.filter((n) => n.meta.vanish !== true);
+  const partCount = visible.filter((n) => n.type === 'part').length;
+  const junkRoots = visible.filter((n) => n.type !== 'part');
 
   if (partCount === 0) {
     warnings.push({

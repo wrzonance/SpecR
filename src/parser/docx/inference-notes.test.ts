@@ -5,7 +5,12 @@ import type { DocxParagraph, NumberingMap, StyleMap } from './types.js';
 import type { NodeType, SpecNode } from '../../ast/types.js';
 
 function emptyStyleMap(): StyleMap {
-  return { styles: new Map(), resolvedNumPr: new Map() };
+  return {
+    styles: new Map(),
+    resolvedNumPr: new Map(),
+    vanishStyleIds: new Set(),
+    vanishCharStyleIds: new Set(),
+  };
 }
 
 function makePara(overrides: Partial<DocxParagraph> = {}): DocxParagraph {
@@ -34,6 +39,8 @@ describe('classifyParagraphs + buildTree — specifier notes become vanish notes
     const styleMap: StyleMap = {
       styles: new Map([['ARCATnote', { styleId: 'ARCATnote', name: 'ARCATnote' }]]),
       resolvedNumPr: new Map(),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
     };
     const classified = classifyParagraphs(
       [
@@ -53,6 +60,8 @@ describe('classifyParagraphs + buildTree — specifier notes become vanish notes
     const styleMap: StyleMap = {
       styles: new Map([['FootnoteText', { styleId: 'FootnoteText', name: 'footnote text' }]]),
       resolvedNumPr: new Map(),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
     };
     const classified = classifyParagraphs(
       [makePara({ styleId: 'FootnoteText', text: 'See appendix for details.' })],
@@ -129,6 +138,8 @@ describe('classifyParagraphs — note-style name matching (CodeRabbit #113)', ()
     const styleMap: StyleMap = {
       styles: new Map([['VendorNote', { styleId: 'VendorNote', name: 'VendorNote' }]]),
       resolvedNumPr: new Map(),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
     };
     const classified = classifyParagraphs(
       [
@@ -146,6 +157,8 @@ describe('classifyParagraphs — note-style name matching (CodeRabbit #113)', ()
     const styleMap: StyleMap = {
       styles: new Map([['EndnoteText', { styleId: 'EndnoteText', name: 'endnote text' }]]),
       resolvedNumPr: new Map(),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
     };
     const classified = classifyParagraphs(
       [makePara({ styleId: 'EndnoteText', text: 'See bibliography.' })],
