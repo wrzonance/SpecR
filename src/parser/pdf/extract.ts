@@ -18,6 +18,11 @@ export interface PdfExtractorDependencies {
   readonly getDocument: typeof getDocument;
 }
 
+interface PageDimensions {
+  readonly width: number;
+  readonly height: number;
+}
+
 const PdfJsTextItemSchema = z.object({
   str: z.string(),
   transform: z.array(z.unknown()),
@@ -81,22 +86,52 @@ function mapStructuredItem(item: StructuredTextItem): PdfTextItem {
   };
 }
 
+async function readPageDimensions(pdf: PDFDocumentProxy): Promise<readonly PageDimensions[]> {
+  const dimensions: PageDimensions[] = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1 });
+    dimensions.push({ width: viewport.width, height: viewport.height });
+  }
+  return dimensions;
+}
+
+async function extractPageDimensions(
+  data: ArrayBuffer,
+  deps: PdfExtractorDependencies
+): Promise<readonly PageDimensions[]> {
+  const task = deps.getDocument({ data, stopAtErrors: false, disableFontFace: true });
+  try {
+    return await readPageDimensions(await task.promise);
+  } finally {
+    await task.destroy();
+  }
+}
+
+function pageDimensions(dimensions: readonly PageDimensions[], index: number): PageDimensions {
+  return dimensions[index] ?? { width: DEFAULT_PAGE_WIDTH, height: DEFAULT_PAGE_HEIGHT };
+}
+
 async function extractPrimary(
   buffer: Buffer,
   deps: PdfExtractorDependencies
 ): Promise<PdfExtractionResult> {
   await ensurePdfJsModule();
-  const [textResult, itemResult] = await Promise.all([
+  const [textResult, itemResult, dimensions] = await Promise.all([
     deps.extractText(pdfData(buffer), { mergePages: false }),
     deps.extractTextItems(pdfData(buffer)),
+    extractPageDimensions(pdfData(buffer), deps),
   ]);
-  const pages = textResult.text.map((text, index) => ({
-    pageNumber: index + 1,
-    width: DEFAULT_PAGE_WIDTH,
-    height: DEFAULT_PAGE_HEIGHT,
-    text,
-    items: (itemResult.items[index] ?? []).map(mapStructuredItem),
-  }));
+  const pages = textResult.text.map((text, index) => {
+    const dimension = pageDimensions(dimensions, index);
+    return {
+      pageNumber: index + 1,
+      width: dimension.width,
+      height: dimension.height,
+      text,
+      items: (itemResult.items[index] ?? []).map(mapStructuredItem),
+    };
+  });
   return { text: pages.map((page) => page.text).join('\n'), pages, warnings: [] };
 }
 

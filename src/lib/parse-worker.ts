@@ -3,6 +3,7 @@ import { parse } from '../parser/index.js';
 import { ParseWarningSchema, SecRefSchema } from '../ast/index.js';
 import type { SpecTree, SecRef } from '../ast/index.js';
 import { SectionNumberSchema } from './section-number.js';
+import { config } from './env.js';
 
 export interface WorkerInput {
   readonly buffer: Buffer;
@@ -40,6 +41,8 @@ export const workerOutputSchema = z.object({
 // Format safety validation (assertSecSafe/assertDocxSafe) already ran in the
 // main thread before the job was created.
 export default async function parseWorker({ buffer, ext }: WorkerInput): Promise<WorkerOutput> {
-  const { tree, refs, capabilities } = await parse(buffer, `upload${ext}`);
+  const { tree, refs, capabilities } = await parse(buffer, `upload${ext}`, {
+    ocrMinCharsPerPage: config.OCR_MIN_CHARS_PER_PAGE,
+  });
   return { tree, refs, ...(capabilities !== undefined ? { capabilities } : {}) };
 }

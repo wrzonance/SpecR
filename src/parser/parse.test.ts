@@ -12,6 +12,7 @@ vi.mock('./docx/index.js', () => ({
 }));
 vi.mock('./pdf/index.js', () => ({
   parsePdf: vi.fn(),
+  assertPdfSafe: vi.fn(),
 }));
 vi.mock('../lib/decode-text.js', () => ({
   decodeTextBuffer: vi.fn((buf: Buffer) => buf.toString('utf-8')),
@@ -75,8 +76,8 @@ describe('parse() dispatcher', () => {
       capabilities: ['read-only'],
     });
     const buf = Buffer.from('%PDF-1.4');
-    const result = await parse(buf, 'spec.pdf');
-    expect(parsePdf).toHaveBeenCalledWith(buf);
+    const result = await parse(buf, 'spec.pdf', { ocrMinCharsPerPage: 24 });
+    expect(parsePdf).toHaveBeenCalledWith(buf, { ocrMinCharsPerPage: 24 });
     expect(result.tree).toBe(mockTree);
     expect(result.capabilities).toEqual(['read-only']);
   });

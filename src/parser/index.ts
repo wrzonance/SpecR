@@ -23,7 +23,7 @@ export type {
   PropertyDecision,
 } from './docx/index.js';
 export { parseText } from './text/index.js';
-export { parsePdf } from './pdf/index.js';
+export { parsePdf, assertPdfSafe } from './pdf/index.js';
 export { extractRefsFromTree } from './refs/index.js';
 export { ParserError } from './error.js';
 export type { SectionInference } from '../lib/infer-section.js';
@@ -33,6 +33,10 @@ export interface ParseResult {
   readonly refs: readonly SecRef[];
   readonly sectionInference: SectionInference;
   readonly capabilities?: readonly string[];
+}
+
+export interface ParseOptions {
+  readonly ocrMinCharsPerPage?: number;
 }
 
 function withArticleRoles(tree: SpecTree): SpecTree {
@@ -49,7 +53,11 @@ function applyInference(tree: SpecTree, inference: SectionInference): SpecTree {
   return { ...tree, section, title };
 }
 
-export async function parse(buffer: Buffer, filename: string): Promise<ParseResult> {
+export async function parse(
+  buffer: Buffer,
+  filename: string,
+  options?: ParseOptions
+): Promise<ParseResult> {
   const ext = path.extname(filename).toLowerCase();
   if (ext === '.sec') {
     const text = assertSecSafe(buffer);
@@ -76,7 +84,11 @@ export async function parse(buffer: Buffer, filename: string): Promise<ParseResu
     return { tree: withArticleRoles(tree), refs, sectionInference, capabilities };
   }
   if (ext === '.pdf') {
-    const { tree, refs, capabilities } = await parsePdf(buffer);
+    const pdfOptions =
+      options?.ocrMinCharsPerPage === undefined
+        ? {}
+        : { ocrMinCharsPerPage: options.ocrMinCharsPerPage };
+    const { tree, refs, capabilities } = await parsePdf(buffer, pdfOptions);
     const sectionInference = inferSectionMeta(tree);
     return { tree: withArticleRoles(tree), refs, sectionInference, capabilities };
   }

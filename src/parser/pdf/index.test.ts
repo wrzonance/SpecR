@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { detectPdfOcrNeed, parsePdf } from './index.js';
 import type { PdfExtractionResult } from './extract.js';
 
@@ -68,6 +68,18 @@ function extractionResult(pageTexts: readonly string[]): PdfExtractionResult {
   };
 }
 
+function extractionResultWithoutItems(text: string): PdfExtractionResult {
+  return {
+    text,
+    warnings: [],
+    pages: [{ pageNumber: 1, width: 612, height: 792, text, items: [] }],
+  };
+}
+
+function hasOcrWarning(result: Awaited<ReturnType<typeof parsePdf>>): boolean {
+  return result.tree.warnings?.some((warning) => warning.type === 'pdf-needs-ocr') ?? false;
+}
+
 describe('detectPdfOcrNeed', () => {
   it('classifies a PDF as scanned when every page is below the text threshold', () => {
     expect(detectPdfOcrNeed(extractionResult(['', '   ']).pages, 16)).toEqual({
@@ -82,6 +94,15 @@ describe('detectPdfOcrNeed', () => {
     expect(detectPdfOcrNeed(result.pages, 16)).toEqual({
       status: 'mixed',
       pageNumbers: [2],
+    });
+  });
+
+  it('classifies pages with extractor text but no positioned items as scanned', () => {
+    const result = extractionResultWithoutItems('Text exists only in the merged extractor output');
+
+    expect(detectPdfOcrNeed(result.pages, 16)).toEqual({
+      status: 'scanned',
+      pageNumbers: [1],
     });
   });
 });
@@ -123,6 +144,38 @@ describe('parsePdf', () => {
     expect(result.tree.warnings?.some((warning) => warning.type === 'pdf-needs-ocr') ?? false).toBe(
       false
     );
+  });
+
+  it('uses the default OCR threshold without importing env and honors explicit thresholds', async () => {
+    vi.doMock('../../lib/env.js', () => {
+      throw new Error('parser PDF must not import env');
+    });
+    try {
+      const sparse = extractionResult(['1234567890']);
+      const defaultResult = await parsePdf(Buffer.from('%PDF'), {
+        extractPdfText: () => Promise.resolve(sparse),
+      });
+      const explicitResult = await parsePdf(Buffer.from('%PDF'), {
+        ocrMinCharsPerPage: 4,
+        extractPdfText: () => Promise.resolve(sparse),
+      });
+
+      expect(hasOcrWarning(defaultResult)).toBe(true);
+      expect(hasOcrWarning(explicitResult)).toBe(false);
+    } finally {
+      vi.doUnmock('../../lib/env.js');
+    }
+  });
+
+  it('emits a needs-OCR warning when merged text has no usable positioned items', async () => {
+    const result = await parsePdf(Buffer.from('%PDF'), {
+      ocrMinCharsPerPage: 16,
+      extractPdfText: () =>
+        Promise.resolve(extractionResultWithoutItems('Text exists only outside positioned items')),
+    });
+
+    expect(hasOcrWarning(result)).toBe(true);
+    expect(result.capabilities).toContain('parse-warnings');
   });
 
   it('emits a needs-OCR warning instead of crashing when no text layer is present', async () => {

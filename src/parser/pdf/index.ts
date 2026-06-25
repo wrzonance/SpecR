@@ -5,8 +5,11 @@ import { extractPdfText } from './extract.js';
 import type { PdfExtractionResult } from './extract.js';
 import { normalizePdfText, type PdfPageText } from './normalize.js';
 
+export { assertPdfSafe } from './safety.js';
+
 type PdfOcrStatus = 'none' | 'scanned' | 'mixed';
 type PdfTextExtractor = (buffer: Buffer) => Promise<PdfExtractionResult>;
+const DEFAULT_OCR_MIN_CHARS_PER_PAGE = 16;
 
 export interface PdfOcrNeed {
   readonly status: PdfOcrStatus;
@@ -19,7 +22,7 @@ export interface ParsePdfOptions {
 }
 
 function pageChars(page: PdfPageText): number {
-  return page.text.replace(/\s/g, '').length;
+  return normalizePdfText([page]).replace(/\s/g, '').length;
 }
 
 export function detectPdfOcrNeed(
@@ -34,11 +37,6 @@ export function detectPdfOcrNeed(
     status: pageNumbers.length === pages.length ? 'scanned' : 'mixed',
     pageNumbers,
   };
-}
-
-async function configuredOcrMinChars(): Promise<number> {
-  const { config } = await import('../../lib/env.js');
-  return config.OCR_MIN_CHARS_PER_PAGE;
 }
 
 function ocrLineHint(need: PdfOcrNeed, minCharsPerPage: number): string {
@@ -76,7 +74,7 @@ function capabilitiesWithWarnings(
 
 export async function parsePdf(buffer: Buffer, options: ParsePdfOptions = {}) {
   const extractor = options.extractPdfText ?? extractPdfText;
-  const minChars = options.ocrMinCharsPerPage ?? (await configuredOcrMinChars());
+  const minChars = options.ocrMinCharsPerPage ?? DEFAULT_OCR_MIN_CHARS_PER_PAGE;
   const extracted = await extractor(buffer);
   const normalized = normalizePdfText(extracted.pages);
   const parsed = parseText(normalized);

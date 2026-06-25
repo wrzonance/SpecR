@@ -2,7 +2,7 @@ import multer from 'multer';
 import path from 'node:path';
 import { z } from 'zod';
 import type { Request, Response } from 'express';
-import { assertDocxSafe, assertSecSafe } from '../parser/index.js';
+import { assertDocxSafe, assertPdfSafe, assertSecSafe } from '../parser/index.js';
 import { createJob, updateJob, getJob, type ParseStage } from '../lib/jobs.js';
 import { parsePool } from '../lib/parse-pool.js';
 import { workerOutputSchema, type WorkerOutput } from '../lib/parse-worker.js';
@@ -53,6 +53,10 @@ async function assertUploadSafe(ext: string, buffer: Buffer): Promise<void> {
     await assertDocxSafe(buffer);
     return;
   }
+  if (ext === '.pdf') {
+    assertPdfSafe(buffer);
+    return;
+  }
   assertSecSafe(buffer);
 }
 
@@ -63,7 +67,7 @@ async function validateUpload(req: Request): Promise<UploadValidation> {
   if (!ALLOWED_EXT.has(ext)) return { error: 'unsupported file extension' };
   const mimeError = uploadMimeError(ext, file.mimetype);
   if (mimeError !== null) return { error: mimeError };
-  if (ext === '.txt' || ext === '.pdf') return { file, ext };
+  if (ext === '.txt') return { file, ext };
   try {
     await assertUploadSafe(ext, file.buffer);
     return { file, ext };

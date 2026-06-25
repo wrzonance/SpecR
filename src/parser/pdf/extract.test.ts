@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractPdfText, type PdfExtractorDependencies } from './extract.js';
+import { normalizePdfText } from './normalize.js';
 
 function pdfObject(id: number, body: string): string {
   return `${id} 0 obj\n${body}\nendobj\n`;
@@ -37,6 +38,40 @@ function textPdf(text: string): Buffer {
     pdfObject(
       5,
       `<< /Length ${Buffer.byteLength(stream, 'utf-8')} >>\nstream\n${stream}\nendstream`
+    ),
+  ]);
+}
+
+function textStream(lines: readonly string[], y: number): string {
+  const escaped = lines.map((line) =>
+    line.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)')
+  );
+  const textOps = escaped.map((line) => `(${line}) Tj T*`).join(' ');
+  return `BT /F1 12 Tf 20 TL 72 ${y} Td ${textOps} ET`;
+}
+
+function a4TwoPagePdf(): Buffer {
+  const firstStream = textStream(['SpecR Header', 'PART 1 - GENERAL', '1.1 SUMMARY'], 820);
+  const secondStream = textStream(['SpecR Header', 'PART 2 - PRODUCTS', '2.1 MATERIALS'], 820);
+  return buildPdf([
+    pdfObject(1, '<< /Type /Catalog /Pages 2 0 R >>'),
+    pdfObject(2, '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>'),
+    pdfObject(
+      3,
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>'
+    ),
+    pdfObject(
+      4,
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>'
+    ),
+    pdfObject(5, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'),
+    pdfObject(
+      6,
+      `<< /Length ${Buffer.byteLength(firstStream, 'utf-8')} >>\nstream\n${firstStream}\nendstream`
+    ),
+    pdfObject(
+      7,
+      `<< /Length ${Buffer.byteLength(secondStream, 'utf-8')} >>\nstream\n${secondStream}\nendstream`
     ),
   ]);
 }
@@ -79,5 +114,14 @@ describe('extractPdfText', () => {
 
     expect(result.pages).toHaveLength(1);
     expect(result.pages[0]?.text).toBe('');
+  });
+
+  it('keeps real A4 page dimensions on the primary path so repeated furniture is stripped', async () => {
+    const result = await extractPdfText(a4TwoPagePdf());
+
+    expect(result.pages.map((page) => page.height)).toEqual([842, 842]);
+    expect(normalizePdfText(result.pages)).toBe(
+      ['PART 1 - GENERAL', '1.1 SUMMARY', 'PART 2 - PRODUCTS', '2.1 MATERIALS'].join('\n')
+    );
   });
 });

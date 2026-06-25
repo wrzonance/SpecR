@@ -13,6 +13,9 @@ vi.mock('../parser/index.js', () => ({
 vi.mock('../lib/parse-pool.js', () => ({
   parsePool: { run: vi.fn() },
 }));
+vi.mock('../lib/env.js', () => ({
+  config: { OCR_MIN_CHARS_PER_PAGE: 16 },
+}));
 vi.mock('../lib/jobs.js', () => ({
   createOnboardingJob: vi.fn().mockReturnValue('onboard-job-id'),
   updateOnboardingJob: vi.fn(),
