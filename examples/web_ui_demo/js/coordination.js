@@ -21,6 +21,21 @@ const GROUPS = [
     title: 'DANGLING CROSS-REFERENCES',
     empty: 'No loaded section cites a section outside this scope.',
   },
+  {
+    type: 'related_listed_not_cited',
+    title: 'LISTED IN RELATED SECTIONS, NOT CITED',
+    empty: 'Every Related Sections entry is cited somewhere in its spec body.',
+  },
+  {
+    type: 'related_cited_not_listed',
+    title: 'CITED IN BODY, NOT IN RELATED SECTIONS',
+    empty: 'Every section cited in a body is also listed under Related Sections.',
+  },
+  {
+    type: 'standard_cited_not_listed',
+    title: 'STANDARD CITED, NOT IN REFERENCES',
+    empty: 'Every standard cited in a body is also listed under References.',
+  },
 ];
 
 function sectionButton(section, ctx) {
@@ -32,10 +47,30 @@ function sectionButton(section, ctx) {
 
 function findingSection(finding) {
   if (finding.type === 'dangling_ref') return finding.targetSpecSection;
+  if (finding.type === 'standard_cited_not_listed') return finding.sourceSpecSection;
   return finding.section;
 }
 
+// The #259 article<->body consistency findings: source spec section, the
+// relationship, and the cited/listed target (a section number or standard code).
+const REFERENCE_FINDINGS = {
+  related_listed_not_cited: { arrow: 'lists (uncited)', target: (f) => f.section },
+  related_cited_not_listed: { arrow: 'cites (unlisted)', target: (f) => f.section },
+  standard_cited_not_listed: { arrow: 'cites (unlisted)', target: (f) => f.standardCode },
+};
+
+function renderReferenceFinding(finding, ctx, shape) {
+  const row = el('li', `coord-finding is-${finding.type}`);
+  row.appendChild(sectionButton(finding.sourceSpecSection, ctx));
+  row.appendChild(el('span', 'coord-arrow', shape.arrow));
+  row.appendChild(el('span', 'coord-target', shape.target(finding) || 'unknown'));
+  return row;
+}
+
 function renderFinding(finding, ctx) {
+  const reference = REFERENCE_FINDINGS[finding.type];
+  if (reference) return renderReferenceFinding(finding, ctx, reference);
+
   const row = el('li', `coord-finding is-${finding.type}`);
   if (finding.type === 'present_not_required') {
     row.appendChild(sectionButton(finding.section, ctx));
@@ -95,6 +130,15 @@ export function renderCoordinationReport(container, report, ctx = {}) {
     el('span', 'coord-chip', `${report.summary.requiredNotPresent} REQUIRED NOT PRESENT`)
   );
   summary.appendChild(el('span', 'coord-chip', `${report.summary.danglingRef} DANGLING REFS`));
+  summary.appendChild(
+    el('span', 'coord-chip', `${report.summary.relatedListedNotCited} LISTED NOT CITED`)
+  );
+  summary.appendChild(
+    el('span', 'coord-chip', `${report.summary.relatedCitedNotListed} CITED NOT LISTED`)
+  );
+  summary.appendChild(
+    el('span', 'coord-chip', `${report.summary.standardCitedNotListed} STD CITED NOT LISTED`)
+  );
   container.appendChild(summary);
 
   if (report.notes.length > 0) {

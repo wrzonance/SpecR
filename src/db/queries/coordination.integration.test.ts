@@ -86,6 +86,44 @@ async function addRef(
   );
   return paragraphId;
 }
+async function newArticle(specId: string, headingText: string, position: number): Promise<string> {
+  const r = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, node_type, text, position) VALUES ($1, 'article', $2, $3) RETURNING id`,
+    [specId, headingText, position]
+  );
+  const id = r.rows[0]?.id;
+  if (id === undefined) throw new Error('newArticle: no id');
+  return id;
+}
+// Body/article ref with explicit target_type + parent. value = canonical section
+// or standard_code. Used by the #259 article<->body consistency tests.
+async function addClassifiedRef(args: {
+  specId: string;
+  parentId: string | null;
+  text: string;
+  targetType: 'section' | 'standard';
+  value: string;
+}): Promise<void> {
+  const p = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position) VALUES ($1, $2, 'pr1', $3, 1) RETURNING id`,
+    [args.specId, args.parentId, args.text]
+  );
+  const pid = p.rows[0]?.id;
+  if (pid === undefined) throw new Error('addClassifiedRef: no paragraph id');
+  await pool.query(
+    `INSERT INTO spec_references
+       (source_spec_id, source_paragraph_id, target_type, target_spec_section, standard_code, reference_text)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      args.specId,
+      pid,
+      args.targetType,
+      args.targetType === 'section' ? args.value : null,
+      args.targetType === 'standard' ? args.value : null,
+      args.text,
+    ]
+  );
+}
 // Narrowing filter: ofType(fs, 'dangling_ref') is typed to the dangling variant,
 // so variant-specific fields (.targetSpecSection, .section, .specId) typecheck.
 function ofType<T extends Finding['type']>(
@@ -129,13 +167,118 @@ describe('getCoordinationReport', () => {
     expect(ofType(report.findings, 'dangling_ref').map((f) => f.targetSpecSection)).toEqual([
       '09 91 00',
     ]);
+    // Both refs sit in the body with no Related Sections article, so each is also
+    // a legitimate #259 related_cited_not_listed (cited but not listed).
+    expect(
+      ofType(report.findings, 'related_cited_not_listed')
+        .map((f) => f.section)
+        .sort((a, b) => a.localeCompare(b))
+    ).toEqual(['07 92 00', '09 91 00']);
     expect(report.summary).toEqual({
       requiredNotPresent: 1,
       presentNotRequired: 1,
       danglingRef: 1,
-      total: 3,
+      relatedListedNotCited: 0,
+      relatedCitedNotListed: 2,
+      standardCitedNotListed: 0,
+      total: 5,
     });
     expect(report.notes).toEqual([]);
+  });
+
+  it('#259 A3: lists 07 84 00 under Related Sections but never cites it → related_listed_not_cited', async () => {
+    const projectId = await newProject('coord-a3');
+    const spec = await newSpec('08 11 13', 'Hollow Metal Doors');
+    await addProjectSpec(projectId, spec, 1);
+    const related = await newArticle(spec, '1.1 RELATED SECTIONS', 1);
+    await addClassifiedRef({
+      specId: spec,
+      parentId: related,
+      text: 'Section 07 84 00',
+      targetType: 'section',
+      value: '07 84 00',
+    });
+
+    const report = await getCoordinationReport(projectId, undefined);
+    const f = ofType(report.findings, 'related_listed_not_cited');
+    expect(f.map((x) => x.section)).toEqual(['07 84 00']);
+    expect(f[0]?.sourceSpecSection).toBe('08 11 13');
+    expect(report.summary.relatedListedNotCited).toBe(1);
+  });
+
+  it('#259 A2: cites Section 26 05 33 in the body with no Related Sections entry → related_cited_not_listed', async () => {
+    const projectId = await newProject('coord-a2');
+    const spec = await newSpec('26 27 26', 'Wiring Devices');
+    await addProjectSpec(projectId, spec, 1);
+    await addClassifiedRef({
+      specId: spec,
+      parentId: null,
+      text: 'Coordinate with Section 26 05 33',
+      targetType: 'section',
+      value: '26 05 33',
+    });
+
+    const report = await getCoordinationReport(projectId, undefined);
+    const f = ofType(report.findings, 'related_cited_not_listed');
+    expect(f.map((x) => x.section)).toEqual(['26 05 33']);
+    expect(report.summary.relatedCitedNotListed).toBe(1);
+  });
+
+  it('#259 B2: cites ASTM E814 in the body with no References entry → standard_cited_not_listed; a listed-but-uncited standard yields nothing', async () => {
+    const projectId = await newProject('coord-b2');
+    const spec = await newSpec('07 84 00', 'Firestopping');
+    await addProjectSpec(projectId, spec, 1);
+    const refsArticle = await newArticle(spec, '1.02 REFERENCES', 1);
+    // listed-but-uncited (B1 non-goal): MUST yield nothing
+    await addClassifiedRef({
+      specId: spec,
+      parentId: refsArticle,
+      text: 'ASTM E119',
+      targetType: 'standard',
+      value: 'ASTM E119',
+    });
+    // cited-but-unlisted (B2): the finding
+    await addClassifiedRef({
+      specId: spec,
+      parentId: null,
+      text: 'Seal per ASTM E814',
+      targetType: 'standard',
+      value: 'ASTM E814',
+    });
+
+    const report = await getCoordinationReport(projectId, undefined);
+    const f = ofType(report.findings, 'standard_cited_not_listed');
+    expect(f.map((x) => x.standardCode)).toEqual(['ASTM E814']);
+    expect(report.summary.standardCitedNotListed).toBe(1);
+  });
+
+  it('#259 healthy case: a section both listed under Related Sections AND cited in the body yields no A2/A3', async () => {
+    const projectId = await newProject('coord-healthy');
+    const spec = await newSpec('08 11 13', 'Hollow Metal Doors');
+    await addProjectSpec(projectId, spec, 1);
+    const related = await newArticle(spec, '1.1 RELATED SECTIONS', 1);
+    // listed under Related Sections
+    await addClassifiedRef({
+      specId: spec,
+      parentId: related,
+      text: 'Section 07 84 00',
+      targetType: 'section',
+      value: '07 84 00',
+    });
+    // AND cited in the body — the coordinated, healthy case
+    await addClassifiedRef({
+      specId: spec,
+      parentId: null,
+      text: 'Seal the head joint per Section 07 84 00',
+      targetType: 'section',
+      value: '07 84 00',
+    });
+
+    const report = await getCoordinationReport(projectId, undefined);
+    expect(ofType(report.findings, 'related_listed_not_cited')).toHaveLength(0);
+    expect(ofType(report.findings, 'related_cited_not_listed')).toHaveLength(0);
+    expect(report.summary.relatedListedNotCited).toBe(0);
+    expect(report.summary.relatedCitedNotListed).toBe(0);
   });
 
   it('dangling_ref carries the source paragraph id and a snippet of the ref in context (#260)', async () => {

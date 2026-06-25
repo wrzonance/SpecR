@@ -3094,7 +3094,7 @@ paths:
   /projects/{id}/coordination-report:
     get:
       operationId: getCoordinationReport
-      summary: Project coordination report — required/present/reference findings
+      summary: Project coordination report — required/present/reference + article-body consistency findings
       tags: [projects]
       parameters:
         - name: id
@@ -3389,23 +3389,41 @@ components:
           items: { type: string }
     CoordinationSummary:
       type: object
-      required: [requiredNotPresent, presentNotRequired, danglingRef, total]
+      required:
+        [
+          requiredNotPresent,
+          presentNotRequired,
+          danglingRef,
+          relatedListedNotCited,
+          relatedCitedNotListed,
+          standardCitedNotListed,
+          total,
+        ]
       properties:
         requiredNotPresent: { type: integer }
         presentNotRequired: { type: integer }
         danglingRef: { type: integer }
+        relatedListedNotCited: { type: integer }
+        relatedCitedNotListed: { type: integer }
+        standardCitedNotListed: { type: integer }
         total: { type: integer }
     CoordinationFinding:
       oneOf:
         - $ref: '#/components/schemas/FindingRequiredNotPresent'
         - $ref: '#/components/schemas/FindingPresentNotRequired'
         - $ref: '#/components/schemas/FindingDanglingRef'
+        - $ref: '#/components/schemas/FindingRelatedListedNotCited'
+        - $ref: '#/components/schemas/FindingRelatedCitedNotListed'
+        - $ref: '#/components/schemas/FindingStandardCitedNotListed'
       discriminator:
         propertyName: type
         mapping:
           required_not_present: '#/components/schemas/FindingRequiredNotPresent'
           present_not_required: '#/components/schemas/FindingPresentNotRequired'
           dangling_ref: '#/components/schemas/FindingDanglingRef'
+          related_listed_not_cited: '#/components/schemas/FindingRelatedListedNotCited'
+          related_cited_not_listed: '#/components/schemas/FindingRelatedCitedNotListed'
+          standard_cited_not_listed: '#/components/schemas/FindingStandardCitedNotListed'
     FindingRequiredNotPresent:
       type: object
       required: [type, section, title, requiredId]
@@ -3458,6 +3476,40 @@ components:
             properties:
               libraryId: { type: string, format: uuid }
               name: { type: string }
+    FindingRelatedListedNotCited:
+      type: object
+      description: >
+        A3 — a section appears in this spec's Related Sections article but is never
+        referenced anywhere else in its body. Likely an over-broad coordination list.
+      required: [type, sourceSpecId, sourceSpecSection, section]
+      properties:
+        type: { type: string, enum: [related_listed_not_cited] }
+        sourceSpecId: { type: string, format: uuid }
+        sourceSpecSection: { type: string }
+        section: { type: string, description: Canonical CSI number listed but not cited }
+    FindingRelatedCitedNotListed:
+      type: object
+      description: >
+        A2 — a section is cited in this spec's body but absent from its Related
+        Sections article. The coordination list is missing a real dependency.
+      required: [type, sourceSpecId, sourceSpecSection, section]
+      properties:
+        type: { type: string, enum: [related_cited_not_listed] }
+        sourceSpecId: { type: string, format: uuid }
+        sourceSpecSection: { type: string }
+        section: { type: string, description: Canonical CSI number cited but not listed }
+    FindingStandardCitedNotListed:
+      type: object
+      description: >
+        B2 — a code/standard (ASTM, NFPA, UL, …) is cited in this spec's body but
+        absent from its References article. (The inverse, a listed-but-uncited
+        standard, is intentionally NOT reported — #259 non-goal B1.)
+      required: [type, sourceSpecId, sourceSpecSection, standardCode]
+      properties:
+        type: { type: string, enum: [standard_cited_not_listed] }
+        sourceSpecId: { type: string, format: uuid }
+        sourceSpecSection: { type: string }
+        standardCode: { type: string, description: 'Normalized "ORG identifier", e.g. ASTM E814' }
 
     # ── Open comments (#262) ─────────────────────────────────────────────────────
 

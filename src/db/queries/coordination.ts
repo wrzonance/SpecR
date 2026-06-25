@@ -9,6 +9,11 @@ import {
   type RequiredSection,
 } from './required-sections.js';
 import { getBrokenRefs, type BrokenRef } from './project-refs.js';
+import {
+  classifyScopedRefs,
+  buildReferenceConsistencyFindings,
+  type ReferenceConsistencyFinding,
+} from './article-refs.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -37,12 +42,33 @@ export type Finding =
       readonly targetSpecSection: string;
       readonly referenceText: string;
       readonly availableFrom: readonly { readonly libraryId: string; readonly name: string }[];
+    }
+  | {
+      readonly type: 'related_listed_not_cited';
+      readonly sourceSpecId: string;
+      readonly sourceSpecSection: string;
+      readonly section: string;
+    }
+  | {
+      readonly type: 'related_cited_not_listed';
+      readonly sourceSpecId: string;
+      readonly sourceSpecSection: string;
+      readonly section: string;
+    }
+  | {
+      readonly type: 'standard_cited_not_listed';
+      readonly sourceSpecId: string;
+      readonly sourceSpecSection: string;
+      readonly standardCode: string;
     };
 
 export interface CoordinationSummary {
   readonly requiredNotPresent: number;
   readonly presentNotRequired: number;
   readonly danglingRef: number;
+  readonly relatedListedNotCited: number;
+  readonly relatedCitedNotListed: number;
+  readonly standardCitedNotListed: number;
   readonly total: number;
 }
 
@@ -130,10 +156,19 @@ function toDangling(
   };
 }
 
+function toReferenceFinding(f: ReferenceConsistencyFinding): Finding {
+  const base = { sourceSpecId: f.sourceSpecId, sourceSpecSection: f.sourceSpecSection };
+  if (f.type === 'standard_cited_not_listed') {
+    return { type: f.type, ...base, standardCode: f.value };
+  }
+  return { type: f.type, ...base, section: f.value };
+}
+
 function buildFindings(
   required: readonly RequiredSection[],
   present: readonly PresentSpec[],
-  broken: readonly BrokenRef[]
+  broken: readonly BrokenRef[],
+  referenceFindings: readonly Finding[]
 ): { readonly findings: readonly Finding[]; readonly notes: readonly string[] } {
   const requiredSections = new Set(required.map((r) => r.section));
   const presentSections = new Set(present.map((p) => p.section));
@@ -166,7 +201,7 @@ function buildFindings(
   });
 
   return {
-    findings: [...requiredNotPresent, ...presentNotRequired, ...danglingRef],
+    findings: [...requiredNotPresent, ...presentNotRequired, ...danglingRef, ...referenceFindings],
     notes: empty ? [EMPTY_REQUIRED_NOTE] : [],
   };
 }
@@ -177,6 +212,9 @@ function summarize(findings: readonly Finding[]): CoordinationSummary {
     requiredNotPresent: count('required_not_present'),
     presentNotRequired: count('present_not_required'),
     danglingRef: count('dangling_ref'),
+    relatedListedNotCited: count('related_listed_not_cited'),
+    relatedCitedNotListed: count('related_cited_not_listed'),
+    standardCitedNotListed: count('standard_cited_not_listed'),
     total: findings.length,
   };
 }
@@ -194,8 +232,13 @@ export async function getCoordinationReport(
     const required = await listRequiredSections(requiredScope(projectId, packageId), client);
     const present = await readPresent(projectId, packageId, client);
     const broken = await getBrokenRefs(projectId, client);
+    const classified = await classifyScopedRefs(
+      present.map((p) => p.specId),
+      client
+    );
     await client.query('COMMIT');
-    const { findings, notes } = buildFindings(required, present, broken);
+    const referenceFindings = buildReferenceConsistencyFindings(classified).map(toReferenceFinding);
+    const { findings, notes } = buildFindings(required, present, broken, referenceFindings);
     return {
       projectId,
       packageId: packageId ?? null,
