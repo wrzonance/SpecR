@@ -13,6 +13,7 @@ import {
   ConventionRulesSchema,
   EditabilitySchema,
   PatchEditabilityBodySchema,
+  PatchRemovalBodySchema,
   ReclassifyBodySchema,
 } from './schemas.js';
 
@@ -446,5 +447,20 @@ describe('ReclassifyBodySchema (O-9 / #136)', () => {
     // The reclassify handler maps `undefined` (truly bodyless) to {} but passes
     // an explicit `null` straight to this schema, which must reject it → 400.
     expect(ReclassifyBodySchema.safeParse(null).success).toBe(false);
+  });
+});
+
+describe('PatchRemovalBodySchema (#251)', () => {
+  it('accepts { removed: true }', () => {
+    expect(PatchRemovalBodySchema.parse({ removed: true })).toEqual({ removed: true });
+  });
+  it('accepts { removed: false } (un-vanish)', () => {
+    expect(PatchRemovalBodySchema.parse({ removed: false })).toEqual({ removed: false });
+  });
+  it('rejects a missing removed flag', () => {
+    expect(PatchRemovalBodySchema.safeParse({}).success).toBe(false);
+  });
+  it('rejects a non-boolean removed flag', () => {
+    expect(PatchRemovalBodySchema.safeParse({ removed: 'yes' }).success).toBe(false);
   });
 });

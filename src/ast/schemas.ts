@@ -178,6 +178,15 @@ export const PatchEditabilityBodySchema = z.object({
 
 export type PatchEditabilityBody = z.infer<typeof PatchEditabilityBodySchema>;
 
+// #251 — reversible paragraph removal. `removed: true` sets meta.vanish (suppress
+// render, keep the row + subtree + refs); `false` reverses it. Distinct from a
+// hard DELETE by design (ADR-022, symmetric with ADR-030 spec soft-delete).
+export const PatchRemovalBodySchema = z.object({
+  removed: z.boolean(),
+});
+
+export type PatchRemovalBody = z.infer<typeof PatchRemovalBodySchema>;
+
 // Reclassify input. `rules` (optional) supplies candidate rules for a preview;
 // omitted → resolve the spec's library convention profile. `preview: true`
 // computes the diff without persisting (preview-before-save). The rules schema
