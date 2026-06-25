@@ -114,13 +114,17 @@ describe('generateSec — entity and note round-trip', () => {
     expect(note?.text).toContain('O&M data');
   });
 
-  // #251: an owner-removed body paragraph (meta.vanish via the /removal endpoint)
-  // is deliberately PRESERVED by the canonical .SEC serialization — SEC is a
-  // lossless round-trip format, not an owner-facing render. Suppression of removed
-  // paragraphs is honored only in the DOCX/Markdown renders; SEC keeps the text so
-  // removal stays reversible through the canonical format. (Do not "fix" SEC to
-  // drop vanished body nodes — that would destroy reversibility.)
-  it('preserves an owner-vanished body paragraph (lossless serialization, not a render)', () => {
+  // KNOWN LIMITATION (#278, from #251): the SEC generator does NOT encode
+  // owner-removal. A body paragraph removed via the /removal endpoint (meta.vanish)
+  // is written as an ordinary <LST>/<SPT>/<TXT> with no marker, so vanish is LOST on
+  // a SEC round-trip and the removed text reappears. Removal is honored only in the
+  // owner-facing DOCX/Markdown renders; in SEC the `vanish` flag already means
+  // "specifier note" (the parser sets it for <NTE>), so the two uses collide.
+  // This is latent — there is no .SEC export endpoint today (generateSec is a
+  // parser round-trip utility), so removed content cannot leak to a user via SEC.
+  // When a SEC export ships, #278 must filter or encode owner-removed nodes.
+  // This test pins the *current* behavior so the regression is explicit, not silent.
+  it('KNOWN LIMITATION (#278): owner-removal (vanish) is NOT preserved across a SEC round-trip', () => {
     const tree: SpecTree = {
       id: 't1',
       section: '27 10 00',
@@ -136,7 +140,6 @@ describe('generateSec — entity and note round-trip', () => {
               type: 'article',
               text: 'SUMMARY',
               children: [
-                { id: 'k1', type: 'pr1', text: 'Kept paragraph.', children: [], meta: {} },
                 {
                   id: 'r1',
                   type: 'pr1',
@@ -152,9 +155,11 @@ describe('generateSec — entity and note round-trip', () => {
         },
       ],
     };
-    const xml = generateSec(tree);
-    expect(xml).toContain('Removed paragraph.'); // preserved, not dropped
-    expect(xml).toContain('Kept paragraph.');
+    const after = parseSec(generateSec(tree)).tree;
+    const reparsed = after.parts[0]?.children[0]?.children[0];
+    expect(reparsed?.text).toBe('Removed paragraph.');
+    // vanish is lost on the body paragraph — documents the #278 gap, not desired.
+    expect(reparsed?.meta.vanish).toBeUndefined();
   });
 });
 
