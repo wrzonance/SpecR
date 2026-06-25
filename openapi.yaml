@@ -59,7 +59,7 @@ paths:
       operationId: parseDocument
       summary: Upload and parse a spec document (async)
       description: >
-        Upload a `.docx`, `.sec`, or `.txt` file. Returns 202 immediately with a
+        Upload a `.docx`, `.sec`, `.txt`, or `.pdf` file. Returns 202 immediately with a
         `jobId`; poll `/parse/jobs/{jobId}` for progress and result. Rate-limited
         to 10 requests per IP per minute.
       tags: [parse]
@@ -74,7 +74,7 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: Spec document (.docx, .sec, or .txt). Max 10 MB.
+                  description: Spec document (.docx, .sec, .txt, or .pdf). Max 10 MB.
                 section:
                   type: string
                   description: Override the detected CSI section number (e.g. "09 91 26").
@@ -3925,7 +3925,13 @@ components:
       properties:
         type:
           type: string
-          enum: [root-continuation, empty-part, no-structure-found, unusual-part-count]
+          enum:
+            - root-continuation
+            - empty-part
+            - no-structure-found
+            - unusual-part-count
+            - pdf-needs-ocr
+            - pdf-degraded-extraction
         lineHint:
           type: string
           description: 'Source location hint (e.g. "line 12: <text>")'

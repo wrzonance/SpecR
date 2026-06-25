@@ -10,6 +10,9 @@ vi.mock('./docx/index.js', () => ({
   parseDocx: vi.fn(),
   assertDocxSafe: vi.fn(),
 }));
+vi.mock('./pdf/index.js', () => ({
+  parsePdf: vi.fn(),
+}));
 vi.mock('../lib/decode-text.js', () => ({
   decodeTextBuffer: vi.fn((buf: Buffer) => buf.toString('utf-8')),
 }));
@@ -17,6 +20,7 @@ vi.mock('../lib/decode-text.js', () => ({
 import { parse } from './index.js';
 import { assertSecSafe, parseSec } from './sec/index.js';
 import { parseDocx } from './docx/index.js';
+import { parsePdf } from './pdf/index.js';
 import { ParserError } from './error.js';
 import type { SpecTree } from '../ast/types.js';
 
@@ -61,7 +65,20 @@ describe('parse() dispatcher', () => {
   });
 
   it('throws ParserError for unsupported extension', async () => {
-    await expect(parse(Buffer.from(''), 'spec.pdf')).rejects.toBeInstanceOf(ParserError);
+    await expect(parse(Buffer.from(''), 'spec.xyz')).rejects.toBeInstanceOf(ParserError);
+  });
+
+  it('dispatches .pdf to parsePdf', async () => {
+    vi.mocked(parsePdf).mockResolvedValue({
+      tree: mockTree,
+      refs: [],
+      capabilities: ['read-only'],
+    });
+    const buf = Buffer.from('%PDF-1.4');
+    const result = await parse(buf, 'spec.pdf');
+    expect(parsePdf).toHaveBeenCalledWith(buf);
+    expect(result.tree).toBe(mockTree);
+    expect(result.capabilities).toEqual(['read-only']);
   });
 
   it('updates tree section and title when inference fires on unknown section', async () => {

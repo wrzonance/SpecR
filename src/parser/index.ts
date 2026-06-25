@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { assertSecSafe, parseSec } from './sec/index.js';
 import { parseDocx } from './docx/index.js';
+import { parsePdf } from './pdf/index.js';
 import { parseText } from './text/index.js';
 import { extractRefsFromTree } from './refs/index.js';
 import { ParserError } from './error.js';
@@ -22,6 +23,7 @@ export type {
   PropertyDecision,
 } from './docx/index.js';
 export { parseText } from './text/index.js';
+export { parsePdf } from './pdf/index.js';
 export { extractRefsFromTree } from './refs/index.js';
 export { ParserError } from './error.js';
 export type { SectionInference } from '../lib/infer-section.js';
@@ -70,6 +72,11 @@ export async function parse(buffer: Buffer, filename: string): Promise<ParseResu
   if (ext === '.txt') {
     const text = decodeTextBuffer(buffer);
     const { tree, refs, capabilities } = parseText(text);
+    const sectionInference = inferSectionMeta(tree);
+    return { tree: withArticleRoles(tree), refs, sectionInference, capabilities };
+  }
+  if (ext === '.pdf') {
+    const { tree, refs, capabilities } = await parsePdf(buffer);
     const sectionInference = inferSectionMeta(tree);
     return { tree: withArticleRoles(tree), refs, sectionInference, capabilities };
   }

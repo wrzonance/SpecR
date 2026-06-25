@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool } from '../db/index.js';
+import type { ParseWarning } from '../ast/types.js';
 
 let server: Server;
 let baseUrl: string;
@@ -39,6 +40,7 @@ interface JobResult {
   title: string;
   nodeCount: number;
   capabilities?: string[];
+  warnings?: ParseWarning[];
 }
 
 interface JobData {
@@ -81,13 +83,77 @@ async function assertUfgsSpecInDb(specId: string): Promise<void> {
   expect(parseInt(paraResult.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
 }
 
-async function assertFailsForPdf(): Promise<void> {
-  const form = new FormData();
-  form.append(
-    'file',
-    new Blob([new Uint8Array(Buffer.from('x'))], { type: 'application/pdf' }),
-    'file.pdf'
+async function assertParagraphsStored(specId: string): Promise<void> {
+  const paraResult = await pool.query<{ count: string }>(
+    'SELECT COUNT(*) AS count FROM paragraphs WHERE spec_id = $1',
+    [specId]
   );
+  expect(parseInt(paraResult.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
+}
+
+function pdfObject(id: number, body: string): string {
+  return `${id} 0 obj\n${body}\nendobj\n`;
+}
+
+function buildPdf(objects: readonly string[]): Buffer {
+  const header = '%PDF-1.4\n';
+  const offsets: number[] = [0];
+  let body = '';
+  for (const object of objects) {
+    offsets.push(Buffer.byteLength(header + body, 'utf-8'));
+    body += object;
+  }
+  const xrefOffset = Buffer.byteLength(header + body, 'utf-8');
+  const xref = [
+    `xref\n0 ${objects.length + 1}`,
+    '0000000000 65535 f ',
+    ...offsets.slice(1).map((offset) => `${offset.toString().padStart(10, '0')} 00000 n `),
+  ].join('\n');
+  const trailer = `\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(`${header}${body}${xref}${trailer}`, 'utf-8');
+}
+
+function textPdf(lines: readonly string[]): Buffer {
+  const escaped = lines.map((line) =>
+    line.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)')
+  );
+  const textOps = escaped.map((line) => `(${line}) Tj T*`).join(' ');
+  const stream = `BT /F1 12 Tf 20 TL 72 720 Td ${textOps} ET`;
+  return buildPdf([
+    pdfObject(1, '<< /Type /Catalog /Pages 2 0 R >>'),
+    pdfObject(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
+    pdfObject(
+      3,
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>'
+    ),
+    pdfObject(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'),
+    pdfObject(
+      5,
+      `<< /Length ${Buffer.byteLength(stream, 'utf-8')} >>\nstream\n${stream}\nendstream`
+    ),
+  ]);
+}
+
+function blankPdf(): Buffer {
+  return buildPdf([
+    pdfObject(1, '<< /Type /Catalog /Pages 2 0 R >>'),
+    pdfObject(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
+    pdfObject(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> >>'),
+  ]);
+}
+
+async function postPdf(buffer: Buffer): Promise<JobData> {
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(buffer)], { type: 'application/pdf' }), 'file.pdf');
+  const postRes = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+  expect(postRes.status).toBe(202);
+  const postBody = (await postRes.json()) as { success: boolean; data: { jobId: string } };
+  return waitForJob(postBody.data.jobId);
+}
+
+async function assertFailsForUnsupportedExtension(): Promise<void> {
+  const form = new FormData();
+  form.append('file', new Blob(['content'], { type: 'text/plain' }), 'file.xyz');
   const postRes = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
   // Security hardening (issue #22): unsupported extensions now rejected at the handler
   // before createJob — returns 400, no job created.
@@ -139,7 +205,33 @@ describe('POST /parse integration', () => {
   });
 
   it('job fails gracefully for unsupported extension', async () => {
-    await assertFailsForPdf();
+    await assertFailsForUnsupportedExtension();
+  });
+
+  it('parses text-layer PDF and stores paragraphs in DB', async () => {
+    const fixture = textPdf([
+      'SECTION 03 30 00 - CAST-IN-PLACE CONCRETE',
+      'PART 1 - GENERAL',
+      '1.1 SCOPE',
+      'Cast-in-place concrete work.',
+    ]);
+
+    const job = await postPdf(fixture);
+    expect(job.status).toBe('complete');
+    const specId = job.result?.specId;
+    expect(specId).toBeDefined();
+    if (specId) {
+      cleanupIds.push(specId);
+      await assertParagraphsStored(specId);
+    }
+  }, 30_000);
+
+  it('completes no-text PDF with a needs-OCR warning instead of crashing', async () => {
+    const job = await postPdf(blankPdf());
+    expect(job.status).toBe('complete');
+    expect(job.result?.warnings?.some((warning) => warning.type === 'pdf-needs-ocr')).toBe(true);
+    const specId = job.result?.specId;
+    if (specId) cleanupIds.push(specId);
   });
 
   it('GET /parse/jobs/:jobId returns 404 for unknown job', async () => {

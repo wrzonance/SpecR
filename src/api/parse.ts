@@ -27,7 +27,8 @@ const ParseBodySchema = z.object({
 });
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const ALLOWED_EXT = new Set(['.docx', '.sec', '.txt']);
+const PDF_MIME = 'application/pdf';
+const ALLOWED_EXT = new Set(['.docx', '.pdf', '.sec', '.txt']);
 
 export const upload = multer({
   storage: multer.memoryStorage(),
@@ -41,17 +42,30 @@ export const upload = multer({
 
 type UploadValidation = { error: string } | { file: Express.Multer.File; ext: string };
 
+function uploadMimeError(ext: string, mimetype: string): string | null {
+  if (ext === '.docx' && mimetype !== DOCX_MIME) return 'MIME type mismatch for .docx';
+  if (ext === '.pdf' && mimetype !== PDF_MIME) return 'MIME type mismatch for .pdf';
+  return null;
+}
+
+async function assertUploadSafe(ext: string, buffer: Buffer): Promise<void> {
+  if (ext === '.docx') {
+    await assertDocxSafe(buffer);
+    return;
+  }
+  assertSecSafe(buffer);
+}
+
 async function validateUpload(req: Request): Promise<UploadValidation> {
   if (!req.file) return { error: 'file required' };
   const file = req.file;
   const ext = path.extname(file.originalname).toLowerCase();
   if (!ALLOWED_EXT.has(ext)) return { error: 'unsupported file extension' };
-  if (ext === '.txt') return { file, ext }; // plaintext: no archive or XML validation needed
-  if (ext === '.docx' && file.mimetype !== DOCX_MIME)
-    return { error: 'MIME type mismatch for .docx' };
+  const mimeError = uploadMimeError(ext, file.mimetype);
+  if (mimeError !== null) return { error: mimeError };
+  if (ext === '.txt' || ext === '.pdf') return { file, ext };
   try {
-    if (ext === '.docx') await assertDocxSafe(file.buffer);
-    else assertSecSafe(file.buffer);
+    await assertUploadSafe(ext, file.buffer);
     return { file, ext };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'invalid file' };

@@ -53,7 +53,11 @@ describe('parseHandler', () => {
   it('returns 400 for unsupported file extension', async () => {
     const { parseHandler } = await import('./parse.js');
     const req = {
-      file: { originalname: 'test.pdf', mimetype: 'application/pdf', buffer: Buffer.alloc(4) },
+      file: {
+        originalname: 'test.xyz',
+        mimetype: 'application/octet-stream',
+        buffer: Buffer.alloc(4),
+      },
       body: {},
     } as unknown as Request;
     const res = makeRes();

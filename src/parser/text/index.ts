@@ -41,6 +41,10 @@ const WARNING_SUGGESTIONS: Readonly<Record<ParseWarningType, string>> = {
     'Continuation text appeared before first structural heading and was dropped. Possible noise-prefix bleed; consider whether this line should be a heading.',
   'unusual-part-count':
     'More PART headings than a CSI spec normally has (typically 3). Headings may be over-matched.',
+  'pdf-needs-ocr':
+    'PDF page text layer is empty or too sparse. OCR is required before full PDF ingest can recover this page.',
+  'pdf-degraded-extraction':
+    'Primary PDF text extraction was incomplete or failed, so the low-level fallback extractor was used.',
 };
 
 const SECTION_EXTRACT_RE = new RegExp(
@@ -152,11 +156,15 @@ function buildTree(lines: readonly string[]): BuildResult {
   return { parts: rootChildren, droppedAtRoot, partLineIndex };
 }
 
+export function warningSuggestionFor(type: ParseWarningType): string {
+  return WARNING_SUGGESTIONS[type];
+}
+
 function makeWarning(type: ParseWarningType, lineHint?: string): ParseWarning {
   return {
     type,
     ...(lineHint !== undefined ? { lineHint } : {}),
-    suggestion: WARNING_SUGGESTIONS[type],
+    suggestion: warningSuggestionFor(type),
   };
 }
 
