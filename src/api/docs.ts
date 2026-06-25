@@ -27,7 +27,7 @@ export function registerDocsRoutes(app: Express): void {
   app.get('/docs/scalar.js', (_req: Request, res: Response) => {
     res
       .type('application/javascript')
-      .sendFile(join(SCALAR_DIR, SCALAR_STANDALONE), { dotfiles: 'allow' }, (err: Error) => {
+      .sendFile(join(SCALAR_DIR, SCALAR_STANDALONE), (err: Error) => {
         if (!err || res.headersSent) return;
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
           res
@@ -40,6 +40,6 @@ export function registerDocsRoutes(app: Express): void {
       });
   });
   app.get('/openapi.yaml', (_req: Request, res: Response) => {
-    res.type('text/yaml').sendFile(OPENAPI_PATH, { dotfiles: 'allow' });
+    res.type('text/yaml').sendFile(OPENAPI_PATH);
   });
 }
