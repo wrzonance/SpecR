@@ -29,8 +29,16 @@ type RecoveryDecision = RemapDecision | PassDecision | UnrecoverableDecision;
 const MIN_GARBLED_CHARS = 16;
 const MIN_REMAP_IMPROVEMENT = 2;
 const GARBLED_SCORE_THRESHOLD = 4;
+const ITEM_Y_TOLERANCE = 3;
+const ITEM_GROUP_GAP = 120;
 const SOURCE_ENCODINGS = ['windows-1252', 'ISO-8859-1', 'latin1'] as const;
+const REPLACEMENT_CHAR = '\uFFFD';
 const MOJIBAKE_RE = /[\u00c2\u00c3\u00e2][\u0080-\uffff]{1,2}|\ufffd/gu;
+
+interface ItemGroup {
+  readonly y: number;
+  readonly items: readonly PdfTextItem[];
+}
 
 function warning(type: ParseWarning['type'], lineHint: string): ParseWarning {
   return { type, lineHint, suggestion: warningSuggestionFor(type) };
@@ -69,6 +77,14 @@ function garbageScore(text: string): number {
   return mojibake * 3 + controls * 4 + Math.round(symbolRatio(text) * 12) + lowLetters;
 }
 
+function replacementCount(text: string): number {
+  return [...text].filter((char) => char === REPLACEMENT_CHAR).length;
+}
+
+function introducesReplacement(original: string, decoded: string): boolean {
+  return replacementCount(decoded) > replacementCount(original);
+}
+
 function decodeCandidate(text: string, sourceEncoding: string): string | null {
   if (!iconv.encodingExists(sourceEncoding)) return null;
   const bytes = iconv.encode(text, sourceEncoding);
@@ -96,10 +112,12 @@ function bestRemap(text: string, originalScore: number): RemapDecision | null {
     const candidate = remapCandidate(text, encoding);
     return candidate === null ? [] : [candidate];
   });
-  const sorted = candidates.toSorted((a, b) => garbageScore(a.text) - garbageScore(b.text));
-  const best = sorted[0];
-  if (best === undefined) return null;
-  return originalScore - garbageScore(best.text) >= MIN_REMAP_IMPROVEMENT ? best : null;
+  const viable = candidates.filter(
+    (candidate) =>
+      originalScore - garbageScore(candidate.text) >= MIN_REMAP_IMPROVEMENT &&
+      !introducesReplacement(text, candidate.text)
+  );
+  return viable.toSorted((a, b) => garbageScore(a.text) - garbageScore(b.text))[0] ?? null;
 }
 
 function decideRecovery(text: string): RecoveryDecision {
@@ -111,15 +129,57 @@ function decideRecovery(text: string): RecoveryDecision {
   return remapped ?? { kind: 'unrecoverable' };
 }
 
-function remapItem(item: PdfTextItem, sourceEncoding: string): PdfTextItem {
-  return { ...item, str: decodeCandidate(item.str, sourceEncoding) ?? item.str };
+function compareItemPosition(a: PdfTextItem, b: PdfTextItem): number {
+  const yDelta = b.y - a.y;
+  return Math.abs(yDelta) <= ITEM_Y_TOLERANCE ? a.x - b.x : yDelta;
+}
+
+function itemGap(prev: PdfTextItem, next: PdfTextItem): number {
+  return next.x - (prev.x + prev.width);
+}
+
+function shouldStartGroup(current: ItemGroup, item: PdfTextItem): boolean {
+  const last = current.items.at(-1);
+  if (Math.abs(current.y - item.y) > ITEM_Y_TOLERANCE) return true;
+  return last !== undefined && itemGap(last, item) > ITEM_GROUP_GAP;
+}
+
+function appendItemGroup(groups: readonly ItemGroup[], item: PdfTextItem): readonly ItemGroup[] {
+  const current = groups.at(-1);
+  if (current === undefined || shouldStartGroup(current, item)) {
+    return [...groups, { y: item.y, items: [item] }];
+  }
+  return [...groups.slice(0, -1), { ...current, items: [...current.items, item] }];
+}
+
+function itemGroups(items: readonly PdfTextItem[]): readonly ItemGroup[] {
+  return [...items].sort(compareItemPosition).reduce<readonly ItemGroup[]>(appendItemGroup, []);
+}
+
+function groupText(group: ItemGroup): string {
+  return group.items.map((item) => item.str).join('');
+}
+
+function mergedGroupItem(group: ItemGroup, text: string): PdfTextItem | null {
+  const first = group.items[0];
+  if (first === undefined) return null;
+  const right = Math.max(...group.items.map((item) => item.x + item.width));
+  return { ...first, str: text, width: Math.max(0, right - first.x) };
+}
+
+function remapItemGroup(group: ItemGroup, sourceEncoding: string): readonly PdfTextItem[] {
+  const original = groupText(group);
+  const decoded = decodeCandidate(original, sourceEncoding);
+  if (decoded === null || introducesReplacement(original, decoded)) return group.items;
+  const merged = mergedGroupItem(group, decoded);
+  return merged === null ? group.items : [merged];
 }
 
 function remapPage(page: PdfPageText, decision: RemapDecision): PdfPageText {
   return {
     ...page,
     text: decision.text,
-    items: page.items.map((item) => remapItem(item, decision.encoding)),
+    items: itemGroups(page.items).flatMap((group) => remapItemGroup(group, decision.encoding)),
   };
 }
 
