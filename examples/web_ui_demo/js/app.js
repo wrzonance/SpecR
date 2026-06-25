@@ -380,6 +380,7 @@ async function saveProjectSettings() {
     renderBoard();
     await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     toast('Project settings saved');
   } catch (err) {
     toast(`settings save failed: ${err.message}`, 'err');
@@ -1123,6 +1124,7 @@ async function addMapSpecFromLibrary() {
     renderBoard();
     await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     toast(
       `Section ${spec.section} loaded from ${result.source?.name || library.name} - TOC unchanged`
     );
@@ -1347,6 +1349,7 @@ async function removeSpecFromLibrary(spec) {
     await refreshTocLibrarySpecs();
     renderBoard();
     await refreshCoordination();
+    await refreshOpenComments();
     toast(`Section ${spec.section} removed from library`);
   } catch (err) {
     toast(`remove failed: ${err.message}`, 'err');
@@ -1479,6 +1482,7 @@ async function onToggleParagraphRemoval(spec, node, removed) {
     renderBoard();
     await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     toast(removed ? 'Paragraph removed — hidden from owner renders' : 'Paragraph restored');
   } catch (err) {
     if (err.status === 422) {
@@ -1530,6 +1534,7 @@ async function onDeleteParagraph(spec, node) {
     renderBoard();
     await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     toast(
       contained.length > 0
         ? `Paragraph deleted — ${contained.length} reference${contained.length === 1 ? '' : 's'} removed`
@@ -1608,6 +1613,7 @@ async function commitTextEdit(specId, nodeId, newText, removedRefs, alsoRemoveSp
     renderBoard();
     const brokenCount = await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     announceEdit(removedRefs, alsoRemoveSpec, brokenCount);
     return 'committed';
   } catch (err) {
@@ -1619,6 +1625,7 @@ async function commitTextEdit(specId, nodeId, newText, removedRefs, alsoRemoveSp
     renderBoard();
     await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     toast(`save failed: ${err.message}`, 'err');
     return 'cancelled';
   }
@@ -1701,6 +1708,7 @@ async function onRemoveSpecFromProject(spec) {
     renderBoard();
     const brokenCount = await refreshBrokenCount();
     await refreshCoordination();
+    await refreshOpenComments();
     const action = removedFromProject ? 'removed from project' : 'removed from map';
     toast(
       `Section ${spec.tree.section} ${action} — TOC unchanged${brokenCount ? `, ${brokenCount} broken refs` : ''}`,
@@ -1746,6 +1754,7 @@ async function addSpecsFromTocToProject() {
   renderBoard();
   await refreshBrokenCount();
   await refreshCoordination();
+  await refreshOpenComments();
   if (added > 0) toast(`${added} TOC section${added === 1 ? '' : 's'} loaded on the map`);
   if (failed > 0)
     toast(`${failed} TOC section${failed === 1 ? '' : 's'} could not be loaded`, 'warn');
@@ -1901,6 +1910,7 @@ async function onSpecReady(result, context = { destination: 'project' }) {
   renderBoard();
   await refreshBrokenCount();
   await refreshCoordination();
+  await refreshOpenComments();
   toast(
     isNew
       ? `Section ${result.section} loaded — ${result.nodeCount} nodes inferred`
