@@ -400,4 +400,22 @@ describe('PATCH /specs/:id/paragraphs/:nodeId/removal', () => {
     });
     expect(r.status).toBe(403);
   });
+
+  it('422 for a note node the renderers cannot suppress', async () => {
+    const noteRow = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, NULL, 'note', 'Editorial note.', 99) RETURNING id`,
+      [specId]
+    );
+    const noteId = noteRow.rows[0]!.id;
+    const r = await req('PATCH', `/specs/${specId}/paragraphs/${noteId}/removal`, {
+      removed: true,
+    });
+    expect(r.status).toBe(422);
+    const row = await pool.query<{ vanish: boolean }>(
+      `SELECT vanish FROM paragraphs WHERE id = $1`,
+      [noteId]
+    );
+    expect(row.rows[0]!.vanish).toBe(false); // flag never written
+  });
 });

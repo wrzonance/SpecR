@@ -330,7 +330,11 @@ paths:
         every render while the row, its subtree, and any contained cross-references
         stay intact; `removed: false` reverses it. This is a soft, reversible
         removal by design (symmetric with the spec soft-delete in ADR-030), not a
-        hard cascading DELETE. The node must belong to the spec in the path (else
+        hard cascading DELETE. Only body paragraphs are removable: a structural
+        heading (`part`/`article`) or a `note` node — which the renderers cannot
+        suppress — is rejected 422. The toggle is idempotent: re-sending the same
+        `removed` value is a no-op that returns the node unchanged without minting
+        a new content version. The node must belong to the spec in the path (else
         403). The composed edit gate (ADR-018) rejects an archived spec or one
         locked upstream in a DMS (409).
       tags: [specs]
@@ -370,6 +374,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/WriteConflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 

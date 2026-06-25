@@ -328,13 +328,31 @@ export async function updateParagraphText(
   }
 }
 
+// Node types every renderer can actually suppress when `vanish` is set. Markdown
+// and DOCX both emit `note` blockquotes *before* checking vanish, and the
+// markdown part/article heading renderers never check vanish at all — so storing
+// vanish on those types would silently lie about the "suppressed from every
+// render" contract. Removal therefore only applies to body paragraphs.
+const REMOVABLE_NODE_TYPES: ReadonlySet<string> = new Set([
+  'pr1',
+  'pr2',
+  'pr3',
+  'pr4',
+  'pr5',
+  'pr6',
+  'pr7',
+  'continuation',
+]);
+
 /** Outcome of {@link setParagraphVanish}: the (specId, nodeId) pairing is
  *  validated before the write so the API maps `not-found` → 404 and
- *  `wrong-spec` → 403 (mirrors updateParagraphText). */
+ *  `wrong-spec` → 403 (mirrors updateParagraphText); `not-removable` → 422 for a
+ *  structural/note node the renderers cannot hide. */
 export type SetVanishResult =
   | { readonly status: 'updated'; readonly node: SpecNode }
   | { readonly status: 'not-found' }
-  | { readonly status: 'wrong-spec' };
+  | { readonly status: 'wrong-spec' }
+  | { readonly status: 'not-removable'; readonly nodeType: string };
 
 /** In-transaction body of {@link setParagraphVanish}: gate → ownership check →
  *  write vanish + bump specs.content_version. The caller commits on 'updated',
@@ -349,23 +367,31 @@ async function applyVanish(
   // before any paragraph write. Throws typed errors (forbidden).
   await assertSpecWritable(client, specId);
 
-  const owner = await client.query<{ spec_id: string }>(
-    `SELECT spec_id FROM paragraphs WHERE id = $1 FOR UPDATE`,
+  const owner = await client.query<{ spec_id: string; node_type: string; vanish: boolean }>(
+    `SELECT spec_id, node_type, vanish FROM paragraphs WHERE id = $1 FOR UPDATE`,
     [nodeId]
   );
   const ownerRow = owner.rows[0];
   if (!ownerRow) return { status: 'not-found' };
   if (ownerRow.spec_id !== specId) return { status: 'wrong-spec' };
+  if (!REMOVABLE_NODE_TYPES.has(ownerRow.node_type)) {
+    return { status: 'not-removable', nodeType: ownerRow.node_type };
+  }
 
-  await client.query(
-    `UPDATE paragraphs SET vanish = $2, base_version = base_version + 1, updated_at = now()
-     WHERE id = $1`,
-    [nodeId, vanish]
-  );
-  await client.query(
-    `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
-    [specId]
-  );
+  // Idempotent toggle: a no-op (vanish already at the requested value) must NOT
+  // bump version counters — a retried/duplicate request would otherwise mint
+  // phantom content versions and make concurrent optimistic writes fail stale.
+  if (ownerRow.vanish !== vanish) {
+    await client.query(
+      `UPDATE paragraphs SET vanish = $2, base_version = base_version + 1, updated_at = now()
+       WHERE id = $1`,
+      [nodeId, vanish]
+    );
+    await client.query(
+      `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
+      [specId]
+    );
+  }
 
   const node = await fetchSubtreeNode(client, specId, nodeId);
   if (!node) throw new DatabaseError('setParagraphVanish: updated node vanished mid-transaction');
@@ -376,9 +402,14 @@ async function applyVanish(
  * Set or clear a paragraph's `vanish` flag by UUID — the editability program's
  * reversible removal (#251, ADR-022). `vanish: true` suppresses the node from
  * every render while keeping the row, its subtree, and contained refs intact;
- * `false` reverses it. Passes the composed edit gate (ADR-018) and verifies the
- * (specId, nodeId) pairing under a row lock, so removal is authorized exactly
- * like any other content write. A successful write bumps `specs.content_version`.
+ * `false` reverses it. Only body paragraphs are removable: structural headings
+ * (`part`/`article`) and `note` nodes are rejected `not-removable` because the
+ * renderers cannot suppress them, so vanish on those would silently lie. Passes
+ * the composed edit gate (ADR-018) and verifies the (specId, nodeId) pairing
+ * under a row lock, so removal is authorized exactly like any other content
+ * write. The toggle is idempotent — a no-op (vanish already at the requested
+ * value) leaves the row untouched; an effective change bumps
+ * `specs.content_version`.
  */
 export async function setParagraphVanish(
   specId: string,

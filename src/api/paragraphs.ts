@@ -61,9 +61,12 @@ export async function updateParagraphHandler(req: Request, res: Response): Promi
  * PATCH /specs/:id/paragraphs/:nodeId/removal — the editability program's
  * reversible removal (#251, ADR-022). `{ removed: true }` sets `meta.vanish`
  * (suppress render, keep the row + subtree + contained refs); `false` reverses
- * it. Passes the composed edit gate (ADR-018): archived/upstream-locked → 409.
- * A separate sub-route from the text-replacement PATCH — removal is a lifecycle
- * action, not a text edit, and must not require a non-empty `text`.
+ * it. Only body paragraphs are removable: a structural heading or `note` node
+ * the renderers cannot hide is rejected 422. The toggle is idempotent — a no-op
+ * returns the node unchanged without bumping any version. Passes the composed
+ * edit gate (ADR-018): archived/upstream-locked → 409. A separate sub-route from
+ * the text-replacement PATCH — removal is a lifecycle action, not a text edit,
+ * and must not require a non-empty `text`.
  */
 export async function removeParagraphHandler(req: Request, res: Response): Promise<void> {
   const specId = z.uuid().safeParse(req.params['id']);
@@ -90,6 +93,12 @@ export async function removeParagraphHandler(req: Request, res: Response): Promi
         return;
       case 'wrong-spec':
         res.status(403).json({ success: false, error: 'paragraph does not belong to this spec' });
+        return;
+      case 'not-removable':
+        res.status(422).json({
+          success: false,
+          error: `node type "${result.nodeType}" cannot be removed — only body paragraphs are render-suppressible`,
+        });
         return;
       case 'updated':
         res.status(200).json({ success: true, data: result.node });

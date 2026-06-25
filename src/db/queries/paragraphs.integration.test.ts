@@ -249,6 +249,8 @@ describe('insertTree — source facts (#131)', () => {
 describe('setParagraphVanish — reversible paragraph removal (#251)', () => {
   let specId: string;
   let nodeId: string;
+  let noteId: string;
+  let articleId: string;
   let otherSpecId: string;
 
   beforeAll(async () => {
@@ -268,6 +270,20 @@ describe('setParagraphVanish — reversible paragraph removal (#251)', () => {
       [specId]
     );
     nodeId = node.rows[0]!.id;
+    // A note and an article heading — types the renderers cannot suppress, so
+    // removal must reject them rather than store a vanish that silently lies.
+    const note = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, NULL, 'note', 'Editorial note.', 2) RETURNING id`,
+      [specId]
+    );
+    noteId = note.rows[0]!.id;
+    const article = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, NULL, 'article', 'SUMMARY', 3) RETURNING id`,
+      [specId]
+    );
+    articleId = article.rows[0]!.id;
     const other = await pool.query<{ id: string }>(
       `INSERT INTO specs (section, title, source, library_id)
        VALUES ('99 99 80', 'Vanish DB Other', 'arcat', $1) RETURNING id`,
@@ -309,6 +325,7 @@ describe('setParagraphVanish — reversible paragraph removal (#251)', () => {
   });
 
   it('bumps specs.content_version on a successful vanish', async () => {
+    await setParagraphVanish(specId, nodeId, false); // ensure an effective change
     const before = await pool.query<{ content_version: number }>(
       `SELECT content_version FROM specs WHERE id = $1`,
       [specId]
@@ -319,5 +336,53 @@ describe('setParagraphVanish — reversible paragraph removal (#251)', () => {
       [specId]
     );
     expect(after.rows[0]!.content_version).toBeGreaterThan(before.rows[0]!.content_version);
+  });
+
+  it('rejects a note node — renderers cannot suppress it (not-removable)', async () => {
+    const r = await setParagraphVanish(specId, noteId, true);
+    expect(r.status).toBe('not-removable');
+    if (r.status === 'not-removable') expect(r.nodeType).toBe('note');
+    const row = await pool.query<{ vanish: boolean }>(
+      `SELECT vanish FROM paragraphs WHERE id = $1`,
+      [noteId]
+    );
+    expect(row.rows[0]!.vanish).toBe(false); // flag never written
+  });
+
+  it('rejects an article heading — renderers cannot suppress it (not-removable)', async () => {
+    const r = await setParagraphVanish(specId, articleId, true);
+    expect(r.status).toBe('not-removable');
+    if (r.status === 'not-removable') expect(r.nodeType).toBe('article');
+  });
+
+  it('idempotent no-op: re-removing an already-removed node does not bump content_version', async () => {
+    await setParagraphVanish(specId, nodeId, true); // now vanished
+    const before = await pool.query<{ content_version: number }>(
+      `SELECT content_version FROM specs WHERE id = $1`,
+      [specId]
+    );
+    const r = await setParagraphVanish(specId, nodeId, true); // no-op
+    expect(r.status).toBe('updated');
+    if (r.status === 'updated') expect(r.node.meta.vanish).toBe(true);
+    const after = await pool.query<{ content_version: number }>(
+      `SELECT content_version FROM specs WHERE id = $1`,
+      [specId]
+    );
+    expect(after.rows[0]!.content_version).toBe(before.rows[0]!.content_version);
+  });
+
+  it('idempotent no-op: re-restoring an already-restored node does not bump base_version', async () => {
+    await setParagraphVanish(specId, nodeId, false); // now restored
+    const before = await pool.query<{ base_version: number }>(
+      `SELECT base_version FROM paragraphs WHERE id = $1`,
+      [nodeId]
+    );
+    const r = await setParagraphVanish(specId, nodeId, false); // no-op
+    expect(r.status).toBe('updated');
+    const after = await pool.query<{ base_version: number }>(
+      `SELECT base_version FROM paragraphs WHERE id = $1`,
+      [nodeId]
+    );
+    expect(after.rows[0]!.base_version).toBe(before.rows[0]!.base_version);
   });
 });
