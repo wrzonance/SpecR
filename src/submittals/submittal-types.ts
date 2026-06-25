@@ -35,6 +35,7 @@ function isSubmittalsArticle(node: SpecNode): boolean {
 }
 
 function allText(node: SpecNode): readonly string[] {
+  if (node.meta.vanish === true) return [];
   return [node.text, ...node.children.flatMap(allText)];
 }
 
@@ -49,11 +50,12 @@ function matchingTypes(text: string): readonly string[] {
 
 export function resolveRequiredSubmittalTypes(tree: SpecTree): readonly string[] {
   const partOne = tree.parts.find(isPartOne);
-  const submittals = partOne?.children.find(isSubmittalsArticle);
-  if (submittals === undefined) return [];
+  const submittals = partOne?.children.filter(isSubmittalsArticle) ?? [];
   const seen = new Set<string>();
-  for (const text of allText(submittals)) {
-    for (const type of matchingTypes(text)) seen.add(type);
+  for (const article of submittals) {
+    for (const text of allText(article)) {
+      for (const type of matchingTypes(text)) seen.add(type);
+    }
   }
   return TYPE_RULES.map((rule) => rule.label).filter((label) => seen.has(label));
 }

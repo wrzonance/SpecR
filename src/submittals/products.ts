@@ -32,6 +32,10 @@ function source(tree: SpecTree, node: SpecNode) {
   };
 }
 
+function isVanished(node: SpecNode): boolean {
+  return node.meta.vanish === true;
+}
+
 function associationsIn(node: SpecNode): readonly ParagraphAssociation[] {
   return [node.meta.associations ?? [], ...node.children.map(associationsIn)].flat();
 }
@@ -49,6 +53,7 @@ function productFromParagraph(text: string): string | null {
 }
 
 function articleCandidate(tree: SpecTree, article: SpecNode): ProductCandidate | null {
+  if (isVanished(article)) return null;
   const name = titleCase(article.text);
   if (name.length === 0 || GENERIC_ARTICLES.has(normalizedKey(name))) return null;
   return { productName: name, source: source(tree, article), datasheets: associationsIn(article) };
@@ -56,6 +61,7 @@ function articleCandidate(tree: SpecTree, article: SpecNode): ProductCandidate |
 
 function paragraphCandidates(tree: SpecTree, article: SpecNode): readonly ProductCandidate[] {
   return article.children.flatMap((child) => {
+    if (isVanished(child)) return [];
     if (!PRODUCT_NODE_TYPES.has(child.type)) return [];
     const productName = productFromParagraph(child.text);
     if (productName === null) return [];
@@ -64,6 +70,7 @@ function paragraphCandidates(tree: SpecTree, article: SpecNode): readonly Produc
 }
 
 function candidatesFromArticle(tree: SpecTree, article: SpecNode): readonly ProductCandidate[] {
+  if (isVanished(article)) return [];
   const articleProduct = articleCandidate(tree, article);
   if (articleProduct !== null) return [articleProduct];
   return paragraphCandidates(tree, article);
@@ -73,6 +80,7 @@ export function extractProductCandidates(tree: SpecTree): readonly ProductCandid
   const productsPart = tree.parts.find(isProductsPart);
   if (productsPart === undefined) return [];
   return productsPart.children.flatMap((child) => {
+    if (isVanished(child)) return [];
     if (child.type === 'article') return candidatesFromArticle(tree, child);
     if (!PRODUCT_NODE_TYPES.has(child.type)) return [];
     const productName = productFromParagraph(child.text);

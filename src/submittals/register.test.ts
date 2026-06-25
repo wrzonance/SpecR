@@ -50,6 +50,21 @@ function productsPart(...products: SpecNode[]): SpecNode {
   return node('p2', 'part', 'PART 2 - PRODUCTS', products);
 }
 
+function vanishedNode(
+  id: string,
+  type: SpecNode['type'],
+  text: string,
+  children: readonly SpecNode[] = []
+): SpecNode {
+  return {
+    id,
+    type,
+    text,
+    children,
+    meta: { vanish: true },
+  };
+}
+
 function executionPart(...items: SpecNode[]): SpecNode {
   return node('p3', 'part', 'PART 3 - EXECUTION', items);
 }
@@ -191,5 +206,74 @@ describe('buildSubmittalRegister', () => {
     expect(register.rows).toEqual([]);
     expect(register.findings).toEqual([]);
     expect(register.summary.totalFindings).toBe(0);
+  });
+
+  it('submittals: split action and informational submittals articles both contribute required types', () => {
+    const tree = spec('spec-a', '23 09 23', 'Instrumentation and Control', [
+      node('p1', 'part', 'PART 1 - GENERAL', [
+        node('action-submittals', 'article', 'ACTION SUBMITTALS', [
+          node('product-data', 'pr1', 'Product Data'),
+        ]),
+        node('informational-submittals', 'article', 'INFORMATIONAL SUBMITTALS', [
+          node('certificates', 'pr1', 'Certificates'),
+        ]),
+      ]),
+      productsPart(
+        node('controllers', 'article', 'DDC CONTROLLERS', [], [assoc('ds-ctrl', 'Controller')])
+      ),
+    ]);
+
+    const register = buildSubmittalRegister([tree]);
+
+    expect(register.rows[0]?.requiredSubmittalTypes).toEqual(['Product Data', 'Certificates']);
+  });
+
+  it('submittals: vanished submittal lines do not contribute required types', () => {
+    const tree = spec('spec-a', '10 14 00', 'Signage', [
+      node('p1', 'part', 'PART 1 - GENERAL', [
+        node('submittals', 'article', 'SUBMITTALS', [
+          vanishedNode('removed-product-data', 'pr1', 'Product Data'),
+        ]),
+      ]),
+      productsPart(node('signs', 'article', 'SIGNS', [], [assoc('ds-signs', 'Signs')])),
+    ]);
+
+    const register = buildSubmittalRegister([tree]);
+
+    expect(register.rows[0]?.requiredSubmittalTypes).toEqual([]);
+    expect(register.findings).toEqual([
+      {
+        type: 'product_without_submittal_type',
+        specId: 'spec-a',
+        sourceSpecSection: '10 14 00',
+        productName: 'Signs',
+        sourceParagraphId: 'signs',
+      },
+    ]);
+  });
+
+  it('submittals: vanished Part 2 product candidates create no register row or datasheet finding', () => {
+    const tree = spec('spec-a', '23 33 00', 'Air Duct Accessories', [
+      part1WithSubmittals('Product Data'),
+      productsPart(
+        node(
+          'live-damper',
+          'pr1',
+          'Control Dampers: factory fabricated',
+          [],
+          [assoc('ds-dampers', 'Dampers')]
+        ),
+        vanishedNode('removed-grille', 'pr1', 'Return Grilles: deleted alternate'),
+        node('generic-products', 'article', 'PRODUCTS', [
+          vanishedNode('removed-louver', 'pr1', 'Louvers: deleted alternate'),
+        ]),
+        vanishedNode('removed-article', 'article', 'OBSOLETE DAMPERS')
+      ),
+    ]);
+
+    const register = buildSubmittalRegister([tree]);
+
+    expect(register.rows.map((row) => row.productName)).toEqual(['Control Dampers']);
+    expect(register.findings).toEqual([]);
   });
 });
