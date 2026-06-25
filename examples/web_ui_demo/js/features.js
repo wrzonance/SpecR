@@ -17,4 +17,5 @@ export const API_FEATURES = {
   openComments: true, // GET /specs|projects/:id/open-comments              (landed #262/#272)
   coordination: true, // coordination-report + required-sections            (landed #239/#241)
   impliedRelated: true, // implied_related_section coordination finding      (landed #261)
+  umbrellaCallout: true, // umbrella_not_called_out coordination finding (landed #264)
 };

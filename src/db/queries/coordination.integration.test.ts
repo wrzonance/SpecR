@@ -199,9 +199,57 @@ describe('getCoordinationReport', () => {
       relatedCitedNotListed: 2,
       standardCitedNotListed: 0,
       impliedRelatedSection: 0,
+      umbrellaNotCalledOut: 0,
       total: 5,
     });
-    expect(report.notes).toEqual([]);
+    expect(report.notes).toEqual([
+      'umbrella call-out check covers only divisions 26, 27, 28; skipped divisions: 03, 05',
+    ]);
+  });
+
+  it('coordination: Div 26 subordinate without 26 00 00 citation -> umbrella_not_called_out', async () => {
+    const projectId = await newProject('coord-umbrella-missing');
+    const spec = await newSpec('26 05 33', 'Raceway and Boxes');
+    await addProjectSpec(projectId, spec, 1);
+
+    const report = await getCoordinationReport(projectId, undefined);
+    const findings = ofType(report.findings, 'umbrella_not_called_out');
+
+    expect(findings).toEqual([
+      {
+        type: 'umbrella_not_called_out',
+        sourceSpecId: spec,
+        sourceSpecSection: '26 05 33',
+        umbrellaSpecSection: '26 00 00',
+      },
+    ]);
+    expect(report.summary.umbrellaNotCalledOut).toBe(1);
+    expect(report.summary.total).toBe(1);
+  });
+
+  it('coordination: Div 26 subordinate citing 26 00 00 -> no umbrella_not_called_out', async () => {
+    const projectId = await newProject('coord-umbrella-cited');
+    const spec = await newSpec('26 05 33', 'Raceway and Boxes');
+    await addProjectSpec(projectId, spec, 1);
+    await addRef(spec, '26 00 00', 'Section 26 00 00', null);
+
+    const report = await getCoordinationReport(projectId, undefined);
+
+    expect(ofType(report.findings, 'umbrella_not_called_out')).toHaveLength(0);
+    expect(report.summary.umbrellaNotCalledOut).toBe(0);
+  });
+
+  it('coordination: unsupported umbrella divisions are skipped and reported without false positives', async () => {
+    const projectId = await newProject('coord-umbrella-skipped');
+    const spec = await newSpec('08 11 13', 'Hollow Metal Doors');
+    await addProjectSpec(projectId, spec, 1);
+
+    const report = await getCoordinationReport(projectId, undefined);
+
+    expect(ofType(report.findings, 'umbrella_not_called_out')).toHaveLength(0);
+    expect(report.notes).toContain(
+      'umbrella call-out check covers only divisions 26, 27, 28; skipped divisions: 08'
+    );
   });
 
   it('#259 A3: lists 07 84 00 under Related Sections but never cites it → related_listed_not_cited', async () => {
@@ -429,6 +477,7 @@ describe('getCoordinationReport', () => {
     expect(ofType(report.findings, 'dangling_ref')).toHaveLength(1);
     expect(report.notes).toEqual([
       'no required sections authored at this scope — present/required comparison skipped',
+      'umbrella call-out check covers only divisions 26, 27, 28; skipped divisions: 03',
     ]);
   });
 
