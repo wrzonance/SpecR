@@ -113,6 +113,49 @@ describe('generateSec — entity and note round-trip', () => {
     expect(note?.meta.vanish).toBe(true);
     expect(note?.text).toContain('O&M data');
   });
+
+  // #251: an owner-removed body paragraph (meta.vanish via the /removal endpoint)
+  // is deliberately PRESERVED by the canonical .SEC serialization — SEC is a
+  // lossless round-trip format, not an owner-facing render. Suppression of removed
+  // paragraphs is honored only in the DOCX/Markdown renders; SEC keeps the text so
+  // removal stays reversible through the canonical format. (Do not "fix" SEC to
+  // drop vanished body nodes — that would destroy reversibility.)
+  it('preserves an owner-vanished body paragraph (lossless serialization, not a render)', () => {
+    const tree: SpecTree = {
+      id: 't1',
+      section: '27 10 00',
+      title: 'BUILDING TELECOMMUNICATIONS CABLING SYSTEM',
+      parts: [
+        {
+          id: 'p1',
+          type: 'part',
+          text: 'GENERAL',
+          children: [
+            {
+              id: 's1',
+              type: 'article',
+              text: 'SUMMARY',
+              children: [
+                { id: 'k1', type: 'pr1', text: 'Kept paragraph.', children: [], meta: {} },
+                {
+                  id: 'r1',
+                  type: 'pr1',
+                  text: 'Removed paragraph.',
+                  children: [],
+                  meta: { vanish: true },
+                },
+              ],
+              meta: {},
+            },
+          ],
+          meta: {},
+        },
+      ],
+    };
+    const xml = generateSec(tree);
+    expect(xml).toContain('Removed paragraph.'); // preserved, not dropped
+    expect(xml).toContain('Kept paragraph.');
+  });
 });
 
 describe('generateSec — standard reference round-trip', () => {

@@ -328,11 +328,13 @@ export async function updateParagraphText(
   }
 }
 
-// Node types every renderer can actually suppress when `vanish` is set. Markdown
-// and DOCX both emit `note` blockquotes *before* checking vanish, and the
+// Node types the owner-facing renderers (DOCX, Markdown) actually suppress when
+// `vanish` is set. Both emit `note` blockquotes *before* checking vanish, and the
 // markdown part/article heading renderers never check vanish at all — so storing
-// vanish on those types would silently lie about the "suppressed from every
-// render" contract. Removal therefore only applies to body paragraphs.
+// vanish on those types would silently lie about the removal contract. (The `.SEC`
+// serialization is intentionally lossless and preserves the flag for round-trip
+// fidelity — it is not an owner-facing render.) Removal only applies to body
+// paragraphs.
 const REMOVABLE_NODE_TYPES: ReadonlySet<string> = new Set([
   'pr1',
   'pr2',
@@ -401,15 +403,16 @@ async function applyVanish(
 /**
  * Set or clear a paragraph's `vanish` flag by UUID — the editability program's
  * reversible removal (#251, ADR-022). `vanish: true` suppresses the node from
- * every render while keeping the row, its subtree, and contained refs intact;
- * `false` reverses it. Only body paragraphs are removable: structural headings
- * (`part`/`article`) and `note` nodes are rejected `not-removable` because the
- * renderers cannot suppress them, so vanish on those would silently lie. Passes
- * the composed edit gate (ADR-018) and verifies the (specId, nodeId) pairing
- * under a row lock, so removal is authorized exactly like any other content
- * write. The toggle is idempotent — a no-op (vanish already at the requested
- * value) leaves the row untouched; an effective change bumps
- * `specs.content_version`.
+ * the owner-facing renders (DOCX, Markdown) while keeping the row, its subtree,
+ * and contained refs intact; `false` reverses it. The canonical `.SEC`
+ * serialization is lossless and preserves the flag for round-trip fidelity.
+ * Only body paragraphs are removable: structural headings (`part`/`article`) and
+ * `note` nodes are rejected `not-removable` because the owner-facing renderers
+ * cannot suppress them, so vanish on those would silently lie. Passes the
+ * composed edit gate (ADR-018) and verifies the (specId, nodeId) pairing under a
+ * row lock, so removal is authorized exactly like any other content write. The
+ * toggle is idempotent — a no-op (vanish already at the requested value) leaves
+ * the row untouched; an effective change bumps `specs.content_version`.
  */
 export async function setParagraphVanish(
   specId: string,

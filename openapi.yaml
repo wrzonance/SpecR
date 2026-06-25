@@ -326,17 +326,19 @@ paths:
       summary: Remove or restore a paragraph (reversible soft removal)
       description: >
         The editability program's reversible paragraph removal (#251, ADR-022).
-        `removed: true` sets the node's `vanish` flag — it is suppressed from
-        every render while the row, its subtree, and any contained cross-references
-        stay intact; `removed: false` reverses it. This is a soft, reversible
-        removal by design (symmetric with the spec soft-delete in ADR-030), not a
-        hard cascading DELETE. Only body paragraphs are removable: a structural
-        heading (`part`/`article`) or a `note` node — which the renderers cannot
-        suppress — is rejected 422. The toggle is idempotent: re-sending the same
-        `removed` value is a no-op that returns the node unchanged without minting
-        a new content version. The node must belong to the spec in the path (else
-        403). The composed edit gate (ADR-018) rejects an archived spec or one
-        locked upstream in a DMS (409).
+        `removed: true` sets the node's `vanish` flag — it is suppressed from the
+        owner-facing renders (DOCX and Markdown) while the row, its subtree, and
+        any contained cross-references stay intact; `removed: false` reverses it.
+        The canonical `.SEC` serialization is lossless and preserves the flag for
+        round-trip fidelity rather than dropping the node. This is a soft,
+        reversible removal by design (symmetric with the spec soft-delete in
+        ADR-030), not a hard cascading DELETE. Only body paragraphs are removable:
+        a structural heading (`part`/`article`) or a `note` node — which the
+        owner-facing renderers cannot suppress — is rejected 422. The toggle is
+        idempotent: re-sending the same `removed` value is a no-op that returns the
+        node unchanged without minting a new content version. The node must belong
+        to the spec in the path (else 403). The composed edit gate (ADR-018)
+        rejects an archived spec or one locked upstream in a DMS (409).
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
