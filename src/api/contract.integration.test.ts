@@ -55,6 +55,7 @@ const RESPONSE_ALLOWLIST = new Set([
   'patch /libraries/{}',
   'patch /specs/{}',
   'patch /specs/{}/paragraphs/{}',
+  'patch /specs/{}/paragraphs/{}/removal',
   'patch /templates/{}',
   'post /libraries/clients',
   'post /libraries/{}/conventions/clone',
