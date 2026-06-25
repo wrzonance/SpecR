@@ -324,6 +324,11 @@ describe('setParagraphVanish — reversible paragraph removal (#251)', () => {
     expect(r.status).toBe('wrong-spec');
   });
 
+  it('accepts an uppercase spec UUID (case-insensitive ownership — not a false wrong-spec)', async () => {
+    const r = await setParagraphVanish(specId.toUpperCase(), nodeId, true);
+    expect(r.status).toBe('updated');
+  });
+
   it('bumps specs.content_version on a successful vanish', async () => {
     await setParagraphVanish(specId, nodeId, false); // ensure an effective change
     const before = await pool.query<{ content_version: number }>(

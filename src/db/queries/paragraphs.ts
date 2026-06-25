@@ -286,7 +286,10 @@ async function applyParagraphUpdate(
   );
   const ownerRow = owner.rows[0];
   if (!ownerRow) return { status: 'not-found' };
-  if (ownerRow.spec_id !== specId) return { status: 'wrong-spec' };
+  // UUIDs compare case-insensitively in PostgreSQL but `pg` returns spec_id
+  // lowercased, while z.uuid() accepts (and preserves) an uppercase input — so
+  // normalize both sides before comparing, else an uppercase specId false-403s.
+  if (ownerRow.spec_id.toLowerCase() !== specId.toLowerCase()) return { status: 'wrong-spec' };
 
   await client.query(
     `UPDATE paragraphs SET text = $2, base_version = base_version + 1, updated_at = now()
@@ -373,7 +376,9 @@ async function applyVanish(
   );
   const ownerRow = owner.rows[0];
   if (!ownerRow) return { status: 'not-found' };
-  if (ownerRow.spec_id !== specId) return { status: 'wrong-spec' };
+  // Normalize both sides: pg lowercases the returned UUID while z.uuid() preserves
+  // an uppercase input, so a strict compare would false-403 a valid uppercase spec.
+  if (ownerRow.spec_id.toLowerCase() !== specId.toLowerCase()) return { status: 'wrong-spec' };
   if (!REMOVABLE_NODE_TYPES.has(ownerRow.node_type)) {
     return { status: 'not-removable', nodeType: ownerRow.node_type };
   }
