@@ -249,6 +249,40 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts).toHaveLength(3);
   });
 
+  // Regression (parsing-needs-fixing.docx): a CPI PART heading whose literal run
+  // text bakes in the render-derived "PART n -" prefix (PART 1/2 came bare from
+  // numbering, but PART 3's text was literally "PART 3 - EXECUTION"). Without
+  // stripping, the renderer's own getLabel prefix doubles it to the garbled
+  // "PART 3 - PART 3 - EXECUTION". The AST must store only the part name.
+  it('strips a baked-in "PART n -" prefix from part-node text', () => {
+    const tree = buildTree([makeClassified('part', 0, 'PART 3 - EXECUTION')], '01', 'T', 'cpi');
+    expect(tree.parts[0]?.text).toBe('EXECUTION');
+  });
+
+  it('leaves a bare-name part heading (numbering-supplied prefix) untouched', () => {
+    const tree = buildTree([makeClassified('part', 0, 'GENERAL')], '01', 'T', 'cpi');
+    expect(tree.parts[0]?.text).toBe('GENERAL');
+  });
+
+  it('keeps the original when stripping a bare "PART n" would empty the text', () => {
+    const tree = buildTree([makeClassified('part', 0, 'PART 1')], '01', 'T', 'arcat');
+    expect(tree.parts[0]?.text).toBe('PART 1');
+  });
+
+  // A hidden (vanish) PART becomes a note and keeps its full text verbatim —
+  // hidden content is retained as-authored for document-control tracking, so the
+  // prefix-strip must not touch it.
+  it('does NOT strip the prefix from a hidden part (kept verbatim as a note)', () => {
+    const tree = buildTree(
+      [makeClassified('part', 0, 'PART 3 - EXECUTION', true)],
+      '01',
+      'T',
+      'cpi'
+    );
+    expect(tree.parts[0]?.type).toBe('note');
+    expect(tree.parts[0]?.text).toBe('PART 3 - EXECUTION');
+  });
+
   it('handles sibling articles (ilvl stepping back to article level)', () => {
     const classified = [
       makeClassified('part', 0, 'PART 1'),

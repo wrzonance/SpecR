@@ -18,9 +18,9 @@ describe.runIf(existsSync(ARTIFACT))('CPI PART inference — parsing-needs-fixin
     const partRoots = tree.parts.filter((n) => n.type === 'part');
     expect(partRoots).toHaveLength(3);
 
-    const joined = partRoots.map((n) => n.text).join(' | ');
-    for (const name of ['GENERAL', 'PRODUCTS', 'EXECUTION']) {
-      expect(joined).toContain(name);
-    }
+    // Exact names, no baked-in "PART n -" prefix: PART 3's literal run text was
+    // "PART 3 - EXECUTION"; the AST must store just "EXECUTION" so the renderer's
+    // own label doesn't double it to "PART 3 - PART 3 - EXECUTION".
+    expect(partRoots.map((n) => n.text)).toEqual(['GENERAL', 'PRODUCTS', 'EXECUTION']);
   });
 });

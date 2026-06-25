@@ -2,6 +2,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { v4 as uuidv4 } from 'uuid';
 import type { SpecNode, SpecTree, NodeType, SecRef } from '../../ast/types.js';
 import { ParserError } from '../error.js';
+import { stripPartPrefix } from '../part-prefix.js';
 import type { NteNode, PrtNode, RefNode, SptNode } from './elements.js';
 import { decodeXmlEntities } from './entities.js';
 import { parseSectionNumberCandidate } from '../../lib/section-number.js';
@@ -47,10 +48,6 @@ function stripTags(raw: string): string {
 
 function extractSrfSections(raw: string): string[] {
   return [...raw.matchAll(/<SRF>([^<]+)<\/SRF>/g)].map((m) => m[1]?.trim() ?? '').filter(Boolean);
-}
-
-function stripPartPrefix(raw: string): string {
-  return raw.replace(/^PART\s+\d+\s+[-–]?\s*/i, '').trim();
 }
 
 function normalizeTaggedSection(raw: string): string | null {

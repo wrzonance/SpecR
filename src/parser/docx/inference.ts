@@ -14,6 +14,7 @@ import type {
   StyleMap,
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
+import { stripPartPrefix } from '../part-prefix.js';
 
 // Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
 const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
@@ -217,11 +218,20 @@ function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode
   };
 }
 
+// A visible PART heading stores only its name in the AST; the "PART n -" label
+// is render-derived (getLabel). Keep the raw text when stripping would empty it
+// (a bare "PART n" with no name) and for hidden parts (kept verbatim as notes).
+function nodeText(cp: ClassifiedParagraph): string {
+  if (cp.isVanish || cp.nodeType !== 'part') return cp.paragraph.text;
+  const stripped = stripPartPrefix(cp.paragraph.text);
+  return stripped.length > 0 ? stripped : cp.paragraph.text;
+}
+
 function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source): SpecNode {
   return {
     id: uuidv4(),
     type: cp.isVanish ? 'note' : cp.nodeType,
-    text: cp.paragraph.text,
+    text: nodeText(cp),
     children,
     meta: {
       source,
