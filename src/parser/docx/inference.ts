@@ -104,13 +104,35 @@ function trySignal5(para: DocxParagraph): SignalHit | null {
 
 function buildConflicts(winner: SignalHit, hits: readonly SignalHit[]): readonly SignalConflict[] {
   return hits
-    .slice(1)
-    .filter((h) => h.nodeType !== winner.nodeType)
+    .filter((h) => h !== winner && h.nodeType !== winner.nodeType)
     .map((h) => ({
       signal: h.signal,
       reportedIlvl: h.normalizedIlvl,
       reportedNodeType: h.nodeType,
     }));
+}
+
+// An article is the top content tier under a PART, so it cannot be deeply indented.
+// Hand-authored manufacturer docs reuse numIds with inconsistent ilvl baselines, so
+// a nested list item can resolve to 'article' via the global articleIlvl offset
+// (parsing-needs-fixing.docx: "1. Normal street clothes…", numId 13 ilvl 3 → article,
+// yet indented at pr-tier). When the winning numbering/style signal says 'article'
+// but indentation places the paragraph ≥2 tiers deeper, the numbering baseline is
+// misaligned — defer to indentation so the item nests instead of becoming a spurious
+// top-level 3.x. A genuine article sits at indent tier ≤2 (clean CPI articles reach
+// ~900 twips → tier 2), so the ≥3 threshold never demotes a real article. The losing
+// Signal-1 'article' is preserved as a conflict (never dropped) by buildConflicts.
+const ARTICLE_INDENT_CONTRADICTION_MIN_TIER = 3;
+
+function correctMisalignedArticle(winner: SignalHit, hits: readonly SignalHit[]): SignalHit {
+  if (winner.nodeType !== 'article' || (winner.signal !== 1 && winner.signal !== 2)) {
+    return winner;
+  }
+  const indentHit = hits.find((h) => h.signal === 5);
+  if (!indentHit || indentHit.normalizedIlvl < ARTICLE_INDENT_CONTRADICTION_MIN_TIER) {
+    return winner;
+  }
+  return indentHit;
 }
 
 // Specifier notes are editorial metadata, not spec content: banner text in any
@@ -163,10 +185,11 @@ function classifyOne(
   const s5 = trySignal5(para);
   if (s5) hits.push(s5);
 
-  const winner = hits[0];
-  if (!winner) {
+  const rawWinner = hits[0];
+  if (!rawWinner) {
     return continuationResult(para, prevNonContIlvl, para.isVanish);
   }
+  const winner = correctMisalignedArticle(rawWinner, hits);
   const conflicts = buildConflicts(winner, hits);
 
   return {

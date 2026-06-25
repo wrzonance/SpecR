@@ -196,6 +196,55 @@ describe('classifyParagraphs — CPI regressions', () => {
   });
 });
 
+describe('classifyParagraphs — misaligned-numbering article guard', () => {
+  // Regression (parsing-needs-fixing.docx PART 3): hand-authored manufacturer docs
+  // reuse numIds with inconsistent ilvl baselines. A nested list item ("1. Normal
+  // street clothes…", numId 13, ilvl 3, indent 2160) resolved to 'article' via the
+  // global articleIlvl=3 — becoming a spurious top-level 3.x that corrupts sibling
+  // numbering. Its indentation (2160 twips → pr-tier) contradicts the article claim
+  // by ≥2 tiers, so indentation wins and it nests as a pr node instead.
+  it('demotes a Signal-1 "article" whose indentation is ≥2 tiers deeper', () => {
+    const result = classifyParagraphs(
+      [
+        makePara({
+          numId: 13,
+          ilvl: 3,
+          leftIndent: 2160,
+          text: 'Normal street clothes may be worn',
+        }),
+      ],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).not.toBe('article');
+    expect(result[0]?.signalUsed).toBe(5); // indentation wins
+    // the discarded Signal-1 article is persisted as a conflict, never dropped
+    expect(
+      result[0]?.conflicts.some((c) => c.signal === 1 && c.reportedNodeType === 'article')
+    ).toBe(true);
+  });
+
+  it('keeps a Signal-1 article when indentation agrees within 1 tier (real CPI article ≈900 twips)', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 3, leftIndent: 900, text: 'SUMMARY' })],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(1);
+  });
+
+  it('keeps a Signal-1 article when there is no indentation evidence', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 3 })],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(1);
+  });
+});
+
 function makeClassified(
   nodeType: NodeType,
   normalizedIlvl: number,
