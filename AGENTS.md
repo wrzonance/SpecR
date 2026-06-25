@@ -8,6 +8,7 @@ Headless REST API for CSI MasterFormat specification automation: round-trip DOCX
 
 These tighten or replace the global defaults — they win where they differ.
 
+- **GitHub PRs created by Claude or Codex must be drafts.** Use `gh pr create --draft` or connector `draft: true`; do not create a ready-for-review PR directly.
 - **ESLint complexity is enforced, not advisory** (`eslint.config.js`): `complexity` = 10, `sonarjs/cognitive-complexity` = 10, `max-lines-per-function` = 50, `max-lines` = 400 (file cap is **400**, not the global 800), `no-console` = error, `@typescript-eslint/no-explicit-any` = error. Test files (`src/**/*.test.ts`) and `scripts/**/*.ts` relax line/console caps — see the config for the exact exemptions.
 - **TypeScript strict, plus** `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `verbatimModuleSyntax`. No `any`, no `as unknown as`, no type assertions across module boundaries, no non-null assertion (`!`) outside tests.
 - **Coverage is a DIAGNOSTIC, not a target.** No enforced percentage. Tests at module API boundaries beat tests on internals. Every bug-fix is pinned with a regression test whose name states the symptom, e.g. `'inference: CPI ilvl gap — Article at ilvl=3, not ilvl=1'`.
