@@ -15,6 +15,7 @@ describe('implied related-section title keyword matching', () => {
           specId: 'spec-conduit',
           section: '26 05 33',
           relatedSections: [],
+          bodyCitedSections: [],
           paragraphs: [
             {
               id: 'para-firestop',
@@ -49,7 +50,27 @@ describe('implied related-section title keyword matching', () => {
           specId: 'spec-conduit',
           section: '26 05 33',
           relatedSections: ['07 84 00'],
+          bodyCitedSections: [],
           paragraphs: [{ id: 'para-firestop', text: 'Provide firestopping at penetrations.' }],
+        },
+      ],
+    });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('coordination: explicitly cited body section suppresses implied_related_section', () => {
+    const index = buildTitleKeywordIndex([{ section: '07 84 00', title: 'Firestopping' }]);
+
+    const findings = findImpliedRelatedSections({
+      catalog: index,
+      specs: [
+        {
+          specId: 'spec-conduit',
+          section: '26 05 33',
+          relatedSections: [],
+          bodyCitedSections: ['07 84 00'],
+          paragraphs: [{ id: 'para-firestop', text: 'Section 07 84 00 Firestopping' }],
         },
       ],
     });
@@ -71,6 +92,7 @@ describe('implied related-section title keyword matching', () => {
           specId: 'spec-doors',
           section: '08 11 13',
           relatedSections: [],
+          bodyCitedSections: [],
           paragraphs: [{ id: 'para-general', text: 'Provide the work in general conformance.' }],
         },
       ],

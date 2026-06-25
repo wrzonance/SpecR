@@ -93,6 +93,17 @@ function relatedSectionsBySpec(
   return bySpec;
 }
 
+function bodyCitedSectionsBySpec(
+  classified: readonly ClassifiedRef[]
+): ReadonlyMap<string, string[]> {
+  const bySpec = new Map<string, string[]>();
+  for (const ref of classified) {
+    if (ref.targetType !== 'section' || ref.ancestorRole === 'related-sections') continue;
+    bySpec.set(ref.sourceSpecId, [...(bySpec.get(ref.sourceSpecId) ?? []), ref.value]);
+  }
+  return bySpec;
+}
+
 function paragraphsBySpec(rows: readonly ParagraphRow[]): ReadonlyMap<string, SourceParagraph[]> {
   const bySpec = new Map<string, SourceParagraph[]>();
   for (const row of rows) {
@@ -107,11 +118,13 @@ function sourceBodies(
   classified: readonly ClassifiedRef[]
 ): readonly SourceSpecBody[] {
   const related = relatedSectionsBySpec(classified);
+  const bodyCited = bodyCitedSectionsBySpec(classified);
   const bodies = paragraphsBySpec(paragraphs);
   return present.map((spec) => ({
     specId: spec.specId,
     section: spec.section,
     relatedSections: related.get(spec.specId) ?? [],
+    bodyCitedSections: bodyCited.get(spec.specId) ?? [],
     paragraphs: bodies.get(spec.specId) ?? [],
   }));
 }

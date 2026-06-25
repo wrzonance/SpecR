@@ -351,6 +351,34 @@ describe('getCoordinationReport', () => {
     expect(report.summary.impliedRelatedSection).toBe(0);
   });
 
+  it('coordination: explicit body citation yields related_cited_not_listed only, not implied_related_section', async () => {
+    const projectId = await newProject('coord-implied-explicit');
+    await addDefaultProjectSource(projectId);
+    const conduit = await newSpec('26 05 33', 'Raceways and Boxes for Electrical Systems');
+    await newSpec('07 84 00', 'Firestopping');
+    await addProjectSpec(projectId, conduit, 1);
+    await addClassifiedRef({
+      specId: conduit,
+      parentId: null,
+      text: 'Section 07 84 00 Firestopping',
+      targetType: 'section',
+      value: '07 84 00',
+    });
+
+    const report = await getCoordinationReport(projectId, undefined);
+
+    expect(ofType(report.findings, 'related_cited_not_listed')).toEqual([
+      {
+        type: 'related_cited_not_listed',
+        sourceSpecId: conduit,
+        sourceSpecSection: '26 05 33',
+        section: '07 84 00',
+      },
+    ]);
+    expect(ofType(report.findings, 'implied_related_section')).toEqual([]);
+    expect(report.summary.impliedRelatedSection).toBe(0);
+  });
+
   it('coordination: generic body word general does not imply catalog General sections', async () => {
     const projectId = await newProject('coord-implied-general');
     await addDefaultProjectSource(projectId);

@@ -20,6 +20,7 @@ export interface SourceSpecBody {
   readonly specId: string;
   readonly section: string;
   readonly relatedSections: readonly string[];
+  readonly bodyCitedSections: readonly string[];
   readonly paragraphs: readonly SourceParagraph[];
 }
 
@@ -258,7 +259,7 @@ function findingsForSpec(
   catalog: TitleKeywordIndex,
   emitted: Set<string>
 ): readonly ImpliedRelatedSectionFinding[] {
-  const listed = new Set(spec.relatedSections);
+  const listed = new Set([...spec.relatedSections, ...spec.bodyCitedSections]);
   return spec.paragraphs.flatMap((paragraph) => {
     return findingsForParagraph(spec, paragraph, catalog, listed, emitted);
   });
