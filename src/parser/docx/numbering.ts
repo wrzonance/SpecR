@@ -89,9 +89,12 @@ function buildPStyleMaps(
 }
 
 const SPEC_SHAPED_MIN_LINKED_LEVELS = 3;
-// Word renders the ilvl=0 prefix from lvlText; a "PART" token there means the
-// numbering itself generates "PART n", i.e. ilvl=0 is a real CSI PART heading.
-const PART_LVLTEXT_PATTERN = /\bPART\b/i;
+// Word renders the ilvl=0 prefix from lvlText; "PART" immediately followed by the
+// level field (%1) means the numbering itself generates "PART n", i.e. ilvl=0 is a
+// real CSI PART heading. Requiring the %-field (not a bare \bPART\b) rejects
+// incidental matches like "PART OF %1" / "%1 PART" / "PART-%1" that no CSI part
+// level emits — CSI part lvlText is always "PART %1[ -]".
+const PART_LVLTEXT_PATTERN = /\bPART\s*%\d/i;
 
 // CPI-authored numbering links no pStyles (the PART paragraphs use plain text
 // styles), so the pStyle-ladder rule misses it. But its ilvl=0 lvlText literally

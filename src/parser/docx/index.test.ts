@@ -686,26 +686,38 @@ describe('parseDocx — ARCAT-realistic regression (21 11 00: 34 parts instead o
 //    paragraph text is the bare canonical name. Before the fix the Signal-1 guard
 //    demoted GENERAL/PRODUCTS to continuation and only 1 part survived. ──
 
+// numId 1 → abstractNum 5: the CPI PART ladder (ilvl=0 lvlText "PART %1 -", 0 pStyle
+// links). numId 2 → abstractNum 0: a generic outline ("%1", NOT part-shaped) — the
+// artifact uses it for EMPTY PART anchors that must drop, not become spurious parts.
 const CPI_PART_NUMBERING = `<?xml version="1.0" encoding="UTF-8"?>
 <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:abstractNum w:abstractNumId="5">
     <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="PART %1 -"/></w:lvl>
     <w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl>
   </w:abstractNum>
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl>
+  </w:abstractNum>
   <w:num w:numId="1"><w:abstractNumId w:val="5"/></w:num>
+  <w:num w:numId="2"><w:abstractNumId w:val="0"/></w:num>
 </w:numbering>`;
 
-function numbered(ilvl: number, text: string): string {
-  return `<w:p><w:pPr><w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
+function numbered(ilvl: number, text: string, numId = 1): string {
+  return `<w:p><w:pPr><w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
 }
 
+// Mirrors the parsing-needs-fixing.docx pathology: bare-name PART headings on the
+// "PART %1 -" ladder, plus an EMPTY anchor on the generic numId 2 that must drop.
 const CPI_PART_DOC = `<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
     ${numbered(0, 'GENERAL')}
     ${numbered(1, 'SUMMARY')}
     ${numbered(0, 'PRODUCTS')}
+    ${numbered(0, '', 2)}
     ${numbered(1, 'MANUFACTURERS')}
+    ${numbered(0, 'EXECUTION')}
+    ${numbered(1, 'INSTALLATION')}
   </w:body>
 </w:document>`;
 
@@ -718,10 +730,17 @@ describe('parseDocx — CPI PART inference (numbering lvlText "PART %1 -", 0 pSt
     return parseDocx(buffer);
   }
 
-  it('bare GENERAL/PRODUCTS on non-pStyle-linked PART numbering yield part roots (was 1)', async () => {
+  it('bare GENERAL/PRODUCTS/EXECUTION on non-pStyle-linked PART numbering yield 3 part roots (was 1)', async () => {
     const tree = await parseCpi();
     const partRoots = tree.parts.filter((n) => n.type === 'part');
-    expect(partRoots.map((n) => n.text)).toEqual(['GENERAL', 'PRODUCTS']);
+    expect(partRoots.map((n) => n.text)).toEqual(['GENERAL', 'PRODUCTS', 'EXECUTION']);
+  });
+
+  it('an empty PART anchor on generic (non-PART) numbering drops — no spurious part', async () => {
+    const tree = await parseCpi();
+    // exactly 3 parts, none empty
+    expect(tree.parts.filter((n) => n.type === 'part')).toHaveLength(3);
+    expect(tree.parts.some((n) => n.type === 'part' && n.text.trim() === '')).toBe(false);
   });
 
   it('articles nest under their parts, never at root', async () => {
