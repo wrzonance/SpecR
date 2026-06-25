@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseText } from './index.js';
+import { parseText, warningSuggestionFor } from './index.js';
 
 describe('parseText — anomaly warnings', () => {
   it('no-structure-found: empty doc → tree.warnings has no-structure-found, capabilities includes parse-warnings', () => {
@@ -102,5 +102,40 @@ describe('parseText — anomaly warnings', () => {
     ].join('\n');
     const result = parseText(text);
     expect(result.capabilities).toEqual(['read-only']);
+  });
+});
+
+describe('warningSuggestionFor — PDF warning types added in this PR', () => {
+  it('returns a non-empty string for pdf-needs-ocr', () => {
+    const suggestion = warningSuggestionFor('pdf-needs-ocr');
+    expect(typeof suggestion).toBe('string');
+    expect(suggestion.length).toBeGreaterThan(0);
+  });
+
+  it('returns a non-empty string for pdf-degraded-extraction', () => {
+    const suggestion = warningSuggestionFor('pdf-degraded-extraction');
+    expect(typeof suggestion).toBe('string');
+    expect(suggestion.length).toBeGreaterThan(0);
+  });
+
+  it('pdf-needs-ocr suggestion mentions OCR', () => {
+    expect(warningSuggestionFor('pdf-needs-ocr')).toMatch(/ocr/i);
+  });
+
+  it('pdf-degraded-extraction suggestion mentions fallback or extractor', () => {
+    expect(warningSuggestionFor('pdf-degraded-extraction')).toMatch(/fallback|extractor/i);
+  });
+
+  it('returns distinct strings for pdf-needs-ocr and pdf-degraded-extraction', () => {
+    expect(warningSuggestionFor('pdf-needs-ocr')).not.toBe(
+      warningSuggestionFor('pdf-degraded-extraction')
+    );
+  });
+
+  it('still returns the correct suggestion for pre-existing warning types', () => {
+    expect(warningSuggestionFor('no-structure-found')).toMatch(/no part|no-part|structure|pdf/i);
+    expect(warningSuggestionFor('empty-part')).toMatch(/part|article|content/i);
+    expect(warningSuggestionFor('root-continuation')).toMatch(/continuation|heading/i);
+    expect(warningSuggestionFor('unusual-part-count')).toMatch(/part|heading/i);
   });
 });

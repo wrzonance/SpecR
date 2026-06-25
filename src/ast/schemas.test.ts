@@ -15,6 +15,8 @@ import {
   PatchEditabilityBodySchema,
   PatchRemovalBodySchema,
   ReclassifyBodySchema,
+  ParseWarningTypeSchema,
+  ParseWarningSchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -462,5 +464,47 @@ describe('PatchRemovalBodySchema (#251)', () => {
   });
   it('rejects a non-boolean removed flag', () => {
     expect(PatchRemovalBodySchema.safeParse({ removed: 'yes' }).success).toBe(false);
+  });
+});
+
+describe('ParseWarningTypeSchema — PDF warning types added in this PR', () => {
+  it('accepts pdf-needs-ocr', () => {
+    expect(ParseWarningTypeSchema.parse('pdf-needs-ocr')).toBe('pdf-needs-ocr');
+  });
+
+  it('accepts pdf-degraded-extraction', () => {
+    expect(ParseWarningTypeSchema.parse('pdf-degraded-extraction')).toBe('pdf-degraded-extraction');
+  });
+
+  it('accepts all pre-existing warning types', () => {
+    for (const type of ['root-continuation', 'empty-part', 'no-structure-found', 'unusual-part-count'] as const) {
+      expect(ParseWarningTypeSchema.parse(type)).toBe(type);
+    }
+  });
+
+  it('rejects an unknown warning type', () => {
+    expect(ParseWarningTypeSchema.safeParse('pdf-corrupted').success).toBe(false);
+    expect(ParseWarningTypeSchema.safeParse('ocr-needed').success).toBe(false);
+    expect(ParseWarningTypeSchema.safeParse('').success).toBe(false);
+  });
+});
+
+describe('ParseWarningSchema — PDF warning round-trips', () => {
+  it('round-trips a pdf-needs-ocr warning with lineHint and suggestion', () => {
+    const warning = {
+      type: 'pdf-needs-ocr',
+      lineHint: 'all pages below 16 non-whitespace text-layer chars',
+      suggestion: 'PDF page text layer is empty or too sparse.',
+    };
+    expect(ParseWarningSchema.parse(warning)).toEqual(warning);
+  });
+
+  it('round-trips a pdf-degraded-extraction warning without optional fields', () => {
+    const warning = { type: 'pdf-degraded-extraction' };
+    expect(ParseWarningSchema.parse(warning)).toEqual(warning);
+  });
+
+  it('rejects a pdf warning with an invalid type', () => {
+    expect(ParseWarningSchema.safeParse({ type: 'pdf-missing-font' }).success).toBe(false);
   });
 });

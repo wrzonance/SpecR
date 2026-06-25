@@ -25,6 +25,7 @@ describe('env validation — defaults and coercion', () => {
     expect(config.PORT).toBe(4000);
     expect(typeof config.PORT).toBe('number');
     expect(config.LOG_LEVEL).toBe('debug');
+    expect(config.OCR_MIN_CHARS_PER_PAGE).toBe(16);
   });
 
   it('defaults PORT to 3000 when not set', async () => {
@@ -47,6 +48,26 @@ describe('env validation — defaults and coercion', () => {
     expect(config.LOG_LEVEL).toBe('info');
   });
 
+  it('defaults OCR_MIN_CHARS_PER_PAGE to 16 when not set', async () => {
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    delete process.env['OCR_MIN_CHARS_PER_PAGE'];
+
+    const { config } = await import('./env.js');
+
+    expect(config.OCR_MIN_CHARS_PER_PAGE).toBe(16);
+  });
+
+  it('coerces OCR_MIN_CHARS_PER_PAGE to a positive integer', async () => {
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    process.env['OCR_MIN_CHARS_PER_PAGE'] = '24';
+
+    const { config } = await import('./env.js');
+
+    expect(config.OCR_MIN_CHARS_PER_PAGE).toBe(24);
+  });
+
   it('coerces PORT string "4000" to number 4000', async () => {
     process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
     process.env['NODE_ENV'] = 'test';
@@ -56,6 +77,47 @@ describe('env validation — defaults and coercion', () => {
 
     expect(config.PORT).toBe(4000);
     expect(typeof config.PORT).toBe('number');
+  });
+});
+
+describe('env validation — OCR_MIN_CHARS_PER_PAGE boundary cases', () => {
+  it('rejects OCR_MIN_CHARS_PER_PAGE of 0 (must be positive)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    process.env['OCR_MIN_CHARS_PER_PAGE'] = '0';
+
+    await expect(import('./env.js')).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+
+  it('rejects a negative OCR_MIN_CHARS_PER_PAGE', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    process.env['OCR_MIN_CHARS_PER_PAGE'] = '-5';
+
+    await expect(import('./env.js')).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+
+  it('rejects a floating-point OCR_MIN_CHARS_PER_PAGE (must be an integer)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    process.env['OCR_MIN_CHARS_PER_PAGE'] = '16.5';
+
+    await expect(import('./env.js')).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
   });
 });
 

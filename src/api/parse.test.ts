@@ -53,7 +53,11 @@ describe('parseHandler', () => {
   it('returns 400 for unsupported file extension', async () => {
     const { parseHandler } = await import('./parse.js');
     const req = {
-      file: { originalname: 'test.pdf', mimetype: 'application/pdf', buffer: Buffer.alloc(4) },
+      file: {
+        originalname: 'test.xyz',
+        mimetype: 'application/octet-stream',
+        buffer: Buffer.alloc(4),
+      },
       body: {},
     } as unknown as Request;
     const res = makeRes();
@@ -137,6 +141,62 @@ describe('parseHandler', () => {
     const res = makeRes();
     await parseHandler(req, res);
     expect(res.status).toHaveBeenCalledWith(202);
+  });
+
+  it('returns 202 for a valid .pdf upload with correct MIME type', async () => {
+    const { createJob } = await import('../lib/jobs.js');
+    vi.mocked(createJob).mockReturnValue('pdf-job-id');
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: {
+        originalname: 'spec.pdf',
+        mimetype: 'application/pdf',
+        buffer: Buffer.from('%PDF-1.4'),
+      },
+      body: {},
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { jobId: 'pdf-job-id' } })
+    );
+  });
+
+  it('returns 400 for .pdf with wrong MIME type', async () => {
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: {
+        originalname: 'spec.pdf',
+        mimetype: 'application/octet-stream',
+        buffer: Buffer.from('%PDF-1.4'),
+      },
+      body: {},
+    } as unknown as Request;
+    const res = makeRes();
+    await parseHandler(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'MIME type mismatch for .pdf' })
+    );
+  });
+
+  it('does NOT call assertDocxSafe or assertSecSafe when uploading a .pdf', async () => {
+    const { assertDocxSafe, assertSecSafe } = await import('../parser/index.js');
+    const { createJob } = await import('../lib/jobs.js');
+    vi.mocked(createJob).mockReturnValue('pdf-skip-job');
+    const { parseHandler } = await import('./parse.js');
+    const req = {
+      file: {
+        originalname: 'spec.pdf',
+        mimetype: 'application/pdf',
+        buffer: Buffer.from('%PDF-1.4'),
+      },
+      body: {},
+    } as unknown as Request;
+    await parseHandler(req, makeRes());
+    expect(assertDocxSafe).not.toHaveBeenCalled();
+    expect(assertSecSafe).not.toHaveBeenCalled();
   });
 
   it('parse: dirty section override normalized before persist', async () => {
