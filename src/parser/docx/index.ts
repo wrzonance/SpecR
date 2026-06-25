@@ -152,7 +152,12 @@ function buildClassification(
 
   onProgress?.('document', 55);
   const commentsById = entries.commentsXml ? parseCommentsXml(entries.commentsXml) : new Map();
-  const paragraphs = parseDocument(entries.documentXml, resolvedNumberingMap, commentsById);
+  const paragraphs = parseDocument(
+    entries.documentXml,
+    resolvedNumberingMap,
+    styleMap,
+    commentsById
+  );
 
   if (paragraphs.length === 0) {
     throw new ParserError('document contains no paragraphs');

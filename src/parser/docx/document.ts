@@ -4,7 +4,7 @@ import { extractAttrStr, getAttrVal, getAttrNumVal, toArray } from './xml-utils.
 import { parseParagraphSources } from './source-facts.js';
 import type { SourceFacts } from '../../ast/types.js';
 import type { DocxComment } from './comments.js';
-import type { DocxParagraph, NumberingMap } from './types.js';
+import type { DocxParagraph, NumberingMap, StyleMap } from './types.js';
 import type { ParagraphSource } from './source-facts.js';
 
 // Entity audit (issue #22): fxp v5 does not resolve custom or recursive entity declarations
@@ -101,10 +101,52 @@ function resolveOutlineLvl(pPr: Record<string, unknown> | undefined): number | u
   return isNaN(n) ? undefined : n;
 }
 
-function resolveIsVanish(pPr: Record<string, unknown> | undefined): boolean {
+function runIsVanish(
+  run: Record<string, unknown>,
+  vanishCharStyleIds: ReadonlySet<string>
+): boolean {
+  const rPr = run['w:rPr'];
+  if (typeof rPr === 'object' && rPr !== null) {
+    const rec = rPr as Record<string, unknown>;
+    if ('w:vanish' in rec) return true;
+    const rStyle = getAttrVal(rec['w:rStyle']);
+    if (rStyle && vanishCharStyleIds.has(rStyle)) return true;
+  }
+  return false;
+}
+
+function allTextRunsVanish(
+  raw: Record<string, unknown>,
+  vanishCharStyleIds: ReadonlySet<string>
+): boolean {
+  const directRuns = toArray<Record<string, unknown>>(
+    raw['w:r'] as readonly Record<string, unknown>[] | undefined
+  );
+  const linkRuns = toArray<Record<string, unknown>>(
+    raw['w:hyperlink'] as readonly Record<string, unknown>[] | undefined
+  ).flatMap((h) =>
+    toArray<Record<string, unknown>>(h['w:r'] as readonly Record<string, unknown>[] | undefined)
+  );
+  const textRuns = [...directRuns, ...linkRuns].filter((r) => extractRunText(r).length > 0);
+  if (textRuns.length === 0) return false;
+  return textRuns.every((r) => runIsVanish(r, vanishCharStyleIds));
+}
+
+function paragraphMarkVanish(pPr: Record<string, unknown> | undefined): boolean {
   const raw = pPr?.['w:rPr'];
   if (raw === null || typeof raw !== 'object') return false;
   return 'w:vanish' in (raw as Record<string, unknown>);
+}
+
+function resolveParagraphVanish(
+  raw: Record<string, unknown>,
+  pPr: Record<string, unknown> | undefined,
+  styleId: string | undefined,
+  styleMap: StyleMap
+): boolean {
+  if (paragraphMarkVanish(pPr)) return true;
+  if (styleId && styleMap.vanishStyleIds.has(styleId)) return true;
+  return allTextRunsVanish(raw, styleMap.vanishCharStyleIds);
 }
 
 function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxParagraph {
@@ -122,6 +164,7 @@ function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxP
 function parseParagraph(
   raw: Record<string, unknown>,
   numberingMap: NumberingMap,
+  styleMap: StyleMap,
   source: ParagraphSource | undefined
 ): DocxParagraph {
   const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
@@ -132,7 +175,7 @@ function parseParagraph(
   const outlineLvl = resolveOutlineLvl(pPr);
   const para: DocxParagraph = {
     text: source?.text ?? extractText(raw),
-    isVanish: resolveIsVanish(pPr),
+    isVanish: resolveParagraphVanish(raw, pPr, styleId, styleMap),
   };
   return addParagraphFields(para, {
     styleId,
@@ -147,6 +190,7 @@ function parseParagraph(
 export function parseDocument(
   xml: string,
   numberingMap: NumberingMap,
+  styleMap: StyleMap,
   commentsById: ReadonlyMap<string, DocxComment> = new Map()
 ): DocxParagraph[] {
   let parsed: unknown;
@@ -165,5 +209,5 @@ export function parseDocument(
   const paragraphSources = parseParagraphSources(xml, commentsById);
   return toArray<Record<string, unknown>>(
     body['w:p'] as readonly Record<string, unknown>[] | undefined
-  ).map((p, index) => parseParagraph(p, numberingMap, paragraphSources[index]));
+  ).map((p, index) => parseParagraph(p, numberingMap, styleMap, paragraphSources[index]));
 }
