@@ -128,6 +128,13 @@ function correctMisalignedArticle(winner: SignalHit, hits: readonly SignalHit[])
   if (winner.nodeType !== 'article' || (winner.signal !== 1 && winner.signal !== 2)) {
     return winner;
   }
+  // Corroboration: a literal "N.N" text prefix (Signal 4) or a second numbering/style
+  // signal independently calling this an article outweighs indentation — only an
+  // article with no other non-indent support is a misaligned-numbering artifact.
+  const articleVotes = hits.filter((h) => h.signal !== 5 && h.nodeType === 'article');
+  if (articleVotes.length > 1) {
+    return winner;
+  }
   const indentHit = hits.find((h) => h.signal === 5);
   if (!indentHit || indentHit.normalizedIlvl < ARTICLE_INDENT_CONTRADICTION_MIN_TIER) {
     return winner;

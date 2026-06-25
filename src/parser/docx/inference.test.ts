@@ -243,6 +243,19 @@ describe('classifyParagraphs — misaligned-numbering article guard', () => {
     expect(result[0]?.nodeType).toBe('article');
     expect(result[0]?.signalUsed).toBe(1);
   });
+
+  // Codex review hardening: a deep indent must NOT override an article when a literal
+  // "N.N" text prefix (Signal 4) independently corroborates it. Only an article with
+  // no other non-indent corroboration is treated as a misaligned-numbering artifact.
+  it('keeps an article when a literal "N.N" text signal corroborates, despite deep indent', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 3, leftIndent: 2160, text: '1.1 SUMMARY OF WORK' })],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(1);
+  });
 });
 
 function makeClassified(
