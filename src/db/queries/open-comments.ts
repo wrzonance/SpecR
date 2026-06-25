@@ -3,7 +3,7 @@ import { pool } from '../index.js';
 import { DatabaseError } from '../errors.js';
 import { SpecNotFoundError } from './edit-gate.js';
 import { ProjectNotFoundError } from './derive.js';
-import { SourceFactsSchema } from '../../ast/index.js';
+import { parseSourceFacts } from '../../ast/index.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -49,6 +49,7 @@ const SPEC_SQL = `SELECT p.id AS "paragraphId", s.id AS "specId", s.section AS "
                          p.source_facts AS "sourceFacts"
                   FROM paragraphs p JOIN specs s ON s.id = p.spec_id
                   WHERE p.spec_id = $1
+                    AND p.source_facts ? 'comments'
                   ORDER BY s.section, p.position`;
 
 const PROJECT_SQL = `SELECT p.id AS "paragraphId", s.id AS "specId", s.section AS "specSection",
@@ -57,6 +58,7 @@ const PROJECT_SQL = `SELECT p.id AS "paragraphId", s.id AS "specId", s.section A
                        JOIN specs s ON s.id = ps.spec_id
                        JOIN paragraphs p ON p.spec_id = s.id
                      WHERE ps.project_id = $1
+                       AND p.source_facts ? 'comments'
                      ORDER BY s.section, p.position`;
 
 async function assertScope(scope: OpenCommentsScope, client: Queryable): Promise<void> {
@@ -81,7 +83,7 @@ async function readParagraphFacts(
 }
 
 // Split one paragraph's comment facts into open occurrences + a total count.
-// source_facts is validated through SourceFactsSchema, which backfills the closed
+// source_facts is validated through parseSourceFacts, which backfills the closed
 // flag for rows written before that field existed: a legacy comment whose text
 // ends in "Closed" reads as closed; everything else reads as open. (The strike-out
 // signal is parse-time-only and unrecoverable from stored facts.)
@@ -89,7 +91,7 @@ function splitComments(row: ParagraphFactsRow): {
   readonly open: readonly OpenComment[];
   readonly total: number;
 } {
-  const facts = SourceFactsSchema.parse(row.sourceFacts ?? {});
+  const facts = parseSourceFacts(row.sourceFacts);
   const comments = facts.comments ?? [];
   const open = comments
     .filter((c) => !c.closed)

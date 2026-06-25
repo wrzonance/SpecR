@@ -6,12 +6,14 @@ import {
   ProjectNotFoundError,
   type OpenCommentsScope,
 } from '../db/index.js';
+import { logger } from '../lib/logger.js';
 
 function mapError(err: unknown, res: Response): void {
   if (err instanceof SpecNotFoundError || err instanceof ProjectNotFoundError) {
     res.status(404).json({ success: false, error: err.message });
     return;
   }
+  logger.error({ err }, 'open-comments report failed');
   res.status(500).json({ success: false, error: 'open-comments report failed' });
 }
 
