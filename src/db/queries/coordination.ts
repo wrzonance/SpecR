@@ -12,8 +12,13 @@ import { getBrokenRefs, type BrokenRef } from './project-refs.js';
 import {
   classifyScopedRefs,
   buildReferenceConsistencyFindings,
+  type ClassifiedRef,
   type ReferenceConsistencyFinding,
 } from './article-refs.js';
+import {
+  buildUmbrellaCalloutFindings,
+  type UmbrellaNotCalledOutFinding,
+} from './umbrella-callouts.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -60,7 +65,8 @@ export type Finding =
       readonly sourceSpecId: string;
       readonly sourceSpecSection: string;
       readonly standardCode: string;
-    };
+    }
+  | UmbrellaNotCalledOutFinding;
 
 export interface CoordinationSummary {
   readonly requiredNotPresent: number;
@@ -69,6 +75,7 @@ export interface CoordinationSummary {
   readonly relatedListedNotCited: number;
   readonly relatedCitedNotListed: number;
   readonly standardCitedNotListed: number;
+  readonly umbrellaNotCalledOut: number;
   readonly total: number;
 }
 
@@ -168,7 +175,11 @@ function buildFindings(
   required: readonly RequiredSection[],
   present: readonly PresentSpec[],
   broken: readonly BrokenRef[],
-  referenceFindings: readonly Finding[]
+  referenceFindings: readonly Finding[],
+  umbrellaResult: {
+    readonly findings: readonly UmbrellaNotCalledOutFinding[];
+    readonly notes: readonly string[];
+  }
 ): { readonly findings: readonly Finding[]; readonly notes: readonly string[] } {
   const requiredSections = new Set(required.map((r) => r.section));
   const presentSections = new Set(present.map((p) => p.section));
@@ -201,8 +212,14 @@ function buildFindings(
   });
 
   return {
-    findings: [...requiredNotPresent, ...presentNotRequired, ...danglingRef, ...referenceFindings],
-    notes: empty ? [EMPTY_REQUIRED_NOTE] : [],
+    findings: [
+      ...requiredNotPresent,
+      ...presentNotRequired,
+      ...danglingRef,
+      ...referenceFindings,
+      ...umbrellaResult.findings,
+    ],
+    notes: [...(empty ? [EMPTY_REQUIRED_NOTE] : []), ...umbrellaResult.notes],
   };
 }
 
@@ -215,8 +232,15 @@ function summarize(findings: readonly Finding[]): CoordinationSummary {
     relatedListedNotCited: count('related_listed_not_cited'),
     relatedCitedNotListed: count('related_cited_not_listed'),
     standardCitedNotListed: count('standard_cited_not_listed'),
+    umbrellaNotCalledOut: count('umbrella_not_called_out'),
     total: findings.length,
   };
+}
+
+function sectionRefs(
+  classified: readonly ClassifiedRef[]
+): readonly { readonly sourceSpecId: string; readonly value: string }[] {
+  return classified.filter((ref) => ref.targetType === 'section');
 }
 
 export async function getCoordinationReport(
@@ -238,7 +262,14 @@ export async function getCoordinationReport(
     );
     await client.query('COMMIT');
     const referenceFindings = buildReferenceConsistencyFindings(classified).map(toReferenceFinding);
-    const { findings, notes } = buildFindings(required, present, broken, referenceFindings);
+    const umbrellaResult = buildUmbrellaCalloutFindings(present, sectionRefs(classified));
+    const { findings, notes } = buildFindings(
+      required,
+      present,
+      broken,
+      referenceFindings,
+      umbrellaResult
+    );
     return {
       projectId,
       packageId: packageId ?? null,
