@@ -345,6 +345,33 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts[0]?.text).toBe('PART 3 - EXECUTION');
   });
 
+  // Codex review: stripping "PART 3 - " (9 chars) must rebase the part's source-fact
+  // offsets onto the shorter text, or comment/color anchors point past it.
+  it('rebases a part node’s source-fact offsets when the prefix is stripped', () => {
+    const cp: ClassifiedParagraph = {
+      paragraph: {
+        text: 'PART 3 - EXECUTION',
+        isVanish: false,
+        sourceFacts: {
+          comments: [{ author: 'A', text: 'check', anchor: [9, 18], closed: false }],
+          colors: [{ color: 'FF0000', coverage: 0.5, spans: [[9, 18]] }],
+        },
+      },
+      resolvedIlvl: 0,
+      nodeType: 'part',
+      signalUsed: 1,
+      conflicts: [],
+      isVanish: false,
+    };
+    const tree = buildTree([cp], '01', 'T', 'cpi');
+    const part = tree.parts[0]!;
+    const facts = part.meta.sourceFacts!;
+    expect(part.text).toBe('EXECUTION');
+    expect(facts.comments![0]!.anchor).toEqual([0, 9]);
+    expect(facts.colors![0]!.spans).toEqual([[0, 9]]);
+    expect(facts.colors![0]!.coverage).toBe(1);
+  });
+
   it('handles sibling articles (ilvl stepping back to article level)', () => {
     const classified = [
       makeClassified('part', 0, 'PART 1'),

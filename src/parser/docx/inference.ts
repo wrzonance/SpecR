@@ -14,7 +14,7 @@ import type {
   StyleMap,
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
-import { stripPartPrefix } from '../part-prefix.js';
+import { planPartStrip, rebaseSourceFacts } from '../part-prefix.js';
 
 // Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
 const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
@@ -248,26 +248,37 @@ function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode
   };
 }
 
-// A visible PART heading stores only its name in the AST; the "PART n -" label
-// is render-derived (getLabel). Keep the raw text when stripping would empty it
-// (a bare "PART n" with no name) and for hidden parts (kept verbatim as notes).
-function nodeText(cp: ClassifiedParagraph): string {
-  if (cp.isVanish || cp.nodeType !== 'part') return cp.paragraph.text;
-  const stripped = stripPartPrefix(cp.paragraph.text);
-  return stripped.length > 0 ? stripped : cp.paragraph.text;
+// A visible PART heading stores only its name in the AST; the "PART n -" label is
+// render-derived (getLabel). Strip it, rebasing any source-fact offsets onto the
+// shorter text so comment/color/choice anchors stay valid. Hidden parts (kept
+// verbatim as notes), non-parts, and a bare "PART n" (strip would empty it) keep
+// their raw text + facts unchanged.
+function nodeContent(cp: ClassifiedParagraph): {
+  readonly text: string;
+  readonly sourceFacts?: NonNullable<DocxParagraph['sourceFacts']>;
+} {
+  const facts = cp.paragraph.sourceFacts;
+  const plan = !cp.isVanish && cp.nodeType === 'part' ? planPartStrip(cp.paragraph.text) : null;
+  if (!plan) {
+    return facts ? { text: cp.paragraph.text, sourceFacts: facts } : { text: cp.paragraph.text };
+  }
+  return facts
+    ? { text: plan.text, sourceFacts: rebaseSourceFacts(facts, plan.removed, plan.text.length) }
+    : { text: plan.text };
 }
 
 function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source): SpecNode {
+  const content = nodeContent(cp);
   return {
     id: uuidv4(),
     type: cp.isVanish ? 'note' : cp.nodeType,
-    text: nodeText(cp),
+    text: content.text,
     children,
     meta: {
       source,
       ...(cp.isVanish ? { vanish: true as const } : {}),
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
-      ...sourceFactsMeta(cp),
+      ...(content.sourceFacts ? { sourceFacts: content.sourceFacts } : {}),
     },
   };
 }
