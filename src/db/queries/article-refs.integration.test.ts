@@ -120,6 +120,26 @@ describe('classifyScopedRefs', () => {
     expect(byValue.get('ASTM E119')).toBe('other');
   });
 
+  it('does not borrow an article role across specs: a parent_id into another spec is ignored', async () => {
+    // specA owns a RELATED SECTIONS article. specB has a ref whose paragraph's
+    // parent_id points INTO specA's article. The ancestry walk must stay within
+    // specB, so the ref classifies as 'other' — not 'related-sections'.
+    const specA = await newSpec('08 11 13', 'Hollow Metal Doors');
+    const specAArticle = await newArticle(specA, '1.1 RELATED SECTIONS', 1);
+    const specB = await newSpec('09 21 16', 'Gypsum Board');
+    await addRef({
+      specId: specB,
+      parentId: specAArticle,
+      text: 'Section 07 84 00',
+      targetType: 'section',
+      value: '07 84 00',
+    });
+
+    const classified = await classifyScopedRefs([specB], pool);
+
+    expect(classified.map((c) => [c.value, c.ancestorRole])).toEqual([['07 84 00', 'other']]);
+  });
+
   it('returns an empty array for an empty spec set without querying', async () => {
     expect(await classifyScopedRefs([], pool)).toEqual([]);
   });

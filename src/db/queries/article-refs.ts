@@ -40,14 +40,18 @@ const CLASSIFY_SQL = `
       AND COALESCE(sr.target_spec_section, sr.standard_code) IS NOT NULL
   ),
   ancestry AS (
-    SELECT r.ref_id, p.id, p.parent_id, p.node_type, p.text, 0 AS depth
+    SELECT r.ref_id, r.source_spec_id, p.id, p.parent_id, p.node_type, p.text, 0 AS depth
     FROM refs r JOIN paragraphs p ON p.id = r.source_paragraph_id
     UNION ALL
-    -- depth cap is a cycle guard: paragraphs is application-built and acyclic,
-    -- but a corrupt parent_id loop would otherwise recurse unbounded. CSI trees
-    -- are only a handful deep, so 100 is far above any legitimate chain.
-    SELECT a.ref_id, p.id, p.parent_id, p.node_type, p.text, a.depth + 1
-    FROM ancestry a JOIN paragraphs p ON p.id = a.parent_id
+    -- Constrain every step to the ref's OWN spec: paragraphs.parent_id can in
+    -- principle point across specs, and an article role must only ever be
+    -- borrowed from the same spec's tree (mirrors the spec-scoped subtree CTE in
+    -- paragraphs.ts). The depth cap is a cycle guard: paragraphs is
+    -- application-built and acyclic, but a corrupt parent_id loop would
+    -- otherwise recurse unbounded. CSI trees are only a handful deep, so 100 is
+    -- far above any legitimate chain.
+    SELECT a.ref_id, a.source_spec_id, p.id, p.parent_id, p.node_type, p.text, a.depth + 1
+    FROM ancestry a JOIN paragraphs p ON p.id = a.parent_id AND p.spec_id = a.source_spec_id
     WHERE a.depth < 100
   ),
   nearest_article AS (
