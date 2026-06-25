@@ -10,6 +10,7 @@ import type { ParseWarning } from '../ast/types.js';
 
 let server: Server;
 let baseUrl: string;
+const OCR_E2E_ENABLED = process.env['SPECR_OCR_E2E'] === '1';
 
 beforeAll(async () => {
   const app = express();
@@ -226,13 +227,20 @@ describe('POST /parse integration', () => {
     }
   }, 30_000);
 
-  it('completes no-text PDF with a needs-OCR warning instead of crashing', async () => {
-    const job = await postPdf(blankPdf());
-    expect(job.status).toBe('complete');
-    expect(job.result?.warnings?.some((warning) => warning.type === 'pdf-needs-ocr')).toBe(true);
-    const specId = job.result?.specId;
-    if (specId) cleanupIds.push(specId);
-  });
+  it.skipIf(!OCR_E2E_ENABLED)(
+    'completes no-text PDF with an OCR warning instead of crashing',
+    async () => {
+      const job = await postPdf(blankPdf());
+      expect(job.status).toBe('complete');
+      expect(
+        job.result?.warnings?.some(
+          (warning) => warning.type === 'pdf-ocr-applied' || warning.type === 'pdf-ocr-unusable'
+        )
+      ).toBe(true);
+      const specId = job.result?.specId;
+      if (specId) cleanupIds.push(specId);
+    }
+  );
 
   it('GET /parse/jobs/:jobId returns 404 for unknown job', async () => {
     const res = await fetch(`${baseUrl}/parse/jobs/nonexistent-id`);

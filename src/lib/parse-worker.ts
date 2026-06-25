@@ -34,6 +34,16 @@ export const workerOutputSchema = z.object({
   capabilities: z.array(z.string()).optional(),
 });
 
+function parseOptionsFromConfig() {
+  return {
+    ocrMinCharsPerPage: config.OCR_MIN_CHARS_PER_PAGE,
+    ocrLowConfidenceThreshold: config.OCR_LOW_CONFIDENCE_THRESHOLD,
+    ocrRenderScale: config.OCR_RENDER_SCALE,
+    ...(config.OCR_LANG_PATH !== undefined ? { ocrLangPath: config.OCR_LANG_PATH } : {}),
+    ...(config.OCR_CACHE_PATH !== undefined ? { ocrCachePath: config.OCR_CACHE_PATH } : {}),
+  };
+}
+
 // Delegates to the parse() orchestrator so the upload path runs the same
 // pipeline as CLI ingest — including lib/infer-section section/title recovery,
 // which this worker previously skipped (DOCX uploads whose docProps/core.xml
@@ -41,8 +51,10 @@ export const workerOutputSchema = z.object({
 // Format safety validation (assertSecSafe/assertDocxSafe) already ran in the
 // main thread before the job was created.
 export default async function parseWorker({ buffer, ext }: WorkerInput): Promise<WorkerOutput> {
-  const { tree, refs, capabilities } = await parse(buffer, `upload${ext}`, {
-    ocrMinCharsPerPage: config.OCR_MIN_CHARS_PER_PAGE,
-  });
+  const { tree, refs, capabilities } = await parse(
+    buffer,
+    `upload${ext}`,
+    parseOptionsFromConfig()
+  );
   return { tree, refs, ...(capabilities !== undefined ? { capabilities } : {}) };
 }

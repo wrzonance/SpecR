@@ -6,6 +6,10 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']),
   LOG_LEVEL: z.string().default('info'),
   OCR_MIN_CHARS_PER_PAGE: z.coerce.number().int().positive().default(16),
+  OCR_LOW_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(100).default(70),
+  OCR_LANG_PATH: z.string().min(1).optional(),
+  OCR_CACHE_PATH: z.string().min(1).optional(),
+  OCR_RENDER_SCALE: z.coerce.number().positive().default(2),
 });
 
 const result = schema.safeParse(process.env);

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { assertSecSafe, parseSec } from './sec/index.js';
 import { parseDocx } from './docx/index.js';
 import { parsePdf } from './pdf/index.js';
+import type { ParsePdfOptions } from './pdf/index.js';
 import { parseText } from './text/index.js';
 import { extractRefsFromTree } from './refs/index.js';
 import { ParserError } from './error.js';
@@ -37,6 +38,10 @@ export interface ParseResult {
 
 export interface ParseOptions {
   readonly ocrMinCharsPerPage?: number;
+  readonly ocrLowConfidenceThreshold?: number;
+  readonly ocrLangPath?: string;
+  readonly ocrCachePath?: string;
+  readonly ocrRenderScale?: number;
 }
 
 function withArticleRoles(tree: SpecTree): SpecTree {
@@ -53,44 +58,73 @@ function applyInference(tree: SpecTree, inference: SectionInference): SpecTree {
   return { ...tree, section, title };
 }
 
+function parseSecBuffer(buffer: Buffer): ParseResult {
+  const text = assertSecSafe(buffer);
+  const { tree, refs } = parseSec(text);
+  const sectionInference = inferSectionMeta(tree);
+  return {
+    tree: withArticleRoles(applyInference(tree, sectionInference)),
+    refs,
+    sectionInference,
+  };
+}
+
+async function parseDocxBuffer(buffer: Buffer): Promise<ParseResult> {
+  const noop = (_stage: string, _pct: number): void => {};
+  const tree = await parseDocx(buffer, noop);
+  const sectionInference = inferSectionMeta(tree);
+  const finalTree = withArticleRoles(applyInference(tree, sectionInference));
+  return { tree: finalTree, refs: extractRefsFromTree(finalTree), sectionInference };
+}
+
+function parseTxtBuffer(buffer: Buffer): ParseResult {
+  const text = decodeTextBuffer(buffer);
+  const { tree, refs, capabilities } = parseText(text);
+  const sectionInference = inferSectionMeta(tree);
+  return { tree: withArticleRoles(tree), refs, sectionInference, capabilities };
+}
+
+function ocrOptionsFromParseOptions(options?: ParseOptions): ParsePdfOptions['ocr'] | undefined {
+  const hasOcrOptions =
+    options?.ocrLangPath !== undefined ||
+    options?.ocrCachePath !== undefined ||
+    options?.ocrRenderScale !== undefined;
+  if (!hasOcrOptions) return undefined;
+  return {
+    ...(options.ocrLangPath !== undefined ? { langPath: options.ocrLangPath } : {}),
+    ...(options.ocrCachePath !== undefined ? { cachePath: options.ocrCachePath } : {}),
+    ...(options.ocrRenderScale !== undefined ? { scale: options.ocrRenderScale } : {}),
+  };
+}
+
+function pdfOptionsFromParseOptions(options?: ParseOptions): ParsePdfOptions {
+  const ocr = ocrOptionsFromParseOptions(options);
+  return {
+    ...(options?.ocrMinCharsPerPage !== undefined
+      ? { ocrMinCharsPerPage: options.ocrMinCharsPerPage }
+      : {}),
+    ...(options?.ocrLowConfidenceThreshold !== undefined
+      ? { ocrLowConfidenceThreshold: options.ocrLowConfidenceThreshold }
+      : {}),
+    ...(ocr !== undefined ? { ocr } : {}),
+  };
+}
+
+async function parsePdfBuffer(buffer: Buffer, options?: ParseOptions): Promise<ParseResult> {
+  const { tree, refs, capabilities } = await parsePdf(buffer, pdfOptionsFromParseOptions(options));
+  const sectionInference = inferSectionMeta(tree);
+  return { tree: withArticleRoles(tree), refs, sectionInference, capabilities };
+}
+
 export async function parse(
   buffer: Buffer,
   filename: string,
   options?: ParseOptions
 ): Promise<ParseResult> {
   const ext = path.extname(filename).toLowerCase();
-  if (ext === '.sec') {
-    const text = assertSecSafe(buffer);
-    const { tree, refs } = parseSec(text);
-    const sectionInference = inferSectionMeta(tree);
-    return {
-      tree: withArticleRoles(applyInference(tree, sectionInference)),
-      refs,
-      sectionInference,
-    };
-  }
-  if (ext === '.docx') {
-    const noop = (_stage: string, _pct: number): void => {};
-    const tree = await parseDocx(buffer, noop);
-    const sectionInference = inferSectionMeta(tree);
-    const finalTree = withArticleRoles(applyInference(tree, sectionInference));
-    const refs = extractRefsFromTree(finalTree);
-    return { tree: finalTree, refs, sectionInference };
-  }
-  if (ext === '.txt') {
-    const text = decodeTextBuffer(buffer);
-    const { tree, refs, capabilities } = parseText(text);
-    const sectionInference = inferSectionMeta(tree);
-    return { tree: withArticleRoles(tree), refs, sectionInference, capabilities };
-  }
-  if (ext === '.pdf') {
-    const pdfOptions =
-      options?.ocrMinCharsPerPage === undefined
-        ? {}
-        : { ocrMinCharsPerPage: options.ocrMinCharsPerPage };
-    const { tree, refs, capabilities } = await parsePdf(buffer, pdfOptions);
-    const sectionInference = inferSectionMeta(tree);
-    return { tree: withArticleRoles(tree), refs, sectionInference, capabilities };
-  }
+  if (ext === '.sec') return parseSecBuffer(buffer);
+  if (ext === '.docx') return parseDocxBuffer(buffer);
+  if (ext === '.txt') return parseTxtBuffer(buffer);
+  if (ext === '.pdf') return parsePdfBuffer(buffer, options);
   throw new ParserError(`unsupported format: ${ext}`);
 }
