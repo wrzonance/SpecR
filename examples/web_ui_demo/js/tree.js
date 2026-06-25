@@ -126,18 +126,45 @@ function autosize(textarea) {
   textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
+// Only body paragraphs (pr1–pr7 / continuation) are soft-removable server-side
+// (#251) — a part/article/note is rejected 422. Notes never reach this code
+// (renderNote handles them), so the check covers the remaining structural types.
+const REMOVABLE_TYPES = new Set(['pr1', 'pr2', 'pr3', 'pr4', 'pr5', 'pr6', 'pr7', 'continuation']);
+
+function makeRemovalButton(node, ctx) {
+  const removed = Boolean(node.meta && node.meta.vanish);
+  const btn = el(
+    'button',
+    `para-act para-removal${removed ? ' is-restore' : ''}`,
+    removed ? '↩' : '⊘'
+  );
+  btn.type = 'button';
+  btn.title = removed
+    ? 'Restore this paragraph (clears the removal)'
+    : 'Remove this paragraph (reversible — it is hidden from owner renders, not deleted)';
+  btn.addEventListener('click', () => ctx.onToggleParagraphRemoval(ctx.spec, node, !removed));
+  return btn;
+}
+
 function makeParaActions(node, row, ctx) {
   const actions = el('div', 'para-actions');
-  const edit = el('button', 'para-act para-edit', '✎');
-  edit.type = 'button';
-  edit.title = 'Edit this paragraph';
-  edit.addEventListener('click', () => beginEdit(node, row, ctx));
-  const del = el('button', 'para-act para-del', '✕');
-  del.type = 'button';
-  del.title = 'Delete this paragraph (and any reference it contains)';
-  del.addEventListener('click', () => ctx.onDeleteParagraph(ctx.spec, node));
-  actions.appendChild(edit);
-  actions.appendChild(del);
+  if (ctx.editEnabled) {
+    const edit = el('button', 'para-act para-edit', '✎');
+    edit.type = 'button';
+    edit.title = 'Edit this paragraph';
+    edit.addEventListener('click', () => beginEdit(node, row, ctx));
+    actions.appendChild(edit);
+  }
+  if (ctx.removalEnabled && REMOVABLE_TYPES.has(node.type)) {
+    actions.appendChild(makeRemovalButton(node, ctx));
+  }
+  if (ctx.deleteEnabled) {
+    const del = el('button', 'para-act para-del', '✕');
+    del.type = 'button';
+    del.title = 'Delete this paragraph (and any reference it contains)';
+    del.addEventListener('click', () => ctx.onDeleteParagraph(ctx.spec, node));
+    actions.appendChild(del);
+  }
   return actions;
 }
 
@@ -224,7 +251,7 @@ function renderPrNode(node, index, ctx) {
     renderPrNode(child, ordinal, ctx)
   );
   row.appendChild(body);
-  if (ctx.editEnabled) row.appendChild(makeParaActions(node, row, ctx));
+  if (ctx.actionsEnabled) row.appendChild(makeParaActions(node, row, ctx));
   return row;
 }
 
@@ -239,10 +266,33 @@ function makeCollapsible(container, barClass, labelText, titleText, startClosed)
   return bar;
 }
 
+// Humanizes an ADR-033 article role enum ('related-sections' → 'Related Sections')
+// for the heading chip. The server only emits the recognized kebab-case values,
+// so a generic de-kebab keeps the demo correct if the enum grows server-side.
+function humanizeArticleRole(role) {
+  return role
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+// The role chip surfaces meta.articleRole (present only on recognized article
+// nodes — GET /specs/:id, ADR-033). Absent for unknown/non-standard articles.
+function articleRoleChip(node) {
+  const role = node.meta && node.meta.articleRole;
+  if (!role) return null;
+  const chip = el('span', `article-role role-${role}`, humanizeArticleRole(role));
+  chip.title = `CSI article role: ${humanizeArticleRole(role)} (inferred from heading)`;
+  return chip;
+}
+
 function renderArticle(node, index, partNumber, ctx) {
   const wrap = el('div', 'tree-article');
   const label = getLabel('article', index, partNumber);
-  wrap.appendChild(makeCollapsible(wrap, 'article-bar', label, node.text, true));
+  const bar = makeCollapsible(wrap, 'article-bar', label, node.text, true);
+  const chip = articleRoleChip(node);
+  if (chip) bar.appendChild(chip);
+  wrap.appendChild(bar);
   const children = el('div', 'article-children');
   appendNumberedChildren(children, node.children, (child, ordinal) =>
     renderPrNode(child, ordinal, ctx)
@@ -446,8 +496,13 @@ function renderRefsFooter(references, ownSection, ctx, sheet, walkState) {
 }
 
 // Derives a per-sheet render context: the base callbacks plus the spec, a
-// paragraph→references index, the broken-section set, and an edit flag. Edit
-// affordances appear only when the host wired an onDeleteParagraph callback.
+// paragraph→references index, the broken-section set, and per-affordance flags.
+// Each paragraph action appears only when the host wired its callback:
+//   edit    → onSaveParagraphEdit   (text editing — always on in the demo)
+//   removal → onToggleParagraphRemoval (#251 soft removal, flag-gated)
+//   delete  → onDeleteParagraph     (hard delete, Phase-4-gated)
+// actionsEnabled gates the whole action row so nodes stay clean when nothing is
+// wired.
 function buildSheetCtx(spec, ctx) {
   const refsByParagraph = new Map();
   for (const ref of spec.references) {
@@ -460,10 +515,16 @@ function buildSheetCtx(spec, ctx) {
   const brokenSections = new Set(
     spec.references.filter((r) => r.isBroken && r.targetSection).map((r) => r.targetSection)
   );
+  const editEnabled = typeof ctx.onSaveParagraphEdit === 'function';
+  const removalEnabled = typeof ctx.onToggleParagraphRemoval === 'function';
+  const deleteEnabled = typeof ctx.onDeleteParagraph === 'function';
   return {
     ...ctx,
     spec,
-    editEnabled: typeof ctx.onDeleteParagraph === 'function',
+    editEnabled,
+    removalEnabled,
+    deleteEnabled,
+    actionsEnabled: editEnabled || removalEnabled || deleteEnabled,
     referencesFor: (nodeId) => refsByParagraph.get(nodeId) ?? [],
     brokenSections,
   };
