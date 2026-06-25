@@ -68,6 +68,8 @@ export interface StyleMap {
   readonly styles: ReadonlyMap<string, StyleInfo>;
   // Effective numPr for each style after walking basedOn chain
   readonly resolvedNumPr: ReadonlyMap<string, StyleNumPr>;
+  readonly vanishStyleIds: ReadonlySet<string>;
+  readonly vanishCharStyleIds: ReadonlySet<string>;
 }
 
 // ─── document.xml ─────────────────────────────────────────────────────────────

@@ -103,6 +103,66 @@ function resolveNumPrChain(
   return undefined;
 }
 
+function resolveVanishChain(
+  styleId: string,
+  styles: ReadonlyMap<string, StyleInfo>,
+  depth: number
+): boolean {
+  if (depth > MAX_BASED_ON_DEPTH) return false;
+  const style = styles.get(styleId);
+  if (!style) return false;
+  if (style.isVanish) return true;
+  return style.basedOn ? resolveVanishChain(style.basedOn, styles, depth + 1) : false;
+}
+
+function characterStyleVanishIds(root: Record<string, unknown>): Set<string> {
+  const ids = new Set<string>();
+  for (const raw of toArray(root['w:style'] as readonly unknown[] | undefined)) {
+    const rec = asRecord(raw);
+    if (!rec || extractAttrStr(rec, '@_w:type') !== 'character') continue;
+    const styleId = extractAttrStr(rec, '@_w:styleId');
+    const rPr = asRecord(rec['w:rPr']);
+    if (styleId && rPr !== undefined && 'w:vanish' in rPr) ids.add(styleId);
+  }
+  return ids;
+}
+
+function emptyStyleMap(): StyleMap {
+  return {
+    styles: new Map(),
+    resolvedNumPr: new Map(),
+    vanishStyleIds: new Set(),
+    vanishCharStyleIds: new Set(),
+  };
+}
+
+function paragraphStyles(root: Record<string, unknown>): Map<string, StyleInfo> {
+  const styles = new Map<string, StyleInfo>();
+  for (const raw of toArray(root['w:style'] as readonly unknown[] | undefined)) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const info = parseStyleInfo(raw as Record<string, unknown>);
+    if (info) styles.set(info.styleId, info);
+  }
+  return styles;
+}
+
+function resolvedNumPrMap(styles: ReadonlyMap<string, StyleInfo>): Map<string, StyleNumPr> {
+  const resolvedNumPr = new Map<string, StyleNumPr>();
+  for (const styleId of styles.keys()) {
+    const resolved = resolveNumPrChain(styleId, styles, 0);
+    if (resolved) resolvedNumPr.set(styleId, resolved);
+  }
+  return resolvedNumPr;
+}
+
+function vanishStyleIdSet(styles: ReadonlyMap<string, StyleInfo>): Set<string> {
+  const vanishStyleIds = new Set<string>();
+  for (const styleId of styles.keys()) {
+    if (resolveVanishChain(styleId, styles, 0)) vanishStyleIds.add(styleId);
+  }
+  return vanishStyleIds;
+}
+
 export function buildStyleMap(xml: string): StyleMap {
   let parsed: unknown;
   try {
@@ -114,20 +174,13 @@ export function buildStyleMap(xml: string): StyleMap {
   const root = (parsed as Record<string, unknown>)['w:styles'] as
     | Record<string, unknown>
     | undefined;
-  if (!root) return { styles: new Map(), resolvedNumPr: new Map() };
+  if (!root) return emptyStyleMap();
 
-  const styles = new Map<string, StyleInfo>();
-  for (const raw of toArray(root['w:style'] as readonly unknown[] | undefined)) {
-    if (typeof raw !== 'object' || raw === null) continue;
-    const info = parseStyleInfo(raw as Record<string, unknown>);
-    if (info) styles.set(info.styleId, info);
-  }
-
-  const resolvedNumPr = new Map<string, StyleNumPr>();
-  for (const styleId of styles.keys()) {
-    const resolved = resolveNumPrChain(styleId, styles, 0);
-    if (resolved) resolvedNumPr.set(styleId, resolved);
-  }
-
-  return { styles, resolvedNumPr };
+  const styles = paragraphStyles(root);
+  return {
+    styles,
+    resolvedNumPr: resolvedNumPrMap(styles),
+    vanishStyleIds: vanishStyleIdSet(styles),
+    vanishCharStyleIds: characterStyleVanishIds(root),
+  };
 }
