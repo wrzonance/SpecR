@@ -45,6 +45,14 @@ async function addProjectSpec(projectId: string, specId: string, position: numbe
     [projectId, specId, position]
   );
 }
+async function addDefaultProjectSource(projectId: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO project_sources (project_id, library_id, priority)
+     VALUES ($1, (SELECT id FROM libraries WHERE name = 'Default Company Master'), 1)
+     ON CONFLICT (project_id, library_id) DO NOTHING`,
+    [projectId]
+  );
+}
 async function newPackage(projectId: string, name: string): Promise<string> {
   const r = await pool.query<{ id: string }>(
     `INSERT INTO design_packages (project_id, name, position) VALUES ($1, $2, 1) RETURNING id`,
@@ -93,6 +101,15 @@ async function newArticle(specId: string, headingText: string, position: number)
   );
   const id = r.rows[0]?.id;
   if (id === undefined) throw new Error('newArticle: no id');
+  return id;
+}
+async function addParagraph(specId: string, text: string, position: number): Promise<string> {
+  const r = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, node_type, text, position) VALUES ($1, 'pr1', $2, $3) RETURNING id`,
+    [specId, text, position]
+  );
+  const id = r.rows[0]?.id;
+  if (id === undefined) throw new Error('addParagraph: no id');
   return id;
 }
 // Body/article ref with explicit target_type + parent. value = canonical section
@@ -181,6 +198,7 @@ describe('getCoordinationReport', () => {
       relatedListedNotCited: 0,
       relatedCitedNotListed: 2,
       standardCitedNotListed: 0,
+      impliedRelatedSection: 0,
       total: 5,
     });
     expect(report.notes).toEqual([]);
@@ -279,6 +297,72 @@ describe('getCoordinationReport', () => {
     expect(ofType(report.findings, 'related_cited_not_listed')).toHaveLength(0);
     expect(report.summary.relatedListedNotCited).toBe(0);
     expect(report.summary.relatedCitedNotListed).toBe(0);
+  });
+
+  it('coordination: conduit body mentions firestopping but 07 84 00 not listed -> implied_related_section', async () => {
+    const projectId = await newProject('coord-implied');
+    await addDefaultProjectSource(projectId);
+    const conduit = await newSpec('26 05 33', 'Raceways and Boxes for Electrical Systems');
+    await newSpec('07 84 00', 'Firestopping');
+    await addProjectSpec(projectId, conduit, 1);
+    const paragraphId = await addParagraph(
+      conduit,
+      'Firestopping shall be provided where conduits penetrate rated assemblies.',
+      1
+    );
+
+    const report = await getCoordinationReport(projectId, undefined);
+    const findings = ofType(report.findings, 'implied_related_section');
+
+    expect(findings).toEqual([
+      {
+        type: 'implied_related_section',
+        sourceSpecId: conduit,
+        sourceSpecSection: '26 05 33',
+        sourceParagraphId: paragraphId,
+        impliedSection: '07 84 00',
+        impliedTitle: 'Firestopping',
+        matchedKeyword: 'firestop',
+        confidence: 0.72,
+      },
+    ]);
+    expect(report.summary.impliedRelatedSection).toBe(1);
+  });
+
+  it('coordination: firestopping already listed in Related Sections -> no implied_related_section', async () => {
+    const projectId = await newProject('coord-implied-listed');
+    await addDefaultProjectSource(projectId);
+    const conduit = await newSpec('26 05 33', 'Raceways and Boxes for Electrical Systems');
+    await newSpec('07 84 00', 'Firestopping');
+    await addProjectSpec(projectId, conduit, 1);
+    const related = await newArticle(conduit, '1.1 RELATED SECTIONS', 1);
+    await addClassifiedRef({
+      specId: conduit,
+      parentId: related,
+      text: 'Section 07 84 00 Firestopping',
+      targetType: 'section',
+      value: '07 84 00',
+    });
+    await addParagraph(conduit, 'Provide firestopping at conduit penetrations.', 2);
+
+    const report = await getCoordinationReport(projectId, undefined);
+
+    expect(ofType(report.findings, 'implied_related_section')).toEqual([]);
+    expect(report.summary.impliedRelatedSection).toBe(0);
+  });
+
+  it('coordination: generic body word general does not imply catalog General sections', async () => {
+    const projectId = await newProject('coord-implied-general');
+    await addDefaultProjectSource(projectId);
+    const doors = await newSpec('08 11 13', 'Hollow Metal Doors');
+    await newSpec('01 00 00', 'General Requirements');
+    await addProjectSpec(projectId, doors, 1);
+    await addParagraph(doors, 'Provide the work in general conformance with the Contract.', 1);
+
+    const report = await getCoordinationReport(projectId, undefined);
+
+    expect(ofType(report.findings, 'implied_related_section')).toEqual([]);
+    expect(report.summary.impliedRelatedSection).toBe(0);
   });
 
   it('dangling_ref carries the source paragraph id and a snippet of the ref in context (#260)', async () => {

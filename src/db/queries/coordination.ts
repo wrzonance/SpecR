@@ -14,6 +14,8 @@ import {
   buildReferenceConsistencyFindings,
   type ReferenceConsistencyFinding,
 } from './article-refs.js';
+import { readImpliedRelatedFindings } from './coordination-implied.js';
+import type { ImpliedRelatedSectionFinding } from '../../coordination/index.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -60,7 +62,8 @@ export type Finding =
       readonly sourceSpecId: string;
       readonly sourceSpecSection: string;
       readonly standardCode: string;
-    };
+    }
+  | ImpliedRelatedSectionFinding;
 
 export interface CoordinationSummary {
   readonly requiredNotPresent: number;
@@ -69,6 +72,7 @@ export interface CoordinationSummary {
   readonly relatedListedNotCited: number;
   readonly relatedCitedNotListed: number;
   readonly standardCitedNotListed: number;
+  readonly impliedRelatedSection: number;
   readonly total: number;
 }
 
@@ -168,7 +172,8 @@ function buildFindings(
   required: readonly RequiredSection[],
   present: readonly PresentSpec[],
   broken: readonly BrokenRef[],
-  referenceFindings: readonly Finding[]
+  referenceFindings: readonly Finding[],
+  impliedFindings: readonly Finding[]
 ): { readonly findings: readonly Finding[]; readonly notes: readonly string[] } {
   const requiredSections = new Set(required.map((r) => r.section));
   const presentSections = new Set(present.map((p) => p.section));
@@ -201,7 +206,13 @@ function buildFindings(
   });
 
   return {
-    findings: [...requiredNotPresent, ...presentNotRequired, ...danglingRef, ...referenceFindings],
+    findings: [
+      ...requiredNotPresent,
+      ...presentNotRequired,
+      ...danglingRef,
+      ...referenceFindings,
+      ...impliedFindings,
+    ],
     notes: empty ? [EMPTY_REQUIRED_NOTE] : [],
   };
 }
@@ -215,6 +226,7 @@ function summarize(findings: readonly Finding[]): CoordinationSummary {
     relatedListedNotCited: count('related_listed_not_cited'),
     relatedCitedNotListed: count('related_cited_not_listed'),
     standardCitedNotListed: count('standard_cited_not_listed'),
+    impliedRelatedSection: count('implied_related_section'),
     total: findings.length,
   };
 }
@@ -236,9 +248,22 @@ export async function getCoordinationReport(
       present.map((p) => p.specId),
       client
     );
+    const impliedFindings = await readImpliedRelatedFindings(
+      projectId,
+      packageId,
+      present,
+      classified,
+      client
+    );
     await client.query('COMMIT');
     const referenceFindings = buildReferenceConsistencyFindings(classified).map(toReferenceFinding);
-    const { findings, notes } = buildFindings(required, present, broken, referenceFindings);
+    const { findings, notes } = buildFindings(
+      required,
+      present,
+      broken,
+      referenceFindings,
+      impliedFindings
+    );
     return {
       projectId,
       packageId: packageId ?? null,
