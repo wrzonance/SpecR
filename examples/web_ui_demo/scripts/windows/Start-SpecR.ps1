@@ -46,6 +46,9 @@ $DatabaseUrl = if ($env:DATABASE_URL) {
 else {
     'postgres://specr:specr@localhost:5432/specr'
 }
+# Remember whether the user supplied DATABASE_URL: if they did we respect it and
+# never auto-provision; if not, we may start the bundled docker postgres below.
+$DbIsDefault = -not $env:DATABASE_URL
 
 function Invoke-CheckedPnpm([string[]]$PnpmArgs) {
     Write-Host ">> pnpm $($PnpmArgs -join ' ')" -ForegroundColor DarkCyan
@@ -136,6 +139,91 @@ function Initialize-Network {
     }
 }
 
+# --- Database support -------------------------------------------------------
+# The API needs PostgreSQL. On a fresh machine nothing listens on :5432, so
+# `pnpm migrate` dies with ECONNREFUSED. When the user hasn't supplied their own
+# DATABASE_URL we start the bundled `docker compose` postgres on the first free
+# host port and point the backend at it; otherwise we just verify their server.
+
+# $true when a TCP connection to the host:port succeeds within the timeout.
+function Test-TcpOpen([string]$DbHost, [int]$Port, [int]$TimeoutMs = 1000) {
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $async = $client.BeginConnect($DbHost, $Port, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne($TimeoutMs)) { return $false }
+        $client.EndConnect($async)
+        return $true
+    }
+    catch { return $false }
+    finally { $client.Dispose() }
+}
+
+# Published host port of the already-running bundled postgres service, or $null.
+function Get-ComposePgPort {
+    try {
+        $out = & docker compose port postgres 5432 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
+        if (($out | Select-Object -First 1) -match ':(\d+)\s*$') { return [int]$Matches[1] }
+        return $null
+    }
+    catch { return $null }
+}
+
+# Starts (or reuses) the bundled docker postgres and returns its host port. Picks
+# the first free port at/after 5432 so it never collides with an existing server.
+function Get-DockerDatabasePort {
+    $running = Get-ComposePgPort
+    if ($running -and (Test-TcpOpen 'localhost' $running)) {
+        Write-Host "==> Reusing running compose PostgreSQL on host port $running" -ForegroundColor DarkGray
+        return $running
+    }
+
+    $port = Find-FreePort 5432
+    Write-Host "==> Starting bundled PostgreSQL (docker compose) on host port $port" -ForegroundColor Cyan
+    $env:SPECR_DB_HOST_PORT = "$port"
+    & docker compose up -d postgres
+    if ($LASTEXITCODE -ne 0) {
+        throw 'docker compose up -d postgres failed (is Docker Desktop running?)'
+    }
+
+    Write-Host "==> Waiting for PostgreSQL on localhost:$port" -ForegroundColor Cyan
+    for ($i = 0; $i -lt 60; $i++) {
+        if (Test-TcpOpen 'localhost' $port) { return $port }
+        Start-Sleep -Milliseconds 1000
+    }
+    throw "PostgreSQL did not become ready on host port $port after ~60s"
+}
+
+# Ensures the API has a reachable database, provisioning the bundled one if needed.
+function Initialize-Database {
+    $uri = $null
+    try { $uri = [uri]$env:DATABASE_URL } catch { $uri = $null }
+    if (-not $uri -or -not $uri.Host) {
+        Write-Host '==> Could not parse DATABASE_URL host/port; leaving it to pnpm migrate' -ForegroundColor Yellow
+        return
+    }
+    $dbHost = $uri.Host
+    $dbPort = if ($uri.Port -gt 0) { $uri.Port } else { 5432 }
+
+    if (Test-TcpOpen $dbHost $dbPort) {
+        Write-Host "==> PostgreSQL reachable at ${dbHost}:${dbPort}" -ForegroundColor DarkGray
+        return
+    }
+
+    if (-not $script:DbIsDefault) {
+        throw "DATABASE_URL points at ${dbHost}:${dbPort}, which is not reachable -- start that database or fix DATABASE_URL."
+    }
+
+    Write-Host "==> PostgreSQL not reachable at ${dbHost}:${dbPort}" -ForegroundColor Yellow
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        throw 'PostgreSQL is not running and Docker was not found. Start PostgreSQL, install Docker Desktop, or set DATABASE_URL to an existing server, then re-run.'
+    }
+
+    $port = Get-DockerDatabasePort
+    $env:DATABASE_URL = "postgres://specr:specr@localhost:$port/specr"
+    Write-Host "==> SpecR API will use $($env:DATABASE_URL)" -ForegroundColor DarkGray
+}
+
 Write-Host ''
 Write-Host "==> Building and starting SpecR API from $RepoRoot" -ForegroundColor Cyan
 Set-Location $RepoRoot
@@ -144,6 +232,7 @@ $env:NODE_ENV = if ($env:NODE_ENV) { $env:NODE_ENV } else { 'production' }
 $env:PORT = $ApiPort
 
 Initialize-Network
+Initialize-Database
 
 Invoke-CheckedPnpm @('install', '--frozen-lockfile')
 Invoke-CheckedPnpm @('migrate')

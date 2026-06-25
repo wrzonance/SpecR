@@ -6,7 +6,9 @@ services:
       POSTGRES_PASSWORD: specr
       POSTGRES_DB: specr
     ports:
-      - "5432:5432"
+      # Host port is overridable (the Windows demo launcher picks a free one and
+      # points DATABASE_URL at it); defaults to 5432 for `docker compose up`/CI.
+      - "${SPECR_DB_HOST_PORT:-5432}:5432"
     volumes:
       - specr_pgdata:/var/lib/postgresql/data
     healthcheck:

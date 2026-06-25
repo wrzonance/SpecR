@@ -57,3 +57,15 @@ $env:SPECR_CA_CERT = 'C:\path\to\corp-root.pem'
 
 As a debug-only last resort, `SPECR_INSECURE_TLS=1` disables TLS verification
 entirely — never leave it on.
+
+### Database (Windows)
+
+`Start-SpecR.bat` needs PostgreSQL. If nothing is listening on the configured
+port it auto-starts the bundled `docker compose` service on the first free host
+port — so it never collides with an existing Postgres — and points the API at
+that port via `DATABASE_URL`.
+
+- Set `DATABASE_URL` to use your own/remote server instead; the launcher then
+  only verifies the connection and never starts Docker.
+- With no Docker and no reachable database it stops with a clear message instead
+  of a raw connection-refused stack trace.
