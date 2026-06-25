@@ -27,13 +27,23 @@ const MAX_ILVL = 8;
 // Without this guard, Signal 1 misclassifies them as 'part'.
 const PART_HEADING_PATTERN = /^PART\s+\d+/i;
 
+// CPI-authored DOCX generates the "PART n" prefix from numbering, so the
+// paragraph text is the bare canonical CSI part name. Exact-match only — a
+// trailing word ("GENERAL REQUIREMENTS", "PRODUCT DATA") is body content, not a
+// part heading. The Signal-1 guard already requires ilvl=0, so this can't fire
+// on deeper body articles.
+const BARE_PART_NAME = /^(GENERAL|PRODUCTS|EXECUTION)$/i;
+
 /**
- * Returns true if the text looks like a CSI PART heading (e.g. "PART 1 – GENERAL").
- * Used by Signal 1 as a confirmation guard when ilvl=0, preventing generic numbered
- * lists exported by LibreOffice/Word from being misclassified as PART nodes.
+ * Returns true if the text looks like a CSI PART heading: either a "PART n"
+ * prefix (e.g. "PART 1 – GENERAL") or an exact bare canonical part name
+ * ("GENERAL"/"PRODUCTS"/"EXECUTION"). Used by Signal 1 as a confirmation guard
+ * when ilvl=0, preventing generic numbered lists exported by LibreOffice/Word
+ * from being misclassified as PART nodes.
  */
 export function isPartHeading(text: string): boolean {
-  return PART_HEADING_PATTERN.test(text.trim());
+  const trimmed = text.trim();
+  return PART_HEADING_PATTERN.test(trimmed) || BARE_PART_NAME.test(trimmed);
 }
 
 // Specifier-note banners vary by vendor: "** NOTE TO SPECIFIER **" (ARCAT),

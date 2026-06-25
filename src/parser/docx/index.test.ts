@@ -680,3 +680,54 @@ describe('parseDocx — ARCAT-realistic regression (21 11 00: 34 parts instead o
     expect(result.tree.title).toBe('Structured Cabling');
   });
 });
+
+// ── CPI-shaped regression: PART headings anchored on numbering that is NOT
+//    pStyle-linked. The ilvl=0 lvlText "PART %1 -" generates the prefix, so the
+//    paragraph text is the bare canonical name. Before the fix the Signal-1 guard
+//    demoted GENERAL/PRODUCTS to continuation and only 1 part survived. ──
+
+const CPI_PART_NUMBERING = `<?xml version="1.0" encoding="UTF-8"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="5">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="PART %1 -"/></w:lvl>
+    <w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="5"/></w:num>
+</w:numbering>`;
+
+function numbered(ilvl: number, text: string): string {
+  return `<w:p><w:pPr><w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
+}
+
+const CPI_PART_DOC = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    ${numbered(0, 'GENERAL')}
+    ${numbered(1, 'SUMMARY')}
+    ${numbered(0, 'PRODUCTS')}
+    ${numbered(1, 'MANUFACTURERS')}
+  </w:body>
+</w:document>`;
+
+describe('parseDocx — CPI PART inference (numbering lvlText "PART %1 -", 0 pStyle links)', () => {
+  async function parseCpi() {
+    const buffer = await makeDocx({
+      documentXml: CPI_PART_DOC,
+      numberingXml: CPI_PART_NUMBERING,
+    });
+    return parseDocx(buffer);
+  }
+
+  it('bare GENERAL/PRODUCTS on non-pStyle-linked PART numbering yield part roots (was 1)', async () => {
+    const tree = await parseCpi();
+    const partRoots = tree.parts.filter((n) => n.type === 'part');
+    expect(partRoots.map((n) => n.text)).toEqual(['GENERAL', 'PRODUCTS']);
+  });
+
+  it('articles nest under their parts, never at root', async () => {
+    const tree = await parseCpi();
+    expect(tree.parts.filter((n) => n.type === 'article')).toHaveLength(0);
+    const general = tree.parts.find((n) => n.text === 'GENERAL');
+    expect(general?.children.some((c) => c.type === 'article' && c.text === 'SUMMARY')).toBe(true);
+  });
+});

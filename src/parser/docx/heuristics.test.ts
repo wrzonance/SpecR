@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { matchTextSignal, matchIndentSignal, isSpecifierNote } from './heuristics.js';
+import {
+  matchTextSignal,
+  matchIndentSignal,
+  isSpecifierNote,
+  isPartHeading,
+} from './heuristics.js';
 
 describe('matchTextSignal', () => {
   it('detects PART heading', () => {
@@ -50,6 +55,25 @@ describe('matchTextSignal', () => {
 
   it('returns null for unmatched plain text', () => {
     expect(matchTextSignal('Lorem ipsum dolor sit amet')).toBeNull();
+  });
+});
+
+describe('isPartHeading', () => {
+  it('detects "PART n" prefixed headings', () => {
+    expect(isPartHeading('PART 1 - GENERAL')).toBe(true);
+    expect(isPartHeading('part 2 PRODUCTS')).toBe(true);
+  });
+
+  it('detects bare canonical CSI part names (mixed case + surrounding spaces)', () => {
+    expect(isPartHeading('GENERAL')).toBe(true);
+    expect(isPartHeading('  Products  ')).toBe(true);
+    expect(isPartHeading('execution')).toBe(true);
+  });
+
+  it('rejects bare names that merely start with a canonical part word', () => {
+    expect(isPartHeading('GENERAL REQUIREMENTS')).toBe(false);
+    expect(isPartHeading('General notes')).toBe(false);
+    expect(isPartHeading('PRODUCT DATA')).toBe(false);
   });
 });
 

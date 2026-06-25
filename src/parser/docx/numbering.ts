@@ -89,11 +89,24 @@ function buildPStyleMaps(
 }
 
 const SPEC_SHAPED_MIN_LINKED_LEVELS = 3;
+// Word renders the ilvl=0 prefix from lvlText; a "PART" token there means the
+// numbering itself generates "PART n", i.e. ilvl=0 is a real CSI PART heading.
+const PART_LVLTEXT_PATTERN = /\bPART\b/i;
+
+// CPI-authored numbering links no pStyles (the PART paragraphs use plain text
+// styles), so the pStyle-ladder rule misses it. But its ilvl=0 lvlText literally
+// generates a "PART n" prefix — direct, low-false-positive evidence ilvl=0 is a
+// PART. Generic <ol> lists use "%1."/"•"/"(%1)" lvlText, never "PART".
+function ilvlZeroDeclaresPart(an: AbstractNum): boolean {
+  const lvl0 = an.levels.find((lvl) => lvl.ilvl === 0);
+  return lvl0?.lvlText !== undefined && PART_LVLTEXT_PATTERN.test(lvl0.lvlText);
+}
 
 // A numbering definition whose levels link a multi-level style ladder is
 // spec-shaped: flat lists (LibreOffice <ol>) link zero styles, single-purpose
 // numbering links one. Three or more linked levels means part/article/pr
-// tiers — strong evidence ilvl=0 under this numId is a real PART heading.
+// tiers — strong evidence ilvl=0 under this numId is a real PART heading. The
+// non-pStyle-linked CPI case is caught instead by its ilvl=0 "PART" lvlText.
 function findSpecShapedNumIds(
   nums: ReadonlyMap<number, Num>,
   abstractNums: ReadonlyMap<number, AbstractNum>
@@ -103,7 +116,9 @@ function findSpecShapedNumIds(
     const an = abstractNums.get(num.abstractNumId);
     if (!an) continue;
     const linkedLevels = an.levels.filter((lvl) => lvl.pStyle).length;
-    if (linkedLevels >= SPEC_SHAPED_MIN_LINKED_LEVELS) specShaped.add(num.numId);
+    if (linkedLevels >= SPEC_SHAPED_MIN_LINKED_LEVELS || ilvlZeroDeclaresPart(an)) {
+      specShaped.add(num.numId);
+    }
   }
   return specShaped;
 }
