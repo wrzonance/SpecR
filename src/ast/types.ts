@@ -110,8 +110,12 @@ export type ParseWarningType =
   | 'empty-part'
   | 'no-structure-found'
   | 'unusual-part-count'
-  | 'pdf-needs-ocr'
-  | 'pdf-degraded-extraction';
+  | 'pdf-degraded-extraction'
+  | 'pdf-ocr-applied'
+  | 'pdf-ocr-low-confidence'
+  | 'pdf-ocr-unusable'
+  | 'pdf-font-encoding-remapped'
+  | 'pdf-font-encoding-unrecoverable';
 
 export interface ParseWarning {
   readonly type: ParseWarningType;

@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@napi-rs/canvas": "^1.0.1",
     "chardet": "^2.1.1",
     "docx": "^9.6.1",
     "express": "^5.2.1",
@@ -41,6 +42,7 @@
     "pg": "^8.20.0",
     "pino": "^10.3.1",
     "piscina": "^5.1.4",
+    "tesseract.js": "^7.0.0",
     "unpdf": "^1.6.2",
     "uuid": "^11.0.0",
     "yauzl": "^3.3.0",

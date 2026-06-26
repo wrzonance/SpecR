@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { detectPdfOcrNeed, parsePdf } from './index.js';
 import type { PdfExtractionResult } from './extract.js';
 
+interface FakeOcrOptions {
+  readonly renderPageAsImage: (
+    data: Uint8Array,
+    pageNumber: number,
+    options: { readonly scale: number }
+  ) => Promise<Buffer>;
+  readonly recognize: (
+    image: Buffer
+  ) => Promise<{ readonly text: string; readonly confidence: number }>;
+}
+
 function pdfObject(id: number, body: string): string {
   return `${id} 0 obj\n${body}\nendobj\n`;
 }
@@ -77,7 +88,28 @@ function extractionResultWithoutItems(text: string): PdfExtractionResult {
 }
 
 function hasOcrWarning(result: Awaited<ReturnType<typeof parsePdf>>): boolean {
-  return result.tree.warnings?.some((warning) => warning.type === 'pdf-needs-ocr') ?? false;
+  return result.tree.warnings?.some((warning) => warning.type === 'pdf-ocr-applied') ?? false;
+}
+
+function warningTypes(result: Awaited<ReturnType<typeof parsePdf>>): readonly string[] {
+  return result.tree.warnings?.map((warning) => warning.type) ?? [];
+}
+
+function fakeOcr(
+  pageText: ReadonlyMap<number, string>,
+  renderedPages: number[] = [],
+  confidence = 96
+): FakeOcrOptions {
+  return {
+    renderPageAsImage: (_data, pageNumber) => {
+      renderedPages.push(pageNumber);
+      return Promise.resolve(Buffer.from(`page-${pageNumber}`, 'utf-8'));
+    },
+    recognize: (image) => {
+      const pageNumber = Number.parseInt(image.toString('utf-8').replace('page-', ''), 10);
+      return Promise.resolve({ text: pageText.get(pageNumber) ?? '', confidence });
+    },
+  };
 }
 
 describe('detectPdfOcrNeed', () => {
@@ -141,9 +173,7 @@ describe('parsePdf', () => {
 
     expect(result.tree.section).toBe('03 30 00');
     expect(result.tree.parts).toHaveLength(1);
-    expect(result.tree.warnings?.some((warning) => warning.type === 'pdf-needs-ocr') ?? false).toBe(
-      false
-    );
+    expect(warningTypes(result)).not.toContain('pdf-ocr-applied');
   });
 
   it('uses the default OCR threshold without importing env and honors explicit thresholds', async () => {
@@ -154,6 +184,7 @@ describe('parsePdf', () => {
       const sparse = extractionResult(['1234567890']);
       const defaultResult = await parsePdf(Buffer.from('%PDF'), {
         extractPdfText: () => Promise.resolve(sparse),
+        ocr: fakeOcr(new Map([[1, 'PART 1 - GENERAL']])),
       });
       const explicitResult = await parsePdf(Buffer.from('%PDF'), {
         ocrMinCharsPerPage: 4,
@@ -167,30 +198,127 @@ describe('parsePdf', () => {
     }
   });
 
-  it('emits a needs-OCR warning when merged text has no usable positioned items', async () => {
+  it('runs injected OCR when merged text has no usable positioned items', async () => {
     const result = await parsePdf(Buffer.from('%PDF'), {
       ocrMinCharsPerPage: 16,
       extractPdfText: () =>
         Promise.resolve(extractionResultWithoutItems('Text exists only outside positioned items')),
+      ocr: fakeOcr(
+        new Map([
+          [
+            1,
+            ['SECTION 03 30 00 - CAST-IN-PLACE CONCRETE', 'PART 1 - GENERAL', '1.1 SCOPE'].join(
+              '\n'
+            ),
+          ],
+        ])
+      ),
     });
 
     expect(hasOcrWarning(result)).toBe(true);
+    expect(result.tree.section).toBe('03 30 00');
     expect(result.capabilities).toContain('parse-warnings');
   });
 
-  it('emits a needs-OCR warning instead of crashing when no text layer is present', async () => {
+  it('runs OCR for scanned PDFs before hierarchy inference', async () => {
+    const renderedPages: number[] = [];
     const result = await parsePdf(Buffer.from('%PDF'), {
       ocrMinCharsPerPage: 16,
       extractPdfText: () => Promise.resolve(extractionResult([''])),
+      ocr: fakeOcr(
+        new Map([
+          [
+            1,
+            [
+              'SECTION 07 84 00 - FIRESTOPPING',
+              'PART 1 - GENERAL',
+              '1.1 SUMMARY',
+              'Firestopping work.',
+            ].join('\n'),
+          ],
+        ]),
+        renderedPages
+      ),
     });
 
-    expect(result.tree.warnings?.some((warning) => warning.type === 'pdf-needs-ocr')).toBe(true);
+    expect(renderedPages).toEqual([1]);
+    expect(result.tree.section).toBe('07 84 00');
+    expect(result.tree.parts[0]?.text).toBe('GENERAL');
+    expect(warningTypes(result)).toContain('pdf-ocr-applied');
+    expect(warningTypes(result)).not.toContain('pdf-needs-ocr');
     expect(result.capabilities).toContain('parse-warnings');
+  });
+
+  it('OCRs only sparse mixed-PDF pages and preserves page order', async () => {
+    const renderedPages: number[] = [];
+    const result = await parsePdf(Buffer.from('%PDF'), {
+      ocrMinCharsPerPage: 16,
+      extractPdfText: () =>
+        Promise.resolve(
+          extractionResult([
+            ['SECTION 03 30 00 - CAST-IN-PLACE CONCRETE', 'PART 1 - GENERAL', '1.1 SUMMARY'].join(
+              '\n'
+            ),
+            '',
+          ])
+        ),
+      ocr: fakeOcr(
+        new Map([[2, ['PART 2 - PRODUCTS', '2.1 MATERIALS'].join('\n')]]),
+        renderedPages
+      ),
+    });
+
+    expect(renderedPages).toEqual([2]);
+    expect(result.tree.parts.map((part) => part.text)).toEqual(['GENERAL', 'PRODUCTS']);
+    expect(warningTypes(result)).toContain('pdf-ocr-applied');
+  });
+
+  it('emits a low-confidence warning when injected OCR confidence is below the threshold', async () => {
+    const result = await parsePdf(Buffer.from('%PDF'), {
+      ocrLowConfidenceThreshold: 80,
+      ocrMinCharsPerPage: 16,
+      extractPdfText: () => Promise.resolve(extractionResult([''])),
+      ocr: fakeOcr(new Map([[1, ['PART 1 - GENERAL', '1.1 SUMMARY'].join('\n')]]), [], 42),
+    });
+
+    expect(warningTypes(result)).toContain('pdf-ocr-low-confidence');
+  });
+
+  it('remaps recoverable PDF font-encoding mojibake before parsing', async () => {
+    const result = await parsePdf(Buffer.from('%PDF'), {
+      ocrMinCharsPerPage: 16,
+      extractPdfText: () =>
+        Promise.resolve(
+          extractionResult([
+            ['SECTION 03 30 00 â€“ CAST-IN-PLACE CONCRETE', 'PART 1 â€“ GENERAL', '1.1 SCOPE'].join(
+              '\n'
+            ),
+          ])
+        ),
+    });
+
+    expect(warningTypes(result)).toContain('pdf-font-encoding-remapped');
+    expect(result.tree.title).toBe('CAST-IN-PLACE CONCRETE');
+    expect(result.tree.parts[0]?.text).toBe('GENERAL');
+  });
+
+  it('flags unrecoverable PDF font-encoding corruption instead of silently parsing garbage', async () => {
+    const result = await parsePdf(Buffer.from('%PDF'), {
+      ocrMinCharsPerPage: 16,
+      extractPdfText: () =>
+        Promise.resolve(
+          extractionResult([['6(&7,21 03 30 00', '3$57 *(1(5$/', '6&23('].join('\n')])
+        ),
+    });
+
+    // KNOWN AMBIGUITY: custom PDF font encodings can erase the original glyph map,
+    // leaving symbol-heavy text that cannot be deterministically remapped.
+    expect(warningTypes(result)).toContain('pdf-font-encoding-unrecoverable');
   });
 
   it('preserves degraded extraction warnings from the extractor', async () => {
     const result = await parsePdf(Buffer.from('%PDF'), {
-      ocrMinCharsPerPage: 16,
+      ocrMinCharsPerPage: 4,
       extractPdfText: () =>
         Promise.resolve({
           ...extractionResult(['PART 1 - GENERAL']),

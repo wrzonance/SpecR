@@ -41,10 +41,18 @@ const WARNING_SUGGESTIONS: Readonly<Record<ParseWarningType, string>> = {
     'Continuation text appeared before first structural heading and was dropped. Possible noise-prefix bleed; consider whether this line should be a heading.',
   'unusual-part-count':
     'More PART headings than a CSI spec normally has (typically 3). Headings may be over-matched.',
-  'pdf-needs-ocr':
-    'PDF page text layer is empty or too sparse. OCR is required before full PDF ingest can recover this page.',
   'pdf-degraded-extraction':
     'Primary PDF text extraction was incomplete or failed, so the low-level fallback extractor was used.',
+  'pdf-ocr-applied':
+    'One or more PDF pages had sparse text layers and were recovered with OCR. Review OCR text for accuracy.',
+  'pdf-ocr-low-confidence':
+    'OCR confidence was below the configured threshold. Review the recovered text against the source scan.',
+  'pdf-ocr-unusable':
+    'OCR did not produce usable text for one or more sparse PDF pages. The parse may be partial.',
+  'pdf-font-encoding-remapped':
+    'PDF text looked like font-encoding mojibake and was remapped before parsing.',
+  'pdf-font-encoding-unrecoverable':
+    'PDF text looked font-encoded or symbol-corrupted, but no deterministic remap improved it.',
 };
 
 const SECTION_EXTRACT_RE = new RegExp(
