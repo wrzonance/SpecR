@@ -196,6 +196,80 @@ describe('classifyParagraphs — CPI regressions', () => {
   });
 });
 
+describe('classifyParagraphs — misaligned-numbering article guard', () => {
+  // Regression (parsing-needs-fixing.docx PART 3): hand-authored manufacturer docs
+  // reuse numIds with inconsistent ilvl baselines. A nested list item ("1. Normal
+  // street clothes…", numId 13, ilvl 3, indent 2160) resolved to 'article' via the
+  // global articleIlvl=3 — becoming a spurious top-level 3.x that corrupts sibling
+  // numbering. Its indentation (2160 twips → pr-tier) contradicts the article claim
+  // by ≥2 tiers, so indentation wins and it nests as a pr node instead.
+  it('demotes a Signal-1 "article" whose indentation is ≥2 tiers deeper', () => {
+    const result = classifyParagraphs(
+      [
+        makePara({
+          numId: 13,
+          ilvl: 3,
+          leftIndent: 2160,
+          text: 'Normal street clothes may be worn',
+        }),
+      ],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).not.toBe('article');
+    expect(result[0]?.signalUsed).toBe(5); // indentation wins (no text signal present)
+    // the discarded Signal-1 article is persisted as a conflict, never dropped
+    expect(
+      result[0]?.conflicts.some((c) => c.signal === 1 && c.reportedNodeType === 'article')
+    ).toBe(true);
+  });
+
+  // Codex review: when demoting a bogus article, honor signal precedence — a literal
+  // "1." text tier (Signal 4 → pr2) outranks the raw twips estimate (Signal 5 → pr3).
+  it('demotes to the highest-priority remaining signal (text tier beats indent twips)', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 13, ilvl: 3, leftIndent: 2160, text: '1. Normal street clothes' })],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('pr2'); // from Signal 4 text, not pr3 from indent
+    expect(result[0]?.signalUsed).toBe(4);
+  });
+
+  it('keeps a Signal-1 article when indentation agrees within 1 tier (real CPI article ≈900 twips)', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 3, leftIndent: 900, text: 'SUMMARY' })],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(1);
+  });
+
+  it('keeps a Signal-1 article when there is no indentation evidence', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 3 })],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(1);
+  });
+
+  // Codex review hardening: a deep indent must NOT override an article when a literal
+  // "N.N" text prefix (Signal 4) independently corroborates it. Only an article with
+  // no other non-indent corroboration is treated as a misaligned-numbering artifact.
+  it('keeps an article when a literal "N.N" text signal corroborates, despite deep indent', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 3, leftIndent: 2160, text: '1.1 SUMMARY OF WORK' })],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(1);
+  });
+});
+
 function makeClassified(
   nodeType: NodeType,
   normalizedIlvl: number,
@@ -247,6 +321,67 @@ describe('buildTree — Pass 2: tree structure', () => {
     ];
     const tree = buildTree(classified, '01', 'T', 'arcat');
     expect(tree.parts).toHaveLength(3);
+  });
+
+  // Regression (parsing-needs-fixing.docx): a CPI PART heading whose literal run
+  // text bakes in the render-derived "PART n -" prefix (PART 1/2 came bare from
+  // numbering, but PART 3's text was literally "PART 3 - EXECUTION"). Without
+  // stripping, the renderer's own getLabel prefix doubles it to the garbled
+  // "PART 3 - PART 3 - EXECUTION". The AST must store only the part name.
+  it('strips a baked-in "PART n -" prefix from part-node text', () => {
+    const tree = buildTree([makeClassified('part', 0, 'PART 3 - EXECUTION')], '01', 'T', 'cpi');
+    expect(tree.parts[0]?.text).toBe('EXECUTION');
+  });
+
+  it('leaves a bare-name part heading (numbering-supplied prefix) untouched', () => {
+    const tree = buildTree([makeClassified('part', 0, 'GENERAL')], '01', 'T', 'cpi');
+    expect(tree.parts[0]?.text).toBe('GENERAL');
+  });
+
+  it('keeps the original when stripping a bare "PART n" would empty the text', () => {
+    const tree = buildTree([makeClassified('part', 0, 'PART 1')], '01', 'T', 'arcat');
+    expect(tree.parts[0]?.text).toBe('PART 1');
+  });
+
+  // A hidden (vanish) PART becomes a note and keeps its full text verbatim —
+  // hidden content is retained as-authored for document-control tracking, so the
+  // prefix-strip must not touch it.
+  it('does NOT strip the prefix from a hidden part (kept verbatim as a note)', () => {
+    const tree = buildTree(
+      [makeClassified('part', 0, 'PART 3 - EXECUTION', true)],
+      '01',
+      'T',
+      'cpi'
+    );
+    expect(tree.parts[0]?.type).toBe('note');
+    expect(tree.parts[0]?.text).toBe('PART 3 - EXECUTION');
+  });
+
+  // Codex review: stripping "PART 3 - " (9 chars) must rebase the part's source-fact
+  // offsets onto the shorter text, or comment/color anchors point past it.
+  it('rebases a part node’s source-fact offsets when the prefix is stripped', () => {
+    const cp: ClassifiedParagraph = {
+      paragraph: {
+        text: 'PART 3 - EXECUTION',
+        isVanish: false,
+        sourceFacts: {
+          comments: [{ author: 'A', text: 'check', anchor: [9, 18], closed: false }],
+          colors: [{ color: 'FF0000', coverage: 0.5, spans: [[9, 18]] }],
+        },
+      },
+      resolvedIlvl: 0,
+      nodeType: 'part',
+      signalUsed: 1,
+      conflicts: [],
+      isVanish: false,
+    };
+    const tree = buildTree([cp], '01', 'T', 'cpi');
+    const part = tree.parts[0]!;
+    const facts = part.meta.sourceFacts!;
+    expect(part.text).toBe('EXECUTION');
+    expect(facts.comments![0]!.anchor).toEqual([0, 9]);
+    expect(facts.colors![0]!.spans).toEqual([[0, 9]]);
+    expect(facts.colors![0]!.coverage).toBe(1);
   });
 
   it('handles sibling articles (ilvl stepping back to article level)', () => {

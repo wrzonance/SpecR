@@ -28,9 +28,17 @@ const MAX_ILVL = 8;
 const PART_HEADING_PATTERN = /^PART\s+\d+/i;
 
 /**
- * Returns true if the text looks like a CSI PART heading (e.g. "PART 1 – GENERAL").
- * Used by Signal 1 as a confirmation guard when ilvl=0, preventing generic numbered
- * lists exported by LibreOffice/Word from being misclassified as PART nodes.
+ * Returns true if the text is a literal "PART n" heading (e.g. "PART 1 – GENERAL").
+ * Used by Signal 1 as a confirmation guard when ilvl=0, alongside the
+ * specShapedNumIds numbering check, to keep generic numbered lists exported by
+ * LibreOffice/Word from being misclassified as PART nodes.
+ *
+ * Bare canonical names ("GENERAL"/"PRODUCTS"/"EXECUTION") are deliberately NOT
+ * matched here: a generic <ol> item at ilvl=0 whose text happens to be one of
+ * those words would otherwise be promoted to a PART with no numbering evidence.
+ * The real CPI bare-name case is recognized instead by its ilvl=0 "PART %1"
+ * lvlText, which marks the numId spec-shaped — see findSpecShapedNumIds
+ * (numbering.ts) and the Signal-1 guard (inference.ts).
  */
 export function isPartHeading(text: string): boolean {
   return PART_HEADING_PATTERN.test(text.trim());

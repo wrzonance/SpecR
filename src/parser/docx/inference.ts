@@ -14,6 +14,7 @@ import type {
   StyleMap,
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
+import { planPartStrip, rebaseSourceFacts } from '../part-prefix.js';
 
 // Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
 const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
@@ -103,13 +104,45 @@ function trySignal5(para: DocxParagraph): SignalHit | null {
 
 function buildConflicts(winner: SignalHit, hits: readonly SignalHit[]): readonly SignalConflict[] {
   return hits
-    .slice(1)
-    .filter((h) => h.nodeType !== winner.nodeType)
+    .filter((h) => h !== winner && h.nodeType !== winner.nodeType)
     .map((h) => ({
       signal: h.signal,
       reportedIlvl: h.normalizedIlvl,
       reportedNodeType: h.nodeType,
     }));
+}
+
+// An article is the top content tier under a PART, so it cannot be deeply indented.
+// Hand-authored manufacturer docs reuse numIds with inconsistent ilvl baselines, so
+// a nested list item can resolve to 'article' via the global articleIlvl offset
+// (parsing-needs-fixing.docx: "1. Normal street clothes…", numId 13 ilvl 3 → article,
+// yet indented at pr-tier). When the winning numbering/style signal says 'article'
+// but indentation places the paragraph ≥2 tiers deeper, the numbering baseline is
+// misaligned — defer to indentation so the item nests instead of becoming a spurious
+// top-level 3.x. A genuine article sits at indent tier ≤2 (clean CPI articles reach
+// ~900 twips → tier 2), so the ≥3 threshold never demotes a real article. The losing
+// Signal-1 'article' is preserved as a conflict (never dropped) by buildConflicts.
+const ARTICLE_INDENT_CONTRADICTION_MIN_TIER = 3;
+
+function correctMisalignedArticle(winner: SignalHit, hits: readonly SignalHit[]): SignalHit {
+  if (winner.nodeType !== 'article' || (winner.signal !== 1 && winner.signal !== 2)) {
+    return winner;
+  }
+  // Corroboration: a literal "N.N" text prefix (Signal 4) or a second numbering/style
+  // signal independently calling this an article outweighs indentation — only an
+  // article with no other non-indent support is a misaligned-numbering artifact.
+  const articleVotes = hits.filter((h) => h.signal !== 5 && h.nodeType === 'article');
+  if (articleVotes.length > 1) {
+    return winner;
+  }
+  const indentHit = hits.find((h) => h.signal === 5);
+  if (!indentHit || indentHit.normalizedIlvl < ARTICLE_INDENT_CONTRADICTION_MIN_TIER) {
+    return winner;
+  }
+  // Demote, honoring signal precedence: hits are in priority order (1,2,4,5), so the
+  // first remaining non-article hit prefers a literal "N." text tier over the raw
+  // twips estimate. Falls back to the indent hit when it's the only non-article hit.
+  return hits.find((h) => h.nodeType !== 'article') ?? indentHit;
 }
 
 // Specifier notes are editorial metadata, not spec content: banner text in any
@@ -162,10 +195,11 @@ function classifyOne(
   const s5 = trySignal5(para);
   if (s5) hits.push(s5);
 
-  const winner = hits[0];
-  if (!winner) {
+  const rawWinner = hits[0];
+  if (!rawWinner) {
     return continuationResult(para, prevNonContIlvl, para.isVanish);
   }
+  const winner = correctMisalignedArticle(rawWinner, hits);
   const conflicts = buildConflicts(winner, hits);
 
   return {
@@ -217,17 +251,37 @@ function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode
   };
 }
 
+// A visible PART heading stores only its name in the AST; the "PART n -" label is
+// render-derived (getLabel). Strip it, rebasing any source-fact offsets onto the
+// shorter text so comment/color/choice anchors stay valid. Hidden parts (kept
+// verbatim as notes), non-parts, and a bare "PART n" (strip would empty it) keep
+// their raw text + facts unchanged.
+function nodeContent(cp: ClassifiedParagraph): {
+  readonly text: string;
+  readonly sourceFacts?: NonNullable<DocxParagraph['sourceFacts']>;
+} {
+  const facts = cp.paragraph.sourceFacts;
+  const plan = !cp.isVanish && cp.nodeType === 'part' ? planPartStrip(cp.paragraph.text) : null;
+  if (!plan) {
+    return facts ? { text: cp.paragraph.text, sourceFacts: facts } : { text: cp.paragraph.text };
+  }
+  return facts
+    ? { text: plan.text, sourceFacts: rebaseSourceFacts(facts, plan.removed, plan.text.length) }
+    : { text: plan.text };
+}
+
 function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source): SpecNode {
+  const content = nodeContent(cp);
   return {
     id: uuidv4(),
     type: cp.isVanish ? 'note' : cp.nodeType,
-    text: cp.paragraph.text,
+    text: content.text,
     children,
     meta: {
       source,
       ...(cp.isVanish ? { vanish: true as const } : {}),
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
-      ...sourceFactsMeta(cp),
+      ...(content.sourceFacts ? { sourceFacts: content.sourceFacts } : {}),
     },
   };
 }

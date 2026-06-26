@@ -1,4 +1,5 @@
 import type { NodeType } from '../../ast/types.js';
+import { stripPartPrefix } from '../part-prefix.js';
 
 export type LineType = NodeType | 'blank' | 'header';
 
@@ -30,10 +31,6 @@ const PR_SIGNALS: readonly PrSignal[] = [
   { re: /^\d+\)\s+\S/, type: 'pr4', level: 5 },
   { re: /^[a-z]\)\s+\S/, type: 'pr5', level: 6 },
 ];
-
-function stripPartPrefix(s: string): string {
-  return s.replace(/^PART\s+\d+\s*[-–—]?\s*/i, '').trim();
-}
 
 function stripArticlePrefix(s: string): string {
   return s.replace(/^\d+\.\d+\s*/, '').trim();

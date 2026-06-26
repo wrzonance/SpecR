@@ -64,13 +64,16 @@ const MASTERSPEC_NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="y
   </w:num>
 </w:numbering>`;
 
+// Generic single-level list: one pStyle link, NON-PART lvlText. Deliberately
+// not "PART %1" so the spec-shaped test below isolates the pStyle-ladder
+// threshold (a "PART" lvlText is a separate, intentional spec-shaped signal).
 const MULTI_NUM_NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:numbering ${W}>
   <w:abstractNum w:abstractNumId="0">
     <w:lvl w:ilvl="0">
       <w:numFmt w:val="decimal"/>
       <w:pStyle w:val="PRT"/>
-      <w:lvlText w:val="PART %1"/>
+      <w:lvlText w:val="%1."/>
     </w:lvl>
   </w:abstractNum>
   <w:num w:numId="1">
@@ -284,5 +287,65 @@ describe('buildNumberingMap — spec-shaped ladder detection', () => {
 
   it('emptyNumberingMap has empty specShapedNumIds', () => {
     expect(emptyNumberingMap().specShapedNumIds.size).toBe(0);
+  });
+});
+
+describe('buildNumberingMap — ilvl=0 lvlText declares PART (CPI non-pStyle-linked)', () => {
+  const CPI_PART_LVLTEXT = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="5">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="PART %1 -"/></w:lvl>
+    <w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="5"/></w:num>
+</w:numbering>`;
+
+  it('CPI PART inference: ilvl=0 lvlText "PART %1 -" with 0 pStyle links marks numId spec-shaped', () => {
+    const map = buildNumberingMap(CPI_PART_LVLTEXT);
+    // numId 1's abstractNum links zero pStyles, but its ilvl=0 lvlText generates
+    // a literal "PART n" prefix — strong evidence ilvl=0 is a real PART heading.
+    expect(map.specShapedNumIds.has(1)).toBe(true);
+  });
+
+  it('generic list with ilvl=0 lvlText "%1." and 0 pStyle links is NOT spec-shaped', () => {
+    const generic = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+    <w:lvl w:ilvl="1"><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%2."/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="7"><w:abstractNumId w:val="0"/></w:num>
+</w:numbering>`;
+    const map = buildNumberingMap(generic);
+    expect(map.specShapedNumIds.has(7)).toBe(false);
+  });
+
+  it('real ARCAT lvlText "PART  %1  " (double-spaced) with 0 pStyle links marks numId spec-shaped', () => {
+    // The actual ARCAT label template uses two spaces around the field; the
+    // start-anchored detector must still match it (guards against over-tightening).
+    const arcat = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="3">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="PART  %1  "/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="9"><w:abstractNumId w:val="3"/></w:num>
+</w:numbering>`;
+    const map = buildNumberingMap(arcat);
+    expect(map.specShapedNumIds.has(9)).toBe(true);
+  });
+
+  it('inference: embedded "SECTION PART %1" lvlText does NOT mark numId spec-shaped', () => {
+    // Regression: an un-anchored \bPART\s*%\d matched embedded prefixes, falsely
+    // marking the numId spec-shaped so inference.ts would promote unrelated ilvl=0
+    // paragraphs to phantom PART headings. The "^" anchor rejects it.
+    const embedded = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="8">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="SECTION PART %1"/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="4"><w:abstractNumId w:val="8"/></w:num>
+</w:numbering>`;
+    const map = buildNumberingMap(embedded);
+    expect(map.specShapedNumIds.has(4)).toBe(false);
   });
 });

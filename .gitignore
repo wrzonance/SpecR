@@ -32,6 +32,9 @@ docs/references/ARCAT/*.docx
 # Manufacturer specifications (CPI, etc.) - copyright respective manufacturers
 docs/references/MANUFACTURER_CPI/*.docx
 docs/references/MANUFACTURER_*/*.docx
+# Rendered/derived artifacts of those specs (screenshots, editor lock files) — also never commit
+docs/references/MANUFACTURER_*/*.png
+docs/references/MANUFACTURER_*/.~lock.*#
 
 # Text-extracted copies of copyrighted specs (parser test fixtures only - never commit)
 tests/fixtures/text/cpi-*.txt

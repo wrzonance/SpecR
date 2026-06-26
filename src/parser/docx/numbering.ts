@@ -89,11 +89,31 @@ function buildPStyleMaps(
 }
 
 const SPEC_SHAPED_MIN_LINKED_LEVELS = 3;
+// Word renders the ilvl=0 prefix from lvlText; a leading "PART" immediately followed
+// by the level field (%1) means the numbering itself generates "PART n", i.e. ilvl=0
+// is a real CSI PART heading. Start-anchored, requiring the %-field plus a trailing
+// boundary (delimiter, whitespace, or end), so it matches the real label templates —
+// ARCAT "PART  %1  ", CPI "PART %1 -", plain "PART %1" — while rejecting incidental
+// matches ("PART OF %1" / "%1 PART" / "PART-%1") AND embedded prefixes
+// ("SECTION PART %1"), none of which a CSI part level emits. The "^" matters: an
+// un-anchored \bPART\s*%\d would accept "SECTION PART %1" and falsely mark that numId
+// spec-shaped, so inference.ts would then promote unrelated ilvl=0 paragraphs to PART.
+const PART_LVLTEXT_PATTERN = /^PART\s+%\d(?:\s*[-–—.:]\s*|\s|$)/i;
+
+// CPI-authored numbering links no pStyles (the PART paragraphs use plain text
+// styles), so the pStyle-ladder rule misses it. But its ilvl=0 lvlText literally
+// generates a "PART n" prefix — direct, low-false-positive evidence ilvl=0 is a
+// PART. Generic <ol> lists use "%1."/"•"/"(%1)" lvlText, never "PART".
+function ilvlZeroDeclaresPart(an: AbstractNum): boolean {
+  const lvl0 = an.levels.find((lvl) => lvl.ilvl === 0);
+  return lvl0?.lvlText !== undefined && PART_LVLTEXT_PATTERN.test(lvl0.lvlText);
+}
 
 // A numbering definition whose levels link a multi-level style ladder is
 // spec-shaped: flat lists (LibreOffice <ol>) link zero styles, single-purpose
 // numbering links one. Three or more linked levels means part/article/pr
-// tiers — strong evidence ilvl=0 under this numId is a real PART heading.
+// tiers — strong evidence ilvl=0 under this numId is a real PART heading. The
+// non-pStyle-linked CPI case is caught instead by its ilvl=0 "PART" lvlText.
 function findSpecShapedNumIds(
   nums: ReadonlyMap<number, Num>,
   abstractNums: ReadonlyMap<number, AbstractNum>
@@ -103,7 +123,9 @@ function findSpecShapedNumIds(
     const an = abstractNums.get(num.abstractNumId);
     if (!an) continue;
     const linkedLevels = an.levels.filter((lvl) => lvl.pStyle).length;
-    if (linkedLevels >= SPEC_SHAPED_MIN_LINKED_LEVELS) specShaped.add(num.numId);
+    if (linkedLevels >= SPEC_SHAPED_MIN_LINKED_LEVELS || ilvlZeroDeclaresPart(an)) {
+      specShaped.add(num.numId);
+    }
   }
   return specShaped;
 }

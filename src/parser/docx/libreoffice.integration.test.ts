@@ -55,11 +55,13 @@ describe.skipIf(!FIXTURES_AVAILABLE)('LibreOffice DOCX fixture parsing', () => {
     expect(wrongNodes).toHaveLength(0);
   });
 
-  it('PART nodes have text matching PART N pattern', async () => {
+  it('PART nodes store the bare canonical name (the "PART n -" label is render-derived)', async () => {
     const buffer = readFileSync(FIXTURE_PATH);
     const tree = await parseDocx(buffer);
-    for (const part of tree.parts) {
-      expect(part.text).toMatch(/^PART\s+\d+/i);
-    }
+    // The fixture's headings are literal "PART n - NAME"; the parser strips the
+    // render-derived prefix so the AST holds only the name (getLabel re-adds it),
+    // which is what prevents the doubled "PART n - PART n - NAME" on render.
+    const partTexts = tree.parts.filter((p) => p.type === 'part').map((p) => p.text);
+    expect(partTexts).toEqual(['GENERAL', 'PRODUCTS', 'EXECUTION']);
   });
 });

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { matchTextSignal, matchIndentSignal, isSpecifierNote } from './heuristics.js';
+import {
+  matchTextSignal,
+  matchIndentSignal,
+  isSpecifierNote,
+  isPartHeading,
+} from './heuristics.js';
 
 describe('matchTextSignal', () => {
   it('detects PART heading', () => {
@@ -50,6 +55,29 @@ describe('matchTextSignal', () => {
 
   it('returns null for unmatched plain text', () => {
     expect(matchTextSignal('Lorem ipsum dolor sit amet')).toBeNull();
+  });
+});
+
+describe('isPartHeading', () => {
+  it('detects "PART n" prefixed headings', () => {
+    expect(isPartHeading('PART 1 - GENERAL')).toBe(true);
+    expect(isPartHeading('part 2 PRODUCTS')).toBe(true);
+  });
+
+  // P2 (Codex review): bare canonical names must NOT be promoted on text alone —
+  // a generic numbered-list item "GENERAL" at ilvl=0 would otherwise become a
+  // spurious PART. The real CPI bare-name case is gated on numbering evidence
+  // (specShapedNumIds via the "PART %1" lvlText), not this text guard.
+  it('does NOT promote a bare canonical part name without numbering evidence', () => {
+    expect(isPartHeading('GENERAL')).toBe(false);
+    expect(isPartHeading('  Products  ')).toBe(false);
+    expect(isPartHeading('execution')).toBe(false);
+  });
+
+  it('rejects body text that merely starts with a canonical part word', () => {
+    expect(isPartHeading('GENERAL REQUIREMENTS')).toBe(false);
+    expect(isPartHeading('General notes')).toBe(false);
+    expect(isPartHeading('PRODUCT DATA')).toBe(false);
   });
 });
 
