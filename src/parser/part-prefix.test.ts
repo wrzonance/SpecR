@@ -10,23 +10,25 @@ describe('stripPartPrefix', () => {
     expect(stripPartPrefix('PART 2 PRODUCTS')).toBe('PRODUCTS'); // no dash
   });
 
-  // Codex review: colon/period separators must be consumed too, not left dangling.
-  it('strips a colon or period separator (followed by space), leaving no punctuation', () => {
+  // Codex review: colon/period separators must be consumed too (space or not),
+  // never left dangling as ": GENERAL" / ".EXECUTION".
+  it('strips a colon or period separator, with or without a following space', () => {
     expect(stripPartPrefix('PART 1: GENERAL')).toBe('GENERAL');
     expect(stripPartPrefix('PART 3. EXECUTION')).toBe('EXECUTION');
-  });
-
-  it('does not treat a period before a digit as a separator (keeps "PART 1.0 …" digit)', () => {
-    // the lookahead requires whitespace after . / : — so a version-like number survives
-    expect(stripPartPrefix('PART 1.0 SUMMARY')).toContain('0 SUMMARY');
+    expect(stripPartPrefix('PART 1:GENERAL')).toBe('GENERAL');
+    expect(stripPartPrefix('PART 3.EXECUTION')).toBe('EXECUTION');
   });
 
   it('is case-insensitive on the PART keyword', () => {
     expect(stripPartPrefix('Part 1 - General')).toBe('General');
   });
 
-  it('returns empty for a bare "PART n" with no name (caller decides fallback)', () => {
-    expect(stripPartPrefix('PART 1')).toBe('');
+  // Codex review: never partial-strip — without a real delimiter, leave the text
+  // alone rather than emit stray punctuation (": GENERAL", ".0 SUMMARY").
+  it('does not strip when no real delimiter follows the number', () => {
+    expect(stripPartPrefix('PART 1.0 SUMMARY')).toBe('PART 1.0 SUMMARY'); // version-like decimal
+    expect(stripPartPrefix('PART 1GENERAL')).toBe('PART 1GENERAL'); // glued name
+    expect(stripPartPrefix('PART 1')).toBe('PART 1'); // bare, no name
   });
 
   it('leaves a bare part name untouched', () => {
