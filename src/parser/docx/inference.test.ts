@@ -217,11 +217,23 @@ describe('classifyParagraphs — misaligned-numbering article guard', () => {
       emptyStyleMap()
     );
     expect(result[0]?.nodeType).not.toBe('article');
-    expect(result[0]?.signalUsed).toBe(5); // indentation wins
+    expect(result[0]?.signalUsed).toBe(5); // indentation wins (no text signal present)
     // the discarded Signal-1 article is persisted as a conflict, never dropped
     expect(
       result[0]?.conflicts.some((c) => c.signal === 1 && c.reportedNodeType === 'article')
     ).toBe(true);
+  });
+
+  // Codex review: when demoting a bogus article, honor signal precedence — a literal
+  // "1." text tier (Signal 4 → pr2) outranks the raw twips estimate (Signal 5 → pr3).
+  it('demotes to the highest-priority remaining signal (text tier beats indent twips)', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 13, ilvl: 3, leftIndent: 2160, text: '1. Normal street clothes' })],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('pr2'); // from Signal 4 text, not pr3 from indent
+    expect(result[0]?.signalUsed).toBe(4);
   });
 
   it('keeps a Signal-1 article when indentation agrees within 1 tier (real CPI article ≈900 twips)', () => {

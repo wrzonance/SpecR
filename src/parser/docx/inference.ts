@@ -139,7 +139,10 @@ function correctMisalignedArticle(winner: SignalHit, hits: readonly SignalHit[])
   if (!indentHit || indentHit.normalizedIlvl < ARTICLE_INDENT_CONTRADICTION_MIN_TIER) {
     return winner;
   }
-  return indentHit;
+  // Demote, honoring signal precedence: hits are in priority order (1,2,4,5), so the
+  // first remaining non-article hit prefers a literal "N." text tier over the raw
+  // twips estimate. Falls back to the indent hit when it's the only non-article hit.
+  return hits.find((h) => h.nodeType !== 'article') ?? indentHit;
 }
 
 // Specifier notes are editorial metadata, not spec content: banner text in any

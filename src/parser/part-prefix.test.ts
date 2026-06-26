@@ -10,6 +10,17 @@ describe('stripPartPrefix', () => {
     expect(stripPartPrefix('PART 2 PRODUCTS')).toBe('PRODUCTS'); // no dash
   });
 
+  // Codex review: colon/period separators must be consumed too, not left dangling.
+  it('strips a colon or period separator (followed by space), leaving no punctuation', () => {
+    expect(stripPartPrefix('PART 1: GENERAL')).toBe('GENERAL');
+    expect(stripPartPrefix('PART 3. EXECUTION')).toBe('EXECUTION');
+  });
+
+  it('does not treat a period before a digit as a separator (keeps "PART 1.0 …" digit)', () => {
+    // the lookahead requires whitespace after . / : — so a version-like number survives
+    expect(stripPartPrefix('PART 1.0 SUMMARY')).toContain('0 SUMMARY');
+  });
+
   it('is case-insensitive on the PART keyword', () => {
     expect(stripPartPrefix('Part 1 - General')).toBe('General');
   });
