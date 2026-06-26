@@ -27,8 +27,18 @@ describe('stripPartPrefix', () => {
   // alone rather than emit stray punctuation (": GENERAL", ".0 SUMMARY").
   it('does not strip when no real delimiter follows the number', () => {
     expect(stripPartPrefix('PART 1.0 SUMMARY')).toBe('PART 1.0 SUMMARY'); // version-like decimal
-    expect(stripPartPrefix('PART 1GENERAL')).toBe('PART 1GENERAL'); // glued name
     expect(stripPartPrefix('PART 1')).toBe('PART 1'); // bare, no name
+  });
+
+  // Codex review (regression): the classifiers (isPartHeading / signals PART_RE,
+  // both /^PART\s+\d+/i on trimmed text) accept a de-spaced "PART 1GENERAL" and a
+  // leading-whitespace heading as PART nodes, so the stripper MUST strip them too —
+  // otherwise the render-time label doubles into "PART 1 - PART 1GENERAL". A letter
+  // glued to the number is a clean cut (no stray punctuation).
+  it('strips a name glued directly to the number, and tolerates leading whitespace', () => {
+    expect(stripPartPrefix('PART 1GENERAL')).toBe('GENERAL'); // de-spaced (lossy PDF/text)
+    expect(stripPartPrefix('PART 2PRODUCTS')).toBe('PRODUCTS');
+    expect(stripPartPrefix('  PART 1 - GENERAL')).toBe('GENERAL'); // leading whitespace
   });
 
   it('leaves a bare part name untouched', () => {

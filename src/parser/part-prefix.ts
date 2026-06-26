@@ -10,16 +10,20 @@ import type { SourceFacts, SourceColorFact } from '../ast/types.js';
 // numbering can supply the prefix (bare-name text) or the author can bake it into
 // the literal run text, and both must normalize to the same canonical name.
 //
-// Strip "PART n" plus a REAL delimiter to the name — never a partial match that
-// leaves stray punctuation. After "PART <digits>" exactly one delimiter must
-// follow, tried in this order so a dash/colon/period is consumed before bare
-// whitespace:
-//   1. a hyphen / en-dash / em-dash, with optional surrounding spaces  ("PART 1 - X", "PART 1-X")
-//   2. a colon or period NOT followed by a digit                       ("PART 1: X", "PART 3.X")
-//   3. plain whitespace                                                ("PART 2 X")
-// The (?!\d) keeps a version-like "PART 1.0 …" from matching, and requiring a
-// delimiter leaves "PART 1", "PART 1GENERAL", and "PARTITION 1" untouched.
-const PART_PREFIX = /^PART\s+\d+(?:\s*[-–—]\s*|\s*[.:](?!\d)\s*|\s+)/i;
+// Strip "PART n" and its separators down to the name. This MUST cover every input
+// the PART classifiers accept — isPartHeading() (heuristics.ts) and the text/PDF
+// PART_RE (signals.ts) both test /^PART\s+\d+/i on TRIMMED text — because whatever
+// they route to a part node, the render-time "PART n -" label (generator/markdown
+// getLabel) re-adds; any prefix left here doubles into "PART 1 - PART 1 …".
+//
+// Match: optional leading whitespace (the classifiers trim), "PART <digits>", any
+// run of separators (whitespace / "." / ":" / hyphen / en-dash / em-dash), then
+// REQUIRE a letter — the start of the name. Requiring a letter is what makes this
+// safe: it strips a de-spaced "PART 1GENERAL" → "GENERAL" (lossy PDF/text) yet
+// leaves a version-like "PART 1.0 …" intact (the char after the separators is a
+// digit, not a letter) and a bare "PART 1" / "PARTITION 1" untouched (no letter
+// follows / no whitespace after PART). No stray punctuation can survive the cut.
+const PART_PREFIX = /^\s*PART\s+\d+[\s.:—–-]*(?=[a-z])/i;
 
 export function stripPartPrefix(text: string): string {
   return text.replace(PART_PREFIX, '').trim();
