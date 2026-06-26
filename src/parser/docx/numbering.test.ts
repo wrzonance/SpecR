@@ -319,4 +319,33 @@ describe('buildNumberingMap — ilvl=0 lvlText declares PART (CPI non-pStyle-lin
     const map = buildNumberingMap(generic);
     expect(map.specShapedNumIds.has(7)).toBe(false);
   });
+
+  it('real ARCAT lvlText "PART  %1  " (double-spaced) with 0 pStyle links marks numId spec-shaped', () => {
+    // The actual ARCAT label template uses two spaces around the field; the
+    // start-anchored detector must still match it (guards against over-tightening).
+    const arcat = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="3">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="PART  %1  "/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="9"><w:abstractNumId w:val="3"/></w:num>
+</w:numbering>`;
+    const map = buildNumberingMap(arcat);
+    expect(map.specShapedNumIds.has(9)).toBe(true);
+  });
+
+  it('inference: embedded "SECTION PART %1" lvlText does NOT mark numId spec-shaped', () => {
+    // Regression: an un-anchored \bPART\s*%\d matched embedded prefixes, falsely
+    // marking the numId spec-shaped so inference.ts would promote unrelated ilvl=0
+    // paragraphs to phantom PART headings. The "^" anchor rejects it.
+    const embedded = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering ${W}>
+  <w:abstractNum w:abstractNumId="8">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="SECTION PART %1"/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="4"><w:abstractNumId w:val="8"/></w:num>
+</w:numbering>`;
+    const map = buildNumberingMap(embedded);
+    expect(map.specShapedNumIds.has(4)).toBe(false);
+  });
 });

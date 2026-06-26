@@ -89,12 +89,16 @@ function buildPStyleMaps(
 }
 
 const SPEC_SHAPED_MIN_LINKED_LEVELS = 3;
-// Word renders the ilvl=0 prefix from lvlText; "PART" immediately followed by the
-// level field (%1) means the numbering itself generates "PART n", i.e. ilvl=0 is a
-// real CSI PART heading. Requiring the %-field (not a bare \bPART\b) rejects
-// incidental matches like "PART OF %1" / "%1 PART" / "PART-%1" that no CSI part
-// level emits — CSI part lvlText is always "PART %1[ -]".
-const PART_LVLTEXT_PATTERN = /\bPART\s*%\d/i;
+// Word renders the ilvl=0 prefix from lvlText; a leading "PART" immediately followed
+// by the level field (%1) means the numbering itself generates "PART n", i.e. ilvl=0
+// is a real CSI PART heading. Start-anchored, requiring the %-field plus a trailing
+// boundary (delimiter, whitespace, or end), so it matches the real label templates —
+// ARCAT "PART  %1  ", CPI "PART %1 -", plain "PART %1" — while rejecting incidental
+// matches ("PART OF %1" / "%1 PART" / "PART-%1") AND embedded prefixes
+// ("SECTION PART %1"), none of which a CSI part level emits. The "^" matters: an
+// un-anchored \bPART\s*%\d would accept "SECTION PART %1" and falsely mark that numId
+// spec-shaped, so inference.ts would then promote unrelated ilvl=0 paragraphs to PART.
+const PART_LVLTEXT_PATTERN = /^PART\s+%\d(?:\s*[-–—.:]\s*|\s|$)/i;
 
 // CPI-authored numbering links no pStyles (the PART paragraphs use plain text
 // styles), so the pStyle-ladder rule misses it. But its ilvl=0 lvlText literally
