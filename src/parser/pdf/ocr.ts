@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import Tesseract from 'tesseract.js';
 import { definePDFJSModule, renderPageAsImage } from 'unpdf';
+import { ParserError } from '../error.js';
 
 export interface PdfOcrText {
   readonly pageNumber: number;
@@ -55,7 +56,10 @@ function ensurePdfJsModule(): Promise<void> {
 }
 
 function pdfData(buffer: Buffer): Uint8Array {
-  return Uint8Array.from(buffer);
+  // Buffer already is a Uint8Array; return it directly rather than copying the
+  // whole file on this hot fallback path. The caller (parsePdf) does not reuse
+  // the buffer after OCR, so letting pdf.js consume it in place is safe.
+  return buffer;
 }
 
 function tesseractOptions(options: PdfOcrOptions): TesseractWorkerOptions {
@@ -79,21 +83,25 @@ async function defaultRenderPageAsImage(
 }
 
 async function createManagedRecognizer(options: PdfOcrOptions): Promise<ManagedRecognizer> {
-  await mkdir(options.cachePath ?? DEFAULT_CACHE_PATH, { recursive: true });
-  const worker = await Tesseract.createWorker(
-    options.language ?? DEFAULT_OCR_LANGUAGE,
-    1,
-    tesseractOptions(options)
-  );
-  return {
-    recognize: async (image) => {
-      const result = await worker.recognize(image);
-      return { text: result.data.text, confidence: result.data.confidence };
-    },
-    terminate: async () => {
-      await worker.terminate();
-    },
-  };
+  try {
+    await mkdir(options.cachePath ?? DEFAULT_CACHE_PATH, { recursive: true });
+    const worker = await Tesseract.createWorker(
+      options.language ?? DEFAULT_OCR_LANGUAGE,
+      1,
+      tesseractOptions(options)
+    );
+    return {
+      recognize: async (image) => {
+        const result = await worker.recognize(image);
+        return { text: result.data.text, confidence: result.data.confidence };
+      },
+      terminate: async () => {
+        await worker.terminate();
+      },
+    };
+  } catch (err) {
+    throw new ParserError('failed to initialize OCR worker', { cause: err });
+  }
 }
 
 function imageBuffer(image: ArrayBuffer | Buffer): Buffer {
@@ -120,9 +128,13 @@ async function recognizePage(
   recognizer: PdfOcrRecognizer,
   scale: number
 ): Promise<PdfOcrText> {
-  const image = await renderer(data, pageNumber, { scale });
-  const result = await recognizer(imageBuffer(image));
-  return { pageNumber, text: result.text, confidence: result.confidence };
+  try {
+    const image = await renderer(data, pageNumber, { scale });
+    const result = await recognizer(imageBuffer(image));
+    return { pageNumber, text: result.text, confidence: result.confidence };
+  } catch (err) {
+    throw new ParserError(`failed to OCR page ${pageNumber}`, { cause: err });
+  }
 }
 
 export async function recognizePdfPages(

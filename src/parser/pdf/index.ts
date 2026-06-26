@@ -149,10 +149,6 @@ function spliceOcrText(
   });
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : 'unknown OCR failure';
-}
-
 async function applyOcrIfNeeded(
   buffer: Buffer,
   pages: readonly PdfPageText[],
@@ -172,15 +168,14 @@ async function applyOcrIfNeeded(
         options.ocrLowConfidenceThreshold ?? DEFAULT_OCR_LOW_CONFIDENCE_THRESHOLD
       ),
     };
-  } catch (err) {
+  } catch {
+    // OCR is a best-effort fallback: surface a generic warning instead of the raw
+    // error. Tesseract/render failures commonly carry cache/lang filesystem paths,
+    // which must not leak to API callers (CLAUDE.md: stack traces never leave the
+    // process). recognizePdfPages already wraps the cause in a typed ParserError.
     return {
       pages,
-      warnings: [
-        pdfWarning(
-          'pdf-ocr-unusable',
-          `${ocrLineHint(need, minCharsPerPage)}: ${errorMessage(err)}`
-        ),
-      ],
+      warnings: [pdfWarning('pdf-ocr-unusable', ocrLineHint(need, minCharsPerPage))],
     };
   }
 }

@@ -183,16 +183,25 @@ function remapPage(page: PdfPageText, decision: RemapDecision): PdfPageText {
   };
 }
 
-function recoveryLineHint(pageNumbers: readonly number[], decision: RemapDecision | null): string {
+function remappedLineHint(
+  pageNumbers: readonly number[],
+  decisions: readonly RemapDecision[]
+): string {
   const pages = `pages ${pageNumbers.join(', ')}`;
-  if (decision === null) return `${pages}: detected symbol-heavy text with no stable remap`;
-  return `${pages}: ${decision.encoding} bytes decoded as UTF-8 (${decision.fingerprint})`;
+  // Pages can recover with different source encodings/fingerprints, so report the
+  // distinct set rather than attributing every page to the last decision seen.
+  const variants = [...new Set(decisions.map((d) => `${d.encoding} (${d.fingerprint})`))];
+  return `${pages}: ${variants.join('; ')} bytes decoded as UTF-8`;
+}
+
+function unrecoverableLineHint(pageNumbers: readonly number[]): string {
+  return `pages ${pageNumbers.join(', ')}: detected symbol-heavy text with no stable remap`;
 }
 
 export function recoverPdfFontEncoding(pages: readonly PdfPageText[]): PdfFontEncodingRecovery {
   const remapped: number[] = [];
+  const remapDecisions: RemapDecision[] = [];
   const unrecoverable: number[] = [];
-  let remapDecision: RemapDecision | null = null;
   const recoveredPages = pages.map((page) => {
     const decision = decideRecovery(page.text);
     if (decision.kind === 'pass') return page;
@@ -201,17 +210,17 @@ export function recoverPdfFontEncoding(pages: readonly PdfPageText[]): PdfFontEn
       return page;
     }
     remapped.push(page.pageNumber);
-    remapDecision = decision;
+    remapDecisions.push(decision);
     return remapPage(page, decision);
   });
   const warnings: ParseWarning[] = [];
   if (remapped.length > 0) {
-    warnings.push(warning('pdf-font-encoding-remapped', recoveryLineHint(remapped, remapDecision)));
+    warnings.push(
+      warning('pdf-font-encoding-remapped', remappedLineHint(remapped, remapDecisions))
+    );
   }
   if (unrecoverable.length > 0) {
-    warnings.push(
-      warning('pdf-font-encoding-unrecoverable', recoveryLineHint(unrecoverable, null))
-    );
+    warnings.push(warning('pdf-font-encoding-unrecoverable', unrecoverableLineHint(unrecoverable)));
   }
   return { pages: recoveredPages, warnings };
 }

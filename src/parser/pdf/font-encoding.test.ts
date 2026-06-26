@@ -58,4 +58,21 @@ describe('recoverPdfFontEncoding', () => {
     expect(normalized).toContain('PART 1 — GENERAL');
     expect(warningTypes(result)).toContain('pdf-font-encoding-remapped');
   });
+
+  it('font-encoding: multi-page remap warning lists every remapped page, not just the last', () => {
+    const mojibake = (section: string): string =>
+      [`SECTION ${section} â€“ DEMO`, 'PART 1 â€“ GENERAL', '1.1 SCOPE of the described work'].join(
+        '\n'
+      );
+    const result = recoverPdfFontEncoding([
+      { ...page(mojibake('03 30 00')), pageNumber: 1 },
+      { ...page(mojibake('23 05 00')), pageNumber: 2 },
+    ]);
+
+    const remap = result.warnings.find((warning) => warning.type === 'pdf-font-encoding-remapped');
+    // Aggregated hint must cover both remapped pages (the prior single-decision
+    // accumulator attributed only the last page's decision to the whole run).
+    expect(remap?.lineHint).toContain('pages 1, 2');
+    expect(remap?.lineHint).toContain('windows-1252');
+  });
 });

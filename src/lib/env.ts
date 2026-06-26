@@ -9,7 +9,10 @@ const schema = z.object({
   OCR_LOW_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(100).default(70),
   OCR_LANG_PATH: z.string().min(1).optional(),
   OCR_CACHE_PATH: z.string().min(1).optional(),
-  OCR_RENDER_SCALE: z.coerce.number().positive().default(2),
+  // Render scale multiplies page raster dimensions for OCR; cap it so a bad env
+  // value cannot explode image size and OOM the worker (scale 10 ≈ 720 DPI on a
+  // Letter page is already far beyond what OCR needs).
+  OCR_RENDER_SCALE: z.coerce.number().positive().max(10).default(2),
 });
 
 const result = schema.safeParse(process.env);
