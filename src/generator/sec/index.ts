@@ -120,6 +120,11 @@ function renderPart(node: SpecNode, index: number, refs: RefIndex): string {
 // root is plain <TXT>, and only a structural root becomes a <PRT>. The root level
 // previously mapped EVERY root through renderPart, so a note/continuation/vanish
 // root rendered as a fake "PART n" and shifted real PART numbering.
+//
+// KNOWN LIMITATION (adjacent to #278): root-level <NTE>/<TXT> chrome is emitted for
+// export fidelity but is NOT re-parseable — parseSec rebuilds roots only from <PRT>,
+// so a DOCX-origin tree's root note/continuation is lost on generate → parse. The
+// fix is parser-side and out of scope here; pinned by a KNOWN LIMITATION test.
 function renderRoot(node: SpecNode, partIndex: number, refs: RefIndex): string {
   if (node.type === 'note') return renderNote(node);
   if (node.type === 'continuation') {

@@ -353,6 +353,38 @@ describe('generateSec — #296 root-level renderer parity + hidden non-note supp
     expect(xml).not.toContain('PART 3');
     expect(xml).not.toContain('hidden form');
   });
+
+  // KNOWN LIMITATION (#296, adjacent to #278): a root-level note/visible-continuation
+  // is correct SEC OUTPUT — a specifier note belongs in the export as <NTE>, and
+  // visible preamble text as <TXT> — but parseSec rebuilds roots ONLY from <PRT>
+  // (sec.PRT), so a generate → re-parse round-trip silently DROPS those root nodes.
+  // This manifests only for DOCX-origin trees (SEC-origin trees have <PRT>-only
+  // roots, so the round-trip faithfulness contract is unaffected). The correct fix
+  // is parser-side (read root-level non-PRT chrome) and out of scope for this render
+  // bugfix; suppressing the roots instead would LOSE a specifier note from the
+  // export — strictly worse. Pinned here so the lossiness is documented, not silent.
+  it('KNOWN LIMITATION (#296): root-level note/continuation are emitted but NOT re-parseable', () => {
+    const tree = root([
+      {
+        id: 'n',
+        type: 'note',
+        text: 'root specifier banner',
+        children: [],
+        meta: { vanish: true },
+      },
+      { id: 'c', type: 'continuation', text: 'root preamble line', children: [], meta: {} },
+      part('GENERAL'),
+    ]);
+    const xml = generateSec(tree);
+    // Output is correct: the note exports as <NTE>, the visible continuation as <TXT>.
+    expect(xml).toContain('<NTE><NPR>root specifier banner</NPR></NTE>');
+    expect(xml).toContain('<TXT>root preamble line</TXT>');
+    // But re-parsing keeps only the <PRT> root — the note/continuation chrome is lost.
+    const reparsed = parseSec(xml).tree;
+    expect(reparsed.parts).toHaveLength(1);
+    expect(reparsed.parts[0]?.type).toBe('part');
+    expect(reparsed.parts.some((n) => n.type === 'note' || n.type === 'continuation')).toBe(false);
+  });
 });
 
 describe('generateSec — real UFGS fixture round-trip', () => {
