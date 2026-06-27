@@ -42,6 +42,7 @@ export interface ParseOptions {
   readonly ocrLangPath?: string;
   readonly ocrCachePath?: string;
   readonly ocrRenderScale?: number;
+  readonly ocrInitTimeoutMs?: number;
 }
 
 function withArticleRoles(tree: SpecTree): SpecTree {
@@ -84,16 +85,22 @@ function parseTxtBuffer(buffer: Buffer): ParseResult {
   return { tree: withArticleRoles(tree), refs, sectionInference, capabilities };
 }
 
-function ocrOptionsFromParseOptions(options?: ParseOptions): ParsePdfOptions['ocr'] | undefined {
-  const hasOcrOptions =
+function hasAnyOcrOption(options?: ParseOptions): boolean {
+  return (
     options?.ocrLangPath !== undefined ||
     options?.ocrCachePath !== undefined ||
-    options?.ocrRenderScale !== undefined;
-  if (!hasOcrOptions) return undefined;
+    options?.ocrRenderScale !== undefined ||
+    options?.ocrInitTimeoutMs !== undefined
+  );
+}
+
+function ocrOptionsFromParseOptions(options?: ParseOptions): ParsePdfOptions['ocr'] | undefined {
+  if (options === undefined || !hasAnyOcrOption(options)) return undefined;
   return {
     ...(options.ocrLangPath !== undefined ? { langPath: options.ocrLangPath } : {}),
     ...(options.ocrCachePath !== undefined ? { cachePath: options.ocrCachePath } : {}),
     ...(options.ocrRenderScale !== undefined ? { scale: options.ocrRenderScale } : {}),
+    ...(options.ocrInitTimeoutMs !== undefined ? { initTimeoutMs: options.ocrInitTimeoutMs } : {}),
   };
 }
 

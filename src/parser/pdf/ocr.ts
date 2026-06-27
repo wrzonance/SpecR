@@ -32,12 +32,18 @@ export interface PdfOcrOptions {
   readonly cachePath?: string;
   readonly language?: string;
   readonly scale?: number;
+  /** Max ms to wait for the worker to initialize before degrading (see #298). */
+  readonly initTimeoutMs?: number;
+  /** DI seam for the worker factory — defaults to the real Tesseract factory. */
+  readonly createWorker?: ManagedRecognizerFactory;
 }
 
-interface ManagedRecognizer {
+export interface ManagedRecognizer {
   readonly recognize: PdfOcrRecognizer;
   readonly terminate: () => Promise<void>;
 }
+
+export type ManagedRecognizerFactory = (options: PdfOcrOptions) => Promise<ManagedRecognizer>;
 
 interface TesseractWorkerOptions {
   readonly workerBlobURL: boolean;
@@ -47,6 +53,7 @@ interface TesseractWorkerOptions {
 
 const DEFAULT_OCR_LANGUAGE = 'eng';
 const DEFAULT_RENDER_SCALE = 2;
+const DEFAULT_OCR_INIT_TIMEOUT_MS = 30_000;
 const DEFAULT_CACHE_PATH = path.join(tmpdir(), 'specr-tesseract');
 let pdfJsModulePromise: Promise<void> | null = null;
 
@@ -83,24 +90,58 @@ async function defaultRenderPageAsImage(
 }
 
 async function createManagedRecognizer(options: PdfOcrOptions): Promise<ManagedRecognizer> {
+  await mkdir(options.cachePath ?? DEFAULT_CACHE_PATH, { recursive: true });
+  const worker = await Tesseract.createWorker(
+    options.language ?? DEFAULT_OCR_LANGUAGE,
+    1,
+    tesseractOptions(options)
+  );
+  return {
+    recognize: async (image) => {
+      const result = await worker.recognize(image);
+      return { text: result.data.text, confidence: result.data.confidence };
+    },
+    terminate: async () => {
+      await worker.terminate();
+    },
+  };
+}
+
+function terminateLater(init: Promise<ManagedRecognizer>): void {
+  // The factory lost the race against the init timeout but may still resolve
+  // later (a stalled CDN fetch can eventually complete). Terminate the worker so
+  // a timed-out attempt never leaks a Tesseract worker process. A late rejection
+  // is already covered by the timeout degradation, so swallow it.
+  void init.then(
+    (managed) => managed.terminate().catch(() => undefined),
+    () => undefined
+  );
+}
+
+// Bound worker initialization: when traineddata is uncached AND OCR_LANG_PATH is
+// unset, tesseract.js fetches eng.traineddata from a CDN; a connection that is
+// accepted but never answered would otherwise hang the parse job indefinitely
+// (#298). Race the factory against a timer and surface a typed ParserError so
+// parsePdf degrades to a `pdf-ocr-unusable` warning instead of stalling. Any
+// factory rejection (the #290 fail-fast) is wrapped here as well.
+async function initManagedRecognizer(options: PdfOcrOptions): Promise<ManagedRecognizer> {
+  const factory = options.createWorker ?? createManagedRecognizer;
+  const timeoutMs = options.initTimeoutMs ?? DEFAULT_OCR_INIT_TIMEOUT_MS;
+  const init = factory(options);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      terminateLater(init);
+      reject(new ParserError(`OCR worker init exceeded ${timeoutMs}ms timeout`));
+    }, timeoutMs);
+  });
   try {
-    await mkdir(options.cachePath ?? DEFAULT_CACHE_PATH, { recursive: true });
-    const worker = await Tesseract.createWorker(
-      options.language ?? DEFAULT_OCR_LANGUAGE,
-      1,
-      tesseractOptions(options)
-    );
-    return {
-      recognize: async (image) => {
-        const result = await worker.recognize(image);
-        return { text: result.data.text, confidence: result.data.confidence };
-      },
-      terminate: async () => {
-        await worker.terminate();
-      },
-    };
+    return await Promise.race([init, timeout]);
   } catch (err) {
+    if (err instanceof ParserError) throw err;
     throw new ParserError('failed to initialize OCR worker', { cause: err });
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -113,7 +154,7 @@ async function withRecognizer<T>(
   fn: (recognizer: PdfOcrRecognizer) => Promise<T>
 ): Promise<T> {
   if (options.recognize !== undefined) return fn(options.recognize);
-  const managed = await createManagedRecognizer(options);
+  const managed = await initManagedRecognizer(options);
   try {
     return await fn(managed.recognize);
   } finally {
