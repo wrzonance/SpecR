@@ -1,7 +1,13 @@
 import { type Router as RouterType, Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { healthHandler } from './health.js';
-import { getSpecHandler, getSpecLineageHandler, updateSpecHandler } from './specs.js';
+import {
+  getSpecHandler,
+  getSpecLineageHandler,
+  updateSpecHandler,
+  withdrawSpecHandler,
+  restoreSpecHandler,
+} from './specs.js';
 import { setStyleSourceHandler, clearStyleSourceHandler } from './style-source.js';
 import { updateParagraphHandler, removeParagraphHandler } from './paragraphs.js';
 import { acquireLockHandler, releaseLockHandler, getLockHandler } from './locks.js';
@@ -115,6 +121,8 @@ router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/open-comments', getSpecOpenCommentsHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
+router.delete('/specs/:id', withdrawSpecHandler);
+router.post('/specs/:id/restore', restoreSpecHandler);
 router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
 router.patch('/specs/:id/paragraphs/:nodeId/removal', removeParagraphHandler);
 router.patch('/specs/:id/paragraphs/:nodeId/editability', patchEditabilityHandler);

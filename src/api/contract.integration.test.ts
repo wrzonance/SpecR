@@ -94,6 +94,8 @@ const RESPONSE_ALLOWLIST = new Set([
   'patch /projects/{}',
   'delete /projects/{}',
   'post /projects/{}/restore',
+  'delete /specs/{}',
+  'post /specs/{}/restore',
 ]);
 
 let server: Server;

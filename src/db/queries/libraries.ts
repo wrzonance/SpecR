@@ -165,10 +165,12 @@ export async function listLibrarySpecs(
 ): Promise<readonly LibrarySpec[]> {
   try {
     const result = await db.query<LibrarySpecRow>(
+      // Withdrawn masters (ADR-030) are hidden from the library listing — they
+      // remain GET-able by id (with withdrawnAt surfaced) and restorable.
       `SELECT s.id, s.section, s.title, COUNT(p.id)::int AS node_count
          FROM specs s
          LEFT JOIN paragraphs p ON p.spec_id = s.id
-        WHERE s.library_id = $1
+        WHERE s.library_id = $1 AND s.withdrawn_at IS NULL
         GROUP BY s.id, s.section, s.title
         ORDER BY s.section`,
       [libraryId]

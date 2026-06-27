@@ -7,6 +7,9 @@ vi.mock('../db/index.js', () => ({
   getSpecLineage: vi.fn(),
   getSpecStyleSource: vi.fn(),
   getOnboardingStatus: vi.fn(),
+  getSpecWithdrawnAt: vi.fn(),
+  withdrawSpec: vi.fn(),
+  restoreSpec: vi.fn(),
 }));
 
 vi.mock('../lib/logger.js', () => ({
@@ -27,8 +30,9 @@ beforeEach(() => {
 });
 
 describe('getSpecHandler', () => {
-  it('returns 200 with reconstructed SpecTree, styleSource and onboardingStatus when spec exists', async () => {
-    const { getSpecTree, getSpecStyleSource, getOnboardingStatus } = await import('../db/index.js');
+  it('returns 200 with reconstructed SpecTree, styleSource, onboardingStatus and withdrawnAt when spec exists', async () => {
+    const { getSpecTree, getSpecStyleSource, getOnboardingStatus, getSpecWithdrawnAt } =
+      await import('../db/index.js');
     vi.mocked(getSpecTree).mockResolvedValueOnce({
       tree: {
         id: 'abc',
@@ -51,6 +55,7 @@ describe('getSpecHandler', () => {
       templateName: 'House Style',
     });
     vi.mocked(getOnboardingStatus).mockResolvedValueOnce('active');
+    vi.mocked(getSpecWithdrawnAt).mockResolvedValueOnce('2026-06-27T00:00:00.000Z');
     const { getSpecHandler } = await import('./specs.js');
     const req = { params: { id: 'abc' } } as unknown as Request;
     const res = makeRes();
@@ -66,16 +71,20 @@ describe('getSpecHandler', () => {
     expect(data['styleSource']).toEqual({ templateId: 'tpl-1', templateName: 'House Style' });
     // #139: onboarding status surfaces as a sibling field on the tree
     expect(data['onboardingStatus']).toBe('active');
+    // ADR-030: a withdrawn master surfaces its tombstone here (GET stays resolvable)
+    expect(data['withdrawnAt']).toBe('2026-06-27T00:00:00.000Z');
   });
 
-  it('returns 200 with styleSource: null when spec has no style template', async () => {
-    const { getSpecTree, getSpecStyleSource, getOnboardingStatus } = await import('../db/index.js');
+  it('returns 200 with styleSource and withdrawnAt null when spec has no style template / is active', async () => {
+    const { getSpecTree, getSpecStyleSource, getOnboardingStatus, getSpecWithdrawnAt } =
+      await import('../db/index.js');
     vi.mocked(getSpecTree).mockResolvedValueOnce({
       tree: { id: 'abc', section: '27 21 00', title: 'Cabling', parts: [] },
       references: [],
     });
     vi.mocked(getSpecStyleSource).mockResolvedValueOnce(null);
     vi.mocked(getOnboardingStatus).mockResolvedValueOnce('review');
+    vi.mocked(getSpecWithdrawnAt).mockResolvedValueOnce(null);
     const { getSpecHandler } = await import('./specs.js');
     const req = { params: { id: 'abc' } } as unknown as Request;
     const res = makeRes();
@@ -84,6 +93,7 @@ describe('getSpecHandler', () => {
     const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
     expect((body['data'] as Record<string, unknown>)['styleSource']).toBeNull();
     expect((body['data'] as Record<string, unknown>)['onboardingStatus']).toBe('review');
+    expect((body['data'] as Record<string, unknown>)['withdrawnAt']).toBeNull();
   });
 
   it('returns 404 when spec not found', async () => {
@@ -164,5 +174,130 @@ describe('updateSpecHandler', () => {
     expect(res.status).toHaveBeenCalledWith(400);
     const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body['error']).toBe('missing spec id');
+  });
+});
+
+const VALID_ID = '123e4567-e89b-42d3-a456-426614174000';
+
+describe('withdrawSpecHandler', () => {
+  it('returns 200 with {specId, withdrawnAt} on a master', async () => {
+    const { withdrawSpec } = await import('../db/index.js');
+    vi.mocked(withdrawSpec).mockResolvedValueOnce({
+      kind: 'withdrawn',
+      specId: VALID_ID,
+      withdrawnAt: '2026-06-27T00:00:00.000Z',
+    });
+    const { withdrawSpecHandler } = await import('./specs.js');
+    const res = makeRes();
+    await withdrawSpecHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    const data = (res.json.mock.calls[0]?.[0] as Record<string, unknown>)['data'] as Record<
+      string,
+      unknown
+    >;
+    expect(data['specId']).toBe(VALID_ID);
+    expect(data['withdrawnAt']).toBe('2026-06-27T00:00:00.000Z');
+  });
+
+  it('returns 409 on a project copy', async () => {
+    const { withdrawSpec } = await import('../db/index.js');
+    vi.mocked(withdrawSpec).mockResolvedValueOnce({ kind: 'project-copy' });
+    const { withdrawSpecHandler } = await import('./specs.js');
+    const res = makeRes();
+    await withdrawSpecHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(409);
+  });
+
+  it('returns 404 when unknown', async () => {
+    const { withdrawSpec } = await import('../db/index.js');
+    vi.mocked(withdrawSpec).mockResolvedValueOnce({ kind: 'not-found' });
+    const { withdrawSpecHandler } = await import('./specs.js');
+    const res = makeRes();
+    await withdrawSpecHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('returns 400 on a malformed (non-UUID) id', async () => {
+    const { withdrawSpecHandler } = await import('./specs.js');
+    const res = makeRes();
+    await withdrawSpecHandler(
+      { params: { id: 'nope' } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('returns 500 on database error', async () => {
+    const { withdrawSpec } = await import('../db/index.js');
+    vi.mocked(withdrawSpec).mockRejectedValueOnce(new Error('db down'));
+    const { withdrawSpecHandler } = await import('./specs.js');
+    const res = makeRes();
+    await withdrawSpecHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
+});
+
+describe('restoreSpecHandler', () => {
+  it('returns 200 with {specId} on a master', async () => {
+    const { restoreSpec } = await import('../db/index.js');
+    vi.mocked(restoreSpec).mockResolvedValueOnce({ kind: 'restored', specId: VALID_ID });
+    const { restoreSpecHandler } = await import('./specs.js');
+    const res = makeRes();
+    await restoreSpecHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    const data = (res.json.mock.calls[0]?.[0] as Record<string, unknown>)['data'] as Record<
+      string,
+      unknown
+    >;
+    expect(data['specId']).toBe(VALID_ID);
+  });
+
+  it('returns 409 on a project copy', async () => {
+    const { restoreSpec } = await import('../db/index.js');
+    vi.mocked(restoreSpec).mockResolvedValueOnce({ kind: 'project-copy' });
+    const { restoreSpecHandler } = await import('./specs.js');
+    const res = makeRes();
+    await restoreSpecHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(409);
+  });
+
+  it('returns 404 when unknown', async () => {
+    const { restoreSpec } = await import('../db/index.js');
+    vi.mocked(restoreSpec).mockResolvedValueOnce({ kind: 'not-found' });
+    const { restoreSpecHandler } = await import('./specs.js');
+    const res = makeRes();
+    await restoreSpecHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('returns 400 on a malformed (non-UUID) id', async () => {
+    const { restoreSpecHandler } = await import('./specs.js');
+    const res = makeRes();
+    await restoreSpecHandler(
+      { params: { id: 'nope' } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
   });
 });

@@ -48,7 +48,8 @@ export async function getBrokenRefs(
                WHERE pso.project_id = $1
                  AND EXISTS (SELECT 1 FROM specs ms
                              WHERE ms.library_id = pso.library_id
-                               AND ms.section = sr.target_spec_section)) AS available_from
+                               AND ms.section = sr.target_spec_section
+                               AND ms.withdrawn_at IS NULL)) AS available_from
        FROM spec_references sr
        JOIN specs s ON s.id = sr.source_spec_id
        JOIN paragraphs p ON p.id = sr.source_paragraph_id

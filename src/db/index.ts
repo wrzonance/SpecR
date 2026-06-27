@@ -29,6 +29,9 @@ export {
   createSpec,
   getSpecTree,
   persistParsedSpec,
+  withdrawSpec,
+  restoreSpec,
+  getSpecWithdrawnAt,
 } from './queries/specs.js';
 export type {
   SpecSummary,
@@ -37,6 +40,8 @@ export type {
   SpecTreeResult,
   SpecReference,
   OriginMeta,
+  WithdrawSpecOutcome,
+  RestoreSpecOutcome,
 } from './queries/specs.js';
 export { getOnboardingStatus, finalizeOnboarding, reopenOnboarding } from './queries/onboarding.js';
 export type { OnboardingStatus, FinalizeOutcome, ReopenOutcome } from './queries/onboarding.js';

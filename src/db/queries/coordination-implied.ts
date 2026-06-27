@@ -54,7 +54,7 @@ async function readCatalog(
        SELECT s.section, s.title, 2 AS rank, ps.priority AS source_priority
        FROM project_sources ps
        JOIN specs s ON s.library_id = ps.library_id
-       WHERE ps.project_id = $1
+       WHERE ps.project_id = $1 AND s.withdrawn_at IS NULL
      )
      SELECT DISTINCT ON (section) section, title
      FROM catalog
