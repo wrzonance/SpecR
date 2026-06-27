@@ -238,6 +238,123 @@ describe('generateSec — known inversion ambiguity', () => {
   });
 });
 
+describe('generateSec — #296 root-level renderer parity + hidden non-note suppression', () => {
+  const part = (text: string): SpecNode => ({
+    id: `p-${text}`,
+    type: 'part',
+    text,
+    children: [],
+    meta: {},
+  });
+  const root = (roots: readonly SpecNode[]): SpecTree => ({
+    id: 't',
+    section: '01 00 00',
+    title: 'ROOTS',
+    parts: roots,
+  });
+
+  it('suppresses a hidden non-note (continuation + vanish) child — no <TXT>', () => {
+    const tree = root([
+      {
+        id: 'p',
+        type: 'part',
+        text: 'GENERAL',
+        meta: {},
+        children: [
+          {
+            id: 'a',
+            type: 'article',
+            text: 'SUMMARY',
+            meta: {},
+            children: [
+              {
+                id: 'h',
+                type: 'continuation',
+                text: 'HIDDEN SIGN-OFF BODY',
+                children: [],
+                meta: { vanish: true },
+              },
+              {
+                id: 'c',
+                type: 'continuation',
+                text: 'visible continuation',
+                children: [],
+                meta: {},
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    const xml = generateSec(tree);
+    expect(xml).not.toContain('HIDDEN SIGN-OFF BODY');
+    expect(xml).toContain('<TXT>visible continuation</TXT>');
+  });
+
+  it('suppresses a hidden non-note continuation root — no <PRT>, no <TXT>', () => {
+    const xml = generateSec(
+      root([
+        {
+          id: 'v',
+          type: 'continuation',
+          text: 'HIDDEN ROOT FORM',
+          children: [],
+          meta: { vanish: true },
+        },
+        part('GENERAL'),
+      ])
+    );
+    expect(xml).not.toContain('HIDDEN ROOT FORM');
+    expect(xml).toContain('<TTL>PART 1   GENERAL</TTL>');
+  });
+
+  it('renders a note root as <NTE>, not a fake <PRT>', () => {
+    const xml = generateSec(
+      root([
+        { id: 'n', type: 'note', text: 'specifier banner', children: [], meta: { vanish: true } },
+        part('GENERAL'),
+      ])
+    );
+    expect(xml).toContain('<NTE><NPR>specifier banner</NPR></NTE>');
+    expect(xml).not.toContain('PART 1   specifier banner');
+    expect(xml).toContain('<TTL>PART 1   GENERAL</TTL>');
+  });
+
+  it('renders a visible continuation root as <TXT>, not a fake <PRT>', () => {
+    const xml = generateSec(
+      root([
+        { id: 'c', type: 'continuation', text: 'preamble line', children: [], meta: {} },
+        part('GENERAL'),
+      ])
+    );
+    expect(xml).toContain('<TXT>preamble line</TXT>');
+    expect(xml).not.toContain('PART 1   preamble line');
+    expect(xml).toContain('<TTL>PART 1   GENERAL</TTL>');
+  });
+
+  it('PART numbering counts only real part roots (note/continuation/vanish do not shift)', () => {
+    const xml = generateSec(
+      root([
+        { id: 'n', type: 'note', text: 'banner', children: [], meta: { vanish: true } },
+        { id: 'c', type: 'continuation', text: 'preamble', children: [], meta: {} },
+        {
+          id: 'v',
+          type: 'continuation',
+          text: 'hidden form',
+          children: [],
+          meta: { vanish: true },
+        },
+        part('GENERAL'),
+        part('PRODUCTS'),
+      ])
+    );
+    expect(xml).toContain('<TTL>PART 1   GENERAL</TTL>');
+    expect(xml).toContain('<TTL>PART 2   PRODUCTS</TTL>');
+    expect(xml).not.toContain('PART 3');
+    expect(xml).not.toContain('hidden form');
+  });
+});
+
 describe('generateSec — real UFGS fixture round-trip', () => {
   it.each(['27_41_00.SEC', '27_10_00.SEC', 'deep-nesting.SEC'])(
     'parse → generate → re-parse yields an identical tree for %s',

@@ -85,8 +85,13 @@ function renderChildren(node: SpecNode, tier: number, refs: RefIndex): string {
   const out: string[] = [];
   for (const child of node.children) {
     if (child.type === 'note') out.push(renderNote(child));
-    else if (child.type === 'continuation') out.push(`<TXT>${escape(child.text)}</TXT>`);
-    else if (tierOf(child.type) !== null) out.push(renderStructuralChild(child, tier, refs));
+    // A hidden non-note continuation is suppressed (#296). A note is always kept
+    // as <NTE> (SEC notes are vanish by definition), and a structural node keeps
+    // rendering even when vanish — owner-removal (vanish on a body node) is the
+    // separate, still-lossy #278 case the round-trip tests pin.
+    else if (child.type === 'continuation') {
+      if (child.meta.vanish !== true) out.push(`<TXT>${escape(child.text)}</TXT>`);
+    } else if (tierOf(child.type) !== null) out.push(renderStructuralChild(child, tier, refs));
   }
   return out.join('');
 }
@@ -110,6 +115,35 @@ function renderPart(node: SpecNode, index: number, refs: RefIndex): string {
   return `<PRT>${ttl}${body}</PRT>`;
 }
 
+// A tree root carries the same rule as a deeper node (#296): a note root is a
+// <NTE>, a hidden non-note continuation root is suppressed, a visible continuation
+// root is plain <TXT>, and only a structural root becomes a <PRT>. The root level
+// previously mapped EVERY root through renderPart, so a note/continuation/vanish
+// root rendered as a fake "PART n" and shifted real PART numbering.
+function renderRoot(node: SpecNode, partIndex: number, refs: RefIndex): string {
+  if (node.type === 'note') return renderNote(node);
+  if (node.type === 'continuation') {
+    return node.meta.vanish === true ? '' : `<TXT>${escape(node.text)}</TXT>`;
+  }
+  return renderPart(node, partIndex, refs);
+}
+
+// Only structural roots take a "PART n" ordinal — note/continuation roots are
+// chrome and must not advance it (mirrors markdown.ts consumesNumber).
+function isPartRoot(node: SpecNode): boolean {
+  return node.type !== 'note' && node.type !== 'continuation';
+}
+
+function renderRoots(parts: readonly SpecNode[], refs: RefIndex): string {
+  const out: string[] = [];
+  let partIndex = 0;
+  for (const node of parts) {
+    out.push(renderRoot(node, partIndex, refs));
+    if (isPartRoot(node)) partIndex += 1;
+  }
+  return out.join('');
+}
+
 /**
  * Render a spec tree (and optional standard refs) to a SpecsIntact .SEC XML
  * string. The output is the canonical inverse of the SEC parser: re-parsing it
@@ -120,7 +154,7 @@ export function generateSec(tree: SpecTree, refs: readonly SecRef[] = []): strin
     const refIndex = indexRefs(refs);
     const scn = `<SCN>SECTION ${escape(tree.section)}</SCN>`;
     const stl = `<STL>${escape(tree.title)}</STL>`;
-    const parts = tree.parts.map((part, i) => renderPart(part, i, refIndex)).join('');
+    const parts = renderRoots(tree.parts, refIndex);
     return `${XML_DECL}<SEC>${scn}${stl}${parts}</SEC>`;
   } catch (err) {
     if (err instanceof GeneratorError) throw err;

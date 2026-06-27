@@ -230,6 +230,100 @@ describe('generateDocx', () => {
   });
 });
 
+// #296: the DOCX generator already walks roots and children through one uniform
+// pass (collectParagraphs → emitNode), so the representation fix alone (hidden
+// non-note → continuation + meta.vanish, not a note) makes hidden roots/children
+// disappear and keeps PART numbering — which is list-driven, not index-driven —
+// intact. These tests pin that end-to-end for the third renderer.
+describe('generateDocx — #296 hidden non-note suppression + root parity', () => {
+  const part = (id: string, text: string): SpecTree['parts'][number] => ({
+    id,
+    type: 'part',
+    text,
+    children: [],
+    meta: {},
+  });
+  const tree = (roots: SpecTree['parts']): SpecTree => ({
+    id: '00000000-0000-0000-0000-0000000000aa',
+    section: '01 00 00',
+    title: 'Roots',
+    parts: roots,
+  });
+  // each PART paragraph is the only level-0 numbered paragraph; counting them
+  // proves note/continuation/vanish roots created no phantom PART.
+  const partLevelCount = (xml: string): number => (xml.match(/<w:ilvl w:val="0"\/>/g) ?? []).length;
+
+  it('suppresses a hidden non-note (continuation + vanish) root and its child', async () => {
+    const xml = await getDocXml(
+      await generateDocx(
+        tree([
+          {
+            id: '00000000-0000-0000-0000-0000000000b1',
+            type: 'continuation',
+            text: 'HIDDEN ROOT SIGN-OFF',
+            meta: { vanish: true },
+            children: [
+              {
+                id: '00000000-0000-0000-0000-0000000000b2',
+                type: 'continuation',
+                text: 'HIDDEN ROOT CHILD',
+                meta: {},
+                children: [],
+              },
+            ],
+          },
+          part('00000000-0000-0000-0000-0000000000b3', 'GENERAL'),
+        ])
+      )
+    );
+    expect(xml).not.toContain('HIDDEN ROOT SIGN-OFF');
+    expect(xml).not.toContain('HIDDEN ROOT CHILD');
+    expect(xml).toContain('GENERAL');
+  });
+
+  it('renders note and visible continuation roots; PART count unaffected by chrome roots', async () => {
+    const xml = await getDocXml(
+      await generateDocx(
+        tree([
+          {
+            id: '00000000-0000-0000-0000-0000000000c1',
+            type: 'note',
+            text: 'specifier banner root',
+            meta: { vanish: true },
+            children: [],
+          },
+          {
+            id: '00000000-0000-0000-0000-0000000000c2',
+            type: 'continuation',
+            text: 'preamble root line',
+            meta: {},
+            children: [],
+          },
+          {
+            id: '00000000-0000-0000-0000-0000000000c3',
+            type: 'continuation',
+            text: 'HIDDEN FORM ROOT',
+            meta: { vanish: true },
+            children: [],
+          },
+          part('00000000-0000-0000-0000-0000000000c4', 'GENERAL'),
+          part('00000000-0000-0000-0000-0000000000c5', 'PRODUCTS'),
+        ])
+      )
+    );
+    // note + visible continuation roots render (no [NOTE] marker, verbatim)
+    expect(xml).toContain('specifier banner root');
+    expect(xml).toContain('preamble root line');
+    expect(xml).not.toContain('[NOTE]');
+    // hidden root suppressed
+    expect(xml).not.toContain('HIDDEN FORM ROOT');
+    // exactly two real PARTs → two level-0 numbered paragraphs, no shift
+    expect(partLevelCount(xml)).toBe(2);
+    expect(xml).toContain('GENERAL');
+    expect(xml).toContain('PRODUCTS');
+  });
+});
+
 describe('generateDocx — content controls', () => {
   it('document.xml contains w:sdt elements', async () => {
     const buffer = await generateDocx(SYNTHETIC_TREE);
