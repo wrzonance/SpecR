@@ -33,7 +33,8 @@ assets or add CORS just for this example.
 
 `Start-SpecR.sh` and `Start-SpecR.bat` are convenience wrappers for local demos.
 They build and start the API from the repo root, then run `server.mjs` from this
-directory. They assume PostgreSQL and `pnpm` are already available.
+directory. `Start-SpecR.sh` uses an existing `pnpm >=11` or activates pnpm 11
+through Corepack when needed.
 
 ### Behind a corporate proxy (Windows)
 
@@ -60,10 +61,11 @@ entirely — never leave it on.
 
 ### Database (Windows)
 
-`Start-SpecR.bat` needs PostgreSQL. If nothing is listening on the configured
-port it auto-starts the bundled `docker compose` service on the first free host
-port — so it never collides with an existing Postgres — and points the API at
-that port via `DATABASE_URL`.
+`Start-SpecR.sh` and `Start-SpecR.bat` need PostgreSQL. If nothing is listening
+on the configured default port and you did not set `DATABASE_URL`, the launcher
+auto-starts the bundled `docker compose` service on a free host port and points
+the API at that port via `DATABASE_URL`. The Unix launcher also avoids the chosen
+API and web demo ports when selecting the Docker PostgreSQL host port.
 
 - Set `DATABASE_URL` to use your own/remote server instead; the launcher then
   only verifies the connection and never starts Docker.
