@@ -43,6 +43,7 @@ export interface ParseOptions {
   readonly ocrCachePath?: string;
   readonly ocrRenderScale?: number;
   readonly ocrInitTimeoutMs?: number;
+  readonly ocrRequireLocalTraineddata?: boolean;
 }
 
 function withArticleRoles(tree: SpecTree): SpecTree {
@@ -90,7 +91,8 @@ function hasAnyOcrOption(options?: ParseOptions): boolean {
     options?.ocrLangPath !== undefined ||
     options?.ocrCachePath !== undefined ||
     options?.ocrRenderScale !== undefined ||
-    options?.ocrInitTimeoutMs !== undefined
+    options?.ocrInitTimeoutMs !== undefined ||
+    options?.ocrRequireLocalTraineddata !== undefined
   );
 }
 
@@ -101,6 +103,9 @@ function ocrOptionsFromParseOptions(options?: ParseOptions): ParsePdfOptions['oc
     ...(options.ocrCachePath !== undefined ? { cachePath: options.ocrCachePath } : {}),
     ...(options.ocrRenderScale !== undefined ? { scale: options.ocrRenderScale } : {}),
     ...(options.ocrInitTimeoutMs !== undefined ? { initTimeoutMs: options.ocrInitTimeoutMs } : {}),
+    ...(options.ocrRequireLocalTraineddata !== undefined
+      ? { requireLocalTraineddata: options.ocrRequireLocalTraineddata }
+      : {}),
   };
 }
 

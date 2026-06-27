@@ -293,6 +293,32 @@ describe('parsePdf', () => {
     expect(result.capabilities).toContain('parse-warnings');
   });
 
+  it('ocr: offline with no local traineddata → degrades to pdf-ocr-unusable WITHOUT spawning a worker (no leak)', async () => {
+    let spawned = false;
+    const result = await parsePdf(Buffer.from('%PDF'), {
+      ocrMinCharsPerPage: 16,
+      extractPdfText: () => Promise.resolve(extractionResult([''])),
+      ocr: {
+        requireLocalTraineddata: true,
+        hasLocalTraineddata: () => Promise.resolve(false),
+        // If pre-flight wrongly let this run, OCR would SUCCEED (pdf-ocr-applied)
+        // and spawn a worker — so the assertions below fail loudly on regression.
+        createWorker: () => {
+          spawned = true;
+          return Promise.resolve<ManagedRecognizer>({
+            recognize: () => Promise.resolve({ text: 'PART 1 - GENERAL', confidence: 99 }),
+            terminate: () => Promise.resolve(),
+          });
+        },
+        renderPageAsImage: () => Promise.resolve(Buffer.alloc(0)),
+      },
+    });
+
+    expect(spawned).toBe(false);
+    expect(warningTypes(result)).toContain('pdf-ocr-unusable');
+    expect(warningTypes(result)).not.toContain('pdf-ocr-applied');
+  });
+
   it('ocr: #290 fail-fast preserved — a rejecting worker init degrades to pdf-ocr-unusable', async () => {
     const result = await parsePdf(Buffer.from('%PDF'), {
       ocrMinCharsPerPage: 16,
