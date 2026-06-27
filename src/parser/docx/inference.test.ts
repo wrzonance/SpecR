@@ -343,17 +343,19 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts[0]?.text).toBe('PART 1');
   });
 
-  // A hidden (vanish) PART becomes a note and keeps its full text verbatim —
-  // hidden content is retained as-authored for document-control tracking, so the
-  // prefix-strip must not touch it.
-  it('does NOT strip the prefix from a hidden part (kept verbatim as a note)', () => {
+  // #296: hidden content is classified as a continuation (suppressed), not a part,
+  // and keeps its full text verbatim — retained as-authored for document-control
+  // tracking. The part prefix-strip (makeNode/nodeContent) only runs for real part
+  // nodes, so a hidden "PART 3 - EXECUTION" is never touched.
+  it('does NOT strip the prefix from hidden content (kept verbatim, suppressed)', () => {
     const tree = buildTree(
-      [makeClassified('part', 0, 'PART 3 - EXECUTION', true)],
+      [makeClassified('continuation', 0, 'PART 3 - EXECUTION', true)],
       '01',
       'T',
       'cpi'
     );
-    expect(tree.parts[0]?.type).toBe('note');
+    expect(tree.parts[0]?.type).toBe('continuation');
+    expect(tree.parts[0]?.meta.vanish).toBe(true);
     expect(tree.parts[0]?.text).toBe('PART 3 - EXECUTION');
   });
 
@@ -470,14 +472,23 @@ describe('buildTree — Pass 2: edge cases and meta', () => {
     expect(tree.parts[0]?.meta.source).toBe('cpi');
   });
 
-  it('overrides nodeType to note for vanish paragraphs', () => {
-    const classified = [
-      makeClassified('part', 0, 'PART 1'),
-      makeClassified('article', 1, 'note text', true), // isVanish=true
-    ];
+  // #296: a hidden (vanish) paragraph is a SUPPRESSED continuation, not a note —
+  // only a genuine specifier note (banner/style, see inference-notes.test.ts)
+  // becomes a [NOTE]. classifyParagraphs routes hidden content to a continuation;
+  // buildTree carries meta.vanish so every renderer drops it.
+  it('classifies a hidden non-note paragraph as a suppressed continuation', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ isVanish: true, text: 'PROCESSING FORM — internal use only' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
     const tree = buildTree(classified, '01', 'T', 'arcat');
-    expect(tree.parts[0]?.children[0]?.type).toBe('note');
-    expect(tree.parts[0]?.children[0]?.meta.vanish).toBe(true);
+    const hidden = tree.parts[0]?.children[0];
+    expect(hidden?.type).toBe('continuation');
+    expect(hidden?.meta.vanish).toBe(true);
   });
 });
 
