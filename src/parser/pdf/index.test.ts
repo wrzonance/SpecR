@@ -293,6 +293,21 @@ describe('parsePdf', () => {
     expect(result.capabilities).toContain('parse-warnings');
   });
 
+  it('ocr: #290 fail-fast preserved — a rejecting worker init degrades to pdf-ocr-unusable', async () => {
+    const result = await parsePdf(Buffer.from('%PDF'), {
+      ocrMinCharsPerPage: 16,
+      extractPdfText: () => Promise.resolve(extractionResult([''])),
+      ocr: {
+        // The offline fetch rejects (`TypeError: fetch failed`) — #290's case;
+        // it must keep degrading to a warning at the parsePdf boundary, not throw.
+        createWorker: () => Promise.reject(new Error('fetch failed')),
+      },
+    });
+
+    expect(warningTypes(result)).toContain('pdf-ocr-unusable');
+    expect(warningTypes(result)).not.toContain('pdf-ocr-applied');
+  });
+
   it('emits a low-confidence warning when injected OCR confidence is below the threshold', async () => {
     const result = await parsePdf(Buffer.from('%PDF'), {
       ocrLowConfidenceThreshold: 80,
