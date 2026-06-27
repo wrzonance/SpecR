@@ -361,6 +361,63 @@ describe('DELETE /specs/:id (withdraw) + POST /specs/:id/restore (ADR-030, integ
     if (typeof created['specId'] === 'string') copySpecIds.push(created['specId']);
   });
 
+  it('broken-ref availableFrom hides a withdrawn master, offers it again after restore', async () => {
+    // A project sourced from `lib`; `target` (the master holding the missing
+    // section) is what the availableFrom advisory should name. A project copy in
+    // the project carries an outgoing BROKEN ref to that section.
+    const lib = await createLibrary();
+    const target = await createMaster(lib, '99 09 00');
+    const projectId = await createProject('withdraw-availfrom');
+    await pool.query(
+      `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
+      [projectId, lib]
+    );
+    const copy = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, project_id, content_version)
+       VALUES ('99 10 00', 'Citing Copy', 'ufgs', $1, 1) RETURNING id`,
+      [projectId]
+    );
+    const copyId = copy.rows[0]?.id;
+    if (!copyId) throw new Error('failed to create citing copy');
+    copySpecIds.push(copyId);
+    await pool.query(
+      `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`,
+      [projectId, copyId]
+    );
+    const para = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, NULL, 'item', 'See Section 99 09 00.', 0) RETURNING id`,
+      [copyId]
+    );
+    const paraId = para.rows[0]?.id;
+    if (!paraId) throw new Error('failed to create citing paragraph');
+    await pool.query(
+      `INSERT INTO spec_references
+         (source_spec_id, source_paragraph_id, target_type, target_spec_section, is_broken, reference_text)
+       VALUES ($1, $2, 'section', '99 09 00', true, 'Section 99 09 00')`,
+      [copyId, paraId]
+    );
+
+    const availableLibs = async (): Promise<unknown[]> => {
+      const res = await fetch(`${baseUrl}/projects/${projectId}/references/broken`);
+      expect(res.status).toBe(200);
+      const refs = ((await res.json()) as Record<string, unknown>)['data'] as Array<
+        Record<string, unknown>
+      >;
+      const ref = refs.find((r) => r['targetSpecSection'] === '99 09 00');
+      return (ref?.['availableFrom'] as unknown[]) ?? [];
+    };
+
+    // Active master → the advisory names the source library…
+    expect(await availableLibs()).toEqual([expect.objectContaining({ libraryId: lib })]);
+    // …withdrawn → the advisory no longer offers it…
+    await withdraw(target);
+    expect(await availableLibs()).toEqual([]);
+    // …restored → it returns.
+    await restore(target);
+    expect(await availableLibs()).toEqual([expect.objectContaining({ libraryId: lib })]);
+  });
+
   it('404 — withdraw unknown spec', async () => {
     expect((await withdraw(randomUUID())).status).toBe(404);
   });
