@@ -277,6 +277,120 @@ export async function updateSpec(id: string, input: UpdateSpecInput): Promise<Sp
   }
 }
 
+/** Outcome of a spec withdraw (ADR-030). `withdrawn` is idempotent — a
+ *  re-withdraw returns the ORIGINAL `withdrawnAt`. `project-copy` (→ 409)
+ *  steers the caller to the membership endpoint; `not-found` → 404. */
+export type WithdrawSpecOutcome =
+  | { readonly kind: 'withdrawn'; readonly specId: string; readonly withdrawnAt: string }
+  | { readonly kind: 'project-copy' }
+  | { readonly kind: 'not-found' };
+
+/** Outcome of a spec restore (ADR-030). `restored` is idempotent — restoring an
+ *  already-active master is a 200 no-op. Withdrawal is a library-master concept,
+ *  so a project copy returns `project-copy` (→ 409), mirroring withdraw. */
+export type RestoreSpecOutcome =
+  | { readonly kind: 'restored'; readonly specId: string }
+  | { readonly kind: 'project-copy' }
+  | { readonly kind: 'not-found' };
+
+/**
+ * Soft-withdraw a library master (ADR-030): tombstone it with
+ * `withdrawn_at = now()`. The row, its paragraphs, and `parent_spec_id` lineage
+ * edges stay intact — only listings/resolution hide it. **Idempotent**:
+ * `COALESCE` preserves an existing `withdrawn_at`, so a re-withdraw returns the
+ * ORIGINAL timestamp. Withdrawal targets masters only; a project copy
+ * (`project_id` set, `library_id` null) returns `project-copy`. One statement: a
+ * `target` CTE classifies the row, an `updated` CTE writes only when it is a
+ * master, and the final SELECT joins both so `not-found` / `project-copy` /
+ * `withdrawn` are distinguishable from a single round trip.
+ */
+export async function withdrawSpec(id: string): Promise<WithdrawSpecOutcome> {
+  try {
+    const { rows } = await pool.query<{
+      id: string;
+      is_master: boolean;
+      withdrawn_at: Date | null;
+    }>(
+      `WITH target AS (
+         SELECT id, library_id, withdrawn_at FROM specs WHERE id = $1
+       ),
+       updated AS (
+         UPDATE specs s
+         SET withdrawn_at = COALESCE(s.withdrawn_at, now())
+         FROM target t
+         WHERE s.id = t.id AND t.library_id IS NOT NULL AND s.withdrawn_at IS NULL
+         RETURNING s.id, s.withdrawn_at
+       )
+       SELECT t.id,
+              (t.library_id IS NOT NULL) AS is_master,
+              COALESCE(u.withdrawn_at, t.withdrawn_at) AS withdrawn_at
+       FROM target t
+       LEFT JOIN updated u ON u.id = t.id`,
+      [id]
+    );
+    const row = rows[0];
+    if (!row) return { kind: 'not-found' };
+    if (!row.is_master) return { kind: 'project-copy' };
+    if (!row.withdrawn_at) {
+      throw new DatabaseError('withdrawSpec: master row missing withdrawn_at after update');
+    }
+    return { kind: 'withdrawn', specId: row.id, withdrawnAt: row.withdrawn_at.toISOString() };
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`withdrawSpec: update failed for ${id}`, { cause: err });
+  }
+}
+
+/**
+ * Restore a withdrawn library master (ADR-030): clear `withdrawn_at`.
+ * **Idempotent** — restoring an already-active master is a 200 no-op. Mirrors
+ * `withdrawSpec` on ownership: a project copy returns `project-copy` (→ 409),
+ * unknown id → `not-found` (→ 404).
+ */
+export async function restoreSpec(id: string): Promise<RestoreSpecOutcome> {
+  try {
+    const { rows } = await pool.query<{ id: string; is_master: boolean }>(
+      `WITH target AS (
+         SELECT id, library_id FROM specs WHERE id = $1
+       ),
+       updated AS (
+         UPDATE specs s
+         SET withdrawn_at = NULL
+         FROM target t
+         WHERE s.id = t.id AND t.library_id IS NOT NULL AND s.withdrawn_at IS NOT NULL
+         RETURNING s.id
+       )
+       SELECT t.id, (t.library_id IS NOT NULL) AS is_master
+       FROM target t
+       LEFT JOIN updated u ON u.id = t.id`,
+      [id]
+    );
+    const row = rows[0];
+    if (!row) return { kind: 'not-found' };
+    if (!row.is_master) return { kind: 'project-copy' };
+    return { kind: 'restored', specId: row.id };
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`restoreSpec: update failed for ${id}`, { cause: err });
+  }
+}
+
+/** The spec's withdrawal tombstone as ISO-8601, or null when active/unknown.
+ *  Surfaced on GET /specs/:id so a withdrawn master's lineage/history still
+ *  resolves (ADR-030) — only listings/resolution hide it. */
+export async function getSpecWithdrawnAt(id: string): Promise<string | null> {
+  try {
+    const { rows } = await pool.query<{ withdrawn_at: Date | null }>(
+      `SELECT withdrawn_at FROM specs WHERE id = $1`,
+      [id]
+    );
+    const row = rows[0];
+    return row?.withdrawn_at ? row.withdrawn_at.toISOString() : null;
+  } catch (err) {
+    throw new DatabaseError(`getSpecWithdrawnAt: query failed for ${id}`, { cause: err });
+  }
+}
+
 export async function persistParsedSpec(result: {
   readonly tree: SpecTree;
   readonly refs: readonly SecRef[];

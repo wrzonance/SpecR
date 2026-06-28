@@ -46,11 +46,13 @@ async function resolveSection(
   client: PoolClient
 ): Promise<Resolution> {
   const res = await client.query<ResolutionRow>(
+    // Withdrawn masters (ADR-030) are not resolvable into a project — a section
+    // held only by a withdrawn master resolves as if no source holds it.
     `SELECT s.id AS spec_id, ps.library_id, l.name
      FROM project_sources ps
      JOIN libraries l ON l.id = ps.library_id
      JOIN specs s ON s.library_id = ps.library_id AND s.section = $2
-     WHERE ps.project_id = $1
+     WHERE ps.project_id = $1 AND s.withdrawn_at IS NULL
      ORDER BY ps.priority, s.created_at, s.id`,
     [projectId, section]
   );

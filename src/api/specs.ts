@@ -6,8 +6,18 @@ import {
   getSpecLineage,
   getSpecStyleSource,
   getOnboardingStatus,
+  getSpecWithdrawnAt,
+  withdrawSpec,
+  restoreSpec,
 } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+
+// A project copy is the wrong target for spec withdrawal/restore (ADR-030) —
+// those operate on library masters. Withdraw steers the caller to the membership
+// endpoint; restore notes the master-only scope. Shared 409 messages.
+const PROJECT_COPY_WITHDRAW =
+  'spec is a project copy — remove it via DELETE /projects/:id/specs/:specId';
+const PROJECT_COPY_RESTORE = 'spec is a project copy — withdrawal applies only to library masters';
 
 export async function getSpecHandler(req: Request, res: Response): Promise<void> {
   const id = req.params['id'];
@@ -25,11 +35,17 @@ export async function getSpecHandler(req: Request, res: Response): Promise<void>
     // query keeps getSpecTree untouched (owned by a parallel PR); styleSource is
     // { templateId, templateName } | null. onboardingStatus (#139) is surfaced the
     // same way: 'review' | 'active'.
-    const styleSource = await getSpecStyleSource(id);
-    const onboardingStatus = await getOnboardingStatus(id);
-    res
-      .status(200)
-      .json({ success: true, data: { ...result.tree, styleSource, onboardingStatus } });
+    // A withdrawn master (ADR-030) is still GET-able with its tombstone surfaced
+    // (null when active), so lineage/history resolves. Same sibling-field pattern.
+    const [styleSource, onboardingStatus, withdrawnAt] = await Promise.all([
+      getSpecStyleSource(id),
+      getOnboardingStatus(id),
+      getSpecWithdrawnAt(id),
+    ]);
+    res.status(200).json({
+      success: true,
+      data: { ...result.tree, styleSource, onboardingStatus, withdrawnAt },
+    });
   } catch (err) {
     logger.error({ err }, 'get spec failed');
     res.status(500).json({ success: false, error: 'internal server error' });
@@ -71,6 +87,56 @@ export async function updateSpecHandler(req: Request, res: Response): Promise<vo
     res.status(200).json({ success: true, data: spec });
   } catch (err) {
     logger.error({ err }, 'update spec failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function withdrawSpecHandler(req: Request, res: Response): Promise<void> {
+  const idResult = z.uuid().safeParse(req.params['id']);
+  if (!idResult.success) {
+    res.status(400).json({ success: false, error: 'invalid spec id' });
+    return;
+  }
+  try {
+    // Idempotent: a re-withdraw returns the EXISTING withdrawnAt (ADR-030).
+    const outcome = await withdrawSpec(idResult.data);
+    if (outcome.kind === 'not-found') {
+      res.status(404).json({ success: false, error: 'spec not found' });
+      return;
+    }
+    if (outcome.kind === 'project-copy') {
+      res.status(409).json({ success: false, error: PROJECT_COPY_WITHDRAW });
+      return;
+    }
+    res
+      .status(200)
+      .json({ success: true, data: { specId: outcome.specId, withdrawnAt: outcome.withdrawnAt } });
+  } catch (err) {
+    logger.error({ err }, 'withdraw spec failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function restoreSpecHandler(req: Request, res: Response): Promise<void> {
+  const idResult = z.uuid().safeParse(req.params['id']);
+  if (!idResult.success) {
+    res.status(400).json({ success: false, error: 'invalid spec id' });
+    return;
+  }
+  try {
+    // Idempotent: restoring an already-active master is a 200 no-op (ADR-030).
+    const outcome = await restoreSpec(idResult.data);
+    if (outcome.kind === 'not-found') {
+      res.status(404).json({ success: false, error: 'spec not found' });
+      return;
+    }
+    if (outcome.kind === 'project-copy') {
+      res.status(409).json({ success: false, error: PROJECT_COPY_RESTORE });
+      return;
+    }
+    res.status(200).json({ success: true, data: { specId: outcome.specId } });
+  } catch (err) {
+    logger.error({ err }, 'restore spec failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }

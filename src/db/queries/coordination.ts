@@ -132,14 +132,18 @@ async function readPresent(
   packageId: string | undefined,
   client: Queryable
 ): Promise<readonly PresentSpec[]> {
+  // ADR-030: withdrawn masters never reach the coordination "present" set. In
+  // today's copy model project_specs/package_specs reference project copies
+  // (never withdrawn), so this filter is a no-op guard — but it pins the ADR's
+  // invariant verifiably and stays correct if membership ever points at masters.
   const sql =
     packageId === undefined
       ? `SELECT s.id AS spec_id, s.section, s.title
          FROM project_specs ps JOIN specs s ON s.id = ps.spec_id
-         WHERE ps.project_id = $1 ORDER BY s.section`
+         WHERE ps.project_id = $1 AND s.withdrawn_at IS NULL ORDER BY s.section`
       : `SELECT s.id AS spec_id, s.section, s.title
          FROM package_specs ks JOIN specs s ON s.id = ks.spec_id
-         WHERE ks.package_id = $1 ORDER BY s.section`;
+         WHERE ks.package_id = $1 AND s.withdrawn_at IS NULL ORDER BY s.section`;
   const r = await client.query<{ spec_id: string; section: string; title: string }>(sql, [
     packageId ?? projectId,
   ]);

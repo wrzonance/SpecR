@@ -197,6 +197,103 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: withdrawSpec
+      summary: Soft-withdraw (tombstone) a library master
+      description: >
+        Soft-withdraws a library master (ADR-030): tombstones it with
+        `withdrawn_at`. The row, its paragraphs, and `parent_spec_id` lineage
+        edges stay intact — the master is hidden from listings/resolution
+        (`GET /libraries/{id}/specs`, project source resolution, broken-ref
+        `availableFrom`, the coordination present set) but remains retrievable
+        by id (with `withdrawnAt` surfaced) and reversible via
+        `POST /specs/{id}/restore`. Idempotent — a re-withdraw returns the
+        EXISTING `withdrawnAt`, never a new timestamp. Withdrawal targets
+        library masters only; on a project copy it returns 409.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Master withdrawn (or already was)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [specId, withdrawnAt]
+                        properties:
+                          specId:
+                            type: string
+                            format: uuid
+                          withdrawnAt:
+                            type: string
+                            format: date-time
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            The id is a project copy, not a library master — withdrawal applies
+            to masters. Remove a project copy via
+            `DELETE /projects/{id}/specs/{specId}` instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/restore:
+    post:
+      operationId: restoreSpec
+      summary: Restore a withdrawn library master
+      description: >
+        Clears a library master's withdrawal tombstone (ADR-030), making it
+        visible in listings/resolution again. Idempotent — restoring a master
+        that is not withdrawn is a 200 no-op. On a project copy it returns 409
+        (withdrawal/restore applies to masters).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Master restored (or was already active)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [specId]
+                        properties:
+                          specId:
+                            type: string
+                            format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            The id is a project copy, not a library master — withdrawal/restore
+            applies to masters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /specs/{id}/paragraphs/{nodeId}:
     patch:
@@ -4221,6 +4318,14 @@ components:
             Only present on GET /specs/{id}.
           type: string
           enum: [review, active]
+        withdrawnAt:
+          type: [string, 'null']
+          format: date-time
+          description: >
+            Soft-delete (withdraw) tombstone (ADR-030): ISO-8601 when the master
+            is withdrawn, `null` when active. A withdrawn master stays GET-able so
+            lineage/history resolves; only listings/resolution hide it. Only
+            present on GET /specs/{id}.
         warnings:
           type: array
           items:
@@ -4559,7 +4664,8 @@ components:
 
     ProjectWithToc:
       type: object
-      required: [projectId, name, description, sources, toc, deletedAt, deletedBy, sectionNumberFormat]
+      required:
+        [projectId, name, description, sources, toc, deletedAt, deletedBy, sectionNumberFormat]
       properties:
         projectId:
           type: string

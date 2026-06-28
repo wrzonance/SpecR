@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
@@ -167,5 +168,282 @@ describe('PATCH /specs/:id (integration)', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(res.status).toBe(200);
     expect((body['data'] as Record<string, unknown>)['section']).toBe('27 21 00.10 20');
+  });
+});
+
+describe('DELETE /specs/:id (withdraw) + POST /specs/:id/restore (ADR-030, integration)', () => {
+  const masterIds: string[] = [];
+  const copySpecIds: string[] = [];
+  const projectIds: string[] = [];
+  const libraryIds: string[] = [];
+
+  async function createLibrary(): Promise<string> {
+    const res = await pool.query<{ id: string }>(
+      `INSERT INTO libraries (tier, name) VALUES ('client', $1) RETURNING id`,
+      [`withdraw-test ${randomUUID()}`]
+    );
+    const row = res.rows[0];
+    if (!row) throw new Error('failed to create test library');
+    libraryIds.push(row.id);
+    return row.id;
+  }
+
+  async function createMaster(libraryId: string, section: string): Promise<string> {
+    const res = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ($1, $2, 'ufgs', $3) RETURNING id`,
+      [section, `Master ${section}`, libraryId]
+    );
+    const row = res.rows[0];
+    if (!row) throw new Error('failed to create test master');
+    masterIds.push(row.id);
+    return row.id;
+  }
+
+  async function createProject(label: string): Promise<string> {
+    const res = await pool.query<{ id: string }>(
+      `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+      [`${label} ${randomUUID()}`]
+    );
+    const row = res.rows[0];
+    if (!row) throw new Error('failed to create test project');
+    projectIds.push(row.id);
+    return row.id;
+  }
+
+  // A project copy is a spec with project_id set (library_id NULL) and
+  // parent_spec_id pointing back at its master (the copy model, ADR-015/030).
+  async function createProjectCopy(section: string): Promise<string> {
+    const projectId = await createProject('withdraw-copy');
+    const master = await createMaster(await createLibrary(), section);
+    const res = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, project_id, parent_spec_id, content_version)
+       VALUES ($1, $2, 'ufgs', $3, $4, 1) RETURNING id`,
+      [section, `Copy ${section}`, projectId, master]
+    );
+    const row = res.rows[0];
+    if (!row) throw new Error('failed to create test project copy');
+    copySpecIds.push(row.id);
+    return row.id;
+  }
+
+  afterAll(async () => {
+    // Membership rows pin the copies (FK is RESTRICT) — clear them first.
+    if (projectIds.length) {
+      await pool.query('DELETE FROM project_specs WHERE project_id = ANY($1::uuid[])', [
+        projectIds,
+      ]);
+    }
+    if (copySpecIds.length) {
+      await pool.query('DELETE FROM specs WHERE id = ANY($1::uuid[])', [copySpecIds]);
+    }
+    if (projectIds.length) {
+      await pool.query('DELETE FROM project_sources WHERE project_id = ANY($1::uuid[])', [
+        projectIds,
+      ]);
+      await pool.query('DELETE FROM projects WHERE id = ANY($1::uuid[])', [projectIds]);
+    }
+    if (masterIds.length) {
+      await pool.query('DELETE FROM specs WHERE id = ANY($1::uuid[])', [masterIds]);
+    }
+    if (libraryIds.length) {
+      await pool.query('DELETE FROM libraries WHERE id = ANY($1::uuid[])', [libraryIds]);
+    }
+  });
+
+  function withdraw(id: string): Promise<Response> {
+    return fetch(`${baseUrl}/specs/${id}`, { method: 'DELETE' });
+  }
+  function restore(id: string): Promise<Response> {
+    return fetch(`${baseUrl}/specs/${id}/restore`, { method: 'POST' });
+  }
+  async function dataOf(res: Response): Promise<Record<string, unknown>> {
+    return ((await res.json()) as Record<string, unknown>)['data'] as Record<string, unknown>;
+  }
+  async function listSpecIds(libraryId: string): Promise<string[]> {
+    const res = await fetch(`${baseUrl}/libraries/${libraryId}/specs`);
+    const body = (await res.json()) as { data: Array<{ specId: string }> };
+    return body.data.map((s) => s.specId);
+  }
+  async function rowVersion(id: string): Promise<string> {
+    const res = await pool.query<{ xmin: string }>(
+      'SELECT xmin::text AS xmin FROM specs WHERE id = $1',
+      [id]
+    );
+    const row = res.rows[0];
+    if (!row) throw new Error('failed to read spec row version');
+    return row.xmin;
+  }
+
+  it('withdraws a master: 200 {specId, withdrawnAt}, hidden from listing, still GET-able', async () => {
+    const lib = await createLibrary();
+    const id = await createMaster(lib, '99 01 00');
+    expect(await listSpecIds(lib)).toContain(id);
+
+    const res = await withdraw(id);
+    expect(res.status).toBe(200);
+    const data = await dataOf(res);
+    expect(data['specId']).toBe(id);
+    expect(typeof data['withdrawnAt']).toBe('string');
+
+    // Hidden from the library listing (listLibrarySpecs filters withdrawn_at).
+    expect(await listSpecIds(lib)).not.toContain(id);
+
+    // Still GET-able by id, with withdrawnAt surfaced (lineage/history resolves).
+    const got = await fetch(`${baseUrl}/specs/${id}`);
+    expect(got.status).toBe(200);
+    expect((await dataOf(got))['withdrawnAt']).toBe(data['withdrawnAt']);
+  });
+
+  it('active master surfaces withdrawnAt: null on GET /specs/:id', async () => {
+    const id = await createMaster(await createLibrary(), '99 02 00');
+    const got = await fetch(`${baseUrl}/specs/${id}`);
+    expect((await dataOf(got))['withdrawnAt']).toBeNull();
+  });
+
+  it('re-withdraw is idempotent: returns the original withdrawnAt unchanged', async () => {
+    const id = await createMaster(await createLibrary(), '99 03 00');
+    const first = await dataOf(await withdraw(id));
+    const versionAfterFirst = await rowVersion(id);
+    const second = await withdraw(id);
+    expect(second.status).toBe(200);
+    expect((await dataOf(second))['withdrawnAt']).toBe(first['withdrawnAt']);
+    expect(await rowVersion(id)).toBe(versionAfterFirst);
+  });
+
+  it('restore: 200, reappears in listing, withdrawnAt cleared on GET', async () => {
+    const lib = await createLibrary();
+    const id = await createMaster(lib, '99 04 00');
+    await withdraw(id);
+
+    const res = await restore(id);
+    expect(res.status).toBe(200);
+    expect((await dataOf(res))['specId']).toBe(id);
+
+    expect(await listSpecIds(lib)).toContain(id);
+    const got = await fetch(`${baseUrl}/specs/${id}`);
+    expect((await dataOf(got))['withdrawnAt']).toBeNull();
+  });
+
+  it('restore is idempotent on a non-withdrawn master: 200', async () => {
+    const id = await createMaster(await createLibrary(), '99 05 00');
+    const versionBeforeRestore = await rowVersion(id);
+    expect((await restore(id)).status).toBe(200);
+    expect(await rowVersion(id)).toBe(versionBeforeRestore);
+  });
+
+  it('409 — withdraw a project copy steers to the membership endpoint', async () => {
+    const copyId = await createProjectCopy('99 06 00');
+    const res = await withdraw(copyId);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['success']).toBe(false);
+    expect(String(body['error'])).toContain('project copy');
+  });
+
+  it('409 — restore a project copy (withdrawal applies to masters)', async () => {
+    const copyId = await createProjectCopy('99 07 00');
+    expect((await restore(copyId)).status).toBe(409);
+  });
+
+  it('project source resolution hides a withdrawn master, resolves again after restore', async () => {
+    const lib = await createLibrary();
+    const id = await createMaster(lib, '99 08 00');
+    const projectId = await createProject('withdraw-resolve');
+    await pool.query(
+      `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
+      [projectId, lib]
+    );
+
+    await withdraw(id);
+    const derive = (): Promise<Response> =>
+      fetch(`${baseUrl}/projects/${projectId}/specs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ section: '99 08 00' }),
+      });
+
+    // The only holder of 99 08 00 is withdrawn → unresolved (422).
+    expect((await derive()).status).toBe(422);
+
+    // After restore the section resolves and clones into the project (201).
+    await restore(id);
+    const ok = await derive();
+    expect(ok.status).toBe(201);
+    const created = await dataOf(ok);
+    if (typeof created['specId'] === 'string') copySpecIds.push(created['specId']);
+  });
+
+  it('broken-ref availableFrom hides a withdrawn master, offers it again after restore', async () => {
+    // A project sourced from `lib`; `target` (the master holding the missing
+    // section) is what the availableFrom advisory should name. A project copy in
+    // the project carries an outgoing BROKEN ref to that section.
+    const lib = await createLibrary();
+    const target = await createMaster(lib, '99 09 00');
+    const projectId = await createProject('withdraw-availfrom');
+    await pool.query(
+      `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
+      [projectId, lib]
+    );
+    const copy = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, project_id, content_version)
+       VALUES ('99 10 00', 'Citing Copy', 'ufgs', $1, 1) RETURNING id`,
+      [projectId]
+    );
+    const copyId = copy.rows[0]?.id;
+    if (!copyId) throw new Error('failed to create citing copy');
+    copySpecIds.push(copyId);
+    await pool.query(
+      `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`,
+      [projectId, copyId]
+    );
+    const para = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, NULL, 'item', 'See Section 99 09 00.', 0) RETURNING id`,
+      [copyId]
+    );
+    const paraId = para.rows[0]?.id;
+    if (!paraId) throw new Error('failed to create citing paragraph');
+    await pool.query(
+      `INSERT INTO spec_references
+         (source_spec_id, source_paragraph_id, target_type, target_spec_section, is_broken, reference_text)
+       VALUES ($1, $2, 'section', '99 09 00', true, 'Section 99 09 00')`,
+      [copyId, paraId]
+    );
+
+    const availableLibs = async (): Promise<unknown[]> => {
+      const res = await fetch(`${baseUrl}/projects/${projectId}/references/broken`);
+      expect(res.status).toBe(200);
+      const refs = ((await res.json()) as Record<string, unknown>)['data'] as Array<
+        Record<string, unknown>
+      >;
+      const ref = refs.find((r) => r['targetSpecSection'] === '99 09 00');
+      return (ref?.['availableFrom'] as unknown[]) ?? [];
+    };
+
+    // Active master → the advisory names the source library…
+    expect(await availableLibs()).toEqual([expect.objectContaining({ libraryId: lib })]);
+    // …withdrawn → the advisory no longer offers it…
+    await withdraw(target);
+    expect(await availableLibs()).toEqual([]);
+    // …restored → it returns.
+    await restore(target);
+    expect(await availableLibs()).toEqual([expect.objectContaining({ libraryId: lib })]);
+  });
+
+  it('404 — withdraw unknown spec', async () => {
+    expect((await withdraw(randomUUID())).status).toBe(404);
+  });
+
+  it('404 — restore unknown spec', async () => {
+    expect((await restore(randomUUID())).status).toBe(404);
+  });
+
+  it('400 — malformed (non-UUID) spec id on withdraw', async () => {
+    expect((await withdraw('not-a-uuid')).status).toBe(400);
+  });
+
+  it('400 — malformed (non-UUID) spec id on restore', async () => {
+    expect((await restore('not-a-uuid')).status).toBe(400);
   });
 });
