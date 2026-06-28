@@ -308,6 +308,23 @@ describe('generateSec — #296 root-level renderer parity + hidden non-note supp
     expect(xml).toContain('<TTL>PART 1   GENERAL</TTL>');
   });
 
+  it('suppresses a hidden structural root — no fake PART, no part-number shift', () => {
+    const xml = generateSec(
+      root([
+        {
+          id: 'hidden-part',
+          type: 'part',
+          text: 'HIDDEN ROOT PART',
+          children: [],
+          meta: { vanish: true },
+        },
+        part('GENERAL'),
+      ])
+    );
+    expect(xml).not.toContain('HIDDEN ROOT PART');
+    expect(xml).toContain('<TTL>PART 1   GENERAL</TTL>');
+  });
+
   it('renders a note root as <NTE>, not a fake <PRT>', () => {
     const xml = generateSec(
       root([

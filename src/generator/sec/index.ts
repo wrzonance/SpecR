@@ -116,8 +116,8 @@ function renderPart(node: SpecNode, index: number, refs: RefIndex): string {
 }
 
 // A tree root carries the same rule as a deeper node (#296): a note root is a
-// <NTE>, a hidden non-note continuation root is suppressed, a visible continuation
-// root is plain <TXT>, and only a structural root becomes a <PRT>. The root level
+// <NTE>, a hidden non-note root is suppressed, a visible continuation root is
+// plain <TXT>, and only a visible structural root becomes a <PRT>. The root level
 // previously mapped EVERY root through renderPart, so a note/continuation/vanish
 // root rendered as a fake "PART n" and shifted real PART numbering.
 //
@@ -127,16 +127,17 @@ function renderPart(node: SpecNode, index: number, refs: RefIndex): string {
 // fix is parser-side and out of scope here; pinned by a KNOWN LIMITATION test.
 function renderRoot(node: SpecNode, partIndex: number, refs: RefIndex): string {
   if (node.type === 'note') return renderNote(node);
+  if (node.meta.vanish === true) return '';
   if (node.type === 'continuation') {
-    return node.meta.vanish === true ? '' : `<TXT>${escape(node.text)}</TXT>`;
+    return `<TXT>${escape(node.text)}</TXT>`;
   }
   return renderPart(node, partIndex, refs);
 }
 
-// Only structural roots take a "PART n" ordinal — note/continuation roots are
-// chrome and must not advance it (mirrors markdown.ts consumesNumber).
+// Only visible structural roots take a "PART n" ordinal — note/continuation/vanish
+// roots are chrome and must not advance it (mirrors markdown.ts consumesNumber).
 function isPartRoot(node: SpecNode): boolean {
-  return node.type !== 'note' && node.type !== 'continuation';
+  return node.type !== 'note' && node.type !== 'continuation' && node.meta.vanish !== true;
 }
 
 function renderRoots(parts: readonly SpecNode[], refs: RefIndex): string {
