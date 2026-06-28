@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { detectPdfOcrNeed, parsePdf } from './index.js';
 import type { PdfExtractionResult } from './extract.js';
+import type { ManagedRecognizer } from './ocr.js';
 
 interface FakeOcrOptions {
   readonly renderPageAsImage: (
@@ -271,6 +272,66 @@ describe('parsePdf', () => {
     expect(renderedPages).toEqual([2]);
     expect(result.tree.parts.map((part) => part.text)).toEqual(['GENERAL', 'PRODUCTS']);
     expect(warningTypes(result)).toContain('pdf-ocr-applied');
+  });
+
+  it('ocr: worker init stall degrades to pdf-ocr-unusable within timeout, never hangs', async () => {
+    const start = Date.now();
+    const result = await parsePdf(Buffer.from('%PDF'), {
+      ocrMinCharsPerPage: 16,
+      extractPdfText: () => Promise.resolve(extractionResult([''])),
+      ocr: {
+        // Offline/uncached/unconfigured: the worker factory never resolves (a CDN
+        // connection accepted but never answered). The bounded init must degrade.
+        initTimeoutMs: 50,
+        createWorker: () => new Promise<ManagedRecognizer>(() => undefined),
+      },
+    });
+
+    expect(Date.now() - start).toBeLessThan(2_000);
+    expect(warningTypes(result)).toContain('pdf-ocr-unusable');
+    expect(warningTypes(result)).not.toContain('pdf-ocr-applied');
+    expect(result.capabilities).toContain('parse-warnings');
+  });
+
+  it('ocr: offline with no local traineddata → degrades to pdf-ocr-unusable WITHOUT spawning a worker (no leak)', async () => {
+    let spawned = false;
+    const result = await parsePdf(Buffer.from('%PDF'), {
+      ocrMinCharsPerPage: 16,
+      extractPdfText: () => Promise.resolve(extractionResult([''])),
+      ocr: {
+        requireLocalTraineddata: true,
+        hasLocalTraineddata: () => Promise.resolve(false),
+        // If pre-flight wrongly let this run, OCR would SUCCEED (pdf-ocr-applied)
+        // and spawn a worker — so the assertions below fail loudly on regression.
+        createWorker: () => {
+          spawned = true;
+          return Promise.resolve<ManagedRecognizer>({
+            recognize: () => Promise.resolve({ text: 'PART 1 - GENERAL', confidence: 99 }),
+            terminate: () => Promise.resolve(),
+          });
+        },
+        renderPageAsImage: () => Promise.resolve(Buffer.alloc(0)),
+      },
+    });
+
+    expect(spawned).toBe(false);
+    expect(warningTypes(result)).toContain('pdf-ocr-unusable');
+    expect(warningTypes(result)).not.toContain('pdf-ocr-applied');
+  });
+
+  it('ocr: #290 fail-fast preserved — a rejecting worker init degrades to pdf-ocr-unusable', async () => {
+    const result = await parsePdf(Buffer.from('%PDF'), {
+      ocrMinCharsPerPage: 16,
+      extractPdfText: () => Promise.resolve(extractionResult([''])),
+      ocr: {
+        // The offline fetch rejects (`TypeError: fetch failed`) — #290's case;
+        // it must keep degrading to a warning at the parsePdf boundary, not throw.
+        createWorker: () => Promise.reject(new Error('fetch failed')),
+      },
+    });
+
+    expect(warningTypes(result)).toContain('pdf-ocr-unusable');
+    expect(warningTypes(result)).not.toContain('pdf-ocr-applied');
   });
 
   it('emits a low-confidence warning when injected OCR confidence is below the threshold', async () => {

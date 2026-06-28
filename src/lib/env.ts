@@ -13,6 +13,17 @@ const schema = z.object({
   // value cannot explode image size and OOM the worker (scale 10 ≈ 720 DPI on a
   // Letter page is already far beyond what OCR needs).
   OCR_RENDER_SCALE: z.coerce.number().positive().max(10).default(2),
+  // Bound OCR worker initialization. When traineddata is uncached AND
+  // OCR_LANG_PATH is unset, tesseract.js fetches eng.traineddata from a CDN; a
+  // network that accepts the connection but never responds would otherwise hang
+  // the parse job forever. On timeout we degrade to a `pdf-ocr-unusable` warning.
+  OCR_INIT_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  // Strict offline OCR. When true, refuse to OCR unless eng.traineddata is
+  // present locally (OCR_LANG_PATH dir or the cache) — pre-flighted BEFORE any
+  // worker spawns, so an offline box never spawns a worker that would black-hole
+  // on a CDN fetch and leak (ADR-039). Default false preserves the convenient
+  // networked-dev behavior (CDN fetch on first run, bounded by OCR_INIT_TIMEOUT_MS).
+  OCR_REQUIRE_LOCAL_TRAINEDDATA: z.stringbool().default(false),
 });
 
 const result = schema.safeParse(process.env);

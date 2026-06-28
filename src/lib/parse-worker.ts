@@ -39,6 +39,8 @@ function parseOptionsFromConfig() {
     ocrMinCharsPerPage: config.OCR_MIN_CHARS_PER_PAGE,
     ocrLowConfidenceThreshold: config.OCR_LOW_CONFIDENCE_THRESHOLD,
     ocrRenderScale: config.OCR_RENDER_SCALE,
+    ocrInitTimeoutMs: config.OCR_INIT_TIMEOUT_MS,
+    ocrRequireLocalTraineddata: config.OCR_REQUIRE_LOCAL_TRAINEDDATA,
     ...(config.OCR_LANG_PATH !== undefined ? { ocrLangPath: config.OCR_LANG_PATH } : {}),
     ...(config.OCR_CACHE_PATH !== undefined ? { ocrCachePath: config.OCR_CACHE_PATH } : {}),
   };
