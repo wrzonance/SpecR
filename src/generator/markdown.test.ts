@@ -208,6 +208,88 @@ describe('renderMarkdown', () => {
     expect(md).toContain('   2. Section 01 33 00');
     expect(md).not.toContain('3. Section 01 30 00');
   });
+  // #296: root-level renderer asymmetry. renderMarkdown used to map EVERY root
+  // through renderPart → "## PART {i+1}", ignoring note/vanish/continuation roots
+  // that renderPrNode already honors at the child level. A hidden/note/continuation
+  // root rendered as a fake PART and shifted real PART numbering by its array index.
+  function rootTree(roots: SpecTree['parts']): SpecTree {
+    return { id: 'r', section: '01 00 00', title: 'Roots', parts: roots };
+  }
+  const part = (text: string): SpecTree['parts'][number] => ({
+    id: `p-${text}`,
+    type: 'part',
+    text,
+    children: [],
+    meta: {},
+  });
+
+  it('#296: suppresses a hidden (meta.vanish) non-note root — not rendered as a PART', () => {
+    const md = renderMarkdown(
+      rootTree([
+        {
+          id: 'h',
+          type: 'continuation',
+          text: 'SIGN-OFF FORM hidden',
+          children: [],
+          meta: { vanish: true },
+        },
+        part('GENERAL'),
+      ])
+    );
+    expect(md).not.toContain('SIGN-OFF FORM hidden');
+    expect(md).not.toContain('## PART 2');
+    expect(md).toContain('## PART 1 - GENERAL');
+  });
+
+  it('#296: suppresses a hidden non-note child', () => {
+    const md = renderMarkdown(
+      rootTree([
+        {
+          id: 'p',
+          type: 'part',
+          text: 'GENERAL',
+          meta: {},
+          children: [
+            {
+              id: 'c',
+              type: 'continuation',
+              text: 'hidden child body',
+              children: [],
+              meta: { vanish: true },
+            },
+          ],
+        },
+      ])
+    );
+    expect(md).not.toContain('hidden child body');
+  });
+
+  it('#296: PART numbering counts only real part roots (note/continuation/vanish do not shift)', () => {
+    const md = renderMarkdown(
+      rootTree([
+        { id: 'n', type: 'note', text: 'specifier banner', children: [], meta: { vanish: true } },
+        { id: 'c', type: 'continuation', text: 'preamble line', children: [], meta: {} },
+        {
+          id: 'v',
+          type: 'continuation',
+          text: 'hidden form',
+          children: [],
+          meta: { vanish: true },
+        },
+        part('GENERAL'),
+        part('PRODUCTS'),
+      ])
+    );
+    expect(md).toContain('## PART 1 - GENERAL');
+    expect(md).toContain('## PART 2 - PRODUCTS');
+    expect(md).not.toContain('PART 3');
+    // note root renders as [NOTE], continuation root as plain text, vanish suppressed
+    expect(md).toContain('> **[NOTE]** specifier banner');
+    expect(md).toContain('preamble line');
+    expect(md).not.toContain('## PART 1 - specifier banner');
+    expect(md).not.toContain('hidden form');
+  });
+
   it('renders empty tree without error', () => {
     const empty: SpecTree = {
       id: '00000000-0000-0000-0000-000000000001',

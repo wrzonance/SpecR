@@ -101,4 +101,9 @@ export interface ClassifiedParagraph {
   readonly signalUsed: 1 | 2 | 3 | 4 | 5;
   readonly conflicts: readonly SignalConflict[];
   readonly isVanish: boolean;
+  // A genuine specifier note (banner text or a note-named style) — editorial
+  // metadata rendered as [NOTE]. Distinct from isVanish (merely hidden): hidden
+  // non-note content is a suppressed 'continuation', a note renders (#296).
+  // Absent === not a note.
+  readonly isNote?: boolean;
 }

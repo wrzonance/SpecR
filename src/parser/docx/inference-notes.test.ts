@@ -56,6 +56,42 @@ describe('classifyParagraphs + buildTree — specifier notes become vanish notes
     expect(note?.meta.vanish).toBe(true);
   });
 
+  // #296: a fully-hidden paragraph that is NOT a specifier note (sign-off forms,
+  // processing forms, document-control chrome) must become a SUPPRESSED non-note
+  // node (continuation + meta.vanish), not a visible [NOTE]. Renderers display
+  // note nodes regardless of meta.vanish, so misrepresenting hidden body content
+  // as a note leaked it into every render.
+  it('#296: hidden non-note paragraph → suppressed continuation with meta.vanish, not a note', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ isVanish: true, text: 'SIGN-OFF: ______  Reviewed by ______' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01 00 00', 'T', 'cpi');
+    const hidden = tree.parts[0]?.children[0];
+    expect(hidden?.type).toBe('continuation');
+    expect(hidden?.type).not.toBe('note');
+    expect(hidden?.meta.vanish).toBe(true);
+    expect(hidden?.text).toBe('SIGN-OFF: ______  Reviewed by ______');
+  });
+
+  it('#296: hidden non-note paragraph at root → suppressed continuation, text kept verbatim', () => {
+    const classified = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 0, isVanish: true, text: 'PART 3 - EXECUTION' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01 00 00', 'T', 'cpi');
+    const node = tree.parts[0];
+    expect(node?.type).toBe('continuation');
+    expect(node?.meta.vanish).toBe(true);
+    // hidden content is retained as-authored — the "PART 3 - " prefix is NOT stripped
+    expect(node?.text).toBe('PART 3 - EXECUTION');
+  });
+
   it('FootnoteText style is NOT a specifier note', () => {
     const styleMap: StyleMap = {
       styles: new Map([['FootnoteText', { styleId: 'FootnoteText', name: 'footnote text' }]]),

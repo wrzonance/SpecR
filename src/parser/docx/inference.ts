@@ -161,7 +161,8 @@ function isNoteParagraph(para: DocxParagraph, styleMap: StyleMap): boolean {
 function continuationResult(
   para: DocxParagraph,
   prevNonContIlvl: number,
-  isVanish: boolean
+  isVanish: boolean,
+  isNote: boolean
 ): ClassifiedParagraph {
   return {
     paragraph: para,
@@ -170,6 +171,7 @@ function continuationResult(
     signalUsed: 3,
     conflicts: [],
     isVanish,
+    isNote,
   };
 }
 
@@ -179,9 +181,14 @@ function classifyOne(
   styleMap: StyleMap,
   prevNonContIlvl: number
 ): ClassifiedParagraph {
-  // Hidden + specifier-note paragraphs render as vanish notes — never structural.
-  if (para.isVanish || isNoteParagraph(para, styleMap)) {
-    return continuationResult(para, prevNonContIlvl, true);
+  // Hidden + specifier-note paragraphs are non-structural. Both carry meta.vanish
+  // (a specifier note is editorial content hidden in the published spec, matching
+  // SEC <NTE> semantics), but isNote splits them: a genuine note becomes a 'note'
+  // AST node ([NOTE]); hidden non-note body content becomes a suppressed
+  // 'continuation' so renderers drop it instead of leaking it as a note (#296).
+  const isNote = isNoteParagraph(para, styleMap);
+  if (para.isVanish || isNote) {
+    return continuationResult(para, prevNonContIlvl, true, isNote);
   }
 
   const hits: SignalHit[] = [];
@@ -197,7 +204,7 @@ function classifyOne(
 
   const rawWinner = hits[0];
   if (!rawWinner) {
-    return continuationResult(para, prevNonContIlvl, para.isVanish);
+    return continuationResult(para, prevNonContIlvl, para.isVanish, false);
   }
   const winner = correctMisalignedArticle(rawWinner, hits);
   const conflicts = buildConflicts(winner, hits);
@@ -241,10 +248,15 @@ function sourceFactsMeta(cp: ClassifiedParagraph): {
   return cp.paragraph.sourceFacts ? { sourceFacts: cp.paragraph.sourceFacts } : {};
 }
 
+// Non-structural paragraphs (classifyParagraphs routes every vanish/note here as
+// a 'continuation'). A genuine specifier note becomes a 'note' (rendered as
+// [NOTE]); hidden non-note content becomes a suppressed 'continuation' carrying
+// meta.vanish, which every renderer drops (#296). Text is kept verbatim — hidden
+// content is retained as-authored for document-control tracking.
 function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode {
   return {
     id: uuidv4(),
-    type: cp.isVanish ? 'note' : 'continuation',
+    type: cp.isNote ? 'note' : 'continuation',
     text: cp.paragraph.text,
     children: [],
     meta: { source, ...(cp.isVanish ? { vanish: true } : {}), ...sourceFactsMeta(cp) },
@@ -253,15 +265,14 @@ function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode
 
 // A visible PART heading stores only its name in the AST; the "PART n -" label is
 // render-derived (getLabel). Strip it, rebasing any source-fact offsets onto the
-// shorter text so comment/color/choice anchors stay valid. Hidden parts (kept
-// verbatim as notes), non-parts, and a bare "PART n" (strip would empty it) keep
-// their raw text + facts unchanged.
+// shorter text so comment/color/choice anchors stay valid. Non-parts and a bare
+// "PART n" (strip would empty it) keep their raw text + facts unchanged.
 function nodeContent(cp: ClassifiedParagraph): {
   readonly text: string;
   readonly sourceFacts?: NonNullable<DocxParagraph['sourceFacts']>;
 } {
   const facts = cp.paragraph.sourceFacts;
-  const plan = !cp.isVanish && cp.nodeType === 'part' ? planPartStrip(cp.paragraph.text) : null;
+  const plan = cp.nodeType === 'part' ? planPartStrip(cp.paragraph.text) : null;
   if (!plan) {
     return facts ? { text: cp.paragraph.text, sourceFacts: facts } : { text: cp.paragraph.text };
   }
@@ -270,16 +281,18 @@ function nodeContent(cp: ClassifiedParagraph): {
     : { text: plan.text };
 }
 
+// Structural nodes only. classifyParagraphs routes every vanish/note paragraph to
+// a 'continuation' (handled by makeContinuationNode), so a cp reaching makeNode is
+// always visible, non-note, structural content — its type maps straight through.
 function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source): SpecNode {
   const content = nodeContent(cp);
   return {
     id: uuidv4(),
-    type: cp.isVanish ? 'note' : cp.nodeType,
+    type: cp.nodeType,
     text: content.text,
     children,
     meta: {
       source,
-      ...(cp.isVanish ? { vanish: true as const } : {}),
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
       ...(content.sourceFacts ? { sourceFacts: content.sourceFacts } : {}),
     },
