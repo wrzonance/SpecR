@@ -265,6 +265,15 @@ describe('DELETE /specs/:id (withdraw) + POST /specs/:id/restore (ADR-030, integ
     const body = (await res.json()) as { data: Array<{ specId: string }> };
     return body.data.map((s) => s.specId);
   }
+  async function rowVersion(id: string): Promise<string> {
+    const res = await pool.query<{ xmin: string }>(
+      'SELECT xmin::text AS xmin FROM specs WHERE id = $1',
+      [id]
+    );
+    const row = res.rows[0];
+    if (!row) throw new Error('failed to read spec row version');
+    return row.xmin;
+  }
 
   it('withdraws a master: 200 {specId, withdrawnAt}, hidden from listing, still GET-able', async () => {
     const lib = await createLibrary();
@@ -295,9 +304,11 @@ describe('DELETE /specs/:id (withdraw) + POST /specs/:id/restore (ADR-030, integ
   it('re-withdraw is idempotent: returns the original withdrawnAt unchanged', async () => {
     const id = await createMaster(await createLibrary(), '99 03 00');
     const first = await dataOf(await withdraw(id));
+    const versionAfterFirst = await rowVersion(id);
     const second = await withdraw(id);
     expect(second.status).toBe(200);
     expect((await dataOf(second))['withdrawnAt']).toBe(first['withdrawnAt']);
+    expect(await rowVersion(id)).toBe(versionAfterFirst);
   });
 
   it('restore: 200, reappears in listing, withdrawnAt cleared on GET', async () => {
@@ -316,7 +327,9 @@ describe('DELETE /specs/:id (withdraw) + POST /specs/:id/restore (ADR-030, integ
 
   it('restore is idempotent on a non-withdrawn master: 200', async () => {
     const id = await createMaster(await createLibrary(), '99 05 00');
+    const versionBeforeRestore = await rowVersion(id);
     expect((await restore(id)).status).toBe(200);
+    expect(await rowVersion(id)).toBe(versionBeforeRestore);
   });
 
   it('409 — withdraw a project copy steers to the membership endpoint', async () => {

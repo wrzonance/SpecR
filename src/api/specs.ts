@@ -35,11 +35,13 @@ export async function getSpecHandler(req: Request, res: Response): Promise<void>
     // query keeps getSpecTree untouched (owned by a parallel PR); styleSource is
     // { templateId, templateName } | null. onboardingStatus (#139) is surfaced the
     // same way: 'review' | 'active'.
-    const styleSource = await getSpecStyleSource(id);
-    const onboardingStatus = await getOnboardingStatus(id);
     // A withdrawn master (ADR-030) is still GET-able with its tombstone surfaced
     // (null when active), so lineage/history resolves. Same sibling-field pattern.
-    const withdrawnAt = await getSpecWithdrawnAt(id);
+    const [styleSource, onboardingStatus, withdrawnAt] = await Promise.all([
+      getSpecStyleSource(id),
+      getOnboardingStatus(id),
+      getSpecWithdrawnAt(id),
+    ]);
     res.status(200).json({
       success: true,
       data: { ...result.tree, styleSource, onboardingStatus, withdrawnAt },

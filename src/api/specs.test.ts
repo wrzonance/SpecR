@@ -25,8 +25,18 @@ function makeRes(): {
   return { status, json };
 }
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolveValue: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolveValue = resolve;
+  });
+  if (!resolveValue) throw new Error('failed to initialize deferred');
+  return { promise, resolve: resolveValue };
+}
+
 beforeEach(() => {
   vi.resetModules();
+  vi.clearAllMocks();
 });
 
 describe('getSpecHandler', () => {
@@ -94,6 +104,39 @@ describe('getSpecHandler', () => {
     expect((body['data'] as Record<string, unknown>)['styleSource']).toBeNull();
     expect((body['data'] as Record<string, unknown>)['onboardingStatus']).toBe('review');
     expect((body['data'] as Record<string, unknown>)['withdrawnAt']).toBeNull();
+  });
+
+  it('starts sibling metadata lookups concurrently after the spec tree loads', async () => {
+    const { getSpecTree, getSpecStyleSource, getOnboardingStatus, getSpecWithdrawnAt } =
+      await import('../db/index.js');
+    vi.mocked(getSpecTree).mockResolvedValueOnce({
+      tree: { id: 'abc', section: '27 21 00', title: 'Cabling', parts: [] },
+      references: [],
+    });
+    const styleSource = deferred<null>();
+    const onboardingStatus = deferred<'active'>();
+    const withdrawnAt = deferred<null>();
+    vi.mocked(getSpecStyleSource).mockReturnValueOnce(styleSource.promise);
+    vi.mocked(getOnboardingStatus).mockReturnValueOnce(onboardingStatus.promise);
+    vi.mocked(getSpecWithdrawnAt).mockReturnValueOnce(withdrawnAt.promise);
+    const { getSpecHandler } = await import('./specs.js');
+    const req = { params: { id: 'abc' } } as unknown as Request;
+    const res = makeRes();
+
+    const handled = getSpecHandler(req, res as unknown as Response);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    try {
+      expect(getSpecStyleSource).toHaveBeenCalledWith('abc');
+      expect(getOnboardingStatus).toHaveBeenCalledWith('abc');
+      expect(getSpecWithdrawnAt).toHaveBeenCalledWith('abc');
+    } finally {
+      styleSource.resolve(null);
+      onboardingStatus.resolve('active');
+      withdrawnAt.resolve(null);
+      await handled;
+    }
   });
 
   it('returns 404 when spec not found', async () => {
@@ -299,5 +342,17 @@ describe('restoreSpecHandler', () => {
       res as unknown as Response
     );
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('returns 500 on database error', async () => {
+    const { restoreSpec } = await import('../db/index.js');
+    vi.mocked(restoreSpec).mockRejectedValueOnce(new Error('db down'));
+    const { restoreSpecHandler } = await import('./specs.js');
+    const res = makeRes();
+    await restoreSpecHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(500);
   });
 });

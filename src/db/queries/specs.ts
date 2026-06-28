@@ -318,7 +318,7 @@ export async function withdrawSpec(id: string): Promise<WithdrawSpecOutcome> {
          UPDATE specs s
          SET withdrawn_at = COALESCE(s.withdrawn_at, now())
          FROM target t
-         WHERE s.id = t.id AND t.library_id IS NOT NULL
+         WHERE s.id = t.id AND t.library_id IS NOT NULL AND s.withdrawn_at IS NULL
          RETURNING s.id, s.withdrawn_at
        )
        SELECT t.id,
@@ -357,7 +357,7 @@ export async function restoreSpec(id: string): Promise<RestoreSpecOutcome> {
          UPDATE specs s
          SET withdrawn_at = NULL
          FROM target t
-         WHERE s.id = t.id AND t.library_id IS NOT NULL
+         WHERE s.id = t.id AND t.library_id IS NOT NULL AND s.withdrawn_at IS NOT NULL
          RETURNING s.id
        )
        SELECT t.id, (t.library_id IS NOT NULL) AS is_master

@@ -18,6 +18,7 @@ const EXCLUDE = new Set(['post /mcp', 'get /mcp', 'delete /mcp']);
 // Response bodies asserted in this file.
 const RESPONSE_COVERED = new Set([
   'delete /projects/{}/revision-nomenclature',
+  'delete /specs/{}',
   'get /health',
   'get /conventions',
   'get /libraries',
@@ -26,6 +27,7 @@ const RESPONSE_COVERED = new Set([
   'get /projects/{}/revision-nomenclature',
   'get /revision-nomenclature-profiles',
   'get /templates',
+  'post /specs/{}/restore',
   'post /projects/{}/revision-nomenclature/clone',
   'put /projects/{}/revision-nomenclature',
 ]);
@@ -94,8 +96,6 @@ const RESPONSE_ALLOWLIST = new Set([
   'patch /projects/{}',
   'delete /projects/{}',
   'post /projects/{}/restore',
-  'delete /specs/{}',
-  'post /specs/{}/restore',
 ]);
 
 let server: Server;
