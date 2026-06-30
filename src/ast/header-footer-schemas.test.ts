@@ -137,3 +137,32 @@ describe('HeaderFooterCompositionSchema — typed fields still fail validation',
     ).toThrow();
   });
 });
+
+describe('HeaderFooterCompositionSchema — reserved-key promotion (ADR-040 caveat)', () => {
+  it('h/f schema: v2 reserves variants/pageNumbering/raw — non-colliding v1 extension keys still validate; a colliding legacy value is the typed field (ADR-040 caveat)', () => {
+    // General backward-compat holds: a v1 payload with an arbitrary, non-colliding
+    // .catchall extension key still validates and round-trips it untouched.
+    const v1WithExtension = {
+      header: { center: { content: [{ kind: 'sectionTitle' }] } },
+      footer: { right: { content: [{ kind: 'pageNumber' }] } },
+      style: { fontFamily: 'Arial' },
+      someClientKey: { layoutPreset: 'acme', nested: { flag: true } },
+    };
+    expect(HeaderFooterCompositionSchema.parse(v1WithExtension)).toEqual(v1WithExtension);
+
+    // Accepted migration caveat: v2 promotes `variants`/`pageNumbering`/`raw`
+    // from open extension keys to RESERVED typed keys. A payload using one of
+    // those names is now parsed as the typed field — a CONFORMING value passes...
+    const conforming = { pageNumbering: { mode: 'continuous', startAt: 1 } };
+    expect(HeaderFooterCompositionSchema.parse(conforming)).toEqual(conforming);
+
+    // ...and a NON-conforming legacy value under that reserved name now rejects
+    // at the boundary (the documented, deliberate behavior — tolerant parsing
+    // was rejected so invalid typed fields can never slip through; see ADR-040).
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({ pageNumbering: { vendorPolicy: true } })
+    ).toThrow();
+    expect(() => HeaderFooterCompositionSchema.parse({ raw: '<w:hdr/>' })).toThrow();
+    expect(() => HeaderFooterCompositionSchema.parse({ variants: 'legacy-string' })).toThrow();
+  });
+});
