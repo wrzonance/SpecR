@@ -203,8 +203,10 @@ export async function clearSpecNumberingProfile(specId: string): Promise<boolean
 
 /**
  * Resolve the effective numbering profile for a spec.
- * Returns the assigned profile's rules if set; else the built-in CSI Default.
- * Always returns a valid NumberingProfile — never null.
+ * Returns null when the spec does not exist; otherwise the assigned profile's
+ * rules if one is set, else the built-in CSI Default (an existing-but-unassigned
+ * spec never resolves to null). Lets callers map a missing spec to 404 distinctly
+ * from the unassigned → built-in fallback.
  * Wraps ZodError as DatabaseError with the original error as cause.
  */
 export async function getEffectiveNumberingProfile(
