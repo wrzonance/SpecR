@@ -15,6 +15,14 @@ describe('NumberingProfileSchema', () => {
     expect((parsed as Record<string, unknown>)['vendorX']).toEqual({ note: 'keep me' });
   });
 
+  it('round-trips unknown keys at the tiers container level (ADR-021)', () => {
+    const parsed = NumberingProfileSchema.parse({
+      ...valid,
+      tiers: { ...valid.tiers, vendorTierMeta: { keep: true } },
+    });
+    expect((parsed.tiers as Record<string, unknown>)['vendorTierMeta']).toEqual({ keep: true });
+  });
+
   it('rejects a part tier with maxCount > 5 (CSI integer-part bound)', () => {
     expect(() =>
       NumberingProfileSchema.parse({

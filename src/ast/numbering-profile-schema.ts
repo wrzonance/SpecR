@@ -24,12 +24,14 @@ const NumberingLevelSchema = z
 
 export const NumberingProfileSchema = z
   .object({
-    tiers: z.object({
-      part: PartTierSchema,
-      article: TierShapeSchema.exactOptional(),
-      paragraph: TierShapeSchema.exactOptional(),
-      subparagraph: TierShapeSchema.exactOptional(),
-    }),
+    tiers: z
+      .object({
+        part: PartTierSchema,
+        article: TierShapeSchema.exactOptional(),
+        paragraph: TierShapeSchema.exactOptional(),
+        subparagraph: TierShapeSchema.exactOptional(),
+      })
+      .catchall(JsonValue),
     numbering: z.array(
       z
         .object({ numId: z.number().int(), levels: z.array(NumberingLevelSchema) })
