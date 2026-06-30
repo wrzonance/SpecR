@@ -61,7 +61,10 @@ paths:
       description: >
         Upload a `.docx`, `.sec`, `.txt`, or `.pdf` file. Returns 202 immediately with a
         `jobId`; poll `/parse/jobs/{jobId}` for progress and result. Rate-limited
-        to 10 requests per IP per minute.
+        to 10 requests per IP per minute. Optionally pass `numberingProfileId` to apply
+        a saved structural numbering profile (#299) as a deterministic override during
+        this parse; omit it for the default 5-signal inference. Profile application is at
+        parse time — an already-parsed spec is not re-applied (SpecR keeps no source DOCX).
       tags: [parse]
       requestBody:
         required: true
@@ -81,6 +84,13 @@ paths:
                 title:
                   type: string
                   description: Override the detected section title.
+                numberingProfileId:
+                  type: string
+                  format: uuid
+                  description: >
+                    Optional saved numbering profile to apply as a deterministic
+                    structural override (#299). Must exist (→ 404 if not). Applies to
+                    DOCX inference; omit for default 5-signal behavior.
       responses:
         '202':
           description: Parse job accepted
@@ -101,6 +111,8 @@ paths:
                             format: uuid
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':

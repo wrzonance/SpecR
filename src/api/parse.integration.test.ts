@@ -3,6 +3,7 @@ import express from 'express';
 import type { Server } from 'http';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool } from '../db/index.js';
@@ -360,4 +361,76 @@ describe('POST /parse — .txt upload', () => {
     const res = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
     expect(res.status).toBe(400);
   });
+});
+
+// #299 — an assigned numbering profile is resolved at the REST ingress and threaded
+// into the parse worker. These prove the production wiring (resolution + 404 + the
+// built-in default passing through unchanged); the override's tier/conflict behavior
+// is pinned at the unit level (parser INV3/INV4 + the parse-worker threading test),
+// and a numbering-driven golden e2e needs the gitignored ARCAT fixtures (CI-only).
+describe('POST /parse — numbering profile (#299)', () => {
+  const DOCX_FIXTURE = resolve('tests/fixtures/libreoffice/csi-spec-sample.docx');
+  const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+  async function postDocx(fields: Record<string, string> = {}): Promise<{
+    status: number;
+    body: { success: boolean; error?: string; data?: { jobId: string } };
+  }> {
+    const buf = readFileSync(DOCX_FIXTURE);
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([new Uint8Array(buf)], { type: DOCX_MIME }),
+      'csi-spec-sample.docx'
+    );
+    for (const [key, value] of Object.entries(fields)) form.append(key, value);
+    const res = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+    return {
+      status: res.status,
+      body: (await res.json()) as { success: boolean; error?: string; data?: { jobId: string } },
+    };
+  }
+
+  async function builtInProfileId(): Promise<string> {
+    const row = await pool.query<{ id: string }>(
+      `SELECT id FROM numbering_profiles WHERE library_id IS NULL LIMIT 1`
+    );
+    const id = row.rows[0]?.id;
+    if (!id) throw new Error('built-in CSI Default profile missing — run seed/migrate');
+    return id;
+  }
+
+  it('404 — a non-existent numberingProfileId is rejected before the job starts', async () => {
+    const { status, body } = await postDocx({ numberingProfileId: randomUUID() });
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error).toBe('numbering profile not found');
+    expect(body.data).toBeUndefined(); // no job created
+  });
+
+  it('400 — a malformed numberingProfileId is rejected', async () => {
+    const { status } = await postDocx({ numberingProfileId: 'not-a-uuid' });
+    expect(status).toBe(400);
+  });
+
+  it('built-in CSI Default profile threads through and is a passthrough (same node count as no profile)', async () => {
+    // No profile → baseline.
+    const noProfile = await postDocx();
+    expect(noProfile.status).toBe(202);
+    const job0 = await waitForJob(noProfile.body.data!.jobId);
+    expect(job0.status).toBe('complete');
+    const specId = job0.result!.specId;
+    cleanupIds.push(specId);
+    const baselineCount = job0.result!.nodeCount;
+    expect(baselineCount).toBeGreaterThan(0);
+
+    // Built-in default (empty profile) → resolved, threaded to the worker, applied.
+    const withDefault = await postDocx({ numberingProfileId: await builtInProfileId() });
+    expect(withDefault.status).toBe(202);
+    const job1 = await waitForJob(withDefault.body.data!.jobId);
+    expect(job1.status).toBe('complete');
+    // Same file → upsert to the same spec; empty default changes nothing (byte-for-byte).
+    expect(job1.result!.specId).toBe(specId);
+    expect(job1.result!.nodeCount).toBe(baselineCount);
+  }, 30_000);
 });

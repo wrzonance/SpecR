@@ -6,17 +6,19 @@ import { assertDocxSafe, assertPdfSafe, assertSecSafe } from '../parser/index.js
 import { createJob, updateJob, getJob, type ParseStage } from '../lib/jobs.js';
 import { parsePool } from '../lib/parse-pool.js';
 import { workerOutputSchema, type WorkerOutput } from '../lib/parse-worker.js';
-import { persistParsedSpec } from '../db/index.js';
+import { persistParsedSpec, getNumberingProfile } from '../db/index.js';
 import type { OriginMeta } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
+import type { NumberingProfile } from '../ast/index.js';
 import { parseSectionNumberCandidate } from '../lib/section-number.js';
 
 interface ParseBody {
   readonly section?: string;
   readonly title?: string;
+  readonly numberingProfileId?: string;
 }
 
 // Multipart text fields from multer. Non-strict (unknown keys stripped) to
@@ -24,6 +26,9 @@ interface ParseBody {
 const ParseBodySchema = z.object({
   section: z.string().exactOptional(),
   title: z.string().exactOptional(),
+  // Optional structural numbering profile to apply during this parse (#299).
+  // Absent ⇒ no profile ⇒ byte-for-byte today's behavior (no default injected).
+  numberingProfileId: z.uuid().exactOptional(),
 });
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -76,6 +81,42 @@ async function validateUpload(req: Request): Promise<UploadValidation> {
   }
 }
 
+// Resolve the optional assigned numbering profile (#299) before the job starts,
+// so a missing profile is a synchronous 404 rather than a failed async job.
+// Returns the profile's rules; `undefined` when none was requested; `null` after
+// a 404/500 was sent (the caller must stop). Application happens at parse time —
+// SpecR stores no source DOCX to re-apply a profile against later (ADR-021).
+async function resolveRequestedProfile(
+  profileId: string | undefined,
+  res: Response
+): Promise<NumberingProfile | null | undefined> {
+  if (profileId === undefined) return undefined;
+  try {
+    const profile = await getNumberingProfile(profileId);
+    if (!profile) {
+      res.status(404).json({ success: false, error: 'numbering profile not found' });
+      return null;
+    }
+    return profile.rules;
+  } catch (err) {
+    logger.error({ err }, 'numbering profile lookup failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+    return null;
+  }
+}
+
+// Validate + canonicalize the optional section override. Returns the canonical
+// section, `undefined` when none was given, or `null` after sending a 400.
+function resolveSectionOverride(raw: string | undefined, res: Response): string | null | undefined {
+  if (raw === undefined) return undefined;
+  const parsed = parseSectionNumberCandidate(raw, 'strong');
+  if (parsed?.ok !== true) {
+    res.status(400).json({ success: false, error: 'invalid section override format' });
+    return null;
+  }
+  return parsed.canonical;
+}
+
 export async function parseHandler(req: Request, res: Response): Promise<void> {
   const validation = await validateUpload(req);
   if ('error' in validation) {
@@ -90,20 +131,16 @@ export async function parseHandler(req: Request, res: Response): Promise<void> {
     return;
   }
   const rawBody: ParseBody = bodyResult.data;
-  const parsedSection =
-    rawBody.section !== undefined ? parseSectionNumberCandidate(rawBody.section, 'strong') : null;
-  if (rawBody.section !== undefined && parsedSection?.ok !== true) {
-    res.status(400).json({ success: false, error: 'invalid section override format' });
-    return;
-  }
-  const body: ParseBody = {
-    ...rawBody,
-    ...(parsedSection?.ok === true ? { section: parsedSection.canonical } : {}),
-  };
+  const section = resolveSectionOverride(rawBody.section, res);
+  if (section === null) return; // 400 already sent
+  const numberingProfile = await resolveRequestedProfile(rawBody.numberingProfileId, res);
+  if (numberingProfile === null) return; // 404/500 already sent
+
+  const body: ParseBody = { ...rawBody, ...(section !== undefined ? { section } : {}) };
 
   const jobId = createJob();
   // Pass buffer and ext, not the full file object, so the request closure can be GC'd
-  void processParseJob(jobId, file.buffer, ext, body, file.originalname);
+  void processParseJob(jobId, file.buffer, ext, body, file.originalname, numberingProfile);
   res.status(202).json({ success: true, data: { jobId } });
 }
 
@@ -142,12 +179,30 @@ function buildOriginMeta(filename: string, buffer: Buffer): OriginMeta {
   return { filename: sanitizeFilename(filename), sha256: sha256Hex(buffer), loader: 'rest:parse' };
 }
 
+// Run the parse worker over the Piscina boundary and validate its structured-clone
+// return. Buffer from multer may reference a shared pool — structured clone (no
+// transferList) is safe. An assigned numbering profile (#299) is forwarded only
+// when present, so the no-profile call shape is byte-for-byte unchanged.
+async function runParseWorker(
+  buffer: Buffer,
+  ext: string,
+  numberingProfile?: NumberingProfile
+): Promise<WorkerOutput> {
+  const workerRaw: unknown = await parsePool.run({
+    buffer,
+    ext,
+    ...(numberingProfile !== undefined ? { numberingProfile } : {}),
+  });
+  return workerOutputSchema.parse(workerRaw) as WorkerOutput;
+}
+
 async function processParseJob(
   jobId: string,
   buffer: Buffer,
   ext: string,
   body: ParseBody,
-  filename: string
+  filename: string,
+  numberingProfile?: NumberingProfile
 ): Promise<void> {
   try {
     const onProgress = (stage: string, pct: number): void => {
@@ -155,9 +210,7 @@ async function processParseJob(
     };
 
     onProgress('extracting', 10);
-    // Buffer from multer may reference a shared pool — structured clone (no transferList) is safe.
-    const workerRaw: unknown = await parsePool.run({ buffer, ext });
-    const { tree, refs, capabilities } = workerOutputSchema.parse(workerRaw) as WorkerOutput;
+    const { tree, refs, capabilities } = await runParseWorker(buffer, ext, numberingProfile);
     onProgress('classifying', 75);
 
     const finalTree: SpecTree = {
