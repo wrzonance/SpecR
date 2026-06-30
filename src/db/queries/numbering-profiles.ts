@@ -144,12 +144,18 @@ export async function updateNumberingProfile(
 }
 
 /**
- * Delete a profile. Returns false when not found.
+ * Delete a library-owned profile. Returns false when not found.
+ * The built-in CSI Default (`library_id IS NULL`) is never deletable — this query
+ * silently excludes it, so callers get `false` (→ 404) rather than accidentally
+ * removing the shared fallback row.
  * Throws NumberingProfileInUseError when a spec still references this profile (pg 23503 RESTRICT).
  */
 export async function deleteNumberingProfile(id: string): Promise<boolean> {
   try {
-    const result = await pool.query(`DELETE FROM numbering_profiles WHERE id = $1`, [id]);
+    const result = await pool.query(
+      `DELETE FROM numbering_profiles WHERE id = $1 AND library_id IS NOT NULL`,
+      [id]
+    );
     return (result.rowCount ?? 0) === 1;
   } catch (err) {
     const dbErr =

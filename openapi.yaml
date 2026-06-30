@@ -3435,7 +3435,7 @@ paths:
                 name:
                   type: string
                   minLength: 1
-                  description: Unique display name for the profile.
+                  description: Display name for the profile.
                 rules:
                   $ref: '#/components/schemas/NumberingProfile'
       responses:
@@ -3588,10 +3588,9 @@ paths:
       operationId: deleteNumberingProfile
       summary: Delete a numbering profile
       description: >
-        Permanently deletes the profile. The built-in CSI Default
-        (`libraryId: null`) cannot be deleted via this endpoint (it has no
-        library-owned FK chain to trigger the RESTRICT). A profile assigned to
-        any spec cannot be deleted (→ 409).
+        Permanently deletes a library-owned profile. The built-in CSI Default
+        (`libraryId: null`) is protected and cannot be deleted (→ 409). A
+        profile assigned to any spec cannot be deleted (→ 409).
       tags: [numbering-profiles]
       parameters:
         - name: id

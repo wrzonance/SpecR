@@ -262,6 +262,24 @@ describe('DELETE /numbering-profiles/:id', () => {
     const check = await pool.query(`SELECT 1 FROM numbering_profiles WHERE id = $1`, [profile.id]);
     expect(check.rows).toHaveLength(1);
   });
+
+  it('DELETE /numbering-profiles/:id — refuses to delete the built-in CSI Default (409), built-in remains resolvable', async () => {
+    const row = await pool.query<{ id: string }>(
+      `SELECT id FROM numbering_profiles WHERE library_id IS NULL LIMIT 1`
+    );
+    expect(row.rows).toHaveLength(1);
+    const builtInId = row.rows[0]!.id;
+
+    const res = await del(`/numbering-profiles/${builtInId}`);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('built-in');
+
+    // Built-in must still exist in the database after the refused delete
+    const check = await pool.query(`SELECT 1 FROM numbering_profiles WHERE id = $1`, [builtInId]);
+    expect(check.rows).toHaveLength(1);
+  });
 });
 
 // ─── PUT /specs/:id/numbering-profile ────────────────────────────────────────

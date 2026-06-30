@@ -98,6 +98,18 @@ export async function deleteProfileHandler(req: Request, res: Response): Promise
   const id = parseUuid(req, res, 'numbering profile');
   if (!id) return;
   try {
+    const existing = await getNumberingProfile(id);
+    if (existing === null) {
+      res.status(404).json({ success: false, error: 'numbering profile not found' });
+      return;
+    }
+    if (existing.libraryId === null) {
+      res.status(409).json({
+        success: false,
+        error: 'the built-in CSI Default numbering profile cannot be deleted',
+      });
+      return;
+    }
     const deleted = await deleteNumberingProfile(id);
     if (!deleted) {
       res.status(404).json({ success: false, error: 'numbering profile not found' });
