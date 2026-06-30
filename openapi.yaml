@@ -5937,7 +5937,7 @@ components:
     NumberingProfileRow:
       type: object
       description: A persisted numbering profile row from the database.
-      required: [id, name, rules, createdAt, updatedAt]
+      required: [id, libraryId, name, rules, createdAt, updatedAt]
       properties:
         id:
           type: string
