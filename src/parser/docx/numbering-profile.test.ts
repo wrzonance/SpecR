@@ -189,6 +189,36 @@ describe('extractNumberingProfile — edge cases', () => {
       pStyleToNumId: new Map(),
       pStyleToIlvl: new Map(),
       articleIlvl: 1,
+      // numId 2 IS spec-shaped (passes the spec-shaped filter) but its abstractNum
+      // is missing — so it must be the abstractNum guard, not the filter, that drops it.
+      specShapedNumIds: new Set([1, 2]),
+    };
+    const styles: StyleMap = {
+      styles: new Map(),
+      resolvedNumPr: new Map(),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const profile = extractNumberingProfile(map, styles);
+    expect(profile.numbering.map((n) => n.numId)).toEqual([1]);
+  });
+
+  it('emits only spec-shaped numIds — round-trips specShapedNumIds', () => {
+    // A generic (non-spec-shaped) list numId with a valid abstractNum must NOT
+    // appear in numbering: only the structural ladder belongs there. This makes
+    // Task 5's reconstruction `new Set(numbering.map(n => n.numId))` exact.
+    const map: NumberingMap = {
+      nums: new Map([
+        [1, { numId: 1, abstractNumId: 0 }], // spec-shaped
+        [7, { numId: 7, abstractNumId: 5 }], // generic bullet list — NOT spec-shaped
+      ]),
+      abstractNums: new Map([
+        [0, { abstractNumId: 0, levels: [{ ilvl: 0, numFmt: 'decimal', lvlText: 'PART %1' }] }],
+        [5, { abstractNumId: 5, levels: [{ ilvl: 0, numFmt: 'bullet', lvlText: '•' }] }],
+      ]),
+      pStyleToNumId: new Map(),
+      pStyleToIlvl: new Map(),
+      articleIlvl: 1,
       specShapedNumIds: new Set([1]),
     };
     const styles: StyleMap = {
@@ -199,6 +229,8 @@ describe('extractNumberingProfile — edge cases', () => {
     };
     const profile = extractNumberingProfile(map, styles);
     expect(profile.numbering.map((n) => n.numId)).toEqual([1]);
+    // Round-trip: the set of emitted numIds equals the input specShapedNumIds
+    expect(new Set(profile.numbering.map((n) => n.numId))).toEqual(map.specShapedNumIds);
   });
 
   it('style present in both pStyle maps and resolvedNumPr — pStyle entry wins (no duplicate)', () => {

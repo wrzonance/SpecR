@@ -18,6 +18,11 @@ function tierForIlvl(ilvl: number, articleIlvl: number): TierName {
 function buildNumbering(map: NumberingMap): NumberingProfile['numbering'] {
   const result: NumberingProfile['numbering'] = [];
   for (const [numId, num] of map.nums) {
+    // Only spec-shaped numIds describe the structural ladder. A generic list
+    // numId would get tier 'part' at ilvl 0 (0 < articleIlvl) — wrong, and it
+    // would make every numId look spec-shaped. Skipping non-spec-shaped numIds
+    // lets Task 5 reconstruct specShapedNumIds as exactly the set of emitted numIds.
+    if (!map.specShapedNumIds.has(numId)) continue;
     const absNum = map.abstractNums.get(num.abstractNumId);
     // Skip numIds whose abstractNum is missing — see test: KNOWN AMBIGUITY
     if (absNum === undefined) continue;
