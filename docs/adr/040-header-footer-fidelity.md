@@ -78,3 +78,29 @@ deliberately override an inherited v1 layer. This is pinned as a
   the resolver's job (#304).
 - No migration: `header_footer_configs.config` is JSONB; the richer shape needs
   no DDL. The schema is the contract; the column is the store.
+
+### Compatibility caveat: reserved-key promotion (accepted)
+
+v1's top-level `.catchall(JsonValue)` accepted *any* JSON-safe key, so a
+pre-existing v1 `header_footer_config` could in principle have used `variants`,
+`pageNumbering`, or `raw` as a custom extension key. v2 **promotes those three
+names from open extension keys to reserved typed keys.** A legacy row that used
+one of them at the top level with a value that does not conform to its new typed
+shape (e.g. `{ raw: "<w:hdr/>" }`, `{ pageNumbering: { vendorPolicy: true } }`)
+will now fail boundary validation.
+
+This is an **accepted, documented migration caveat**, not a defect:
+
+- These configs are SpecR-authored and brand-new from #208 (migration 030);
+  the three names are novel to *this* feature, so real-world exposure is ~nil
+  (no fixture, seed, or consumer uses them — verified during #302 review).
+- The general backward-compat guarantee is **unchanged**: v1
+  `{ header, footer, style }` payloads and every *non-colliding* `.catchall`
+  extension key still validate and round-trip.
+- The deliberately-rejected alternative is tolerant parsing (e.g.
+  `union([Typed, JsonValue])`), which would let `{ pageNumbering: { mode:
+  'bogus' } }` slip through and directly violate the "invalid known field kinds
+  still fail boundary validation" acceptance criterion. Typed validation wins;
+  the collision is documented instead. Pinned by a regression test in
+  `src/ast/header-footer-schemas.test.ts`. If a real colliding legacy row ever
+  surfaces, normalizing it is a data-migration concern for #304/#306.
