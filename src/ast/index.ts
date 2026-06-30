@@ -115,3 +115,5 @@ export type { SubmittalRegisterBody } from './submittal-register-schemas.js';
 export type { ParagraphAssociation } from './types.js';
 export type { ParseWarning, ParseWarningType } from './types.js';
 export { textEndsWithClosed } from './comment-closure.js';
+export { NumberingProfileSchema, TierNameSchema } from './numbering-profile-schema.js';
+export type { NumberingProfile, TierName } from './numbering-profile-schema.js';
