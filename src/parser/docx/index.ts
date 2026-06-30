@@ -5,9 +5,12 @@ import { buildNumberingMap, emptyNumberingMap, withArticleIlvl } from './numberi
 import { buildStyleMap } from './styles.js';
 import { parseDocument } from './document.js';
 import { parseCommentsXml } from './comments.js';
+import type { DocxComment } from './comments.js';
 import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
+import { applyNumberingProfile, mergeProfileConflicts } from './numbering-profile.js';
 import type { SpecTree, StyleProperties } from '../../ast/types.js';
-import type { NumberingMap, StyleMap, ClassifiedParagraph } from './types.js';
+import type { NumberingProfile } from '../../ast/index.js';
+import type { NumberingMap, StyleMap, ClassifiedParagraph, DocxParagraph } from './types.js';
 import { resolveStyleCascade } from './resolver.js';
 import { parseSectionNumberCandidate } from '../../lib/section-number.js';
 
@@ -101,11 +104,12 @@ interface ValidEntries {
 
 function runPipeline(
   entries: ValidEntries,
-  onProgress?: (stage: string, pct: number) => void
+  onProgress?: (stage: string, pct: number) => void,
+  numberingProfile?: NumberingProfile
 ): SpecTree {
   // Override articleIlvl now that StyleMap is available — numbering.xml alone cannot
   // distinguish CPI-v2 (ART at ilvl=3) from ARCAT (article at ilvl=1).
-  const { classified, styleMap } = buildClassification(entries, onProgress);
+  const { classified, styleMap } = buildClassification(entries, onProgress, numberingProfile);
 
   const source = detectSource(styleMap);
   // Section/title from core.xml only; when absent, the parse() orchestrator's
@@ -130,6 +134,47 @@ interface Classification {
   readonly styleMap: StyleMap;
 }
 
+function parseParagraphsOrThrow(
+  documentXml: string,
+  numberingMap: NumberingMap,
+  styleMap: StyleMap,
+  commentsById: ReadonlyMap<string, DocxComment>
+): readonly DocxParagraph[] {
+  const paragraphs = parseDocument(documentXml, numberingMap, styleMap, commentsById);
+  if (paragraphs.length === 0) {
+    throw new ParserError('document contains no paragraphs');
+  }
+  return paragraphs;
+}
+
+// Classify paragraphs, optionally applying a numbering profile as a deterministic
+// override. Without a profile the path is byte-for-byte today's behavior. With one,
+// paragraphs are parsed/classified against the overridden map (authoritative), the
+// un-profiled base map classifies the same paragraphs, and per-paragraph
+// disagreements are recorded as conflicts (losing signal persisted, never dropped).
+function classifyWithOptionalProfile(
+  documentXml: string,
+  resolvedNumberingMap: NumberingMap,
+  styleMap: StyleMap,
+  commentsById: ReadonlyMap<string, DocxComment>,
+  numberingProfile?: NumberingProfile
+): readonly ClassifiedParagraph[] {
+  if (numberingProfile === undefined) {
+    const paragraphs = parseParagraphsOrThrow(
+      documentXml,
+      resolvedNumberingMap,
+      styleMap,
+      commentsById
+    );
+    return classifyParagraphs(paragraphs, resolvedNumberingMap, styleMap);
+  }
+  const overridden = applyNumberingProfile(resolvedNumberingMap, numberingProfile);
+  const paragraphs = parseParagraphsOrThrow(documentXml, overridden, styleMap, commentsById);
+  const withProfile = classifyParagraphs(paragraphs, overridden, styleMap);
+  const baseClassified = classifyParagraphs(paragraphs, resolvedNumberingMap, styleMap);
+  return mergeProfileConflicts(withProfile, baseClassified);
+}
+
 function buildClassification(
   entries: {
     readonly numberingXml: string | null;
@@ -137,7 +182,8 @@ function buildClassification(
     readonly documentXml: string;
     readonly commentsXml?: string | null;
   },
-  onProgress?: (stage: string, pct: number) => void
+  onProgress?: (stage: string, pct: number) => void,
+  numberingProfile?: NumberingProfile
 ): Classification {
   onProgress?.('numbering', 25);
   const numberingMap = entries.numberingXml
@@ -151,21 +197,19 @@ function buildClassification(
   const resolvedNumberingMap = withArticleIlvl(numberingMap, articleIlvl);
 
   onProgress?.('document', 55);
-  const commentsById = entries.commentsXml ? parseCommentsXml(entries.commentsXml) : new Map();
-  const paragraphs = parseDocument(
-    entries.documentXml,
-    resolvedNumberingMap,
-    styleMap,
-    commentsById
-  );
-
-  if (paragraphs.length === 0) {
-    throw new ParserError('document contains no paragraphs');
-  }
+  const commentsById = entries.commentsXml
+    ? parseCommentsXml(entries.commentsXml)
+    : new Map<string, DocxComment>();
 
   onProgress?.('classifying', 75);
   return {
-    classified: classifyParagraphs(paragraphs, resolvedNumberingMap, styleMap),
+    classified: classifyWithOptionalProfile(
+      entries.documentXml,
+      resolvedNumberingMap,
+      styleMap,
+      commentsById,
+      numberingProfile
+    ),
     styleMap,
   };
 }
@@ -216,7 +260,8 @@ export async function analyzeDocxStyles(buffer: Buffer): Promise<DocxStyleAnalys
 
 export async function parseDocx(
   buffer: Buffer,
-  onProgress?: (stage: string, pct: number) => void
+  onProgress?: (stage: string, pct: number) => void,
+  numberingProfile?: NumberingProfile
 ): Promise<SpecTree> {
   let zip: JSZip;
   try {
@@ -231,5 +276,9 @@ export async function parseDocx(
   if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
   if (!documentXml) throw new ParserError('DOCX missing word/document.xml');
 
-  return runPipeline({ numberingXml, stylesXml, documentXml, commentsXml, coreXml }, onProgress);
+  return runPipeline(
+    { numberingXml, stylesXml, documentXml, commentsXml, coreXml },
+    onProgress,
+    numberingProfile
+  );
 }
