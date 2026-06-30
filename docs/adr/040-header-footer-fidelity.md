@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-#208 (migration 030, `header_footer_configs`) introduced a single
+Issue `#208` (migration 030, `header_footer_configs`) introduced a single
 header/footer composition shape — `{ header, footer, style }`, JSONB-backed and
 open via `.catchall` (ADR-021) — resolved across the client → project → package
 → revision scope chain. That single shape cannot express Word's actual
