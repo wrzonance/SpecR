@@ -104,8 +104,16 @@ export type { GenerateBody } from './generate-schemas.js';
 export {
   HeaderFooterCompositionSchema,
   HeaderFooterFieldKindSchema,
+  HeaderFooterVariantSchema,
+  PageNumberingModeSchema,
+  defaultVariant,
 } from './header-footer-schemas.js';
-export type { HeaderFooterComposition, HeaderFooterFieldKind } from './header-footer-schemas.js';
+export type {
+  HeaderFooterComposition,
+  HeaderFooterFieldKind,
+  HeaderFooterVariant,
+  PageNumberingMode,
+} from './header-footer-schemas.js';
 export { RequiredSectionsBodySchema } from './required-sections-schemas.js';
 export type { RequiredSectionsBody } from './required-sections-schemas.js';
 export { CreateAssociationBodySchema } from './association-schemas.js';

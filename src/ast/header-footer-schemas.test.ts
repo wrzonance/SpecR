@@ -1,0 +1,139 @@
+import { describe, it, expect } from 'vitest';
+import {
+  HeaderFooterCompositionSchema,
+  PageNumberingModeSchema,
+  defaultVariant,
+} from './header-footer-schemas.js';
+
+// #302 (parent #301): extend the v1 composition (#208) with Word-style page
+// variants, a page-numbering policy, and an open `raw` sidecar — without
+// breaking any existing v1 `{ header, footer, style }` payload.
+
+describe('HeaderFooterCompositionSchema — v1 backward compatibility (#208 → default variant)', () => {
+  it('still validates a v1 { header, footer, style } payload unchanged', () => {
+    const v1 = {
+      header: {
+        left: { content: [{ kind: 'clientName' }] },
+        center: { content: [{ kind: 'sectionNumber' }, { kind: 'sectionTitle' }] },
+        style: { fontFamily: 'Arial', fontSizeHalfPt: 18 },
+        ruleLine: { enabled: true, widthTwips: 8 },
+      },
+      footer: {
+        right: { content: [{ kind: 'pageNumber', label: 'Page' }] },
+      },
+      style: { fontFamily: 'Arial' },
+    };
+    expect(HeaderFooterCompositionSchema.parse(v1)).toEqual(v1);
+  });
+
+  it('treats the v1 top-level header/footer/style AS the default variant', () => {
+    // Documents the v1→default compatibility contract: with no explicit
+    // `variants.default`, the legacy top-level fields ARE the default variant.
+    const v1 = {
+      header: { center: { content: [{ kind: 'sectionTitle' }] } },
+      footer: { right: { content: [{ kind: 'pageNumber' }] } },
+      style: { bold: true },
+    };
+    const config = HeaderFooterCompositionSchema.parse(v1);
+    expect(defaultVariant(config)).toEqual({
+      header: v1.header,
+      footer: v1.footer,
+      style: v1.style,
+    });
+  });
+
+  it('round-trips the #208 open .catchall extension keys (vendor/client tokens)', () => {
+    const v1Open = {
+      header: {
+        left: { content: [{ kind: 'clientName' }] },
+        style: { fontFamily: 'Arial', clientToken: 'acme' },
+        ruleLine: { enabled: true, futureRule: { colorMode: 'theme' } },
+      },
+      footer: { right: { content: [{ kind: 'pageNumber', fallback: 'name' }] } },
+      vendorExtension: { layoutPreset: 'client-a' },
+    };
+    expect(HeaderFooterCompositionSchema.parse(v1Open)).toEqual(v1Open);
+  });
+});
+
+describe('HeaderFooterCompositionSchema — v2 variants (default/first/even)', () => {
+  it('validates default/first/even variants and round-trips unknown keys', () => {
+    const v2 = {
+      variants: {
+        default: { header: { center: { content: [{ kind: 'sectionTitle' }] } } },
+        first: { header: { center: { content: [{ kind: 'literal', text: 'COVER' }] } } },
+        even: { footer: { left: { content: [{ kind: 'pageNumber' }] } } },
+      },
+      raw: {
+        warnings: ['unsupported w:fldSimple in odd footer'],
+        capturedOoxml: { 'header2.xml': '<w:hdr/>' },
+      },
+      vendorExtension: { layoutPreset: 'duplex' },
+    };
+    expect(HeaderFooterCompositionSchema.parse(v2)).toEqual(v2);
+  });
+
+  it('prefers an explicit variants.default over v1 top-level fields', () => {
+    const config = HeaderFooterCompositionSchema.parse({
+      header: { center: { content: [{ kind: 'literal', text: 'V1' }] } },
+      variants: {
+        default: { header: { center: { content: [{ kind: 'literal', text: 'V2' }] } } },
+      },
+    });
+    // KNOWN AMBIGUITY: a payload may carry BOTH the v1 top-level fields and an
+    // explicit `variants.default`. OOXML has no canonical answer for which
+    // wins; SpecR (ADR-040) defines the explicit `variants.default` as
+    // authoritative so a v2 caller can deliberately override an inherited v1
+    // layer. Cross-scope precedence/resolution is out of scope here (#304).
+    expect(defaultVariant(config)).toEqual({
+      header: { center: { content: [{ kind: 'literal', text: 'V2' }] } },
+    });
+  });
+});
+
+describe('HeaderFooterCompositionSchema — pageNumbering policy', () => {
+  it('accepts mode "continuous" with an optional startAt', () => {
+    const input = { pageNumbering: { mode: 'continuous', startAt: 1 } };
+    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
+  });
+
+  it('accepts mode "restartPerSpec" without startAt', () => {
+    const input = { pageNumbering: { mode: 'restartPerSpec' } };
+    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
+  });
+
+  it('exposes both modes via PageNumberingModeSchema', () => {
+    expect(PageNumberingModeSchema.parse('continuous')).toBe('continuous');
+    expect(PageNumberingModeSchema.parse('restartPerSpec')).toBe('restartPerSpec');
+  });
+
+  it('rejects an unknown pageNumbering mode', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({ pageNumbering: { mode: 'perPage' } })
+    ).toThrow();
+  });
+
+  it('rejects a non-integer startAt', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({ pageNumbering: { mode: 'continuous', startAt: 'one' } })
+    ).toThrow();
+  });
+});
+
+describe('HeaderFooterCompositionSchema — typed fields still fail validation', () => {
+  it('rejects an invalid header field kind (catchall must not swallow typed-field errors)', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        header: { left: { content: [{ kind: 'notARealKind' }] } },
+      })
+    ).toThrow();
+  });
+
+  it('rejects an invalid field kind nested inside a v2 variant', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        variants: { first: { footer: { right: { content: [{ kind: 'bogus' }] } } } },
+      })
+    ).toThrow();
+  });
+});
