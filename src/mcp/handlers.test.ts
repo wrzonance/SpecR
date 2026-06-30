@@ -57,18 +57,18 @@ describe('handleGetNumberingProfile', () => {
     expect(vi.mocked(db.getEffectiveNumberingProfile)).toHaveBeenCalledWith(FAKE_SPEC_ID);
   });
 
-  it('returns isError without calling getEffectiveNumberingProfile for an unknown spec', async () => {
+  it('returns isError for an unknown spec via a single effective-profile lookup (null)', async () => {
     const db = await import('../db/index.js');
     const { handleGetNumberingProfile } = await import('./handlers.js');
 
-    vi.mocked(db.getSpecTree).mockResolvedValueOnce(null);
+    vi.mocked(db.getEffectiveNumberingProfile).mockResolvedValueOnce(null);
 
     const result = await handleGetNumberingProfile({ specId: UNKNOWN_SPEC_ID });
 
     expect(result).toMatchObject({ isError: true });
     const text = (result as { isError: true; content: { text: string }[] }).content[0]?.text ?? '';
     expect(text).toContain(UNKNOWN_SPEC_ID);
-    expect(vi.mocked(db.getEffectiveNumberingProfile)).not.toHaveBeenCalled();
+    expect(vi.mocked(db.getEffectiveNumberingProfile)).toHaveBeenCalledWith(UNKNOWN_SPEC_ID);
   });
 });
 

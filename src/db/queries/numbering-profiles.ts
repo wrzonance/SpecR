@@ -207,7 +207,9 @@ export async function clearSpecNumberingProfile(specId: string): Promise<boolean
  * Always returns a valid NumberingProfile — never null.
  * Wraps ZodError as DatabaseError with the original error as cause.
  */
-export async function getEffectiveNumberingProfile(specId: string): Promise<NumberingProfile> {
+export async function getEffectiveNumberingProfile(
+  specId: string
+): Promise<NumberingProfile | null> {
   try {
     const result = await pool.query<{ rules: unknown }>(
       `SELECT np.rules
@@ -216,8 +218,12 @@ export async function getEffectiveNumberingProfile(specId: string): Promise<Numb
        WHERE s.id = $1`,
       [specId]
     );
-    const rawRules = result.rows[0]?.rules ?? null;
-    const rules = rawRules ?? (await resolveBuiltInRules());
+    // No row → the spec itself does not exist. Surface that as null rather than
+    // silently resolving the built-in default, so a caller can distinguish a
+    // missing spec (404) from an existing-but-unassigned one (built-in fallback).
+    const row = result.rows[0];
+    if (!row) return null;
+    const rules = row.rules ?? (await resolveBuiltInRules());
     return parseRules(specId, rules);
   } catch (err) {
     if (err instanceof DatabaseError) throw err;

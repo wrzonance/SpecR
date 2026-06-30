@@ -3680,9 +3680,10 @@ paths:
           $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: clearSpecNumberingProfile
-      summary: Clear a spec's numbering profile (revert to library default)
+      summary: Clear a spec's numbering profile
       description: >
-        Removes the spec→profile association. The spec must exist (missing → 404).
+        Removes the spec→profile association, so the spec falls back to the built-in
+        CSI Default when its structure is resolved. The spec must exist (missing → 404).
         Idempotent when no profile is currently assigned — the UPDATE still returns
         rowCount=1 if the spec exists.
       tags: [specs]

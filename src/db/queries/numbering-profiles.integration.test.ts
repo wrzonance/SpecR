@@ -15,11 +15,14 @@ import {
 } from './numbering-profiles.js';
 import type { NumberingProfile } from '../../ast/index.js';
 
-// FK-safe cleanup order: clear spec FK refs → delete specs → delete custom profiles → delete libraries
+// FK-safe cleanup order: clear spec FK refs → delete specs → delete libraries.
+// Deleting the np-test-% libraries CASCADEs to their numbering_profiles, so cleanup
+// stays scoped to this suite's fixtures — a broad `DELETE FROM numbering_profiles`
+// would clobber other suites' rows in a shared integration DB and cause
+// order-dependent failures.
 afterEach(async () => {
   await pool.query(`UPDATE specs SET numbering_profile_id = NULL WHERE title LIKE 'np-test-%'`);
   await pool.query(`DELETE FROM specs WHERE title LIKE 'np-test-%'`);
-  await pool.query(`DELETE FROM numbering_profiles WHERE library_id IS NOT NULL`);
   await pool.query(`DELETE FROM libraries WHERE name LIKE 'np-test-%'`);
 });
 
@@ -215,13 +218,14 @@ describe('getEffectiveNumberingProfile', () => {
     });
 
     const effective = await getEffectiveNumberingProfile(specId);
-    // CSI Default has maxCount: 5
-    expect(effective.tiers.part.maxCount).toBe(5);
+    // An existing but unassigned spec resolves to the built-in CSI Default (maxCount 5).
+    expect(effective).not.toBeNull();
+    expect(effective?.tiers.part.maxCount).toBe(5);
   });
 
-  it('(a) returns the CSI Default when the spec does not exist', async () => {
+  it('(a) returns null when the spec does not exist (not the CSI Default)', async () => {
     const effective = await getEffectiveNumberingProfile('00000000-0000-4000-8000-000000000099');
-    expect(effective.tiers.part.maxCount).toBe(5);
+    expect(effective).toBeNull();
   });
 
   it('(b) returns the assigned profile rules after setSpecNumberingProfile', async () => {
@@ -252,6 +256,7 @@ describe('getEffectiveNumberingProfile', () => {
     await clearSpecNumberingProfile(specId);
 
     const effective = await getEffectiveNumberingProfile(specId);
-    expect(effective.tiers.part.maxCount).toBe(5);
+    expect(effective).not.toBeNull();
+    expect(effective?.tiers.part.maxCount).toBe(5);
   });
 });

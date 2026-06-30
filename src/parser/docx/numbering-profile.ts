@@ -45,8 +45,12 @@ type LadderEntry = { styleId: string; numId: number; ilvl: number; tier: TierNam
 function buildStyleLadder(map: NumberingMap, styles: StyleMap): NumberingProfile['styleLadder'] {
   const ladder = new Map<string, LadderEntry>();
 
-  // Primary source: pStyleToNumId + pStyleToIlvl (both must be present for a style to qualify)
+  // Primary source: pStyleToNumId + pStyleToIlvl (both must be present for a style
+  // to qualify). Skip non-spec-shaped numIds so a generic bullet/flat-list style at
+  // ilvl=0 is not serialized as a structural tier (buildNumbering already excludes
+  // them; applyNumberingProfile would otherwise replay a bogus 'part' override).
   for (const [styleId, numId] of map.pStyleToNumId) {
+    if (!map.specShapedNumIds.has(numId)) continue;
     const ilvl = map.pStyleToIlvl.get(styleId);
     if (ilvl === undefined) continue;
     ladder.set(styleId, { styleId, numId, ilvl, tier: tierForIlvl(ilvl, map.articleIlvl) });
@@ -55,6 +59,7 @@ function buildStyleLadder(map: NumberingMap, styles: StyleMap): NumberingProfile
   // Union: resolvedNumPr provides the authoritative effective-numPr per style
   // after walking the basedOn chain — add any style not already populated above
   for (const [styleId, numPr] of styles.resolvedNumPr) {
+    if (!map.specShapedNumIds.has(numPr.numId)) continue;
     if (ladder.has(styleId)) continue;
     ladder.set(styleId, {
       styleId,

@@ -194,7 +194,12 @@ export async function snapshotHandler(req: Request, res: Response): Promise<void
     res.status(400).json({ success: false, error: 'only .docx files are accepted' });
     return;
   }
-  if (req.file.mimetype !== DOCX_MIME) {
+  // Accept the canonical DOCX type, an empty type, or the generic
+  // application/octet-stream many clients send for file parts. The extension check
+  // above and assertDocxSafe(buffer) below are the real validation; a strict
+  // equality only adds false negatives for legitimate .docx uploads.
+  const mimetype = req.file.mimetype;
+  if (mimetype && mimetype !== DOCX_MIME && mimetype !== 'application/octet-stream') {
     res.status(400).json({ success: false, error: 'MIME type mismatch for .docx' });
     return;
   }
