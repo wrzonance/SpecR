@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { SpecNode, SourceFacts } from './types.js';
 import { SectionNumberInputSchema, SectionNumberSchema } from '../lib/section-number.js';
 import { textEndsWithClosed } from './comment-closure.js';
+import { NumberingProfileSchema } from './numbering-profile-schema.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -504,3 +505,26 @@ export const SetStyleSourceBodySchema = z.object({
 });
 
 export type SetStyleSourceBody = z.infer<typeof SetStyleSourceBodySchema>;
+
+// ── Numbering profile CRUD request bodies (#299) ─────────────────────────────
+
+export const CreateNumberingProfileBodySchema = z.object({
+  name: z.string().check(z.minLength(1)),
+  rules: NumberingProfileSchema,
+});
+
+export type CreateNumberingProfileBody = z.infer<typeof CreateNumberingProfileBodySchema>;
+
+export const PatchNumberingProfileBodySchema = z.object({
+  name: z.string().check(z.minLength(1)).exactOptional(),
+  rules: NumberingProfileSchema.exactOptional(),
+});
+
+export type PatchNumberingProfileBody = z.infer<typeof PatchNumberingProfileBodySchema>;
+
+// Assign an existing profile to a spec (#299).
+export const SetSpecNumberingProfileBodySchema = z.object({
+  profileId: z.uuid(),
+});
+
+export type SetSpecNumberingProfileBody = z.infer<typeof SetSpecNumberingProfileBodySchema>;

@@ -96,6 +96,13 @@ const RESPONSE_ALLOWLIST = new Set([
   'patch /projects/{}',
   'delete /projects/{}',
   'post /projects/{}/restore',
+  // numbering profiles (#299)
+  'get /libraries/{}/numbering-profiles',
+  'post /libraries/{}/numbering-profiles',
+  'post /numbering-profiles/snapshot',
+  'get /numbering-profiles/{}',
+  'patch /numbering-profiles/{}',
+  'put /specs/{}/numbering-profile',
 ]);
 
 let server: Server;

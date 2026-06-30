@@ -54,6 +54,9 @@ import {
   CloneRevisionNomenclatureBodySchema,
   RequiredSectionsBodySchema,
   SubmittalRegisterBodySchema,
+  CreateNumberingProfileBodySchema,
+  PatchNumberingProfileBodySchema,
+  SetSpecNumberingProfileBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 import { generateHandler, generateManualHandler, generateRevisionHandler } from './generate.js';
@@ -104,6 +107,16 @@ import {
   listAssociationsHandler,
   deleteAssociationHandler,
 } from './associations.js';
+import {
+  listProfilesHandler,
+  createProfileHandler,
+  getProfileHandler,
+  patchProfileHandler,
+  deleteProfileHandler,
+  setSpecProfileHandler,
+  clearSpecProfileHandler,
+  snapshotHandler,
+} from './numbering-profiles.js';
 
 const parseRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
@@ -254,3 +267,25 @@ router.delete(
   '/specs/:id/paragraphs/:nodeId/associations/:associationId',
   deleteAssociationHandler
 );
+router.get('/libraries/:id/numbering-profiles', listProfilesHandler);
+router.post(
+  '/libraries/:id/numbering-profiles',
+  validateBody(CreateNumberingProfileBodySchema),
+  createProfileHandler
+);
+// /numbering-profiles/snapshot MUST be registered before /numbering-profiles/:id
+// so Express matches the literal path first (#299).
+router.post('/numbering-profiles/snapshot', parseRateLimit, upload.single('file'), snapshotHandler);
+router.get('/numbering-profiles/:id', getProfileHandler);
+router.patch(
+  '/numbering-profiles/:id',
+  validateBody(PatchNumberingProfileBodySchema),
+  patchProfileHandler
+);
+router.delete('/numbering-profiles/:id', deleteProfileHandler);
+router.put(
+  '/specs/:id/numbering-profile',
+  validateBody(SetSpecNumberingProfileBodySchema),
+  setSpecProfileHandler
+);
+router.delete('/specs/:id/numbering-profile', clearSpecProfileHandler);

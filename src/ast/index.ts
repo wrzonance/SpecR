@@ -117,3 +117,13 @@ export type { ParseWarning, ParseWarningType } from './types.js';
 export { textEndsWithClosed } from './comment-closure.js';
 export { NumberingProfileSchema, TierNameSchema } from './numbering-profile-schema.js';
 export type { NumberingProfile, TierName } from './numbering-profile-schema.js';
+export {
+  CreateNumberingProfileBodySchema,
+  PatchNumberingProfileBodySchema,
+  SetSpecNumberingProfileBodySchema,
+} from './schemas.js';
+export type {
+  CreateNumberingProfileBody,
+  PatchNumberingProfileBody,
+  SetSpecNumberingProfileBody,
+} from './schemas.js';

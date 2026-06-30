@@ -3374,6 +3374,317 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  # ─── Numbering profiles (#299) ───────────────────────────────────────────────
+
+  /libraries/{id}/numbering-profiles:
+    get:
+      operationId: listNumberingProfiles
+      summary: List numbering profiles for a library
+      description: >
+        Returns the library's own profiles plus the singleton built-in CSI
+        Default (library_id IS NULL). Library rows appear first (ordered by
+        created_at); the built-in is last.
+      tags: [numbering-profiles]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: Library UUID
+      responses:
+        '200':
+          description: Numbering profiles (library-owned + CSI Default)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/NumberingProfileRow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createNumberingProfile
+      summary: Create a numbering profile for a library
+      description: >
+        Creates a new named numbering profile owned by the library. The `rules`
+        object carries the NumberingProfile shape (tiers, numbering, styleLadder).
+        Library must exist (missing → 404).
+      tags: [numbering-profiles]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: Library UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, rules]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  description: Unique display name for the profile.
+                rules:
+                  $ref: '#/components/schemas/NumberingProfile'
+      responses:
+        '201':
+          description: Numbering profile created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/NumberingProfileRow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /numbering-profiles/snapshot:
+    post:
+      operationId: snapshotNumberingProfile
+      summary: Extract a numbering profile from a DOCX upload
+      description: >
+        Upload a `.docx` file and receive back its extracted `NumberingProfile`
+        (tiers, numbering, styleLadder, articleIlvl) without persisting anything.
+        Useful for previewing what profile would be inferred from a source-of-truth
+        DOCX before creating a permanent profile row.
+
+
+        Rate-limited to 10 requests per IP per minute (shared with `POST /parse`).
+      tags: [numbering-profiles]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Source `.docx` file. Max 10 MB.
+      responses:
+        '200':
+          description: Extracted numbering profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/NumberingProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /numbering-profiles/{id}:
+    get:
+      operationId: getNumberingProfile
+      summary: Get a numbering profile by ID
+      tags: [numbering-profiles]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: Numbering profile UUID
+      responses:
+        '200':
+          description: Numbering profile row
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/NumberingProfileRow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: patchNumberingProfile
+      summary: Update a numbering profile (name and/or rules)
+      description: >
+        Partial update: omit a field to leave it unchanged. At least one of
+        `name` or `rules` should be present (an empty body is accepted but is
+        a no-op).
+      tags: [numbering-profiles]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: Numbering profile UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                rules:
+                  $ref: '#/components/schemas/NumberingProfile'
+      responses:
+        '200':
+          description: Updated numbering profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/NumberingProfileRow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteNumberingProfile
+      summary: Delete a numbering profile
+      description: >
+        Permanently deletes the profile. The built-in CSI Default
+        (`libraryId: null`) cannot be deleted via this endpoint (it has no
+        library-owned FK chain to trigger the RESTRICT). A profile assigned to
+        any spec cannot be deleted (→ 409).
+      tags: [numbering-profiles]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: Numbering profile UUID
+      responses:
+        '204':
+          description: Profile deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/numbering-profile:
+    put:
+      operationId: setSpecNumberingProfile
+      summary: Assign a numbering profile to a spec
+      description: >
+        Associates an existing numbering profile with the spec so the parser
+        uses it as a deterministic numbering override (#299). One profile per
+        spec; re-assigning replaces the previous one. Both the spec and the
+        profile must exist (either missing → 404, pre-checked).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profileId]
+              properties:
+                profileId:
+                  type: string
+                  format: uuid
+                  description: Numbering profile to assign to the spec.
+      responses:
+        '200':
+          description: Numbering profile assigned
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [profileId, name]
+                        properties:
+                          profileId:
+                            type: string
+                            format: uuid
+                          name:
+                            type: string
+                            description: Display name of the assigned profile.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: clearSpecNumberingProfile
+      summary: Clear a spec's numbering profile (revert to library default)
+      description: >
+        Removes the spec→profile association. The spec must exist (missing → 404).
+        Idempotent when no profile is currently assigned — the UPDATE still returns
+        rowCount=1 if the spec exists.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '204':
+          description: Numbering profile cleared
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+
 # ─── Components ───────────────────────────────────────────────────────────────
 
 components:
@@ -5591,3 +5902,57 @@ components:
           type: object
           additionalProperties: true
           description: Arbitrary provider-specific metadata.
+
+    NumberingProfile:
+      type: object
+      description: >
+        Extracted numbering configuration from a DOCX file. Carries tiers
+        (CSI hierarchy), numbering (numId→levels map), styleLadder (style→tier
+        map), and articleIlvl (zero-based index of the Article level). Open
+        schema — unknown keys are preserved for forward-compatibility.
+      additionalProperties: true
+      required: [tiers, numbering, styleLadder]
+      properties:
+        tiers:
+          type: object
+          additionalProperties: true
+          description: CSI tier shape constraints (part, article, paragraph, subparagraph).
+        numbering:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          description: Per-numId level definitions.
+        styleLadder:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          description: Per-styleId tier assignment derived from the style cascade.
+        articleIlvl:
+          type: integer
+          minimum: 0
+          description: Zero-based ilvl of the Article tier in this document.
+
+    NumberingProfileRow:
+      type: object
+      description: A persisted numbering profile row from the database.
+      required: [id, name, rules, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        libraryId:
+          type: [string, 'null']
+          format: uuid
+          description: Owning library UUID, or null for the built-in CSI Default.
+        name:
+          type: string
+        rules:
+          $ref: '#/components/schemas/NumberingProfile'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time

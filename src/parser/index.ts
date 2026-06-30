@@ -21,6 +21,7 @@ export {
   analyzeDocxStyles,
   deriveTemplate,
   extractNumberingProfile,
+  extractNumberingProfileFromDocx,
 } from './docx/index.js';
 export type {
   DocxStyleAnalysis,

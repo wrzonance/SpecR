@@ -7,7 +7,11 @@ import { parseDocument } from './document.js';
 import { parseCommentsXml } from './comments.js';
 import type { DocxComment } from './comments.js';
 import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
-import { applyNumberingProfile, mergeProfileConflicts } from './numbering-profile.js';
+import {
+  applyNumberingProfile,
+  mergeProfileConflicts,
+  extractNumberingProfile,
+} from './numbering-profile.js';
 import type { SpecTree, StyleProperties } from '../../ast/types.js';
 import type { NumberingProfile } from '../../ast/index.js';
 import type { NumberingMap, StyleMap, ClassifiedParagraph, DocxParagraph } from './types.js';
@@ -220,7 +224,7 @@ export { assertDocxSafe } from './safety.js';
 export { resolveStyleCascade } from './resolver.js';
 export type { ClassifiedParagraph } from './types.js';
 export { deriveTemplate } from './derive-template.js';
-export { extractNumberingProfile } from './numbering-profile.js';
+export { extractNumberingProfile };
 export type {
   DerivedTemplate,
   DerivedRule,
@@ -281,4 +285,25 @@ export async function parseDocx(
     onProgress,
     numberingProfile
   );
+}
+
+/**
+ * Extract a NumberingProfile from a raw DOCX buffer without parsing the
+ * full spec tree. Used by the snapshot REST endpoint (#299) and any caller
+ * that only needs numbering metadata, not paragraphs.
+ */
+export async function extractNumberingProfileFromDocx(buffer: Buffer): Promise<NumberingProfile> {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(buffer);
+  } catch (err) {
+    throw new ParserError('failed to read DOCX archive', { cause: err });
+  }
+  const { numberingXml, stylesXml } = await extractEntries(zip);
+  if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
+  const numberingMap = numberingXml ? buildNumberingMap(numberingXml) : emptyNumberingMap();
+  const styleMap = buildStyleMap(stylesXml);
+  const articleIlvl = detectArticleIlvl(styleMap, numberingMap);
+  const resolvedMap = withArticleIlvl(numberingMap, articleIlvl);
+  return extractNumberingProfile(resolvedMap, styleMap);
 }

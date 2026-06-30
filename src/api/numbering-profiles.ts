@@ -1,0 +1,192 @@
+import path from 'node:path';
+import { z } from 'zod';
+import type { Request, Response } from 'express';
+import {
+  listNumberingProfiles,
+  getNumberingProfile,
+  createNumberingProfile,
+  updateNumberingProfile,
+  deleteNumberingProfile,
+  setSpecNumberingProfile,
+  clearSpecNumberingProfile,
+  NumberingProfileInUseError,
+} from '../db/index.js';
+import type {
+  CreateNumberingProfileBody,
+  PatchNumberingProfileBody,
+  SetSpecNumberingProfileBody,
+} from '../ast/index.js';
+import { assertDocxSafe, extractNumberingProfileFromDocx } from '../parser/index.js';
+import { logger } from '../lib/logger.js';
+import { getPgCode } from '../lib/pg-errors.js';
+
+const UUID_SCHEMA = z.uuid();
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+function parseUuid(req: Request, res: Response, label: string): string | null {
+  const result = UUID_SCHEMA.safeParse(req.params['id']);
+  if (!result.success) {
+    res.status(400).json({ success: false, error: `invalid ${label} id` });
+    return null;
+  }
+  return result.data;
+}
+
+export async function listProfilesHandler(req: Request, res: Response): Promise<void> {
+  const libraryId = parseUuid(req, res, 'library');
+  if (!libraryId) return;
+  try {
+    const profiles = await listNumberingProfiles(libraryId);
+    res.status(200).json({ success: true, data: profiles });
+  } catch (err) {
+    logger.error({ err }, 'list numbering profiles failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function createProfileHandler(req: Request, res: Response): Promise<void> {
+  const libraryId = parseUuid(req, res, 'library');
+  if (!libraryId) return;
+  const { name, rules } = req.body as CreateNumberingProfileBody;
+  try {
+    const profile = await createNumberingProfile(libraryId, name, rules);
+    res.status(201).json({ success: true, data: profile });
+  } catch (err) {
+    if (getPgCode(err) === '23503') {
+      res.status(404).json({ success: false, error: 'library not found' });
+      return;
+    }
+    logger.error({ err }, 'create numbering profile failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function getProfileHandler(req: Request, res: Response): Promise<void> {
+  const id = parseUuid(req, res, 'numbering profile');
+  if (!id) return;
+  try {
+    const profile = await getNumberingProfile(id);
+    if (!profile) {
+      res.status(404).json({ success: false, error: 'numbering profile not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: profile });
+  } catch (err) {
+    logger.error({ err }, 'get numbering profile failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function patchProfileHandler(req: Request, res: Response): Promise<void> {
+  const id = parseUuid(req, res, 'numbering profile');
+  if (!id) return;
+  const patch = req.body as PatchNumberingProfileBody;
+  try {
+    const profile = await updateNumberingProfile(id, patch);
+    if (!profile) {
+      res.status(404).json({ success: false, error: 'numbering profile not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: profile });
+  } catch (err) {
+    logger.error({ err }, 'patch numbering profile failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function deleteProfileHandler(req: Request, res: Response): Promise<void> {
+  const id = parseUuid(req, res, 'numbering profile');
+  if (!id) return;
+  try {
+    const deleted = await deleteNumberingProfile(id);
+    if (!deleted) {
+      res.status(404).json({ success: false, error: 'numbering profile not found' });
+      return;
+    }
+    res.status(204).send();
+  } catch (err) {
+    if (err instanceof NumberingProfileInUseError) {
+      res
+        .status(409)
+        .json({ success: false, error: 'numbering profile is in use by one or more specs' });
+      return;
+    }
+    logger.error({ err }, 'delete numbering profile failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function setSpecProfileHandler(req: Request, res: Response): Promise<void> {
+  const specId = parseUuid(req, res, 'spec');
+  if (!specId) return;
+  const { profileId } = req.body as SetSpecNumberingProfileBody;
+  try {
+    const profile = await getNumberingProfile(profileId);
+    if (!profile) {
+      res.status(404).json({ success: false, error: 'numbering profile not found' });
+      return;
+    }
+    const updated = await setSpecNumberingProfile(specId, profileId);
+    if (!updated) {
+      res.status(404).json({ success: false, error: 'spec not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: { profileId, name: profile.name } });
+  } catch (err) {
+    if (getPgCode(err) === '23503') {
+      res.status(404).json({ success: false, error: 'numbering profile not found' });
+      return;
+    }
+    logger.error({ err }, 'set spec numbering profile failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function clearSpecProfileHandler(req: Request, res: Response): Promise<void> {
+  const specId = parseUuid(req, res, 'spec');
+  if (!specId) return;
+  try {
+    const cleared = await clearSpecNumberingProfile(specId);
+    if (!cleared) {
+      res.status(404).json({ success: false, error: 'spec not found' });
+      return;
+    }
+    res.status(204).send();
+  } catch (err) {
+    logger.error({ err }, 'clear spec numbering profile failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function snapshotHandler(req: Request, res: Response): Promise<void> {
+  if (!req.file) {
+    res.status(400).json({ success: false, error: 'file required' });
+    return;
+  }
+  const ext = path.extname(req.file.originalname).toLowerCase();
+  if (ext !== '.docx') {
+    res.status(400).json({ success: false, error: 'only .docx files are accepted' });
+    return;
+  }
+  if (req.file.mimetype !== DOCX_MIME) {
+    res.status(400).json({ success: false, error: 'MIME type mismatch for .docx' });
+    return;
+  }
+  const { buffer } = req.file;
+  try {
+    await assertDocxSafe(buffer);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'invalid DOCX file';
+    res.status(400).json({ success: false, error: msg });
+    return;
+  }
+  try {
+    const profile = await extractNumberingProfileFromDocx(buffer);
+    res.status(200).json({ success: true, data: profile });
+  } catch (err) {
+    logger.error({ err }, 'snapshot numbering profile failed');
+    res
+      .status(422)
+      .json({ success: false, error: 'failed to extract numbering profile from DOCX' });
+  }
+}
