@@ -32,6 +32,30 @@ function parseUuid(req: Request, res: Response, label: string): string | null {
   return result.data;
 }
 
+// Guard the mutating endpoints (PATCH/DELETE). The built-in CSI Default
+// (library_id IS NULL) is immutable: getEffectiveNumberingProfile falls back to
+// it for every unassigned spec, so editing or deleting it would corrupt that
+// global default. Returns true (and sends 404/409) when the request must stop.
+async function rejectMissingOrBuiltIn(
+  id: string,
+  res: Response,
+  action: 'modified' | 'deleted'
+): Promise<boolean> {
+  const existing = await getNumberingProfile(id);
+  if (existing === null) {
+    res.status(404).json({ success: false, error: 'numbering profile not found' });
+    return true;
+  }
+  if (existing.libraryId === null) {
+    res.status(409).json({
+      success: false,
+      error: `the built-in CSI Default numbering profile cannot be ${action}`,
+    });
+    return true;
+  }
+  return false;
+}
+
 export async function listProfilesHandler(req: Request, res: Response): Promise<void> {
   const libraryId = parseUuid(req, res, 'library');
   if (!libraryId) return;
@@ -82,6 +106,7 @@ export async function patchProfileHandler(req: Request, res: Response): Promise<
   if (!id) return;
   const patch = req.body as PatchNumberingProfileBody;
   try {
+    if (await rejectMissingOrBuiltIn(id, res, 'modified')) return;
     const profile = await updateNumberingProfile(id, patch);
     if (!profile) {
       res.status(404).json({ success: false, error: 'numbering profile not found' });
@@ -98,18 +123,7 @@ export async function deleteProfileHandler(req: Request, res: Response): Promise
   const id = parseUuid(req, res, 'numbering profile');
   if (!id) return;
   try {
-    const existing = await getNumberingProfile(id);
-    if (existing === null) {
-      res.status(404).json({ success: false, error: 'numbering profile not found' });
-      return;
-    }
-    if (existing.libraryId === null) {
-      res.status(409).json({
-        success: false,
-        error: 'the built-in CSI Default numbering profile cannot be deleted',
-      });
-      return;
-    }
+    if (await rejectMissingOrBuiltIn(id, res, 'deleted')) return;
     const deleted = await deleteNumberingProfile(id);
     if (!deleted) {
       res.status(404).json({ success: false, error: 'numbering profile not found' });

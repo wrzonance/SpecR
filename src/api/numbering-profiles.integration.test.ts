@@ -280,6 +280,29 @@ describe('DELETE /numbering-profiles/:id', () => {
     const check = await pool.query(`SELECT 1 FROM numbering_profiles WHERE id = $1`, [builtInId]);
     expect(check.rows).toHaveLength(1);
   });
+
+  it('PATCH /numbering-profiles/:id — refuses to modify the built-in CSI Default (409), rules unchanged', async () => {
+    const row = await pool.query<{ id: string; rules: unknown }>(
+      `SELECT id, rules FROM numbering_profiles WHERE library_id IS NULL LIMIT 1`
+    );
+    expect(row.rows).toHaveLength(1);
+    const builtInId = row.rows[0]!.id;
+    const rulesBefore = JSON.stringify(row.rows[0]!.rules);
+
+    const res = await patch(`/numbering-profiles/${builtInId}`, { name: 'hijacked default' });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('built-in');
+
+    // The built-in row's name and rules must be untouched by the refused PATCH
+    const after = await pool.query<{ name: string; rules: unknown }>(
+      `SELECT name, rules FROM numbering_profiles WHERE id = $1`,
+      [builtInId]
+    );
+    expect(after.rows[0]!.name).toBe('CSI Default');
+    expect(JSON.stringify(after.rows[0]!.rules)).toBe(rulesBefore);
+  });
 });
 
 // ─── PUT /specs/:id/numbering-profile ────────────────────────────────────────

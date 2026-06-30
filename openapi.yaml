@@ -3543,7 +3543,8 @@ paths:
       description: >
         Partial update: omit a field to leave it unchanged. At least one of
         `name` or `rules` should be present (an empty body is accepted but is
-        a no-op).
+        a no-op). The built-in CSI Default (`libraryId: null`) is protected and
+        cannot be modified (→ 409) — it is the fallback for every unassigned spec.
       tags: [numbering-profiles]
       parameters:
         - name: id
@@ -3580,6 +3581,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
