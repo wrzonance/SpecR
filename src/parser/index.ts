@@ -14,7 +14,13 @@ import type { SectionInference } from '../lib/infer-section.js';
 
 export { parseSec, assertSecSafe } from './sec/index.js';
 export type { ParsedSec } from './sec/index.js';
-export { parseDocx, assertDocxSafe, analyzeDocxStyles, deriveTemplate } from './docx/index.js';
+export {
+  parseDocx,
+  assertDocxSafe,
+  analyzeDocxStyles,
+  deriveTemplate,
+  extractNumberingProfile,
+} from './docx/index.js';
 export type {
   DocxStyleAnalysis,
   DerivedTemplate,
@@ -28,6 +34,7 @@ export { parsePdf, assertPdfSafe } from './pdf/index.js';
 export { extractRefsFromTree } from './refs/index.js';
 export { ParserError } from './error.js';
 export type { SectionInference } from '../lib/infer-section.js';
+export type { NumberingProfile, TierName } from '../ast/index.js';
 
 export interface ParseResult {
   readonly tree: SpecTree;

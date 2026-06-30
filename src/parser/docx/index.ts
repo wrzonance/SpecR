@@ -176,6 +176,7 @@ export { assertDocxSafe } from './safety.js';
 export { resolveStyleCascade } from './resolver.js';
 export type { ClassifiedParagraph } from './types.js';
 export { deriveTemplate } from './derive-template.js';
+export { extractNumberingProfile } from './numbering-profile.js';
 export type {
   DerivedTemplate,
   DerivedRule,
