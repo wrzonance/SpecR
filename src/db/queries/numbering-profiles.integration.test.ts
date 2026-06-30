@@ -124,6 +124,24 @@ describe('updateNumberingProfile', () => {
     });
     expect(result).toBeNull();
   });
+
+  it('refuses to update the built-in CSI Default (library_id IS NULL guard), rules unchanged', async () => {
+    const builtIn = await pool.query<{ id: string; name: string; rules: unknown }>(
+      `SELECT id, name, rules FROM numbering_profiles WHERE library_id IS NULL LIMIT 1`
+    );
+    const id = builtIn.rows[0]!.id;
+    const rulesBefore = JSON.stringify(builtIn.rows[0]!.rules);
+
+    const result = await updateNumberingProfile(id, { name: 'hijacked', rules: ALT_RULES });
+    expect(result).toBeNull(); // guarded by `AND library_id IS NOT NULL`
+
+    const after = await pool.query<{ name: string; rules: unknown }>(
+      `SELECT name, rules FROM numbering_profiles WHERE id = $1`,
+      [id]
+    );
+    expect(after.rows[0]!.name).toBe('CSI Default');
+    expect(JSON.stringify(after.rows[0]!.rules)).toBe(rulesBefore);
+  });
 });
 
 describe('deleteNumberingProfile', () => {

@@ -126,12 +126,16 @@ export async function updateNumberingProfile(
   const parsedRules =
     patch.rules !== undefined ? JSON.stringify(NumberingProfileSchema.parse(patch.rules)) : null;
   try {
+    // `AND library_id IS NOT NULL` makes the built-in CSI Default immutable at the
+    // data layer (defense-in-depth beneath the handler's 409): the built-in backs
+    // getEffectiveNumberingProfile for every unassigned spec, so a mutated default
+    // would silently corrupt that global fallback. Mirrors the delete guard.
     const result = await pool.query<RawRow>(
       `UPDATE numbering_profiles
        SET name        = COALESCE($2, name),
            rules       = COALESCE($3::jsonb, rules),
            updated_at  = now()
-       WHERE id = $1
+       WHERE id = $1 AND library_id IS NOT NULL
        RETURNING ${COLUMNS}`,
       [id, patch.name ?? null, parsedRules]
     );
