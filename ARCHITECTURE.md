@@ -775,6 +775,8 @@ server.registerTool('tool_name', {
 
 Rules: import DB functions from `../db/index.js` only (no internal query-file imports); use `z.uuid()` (Zod v4), not `z.string().uuid()`; always return `{ isError: true, content: [...] }` on error — never throw from a tool handler; extract handlers if a body exceeds the 50-line `max-lines-per-function` cap.
 
+**Result anchors (`_meta['specr/anchors']`):** the four locate-oriented tools (`search_library`, `get_spec`, `get_references`, `coordination_report`) attach navigation anchors to their result's `_meta` under the key `specr/anchors` — an array of `{ section: string; specId?: string; paragraphId?: string }` derived purely from data already in the result (`src/mcp/anchors.ts`). The text `content` is unchanged, so text-only consumers are unaffected. UI clients (the `web_ui_demo` chat sidebar) use these to highlight the section(s) an answer is about in the active view. Attach with `anchorsMeta(anchors)`, which returns `undefined` for an empty list so no `_meta` is added. `_meta` is MCP's sanctioned channel for implementation metadata, chosen over a full `outputSchema`/`structuredContent` (disproportionate for tools like `get_spec` that return an entire tree).
+
 **Adding a resource:**
 
 ```typescript
