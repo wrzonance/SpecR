@@ -78,6 +78,13 @@ function trySignal2(
   styleMap: StyleMap,
   numberingMap: NumberingMap
 ): SignalHit | null {
+  // Explicit numId=0 is OOXML's "remove numbering" sentinel: the paragraph opted out
+  // of its style's list membership (e.g. a de-numbered, centered "****** [OR] ******"
+  // separator that keeps the PART style SPECText1 but sets <w:numId w:val="0"/>). Signal
+  // 1 already bails on numId=0; Signal 2 must too, or the STYLE's numbering resurrects a
+  // paragraph the author explicitly un-numbered into a spurious structural node
+  // (more-broken-parsing.docx 08 14 16 → 5 parts). Text/indent signals still run below.
+  if (para.numId === 0) return null;
   if (!para.styleId) return null;
   const styleInfo = styleMap.styles.get(para.styleId);
   if (styleInfo?.suppressesNumbering) return null;

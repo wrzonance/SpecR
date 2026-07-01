@@ -114,6 +114,67 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     expect(result[0]?.signalUsed).toBe(3);
   });
 
+  it('numId=0 override suppresses style numbering — SPECText1 [OR] separator is not a part (08 14 16)', () => {
+    // Regression (more-broken-parsing.docx, 08 14 16): decorative "****** [OR] ******"
+    // separators keep the PART style (SPECText1 → ilvl 0) but set <w:numId w:val="0"/>
+    // to REMOVE numbering. Signal 1 already bails on numId=0; Signal 2 read the STYLE's
+    // resolvedNumPr and ignored the paragraph's opt-out, promoting them to spurious PART
+    // nodes that split PRODUCTS/EXECUTION → 5 parts. An explicit numId=0 (OOXML's
+    // "remove numbering" sentinel) must suppress style-derived numbering exactly as it
+    // suppresses direct numbering — the paragraph is not a numbered structural node.
+    const styleMap: StyleMap = {
+      styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
+      resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'SPECText1', numId: 0, ilvl: 0, text: '****** [OR] ******' })],
+      numMap(1),
+      styleMap
+    );
+    expect(result[0]?.nodeType).not.toBe('part');
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.signalUsed).toBe(3);
+  });
+
+  it('numId=0 does not block Signal 4 — a de-numbered article style still reads its text tier', () => {
+    // Guard the guard: suppressing Signal 2 on numId=0 must not swallow a paragraph
+    // that carries a literal "N.N" tier. A SPECText1 paragraph with numId=0 whose text
+    // is "1.1 SUMMARY" is still an article via Signal 4 (text), not a continuation.
+    const styleMap: StyleMap = {
+      styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
+      resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'SPECText1', numId: 0, text: '1.1 SUMMARY' })],
+      numMap(1),
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(4);
+  });
+
+  it('numId=undefined still inherits style numbering (Signal 2 unaffected by the numId=0 guard)', () => {
+    // A paragraph with NO direct numPr (numId undefined) must still fire Signal 2 from
+    // its style — only an explicit numId=0 opt-out suppresses it.
+    const styleMap: StyleMap = {
+      styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
+      resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'SPECText1', text: 'GENERAL' })],
+      numMap(1),
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('part');
+    expect(result[0]?.signalUsed).toBe(2);
+  });
+
   it('signal 1 wins over signal 2; conflict logged', () => {
     const styleMap: StyleMap = {
       styles: new Map([['Heading2', { styleId: 'Heading2', name: 'heading 2' }]]),
