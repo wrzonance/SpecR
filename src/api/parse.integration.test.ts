@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
+import JSZip from 'jszip';
 import type { Server } from 'http';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool } from '../db/index.js';
-import type { ParseWarning } from '../ast/types.js';
+import { pool, createLibrary, createNumberingProfile } from '../db/index.js';
+import type { ParseWarning, SpecNode } from '../ast/types.js';
+import type { NumberingProfile } from '../ast/index.js';
 
 let server: Server;
 let baseUrl: string;
@@ -360,4 +363,189 @@ describe('POST /parse — .txt upload', () => {
     const res = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
     expect(res.status).toBe(400);
   });
+});
+
+// A minimal numbering-driven .docx (built in-test, no committed binary): one
+// abstractNum whose ilvl-0 lvlText literally declares "PART" (→ a spec-shaped
+// numId), with paragraphs at ilvl 0/1/2/3 carrying plain text (no "1.1"-style
+// prefixes), so structure is decided by Signal 1 (numbering), not Signal 4 (text).
+// That makes it sensitive to an articleIlvl override — the only committed DOCX
+// fixtures are text-driven and immune. With articleIlvl=2 the ilvl-2 paragraph
+// shifts pr1→article (a structural disagreement that surfaces in meta.conflicts).
+async function buildNumberingDrivenDocx(): Promise<Buffer> {
+  const w = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const lvl = (i: number, text: string): string =>
+    `<w:lvl w:ilvl="${i}"><w:numFmt w:val="decimal"/><w:lvlText w:val="${text}"/></w:lvl>`;
+  const para = (ilvl: number, text: string): string =>
+    `<w:p><w:pPr><w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="5"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
+  const zip = new JSZip();
+  zip.file(
+    '[Content_Types].xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`
+  );
+  zip.file(
+    '_rels/.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`
+  );
+  zip.file(
+    'word/_rels/document.xml.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`
+  );
+  zip.file(
+    'word/styles.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="${w}"><w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>`
+  );
+  zip.file(
+    'word/numbering.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering xmlns:w="${w}"><w:abstractNum w:abstractNumId="0">${lvl(0, 'PART %1')}${lvl(1, '%1.0%2')}${lvl(2, '%1.0%2.%3')}${lvl(3, '%4')}</w:abstractNum><w:num w:numId="5"><w:abstractNumId w:val="0"/></w:num></w:numbering>`
+  );
+  zip.file(
+    'word/document.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="${w}"><w:body>${para(0, 'GENERAL')}${para(1, 'SUMMARY')}${para(2, 'Section includes work under this contract')}${para(3, 'Related requirements appear elsewhere')}</w:body></w:document>`
+  );
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
+
+function findNodeByText(nodes: readonly SpecNode[], prefix: string): SpecNode | undefined {
+  for (const node of nodes) {
+    if (node.text.startsWith(prefix)) return node;
+    const found = findNodeByText(node.children, prefix);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+// #299 — an assigned numbering profile is resolved at the REST ingress, threaded
+// into the parse worker, and applied to the production parse. These prove the full
+// path: resolution + 404, the built-in default passing through unchanged, AND a real
+// override deterministically reshaping the persisted tree + recording meta.conflicts.
+describe('POST /parse — numbering profile (#299)', () => {
+  const DOCX_FIXTURE = resolve('tests/fixtures/libreoffice/csi-spec-sample.docx');
+  const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+  async function postDocx(fields: Record<string, string> = {}): Promise<{
+    status: number;
+    body: { success: boolean; error?: string; data?: { jobId: string } };
+  }> {
+    const buf = readFileSync(DOCX_FIXTURE);
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([new Uint8Array(buf)], { type: DOCX_MIME }),
+      'csi-spec-sample.docx'
+    );
+    for (const [key, value] of Object.entries(fields)) form.append(key, value);
+    const res = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+    return {
+      status: res.status,
+      body: (await res.json()) as { success: boolean; error?: string; data?: { jobId: string } },
+    };
+  }
+
+  async function builtInProfileId(): Promise<string> {
+    const row = await pool.query<{ id: string }>(
+      `SELECT id FROM numbering_profiles WHERE library_id IS NULL LIMIT 1`
+    );
+    const id = row.rows[0]?.id;
+    if (!id) throw new Error('built-in CSI Default profile missing — run seed/migrate');
+    return id;
+  }
+
+  it('404 — a non-existent numberingProfileId is rejected before the job starts', async () => {
+    const { status, body } = await postDocx({ numberingProfileId: randomUUID() });
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error).toBe('numbering profile not found');
+    expect(body.data).toBeUndefined(); // no job created
+  });
+
+  it('400 — a malformed numberingProfileId is rejected', async () => {
+    const { status } = await postDocx({ numberingProfileId: 'not-a-uuid' });
+    expect(status).toBe(400);
+  });
+
+  it('built-in CSI Default profile threads through and is a passthrough (same node count as no profile)', async () => {
+    // No profile → baseline.
+    const noProfile = await postDocx();
+    expect(noProfile.status).toBe(202);
+    const job0 = await waitForJob(noProfile.body.data!.jobId);
+    expect(job0.status).toBe('complete');
+    const specId = job0.result!.specId;
+    cleanupIds.push(specId);
+    const baselineCount = job0.result!.nodeCount;
+    expect(baselineCount).toBeGreaterThan(0);
+
+    // Built-in default (empty profile) → resolved, threaded to the worker, applied.
+    const withDefault = await postDocx({ numberingProfileId: await builtInProfileId() });
+    expect(withDefault.status).toBe(202);
+    const job1 = await waitForJob(withDefault.body.data!.jobId);
+    expect(job1.status).toBe('complete');
+    // Same file → upsert to the same spec; empty default changes nothing (byte-for-byte).
+    expect(job1.result!.specId).toBe(specId);
+    expect(job1.result!.nodeCount).toBe(baselineCount);
+  }, 30_000);
+
+  // The full override path: a real numbering-driven document parsed twice through
+  // POST /parse — once with no profile, once with a profile that sets articleIlvl=2.
+  async function postBuffer(
+    buffer: Buffer,
+    fields: Record<string, string>
+  ): Promise<{ status: number; body: { data?: { jobId: string } } }> {
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(buffer)], { type: DOCX_MIME }), 'numbered.docx');
+    for (const [key, value] of Object.entries(fields)) form.append(key, value);
+    const res = await fetch(`${baseUrl}/parse`, { method: 'POST', body: form });
+    return { status: res.status, body: (await res.json()) as { data?: { jobId: string } } };
+  }
+
+  async function fetchTree(specId: string): Promise<{ parts: readonly SpecNode[] }> {
+    const res = await fetch(`${baseUrl}/specs/${specId}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { parts: readonly SpecNode[] } };
+    return body.data;
+  }
+
+  it('applies an assigned profile end-to-end — override reshapes the persisted tree + records meta.conflicts', async () => {
+    const docx = await buildNumberingDrivenDocx();
+    const SECTION = '09 91 23';
+    // Same (section, source=unknown) upsert key across both uploads — start clean.
+    await pool.query(`DELETE FROM specs WHERE section = $1 AND source = 'unknown'`, [SECTION]);
+
+    // 1) No profile → baseline tiers (articleIlvl=1): "Section includes…" is pr1.
+    const base = await postBuffer(docx, { section: SECTION });
+    expect(base.status).toBe(202);
+    const baseJob = await waitForJob(base.body.data!.jobId);
+    expect(baseJob.status).toBe('complete');
+    const specId = baseJob.result!.specId;
+    cleanupIds.push(specId);
+    const baseNode = findNodeByText((await fetchTree(specId)).parts, 'Section includes');
+    expect(baseNode?.type).toBe('pr1');
+    expect(baseNode?.meta.conflicts ?? []).toEqual([]);
+
+    // 2) A profile that declares articleIlvl=2 (numId 5 stays spec-shaped).
+    const lib = await createLibrary({ tier: 'client', name: `np-e2e-${randomUUID().slice(0, 8)}` });
+    const overrideRules: NumberingProfile = {
+      tiers: { part: { numberStyle: 'integer', maxCount: 5 } },
+      numbering: [{ numId: 5, levels: [{ ilvl: 0, tier: 'part' }] }],
+      styleLadder: [],
+      articleIlvl: 2,
+    };
+    const profile = await createNumberingProfile(lib.id, 'Shift articleIlvl', overrideRules);
+
+    // 3) Re-parse the same file WITH the profile → upsert same spec, override applied.
+    const withProfile = await postBuffer(docx, {
+      section: SECTION,
+      numberingProfileId: profile.id,
+    });
+    expect(withProfile.status).toBe(202);
+    const ovJob = await waitForJob(withProfile.body.data!.jobId);
+    expect(ovJob.status).toBe('complete');
+    expect(ovJob.result!.specId).toBe(specId);
+
+    // The override deterministically shifts pr1 → article, and the losing base
+    // inference (pr1) is persisted as a conflict — never dropped.
+    const ovNode = findNodeByText((await fetchTree(specId)).parts, 'Section includes');
+    expect(ovNode?.type).toBe('article');
+    expect(ovNode?.meta.conflicts?.length ?? 0).toBeGreaterThan(0);
+  }, 30_000);
 });

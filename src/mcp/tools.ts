@@ -20,6 +20,7 @@ import {
   handleCoordinationReport,
   handleSubmittalRegister,
   handleOpenCommentsReport,
+  handleGetNumberingProfile,
 } from './handlers.js';
 import { registerOnboardingTools } from './onboarding-tools.js';
 
@@ -163,6 +164,23 @@ function registerSpecTools(server: McpServer): void {
       },
     },
     handleGetSpecDiff
+  );
+}
+
+function registerNumberingProfileTool(server: McpServer): void {
+  server.registerTool(
+    'get_numbering_profile',
+    {
+      description:
+        'Return the effective structural numbering profile for a spec ' +
+        '(tiers, numbering, styleLadder, articleIlvl). ' +
+        'An unassigned spec resolves to the built-in CSI Default profile. ' +
+        'Returns isError when the spec UUID is not found.',
+      inputSchema: {
+        specId: z.uuid().describe('Spec UUID (from search_library, list_sections, or get_spec)'),
+      },
+    },
+    handleGetNumberingProfile
   );
 }
 
@@ -381,6 +399,7 @@ export function registerTools(server: McpServer): void {
   registerLibraryTools(server);
   registerProjectTools(server);
   registerSpecTools(server);
+  registerNumberingProfileTool(server);
   registerParserTools(server);
   registerGeneratorTools(server);
   registerLoaderTools(server);

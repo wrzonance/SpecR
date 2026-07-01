@@ -1,13 +1,17 @@
 import { z } from 'zod';
 import { parse } from '../parser/index.js';
 import { ParseWarningSchema, SecRefSchema } from '../ast/index.js';
-import type { SpecTree, SecRef } from '../ast/index.js';
+import type { SpecTree, SecRef, NumberingProfile } from '../ast/index.js';
 import { SectionNumberSchema } from './section-number.js';
 import { config } from './env.js';
 
 export interface WorkerInput {
   readonly buffer: Buffer;
   readonly ext: string;
+  // Optional structural numbering profile (#299), resolved by the upload handler
+  // from specs.numbering_profile_id and injected here. A plain JSON object →
+  // structured-cloneable across the Piscina boundary. Absent ⇒ today's behavior.
+  readonly numberingProfile?: NumberingProfile;
 }
 
 export interface WorkerOutput {
@@ -52,11 +56,14 @@ function parseOptionsFromConfig() {
 // carries no metadata persisted section='unknown').
 // Format safety validation (assertSecSafe/assertDocxSafe) already ran in the
 // main thread before the job was created.
-export default async function parseWorker({ buffer, ext }: WorkerInput): Promise<WorkerOutput> {
-  const { tree, refs, capabilities } = await parse(
-    buffer,
-    `upload${ext}`,
-    parseOptionsFromConfig()
-  );
+export default async function parseWorker({
+  buffer,
+  ext,
+  numberingProfile,
+}: WorkerInput): Promise<WorkerOutput> {
+  const { tree, refs, capabilities } = await parse(buffer, `upload${ext}`, {
+    ...parseOptionsFromConfig(),
+    ...(numberingProfile !== undefined ? { numberingProfile } : {}),
+  });
   return { tree, refs, ...(capabilities !== undefined ? { capabilities } : {}) };
 }

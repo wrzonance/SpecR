@@ -76,4 +76,36 @@ describe('parseWorker', () => {
     expect(parse).toHaveBeenCalledWith(buffer, 'upload.pdf', { ocrMinCharsPerPage: 24 });
     expect(result.capabilities).toEqual(['read-only']);
   });
+
+  it('threads an assigned numbering profile into the parse options (#299)', async () => {
+    const parseWorker = (await import('./parse-worker.js')).default;
+    const { parse } = await import('../parser/index.js');
+    vi.mocked(parse).mockClear();
+    const buffer = Buffer.from('PK\x03\x04');
+    const numberingProfile = {
+      tiers: { part: { numberStyle: 'integer' as const, maxCount: 5 } },
+      numbering: [{ numId: 7, levels: [{ ilvl: 0, tier: 'part' as const }] }],
+      styleLadder: [],
+      articleIlvl: 2,
+    };
+
+    await parseWorker({ buffer, ext: '.docx', numberingProfile });
+
+    expect(parse).toHaveBeenCalledWith(buffer, 'upload.docx', {
+      ocrMinCharsPerPage: 24,
+      numberingProfile,
+    });
+  });
+
+  it('omits numberingProfile from parse options when none is assigned (byte-for-byte)', async () => {
+    const parseWorker = (await import('./parse-worker.js')).default;
+    const { parse } = await import('../parser/index.js');
+    vi.mocked(parse).mockClear();
+    const buffer = Buffer.from('PK\x03\x04');
+
+    await parseWorker({ buffer, ext: '.docx' });
+
+    // No numberingProfile key at all — identical to the pre-#299 call shape.
+    expect(parse).toHaveBeenCalledWith(buffer, 'upload.docx', { ocrMinCharsPerPage: 24 });
+  });
 });

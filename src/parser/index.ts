@@ -10,11 +10,19 @@ import { decodeTextBuffer } from '../lib/decode-text.js';
 import { inferSectionMeta } from '../lib/infer-section.js';
 import { tagArticleRoles } from '../ast/index.js';
 import type { SpecTree, SecRef } from '../ast/types.js';
+import type { NumberingProfile } from '../ast/index.js';
 import type { SectionInference } from '../lib/infer-section.js';
 
 export { parseSec, assertSecSafe } from './sec/index.js';
 export type { ParsedSec } from './sec/index.js';
-export { parseDocx, assertDocxSafe, analyzeDocxStyles, deriveTemplate } from './docx/index.js';
+export {
+  parseDocx,
+  assertDocxSafe,
+  analyzeDocxStyles,
+  deriveTemplate,
+  extractNumberingProfile,
+  extractNumberingProfileFromDocx,
+} from './docx/index.js';
 export type {
   DocxStyleAnalysis,
   DerivedTemplate,
@@ -28,6 +36,7 @@ export { parsePdf, assertPdfSafe } from './pdf/index.js';
 export { extractRefsFromTree } from './refs/index.js';
 export { ParserError } from './error.js';
 export type { SectionInference } from '../lib/infer-section.js';
+export type { NumberingProfile, TierName } from '../ast/index.js';
 
 export interface ParseResult {
   readonly tree: SpecTree;
@@ -44,6 +53,9 @@ export interface ParseOptions {
   readonly ocrRenderScale?: number;
   readonly ocrInitTimeoutMs?: number;
   readonly ocrRequireLocalTraineddata?: boolean;
+  // Optional deterministic numbering override (#299). Absent === today's
+  // inference-only path, byte-for-byte unchanged. Threaded to the DOCX parser only.
+  readonly numberingProfile?: NumberingProfile;
 }
 
 function withArticleRoles(tree: SpecTree): SpecTree {
@@ -71,9 +83,13 @@ function parseSecBuffer(buffer: Buffer): ParseResult {
   };
 }
 
-async function parseDocxBuffer(buffer: Buffer): Promise<ParseResult> {
+async function parseDocxBuffer(buffer: Buffer, options?: ParseOptions): Promise<ParseResult> {
   const noop = (_stage: string, _pct: number): void => {};
-  const tree = await parseDocx(buffer, noop);
+  // Pass the profile arg only when present so the no-profile call stays byte-for-byte
+  // today's two-arg call — exactOptionalPropertyTypes forbids a trailing `undefined`.
+  const profile = options?.numberingProfile;
+  const tree =
+    profile === undefined ? await parseDocx(buffer, noop) : await parseDocx(buffer, noop, profile);
   const sectionInference = inferSectionMeta(tree);
   const finalTree = withArticleRoles(applyInference(tree, sectionInference));
   return { tree: finalTree, refs: extractRefsFromTree(finalTree), sectionInference };
@@ -135,7 +151,7 @@ export async function parse(
 ): Promise<ParseResult> {
   const ext = path.extname(filename).toLowerCase();
   if (ext === '.sec') return parseSecBuffer(buffer);
-  if (ext === '.docx') return parseDocxBuffer(buffer);
+  if (ext === '.docx') return parseDocxBuffer(buffer, options);
   if (ext === '.txt') return parseTxtBuffer(buffer);
   if (ext === '.pdf') return parsePdfBuffer(buffer, options);
   throw new ParserError(`unsupported format: ${ext}`);

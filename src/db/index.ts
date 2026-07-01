@@ -280,6 +280,18 @@ export type {
   RequiredScope,
   SeedSource,
 } from './queries/required-sections.js';
+export {
+  listNumberingProfiles,
+  getNumberingProfile,
+  createNumberingProfile,
+  updateNumberingProfile,
+  deleteNumberingProfile,
+  setSpecNumberingProfile,
+  clearSpecNumberingProfile,
+  getEffectiveNumberingProfile,
+  NumberingProfileInUseError,
+} from './queries/numbering-profiles.js';
+export type { NumberingProfileRow } from './queries/numbering-profiles.js';
 export { getCoordinationReport } from './queries/coordination.js';
 export type { Finding, CoordinationSummary, CoordinationReport } from './queries/coordination.js';
 export {
