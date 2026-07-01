@@ -69,13 +69,76 @@ const HeaderFooterRegionSchema = z
   })
   .catchall(JsonValue);
 
+// A single header/footer page variant — the v1 `{ header, footer, style }`
+// shape (#208). Reused for each Word-style page variant (default/first/even).
+const variantShape = {
+  header: HeaderFooterRegionSchema.exactOptional(),
+  footer: HeaderFooterRegionSchema.exactOptional(),
+  style: HeaderFooterVisualStyleSchema.exactOptional(),
+};
+
+export const HeaderFooterVariantSchema = z.object(variantShape).catchall(JsonValue);
+
+// Word-style page variants (ADR-040): `default` applies to every page unless a
+// more specific variant overrides it; `first` overrides the first page
+// (`w:titlePg`); `even` overrides even pages (`w:evenAndOddHeaders`).
+const HeaderFooterVariantsSchema = z
+  .object({
+    default: HeaderFooterVariantSchema.exactOptional(),
+    first: HeaderFooterVariantSchema.exactOptional(),
+    even: HeaderFooterVariantSchema.exactOptional(),
+  })
+  .catchall(JsonValue);
+
+export const PageNumberingModeSchema = z.enum(['continuous', 'restartPerSpec']);
+
+// Page-numbering policy: continuous across the package, or restarting at each
+// spec section. `startAt` seeds the first rendered number (`w:pgNumType@start`).
+const PageNumberingSchema = z
+  .object({
+    mode: PageNumberingModeSchema,
+    startAt: z.number().int().exactOptional(),
+  })
+  .catchall(JsonValue);
+
+// Open sidecar for captured but unmodeled header/footer OOXML plus parser
+// warnings (#306). Fully open so round-tripping never loses unsupported markup.
+const HeaderFooterRawSidecarSchema = z
+  .object({
+    warnings: z.array(z.string()).exactOptional(),
+  })
+  .catchall(JsonValue);
+
 export const HeaderFooterCompositionSchema = z
   .object({
-    header: HeaderFooterRegionSchema.exactOptional(),
-    footer: HeaderFooterRegionSchema.exactOptional(),
-    style: HeaderFooterVisualStyleSchema.exactOptional(),
+    // v1 (#208) fields — preserved; read as the `default` variant (ADR-040).
+    ...variantShape,
+    // v2 (#302) fields.
+    variants: HeaderFooterVariantsSchema.exactOptional(),
+    pageNumbering: PageNumberingSchema.exactOptional(),
+    raw: HeaderFooterRawSidecarSchema.exactOptional(),
   })
   .catchall(JsonValue);
 
 export type HeaderFooterFieldKind = z.infer<typeof HeaderFooterFieldKindSchema>;
+export type HeaderFooterVariant = z.infer<typeof HeaderFooterVariantSchema>;
+export type PageNumberingMode = z.infer<typeof PageNumberingModeSchema>;
 export type HeaderFooterComposition = z.infer<typeof HeaderFooterCompositionSchema>;
+
+/**
+ * The effective `default` page variant for a composition.
+ *
+ * Backward-compat contract (ADR-040): a v1 (#208) payload carries its single
+ * header/footer/style at the top level, and that IS the default variant. A v2
+ * payload may instead carry `variants.default`. When both are present the
+ * explicit `variants.default` wins (see the KNOWN AMBIGUITY test). Cross-scope
+ * precedence/resolution is out of scope here (#304).
+ */
+export function defaultVariant(config: HeaderFooterComposition): HeaderFooterVariant {
+  if (config.variants?.default) return config.variants.default;
+  const variant: HeaderFooterVariant = {};
+  if (config.header !== undefined) variant.header = config.header;
+  if (config.footer !== undefined) variant.footer = config.footer;
+  if (config.style !== undefined) variant.style = config.style;
+  return variant;
+}
