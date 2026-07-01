@@ -57,27 +57,28 @@ export function anchorsFromReferences(a: {
   return out;
 }
 
-// A finding's anchor is where it should be *located* in the UI. `dangling_ref`
-// carries an exact source paragraph (from BrokenRef) and points there. The other
-// reference-consistency findings (related_listed_not_cited, related_cited_not_listed,
-// standard_cited_not_listed) are built from ClassifiedRef, which has no per-paragraph
-// locator — they anchor at the source spec's section instead. Submittal / implied /
-// umbrella findings carry no single section locator in v1 → no anchor.
+// A finding's anchor is where it should be *located* in the UI. Almost every
+// Finding variant carries a source spec section (`sourceSpecSection`) plus a spec
+// id under one of two keys — `sourceSpecId`, or `specId` on submittal findings —
+// and many carry an exact `sourceParagraphId`. present_not_required /
+// required_not_present instead carry their own `section` (+ optional specId).
+// A structural projection (not a per-type switch) covers every locatable finding
+// — reference, submittal, implied, umbrella — and stays robust to new Finding
+// variants. Reference-consistency findings on origin/main lack sourceParagraphId
+// (built from ClassifiedRef) and gracefully fall back to a section-level anchor.
+function findingSpecId(f: Finding): string | undefined {
+  if ('sourceSpecId' in f) return f.sourceSpecId;
+  if ('specId' in f) return f.specId;
+  return undefined;
+}
+
 function findingAnchor(f: Finding): McpAnchor | null {
-  switch (f.type) {
-    case 'dangling_ref':
-      return anchor(f.sourceSpecSection, f.sourceSpecId, f.sourceParagraphId);
-    case 'related_listed_not_cited':
-    case 'related_cited_not_listed':
-    case 'standard_cited_not_listed':
-      return anchor(f.sourceSpecSection, f.sourceSpecId);
-    case 'present_not_required':
-      return anchor(f.section, f.specId);
-    case 'required_not_present':
-      return anchor(f.section);
-    default:
-      return null;
+  if ('sourceSpecSection' in f) {
+    const paragraphId = 'sourceParagraphId' in f ? f.sourceParagraphId : undefined;
+    return anchor(f.sourceSpecSection, findingSpecId(f), paragraphId);
   }
+  if ('section' in f) return anchor(f.section, findingSpecId(f));
+  return null;
 }
 
 export function anchorsFromReport(findings: readonly Finding[]): McpAnchor[] {

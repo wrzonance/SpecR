@@ -120,6 +120,46 @@ describe('anchorsFromReport', () => {
       { section: '03 30 00' },
     ]);
   });
+
+  it('anchors submittal, implied, and umbrella findings at their source (specId key varies)', () => {
+    const anchors = anchorsFromReport([
+      {
+        type: 'product_without_submittal_type',
+        specId: 's4',
+        sourceSpecSection: '23 05 00',
+        productName: 'Pump',
+        sourceParagraphId: 'p4',
+      },
+      {
+        type: 'submittal_type_without_product',
+        specId: 's5',
+        sourceSpecSection: '23 07 00',
+        submittalType: 'Product Data',
+      },
+      {
+        type: 'implied_related_section',
+        sourceSpecId: 's6',
+        sourceSpecSection: '07 92 00',
+        sourceParagraphId: 'p6',
+        impliedSection: '07 84 00',
+        impliedTitle: 'Firestopping',
+        matchedKeyword: 'firestop',
+        confidence: 0.8,
+      },
+      {
+        type: 'umbrella_not_called_out',
+        sourceSpecId: 's7',
+        sourceSpecSection: '09 21 16',
+        umbrellaSpecSection: '09 20 00',
+      },
+    ]);
+    expect(anchors).toEqual([
+      { section: '23 05 00', specId: 's4', paragraphId: 'p4' },
+      { section: '23 07 00', specId: 's5' },
+      { section: '07 92 00', specId: 's6', paragraphId: 'p6' },
+      { section: '09 21 16', specId: 's7' },
+    ]);
+  });
 });
 
 describe('anchorsMeta', () => {
