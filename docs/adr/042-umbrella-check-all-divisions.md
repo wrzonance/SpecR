@@ -54,8 +54,10 @@ The note lists the sorted, de-duplicated divisions of the present sections. Empt
 The finding shape (`umbrella_not_called_out` with `sourceSpecId` / `sourceSpecSection` /
 `umbrellaSpecSection`), the summary field (`umbrellaNotCalledOut`), the reference-based satisfaction
 rule, and the deterministic-and-pure / no-migration properties are all retained from ADR-037. REST and
-MCP inherit the change because both surface `getCoordinationReport`; the API shape is unchanged, so no
-`openapi.yaml` change is required.
+MCP inherit the change because both surface `getCoordinationReport`; the API shape (routes, request/
+response schemas, status codes) is unchanged. Only the `FindingUmbrellaNotCalledOut` description prose
+in `openapi.yaml` is refreshed to drop the stale "Division 26/27/28 only" wording so the served `/docs`
+contract matches the new behavior.
 
 ## Consequences
 
