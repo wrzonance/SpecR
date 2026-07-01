@@ -5928,8 +5928,9 @@ components:
       description: >
         Extracted numbering configuration from a DOCX file. Carries tiers
         (CSI hierarchy), numbering (numId→levels map), styleLadder (style→tier
-        map), and articleIlvl (zero-based index of the Article level). Open
-        schema — unknown keys are preserved for forward-compatibility.
+        map), and articleIlvl (the ilvl at which the Article tier sits, always
+        >= 1 — ilvl 0 is the PART tier). Open schema — unknown keys are
+        preserved for forward-compatibility.
       additionalProperties: true
       required: [tiers, numbering, styleLadder]
       properties:
