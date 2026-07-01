@@ -6,6 +6,11 @@ Proposed (Phase 4 — Track B design gate). Implements the core of #105 (errors-
 view per project), consuming the ADR-028 `required_sections` substrate. No endpoint code lands
 until this ADR merges.
 
+**Amended by [ADR-043](043-present-not-required-empty-toc.md) (2026-07-01):** the empty-required
+suppression below ("Empty required list ⇒ suppress `present_not_required`") is **reversed** —
+`present_not_required` is now emitted for every present spec even when no TOC is authored, with a
+reworded note. All other decisions in this ADR stand.
+
 ## Context
 
 A CSI MasterFormat project manual diverges from reality in ways that are individually
@@ -89,11 +94,11 @@ Alternatives.)
   — package-level required only, **never unioned** with the baseline (consistent with ADR-028's
   snapshot model). `getBrokenRefs` remains project-grained; at package scope, dangling refs are
   intersected with the package's present source specs.
-- **Empty required list ⇒ suppress `present_not_required`** and push a `notes[]` entry
-  (`"no required sections authored at this scope — present/required comparison skipped"`). With no
-  authored intent there is no opinion on what is "extra"; flagging every present section as unrequired
-  would be noise. `required_not_present` is then trivially empty; `dangling_ref` still runs
-  (`is_broken ∖ ∅`).
+- **Empty required list ⇒ suppress `present_not_required`** and push a `notes[]` entry.
+  **~~Superseded by [ADR-043](043-present-not-required-empty-toc.md):~~** the suppression made the
+  category read as broken for unauthored-TOC projects, so `present_not_required` is now emitted for
+  every present spec (with a reworded note). `required_not_present` is still trivially empty when
+  `required` is empty; `dangling_ref` still runs (`is_broken ∖ ∅`).
 - **`present_not_required` is emitted per present spec** (carrying `specId`), not deduped by section —
   the finding must say *which* document is unaccounted-for.
 

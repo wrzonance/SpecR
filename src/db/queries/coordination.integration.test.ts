@@ -120,7 +120,7 @@ async function addClassifiedRef(args: {
   text: string;
   targetType: 'section' | 'standard';
   value: string;
-}): Promise<void> {
+}): Promise<string> {
   const p = await pool.query<{ id: string }>(
     `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position) VALUES ($1, $2, 'pr1', $3, 1) RETURNING id`,
     [args.specId, args.parentId, args.text]
@@ -140,6 +140,7 @@ async function addClassifiedRef(args: {
       args.text,
     ]
   );
+  return pid;
 }
 // Narrowing filter: ofType(fs, 'dangling_ref') is typed to the dangling variant,
 // so variant-specific fields (.targetSpecSection, .section, .specId) typecheck.
@@ -233,7 +234,11 @@ describe('getCoordinationReport', () => {
       },
     ]);
     expect(report.summary.umbrellaNotCalledOut).toBe(1);
-    expect(report.summary.total).toBe(1);
+    // ADR-043: no TOC authored, so the present spec is also present-not-required.
+    expect(ofType(report.findings, 'present_not_required').map((f) => f.section)).toEqual([
+      '26 05 33',
+    ]);
+    expect(report.summary.total).toBe(2);
   });
 
   it('coordination: Div 26 subordinate citing 26 00 00 -> no umbrella_not_called_out', async () => {
@@ -419,7 +424,7 @@ describe('getCoordinationReport', () => {
     const conduit = await newSpec('26 05 33', 'Raceways and Boxes for Electrical Systems');
     await newSpec('07 84 00', 'Firestopping');
     await addProjectSpec(projectId, conduit, 1);
-    await addClassifiedRef({
+    const refParagraphId = await addClassifiedRef({
       specId: conduit,
       parentId: null,
       text: 'Section 07 84 00 Firestopping',
@@ -434,11 +439,34 @@ describe('getCoordinationReport', () => {
         type: 'related_cited_not_listed',
         sourceSpecId: conduit,
         sourceSpecSection: '26 05 33',
+        sourceParagraphId: refParagraphId,
         section: '07 84 00',
       },
     ]);
     expect(ofType(report.findings, 'implied_related_section')).toEqual([]);
     expect(report.summary.impliedRelatedSection).toBe(0);
+  });
+
+  it('related_listed_not_cited carries the listing paragraph-level locator (#1 audit anchor)', async () => {
+    const projectId = await newProject('coord-ref-anchor');
+    await addDefaultProjectSource(projectId);
+    const spec = await newSpec('08 11 13', 'Hollow Metal Doors');
+    await addProjectSpec(projectId, spec, 1);
+    const related = await newArticle(spec, '1.1 RELATED SECTIONS', 1);
+    const listPid = await addClassifiedRef({
+      specId: spec,
+      parentId: related,
+      text: 'Section 07 84 00 Firestopping',
+      targetType: 'section',
+      value: '07 84 00',
+    });
+
+    const report = await getCoordinationReport(projectId, undefined);
+    const listed = ofType(report.findings, 'related_listed_not_cited');
+
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.section).toBe('07 84 00');
+    expect(listed[0]?.sourceParagraphId).toBe(listPid);
   });
 
   it('coordination: generic body word general does not imply catalog General sections', async () => {
@@ -478,7 +506,7 @@ describe('getCoordinationReport', () => {
     expect(finding.snippet.endsWith('…')).toBe(true);
   });
 
-  it('suppresses present_not_required and emits a note when the required list is empty', async () => {
+  it('emits present_not_required for every present spec when the required list is empty (ADR-043)', async () => {
     const projectId = await newProject('coord-empty');
     const specA = await newSpec('03 30 00', 'Concrete');
     await addProjectSpec(projectId, specA, 1);
@@ -486,11 +514,14 @@ describe('getCoordinationReport', () => {
 
     const report = await getCoordinationReport(projectId, undefined);
 
-    expect(ofType(report.findings, 'present_not_required')).toHaveLength(0);
+    // ADR-043: with no authored TOC, every present spec is trivially not in it.
+    expect(ofType(report.findings, 'present_not_required').map((f) => f.section)).toEqual([
+      '03 30 00',
+    ]);
     expect(ofType(report.findings, 'required_not_present')).toHaveLength(0);
     expect(ofType(report.findings, 'dangling_ref')).toHaveLength(1);
     expect(report.notes).toEqual([
-      'no required sections authored at this scope — present/required comparison skipped',
+      'no required sections authored at this scope — every present section is reported as present-not-required',
       'umbrella call-out check covers all divisions in scope: 03',
     ]);
   });

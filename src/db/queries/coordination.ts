@@ -57,18 +57,21 @@ export type Finding =
       readonly type: 'related_listed_not_cited';
       readonly sourceSpecId: string;
       readonly sourceSpecSection: string;
+      readonly sourceParagraphId: string;
       readonly section: string;
     }
   | {
       readonly type: 'related_cited_not_listed';
       readonly sourceSpecId: string;
       readonly sourceSpecSection: string;
+      readonly sourceParagraphId: string;
       readonly section: string;
     }
   | {
       readonly type: 'standard_cited_not_listed';
       readonly sourceSpecId: string;
       readonly sourceSpecSection: string;
+      readonly sourceParagraphId: string;
       readonly standardCode: string;
     }
   | SubmittalFinding
@@ -105,7 +108,7 @@ interface PresentSpec {
 }
 
 const EMPTY_REQUIRED_NOTE =
-  'no required sections authored at this scope — present/required comparison skipped';
+  'no required sections authored at this scope — every present section is reported as present-not-required';
 
 async function assertScope(
   projectId: string,
@@ -179,7 +182,11 @@ function toDangling(
 }
 
 function toReferenceFinding(f: ReferenceConsistencyFinding): Finding {
-  const base = { sourceSpecId: f.sourceSpecId, sourceSpecSection: f.sourceSpecSection };
+  const base = {
+    sourceSpecId: f.sourceSpecId,
+    sourceSpecSection: f.sourceSpecSection,
+    sourceParagraphId: f.sourceParagraphId,
+  };
   if (f.type === 'standard_cited_not_listed') {
     return { type: f.type, ...base, standardCode: f.value };
   }
@@ -209,16 +216,18 @@ function buildFindings(
     }));
 
   const empty = requiredSections.size === 0;
-  const presentNotRequired: Finding[] = empty
-    ? []
-    : present
-        .filter((p) => !requiredSections.has(p.section))
-        .map((p) => ({
-          type: 'present_not_required',
-          section: p.section,
-          specId: p.specId,
-          title: p.title,
-        }));
+  // ADR-043 (supersedes ADR-029's empty-required suppression): with no authored
+  // TOC every present spec is trivially "present, not in the TOC" — surface them
+  // (with the note below) rather than hide the whole category. required_not_present
+  // stays naturally empty; the `empty` flag now only drives the explanatory note.
+  const presentNotRequired: Finding[] = present
+    .filter((p) => !requiredSections.has(p.section))
+    .map((p) => ({
+      type: 'present_not_required',
+      section: p.section,
+      specId: p.specId,
+      title: p.title,
+    }));
 
   const danglingRef = broken.flatMap((b) => {
     const f = toDangling(b, presentIds, requiredSections);
