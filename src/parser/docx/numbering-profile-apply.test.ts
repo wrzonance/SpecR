@@ -4,7 +4,7 @@ import {
   mergeProfileConflicts,
   extractNumberingProfile,
 } from './numbering-profile.js';
-import { classifyParagraphs } from './inference.js';
+import { classifyParagraphs, buildTree } from './inference.js';
 import { classifyWithOptionalProfile } from './index.js';
 import type {
   ClassifiedParagraph,
@@ -249,6 +249,57 @@ describe('#317 classifyWithOptionalProfile — style-inherited conflict is recor
     // paragraph as 'article' too, and dropped this conflict entirely.
     expect(merged[0]?.conflicts).toHaveLength(1);
     expect(merged[0]?.conflicts[0]?.reportedNodeType).toBe('pr2');
+  });
+});
+
+// ─── #317: continuation/note nodes preserve profile-vs-inference conflicts ────────
+
+describe('#317 makeContinuationNode — a demoted continuation keeps its conflicts in meta', () => {
+  it('serializes conflicts on a continuation node (not just structural makeNode nodes)', () => {
+    // A profile can demote a paragraph to 'continuation' while the un-profiled base
+    // inference disagreed (here: base said 'article'). buildTree must persist that
+    // losing signal via meta.conflicts — makeContinuationNode historically dropped it.
+    const partCp = cp('part', 0, 1);
+    const contCp = cp('continuation', 1, 2, [
+      { signal: 1, reportedIlvl: 1, reportedNodeType: 'article' },
+    ]);
+    const tree = buildTree([partCp, contCp], '21 11 00', 'T', 'arcat');
+
+    const child = tree.parts[0]?.children[0];
+    expect(child?.type).toBe('continuation');
+    expect(child?.meta.conflicts).toEqual([
+      { signal: 1, reportedIlvl: 1, reportedNodeType: 'article' },
+    ]);
+  });
+});
+
+// ─── #317 / #319: profile `tier` is derived from ilvl, not independently authoritative ─
+
+describe('#317 KNOWN AMBIGUITY — profile `tier` is derived from ilvl, not authoritative', () => {
+  // KNOWN AMBIGUITY (#319): a styleLadder/numbering `tier` field is written by the
+  // extractor (tierForIlvl) and NOT read on apply — classification derives the node
+  // type from ilvl + articleIlvl. A manually-edited `tier` that disagrees with its
+  // `ilvl` is therefore a silent no-op. The design doc calls the profile
+  // "authoritative for the numId→tier mapping"; today that authority flows through
+  // ilvl+articleIlvl. Making `tier` independently authoritative is deferred to #319.
+  it('a styleLadder entry with tier=article but ilvl=3 classifies by ilvl (→ pr2), not the declared tier', () => {
+    const base: NumberingMap = {
+      nums: new Map([[1, { numId: 1, abstractNumId: 0 }]]),
+      abstractNums: new Map([[0, { abstractNumId: 0, levels: [{ ilvl: 0, numFmt: 'decimal' }] }]]),
+      pStyleToNumId: new Map(),
+      pStyleToIlvl: new Map(),
+      articleIlvl: 1,
+      specShapedNumIds: new Set([1]),
+    };
+    const profile: NumberingProfile = {
+      tiers: { part: { numberStyle: 'integer', maxCount: 5 } },
+      numbering: [],
+      styleLadder: [{ styleId: 'H', numId: 1, ilvl: 3, tier: 'article' }],
+    };
+    const xml = docXmlWithStyledPara('H', 'Materials');
+    const merged = classifyWithOptionalProfile(xml, base, emptyStyleMap(), new Map(), profile);
+    // ilvl 3 with articleIlvl 1 → offset 2 → pr2; the declared tier:'article' is ignored.
+    expect(merged[0]?.nodeType).toBe('pr2');
   });
 });
 

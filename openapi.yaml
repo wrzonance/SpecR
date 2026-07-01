@@ -3703,7 +3703,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-
 # ─── Components ───────────────────────────────────────────────────────────────
 
 components:
@@ -5978,16 +5977,49 @@ components:
                   minimum: 1
         numbering:
           type: array
+          description: Per-numId level definitions.
           items:
             type: object
             additionalProperties: true
-          description: Per-numId level definitions.
+            required: [numId, levels]
+            properties:
+              numId:
+                type: integer
+              levels:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                  required: [ilvl, tier]
+                  properties:
+                    ilvl:
+                      type: integer
+                      minimum: 0
+                    tier:
+                      type: string
+                      enum: [part, article, paragraph, subparagraph]
+                    labelTemplate:
+                      type: string
+                    numFmt:
+                      type: string
         styleLadder:
           type: array
+          description: Per-styleId tier assignment derived from the style cascade.
           items:
             type: object
             additionalProperties: true
-          description: Per-styleId tier assignment derived from the style cascade.
+            required: [styleId, numId, ilvl, tier]
+            properties:
+              styleId:
+                type: string
+              numId:
+                type: integer
+              ilvl:
+                type: integer
+                minimum: 0
+              tier:
+                type: string
+                enum: [part, article, paragraph, subparagraph]
         articleIlvl:
           type: integer
           minimum: 0

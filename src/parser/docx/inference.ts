@@ -259,7 +259,16 @@ function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode
     type: cp.isNote ? 'note' : 'continuation',
     text: cp.paragraph.text,
     children: [],
-    meta: { source, ...(cp.isVanish ? { vanish: true } : {}), ...sourceFactsMeta(cp) },
+    // Carry conflicts here too (mirrors makeNode): a profile can demote a
+    // paragraph to 'continuation' while the un-profiled base inference disagreed,
+    // and that losing signal must still be persisted via meta.conflicts rather
+    // than dropped at serialization ("conflicts persisted, never dropped"). (#317)
+    meta: {
+      source,
+      ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
+      ...(cp.isVanish ? { vanish: true } : {}),
+      ...sourceFactsMeta(cp),
+    },
   };
 }
 

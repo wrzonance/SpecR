@@ -120,6 +120,15 @@ behaviourally identical to today's engine — so an un-onboarded spec is unchang
 - When a profile is present, it is **authoritative** for the numId→tier and
   style→`numPr` mapping. Signals 3–5 (document order, text regex, indentation)
   still run for per-paragraph classification.
+
+> **Implementation note (#319):** today the profile's authority over the numId→tier
+> mapping flows through `ilvl` + `articleIlvl` — classification derives the node type
+> from those (`ilvlToNodeType`). The explicit `tier` field on `styleLadder`/`numbering`
+> is *written by the extractor* (`tierForIlvl`) and *not read on apply*, so it is a
+> derived label: editing `tier` without a matching `ilvl` is a silent no-op. Making
+> `tier` independently authoritative (or rejecting an inconsistent `tier`/`ilvl` pair)
+> is deferred to #319; the current behavior is pinned by a KNOWN AMBIGUITY test in
+> `numbering-profile-apply.test.ts`.
 - Where the profile disagrees with what inference *would* have produced for a
   paragraph, that disagreement is written to `paragraphs.conflicts` (JSONB,
   existing channel) and surfaces as `meta.conflicts` — persisted, never dropped.
