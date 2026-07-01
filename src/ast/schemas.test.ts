@@ -15,6 +15,8 @@ import {
   PatchEditabilityBodySchema,
   PatchRemovalBodySchema,
   ReclassifyBodySchema,
+  CreateNumberingProfileBodySchema,
+  PatchNumberingProfileBodySchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -44,6 +46,33 @@ describe('NodeTypeSchema', () => {
 
   it('rejects unknown node type', () => {
     expect(() => NodeTypeSchema.parse('paragraph')).toThrow();
+  });
+});
+
+describe('#317 numbering-profile body name — trim before length check', () => {
+  const RULES = {
+    tiers: { part: { numberStyle: 'integer', maxCount: 5 } },
+    numbering: [],
+    styleLadder: [],
+  };
+
+  it('rejects a whitespace-only create name (→ 422, not a DB CHECK 500)', () => {
+    const result = CreateNumberingProfileBodySchema.safeParse({ name: '   ', rules: RULES });
+    expect(result.success).toBe(false);
+  });
+
+  it('trims surrounding whitespace on a valid create name', () => {
+    const result = CreateNumberingProfileBodySchema.safeParse({
+      name: '  CSI East  ',
+      rules: RULES,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.name).toBe('CSI East');
+  });
+
+  it('rejects a whitespace-only patch name', () => {
+    const result = PatchNumberingProfileBodySchema.safeParse({ name: '  ' });
+    expect(result.success).toBe(false);
   });
 });
 

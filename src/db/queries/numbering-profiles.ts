@@ -176,14 +176,39 @@ export async function deleteNumberingProfile(id: string): Promise<boolean> {
   }
 }
 
-/** Assign (or replace) a spec's numbering profile. Returns false when the spec does not exist. */
-export async function setSpecNumberingProfile(specId: string, profileId: string): Promise<boolean> {
+/** Outcome of assigning a numbering profile to a spec (library scoping enforced). */
+export type SetSpecProfileResult = 'assigned' | 'spec-not-found' | 'library-mismatch';
+
+/**
+ * Assign (or replace) a spec's numbering profile, enforcing library scoping: a
+ * spec may be assigned only the built-in CSI Default (library_id IS NULL) or a
+ * profile owned by its OWN library. The scope predicate lives in the UPDATE's
+ * WHERE so a cross-library assignment matches zero rows atomically — otherwise a
+ * library-A profile could bind a library-B spec, hiding it from B's scoped
+ * `listNumberingProfiles` and blocking A's deletion via the RESTRICT FK (#317).
+ * Assumes the caller has already checked that the profile exists (the handler
+ * does); a missing profile also yields 'library-mismatch'.
+ */
+export async function setSpecNumberingProfile(
+  specId: string,
+  profileId: string
+): Promise<SetSpecProfileResult> {
   try {
-    const result = await pool.query(`UPDATE specs SET numbering_profile_id = $2 WHERE id = $1`, [
-      specId,
-      profileId,
-    ]);
-    return (result.rowCount ?? 0) === 1;
+    const upd = await pool.query(
+      `UPDATE specs s
+          SET numbering_profile_id = $2
+        WHERE s.id = $1
+          AND EXISTS (
+            SELECT 1 FROM numbering_profiles p
+            WHERE p.id = $2 AND (p.library_id IS NULL OR p.library_id = s.library_id)
+          )`,
+      [specId, profileId]
+    );
+    if ((upd.rowCount ?? 0) === 1) return 'assigned';
+    // No row updated — distinguish a missing spec (→404) from an existing spec
+    // whose scope rejects the profile (→409) so the handler can map each cleanly.
+    const specExists = await pool.query(`SELECT 1 FROM specs WHERE id = $1`, [specId]);
+    return (specExists.rowCount ?? 0) === 1 ? 'library-mismatch' : 'spec-not-found';
   } catch (err) {
     throw new DatabaseError('setSpecNumberingProfile: update failed', { cause: err });
   }

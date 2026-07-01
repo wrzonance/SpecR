@@ -152,17 +152,20 @@ export async function setSpecProfileHandler(req: Request, res: Response): Promis
       res.status(404).json({ success: false, error: 'numbering profile not found' });
       return;
     }
-    const updated = await setSpecNumberingProfile(specId, profileId);
-    if (!updated) {
+    const outcome = await setSpecNumberingProfile(specId, profileId);
+    if (outcome === 'spec-not-found') {
       res.status(404).json({ success: false, error: 'spec not found' });
+      return;
+    }
+    if (outcome === 'library-mismatch') {
+      res.status(409).json({
+        success: false,
+        error: 'numbering profile belongs to a different library than the spec',
+      });
       return;
     }
     res.status(200).json({ success: true, data: { profileId, name: profile.name } });
   } catch (err) {
-    if (getPgCode(err) === '23503') {
-      res.status(404).json({ success: false, error: 'numbering profile not found' });
-      return;
-    }
     logger.error({ err }, 'set spec numbering profile failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }

@@ -508,15 +508,18 @@ export type SetStyleSourceBody = z.infer<typeof SetStyleSourceBodySchema>;
 
 // ── Numbering profile CRUD request bodies (#299) ─────────────────────────────
 
+// name is trimmed BEFORE the length check so a whitespace-only name fails Zod
+// (→ 422) rather than passing minLength(1) and later tripping the DB's
+// `length(trim(name)) > 0` CHECK as a pg 23514 the handler would surface as 500.
 export const CreateNumberingProfileBodySchema = z.object({
-  name: z.string().check(z.minLength(1)),
+  name: z.string().trim().check(z.minLength(1)),
   rules: NumberingProfileSchema,
 });
 
 export type CreateNumberingProfileBody = z.infer<typeof CreateNumberingProfileBodySchema>;
 
 export const PatchNumberingProfileBodySchema = z.object({
-  name: z.string().check(z.minLength(1)).exactOptional(),
+  name: z.string().trim().check(z.minLength(1)).exactOptional(),
   rules: NumberingProfileSchema.exactOptional(),
 });
 

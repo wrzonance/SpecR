@@ -156,7 +156,7 @@ function parseParagraphsOrThrow(
 // paragraphs are parsed/classified against the overridden map (authoritative), the
 // un-profiled base map classifies the same paragraphs, and per-paragraph
 // disagreements are recorded as conflicts (losing signal persisted, never dropped).
-function classifyWithOptionalProfile(
+export function classifyWithOptionalProfile(
   documentXml: string,
   resolvedNumberingMap: NumberingMap,
   styleMap: StyleMap,
@@ -173,9 +173,22 @@ function classifyWithOptionalProfile(
     return classifyParagraphs(paragraphs, resolvedNumberingMap, styleMap);
   }
   const overridden = applyNumberingProfile(resolvedNumberingMap, numberingProfile);
-  const paragraphs = parseParagraphsOrThrow(documentXml, overridden, styleMap, commentsById);
-  const withProfile = classifyParagraphs(paragraphs, overridden, styleMap);
-  const baseClassified = classifyParagraphs(paragraphs, resolvedNumberingMap, styleMap);
+  const profiledParas = parseParagraphsOrThrow(documentXml, overridden, styleMap, commentsById);
+  const withProfile = classifyParagraphs(profiledParas, overridden, styleMap);
+  // Parse a SECOND time against the base map before the un-profiled comparison.
+  // parseParagraph resolves style-inherited numId/ilvl FROM THE MAP at parse time
+  // (document.ts resolveNumPr), so a paragraph parsed under `overridden` already
+  // carries the profiled numbering. Reusing those paragraphs for the base path
+  // would let the "un-profiled" classification see the overridden style mapping and
+  // silently agree with the profile — dropping the losing base inference from
+  // meta.conflicts. A fresh parse restores the true base numbering. (#317)
+  const baseParas = parseParagraphsOrThrow(
+    documentXml,
+    resolvedNumberingMap,
+    styleMap,
+    commentsById
+  );
+  const baseClassified = classifyParagraphs(baseParas, resolvedNumberingMap, styleMap);
   return mergeProfileConflicts(withProfile, baseClassified);
 }
 

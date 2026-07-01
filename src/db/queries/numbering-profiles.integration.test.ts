@@ -190,20 +190,59 @@ describe('setSpecNumberingProfile / clearSpecNumberingProfile', () => {
     });
 
     const assigned = await setSpecNumberingProfile(specId, profile.id);
-    expect(assigned).toBe(true);
+    expect(assigned).toBe('assigned');
 
     const cleared = await clearSpecNumberingProfile(specId);
     expect(cleared).toBe(true);
   });
 
-  it('returns false for an unknown spec id', async () => {
+  it("returns 'spec-not-found' for an unknown spec id", async () => {
     const lib = await createLibrary({ tier: 'client', name: 'np-test-assign-miss' });
     const profile = await createNumberingProfile(lib.id, 'Orphan Assign', MINIMAL_RULES);
     const result = await setSpecNumberingProfile(
       '00000000-0000-4000-8000-000000000099',
       profile.id
     );
-    expect(result).toBe(false);
+    expect(result).toBe('spec-not-found');
+  });
+
+  it("(#317) rejects assigning a profile owned by a DIFFERENT library ('library-mismatch')", async () => {
+    const libA = await createLibrary({ tier: 'client', name: 'np-test-xlib-a' });
+    const libB = await createLibrary({ tier: 'client', name: 'np-test-xlib-b' });
+    // ALT_RULES (maxCount 3) so a wrongful assignment would be observable vs the
+    // built-in default (maxCount 5) below.
+    const profileA = await createNumberingProfile(libA.id, 'Lib A Profile', ALT_RULES);
+    const specB = await createSpec({
+      section: '07 21 21',
+      title: 'np-test-xlib-spec',
+      source: 'arcat',
+      libraryId: libB.id,
+    });
+
+    const outcome = await setSpecNumberingProfile(specB, profileA.id);
+    expect(outcome).toBe('library-mismatch');
+
+    // The assignment did NOT happen — the spec still resolves to the built-in default.
+    const effective = await getEffectiveNumberingProfile(specB);
+    expect(effective?.tiers.part.maxCount).toBe(5);
+  });
+
+  it('(#317) allows assigning the built-in CSI Default to any library’s spec', async () => {
+    const lib = await createLibrary({ tier: 'client', name: 'np-test-builtin-assign' });
+    const spec = await createSpec({
+      section: '07 21 22',
+      title: 'np-test-builtin-spec',
+      source: 'arcat',
+      libraryId: lib.id,
+    });
+    const builtIn = await pool.query<{ id: string }>(
+      `SELECT id FROM numbering_profiles WHERE library_id IS NULL LIMIT 1`
+    );
+    const builtInId = builtIn.rows[0]?.id;
+    expect(builtInId).toBeDefined();
+
+    const outcome = await setSpecNumberingProfile(spec, builtInId as string);
+    expect(outcome).toBe('assigned');
   });
 });
 

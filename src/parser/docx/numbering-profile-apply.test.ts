@@ -5,6 +5,7 @@ import {
   extractNumberingProfile,
 } from './numbering-profile.js';
 import { classifyParagraphs } from './inference.js';
+import { classifyWithOptionalProfile } from './index.js';
 import type {
   ClassifiedParagraph,
   DocxParagraph,
@@ -201,6 +202,53 @@ describe('#299 INV4 — mergeProfileConflicts records the losing base classifica
       existing,
       { signal: 2, reportedIlvl: 3, reportedNodeType: 'pr2' },
     ]);
+  });
+});
+
+// ─── #317: style-inherited conflicts survive the profile override ────────────────
+
+// One style-inherited paragraph (w:pStyle, NO own w:numPr) — numId/ilvl come from
+// the map at parse time, which is exactly the path the base reparse must protect.
+function docXmlWithStyledPara(styleId: string, text: string): string {
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?>` +
+    `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+    `<w:p><w:pPr><w:pStyle w:val="${styleId}"/></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>` +
+    `</w:body></w:document>`
+  );
+}
+
+describe('#317 classifyWithOptionalProfile — style-inherited conflict is recorded, not dropped', () => {
+  it('records the losing base inference when a styleLadder override remaps a style-inherited paragraph', () => {
+    // Base: style H inherits numId 1 at ilvl 3 → with articleIlvl 1, offset 2 → pr2.
+    const base: NumberingMap = {
+      nums: new Map([
+        [1, { numId: 1, abstractNumId: 0 }],
+        [2, { numId: 2, abstractNumId: 0 }],
+      ]),
+      abstractNums: new Map([[0, { abstractNumId: 0, levels: [{ ilvl: 0, numFmt: 'decimal' }] }]]),
+      pStyleToNumId: new Map([['H', 1]]),
+      pStyleToIlvl: new Map([['H', 3]]),
+      articleIlvl: 1,
+      specShapedNumIds: new Set([1, 2]),
+    };
+    // Profile remaps style H to numId 2 at ilvl 1 → article (spec-shaped via base set).
+    const profile: NumberingProfile = {
+      tiers: { part: { numberStyle: 'integer', maxCount: 5 } },
+      numbering: [],
+      styleLadder: [{ styleId: 'H', numId: 2, ilvl: 1, tier: 'article' }],
+    };
+    const xml = docXmlWithStyledPara('H', 'Submittals and quality assurance');
+
+    const merged = classifyWithOptionalProfile(xml, base, emptyStyleMap(), new Map(), profile);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.nodeType).toBe('article'); // profile wins (authoritative)
+    // The losing un-profiled inference (pr2) MUST be recorded. Before the base
+    // reparse, the base path reused the overridden-baked numbering, classified the
+    // paragraph as 'article' too, and dropped this conflict entirely.
+    expect(merged[0]?.conflicts).toHaveLength(1);
+    expect(merged[0]?.conflicts[0]?.reportedNodeType).toBe('pr2');
   });
 });
 
