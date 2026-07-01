@@ -1,7 +1,11 @@
 // src/mcp/coordination-handler.ts
 import { getCoordinationReport, ProjectNotFoundError, PackageNotFoundError } from '../db/index.js';
+import { anchorsFromReport, anchorsMeta } from './anchors.js';
 
-type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
+type ToolOk = {
+  readonly content: { readonly type: 'text'; readonly text: string }[];
+  readonly _meta?: Record<string, unknown>;
+};
 type ToolError = {
   readonly isError: true;
   readonly content: { readonly type: 'text'; readonly text: string }[];
@@ -21,7 +25,11 @@ export async function handleCoordinationReport({
 }): Promise<ToolResult> {
   try {
     const report = await getCoordinationReport(projectId, packageId);
-    return { content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }] };
+    const meta = anchorsMeta(anchorsFromReport(report.findings));
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],
+      ...(meta ? { _meta: meta } : {}),
+    };
   } catch (err) {
     if (err instanceof ProjectNotFoundError || err instanceof PackageNotFoundError) {
       return toolErr(err.message);
