@@ -43,6 +43,8 @@ The technical challenge is not any single feature but the intersection of five r
 | DOCX generation | **dolanmiu/docx** | MIT, 5700★, 8M/week. Only TS library with full multilevel numbering control. Write-only — intentional for our use case. |
 | DOCX parsing | **JSZip** (raw OOXML) | No TS library resolves OOXML style inheritance or builds list hierarchy. We implement the inference engine from first principles. |
 | SEC parsing | **fast-xml-parser** | SpecsIntact XML (.SEC) uses a well-defined schema. Fast, zero deps. |
+| PDF text layer | **unpdf** (primary) + **pdfjs-dist** (fallback) | Extract the PDF text layer; drop to the low-level `pdfjs-dist` API for malformed files. Feeds the text-inference path (ADR-034). |
+| PDF OCR | **tesseract.js** + **@napi-rs/canvas** | WASM OCR for scanned/no-text-layer pages, rasterized via prebuilt native canvas. Bounded, offline-safe worker init (ADR-039). |
 | MCP server | **@modelcontextprotocol/sdk** | Exposes SpecR as an AI tool — paragraph search, spec reading, diff review — via Model Context Protocol (ADR-010). |
 | Logging | **pino** | Structured JSON logs, low overhead |
 | HTTP upload | **multer** | Multipart DOCX/SEC file uploads |
@@ -129,6 +131,15 @@ PostgreSQL: insert spec + paragraph rows with parent_id, ilvl, version
     ↓
 Return spec ID + summary
 ```
+
+`.SEC`, `.txt`, and `.pdf` uploads enter the same pipeline through format
+adapters that converge on the AST. PDF (ADR-034) extracts the text layer via
+`unpdf` (falling back to `pdfjs-dist`); pages with no usable text layer are
+rasterized and OCR'd with `tesseract.js`, with font-encoding recovery, then fed
+to the text-based inference path. OCR worker init is time-bounded and offline-safe
+so scanned PDFs degrade with warnings rather than hang (ADR-039). A parse may also
+apply a saved structural numbering profile as a deterministic override instead of
+the default 5-signal inference (`numberingProfileId`, #299).
 
 ### Data Flow: Generate
 
@@ -231,6 +242,7 @@ interface CsiNode {
   meta: {
     vanish?: boolean   // specifier note (CMT / ARCATnote / NTE)
     source?: 'ufgs' | 'arcat' | 'cpi' | 'unknown'
+    articleRole?: string // derived Article role — 'related-sections' | 'references' | 'submittals' | … (ADR-033, not persisted)
     revitParam?: string // Revit parameter binding (Phase 4)
     baseVersion?: number // for 3-way merge
   }
@@ -258,7 +270,7 @@ interface ApiResponse<T> {
 
 | Method | Path | Body | Response |
 |--------|------|------|----------|
-| POST | `/parse` | multipart: `file` (.docx or .sec), `section?`, `title?` | `202 { jobId }` — async; poll `GET /parse/jobs/:jobId` for result |
+| POST | `/parse` | multipart: `file` (.docx/.sec/.txt/.pdf), `section?`, `title?`, `numberingProfileId?` | `202 { jobId }` — async; poll `GET /parse/jobs/:jobId` for result |
 | GET | `/parse/jobs/:jobId` | — | `{ jobId, status, progress, result?, error? }` |
 | GET | `/specs/:id` | — | `CsiTree` |
 | PATCH | `/specs/:id` | `{ title?, section? }` | `{ specId, title, section }` |
@@ -272,6 +284,17 @@ interface ApiResponse<T> {
 | POST | `/mcp` | MCP JSON-RPC request | MCP JSON-RPC response (Streamable HTTP transport) |
 | GET | `/mcp` | — | `405 Method Not Allowed` |
 | DELETE | `/mcp` | — | `405 Method Not Allowed` |
+
+The table above is the original MVP surface. `openapi.yaml` is the authoritative,
+CI-enforced contract (rendered live at `GET /docs` via Scalar, served raw at
+`GET /openapi.yaml`). Endpoint groups added since the MVP:
+
+- **Spec lifecycle:** `DELETE /specs/:id` (soft-withdraw) + `/specs/:id/restore`; advisory locks (`GET/PUT/DELETE /specs/:id/lock`); reversible paragraph removal; single-paragraph `PATCH`.
+- **Onboarding & editability:** `PATCH .../editability`, `POST /specs/:id/reclassify`, `POST /specs/:id/finalize` & `/reopen`, `POST .../comments/:index/accept-as-note`, external-content associations, `POST/DELETE /specs/:id/style-source`, numbering-profile assignment.
+- **Projects:** `GET /projects` (list), `PATCH /projects/:id` (rename + `sectionNumberFormat`), `DELETE /projects/:id` + `/restore`, `PUT /projects/:id/sources`.
+- **Coordination / E&O:** required-sections (project + package), `GET /projects/:id/coordination-report`, `POST /projects/:id/submittal-register`, `GET /specs/:id/open-comments` & `GET /projects/:id/open-comments`.
+- **Libraries:** `GET /libraries`, `POST /libraries/clients`, `PATCH /libraries/:id`, `GET /libraries/:id/specs`, async `POST /libraries/:id/import`, convention profiles, numbering profiles.
+- **Revisions & templates:** `POST /revisions/:id/generate` (issued/addendum manuals), revision-nomenclature profiles, style-template CRUD + `POST /templates/import`.
 
 ## Database Schema (Overview)
 
@@ -298,6 +321,8 @@ CREATE TABLE specs (
   origin_version INTEGER,
   content_version INTEGER NOT NULL DEFAULT 1,
   origin_meta JSONB,
+  onboarding_status TEXT NOT NULL DEFAULT 'active', -- 'review' | 'active' (ADR-022; #139)
+  withdrawn_at TIMESTAMPTZ,                          -- NULL = active; soft-withdraw a master (ADR-030)
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -311,6 +336,9 @@ CREATE TABLE paragraphs (
   text TEXT,
   position INTEGER,      -- sibling order
   vanish BOOLEAN DEFAULT false,
+  source_facts JSONB NOT NULL DEFAULT '{}', -- parsed comment/color/choice-token facts (#187)
+  classification JSONB,                      -- derived editability classification (ADR-022)
+  editability_override JSONB,                -- human override, never merged into classification (ADR-022 D2)
   revit_param TEXT,
   origin_paragraph_id UUID REFERENCES paragraphs(id) ON DELETE SET NULL,
   base_version INTEGER DEFAULT 1,
@@ -333,6 +361,10 @@ CREATE TABLE projects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   description TEXT,
+  -- section_number_format CHECK IN ('canonical','dots','compact','spaced-compact') (ADR-032)
+  section_number_format TEXT NOT NULL DEFAULT 'canonical',
+  deleted_at TIMESTAMPTZ,   -- NULL = active; soft-delete (ADR-031)
+  deleted_by TEXT,          -- free-text actor recorded at soft-delete
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -432,6 +464,25 @@ CREATE TABLE revit_parameter_mappings (
 );
 ```
 
+### Additional tables
+
+Later migrations add these tables (see the migration files and cited ADRs for
+column detail):
+
+| Table | Purpose | ADR / PR |
+|-------|---------|----------|
+| `division_general_specs` | Division-general context, library- and project-scoped | ADR-023 |
+| `editing_conventions` | Built-in + library-scoped editability convention profiles | ADR-022 |
+| `paragraph_associations` | Paragraph ↔ external document reference links | #242 |
+| `required_sections` | Authored required-sections substrate (project + package scope) | ADR-028 |
+| `keynotes` | Keynote master table + project-filtered query (**storage only**, no API/render yet) | ADR-016 |
+| `header_footer_configs` | Scoped header/footer overrides (**foundation only**, no resolution/render yet) | ADR-017, ADR-040 |
+| `numbering_profiles` | Saved structural numbering profiles, library-scoped | #299 |
+| `revision_nomenclature_profiles` | Structured revision/addendum naming, built-in + project override | ADR-025 |
+
+Concurrency/versioning also add advisory lock and lifecycle-state storage
+(ADR-018). Style storage moved to a JSONB payload on `style_rules` (ADR-021).
+
 ### Composite Revit identity
 
 A single Revit family instance (e.g., "Data Outlet A") is rarely one parameter source — it contains multiple sub-components (faceplate, jack, conduit, backbox, cable), each with its own Revit parameters. The schema treats `(revit_instance_id, revit_component_role, revit_param)` as the source identity, with `revit_component_role = NULL` reserved for parameters defined at the family-instance level itself.
@@ -489,6 +540,42 @@ When a Revit model sync pushes new Family Instance data, the system will surface
 - Candidate new spec sections (new Revit category with no matching spec in TOC)
 
 These appear in the web dashboard as pending additions — not auto-applied. The spec manager approves or rejects. The `spec_references` model supports this: a Revit-sourced paragraph can carry references the same way parsed content does.
+
+## Coordination Report / Errors-&-Omissions
+
+`GET /projects/:id/coordination-report` is a read-only, computed report over a
+project's TOC, authored intent, and extracted references. It never mutates state;
+it returns a discriminated union of `Finding` types plus per-type summary counts.
+Findings are backed by `src/db/queries/coordination.ts` and its helpers
+(`article-refs.ts`, `umbrella-callouts.ts`, `snippet.ts`) and the
+`src/coordination/` and `src/submittals/` modules. The finding vocabulary:
+
+| Finding | Meaning | ADR |
+|---------|---------|-----|
+| `required_not_present` | Section authored as required but absent from the TOC | ADR-028/029 |
+| `present_not_required` | Section in the TOC but not in the required baseline | ADR-028/029 |
+| `dangling_ref` | Reference to a section not present (carries `sourceParagraphId` + `snippet`) | #269 |
+| `related_listed_not_cited` | Listed in a Related Sections article but never cited in the body | #277 |
+| `related_cited_not_listed` | Cited in the body but missing from Related Sections | #277 |
+| `standard_cited_not_listed` | Standard cited in body but absent from the References article | #277 |
+| `umbrella_not_called_out` | Umbrella section (Div 26/27/28) not cross-called by a subordinate | ADR-037 |
+| `implied_related_section` | Advisory: a likely related section inferred by title-keyword match | ADR-035 |
+| `product_*` / `submittal_type_*` | Product↔submittal-type gaps from the submittal register | ADR-036 |
+
+The **submittal register** (`POST /projects/:id/submittal-register`) is a related,
+product-driven analysis returning the same-shaped findings for selected specs.
+Semantic **article-role tagging** (ADR-033) is the substrate several of these
+findings build on — see the AST section.
+
+## Document Concurrency
+
+Writes are guarded so concurrent editors do not clobber each other (ADR-018).
+Paragraph updates are **optimistic** (version-checked); a spec carries an
+advisory **lock** (`GET/PUT/DELETE /specs/:id/lock`, acquire/refresh/steal-after-expiry/release);
+and specs move through a review/active **lifecycle** (`onboarding_status`), with
+issued package revisions frozen as immutable snapshots. The edit-gate and lock
+logic live in `src/api/locks.ts`, `src/api/edit-gate-response.ts`, and
+`src/db/queries/{locks,edit-gate,revisions}.ts`.
 
 ## Phased Delivery
 
@@ -721,7 +808,7 @@ specr/
 │   ├── mcp/
 │   │   ├── server.ts            # registerMcpRoutes(app) — Streamable HTTP routing: stateless + stateful sessions
 │   │   ├── sessions.ts          # McpSessionStore — stateful session lifecycle (Map keyed by minted session id)
-│   │   ├── tools.ts             # registerTools(server): search_library, list_sections, get_spec, get_paragraph, parse_document, generate_docx, load_files, coordination_report — and delegates to registerOnboardingTools (onboarding-tools.ts)
+│   │   ├── tools.ts             # registerTools(server): search_library, list_sections, get_spec, get_paragraph, get_spec_lineage, get_spec_diff, get_numbering_profile, get_references, list_projects, parse_document, generate_docx, load_files, coordination_report, submittal_register, open_comments_report — and delegates to registerOnboardingTools (onboarding-tools.ts)
 │   │   ├── onboarding-tools.ts  # registerOnboardingTools(server): review_editability, get_onboarding_report, set_/clear_editability_override, reclassify_spec (#140)
 │   │   ├── onboarding-handlers.ts # handlers for the onboarding tools — thin adapters over the shared db/index.js queries (single source with REST)
 │   │   └── resources.ts         # registerResources(server): specr://specs/{id}, specr://sections
