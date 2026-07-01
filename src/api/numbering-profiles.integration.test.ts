@@ -144,6 +144,14 @@ describe('GET /libraries/:id/numbering-profiles', () => {
     const res = await get('/libraries/not-a-uuid/numbering-profiles');
     expect(res.status).toBe(400);
   });
+
+  it('404 — unknown library (does not silently return just the built-in default) (#320)', async () => {
+    const res = await get(`/libraries/${UNKNOWN_UUID}/numbering-profiles`);
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('library not found');
+  });
 });
 
 // ─── POST /libraries/:id/numbering-profiles ───────────────────────────────────

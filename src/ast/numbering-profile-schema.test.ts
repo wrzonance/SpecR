@@ -49,4 +49,16 @@ describe('NumberingProfileSchema', () => {
       })
     ).toThrow();
   });
+
+  // #320: articleIlvl 0 is unrepresentable — ilvlToNodeType always maps ilvl 0 to
+  // 'part', so an article could never appear (and no PART tier could exist below it).
+  // Reject it at the boundary rather than accept a profile that corrupts hierarchy.
+  it('rejects articleIlvl 0 (article can never share ilvl 0 with part)', () => {
+    expect(() => NumberingProfileSchema.parse({ ...valid, articleIlvl: 0 })).toThrow();
+  });
+
+  it('accepts articleIlvl 1 (the minimum valid Article level)', () => {
+    const parsed = NumberingProfileSchema.parse({ ...valid, articleIlvl: 1 });
+    expect(parsed.articleIlvl).toBe(1);
+  });
 });

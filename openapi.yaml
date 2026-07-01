@@ -3420,6 +3420,8 @@ paths:
                           $ref: '#/components/schemas/NumberingProfileRow'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -5926,8 +5928,9 @@ components:
       description: >
         Extracted numbering configuration from a DOCX file. Carries tiers
         (CSI hierarchy), numbering (numId→levels map), styleLadder (style→tier
-        map), and articleIlvl (zero-based index of the Article level). Open
-        schema — unknown keys are preserved for forward-compatibility.
+        map), and articleIlvl (the ilvl at which the Article tier sits, always
+        >= 1 — ilvl 0 is the PART tier). Open schema — unknown keys are
+        preserved for forward-compatibility.
       additionalProperties: true
       required: [tiers, numbering, styleLadder]
       properties:
@@ -6022,8 +6025,10 @@ components:
                 enum: [part, article, paragraph, subparagraph]
         articleIlvl:
           type: integer
-          minimum: 0
-          description: Zero-based ilvl of the Article tier in this document.
+          minimum: 1
+          description: >
+            Ilvl of the Article tier. Always >= 1 — ilvl 0 is reserved for the
+            PART tier, so the Article level can never be 0.
 
     NumberingProfileRow:
       type: object

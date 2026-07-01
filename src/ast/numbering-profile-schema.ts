@@ -47,7 +47,9 @@ export const NumberingProfileSchema = z
         })
         .catchall(JsonValue)
     ),
-    articleIlvl: z.number().int().min(0).exactOptional(),
+    // Article sits BELOW part; ilvl 0 is always 'part' (ilvlToNodeType), so the
+    // Article level is never 0. min(1) rejects an unrepresentable articleIlvl 0. (#320)
+    articleIlvl: z.number().int().min(1).exactOptional(),
   })
   .catchall(JsonValue);
 
