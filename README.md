@@ -12,7 +12,7 @@ SpecR is an independent project and is not affiliated with CSI.
 SpecR treats specifications as structured data rather than opaque Word files.
 The core workflow is:
 
-1. Upload a `.docx`, `.SEC`, or `.txt` spec.
+1. Upload a `.docx`, `.SEC`, `.txt`, or `.pdf` spec.
 2. Parse it into a parent/child CSI paragraph tree.
 3. Store the canonical AST and paragraph lineage in PostgreSQL.
 4. Generate DOCX or `.SEC` output from the AST.
@@ -25,17 +25,34 @@ sync workflows are still roadmap items.
 ## Included Today
 
 - DOCX parser with 5-signal hierarchy inference, inference-conflict surfacing,
-  source-fact capture, and ARCAT/CPI/LibreOffice fixture coverage.
+  source-fact capture, hidden/`vanish` content retention (excluded from
+  structural inference, not discarded), and ARCAT/CPI/LibreOffice fixture
+  coverage.
 - UFGS SpecsIntact `.SEC` parser and `.SEC` output renderer.
 - Plaintext `.txt` parser for read-only ingest.
+- PDF parser: text-layer extraction with a `pdfjs-dist` fallback, automatic
+  OCR (`tesseract.js`) for scanned pages, and font-encoding recovery — feeding
+  the same text-based inference path, with graceful degradation warnings.
 - PostgreSQL-backed specs, paragraphs, versions, projects, libraries, design
   packages, package revisions, style templates, conventions, locks, and lineage.
-- DOCX generator with CSI multilevel numbering, content-control UUID anchors,
-  style-template application, multi-section manual assembly, cover page, and TOC
-  field support.
+- DOCX generator with CSI multilevel numbering (seven CSI tiers), content-control
+  UUID anchors, style-template application, multi-section manual assembly, cover
+  page, and TOC field support.
+- Immutable package revisions with revision/addendum manual rendering
+  (`POST /revisions/{id}/generate`) and project-scoped revision-nomenclature
+  profiles.
 - Diff and merge endpoints for round-trip reviewer redlines.
+- Document concurrency: optimistic paragraph writes, advisory spec locks, and a
+  review/active lifecycle state.
+- Project coordination / errors-&-omissions report: required-vs-present sections,
+  dangling references, Related-Sections/References article-body consistency,
+  umbrella↔subordinate call-outs, implied related sections, and a product-driven
+  submittal register.
+- Onboarding pipeline: async library-master import, per-paragraph editability
+  classification with human overrides, reclassify, finalize/reopen, comment
+  closure + open-comments reporting, and structural numbering profiles.
 - Style-template CRUD, DOCX template import, convention profile CRUD, and
-  editability classification persistence with user overrides.
+  spec/project soft-delete (withdraw) with restore.
 - MCP Streamable HTTP server with read-oriented tools/resources and optional
   stateful sessions.
 - Revit 2024 add-in scaffold with a typed REST client and health-check ribbon
@@ -46,14 +63,28 @@ work.
 
 ## API Surface
 
-The canonical contract is [openapi.yaml](openapi.yaml). Key groups:
+The canonical contract is [openapi.yaml](openapi.yaml), CI-enforced by a
+route↔spec coverage gate. It is rendered as a live Scalar reference at `GET /docs`
+and served raw at `GET /openapi.yaml`. Key groups:
 
-- Parsing: `POST /parse`, `GET /parse/jobs/{jobId}`
-- Specs: `GET/PATCH /specs/{id}`, paragraph updates, lineage, locks
-- Generation: `POST /specs/{id}/generate`, `POST /projects/{id}/generate`
+- Parsing: `POST /parse` (`.docx`/`.SEC`/`.txt`/`.pdf`, optional numbering
+  profile), `GET /parse/jobs/{jobId}`
+- Specs: `GET/PATCH/DELETE /specs/{id}` (soft-withdraw) + `restore`, paragraph
+  updates, editability overrides, reversible paragraph removal, reclassify,
+  finalize/reopen, external-content associations, lineage, style-source,
+  numbering-profile assignment, and advisory locks
+- Generation: `POST /specs/{id}/generate`, `POST /projects/{id}/generate`,
+  `POST /revisions/{id}/generate` (issued/addendum manuals)
 - Round trip: `POST /specs/{id}/diff`, `POST /specs/{id}/merge`
-- Projects and references: project TOCs, broken refs, inbound refs
-- Packages and revisions: design packages and immutable revision snapshots
+- Projects: list/create, rename + settings, soft-delete + restore, sources,
+  TOC, references (broken/inbound), division general-spec
+- Coordination: required-sections (project + package), `GET
+  /projects/{id}/coordination-report`, `POST /projects/{id}/submittal-register`,
+  open-comments
+- Libraries: list, client-tier create, rename, specs, async master import,
+  convention profiles, numbering profiles
+- Packages and revisions: design packages, immutable revision snapshots, and
+  revision-nomenclature profiles
 - Templates and conventions: style templates, DOCX template import, convention
   profiles
 - MCP: `POST /mcp`
@@ -72,11 +103,14 @@ reading or correcting via `db/index.js` queries, rate-limited by the shared
 | `get_paragraph` | One paragraph with its ancestor chain |
 | `get_spec_lineage` | Chain of custody for a spec (ADR-015) |
 | `get_spec_diff` | 3-way merge diff for a returned DOCX |
-| `parse_document` | Parse and store a base64 DOCX/SEC/TXT |
+| `get_numbering_profile` | Read a spec's effective structural numbering profile |
+| `parse_document` | Parse and store a base64 DOCX/SEC/TXT/PDF |
 | `generate_docx` | Generate DOCX from a stored spec |
 | `load_files` | Bulk-load specs by glob or paths |
 | `list_projects` / `get_references` | Project list and per-section cross-references |
 | `coordination_report` | Project errors-and-omissions report |
+| `submittal_register` | Product-driven submittal register for selected specs |
+| `open_comments_report` | Open (unclosed) Word comments in a spec or project |
 | `review_editability` | Per-paragraph editability + confidence + evidence (low-confidence filter) |
 | `get_onboarding_report` | Spec onboarding report (editability summary, style source, status) |
 | `set_editability_override` / `clear_editability_override` | Apply or remove a human editability override |
@@ -122,6 +156,14 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md). The short version:
 
 Module boundaries are intentionally strict: import sibling modules through their
 `index.ts` barrels, not internal files.
+
+## Example Client
+
+`examples/web_ui_demo/` is a standalone reference web client for the REST API — a
+static front end plus a small proxy server. It lives under `examples/` on purpose:
+it may drift as the API evolves and must never require backend changes. See
+[examples/web_ui_demo/README.md](examples/web_ui_demo/README.md) to run it,
+including Windows/corporate-proxy launch helpers.
 
 ## Reference Data
 
