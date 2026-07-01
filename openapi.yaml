@@ -3420,6 +3420,8 @@ paths:
                           $ref: '#/components/schemas/NumberingProfileRow'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -6022,8 +6024,10 @@ components:
                 enum: [part, article, paragraph, subparagraph]
         articleIlvl:
           type: integer
-          minimum: 0
-          description: Zero-based ilvl of the Article tier in this document.
+          minimum: 1
+          description: >
+            Zero-based ilvl of the Article tier. Always >= 1 — ilvl 0 is the PART
+            tier, so the Article level can never be 0.
 
     NumberingProfileRow:
       type: object

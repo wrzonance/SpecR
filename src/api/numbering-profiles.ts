@@ -9,6 +9,7 @@ import {
   deleteNumberingProfile,
   setSpecNumberingProfile,
   clearSpecNumberingProfile,
+  findLibraryById,
   NumberingProfileInUseError,
 } from '../db/index.js';
 import type {
@@ -60,6 +61,14 @@ export async function listProfilesHandler(req: Request, res: Response): Promise<
   const libraryId = parseUuid(req, res, 'library');
   if (!libraryId) return;
   try {
+    // Verify the parent library exists first — listNumberingProfiles matches the
+    // built-in CSI Default (library_id IS NULL) regardless, so a typo/deleted
+    // library UUID would otherwise return 200 with just the built-in. (#320)
+    const library = await findLibraryById(libraryId);
+    if (!library) {
+      res.status(404).json({ success: false, error: 'library not found' });
+      return;
+    }
     const profiles = await listNumberingProfiles(libraryId);
     res.status(200).json({ success: true, data: profiles });
   } catch (err) {
