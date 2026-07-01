@@ -82,8 +82,22 @@ describe('isPartHeading', () => {
 });
 
 describe('matchIndentSignal', () => {
-  it('returns 0 for no indentation (part level)', () => {
-    expect(matchIndentSignal(0)).toBe(0);
+  it('returns null for no indentation (0) — indentation never establishes a PART', () => {
+    // Regression (08 1416 Flush Wood Doors.docx): a ≈0 indent is not positive evidence
+    // of the top (PART) tier — most body text and headers are unindented too. Signal 5
+    // must only distinguish article-and-deeper; a real PART is set by numbering / "PART
+    // n" text / a part style, never by "not indented". Returning 0 here made an
+    // unindented preamble line ("SUMMARY OF CHANGE(S):") a phantom PART.
+    expect(matchIndentSignal(0)).toBeNull();
+  });
+
+  it('returns null for a negative (hanging/outdent) left indent', () => {
+    // -86 twips rounds to -0; the old `estimated < 0` guard let -0 through as ilvl 0 → PART.
+    expect(matchIndentSignal(-86)).toBeNull();
+  });
+
+  it('returns null for a small positive indent that rounds to 0 (< half a level)', () => {
+    expect(matchIndentSignal(200)).toBeNull();
   });
 
   it('returns 1 for 576 twips (article level)', () => {

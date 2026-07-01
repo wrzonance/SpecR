@@ -216,6 +216,44 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
     expect(result[0]?.signalUsed).toBe(5);
   });
 
+  it('indent alone never creates a PART — negative-indent "SUMMARY OF CHANGE(S):" preamble (08 14 16)', () => {
+    // Regression (08 1416 Flush Wood Doors.docx): a preamble line "SUMMARY OF
+    // CHANGE(S):" with a slight NEGATIVE left indent (-86 twips), no numbering, no
+    // style, not hidden. Signal 5 rounded -86/576 → -0 → ilvl 0 → 'part', inventing a
+    // phantom PART 1 that pushed GENERAL/PRODUCTS/EXECUTION to PART 2/3/4. Indentation
+    // is the weakest signal and must never establish a PART (the top tier needs real
+    // evidence: numbering, "PART n" text, or a part style) — so a paragraph whose only
+    // signal is a ≈0/negative indent falls through to continuation.
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: -86, text: 'SUMMARY OF CHANGE(S):' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).not.toBe('part');
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.signalUsed).toBe(3);
+  });
+
+  it('indent alone never creates a PART — a plain unindented (0) paragraph is not a part', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 0, text: 'Some unindented preamble line.' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).not.toBe('part');
+    expect(result[0]?.nodeType).toBe('continuation');
+  });
+
+  it('signal 5 still classifies article-and-deeper from indentation (article unaffected)', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 576, text: 'Lorem ipsum dolor sit amet consectetur.' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(5);
+  });
+
   it('continuation: no signal fires → nodeType continuation, signalUsed 3', () => {
     const result = classifyParagraphs(
       [makePara({ text: 'Some plain paragraph text.' })],

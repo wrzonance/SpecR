@@ -103,7 +103,14 @@ export function matchIndentSignal(leftIndent: number | undefined): number | null
   if (leftIndent === undefined) return null;
 
   const estimated = Math.round(leftIndent / TWIPS_PER_LEVEL);
-  if (estimated < 0 || estimated > MAX_ILVL) return null;
+  // estimated <= 0 (a ≈0 or negative/hanging indent) is NOT positive evidence of the
+  // top PART tier — unindented body text, headers, and preamble lines all sit at ~0.
+  // Indentation only distinguishes article-and-deeper (ilvl >= 1); a real PART is set by
+  // numbering, "PART n" text, or a part style, never by "not indented". Returning 0 here
+  // let a negative-indent preamble ("SUMMARY OF CHANGE(S):", -86 twips → round → -0)
+  // become a phantom PART. Also rejects the negative case the old `< 0` guard missed
+  // (Math.round(-86/576) === -0, which is not < 0).
+  if (estimated <= 0 || estimated > MAX_ILVL) return null;
 
   return estimated;
 }
