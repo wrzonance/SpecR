@@ -6027,8 +6027,8 @@ components:
           type: integer
           minimum: 1
           description: >
-            Zero-based ilvl of the Article tier. Always >= 1 — ilvl 0 is the PART
-            tier, so the Article level can never be 0.
+            Ilvl of the Article tier. Always >= 1 — ilvl 0 is reserved for the
+            PART tier, so the Article level can never be 0.
 
     NumberingProfileRow:
       type: object
