@@ -4098,9 +4098,9 @@ components:
     FindingUmbrellaNotCalledOut:
       type: object
       description: >
-        A Division 26/27/28 subordinate section does not cite its division umbrella
-        section (`DD 00 00`). Divisions outside the registry are skipped and
-        reported in coordination report notes.
+        A subordinate section does not cite its division umbrella section
+        (`DD 00 00`). Checked across every division present in scope (ADR-042);
+        the coordination report notes list the divisions covered.
       required: [type, sourceSpecId, sourceSpecSection, umbrellaSpecSection]
       properties:
         type: { type: string, enum: [umbrella_not_called_out] }

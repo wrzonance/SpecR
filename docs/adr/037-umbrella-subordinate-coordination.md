@@ -2,7 +2,13 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-042](042-umbrella-check-all-divisions.md).
+
+The narrow 26/27/28 registry below was the initial, deliberately conservative scope. ADR-042
+generalizes the check to every division present in scope; the `umbrella_not_called_out` finding
+shape, the reference-based satisfaction rule, and the purity/no-migration properties are all
+retained unchanged. Read this ADR for the original rationale; read ADR-042 for the current
+behavior.
 
 ## Context
 

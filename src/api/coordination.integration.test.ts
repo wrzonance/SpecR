@@ -72,8 +72,9 @@ describe('coordination-report API', () => {
     };
     expect(body.success).toBe(true);
     expect(body.data.summary.total).toBe(body.data.findings.length);
-    // present 05 12 00 (not required) + required 07 92 00 (absent) = 2 findings
-    expect(body.data.summary.total).toBe(2);
+    // present 05 12 00 (not required) + required 07 92 00 (absent)
+    // + 05 12 00 omits its 05 00 00 umbrella call-out (ADR-042, all divisions) = 3 findings
+    expect(body.data.summary.total).toBe(3);
   });
 
   it('#259: a body section ref with no Related Sections entry surfaces related_cited_not_listed', async () => {

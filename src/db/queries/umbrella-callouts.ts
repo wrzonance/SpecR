@@ -20,9 +20,6 @@ export interface UmbrellaCalloutResult {
   readonly notes: readonly string[];
 }
 
-const SUPPORTED_UMBRELLA_DIVISIONS = ['26', '27', '28'] as const;
-const SUPPORTED_SET = new Set<string>(SUPPORTED_UMBRELLA_DIVISIONS);
-
 function divisionOf(section: string): string | null {
   const match = /^(\d{2}) /.exec(section);
   return match?.[1] ?? null;
@@ -72,26 +69,11 @@ function checkedFinding(
   };
 }
 
-function skippedDivisions(present: readonly UmbrellaPresentSpec[]): readonly string[] {
-  const divisions = new Set<string>();
-  for (const spec of present) {
-    const division = divisionOf(spec.section);
-    if (division !== null && !SUPPORTED_SET.has(division) && !isUmbrella(spec.section, division)) {
-      divisions.add(division);
-    }
-  }
-  return [...divisions].sort((a, b) => a.localeCompare(b));
-}
-
-function coverageNotes(present: readonly UmbrellaPresentSpec[]): readonly string[] {
-  const skipped = skippedDivisions(present);
-  return skipped.length === 0
+function coverageNotes(divisions: readonly string[]): readonly string[] {
+  const unique = [...new Set(divisions)].sort((a, b) => a.localeCompare(b));
+  return unique.length === 0
     ? []
-    : [
-        `umbrella call-out check covers only divisions ${SUPPORTED_UMBRELLA_DIVISIONS.join(
-          ', '
-        )}; skipped divisions: ${skipped.join(', ')}`,
-      ];
+    : [`umbrella call-out check covers all divisions in scope: ${unique.join(', ')}`];
 }
 
 export function buildUmbrellaCalloutFindings(
@@ -99,11 +81,15 @@ export function buildUmbrellaCalloutFindings(
   sectionRefs: readonly UmbrellaSectionRef[]
 ): UmbrellaCalloutResult {
   const grouped = refsBySource(sectionRefs);
-  const findings = present.flatMap((spec) => {
+  // Resolve each spec's division once, then derive both findings and the
+  // coverage note from that single pass (no repeated divisionOf scan).
+  const withDivision = present.flatMap((spec) => {
     const division = divisionOf(spec.section);
-    if (division === null || !SUPPORTED_SET.has(division)) return [];
+    return division === null ? [] : [{ spec, division }];
+  });
+  const findings = withDivision.flatMap(({ spec, division }) => {
     const finding = checkedFinding(spec, division, grouped);
     return finding === null ? [] : [finding];
   });
-  return { findings, notes: coverageNotes(present) };
+  return { findings, notes: coverageNotes(withDivision.map(({ division }) => division)) };
 }
