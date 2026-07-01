@@ -20,9 +20,6 @@ export interface UmbrellaCalloutResult {
   readonly notes: readonly string[];
 }
 
-const SUPPORTED_UMBRELLA_DIVISIONS = ['26', '27', '28'] as const;
-const SUPPORTED_SET = new Set<string>(SUPPORTED_UMBRELLA_DIVISIONS);
-
 function divisionOf(section: string): string | null {
   const match = /^(\d{2}) /.exec(section);
   return match?.[1] ?? null;
@@ -72,26 +69,20 @@ function checkedFinding(
   };
 }
 
-function skippedDivisions(present: readonly UmbrellaPresentSpec[]): readonly string[] {
+function coveredDivisions(present: readonly UmbrellaPresentSpec[]): readonly string[] {
   const divisions = new Set<string>();
   for (const spec of present) {
     const division = divisionOf(spec.section);
-    if (division !== null && !SUPPORTED_SET.has(division) && !isUmbrella(spec.section, division)) {
-      divisions.add(division);
-    }
+    if (division !== null) divisions.add(division);
   }
   return [...divisions].sort((a, b) => a.localeCompare(b));
 }
 
 function coverageNotes(present: readonly UmbrellaPresentSpec[]): readonly string[] {
-  const skipped = skippedDivisions(present);
-  return skipped.length === 0
+  const divisions = coveredDivisions(present);
+  return divisions.length === 0
     ? []
-    : [
-        `umbrella call-out check covers only divisions ${SUPPORTED_UMBRELLA_DIVISIONS.join(
-          ', '
-        )}; skipped divisions: ${skipped.join(', ')}`,
-      ];
+    : [`umbrella call-out check covers all divisions in scope: ${divisions.join(', ')}`];
 }
 
 export function buildUmbrellaCalloutFindings(
@@ -101,7 +92,7 @@ export function buildUmbrellaCalloutFindings(
   const grouped = refsBySource(sectionRefs);
   const findings = present.flatMap((spec) => {
     const division = divisionOf(spec.section);
-    if (division === null || !SUPPORTED_SET.has(division)) return [];
+    if (division === null) return [];
     const finding = checkedFinding(spec, division, grouped);
     return finding === null ? [] : [finding];
   });
