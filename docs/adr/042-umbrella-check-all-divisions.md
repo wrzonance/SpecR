@@ -45,7 +45,7 @@ Generalize the umbrella call-out check to **every division present in scope**. D
 Replace the "skipped divisions" note with a positive, dynamic coverage note that names what was
 actually checked:
 
-```
+```text
 umbrella call-out check covers all divisions in scope: 03, 05, 26
 ```
 
