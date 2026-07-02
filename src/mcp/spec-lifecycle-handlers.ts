@@ -26,7 +26,9 @@ export const SpecIdShape = {
 const SpecIdArgs = z.object(SpecIdShape);
 
 // Path id + the REST PATCH body reused verbatim, so the tool advertises exactly what
-// the handler validates. At least one field must change (matches update_project).
+// the handler validates. Deliberately stricter than REST: at least one field must change
+// (consistent with update_project). REST PATCH /specs treats {} as a no-op, but for an
+// agent an empty update is a mistake worth rejecting rather than silently no-op'ing.
 export const UpdateSpecShape = {
   ...SpecIdShape,
   ...PatchSpecBodySchema.shape,
