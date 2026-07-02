@@ -56,6 +56,21 @@ describe('matchTextSignal', () => {
     });
   });
 
+  // Codex adversarial review (P2): a manual heading may put a dash/colon/em-dash BETWEEN
+  // the "N.N" and the title ("1.2 - RELATED SECTIONS"). planOutlineNumberStrip already
+  // consumes those separators, so the classification gate must too — skip the whole
+  // separator run before checking for the capital title, or a real heading is demoted.
+  it('classifies a separator-delimited "N.N - TITLE" heading as an article', () => {
+    expect(matchTextSignal('1.2 - RELATED SECTIONS')).toEqual({
+      nodeType: 'article',
+      normalizedIlvl: 1,
+    });
+    expect(matchTextSignal('1.2: SUMMARY')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
+    expect(matchTextSignal('1.2 — Products')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
+    // …but a dash/colon before a lowercase/measurement continuation is still prose.
+    expect(matchTextSignal('1.2 - 2.0 inches range')).toBeNull();
+  });
+
   // Codex adversarial review (P2): a single-dot "N.N" is a HEADING only when a capital
   // letter follows (CSI headings are titled). A lowercase continuation is authored
   // PROSE — a decimal measurement ("2.0 inches …") or a sentence — and must NOT become
@@ -226,6 +241,10 @@ describe('isDecimalProse', () => {
     expect(isDecimalProse('RELATED SECTIONS')).toBe(false); // no leading decimal
     expect(isDecimalProse('1. list item')).toBe(false); // no interior decimal (pr2 label form)
     expect(isDecimalProse('The 2.0 inch pipe')).toBe(false); // decimal not at start
+    // A separator-delimited heading is NOT prose (mirror of the Signal-4 gate): the
+    // capital title after the dash/colon marks it a heading.
+    expect(isDecimalProse('1.2 - RELATED SECTIONS')).toBe(false);
+    expect(isDecimalProse('1.2: SUMMARY')).toBe(false);
   });
 });
 
