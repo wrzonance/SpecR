@@ -42,6 +42,14 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['delete /specs/{}', 'delete_spec'], // destructive tier — soft withdraw (ADR-030)
   // wave 5 — merge
   ['post /specs/{}/merge', 'apply_merge'],
+  // wave 6 — assignment (numbering profile / style source / lock)
+  ['put /specs/{}/numbering-profile', 'assign_numbering_profile'],
+  ['delete /specs/{}/numbering-profile', 'clear_numbering_profile'],
+  ['post /specs/{}/style-source', 'assign_style_source'],
+  ['delete /specs/{}/style-source', 'clear_style_source'],
+  ['get /specs/{}/lock', 'get_spec_lock'],
+  ['put /specs/{}/lock', 'lock_spec'],
+  ['delete /specs/{}/lock', 'unlock_spec'],
   // …extend during each write-tool wave.
 ]);
 
@@ -63,14 +71,6 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['put /packages/{}/specs', 'pending — wave 2 (assign_specs_to_package)'],
   ['post /packages/{}/revisions', 'pending — wave 2 (issue package revision)'],
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
-  // --- Wave 6: assignment (numbering profile / style source / lock) ---
-  ['put /specs/{}/numbering-profile', 'pending — wave 6 (assign_numbering_profile)'],
-  ['delete /specs/{}/numbering-profile', 'pending — wave 6 (clear numbering-profile assignment)'],
-  ['post /specs/{}/style-source', 'pending — wave 6 (assign_style_source)'],
-  ['delete /specs/{}/style-source', 'pending — wave 6 (clear style-source assignment)'],
-  ['get /specs/{}/lock', 'pending — wave 6 (read spec lock)'],
-  ['put /specs/{}/lock', 'pending — wave 6 (lock_spec)'],
-  ['delete /specs/{}/lock', 'pending — wave 6 (unlock_spec)'],
   // --- Wave 7: config CRUD (templates / conventions / required-sections /
   //     revision-nomenclature / numbering-profile management / libraries / general-spec) ---
   ['get /templates', 'pending — wave 7 (list templates)'],

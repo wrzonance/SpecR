@@ -75,6 +75,14 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['restore_spec', 'write'],
   // wave 5 — merge
   ['apply_merge', 'write'],
+  // wave 6 — assignment (numbering profile / style source / lock); all reversible config
+  ['get_spec_lock', 'read'],
+  ['lock_spec', 'write'],
+  ['unlock_spec', 'write'],
+  ['assign_style_source', 'write'],
+  ['clear_style_source', 'write'],
+  ['assign_numbering_profile', 'write'],
+  ['clear_numbering_profile', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row

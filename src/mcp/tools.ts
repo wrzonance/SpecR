@@ -26,6 +26,7 @@ import { registerProjectTools } from './project-tools.js';
 import { registerParagraphTools } from './paragraph-tools.js';
 import { registerSpecLifecycleTools } from './spec-lifecycle-tools.js';
 import { registerMergeTools } from './merge-tools.js';
+import { registerSpecAssignmentTools } from './spec-assignment-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
@@ -389,6 +390,7 @@ export function registerTools(
   registerParagraphTools(reg);
   registerSpecLifecycleTools(reg);
   registerMergeTools(reg);
+  registerSpecAssignmentTools(reg);
   registerSpecTools(reg);
   registerNumberingProfileTool(reg);
   registerParserTools(reg);
