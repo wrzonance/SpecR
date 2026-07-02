@@ -239,7 +239,10 @@ Invoke-CheckedPnpm @('migrate')
 Invoke-CheckedPnpm @('seed')
 Invoke-CheckedPnpm @('build')
 
-$api = Start-Process -FilePath 'node' -ArgumentList 'dist/index.js' -WorkingDirectory $RepoRoot -NoNewWindow -PassThru
+# Hand the demo's .env to the API too, so its rate-limit toggle (DISABLE_RATE_LIMIT)
+# reaches the API process. Node's --env-file does NOT override already-set env vars, so
+# DATABASE_URL/NODE_ENV/PORT above still win; the file only fills in keys we didn't set.
+$api = Start-Process -FilePath 'node' -ArgumentList "--env-file-if-exists=`"$(Join-Path $ExampleRoot '.env')`"", 'dist/index.js' -WorkingDirectory $RepoRoot -NoNewWindow -PassThru
 
 try {
     Write-Host ''

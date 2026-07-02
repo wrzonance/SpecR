@@ -60,8 +60,9 @@ paths:
       summary: Upload and parse a spec document (async)
       description: >
         Upload a `.docx`, `.sec`, `.txt`, or `.pdf` file. Returns 202 immediately with a
-        `jobId`; poll `/parse/jobs/{jobId}` for progress and result. Rate-limited
-        to 10 requests per IP per minute. Optionally pass `numberingProfileId` to apply
+        `jobId`; poll `/parse/jobs/{jobId}` for progress and result. Rate-limited per IP
+        to a configurable quota (default 10 requests/minute via `RATE_LIMIT_UPLOAD_MAX`;
+        disable with `DISABLE_RATE_LIMIT`). Optionally pass `numberingProfileId` to apply
         a saved structural numbering profile (#299) as a deterministic override during
         this parse; omit it for the default 5-signal inference. Profile application is at
         parse time — an already-parsed spec is not re-applied (SpecR keeps no source DOCX).
@@ -1863,8 +1864,8 @@ paths:
         The pipeline parses (capturing source facts), persists the spec into the
         library, derives a style template (DOCX only), and classifies editability
         using the library's convention profile or the built-in default. Source
-        bytes are discarded after parse (ADR-021). Rate-limited to 10 requests
-        per IP per minute (shared with `POST /parse`).
+        bytes are discarded after parse (ADR-021). Rate-limited per IP (default
+        10 requests/minute, shared with `POST /parse`; configurable, can be disabled).
       tags: [libraries]
       parameters:
         - name: id
@@ -3076,7 +3077,7 @@ paths:
         concrete font family until theme-font support lands.
 
 
-        Rate-limited to 10 requests per IP per minute (shared with `POST /parse`).
+        Rate-limited per IP (default 10 requests/minute, shared with `POST /parse`; configurable, disable with `DISABLE_RATE_LIMIT`).
       tags: [templates]
       requestBody:
         required: true
@@ -3485,7 +3486,7 @@ paths:
         DOCX before creating a permanent profile row.
 
 
-        Rate-limited to 10 requests per IP per minute (shared with `POST /parse`).
+        Rate-limited per IP (default 10 requests/minute, shared with `POST /parse`; configurable, disable with `DISABLE_RATE_LIMIT`).
       tags: [numbering-profiles]
       requestBody:
         required: true
@@ -3822,7 +3823,7 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
     TooManyRequests:
       description: >
-        Rate limit exceeded (10 uploads per IP per minute) —
+        Rate limit exceeded (default 10 uploads per IP per minute; configurable) —
         `{success: false, error: "too many requests — please wait before uploading again"}`
       content:
         application/json:

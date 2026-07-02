@@ -238,7 +238,10 @@ run_pnpm migrate
 run_pnpm seed
 run_pnpm build
 
-node dist/index.js &
+# Hand the demo's .env to the API too, so its rate-limit toggle (DISABLE_RATE_LIMIT)
+# reaches the API process. Node's --env-file does NOT override already-exported vars, so
+# DATABASE_URL/NODE_ENV/PORT above still win; the file only fills in keys we didn't export.
+node --env-file-if-exists="$EXAMPLE_ROOT/.env" dist/index.js &
 API_PID="$!"
 
 printf '\n==> Waiting for the SpecR API on http://127.0.0.1:%s\n' "$API_PORT"
