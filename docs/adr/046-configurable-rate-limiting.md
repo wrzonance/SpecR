@@ -1,4 +1,4 @@
-# ADR-044: Configurable, runtime-mutable rate limiting (env-seeded)
+# ADR-046: Configurable, runtime-mutable rate limiting (env-seeded)
 
 ## Status
 
