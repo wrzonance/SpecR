@@ -18,6 +18,7 @@ const DEFAULT_MCP_RATE_LIMIT_MAX = 20;
 
 function createMcpServer(): McpServer {
   const server = new McpServer({ name: 'specr', version: '0.1.0' });
+  // Capability tiers gate which tools are exposed (src/mcp/capabilities.ts). Default read,write.
   registerTools(server);
   registerResources(server);
   return server;

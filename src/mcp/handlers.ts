@@ -12,6 +12,7 @@ import {
   getInboundReferences,
   getOutboundReferences,
   listProjects,
+  listLibraries,
   pool,
 } from '../db/index.js';
 import type { InboundReference, OutboundReference } from '../db/index.js';
@@ -35,7 +36,7 @@ type ToolOk = {
   readonly content: { readonly type: 'text'; readonly text: string }[];
   readonly _meta?: Record<string, unknown>;
 };
-type ToolResult = ToolError | ToolOk;
+export type ToolResult = ToolError | ToolOk;
 type ReferenceDirection = 'from' | 'to' | 'both';
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
@@ -105,6 +106,16 @@ export async function handleListSections({
       isError: true,
       content: [{ type: 'text' as const, text: 'Internal error — section list failed' }],
     };
+  }
+}
+
+export async function handleListLibraries(): Promise<ToolResult> {
+  try {
+    const libraries = await listLibraries();
+    return { content: [{ type: 'text' as const, text: JSON.stringify(libraries, null, 2) }] };
+  } catch (err) {
+    logger.error({ err }, 'mcp tool list_libraries failed');
+    return toolError('Internal error — listing libraries failed');
   }
 }
 

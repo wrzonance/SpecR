@@ -7,6 +7,7 @@ vi.mock('../lib/env.js', () => ({
     DATABASE_URL: 'postgres://test:test@localhost:5432/test',
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
+    MCP_ALLOWED_TIERS: 'read,write',
   },
 }));
 
