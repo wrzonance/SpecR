@@ -152,6 +152,26 @@ describe('planLabelStrip (single-dot article number — only when it IS the labe
     expect(planLabelStrip('2.0 GHz frequency band', '1.1')).toBeNull();
   });
 
+  // Codex adversarial review (P2 data-loss): a heading title is capitalized (ALL-CAPS or
+  // Title-Case) — a real article never opens with a lowercase word — so we require an
+  // UPPERCASE letter after the label before stripping. This preserves decimal PROSE whose
+  // number happens to equal its computed label ("1.1 inches of clearance minimum" sitting
+  // at article 1.1) and lowercase-unit measurements ("1.1 mm tolerance", "2.1 kHz clock"),
+  // which read as sentence fragments, not titles. Every real corpus heading passes this.
+  it('does NOT strip when a lowercase word follows the label (decimal prose, not a heading)', () => {
+    expect(planLabelStrip('1.1 inches of clearance minimum', '1.1')).toBeNull();
+    expect(planLabelStrip('1.1 mm tolerance', '1.1')).toBeNull();
+    expect(planLabelStrip('2.1 kHz reference clock', '2.1')).toBeNull();
+  });
+
+  // Corollary: a title starting with a digit (not [A-Z]) is left intact rather than risk
+  // stripping a measurement like "1.2 600 volts minimum". No data loss — a genuine
+  // digit-leading heading merely renders its label doubled (recoverable), which the
+  // conservative direction prefers over destroying a value.
+  it('does NOT strip when a digit follows the label (ambiguous with a value)', () => {
+    expect(planLabelStrip('1.2 600 volts minimum required', '1.2')).toBeNull();
+  });
+
   it('matches the label as a whole token — "1.2" never strips inside "12.3"', () => {
     expect(planLabelStrip('12.3 kV switchgear rating', '1.2')).toBeNull();
   });

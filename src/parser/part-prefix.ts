@@ -91,15 +91,25 @@ function escapeRegExp(s: string): string {
  * label ("1.2 RELATED SECTIONS", where 1.2 IS the article's position) from a decimal
  * value that merely opens the text ("2.1 GHz frequency band", which is not article
  * 2.1's label unless it truly sits there). The label is matched as a whole token
- * (followed by a separator run, then real content), so "1.2" never matches inside
- * "12.3" and a bare "1.2 " (no content) is left intact. Returns null when the leading
- * number is not this node's label, or when stripping would empty the text.
+ * (followed by a separator run), so "1.2" never matches inside "12.3" and a bare
+ * "1.2 " (no content) is left intact.
+ *
+ * A second, conservative guard closes the residual collision (Codex adversarial
+ * review): a decimal PROSE line whose number coincidentally equals its computed label
+ * ("1.1 inches of clearance minimum" sitting at article 1.1). A real article heading
+ * is a TITLE — ALL-CAPS or Title-Case — so it always opens with an UPPERCASE letter;
+ * decimal prose and lowercase-unit measurements ("1.1 mm tolerance", "2.1 kHz clock")
+ * open with a lowercase word or a digit. Requiring `[A-Z]` after the label therefore
+ * strips genuine headings while preserving values — and it is strictly MORE
+ * conservative than a bare match, so it can only ever keep more data, never lose more.
+ * Returns null when the leading number is not this node's label, when a non-uppercase
+ * character follows, or when stripping would empty the text.
  */
 export function planLabelStrip(
   text: string,
   label: string
 ): { text: string; removed: number } | null {
-  const re = new RegExp(`^\\s*${escapeRegExp(label)}[\\s.:—–-]+(?=\\S)`);
+  const re = new RegExp(`^\\s*${escapeRegExp(label)}[\\s.:—–-]+(?=[A-Z])`);
   const match = re.exec(text);
   if (!match) return null;
   const stripped = text.slice(match[0].length).trim();

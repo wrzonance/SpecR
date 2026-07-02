@@ -1,8 +1,9 @@
 import type { SpecNode, SpecTree } from '../ast/types.js';
-import { getLabel, consumesNumber } from '../ast/labels.js';
+import { getLabel, consumesNumber } from '../ast/index.js';
 
 // getLabel is re-exported so existing consumers (and the markdown-renderer contract)
-// keep importing CSI labels from here; the logic itself is single-sourced in ast/labels.
+// keep importing CSI labels from here; the logic itself is single-sourced in ast/labels
+// and reached through the ast barrel (module-boundary rule).
 export { getLabel };
 
 const INDENT = '   ';

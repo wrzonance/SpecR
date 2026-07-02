@@ -563,17 +563,37 @@ describe('buildTree — Pass 2: tree structure', () => {
   });
 
   // A real single-dot outline heading IS stripped — at the position where its typed
-  // number equals its label. Sequentially-numbered articles ("1.1 …", "1.2 …") land on
-  // matching labels and lose their duplicate number; a numeric- or lowercase-leading
-  // title strips just the same, because label-match keys off POSITION, not title shape.
-  it('strips the typed number from articles that sit at their labeled position', () => {
+  // number equals its label AND the title reads like a heading (ALL-CAPS or Title-Case,
+  // i.e. an uppercase first letter). Sequentially-numbered articles ("1.1 …", "1.2 …")
+  // land on matching labels and lose their duplicate number.
+  it('strips the typed number from uppercase-titled articles at their labeled position', () => {
     const classified = classifyParagraphs(
       [
         makePara({ text: 'PART 1 - GENERAL' }),
-        makePara({ text: '1.1 SUMMARY' }), // ord 0 → label 1.1 → strip
-        makePara({ text: '1.2 RELATED SECTIONS' }), // ord 1 → label 1.2 → strip
-        makePara({ text: '1.3 600 V Power Receptacle' }), // ord 2 → label 1.3 → strip (numeric title)
-        makePara({ text: '1.4 related sections' }), // ord 3 → label 1.4 → strip (lowercase title)
+        makePara({ text: '1.1 SUMMARY' }), // ord 0 → label 1.1, ALL-CAPS → strip
+        makePara({ text: '1.2 RELATED SECTIONS' }), // ord 1 → label 1.2, ALL-CAPS → strip
+        makePara({ text: '1.3 Related Sections' }), // ord 2 → label 1.3, Title-Case → strip
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const kids = tree.parts[0]?.children ?? [];
+    expect(kids.map((c) => c.text)).toEqual(['SUMMARY', 'RELATED SECTIONS', 'Related Sections']);
+  });
+
+  // Codex adversarial review (P2 data-loss): a title that opens with a lowercase word or
+  // a digit is indistinguishable from a measurement/prose value that merely coincides
+  // with its label ("1.3 600 V …" ≈ "1.3 600 volts …"; "1.4 related …" ≈ "1.4 relative
+  // humidity …"). Position alone cannot tell them apart, so the strip is withheld and the
+  // text kept verbatim — no data loss. A genuine lowercase/numeric heading (vanishingly
+  // rare; none in the corpus) merely renders its label doubled, which is recoverable.
+  it('does NOT strip a digit- or lowercase-leading title (ambiguous with a value)', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 600 V power feed' }), // ord 0 → label 1.1, digit title → keep
+        makePara({ text: '1.2 relative humidity range' }), // ord 1 → label 1.2, lowercase → keep
       ],
       numMap(),
       emptyStyleMap()
@@ -581,10 +601,8 @@ describe('buildTree — Pass 2: tree structure', () => {
     const tree = buildTree(classified, '01', 'T', 'unknown');
     const kids = tree.parts[0]?.children ?? [];
     expect(kids.map((c) => c.text)).toEqual([
-      'SUMMARY',
-      'RELATED SECTIONS',
-      '600 V Power Receptacle',
-      'related sections',
+      '1.1 600 V power feed',
+      '1.2 relative humidity range',
     ]);
   });
 
@@ -617,6 +635,51 @@ describe('buildTree — Pass 2: tree structure', () => {
       'unknown'
     );
     expect(tree.parts[0]?.children[0]?.text).toBe('1.1 mm tolerance'); // content preserved
+  });
+
+  // Codex adversarial review (P2 data-loss), end-to-end: a Signal-4 (manual text-outline)
+  // paragraph that is decimal PROSE whose number coincides with its computed label — the
+  // exact case Codex flagged: "1.1 inches of clearance minimum" as the first article under
+  // PART 1 (label 1.1). The lowercase "inches" marks it as a value, not a heading, so the
+  // number is preserved. Before the uppercase-first guard this dropped "1.1".
+  it('preserves Signal-4 decimal prose whose number equals its label (lowercase → value)', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 inches of clearance minimum' }),
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    expect(tree.parts[0]?.children[0]?.text).toBe('1.1 inches of clearance minimum');
+  });
+
+  // KNOWN AMBIGUITY: a measurement with a CAPITAL-leading unit ("1.2 GHz frequency band")
+  // that is itself a Signal-4 top-level article sitting at EXACTLY its own computed label
+  // is textually identical to a heading — "GHz" looks like the first word of a Title.
+  // Neither position nor text can separate them, so the label-match strip treats it as a
+  // heading and removes "1.2". This is the residual, irreducible intersection of (capital
+  // unit) × (Signal-4 article) × (exact-ordinal match); it does NOT occur in the reference
+  // corpus, and real measurements live in pr-level content or continuations — which the
+  // article-only strip never touches. We document the behavior here rather than silently
+  // picking it; preferring "keep" here would double the label on every genuine heading at
+  // its position (the original bug this whole pass fixes).
+  it('KNOWN AMBIGUITY: capital-unit measurement at its exact label ordinal is stripped', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 MANUFACTURERS' }), // ord 0 → label 1.1 (real heading)
+        makePara({ text: '1.2 GHz frequency band' }), // ord 1 → label 1.2 == number, capital G → stripped
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const kids = tree.parts[0]?.children ?? [];
+    expect(kids[0]?.text).toBe('MANUFACTURERS');
+    // The 2nd article's label is "1.2"; the measurement literally opens "1.2 G…" → stripped.
+    expect(kids[1]?.text).toBe('GHz frequency band');
   });
 
   // #296: hidden content is classified as a continuation (suppressed), not a part,

@@ -16,7 +16,7 @@ import type {
   StyleNumPr,
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
-import { getLabel, consumesNumber } from '../../ast/labels.js';
+import { getLabel, consumesNumber } from '../../ast/index.js';
 import {
   planPartStrip,
   planOutlineNumberStrip,
