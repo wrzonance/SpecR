@@ -15,7 +15,12 @@ function ok(data: unknown): ToolResult {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
 }
 
-const ProjectIdArgs = z.object({ projectId: z.uuid() });
+// Shapes are exported so project-tools.ts advertises the SAME field constraints the
+// handlers validate — one source of truth, no drift between the tool schema and the guard.
+export const ProjectIdShape = {
+  projectId: z.uuid().describe('Project UUID (from list_projects)'),
+};
+const ProjectIdArgs = z.object(ProjectIdShape);
 
 export async function handleGetProject(args: unknown): Promise<ToolResult> {
   const parsed = ProjectIdArgs.safeParse(args);
@@ -30,12 +35,15 @@ export async function handleGetProject(args: unknown): Promise<ToolResult> {
   }
 }
 
+export const UpdateProjectShape = {
+  projectId: z.uuid().describe('Project UUID (from list_projects)'),
+  name: z.string().min(1).optional().describe('New project name'),
+  sectionNumberFormat: SectionNumberFormatSchema.optional().describe(
+    'Project section-number display format'
+  ),
+};
 const UpdateProjectArgs = z
-  .object({
-    projectId: z.uuid(),
-    name: z.string().min(1).optional(),
-    sectionNumberFormat: SectionNumberFormatSchema.optional(),
-  })
+  .object(UpdateProjectShape)
   .refine((v) => v.name !== undefined || v.sectionNumberFormat !== undefined, {
     message: 'at least one of name or sectionNumberFormat is required',
   });
@@ -55,14 +63,24 @@ export async function handleUpdateProject(args: unknown): Promise<ToolResult> {
   try {
     const updated = await updateProject(projectId, input, pool);
     if (!updated) return toolError(`Project not found: id=${projectId}`);
-    return ok(updated);
+    // Key by projectId to match create_project/get_project and the REST PATCH response
+    // (updateProject returns the DB shape keyed `id`).
+    return ok({
+      projectId: updated.id,
+      name: updated.name,
+      sectionNumberFormat: updated.sectionNumberFormat,
+    });
   } catch (err) {
     logger.error({ err }, 'mcp tool update_project failed');
     return toolError('Internal error — project update failed');
   }
 }
 
-const DeleteProjectArgs = z.object({ projectId: z.uuid(), deletedBy: z.string().min(1) });
+export const DeleteProjectShape = {
+  projectId: z.uuid().describe('Project UUID (from list_projects)'),
+  deletedBy: z.string().min(1).describe('Who is deleting it (audit trail)'),
+};
+const DeleteProjectArgs = z.object(DeleteProjectShape);
 
 export async function handleDeleteProject(args: unknown): Promise<ToolResult> {
   const parsed = DeleteProjectArgs.safeParse(args);
