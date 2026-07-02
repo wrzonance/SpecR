@@ -149,6 +149,7 @@ describe('buildReferenceConsistencyFindings', () => {
   const spec = (overrides: Partial<ClassifiedRef>): ClassifiedRef => ({
     sourceSpecId: 's1',
     sourceSpecSection: '08 11 13',
+    sourceParagraphId: 'p1',
     targetType: 'section',
     value: '00 00 00',
     ancestorRole: 'other',
@@ -164,6 +165,7 @@ describe('buildReferenceConsistencyFindings', () => {
         type: 'related_listed_not_cited',
         sourceSpecId: 's1',
         sourceSpecSection: '08 11 13',
+        sourceParagraphId: 'p1',
         value: '07 84 00',
       },
     ]);
@@ -178,6 +180,7 @@ describe('buildReferenceConsistencyFindings', () => {
         type: 'related_cited_not_listed',
         sourceSpecId: 's1',
         sourceSpecSection: '08 11 13',
+        sourceParagraphId: 'p1',
         value: '26 05 33',
       },
     ]);
@@ -200,6 +203,7 @@ describe('buildReferenceConsistencyFindings', () => {
         type: 'standard_cited_not_listed',
         sourceSpecId: 's1',
         sourceSpecSection: '08 11 13',
+        sourceParagraphId: 'p1',
         value: 'ASTM E814',
       },
     ]);
@@ -217,6 +221,7 @@ describe('buildReferenceConsistencyFindings', () => {
       {
         sourceSpecId: 'A',
         sourceSpecSection: '08 11 13',
+        sourceParagraphId: 'pA',
         targetType: 'section',
         value: '07 84 00',
         ancestorRole: 'related-sections',
@@ -224,6 +229,7 @@ describe('buildReferenceConsistencyFindings', () => {
       {
         sourceSpecId: 'B',
         sourceSpecSection: '09 21 16',
+        sourceParagraphId: 'pB',
         targetType: 'section',
         value: '07 84 00',
         ancestorRole: 'other',

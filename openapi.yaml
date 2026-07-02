@@ -4029,22 +4029,30 @@ components:
       description: >
         A3 — a section appears in this spec's Related Sections article but is never
         referenced anywhere else in its body. Likely an over-broad coordination list.
-      required: [type, sourceSpecId, sourceSpecSection, section]
+      required: [type, sourceSpecId, sourceSpecSection, sourceParagraphId, section]
       properties:
         type: { type: string, enum: [related_listed_not_cited] }
         sourceSpecId: { type: string, format: uuid }
         sourceSpecSection: { type: string }
+        sourceParagraphId:
+          type: string
+          format: uuid
+          description: Related Sections list paragraph that names the section — the paragraph-level locator
         section: { type: string, description: Canonical CSI number listed but not cited }
     FindingRelatedCitedNotListed:
       type: object
       description: >
         A2 — a section is cited in this spec's body but absent from its Related
         Sections article. The coordination list is missing a real dependency.
-      required: [type, sourceSpecId, sourceSpecSection, section]
+      required: [type, sourceSpecId, sourceSpecSection, sourceParagraphId, section]
       properties:
         type: { type: string, enum: [related_cited_not_listed] }
         sourceSpecId: { type: string, format: uuid }
         sourceSpecSection: { type: string }
+        sourceParagraphId:
+          type: string
+          format: uuid
+          description: Body paragraph that cites the section — the paragraph-level locator
         section: { type: string, description: Canonical CSI number cited but not listed }
     FindingStandardCitedNotListed:
       type: object
@@ -4052,11 +4060,15 @@ components:
         B2 — a code/standard (ASTM, NFPA, UL, …) is cited in this spec's body but
         absent from its References article. (The inverse, a listed-but-uncited
         standard, is intentionally NOT reported — #259 non-goal B1.)
-      required: [type, sourceSpecId, sourceSpecSection, standardCode]
+      required: [type, sourceSpecId, sourceSpecSection, sourceParagraphId, standardCode]
       properties:
         type: { type: string, enum: [standard_cited_not_listed] }
         sourceSpecId: { type: string, format: uuid }
         sourceSpecSection: { type: string }
+        sourceParagraphId:
+          type: string
+          format: uuid
+          description: Body paragraph that cites the standard — the paragraph-level locator
         standardCode: { type: string, description: 'Normalized "ORG identifier", e.g. ASTM E814' }
     FindingImpliedRelatedSection:
       type: object

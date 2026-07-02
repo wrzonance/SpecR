@@ -9,6 +9,7 @@ interface Queryable {
 export interface ClassifiedRef {
   readonly sourceSpecId: string;
   readonly sourceSpecSection: string;
+  readonly sourceParagraphId: string;
   readonly targetType: 'section' | 'standard';
   readonly value: string;
   readonly ancestorRole: 'related-sections' | 'references' | 'other';
@@ -17,6 +18,7 @@ export interface ClassifiedRef {
 interface ClassifiedRefRow {
   readonly source_spec_id: string;
   readonly source_spec_section: string;
+  readonly source_paragraph_id: string;
   readonly target_type: 'section' | 'standard';
   readonly value: string;
   readonly article_text: string | null;
@@ -60,8 +62,8 @@ const CLASSIFY_SQL = `
     WHERE node_type = 'article'
     ORDER BY ref_id, depth ASC
   )
-  SELECT r.source_spec_id, r.source_spec_section, r.target_type, r.value,
-         na.article_text
+  SELECT r.source_spec_id, r.source_spec_section, r.source_paragraph_id,
+         r.target_type, r.value, na.article_text
   FROM refs r
   LEFT JOIN nearest_article na ON na.ref_id = r.ref_id
 `;
@@ -82,6 +84,7 @@ export async function classifyScopedRefs(
     return result.rows.map((row) => ({
       sourceSpecId: row.source_spec_id,
       sourceSpecSection: row.source_spec_section,
+      sourceParagraphId: row.source_paragraph_id,
       targetType: row.target_type,
       value: row.value,
       ancestorRole: resolveRole(row.article_text),
@@ -98,27 +101,29 @@ export interface ReferenceConsistencyFinding {
     | 'standard_cited_not_listed';
   readonly sourceSpecId: string;
   readonly sourceSpecSection: string;
+  readonly sourceParagraphId: string;
   readonly value: string;
 }
 
-// Mutable accumulators: the Sets are filled in place by `place()` and never
-// escape `buildReferenceConsistencyFindings`, so they are deliberately not
-// `readonly` — only the spec section, which is fixed at creation, is.
+// Mutable accumulators: each Map holds value -> a representative source paragraph
+// id (first occurrence wins), filled in place by `place()` and never escaping
+// `buildReferenceConsistencyFindings`, so they are deliberately not `readonly` —
+// only the spec section, which is fixed at creation, is.
 interface SpecBuckets {
   readonly sourceSpecSection: string;
-  listedSections: Set<string>;
-  citedSections: Set<string>;
-  listedStandards: Set<string>;
-  citedStandards: Set<string>;
+  listedSections: Map<string, string>;
+  citedSections: Map<string, string>;
+  listedStandards: Map<string, string>;
+  citedStandards: Map<string, string>;
 }
 
 function emptyBuckets(sourceSpecSection: string): SpecBuckets {
   return {
     sourceSpecSection,
-    listedSections: new Set(),
-    citedSections: new Set(),
-    listedStandards: new Set(),
-    citedStandards: new Set(),
+    listedSections: new Map(),
+    citedSections: new Map(),
+    listedStandards: new Map(),
+    citedStandards: new Map(),
   };
 }
 
@@ -130,32 +135,57 @@ function bucketOf(maps: Map<string, SpecBuckets>, ref: ClassifiedRef): SpecBucke
   return fresh;
 }
 
-function place(b: SpecBuckets, ref: ClassifiedRef): void {
+function bucketFor(b: SpecBuckets, ref: ClassifiedRef): Map<string, string> {
   if (ref.targetType === 'section') {
-    (ref.ancestorRole === 'related-sections' ? b.listedSections : b.citedSections).add(ref.value);
-  } else {
-    (ref.ancestorRole === 'references' ? b.listedStandards : b.citedStandards).add(ref.value);
+    return ref.ancestorRole === 'related-sections' ? b.listedSections : b.citedSections;
   }
+  return ref.ancestorRole === 'references' ? b.listedStandards : b.citedStandards;
 }
 
-function difference(a: ReadonlySet<string>, b: ReadonlySet<string>): string[] {
-  return [...a].filter((v) => !b.has(v)).sort((x, y) => x.localeCompare(y));
+function place(b: SpecBuckets, ref: ClassifiedRef): void {
+  const bucket = bucketFor(b, ref);
+  // First occurrence wins as this value's representative paragraph-level locator.
+  if (!bucket.has(ref.value)) bucket.set(ref.value, ref.sourceParagraphId);
+}
+
+interface ValueAnchor {
+  readonly value: string;
+  readonly sourceParagraphId: string;
+}
+
+// Keys present in `a` but not `b`, each carrying a's representative paragraph.
+function difference(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): ValueAnchor[] {
+  return [...a.entries()]
+    .filter(([value]) => !b.has(value))
+    .map(([value, sourceParagraphId]) => ({ value, sourceParagraphId }))
+    .sort((x, y) => x.value.localeCompare(y.value));
 }
 
 function findingsForSpec(specId: string, b: SpecBuckets): ReferenceConsistencyFinding[] {
   const base = { sourceSpecId: specId, sourceSpecSection: b.sourceSpecSection };
   return [
     ...difference(b.listedSections, b.citedSections).map(
-      (value): ReferenceConsistencyFinding => ({ type: 'related_listed_not_cited', ...base, value })
+      ({ value, sourceParagraphId }): ReferenceConsistencyFinding => ({
+        type: 'related_listed_not_cited',
+        ...base,
+        value,
+        sourceParagraphId,
+      })
     ),
     ...difference(b.citedSections, b.listedSections).map(
-      (value): ReferenceConsistencyFinding => ({ type: 'related_cited_not_listed', ...base, value })
+      ({ value, sourceParagraphId }): ReferenceConsistencyFinding => ({
+        type: 'related_cited_not_listed',
+        ...base,
+        value,
+        sourceParagraphId,
+      })
     ),
     ...difference(b.citedStandards, b.listedStandards).map(
-      (value): ReferenceConsistencyFinding => ({
+      ({ value, sourceParagraphId }): ReferenceConsistencyFinding => ({
         type: 'standard_cited_not_listed',
         ...base,
         value,
+        sourceParagraphId,
       })
     ),
   ];
