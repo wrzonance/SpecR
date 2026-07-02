@@ -1,4 +1,3 @@
-import type { Pool } from 'pg';
 import { pool, findSpecById, assertSpecWritable } from '../db/index.js';
 import { applyAccepted, type ApplyAcceptedResult } from './conflict.js';
 import type { DiffResult } from './types.js';
@@ -19,12 +18,11 @@ export async function applyMerge(
   specId: string,
   accept: readonly string[],
   diff: DiffResult,
-  expectedVersion: number | undefined,
-  db: Pool = pool
+  expectedVersion: number | undefined
 ): Promise<ApplyMergeOutcome> {
   const spec = await findSpecById(specId);
   if (!spec) return { kind: 'not-found' };
-  const client = await db.connect();
+  const client = await pool.connect();
   try {
     await client.query('BEGIN');
     // A merge mutates content, so it is governed exactly like a paragraph write.
