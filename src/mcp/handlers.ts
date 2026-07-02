@@ -44,6 +44,12 @@ export function toolError(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };
 }
 
+/** Wrap a JSON-serializable payload as a successful tool result. Shared by every
+ * write-tool handler module so the ok-shape can't drift between them. */
+export function ok(data: unknown): ToolResult {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+}
+
 function isToolError(v: unknown): v is ToolError {
   return typeof v === 'object' && v !== null && 'isError' in v;
 }

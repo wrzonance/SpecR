@@ -10,11 +10,7 @@ import {
 import { SetStyleSourceBodySchema, SetSpecNumberingProfileBodySchema } from '../ast/index.js';
 import { getPgCode } from '../lib/pg-errors.js';
 import { logger } from '../lib/logger.js';
-import { toolError, type ToolResult } from './handlers.js';
-
-function ok(data: unknown): ToolResult {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
-}
+import { toolError, ok, type ToolResult } from './handlers.js';
 
 // specId-only shape, shared by the two clear tools.
 export const AssignmentSpecIdShape = {

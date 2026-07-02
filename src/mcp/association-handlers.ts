@@ -8,11 +8,7 @@ import {
 } from '../db/index.js';
 import { CreateAssociationBodySchema } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
-import { toolError, type ToolResult } from './handlers.js';
-
-function ok(data: unknown): ToolResult {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
-}
+import { toolError, ok, type ToolResult } from './handlers.js';
 
 export const ParagraphRefShape = {
   specId: z.uuid().describe('Spec UUID (from get_spec / list_sections)'),

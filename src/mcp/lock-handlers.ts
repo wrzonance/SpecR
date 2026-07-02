@@ -2,11 +2,7 @@ import { z } from 'zod';
 import { acquireLock, releaseLock, getLock, findSpecById } from '../db/index.js';
 import { AcquireLockBodySchema, ReleaseLockBodySchema } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
-import { toolError, type ToolResult } from './handlers.js';
-
-function ok(data: unknown): ToolResult {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
-}
+import { toolError, ok, type ToolResult } from './handlers.js';
 
 export const SpecLockIdShape = {
   specId: z.uuid().describe('Spec UUID (from search_library, list_sections, or get_spec)'),
