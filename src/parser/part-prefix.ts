@@ -56,12 +56,27 @@ export function planPartStrip(text: string): { text: string; removed: number } |
   return { text: stripped, removed: match[0].length };
 }
 
-// A leading manual decimal-outline number ("1.4.2.1 Install…" → "Install…"). Requires
-// at least one INTERIOR dot (a bare "1." is the pr2 label form, not an outline number)
-// and a following letter. Used for article/pr nodes classified by the decimal text
-// signal (Signal 4): their typed number duplicates the render-derived CSI label, so it
-// must be stripped. Mirrors the deep-numbering patterns in heuristics.ts (Signal 4).
-const DECIMAL_OUTLINE_PREFIX = /^\s*\d+(?:\.\d+)+[\s.:—–-]*(?=[a-z])/i;
+// A leading manual decimal-outline number on a heading whose typed number duplicates
+// the render-derived CSI label (Signal-4 article/pr nodes) — must be stripped or it
+// doubles ("1.2  1.2 RELATED SECTIONS"). Mirrors heuristics.ts (Signal 4). Two tiers,
+// because a single-dot "N.N" is genuinely ambiguous:
+//   • DEEP (>=2 interior dots, "1.4.2.1 …"): unambiguously an outline number — a
+//     measurement is never multi-dot — so strip whatever letter follows (upper OR
+//     lower case), down to a following letter.
+//   • ARTICLE (exactly one interior dot, "1.2 …"): a real heading ("1.2 RELATED
+//     SECTIONS") OR authored decimal PROSE ("2.0 inches of clearance minimum", which
+//     the N.N text signal misclassifies as an article). Only strip when a CAPITAL
+//     letter follows (CSI headings are titled); a lowercase continuation is a
+//     measurement/sentence and MUST be preserved verbatim (round-trip fidelity —
+//     Codex adversarial review, P2 data-loss).
+// A bare "1." (no interior dot) is the pr2 label form, not an outline number, so
+// neither tier matches it.
+const DEEP_OUTLINE_PREFIX = /^\s*\d+(?:\.\d+){2,}[\s.:—–-]*(?=[A-Za-z])/;
+const ARTICLE_OUTLINE_PREFIX = /^\s*\d+\.\d+[\s.:—–-]*(?=[A-Z])/;
+
+function matchOutlinePrefix(text: string): RegExpExecArray | null {
+  return DEEP_OUTLINE_PREFIX.exec(text) ?? ARTICLE_OUTLINE_PREFIX.exec(text);
+}
 
 /**
  * Strip a leading decimal-outline number from a manually-numbered heading's text and
@@ -69,7 +84,7 @@ const DECIMAL_OUTLINE_PREFIX = /^\s*\d+(?:\.\d+)+[\s.:—–-]*(?=[a-z])/i;
  * such prefix, or when stripping would empty the text.
  */
 export function planOutlineNumberStrip(text: string): { text: string; removed: number } | null {
-  const match = DECIMAL_OUTLINE_PREFIX.exec(text);
+  const match = matchOutlinePrefix(text);
   if (!match) return null;
   const stripped = text.slice(match[0].length).trim();
   if (stripped.length === 0) return null;

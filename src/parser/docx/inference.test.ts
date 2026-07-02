@@ -523,6 +523,39 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts[0]?.text).toBe('PART 1');
   });
 
+  // Codex adversarial review (P2 data-loss, end-to-end repro): an unnumbered/unstyled
+  // paragraph beginning with a decimal MEASUREMENT ("2.0 inches of clearance minimum")
+  // is misclassified by the N.N text signal as a Signal-4 article. The outline-number
+  // strip must NOT fire on it — the "2.0" is authored prose, not a render-derived
+  // label — or content is lost and round-trip fidelity breaks. A single-dot decimal
+  // with a lowercase continuation is preserved verbatim.
+  it('preserves decimal PROSE text through classify→buildTree (no outline strip)', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '2.0 inches of clearance minimum' }),
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    expect(classified[1]?.signalUsed).toBe(4); // documents the (pre-existing) N.N misclassification
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const node = tree.parts[0]?.children[0];
+    expect(node?.text).toBe('2.0 inches of clearance minimum'); // "2.0" preserved, not stripped
+  });
+
+  // Contrast: a real single-dot outline heading (capital letter follows) IS stripped —
+  // its typed number duplicates the render-derived CSI label.
+  it('strips the typed outline number from a real N.N heading (capital follows)', () => {
+    const classified = classifyParagraphs(
+      [makePara({ text: 'PART 1 - GENERAL' }), makePara({ text: '1.2 RELATED SECTIONS' })],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    expect(tree.parts[0]?.children[0]?.text).toBe('RELATED SECTIONS');
+  });
+
   // #296: hidden content is classified as a continuation (suppressed), not a part,
   // and keeps its full text verbatim — retained as-authored for document-control
   // tracking. The part prefix-strip (makeNode/nodeContent) only runs for real part

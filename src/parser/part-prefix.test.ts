@@ -117,6 +117,34 @@ describe('planOutlineNumberStrip (manual decimal-outline items — Signal 4)', (
   it('returns null when stripping would empty the text (bare number)', () => {
     expect(planOutlineNumberStrip('1.4.2')).toBeNull();
   });
+
+  // Codex adversarial review (P2 data-loss): an unnumbered/unstyled paragraph whose
+  // text merely BEGINS with a decimal measurement ("2.0 inches of clearance minimum")
+  // is misclassified by the N.N text signal as an article, but its "2.0" is authored
+  // PROSE, not an outline label. Stripping it drops content and breaks round-trip
+  // fidelity. A single-dot "N.N" is ambiguous, so only strip it when a CAPITAL letter
+  // follows (CSI heading convention); a lowercase continuation is a measurement and is
+  // preserved verbatim.
+  it('preserves single-dot decimal PROSE (lowercase continuation) — no data loss', () => {
+    expect(planOutlineNumberStrip('2.0 inches of clearance minimum')).toBeNull();
+    expect(planOutlineNumberStrip('3.5 mm nominal thickness')).toBeNull();
+    expect(planOutlineNumberStrip('1.5 times the rated load')).toBeNull();
+  });
+
+  // A single-dot number followed by a real heading (capital first letter) is still an
+  // outline article — strip it (the "1.2 RELATED SECTIONS" case above), and this
+  // Title-case variant too.
+  it('still strips a single-dot outline heading (capital letter follows)', () => {
+    expect(planOutlineNumberStrip('1.2 Related Sections')?.text).toBe('Related Sections');
+  });
+
+  // Multi-dot numbers (>=2 interior dots) are unambiguously outline — a measurement is
+  // never "1.4.2.1" — so they strip regardless of the following letter's case.
+  it('strips a deep (multi-dot) outline number even when a lowercase word follows', () => {
+    expect(planOutlineNumberStrip('1.4.2.1 installation instructions')?.text).toBe(
+      'installation instructions'
+    );
+  });
 });
 
 describe('rebaseSourceFacts (Codex review: keep fact offsets valid after prefix strip)', () => {
