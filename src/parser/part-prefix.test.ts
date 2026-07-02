@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { stripPartPrefix, planPartStrip, rebaseSourceFacts } from './part-prefix.js';
+import {
+  stripPartPrefix,
+  planPartStrip,
+  planOutlineNumberStrip,
+  rebaseSourceFacts,
+} from './part-prefix.js';
 import type { SourceFacts } from '../ast/types.js';
 
 describe('stripPartPrefix', () => {
@@ -45,6 +50,24 @@ describe('stripPartPrefix', () => {
     expect(stripPartPrefix('EXECUTION')).toBe('EXECUTION');
   });
 
+  // Regression (WIRELESS_ACCESS_POINTS.docx): PART headings authored as "N.0 NAME"
+  // ("2.0 PRODUCTS") are classified as parts, so the render-derived "PART n -" label
+  // re-adds the tier — the stored name must NOT keep the "2.0 " prefix or it renders
+  // "PART 2 - 2.0 PRODUCTS". Strip the whole-number decimal prefix down to the name.
+  it('strips a whole-number decimal PART prefix ("N.0 NAME") down to the name', () => {
+    expect(stripPartPrefix('2.0 PRODUCTS')).toBe('PRODUCTS');
+    expect(stripPartPrefix('3.0 EXECUTION')).toBe('EXECUTION');
+    expect(stripPartPrefix('1.0 GENERAL')).toBe('GENERAL');
+    expect(stripPartPrefix('2.00 PRODUCTS')).toBe('PRODUCTS');
+  });
+
+  // Only whole-number (N.0) decimals are a PART tier — a real "N.N" article number
+  // (e.g. "2.1 SUMMARY") is never stripped, so if such text ever reached the stripper
+  // it is left intact rather than mangled.
+  it('does not strip a non-zero decimal (article) number', () => {
+    expect(stripPartPrefix('2.1 SUMMARY')).toBe('2.1 SUMMARY');
+  });
+
   it('does not strip a word that merely starts with "PART" (e.g. PARTITION)', () => {
     expect(stripPartPrefix('PARTITION 1 SYSTEMS')).toBe('PARTITION 1 SYSTEMS');
   });
@@ -67,6 +90,32 @@ describe('planPartStrip', () => {
 
   it('returns null when stripping would empty the text (bare "PART n")', () => {
     expect(planPartStrip('PART 1')).toBeNull();
+  });
+});
+
+describe('planOutlineNumberStrip (manual decimal-outline items — Signal 4)', () => {
+  // WIRELESS_ACCESS_POINTS.docx types its outline into the text ("1.4.2.1 Install…").
+  // Article/pr nodes get a render-derived CSI label, so the typed decimal prefix must
+  // be stripped or it doubles ("1.2  1.2 RELATED SECTIONS").
+  it('strips a multi-part decimal outline prefix (>=1 interior dot) down to the text', () => {
+    expect(planOutlineNumberStrip('1.2 RELATED SECTIONS')).toEqual({
+      text: 'RELATED SECTIONS',
+      removed: 4,
+    });
+    expect(planOutlineNumberStrip('1.4.2.1 Installation Instructions')?.text).toBe(
+      'Installation Instructions'
+    );
+    expect(planOutlineNumberStrip('2.3.4.5.6 Deep item')?.text).toBe('Deep item');
+  });
+
+  it('does NOT strip a bare "N." (the pr2 label form) or an alpha prefix', () => {
+    expect(planOutlineNumberStrip('1. text here')).toBeNull(); // no interior dot
+    expect(planOutlineNumberStrip('B. Included in this section')).toBeNull(); // alpha
+    expect(planOutlineNumberStrip('SUMMARY')).toBeNull();
+  });
+
+  it('returns null when stripping would empty the text (bare number)', () => {
+    expect(planOutlineNumberStrip('1.4.2')).toBeNull();
   });
 });
 

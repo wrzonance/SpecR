@@ -138,6 +138,26 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     expect(result[0]?.signalUsed).toBe(3);
   });
 
+  it('decoration separator with a LIVE-numbered part style is still not a part (defense-in-depth)', () => {
+    // The numId=0 guard catches DE-numbered separators, but a separator that kept BOTH
+    // a part-tier style AND live numbering (numId != 0) would resurrect as a spurious
+    // PART via Signal 2. A pure "[OR]" / asterisk-rule line is editorial decoration,
+    // never a structural node — gate it to a continuation before any signal runs.
+    const styleMap: StyleMap = {
+      styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
+      resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'SPECText1', numId: 2, ilvl: 0, text: '****** [OR] ******' })],
+      numMap(1),
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.signalUsed).toBe(3);
+  });
+
   it('numId=0 does not block Signal 4 — a de-numbered article style still reads its text tier', () => {
     // Guard the guard: suppressing Signal 2 on numId=0 must not swallow a paragraph
     // that carries a literal "N.N" tier. A SPECText1 paragraph with numId=0 whose text
@@ -277,6 +297,9 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
 
 describe('classifyParagraphs — CPI regressions', () => {
   it('PR1lc suppressesNumbering → continuation not pr1', () => {
+    // An explicit numId=0 opt-out (suppressesNumbering) is an author decision to
+    // de-number this paragraph — it stays a continuation even though its name looks
+    // like a lead-in. This is distinct from the real-file case below (no opt-out).
     const styleMap: StyleMap = {
       styles: new Map([
         ['PR1', { styleId: 'PR1', name: 'PR1' }],
@@ -288,6 +311,64 @@ describe('classifyParagraphs — CPI regressions', () => {
     };
     const result = classifyParagraphs(
       [makePara({ styleId: 'PR1lc', text: 'This continues the paragraph above.' })],
+      numMap(3),
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('continuation');
+  });
+
+  // Regression (CPI CABINETS/CABLE_MANAGEMENT/ELECTRICAL_CABINETS etc.): the real CPI
+  // lead-in styles PR1lc..PR5lc have NEITHER numbering NOR a numId=0 opt-out — they are
+  // unnumbered lead-ins ("Section Includes:", "Related Requirements:") that introduce a
+  // numbered PR2 list. Left as continuations they orphan those PR2 items at the article
+  // tier (a level gap: pr2 directly under article). A lead-in must occupy its base PRn
+  // tier so the list nests under it. The tier is derived from the base PRn style.
+  it('PR1lc lead-in (no numbering, not suppressed) → pr1 tier from base PR1', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([
+        ['PR1', { styleId: 'PR1', name: 'PR1' }],
+        ['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', next: 'PR1' }],
+      ]),
+      resolvedNumPr: new Map([['PR1', { numId: 1, ilvl: 4 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'PR1lc', text: 'Section Includes:' })],
+      numMap(3), // CPI articleIlvl = 3
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('pr1');
+    expect(result[0]?.signalUsed).toBe(2);
+  });
+
+  it('PR2lc lead-in → pr2 tier from base PR2', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([
+        ['PR2', { styleId: 'PR2', name: 'PR2' }],
+        ['PR2lc', { styleId: 'PR2lc', name: 'PR2lc', next: 'PR2' }],
+      ]),
+      resolvedNumPr: new Map([['PR2', { numId: 1, ilvl: 5 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'PR2lc', text: 'Related Requirements:' })],
+      numMap(3),
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('pr2');
+  });
+
+  it('a PRnlc lead-in whose base style has no resolved numbering stays a continuation', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', next: 'PR1' }]]),
+      resolvedNumPr: new Map(), // no base PR1 numbering to inherit
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'PR1lc', text: 'Section Includes:' })],
       numMap(3),
       styleMap
     );

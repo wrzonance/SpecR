@@ -5,6 +5,7 @@ import {
   matchIndentSignal,
   isPartHeading,
   isSpecifierNote,
+  isDecorationSeparator,
 } from './heuristics.js';
 import type {
   ClassifiedParagraph,
@@ -12,9 +13,10 @@ import type {
   NumberingMap,
   SignalConflict,
   StyleMap,
+  StyleNumPr,
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
-import { planPartStrip, rebaseSourceFacts } from '../part-prefix.js';
+import { planPartStrip, planOutlineNumberStrip, rebaseSourceFacts } from '../part-prefix.js';
 
 // Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
 const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
@@ -73,6 +75,21 @@ function trySignal1(para: DocxParagraph, numberingMap: NumberingMap): SignalHit 
   return { nodeType, normalizedIlvl: toNormalizedIlvl(nodeType), signal: 1 };
 }
 
+// CPI lead-in styles PR1lc..PR7lc ("lead-in copy") carry no numbering of their own
+// but occupy the tier of their base PRn style. Their `next` points at PRn and their
+// text is a list lead-in ("Section Includes:") that introduces a numbered PR2 list.
+const LEAD_IN_STYLE = /^(PR\d+)lc$/i;
+
+// Resolve a lead-in style to its base PRn tier so the lead-in becomes a structural
+// node and its list items nest under it (instead of orphaning at the article tier).
+// Only fires when the base style actually has resolved numbering — otherwise there is
+// no tier to inherit and the paragraph stays a continuation. An explicit numId=0
+// opt-out (suppressesNumbering) is honored by the caller BEFORE this runs.
+function resolveLeadInNumPr(styleId: string, styleMap: StyleMap): StyleNumPr | undefined {
+  const base = LEAD_IN_STYLE.exec(styleId)?.[1];
+  return base ? styleMap.resolvedNumPr.get(base) : undefined;
+}
+
 function trySignal2(
   para: DocxParagraph,
   styleMap: StyleMap,
@@ -88,7 +105,8 @@ function trySignal2(
   if (!para.styleId) return null;
   const styleInfo = styleMap.styles.get(para.styleId);
   if (styleInfo?.suppressesNumbering) return null;
-  const resolved = styleMap.resolvedNumPr.get(para.styleId);
+  const resolved =
+    styleMap.resolvedNumPr.get(para.styleId) ?? resolveLeadInNumPr(para.styleId, styleMap);
   if (!resolved) return null;
   const nodeType = ilvlToNodeType(resolved.ilvl, numberingMap.articleIlvl);
   if (nodeType === 'continuation') return null;
@@ -198,6 +216,15 @@ function classifyOne(
     return continuationResult(para, prevNonContIlvl, true, isNote);
   }
 
+  // Editorial separators ("****** [OR] ******", asterisk/dash rules) are never
+  // structural — route them to a plain (visible) continuation before any signal.
+  // Defense-in-depth for the de-numbered-PART-separator class (08 14 16 / 08 11 13):
+  // the numId=0 Signal-2 guard already handles the common case, but a separator that
+  // kept both a PART style and live numbering would otherwise become a spurious PART.
+  if (isDecorationSeparator(para.text)) {
+    return continuationResult(para, prevNonContIlvl, para.isVanish, false);
+  }
+
   const hits: SignalHit[] = [];
 
   const s1 = trySignal1(para, numberingMap);
@@ -279,16 +306,27 @@ function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode
   };
 }
 
-// A visible PART heading stores only its name in the AST; the "PART n -" label is
-// render-derived (getLabel). Strip it, rebasing any source-fact offsets onto the
-// shorter text so comment/color/choice anchors stay valid. Non-parts and a bare
-// "PART n" (strip would empty it) keep their raw text + facts unchanged.
+// A heading stores only its name in the AST; the CSI label ("PART n -", "1.2", "A.")
+// is render-derived (getLabel). Strip the label the author baked into the text so it
+// does not double at render, rebasing source-fact offsets onto the shorter text.
+//   • part → "PART n -" / "N.0" prefix (planPartStrip)
+//   • article/pr classified by the decimal text signal (Signal 4) → the typed
+//     "1.4.2" outline number (planOutlineNumberStrip). Gated on Signal 4 so a
+//     styled/numbered node's text — which is real content, never an outline prefix —
+//     is never touched (styled docs carry zero Signal-4 nodes).
+// A strip that would empty the text (a bare "PART n" / bare number) is skipped.
+function planNodeStrip(cp: ClassifiedParagraph): { text: string; removed: number } | null {
+  if (cp.nodeType === 'part') return planPartStrip(cp.paragraph.text);
+  if (cp.signalUsed === 4) return planOutlineNumberStrip(cp.paragraph.text);
+  return null;
+}
+
 function nodeContent(cp: ClassifiedParagraph): {
   readonly text: string;
   readonly sourceFacts?: NonNullable<DocxParagraph['sourceFacts']>;
 } {
   const facts = cp.paragraph.sourceFacts;
-  const plan = cp.nodeType === 'part' ? planPartStrip(cp.paragraph.text) : null;
+  const plan = planNodeStrip(cp);
   if (!plan) {
     return facts ? { text: cp.paragraph.text, sourceFacts: facts } : { text: cp.paragraph.text };
   }

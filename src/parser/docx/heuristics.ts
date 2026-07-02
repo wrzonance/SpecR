@@ -7,10 +7,29 @@ interface TextSignalEntry {
 }
 
 // All patterns anchored to ^ — prevents mid-word matches (e.g. "3i)" in product codes).
-// Ordered most-specific first.
+// Ordered most-specific first. This ordering is load-bearing: the "N.0 <canonical
+// part name>" PART pattern and the deeper N.N.N patterns MUST precede the generic
+// "N.N" article pattern, because more-specific decimals match it too (first-match wins).
 const TEXT_SIGNALS: readonly TextSignalEntry[] = [
   { pattern: /^PART\s+\d+/i, nodeType: 'part', normalizedIlvl: 0 },
-  { pattern: /^\d+\.\d+\s+/, nodeType: 'article', normalizedIlvl: 1 },
+  // PART headings authored in whole-number decimal form ("2.0 PRODUCTS",
+  // "3.0 EXECUTION"): some manufacturer specs number PARTs as "N.0" and leave them
+  // unstyled/unnumbered, so ONLY the text signal sees them. Gate on a canonical CSI
+  // part name — a bare "N.0" alone is not enough evidence to outrank the article
+  // pattern (a mis-numbered article or a "2.0 inches" measurement must stay put).
+  {
+    pattern: /^\d+\.0+[\s.:—–-]+(?:GENERAL|PRODUCTS|EXECUTION)\b/i,
+    nodeType: 'part',
+    normalizedIlvl: 0,
+  },
+  // Manual decimal outline (docs typed without Word numbering): depth = dot count.
+  // Deeper patterns MUST precede the N.N article pattern (first-match), most dots
+  // first. "1.1.1.1" would never match the shorter N.N pattern (a "." follows N.N,
+  // not whitespace), but ordering deepest-first keeps the intent explicit and safe.
+  { pattern: /^\d+(?:\.\d+){4}\s+/, nodeType: 'pr3', normalizedIlvl: 4 }, // N.N.N.N.N
+  { pattern: /^\d+(?:\.\d+){3}\s+/, nodeType: 'pr2', normalizedIlvl: 3 }, // N.N.N.N
+  { pattern: /^\d+(?:\.\d+){2}\s+/, nodeType: 'pr1', normalizedIlvl: 2 }, // N.N.N
+  { pattern: /^\d+\.\d+\s+/, nodeType: 'article', normalizedIlvl: 1 }, // N.N
   { pattern: /^[A-Z]\.\s/, nodeType: 'pr1', normalizedIlvl: 2 },
   { pattern: /^\d+\.\s/, nodeType: 'pr2', normalizedIlvl: 3 },
   { pattern: /^[a-z]\.\s/, nodeType: 'pr3', normalizedIlvl: 4 },
@@ -67,6 +86,32 @@ export function isSpecifierNote(text: string): boolean {
     .replace(/\s+/g, ' ')
     .toUpperCase();
   return NOTE_TO_SPECIFIER_PATTERN.test(undecorated) || SPECIFIER_NOTES_PATTERN.test(undecorated);
+}
+
+// A horizontal rule made only of decoration chars (asterisks, dashes, equals,
+// bullets) — 3+ so a stray "--" or "==" arrow isn't caught. Spaces allowed so
+// spaced rules ("* * *") match; a trimmed non-empty match always holds a real
+// decoration char.
+const DECORATION_RULE = /^[\s*=•·—–-]{3,}$/;
+// Strips decoration + brackets/parens so an "[OR]" / "OR" alternate-choice marker
+// reduces to the bare token regardless of how it is wrapped ("****** [OR] ******").
+const OR_DECORATION = /[\s*=•·—–[\]()-]/g;
+
+/**
+ * Returns true for editorial *separator* lines that are never structural content:
+ * a decoration rule ("****", "----", "====") or an "[OR]"/"OR" alternate-choice
+ * marker. These carry no hierarchy — a spec author inserts them between mutually
+ * exclusive option blocks. Routing them to a continuation (before any signal runs)
+ * is defense-in-depth: a separator that retained a PART-tier style AND live
+ * numbering would otherwise be promoted to a spurious PART (the numId=0 guard only
+ * catches the DE-numbered variant). Real content, orphan brackets ("]"), and
+ * fill-in placeholders ("[__item__]") are deliberately NOT matched.
+ */
+export function isDecorationSeparator(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 2) return false;
+  if (DECORATION_RULE.test(trimmed)) return true;
+  return trimmed.replace(OR_DECORATION, '').toUpperCase() === 'OR';
 }
 
 /**

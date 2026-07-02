@@ -25,8 +25,21 @@ import type { SourceFacts, SourceColorFact } from '../ast/types.js';
 // follows / no whitespace after PART). No stray punctuation can survive the cut.
 const PART_PREFIX = /^\s*PART\s+\d+[\s.:—–-]*(?=[a-z])/i;
 
+// Whole-number decimal PART prefix: some manufacturer specs number PARTs as "N.0"
+// ("2.0 PRODUCTS" → "PRODUCTS"). Only N.0 is a PART tier — a real "N.N" article
+// number is never matched (the char after "\.0+" separators must be a letter, and
+// only ".0"/".00"… decimals qualify). Mirrors the Signal-4 N.0 PART text pattern
+// (heuristics.ts); both must agree on what a decimal PART heading looks like.
+const DECIMAL_PART_PREFIX = /^\s*\d+\.0+[\s.:—–-]*(?=[a-z])/i;
+
+// The first prefix pattern that matches the (trimmed-at-^) heading, or null.
+function matchPartPrefix(text: string): RegExpExecArray | null {
+  return PART_PREFIX.exec(text) ?? DECIMAL_PART_PREFIX.exec(text);
+}
+
 export function stripPartPrefix(text: string): string {
-  return text.replace(PART_PREFIX, '').trim();
+  const match = matchPartPrefix(text);
+  return (match ? text.slice(match[0].length) : text).trim();
 }
 
 /**
@@ -36,9 +49,29 @@ export function stripPartPrefix(text: string): string {
  * "PART n" with no name) — in both cases the caller keeps the original text.
  */
 export function planPartStrip(text: string): { text: string; removed: number } | null {
-  const match = PART_PREFIX.exec(text);
+  const match = matchPartPrefix(text);
   if (!match) return null;
-  const stripped = text.replace(PART_PREFIX, '').trim();
+  const stripped = text.slice(match[0].length).trim();
+  if (stripped.length === 0) return null;
+  return { text: stripped, removed: match[0].length };
+}
+
+// A leading manual decimal-outline number ("1.4.2.1 Install…" → "Install…"). Requires
+// at least one INTERIOR dot (a bare "1." is the pr2 label form, not an outline number)
+// and a following letter. Used for article/pr nodes classified by the decimal text
+// signal (Signal 4): their typed number duplicates the render-derived CSI label, so it
+// must be stripped. Mirrors the deep-numbering patterns in heuristics.ts (Signal 4).
+const DECIMAL_OUTLINE_PREFIX = /^\s*\d+(?:\.\d+)+[\s.:—–-]*(?=[a-z])/i;
+
+/**
+ * Strip a leading decimal-outline number from a manually-numbered heading's text and
+ * report the chars removed (for source-fact rebasing). Returns null when there is no
+ * such prefix, or when stripping would empty the text.
+ */
+export function planOutlineNumberStrip(text: string): { text: string; removed: number } | null {
+  const match = DECIMAL_OUTLINE_PREFIX.exec(text);
+  if (!match) return null;
+  const stripped = text.slice(match[0].length).trim();
   if (stripped.length === 0) return null;
   return { text: stripped, removed: match[0].length };
 }
