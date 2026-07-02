@@ -46,6 +46,14 @@ afterAll(async () => {
 const base = (): string => `${baseUrl}/specs/${specId}/paragraphs/${paragraphId}/associations`;
 
 describe('paragraph associations REST', () => {
+  it('accepts an uppercase spec id in the route — ownership check is case-insensitive', async () => {
+    // Regression (CodeRabbit): resolveIds compared the route spec id to the canonical
+    // (lowercase) spec_id strictly, so a valid uppercase spec id 404'd on every route.
+    const url = `${baseUrl}/specs/${specId.toUpperCase()}/paragraphs/${paragraphId}/associations`;
+    const res = await fetch(url);
+    expect(res.status).toBe(200); // not a false 404
+  });
+
   it('associates a datasheet to a Part 2 paragraph, visible via REST', async () => {
     const create = await fetch(base(), {
       method: 'POST',

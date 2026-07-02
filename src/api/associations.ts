@@ -29,7 +29,10 @@ async function resolveIds(req: Request, res: Response): Promise<Ids | null> {
     return null;
   }
   const specOfNode = await getParagraphSpecId(nodeId.data);
-  if (specOfNode !== specId.data) {
+  // Case-insensitive: getParagraphSpecId returns the canonical (lowercase) spec_id
+  // while specId.data is an unnormalized route param — match the MCP path so a valid
+  // uppercase spec id is not a false 404 (CodeRabbit).
+  if (!specOfNode || specOfNode.toLowerCase() !== specId.data.toLowerCase()) {
     res.status(404).json({ success: false, error: 'paragraph not found in spec' });
     return null;
   }
