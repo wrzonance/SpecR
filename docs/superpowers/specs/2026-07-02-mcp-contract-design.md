@@ -1,15 +1,14 @@
 # MCP Contract — full REST↔MCP parity, verified by tests, with permission tiers
 
-**Status:** DRAFT — brainstorm design, pending author review.
+**Status:** Accepted — decisions A–E (§5) confirmed by author 2026-07-02. Implementation plan next.
 **Date:** 2026-07-02
 **Branch:** `feat/mcp-contract`
 **Related issues:** #44 (MCP write tools), #43 (auth + multi-tenant), #99 (keynote export MCP tool), #331 (shared ToolResult refactor)
 **Related ADRs:** ADR-026 (OpenAPI contract testing — the sibling this mirrors), ADR-010 (MCP server), ADR-002 (API-first headless)
 
-> ⚠️ **Away-from-keyboard defaults.** The author was away when the pivotal fork was
-> asked. This doc proceeds on the **recommended** answer to each open decision and
-> flags every such choice with **`[DEFAULT — confirm]`**. Nothing here is
-> implemented yet; this is the design artifact for review before `writing-plans`.
+> ✅ **Decisions A–E (§5) confirmed by the author on 2026-07-02.** The `[DEFAULT]`
+> defaults below stand as the accepted decisions. Nothing here is implemented yet;
+> the implementation plan is the next artifact.
 
 ---
 
@@ -173,18 +172,17 @@ releasable. Reads may be tools or resources; **default `[DEFAULT — confirm]`: 
   unwieldy.
 - **Lint/coverage only (no schema check).** Weaker than INV-4; cheap to add later, not a substitute.
 
-## 5. Open decisions (author, please confirm)
+## 5. Decisions (confirmed by author 2026-07-02)
 
-- **A. Sync mechanism** = CI parity gate (hand-authored). `[DEFAULT — confirm]`
+- **A. Sync mechanism** = CI parity gate (hand-authored). ✅
 - **B. Parity scope** = user-facing ops; exempt only health/docs/asset/contract routes. Job-polling
-  endpoints (`get /parse/jobs/{}`, import jobs) **become tools** so an agent can poll its own job.
-  `[DEFAULT — confirm]`
+  endpoints (`get /parse/jobs/{}`, import jobs) **become tools** so an agent can poll its own job. ✅
 - **C. Permission default** = expose `{read, write}`, gate `destructive` off; destructive =
-  every delete/withdraw of project/client/library/spec/package. `[DEFAULT — confirm]`
+  every delete/withdraw of project/client/library/spec/package. ✅
 - **D. Reads as tools vs resources** = tools (uniform with the chat bridge), keep existing 3
-  resources. `[DEFAULT — confirm]`
+  resources. ✅
 - **E. Ordering vs #43** = ship contract + tiers + config gating now; token-scoped tiers when #43
-  lands. `[DEFAULT — confirm]`
+  lands. ✅
 
 ## 6. Testing (the invariants ARE the tests)
 
