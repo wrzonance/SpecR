@@ -1,5 +1,6 @@
 import { type Router as RouterType, Router } from 'express';
 import rateLimit from 'express-rate-limit';
+import { config } from '../lib/env.js';
 import { healthHandler } from './health.js';
 import {
   getSpecHandler,
@@ -119,9 +120,12 @@ import {
 } from './numbering-profiles.js';
 
 const parseRateLimit = rateLimit({
-  windowMs: 60 * 1000, // 1 minute window
-  max: 10, // 10 uploads per IP per minute
-  skip: () => process.env.NODE_ENV === 'test',
+  windowMs: config.RATE_LIMIT_WINDOW_MS,
+  // Read live per request so a runtime change to config.RATE_LIMIT_UPLOAD_MAX takes effect
+  // on the next request (see src/lib/env.ts). Limiting is skipped in tests and whenever it
+  // is disabled via config (the web-UI demo sets DISABLE_RATE_LIMIT).
+  limit: () => config.RATE_LIMIT_UPLOAD_MAX,
+  skip: () => config.NODE_ENV === 'test' || config.DISABLE_RATE_LIMIT,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'too many requests — please wait before uploading again' },

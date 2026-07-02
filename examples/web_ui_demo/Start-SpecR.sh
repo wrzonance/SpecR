@@ -238,7 +238,12 @@ run_pnpm migrate
 run_pnpm seed
 run_pnpm build
 
-node dist/index.js &
+# Hand the demo env to the API so its rate-limit opt-out (DISABLE_RATE_LIMIT=true) reaches
+# the API process. Load the committed .env.example first — so the opt-out works on a clean
+# checkout where the gitignored .env does not exist — then let a real .env override it.
+# Node's --env-file does NOT override already-exported vars (so DATABASE_URL/NODE_ENV/PORT
+# above still win), and a later --env-file overrides an earlier one.
+node --env-file-if-exists="$EXAMPLE_ROOT/.env.example" --env-file-if-exists="$EXAMPLE_ROOT/.env" dist/index.js &
 API_PID="$!"
 
 printf '\n==> Waiting for the SpecR API on http://127.0.0.1:%s\n' "$API_PORT"

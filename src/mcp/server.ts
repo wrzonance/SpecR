@@ -10,11 +10,7 @@ import { registerTools } from './tools.js';
 import { registerResources } from './resources.js';
 import { McpSessionStore, connectSession } from './sessions.js';
 import { logger } from '../lib/logger.js';
-
-// Default guards production; integration suites exceeding 20 calls inject a higher max
-// via registerMcpRoutes options (the limiter is otherwise shared module state that outlives
-// any single test app).
-const DEFAULT_MCP_RATE_LIMIT_MAX = 20;
+import { config } from '../lib/env.js';
 
 function createMcpServer(): McpServer {
   const server = new McpServer({ name: 'specr', version: '0.1.0' });
@@ -77,8 +73,13 @@ export function registerMcpRoutes(
   // One session store per registration — outlives individual requests, scoped to this app.
   const sessions = new McpSessionStore();
   const mcpRateLimit = rateLimit({
-    windowMs: 60 * 1000,
-    max: options?.rateLimitMax ?? DEFAULT_MCP_RATE_LIMIT_MAX,
+    windowMs: config.RATE_LIMIT_WINDOW_MS,
+    // Read live per request (see src/lib/env.ts). The optional override lets integration
+    // suites raise the ceiling above the configured default without touching env.
+    limit: () => options?.rateLimitMax ?? config.RATE_LIMIT_MCP_MAX,
+    // Unlike the REST limiter this does NOT skip in test mode — the rate-limit test
+    // exercises the live limiter, and integration suites raise the ceiling via rateLimitMax.
+    skip: () => config.DISABLE_RATE_LIMIT,
     standardHeaders: true,
     legacyHeaders: false,
     message: { success: false, error: 'too many MCP requests — please wait before retrying' },

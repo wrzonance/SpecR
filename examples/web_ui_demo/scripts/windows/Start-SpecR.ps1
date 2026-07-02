@@ -239,7 +239,12 @@ Invoke-CheckedPnpm @('migrate')
 Invoke-CheckedPnpm @('seed')
 Invoke-CheckedPnpm @('build')
 
-$api = Start-Process -FilePath 'node' -ArgumentList 'dist/index.js' -WorkingDirectory $RepoRoot -NoNewWindow -PassThru
+# Hand the demo env to the API so its rate-limit opt-out (DISABLE_RATE_LIMIT=true) reaches
+# the API process. Load the committed .env.example first — so the opt-out works on a clean
+# checkout where the gitignored .env does not exist — then let a real .env override it.
+# Node's --env-file does NOT override already-set env vars (so DATABASE_URL/NODE_ENV/PORT
+# above still win), and a later --env-file overrides an earlier one.
+$api = Start-Process -FilePath 'node' -ArgumentList "--env-file-if-exists=`"$(Join-Path $ExampleRoot '.env.example')`"", "--env-file-if-exists=`"$(Join-Path $ExampleRoot '.env')`"", 'dist/index.js' -WorkingDirectory $RepoRoot -NoNewWindow -PassThru
 
 try {
     Write-Host ''

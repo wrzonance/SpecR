@@ -34,6 +34,16 @@ const schema = z.object({
     .refine((v) => v.split(',').every((t) => ['read', 'write', 'destructive'].includes(t.trim())), {
       message: 'MCP_ALLOWED_TIERS must be a comma-separated list of: read, write, destructive',
     }),
+  // Rate limiting (express-rate-limit). These are the STARTUP SEED: the limiters read
+  // DISABLE_RATE_LIMIT and the *_MAX values LIVE on every request (skip/limit closures),
+  // so a future admin surface can mutate `config.*` at runtime and have it take effect on
+  // the next request without a restart — config is intentionally NOT frozen. Only
+  // RATE_LIMIT_WINDOW_MS is fixed when a limiter is constructed (the library bakes the
+  // window in). Secure by default: limiting is ON; the web-UI demo opts out via its .env.
+  DISABLE_RATE_LIMIT: z.stringbool().default(false),
+  RATE_LIMIT_UPLOAD_MAX: z.coerce.number().int().positive().default(10),
+  RATE_LIMIT_MCP_MAX: z.coerce.number().int().positive().default(20),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
 });
 
 const result = schema.safeParse(process.env);
