@@ -1,7 +1,12 @@
 // Drag-and-drop ingest: full-window drop target, sequential upload queue, and
 // per-file parse-job progress.
 
-import { uploadSpec, waitForParseJob } from './api.js';
+import {
+  uploadSpec,
+  waitForParseJob,
+  importSpecToLibrary,
+  waitForImportJob,
+} from './api.js';
 
 const ACCEPTED = new Set(['.sec', '.docx', '.txt']);
 const DEFAULT_CONTEXT = { destination: 'project', source: 'master' };
@@ -136,17 +141,32 @@ export function initDropzone({ onSpecReady, onReject, getDropContext, onAddSecti
     const { file, item, context } = entry;
     try {
       setStage(item, 'uploading', 8);
-      const { jobId } = await uploadSpec(file, {
-        libraryId: context.libraryId,
-        importDestination: context.destination,
-        importLibrary: context.library || context.source,
-        importClient: context.client,
-      });
-      const result = await waitForParseJob(jobId, (job) => {
+      const onTick = (job) =>
         setStage(item, stageText(job), job.progress ? job.progress.pct : undefined);
-      });
+      // Whenever we know the target library, ONBOARD the spec into it
+      // (POST /libraries/:id/import) so it actually joins that library. This
+      // covers a library-view upload AND a project-map upload (the map passes
+      // the project's base source library so the section can later resolve a
+      // project copy). POST /parse only creates an orphaned standalone spec
+      // that never joins a library or project, so it's the library-less
+      // fallback. The `destination` field still drives post-processing in
+      // onSpecReady (library refresh vs. project join).
+      let result;
+      if (context.libraryId) {
+        const { jobId } = await importSpecToLibrary(file, context.libraryId);
+        result = await waitForImportJob(jobId, onTick);
+      } else {
+        const { jobId } = await uploadSpec(file, {
+          importDestination: context.destination,
+          importLibrary: context.library || context.source,
+          importClient: context.client,
+        });
+        result = await waitForParseJob(jobId, onTick);
+      }
       item.li.classList.add('is-complete');
-      setStage(item, `complete — ${result.nodeCount} nodes`, 100);
+      const done =
+        typeof result.nodeCount === 'number' ? `${result.nodeCount} nodes` : result.section;
+      setStage(item, `complete — ${done}`, 100);
       await onSpecReady(result, context);
       setTimeout(() => {
         item.li.remove();

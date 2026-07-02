@@ -86,12 +86,11 @@ describe('anchorsFromReferences', () => {
 });
 
 describe('anchorsFromReport', () => {
-  // dangling_ref carries an exact sourceParagraphId (from BrokenRef); the other
-  // reference-consistency findings (e.g. related_cited_not_listed) are built from
-  // ClassifiedRef, which has no per-paragraph locator, so they anchor at the
-  // source section only. present_not_required / required_not_present anchor at
-  // their own `section` field.
-  it('locates dangling-ref findings at the source paragraph; other findings at their section', () => {
+  // On this branch #328 is present, so the reference-consistency findings carry a
+  // sourceParagraphId and the structural findingAnchor locates them at the source
+  // paragraph — same as dangling_ref. present_not_required / required_not_present
+  // anchor at their own `section` field.
+  it('locates paragraph-bearing findings at the source paragraph; section-only findings at their section', () => {
     const anchors = anchorsFromReport([
       {
         type: 'dangling_ref',
@@ -108,6 +107,7 @@ describe('anchorsFromReport', () => {
         type: 'related_cited_not_listed',
         sourceSpecId: 's3',
         sourceSpecSection: '26 05 33',
+        sourceParagraphId: 'p3',
         section: '26 05 33',
       },
       { type: 'present_not_required', section: '01 10 00', specId: 's2', title: 'Summary' },
@@ -115,7 +115,7 @@ describe('anchorsFromReport', () => {
     ]);
     expect(anchors).toEqual([
       { section: '08 11 13', specId: 's1', paragraphId: 'p1' },
-      { section: '26 05 33', specId: 's3' },
+      { section: '26 05 33', specId: 's3', paragraphId: 'p3' },
       { section: '01 10 00', specId: 's2' },
       { section: '03 30 00' },
     ]);

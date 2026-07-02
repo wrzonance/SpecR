@@ -17,6 +17,7 @@ export const API_FEATURES = {
   openComments: true, // GET /specs|projects/:id/open-comments              (landed #262/#272)
   coordination: true, // coordination-report + required-sections            (landed #239/#241)
   submittalRegister: true, // POST submittal-register + product-driven findings (landed #263)
-  impliedRelated: true, // implied_related_section coordination finding      (landed #261)
+  impliedRelated: false, // hidden: false-positive inference (single "control" token) — see #327
   umbrellaCallout: true, // umbrella_not_called_out coordination finding (landed #264)
+  numberingProfiles: true, // numbering-profile CRUD + DOCX snapshot + ingress (landed #299/#317/#320)
 };
