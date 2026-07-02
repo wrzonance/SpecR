@@ -40,6 +40,8 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['post /specs/{}/reopen', 'reopen_spec'],
   ['post /specs/{}/restore', 'restore_spec'],
   ['delete /specs/{}', 'delete_spec'], // destructive tier — soft withdraw (ADR-030)
+  // wave 5 — merge
+  ['post /specs/{}/merge', 'apply_merge'],
   // …extend during each write-tool wave.
 ]);
 
@@ -61,8 +63,6 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['put /packages/{}/specs', 'pending — wave 2 (assign_specs_to_package)'],
   ['post /packages/{}/revisions', 'pending — wave 2 (issue package revision)'],
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
-  // --- Wave 5: merge ---
-  ['post /specs/{}/merge', 'pending — wave 5 (apply_merge)'],
   // --- Wave 6: assignment (numbering profile / style source / lock) ---
   ['put /specs/{}/numbering-profile', 'pending — wave 6 (assign_numbering_profile)'],
   ['delete /specs/{}/numbering-profile', 'pending — wave 6 (clear numbering-profile assignment)'],

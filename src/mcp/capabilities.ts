@@ -73,6 +73,8 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['finalize_spec', 'write'],
   ['reopen_spec', 'write'],
   ['restore_spec', 'write'],
+  // wave 5 — merge
+  ['apply_merge', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row
