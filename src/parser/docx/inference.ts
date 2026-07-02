@@ -344,9 +344,17 @@ function nodeContent(cp: ClassifiedParagraph): {
 // Structural nodes only. classifyParagraphs routes every vanish/note paragraph to
 // a 'continuation' (handled by makeContinuationNode), so a cp reaching makeNode is
 // always visible, non-note, structural content — its type maps straight through.
-function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source): SpecNode {
+// A Signal-4 (manual text-outline) article records its id in `s4ArticleIds` so the
+// label-strip post-pass touches ONLY manual outlines — a Word/style-numbered article's
+// visible text is real content, never a typed label (Codex adversarial review).
+function makeNode(
+  cp: ClassifiedParagraph,
+  children: SpecNode[],
+  source: Source,
+  s4ArticleIds: Set<string>
+): SpecNode {
   const content = nodeContent(cp);
-  return {
+  const node: SpecNode = {
     id: uuidv4(),
     type: cp.nodeType,
     text: content.text,
@@ -357,16 +365,23 @@ function makeNode(cp: ClassifiedParagraph, children: SpecNode[], source: Source)
       ...(content.sourceFacts ? { sourceFacts: content.sourceFacts } : {}),
     },
   };
+  if (cp.signalUsed === 4 && cp.nodeType === 'article') s4ArticleIds.add(node.id);
+  return node;
 }
 
 function appendContinuation(cp: ClassifiedParagraph, target: SpecNode[], source: Source): void {
   target.push(makeContinuationNode(cp, source));
 }
 
-function drainTop(stack: StackEntry[], roots: SpecNode[], source: Source): void {
+function drainTop(
+  stack: StackEntry[],
+  roots: SpecNode[],
+  source: Source,
+  s4ArticleIds: Set<string>
+): void {
   const popped = stack.pop();
   if (!popped) return;
-  const node = makeNode(popped.cp, popped.children, source);
+  const node = makeNode(popped.cp, popped.children, source, s4ArticleIds);
   const top = stack[stack.length - 1];
   const parentChildren = top !== undefined ? top.children : roots;
   parentChildren.push(node);
@@ -433,12 +448,17 @@ function stripArticleLabel(article: SpecNode, partNumber: number, ordinal: numbe
 
 // Walk a part's children, advancing the CSI ordinal only past numbered siblings
 // (consumesNumber) — exactly as the renderer does — so each article's computed label
-// matches what getLabel would prepend at render time.
-function stripLabelsUnderPart(part: SpecNode, partNumber: number): SpecNode {
+// matches what getLabel would prepend at render time. Only Signal-4 (manual-outline)
+// articles are eligible to strip; a numbered/style-derived article's text is content.
+function stripLabelsUnderPart(
+  part: SpecNode,
+  partNumber: number,
+  s4ArticleIds: ReadonlySet<string>
+): SpecNode {
   let ordinal = 0;
   const children = part.children.map((child) => {
     const next =
-      consumesNumber(child) && child.type === 'article'
+      consumesNumber(child) && child.type === 'article' && s4ArticleIds.has(child.id)
         ? stripArticleLabel(child, partNumber, ordinal)
         : child;
     if (consumesNumber(child)) ordinal += 1;
@@ -450,12 +470,15 @@ function stripLabelsUnderPart(part: SpecNode, partNumber: number): SpecNode {
 // Post-pass over the assembled tree: single-dot article numbers are stripped here (not
 // inline) because a node's position — and therefore its label — is only known once the
 // whole tree exists. Multi-dot pr numbers are already stripped inline (unambiguous).
-function stripArticleOutlineLabels(roots: readonly SpecNode[]): SpecNode[] {
+function stripArticleOutlineLabels(
+  roots: readonly SpecNode[],
+  s4ArticleIds: ReadonlySet<string>
+): SpecNode[] {
   let partOrdinal = 0;
   return roots.map((root) => {
     const next =
       consumesNumber(root) && root.type === 'part'
-        ? stripLabelsUnderPart(root, partOrdinal + 1)
+        ? stripLabelsUnderPart(root, partOrdinal + 1, s4ArticleIds)
         : root;
     if (consumesNumber(root)) partOrdinal += 1;
     return next;
@@ -470,6 +493,9 @@ export function buildTree(
 ): SpecTree {
   const roots: SpecNode[] = [];
   const stack: StackEntry[] = [];
+  // Node ids of Signal-4 (manual text-outline) articles — the only articles whose
+  // leading number may be an author-typed label the strip post-pass should remove.
+  const s4ArticleIds = new Set<string>();
   let lastNonContChildren: SpecNode[] = roots;
 
   // Empty paragraphs are layout spacing, not content — drop before structuring.
@@ -487,7 +513,7 @@ export function buildTree(
     while (stack.length > 0) {
       const top = stack[stack.length - 1];
       if (top === undefined || top.cp.resolvedIlvl < cp.resolvedIlvl) break;
-      drainTop(stack, roots, source);
+      drainTop(stack, roots, source, s4ArticleIds);
     }
 
     const entry: StackEntry = { cp, children: [] };
@@ -496,8 +522,8 @@ export function buildTree(
   }
 
   while (stack.length > 0) {
-    drainTop(stack, roots, source);
+    drainTop(stack, roots, source, s4ArticleIds);
   }
 
-  return { id: uuidv4(), section, title, parts: stripArticleOutlineLabels(roots) };
+  return { id: uuidv4(), section, title, parts: stripArticleOutlineLabels(roots, s4ArticleIds) };
 }

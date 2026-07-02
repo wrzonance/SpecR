@@ -601,6 +601,24 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts[0]?.children[0]?.text).toBe('1.9 RELATED SECTIONS');
   });
 
+  // Codex adversarial review (P2 data-loss): the label-match strip must run ONLY on
+  // Signal-4 (manual text-outline) articles. A Word/style-NUMBERED article (Signal 1/2)
+  // gets its number from the numbering definition, so its VISIBLE text is pure content —
+  // it must never be strip-touched even if it happens to open with its label number.
+  // "1.1 mm tolerance" as the first numbered article would otherwise lose "1.1".
+  it('does NOT strip a Signal-1/2 numbered article whose content starts with its label', () => {
+    const tree = buildTree(
+      [
+        makeClassified('part', 0, 'PART 1 - GENERAL'),
+        makeClassified('article', 1, '1.1 mm tolerance'), // makeClassified → signalUsed 1
+      ],
+      '01',
+      'T',
+      'unknown'
+    );
+    expect(tree.parts[0]?.children[0]?.text).toBe('1.1 mm tolerance'); // content preserved
+  });
+
   // #296: hidden content is classified as a continuation (suppressed), not a part,
   // and keeps its full text verbatim — retained as-authored for document-control
   // tracking. The part prefix-strip (makeNode/nodeContent) only runs for real part
