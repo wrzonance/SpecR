@@ -44,7 +44,7 @@ function arcatFixture(): { map: NumberingMap; styles: StyleMap } {
 }
 
 function cpiFixture(): { map: NumberingMap; styles: StyleMap } {
-  // CPI: articleIlvl=3 — ilvl 0-2 are PART, ilvl 3 is article, ilvl 4 is paragraph
+  // articleIlvl=3 (low levels reserved) — ilvl 0-2 are PART, ilvl 3 is article, ilvl 4 is paragraph
   const map: NumberingMap = {
     nums: new Map([[2, { numId: 2, abstractNumId: 1 }]]),
     abstractNums: new Map([
@@ -85,7 +85,7 @@ function cpiFixture(): { map: NumberingMap; styles: StyleMap } {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('extractNumberingProfile — ARCAT (articleIlvl=1)', () => {
+describe('extractNumberingProfile — articleIlvl=1 (no reserved levels)', () => {
   const { map, styles } = arcatFixture();
   const profile = extractNumberingProfile(map, styles);
 
@@ -137,7 +137,7 @@ describe('extractNumberingProfile — ARCAT (articleIlvl=1)', () => {
   });
 });
 
-describe('extractNumberingProfile — CPI (articleIlvl=3)', () => {
+describe('extractNumberingProfile — articleIlvl=3 (low levels reserved)', () => {
   const { map, styles } = cpiFixture();
   const profile = extractNumberingProfile(map, styles);
 
@@ -145,7 +145,7 @@ describe('extractNumberingProfile — CPI (articleIlvl=3)', () => {
     expect(profile.articleIlvl).toBe(3);
   });
 
-  it('CPI ilvl boundary: ilvl<3 → part, ilvl=3 → article, ilvl=4 → paragraph, ilvl=5 → subparagraph', () => {
+  it('articleIlvl=3 ilvl boundary: ilvl<3 → part, ilvl=3 → article, ilvl=4 → paragraph, ilvl=5 → subparagraph', () => {
     const levels = profile.numbering[0]?.levels ?? [];
     // ilvl 0,1,2 are all below articleIlvl=3 → part
     expect(levels[0]).toMatchObject({ ilvl: 0, tier: 'part' });
@@ -164,7 +164,7 @@ describe('extractNumberingProfile — CPI (articleIlvl=3)', () => {
     expect(ids).toEqual(['ART', 'PR1', 'PRT']);
   });
 
-  it('CPI ART entry → tier article', () => {
+  it('ART entry → tier article', () => {
     const art = profile.styleLadder.find((e) => e.styleId === 'ART');
     expect(art).toEqual({ styleId: 'ART', numId: 2, ilvl: 3, tier: 'article' });
   });

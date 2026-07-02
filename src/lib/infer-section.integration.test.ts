@@ -29,11 +29,11 @@ describe('lookupSpecSectionTitle', () => {
   });
 });
 
-describe.skipIf(!ARCAT_AVAILABLE)('parse() with ARCAT DOCX — content inference', () => {
+describe.skipIf(!ARCAT_AVAILABLE)('parse() with a real corpus DOCX — content inference', () => {
   it('infers a valid CSI section number from content', async () => {
     const buffer = await readFile(ARCAT_DOCX);
     const result = await parse(buffer, ARCAT_DOCX);
-    // ARCAT docs lack dc:subject — inference should fire
+    // These corpus docs lack dc:subject — inference should fire
     expect(result.sectionInference.method).toBe('content-high');
     expect(result.sectionInference.confidence).toBe('high');
     expect(result.sectionInference.inferredSection).toMatch(/^\d{2} \d{2} \d{2}$/);

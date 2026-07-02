@@ -20,7 +20,7 @@ function makePara(overrides: Partial<DocxParagraph> = {}): DocxParagraph {
 const numMap = (articleIlvl = 1): NumberingMap => ({ ...emptyNumberingMap(), articleIlvl });
 
 describe('classifyParagraphs — signal 1 (numId+ilvl)', () => {
-  it('ARCAT-style ilvl=0 → part, normalizedIlvl=0', () => {
+  it('articleIlvl=1 ilvl=0 → part, normalizedIlvl=0', () => {
     // Signal 1 requires PART heading text when ilvl=0 — prevents <ol> list items
     // (also numId > 0 at ilvl=0 in LibreOffice) from being misclassified as PART nodes.
     const result = classifyParagraphs(
@@ -33,7 +33,7 @@ describe('classifyParagraphs — signal 1 (numId+ilvl)', () => {
     expect(result[0]?.resolvedIlvl).toBe(0);
   });
 
-  it('CPI ilvl=3 → article when articleIlvl=3, normalizedIlvl=1', () => {
+  it('ilvl=3 → article when articleIlvl=3, normalizedIlvl=1', () => {
     const result = classifyParagraphs(
       [makePara({ numId: 1, ilvl: 3 })],
       numMap(3),
@@ -66,7 +66,7 @@ describe('classifyParagraphs — signal 1 (numId+ilvl)', () => {
     expect(result[0]?.nodeType).toBe('pr1');
   });
 
-  it('ARCAT-style ilvl=7 and ilvl=8 map to pr6/pr7 before Word depth cap', () => {
+  it('articleIlvl=1 ilvl=7 and ilvl=8 map to pr6/pr7 before Word depth cap', () => {
     const result = classifyParagraphs(
       [
         makePara({ numId: 1, ilvl: 7, text: 'Nested option' }),
@@ -295,7 +295,7 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
   });
 });
 
-describe('classifyParagraphs — CPI regressions', () => {
+describe('classifyParagraphs — reserved-low-level (articleIlvl=3) regressions', () => {
   it('PR1lc suppressesNumbering → continuation not pr1', () => {
     // An explicit numId=0 opt-out (suppressesNumbering) is an author decision to
     // de-number this paragraph — it stays a continuation even though its name looks
@@ -317,7 +317,7 @@ describe('classifyParagraphs — CPI regressions', () => {
     expect(result[0]?.nodeType).toBe('continuation');
   });
 
-  // Regression (CPI CABINETS/CABLE_MANAGEMENT/ELECTRICAL_CABINETS etc.): the real CPI
+  // Regression (reserved-low-level fixtures): the real
   // lead-in styles PR1lc..PR5lc have NEITHER numbering NOR a numId=0 opt-out — they are
   // unnumbered lead-ins ("Section Includes:", "Related Requirements:") that introduce a
   // numbered PR2 list. Left as continuations they orphan those PR2 items at the article
@@ -335,7 +335,7 @@ describe('classifyParagraphs — CPI regressions', () => {
     };
     const result = classifyParagraphs(
       [makePara({ styleId: 'PR1lc', text: 'Section Includes:' })],
-      numMap(3), // CPI articleIlvl = 3
+      numMap(3), // articleIlvl = 3 (low levels reserved)
       styleMap
     );
     expect(result[0]?.nodeType).toBe('pr1');
@@ -416,7 +416,7 @@ describe('classifyParagraphs — misaligned-numbering article guard', () => {
     expect(result[0]?.signalUsed).toBe(4);
   });
 
-  it('keeps a Signal-1 article when indentation agrees within 1 tier (real CPI article ≈900 twips)', () => {
+  it('keeps a Signal-1 article when indentation agrees within 1 tier (real article ≈900 twips)', () => {
     const result = classifyParagraphs(
       [makePara({ numId: 1, ilvl: 3, leftIndent: 900, text: 'SUMMARY' })],
       numMap(3),
@@ -503,7 +503,7 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts).toHaveLength(3);
   });
 
-  // Regression (parsing-needs-fixing.docx): a CPI PART heading whose literal run
+  // Regression (a hand-authored doc): a PART heading whose literal run
   // text bakes in the render-derived "PART n -" prefix (PART 1/2 came bare from
   // numbering, but PART 3's text was literally "PART 3 - EXECUTION"). Without
   // stripping, the renderer's own getLabel prefix doubles it to the garbled
@@ -876,14 +876,14 @@ describe('buildTree — conflicts propagation (#56)', () => {
   });
 });
 
-describe('classifyParagraphs — numbering-generated PART headings (ARCAT regression)', () => {
+describe('classifyParagraphs — numbering-generated PART headings (spec-shaped regression)', () => {
   const specShaped = (): NumberingMap => ({
     ...emptyNumberingMap(),
     articleIlvl: 1,
     specShapedNumIds: new Set([1]),
   });
 
-  it('regression: ilvl=0 "GENERAL" with spec-shaped numbering → part (21 11 00 yielded 34 roots, not 3)', () => {
+  it('regression: ilvl=0 "GENERAL" with spec-shaped numbering → part (yielded 34 roots, not 3)', () => {
     const result = classifyParagraphs(
       [makePara({ numId: 1, ilvl: 0, text: 'GENERAL' })],
       specShaped(),

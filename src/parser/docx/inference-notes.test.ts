@@ -170,9 +170,9 @@ describe('buildTree — empty paragraphs are dropped', () => {
 });
 
 describe('classifyParagraphs — note-style name matching (CodeRabbit #113)', () => {
-  it('regression: VendorNote style IS a note — "vendor" contains "end" and must not be excluded', () => {
+  it('regression: AppendixNote style IS a note — "append" contains "end" and must not be excluded', () => {
     const styleMap: StyleMap = {
-      styles: new Map([['VendorNote', { styleId: 'VendorNote', name: 'VendorNote' }]]),
+      styles: new Map([['AppendixNote', { styleId: 'AppendixNote', name: 'AppendixNote' }]]),
       resolvedNumPr: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
@@ -180,7 +180,7 @@ describe('classifyParagraphs — note-style name matching (CodeRabbit #113)', ()
     const classified = classifyParagraphs(
       [
         makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
-        makePara({ styleId: 'VendorNote', text: 'Coordinate finishes with vendor.' }),
+        makePara({ styleId: 'AppendixNote', text: 'See the appendix for finishes.' }),
       ],
       numMap(1),
       styleMap

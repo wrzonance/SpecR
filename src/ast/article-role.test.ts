@@ -18,13 +18,13 @@ describe('deriveArticleRole — canonical CSI headings', () => {
     expect(deriveArticleRole('DELIVERY, STORAGE AND HANDLING')).toBe('delivery-storage-handling');
   });
 
-  it('tolerates a leading CSI numbering prefix (ARCAT "1.1 X" form)', () => {
+  it('tolerates a leading CSI numbering prefix ("1.1 X" form)', () => {
     expect(deriveArticleRole('1.1 RELATED SECTIONS')).toBe('related-sections');
     expect(deriveArticleRole('1.3 SUBMITTALS')).toBe('submittals');
   });
 
-  it('tolerates a CPI-style numbering prefix and offset (same logical article)', () => {
-    // CPI reserves low ilvls for Schedule/PDS; the inference engine normalizes
+  it('tolerates a reserved-low-level numbering prefix and offset (same logical article)', () => {
+    // some docs reserve low ilvls for a Schedule/Product-Data block; the inference engine normalizes
     // the offset into node_type='article' before the deriver runs, so the only
     // thing the deriver sees is the heading text — prefix or not, it classifies.
     expect(deriveArticleRole('1.02 REFERENCES')).toBe('references');

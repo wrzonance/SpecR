@@ -185,7 +185,7 @@ function isNoteParagraph(para: DocxParagraph, styleMap: StyleMap): boolean {
   const style = styleMap.styles.get(para.styleId);
   const label = `${para.styleId} ${style?.name ?? ''}`;
   // exclusion targets Word's built-in FootnoteText/EndnoteText styles —
-  // bare /foot|end/ would also exclude e.g. VendorNote ("vEND-or")
+  // bare /foot|end/ would also exclude e.g. AppendixNote ("app-END-ix")
   return /note/i.test(label) && !/footnote|endnote/i.test(label);
 }
 
