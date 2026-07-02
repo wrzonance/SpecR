@@ -67,7 +67,8 @@ describe.skipIf(!FIXTURES_AVAILABLE)('prefixed-heading-style corpus fixture pars
 
       expect(tree.parts.length).toBeGreaterThan(0);
       // These files have preamble continuation nodes before CSI content;
-      // source is set on all nodes from articleIlvl=1 detection.
+      // source is stamped on every node from the document-level style-vocabulary
+      // fingerprint (detectSource), independent of node type or level.
       const nodes = allNodes(tree.parts);
       const sources = new Set(nodes.map((n) => n.meta.source));
       expect(sources.has('arcat')).toBe(true);
