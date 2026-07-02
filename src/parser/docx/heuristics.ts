@@ -26,24 +26,10 @@ const TEXT_SIGNALS: readonly TextSignalEntry[] = [
   // Deeper patterns MUST precede the N.N article pattern (first-match), most dots
   // first. "1.1.1.1" would never match the shorter N.N pattern (a "." follows N.N,
   // not whitespace), but ordering deepest-first keeps the intent explicit and safe.
-  // Multi-dot numbers are unambiguously outline (a measurement is never "1.2.3"), so
-  // they match any following char.
   { pattern: /^\d+(?:\.\d+){4}\s+/, nodeType: 'pr3', normalizedIlvl: 4 }, // N.N.N.N.N
   { pattern: /^\d+(?:\.\d+){3}\s+/, nodeType: 'pr2', normalizedIlvl: 3 }, // N.N.N.N
   { pattern: /^\d+(?:\.\d+){2}\s+/, nodeType: 'pr1', normalizedIlvl: 2 }, // N.N.N
-  // Single-dot "N.N" is a HEADING only when a CAPITAL letter follows the number and its
-  // separators (CSI headings are titled: "1.2 RELATED SECTIONS", "1.2 - RELATED
-  // SECTIONS", "1.2: SUMMARY"). A lowercase/digit continuation is authored PROSE — a
-  // decimal measurement ("2.0 inches of clearance minimum") or a sentence — which must
-  // NOT become an article: it would either lose its number to the render-derived label
-  // strip (part-prefix planOutlineNumberStrip) or, if kept, round-trip with a doubled
-  // label. Failing this pattern routes it to a continuation, which preserves the full
-  // text verbatim. The separator class deliberately OMITS the period ("." would conflate
-  // with a multi-dot decimal, e.g. "1.4.2.1"); multi-dot numbers are matched by the
-  // deeper patterns above first. The [\s:—–-] class and [A-Z] gate MUST mirror
-  // isDecimalProse (below) — they are exact complements and drift is a bug.
-  // (Codex adversarial review, P2.)
-  { pattern: /^\d+\.\d+[\s:—–-]+(?=[A-Z])/, nodeType: 'article', normalizedIlvl: 1 }, // N.N heading
+  { pattern: /^\d+\.\d+\s+/, nodeType: 'article', normalizedIlvl: 1 }, // N.N
   { pattern: /^[A-Z]\.\s/, nodeType: 'pr1', normalizedIlvl: 2 },
   { pattern: /^\d+\.\s/, nodeType: 'pr2', normalizedIlvl: 3 },
   { pattern: /^[a-z]\.\s/, nodeType: 'pr3', normalizedIlvl: 4 },
@@ -126,31 +112,6 @@ export function isDecorationSeparator(text: string): boolean {
   if (trimmed.length < 2) return false;
   if (DECORATION_RULE.test(trimmed)) return true;
   return trimmed.replace(OR_DECORATION, '').toUpperCase() === 'OR';
-}
-
-// A single-dot "N.N" whose title (after its separators) starts with a lowercase letter
-// or digit — the affirmative "this is authored prose, not a heading" signature (a
-// decimal measurement "2.0 inches …", "16.5 in. round", or a value "1.2 24V …"). The
-// mirror of the Signal-4 article gate above, which fires when a CAPITAL follows the
-// number+separators; between them they classify every real single-dot line. Two subtle
-// but load-bearing choices: (1) the lookahead is POSITIVE ([a-z0-9]) — a negative
-// (?![A-Z]) would let the greedy separator run BACKTRACK to sit before a separator
-// (never a capital) and wrongly match "1.2 - RELATED SECTIONS" as prose; (2) the
-// separator class omits the period so a multi-dot outline ("1.4.2.1 installation") is
-// not mistaken for prose — its second decimal dot breaks the separator run.
-const DECIMAL_PROSE = /^\s*\d+\.\d+[\s:—–-]+(?=[a-z0-9])/;
-
-/**
- * Returns true when text affirmatively looks like a leading decimal MEASUREMENT/value
- * rather than a heading. Signal 5 (indentation) uses this to refuse to promote such a
- * paragraph to a structural node: indentation is the weakest evidence and must not
- * override the text's own "I am prose" signal, or the measurement becomes a phantom
- * article that renderers label (and whose number is never stripped, since the strip is
- * gated on Signal 4). Real Word/style numbering (Signal 1/2) still classifies it — its
- * text is genuine content that merely starts with a number. (Codex adversarial review.)
- */
-export function isDecimalProse(text: string): boolean {
-  return DECIMAL_PROSE.test(text);
 }
 
 /**

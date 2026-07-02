@@ -448,46 +448,6 @@ describe('classifyParagraphs — misaligned-numbering article guard', () => {
     expect(result[0]?.nodeType).toBe('article');
     expect(result[0]?.signalUsed).toBe(1);
   });
-
-  // Codex adversarial review (P2, indented path): decimal PROSE that ALSO carries
-  // indentation ("2.0 inches of clearance minimum", leftIndent 576) must not become a
-  // phantom article via Signal 5. Signal 5 (indentation) is the weakest evidence, and
-  // the outline strip is gated on Signal 4, so a Signal-5 article would keep "2.0 …"
-  // AND gain a render label. Weak indentation must not override the text's affirmative
-  // "this is prose" signature — it routes to a continuation (text preserved, no label).
-  it('does NOT let Signal 5 promote indented decimal PROSE to an article', () => {
-    const result = classifyParagraphs(
-      [makePara({ leftIndent: 576, text: '2.0 inches of clearance minimum' })],
-      numMap(),
-      emptyStyleMap()
-    );
-    expect(result[0]?.nodeType).toBe('continuation');
-  });
-
-  // Guard the guard: Signal 5 STILL promotes a genuine unnumbered heading (no leading
-  // decimal) by its indentation — only affirmative decimal prose is held back.
-  it('still lets Signal 5 promote a genuine unnumbered heading (no decimal prefix)', () => {
-    const result = classifyParagraphs(
-      [makePara({ leftIndent: 576, text: 'RELATED SECTIONS' })],
-      numMap(),
-      emptyStyleMap()
-    );
-    expect(result[0]?.nodeType).toBe('article');
-    expect(result[0]?.signalUsed).toBe(5);
-  });
-
-  // A REAL Word-numbered node whose content merely starts with a measurement is still
-  // structural (Signal 1) — the decimal-prose guard only holds back weak Signal-5-only
-  // evidence, never real numbering. Its text is genuine content, kept verbatim.
-  it('keeps a Signal-1 node whose text starts with a measurement (real numbering wins)', () => {
-    const result = classifyParagraphs(
-      [makePara({ numId: 1, ilvl: 3, text: '2.0 inches of clearance minimum' })],
-      numMap(3),
-      emptyStyleMap()
-    );
-    expect(result[0]?.nodeType).toBe('article');
-    expect(result[0]?.signalUsed).toBe(1);
-  });
 });
 
 function makeClassified(
@@ -563,13 +523,14 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts[0]?.text).toBe('PART 1');
   });
 
-  // Codex adversarial review (P2, end-to-end repro): an unnumbered/unstyled paragraph
-  // beginning with a decimal MEASUREMENT ("2.0 inches of clearance minimum") is authored
-  // PROSE, not a heading. A lowercase single-dot "N.N" no longer classifies as an article
-  // (it would either lose its number to the outline strip, or round-trip with a doubled
-  // render label) — it routes to a continuation, which preserves the full text verbatim
-  // with no render label. Round-trip fidelity holds.
-  it('routes decimal PROSE to a continuation with text preserved (not a phantom article)', () => {
+  // Codex adversarial review (P2 data-loss, end-to-end repro): an unnumbered/unstyled
+  // paragraph beginning with a decimal MEASUREMENT ("2.0 inches of clearance minimum")
+  // is classified by the N.N text signal as a Signal-4 article. The outline-number
+  // strip must NOT fire on it — the "2.0" is authored prose, not a render-derived
+  // label — or content is lost and round-trip fidelity breaks. A single-dot decimal
+  // with a lowercase continuation is preserved verbatim (planOutlineNumberStrip returns
+  // null; the strip's ARTICLE tier requires a CAPITAL after the number+separators).
+  it('preserves decimal PROSE text through classify→buildTree (no outline strip)', () => {
     const classified = classifyParagraphs(
       [
         makePara({ text: 'PART 1 - GENERAL' }),
@@ -578,11 +539,72 @@ describe('buildTree — Pass 2: tree structure', () => {
       numMap(),
       emptyStyleMap()
     );
-    expect(classified[1]?.nodeType).toBe('continuation'); // prose, not an article
+    expect(classified[1]?.signalUsed).toBe(4);
     const tree = buildTree(classified, '01', 'T', 'unknown');
     const node = tree.parts[0]?.children[0];
-    expect(node?.type).toBe('continuation');
-    expect(node?.text).toBe('2.0 inches of clearance minimum'); // "2.0" preserved verbatim
+    expect(node?.text).toBe('2.0 inches of clearance minimum'); // "2.0" preserved, not stripped
+  });
+
+  // KNOWN AMBIGUITY: a single-dot "N.N <X>" typed into an UNNUMBERED/UNSTYLED paragraph
+  // (only the text signal sees it) is genuinely indistinguishable between an outline
+  // HEADING ("1.2 RELATED SECTIONS", "1.2 600 V Power Receptacle") and decimal PROSE
+  // ("2.0 inches of clearance minimum", "2.0 GHz frequency band"). Every text heuristic
+  // has a counterexample: measurements can carry a capital unit (GHz, V), headings can
+  // start with a numeral ("600 V …"). Codex adversarial review surfaced five successive
+  // heading/measurement shapes that a "smart" classifier mis-sorts, so we deliberately
+  // do NOT try to sort them by text. The chosen behavior is the fidelity-safe one, held
+  // by two invariants and verified here:
+  //   1. NEVER lose data — the outline-number strip only fires when the label is
+  //      UNAMBIGUOUS (multi-dot "1.4.2.1", or single-dot with a CAPITAL title after the
+  //      separators). A lowercase/numeric continuation keeps its number verbatim.
+  //   2. NEVER demote a heading — any "N.N " stays a structural article, so a manual
+  //      heading (whatever its title shape) keeps its place in the outline.
+  // The only residual is cosmetic: a non-capital-leading heading ("1.2 related", "1.2
+  // 600 V …") keeps its typed number, so the render shows it alongside the derived CSI
+  // label. That is strictly preferable to data loss or a demoted heading. A proper fix
+  // (strip iff the typed number equals the sibling-derived label) needs build-time label
+  // context and a shared label util across the parser/generator boundary — future work.
+  it('KNOWN AMBIGUITY: numeric/lowercase-leading N.N stays a text-preserving article', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.2 600 V Power Receptacle' }), // numeric-leading heading
+        makePara({ text: '1.2 related sections' }), // lowercase-leading heading
+        makePara({ text: '2.0 inches of clearance minimum' }), // decimal measurement
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const kids = tree.parts[0]?.children ?? [];
+    // Invariant 2 (never demote a heading): all three stay structural articles — a
+    // manual heading keeps its place in the outline whatever its title shape.
+    expect(kids.every((c) => c.type === 'article')).toBe(true);
+    // Invariant 1 (never lose data): a non-capital continuation keeps its number
+    // verbatim — the strip fires only on an UNAMBIGUOUS label (capital after the
+    // separators, or multi-dot). Nothing is silently dropped.
+    expect(kids[0]?.text).toBe('1.2 600 V Power Receptacle');
+    expect(kids[1]?.text).toBe('1.2 related sections');
+    expect(kids[2]?.text).toBe('2.0 inches of clearance minimum');
+  });
+
+  // KNOWN LIMITATION (same ambiguity, the one case the text strip gets wrong): a
+  // capital-UNIT measurement typed as its own unnumbered line ("2.0 GHz frequency
+  // band") is indistinguishable from a capital-led heading, so the strip's [A-Z] gate
+  // treats "2.0" as an outline label and removes it. This is NOT in the corpus (no
+  // fixture has such a line), and the corpus's real manual articles are all word-titled
+  // and strip correctly. The only sound fix is to strip iff the typed number equals the
+  // sibling-derived CSI label (build-time) — a shared parser/generator label util,
+  // filed as follow-up. Pinned here so any future change to the behavior is visible.
+  it('KNOWN LIMITATION: a capital-unit measurement ("2.0 GHz …") is over-stripped', () => {
+    const classified = classifyParagraphs(
+      [makePara({ text: 'PART 1 - GENERAL' }), makePara({ text: '2.0 GHz frequency band' })],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    // documents today's (imperfect) behavior — "2.0" is dropped as if it were a label
+    expect(tree.parts[0]?.children[0]?.text).toBe('GHz frequency band');
   });
 
   // Contrast: a real single-dot outline heading (capital letter follows) IS stripped —

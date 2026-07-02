@@ -5,7 +5,6 @@ import {
   isSpecifierNote,
   isPartHeading,
   isDecorationSeparator,
-  isDecimalProse,
 } from './heuristics.js';
 
 describe('matchTextSignal', () => {
@@ -49,47 +48,19 @@ describe('matchTextSignal', () => {
       normalizedIlvl: 1,
     });
     expect(matchTextSignal('10.11 SCHEDULES')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
-    // Title-case headings count too (a capital first letter is the CSI heading tell).
-    expect(matchTextSignal('1.2 Related Sections')).toEqual({
-      nodeType: 'article',
-      normalizedIlvl: 1,
-    });
   });
 
-  // Codex adversarial review (P2): a manual heading may put a dash/colon/em-dash BETWEEN
-  // the "N.N" and the title ("1.2 - RELATED SECTIONS"). planOutlineNumberStrip already
-  // consumes those separators, so the classification gate must too — skip the whole
-  // separator run before checking for the capital title, or a real heading is demoted.
-  it('classifies a separator-delimited "N.N - TITLE" heading as an article', () => {
-    expect(matchTextSignal('1.2 - RELATED SECTIONS')).toEqual({
-      nodeType: 'article',
-      normalizedIlvl: 1,
-    });
-    expect(matchTextSignal('1.2: SUMMARY')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
-    expect(matchTextSignal('1.2 — Products')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
-    // …but a dash/colon before a lowercase/measurement continuation is still prose.
-    expect(matchTextSignal('1.2 - 2.0 inches range')).toBeNull();
-  });
-
-  // Codex adversarial review (P2): a single-dot "N.N" is a HEADING only when a capital
-  // letter follows (CSI headings are titled). A lowercase continuation is authored
-  // PROSE — a decimal measurement ("2.0 inches …") or a sentence — and must NOT become
-  // a Signal-4 article, or it either loses its number to the outline strip or (if kept)
-  // round-trips with a doubled render label. Classifying it as null routes it to a
-  // continuation, which preserves the full text verbatim with no render label. The
-  // strip criterion (part-prefix ARTICLE_OUTLINE_PREFIX, also [A-Z]) mirrors this.
-  it('does NOT treat a lowercase single-dot "N.N" as an article (prose, not a heading)', () => {
-    expect(matchTextSignal('2.0 inches of clearance minimum')).toBeNull();
-    expect(matchTextSignal('3.5 mm nominal thickness')).toBeNull();
-    expect(matchTextSignal('1.2 related sections')).toBeNull(); // lowercase heading → prose home
-  });
-
-  // The N.0 promotion is gated on a canonical part name — a genuine "N.0" article with
-  // non-canonical (but titled) text stays an article, and a real sub-article "N.1
-  // SUMMARY" is never touched.
-  it('does NOT promote a non-canonical "N.0" line, and keeps titled N.N articles', () => {
+  // The N.0 promotion is gated on a canonical part name — a genuine "N.0" article
+  // with non-canonical text stays an article (no evidence it is a PART tier), and a
+  // real sub-article "N.1 SUMMARY" is never touched.
+  it('does NOT promote a non-canonical "N.0" line, and keeps real N.N articles', () => {
     expect(matchTextSignal('2.0 WIDGETS')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
     expect(matchTextSignal('2.1 SUMMARY')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
+    // "1.0" inside prose is not a heading start (requires the canonical name to follow)
+    expect(matchTextSignal('2.0 inches of clearance minimum')).toEqual({
+      nodeType: 'article',
+      normalizedIlvl: 1,
+    });
   });
 
   it('detects pr1 (uppercase letter dot space)', () => {
@@ -219,32 +190,6 @@ describe('isDecorationSeparator', () => {
     expect(isDecorationSeparator('FLOOR')).toBe(false); // contains "OR" but is a word
     expect(isDecorationSeparator('--')).toBe(false); // too short to be a rule
     expect(isDecorationSeparator('')).toBe(false);
-  });
-});
-
-describe('isDecimalProse', () => {
-  // Affirmative "this is prose, not a heading" signature: a single-dot "N.N" followed
-  // by a lowercase letter or digit — a decimal measurement ("2.0 inches", "16.5 in.")
-  // or a value. Mirrors the Signal-4 article gate (only a CAPITAL letter marks a
-  // heading). Used to stop Signal 5 (indentation) from promoting such prose to a
-  // phantom article (Codex adversarial review, P2).
-  it('true for a single-dot decimal followed by lowercase/digit (measurement/prose)', () => {
-    expect(isDecimalProse('2.0 inches of clearance minimum')).toBe(true);
-    expect(isDecimalProse('16.5 in. round')).toBe(true);
-    expect(isDecimalProse('1.2 24V power supply')).toBe(true);
-  });
-
-  it('false for a capital-first heading, a multi-dot outline, or non-decimal text', () => {
-    expect(isDecimalProse('1.2 RELATED SECTIONS')).toBe(false); // capital → heading
-    expect(isDecimalProse('1.2 Related Sections')).toBe(false); // Title-case heading
-    expect(isDecimalProse('1.4.2.1 installation instructions')).toBe(false); // multi-dot outline
-    expect(isDecimalProse('RELATED SECTIONS')).toBe(false); // no leading decimal
-    expect(isDecimalProse('1. list item')).toBe(false); // no interior decimal (pr2 label form)
-    expect(isDecimalProse('The 2.0 inch pipe')).toBe(false); // decimal not at start
-    // A separator-delimited heading is NOT prose (mirror of the Signal-4 gate): the
-    // capital title after the dash/colon marks it a heading.
-    expect(isDecimalProse('1.2 - RELATED SECTIONS')).toBe(false);
-    expect(isDecimalProse('1.2: SUMMARY')).toBe(false);
   });
 });
 
