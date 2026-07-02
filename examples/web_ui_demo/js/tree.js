@@ -66,6 +66,10 @@ function linkifyText(text, ctx) {
 
 function renderNote(node, ctx) {
   const wrap = el('div', 'tree-note');
+  // Notes carry a stable paragraph id too — a citation inside a NOTE can be a
+  // coordination finding's sourceParagraphId, so the audit view must be able to
+  // locate it (ADR-041).
+  wrap.dataset.nodeId = node.id;
   wrap.appendChild(el('span', 'note-tag', 'NOTE'));
   wrap.appendChild(linkifyText(node.text, ctx));
   return wrap;

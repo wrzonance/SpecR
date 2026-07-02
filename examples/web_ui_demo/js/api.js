@@ -19,6 +19,9 @@ async function sendJson(method, path, payload) {
     opts.body = JSON.stringify(payload);
   }
   const res = await fetch(path, opts);
+  // 204 No Content (association/profile deletes, clear-assignment) carries no
+  // body — a bare 2xx is success. Reading res.json() on it would throw.
+  if (res.status === 204) return undefined;
   let body = null;
   try {
     body = await res.json();
@@ -65,6 +68,54 @@ export function renameLibrary(libraryId, name) {
 
 export function listLibrarySpecs(libraryId) {
   return getJson(`/libraries/${enc(libraryId)}/specs`);
+}
+
+// Onboards a spec INTO a library via POST /libraries/:id/import (async, 202).
+// This is the correct path for "Add Specs to a library": unlike POST /parse
+// (which creates a standalone spec with no library), the import handler persists
+// the spec against the target library, so it appears in listLibrarySpecs. The
+// returned { jobId } is polled with waitForImportJob. 404 if the library is
+// unknown; 429 shares the /parse rate limit.
+export async function importSpecToLibrary(file, libraryId) {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const res = await fetch(`/libraries/${enc(libraryId)}/import`, { method: 'POST', body: form });
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+  if (!res.ok || !body || body.success !== true) {
+    const err = new Error((body && body.error) || `library import failed: ${res.status}`);
+    err.status = res.status;
+    err.responseBody = body;
+    console.error(`SpecR library import rejected (HTTP ${res.status}) for ${file.name}:`, body);
+    throw err;
+  }
+  return body.data; // { jobId }
+}
+
+export function getImportJob(jobId) {
+  return getJson(`/libraries/import/jobs/${enc(jobId)}`);
+}
+
+// Polls a library-onboarding job to completion. Same onProgress contract as
+// waitForParseJob; the resolved result is the OnboardingJobResult
+// ({ specId, section, title, libraryId, report }) — note: no nodeCount.
+export async function waitForImportJob(jobId, onProgress, pollMs = 400) {
+  for (;;) {
+    const job = await getImportJob(jobId);
+    if (onProgress) onProgress(job);
+    if (job.status === 'complete') return job.result;
+    if (job.status === 'failed') {
+      console.error(`SpecR import job ${jobId} failed:`, job);
+      const err = new Error(job.error || 'import failed');
+      err.jobId = jobId;
+      throw err;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
 }
 
 // Uploads one file to POST /parse. Resolves with { jobId }.
@@ -205,6 +256,70 @@ export function getRequiredSections(projectId) {
 
 export function setRequiredSections(projectId, sections) {
   return sendJson('PUT', `/projects/${enc(projectId)}/required-sections`, { sections });
+}
+
+// ── Numbering profiles (#299 / #317 / #320) ───────────────────────────────
+// A numbering profile is the source DOCX's structural numbering scheme (part
+// tier bounds, articleIlvl, numId→level map, style→tier ladder) captured as an
+// editable, library-scoped profile. NULL library = the built-in "CSI Default"
+// singleton, which every unassigned spec resolves to (byte-for-byte today's
+// engine behavior). Rows carry { id, libraryId, name, rules, createdAt, updatedAt }.
+
+// Lists a library's numbering profiles — always includes the built-in CSI
+// Default (libraryId: null). 404 if the library id is unknown (#320).
+export function listNumberingProfiles(libraryId) {
+  return getJson(`/libraries/${enc(libraryId)}/numbering-profiles`);
+}
+
+// Creates a library-scoped profile from a full NumberingProfile `rules` object.
+// 201 → the persisted row; 404 unknown library; 422 invalid rules.
+export function createNumberingProfile(libraryId, name, rules) {
+  return sendJson('POST', `/libraries/${enc(libraryId)}/numbering-profiles`, { name, rules });
+}
+
+export function getNumberingProfile(profileId) {
+  return getJson(`/numbering-profiles/${enc(profileId)}`);
+}
+
+// Renames / re-rules a profile. 409 if it targets the immutable built-in.
+export function updateNumberingProfile(profileId, patch) {
+  return sendJson('PATCH', `/numbering-profiles/${enc(profileId)}`, patch);
+}
+
+// Deletes a profile. 409 if built-in or still assigned to one or more specs.
+export function deleteNumberingProfile(profileId) {
+  return sendJson('DELETE', `/numbering-profiles/${enc(profileId)}`);
+}
+
+// Uploads a .docx to POST /numbering-profiles/snapshot and resolves with the
+// extracted NumberingProfile (tiers, numbering, styleLadder, articleIlvl) —
+// nothing is persisted. 400 non-docx / unsafe; 422 extraction failure.
+export async function snapshotNumberingProfile(file) {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const res = await fetch('/numbering-profiles/snapshot', { method: 'POST', body: form });
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+  if (!res.ok || !body || body.success !== true) {
+    const err = new Error((body && body.error) || `snapshot failed: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return body.data;
+}
+
+// Assigns a numbering profile to a spec. 200 → { profileId, name }; 404 spec or
+// profile not found; 409 if the profile belongs to a different library (#320).
+export function setSpecNumberingProfile(specId, profileId) {
+  return sendJson('PUT', `/specs/${enc(specId)}/numbering-profile`, { profileId });
+}
+
+export function clearSpecNumberingProfile(specId) {
+  return sendJson('DELETE', `/specs/${enc(specId)}/numbering-profile`);
 }
 
 // Polls a parse job until it completes or fails. Calls onProgress with the

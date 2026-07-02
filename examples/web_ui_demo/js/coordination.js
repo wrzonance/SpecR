@@ -87,8 +87,42 @@ function findingSection(finding) {
   return finding.section;
 }
 
+// The sheet a finding belongs to, for tree grouping. sourceSpecSection is present
+// on every body-derived finding; present/required_not_present carry finding.section.
+const NO_SECTION = '—';
+function groupingSection(finding) {
+  return finding.sourceSpecSection ?? finding.section ?? NO_SECTION;
+}
+
+// CSI division = first two digits of "NN NN NN"; anything else buckets last.
+function divisionOf(section) {
+  return /^\d{2}/.test(section) ? section.slice(0, 2) : NO_SECTION;
+}
+
+// Sort division/section keys ascending, with the section-less bucket ('—') last.
+function sortedBucketKeys(map) {
+  return [...map.keys()].sort((a, b) => {
+    if (a === NO_SECTION) return 1;
+    if (b === NO_SECTION) return -1;
+    return a.localeCompare(b);
+  });
+}
+
 function visibleGroups() {
   return GROUPS.filter((group) => !group.flag || API_FEATURES[group.flag]);
+}
+
+// Stamp the finding→spec-pane anchor so the audit view can drive the right pane
+// (ADR-041): data-spec-id + data-paragraph-id scroll to the exact paragraph
+// (present on dangling_ref / implied / submittal-product findings); data-section
+// drives bidirectional reflection. is-locatable marks the row interactive.
+function stampAnchor(row, finding) {
+  const target = findingSection(finding);
+  if (target) row.dataset.section = target;
+  const specId = finding.sourceSpecId ?? finding.specId;
+  if (specId) row.dataset.specId = specId;
+  if (finding.sourceParagraphId) row.dataset.paragraphId = finding.sourceParagraphId;
+  row.classList.add('is-locatable');
 }
 
 // The #259 article<->body consistency findings: source spec section, the
@@ -196,29 +230,100 @@ function renderFinding(finding, ctx) {
   return row;
 }
 
+// A collapsible shell (rotating chevron + title + count) reused at all three
+// report levels: category (.coord-group), division (.coord-div), section
+// (.coord-sec). aria-expanded is synced to the chevron for keyboard/SR users.
+// The group level keeps the exact markup the audit view (audit.js) keys on.
+function collapsibleShell(levelClass, title, count) {
+  const wrap = el('section', levelClass);
+  const head = el('button', `${levelClass}-head`);
+  head.type = 'button';
+  head.setAttribute('aria-expanded', 'true');
+  const headline = el('span', 'coord-group-headline');
+  headline.appendChild(el('span', 'coord-twist', '▼'));
+  headline.appendChild(el('span', 'coord-group-title', title));
+  head.appendChild(headline);
+  head.appendChild(el('span', 'coord-group-count', String(count)));
+  head.addEventListener('click', () => {
+    const closed = wrap.classList.toggle('is-closed');
+    head.setAttribute('aria-expanded', String(!closed));
+  });
+  wrap.appendChild(head);
+  const body = el('div', `${levelClass}-body`);
+  wrap.appendChild(body);
+  return { wrap, body };
+}
+
+function findingRows(findings, ctx) {
+  const list = el('ul', 'coord-list');
+  for (const finding of findings) {
+    const row = renderFinding(finding, ctx);
+    stampAnchor(row, finding);
+    list.appendChild(row);
+  }
+  return list;
+}
+
+// Bucket a category's findings into division → section → finding[] so the report
+// is a 3-level collapsible tree that very large projects can fold at any level.
+function bucketByDivisionSection(findings) {
+  const byDivision = new Map();
+  for (const finding of findings) {
+    const section = groupingSection(finding);
+    const division = divisionOf(section);
+    if (!byDivision.has(division)) byDivision.set(division, new Map());
+    const bySection = byDivision.get(division);
+    if (!bySection.has(section)) bySection.set(section, []);
+    bySection.get(section).push(finding);
+  }
+  return byDivision;
+}
+
+function renderDivision(division, bySection, ctx) {
+  const total = [...bySection.values()].reduce((n, rows) => n + rows.length, 0);
+  const label = division === NO_SECTION ? 'NO DIVISION' : `DIVISION ${division}`;
+  const { wrap, body } = collapsibleShell('coord-div', label, total);
+  const secList = el('div', 'coord-sec-list');
+  for (const section of sortedBucketKeys(bySection)) {
+    const rows = bySection.get(section);
+    const sec = collapsibleShell('coord-sec', section, rows.length);
+    sec.body.appendChild(findingRows(rows, ctx));
+    secList.appendChild(sec.wrap);
+  }
+  body.appendChild(secList);
+  return wrap;
+}
+
 function renderGroup(report, group, ctx) {
   const findings = report.findings.filter((finding) => finding.type === group.type);
-  const wrap = el('section', 'coord-group');
-  const head = el('button', 'coord-group-head');
-  head.type = 'button';
-  head.appendChild(el('span', 'coord-group-title', group.title));
-  head.appendChild(el('span', 'coord-group-count', String(findings.length)));
-  head.addEventListener('click', () => wrap.classList.toggle('is-closed'));
-  wrap.appendChild(head);
+  const { wrap, body } = collapsibleShell('coord-group', group.title, findings.length);
 
-  const list = el('ul', 'coord-list');
+  // Empty category: keep the flat one-line message (no division/section levels).
   if (findings.length === 0) {
+    const list = el('ul', 'coord-list');
     list.appendChild(el('li', 'coord-empty', group.empty));
-  } else {
-    for (const finding of findings) {
-      const row = renderFinding(finding, ctx);
-      const target = findingSection(finding);
-      if (target) row.dataset.section = target;
-      list.appendChild(row);
-    }
+    body.appendChild(list);
+    return wrap;
   }
-  wrap.appendChild(list);
+
+  const byDivision = bucketByDivisionSection(findings);
+  const divList = el('div', 'coord-div-list');
+  for (const division of sortedBucketKeys(byDivision)) {
+    divList.appendChild(renderDivision(division, byDivision.get(division), ctx));
+  }
+  body.appendChild(divList);
   return wrap;
+}
+
+// The finding total the user can actually see: the backend total minus any groups
+// the demo hides via API_FEATURES (e.g. impliedRelated is suppressed as a known
+// false-positive, #327). Without this, a project whose only finding is hidden shows
+// a nonzero red total with no inspectable row.
+export function visibleCoordinationTotal(report) {
+  const hiddenImplied = API_FEATURES.impliedRelated
+    ? 0
+    : (report.summary.impliedRelatedSection ?? 0);
+  return Math.max(0, report.summary.total - hiddenImplied);
 }
 
 export function renderCoordinationReport(container, report, ctx = {}) {
@@ -229,7 +334,7 @@ export function renderCoordinationReport(container, report, ctx = {}) {
   }
 
   const summary = el('div', 'coord-summary');
-  summary.appendChild(el('span', 'coord-total', `${report.summary.total} TOTAL`));
+  summary.appendChild(el('span', 'coord-total', `${visibleCoordinationTotal(report)} TOTAL`));
   summary.appendChild(
     el('span', 'coord-chip', `${report.summary.presentNotRequired} PRESENT NOT REQUIRED`)
   );

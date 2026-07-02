@@ -1,12 +1,48 @@
-import { createReadStream, statSync } from 'node:fs';
+import { createReadStream, readFileSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
+
+// Load a local .env sitting next to this server (examples/web_ui_demo/.env) so
+// the demo is configured from its own folder — OpenAI key, model, ports — rather
+// than the repo root. A missing .env is fine (the defaults below apply); a real
+// shell/CI environment variable always wins over a value set in the file, so the
+// one-command launchers (which pass PORT/SPECR_API_BASE inline) keep control of
+// the ports while .env supplies the OpenAI settings.
+function loadLocalEnv(path) {
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return false; // no local .env — rely on the real environment + defaults
+  }
+  for (const [key, value] of Object.entries(parseEnv(raw))) {
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+  return true;
+}
+const ENV_FILE = join(ROOT, '.env');
+const ENV_LOADED = loadLocalEnv(ENV_FILE);
+
 const PORT = Number.parseInt(process.env.PORT || '3001', 10);
+// Bind address. Defaults to loopback so the demo stays private to this machine;
+// set HOST=0.0.0.0 to reach it from other machines on your LAN. That also exposes
+// the proxied SpecR API and the OpenAI-backed /chat endpoint, so only opt in on a
+// network you trust.
+const HOST = process.env.HOST || '127.0.0.1';
 const API_BASE = process.env.SPECR_API_BASE || 'http://127.0.0.1:3000';
+
+// OpenAI chat bridge config — the key lives ONLY here (server-side); the browser
+// never sees it. Absent key ⇒ /chat degrades to a clear "not configured" reply.
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_BASE = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const CHAT_MAX_TOOL_ROUNDS = 6; // cap the tool-call loop so a model can't spin forever
+const CHAT_MAX_MESSAGES = 40; // reject oversized histories
 
 const API_PREFIXES = [
   '/health',
@@ -17,6 +53,8 @@ const API_PREFIXES = [
   '/packages',
   '/revisions',
   '/templates',
+  '/numbering-profiles',
+  '/mcp',
 ];
 
 const MIME_TYPES = new Map([
@@ -58,7 +96,8 @@ function proxyHeaders(req, body) {
 
 async function proxyApi(req, res, url) {
   try {
-    const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await readRequestBody(req);
+    const body =
+      req.method === 'GET' || req.method === 'HEAD' ? undefined : await readRequestBody(req);
     const upstream = await fetch(new URL(`${url.pathname}${url.search}`, API_BASE), {
       method: req.method,
       headers: proxyHeaders(req, body),
@@ -107,14 +146,247 @@ async function serveStatic(req, res, url) {
   }
 }
 
+// ── OpenAI ⇄ MCP chat bridge ───────────────────────────────────────────────
+// The browser POSTs its conversation to /chat. We run OpenAI chat-completions
+// with tool-calling, and every tool call the model makes is executed against
+// SpecR's stateless MCP endpoint (POST {API_BASE}/mcp). The key never leaves
+// this process. MVP: non-streaming, read-and-write MCP tools as SpecR exposes.
+
+const SYSTEM_PROMPT = [
+  'You are the SpecR assistant, embedded in a CSI MasterFormat specification tool.',
+  'Answer questions about the specs, projects, and libraries the user has loaded by',
+  'calling the provided MCP tools — never invent spec content, section numbers, or IDs.',
+  'Most tools need UUIDs: discover them first with list_projects, list_sections, or',
+  'search_library, then call the specific tool. Cross-references need a projectId.',
+  'Keep answers concise and cite section numbers (e.g. "09 22 00") where relevant.',
+  'If a tool returns an error or empty result, say so plainly rather than guessing.',
+].join(' ');
+
+let mcpRequestId = 0;
+
+// One JSON-RPC round-trip to the SpecR MCP endpoint. The Streamable-HTTP
+// transport answers with either SSE (a `data:` line) or plain JSON; handle both.
+async function mcpRpc(method, params) {
+  const res = await fetch(new URL('/mcp', API_BASE), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++mcpRequestId, method, params }),
+  });
+  const text = await res.text();
+  // An HTTP-level failure (429 rate-limit / 5xx) carries the API's {success:false,
+  // error} shape, not a JSON-RPC envelope — surface it as an error instead of
+  // parsing it into a phantom "successful" (no-content) tool result.
+  if (!res.ok) throw new Error(`MCP HTTP ${res.status}: ${text.slice(0, 200)}`);
+  const contentType = res.headers.get('content-type') || '';
+  const payload = contentType.includes('text/event-stream')
+    ? (text
+        .split('\n')
+        .find((line) => line.startsWith('data: '))
+        ?.slice(6) ?? '{}')
+    : text;
+  const parsed = JSON.parse(payload);
+  if (parsed.error) throw new Error(parsed.error.message || 'MCP error');
+  if (!('result' in parsed)) throw new Error('MCP response missing result');
+  return parsed.result;
+}
+
+// Discover every MCP tool and shape it as an OpenAI function tool. inputSchema is
+// already JSON Schema on the wire, so it maps straight to `function.parameters`.
+async function listOpenAiTools() {
+  const result = await mcpRpc('tools/list', {});
+  const tools = Array.isArray(result?.tools) ? result.tools : [];
+  return tools.map((tool) => ({
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description || '',
+      parameters:
+        tool.inputSchema && typeof tool.inputSchema === 'object'
+          ? tool.inputSchema
+          : { type: 'object', properties: {} },
+    },
+  }));
+}
+
+// Execute one OpenAI tool_call against MCP; return the text result (truncated)
+// and whether it succeeded. Never throws — a failed tool becomes a tool message.
+async function execToolCall(call) {
+  let args = {};
+  try {
+    args = JSON.parse(call.function?.arguments || '{}');
+  } catch {
+    args = {};
+  }
+  try {
+    const result = await mcpRpc('tools/call', { name: call.function?.name, arguments: args });
+    const text =
+      (result?.content || [])
+        .map((part) => part.text)
+        .filter(Boolean)
+        .join('\n') || '(no content)';
+    const raw = result?._meta?.['specr/anchors'];
+    const anchors = Array.isArray(raw) ? raw : [];
+    return { text: text.slice(0, 8000), ok: result?.isError !== true, anchors };
+  } catch (err) {
+    return { text: `tool error: ${err.message}`, ok: false, anchors: [] };
+  }
+}
+
+async function callOpenAI(messages, tools) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  try {
+    const body = { model: OPENAI_MODEL, messages };
+    if (tools && tools.length > 0) body.tools = tools;
+    const res = await fetch(`${OPENAI_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`OpenAI ${res.status}: ${detail.slice(0, 300)}`);
+    }
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Collapse duplicate navigation anchors (a search may return the same section
+// many times) and cap the payload so a broad answer can't flood the UI.
+function dedupeAnchors(anchors) {
+  const seen = new Set();
+  const out = [];
+  for (const a of anchors) {
+    if (!a || typeof a.section !== 'string' || a.section === '') continue;
+    const key = `${a.section}|${a.specId ?? ''}|${a.paragraphId ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(a);
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+
+// The tool-calling loop: ask OpenAI, run any tool calls against MCP, feed results
+// back, repeat until the model answers with plain text or we hit the round cap.
+// The answering turn's navigation anchors (last successful enriched tool call)
+// ride back as `focus` so the browser can highlight the sections in the active tab.
+async function runChat(userMessages) {
+  const tools = await listOpenAiTools();
+  const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...userMessages];
+  const toolCalls = [];
+  let focusAnchors = [];
+  for (let round = 0; round < CHAT_MAX_TOOL_ROUNDS; round++) {
+    const completion = await callOpenAI(messages, tools);
+    const message = completion.choices?.[0]?.message;
+    if (!message) throw new Error('OpenAI returned no message');
+    messages.push(message);
+    const calls = message.tool_calls;
+    if (!calls || calls.length === 0) {
+      return {
+        reply: message.content || '',
+        toolCalls,
+        focus: { anchors: dedupeAnchors(focusAnchors) },
+      };
+    }
+    for (const call of calls) {
+      const { text, ok, anchors } = await execToolCall(call);
+      toolCalls.push({ name: call.function?.name, ok });
+      if (ok && anchors.length > 0) focusAnchors = anchors; // last enriched answer wins
+      messages.push({ role: 'tool', tool_call_id: call.id, content: text });
+    }
+  }
+  // Round cap reached — force a final answer with tools disabled.
+  const finalMessage = (await callOpenAI(messages, undefined)).choices?.[0]?.message;
+  return {
+    reply: finalMessage?.content || 'Reached the tool-call limit.',
+    toolCalls,
+    focus: { anchors: dedupeAnchors(focusAnchors) },
+  };
+}
+
+// Keep only well-formed user/assistant turns with string content, length-capped.
+function sanitizeMessages(messages) {
+  const clean = [];
+  for (const message of messages) {
+    if (!message || typeof message.content !== 'string') continue;
+    const role = message.role === 'assistant' ? 'assistant' : 'user';
+    clean.push({ role, content: message.content.slice(0, 4000) });
+  }
+  return clean;
+}
+
+async function handleChat(req, res) {
+  if (!OPENAI_API_KEY) {
+    sendJson(res, 200, {
+      success: false,
+      code: 'no-key',
+      error: 'OPENAI_API_KEY not configured on the demo server',
+    });
+    return;
+  }
+  let payload;
+  try {
+    const raw = await readRequestBody(req);
+    payload = raw ? JSON.parse(raw.toString('utf8')) : null;
+  } catch {
+    sendJson(res, 400, { success: false, error: 'invalid JSON body' });
+    return;
+  }
+  const messages = payload?.messages;
+  if (!Array.isArray(messages) || messages.length === 0) {
+    sendJson(res, 400, { success: false, error: 'messages[] required' });
+    return;
+  }
+  if (messages.length > CHAT_MAX_MESSAGES) {
+    sendJson(res, 400, { success: false, error: 'conversation too long' });
+    return;
+  }
+  const clean = sanitizeMessages(messages);
+  if (clean.length === 0) {
+    sendJson(res, 400, { success: false, error: 'no valid messages' });
+    return;
+  }
+  try {
+    const { reply, toolCalls, focus } = await runChat(clean);
+    sendJson(res, 200, { success: true, data: { reply, toolCalls, focus, model: OPENAI_MODEL } });
+  } catch (err) {
+    sendJson(res, 502, { success: false, error: `chat failed: ${err.message}` });
+  }
+}
+
 createServer((req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
+  if (url.pathname === '/chat') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { success: false, error: 'POST only' });
+      return;
+    }
+    void handleChat(req, res);
+    return;
+  }
   if (isApiPath(url.pathname)) {
     void proxyApi(req, res, url);
     return;
   }
   void serveStatic(req, res, url);
-}).listen(PORT, '127.0.0.1', () => {
-  console.log(`SpecR web UI demo: http://127.0.0.1:${PORT}`);
+}).listen(PORT, HOST, () => {
+  const lanExposed = HOST === '0.0.0.0' || HOST === '::';
+  const shown = lanExposed
+    ? `bound to ${HOST}:${PORT} — reachable from other machines on your network`
+    : `http://${HOST}:${PORT}`;
+  console.log(`SpecR web UI demo: ${shown}`);
   console.log(`Proxying API calls to: ${API_BASE}`);
+  console.log(
+    `Config: ${ENV_LOADED ? `loaded ${ENV_FILE}` : `no .env at ${ENV_FILE} (using defaults + real env)`}`
+  );
+  console.log(
+    `Chat bridge: ${OPENAI_API_KEY ? `enabled (model ${OPENAI_MODEL})` : 'disabled (set OPENAI_API_KEY in .env)'}`
+  );
 });

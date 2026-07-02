@@ -55,7 +55,9 @@
       <button class="view-tab is-active" type="button" data-view="map">Project Spec Map</button>
       <button class="view-tab" type="button" data-view="settings">Project Settings</button>
       <button class="view-tab" type="button" data-view="library">Library</button>
+      <button class="view-tab" type="button" data-view="numbering">Numbering</button>
       <button class="view-tab" type="button" data-view="report">Report</button>
+      <button class="view-tab" type="button" data-view="submittal">Submittal</button>
     </nav>
 
     <section class="project-bar" aria-label="Active project controls">
@@ -248,25 +250,130 @@
       </div>
     </section>
 
+    <section class="app-view" id="view-numbering" data-view-panel="numbering" hidden>
+      <div class="numbering-workspace">
+        <div class="band-rule">
+          <h2 class="band-title">NUMBERING PROFILES</h2>
+          <p class="band-hint">
+            how a section's outline is numbered — Parts, Articles, Paragraphs
+          </p>
+        </div>
+        <p class="numbering-intro">
+          Every CSI section is built from three <strong>Parts</strong> — PART 1
+          GENERAL, PART 2 PRODUCTS, PART 3 EXECUTION — and inside each Part an
+          outline of <strong>Articles</strong>, <strong>Paragraphs</strong>, and
+          <strong>Subparagraphs</strong>. A <strong>numbering profile</strong>
+          records the exact scheme a firm or client writes to: how many Parts,
+          where the Articles begin, and the label style — commercial
+          <code>1.01&nbsp;/&nbsp;A.&nbsp;/&nbsp;1.</code> versus all-numeric
+          <code>1.1&nbsp;/&nbsp;1.1.1</code>. Assign one to a library and every
+          spec parsed into it inherits that scheme instead of having it guessed;
+          specs with none fall back to the standard CSI scheme below.
+        </p>
+        <div class="numbering-shell">
+          <section class="numbering-panel">
+            <div class="numbering-panel-head">
+              <h3>LIBRARY PROFILES</h3>
+              <label class="numbering-lib-pick">
+                <span>LIBRARY</span>
+                <select id="numbering-library-select"></select>
+              </label>
+            </div>
+            <div class="numbering-profile-list" id="numbering-profile-list"></div>
+            <form class="numbering-create" id="numbering-create-form">
+              <label>
+                <span>PROFILE NAME</span>
+                <input id="numbering-name-input" type="text" placeholder="ARCAT Standard" autocomplete="off" />
+              </label>
+              <label class="numbering-num">
+                <span>PARTS</span>
+                <input id="numbering-maxparts-input" type="number" min="1" max="5" value="3" />
+              </label>
+              <label class="numbering-num">
+                <span>ARTICLE LEVEL</span>
+                <input id="numbering-articleilvl-input" type="number" min="1" value="1" />
+              </label>
+              <p class="numbering-create-hint">
+                <strong>Parts</strong> — the most top-level Parts a section may
+                have (CSI standard is 3). <strong>Article level</strong> — which outline
+                depth in the Word document the Articles start at: 1 for clean
+                ARCAT-style files, deeper when the authoring tool reserves the first
+                level or two for its own use.
+              </p>
+              <button class="toc-btn is-primary" type="submit">Create Profile</button>
+            </form>
+          </section>
+          <section class="numbering-panel">
+            <div class="numbering-panel-head">
+              <h3>READ A SAMPLE DOCUMENT</h3>
+              <p class="numbering-sub">See the numbering scheme in a Word file — nothing is saved.</p>
+            </div>
+            <div class="numbering-snapshot-drop" id="numbering-snapshot-drop">
+              <p>
+                Browse for a <code>.docx</code> — SpecR reads how that document
+                numbers its Parts, Articles, and Paragraphs and shows you the
+                profile it detects. Nothing is saved until you choose to keep it.
+              </p>
+              <button class="pick-btn" id="numbering-snapshot-pick" type="button">
+                — BROWSE FOR .DOCX —
+              </button>
+              <input type="file" id="numbering-snapshot-input" accept=".docx" hidden />
+            </div>
+            <div class="numbering-snapshot-result" id="numbering-snapshot-result"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
     <section class="app-view" id="view-report" data-view-panel="report" hidden>
-      <section class="coord-report" id="coord-report" aria-labelledby="coord-title">
-        <div class="band-rule">
-          <h2 class="band-title" id="coord-title">COORDINATION REPORT</h2>
-          <p class="band-hint" id="coord-hint">
-            loaded sections compared with authored requirements
-          </p>
+      <div class="audit-split" id="audit-split">
+        <div class="audit-findings" id="audit-findings" aria-label="Coordination findings">
+          <section class="coord-report" id="coord-report" aria-labelledby="coord-title">
+            <div class="band-rule">
+              <h2 class="band-title" id="coord-title">COORDINATION REPORT</h2>
+              <p class="band-hint" id="coord-hint">
+                click a finding to open its section on the right — hover for prev / next
+              </p>
+            </div>
+            <div id="coord-report-body" class="coord-report-body"></div>
+          </section>
+          <section class="coord-report" id="open-comments-report" aria-labelledby="oc-title">
+            <div class="band-rule">
+              <h2 class="band-title" id="oc-title">OPEN REVIEW COMMENTS</h2>
+              <p class="band-hint" id="oc-hint">
+                unresolved owner / editor comments across the project
+              </p>
+            </div>
+            <div id="open-comments-body" class="coord-report-body"></div>
+          </section>
         </div>
-        <div id="coord-report-body" class="coord-report-body"></div>
-      </section>
-      <section class="coord-report" id="open-comments-report" aria-labelledby="oc-title">
-        <div class="band-rule">
-          <h2 class="band-title" id="oc-title">OPEN REVIEW COMMENTS</h2>
-          <p class="band-hint" id="oc-hint">
-            unresolved owner / editor comments across the project
-          </p>
+        <div
+          class="audit-divider"
+          id="audit-divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the findings and spec panes"
+          aria-valuemin="20"
+          aria-valuemax="80"
+          aria-valuenow="50"
+          tabindex="0"
+        ></div>
+        <div class="audit-spec" id="audit-spec">
+          <div class="band-rule audit-spec-head">
+            <h2 class="band-title" id="audit-spec-title">CITED SECTION</h2>
+            <p class="band-hint" id="audit-spec-hint">select a finding to open its section here</p>
+          </div>
+          <div
+            class="audit-spec-pane"
+            id="audit-spec-pane"
+            tabindex="0"
+            aria-label="Cited spec section"
+          ></div>
         </div>
-        <div id="open-comments-body" class="coord-report-body"></div>
-      </section>
+      </div>
+    </section>
+
+    <section class="app-view" id="view-submittal" data-view-panel="submittal" hidden>
       <section
         class="coord-report"
         id="submittal-register-report"
@@ -300,6 +407,50 @@
     </div>
 
     <div id="toast-rack" class="toast-rack" aria-live="polite"></div>
+
+    <button
+      class="chat-toggle"
+      id="chat-toggle"
+      type="button"
+      aria-expanded="false"
+      aria-controls="chat-sidebar"
+    >
+      💬 Ask SpecR
+    </button>
+
+    <aside class="chat-sidebar" id="chat-sidebar" aria-label="SpecR assistant" hidden>
+      <header class="chat-head">
+        <div>
+          <h2 class="chat-title">ASK SpecR</h2>
+          <p class="chat-sub">MCP-powered · answers from your loaded specs</p>
+        </div>
+        <div class="chat-head-actions">
+          <button class="chat-clear" id="chat-clear" type="button" title="Clear conversation">
+            Clear
+          </button>
+          <button class="chat-close" id="chat-close" type="button" aria-label="Close chat">×</button>
+        </div>
+      </header>
+      <div class="chat-messages" id="chat-messages" aria-live="polite">
+        <div class="chat-bubble is-assistant">
+          <span class="chat-role">SpecR</span>
+          <p class="chat-text">
+            Ask me about the specs, projects, and libraries you've loaded — e.g.
+            “list the projects”, “which sections cite 09 22 00?”, or “are there open
+            review comments?”. I answer by calling SpecR's MCP tools.
+          </p>
+        </div>
+      </div>
+      <form class="chat-form" id="chat-form">
+        <input
+          id="chat-input"
+          type="text"
+          placeholder="Ask about your specs…"
+          autocomplete="off"
+        />
+        <button class="toc-btn is-primary" type="submit">Send</button>
+      </form>
+    </aside>
 
     <script type="module" src="js/app.js"></script>
   </body>

@@ -34,11 +34,14 @@ import {
 import { renderSpecSheet } from './tree.js';
 import { API_FEATURES } from './features.js';
 import { buildWebModel, renderWeb } from './web.js';
-import { renderCoordinationReport } from './coordination.js';
+import { renderCoordinationReport, visibleCoordinationTotal } from './coordination.js';
 import { renderOpenComments } from './open-comments.js';
 import { renderSubmittalRegister } from './submittal.js';
+import { initNumbering } from './numbering.js';
+import { initChat } from './chat.js';
 import { initDropzone } from './dropzone.js';
 import { initRefPopover } from './popover.js';
+import { initAudit } from './audit.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
 
 const specs = new Map(); // specId -> { tree, references, warnings?, capabilities? }
@@ -49,6 +52,8 @@ let activeProjectId = null;
 let activeProject = null;
 let projects = [];
 let currentView = 'map';
+let numberingPanel = null; // numbering-profile workspace controller (initNumbering)
+let audit = null; // live coordination audit view controller (initAudit, ADR-041)
 let tocSections = [];
 const tocCollapsedDivisions = new Set();
 let libraries = [];
@@ -110,6 +115,12 @@ function showView(view) {
   for (const tab of document.querySelectorAll('[data-view]')) {
     tab.classList.toggle('is-active', tab.dataset.view === view);
   }
+  if (view === 'numbering') void numberingPanel?.refresh();
+  if (view === 'submittal') void refreshSubmittalRegister();
+  // The audit's findings already repaint on workspace load / spec mutations;
+  // opening the tab just needs a height re-measure. (A refetch here would wipe
+  // the current finding selection and desync the two panes.)
+  if (view === 'report') audit?.fit();
   updateAddFabVisibility();
 }
 
@@ -448,7 +459,8 @@ async function deleteActiveProject() {
     undoMsg.textContent = ' ';
     const undoBtn = document.createElement('button');
     undoBtn.textContent = 'Undo';
-    undoBtn.style.cssText = 'margin-left:6px;text-decoration:underline;background:none;border:none;color:inherit;cursor:pointer;';
+    undoBtn.style.cssText =
+      'margin-left:6px;text-decoration:underline;background:none;border:none;color:inherit;cursor:pointer;';
     undoBtn.addEventListener('click', async () => {
       try {
         const { restoreProject: restore } = await import('./api.js');
@@ -466,7 +478,10 @@ async function deleteActiveProject() {
     const rack = document.getElementById('toast-rack');
     if (rack) {
       const node = rack.lastElementChild;
-      if (node) { node.appendChild(undoMsg); node.appendChild(undoBtn); }
+      if (node) {
+        node.appendChild(undoMsg);
+        node.appendChild(undoBtn);
+      }
     }
   } catch (err) {
     toast(`delete failed: ${err.message}`, 'err');
@@ -549,10 +564,13 @@ async function refreshCoordination() {
   }
   try {
     const report = await getCoordinationReport(activeProjectId);
-    if (out) out.textContent = String(report.summary.total);
-    if (cell) cell.classList.toggle('is-broken', report.summary.total > 0);
-    if (coordBody) renderCoordinationReport(coordBody, report, { onNavigate: navigateToSection });
-    return report.summary.total;
+    const total = visibleCoordinationTotal(report);
+    if (out) out.textContent = String(total);
+    if (cell) cell.classList.toggle('is-broken', total > 0);
+    // No onNavigate: in the audit view (ADR-041) the delegated handler on
+    // #audit-findings drives the spec pane; the section buttons stay in-place.
+    if (coordBody) renderCoordinationReport(coordBody, report);
+    return total;
   } catch (err) {
     if (coordBody) renderCoordinationReport(coordBody, null);
     console.warn('SpecR: could not refresh coordination report', err);
@@ -602,8 +620,10 @@ async function refreshOpenComments() {
     if (out) out.textContent = String(report.summary.open);
     if (cell) cell.classList.toggle('is-broken', report.summary.open > 0);
     if (openCommentsBody) {
+      // Open-comments badges open the section in the audit spec pane rather than
+      // jumping to the map, so the reviewer stays in the Report (ADR-041).
       renderOpenComments(openCommentsBody, report, {
-        onNavigate: navigateToSection,
+        onNavigate: (section) => void audit?.showSection(section),
         displaySection,
       });
     }
@@ -1838,24 +1858,71 @@ function statusFor(section) {
   return null;
 }
 
-function navigateToSection(section) {
+function sheetForSection(section) {
   const specIds = loadedSections().get(section);
-  if (!specIds || specIds.length === 0) return;
-  if (currentView !== 'map') showView('map');
-  // Same-section duplicates sit adjacent on the section-sorted board; flash the
+  if (!specIds || specIds.length === 0) return null;
+  // Same-section duplicates sit adjacent on the section-sorted board; pick the
   // first sheet in DOM order so navigation is deterministic.
-  const sheet = specIds
-    .map((id) => document.getElementById(`sheet-${id}`))
-    .find((node) => node !== null);
-  if (!sheet) return;
-  sheet.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return (
+    specIds.map((id) => document.getElementById(`sheet-${id}`)).find((node) => node !== null) ??
+    null
+  );
+}
+
+function flashSheet(sheet, { scroll }) {
+  if (scroll) sheet.scrollIntoView({ behavior: 'smooth', block: 'start' });
   sheet.classList.remove('is-flash');
-  // restart the flash animation, then drop the class so flashes never pile up
-  void sheet.offsetWidth;
+  void sheet.offsetWidth; // restart the flash animation so flashes never pile up
   sheet.classList.add('is-flash');
-  sheet.addEventListener('animationend', () => sheet.classList.remove('is-flash'), {
-    once: true,
-  });
+  sheet.addEventListener('animationend', () => sheet.classList.remove('is-flash'), { once: true });
+}
+
+function navigateToSection(section) {
+  const sheet = sheetForSection(section);
+  if (!sheet) return;
+  if (currentView !== 'map') showView('map');
+  flashSheet(sheet, { scroll: true });
+}
+
+// Chat-driven focus: highlight the section(s) an answer resolves to in the
+// currently-active tab. Never switches views — a toast is the fallback when the
+// active tab can't show them (spec: 2026-07-01-chat-driven-focus).
+function focusToast(count) {
+  const s = count === 1 ? '' : 's';
+  toast(`${count} section${s} found — open Project Spec Map to view`, 'info');
+}
+
+function applyFocusOnMap(sections) {
+  const sheets = sections.map(sheetForSection).filter((node) => node !== null);
+  if (sheets.length === 0) {
+    const s = sections.length === 1 ? '' : 's';
+    toast(`${sections.length} section${s} found — none are loaded in this project map`, 'info');
+    return;
+  }
+  sheets.forEach((sheet, i) => flashSheet(sheet, { scroll: i === 0 }));
+}
+
+function applyFocusOnReport(anchors) {
+  // Prefer an anchor whose spec is already loaded so the pane stays in project
+  // context; the paragraphId is paired with that spec, so the exact paragraph
+  // resolves. Fall back to the first anchor otherwise.
+  const anchor = anchors.find((a) => a.specId && specs.has(a.specId)) ?? anchors[0];
+  void audit.showAnchor(anchor);
+  if (anchors.length > 1) {
+    toast(`${anchors.length} locations found — showing the first`, 'info');
+  }
+}
+
+function applyFocus(anchors) {
+  if (!Array.isArray(anchors) || anchors.length === 0) return;
+  const clean = anchors.filter((a) => a && typeof a.section === 'string' && a.section !== '');
+  if (clean.length === 0) return;
+  const sections = [...new Set(clean.map((a) => a.section))];
+  // Map highlights whole sheets by section; Report scrolls to the exact
+  // paragraph, so it needs the full anchors (specId + paragraphId), not sections.
+  if (currentView === 'map') return applyFocusOnMap(sections);
+  if (currentView === 'report' && audit) return applyFocusOnReport(clean);
+  focusToast(sections.length);
 }
 
 function onLibraryRef(section) {
@@ -1967,7 +2034,22 @@ async function onMapAddSectionsClick({ chooseFiles, defaultContext }) {
   if (action === 'library') {
     await addMapSpecFromLibrary();
   } else if (action === 'upload') {
-    chooseFiles(defaultContext);
+    // Onboard a brand-new spec into the project's base source library
+    // (Company Masters) first, then resolve a project copy from it — the same
+    // model as "Add from Library". POST /projects/:id/specs resolves sections
+    // only from a project's source libraries, so a standalone /parse would
+    // orphan the spec and 422 on join. Without a company master, fall back to
+    // the standalone parse (no source library to onboard into).
+    const company = companyMaster();
+    const uploadContext = company
+      ? {
+          destination: 'project',
+          source: 'master',
+          libraryId: company.id,
+          libraryName: company.name,
+        }
+      : defaultContext;
+    chooseFiles(uploadContext);
   }
 }
 
@@ -1987,6 +2069,28 @@ async function boot() {
   initTocBuilder();
   initLibraryManager();
   initMapActions();
+  audit = initAudit({
+    findingsPane: document.getElementById('audit-findings'),
+    specPane: document.getElementById('audit-spec-pane'),
+    specTitleEl: document.getElementById('audit-spec-title'),
+    specHintEl: document.getElementById('audit-spec-hint'),
+    split: document.getElementById('audit-split'),
+    divider: document.getElementById('audit-divider'),
+    getLoadedSpec: (specId) => specs.get(specId),
+    fetchSpec: async (specId) => {
+      const data = await getSpecTree(specId);
+      const references = await loadSpecReferences(specId);
+      return { ...data, references };
+    },
+    resolveSection: (section) => loadedSections().get(section)?.[0],
+    // Read-only sheet: no edit/remove/toc callbacks, and citations reflect to a
+    // finding instead of jumping to the map.
+    renderSheet: (spec, onRefNavigate) =>
+      renderSpecSheet(spec, { displaySection, statusFor, onLibraryRef, onNavigate: onRefNavigate }),
+    displaySection,
+  });
+  numberingPanel = initNumbering({ getLibraries: () => libraries, toast });
+  initChat({ onFocus: applyFocus });
 
   const health = document.getElementById('health-dot');
   const healthCell = health.closest('.tb-cell');
