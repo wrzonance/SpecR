@@ -15,14 +15,13 @@ import {
   handleGenerateDocx,
   handleGetSpecLineage,
   handleGetSpecDiff,
-  handleListProjects,
-  handleGetReferences,
   handleCoordinationReport,
   handleSubmittalRegister,
   handleOpenCommentsReport,
   handleGetNumberingProfile,
 } from './handlers.js';
 import { registerOnboardingTools } from './onboarding-tools.js';
+import { registerProjectTools } from './project-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
@@ -79,40 +78,6 @@ function registerLibraryTools(reg: ToolRegistrar): void {
       inputSchema: { division: divisionSchema },
     },
     handleListSections
-  );
-}
-
-function registerProjectTools(reg: ToolRegistrar): void {
-  reg.register(
-    'list_projects',
-    {
-      description: 'List projects (id, name) for use as the projectId argument to get_references.',
-      inputSchema: {},
-    },
-    handleListProjects
-  );
-
-  reg.register(
-    'get_references',
-    {
-      description:
-        'Within a project, return cross-references for a CSI section in both directions: ' +
-        'outbound (specs this section cites) and inbound (specs that cite it). ' +
-        'Read directly from the database — deterministic and complete, including inbound ' +
-        'references to sections not yet loaded. Requires a projectId (see list_projects).',
-      inputSchema: {
-        projectId: z.uuid().describe('Project UUID (from list_projects)'),
-        section: z
-          .string()
-          .min(1)
-          .describe('CSI section number, e.g. "09 91 00" (expanded shapes ok)'),
-        direction: z
-          .enum(['from', 'to', 'both'])
-          .optional()
-          .describe('"from" = specs this section cites; "to" = specs that cite it; default "both"'),
-      },
-    },
-    handleGetReferences
   );
 }
 

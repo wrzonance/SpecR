@@ -52,6 +52,7 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['get_onboarding_report', 'read'],
   ['review_editability', 'read'],
   // writes (persist state)
+  ['create_project', 'write'],
   ['parse_document', 'write'],
   ['load_files', 'write'],
   ['set_editability_override', 'write'],
