@@ -30,8 +30,8 @@ const DANGEROUS_EXTERNAL_RELS_XML = [
 ].join('\n');
 
 // Hyperlinks are passive (user must click) — they are allowed in external rels.
-// All 28 ARCAT/CPI fixture files contain hyperlink external rels; blocking them
-// would reject every real-world spec DOCX that uses arcat.com or chatsworth.com links.
+// All 28 reference fixture files contain hyperlink external rels; blocking them
+// would reject every real-world spec DOCX that uses vendor-site links.
 const HYPERLINK_EXTERNAL_RELS_XML = [
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',

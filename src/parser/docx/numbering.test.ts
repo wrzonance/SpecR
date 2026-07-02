@@ -87,7 +87,7 @@ const MULTI_NUM_NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="ye
   </w:num>
 </w:numbering>`;
 
-describe('buildNumberingMap — ARCAT style', () => {
+describe('buildNumberingMap — prefixed-heading-style docs', () => {
   it('parses abstractNum with correct level count', () => {
     const map = buildNumberingMap(ARCAT_NUMBERING);
     expect(map.abstractNums.get(0)?.levels).toHaveLength(3);
@@ -119,7 +119,7 @@ describe('buildNumberingMap — ARCAT style', () => {
     expect(map.pStyleToIlvl.get('ARCATParagraph')).toBe(2);
   });
 
-  it('detects articleIlvl=1 for ARCAT (no Schedule/PDS reserved levels)', () => {
+  it('detects articleIlvl=1 (no Schedule/PDS reserved levels)', () => {
     const map = buildNumberingMap(ARCAT_NUMBERING);
     expect(map.articleIlvl).toBe(1);
   });
@@ -255,7 +255,7 @@ describe('buildNumberingMap — lvlRestart and orphan num', () => {
 });
 
 describe('buildNumberingMap — spec-shaped ladder detection', () => {
-  it('regression: ARCAT ladder (3 pStyle-linked levels) marks numId 1 spec-shaped — 21 11 00 produced 34 parts', () => {
+  it('regression: spec-shaped ladder (3 pStyle-linked levels) marks numId 1 spec-shaped — produced 34 parts instead of 3', () => {
     const map = buildNumberingMap(ARCAT_NUMBERING);
     expect(map.specShapedNumIds.has(1)).toBe(true);
   });
@@ -290,7 +290,7 @@ describe('buildNumberingMap — spec-shaped ladder detection', () => {
   });
 });
 
-describe('buildNumberingMap — ilvl=0 lvlText declares PART (CPI non-pStyle-linked)', () => {
+describe('buildNumberingMap — ilvl=0 lvlText declares PART (non-pStyle-linked)', () => {
   const CPI_PART_LVLTEXT = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:numbering ${W}>
   <w:abstractNum w:abstractNumId="5">
@@ -300,7 +300,7 @@ describe('buildNumberingMap — ilvl=0 lvlText declares PART (CPI non-pStyle-lin
   <w:num w:numId="1"><w:abstractNumId w:val="5"/></w:num>
 </w:numbering>`;
 
-  it('CPI PART inference: ilvl=0 lvlText "PART %1 -" with 0 pStyle links marks numId spec-shaped', () => {
+  it('PART inference: ilvl=0 lvlText "PART %1 -" with 0 pStyle links marks numId spec-shaped', () => {
     const map = buildNumberingMap(CPI_PART_LVLTEXT);
     // numId 1's abstractNum links zero pStyles, but its ilvl=0 lvlText generates
     // a literal "PART n" prefix — strong evidence ilvl=0 is a real PART heading.
@@ -320,8 +320,8 @@ describe('buildNumberingMap — ilvl=0 lvlText declares PART (CPI non-pStyle-lin
     expect(map.specShapedNumIds.has(7)).toBe(false);
   });
 
-  it('real ARCAT lvlText "PART  %1  " (double-spaced) with 0 pStyle links marks numId spec-shaped', () => {
-    // The actual ARCAT label template uses two spaces around the field; the
+  it('real-world lvlText "PART  %1  " (double-spaced) with 0 pStyle links marks numId spec-shaped', () => {
+    // The real-world label template uses two spaces around the field; the
     // start-anchored detector must still match it (guards against over-tightening).
     const arcat = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:numbering ${W}>

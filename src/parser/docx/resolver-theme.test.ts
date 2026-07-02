@@ -124,7 +124,7 @@ describe('resolveStyleCascade — theme font resolution', () => {
 
   // Acceptance criterion 4: eastAsiaTheme="minorHAnsi" → minor LATIN (token-driven, not slot-driven)
   it('acceptance 4: eastAsiaTheme="minorHAnsi" resolves to minor.latin (token picks script)', () => {
-    // Stock ARCAT/Word docDefaults pattern: eastAsiaTheme="minorHAnsi"
+    // Stock Word docDefaults pattern: eastAsiaTheme="minorHAnsi"
     // The token "minorHAnsi" → minorFont.latin = "Calibri" (NOT minor.ea which is "")
     const styles = `<?xml version="1.0"?><w:styles xmlns:w="x">
       <w:style w:type="paragraph" w:styleId="S">
@@ -147,8 +147,8 @@ describe('resolveStyleCascade — theme font resolution', () => {
     expect([...twoArg.entries()]).toEqual([...threeArgNoTheme.entries()]);
   });
 
-  it('ARCAT docDefaults pattern: asciiTheme+hAnsiTheme+eastAsiaTheme=minorHAnsi, cstheme=minorBidi', () => {
-    // Verbatim ARCAT/stock Word docDefaults pattern
+  it('stock docDefaults pattern: asciiTheme+hAnsiTheme+eastAsiaTheme=minorHAnsi, cstheme=minorBidi', () => {
+    // Verbatim stock Word docDefaults pattern
     const styles = `<?xml version="1.0"?><w:styles xmlns:w="x">
       <w:docDefaults><w:rPrDefault><w:rPr>
         <w:rFonts w:asciiTheme="minorHAnsi" w:hAnsiTheme="minorHAnsi"

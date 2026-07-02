@@ -4,7 +4,7 @@ import { resolve, basename } from 'node:path';
 import { parse } from '../index.js';
 import type { SpecNode } from '../../ast/types.js';
 
-// Whole manufacturer/ARCAT corpus is copyrighted and gitignored under
+// Whole reference corpus is copyrighted and gitignored under
 // docs/references/**/*.docx — this end-to-end sweep skips in CI and runs only where
 // the files are present locally. It is the standing guard for "every real spec parses
 // to the standard 3 parts with sane levels" across every vendor convention we ingest.
@@ -15,7 +15,7 @@ const CORPUS = existsSync(REF)
 
 // Documented non-3-part inputs (not full specs):
 //  • paring-fixes.docx — a 35-paragraph fragment (PART 1 only), a parser test fixture.
-//  • 11_53_00nle.docx  — a failed ARCAT download: 69 bytes of "Error occurred while
+//  • 11_53_00nle.docx  — a failed download: 69 bytes of "Error occurred while
 //    generating the document." saved with a .docx extension; must be REJECTED, not parsed.
 const FRAGMENTS = new Set(['paring-fixes.docx']);
 const INVALID = new Set(['11_53_00nle.docx']);
@@ -97,13 +97,13 @@ describe.skipIf(!existsSync(WIRELESS))('WIRELESS — N.0 parts + manual decimal 
   });
 });
 
-// Regression (CPI CABINETS/ELECTRICAL/etc.): the CPI lead-in style PR1lc ("Section
+// Regression (reserved-low-level fixtures): the lead-in style PR1lc ("Section
 // Includes:") carries no numbering and was dropped to a continuation, orphaning its PR2
 // list at the article tier. It now occupies the pr1 tier so the list nests under it.
 const CABINETS = resolve(
   'docs/references/MANUFACTURER_CPI/CPI_COMMUNICATIONS_CABINETS_RACKS_FRAMES_ENCLOSURES_CSIMFS.docx'
 );
-describe.skipIf(!existsSync(CABINETS))('CPI CABINETS — PR1lc lead-in nests its list', () => {
+describe.skipIf(!existsSync(CABINETS))('CABINETS fixture — PR1lc lead-in nests its list', () => {
   it('"Section Includes:" is a pr1 with pr2 children (not an orphaning continuation)', async () => {
     const { tree } = await parse(readFileSync(CABINETS), 'cabinets.docx');
     const general = visibleParts(tree).find((p) => p.text === 'GENERAL');

@@ -6,7 +6,7 @@ import { parse } from '../index.js';
 import type { SpecNode } from '../../ast/types.js';
 
 const CPI_DIR = resolve('docs/references/MANUFACTURER_CPI');
-// CPI .docx files are copyrighted and gitignored — only present in local dev environments.
+// These reference .docx files are copyrighted and gitignored — only present in local dev environments.
 const FIXTURES_AVAILABLE = existsSync(resolve(CPI_DIR, 'CPI_BUSBAR_CSIMFS.docx'));
 
 function allNodes(nodes: readonly SpecNode[]): SpecNode[] {
@@ -23,7 +23,7 @@ const CPI_FIXTURES = [
 ];
 
 // Files are copyrighted and gitignored — tests skip automatically in CI.
-describe.skipIf(!FIXTURES_AVAILABLE)('CPI fixture parsing', () => {
+describe.skipIf(!FIXTURES_AVAILABLE)('reserved-low-level corpus fixture parsing', () => {
   for (const fixture of CPI_FIXTURES) {
     it(`${fixture}: parses with source=cpi`, async () => {
       const buffer = readFileSync(resolve(CPI_DIR, fixture));
@@ -58,11 +58,11 @@ describe.skipIf(!FIXTURES_AVAILABLE)('CPI fixture parsing', () => {
     });
   }
 
-  it('inference: CPI numId=0 continuation — PR1lc not classified as pr1', async () => {
+  it('inference: numId=0 continuation — PR1lc not classified as pr1', async () => {
     // Regression: PR1lc style has numId=0 (suppressesNumbering=true).
     // Previously resolveNumPrChain walked past suppression → misclassified as pr1.
     // Fix: Clippit ListItemRetriever pattern stops basedOn chain at numId=0.
-    // Proxy assertion: continuation count > pr1 count (CPI files have many continuation
+    // Proxy assertion: continuation count > pr1 count (these files have many continuation
     // paragraphs from lc-suffixed styles; if suppression broken, they'd all be pr1).
     const buffer = readFileSync(resolve(CPI_DIR, 'CPI_BUSBAR_CSIMFS.docx'));
     const tree = await parseDocx(buffer);
@@ -70,18 +70,18 @@ describe.skipIf(!FIXTURES_AVAILABLE)('CPI fixture parsing', () => {
     const nodes = allNodes(tree.parts);
     const continuations = nodes.filter((n) => n.type === 'continuation').length;
     const pr1s = nodes.filter((n) => n.type === 'pr1').length;
-    // In a correctly-parsed CPI file, continuation paragraphs significantly outnumber pr1
+    // In a correctly-parsed file of this family, continuation paragraphs significantly outnumber pr1
     expect(continuations).toBeGreaterThan(pr1s);
   });
 
-  it('classifies roles despite the CPI ilvl offset', async () => {
+  it('classifies roles despite the reserved-low-level ilvl offset', async () => {
     const buffer = readFileSync(resolve(CPI_DIR, 'CPI_BUSBAR_CSIMFS.docx'));
     const { tree } = await parse(buffer, 'CPI_BUSBAR_CSIMFS.docx');
     const articleRoles = allNodes(tree.parts)
       .filter((n) => n.type === 'article')
       .map((n) => n.meta.articleRole);
-    // The CPI offset is normalized into node_type='article' before role
-    // derivation, so a known CPI heading still classifies. At least one
+    // The reserved-low-level offset is normalized into node_type='article' before role
+    // derivation, so a known heading still classifies. At least one
     // recognized role must be present (regression guard for the offset path).
     expect(articleRoles.some((r) => r !== undefined)).toBe(true);
   });

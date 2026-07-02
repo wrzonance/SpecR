@@ -25,7 +25,7 @@ import type { SourceFacts, SourceColorFact } from '../ast/types.js';
 // follows / no whitespace after PART). No stray punctuation can survive the cut.
 const PART_PREFIX = /^\s*PART\s+\d+[\s.:—–-]*(?=[a-z])/i;
 
-// Whole-number decimal PART prefix: some manufacturer specs number PARTs as "N.0"
+// Whole-number decimal PART prefix: some documents number PARTs as "N.0"
 // ("2.0 PRODUCTS" → "PRODUCTS"). Only N.0 is a PART tier — a real "N.N" article
 // number is never matched (the char after "\.0+" separators must be a letter, and
 // only ".0"/".00"… decimals qualify). Mirrors the Signal-4 N.0 PART text pattern

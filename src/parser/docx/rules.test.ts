@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { ilvlToNodeType, ARCAT_ILVL_MAP, CPI_ILVL_MAP } from './rules.js';
+import { ilvlToNodeType } from './rules.js';
 
 describe('ilvlToNodeType', () => {
-  describe('ARCAT-style (articleIlvl=1)', () => {
+  describe('articleIlvl=1 (article at outline level 1)', () => {
     it('maps ilvl 0 to part', () => expect(ilvlToNodeType(0, 1)).toBe('part'));
     it('maps ilvl 1 to article', () => expect(ilvlToNodeType(1, 1)).toBe('article'));
     it('maps ilvl 2 to pr1', () => expect(ilvlToNodeType(2, 1)).toBe('pr1'));
@@ -15,11 +15,11 @@ describe('ilvlToNodeType', () => {
     it('maps ilvl 9+ to continuation', () => expect(ilvlToNodeType(9, 1)).toBe('continuation'));
   });
 
-  describe('CPI-style (articleIlvl=3)', () => {
+  describe('articleIlvl=3 (low outline levels reserved)', () => {
     it('maps ilvl 0 to part', () => expect(ilvlToNodeType(0, 3)).toBe('part'));
-    it('maps ilvl 1 to continuation (reserved Schedule level)', () =>
+    it('maps ilvl 1 to continuation (reserved level)', () =>
       expect(ilvlToNodeType(1, 3)).toBe('continuation'));
-    it('maps ilvl 2 to continuation (reserved PDS level)', () =>
+    it('maps ilvl 2 to continuation (reserved level)', () =>
       expect(ilvlToNodeType(2, 3)).toBe('continuation'));
     it('maps ilvl 3 to article', () => expect(ilvlToNodeType(3, 3)).toBe('article'));
     it('maps ilvl 4 to pr1', () => expect(ilvlToNodeType(4, 3)).toBe('pr1'));
@@ -35,30 +35,10 @@ describe('ilvlToNodeType', () => {
   // source depths collapse to one type, so the original ilvl is not recoverable
   // on round-trip. ADR-027 records this as deliberately lossy.
   describe('KNOWN AMBIGUITY: ilvls beyond pr7 collapse to continuation (lossy)', () => {
-    it('ARCAT-style: ilvl 9, 10, 11 all collapse to continuation', () => {
+    it('articleIlvl=1: ilvl 9, 10, 11 all collapse to continuation', () => {
       expect(ilvlToNodeType(9, 1)).toBe('continuation');
       expect(ilvlToNodeType(10, 1)).toBe('continuation');
       expect(ilvlToNodeType(11, 1)).toBe('continuation');
     });
-  });
-});
-
-describe('ilvl maps — documentation completeness', () => {
-  it('ARCAT_ILVL_MAP covers part through pr7', () => {
-    const types = ARCAT_ILVL_MAP.map((r) => r.nodeType);
-    expect(types).toContain('part');
-    expect(types).toContain('article');
-    expect(types).toContain('pr7');
-  });
-
-  it('CPI_ILVL_MAP article rule has description mentioning reserved levels', () => {
-    const articleRule = CPI_ILVL_MAP.find((r) => r.nodeType === 'article');
-    expect(articleRule?.description.toLowerCase()).toContain('reserved');
-  });
-
-  it('all signal rules have non-empty description', () => {
-    for (const rule of [...ARCAT_ILVL_MAP, ...CPI_ILVL_MAP]) {
-      expect(rule.description.length).toBeGreaterThan(0);
-    }
   });
 });

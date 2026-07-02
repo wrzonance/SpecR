@@ -51,24 +51,29 @@ function parseCoreMetadata(xml: string): { section: string; title: string } {
 }
 
 // Detect spec source from style names.
-// ARCAT: every file embeds ARCAT-prefixed styles (ARCATPart, ARCATArticle, …).
-// CPI v1 (older): uses generic Word styles — Heading1 for PART lines, no vendor prefix.
-// CPI v2 (newer): uses short-form CPI styles — PRT, ART, PR1, PR2, … with numPr in styles.xml.
+// Coarse provenance tag inferred from a document's style-vocabulary fingerprint.
+// ANNOTATION ONLY: surfaced as meta.source, computed after classification, and never
+// read back as an inference input — structure is derived from signals, not this tag.
+// The fingerprints below are two recurring authoring conventions seen in the corpus:
+//   • styles sharing a common heading prefix (…Part, …Article, …)
+//   • short-form PRT + ART styles carrying numPr in styles.xml (absent from the
+//     generic Word templates a flat <ol> export produces)
 function detectSource(styleMap: StyleMap): Source {
   if ([...styleMap.styles.keys()].some((id) => id.startsWith('ARCAT'))) return 'arcat';
-  // CPI v2: vendor-specific PRT + ART styles (not present in generic Word templates)
+  // short-form PRT + ART styles are not present in generic Word templates
   if (styleMap.styles.has('ART') && styleMap.styles.has('PRT')) return 'cpi';
   return 'unknown';
 }
 
-// Detect articleIlvl using StyleMap first, then numbering.xml as fallback.
-// ARCAT: ARCATArticle style has numPr ilvl=1 → articleIlvl=1.
-// CPI v2: ART style has numPr ilvl=3 → articleIlvl=3.
-// Fallback: numbering.xml detectArticleIlvl (SCHEDULE/PDS lvlText heuristic).
+// The ilvl at which the article tier begins is not fixed — a document declares it
+// through its own article style's numPr. Commonly ilvl 1; documents that reserve the
+// low levels for a Schedule / Product-Data block start the article deeper (e.g. ilvl
+// 3). Read it from the document's own article style; if no known article-style name
+// is present, fall back to the numbering.xml scan.
 function detectArticleIlvl(styleMap: StyleMap, numberingMap: NumberingMap): number {
   const artStyle = styleMap.resolvedNumPr.get('ART') ?? styleMap.resolvedNumPr.get('ARCATArticle');
   if (artStyle) return artStyle.ilvl;
-  // Fall back to numbering.xml detection (SCHEDULE/PDS lvlText heuristic)
+  // Fall back to the numbering.xml scan (reserved-level lvlText heuristic).
   return numberingMap.articleIlvl;
 }
 
@@ -111,8 +116,9 @@ function runPipeline(
   onProgress?: (stage: string, pct: number) => void,
   numberingProfile?: NumberingProfile
 ): SpecTree {
-  // Override articleIlvl now that StyleMap is available — numbering.xml alone cannot
-  // distinguish CPI-v2 (ART at ilvl=3) from ARCAT (article at ilvl=1).
+  // Recompute articleIlvl now that the StyleMap is available — numbering.xml alone
+  // cannot tell an article declared at ilvl 1 from one declared deeper (low levels
+  // reserved); the article style's own numPr disambiguates.
   const { classified, styleMap } = buildClassification(entries, onProgress, numberingProfile);
 
   const source = detectSource(styleMap);

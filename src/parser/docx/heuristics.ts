@@ -13,7 +13,7 @@ interface TextSignalEntry {
 const TEXT_SIGNALS: readonly TextSignalEntry[] = [
   { pattern: /^PART\s+\d+/i, nodeType: 'part', normalizedIlvl: 0 },
   // PART headings authored in whole-number decimal form ("2.0 PRODUCTS",
-  // "3.0 EXECUTION"): some manufacturer specs number PARTs as "N.0" and leave them
+  // "3.0 EXECUTION"): some documents number PARTs as "N.0" and leave them
   // unstyled/unnumbered, so ONLY the text signal sees them. Gate on a canonical CSI
   // part name — a bare "N.0" alone is not enough evidence to outrank the article
   // pattern (a mis-numbered article or a "2.0 inches" measurement must stay put).
@@ -62,15 +62,15 @@ const PART_HEADING_PATTERN = /^PART\s+\d+/i;
  * Bare canonical names ("GENERAL"/"PRODUCTS"/"EXECUTION") are deliberately NOT
  * matched here: a generic <ol> item at ilvl=0 whose text happens to be one of
  * those words would otherwise be promoted to a PART with no numbering evidence.
- * The real CPI bare-name case is recognized instead by its ilvl=0 "PART %1"
- * lvlText, which marks the numId spec-shaped — see findSpecShapedNumIds
- * (numbering.ts) and the Signal-1 guard (inference.ts).
+ * The real bare-name case is recognized instead by its ilvl=0 "PART %1" lvlText,
+ * which marks the numId spec-shaped — see findSpecShapedNumIds (numbering.ts) and
+ * the Signal-1 guard (inference.ts).
  */
 export function isPartHeading(text: string): boolean {
   return PART_HEADING_PATTERN.test(text.trim());
 }
 
-// Specifier-note banners vary by vendor: "** NOTE TO SPECIFIER **" (ARCAT),
+// Specifier-note banners vary by author/template: "** NOTE TO SPECIFIER **",
 // "SPECIFIER NOTES:", "NOTES TO SPEC WRITER", with arbitrary decoration
 // (asterisks, dashes, brackets, hashes) around the phrase. Strip decoration
 // and collapse whitespace, then match the phrase variants at the start.
@@ -84,7 +84,7 @@ const SPECIFIER_NOTES_PATTERN = /^SPEC(?:IFIER)?S? NOTES?\b/;
 
 /**
  * Returns true if the text opens with a specifier-note banner in any of its
- * vendor variants, ignoring leading decoration characters.
+ * decoration variants, ignoring leading decoration characters.
  */
 export function isSpecifierNote(text: string): boolean {
   const undecorated = text

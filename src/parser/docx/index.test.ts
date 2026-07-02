@@ -139,7 +139,7 @@ describe('parseDocx — happy path', () => {
     expect(types).toContain('article');
     expect(types).toContain('pr1');
     expect(types).toContain('continuation');
-    // source='unknown' — synthetic styles.xml has no ARCAT/CPI style names
+    // source='unknown' — synthetic styles.xml has no source-identifying style names
     expect(tree.parts[0]?.meta.source).toBe('unknown');
   });
 
@@ -161,7 +161,7 @@ describe('parseDocx — happy path', () => {
   const allNodes = (nodes: readonly SpecNode[]): SpecNode[] =>
     nodes.flatMap((n) => [n, ...allNodes(n.children)]);
 
-  it('hidden preamble does not pollute the root yet is retained (ARCAT path)', async () => {
+  it('hidden preamble does not pollute the root yet is retained (no-reserved-levels path)', async () => {
     const doc = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
     <w:p><w:pPr><w:rPr><w:vanish/></w:rPr></w:pPr><w:r><w:rPr><w:vanish/></w:rPr><w:t>SPECIFICATION PROCESSING FORM</w:t></w:r></w:p>
     <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
@@ -180,8 +180,8 @@ describe('parseDocx — happy path', () => {
     expect(hidden?.meta.vanish).toBe(true);
   });
 
-  it('hidden preamble excluded + retained on the CPI path (ilvl offset)', async () => {
-    // CPI-authored DOCX: PRT/ART styles, Article reserved at ilvl=3 (Schedule/PDS at 1–2).
+  it('hidden preamble excluded + retained on the reserved-low-level path (ilvl offset)', async () => {
+    // Reserved-low-level DOCX: PRT/ART styles, Article reserved at ilvl=3 (Schedule/PDS at 1–2).
     const cpiStyles = `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
       <w:style w:styleId="PRT" w:type="paragraph"><w:name w:val="PRT"/></w:style>
       <w:style w:styleId="ART" w:type="paragraph"><w:name w:val="ART"/><w:pPr><w:numPr><w:ilvl w:val="3"/><w:numId w:val="1"/></w:numPr></w:pPr></w:style>
@@ -225,7 +225,7 @@ describe('parseDocx — error handling', () => {
     await expect(parseDocx(buffer)).rejects.toThrow('document contains no paragraphs');
   });
 
-  it('detects source=arcat when ARCAT-prefixed styles present', async () => {
+  it('detects source=arcat from the source-identifying style-name prefix', async () => {
     const buffer = await makeDocx({ stylesXml: ARCAT_STYLES });
     const tree = await parseDocx(buffer);
     expect(tree.parts[0]?.meta.source).toBe('arcat');
@@ -545,7 +545,7 @@ describe('parseDocx — dc:subject section normalization (#gate)', () => {
   });
 });
 
-// ── ARCAT-realistic end-to-end: numbering-generated PART prefixes, style-only
+// ── Realistic end-to-end: numbering-generated PART prefixes, style-only
 //    part linkage (reverse pStyle), preamble, specifier notes, no core.xml ──
 
 const ARCAT_E2E_NUMBERING = `<?xml version="1.0" encoding="UTF-8"?>
@@ -595,7 +595,7 @@ const ARCAT_E2E_DOC = `<?xml version="1.0" encoding="UTF-8"?>
   </w:body>
 </w:document>`;
 
-describe('parseDocx — ARCAT-realistic regression (21 11 00: 34 parts instead of 3)', () => {
+describe('parseDocx — realistic regression (numbering-generated PART prefixes yielded 34 parts instead of 3)', () => {
   async function parseArcatE2e() {
     const buffer = await makeDocx({
       documentXml: ARCAT_E2E_DOC,
@@ -681,12 +681,12 @@ describe('parseDocx — ARCAT-realistic regression (21 11 00: 34 parts instead o
   });
 });
 
-// ── CPI-shaped regression: PART headings anchored on numbering that is NOT
+// ── Non-pStyle-linked PART regression: PART headings anchored on numbering that is NOT
 //    pStyle-linked. The ilvl=0 lvlText "PART %1 -" generates the prefix, so the
 //    paragraph text is the bare canonical name. Before the fix the Signal-1 guard
 //    demoted GENERAL/PRODUCTS to continuation and only 1 part survived. ──
 
-// numId 1 → abstractNum 5: the CPI PART ladder (ilvl=0 lvlText "PART %1 -", 0 pStyle
+// numId 1 → abstractNum 5: the PART ladder (ilvl=0 lvlText "PART %1 -", 0 pStyle
 // links). numId 2 → abstractNum 0: a generic outline ("%1", NOT part-shaped) — the
 // artifact uses it for EMPTY PART anchors that must drop, not become spurious parts.
 const CPI_PART_NUMBERING = `<?xml version="1.0" encoding="UTF-8"?>
@@ -706,7 +706,7 @@ function numbered(ilvl: number, text: string, numId = 1): string {
   return `<w:p><w:pPr><w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
 }
 
-// Mirrors the parsing-needs-fixing.docx pathology: bare-name PART headings on the
+// Mirrors the real hand-authored pathology: bare-name PART headings on the
 // "PART %1 -" ladder, plus an EMPTY anchor on the generic numId 2 that must drop.
 const CPI_PART_DOC = `<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -721,7 +721,7 @@ const CPI_PART_DOC = `<?xml version="1.0" encoding="UTF-8"?>
   </w:body>
 </w:document>`;
 
-describe('parseDocx — CPI PART inference (numbering lvlText "PART %1 -", 0 pStyle links)', () => {
+describe('parseDocx — numbering-lvlText PART inference (lvlText "PART %1 -", 0 pStyle links)', () => {
   async function parseCpi() {
     const buffer = await makeDocx({
       documentXml: CPI_PART_DOC,

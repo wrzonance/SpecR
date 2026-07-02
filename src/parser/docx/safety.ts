@@ -179,7 +179,7 @@ function readZipEntry(zip: yauzl.ZipFile, entry: yauzl.Entry): Promise<string> {
 // Relationship types that trigger automatic network fetching when Word opens the document
 // (SSRF / server-side request forgery vectors). Hyperlinks and images are passive — they
 // only activate on user interaction — so they are intentionally excluded.
-// Corpus finding: all 28 ARCAT + CPI fixtures use hyperlink external rels (arcat.com URLs).
+// Corpus finding: all 28 DOCX fixtures use hyperlink external rels (website URLs).
 //
 // attachedTemplate (settings.xml.rels) is also excluded: it is provenance metadata that
 // Word writes for any document authored from a template (ubiquitous in corporate specs

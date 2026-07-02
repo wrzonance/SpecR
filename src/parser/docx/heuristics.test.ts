@@ -130,7 +130,7 @@ describe('isPartHeading', () => {
 
   // P2 (Codex review): bare canonical names must NOT be promoted on text alone —
   // a generic numbered-list item "GENERAL" at ilvl=0 would otherwise become a
-  // spurious PART. The real CPI bare-name case is gated on numbering evidence
+  // spurious PART. The real bare-name case is gated on numbering evidence
   // (specShapedNumIds via the "PART %1" lvlText), not this text guard.
   it('does NOT promote a bare canonical part name without numbering evidence', () => {
     expect(isPartHeading('GENERAL')).toBe(false);

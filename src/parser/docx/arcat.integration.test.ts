@@ -6,7 +6,7 @@ import { parse } from '../index.js';
 import type { SpecNode } from '../../ast/types.js';
 
 const ARCAT_DIR = resolve('docs/references/ARCAT');
-// ARCAT .docx files are copyrighted and gitignored — only present in local dev environments.
+// These reference .docx files are copyrighted and gitignored — only present in local dev environments.
 const FIXTURES_AVAILABLE = existsSync(resolve(ARCAT_DIR, '01_10_00arc.docx'));
 
 function allNodes(nodes: readonly SpecNode[]): SpecNode[] {
@@ -40,7 +40,7 @@ const ARCAT_FIXTURES = [
 ];
 
 // Files are copyrighted and gitignored — tests skip automatically in CI.
-describe.skipIf(!FIXTURES_AVAILABLE)('ARCAT fixture parsing', () => {
+describe.skipIf(!FIXTURES_AVAILABLE)('prefixed-heading-style corpus fixture parsing', () => {
   it('classifies standard article roles (REFERENCES at minimum)', async () => {
     // NOTE: 07_21_00ksp.docx is expected to contain a References article.
     // If CI reports "references not found", swap to another fixture from ARCAT_FIXTURES
@@ -51,7 +51,7 @@ describe.skipIf(!FIXTURES_AVAILABLE)('ARCAT fixture parsing', () => {
       .filter((n) => n.type === 'article')
       .map((n) => n.meta.articleRole)
       .filter((r): r is NonNullable<typeof r> => r !== undefined);
-    // ARCAT sections reliably carry a References article; assert role tagging fired.
+    // These sections reliably carry a References article; assert role tagging fired.
     expect(roles).toContain('references');
     // No non-article node should ever carry a role.
     const badlyTagged = allNodes(tree.parts).filter(
@@ -66,17 +66,18 @@ describe.skipIf(!FIXTURES_AVAILABLE)('ARCAT fixture parsing', () => {
       const tree = await parseDocx(buffer);
 
       expect(tree.parts.length).toBeGreaterThan(0);
-      // ARCAT files have preamble continuation nodes before CSI content;
-      // source is set on all nodes from articleIlvl=1 detection.
+      // These files have preamble continuation nodes before CSI content;
+      // source is stamped on every node from the document-level style-vocabulary
+      // fingerprint (detectSource), independent of node type or level.
       const nodes = allNodes(tree.parts);
       const sources = new Set(nodes.map((n) => n.meta.source));
       expect(sources.has('arcat')).toBe(true);
       expect(sources.has('cpi')).toBe(false);
     });
 
-    // Regression: ARCAT "PART n" prefixes are numbering-generated (lvlText
+    // Regression: "PART n" prefixes are numbering-generated (lvlText
     // "PART %1"), so the literal-text part guard demoted every PART heading to
-    // continuation — 21_11_00agf.docx rendered 34 roots instead of 3 parts.
+    // continuation — one fixture rendered 34 roots instead of 3 parts.
     it(`${fixture}: exactly 3 part-type roots (GENERAL/PRODUCTS/EXECUTION)`, async () => {
       const buffer = readFileSync(resolve(ARCAT_DIR, fixture));
       const tree = await parseDocx(buffer);
