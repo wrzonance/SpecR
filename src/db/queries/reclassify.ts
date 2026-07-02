@@ -313,7 +313,10 @@ async function runAccept(
   );
   const owned = owner.rows[0];
   if (!owned) return { status: 'not-found' };
-  if (owned.spec_id !== specId) return { status: 'wrong-spec' };
+  // Case-insensitive: z.uuid() accepts uppercase, Postgres returns lowercase —
+  // normalize both sides so a valid uppercase specId is not a false wrong-spec
+  // (matches updateParagraphText / setParagraphVanish).
+  if (owned.spec_id.toLowerCase() !== specId.toLowerCase()) return { status: 'wrong-spec' };
 
   // Fast no-op path: if the comment was already accepted, return the stored
   // noteId WITHOUT requiring writability — a retry writes nothing, and the
@@ -336,7 +339,7 @@ async function runAccept(
   );
   const anchor = anchorRes.rows[0];
   if (!anchor) return { status: 'not-found' };
-  if (anchor.spec_id !== specId) return { status: 'wrong-spec' };
+  if (anchor.spec_id.toLowerCase() !== specId.toLowerCase()) return { status: 'wrong-spec' };
 
   const text = commentTextAt(anchor.source_facts, index);
   if (text === null) return { status: 'no-comment' };

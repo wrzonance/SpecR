@@ -120,7 +120,12 @@ export async function handleAcceptCommentAsNote(args: unknown): Promise<ToolResu
     if (outcome.status === 'not-found') return toolError(`paragraph not found: id=${nodeId}`);
     if (outcome.status === 'wrong-spec') return toolError('paragraph does not belong to this spec');
     if (outcome.status === 'no-comment') return toolError(`no comment at index ${index}`);
-    return ok({ noteId: outcome.noteId, created: outcome.status === 'created' });
+    // Idempotent success by design: whether the note was just created or already
+    // existed, the postcondition (a note sibling with this id) holds — both return
+    // ok({ noteId }), matching REST's created-path { noteId } shape. This deliberately
+    // diverges from REST's 409-on-already-accepted (an HTTP status-code affordance);
+    // an agent tool favors an idempotent success over a conflict error.
+    return ok({ noteId: outcome.noteId });
   } catch (err) {
     const gate = gateToolError(err);
     if (gate) return gate;

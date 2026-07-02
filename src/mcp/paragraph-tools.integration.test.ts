@@ -191,4 +191,42 @@ describe('accept_comment_as_note MCP tool', () => {
       )
     ).toBe(true);
   });
+
+  it('materializes a comment as a note and is idempotent (returns { noteId } both times)', async () => {
+    const anchor = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version, source_facts)
+       VALUES ($1, NULL, 'pr1', 'Anchor.', 5, 1, $2::jsonb) RETURNING id`,
+      [
+        specId,
+        JSON.stringify({
+          comments: [
+            { author: 'Reviewer', text: 'Add UL listing.', anchor: [0, 5], closed: false },
+          ],
+        }),
+      ]
+    );
+    const anchorId = anchor.rows[0]!.id;
+
+    const first = await handleAcceptCommentAsNote({ specId, nodeId: anchorId, index: 0 });
+    expect(isToolError(first)).toBe(false);
+    const noteId = parse<{ noteId: string }>(first).noteId;
+    expect(noteId).toBeTruthy();
+
+    // Idempotent repeat: same noteId, no duplicate, still a success (not REST's 409).
+    const second = await handleAcceptCommentAsNote({ specId, nodeId: anchorId, index: 0 });
+    expect(isToolError(second)).toBe(false);
+    expect(parse<{ noteId: string }>(second).noteId).toBe(noteId);
+  });
+
+  it('normalizes specId case — an uppercase but correct specId is not a false wrong-spec', async () => {
+    // Regression (Codex P3): acceptCommentAsNote compared spec_id case-sensitively, so a
+    // valid uppercase specId false-failed as wrong-spec. It must reach the no-comment path.
+    const res = await handleAcceptCommentAsNote({
+      specId: specId.toUpperCase(),
+      nodeId: bodyId,
+      index: 0,
+    });
+    expect(isToolError(res)).toBe(true); // bodyId has no comment at index 0…
+    expect(res.content[0]!.text).toContain('no comment'); // …but ownership passed despite the case
+  });
 });

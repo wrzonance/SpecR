@@ -54,9 +54,9 @@ function registerParagraphContentTools(reg: ToolRegistrar): void {
     {
       description:
         'Materialize a captured margin comment as a note paragraph immediately after its ' +
-        'anchor (ADR-022 D4) — never a silent tree mutation. Idempotent: a repeat returns ' +
-        'the existing note’s id. index is the zero-based position in the anchor’s ' +
-        'source_facts.comments.',
+        'anchor (ADR-022 D4) — never a silent tree mutation. Returns { noteId } whether the ' +
+        'note was newly created or already existed (idempotent — a repeat never mints a ' +
+        'duplicate). index is the zero-based position in the anchor’s source_facts.comments.',
       inputSchema: AcceptCommentShape,
     },
     handleAcceptCommentAsNote
