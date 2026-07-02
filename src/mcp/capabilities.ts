@@ -40,6 +40,7 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['list_libraries', 'read'],
   ['list_sections', 'read'],
   ['list_projects', 'read'],
+  ['get_project', 'read'],
   ['get_references', 'read'],
   ['get_spec', 'read'],
   ['get_paragraph', 'read'],
@@ -54,9 +55,13 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['review_editability', 'read'],
   // writes (persist state)
   ['create_project', 'write'],
+  ['update_project', 'write'],
+  ['restore_project', 'write'],
   ['parse_document', 'write'],
   ['load_files', 'write'],
   ['set_editability_override', 'write'],
   ['clear_editability_override', 'write'],
   ['reclassify_spec', 'write'],
+  // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
+  ['delete_project', 'destructive'],
 ]);

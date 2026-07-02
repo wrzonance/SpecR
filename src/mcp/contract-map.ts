@@ -22,6 +22,11 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['patch /specs/{}/paragraphs/{}/editability', 'set_editability_override'],
   ['post /projects', 'create_project'], // added in Task 7
   ['get /libraries', 'list_libraries'], // discover sourceLibraryIds that create_project needs
+  // wave 2 — project lifecycle
+  ['get /projects/{}', 'get_project'],
+  ['patch /projects/{}', 'update_project'],
+  ['delete /projects/{}', 'delete_project'], // destructive tier (gated off by default)
+  ['post /projects/{}/restore', 'restore_project'],
   // …extend during each write-tool wave.
 ]);
 
@@ -33,11 +38,7 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
  * honest — a new REST route with no tool and no entry here fails CI.
  */
 export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
-  // --- Wave 2: projects / packages / revisions ---
-  ['get /projects/{}', 'pending — wave 2 (project read)'],
-  ['patch /projects/{}', 'pending — wave 2 (rename_project)'],
-  ['delete /projects/{}', 'pending — wave 2 (delete_project, destructive)'],
-  ['post /projects/{}/restore', 'pending — wave 2 (restore_project)'],
+  // --- Wave 2 remaining: packages / revisions / spec assignment ---
   ['post /projects/{}/specs', 'pending — wave 2 (assign specs to project)'],
   ['delete /projects/{}/specs/{}', 'pending — wave 2 (unassign project spec)'],
   ['put /projects/{}/sources', 'pending — wave 2 (project source libraries)'],

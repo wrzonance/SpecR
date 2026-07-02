@@ -752,6 +752,8 @@ describe('capability gating (#43)', () => {
     expect(names).toContain('parse_document');
     // …but no destructive tool leaks (guards future waves from exposing one by default).
     expect(tools.some((t) => t.annotations?.destructiveHint === true)).toBe(false);
+    // delete_project (destructive) exists but is gated off by the default read,write posture.
+    expect(names).not.toContain('delete_project');
   });
 });
 
