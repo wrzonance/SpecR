@@ -56,11 +56,13 @@ in-process legitimately changes a limit later, we want to honour it, not throw.
 4. **Secure by default.** Schema and root `.env.example` default to limiting
    **on**. Only the web UI demo opts out: `examples/web_ui_demo/.env.example`
    ships `DISABLE_RATE_LIMIT=true`, and the one-command launchers
-   (`Start-SpecR.sh` / `.ps1`) hand that file to the API process as its
-   `node --env-file-if-exists`. Node's `--env-file` does **not** override
+   (`Start-SpecR.sh` / `.ps1`) start the API with two `node --env-file-if-exists`
+   flags — the committed `.env.example` first (so the opt-out applies on a clean
+   checkout, where the gitignored `.env` does not exist), then a user's real
+   `.env` which overrides it. Node's `--env-file` does **not** override
    already-exported vars, so the launcher's `PORT`/`DATABASE_URL`/`NODE_ENV`
-   still win and the demo's `PORT=3001` cannot clobber the API's port; the file
-   only supplies keys the launcher did not export (i.e. `DISABLE_RATE_LIMIT`).
+   still win and the demo's `PORT=3001` cannot clobber the API's port; the files
+   only supply keys the launcher did not export (i.e. `DISABLE_RATE_LIMIT`).
 
 ### Skip-mode asymmetry (preserved)
 

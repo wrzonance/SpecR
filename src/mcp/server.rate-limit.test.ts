@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import type { Server } from 'http';
+import type { AddressInfo } from 'node:net';
 
 // Stub env before any module evaluation — env.ts calls process.exit(1) without DATABASE_URL.
 // The rate-limit fields are what's under test: the limiter reads them LIVE (per-request
@@ -40,6 +41,13 @@ const REQUEST_BODY = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list
 
 let server: Server | undefined;
 
+// Narrow Server.address() (string | AddressInfo | null) without a type assertion —
+// app.listen(0) yields an AddressInfo for TCP, but the guard keeps us honest per the
+// project's no-assertions rule.
+function isAddressInfo(addr: string | AddressInfo | null): addr is AddressInfo {
+  return addr !== null && typeof addr === 'object';
+}
+
 async function startServer(): Promise<string> {
   const app = express();
   registerMcpRoutes(app);
@@ -47,7 +55,10 @@ async function startServer(): Promise<string> {
     const s = app.listen(0, () => resolve(s));
   });
   server = started;
-  const addr = started.address() as { port: number };
+  const addr = started.address();
+  if (!isAddressInfo(addr)) {
+    throw new Error('expected AddressInfo from a listening TCP server');
+  }
   return `http://127.0.0.1:${addr.port}`;
 }
 
