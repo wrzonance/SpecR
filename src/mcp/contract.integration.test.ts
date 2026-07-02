@@ -38,6 +38,19 @@ describe('MCP contract (REST <-> MCP parity)', () => {
     expect(orphans, 'MCP tools that map to nothing (add to OP_TO_TOOL or MCP_NATIVE)').toEqual([]);
   });
 
+  it('INV-2b: every OP_TO_TOOL value is an actually-registered tool (no phantom mappings)', () => {
+    // Without this, an op mapped to a misspelled or since-removed tool name (e.g. a
+    // burn-down wave renames the tool but leaves the map entry) would still count as
+    // "covered" by INV-1 while no tool performs it — the exact silent REST<->MCP drift
+    // ADR-044 exists to prevent. declaredToolNames() uses ALL_TIERS, so gated tools count.
+    const declared = new Set(declaredToolNames());
+    const phantom = [...OP_TO_TOOL.entries()]
+      .filter(([, tool]) => !declared.has(tool))
+      .map(([op, tool]) => `${op} -> ${tool}`)
+      .sort((a, b) => a.localeCompare(b));
+    expect(phantom, 'OP_TO_TOOL entries mapping to a non-registered tool').toEqual([]);
+  });
+
   it('INV-3: every registered tool has a declared capability tier', () => {
     // declaredToolNames() throws inside the registrar if any tool is untiered.
     expect(() => declaredToolNames()).not.toThrow();
