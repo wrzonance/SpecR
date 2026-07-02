@@ -56,35 +56,51 @@ export function planPartStrip(text: string): { text: string; removed: number } |
   return { text: stripped, removed: match[0].length };
 }
 
-// A leading manual decimal-outline number on a heading whose typed number duplicates
-// the render-derived CSI label (Signal-4 article/pr nodes) — must be stripped or it
-// doubles ("1.2  1.2 RELATED SECTIONS"). Mirrors heuristics.ts (Signal 4). Two tiers,
-// because a single-dot "N.N" is genuinely ambiguous:
-//   • DEEP (>=2 interior dots, "1.4.2.1 …"): unambiguously an outline number — a
-//     measurement is never multi-dot — so strip whatever letter follows (upper OR
-//     lower case), down to a following letter.
-//   • ARTICLE (exactly one interior dot, "1.2 …"): a real heading ("1.2 RELATED
-//     SECTIONS") OR authored decimal PROSE ("2.0 inches of clearance minimum", which
-//     the N.N text signal misclassifies as an article). Only strip when a CAPITAL
-//     letter follows (CSI headings are titled); a lowercase continuation is a
-//     measurement/sentence and MUST be preserved verbatim (round-trip fidelity —
-//     Codex adversarial review, P2 data-loss).
-// A bare "1." (no interior dot) is the pr2 label form, not an outline number, so
-// neither tier matches it.
+// A leading manual MULTI-DOT outline number ("1.4.2.1 Installation …" → "Installation
+// …"). Requires >=2 interior dots, which is unambiguously an outline number — a
+// measurement is never "1.4.2.1", and its render label (a pr letter/number like "A." /
+// "1.") never contains the typed decimal, so the typed number ALWAYS duplicates nothing
+// useful and is safe to remove regardless of the following letter's case. A single-dot
+// "N.N" is NOT handled here — it is genuinely ambiguous between an outline label and a
+// decimal value ("2.1 GHz"), so it is stripped only by planLabelStrip, and only when it
+// equals the node's sibling-derived CSI label. A bare "1." (no interior dot) is the pr2
+// label form, not an outline number, and never matches.
 const DEEP_OUTLINE_PREFIX = /^\s*\d+(?:\.\d+){2,}[\s.:—–-]*(?=[A-Za-z])/;
-const ARTICLE_OUTLINE_PREFIX = /^\s*\d+\.\d+[\s.:—–-]*(?=[A-Z])/;
 
-function matchOutlinePrefix(text: string): RegExpExecArray | null {
-  return DEEP_OUTLINE_PREFIX.exec(text) ?? ARTICLE_OUTLINE_PREFIX.exec(text);
+/**
+ * Strip a leading MULTI-DOT decimal-outline number from a manually-numbered heading's
+ * text and report the chars removed (for source-fact rebasing). Returns null when
+ * there is no such prefix, or when stripping would empty the text.
+ */
+export function planOutlineNumberStrip(text: string): { text: string; removed: number } | null {
+  const match = DEEP_OUTLINE_PREFIX.exec(text);
+  if (!match) return null;
+  const stripped = text.slice(match[0].length).trim();
+  if (stripped.length === 0) return null;
+  return { text: stripped, removed: match[0].length };
+}
+
+// Escape a computed label ("1.2", "10.11") for use as a literal regex prefix.
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
- * Strip a leading decimal-outline number from a manually-numbered heading's text and
- * report the chars removed (for source-fact rebasing). Returns null when there is no
- * such prefix, or when stripping would empty the text.
+ * Strip a single-dot outline number from an article's text ONLY when it equals the
+ * article's own sibling-derived CSI label — the sole reliable way to tell an outline
+ * label ("1.2 RELATED SECTIONS", where 1.2 IS the article's position) from a decimal
+ * value that merely opens the text ("2.1 GHz frequency band", which is not article
+ * 2.1's label unless it truly sits there). The label is matched as a whole token
+ * (followed by a separator run, then real content), so "1.2" never matches inside
+ * "12.3" and a bare "1.2 " (no content) is left intact. Returns null when the leading
+ * number is not this node's label, or when stripping would empty the text.
  */
-export function planOutlineNumberStrip(text: string): { text: string; removed: number } | null {
-  const match = matchOutlinePrefix(text);
+export function planLabelStrip(
+  text: string,
+  label: string
+): { text: string; removed: number } | null {
+  const re = new RegExp(`^\\s*${escapeRegExp(label)}[\\s.:—–-]+(?=\\S)`);
+  const match = re.exec(text);
   if (!match) return null;
   const stripped = text.slice(match[0].length).trim();
   if (stripped.length === 0) return null;

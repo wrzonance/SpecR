@@ -3,6 +3,7 @@ import {
   stripPartPrefix,
   planPartStrip,
   planOutlineNumberStrip,
+  planLabelStrip,
   rebaseSourceFacts,
 } from './part-prefix.js';
 import type { SourceFacts } from '../ast/types.js';
@@ -93,19 +94,24 @@ describe('planPartStrip', () => {
   });
 });
 
-describe('planOutlineNumberStrip (manual decimal-outline items — Signal 4)', () => {
-  // WIRELESS_ACCESS_POINTS.docx types its outline into the text ("1.4.2.1 Install…").
-  // Article/pr nodes get a render-derived CSI label, so the typed decimal prefix must
-  // be stripped or it doubles ("1.2  1.2 RELATED SECTIONS").
-  it('strips a multi-part decimal outline prefix (>=1 interior dot) down to the text', () => {
-    expect(planOutlineNumberStrip('1.2 RELATED SECTIONS')).toEqual({
-      text: 'RELATED SECTIONS',
-      removed: 4,
-    });
+describe('planOutlineNumberStrip (MULTI-DOT outline items only — Signal 4 pr nodes)', () => {
+  // A multi-dot number ("1.4.2.1 Install…") is unambiguously an outline number (never a
+  // measurement) and its pr render label ("A." / "1.") never contains the typed decimal,
+  // so it is always safe to strip. WIRELESS_ACCESS_POINTS.docx types its deep outline
+  // this way. A single-dot "N.N" is NOT handled here (ambiguous with a value like
+  // "2.1 GHz") — planLabelStrip handles it, and only when it equals the node's label.
+  it('strips a multi-dot decimal outline prefix (>=2 interior dots) down to the text', () => {
     expect(planOutlineNumberStrip('1.4.2.1 Installation Instructions')?.text).toBe(
       'Installation Instructions'
     );
     expect(planOutlineNumberStrip('2.3.4.5.6 Deep item')?.text).toBe('Deep item');
+    expect(planOutlineNumberStrip('1.1.1 Wi-Tile')?.text).toBe('Wi-Tile');
+  });
+
+  it('does NOT strip a single-dot "N.N" (ambiguous with a value like "2.1 GHz")', () => {
+    expect(planOutlineNumberStrip('1.2 RELATED SECTIONS')).toBeNull();
+    expect(planOutlineNumberStrip('2.1 GHz frequency band')).toBeNull();
+    expect(planOutlineNumberStrip('2.0 inches of clearance minimum')).toBeNull();
   });
 
   it('does NOT strip a bare "N." (the pr2 label form) or an alpha prefix', () => {
@@ -117,25 +123,42 @@ describe('planOutlineNumberStrip (manual decimal-outline items — Signal 4)', (
   it('returns null when stripping would empty the text (bare number)', () => {
     expect(planOutlineNumberStrip('1.4.2')).toBeNull();
   });
+});
 
-  // Codex adversarial review (P2 data-loss): an unnumbered/unstyled paragraph whose
-  // text merely BEGINS with a decimal measurement ("2.0 inches of clearance minimum")
-  // is misclassified by the N.N text signal as an article, but its "2.0" is authored
-  // PROSE, not an outline label. Stripping it drops content and breaks round-trip
-  // fidelity. A single-dot "N.N" is ambiguous, so only strip it when a CAPITAL letter
-  // follows (CSI heading convention); a lowercase continuation is a measurement and is
-  // preserved verbatim.
-  it('preserves single-dot decimal PROSE (lowercase continuation) — no data loss', () => {
-    expect(planOutlineNumberStrip('2.0 inches of clearance minimum')).toBeNull();
-    expect(planOutlineNumberStrip('3.5 mm nominal thickness')).toBeNull();
-    expect(planOutlineNumberStrip('1.5 times the rated load')).toBeNull();
+describe('planLabelStrip (single-dot article number — only when it IS the label)', () => {
+  // The ONLY reliable way to tell an outline LABEL from a decimal VALUE: strip "1.2"
+  // from an article iff "1.2" is that article's own sibling-derived CSI label. So a real
+  // heading at its matching position strips clean, while a measurement never does (its
+  // number is not that position's label).
+  it('strips the number when it equals the article label', () => {
+    expect(planLabelStrip('1.2 RELATED SECTIONS', '1.2')).toEqual({
+      text: 'RELATED SECTIONS',
+      removed: 4,
+    });
+    expect(planLabelStrip('1.2 Related Sections', '1.2')?.text).toBe('Related Sections');
+    expect(planLabelStrip('1.4 SUBMITTALS', '1.4')?.text).toBe('SUBMITTALS');
+    expect(planLabelStrip('10.11 SCHEDULES', '10.11')?.text).toBe('SCHEDULES');
+    // separator variants (dash/colon) between the label and the title
+    expect(planLabelStrip('1.2 - RELATED SECTIONS', '1.2')?.text).toBe('RELATED SECTIONS');
+    expect(planLabelStrip('1.2: SUMMARY', '1.2')?.text).toBe('SUMMARY');
   });
 
-  // A single-dot number followed by a real heading (capital first letter) is still an
-  // outline article — strip it (the "1.2 RELATED SECTIONS" case above), and this
-  // Title-case variant too.
-  it('still strips a single-dot outline heading (capital letter follows)', () => {
-    expect(planOutlineNumberStrip('1.2 Related Sections')?.text).toBe('Related Sections');
+  it('does NOT strip a measurement whose number is not this article label (no data loss)', () => {
+    // "2.1 GHz …" sitting at, say, article 1.3 — its "2.1" is a value, not the label.
+    expect(planLabelStrip('2.1 GHz frequency band', '1.3')).toBeNull();
+    expect(planLabelStrip('1.5 MHz reference clock', '2.4')).toBeNull();
+    expect(planLabelStrip('2.0 inches of clearance minimum', '1.1')).toBeNull();
+    // even a capital unit is safe — "2.0 GHz" is only stripped if 2.0 IS the label
+    expect(planLabelStrip('2.0 GHz frequency band', '1.1')).toBeNull();
+  });
+
+  it('matches the label as a whole token — "1.2" never strips inside "12.3"', () => {
+    expect(planLabelStrip('12.3 kV switchgear rating', '1.2')).toBeNull();
+  });
+
+  it('returns null when stripping would empty the text (label with no title)', () => {
+    expect(planLabelStrip('1.2 ', '1.2')).toBeNull();
+    expect(planLabelStrip('1.2', '1.2')).toBeNull();
   });
 
   // Multi-dot numbers (>=2 interior dots) are unambiguously outline — a measurement is

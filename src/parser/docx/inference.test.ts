@@ -523,14 +523,11 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts[0]?.text).toBe('PART 1');
   });
 
-  // Codex adversarial review (P2 data-loss, end-to-end repro): an unnumbered/unstyled
-  // paragraph beginning with a decimal MEASUREMENT ("2.0 inches of clearance minimum")
-  // is classified by the N.N text signal as a Signal-4 article. The outline-number
-  // strip must NOT fire on it — the "2.0" is authored prose, not a render-derived
-  // label — or content is lost and round-trip fidelity breaks. A single-dot decimal
-  // with a lowercase continuation is preserved verbatim (planOutlineNumberStrip returns
-  // null; the strip's ARTICLE tier requires a CAPITAL after the number+separators).
-  it('preserves decimal PROSE text through classify→buildTree (no outline strip)', () => {
+  // Label-match strip (Codex adversarial review resolution): the typed number on an
+  // article is stripped ONLY when it equals the article's own sibling-derived CSI label,
+  // so a decimal MEASUREMENT that merely opens the text keeps its number verbatim. Here
+  // "2.0 inches …" sits at the first article (label "1.1"), so "2.0" ≠ "1.1" → preserved.
+  it('preserves decimal measurement text — its number is not the article label', () => {
     const classified = classifyParagraphs(
       [
         makePara({ text: 'PART 1 - GENERAL' }),
@@ -541,82 +538,67 @@ describe('buildTree — Pass 2: tree structure', () => {
     );
     expect(classified[1]?.signalUsed).toBe(4);
     const tree = buildTree(classified, '01', 'T', 'unknown');
-    const node = tree.parts[0]?.children[0];
-    expect(node?.text).toBe('2.0 inches of clearance minimum'); // "2.0" preserved, not stripped
+    expect(tree.parts[0]?.children[0]?.text).toBe('2.0 inches of clearance minimum');
   });
 
-  // KNOWN AMBIGUITY: a single-dot "N.N <X>" typed into an UNNUMBERED/UNSTYLED paragraph
-  // (only the text signal sees it) is genuinely indistinguishable between an outline
-  // HEADING ("1.2 RELATED SECTIONS", "1.2 600 V Power Receptacle") and decimal PROSE
-  // ("2.0 inches of clearance minimum", "2.0 GHz frequency band"). Every text heuristic
-  // has a counterexample: measurements can carry a capital unit (GHz, V), headings can
-  // start with a numeral ("600 V …"). Codex adversarial review surfaced five successive
-  // heading/measurement shapes that a "smart" classifier mis-sorts, so we deliberately
-  // do NOT try to sort them by text. The chosen behavior is the fidelity-safe one, held
-  // by two invariants and verified here:
-  //   1. NEVER lose data — the outline-number strip only fires when the label is
-  //      UNAMBIGUOUS (multi-dot "1.4.2.1", or single-dot with a CAPITAL title after the
-  //      separators). A lowercase/numeric continuation keeps its number verbatim.
-  //   2. NEVER demote a heading — any "N.N " stays a structural article, so a manual
-  //      heading (whatever its title shape) keeps its place in the outline.
-  // The only residual is cosmetic: a non-capital-leading heading ("1.2 related", "1.2
-  // 600 V …") keeps its typed number, so the render shows it alongside the derived CSI
-  // label. That is strictly preferable to data loss or a demoted heading. A proper fix
-  // (strip iff the typed number equals the sibling-derived label) needs build-time label
-  // context and a shared label util across the parser/generator boundary — future work.
-  it('KNOWN AMBIGUITY: numeric/lowercase-leading N.N stays a text-preserving article', () => {
+  // The user's day-1 requirement: countless specs carry "2.1 GHz", "1.5 MHz",
+  // "N.N <unit>" measurement lines, and SpecR must not mangle them. The old text-only
+  // [A-Z] strip dropped "2.0" from "2.0 GHz" (the capital G looked like a heading).
+  // Label-match fixes it: at the first article the label is "1.1" ≠ "2.0", so the whole
+  // measurement is preserved. No unit list, no data loss.
+  it('preserves a capital-unit measurement ("2.0 GHz …") — number ≠ label (no data loss)', () => {
     const classified = classifyParagraphs(
       [
         makePara({ text: 'PART 1 - GENERAL' }),
-        makePara({ text: '1.2 600 V Power Receptacle' }), // numeric-leading heading
-        makePara({ text: '1.2 related sections' }), // lowercase-leading heading
-        makePara({ text: '2.0 inches of clearance minimum' }), // decimal measurement
+        makePara({ text: '2.0 GHz frequency band' }),
+        makePara({ text: '1.5 MHz reference clock' }),
       ],
       numMap(),
       emptyStyleMap()
     );
     const tree = buildTree(classified, '01', 'T', 'unknown');
     const kids = tree.parts[0]?.children ?? [];
-    // Invariant 2 (never demote a heading): all three stay structural articles — a
-    // manual heading keeps its place in the outline whatever its title shape.
-    expect(kids.every((c) => c.type === 'article')).toBe(true);
-    // Invariant 1 (never lose data): a non-capital continuation keeps its number
-    // verbatim — the strip fires only on an UNAMBIGUOUS label (capital after the
-    // separators, or multi-dot). Nothing is silently dropped.
-    expect(kids[0]?.text).toBe('1.2 600 V Power Receptacle');
-    expect(kids[1]?.text).toBe('1.2 related sections');
-    expect(kids[2]?.text).toBe('2.0 inches of clearance minimum');
+    expect(kids[0]?.text).toBe('2.0 GHz frequency band'); // label 1.1 ≠ 2.0 → kept
+    expect(kids[1]?.text).toBe('1.5 MHz reference clock'); // label 1.2 ≠ 1.5 → kept
   });
 
-  // KNOWN LIMITATION (same ambiguity, the one case the text strip gets wrong): a
-  // capital-UNIT measurement typed as its own unnumbered line ("2.0 GHz frequency
-  // band") is indistinguishable from a capital-led heading, so the strip's [A-Z] gate
-  // treats "2.0" as an outline label and removes it. This is NOT in the corpus (no
-  // fixture has such a line), and the corpus's real manual articles are all word-titled
-  // and strip correctly. The only sound fix is to strip iff the typed number equals the
-  // sibling-derived CSI label (build-time) — a shared parser/generator label util,
-  // filed as follow-up. Pinned here so any future change to the behavior is visible.
-  it('KNOWN LIMITATION: a capital-unit measurement ("2.0 GHz …") is over-stripped', () => {
+  // A real single-dot outline heading IS stripped — at the position where its typed
+  // number equals its label. Sequentially-numbered articles ("1.1 …", "1.2 …") land on
+  // matching labels and lose their duplicate number; a numeric- or lowercase-leading
+  // title strips just the same, because label-match keys off POSITION, not title shape.
+  it('strips the typed number from articles that sit at their labeled position', () => {
     const classified = classifyParagraphs(
-      [makePara({ text: 'PART 1 - GENERAL' }), makePara({ text: '2.0 GHz frequency band' })],
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 SUMMARY' }), // ord 0 → label 1.1 → strip
+        makePara({ text: '1.2 RELATED SECTIONS' }), // ord 1 → label 1.2 → strip
+        makePara({ text: '1.3 600 V Power Receptacle' }), // ord 2 → label 1.3 → strip (numeric title)
+        makePara({ text: '1.4 related sections' }), // ord 3 → label 1.4 → strip (lowercase title)
+      ],
       numMap(),
       emptyStyleMap()
     );
     const tree = buildTree(classified, '01', 'T', 'unknown');
-    // documents today's (imperfect) behavior — "2.0" is dropped as if it were a label
-    expect(tree.parts[0]?.children[0]?.text).toBe('GHz frequency band');
+    const kids = tree.parts[0]?.children ?? [];
+    expect(kids.map((c) => c.text)).toEqual([
+      'SUMMARY',
+      'RELATED SECTIONS',
+      '600 V Power Receptacle',
+      'related sections',
+    ]);
   });
 
-  // Contrast: a real single-dot outline heading (capital letter follows) IS stripped —
-  // its typed number duplicates the render-derived CSI label.
-  it('strips the typed outline number from a real N.N heading (capital follows)', () => {
+  // A misnumbered/misplaced heading is NOT stripped (its typed number is not its
+  // position's label) — the safe outcome: keep the text verbatim rather than guess.
+  it('does NOT strip a number that is not the article label at its position', () => {
     const classified = classifyParagraphs(
-      [makePara({ text: 'PART 1 - GENERAL' }), makePara({ text: '1.2 RELATED SECTIONS' })],
+      [makePara({ text: 'PART 1 - GENERAL' }), makePara({ text: '1.9 RELATED SECTIONS' })],
       numMap(),
       emptyStyleMap()
     );
     const tree = buildTree(classified, '01', 'T', 'unknown');
-    expect(tree.parts[0]?.children[0]?.text).toBe('RELATED SECTIONS');
+    // first article's label is "1.1"; typed "1.9" ≠ label → kept verbatim
+    expect(tree.parts[0]?.children[0]?.text).toBe('1.9 RELATED SECTIONS');
   });
 
   // #296: hidden content is classified as a continuation (suppressed), not a part,

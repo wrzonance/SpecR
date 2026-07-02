@@ -1,42 +1,11 @@
-import type { SpecNode, SpecTree, NodeType } from '../ast/types.js';
+import type { SpecNode, SpecTree } from '../ast/types.js';
+import { getLabel, consumesNumber } from '../ast/labels.js';
 
-function alphaLabel(index: number, upper: boolean): string {
-  let n = index + 1;
-  let out = '';
-  const base = upper ? 65 : 97;
-  while (n > 0) {
-    n -= 1;
-    out = String.fromCharCode(base + (n % 26)) + out;
-    n = Math.floor(n / 26);
-  }
-  return out;
-}
-
-export function getLabel(type: NodeType, index: number, partNumber = 1): string {
-  if (type === 'part') return `PART ${index + 1} -`;
-  if (type === 'article') return `${partNumber}.${index + 1}`;
-  return PR_LABELS[type]?.(index) ?? '';
-}
-
-const PR_LABELS: Partial<Record<NodeType, (index: number) => string>> = {
-  pr1: (index) => `${alphaLabel(index, true)}.`,
-  pr2: (index) => `${index + 1}.`,
-  pr3: (index) => `${alphaLabel(index, false)}.`,
-  pr4: (index) => `${index + 1})`,
-  pr5: (index) => `${alphaLabel(index, false)})`,
-  pr6: (index) => `${index + 1})`,
-  pr7: (index) => `${alphaLabel(index, false)})`,
-};
+// getLabel is re-exported so existing consumers (and the markdown-renderer contract)
+// keep importing CSI labels from here; the logic itself is single-sourced in ast/labels.
+export { getLabel };
 
 const INDENT = '   ';
-
-// notes render as [NOTE] blockquotes, continuations as plain text, and vanish
-// nodes not at all — none carry a CSI number, so none may consume an ordinal.
-// Counting them shifted numbered siblings (#122): specifier-note banners pushed
-// a 1..15 "Related Sections" list to 5..20.
-function consumesNumber(node: SpecNode): boolean {
-  return node.type !== 'note' && node.type !== 'continuation' && !node.meta.vanish;
-}
 
 // Render a node's children, advancing the CSI ordinal only past numbered siblings
 // so notes/continuations/vanish nodes interleave without disturbing the sequence.

@@ -16,7 +16,13 @@ import type {
   StyleNumPr,
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
-import { planPartStrip, planOutlineNumberStrip, rebaseSourceFacts } from '../part-prefix.js';
+import { getLabel, consumesNumber } from '../../ast/labels.js';
+import {
+  planPartStrip,
+  planOutlineNumberStrip,
+  planLabelStrip,
+  rebaseSourceFacts,
+} from '../part-prefix.js';
 
 // Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
 const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
@@ -409,6 +415,53 @@ export function auditTreeStructure(roots: readonly SpecNode[]): ParseWarning[] {
   return warnings;
 }
 
+// Strip an article's author-typed outline number IFF it equals the article's own
+// render-derived CSI label ("P.n"). This is the only reliable way to tell an outline
+// LABEL ("1.2 RELATED SECTIONS", where 1.2 IS the article's position) from a decimal
+// VALUE that merely opens the text ("2.1 GHz frequency band"): the value is stripped
+// only in the impossible-to-avoid coincidence that it equals the article's position.
+// Source-fact offsets are rebased onto the shorter text.
+function stripArticleLabel(article: SpecNode, partNumber: number, ordinal: number): SpecNode {
+  const plan = planLabelStrip(article.text, getLabel('article', ordinal, partNumber));
+  if (!plan) return article;
+  const facts = article.meta.sourceFacts;
+  const meta = facts
+    ? { ...article.meta, sourceFacts: rebaseSourceFacts(facts, plan.removed, plan.text.length) }
+    : article.meta;
+  return { ...article, text: plan.text, meta };
+}
+
+// Walk a part's children, advancing the CSI ordinal only past numbered siblings
+// (consumesNumber) — exactly as the renderer does — so each article's computed label
+// matches what getLabel would prepend at render time.
+function stripLabelsUnderPart(part: SpecNode, partNumber: number): SpecNode {
+  let ordinal = 0;
+  const children = part.children.map((child) => {
+    const next =
+      consumesNumber(child) && child.type === 'article'
+        ? stripArticleLabel(child, partNumber, ordinal)
+        : child;
+    if (consumesNumber(child)) ordinal += 1;
+    return next;
+  });
+  return { ...part, children };
+}
+
+// Post-pass over the assembled tree: single-dot article numbers are stripped here (not
+// inline) because a node's position — and therefore its label — is only known once the
+// whole tree exists. Multi-dot pr numbers are already stripped inline (unambiguous).
+function stripArticleOutlineLabels(roots: readonly SpecNode[]): SpecNode[] {
+  let partOrdinal = 0;
+  return roots.map((root) => {
+    const next =
+      consumesNumber(root) && root.type === 'part'
+        ? stripLabelsUnderPart(root, partOrdinal + 1)
+        : root;
+    if (consumesNumber(root)) partOrdinal += 1;
+    return next;
+  });
+}
+
 export function buildTree(
   classified: readonly ClassifiedParagraph[],
   section: string,
@@ -446,5 +499,5 @@ export function buildTree(
     drainTop(stack, roots, source);
   }
 
-  return { id: uuidv4(), section, title, parts: roots };
+  return { id: uuidv4(), section, title, parts: stripArticleOutlineLabels(roots) };
 }
