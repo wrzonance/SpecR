@@ -27,6 +27,13 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['patch /projects/{}', 'update_project'],
   ['delete /projects/{}', 'delete_project'], // destructive tier (gated off by default)
   ['post /projects/{}/restore', 'restore_project'],
+  // wave 3 — paragraphs, associations, comment resolution
+  ['patch /specs/{}/paragraphs/{}', 'update_paragraph'],
+  ['patch /specs/{}/paragraphs/{}/removal', 'remove_paragraph'],
+  ['get /specs/{}/paragraphs/{}/associations', 'list_associations'],
+  ['post /specs/{}/paragraphs/{}/associations', 'create_association'],
+  ['delete /specs/{}/paragraphs/{}/associations/{}', 'delete_association'], // destructive tier
+  ['post /specs/{}/paragraphs/{}/comments/{}/accept-as-note', 'accept_comment_as_note'],
   // …extend during each write-tool wave.
 ]);
 
@@ -48,19 +55,6 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['put /packages/{}/specs', 'pending — wave 2 (assign_specs_to_package)'],
   ['post /packages/{}/revisions', 'pending — wave 2 (issue package revision)'],
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
-  // --- Wave 3 (#44): paragraphs, associations, comment resolution ---
-  ['patch /specs/{}/paragraphs/{}', 'pending — wave 3 (update_paragraph)'],
-  ['patch /specs/{}/paragraphs/{}/removal', 'pending — wave 3 (remove_paragraph)'],
-  ['get /specs/{}/paragraphs/{}/associations', 'pending — wave 3 (list paragraph associations)'],
-  ['post /specs/{}/paragraphs/{}/associations', 'pending — wave 3 (add paragraph association)'],
-  [
-    'delete /specs/{}/paragraphs/{}/associations/{}',
-    'pending — wave 3 (remove paragraph association)',
-  ],
-  [
-    'post /specs/{}/paragraphs/{}/comments/{}/accept-as-note',
-    'pending — wave 3 (accept comment as note)',
-  ],
   // --- Wave 4: spec lifecycle ---
   ['patch /specs/{}', 'pending — wave 4 (update spec metadata)'],
   ['post /specs/{}/finalize', 'pending — wave 4 (finalize_spec)'],
