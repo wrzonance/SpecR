@@ -38,7 +38,7 @@ Anti-patterns rejected in review: swallowing context (`catch { throw new ParserE
 - **Parser** (`src/parser/`): `.SEC` (SpecsIntact XML, fast-xml-parser) and DOCX (raw OOXML via JSZip) → AST. DOCX hierarchy is inferred by a **5-signal engine** (numbering.xml, style chains, document order, text regex, indentation), ported/extended from Clippit's `ListItemRetriever`. See `ARCHITECTURE.md` → "5-Signal Inference Engine".
 - **Generator** (`src/generator/`): AST → DOCX (dolanmiu/docx, full CSI multilevel numbering) with `w:sdt` UUID content controls as round-trip merge anchors. `markdown.ts` is a pure shared renderer (`renderMarkdown`, `getLabel`).
 - **Merge** (`src/merge/`): UUID-anchored, git-style 3-way diff (base/ours/theirs) + conflict detection.
-- **MCP** (`src/mcp/`): stateless Streamable HTTP at `POST /mcp` — one `McpServer` per request. Read-only tools/resources today.
+- **MCP** (`src/mcp/`): stateless Streamable HTTP at `POST /mcp` — one `McpServer` per request. Tools are contract-bound to the REST surface (`contract-map.ts`, ADR-044) and tier-gated read/write/destructive (`capabilities.ts`, ADR-045); destructive tools are off by default.
 - **Module boundaries are hard:** modules import only from a sibling's `index.ts` barrel, never its internals (`import { parse } from '../parser/index.js'`, never `'../parser/docx/numbering.js'`). Per-module dependency rules live in `ARCHITECTURE.md` → "Module Boundaries". For MCP tool/resource patterns and the markdown renderer contract, see `ARCHITECTURE.md` → "MCP Server" and "Markdown Renderer".
 
 ## Build / test / lint
