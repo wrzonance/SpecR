@@ -523,13 +523,13 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts[0]?.text).toBe('PART 1');
   });
 
-  // Codex adversarial review (P2 data-loss, end-to-end repro): an unnumbered/unstyled
-  // paragraph beginning with a decimal MEASUREMENT ("2.0 inches of clearance minimum")
-  // is misclassified by the N.N text signal as a Signal-4 article. The outline-number
-  // strip must NOT fire on it — the "2.0" is authored prose, not a render-derived
-  // label — or content is lost and round-trip fidelity breaks. A single-dot decimal
-  // with a lowercase continuation is preserved verbatim.
-  it('preserves decimal PROSE text through classify→buildTree (no outline strip)', () => {
+  // Codex adversarial review (P2, end-to-end repro): an unnumbered/unstyled paragraph
+  // beginning with a decimal MEASUREMENT ("2.0 inches of clearance minimum") is authored
+  // PROSE, not a heading. A lowercase single-dot "N.N" no longer classifies as an article
+  // (it would either lose its number to the outline strip, or round-trip with a doubled
+  // render label) — it routes to a continuation, which preserves the full text verbatim
+  // with no render label. Round-trip fidelity holds.
+  it('routes decimal PROSE to a continuation with text preserved (not a phantom article)', () => {
     const classified = classifyParagraphs(
       [
         makePara({ text: 'PART 1 - GENERAL' }),
@@ -538,10 +538,11 @@ describe('buildTree — Pass 2: tree structure', () => {
       numMap(),
       emptyStyleMap()
     );
-    expect(classified[1]?.signalUsed).toBe(4); // documents the (pre-existing) N.N misclassification
+    expect(classified[1]?.nodeType).toBe('continuation'); // prose, not an article
     const tree = buildTree(classified, '01', 'T', 'unknown');
     const node = tree.parts[0]?.children[0];
-    expect(node?.text).toBe('2.0 inches of clearance minimum'); // "2.0" preserved, not stripped
+    expect(node?.type).toBe('continuation');
+    expect(node?.text).toBe('2.0 inches of clearance minimum'); // "2.0" preserved verbatim
   });
 
   // Contrast: a real single-dot outline heading (capital letter follows) IS stripped —

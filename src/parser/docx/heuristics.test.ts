@@ -48,19 +48,32 @@ describe('matchTextSignal', () => {
       normalizedIlvl: 1,
     });
     expect(matchTextSignal('10.11 SCHEDULES')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
-  });
-
-  // The N.0 promotion is gated on a canonical part name — a genuine "N.0" article
-  // with non-canonical text stays an article (no evidence it is a PART tier), and a
-  // real sub-article "N.1 SUMMARY" is never touched.
-  it('does NOT promote a non-canonical "N.0" line, and keeps real N.N articles', () => {
-    expect(matchTextSignal('2.0 WIDGETS')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
-    expect(matchTextSignal('2.1 SUMMARY')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
-    // "1.0" inside prose is not a heading start (requires the canonical name to follow)
-    expect(matchTextSignal('2.0 inches of clearance minimum')).toEqual({
+    // Title-case headings count too (a capital first letter is the CSI heading tell).
+    expect(matchTextSignal('1.2 Related Sections')).toEqual({
       nodeType: 'article',
       normalizedIlvl: 1,
     });
+  });
+
+  // Codex adversarial review (P2): a single-dot "N.N" is a HEADING only when a capital
+  // letter follows (CSI headings are titled). A lowercase continuation is authored
+  // PROSE — a decimal measurement ("2.0 inches …") or a sentence — and must NOT become
+  // a Signal-4 article, or it either loses its number to the outline strip or (if kept)
+  // round-trips with a doubled render label. Classifying it as null routes it to a
+  // continuation, which preserves the full text verbatim with no render label. The
+  // strip criterion (part-prefix ARTICLE_OUTLINE_PREFIX, also [A-Z]) mirrors this.
+  it('does NOT treat a lowercase single-dot "N.N" as an article (prose, not a heading)', () => {
+    expect(matchTextSignal('2.0 inches of clearance minimum')).toBeNull();
+    expect(matchTextSignal('3.5 mm nominal thickness')).toBeNull();
+    expect(matchTextSignal('1.2 related sections')).toBeNull(); // lowercase heading → prose home
+  });
+
+  // The N.0 promotion is gated on a canonical part name — a genuine "N.0" article with
+  // non-canonical (but titled) text stays an article, and a real sub-article "N.1
+  // SUMMARY" is never touched.
+  it('does NOT promote a non-canonical "N.0" line, and keeps titled N.N articles', () => {
+    expect(matchTextSignal('2.0 WIDGETS')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
+    expect(matchTextSignal('2.1 SUMMARY')).toEqual({ nodeType: 'article', normalizedIlvl: 1 });
   });
 
   it('detects pr1 (uppercase letter dot space)', () => {

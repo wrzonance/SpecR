@@ -26,10 +26,20 @@ const TEXT_SIGNALS: readonly TextSignalEntry[] = [
   // Deeper patterns MUST precede the N.N article pattern (first-match), most dots
   // first. "1.1.1.1" would never match the shorter N.N pattern (a "." follows N.N,
   // not whitespace), but ordering deepest-first keeps the intent explicit and safe.
+  // Multi-dot numbers are unambiguously outline (a measurement is never "1.2.3"), so
+  // they match any following char.
   { pattern: /^\d+(?:\.\d+){4}\s+/, nodeType: 'pr3', normalizedIlvl: 4 }, // N.N.N.N.N
   { pattern: /^\d+(?:\.\d+){3}\s+/, nodeType: 'pr2', normalizedIlvl: 3 }, // N.N.N.N
   { pattern: /^\d+(?:\.\d+){2}\s+/, nodeType: 'pr1', normalizedIlvl: 2 }, // N.N.N
-  { pattern: /^\d+\.\d+\s+/, nodeType: 'article', normalizedIlvl: 1 }, // N.N
+  // Single-dot "N.N" is a HEADING only when a CAPITAL letter follows (CSI headings are
+  // titled: "1.2 RELATED SECTIONS"). A lowercase/digit continuation is authored PROSE —
+  // a decimal measurement ("2.0 inches of clearance minimum") or a sentence — which must
+  // NOT become an article: it would either lose its number to the render-derived label
+  // strip (part-prefix planOutlineNumberStrip) or, if kept, round-trip with a doubled
+  // label. Failing this pattern routes it to a continuation, which preserves the full
+  // text verbatim. The strip's ARTICLE tier mirrors this [A-Z] gate — keep them aligned.
+  // (Codex adversarial review, P2.)
+  { pattern: /^\d+\.\d+\s+(?=[A-Z])/, nodeType: 'article', normalizedIlvl: 1 }, // N.N heading
   { pattern: /^[A-Z]\.\s/, nodeType: 'pr1', normalizedIlvl: 2 },
   { pattern: /^\d+\.\s/, nodeType: 'pr2', normalizedIlvl: 3 },
   { pattern: /^[a-z]\.\s/, nodeType: 'pr3', normalizedIlvl: 4 },
