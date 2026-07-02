@@ -48,6 +48,7 @@ export type { OnboardingStatus, FinalizeOutcome, ReopenOutcome } from './queries
 export {
   insertTree,
   getParagraphWithAncestors,
+  getParagraphSpecId,
   updateParagraphText,
   setParagraphVanish,
 } from './queries/paragraphs.js';

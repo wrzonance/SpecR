@@ -3,8 +3,8 @@ import {
   createAssociation,
   listAssociationsForParagraph,
   deleteAssociation,
+  getParagraphSpecId,
   AssociationParagraphNotFoundError,
-  pool,
 } from '../db/index.js';
 import { CreateAssociationBodySchema } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
@@ -20,15 +20,12 @@ export const ParagraphRefShape = {
 };
 const ParagraphRef = z.object(ParagraphRefShape);
 
-// Assert the paragraph belongs to the spec (mirrors resolveIds in the REST layer):
-// a nodeId naming a paragraph in a different spec must not be reachable through a
-// spec-scoped tool. Returns a tool error to surface, or null when ownership holds.
+// Assert the paragraph belongs to the spec (shares the db ownership lookup with the
+// REST layer's resolveIds): a nodeId naming a paragraph in a different spec must not
+// be reachable through a spec-scoped tool. Returns a tool error to surface, or null
+// when ownership holds. Case-insensitive — z.uuid() accepts uppercase.
 async function assertParagraphInSpec(specId: string, nodeId: string): Promise<ToolResult | null> {
-  const owner = await pool.query<{ spec_id: string }>(
-    `SELECT spec_id FROM paragraphs WHERE id = $1`,
-    [nodeId]
-  );
-  const specOfNode = owner.rows[0]?.spec_id;
+  const specOfNode = await getParagraphSpecId(nodeId);
   if (!specOfNode || specOfNode.toLowerCase() !== specId.toLowerCase()) {
     return toolError(`paragraph not found in spec: nodeId=${nodeId}`);
   }
