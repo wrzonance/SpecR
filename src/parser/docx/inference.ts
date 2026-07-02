@@ -68,8 +68,8 @@ function trySignal1(para: DocxParagraph, numberingMap: NumberingMap): SignalHit 
   // to generic <ol> list items. Claim 'part' only when either:
   //   (a) the literal text matches the PART heading pattern, or
   //   (b) the numbering definition itself is spec-shaped (>=3 pStyle-linked
-  //       levels) — ARCAT generates the "PART n" prefix from lvlText, so the
-  //       paragraph text is just "GENERAL"/"PRODUCTS"/"EXECUTION".
+  //       levels) — the numbering generates the "PART n" prefix from lvlText, so
+  //       the paragraph text is just "GENERAL"/"PRODUCTS"/"EXECUTION".
   // Generic <ol> lists satisfy neither, so the false positive stays dead.
   if (
     nodeType === 'part' &&
@@ -81,7 +81,7 @@ function trySignal1(para: DocxParagraph, numberingMap: NumberingMap): SignalHit 
   return { nodeType, normalizedIlvl: toNormalizedIlvl(nodeType), signal: 1 };
 }
 
-// CPI lead-in styles PR1lc..PR7lc ("lead-in copy") carry no numbering of their own
+// Lead-in styles PR1lc..PR7lc ("lead-in copy") carry no numbering of their own
 // but occupy the tier of their base PRn style. Their `next` points at PRn and their
 // text is a list lead-in ("Section Includes:") that introduces a numbered PR2 list.
 const LEAD_IN_STYLE = /^(PR\d+)lc$/i;
@@ -144,13 +144,13 @@ function buildConflicts(winner: SignalHit, hits: readonly SignalHit[]): readonly
 }
 
 // An article is the top content tier under a PART, so it cannot be deeply indented.
-// Hand-authored manufacturer docs reuse numIds with inconsistent ilvl baselines, so
+// Hand-authored docs reuse numIds with inconsistent ilvl baselines, so
 // a nested list item can resolve to 'article' via the global articleIlvl offset
 // (parsing-needs-fixing.docx: "1. Normal street clothes…", numId 13 ilvl 3 → article,
 // yet indented at pr-tier). When the winning numbering/style signal says 'article'
 // but indentation places the paragraph ≥2 tiers deeper, the numbering baseline is
 // misaligned — defer to indentation so the item nests instead of becoming a spurious
-// top-level 3.x. A genuine article sits at indent tier ≤2 (clean CPI articles reach
+// top-level 3.x. A genuine article sits at indent tier ≤2 (clean articles reach
 // ~900 twips → tier 2), so the ≥3 threshold never demotes a real article. The losing
 // Signal-1 'article' is preserved as a conflict (never dropped) by buildConflicts.
 const ARTICLE_INDENT_CONTRADICTION_MIN_TIER = 3;
@@ -177,8 +177,8 @@ function correctMisalignedArticle(winner: SignalHit, hits: readonly SignalHit[])
 }
 
 // Specifier notes are editorial metadata, not spec content: banner text in any
-// vendor variant, or a note-named paragraph style (ARCATnote). Footnote/endnote
-// styles are document apparatus, not specifier notes.
+// decoration variant, or a note-named paragraph style (name contains "note").
+// Footnote/endnote styles are document apparatus, not specifier notes.
 function isNoteParagraph(para: DocxParagraph, styleMap: StyleMap): boolean {
   if (isSpecifierNote(para.text)) return true;
   if (!para.styleId) return false;

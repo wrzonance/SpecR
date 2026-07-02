@@ -2,8 +2,8 @@
 // from the article heading, never stored. One source of truth, applied at parse
 // (parser/index.ts) and on read (db buildNodeTree). Tolerant of a leading CSI
 // numbering prefix so it works whether or not a parser already stripped it, and
-// ilvl-agnostic (the inference engine normalizes the CPI offset into
-// node_type='article' before this runs).
+// ilvl-agnostic (the inference engine normalizes the reserved-level ilvl offset
+// into node_type='article' before this runs).
 
 import type { ArticleRole, SpecNode } from './types.js';
 
