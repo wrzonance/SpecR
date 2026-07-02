@@ -737,6 +737,24 @@ describe('tool: get_spec_lineage (#97)', () => {
   });
 });
 
+describe('capability gating (#43)', () => {
+  it('exposes read+write tools but no destructive tool under the default read,write posture', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/list', {});
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const tools = result['tools'] as {
+      name: string;
+      annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+    }[];
+    const names = tools.map((t) => t.name);
+    // A known read tool and a known write tool are exposed under the default posture…
+    expect(names).toContain('get_spec');
+    expect(names).toContain('parse_document');
+    // …but no destructive tool leaks (guards future waves from exposing one by default).
+    expect(tools.some((t) => t.annotations?.destructiveHint === true)).toBe(false);
+  });
+});
+
 describe('load_files tool', () => {
   it('returns LoadResult JSON for a valid glob', async () => {
     const url = `${baseUrl}/mcp`;

@@ -23,6 +23,9 @@ import {
   handleGetNumberingProfile,
 } from './handlers.js';
 import { registerOnboardingTools } from './onboarding-tools.js';
+import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
+import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
+import { config } from '../lib/env.js';
 
 type ToolError = {
   readonly isError: true;
@@ -46,8 +49,8 @@ const divisionSchema = z
   .optional()
   .describe('Filter by 2-digit CSI division, e.g. "27"');
 
-function registerLibraryTools(server: McpServer): void {
-  server.registerTool(
+function registerLibraryTools(reg: ToolRegistrar): void {
+  reg.register(
     'search_library',
     {
       description:
@@ -68,7 +71,7 @@ function registerLibraryTools(server: McpServer): void {
     handleSearchLibrary
   );
 
-  server.registerTool(
+  reg.register(
     'list_sections',
     {
       description:
@@ -79,8 +82,8 @@ function registerLibraryTools(server: McpServer): void {
   );
 }
 
-function registerProjectTools(server: McpServer): void {
-  server.registerTool(
+function registerProjectTools(reg: ToolRegistrar): void {
+  reg.register(
     'list_projects',
     {
       description: 'List projects (id, name) for use as the projectId argument to get_references.',
@@ -89,7 +92,7 @@ function registerProjectTools(server: McpServer): void {
     handleListProjects
   );
 
-  server.registerTool(
+  reg.register(
     'get_references',
     {
       description:
@@ -113,8 +116,8 @@ function registerProjectTools(server: McpServer): void {
   );
 }
 
-function registerSpecTools(server: McpServer): void {
-  server.registerTool(
+function registerSpecTools(reg: ToolRegistrar): void {
+  reg.register(
     'get_spec',
     {
       description:
@@ -126,7 +129,7 @@ function registerSpecTools(server: McpServer): void {
     handleGetSpec
   );
 
-  server.registerTool(
+  reg.register(
     'get_paragraph',
     {
       description:
@@ -138,7 +141,7 @@ function registerSpecTools(server: McpServer): void {
     handleGetParagraph
   );
 
-  server.registerTool(
+  reg.register(
     'get_spec_lineage',
     {
       description:
@@ -150,7 +153,7 @@ function registerSpecTools(server: McpServer): void {
     handleGetSpecLineage
   );
 
-  server.registerTool(
+  reg.register(
     'get_spec_diff',
     {
       description:
@@ -167,8 +170,8 @@ function registerSpecTools(server: McpServer): void {
   );
 }
 
-function registerNumberingProfileTool(server: McpServer): void {
-  server.registerTool(
+function registerNumberingProfileTool(reg: ToolRegistrar): void {
+  reg.register(
     'get_numbering_profile',
     {
       description:
@@ -184,8 +187,8 @@ function registerNumberingProfileTool(server: McpServer): void {
   );
 }
 
-function registerParserTools(server: McpServer): void {
-  server.registerTool(
+function registerParserTools(reg: ToolRegistrar): void {
+  reg.register(
     'parse_document',
     {
       description:
@@ -203,8 +206,8 @@ function registerParserTools(server: McpServer): void {
   );
 }
 
-function registerGeneratorTools(server: McpServer): void {
-  server.registerTool(
+function registerGeneratorTools(reg: ToolRegistrar): void {
+  reg.register(
     'generate_docx',
     {
       description:
@@ -308,8 +311,8 @@ async function handleLoadFiles({
   }
 }
 
-function registerCoordinationTools(server: McpServer): void {
-  server.registerTool(
+function registerCoordinationTools(reg: ToolRegistrar): void {
+  reg.register(
     'coordination_report',
     {
       description:
@@ -332,8 +335,8 @@ function registerCoordinationTools(server: McpServer): void {
   );
 }
 
-function registerSubmittalTools(server: McpServer): void {
-  server.registerTool(
+function registerSubmittalTools(reg: ToolRegistrar): void {
+  reg.register(
     'submittal_register',
     {
       description:
@@ -349,8 +352,8 @@ function registerSubmittalTools(server: McpServer): void {
   );
 }
 
-function registerOpenCommentsTools(server: McpServer): void {
-  server.registerTool(
+function registerOpenCommentsTools(reg: ToolRegistrar): void {
+  reg.register(
     'open_comments_report',
     {
       description:
@@ -370,8 +373,8 @@ function registerOpenCommentsTools(server: McpServer): void {
   );
 }
 
-function registerLoaderTools(server: McpServer): void {
-  server.registerTool(
+function registerLoaderTools(reg: ToolRegistrar): void {
+  reg.register(
     'load_files',
     {
       description:
@@ -395,16 +398,25 @@ function registerLoaderTools(server: McpServer): void {
   );
 }
 
-export function registerTools(server: McpServer): void {
-  registerLibraryTools(server);
-  registerProjectTools(server);
-  registerSpecTools(server);
-  registerNumberingProfileTool(server);
-  registerParserTools(server);
-  registerGeneratorTools(server);
-  registerLoaderTools(server);
-  registerCoordinationTools(server);
-  registerSubmittalTools(server);
-  registerOpenCommentsTools(server);
-  registerOnboardingTools(server);
+export function registerTools(
+  server: McpServer,
+  opts?: { readonly allowedTiers?: ReadonlySet<ToolTier> }
+): readonly string[] {
+  const allowedTiers = opts?.allowedTiers ?? parseAllowedTiers(config.MCP_ALLOWED_TIERS);
+  const reg = createRegistrar(server, allowedTiers);
+  registerLibraryTools(reg);
+  registerProjectTools(reg);
+  registerSpecTools(reg);
+  registerNumberingProfileTool(reg);
+  registerParserTools(reg);
+  registerGeneratorTools(reg);
+  registerLoaderTools(reg);
+  registerCoordinationTools(reg);
+  registerSubmittalTools(reg);
+  registerOpenCommentsTools(reg);
+  registerOnboardingTools(reg);
+  return reg.declared;
 }
+
+// Test-only convenience: declared names with every tier allowed. Used by the contract test.
+export const ALL_TIERS: ReadonlySet<ToolTier> = new Set(TOOL_TIER_VALUES);

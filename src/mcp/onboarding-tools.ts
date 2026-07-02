@@ -3,7 +3,7 @@
 // tools.ts to keep that file under the 400-line cap; the handlers live in
 // onboarding-handlers.ts. registerOnboardingTools is called from registerTools.
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from './tool-registry.js';
 import { EditabilitySchema, ConventionRulesSchema } from '../ast/index.js';
 import {
   handleReviewEditability,
@@ -16,8 +16,8 @@ import {
 const specIdArg = z.uuid().describe('Spec UUID (from search_library or list_sections)');
 const nodeIdArg = z.uuid().describe('Paragraph (node) UUID (from review_editability or get_spec)');
 
-function registerReviewTools(server: McpServer): void {
-  server.registerTool(
+function registerReviewTools(reg: ToolRegistrar): void {
+  reg.register(
     'review_editability',
     {
       description:
@@ -40,7 +40,7 @@ function registerReviewTools(server: McpServer): void {
     handleReviewEditability
   );
 
-  server.registerTool(
+  reg.register(
     'get_onboarding_report',
     {
       description:
@@ -54,8 +54,8 @@ function registerReviewTools(server: McpServer): void {
   );
 }
 
-function registerOverrideTools(server: McpServer): void {
-  server.registerTool(
+function registerOverrideTools(reg: ToolRegistrar): void {
+  reg.register(
     'set_editability_override',
     {
       description:
@@ -72,7 +72,7 @@ function registerOverrideTools(server: McpServer): void {
     handleSetEditabilityOverride
   );
 
-  server.registerTool(
+  reg.register(
     'clear_editability_override',
     {
       description:
@@ -82,7 +82,7 @@ function registerOverrideTools(server: McpServer): void {
     handleClearEditabilityOverride
   );
 
-  server.registerTool(
+  reg.register(
     'reclassify_spec',
     {
       description:
@@ -105,7 +105,7 @@ function registerOverrideTools(server: McpServer): void {
   );
 }
 
-export function registerOnboardingTools(server: McpServer): void {
-  registerReviewTools(server);
-  registerOverrideTools(server);
+export function registerOnboardingTools(reg: ToolRegistrar): void {
+  registerReviewTools(reg);
+  registerOverrideTools(reg);
 }
