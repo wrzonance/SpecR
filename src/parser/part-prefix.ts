@@ -25,8 +25,21 @@ import type { SourceFacts, SourceColorFact } from '../ast/types.js';
 // follows / no whitespace after PART). No stray punctuation can survive the cut.
 const PART_PREFIX = /^\s*PART\s+\d+[\s.:—–-]*(?=[a-z])/i;
 
+// Whole-number decimal PART prefix: some manufacturer specs number PARTs as "N.0"
+// ("2.0 PRODUCTS" → "PRODUCTS"). Only N.0 is a PART tier — a real "N.N" article
+// number is never matched (the char after "\.0+" separators must be a letter, and
+// only ".0"/".00"… decimals qualify). Mirrors the Signal-4 N.0 PART text pattern
+// (heuristics.ts); both must agree on what a decimal PART heading looks like.
+const DECIMAL_PART_PREFIX = /^\s*\d+\.0+[\s.:—–-]*(?=[a-z])/i;
+
+// The first prefix pattern that matches the (trimmed-at-^) heading, or null.
+function matchPartPrefix(text: string): RegExpExecArray | null {
+  return PART_PREFIX.exec(text) ?? DECIMAL_PART_PREFIX.exec(text);
+}
+
 export function stripPartPrefix(text: string): string {
-  return text.replace(PART_PREFIX, '').trim();
+  const match = matchPartPrefix(text);
+  return (match ? text.slice(match[0].length) : text).trim();
 }
 
 /**
@@ -36,9 +49,70 @@ export function stripPartPrefix(text: string): string {
  * "PART n" with no name) — in both cases the caller keeps the original text.
  */
 export function planPartStrip(text: string): { text: string; removed: number } | null {
-  const match = PART_PREFIX.exec(text);
+  const match = matchPartPrefix(text);
   if (!match) return null;
-  const stripped = text.replace(PART_PREFIX, '').trim();
+  const stripped = text.slice(match[0].length).trim();
+  if (stripped.length === 0) return null;
+  return { text: stripped, removed: match[0].length };
+}
+
+// A leading manual MULTI-DOT outline number ("1.4.2.1 Installation …" → "Installation
+// …"). Requires >=2 interior dots, which is unambiguously an outline number — a
+// measurement is never "1.4.2.1", and its render label (a pr letter/number like "A." /
+// "1.") never contains the typed decimal, so the typed number ALWAYS duplicates nothing
+// useful and is safe to remove regardless of the following letter's case. A single-dot
+// "N.N" is NOT handled here — it is genuinely ambiguous between an outline label and a
+// decimal value ("2.1 GHz"), so it is stripped only by planLabelStrip, and only when it
+// equals the node's sibling-derived CSI label. A bare "1." (no interior dot) is the pr2
+// label form, not an outline number, and never matches.
+const DEEP_OUTLINE_PREFIX = /^\s*\d+(?:\.\d+){2,}[\s.:—–-]*(?=[A-Za-z])/;
+
+/**
+ * Strip a leading MULTI-DOT decimal-outline number from a manually-numbered heading's
+ * text and report the chars removed (for source-fact rebasing). Returns null when
+ * there is no such prefix, or when stripping would empty the text.
+ */
+export function planOutlineNumberStrip(text: string): { text: string; removed: number } | null {
+  const match = DEEP_OUTLINE_PREFIX.exec(text);
+  if (!match) return null;
+  const stripped = text.slice(match[0].length).trim();
+  if (stripped.length === 0) return null;
+  return { text: stripped, removed: match[0].length };
+}
+
+// Escape a computed label ("1.2", "10.11") for use as a literal regex prefix.
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Strip a single-dot outline number from an article's text ONLY when it equals the
+ * article's own sibling-derived CSI label — the sole reliable way to tell an outline
+ * label ("1.2 RELATED SECTIONS", where 1.2 IS the article's position) from a decimal
+ * value that merely opens the text ("2.1 GHz frequency band", which is not article
+ * 2.1's label unless it truly sits there). The label is matched as a whole token
+ * (followed by a separator run), so "1.2" never matches inside "12.3" and a bare
+ * "1.2 " (no content) is left intact.
+ *
+ * A second, conservative guard closes the residual collision (Codex adversarial
+ * review): a decimal PROSE line whose number coincidentally equals its computed label
+ * ("1.1 inches of clearance minimum" sitting at article 1.1). A real article heading
+ * is a TITLE — ALL-CAPS or Title-Case — so it always opens with an UPPERCASE letter;
+ * decimal prose and lowercase-unit measurements ("1.1 mm tolerance", "2.1 kHz clock")
+ * open with a lowercase word or a digit. Requiring `[A-Z]` after the label therefore
+ * strips genuine headings while preserving values — and it is strictly MORE
+ * conservative than a bare match, so it can only ever keep more data, never lose more.
+ * Returns null when the leading number is not this node's label, when a non-uppercase
+ * character follows, or when stripping would empty the text.
+ */
+export function planLabelStrip(
+  text: string,
+  label: string
+): { text: string; removed: number } | null {
+  const re = new RegExp(`^\\s*${escapeRegExp(label)}[\\s.:—–-]+(?=[A-Z])`);
+  const match = re.exec(text);
+  if (!match) return null;
+  const stripped = text.slice(match[0].length).trim();
   if (stripped.length === 0) return null;
   return { text: stripped, removed: match[0].length };
 }

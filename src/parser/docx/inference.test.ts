@@ -114,6 +114,87 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     expect(result[0]?.signalUsed).toBe(3);
   });
 
+  it('numId=0 override suppresses style numbering — SPECText1 [OR] separator is not a part (08 14 16)', () => {
+    // Regression (more-broken-parsing.docx, 08 14 16): decorative "****** [OR] ******"
+    // separators keep the PART style (SPECText1 → ilvl 0) but set <w:numId w:val="0"/>
+    // to REMOVE numbering. Signal 1 already bails on numId=0; Signal 2 read the STYLE's
+    // resolvedNumPr and ignored the paragraph's opt-out, promoting them to spurious PART
+    // nodes that split PRODUCTS/EXECUTION → 5 parts. An explicit numId=0 (OOXML's
+    // "remove numbering" sentinel) must suppress style-derived numbering exactly as it
+    // suppresses direct numbering — the paragraph is not a numbered structural node.
+    const styleMap: StyleMap = {
+      styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
+      resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'SPECText1', numId: 0, ilvl: 0, text: '****** [OR] ******' })],
+      numMap(1),
+      styleMap
+    );
+    expect(result[0]?.nodeType).not.toBe('part');
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.signalUsed).toBe(3);
+  });
+
+  it('decoration separator with a LIVE-numbered part style is still not a part (defense-in-depth)', () => {
+    // The numId=0 guard catches DE-numbered separators, but a separator that kept BOTH
+    // a part-tier style AND live numbering (numId != 0) would resurrect as a spurious
+    // PART via Signal 2. A pure "[OR]" / asterisk-rule line is editorial decoration,
+    // never a structural node — gate it to a continuation before any signal runs.
+    const styleMap: StyleMap = {
+      styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
+      resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'SPECText1', numId: 2, ilvl: 0, text: '****** [OR] ******' })],
+      numMap(1),
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.signalUsed).toBe(3);
+  });
+
+  it('numId=0 does not block Signal 4 — a de-numbered article style still reads its text tier', () => {
+    // Guard the guard: suppressing Signal 2 on numId=0 must not swallow a paragraph
+    // that carries a literal "N.N" tier. A SPECText1 paragraph with numId=0 whose text
+    // is "1.1 SUMMARY" is still an article via Signal 4 (text), not a continuation.
+    const styleMap: StyleMap = {
+      styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
+      resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'SPECText1', numId: 0, text: '1.1 SUMMARY' })],
+      numMap(1),
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(4);
+  });
+
+  it('numId=undefined still inherits style numbering (Signal 2 unaffected by the numId=0 guard)', () => {
+    // A paragraph with NO direct numPr (numId undefined) must still fire Signal 2 from
+    // its style — only an explicit numId=0 opt-out suppresses it.
+    const styleMap: StyleMap = {
+      styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
+      resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'SPECText1', text: 'GENERAL' })],
+      numMap(1),
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('part');
+    expect(result[0]?.signalUsed).toBe(2);
+  });
+
   it('signal 1 wins over signal 2; conflict logged', () => {
     const styleMap: StyleMap = {
       styles: new Map([['Heading2', { styleId: 'Heading2', name: 'heading 2' }]]),
@@ -155,6 +236,44 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
     expect(result[0]?.signalUsed).toBe(5);
   });
 
+  it('indent alone never creates a PART — negative-indent "SUMMARY OF CHANGE(S):" preamble (08 14 16)', () => {
+    // Regression (08 1416 Flush Wood Doors.docx): a preamble line "SUMMARY OF
+    // CHANGE(S):" with a slight NEGATIVE left indent (-86 twips), no numbering, no
+    // style, not hidden. Signal 5 rounded -86/576 → -0 → ilvl 0 → 'part', inventing a
+    // phantom PART 1 that pushed GENERAL/PRODUCTS/EXECUTION to PART 2/3/4. Indentation
+    // is the weakest signal and must never establish a PART (the top tier needs real
+    // evidence: numbering, "PART n" text, or a part style) — so a paragraph whose only
+    // signal is a ≈0/negative indent falls through to continuation.
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: -86, text: 'SUMMARY OF CHANGE(S):' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).not.toBe('part');
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.signalUsed).toBe(3);
+  });
+
+  it('indent alone never creates a PART — a plain unindented (0) paragraph is not a part', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 0, text: 'Some unindented preamble line.' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).not.toBe('part');
+    expect(result[0]?.nodeType).toBe('continuation');
+  });
+
+  it('signal 5 still classifies article-and-deeper from indentation (article unaffected)', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 576, text: 'Lorem ipsum dolor sit amet consectetur.' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(5);
+  });
+
   it('continuation: no signal fires → nodeType continuation, signalUsed 3', () => {
     const result = classifyParagraphs(
       [makePara({ text: 'Some plain paragraph text.' })],
@@ -178,6 +297,9 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
 
 describe('classifyParagraphs — CPI regressions', () => {
   it('PR1lc suppressesNumbering → continuation not pr1', () => {
+    // An explicit numId=0 opt-out (suppressesNumbering) is an author decision to
+    // de-number this paragraph — it stays a continuation even though its name looks
+    // like a lead-in. This is distinct from the real-file case below (no opt-out).
     const styleMap: StyleMap = {
       styles: new Map([
         ['PR1', { styleId: 'PR1', name: 'PR1' }],
@@ -189,6 +311,64 @@ describe('classifyParagraphs — CPI regressions', () => {
     };
     const result = classifyParagraphs(
       [makePara({ styleId: 'PR1lc', text: 'This continues the paragraph above.' })],
+      numMap(3),
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('continuation');
+  });
+
+  // Regression (CPI CABINETS/CABLE_MANAGEMENT/ELECTRICAL_CABINETS etc.): the real CPI
+  // lead-in styles PR1lc..PR5lc have NEITHER numbering NOR a numId=0 opt-out — they are
+  // unnumbered lead-ins ("Section Includes:", "Related Requirements:") that introduce a
+  // numbered PR2 list. Left as continuations they orphan those PR2 items at the article
+  // tier (a level gap: pr2 directly under article). A lead-in must occupy its base PRn
+  // tier so the list nests under it. The tier is derived from the base PRn style.
+  it('PR1lc lead-in (no numbering, not suppressed) → pr1 tier from base PR1', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([
+        ['PR1', { styleId: 'PR1', name: 'PR1' }],
+        ['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', next: 'PR1' }],
+      ]),
+      resolvedNumPr: new Map([['PR1', { numId: 1, ilvl: 4 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'PR1lc', text: 'Section Includes:' })],
+      numMap(3), // CPI articleIlvl = 3
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('pr1');
+    expect(result[0]?.signalUsed).toBe(2);
+  });
+
+  it('PR2lc lead-in → pr2 tier from base PR2', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([
+        ['PR2', { styleId: 'PR2', name: 'PR2' }],
+        ['PR2lc', { styleId: 'PR2lc', name: 'PR2lc', next: 'PR2' }],
+      ]),
+      resolvedNumPr: new Map([['PR2', { numId: 1, ilvl: 5 }]]),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'PR2lc', text: 'Related Requirements:' })],
+      numMap(3),
+      styleMap
+    );
+    expect(result[0]?.nodeType).toBe('pr2');
+  });
+
+  it('a PRnlc lead-in whose base style has no resolved numbering stays a continuation', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', next: 'PR1' }]]),
+      resolvedNumPr: new Map(), // no base PR1 numbering to inherit
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const result = classifyParagraphs(
+      [makePara({ styleId: 'PR1lc', text: 'Section Includes:' })],
       numMap(3),
       styleMap
     );
@@ -341,6 +521,165 @@ describe('buildTree — Pass 2: tree structure', () => {
   it('keeps the original when stripping a bare "PART n" would empty the text', () => {
     const tree = buildTree([makeClassified('part', 0, 'PART 1')], '01', 'T', 'arcat');
     expect(tree.parts[0]?.text).toBe('PART 1');
+  });
+
+  // Label-match strip (Codex adversarial review resolution): the typed number on an
+  // article is stripped ONLY when it equals the article's own sibling-derived CSI label,
+  // so a decimal MEASUREMENT that merely opens the text keeps its number verbatim. Here
+  // "2.0 inches …" sits at the first article (label "1.1"), so "2.0" ≠ "1.1" → preserved.
+  it('preserves decimal measurement text — its number is not the article label', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '2.0 inches of clearance minimum' }),
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    expect(classified[1]?.signalUsed).toBe(4);
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    expect(tree.parts[0]?.children[0]?.text).toBe('2.0 inches of clearance minimum');
+  });
+
+  // The user's day-1 requirement: countless specs carry "2.1 GHz", "1.5 MHz",
+  // "N.N <unit>" measurement lines, and SpecR must not mangle them. The old text-only
+  // [A-Z] strip dropped "2.0" from "2.0 GHz" (the capital G looked like a heading).
+  // Label-match fixes it: at the first article the label is "1.1" ≠ "2.0", so the whole
+  // measurement is preserved. No unit list, no data loss.
+  it('preserves a capital-unit measurement ("2.0 GHz …") — number ≠ label (no data loss)', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '2.0 GHz frequency band' }),
+        makePara({ text: '1.5 MHz reference clock' }),
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const kids = tree.parts[0]?.children ?? [];
+    expect(kids[0]?.text).toBe('2.0 GHz frequency band'); // label 1.1 ≠ 2.0 → kept
+    expect(kids[1]?.text).toBe('1.5 MHz reference clock'); // label 1.2 ≠ 1.5 → kept
+  });
+
+  // A real single-dot outline heading IS stripped — at the position where its typed
+  // number equals its label AND the title reads like a heading (ALL-CAPS or Title-Case,
+  // i.e. an uppercase first letter). Sequentially-numbered articles ("1.1 …", "1.2 …")
+  // land on matching labels and lose their duplicate number.
+  it('strips the typed number from uppercase-titled articles at their labeled position', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 SUMMARY' }), // ord 0 → label 1.1, ALL-CAPS → strip
+        makePara({ text: '1.2 RELATED SECTIONS' }), // ord 1 → label 1.2, ALL-CAPS → strip
+        makePara({ text: '1.3 Related Sections' }), // ord 2 → label 1.3, Title-Case → strip
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const kids = tree.parts[0]?.children ?? [];
+    expect(kids.map((c) => c.text)).toEqual(['SUMMARY', 'RELATED SECTIONS', 'Related Sections']);
+  });
+
+  // Codex adversarial review (P2 data-loss): a title that opens with a lowercase word or
+  // a digit is indistinguishable from a measurement/prose value that merely coincides
+  // with its label ("1.3 600 V …" ≈ "1.3 600 volts …"; "1.4 related …" ≈ "1.4 relative
+  // humidity …"). Position alone cannot tell them apart, so the strip is withheld and the
+  // text kept verbatim — no data loss. A genuine lowercase/numeric heading (vanishingly
+  // rare; none in the corpus) merely renders its label doubled, which is recoverable.
+  it('does NOT strip a digit- or lowercase-leading title (ambiguous with a value)', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 600 V power feed' }), // ord 0 → label 1.1, digit title → keep
+        makePara({ text: '1.2 relative humidity range' }), // ord 1 → label 1.2, lowercase → keep
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const kids = tree.parts[0]?.children ?? [];
+    expect(kids.map((c) => c.text)).toEqual([
+      '1.1 600 V power feed',
+      '1.2 relative humidity range',
+    ]);
+  });
+
+  // A misnumbered/misplaced heading is NOT stripped (its typed number is not its
+  // position's label) — the safe outcome: keep the text verbatim rather than guess.
+  it('does NOT strip a number that is not the article label at its position', () => {
+    const classified = classifyParagraphs(
+      [makePara({ text: 'PART 1 - GENERAL' }), makePara({ text: '1.9 RELATED SECTIONS' })],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    // first article's label is "1.1"; typed "1.9" ≠ label → kept verbatim
+    expect(tree.parts[0]?.children[0]?.text).toBe('1.9 RELATED SECTIONS');
+  });
+
+  // Codex adversarial review (P2 data-loss): the label-match strip must run ONLY on
+  // Signal-4 (manual text-outline) articles. A Word/style-NUMBERED article (Signal 1/2)
+  // gets its number from the numbering definition, so its VISIBLE text is pure content —
+  // it must never be strip-touched even if it happens to open with its label number.
+  // "1.1 mm tolerance" as the first numbered article would otherwise lose "1.1".
+  it('does NOT strip a Signal-1/2 numbered article whose content starts with its label', () => {
+    const tree = buildTree(
+      [
+        makeClassified('part', 0, 'PART 1 - GENERAL'),
+        makeClassified('article', 1, '1.1 mm tolerance'), // makeClassified → signalUsed 1
+      ],
+      '01',
+      'T',
+      'unknown'
+    );
+    expect(tree.parts[0]?.children[0]?.text).toBe('1.1 mm tolerance'); // content preserved
+  });
+
+  // Codex adversarial review (P2 data-loss), end-to-end: a Signal-4 (manual text-outline)
+  // paragraph that is decimal PROSE whose number coincides with its computed label — the
+  // exact case Codex flagged: "1.1 inches of clearance minimum" as the first article under
+  // PART 1 (label 1.1). The lowercase "inches" marks it as a value, not a heading, so the
+  // number is preserved. Before the uppercase-first guard this dropped "1.1".
+  it('preserves Signal-4 decimal prose whose number equals its label (lowercase → value)', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 inches of clearance minimum' }),
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    expect(tree.parts[0]?.children[0]?.text).toBe('1.1 inches of clearance minimum');
+  });
+
+  // KNOWN AMBIGUITY: a measurement with a CAPITAL-leading unit ("1.2 GHz frequency band")
+  // that is itself a Signal-4 top-level article sitting at EXACTLY its own computed label
+  // is textually identical to a heading — "GHz" looks like the first word of a Title.
+  // Neither position nor text can separate them, so the label-match strip treats it as a
+  // heading and removes "1.2". This is the residual, irreducible intersection of (capital
+  // unit) × (Signal-4 article) × (exact-ordinal match); it does NOT occur in the reference
+  // corpus, and real measurements live in pr-level content or continuations — which the
+  // article-only strip never touches. We document the behavior here rather than silently
+  // picking it; preferring "keep" here would double the label on every genuine heading at
+  // its position (the original bug this whole pass fixes).
+  it('KNOWN AMBIGUITY: capital-unit measurement at its exact label ordinal is stripped', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 MANUFACTURERS' }), // ord 0 → label 1.1 (real heading)
+        makePara({ text: '1.2 GHz frequency band' }), // ord 1 → label 1.2 == number, capital G → stripped
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const kids = tree.parts[0]?.children ?? [];
+    expect(kids[0]?.text).toBe('MANUFACTURERS');
+    // The 2nd article's label is "1.2"; the measurement literally opens "1.2 G…" → stripped.
+    expect(kids[1]?.text).toBe('GHz frequency band');
   });
 
   // #296: hidden content is classified as a continuation (suppressed), not a part,

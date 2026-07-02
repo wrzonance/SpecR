@@ -36,6 +36,7 @@ export {
   ArticleRoleSchema,
 } from './schemas.js';
 export { deriveArticleRole, tagArticleRoles, ARTICLE_ROLE_RULES } from './article-role.js';
+export { getLabel, consumesNumber } from './labels.js';
 export type {
   UpdateParagraphBody,
   CreateProjectBody,
