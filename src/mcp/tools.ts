@@ -8,6 +8,7 @@ import { logger } from '../lib/logger.js';
 import {
   toolError,
   handleSearchLibrary,
+  handleListLibraries,
   handleGetSpec,
   handleListSections,
   handleGetParagraph,
@@ -68,6 +69,17 @@ function registerLibraryTools(reg: ToolRegistrar): void {
       },
     },
     handleSearchLibrary
+  );
+
+  reg.register(
+    'list_libraries',
+    {
+      description:
+        'List all paragraph libraries (id, name, tier). Use to obtain the sourceLibraryIds ' +
+        'required by create_project — no other tool surfaces library UUIDs.',
+      inputSchema: {},
+    },
+    handleListLibraries
   );
 
   reg.register(

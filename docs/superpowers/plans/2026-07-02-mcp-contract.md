@@ -903,7 +903,7 @@ stays green. Deletes/withdraws get tier `destructive` (gated off by default).
 |------|--------|--------------|-----------------|
 | 2 | Projects/packages | `rename_project`(write), `delete_project`(destructive), `restore_project`(write), `create_package`(write), `assign_specs_to_package`(write) | `patch/delete/restore /projects/{}`, package routes |
 | 3 (#44) | Paragraphs | `add_paragraph`(write), `update_paragraph`(write), `remove_paragraph`(write) | `post/patch /specs/{}/paragraphs…`, `…/removal` |
-| 4 | Spec lifecycle | `finalize_spec`, `reopen_spec`(write), `restore_spec`(write), `delete_spec`(destructive) | `post /specs/{}/finalize|reopen|restore`, `delete /specs/{}` |
+| 4 | Spec lifecycle | `finalize_spec`, `reopen_spec`(write), `restore_spec`(write), `delete_spec`(destructive) | `post /specs/{}/finalize` (+ reopen, restore), `delete /specs/{}` |
 | 5 | Merge | `apply_merge`(write) | `post /specs/{}/merge` |
 | 6 | Assignment | `assign_numbering_profile`, `assign_style_source`(write), `lock_spec`/`unlock_spec`(write) | numbering-profile, style-source, lock routes |
 | 7 | Config CRUD | templates, conventions, required-sections, revision-nomenclature (write; deletes destructive) | remaining CRUD ops |

@@ -1,6 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { pool } from '../db/index.js';
 import { handleCreateProject } from './create-project-handler.js';
+import { handleListLibraries } from './handlers.js';
 import { CreateProjectBodySchema } from '../ast/index.js';
 import { loadSpec } from '../test-utils/contract/validate-response.js';
 
@@ -45,5 +46,13 @@ describe('create_project MCP tool', () => {
     const required = op.requestBody?.content['application/json'].schema.required ?? [];
     const toolKeys = Object.keys(CreateProjectBodySchema.shape);
     for (const field of required) expect(toolKeys).toContain(field);
+  });
+
+  it('list_libraries surfaces the library IDs create_project needs (MCP-only discoverability)', async () => {
+    const res = await handleListLibraries();
+    expect('isError' in res).toBe(false);
+    const libs = JSON.parse(res.content[0]!.text) as { id: string; tier: string }[];
+    const usable = libs.find((l) => l.tier === 'company' || l.tier === 'client');
+    expect(usable?.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

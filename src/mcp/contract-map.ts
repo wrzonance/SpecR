@@ -21,6 +21,7 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['post /specs/{}/reclassify', 'reclassify_spec'],
   ['patch /specs/{}/paragraphs/{}/editability', 'set_editability_override'],
   ['post /projects', 'create_project'], // added in Task 7
+  ['get /libraries', 'list_libraries'], // discover sourceLibraryIds that create_project needs
   // …extend during each write-tool wave.
 ]);
 
@@ -115,7 +116,6 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['post /numbering-profiles/snapshot', 'pending — wave 7 (snapshot numbering profile)'],
   ['get /libraries/{}/numbering-profiles', 'pending — wave 7 (list library numbering profiles)'],
   ['post /libraries/{}/numbering-profiles', 'pending — wave 7 (create library numbering profile)'],
-  ['get /libraries', 'pending — wave 7 (list libraries)'],
   ['patch /libraries/{}', 'pending — wave 7 (update library)'],
   ['get /libraries/{}/specs', 'pending — wave 7 (list library specs)'],
   ['post /libraries/clients', 'pending — wave 7 (create client library)'],

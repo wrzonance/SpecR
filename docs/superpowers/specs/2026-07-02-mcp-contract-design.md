@@ -122,7 +122,7 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
 ```
 
 - Tiers map to **MCP tool annotations** (the industry-standard signal): `read` → `readOnlyHint:
-  true`; `destructive` → `destructiveHint: true`; `idempotentHint` where applicable. Clients that
+  true`; `destructive` → `destructiveHint: true` (write clears both). Clients that
   understand annotations get the hint for free.
 - **Server-side gating.** `registerTools(server, { allowedTiers })` registers only tools whose
   tier ∈ `allowedTiers`. A tool that isn't registered is neither listed nor callable — gating is by

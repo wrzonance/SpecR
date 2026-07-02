@@ -37,6 +37,7 @@ export function tierAnnotations(tier: ToolTier): ToolAnnotations {
 export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   // reads
   ['search_library', 'read'],
+  ['list_libraries', 'read'],
   ['list_sections', 'read'],
   ['list_projects', 'read'],
   ['get_references', 'read'],

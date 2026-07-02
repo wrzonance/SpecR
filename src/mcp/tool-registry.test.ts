@@ -28,6 +28,24 @@ describe('createRegistrar', () => {
     expect(spy).not.toHaveBeenCalled(); // …but never registered → not listable, not callable
   });
 
+  it('tier-derived hints win over tool-supplied annotations (safety signal is authoritative)', () => {
+    const server = new McpServer({ name: 't', version: '0' });
+    const spy = vi.spyOn(server, 'registerTool');
+    const reg = createRegistrar(server, new Set(['read']));
+    // A tool tries to mark itself readOnlyHint:false; its tier (read) must override,
+    // while a non-conflicting annotation (title) is preserved.
+    reg.register(
+      'get_spec',
+      { description: 'read', annotations: { readOnlyHint: false, title: 'X' } },
+      ok
+    );
+    expect(spy).toHaveBeenCalledWith(
+      'get_spec',
+      expect.objectContaining({ annotations: { readOnlyHint: true, title: 'X' } }),
+      ok
+    );
+  });
+
   it('throws McpError for a tool with no declared tier', () => {
     const server = new McpServer({ name: 't', version: '0' });
     const reg = createRegistrar(server, new Set(['read', 'write']));

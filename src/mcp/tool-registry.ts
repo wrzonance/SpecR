@@ -35,9 +35,12 @@ export function createRegistrar(
       }
       declared.push(name);
       if (!allowedTiers.has(tier)) return; // gated: absent ⇒ not listed, not callable
+      // Tier-derived hints are authoritative: spread them LAST so a tool's own
+      // config.annotations can add annotations (title, openWorldHint) but can never
+      // override readOnlyHint/destructiveHint and mis-signal a destructive tool as safe.
       server.registerTool(
         name,
-        { ...config, annotations: { ...tierAnnotations(tier), ...config.annotations } },
+        { ...config, annotations: { ...config.annotations, ...tierAnnotations(tier) } },
         handler
       );
     },
