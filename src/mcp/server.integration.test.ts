@@ -754,10 +754,11 @@ describe('capability gating (#43)', () => {
     expect(names).toContain('update_paragraph');
     // …but no destructive tool leaks (guards future waves from exposing one by default).
     expect(tools.some((t) => t.annotations?.destructiveHint === true)).toBe(false);
-    // delete_project and delete_association (destructive) exist but are gated off by the
-    // default read,write posture.
+    // delete_project, delete_association, delete_spec (destructive) exist but are gated
+    // off by the default read,write posture.
     expect(names).not.toContain('delete_project');
     expect(names).not.toContain('delete_association');
+    expect(names).not.toContain('delete_spec');
   });
 });
 

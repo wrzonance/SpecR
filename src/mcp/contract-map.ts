@@ -34,6 +34,12 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['post /specs/{}/paragraphs/{}/associations', 'create_association'],
   ['delete /specs/{}/paragraphs/{}/associations/{}', 'delete_association'], // destructive tier
   ['post /specs/{}/paragraphs/{}/comments/{}/accept-as-note', 'accept_comment_as_note'],
+  // wave 4 — spec lifecycle
+  ['patch /specs/{}', 'update_spec'],
+  ['post /specs/{}/finalize', 'finalize_spec'],
+  ['post /specs/{}/reopen', 'reopen_spec'],
+  ['post /specs/{}/restore', 'restore_spec'],
+  ['delete /specs/{}', 'delete_spec'], // destructive tier — soft withdraw (ADR-030)
   // …extend during each write-tool wave.
 ]);
 
@@ -55,12 +61,6 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['put /packages/{}/specs', 'pending — wave 2 (assign_specs_to_package)'],
   ['post /packages/{}/revisions', 'pending — wave 2 (issue package revision)'],
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
-  // --- Wave 4: spec lifecycle ---
-  ['patch /specs/{}', 'pending — wave 4 (update spec metadata)'],
-  ['post /specs/{}/finalize', 'pending — wave 4 (finalize_spec)'],
-  ['post /specs/{}/reopen', 'pending — wave 4 (reopen_spec)'],
-  ['post /specs/{}/restore', 'pending — wave 4 (restore_spec)'],
-  ['delete /specs/{}', 'pending — wave 4 (delete_spec, destructive)'],
   // --- Wave 5: merge ---
   ['post /specs/{}/merge', 'pending — wave 5 (apply_merge)'],
   // --- Wave 6: assignment (numbering profile / style source / lock) ---
