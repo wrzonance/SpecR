@@ -61,6 +61,11 @@ export const CreateAssociationShape = {
 };
 
 export async function handleCreateAssociation(args: unknown): Promise<ToolResult> {
+  // Two-step parse by design (not collapsed into z.object(CreateAssociationShape)):
+  // spreading CreateAssociationBodySchema.shape into CreateAssociationShape strips the
+  // cross-field .check() (the DMS-pair/url presence rule), so the body MUST be parsed
+  // against the full CreateAssociationBodySchema to keep that validation from silently
+  // vanishing. The path ids are validated separately.
   const ref = ParagraphRef.safeParse(args);
   if (!ref.success) {
     return toolError('invalid create_association input: specId and nodeId must be UUIDs');

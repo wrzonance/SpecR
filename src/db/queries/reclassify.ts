@@ -347,7 +347,10 @@ async function runAccept(
   const existing = await findExistingNote(client, anchor.parent_id, nodeId, index);
   if (existing) return { status: 'already-accepted', noteId: existing };
 
-  const noteId = await insertNoteSibling(client, anchor, specId, nodeId, index, text);
+  // Persist the canonical spec_id (anchor.spec_id, lowercase from Postgres), not the
+  // raw caller-supplied specId which may be uppercase — otherwise the new note row
+  // carries a differently-cased spec_id than its siblings (CodeRabbit, data integrity).
+  const noteId = await insertNoteSibling(client, anchor, anchor.spec_id, nodeId, index, text);
   return { status: 'created', noteId };
 }
 

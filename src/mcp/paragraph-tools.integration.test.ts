@@ -207,13 +207,22 @@ describe('accept_comment_as_note MCP tool', () => {
     );
     const anchorId = anchor.rows[0]!.id;
 
-    const first = await handleAcceptCommentAsNote({ specId, nodeId: anchorId, index: 0 });
+    // Accept via an UPPERCASE specId: ownership must pass (case-normalized), and the
+    // new note row must persist the canonical lowercase spec_id (CodeRabbit — finding 1).
+    const upper = specId.toUpperCase();
+    const first = await handleAcceptCommentAsNote({ specId: upper, nodeId: anchorId, index: 0 });
     expect(isToolError(first)).toBe(false);
     const noteId = parse<{ noteId: string }>(first).noteId;
     expect(noteId).toBeTruthy();
 
+    const noteRow = await pool.query<{ spec_id: string }>(
+      'SELECT spec_id FROM paragraphs WHERE id = $1',
+      [noteId]
+    );
+    expect(noteRow.rows[0]?.spec_id).toBe(specId); // canonical lowercase, not the uppercase input
+
     // Idempotent repeat: same noteId, no duplicate, still a success (not REST's 409).
-    const second = await handleAcceptCommentAsNote({ specId, nodeId: anchorId, index: 0 });
+    const second = await handleAcceptCommentAsNote({ specId: upper, nodeId: anchorId, index: 0 });
     expect(isToolError(second)).toBe(false);
     expect(parse<{ noteId: string }>(second).noteId).toBe(noteId);
   });
