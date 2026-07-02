@@ -124,6 +124,27 @@ export function isDecorationSeparator(text: string): boolean {
   return trimmed.replace(OR_DECORATION, '').toUpperCase() === 'OR';
 }
 
+// A single-dot "N.N" NOT followed by a capital letter — the affirmative "this is
+// authored prose, not a heading" signature (a decimal measurement "2.0 inches …",
+// "16.5 in. round", or a value "1.2 24V …"). This is the exact complement of the
+// Signal-4 article gate (a single-dot "N.N" is a heading ONLY when a CAPITAL follows —
+// CSI headings are titled), so the two partition the single-dot decimal space with no
+// gap. Multi-dot numbers ("1.4.2.1 …") are excluded — they are unambiguously outline.
+const DECIMAL_PROSE = /^\s*\d+\.\d+\s+(?![A-Z])/;
+
+/**
+ * Returns true when text affirmatively looks like a leading decimal MEASUREMENT/value
+ * rather than a heading. Signal 5 (indentation) uses this to refuse to promote such a
+ * paragraph to a structural node: indentation is the weakest evidence and must not
+ * override the text's own "I am prose" signal, or the measurement becomes a phantom
+ * article that renderers label (and whose number is never stripped, since the strip is
+ * gated on Signal 4). Real Word/style numbering (Signal 1/2) still classifies it — its
+ * text is genuine content that merely starts with a number. (Codex adversarial review.)
+ */
+export function isDecimalProse(text: string): boolean {
+  return DECIMAL_PROSE.test(text);
+}
+
 /**
  * Signal 4: Text regex heuristics.
  * Detects CSI hierarchical patterns from paragraph text.

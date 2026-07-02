@@ -448,6 +448,46 @@ describe('classifyParagraphs — misaligned-numbering article guard', () => {
     expect(result[0]?.nodeType).toBe('article');
     expect(result[0]?.signalUsed).toBe(1);
   });
+
+  // Codex adversarial review (P2, indented path): decimal PROSE that ALSO carries
+  // indentation ("2.0 inches of clearance minimum", leftIndent 576) must not become a
+  // phantom article via Signal 5. Signal 5 (indentation) is the weakest evidence, and
+  // the outline strip is gated on Signal 4, so a Signal-5 article would keep "2.0 …"
+  // AND gain a render label. Weak indentation must not override the text's affirmative
+  // "this is prose" signature — it routes to a continuation (text preserved, no label).
+  it('does NOT let Signal 5 promote indented decimal PROSE to an article', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 576, text: '2.0 inches of clearance minimum' })],
+      numMap(),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('continuation');
+  });
+
+  // Guard the guard: Signal 5 STILL promotes a genuine unnumbered heading (no leading
+  // decimal) by its indentation — only affirmative decimal prose is held back.
+  it('still lets Signal 5 promote a genuine unnumbered heading (no decimal prefix)', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 576, text: 'RELATED SECTIONS' })],
+      numMap(),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(5);
+  });
+
+  // A REAL Word-numbered node whose content merely starts with a measurement is still
+  // structural (Signal 1) — the decimal-prose guard only holds back weak Signal-5-only
+  // evidence, never real numbering. Its text is genuine content, kept verbatim.
+  it('keeps a Signal-1 node whose text starts with a measurement (real numbering wins)', () => {
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 3, text: '2.0 inches of clearance minimum' })],
+      numMap(3),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(1);
+  });
 });
 
 function makeClassified(

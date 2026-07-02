@@ -6,6 +6,7 @@ import {
   isPartHeading,
   isSpecifierNote,
   isDecorationSeparator,
+  isDecimalProse,
 } from './heuristics.js';
 import type {
   ClassifiedParagraph,
@@ -120,6 +121,14 @@ function trySignal4(para: DocxParagraph): SignalHit | null {
 }
 
 function trySignal5(para: DocxParagraph): SignalHit | null {
+  // Indentation is the weakest evidence — it must not override the text's own
+  // affirmative "I am prose" signal. A leading decimal MEASUREMENT ("2.0 inches …")
+  // that merely happens to be indented is not a structural node; promoting it here
+  // would make a phantom article that renderers label and whose number is never
+  // stripped (the strip is gated on Signal 4). Real numbering (Signal 1/2) has already
+  // had its say by priority; if only indentation remains, decimal prose stays a
+  // continuation. (Codex adversarial review, P2 — indented path.)
+  if (isDecimalProse(para.text)) return null;
   const estimated = matchIndentSignal(para.leftIndent);
   if (estimated === null) return null;
   const nodeType = NODE_TYPES_BY_ILVL[estimated];

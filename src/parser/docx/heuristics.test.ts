@@ -5,6 +5,7 @@ import {
   isSpecifierNote,
   isPartHeading,
   isDecorationSeparator,
+  isDecimalProse,
 } from './heuristics.js';
 
 describe('matchTextSignal', () => {
@@ -203,6 +204,28 @@ describe('isDecorationSeparator', () => {
     expect(isDecorationSeparator('FLOOR')).toBe(false); // contains "OR" but is a word
     expect(isDecorationSeparator('--')).toBe(false); // too short to be a rule
     expect(isDecorationSeparator('')).toBe(false);
+  });
+});
+
+describe('isDecimalProse', () => {
+  // Affirmative "this is prose, not a heading" signature: a single-dot "N.N" followed
+  // by a lowercase letter or digit — a decimal measurement ("2.0 inches", "16.5 in.")
+  // or a value. Mirrors the Signal-4 article gate (only a CAPITAL letter marks a
+  // heading). Used to stop Signal 5 (indentation) from promoting such prose to a
+  // phantom article (Codex adversarial review, P2).
+  it('true for a single-dot decimal followed by lowercase/digit (measurement/prose)', () => {
+    expect(isDecimalProse('2.0 inches of clearance minimum')).toBe(true);
+    expect(isDecimalProse('16.5 in. round')).toBe(true);
+    expect(isDecimalProse('1.2 24V power supply')).toBe(true);
+  });
+
+  it('false for a capital-first heading, a multi-dot outline, or non-decimal text', () => {
+    expect(isDecimalProse('1.2 RELATED SECTIONS')).toBe(false); // capital → heading
+    expect(isDecimalProse('1.2 Related Sections')).toBe(false); // Title-case heading
+    expect(isDecimalProse('1.4.2.1 installation instructions')).toBe(false); // multi-dot outline
+    expect(isDecimalProse('RELATED SECTIONS')).toBe(false); // no leading decimal
+    expect(isDecimalProse('1. list item')).toBe(false); // no interior decimal (pr2 label form)
+    expect(isDecimalProse('The 2.0 inch pipe')).toBe(false); // decimal not at start
   });
 });
 
