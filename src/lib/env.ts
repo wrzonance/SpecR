@@ -24,6 +24,16 @@ const schema = z.object({
   // on a CDN fetch and leak (ADR-039). Default false preserves the convenient
   // networked-dev behavior (CDN fetch on first run, bounded by OCR_INIT_TIMEOUT_MS).
   OCR_REQUIRE_LOCAL_TRAINEDDATA: z.stringbool().default(false),
+  // Which MCP capability tiers this process exposes as callable tools.
+  // Default omits `destructive` so an agent cannot delete projects/clients/libraries.
+  // Authoritative parse lives in src/mcp/capabilities.ts (parseAllowedTiers); the tier
+  // literals below are duplicated intentionally to keep src/lib free of an src/mcp import.
+  MCP_ALLOWED_TIERS: z
+    .string()
+    .default('read,write')
+    .refine((v) => v.split(',').every((t) => ['read', 'write', 'destructive'].includes(t.trim())), {
+      message: 'MCP_ALLOWED_TIERS must be a comma-separated list of: read, write, destructive',
+    }),
 });
 
 const result = schema.safeParse(process.env);

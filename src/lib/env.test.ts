@@ -80,6 +80,52 @@ describe('env validation — defaults and coercion', () => {
   });
 });
 
+describe('env validation — MCP_ALLOWED_TIERS', () => {
+  it('defaults to read,write when not set', async () => {
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    delete process.env['MCP_ALLOWED_TIERS'];
+
+    const { config } = await import('./env.js');
+
+    expect(config.MCP_ALLOWED_TIERS).toBe('read,write');
+  });
+
+  it('accepts a valid subset', async () => {
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    process.env['MCP_ALLOWED_TIERS'] = 'read';
+
+    const { config } = await import('./env.js');
+
+    expect(config.MCP_ALLOWED_TIERS).toBe('read');
+  });
+
+  it('accepts all three tiers with surrounding whitespace', async () => {
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    process.env['MCP_ALLOWED_TIERS'] = 'read, write, destructive';
+
+    const { config } = await import('./env.js');
+
+    expect(config.MCP_ALLOWED_TIERS).toBe('read, write, destructive');
+  });
+
+  it('exits with code 1 when a tier token is unknown', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    process.env['MCP_ALLOWED_TIERS'] = 'read,admin';
+
+    await expect(import('./env.js')).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+});
+
 describe('env validation — invalid env exits process', () => {
   it('exits with code 1 when DATABASE_URL is missing', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
