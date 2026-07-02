@@ -108,6 +108,10 @@ describe('planOutlineNumberStrip (MULTI-DOT outline items only — Signal 4 pr n
     expect(planOutlineNumberStrip('1.1.1 Wi-Tile')?.text).toBe('Wi-Tile');
   });
 
+  // KNOWN AMBIGUITY: a leading single-dot "N.N" is indistinguishable, on text alone,
+  // between an outline label ("1.2 RELATED SECTIONS") and a decimal value ("2.1 GHz").
+  // planOutlineNumberStrip (inline, text-only) therefore never strips it — that is
+  // resolved later by planLabelStrip, keyed off the article's position, not its text.
   it('does NOT strip a single-dot "N.N" (ambiguous with a value like "2.1 GHz")', () => {
     expect(planOutlineNumberStrip('1.2 RELATED SECTIONS')).toBeNull();
     expect(planOutlineNumberStrip('2.1 GHz frequency band')).toBeNull();
@@ -164,10 +168,10 @@ describe('planLabelStrip (single-dot article number — only when it IS the labe
     expect(planLabelStrip('2.1 kHz reference clock', '2.1')).toBeNull();
   });
 
-  // Corollary: a title starting with a digit (not [A-Z]) is left intact rather than risk
-  // stripping a measurement like "1.2 600 volts minimum". No data loss — a genuine
-  // digit-leading heading merely renders its label doubled (recoverable), which the
-  // conservative direction prefers over destroying a value.
+  // KNOWN AMBIGUITY: a title starting with a digit ("1.2 600 V Power Receptacle") is
+  // indistinguishable from a measurement ("1.2 600 volts minimum") — so it is left intact
+  // rather than risk destroying a value. No data loss — a genuine digit-leading heading
+  // merely renders its label doubled (recoverable), which the conservative direction prefers.
   it('does NOT strip when a digit follows the label (ambiguous with a value)', () => {
     expect(planLabelStrip('1.2 600 volts minimum required', '1.2')).toBeNull();
   });

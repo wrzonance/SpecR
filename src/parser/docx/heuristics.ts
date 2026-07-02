@@ -22,14 +22,21 @@ const TEXT_SIGNALS: readonly TextSignalEntry[] = [
     nodeType: 'part',
     normalizedIlvl: 0,
   },
-  // Manual decimal outline (docs typed without Word numbering): depth = dot count.
-  // Deeper patterns MUST precede the N.N article pattern (first-match), most dots
-  // first. "1.1.1.1" would never match the shorter N.N pattern (a "." follows N.N,
-  // not whitespace), but ordering deepest-first keeps the intent explicit and safe.
-  { pattern: /^\d+(?:\.\d+){4}\s+/, nodeType: 'pr3', normalizedIlvl: 4 }, // N.N.N.N.N
-  { pattern: /^\d+(?:\.\d+){3}\s+/, nodeType: 'pr2', normalizedIlvl: 3 }, // N.N.N.N
-  { pattern: /^\d+(?:\.\d+){2}\s+/, nodeType: 'pr1', normalizedIlvl: 2 }, // N.N.N
-  { pattern: /^\d+\.\d+\s+/, nodeType: 'article', normalizedIlvl: 1 }, // N.N
+  // Manual decimal outline (docs typed without Word numbering): depth = interior-dot
+  // count (article = 1 dot, pr1 = 2, … pr7 = 8). The ladder is COMPLETE up to the
+  // engine's deepest tier (pr7 / MAX_ILVL) so no realistic depth silently falls through
+  // to a continuation — matching planOutlineNumberStrip, which strips a decimal prefix
+  // of any depth. Deeper patterns MUST precede the N.N article pattern (first-match),
+  // most dots first. "1.1.1.1" would never match the shorter N.N pattern (a "." follows
+  // N.N, not whitespace), but ordering deepest-first keeps the intent explicit and safe.
+  { pattern: /^\d+(?:\.\d+){8}\s+/, nodeType: 'pr7', normalizedIlvl: 8 }, // 8 dots
+  { pattern: /^\d+(?:\.\d+){7}\s+/, nodeType: 'pr6', normalizedIlvl: 7 }, // 7 dots
+  { pattern: /^\d+(?:\.\d+){6}\s+/, nodeType: 'pr5', normalizedIlvl: 6 }, // 6 dots
+  { pattern: /^\d+(?:\.\d+){5}\s+/, nodeType: 'pr4', normalizedIlvl: 5 }, // 5 dots (1.2.3.4.5.6)
+  { pattern: /^\d+(?:\.\d+){4}\s+/, nodeType: 'pr3', normalizedIlvl: 4 }, // 4 dots (N.N.N.N.N)
+  { pattern: /^\d+(?:\.\d+){3}\s+/, nodeType: 'pr2', normalizedIlvl: 3 }, // 3 dots (N.N.N.N)
+  { pattern: /^\d+(?:\.\d+){2}\s+/, nodeType: 'pr1', normalizedIlvl: 2 }, // 2 dots (N.N.N)
+  { pattern: /^\d+\.\d+\s+/, nodeType: 'article', normalizedIlvl: 1 }, // 1 dot (N.N)
   { pattern: /^[A-Z]\.\s/, nodeType: 'pr1', normalizedIlvl: 2 },
   { pattern: /^\d+\.\s/, nodeType: 'pr2', normalizedIlvl: 3 },
   { pattern: /^[a-z]\.\s/, nodeType: 'pr3', normalizedIlvl: 4 },

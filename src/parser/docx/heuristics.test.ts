@@ -42,6 +42,22 @@ describe('matchTextSignal', () => {
     expect(matchTextSignal('2.3.4.5.6 Deep item')).toEqual({ nodeType: 'pr3', normalizedIlvl: 4 });
   });
 
+  // CodeRabbit review: the ladder must be COMPLETE to the engine's deepest tier (pr7)
+  // so a realistic deep outline never silently falls through to a continuation. Depth
+  // continues past pr3: 5 dots → pr4, 6 → pr5, 7 → pr6, 8 → pr7 (the cap).
+  it('classifies decimal depth past pr3, up to the pr7 tier cap', () => {
+    expect(matchTextSignal('1.2.3.4.5.6 Heading')).toEqual({ nodeType: 'pr4', normalizedIlvl: 5 });
+    expect(matchTextSignal('1.2.3.4.5.6.7 Deeper')).toEqual({ nodeType: 'pr5', normalizedIlvl: 6 });
+    expect(matchTextSignal('1.2.3.4.5.6.7.8 Deepest')).toEqual({
+      nodeType: 'pr6',
+      normalizedIlvl: 7,
+    });
+    expect(matchTextSignal('1.2.3.4.5.6.7.8.9 Floor')).toEqual({
+      nodeType: 'pr7',
+      normalizedIlvl: 8,
+    });
+  });
+
   it('keeps two-number "N.N" as an article (deep patterns do not disturb it)', () => {
     expect(matchTextSignal('1.2 RELATED SECTIONS')).toEqual({
       nodeType: 'article',

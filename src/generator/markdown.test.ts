@@ -108,6 +108,52 @@ describe('renderMarkdown', () => {
   it('renders article heading', () => {
     expect(renderMarkdown(TREE)).toContain('### 1.1 REFERENCES');
   });
+  // CodeRabbit review: guard the PART ordinal threading end-to-end — an article under
+  // PART 2 must render as "2.x", never fall back to "1.x". renderPart passes its own
+  // index+1 as partNumber into renderArticle → getLabel('article', ordinal, partNumber).
+  it('labels articles by their PART number — PART 2 article is 2.1, not 1.1', () => {
+    const twoParts: SpecTree = {
+      id: '00000000-0000-0000-0000-0000000000a0',
+      section: '27 21 00',
+      title: 'Two Parts',
+      parts: [
+        {
+          id: '00000000-0000-0000-0000-0000000000a1',
+          type: 'part',
+          text: 'GENERAL',
+          children: [
+            {
+              id: '00000000-0000-0000-0000-0000000000a2',
+              type: 'article',
+              text: 'SUMMARY',
+              children: [],
+              meta: {},
+            },
+          ],
+          meta: {},
+        },
+        {
+          id: '00000000-0000-0000-0000-0000000000a3',
+          type: 'part',
+          text: 'PRODUCTS',
+          children: [
+            {
+              id: '00000000-0000-0000-0000-0000000000a4',
+              type: 'article',
+              text: 'MANUFACTURERS',
+              children: [],
+              meta: {},
+            },
+          ],
+          meta: {},
+        },
+      ],
+    };
+    const md = renderMarkdown(twoParts);
+    expect(md).toContain('### 1.1 SUMMARY');
+    expect(md).toContain('### 2.1 MANUFACTURERS');
+    expect(md).not.toContain('### 1.1 MANUFACTURERS');
+  });
   it('renders pr1 label', () => {
     expect(renderMarkdown(TREE)).toContain('A. Coordinate work of all trades.');
   });
