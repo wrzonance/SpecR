@@ -57,6 +57,7 @@ export {
   CloneRevisionNomenclatureBodySchema,
   RevisionAttributesSchema,
   CreateRevisionBodySchema,
+  StructuredCreateRevisionBodySchema,
 } from './revision-schemas.js';
 export type {
   RevisionNomenclatureType,
@@ -65,6 +66,7 @@ export type {
   CloneRevisionNomenclatureBody,
   RevisionAttributes,
   CreateRevisionBody,
+  StructuredCreateRevisionBody,
 } from './revision-schemas.js';
 export type {
   StyleNodeType,

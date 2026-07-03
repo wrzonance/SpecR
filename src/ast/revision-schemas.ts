@@ -82,7 +82,9 @@ const LegacyCreateRevisionBodySchema = z
   })
   .strict();
 
-const StructuredCreateRevisionBodySchema = z
+// Exported so the MCP tool advertises + validates exactly the structured revision
+// fields (the legacy label form is deprecated and intentionally not agent-exposed).
+export const StructuredCreateRevisionBodySchema = z
   .object({
     type: z.string().check(z.minLength(1)),
     date: RevisionDateSchema.exactOptional(),
@@ -90,6 +92,8 @@ const StructuredCreateRevisionBodySchema = z
     attributes: RevisionAttributesSchema.exactOptional(),
   })
   .strict();
+
+export type StructuredCreateRevisionBody = z.infer<typeof StructuredCreateRevisionBodySchema>;
 
 export const CreateRevisionBodySchema = z.union([
   LegacyCreateRevisionBodySchema,
