@@ -100,6 +100,12 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['get_package_required_sections', 'read'],
   ['set_required_sections', 'write'],
   ['set_package_required_sections', 'write'],
+  // wave 7d — revision-nomenclature config (project scope)
+  ['list_revision_nomenclature_profiles', 'read'],
+  ['get_project_revision_nomenclature', 'read'],
+  ['set_project_revision_nomenclature', 'write'],
+  ['clone_project_revision_nomenclature', 'write'],
+  ['clear_project_revision_nomenclature', 'write'], // clears override (reversible), not destructive
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row
