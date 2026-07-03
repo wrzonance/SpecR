@@ -124,10 +124,14 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['get_project_general_spec', 'write'],
   ['set_library_general_spec', 'write'],
   ['set_project_general_spec', 'write'],
+  // wave 2a — project section membership + sources
+  ['add_project_section', 'write'],
+  ['set_project_sources', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row
   ['delete_spec', 'destructive'], // soft withdraw of a library master (ADR-030)
   ['delete_template', 'destructive'], // hard delete of a style template (RESTRICT if in use)
   ['delete_numbering_profile', 'destructive'], // hard delete (RESTRICT if assigned to any spec)
+  ['remove_project_section', 'destructive'], // hard delete of the project's cloned section (force can drop edits)
 ]);

@@ -90,6 +90,10 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['put /libraries/{}/divisions/{}/general-spec', 'set_library_general_spec'],
   ['get /projects/{}/divisions/{}/general-spec', 'get_project_general_spec'],
   ['put /projects/{}/divisions/{}/general-spec', 'set_project_general_spec'],
+  // wave 2a — project section membership + sources
+  ['post /projects/{}/specs', 'add_project_section'],
+  ['delete /projects/{}/specs/{}', 'remove_project_section'], // destructive tier
+  ['put /projects/{}/sources', 'set_project_sources'],
   // …extend during each write-tool wave.
 ]);
 
@@ -101,10 +105,7 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
  * honest — a new REST route with no tool and no entry here fails CI.
  */
 export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
-  // --- Wave 2 remaining: packages / revisions / spec assignment ---
-  ['post /projects/{}/specs', 'pending — wave 2 (assign specs to project)'],
-  ['delete /projects/{}/specs/{}', 'pending — wave 2 (unassign project spec)'],
-  ['put /projects/{}/sources', 'pending — wave 2 (project source libraries)'],
+  // --- Wave 2 remaining: packages / revisions (wave 2b/2c) ---
   ['get /projects/{}/packages', 'pending — wave 2 (list packages)'],
   ['post /projects/{}/packages', 'pending — wave 2 (create_package)'],
   ['delete /packages/{}', 'pending — wave 2 (delete package, destructive)'],
