@@ -94,6 +94,11 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['post /projects/{}/specs', 'add_project_section'],
   ['delete /projects/{}/specs/{}', 'remove_project_section'], // destructive tier
   ['put /projects/{}/sources', 'set_project_sources'],
+  // wave 2b — design packages (list / create / set specs / delete)
+  ['get /projects/{}/packages', 'list_packages'],
+  ['post /projects/{}/packages', 'create_package'],
+  ['put /packages/{}/specs', 'set_package_specs'],
+  ['delete /packages/{}', 'delete_package'], // destructive tier
   // …extend during each write-tool wave.
 ]);
 
@@ -105,11 +110,7 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
  * honest — a new REST route with no tool and no entry here fails CI.
  */
 export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
-  // --- Wave 2 remaining: packages / revisions (wave 2b/2c) ---
-  ['get /projects/{}/packages', 'pending — wave 2 (list packages)'],
-  ['post /projects/{}/packages', 'pending — wave 2 (create_package)'],
-  ['delete /packages/{}', 'pending — wave 2 (delete package, destructive)'],
-  ['put /packages/{}/specs', 'pending — wave 2 (assign_specs_to_package)'],
+  // --- Wave 2 remaining: revisions (wave 2c) ---
   ['post /packages/{}/revisions', 'pending — wave 2 (issue package revision)'],
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
   // --- Permanent exemptions: async job polling, batch DOCX egress, and reference reads
