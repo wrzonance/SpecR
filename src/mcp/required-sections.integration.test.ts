@@ -167,4 +167,13 @@ describe('required-sections MCP tools', () => {
     });
     expect(isToolError(res)).toBe(true);
   });
+
+  it('rejects a syntactically malformed UUID (schema validation, not not-found)', async () => {
+    expect(isToolError(await handleGetRequiredSections({ projectId: 'not-a-uuid' }))).toBe(true);
+    expect(
+      isToolError(
+        await handleGetPackageRequiredSections({ projectId: 'not-a-uuid', packageId: 'nope' })
+      )
+    ).toBe(true);
+  });
 });

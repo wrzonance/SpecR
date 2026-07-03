@@ -109,9 +109,7 @@ export async function handleSetRequiredSections(args: unknown): Promise<ToolResu
 export async function handleGetPackageRequiredSections(args: unknown): Promise<ToolResult> {
   const parsed = PackageScopeArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(
-      'invalid get_package_required_sections input: projectId and packageId must be UUIDs'
-    );
+    return toolError(`invalid get_package_required_sections input: ${issues(parsed.error)}`);
   }
   try {
     const { projectId, packageId } = parsed.data;
@@ -124,9 +122,7 @@ export async function handleGetPackageRequiredSections(args: unknown): Promise<T
 export async function handleSetPackageRequiredSections(args: unknown): Promise<ToolResult> {
   const scope = PackageScopeArgs.safeParse(args);
   if (!scope.success) {
-    return toolError(
-      'invalid set_package_required_sections input: projectId and packageId must be UUIDs'
-    );
+    return toolError(`invalid set_package_required_sections input: ${issues(scope.error)}`);
   }
   const body = RequiredSectionsBodySchema.safeParse(args);
   if (!body.success) {
