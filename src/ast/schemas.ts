@@ -330,6 +330,25 @@ export const AddSectionToProjectBodySchema = z.object({
 
 export type AddSectionToProjectBody = z.infer<typeof AddSectionToProjectBodySchema>;
 
+// A project's ordered source libraries — a non-empty array of distinct library
+// UUIDs. Shared by the REST route and the MCP tool (one source of truth).
+export const SetProjectSourcesBodySchema = z.object({
+  sourceLibraryIds: z
+    .array(z.uuid())
+    .check(z.minLength(1))
+    .check((ctx) => {
+      if (new Set(ctx.value).size !== ctx.value.length) {
+        ctx.issues.push({
+          code: 'custom',
+          input: ctx.value,
+          message: 'sourceLibraryIds must not contain duplicates',
+        });
+      }
+    }),
+});
+
+export type SetProjectSourcesBody = z.infer<typeof SetProjectSourcesBodySchema>;
+
 export const SetDivisionGeneralSpecBodySchema = z
   .object({
     generalSpecId: z.uuid().exactOptional(),

@@ -16,25 +16,11 @@ import {
   SectionUnresolvedError,
   pool,
 } from '../db/index.js';
+import { SetProjectSourcesBodySchema } from '../ast/index.js';
 import type { CreateProjectBody, AddSectionToProjectBody } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
 import { SectionNumberFormatSchema } from '../lib/section-number.js';
-
-const SetProjectSourcesBody = z.object({
-  sourceLibraryIds: z
-    .array(z.uuid())
-    .check(z.minLength(1))
-    .check((ctx) => {
-      if (new Set(ctx.value).size !== ctx.value.length) {
-        ctx.issues.push({
-          code: 'custom',
-          input: ctx.value,
-          message: 'sourceLibraryIds must not contain duplicates',
-        });
-      }
-    }),
-});
 
 const PatchProjectBody = z
   .object({
@@ -87,7 +73,7 @@ export async function setProjectSourcesHandler(req: Request, res: Response): Pro
     return;
   }
   const id = parsedId.data;
-  const parsed = SetProjectSourcesBody.safeParse(req.body);
+  const parsed = SetProjectSourcesBodySchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
       success: false,
