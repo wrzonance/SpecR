@@ -74,7 +74,13 @@ export async function buildComparisonReport(
 
   const rows = await getComparisonParagraphs(distinct);
   const { matrix, baseline } = alignTrees(buildSources(sources, metaMap, rows), options);
-  const drift = await computeDrift(metas);
+  // Drift follows request/column order (via metaMap), not DB row order, so the
+  // serialized `drift` array is byte-identical every run — the deterministic
+  // report guarantee (ADR-047) covers the whole body, not just the matrix.
+  const orderedMetas = distinct
+    .map((specId) => metaMap.get(specId))
+    .filter((m): m is ComparisonColumnMeta => m !== undefined);
+  const drift = await computeDrift(orderedMetas);
 
   return {
     columns: matrix.columns,

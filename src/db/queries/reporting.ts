@@ -42,7 +42,9 @@ interface ColumnMetaRow {
 }
 
 /** Fetch column metadata for the given spec ids. The caller compares the returned
- *  count against the distinct requested ids to detect not-found sources. */
+ *  count against the distinct requested ids to detect not-found sources. Ordered
+ *  by id so the row order is deterministic; callers that need request/column order
+ *  re-index by specId. */
 export async function getComparisonColumns(
   specIds: readonly string[],
   db: Queryable = pool
@@ -53,7 +55,8 @@ export async function getComparisonColumns(
               project_id AS "projectId", library_id AS "libraryId",
               parent_spec_id AS "parentSpecId"
        FROM specs
-       WHERE id = ANY($1::uuid[])`,
+       WHERE id = ANY($1::uuid[])
+       ORDER BY id`,
       [specIds]
     );
     return result.rows;
