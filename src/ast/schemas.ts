@@ -464,7 +464,11 @@ export const StylePropertiesSchema = z
 // ── Template CRUD request bodies ──────────────────────────────────────────────
 
 export const CreateTemplateBodySchema = z.object({
-  name: z.string().check(z.minLength(1)),
+  // name is trimmed BEFORE the length check so a whitespace-only name fails Zod
+  // (→ 422 / tool validation error) rather than passing minLength(1) and later
+  // tripping the DB's `length(trim(name)) > 0` CHECK as a pg 23514 surfaced as 500
+  // (same pattern as CreateNumberingProfileBodySchema).
+  name: z.string().trim().check(z.minLength(1)),
   owner: z.string().check(z.minLength(1)).exactOptional(),
 });
 
@@ -472,7 +476,9 @@ export type CreateTemplateBody = z.infer<typeof CreateTemplateBodySchema>;
 
 export const PatchTemplateBodySchema = z
   .object({
-    name: z.string().check(z.minLength(1)).exactOptional(),
+    // trimmed before the length check (see CreateTemplateBodySchema) so a
+    // whitespace-only rename fails Zod rather than the DB CHECK.
+    name: z.string().trim().check(z.minLength(1)).exactOptional(),
     // owner can be set to a string (non-empty) or null (to clear it).
     // exactOptional() would make `null` invalid — we want null to be a valid
     // explicit value when the key is present, but undefined when absent.

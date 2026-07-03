@@ -14,6 +14,7 @@ import { inferSectionMeta, computeTitleMatch } from '../lib/infer-section.js';
 import type { SectionInference } from '../lib/infer-section.js';
 import { parseSec, parseDocx, parseText, assertDocxSafe, assertSecSafe } from '../parser/index.js';
 import { decodeTextBuffer } from '../lib/decode-text.js';
+import { decodeBase64Payload } from '../lib/decode-base64.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
@@ -24,7 +25,6 @@ type ToolError = {
 };
 type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
 type ToolResult = ToolError | ToolOk;
-const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 function toolErr(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };
@@ -42,14 +42,9 @@ async function decodeSafeBuffer(
   ext: string,
   contentBase64: string
 ): Promise<Buffer | string | ToolError> {
-  if (!BASE64_RE.test(contentBase64)) {
-    return toolErr('contentBase64 is not valid base64');
-  }
-  const estimatedBytes = Math.ceil((contentBase64.length * 3) / 4);
-  if (estimatedBytes > 10 * 1024 * 1024) {
-    return toolErr('Content exceeds 10 MB decoded limit');
-  }
-  const buf = Buffer.from(contentBase64, 'base64');
+  const decoded = decodeBase64Payload(contentBase64);
+  if ('error' in decoded) return toolErr(decoded.error);
+  const buf = decoded.buffer;
   try {
     if (ext === '.docx') {
       await assertDocxSafe(buf);

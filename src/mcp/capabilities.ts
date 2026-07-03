@@ -83,8 +83,16 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['clear_style_source', 'write'],
   ['assign_numbering_profile', 'write'],
   ['clear_numbering_profile', 'write'],
+  // wave 7a — style-template config CRUD
+  ['list_templates', 'read'],
+  ['get_template', 'read'],
+  ['create_template', 'write'],
+  ['update_template', 'write'],
+  ['upsert_template_rules', 'write'],
+  ['import_template', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row
   ['delete_spec', 'destructive'], // soft withdraw of a library master (ADR-030)
+  ['delete_template', 'destructive'], // hard delete of a style template (RESTRICT if in use)
 ]);
