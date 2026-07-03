@@ -68,6 +68,12 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['put /projects/{}/required-sections', 'set_required_sections'],
   ['get /projects/{}/packages/{}/required-sections', 'get_package_required_sections'],
   ['put /projects/{}/packages/{}/required-sections', 'set_package_required_sections'],
+  // wave 7d — revision-nomenclature config (project scope)
+  ['get /revision-nomenclature-profiles', 'list_revision_nomenclature_profiles'],
+  ['get /projects/{}/revision-nomenclature', 'get_project_revision_nomenclature'],
+  ['put /projects/{}/revision-nomenclature', 'set_project_revision_nomenclature'],
+  ['post /projects/{}/revision-nomenclature/clone', 'clone_project_revision_nomenclature'],
+  ['delete /projects/{}/revision-nomenclature', 'clear_project_revision_nomenclature'],
   // …extend during each write-tool wave.
 ]);
 
@@ -91,17 +97,6 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
   // --- Wave 7 remaining: config CRUD (conventions / required-sections /
   //     revision-nomenclature / numbering-profile management / libraries / general-spec) ---
-  ['get /revision-nomenclature-profiles', 'pending — wave 7 (list revision-nomenclature profiles)'],
-  ['get /projects/{}/revision-nomenclature', 'pending — wave 7 (read revision-nomenclature)'],
-  ['put /projects/{}/revision-nomenclature', 'pending — wave 7 (set revision-nomenclature)'],
-  [
-    'delete /projects/{}/revision-nomenclature',
-    'pending — wave 7 (clear revision-nomenclature override)',
-  ],
-  [
-    'post /projects/{}/revision-nomenclature/clone',
-    'pending — wave 7 (clone revision-nomenclature)',
-  ],
   ['get /numbering-profiles/{}', 'pending — wave 7 (read numbering profile)'],
   ['patch /numbering-profiles/{}', 'pending — wave 7 (update numbering profile)'],
   ['delete /numbering-profiles/{}', 'pending — wave 7 (delete numbering profile, destructive)'],
