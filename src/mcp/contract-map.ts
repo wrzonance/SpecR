@@ -74,6 +74,13 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['put /projects/{}/revision-nomenclature', 'set_project_revision_nomenclature'],
   ['post /projects/{}/revision-nomenclature/clone', 'clone_project_revision_nomenclature'],
   ['delete /projects/{}/revision-nomenclature', 'clear_project_revision_nomenclature'],
+  // wave 7e — numbering-profile management (library-scoped CRUD + snapshot)
+  ['get /libraries/{}/numbering-profiles', 'list_library_numbering_profiles'],
+  ['post /libraries/{}/numbering-profiles', 'create_library_numbering_profile'],
+  ['get /numbering-profiles/{}', 'get_numbering_profile_by_id'],
+  ['patch /numbering-profiles/{}', 'update_numbering_profile'],
+  ['delete /numbering-profiles/{}', 'delete_numbering_profile'], // destructive tier
+  ['post /numbering-profiles/snapshot', 'snapshot_numbering_profile'],
   // …extend during each write-tool wave.
 ]);
 
@@ -95,14 +102,7 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['put /packages/{}/specs', 'pending — wave 2 (assign_specs_to_package)'],
   ['post /packages/{}/revisions', 'pending — wave 2 (issue package revision)'],
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
-  // --- Wave 7 remaining: config CRUD (conventions / required-sections /
-  //     revision-nomenclature / numbering-profile management / libraries / general-spec) ---
-  ['get /numbering-profiles/{}', 'pending — wave 7 (read numbering profile)'],
-  ['patch /numbering-profiles/{}', 'pending — wave 7 (update numbering profile)'],
-  ['delete /numbering-profiles/{}', 'pending — wave 7 (delete numbering profile, destructive)'],
-  ['post /numbering-profiles/snapshot', 'pending — wave 7 (snapshot numbering profile)'],
-  ['get /libraries/{}/numbering-profiles', 'pending — wave 7 (list library numbering profiles)'],
-  ['post /libraries/{}/numbering-profiles', 'pending — wave 7 (create library numbering profile)'],
+  // --- Wave 7 remaining: config CRUD (libraries / general-spec) ---
   ['patch /libraries/{}', 'pending — wave 7 (update library)'],
   ['get /libraries/{}/specs', 'pending — wave 7 (list library specs)'],
   ['post /libraries/clients', 'pending — wave 7 (create client library)'],

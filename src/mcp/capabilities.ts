@@ -106,9 +106,16 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['set_project_revision_nomenclature', 'write'],
   ['clone_project_revision_nomenclature', 'write'],
   ['clear_project_revision_nomenclature', 'write'], // clears override (reversible), not destructive
+  // wave 7e — numbering-profile management (library-scoped CRUD + snapshot)
+  ['list_library_numbering_profiles', 'read'],
+  ['get_numbering_profile_by_id', 'read'],
+  ['snapshot_numbering_profile', 'read'], // pure extraction from an uploaded .docx, persists nothing
+  ['create_library_numbering_profile', 'write'],
+  ['update_numbering_profile', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row
   ['delete_spec', 'destructive'], // soft withdraw of a library master (ADR-030)
   ['delete_template', 'destructive'], // hard delete of a style template (RESTRICT if in use)
+  ['delete_numbering_profile', 'destructive'], // hard delete (RESTRICT if assigned to any spec)
 ]);
