@@ -63,6 +63,11 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /libraries/{}/conventions', 'get_library_conventions'],
   ['put /libraries/{}/conventions', 'set_library_conventions'],
   ['post /libraries/{}/conventions/clone', 'clone_conventions'],
+  // wave 7c — required-sections config (project + package scope)
+  ['get /projects/{}/required-sections', 'get_required_sections'],
+  ['put /projects/{}/required-sections', 'set_required_sections'],
+  ['get /projects/{}/packages/{}/required-sections', 'get_package_required_sections'],
+  ['put /projects/{}/packages/{}/required-sections', 'set_package_required_sections'],
   // …extend during each write-tool wave.
 ]);
 
@@ -86,16 +91,6 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
   // --- Wave 7 remaining: config CRUD (conventions / required-sections /
   //     revision-nomenclature / numbering-profile management / libraries / general-spec) ---
-  ['get /projects/{}/required-sections', 'pending — wave 7 (read required-sections)'],
-  ['put /projects/{}/required-sections', 'pending — wave 7 (set required-sections)'],
-  [
-    'get /projects/{}/packages/{}/required-sections',
-    'pending — wave 7 (read package required-sections)',
-  ],
-  [
-    'put /projects/{}/packages/{}/required-sections',
-    'pending — wave 7 (set package required-sections)',
-  ],
   ['get /revision-nomenclature-profiles', 'pending — wave 7 (list revision-nomenclature profiles)'],
   ['get /projects/{}/revision-nomenclature', 'pending — wave 7 (read revision-nomenclature)'],
   ['put /projects/{}/revision-nomenclature', 'pending — wave 7 (set revision-nomenclature)'],
