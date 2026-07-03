@@ -91,11 +91,13 @@ export async function handleCreateClientLibrary(args: unknown): Promise<ToolResu
   try {
     return ok(await createClientLibrary(input));
   } catch (err) {
-    if (
-      err instanceof ParentLibraryNotFoundError ||
-      err instanceof ParentLibraryNotCompanyError ||
-      err instanceof DefaultCompanyLibraryError
-    ) {
+    // Client errors (bad/absent parentLibraryId) — surface without logging.
+    if (err instanceof ParentLibraryNotFoundError || err instanceof ParentLibraryNotCompanyError) {
+      return toolError(err.message);
+    }
+    // Server-side seed/config problem — log for observability (parity with the REST 500 path).
+    if (err instanceof DefaultCompanyLibraryError) {
+      logger.error({ err }, 'mcp tool create_client_library failed');
       return toolError(err.message);
     }
     if (getPgCode(err) === '23505') return toolError(NAME_TAKEN_ERROR);

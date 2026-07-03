@@ -57,12 +57,17 @@ export async function listLibrarySpecsHandler(req: Request, res: Response): Prom
   }
 }
 
-// Maps a client-library parent-resolution failure to its HTTP status. Returns
-// null for any other error (falls through to pg/500 handling).
-function clientParentErrorStatus(err: unknown): number | null {
-  if (err instanceof ParentLibraryNotFoundError) return 404;
-  if (err instanceof ParentLibraryNotCompanyError) return 422;
-  if (err instanceof DefaultCompanyLibraryError) return 500;
+// Maps a client-library parent-resolution failure to its HTTP status + message.
+// The 500 (missing/misconfigured default company master) is a server-side seed
+// problem, so it is logged here; the 404/422 client errors are not. Returns null
+// for any other error (falls through to pg/500 handling).
+function clientParentErrorResponse(err: unknown): { status: number; message: string } | null {
+  if (err instanceof ParentLibraryNotFoundError) return { status: 404, message: err.message };
+  if (err instanceof ParentLibraryNotCompanyError) return { status: 422, message: err.message };
+  if (err instanceof DefaultCompanyLibraryError) {
+    logger.error({ err }, 'create client library failed');
+    return { status: 500, message: err.message };
+  }
   return null;
 }
 
@@ -79,9 +84,9 @@ export async function createClientLibraryHandler(req: Request, res: Response): P
     const library = await createClientLibrary(input);
     res.status(201).json({ success: true, data: library });
   } catch (err) {
-    const parentStatus = clientParentErrorStatus(err);
-    if (parentStatus !== null && err instanceof Error) {
-      res.status(parentStatus).json({ success: false, error: err.message });
+    const parentErr = clientParentErrorResponse(err);
+    if (parentErr) {
+      res.status(parentErr.status).json({ success: false, error: parentErr.message });
       return;
     }
     const mapped = pgErrorToHttp(err, { '23505': 'a library with that name already exists' });
