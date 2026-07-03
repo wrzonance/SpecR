@@ -16,7 +16,6 @@ import {
   handleGenerateDocx,
   handleGetSpecLineage,
   handleGetSpecDiff,
-  handleCoordinationReport,
   handleSubmittalRegister,
   handleOpenCommentsReport,
   handleGetNumberingProfile,
@@ -37,6 +36,7 @@ import { registerDivisionGeneralTools } from './division-general-tools.js';
 import { registerProjectMembershipTools } from './project-membership-tools.js';
 import { registerPackageTools } from './package-tools.js';
 import { registerPackageRevisionTools } from './package-revision-tools.js';
+import { registerReportTools } from './report-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
@@ -302,30 +302,6 @@ async function handleLoadFiles({
   }
 }
 
-function registerCoordinationTools(reg: ToolRegistrar): void {
-  reg.register(
-    'coordination_report',
-    {
-      description:
-        'Project errors-and-omissions report: required-but-absent sections, ' +
-        'present-but-not-required specs, and dangling cross-references. Each ' +
-        'dangling_ref pinpoints the source paragraph (sourceParagraphId) and a ' +
-        'snippet of the reference in context. Also reports article<->body ' +
-        'reference consistency: related_listed_not_cited (a Related Sections ' +
-        'entry never cited), related_cited_not_listed (a section cited in the ' +
-        'body but not listed), and standard_cited_not_listed (a standard cited ' +
-        'but absent from References). Also suggests implied_related_section ' +
-        'when a body keyword matches an unlisted in-scope section title. Optional packageId scopes to one design ' +
-        'package. Requires a projectId (see list_projects).',
-      inputSchema: {
-        projectId: z.uuid().describe('Project UUID (from list_projects)'),
-        packageId: z.uuid().optional().describe('Optional design-package UUID to scope the report'),
-      },
-    },
-    handleCoordinationReport
-  );
-}
-
 function registerSubmittalTools(reg: ToolRegistrar): void {
   reg.register(
     'submittal_register',
@@ -416,7 +392,7 @@ export function registerTools(
   registerParserTools(reg);
   registerGeneratorTools(reg);
   registerLoaderTools(reg);
-  registerCoordinationTools(reg);
+  registerReportTools(reg);
   registerSubmittalTools(reg);
   registerOpenCommentsTools(reg);
   registerOnboardingTools(reg);

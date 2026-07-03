@@ -100,6 +100,8 @@ import {
   putPackageRequiredSectionsHandler,
 } from './required-sections.js';
 import { getCoordinationReportHandler } from './coordination.js';
+import { compareReportHandler } from './reporting.js';
+import { CompareRequestSchema } from '../reporting/index.js';
 import { postSubmittalRegisterHandler } from './submittal-register.js';
 import { getSpecOpenCommentsHandler, getProjectOpenCommentsHandler } from './open-comments.js';
 import { patchEditabilityHandler, reclassifyHandler, acceptAsNoteHandler } from './editability.js';
@@ -193,6 +195,7 @@ router.post(
 router.delete('/projects/:id/specs/:specId', removeSectionFromProjectHandler);
 router.get('/projects/:id/references/broken', getBrokenRefsHandler);
 router.get('/projects/:id/coordination-report', getCoordinationReportHandler);
+router.post('/reports/compare', validateBody(CompareRequestSchema), compareReportHandler);
 router.post(
   '/projects/:id/submittal-register',
   validateBody(SubmittalRegisterBodySchema),
