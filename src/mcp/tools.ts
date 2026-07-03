@@ -23,6 +23,7 @@ import {
 } from './handlers.js';
 import { registerOnboardingTools } from './onboarding-tools.js';
 import { registerProjectTools } from './project-tools.js';
+import { registerParagraphTools } from './paragraph-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
@@ -383,6 +384,7 @@ export function registerTools(
   const reg = createRegistrar(server, allowedTiers);
   registerLibraryTools(reg);
   registerProjectTools(reg);
+  registerParagraphTools(reg);
   registerSpecTools(reg);
   registerNumberingProfileTool(reg);
   registerParserTools(reg);

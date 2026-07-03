@@ -5,8 +5,8 @@ import {
   createAssociation,
   listAssociationsForParagraph,
   deleteAssociation,
+  getParagraphSpecId,
   AssociationParagraphNotFoundError,
-  pool,
 } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 
@@ -28,11 +28,11 @@ async function resolveIds(req: Request, res: Response): Promise<Ids | null> {
     res.status(400).json({ success: false, error: 'invalid node id' });
     return null;
   }
-  const owner = await pool.query<{ spec_id: string }>(
-    `SELECT spec_id FROM paragraphs WHERE id = $1`,
-    [nodeId.data]
-  );
-  if (owner.rows[0]?.spec_id !== specId.data) {
+  const specOfNode = await getParagraphSpecId(nodeId.data);
+  // Case-insensitive: getParagraphSpecId returns the canonical (lowercase) spec_id
+  // while specId.data is an unnormalized route param — match the MCP path so a valid
+  // uppercase spec id is not a false 404 (CodeRabbit).
+  if (!specOfNode || specOfNode.toLowerCase() !== specId.data.toLowerCase()) {
     res.status(404).json({ success: false, error: 'paragraph not found in spec' });
     return null;
   }

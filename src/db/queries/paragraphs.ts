@@ -131,6 +131,20 @@ function toParagraphRow(r: ChainRow): ParagraphRow {
   };
 }
 
+/** The spec a paragraph belongs to, or null if no such paragraph exists. The single
+ *  source of the paragraph→spec ownership lookup, shared by the REST association
+ *  handlers (resolveIds) and the MCP association tools (assertParagraphInSpec) so the
+ *  raw SELECT lives in one place, independently testable. */
+export async function getParagraphSpecId(
+  paragraphId: string,
+  db: Queryable = pool
+): Promise<string | null> {
+  const res = await db.query<{ spec_id: string }>(`SELECT spec_id FROM paragraphs WHERE id = $1`, [
+    paragraphId,
+  ]);
+  return res.rows[0]?.spec_id ?? null;
+}
+
 export async function getParagraphWithAncestors(
   id: string
 ): Promise<ParagraphWithAncestors | null> {

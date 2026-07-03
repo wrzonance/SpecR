@@ -62,6 +62,13 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['set_editability_override', 'write'],
   ['clear_editability_override', 'write'],
   ['reclassify_spec', 'write'],
+  // wave 3 — paragraphs, associations, comment resolution
+  ['update_paragraph', 'write'],
+  ['remove_paragraph', 'write'], // reversible soft removal (vanish), not a hard delete
+  ['list_associations', 'read'],
+  ['create_association', 'write'],
+  ['accept_comment_as_note', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
+  ['delete_association', 'destructive'], // hard delete of the link row
 ]);

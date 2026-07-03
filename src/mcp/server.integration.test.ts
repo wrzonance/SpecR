@@ -750,10 +750,14 @@ describe('capability gating (#43)', () => {
     // A known read tool and a known write tool are exposed under the default posture…
     expect(names).toContain('get_spec');
     expect(names).toContain('parse_document');
+    // A wave-3 write tool is exposed…
+    expect(names).toContain('update_paragraph');
     // …but no destructive tool leaks (guards future waves from exposing one by default).
     expect(tools.some((t) => t.annotations?.destructiveHint === true)).toBe(false);
-    // delete_project (destructive) exists but is gated off by the default read,write posture.
+    // delete_project and delete_association (destructive) exist but are gated off by the
+    // default read,write posture.
     expect(names).not.toContain('delete_project');
+    expect(names).not.toContain('delete_association');
   });
 });
 
