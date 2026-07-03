@@ -92,6 +92,20 @@ describe('template MCP tools — CRUD lifecycle', () => {
     const id = await createTracked(uniqueName('wave7a-noop'));
     expect(isToolError(await handleUpdateTemplate({ templateId: id }))).toBe(true);
   });
+
+  // Regression: a whitespace-only name passes minLength(1) but the DB CHECK
+  // length(trim(name))>0 would raise pg 23514. The trimmed schema must reject it
+  // as a clean validation error, never fall through to the generic internal error.
+  it('a whitespace-only name is a validation error, not an internal error', async () => {
+    const created = await handleCreateTemplate({ name: '   ' });
+    expect(isToolError(created)).toBe(true);
+    expect(created.content[0]!.text.toLowerCase()).not.toContain('internal error');
+
+    const id = await createTracked(uniqueName('wave7a-wsname'));
+    const updated = await handleUpdateTemplate({ templateId: id, name: '   ' });
+    expect(isToolError(updated)).toBe(true);
+    expect(updated.content[0]!.text.toLowerCase()).not.toContain('internal error');
+  });
 });
 
 describe('template MCP tools — rules & import', () => {
