@@ -9,6 +9,7 @@ import {
 import type { ToolResult } from './handlers.js';
 
 const MISSING = '00000000-0000-0000-0000-000000000000';
+const createdProjectIds: string[] = [];
 let projectId: string;
 let packageId: string;
 
@@ -19,21 +20,28 @@ function parse<T>(res: ToolResult): T {
   return JSON.parse(res.content[0]!.text) as T;
 }
 
-beforeAll(async () => {
+// A fresh project + one design package, tracked for cleanup. Seeding requires an empty
+// target scope (a populated scope raises SeedConflict), so seed tests need their own.
+async function makeProjectPkg(): Promise<{ projectId: string; packageId: string }> {
   const p = await pool.query<{ id: string }>(
     `INSERT INTO projects (name) VALUES ('wave7c-req') RETURNING id`
   );
-  projectId = p.rows[0]!.id;
+  const pid = p.rows[0]!.id;
+  createdProjectIds.push(pid);
   const pkg = await pool.query<{ id: string }>(
     `INSERT INTO design_packages (project_id, name, position) VALUES ($1, 'pkg', 1) RETURNING id`,
-    [projectId]
+    [pid]
   );
-  packageId = pkg.rows[0]!.id;
+  return { projectId: pid, packageId: pkg.rows[0]!.id };
+}
+
+beforeAll(async () => {
+  ({ projectId, packageId } = await makeProjectPkg());
 });
 
 afterAll(async () => {
   // Cascades required_sections + design_packages.
-  await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+  await pool.query('DELETE FROM projects WHERE id = ANY($1::uuid[])', [createdProjectIds]);
 });
 
 describe('required-sections MCP tools', () => {
@@ -85,5 +93,78 @@ describe('required-sections MCP tools', () => {
     expect(
       isToolError(await handleGetPackageRequiredSections({ projectId, packageId: MISSING }))
     ).toBe(true);
+  });
+
+  it('seeds an empty package from the project baseline (seedFrom)', async () => {
+    const fresh = await makeProjectPkg();
+    await handleSetRequiredSections({
+      projectId: fresh.projectId,
+      sections: [{ section: '27 21 00' }, { section: '27 41 00' }],
+    });
+    const seeded = await handleSetPackageRequiredSections({
+      projectId: fresh.projectId,
+      packageId: fresh.packageId,
+      seedFrom: 'baseline',
+    });
+    expect(isToolError(seeded)).toBe(false);
+    const got = parse<{ section: string }[]>(
+      await handleGetPackageRequiredSections({
+        projectId: fresh.projectId,
+        packageId: fresh.packageId,
+      })
+    );
+    expect(got.map((s) => s.section).sort((a, b) => a.localeCompare(b))).toEqual([
+      '27 21 00',
+      '27 41 00',
+    ]);
+  });
+
+  it('seeds an empty package from another package by id (seedFrom.packageId)', async () => {
+    const fresh = await makeProjectPkg();
+    const pkgB = await pool.query<{ id: string }>(
+      `INSERT INTO design_packages (project_id, name, position) VALUES ($1, 'pkgB', 2) RETURNING id`,
+      [fresh.projectId]
+    );
+    const packageBId = pkgB.rows[0]!.id;
+    await handleSetPackageRequiredSections({
+      projectId: fresh.projectId,
+      packageId: fresh.packageId,
+      sections: [{ section: '27 21 00' }],
+    });
+    const seeded = await handleSetPackageRequiredSections({
+      projectId: fresh.projectId,
+      packageId: packageBId,
+      seedFrom: { packageId: fresh.packageId },
+    });
+    expect(isToolError(seeded)).toBe(false);
+    const got = parse<{ section: string }[]>(
+      await handleGetPackageRequiredSections({ projectId: fresh.projectId, packageId: packageBId })
+    );
+    expect(got.map((s) => s.section)).toContain('27 21 00');
+  });
+
+  it('rejects seeding a baseline from a non-toc source (invalid direction)', async () => {
+    const fresh = await makeProjectPkg();
+    // baseline may only be seeded from 'toc'; a package source is an invalid direction.
+    const res = await handleSetRequiredSections({
+      projectId: fresh.projectId,
+      seedFrom: { packageId: fresh.packageId },
+    });
+    expect(isToolError(res)).toBe(true);
+  });
+
+  it('rejects seeding a scope that already has sections (seed conflict)', async () => {
+    const fresh = await makeProjectPkg();
+    await handleSetPackageRequiredSections({
+      projectId: fresh.projectId,
+      packageId: fresh.packageId,
+      sections: [{ section: '27 21 00' }],
+    });
+    const res = await handleSetPackageRequiredSections({
+      projectId: fresh.projectId,
+      packageId: fresh.packageId,
+      seedFrom: 'baseline',
+    });
+    expect(isToolError(res)).toBe(true);
   });
 });
