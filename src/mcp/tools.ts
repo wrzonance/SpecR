@@ -36,6 +36,7 @@ import { registerLibraryManagementTools } from './library-management-tools.js';
 import { registerDivisionGeneralTools } from './division-general-tools.js';
 import { registerProjectMembershipTools } from './project-membership-tools.js';
 import { registerPackageTools } from './package-tools.js';
+import { registerPackageRevisionTools } from './package-revision-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
@@ -409,6 +410,7 @@ export function registerTools(
   registerDivisionGeneralTools(reg);
   registerProjectMembershipTools(reg);
   registerPackageTools(reg);
+  registerPackageRevisionTools(reg);
   registerSpecTools(reg);
   registerNumberingProfileTool(reg);
   registerParserTools(reg);

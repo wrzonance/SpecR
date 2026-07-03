@@ -99,7 +99,9 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['post /projects/{}/packages', 'create_package'],
   ['put /packages/{}/specs', 'set_package_specs'],
   ['delete /packages/{}', 'delete_package'], // destructive tier
-  // …extend during each write-tool wave.
+  // wave 2c — package revisions (issue / read) — LAST ops; full REST↔MCP parity reached
+  ['post /packages/{}/revisions', 'issue_package_revision'],
+  ['get /revisions/{}', 'get_revision'],
 ]);
 
 /**
@@ -110,9 +112,6 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
  * honest — a new REST route with no tool and no entry here fails CI.
  */
 export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
-  // --- Wave 2 remaining: revisions (wave 2c) ---
-  ['post /packages/{}/revisions', 'pending — wave 2 (issue package revision)'],
-  ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
   // --- Permanent exemptions: async job polling, batch DOCX egress, and reference reads
   //     an MCP-native tool already serves. No tool planned. ---
   ['get /parse/jobs/{}', 'async parse-job polling — parse_document runs synchronously as a tool'],
