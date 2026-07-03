@@ -86,4 +86,15 @@ describe('convention MCP tools', () => {
     const libraryId = await insertLibrary();
     expect(isToolError(await handleCloneConventions({ libraryId, sourceId: MISSING }))).toBe(true);
   });
+
+  it('rejects an unsafe (ReDoS) regex in the rules', async () => {
+    const libraryId = await insertLibrary();
+    const res = await handleSetLibraryConventions({
+      libraryId,
+      name: 'Unsafe',
+      rules: { noteBanners: ['(a+)+$'] },
+    });
+    expect(isToolError(res)).toBe(true);
+    expect(res.content[0]!.text.toLowerCase()).toContain('regex');
+  });
 });
