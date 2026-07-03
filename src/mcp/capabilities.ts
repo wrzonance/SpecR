@@ -68,7 +68,13 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['list_associations', 'read'],
   ['create_association', 'write'],
   ['accept_comment_as_note', 'write'],
+  // wave 4 — spec lifecycle
+  ['update_spec', 'write'],
+  ['finalize_spec', 'write'],
+  ['reopen_spec', 'write'],
+  ['restore_spec', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row
+  ['delete_spec', 'destructive'], // soft withdraw of a library master (ADR-030)
 ]);
