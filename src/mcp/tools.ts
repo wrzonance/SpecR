@@ -32,6 +32,7 @@ import { registerConventionTools } from './convention-tools.js';
 import { registerRequiredSectionsTools } from './required-sections-tools.js';
 import { registerRevisionNomenclatureTools } from './revision-nomenclature-tools.js';
 import { registerNumberingProfileCrudTools } from './numbering-profile-crud-tools.js';
+import { registerLibraryManagementTools } from './library-management-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
@@ -401,6 +402,7 @@ export function registerTools(
   registerRequiredSectionsTools(reg);
   registerRevisionNomenclatureTools(reg);
   registerNumberingProfileCrudTools(reg);
+  registerLibraryManagementTools(reg);
   registerSpecTools(reg);
   registerNumberingProfileTool(reg);
   registerParserTools(reg);

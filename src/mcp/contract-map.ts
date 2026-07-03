@@ -81,6 +81,10 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['patch /numbering-profiles/{}', 'update_numbering_profile'],
   ['delete /numbering-profiles/{}', 'delete_numbering_profile'], // destructive tier
   ['post /numbering-profiles/snapshot', 'snapshot_numbering_profile'],
+  // wave 7f — library management (rename / list specs / create client library)
+  ['get /libraries/{}/specs', 'list_library_specs'],
+  ['patch /libraries/{}', 'rename_library'],
+  ['post /libraries/clients', 'create_client_library'],
   // …extend during each write-tool wave.
 ]);
 
@@ -102,11 +106,7 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['put /packages/{}/specs', 'pending — wave 2 (assign_specs_to_package)'],
   ['post /packages/{}/revisions', 'pending — wave 2 (issue package revision)'],
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
-  // --- Wave 7 remaining: config CRUD (libraries / general-spec) ---
-  ['patch /libraries/{}', 'pending — wave 7 (update library)'],
-  ['get /libraries/{}/specs', 'pending — wave 7 (list library specs)'],
-  ['post /libraries/clients', 'pending — wave 7 (create client library)'],
-  ['post /libraries/{}/import', 'pending — wave 7 (import specs into library)'],
+  // --- Wave 7 remaining: division general-spec (wave 7g) ---
   ['get /libraries/{}/divisions/{}/general-spec', 'pending — wave 7 (read library general-spec)'],
   ['put /libraries/{}/divisions/{}/general-spec', 'pending — wave 7 (set library general-spec)'],
   ['get /projects/{}/divisions/{}/general-spec', 'pending — wave 7 (read project general-spec)'],
@@ -117,6 +117,12 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   [
     'get /libraries/import/jobs/{}',
     'async import-job polling — bulk import runs inline via load_files',
+  ],
+  [
+    'post /libraries/{}/import',
+    'async single-master onboarding — returns a 202 job polled via the exempt ' +
+      '/libraries/import/jobs/{} route; MCP tools are synchronous with no job channel. ' +
+      'Agents ingest documents via load_files (MCP-native, inline).',
   ],
   [
     'post /projects/{}/generate',

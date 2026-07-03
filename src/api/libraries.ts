@@ -2,12 +2,13 @@ import { z } from 'zod';
 import type { Request, Response } from 'express';
 import {
   findLibraryById,
-  findLibraryByName,
   listLibraries,
   listLibrarySpecs,
-  createLibrary,
+  createClientLibrary,
   updateLibraryName,
-  DEFAULT_COMPANY_LIBRARY,
+  ParentLibraryNotFoundError,
+  ParentLibraryNotCompanyError,
+  DefaultCompanyLibraryError,
 } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
@@ -56,35 +57,18 @@ export async function listLibrarySpecsHandler(req: Request, res: Response): Prom
   }
 }
 
-// Resolves a client library's parent: an explicit company-tier library, or the
-// seeded Default Company Master. Sends the error response and returns null on
-// 404 (unknown) / 422 (not company-tier) / 500 (default master missing).
-async function resolveClientParent(
-  parentLibraryId: string | undefined,
-  res: Response
-): Promise<{ readonly id: string } | null> {
-  if (parentLibraryId) {
-    const parent = await findLibraryById(parentLibraryId);
-    if (!parent) {
-      res.status(404).json({ success: false, error: 'parent library not found' });
-      return null;
-    }
-    if (parent.tier !== 'company') {
-      res.status(422).json({ success: false, error: 'parent library must be company-tier' });
-      return null;
-    }
-    return parent;
+// Maps a client-library parent-resolution failure to its HTTP status + message.
+// The 500 (missing/misconfigured default company master) is a server-side seed
+// problem, so it is logged here; the 404/422 client errors are not. Returns null
+// for any other error (falls through to pg/500 handling).
+function clientParentErrorResponse(err: unknown): { status: number; message: string } | null {
+  if (err instanceof ParentLibraryNotFoundError) return { status: 404, message: err.message };
+  if (err instanceof ParentLibraryNotCompanyError) return { status: 422, message: err.message };
+  if (err instanceof DefaultCompanyLibraryError) {
+    logger.error({ err }, 'create client library failed');
+    return { status: 500, message: err.message };
   }
-  const company = await findLibraryByName(DEFAULT_COMPANY_LIBRARY);
-  if (!company) {
-    res.status(500).json({ success: false, error: 'default company library missing' });
-    return null;
-  }
-  if (company.tier !== 'company') {
-    res.status(500).json({ success: false, error: 'default company library misconfigured' });
-    return null;
-  }
-  return company;
+  return null;
 }
 
 export async function createClientLibraryHandler(req: Request, res: Response): Promise<void> {
@@ -93,17 +77,18 @@ export async function createClientLibraryHandler(req: Request, res: Response): P
     res.status(400).json({ success: false, error: 'name is required' });
     return;
   }
+  const input = parsed.data.parentLibraryId
+    ? { name: parsed.data.name, parentLibraryId: parsed.data.parentLibraryId }
+    : { name: parsed.data.name };
   try {
-    const parent = await resolveClientParent(parsed.data.parentLibraryId, res);
-    if (!parent) return; // resolveClientParent already replied
-    const library = await createLibrary({
-      tier: 'client',
-      name: parsed.data.name,
-      owner: parsed.data.name,
-      parentLibraryId: parent.id,
-    });
+    const library = await createClientLibrary(input);
     res.status(201).json({ success: true, data: library });
   } catch (err) {
+    const parentErr = clientParentErrorResponse(err);
+    if (parentErr) {
+      res.status(parentErr.status).json({ success: false, error: parentErr.message });
+      return;
+    }
     const mapped = pgErrorToHttp(err, { '23505': 'a library with that name already exists' });
     if (mapped) {
       res.status(mapped.status).json({ success: false, error: mapped.error });
