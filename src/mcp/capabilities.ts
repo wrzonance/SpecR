@@ -95,6 +95,11 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['get_library_conventions', 'read'],
   ['set_library_conventions', 'write'],
   ['clone_conventions', 'write'],
+  // wave 7c — required-sections config (project + package scope)
+  ['get_required_sections', 'read'],
+  ['get_package_required_sections', 'read'],
+  ['set_required_sections', 'write'],
+  ['set_package_required_sections', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row

@@ -29,6 +29,7 @@ import { registerMergeTools } from './merge-tools.js';
 import { registerSpecAssignmentTools } from './spec-assignment-tools.js';
 import { registerTemplateTools } from './template-tools.js';
 import { registerConventionTools } from './convention-tools.js';
+import { registerRequiredSectionsTools } from './required-sections-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
@@ -395,6 +396,7 @@ export function registerTools(
   registerSpecAssignmentTools(reg);
   registerTemplateTools(reg);
   registerConventionTools(reg);
+  registerRequiredSectionsTools(reg);
   registerSpecTools(reg);
   registerNumberingProfileTool(reg);
   registerParserTools(reg);
