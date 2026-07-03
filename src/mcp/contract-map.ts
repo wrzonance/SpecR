@@ -85,6 +85,11 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /libraries/{}/specs', 'list_library_specs'],
   ['patch /libraries/{}', 'rename_library'],
   ['post /libraries/clients', 'create_client_library'],
+  // wave 7g — division general-spec (library + project scope, get/set)
+  ['get /libraries/{}/divisions/{}/general-spec', 'get_library_general_spec'],
+  ['put /libraries/{}/divisions/{}/general-spec', 'set_library_general_spec'],
+  ['get /projects/{}/divisions/{}/general-spec', 'get_project_general_spec'],
+  ['put /projects/{}/divisions/{}/general-spec', 'set_project_general_spec'],
   // …extend during each write-tool wave.
 ]);
 
@@ -106,11 +111,6 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['put /packages/{}/specs', 'pending — wave 2 (assign_specs_to_package)'],
   ['post /packages/{}/revisions', 'pending — wave 2 (issue package revision)'],
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
-  // --- Wave 7 remaining: division general-spec (wave 7g) ---
-  ['get /libraries/{}/divisions/{}/general-spec', 'pending — wave 7 (read library general-spec)'],
-  ['put /libraries/{}/divisions/{}/general-spec', 'pending — wave 7 (set library general-spec)'],
-  ['get /projects/{}/divisions/{}/general-spec', 'pending — wave 7 (read project general-spec)'],
-  ['put /projects/{}/divisions/{}/general-spec', 'pending — wave 7 (set project general-spec)'],
   // --- Permanent exemptions: async job polling, batch DOCX egress, and reference reads
   //     an MCP-native tool already serves. No tool planned. ---
   ['get /parse/jobs/{}', 'async parse-job polling — parse_document runs synchronously as a tool'],

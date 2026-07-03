@@ -116,6 +116,11 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['list_library_specs', 'read'],
   ['rename_library', 'write'],
   ['create_client_library', 'write'],
+  // wave 7g — division general-spec (library + project scope)
+  ['get_library_general_spec', 'read'], // GET auto-resolves (materializes config) but is a read op
+  ['get_project_general_spec', 'read'],
+  ['set_library_general_spec', 'write'],
+  ['set_project_general_spec', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row
