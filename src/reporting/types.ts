@@ -11,6 +11,13 @@ export const CompareRequestSchema = z
     baseline: z.uuid().optional(),
   })
   .superRefine((v, ctx) => {
+    if (new Set(v.sources).size !== v.sources.length) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'sources must be distinct (a spec cannot be compared with itself)',
+        path: ['sources'],
+      });
+    }
     if (v.baseline !== undefined && !v.sources.includes(v.baseline)) {
       ctx.addIssue({
         code: 'custom',

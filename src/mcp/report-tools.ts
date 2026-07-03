@@ -52,7 +52,10 @@ function registerCompareTool(reg: ToolRegistrar): void {
         sources: z
           .array(z.uuid())
           .length(2)
-          .describe('Exactly two live spec UUIDs (project or master) to compare'),
+          .refine((s) => new Set(s).size === s.length, {
+            message: 'the two sources must be distinct (a spec cannot be compared with itself)',
+          })
+          .describe('Exactly two distinct live spec UUIDs (project or master) to compare'),
         baseline: z
           .uuid()
           .optional()

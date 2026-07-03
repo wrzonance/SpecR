@@ -5,6 +5,7 @@ import {
   SpecNotFoundError,
   type CompareRequest,
 } from '../reporting/index.js';
+import { logger } from '../lib/logger.js';
 
 function mapError(err: unknown, res: Response): void {
   if (err instanceof SpecNotFoundError) {
@@ -15,6 +16,9 @@ function mapError(err: unknown, res: Response): void {
     res.status(422).json({ success: false, error: err.message });
     return;
   }
+  // This handler catches everything, so an unexpected failure never reaches the
+  // errorHandler middleware — log it here or it is invisible in production.
+  logger.error({ err }, 'compare report failed');
   res.status(500).json({ success: false, error: 'compare report failed' });
 }
 
