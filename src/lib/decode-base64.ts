@@ -4,8 +4,15 @@
 // size cap from the *encoded* length before materializing the buffer, so an oversized
 // payload is rejected without first allocating it.
 
-/** Base64 alphabet with optional `=` padding — rejects whitespace/URL-safe variants. */
-export const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+/**
+ * Canonical base64: zero or more 4-char groups, optionally closed by a 2-char+`==` or
+ * 3-char+`=` group. Rejects whitespace, URL-safe variants, AND malformed padding like
+ * `AAAA=` or `AAA==` — for those, Buffer.from() decodes more bytes than a length formula
+ * predicts, which would let the size estimate under-count and slip an oversized payload
+ * past the cap. Enforcing well-formed padding here keeps the decoded-size formula below
+ * provably exact.
+ */
+export const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 const MAX_DECODED_BYTES = 10 * 1024 * 1024;
 

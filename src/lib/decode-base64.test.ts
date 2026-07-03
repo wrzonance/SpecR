@@ -12,6 +12,14 @@ describe('decodeBase64Payload', () => {
     expect('error' in decodeBase64Payload('not base64!!')).toBe(true);
   });
 
+  // Regression: malformed padding passes the old loose regex but Buffer.from decodes
+  // more bytes than the length formula predicts, under-counting the cap. Now rejected.
+  it('rejects malformed base64 padding', () => {
+    for (const bad of ['AAAA=', 'AAA==', 'A=', 'AB=', 'AAAAA=']) {
+      expect('error' in decodeBase64Payload(bad)).toBe(true);
+    }
+  });
+
   // Regression: the padded-length estimate must not over-count. A payload decoding to
   // *exactly* maxBytes is at the cap, not over it — the old ceil() rejected these.
   it('accepts payloads decoding to exactly maxBytes, including padded ones', () => {

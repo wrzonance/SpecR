@@ -20,6 +20,7 @@ import { assertDocxSafe } from '../parser/index.js';
 import { generateDocx } from '../generator/index.js';
 import { computeSpecDiff, MergeError } from '../merge/index.js';
 import { logger } from '../lib/logger.js';
+import { decodeBase64Payload } from '../lib/decode-base64.js';
 import { normalizeSectionNumber } from '../lib/section-number.js';
 import {
   anchorsFromSearch,
@@ -38,7 +39,6 @@ type ToolOk = {
 };
 export type ToolResult = ToolError | ToolOk;
 type ReferenceDirection = 'from' | 'to' | 'both';
-const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 export function toolError(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };
@@ -274,15 +274,11 @@ export async function handleGenerateDocx({ specId }: { specId: string }): Promis
 }
 
 async function decodeDocxBuffer(contentBase64: string): Promise<Buffer | ToolError> {
-  if (!BASE64_RE.test(contentBase64)) return toolError('contentBase64 is not valid base64');
-  const estimatedBytes = Math.ceil((contentBase64.length * 3) / 4);
-  if (estimatedBytes > 10 * 1024 * 1024) {
-    return toolError('Content exceeds 10 MB decoded limit');
-  }
-  const buf = Buffer.from(contentBase64, 'base64');
+  const decoded = decodeBase64Payload(contentBase64);
+  if ('error' in decoded) return toolError(decoded.error);
   try {
-    await assertDocxSafe(buf);
-    return buf;
+    await assertDocxSafe(decoded.buffer);
+    return decoded.buffer;
   } catch (err) {
     logger.warn({ err }, 'mcp diff DOCX rejected');
     return toolError('invalid DOCX file');
