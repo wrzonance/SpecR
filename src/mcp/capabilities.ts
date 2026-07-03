@@ -116,6 +116,14 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['list_library_specs', 'read'],
   ['rename_library', 'write'],
   ['create_client_library', 'write'],
+  // wave 7g — division general-spec (library + project scope). The "get" tools are
+  // write-tier: despite mirroring a REST GET, they auto-resolve by persisting the
+  // exact-section config (upsertExactConfig writes division_general_specs), so the
+  // capability model must gate them as writes — a read-only agent must not trigger a DB write.
+  ['get_library_general_spec', 'write'],
+  ['get_project_general_spec', 'write'],
+  ['set_library_general_spec', 'write'],
+  ['set_project_general_spec', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row
