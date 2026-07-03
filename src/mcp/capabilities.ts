@@ -90,6 +90,11 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['update_template', 'write'],
   ['upsert_template_rules', 'write'],
   ['import_template', 'write'],
+  // wave 7b — editing-convention config CRUD
+  ['list_conventions', 'read'],
+  ['get_library_conventions', 'read'],
+  ['set_library_conventions', 'write'],
+  ['clone_conventions', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row

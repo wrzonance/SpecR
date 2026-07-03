@@ -58,6 +58,11 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['delete /templates/{}', 'delete_template'], // destructive tier
   ['post /templates/{}/rules', 'upsert_template_rules'],
   ['post /templates/import', 'import_template'],
+  // wave 7b — editing-convention config CRUD
+  ['get /conventions', 'list_conventions'],
+  ['get /libraries/{}/conventions', 'get_library_conventions'],
+  ['put /libraries/{}/conventions', 'set_library_conventions'],
+  ['post /libraries/{}/conventions/clone', 'clone_conventions'],
   // …extend during each write-tool wave.
 ]);
 
@@ -81,10 +86,6 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
   // --- Wave 7 remaining: config CRUD (conventions / required-sections /
   //     revision-nomenclature / numbering-profile management / libraries / general-spec) ---
-  ['get /conventions', 'pending — wave 7 (list conventions)'],
-  ['get /libraries/{}/conventions', 'pending — wave 7 (read library conventions)'],
-  ['put /libraries/{}/conventions', 'pending — wave 7 (set library conventions)'],
-  ['post /libraries/{}/conventions/clone', 'pending — wave 7 (clone conventions)'],
   ['get /projects/{}/required-sections', 'pending — wave 7 (read required-sections)'],
   ['put /projects/{}/required-sections', 'pending — wave 7 (set required-sections)'],
   [
