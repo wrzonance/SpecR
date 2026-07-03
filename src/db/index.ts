@@ -128,16 +128,26 @@ export type {
 } from './queries/revit.js';
 export {
   createLibrary,
+  createClientLibrary,
   findLibraryById,
   findLibraryByName,
   listLibraries,
   listLibrarySpecs,
   updateLibraryName,
   resolveDefaultLibraryId,
+  ParentLibraryNotFoundError,
+  ParentLibraryNotCompanyError,
+  DefaultCompanyLibraryError,
   UFGS_REFERENCE_LIBRARY,
   DEFAULT_COMPANY_LIBRARY,
 } from './queries/libraries.js';
-export type { Library, LibraryTier, CreateLibraryInput, LibrarySpec } from './queries/libraries.js';
+export type {
+  Library,
+  LibraryTier,
+  CreateLibraryInput,
+  CreateClientLibraryInput,
+  LibrarySpec,
+} from './queries/libraries.js';
 export {
   addSectionToProject,
   removeSectionFromProject,

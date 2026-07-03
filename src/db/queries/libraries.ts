@@ -119,6 +119,56 @@ export async function listLibraries(db: Queryable = pool): Promise<readonly Libr
   }
 }
 
+// Parent-resolution failures for createClientLibrary. Callers map each to their
+// own surface — REST to an HTTP status, MCP to a tool error.
+export class ParentLibraryNotFoundError extends DatabaseError {}
+export class ParentLibraryNotCompanyError extends DatabaseError {}
+export class DefaultCompanyLibraryError extends DatabaseError {}
+
+export interface CreateClientLibraryInput {
+  readonly name: string;
+  readonly parentLibraryId?: string;
+}
+
+// Resolve the company-tier parent for a new client library: an explicit parent
+// (which must be company-tier) or the seeded Default Company Master. Throws a
+// typed error the caller maps to its own surface.
+async function resolveClientParent(
+  parentLibraryId: string | undefined,
+  db: Queryable
+): Promise<Library> {
+  if (parentLibraryId) {
+    const parent = await findLibraryById(parentLibraryId, db);
+    if (!parent) throw new ParentLibraryNotFoundError('parent library not found');
+    if (parent.tier !== 'company') {
+      throw new ParentLibraryNotCompanyError('parent library must be company-tier');
+    }
+    return parent;
+  }
+  const company = await findLibraryByName(DEFAULT_COMPANY_LIBRARY, db);
+  if (!company) throw new DefaultCompanyLibraryError('default company library missing');
+  if (company.tier !== 'company') {
+    throw new DefaultCompanyLibraryError('default company library misconfigured');
+  }
+  return company;
+}
+
+// Create a client library under its resolved company-tier parent, owner = name.
+// Single source of truth for the REST handler and the MCP tool.
+export async function createClientLibrary(
+  input: CreateClientLibraryInput,
+  db: Queryable = pool
+): Promise<Library> {
+  const parent = await resolveClientParent(input.parentLibraryId, db);
+  const createInput: CreateLibraryInput = {
+    tier: 'client',
+    name: input.name,
+    owner: input.name,
+    parentLibraryId: parent.id,
+  };
+  return createLibrary(createInput, db);
+}
+
 /**
  * Default ownership for ingested masters (ADR-015): UFGS corpus loads land in
  * the read-only reference library; everything else is firm content and lands

@@ -112,6 +112,10 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['snapshot_numbering_profile', 'read'], // pure extraction from an uploaded .docx, persists nothing
   ['create_library_numbering_profile', 'write'],
   ['update_numbering_profile', 'write'],
+  // wave 7f — library management (rename / list specs / create client library)
+  ['list_library_specs', 'read'],
+  ['rename_library', 'write'],
+  ['create_client_library', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row
