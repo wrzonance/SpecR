@@ -141,6 +141,11 @@ describe('package revision MCP tools', () => {
     ).toBe(true);
     // missing required `type`
     expect(isToolError(await handleIssuePackageRevision({ packageId }))).toBe(true);
+    // strict: an unknown/misspelled top-level field is rejected, not silently stripped
+    // (parity with the REST route, whose union body is .strict())
+    expect(
+      isToolError(await handleIssuePackageRevision({ packageId, type: 'addendum', typ0: 'oops' }))
+    ).toBe(true);
   });
 
   it('get_revision rejects a bad UUID and an unknown id', async () => {

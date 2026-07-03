@@ -19,7 +19,12 @@ export const IssuePackageRevisionShape = {
   packageId: z.uuid().describe('Design package UUID (from list_packages)'),
   ...StructuredCreateRevisionBodySchema.shape,
 };
-const IssueArgs = z.object(IssuePackageRevisionShape);
+// strictObject (not object) so it inherits StructuredCreateRevisionBodySchema's
+// .strict() mode — .shape drops the unknownKeys policy, so rebuild it explicitly.
+// This keeps the tool at parity with the REST route (validateBody rejects unknown
+// keys): a misspelled top-level field surfaces as an error instead of being
+// silently stripped. Nested `attributes` stays an open bag (strict is top-level only).
+const IssueArgs = z.strictObject(IssuePackageRevisionShape);
 
 export const GetRevisionShape = {
   revisionId: z.uuid().describe('Issued revision UUID (from issue_package_revision)'),
