@@ -9,11 +9,7 @@ import {
 } from '../db/index.js';
 import { UpdateParagraphBodySchema, PatchRemovalBodySchema } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
-import { toolError, type ToolResult } from './handlers.js';
-
-function ok(data: unknown): ToolResult {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
-}
+import { toolError, ok, type ToolResult } from './handlers.js';
 
 // Map an edit-gate error (ADR-018) to a tool error, or null to fall through to the
 // generic 500-equivalent. Mirrors gateErrorResponse in the REST layer so the write

@@ -9,11 +9,7 @@ import {
 import type { UpdateProjectInput } from '../db/index.js';
 import { SectionNumberFormatSchema } from '../lib/section-number.js';
 import { logger } from '../lib/logger.js';
-import { toolError, type ToolResult } from './handlers.js';
-
-function ok(data: unknown): ToolResult {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
-}
+import { toolError, ok, type ToolResult } from './handlers.js';
 
 // Shapes are exported so project-tools.ts advertises the SAME field constraints the
 // handlers validate — one source of truth, no drift between the tool schema and the guard.
