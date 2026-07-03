@@ -127,6 +127,10 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   // wave 2a — project section membership + sources
   ['add_project_section', 'write'],
   ['set_project_sources', 'write'],
+  // wave 2b — design packages
+  ['list_packages', 'read'],
+  ['create_package', 'write'],
+  ['set_package_specs', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row
@@ -134,4 +138,5 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['delete_template', 'destructive'], // hard delete of a style template (RESTRICT if in use)
   ['delete_numbering_profile', 'destructive'], // hard delete (RESTRICT if assigned to any spec)
   ['remove_project_section', 'destructive'], // hard delete of the project's cloned section (force can drop edits)
+  ['delete_package', 'destructive'], // hard delete; CASCADEs membership + issued revisions + snapshots
 ]);
