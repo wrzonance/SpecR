@@ -50,6 +50,14 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /specs/{}/lock', 'get_spec_lock'],
   ['put /specs/{}/lock', 'lock_spec'],
   ['delete /specs/{}/lock', 'unlock_spec'],
+  // wave 7a — style-template config CRUD
+  ['get /templates', 'list_templates'],
+  ['get /templates/{}', 'get_template'],
+  ['post /templates', 'create_template'],
+  ['patch /templates/{}', 'update_template'],
+  ['delete /templates/{}', 'delete_template'], // destructive tier
+  ['post /templates/{}/rules', 'upsert_template_rules'],
+  ['post /templates/import', 'import_template'],
   // …extend during each write-tool wave.
 ]);
 
@@ -71,15 +79,8 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ['put /packages/{}/specs', 'pending — wave 2 (assign_specs_to_package)'],
   ['post /packages/{}/revisions', 'pending — wave 2 (issue package revision)'],
   ['get /revisions/{}', 'pending — wave 2 (read issued revision)'],
-  // --- Wave 7: config CRUD (templates / conventions / required-sections /
+  // --- Wave 7 remaining: config CRUD (conventions / required-sections /
   //     revision-nomenclature / numbering-profile management / libraries / general-spec) ---
-  ['get /templates', 'pending — wave 7 (list templates)'],
-  ['get /templates/{}', 'pending — wave 7 (read template)'],
-  ['post /templates', 'pending — wave 7 (create template)'],
-  ['patch /templates/{}', 'pending — wave 7 (update template)'],
-  ['delete /templates/{}', 'pending — wave 7 (delete template, destructive)'],
-  ['post /templates/{}/rules', 'pending — wave 7 (add template rule)'],
-  ['post /templates/import', 'pending — wave 7 (import template)'],
   ['get /conventions', 'pending — wave 7 (list conventions)'],
   ['get /libraries/{}/conventions', 'pending — wave 7 (read library conventions)'],
   ['put /libraries/{}/conventions', 'pending — wave 7 (set library conventions)'],
