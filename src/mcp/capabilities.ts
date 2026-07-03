@@ -49,6 +49,7 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['get_numbering_profile', 'read'],
   ['generate_docx', 'read'],
   ['coordination_report', 'read'],
+  ['compare_specs', 'read'],
   ['submittal_register', 'read'],
   ['open_comments_report', 'read'],
   ['get_onboarding_report', 'read'],

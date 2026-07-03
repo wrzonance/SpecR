@@ -328,3 +328,5 @@ export {
 export type { CreateAssociationInput } from './queries/associations.js';
 export { getProjectKeynotes } from './queries/keynotes.js';
 export type { ProjectKeynote } from './queries/keynotes.js';
+export { getComparisonColumns, getComparisonParagraphs } from './queries/reporting.js';
+export type { ComparisonColumnMeta, ComparisonParagraphRow } from './queries/reporting.js';

@@ -3294,6 +3294,42 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /reports/compare:
+    post:
+      operationId: postCompareReport
+      summary: Cross-spec comparison matrix — align two live specs by resolved origin, with optional baseline lens
+      description: >
+        Grounded, deterministic cross-spec comparison (ADR-047). Aligns exactly two
+        live specs by resolved paragraph origin (origin_paragraph_id ?? id) and returns
+        a symmetric matrix: one row per aligned paragraph (keyed by resolved origin),
+        one column per source, each cell the source's verbatim text or absent. Every
+        present cell traces to a real specId + paragraph UUID; nothing is synthesized.
+        Supports project↔project (shared master program) and project↔master
+        (drift-from-master, surfacing behindBy version drift). Optionally designate one
+        source as the baseline to reframe cells as added/removed/modified/unchanged. A
+        source id that is not a live spec (frozen package/revision ids) returns 404.
+      tags: [reports]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompareRequest' }
+      responses:
+        '200':
+          description: Comparison report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ComparisonReport' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
   /projects/{id}/submittal-register:
     post:
       operationId: postSubmittalRegister
@@ -3856,6 +3892,104 @@ components:
           enum: [false]
         error:
           type: string
+
+    # ── Cross-spec comparison (reports) ────────────────────────────────────────
+
+    CompareRequest:
+      type: object
+      required: [sources]
+      properties:
+        sources:
+          type: array
+          description: Exactly two live spec UUIDs (project or master) to compare.
+          items: { type: string, format: uuid }
+          minItems: 2
+          maxItems: 2
+        baseline:
+          type: string
+          format: uuid
+          description: Optional — must be one of `sources`; projects a baseline lens over the matrix.
+
+    ComparisonColumn:
+      type: object
+      required: [specId, section, title]
+      properties:
+        specId: { type: string, format: uuid }
+        section: { type: string }
+        title: { type: [string, 'null'] }
+
+    ComparisonCell:
+      description: A grounded cell — either a source's verbatim paragraph, or an absent sentinel.
+      oneOf:
+        - type: object
+          required: [present, specId, paragraphUuid, text]
+          properties:
+            present: { type: boolean, enum: [true] }
+            specId: { type: string, format: uuid }
+            paragraphUuid: { type: string, format: uuid }
+            text: { type: string }
+        - type: object
+          required: [present]
+          properties:
+            present: { type: boolean, enum: [false] }
+
+    ComparisonMatrixRow:
+      type: object
+      required: [originId, cells]
+      properties:
+        originId:
+          type: string
+          description: Resolved-origin alignment key (a real paragraph UUID).
+        cells:
+          type: array
+          description: Index-aligned to `columns`.
+          items: { $ref: '#/components/schemas/ComparisonCell' }
+
+    BaselineLensRow:
+      type: object
+      required: [originId, states]
+      properties:
+        originId: { type: string }
+        states:
+          type: array
+          description: Index-aligned to `columns`.
+          items:
+            type: string
+            enum: [baseline, unchanged, added, removed, modified, absent]
+
+    BaselineLens:
+      type: object
+      required: [specId, rows]
+      properties:
+        specId: { type: string, format: uuid }
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/BaselineLensRow' }
+
+    DriftEntry:
+      type: object
+      required: [specId, behindBy]
+      properties:
+        specId: { type: string, format: uuid }
+        behindBy:
+          type: integer
+          description: Versions this cloned source is behind its master parent (lineage chain).
+
+    ComparisonReport:
+      type: object
+      required: [columns, rows]
+      properties:
+        columns:
+          type: array
+          items: { $ref: '#/components/schemas/ComparisonColumn' }
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/ComparisonMatrixRow' }
+        baseline:
+          $ref: '#/components/schemas/BaselineLens'
+        drift:
+          type: array
+          items: { $ref: '#/components/schemas/DriftEntry' }
 
     # ── Required Sections ──────────────────────────────────────────────────────
 
