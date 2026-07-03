@@ -22,7 +22,8 @@ async function createLibrary(name: string): Promise<string> {
     `INSERT INTO libraries (tier, name) VALUES ('company', $1) RETURNING id`,
     [name]
   );
-  const id = r.rows[0]?.id ?? '';
+  const id = r.rows[0]?.id;
+  if (id === undefined) throw new Error('createLibrary: INSERT ... RETURNING id returned no row');
   createdLibs.push(id);
   return id;
 }
@@ -32,7 +33,8 @@ async function createProject(name: string, libraryId: string): Promise<string> {
     `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
     [name]
   );
-  const id = r.rows[0]?.id ?? '';
+  const id = r.rows[0]?.id;
+  if (id === undefined) throw new Error('createProject: INSERT ... RETURNING id returned no row');
   await pool.query(
     `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
     [id, libraryId]

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
-import type { Server } from 'http';
+import type { Server } from 'node:http';
 import { router } from '../api/router.js';
 import { errorHandler } from '../api/middleware/error.js';
 import { pool, addSectionToProject } from '../db/index.js';
