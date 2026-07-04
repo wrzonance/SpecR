@@ -12,7 +12,14 @@ import { persistParsedSpec, lookupSpecSectionTitle } from '../db/index.js';
 import type { OriginMeta } from '../db/index.js';
 import { inferSectionMeta, computeTitleMatch } from '../lib/infer-section.js';
 import type { SectionInference } from '../lib/infer-section.js';
-import { parseSec, parseDocx, parseText, assertDocxSafe, assertSecSafe } from '../parser/index.js';
+import {
+  parseSec,
+  parseDocx,
+  parseText,
+  extractRefsFromTree,
+  assertDocxSafe,
+  assertSecSafe,
+} from '../parser/index.js';
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { decodeBase64Payload } from '../lib/decode-base64.js';
 import { logger } from '../lib/logger.js';
@@ -102,7 +109,12 @@ async function dispatchParse(
     return { tree, refs };
   }
   if (!Buffer.isBuffer(buf)) return toolErr('invalid .docx payload');
-  return { tree: await parseDocx(buf, noop), refs: [] };
+  // Derive refs from the parsed tree, matching the REST parse/load path
+  // (parseDocxBuffer → extractRefsFromTree). Section/title inference downstream
+  // only reshapes the tree root, so node ids — and thus ref sourceNodeIds —
+  // stay aligned with the paragraphs persisted by persistParsedSpec (#332).
+  const tree = await parseDocx(buf, noop);
+  return { tree, refs: extractRefsFromTree(tree) };
 }
 
 function buildMcpOriginMeta(filename: string, contentBase64: string): OriginMeta {
