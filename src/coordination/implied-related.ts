@@ -183,6 +183,10 @@ function matchEntry(
   const matched = entry.keywords.filter((keyword) => bodyTokens.has(keyword));
   const keyword = matched[0];
   if (keyword === undefined) return null;
+  // Coverage gate (ADR-050): a lone keyword fires only when it is the title's
+  // sole discriminating keyword; multi-keyword titles require >=2 matches, so a
+  // single polysemous token (e.g. "control") no longer implies a broad section.
+  if (matched.length < Math.min(2, entry.keywords.length)) return null;
   const confidence = Math.min(
     MAX_CONFIDENCE,
     BASE_CONFIDENCE + (matched.length - 1) * EXTRA_KEYWORD_CONFIDENCE
