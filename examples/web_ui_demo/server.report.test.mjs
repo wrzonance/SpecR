@@ -27,10 +27,10 @@ function startMock(captured) {
   const server = createServer(async (req, res) => {
     const body = await readBody(req);
     res.setHeader('content-type', 'application/json');
-    if (req.url === '/mcp') return res.end(JSON.stringify(mcpResponse(body)));
+    if (req.url === '/mcp') return res.end(JSON.stringify(mcpResponse(body, captured)));
     if (req.url.endsWith('/chat/completions')) {
       captured.openaiBodies.push(body);
-      return res.end(JSON.stringify(openaiResponse(body)));
+      return res.end(JSON.stringify(openaiResponse(body, captured)));
     }
     res.statusCode = 404;
     res.end('{}');
@@ -38,7 +38,8 @@ function startMock(captured) {
   return server;
 }
 
-function mcpResponse(body) {
+function mcpResponse(body, captured) {
+  if (body.method === 'tools/call') captured.mcpToolCalls.push(body.params?.name);
   if (body.method === 'tools/list') {
     return {
       jsonrpc: '2.0',
@@ -72,7 +73,7 @@ function mcpResponse(body) {
   };
 }
 
-function openaiResponse(body) {
+function openaiResponse(body, captured) {
   const usedTool = body.messages.some((m) => m.role === 'tool');
   if (usedTool) {
     return {
@@ -81,15 +82,16 @@ function openaiResponse(body) {
       ],
     };
   }
+  // First turn emits a tool call. Tests can override which tool the model asks for
+  // (e.g. a write tool it should never be allowed to execute).
+  const toolName = captured.firstCallTool || 'coordination_report';
   return {
     choices: [
       {
         message: {
           role: 'assistant',
           content: null,
-          tool_calls: [
-            { id: 'c1', function: { name: 'coordination_report', arguments: '{"projectId":"p"}' } },
-          ],
+          tool_calls: [{ id: 'c1', function: { name: toolName, arguments: '{"projectId":"p"}' } }],
         },
       },
     ],
@@ -103,7 +105,7 @@ async function listen(server) {
 }
 
 test('POST /report streams grounded steps + a done event with deterministic citations', async (t) => {
-  const captured = { openaiBodies: [] };
+  const captured = { openaiBodies: [], mcpToolCalls: [] };
   const mock = startMock(captured);
   const mockPort = await listen(mock);
   const demoPort = 3000 + (process.pid % 500) + 7;
@@ -158,6 +160,54 @@ test('POST /report streams grounded steps + a done event with deterministic cita
     (firstBody.tools || []).every((tool) => !('__readOnly' in tool)),
     '__readOnly must not be sent to OpenAI'
   );
+});
+
+test('POST /report — a model-emitted write tool never reaches MCP (deny-by-default at the boundary)', async (t) => {
+  // The model asks to call create_project (write tier). The bridge advertises only
+  // read-only tools, so create_project is off the allow-list and must be blocked at
+  // the execution boundary — MCP tools/call must never see it end-to-end.
+  const captured = { openaiBodies: [], mcpToolCalls: [], firstCallTool: 'create_project' };
+  const mock = startMock(captured);
+  const mockPort = await listen(mock);
+  const demoPort = 3000 + (process.pid % 500) + 8;
+
+  const child = spawn(process.execPath, [SERVER], {
+    env: {
+      ...process.env,
+      PORT: String(demoPort),
+      HOST: '127.0.0.1',
+      OPENAI_API_KEY: 'test-key',
+      OPENAI_BASE_URL: `http://127.0.0.1:${mockPort}/v1`,
+      SPECR_API_BASE: `http://127.0.0.1:${mockPort}`,
+    },
+    stdio: 'ignore',
+  });
+  t.after(() => {
+    child.kill();
+    mock.close();
+  });
+  await waitForPort(demoPort);
+
+  const res = await fetch(`http://127.0.0.1:${demoPort}/report`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ request: 'please rename the project' }),
+  });
+  const events = (await res.text())
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .map((l) => JSON.parse(l));
+
+  // MCP never executed the write tool…
+  assert.ok(
+    !captured.mcpToolCalls.includes('create_project'),
+    `MCP must not execute the blocked write tool; saw: ${JSON.stringify(captured.mcpToolCalls)}`
+  );
+  // …it was surfaced as a blocked step, and the report still completed.
+  assert.ok(
+    events.some((e) => e.type === 'step' && e.tool === 'create_project' && e.status === 'error')
+  );
+  assert.ok(events.some((e) => e.type === 'done'));
 });
 
 async function waitForPort(port) {

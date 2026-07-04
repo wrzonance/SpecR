@@ -105,9 +105,10 @@ export function buildReportMessages(request, scope, systemPrompt) {
   ];
 }
 
-// Execute one model tool call against MCP via the injected exec, emit the paired
-// running/done step events, and fold its anchors + trace into the accumulators.
-async function runOneToolCall(call, ctx) {
+// Execute one allow-listed model tool call against MCP via the injected exec,
+// emit the paired running/done step events, and fold its anchors + trace into the
+// accumulators. Only reached after the deny-by-default + budget gates pass.
+async function executeToolCall(call, ctx) {
   const name = call.function?.name;
   const step = {
     type: 'step',
@@ -122,6 +123,57 @@ async function runOneToolCall(call, ctx) {
   if (Array.isArray(anchors)) ctx.anchors.push(...anchors);
   ctx.messages.push({ role: 'tool', tool_call_id: call.id, content: text });
   ctx.emit({ ...step, status: ok ? 'done' : 'error' });
+}
+
+// Deny-by-default at the EXECUTION boundary. A call whose name was never
+// advertised as a read-only tool — a model hallucination, or a name smuggled in
+// via untrusted tool-result / document content (prompt injection) — must never
+// reach MCP. Filtering the advertised tool list is not enough: the model can emit
+// any name. We answer the tool_call_id with an error (so the message history
+// stays valid for the final turn) and never invoke execTool.
+function rejectDisallowedCall(call, ctx) {
+  const name = call.function?.name;
+  ctx.toolCalls.push({ name, ok: false });
+  ctx.messages.push({
+    role: 'tool',
+    tool_call_id: call.id,
+    content: `tool error: "${name}" is not an available read-only reporting tool; it was blocked and not executed.`,
+  });
+  ctx.emit({
+    type: 'step',
+    n: ++ctx.stepNo,
+    tool: name,
+    label: `Blocked ${name} — not a read-only tool`,
+    status: 'error',
+  });
+}
+
+// Call budget exhausted mid-batch: skip the remaining calls without touching MCP,
+// but still answer each tool_call_id so the final compose turn has a valid history.
+// This bounds a single multi-call assistant message to the tool-call budget.
+function skipForBudget(call, ctx) {
+  const name = call.function?.name;
+  ctx.messages.push({
+    role: 'tool',
+    tool_call_id: call.id,
+    content: 'tool error: report call budget reached; this call was not executed.',
+  });
+  ctx.emit({
+    type: 'step',
+    n: ++ctx.stepNo,
+    tool: name,
+    label: `Skipped ${name} — call budget reached`,
+    status: 'error',
+  });
+}
+
+// Route one tool call through the gates: budget first (bounds the batch), then the
+// read-only allow-list (deny-by-default), then execute. Blocked and skipped calls
+// each still push a tool response, so every tool_call_id is answered.
+async function processCall(call, ctx, limits) {
+  if (overBudget(ctx, limits)) return skipForBudget(call, ctx);
+  if (!ctx.allowed.has(call.function?.name)) return rejectDisallowedCall(call, ctx);
+  return executeToolCall(call, ctx);
 }
 
 function safeArgs(call) {
@@ -147,8 +199,11 @@ function usageOf(ctx, round) {
 // text or a guardrail trips — then forces one final, tool-less narrative turn.
 export async function runReport({ request, scope, deps, limits, emit }) {
   const tools = filterReadOnlyTools(await deps.listTools());
+  // The allow-list enforced at execution time — the set of read-only tool names
+  // the model is permitted to actually invoke, independent of what it emits.
+  const allowed = new Set(tools.map((tool) => tool.function?.name).filter(Boolean));
   const messages = buildReportMessages(request, scope, REPORT_SYSTEM_PROMPT);
-  const ctx = { deps, emit, messages, toolCalls: [], anchors: [], stepNo: 0 };
+  const ctx = { deps, emit, messages, toolCalls: [], anchors: [], stepNo: 0, allowed };
 
   for (let round = 1; round <= limits.maxRounds; round++) {
     const completion = await deps.callModel(messages, tools);
@@ -159,7 +214,7 @@ export async function runReport({ request, scope, deps, limits, emit }) {
     if (!calls || calls.length === 0) {
       return finish(message.content || '', ctx, round);
     }
-    for (const call of calls) await runOneToolCall(call, ctx);
+    for (const call of calls) await processCall(call, ctx, limits);
     emit({ type: 'usage', ...usageOf(ctx, round) });
     if (overBudget(ctx, limits)) break;
   }
