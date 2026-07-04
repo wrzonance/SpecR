@@ -5813,8 +5813,10 @@ components:
           format: uuid
           description: >
             Owning library (#318). `null` = a built-in / global template (the
-            seeded default and per-spec onboarded templates). A library-scoped
-            template can only be assigned to a spec in that same library.
+            seeded default, plus templates that predate library scoping).
+            Onboarded templates are created with the spec's own `library_id`,
+            not `null`. A library-scoped template can only be assigned to a spec
+            in that same library.
         createdAt:
           type: string
           format: date-time

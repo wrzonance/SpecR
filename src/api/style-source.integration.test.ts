@@ -189,6 +189,10 @@ describe('POST /specs/:id/style-source', () => {
     // Assign a same-library template first so we know the template is valid…
     const name = `ss-api-xlib-tpl-${randomUUID().slice(0, 8)}`;
     const scopedTemplateId = await makeTemplate(name, otherLib.id);
+    const sameLibRes = await post(`/specs/${scopedSpecId}/style-source`, {
+      templateId: scopedTemplateId,
+    });
+    expect(sameLibRes.status).toBe(200);
     // …then try to bind it to a spec in a DIFFERENT library (UFGS Reference).
     const specElsewhere = await makeSpec();
     const res = await post(`/specs/${specElsewhere}/style-source`, {

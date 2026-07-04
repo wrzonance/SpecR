@@ -47,9 +47,11 @@ export const UpsertTemplateRulesShape = {
 };
 const UpsertTemplateRulesArgs = z.object(UpsertTemplateRulesShape);
 
-// name + optional owner reused from the REST create body, plus the inline DOCX payload.
+// name + optional owner reused from the REST create body — but NOT libraryId: the
+// REST /templates/import route derives a global template and takes no library, so
+// advertising libraryId here would silently ignore it (#318, Codex review).
 export const ImportTemplateShape = {
-  ...CreateTemplateBodySchema.shape,
+  ...CreateTemplateBodySchema.omit({ libraryId: true }).shape,
   contentBase64: z.string().describe('Base64-encoded .docx file to derive a style template from'),
 };
 const ImportTemplateArgs = z.object(ImportTemplateShape);
