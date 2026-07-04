@@ -99,8 +99,10 @@ Revit add-in pattern and keeps the Revit SDK out of source control.
 
 ### Targeting other Revit versions
 
-Revit **2025+** moved to **.NET 8** (`net8.0-windows`) with a different API
-surface. To support those, multi-target the project
-(`<TargetFrameworks>net48;net8.0-windows</TargetFrameworks>`) and select the
-matching `RevitApiDir` per target framework. That work is out of scope for the
-Phase 4c scaffold, which establishes the Revit 2024 baseline.
+Revit **2025 and 2026** moved to **.NET 8** (`net8.0-windows`) and Revit
+**2027** to **.NET 10** (`net10.0-windows`), each with a different API surface
+(Autodesk is also migrating 2025/2026 to .NET 10 as .NET 8 leaves Microsoft
+support in November 2026). To support those, multi-target the project
+(`<TargetFrameworks>net48;net8.0-windows;net10.0-windows</TargetFrameworks>`)
+and select the matching `RevitApiDir` per target framework. That work is out of
+scope for the Phase 4c scaffold, which establishes the Revit 2024 baseline.

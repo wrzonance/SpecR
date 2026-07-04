@@ -14,7 +14,7 @@ UFGS documents reference third-party standards (ASTM, NFPA, IEEE, TIA, etc.) by 
 
 ## Format
 
-SpecsIntact XML (.SEC) using the schema at `http://si.ksc.nasa.gov/sidownloads/xml/specsintactSEC.xsd`
+SpecsIntact XML (.SEC) using the schema at `http://si.ksc.nasa.gov/sidownloads/xml/specsintactSEC.xsd` (the `xsi:noNamespaceSchemaLocation` declared by the files themselves; the live SpecsIntact site has since moved to [specsintact.ksc.nasa.gov](https://specsintact.ksc.nasa.gov))
 
 Key elements:
 - `<PRT>` — Part (contains `<TTL>` title)
