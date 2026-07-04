@@ -63,6 +63,27 @@ Bug fixes need a regression test whose name states the symptom. DOCX inference a
 
 Coverage is diagnostic only. Prefer meaningful boundary coverage over percentage chasing.
 
+## Changing the parser? A/B the corpus first
+
+The inference/parsing engine is the product. Any change to a parsing **regex** or
+inference **signal** can silently reshape how hundreds of fixtures parse. Before and
+after every such change, snapshot the whole reference corpus and diff:
+
+```bash
+pnpm fixture:snapshot before   # known-good baseline
+# …make the parser change…
+pnpm fixture:snapshot after
+pnpm fixture:diff before after
+```
+
+Verify that **only the fixtures you intended to change** moved, that every real spec
+still resolves to 3 parts, and that no specifier-note banner leaked into body text
+(`noteLeaks` must not rise). The reference corpus is copyrighted and gitignored, so the
+tool runs locally — snapshots are written to `.fixture-snapshots/` (also gitignored).
+The always-on guard for the 3-part invariant is `corpus-parts.integration.test.ts`,
+which also asserts no banner leaks; run it with `pnpm test:integration` where the
+corpus is present.
+
 ## Documentation
 
 Use ADRs for non-obvious decisions, rejected common approaches, or choices that will surprise a future reader. Add new ADRs under `docs/adr/NNN-title.md` with Status, Context, Decision, and Consequences.
