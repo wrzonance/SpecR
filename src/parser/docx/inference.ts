@@ -5,6 +5,7 @@ import {
   matchIndentSignal,
   isPartHeading,
   isSpecifierNote,
+  isSpecifierNoteInstruction,
   isDecorationSeparator,
 } from './heuristics.js';
 import type {
@@ -177,10 +178,12 @@ function correctMisalignedArticle(winner: SignalHit, hits: readonly SignalHit[])
 }
 
 // Specifier notes are editorial metadata, not spec content: banner text in any
-// decoration variant, or a note-named paragraph style (name contains "note").
-// Footnote/endnote styles are document apparatus, not specifier notes.
+// decoration variant, the visible "reveal the hidden notes" instruction chrome, or
+// a note-named paragraph style (name contains "note"). Footnote/endnote styles are
+// document apparatus, not specifier notes.
 function isNoteParagraph(para: DocxParagraph, styleMap: StyleMap): boolean {
   if (isSpecifierNote(para.text)) return true;
+  if (isSpecifierNoteInstruction(para.text)) return true;
   if (!para.styleId) return false;
   const style = styleMap.styles.get(para.styleId);
   const label = `${para.styleId} ${style?.name ?? ''}`;

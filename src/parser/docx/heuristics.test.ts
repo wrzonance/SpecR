@@ -3,6 +3,7 @@ import {
   matchTextSignal,
   matchIndentSignal,
   isSpecifierNote,
+  isSpecifierNoteInstruction,
   isPartHeading,
   isDecorationSeparator,
 } from './heuristics.js';
@@ -236,6 +237,44 @@ describe('isSpecifierNote — fuzzy specifier-note detection', () => {
   for (const text of negatives) {
     it(`rejects: ${text.slice(0, 44)}`, () => {
       expect(isSpecifierNote(text)).toBe(false);
+    });
+  }
+});
+
+// A distinct signal from the note BANNER (isSpecifierNote, which opens a note):
+// the visible editorial instruction that points AT the hidden specifier notes —
+// e.g. ARCAT's "Display hidden notes to specifier. (Don't know how? Click Here)"
+// preamble line. It is visible (not w:vanish), carries no note banner, and its
+// style is not note-named, so it otherwise leaks into CSI body as a continuation.
+// Keyed on the "hidden notes to (the) specifier" phrase — inherently editorial
+// chrome, never spec content — NOT on any vendor/source label.
+describe('isSpecifierNoteInstruction — reveal-the-hidden-notes editorial chrome', () => {
+  const positives = [
+    "Display hidden notes to specifier. (Don't know how? Click Here)",
+    'Show hidden notes to the specifier',
+    'display hidden notes to specifier',
+    'To reveal hidden notes to specifier, enable formatting marks.',
+  ];
+  for (const text of positives) {
+    it(`detects: ${text.slice(0, 44)}`, () => {
+      expect(isSpecifierNoteInstruction(text)).toBe(true);
+    });
+  }
+
+  // Blast-radius guards — these real corpus lines (and the isSpecifierNote
+  // negative) all contain "specifier"/"notes" but NOT "hidden notes to specifier",
+  // so a naive non-anchored phrase match would flip real product/editorial content
+  // into a note. The tight phrase must reject every one of them.
+  const negatives = [
+    'The specifier notes that all work shall comply.',
+    'Relief valve shall reseat or CLOSE at a minimum of 80 percent of set pressure.',
+    'Delete all "Specifier Notes" after editing this section.',
+    'A. Provide written notes to the owner.',
+    '** NOTE TO SPECIFIER ** Delete items below not required.',
+  ];
+  for (const text of negatives) {
+    it(`rejects: ${text.slice(0, 44)}`, () => {
+      expect(isSpecifierNoteInstruction(text)).toBe(false);
     });
   }
 });
