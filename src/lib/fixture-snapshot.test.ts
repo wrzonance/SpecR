@@ -58,3 +58,45 @@ describe('fixtureRecord', () => {
     expect(rec.noteLeaks).toBe(0); // renders as `> **[NOTE]** …`, excluded
   });
 });
+
+import { diffSnapshots } from './fixture-snapshot.js';
+import type { Snapshot } from './fixture-snapshot.js';
+
+describe('diffSnapshots', () => {
+  const base: Snapshot = {
+    'A.docx': {
+      parts: 3,
+      noteLeaks: 1,
+      refs: ['sec:09 91 00'],
+      render: 'x\nDisplay hidden notes to specifier.\ny',
+    },
+    'B.docx': { parts: 3, noteLeaks: 0, refs: [], render: 'same' },
+  };
+
+  it('reports only changed fixtures with parts/noteLeaks/refs/line deltas', () => {
+    const after: Snapshot = {
+      'A.docx': {
+        parts: 3,
+        noteLeaks: 0,
+        refs: ['sec:09 91 00'],
+        render: 'x\n> **[NOTE]** Display hidden notes to specifier.\ny',
+      },
+      'B.docx': base['B.docx']!, // unchanged
+    };
+    const d = diffSnapshots(base, after);
+    expect(d.total).toBe(2);
+    expect(d.changed).toHaveLength(1);
+    const a = d.changed[0]!;
+    expect(a.path).toBe('A.docx');
+    expect(a.noteLeaks).toEqual([1, 0]);
+    expect(a.parts).toBeUndefined(); // unchanged fields omitted
+    expect(a.linesRemoved).toContain('Display hidden notes to specifier.');
+    expect(a.linesAdded).toContain('> **[NOTE]** Display hidden notes to specifier.');
+  });
+
+  it('flags fixtures present on only one side', () => {
+    const after: Snapshot = { 'A.docx': base['A.docx']! }; // B removed
+    const d = diffSnapshots(base, after);
+    expect(d.changed.find((c) => c.path === 'B.docx')?.presence).toBe('only-before');
+  });
+});
