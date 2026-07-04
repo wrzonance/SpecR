@@ -104,13 +104,10 @@ async function listen(server) {
   return server.address().port;
 }
 
-test('POST /report streams grounded steps + a done event with deterministic citations', async (t) => {
-  const captured = { openaiBodies: [], mcpToolCalls: [] };
-  const mock = startMock(captured);
-  const mockPort = await listen(mock);
-  const demoPort = 3000 + (process.pid % 500) + 7;
-
-  const child = spawn(process.execPath, [SERVER], {
+// Spawn the demo server as a child pointed at the mock. Kept in one place so every
+// test wires the same env.
+function spawnDemo(mockPort, demoPort) {
+  return spawn(process.execPath, [SERVER], {
     env: {
       ...process.env,
       PORT: String(demoPort),
@@ -121,10 +118,25 @@ test('POST /report streams grounded steps + a done event with deterministic cita
     },
     stdio: 'ignore',
   });
-  t.after(() => {
-    child.kill();
-    mock.close();
-  });
+}
+
+// Cleanup that AWAITS the child's exit before returning, so its listening socket
+// is released before the file's next test spawns — otherwise the OS may still hold
+// the port and the next bind/waitForPort flakes to a timeout.
+async function stopDemo(child, mock) {
+  child.kill();
+  if (child.exitCode === null && child.signalCode === null) await once(child, 'exit');
+  mock.close();
+}
+
+test('POST /report streams grounded steps + a done event with deterministic citations', async (t) => {
+  const captured = { openaiBodies: [], mcpToolCalls: [] };
+  const mock = startMock(captured);
+  const mockPort = await listen(mock);
+  const demoPort = 3000 + (process.pid % 500) + 7;
+
+  const child = spawnDemo(mockPort, demoPort);
+  t.after(() => stopDemo(child, mock));
 
   // Wait for the demo server to accept connections.
   await waitForPort(demoPort);
@@ -171,21 +183,8 @@ test('POST /report — a model-emitted write tool never reaches MCP (deny-by-def
   const mockPort = await listen(mock);
   const demoPort = 3000 + (process.pid % 500) + 8;
 
-  const child = spawn(process.execPath, [SERVER], {
-    env: {
-      ...process.env,
-      PORT: String(demoPort),
-      HOST: '127.0.0.1',
-      OPENAI_API_KEY: 'test-key',
-      OPENAI_BASE_URL: `http://127.0.0.1:${mockPort}/v1`,
-      SPECR_API_BASE: `http://127.0.0.1:${mockPort}`,
-    },
-    stdio: 'ignore',
-  });
-  t.after(() => {
-    child.kill();
-    mock.close();
-  });
+  const child = spawnDemo(mockPort, demoPort);
+  t.after(() => stopDemo(child, mock));
   await waitForPort(demoPort);
 
   const res = await fetch(`http://127.0.0.1:${demoPort}/report`, {
@@ -216,21 +215,8 @@ test('POST /report rejects an oversized body without buffering it whole', async 
   const mockPort = await listen(mock);
   const demoPort = 3000 + (process.pid % 500) + 9;
 
-  const child = spawn(process.execPath, [SERVER], {
-    env: {
-      ...process.env,
-      PORT: String(demoPort),
-      HOST: '127.0.0.1',
-      OPENAI_API_KEY: 'test-key',
-      OPENAI_BASE_URL: `http://127.0.0.1:${mockPort}/v1`,
-      SPECR_API_BASE: `http://127.0.0.1:${mockPort}`,
-    },
-    stdio: 'ignore',
-  });
-  t.after(() => {
-    child.kill();
-    mock.close();
-  });
+  const child = spawnDemo(mockPort, demoPort);
+  t.after(() => stopDemo(child, mock));
   await waitForPort(demoPort);
 
   // ~1 MiB body — far over the 16 KiB cap.
