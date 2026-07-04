@@ -43,10 +43,10 @@
   --err: #dc2626;
 
   /* Type — normal system sans; monospace retained for numbers / keys / code */
-  --display: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, Arial,
-    sans-serif;
-  --serif: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, Arial,
-    sans-serif;
+  --display:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, Arial, sans-serif;
+  --serif:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, Arial, sans-serif;
   --mono: 'IBM Plex Mono', 'Consolas', ui-monospace, monospace;
 }
 
@@ -3362,5 +3362,254 @@ body {
   .chat-sidebar {
     width: 100vw;
     border-left: none;
+  }
+}
+
+/* ── Compose view — agent-driven grounded reporting (#353) ─────────────────── */
+
+.compose {
+  position: relative;
+  z-index: 1;
+  padding: 0.9rem 2rem 8rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.compose-lede {
+  margin: 0;
+  max-width: 70ch;
+  font-family: var(--serif);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-on-vellum);
+}
+
+.compose-scope {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border: 1px dashed var(--line-dim);
+  background: var(--sheet-dim);
+  padding: 0.4rem 0.6rem;
+  overflow-wrap: anywhere;
+}
+
+.compose-field {
+  display: grid;
+  gap: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.compose-field textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 3.4rem;
+  border: 1px solid var(--line-dim);
+  background: var(--sheet);
+  color: var(--vellum);
+  font: 0.92rem var(--serif);
+  padding: 0.55rem 0.65rem;
+}
+
+.compose-field textarea:focus {
+  outline: 2px solid var(--amber);
+  outline-offset: 0;
+}
+
+.compose-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.compose-chip {
+  border: 1px solid var(--line-dim);
+  background: var(--sheet);
+  color: var(--line);
+  font: 0.66rem var(--mono);
+  letter-spacing: 0.04em;
+  padding: 0.32rem 0.6rem;
+  cursor: pointer;
+}
+
+.compose-chip:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.compose-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.compose-pdf:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.compose-pdf:disabled:hover {
+  border-color: var(--line-dim);
+  background: transparent;
+  color: var(--line);
+}
+
+.compose-readonly {
+  margin-left: auto;
+  font: 0.62rem var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--ok);
+}
+
+.compose-meter {
+  font: 0.64rem var(--mono);
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.compose-body {
+  display: grid;
+  grid-template-columns: minmax(15rem, 22rem) 1fr;
+  gap: 1.1rem;
+  align-items: start;
+}
+
+.compose-subhead {
+  margin: 0 0 0.5rem;
+  font: 0.64rem var(--mono);
+  letter-spacing: 0.16em;
+  color: var(--line);
+}
+
+.compose-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.compose-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font: 0.72rem var(--mono);
+  color: var(--ink-on-vellum-dim);
+  border: 1px solid var(--line-dim);
+  background: var(--sheet);
+  padding: 0.4rem 0.55rem;
+}
+
+.compose-step-dot {
+  flex: 0 0 auto;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--amber);
+  animation: compose-pulse 1s ease-in-out infinite;
+}
+
+.compose-step.is-done .compose-step-dot {
+  background: var(--ok);
+  animation: none;
+}
+
+.compose-step.is-error .compose-step-dot {
+  background: var(--err);
+  animation: none;
+}
+
+.compose-step.is-done,
+.compose-step.is-error {
+  color: var(--ink-on-vellum);
+}
+
+@keyframes compose-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.compose-output {
+  min-height: 4rem;
+  border: 1px solid var(--line-dim);
+  background: var(--sheet);
+  padding: 0.85rem 1rem;
+}
+
+.compose-report-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--serif);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--ink-on-vellum);
+  overflow-wrap: anywhere;
+}
+
+.compose-sources {
+  margin-top: 0.9rem;
+  border-top: 1px dashed var(--line-dim);
+  padding-top: 0.6rem;
+}
+
+.compose-sources-head {
+  margin: 0 0 0.4rem;
+  font: 0.62rem var(--mono);
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.compose-source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.compose-cite {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.4rem;
+  border: none;
+  background: rgba(47, 111, 163, 0.12);
+  color: #1d567f;
+  border-bottom: 2px solid #1d567f;
+  cursor: pointer;
+}
+
+.compose-cite:hover {
+  background: var(--amber);
+  color: var(--ink-950);
+  border-bottom-color: var(--amber);
+}
+
+.compose-error {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--err);
+}
+
+@media (max-width: 860px) {
+  .compose-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .compose {
+    padding-left: 1rem;
+    padding-right: 1rem;
   }
 }

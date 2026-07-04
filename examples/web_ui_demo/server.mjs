@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
+import { runReport } from './report-bridge.mjs';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 
@@ -44,6 +45,18 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const CHAT_MAX_TOOL_ROUNDS = 6; // cap the tool-call loop so a model can't spin forever
 const CHAT_MAX_MESSAGES = 40; // reject oversized histories
 
+// Grounded-reporting loop guardrails (#353). A report composes several grounded
+// tool calls, so it gets a wider budget than free-form chat — but still bounded so
+// the "hundreds of DOCX" corpus case cannot run away on cost.
+const REPORT_MAX_ROUNDS = 8;
+const REPORT_MAX_TOOL_CALLS = 12;
+const REPORT_TOKEN_BUDGET = 120_000;
+const REPORT_MAX_REQUEST_CHARS = 4000;
+// Hard byte cap on the /report request body, enforced DURING accumulation so an
+// oversized payload is rejected before it is fully buffered (the request string
+// caps at 4000 chars; 16 KiB leaves ample room for the JSON envelope + scope).
+const REPORT_MAX_BODY_BYTES = 16 * 1024;
+
 const API_PREFIXES = [
   '/health',
   '/specs',
@@ -82,6 +95,24 @@ function sendJson(res, status, payload) {
 async function readRequestBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
+  return chunks.length > 0 ? Buffer.concat(chunks) : undefined;
+}
+
+// Like readRequestBody, but stops accumulating and throws once `maxBytes` is
+// crossed — so an oversized body can't be fully buffered into memory before it
+// is rejected. Used by /report (small JSON envelopes only).
+async function readBoundedBody(req, maxBytes) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) {
+      const err = new Error('request body too large');
+      err.code = 'BODY_TOO_LARGE';
+      throw err;
+    }
+    chunks.push(chunk);
+  }
   return chunks.length > 0 ? Buffer.concat(chunks) : undefined;
 }
 
@@ -190,12 +221,12 @@ async function mcpRpc(method, params) {
   return parsed.result;
 }
 
-// Discover every MCP tool and shape it as an OpenAI function tool. inputSchema is
-// already JSON Schema on the wire, so it maps straight to `function.parameters`.
-async function listOpenAiTools() {
-  const result = await mcpRpc('tools/list', {});
-  const tools = Array.isArray(result?.tools) ? result.tools : [];
-  return tools.map((tool) => ({
+// Shape one MCP tool as an OpenAI function tool. inputSchema is already JSON
+// Schema on the wire, so it maps straight to `function.parameters`. `__readOnly`
+// carries the server's readOnlyHint annotation so the reporting bridge can drop
+// every write/destructive tool before handing the set to the model.
+function toOpenAiTool(tool) {
+  return {
     type: 'function',
     function: {
       name: tool.name,
@@ -205,7 +236,15 @@ async function listOpenAiTools() {
           ? tool.inputSchema
           : { type: 'object', properties: {} },
     },
-  }));
+    __readOnly: tool.annotations?.readOnlyHint === true,
+  };
+}
+
+// Discover every MCP tool and shape it for OpenAI. Used by the free-form /chat.
+async function listOpenAiTools() {
+  const result = await mcpRpc('tools/list', {});
+  const tools = Array.isArray(result?.tools) ? result.tools : [];
+  return tools.map(toOpenAiTool);
 }
 
 // Execute one OpenAI tool_call against MCP; return the text result (truncated)
@@ -237,7 +276,11 @@ async function callOpenAI(messages, tools) {
   const timer = setTimeout(() => controller.abort(), 60_000);
   try {
     const body = { model: OPENAI_MODEL, messages };
-    if (tools && tools.length > 0) body.tools = tools;
+    // Send only the OpenAI-recognized shape — our internal `__readOnly` flag must
+    // not reach the API (it rejects unrecognized tool keys).
+    if (tools && tools.length > 0) {
+      body.tools = tools.map(({ type, function: fn }) => ({ type, function: fn }));
+    }
     const res = await fetch(`${OPENAI_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -361,8 +404,93 @@ async function handleChat(req, res) {
   }
 }
 
+// ── Grounded reporting bridge (#353) ────────────────────────────────────────
+// POST /report streams the agent's tool-calling steps live as newline-delimited
+// JSON (one object per line: step | usage | done | error). It reuses the same
+// MCP + OpenAI plumbing as /chat, but hands the model only read-only tools — the
+// composer cannot mutate state, and every citation traces to a real paragraph.
+
+function reportEmitter(res) {
+  return (obj) => res.write(`${JSON.stringify(obj)}\n`);
+}
+
+function parseReportRequest(payload) {
+  const request = payload?.request;
+  if (typeof request !== 'string' || request.trim() === '')
+    return { error: 'request text required' };
+  if (request.length > REPORT_MAX_REQUEST_CHARS) return { error: 'request too long' };
+  const rawLabel = payload?.scope?.label;
+  const scope =
+    typeof rawLabel === 'string' && rawLabel.trim() !== '' ? { label: rawLabel } : undefined;
+  return { request, scope };
+}
+
+async function handleReport(req, res) {
+  res.writeHead(200, {
+    'content-type': 'application/x-ndjson; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+  });
+  const emit = reportEmitter(res);
+  if (!OPENAI_API_KEY) {
+    emit({
+      type: 'error',
+      code: 'no-key',
+      error: 'OPENAI_API_KEY not configured on the demo server',
+    });
+    res.end();
+    return;
+  }
+  let payload;
+  try {
+    const raw = await readBoundedBody(req, REPORT_MAX_BODY_BYTES);
+    payload = raw ? JSON.parse(raw.toString('utf8')) : null;
+  } catch (err) {
+    const message = err?.code === 'BODY_TOO_LARGE' ? 'request body too large' : 'invalid JSON body';
+    emit({ type: 'error', error: message });
+    res.end();
+    return;
+  }
+  const { request, scope, error } = parseReportRequest(payload);
+  if (error) {
+    emit({ type: 'error', error });
+    res.end();
+    return;
+  }
+  try {
+    const result = await runReport({
+      request,
+      scope,
+      emit,
+      limits: {
+        maxRounds: REPORT_MAX_ROUNDS,
+        maxToolCalls: REPORT_MAX_TOOL_CALLS,
+        tokenBudget: REPORT_TOKEN_BUDGET,
+      },
+      deps: {
+        listTools: listOpenAiTools,
+        callModel: (messages, tools) => callOpenAI(messages, tools),
+        execTool: execToolCall,
+      },
+    });
+    emit({ type: 'done', ...result, model: OPENAI_MODEL });
+  } catch (err) {
+    emit({ type: 'error', error: `report failed: ${err.message}` });
+  } finally {
+    res.end();
+  }
+}
+
 createServer((req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
+  if (url.pathname === '/report') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { success: false, error: 'POST only' });
+      return;
+    }
+    void handleReport(req, res);
+    return;
+  }
   if (url.pathname === '/chat') {
     if (req.method !== 'POST') {
       sendJson(res, 405, { success: false, error: 'POST only' });

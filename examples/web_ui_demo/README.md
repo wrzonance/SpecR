@@ -41,7 +41,8 @@ assets or add CORS just for this example.
 The nav bar switches between: **Project Spec Map** (drop specs, watch the
 cross-reference web knit), **TOC** builder, **Project Settings**, **Library**
 (company + client masters), **Numbering**, **Report** (the live coordination
-audit), and **Submittal** (the submittal register).
+audit), **Submittal** (the submittal register), and **Compose** (agent-driven
+grounded reporting).
 
 ### Coordination audit view (ADR-041)
 
@@ -103,6 +104,50 @@ config file it loaded and whether the chat bridge is enabled.
 
 The bridge auto-discovers every MCP tool via `tools/list`, so it stays in sync as
 SpecR adds tools. No admin controls or per-user permissions — it's an MVP.
+
+## Compose — agent-driven grounded reporting (#353)
+
+The **Compose** tab is the demo's flagship showcase of SpecR's differentiator:
+**deterministic-first, not RAG** (see `ARCHITECTURE.md` → "Deterministic-First:
+Grounded Data, Not RAG"). Instead of a deterministic button, an LLM agent _drives_
+report composition — it calls SpecR's grounded MCP tools, gets computed ground
+truth, and synthesizes a cited narrative. It appears here precisely because this
+is where an agent beats a button: multi-spec / cross-project synthesis, natural-
+language slicing, and composing several grounded reports into one deliverable.
+Everything a single button already does stays a button.
+
+Type a request (or pick an example), press **Compose report**, and:
+
+- The browser POSTs to the demo server's `/report` endpoint, which runs a
+  **read-only** OpenAI tool-calling loop over the MCP tools and streams progress
+  back as newline-delimited JSON.
+- **The grounding is shown.** Each grounded tool call streams into the left column
+  as a live step ("Reading the coordination report…", "Comparing 2 specs…").
+- **Every claim is citable.** The composed narrative lists a **Sources** panel of
+  click-through chips — each traces to a real section + paragraph UUID and opens it
+  in the **Report** audit pane. Citations come deterministically from each tool's
+  `_meta['specr/anchors']`, not from parsing the model's prose.
+- **Determinism where it counts.** The _facts_ are computed by the endpoints; only
+  the wording varies between runs, so **Regenerate** re-runs the same request and
+  reproduces the same findings.
+- **Graceful "not present."** Grounded tools return real empties; the agent is
+  instructed to say "not present" rather than fabricate.
+- **Cost/scope is bounded and surfaced.** A meter shows rounds · grounded calls ·
+  ~tokens; the loop is capped (rounds, tool calls, token budget) so the
+  "hundreds of DOCX" corpus case can't run away.
+- **Read-only by construction.** The composer is handed only tools the MCP server
+  flags `readOnlyHint` — it physically cannot write or edit. That is this demo's
+  answer to the human-in-the-loop-for-writes concern; edits stay in the deterministic
+  views and the free-form **Ask SpecR** chat (which keeps the read+write tier).
+
+Compose uses the **same** `OPENAI_API_KEY` as Ask SpecR (above) and is likewise
+**off until you provide a key** — without one, pressing Compose shows the same
+"not configured" note. The key stays server-side; the browser never sees it.
+
+**Not yet: the PDF.** The vision includes a grounded **PDF artifact** of the
+composed report. That depends on PDF egress (issue #352), which is still open, so
+the **Download PDF** button ships **disabled**, with a tooltip that points at the
+same issue. The cited on-screen report is the deliverable for now.
 
 ## One-Command Demo Launchers
 
