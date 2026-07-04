@@ -112,6 +112,34 @@ describe('GET /projects/:id/revit-links', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects an empty revitInstanceId filter (400, not a silent full inventory)', async () => {
+    const res = await fetch(`${baseUrl}/projects/${projectId}/revit-links?revitInstanceId=`);
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a repeated revitInstanceId filter (array) with 400', async () => {
+    const res = await fetch(
+      `${baseUrl}/projects/${projectId}/revit-links?revitInstanceId=a&revitInstanceId=b`
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a repeated specId filter (array) with 400', async () => {
+    const res = await fetch(
+      `${baseUrl}/projects/${projectId}/revit-links?specId=${specId}&specId=${specId}`
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts a valid revitInstanceId filter and narrows the pivot', async () => {
+    const res = await fetch(
+      `${baseUrl}/projects/${projectId}/revit-links?revitInstanceId=${element}`
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Inventory };
+    expect(body.data.byElement.map((e) => e.revitInstanceId)).toEqual([element]);
+  });
+
   it('returns 404 for an unknown project', async () => {
     const res = await fetch(`${baseUrl}/projects/00000000-0000-0000-0000-000000000000/revit-links`);
     expect(res.status).toBe(404);
