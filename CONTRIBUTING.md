@@ -1,8 +1,6 @@
 # Contributing
 
-This project is TypeScript/Node 22, Express, Zod, PostgreSQL, Vitest, and pnpm.
-The repository is ESM (`"type": "module"`), so relative TypeScript imports use
-`.js` extensions.
+This project is TypeScript/Node 22, Express, Zod, PostgreSQL, Vitest, and pnpm. The repository is ESM (`"type": "module"`), so relative TypeScript imports use `.js` extensions.
 
 ## Setup
 
@@ -14,8 +12,7 @@ pnpm migrate
 pnpm seed
 ```
 
-`pnpm seed` is required before integration tests. It loads the `spec_sections`
-reference data used by `listSpecSections` and the MCP `list_sections` tool.
+`pnpm seed` is required before integration tests. It loads the `spec_sections` reference data used by `listSpecSections` and the MCP `list_sections` tool.
 
 ## Common Commands
 
@@ -45,45 +42,33 @@ pnpm test:integration
 
 ## Quality Rules
 
-- TypeScript is strict and uses `noUncheckedIndexedAccess`,
-  `exactOptionalPropertyTypes`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
-  and `verbatimModuleSyntax`.
-- ESLint enforces `complexity`, cognitive complexity, function length, file
-  length, no `console.*` in `src/`, and no `any`.
+- TypeScript is strict and uses `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, and `verbatimModuleSyntax`.
+- ESLint enforces `complexity`, cognitive complexity, function length, file length, no `console.*` in `src/`, and no `any`.
 - Use `import type` for type-only imports.
 - Do not use non-null assertions outside tests.
 - Validate external input with Zod.
-- Use typed module-boundary errors from `src/lib/errors.ts`; chain `cause` when
-  adding context.
+- Use typed module-boundary errors from `src/lib/errors.ts`; chain `cause` when adding context.
 - Keep `openapi.yaml` in sync with REST endpoint changes.
 - DB migrations are reversible and are the schema of record.
 
 ## Testing
 
-Unit tests should exercise module APIs. Integration and DB-query tests run
-against real PostgreSQL; do not mock Postgres for those paths.
+Unit tests should exercise module APIs. Integration and DB-query tests run against real PostgreSQL; do not mock Postgres for those paths.
 
-Bug fixes need a regression test whose name states the symptom. DOCX inference
-ambiguity is expected in some cases, but it must be documented in a test with:
+Bug fixes need a regression test whose name states the symptom. DOCX inference ambiguity is expected in some cases, but it must be documented in a test with:
 
 ```typescript
 // KNOWN AMBIGUITY: <description>
 ```
 
-Coverage is diagnostic only. Prefer meaningful boundary coverage over percentage
-chasing.
+Coverage is diagnostic only. Prefer meaningful boundary coverage over percentage chasing.
 
 ## Documentation
 
-Use ADRs for non-obvious decisions, rejected common approaches, or choices that
-will surprise a future reader. Add new ADRs under `docs/adr/NNN-title.md` with
-Status, Context, Decision, and Consequences.
+Use ADRs for non-obvious decisions, rejected common approaches, or choices that will surprise a future reader. Add new ADRs under `docs/adr/NNN-title.md` with Status, Context, Decision, and Consequences.
 
-For larger design work, keep design notes in `docs/superpowers/specs/` and plans
-in `docs/superpowers/plans/`, following the existing files.
+For larger design work, keep design notes in `docs/superpowers/specs/` and plans in `docs/superpowers/plans/`, following the existing files.
 
 ## Revit Add-In
 
-The Revit add-in is a separate C#/.NET solution in [revit-addin/](revit-addin/).
-Build it with `dotnet build` from that directory. The pnpm commands above do not
-apply to the add-in.
+The Revit add-in is a separate C#/.NET solution in [revit-addin/](revit-addin/). Build it with `dotnet build` from that directory. The pnpm commands above do not apply to the add-in.

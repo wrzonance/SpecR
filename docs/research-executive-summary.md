@@ -3,6 +3,8 @@
 **Date:** 2026-05-05
 **Status:** Research phase complete. No code written. This document captures all findings, architectural decisions, and hard truths from an extensive analysis of the DOCX/OOXML ecosystem and real-world CSI specification files.
 
+> Point-in-time snapshot: library figures (stars, downloads, versions) reflect May 2026 and are not maintained. Factual errors found in later review have been corrected in place.
+
 ---
 
 ## Table of Contents
@@ -23,7 +25,7 @@
 
 ## The Problem
 
-No open-source tool exists for CSI MasterFormat specification document automation. Commercial tools (MasterSpec, SpecLink, SpecBuilder) dominate but share a fatal limitation: they don't integrate with BIM data programmatically. Revit models contain the ground truth of what's actually designed — what equipment is specified, what manufacturers were selected, what quantities exist — yet this data is manually transcribed into specification documents by humans who copy-paste between Revit schedules and Word files.
+No established open-source tool exists for CSI MasterFormat specification document automation. Commercial tools (MasterSpec via Deltek Specpoint, RIB SpecLink, e-SPECS) dominate, but their BIM integration is proprietary and plugin-locked rather than an open, programmable API. Revit models contain the ground truth of what's actually designed (what equipment is specified, what manufacturers were selected, what quantities exist), yet this data is manually transcribed into specification documents by humans who copy-paste between Revit schedules and Word files.
 
 The goal is to build **SpecR**: a headless API service that treats specification documents as structured data, not opaque Word files. It should:
 
@@ -33,7 +35,7 @@ The goal is to build **SpecR**: a headless API service that treats specification
 - Support git-style 3-way merge when Owner/Client edits come back
 - Work across all CSI divisions from day one
 - Support multiple firms, each with their own master libraries and style templates
-- Be company-agnostic — not tied to any single firm's conventions
+- Be company-agnostic: not tied to any single firm's conventions
 
 ---
 
@@ -45,7 +47,7 @@ The difficulty is not in any single feature. It's in the intersection of five re
 
 2. **Round-trip fidelity**: Documents leave the system, get manually edited by people who don't have this tool, and must come back in without losing their changes.
 
-3. **Hierarchy inference**: The DOCX format stores paragraphs flat. Parent/child relationships do not exist in the file. They must be inferred — and the inference rules change depending on who authored the document.
+3. **Hierarchy inference**: The DOCX format stores paragraphs flat. Parent/child relationships do not exist in the file. They must be inferred, and the inference rules change depending on who authored the document.
 
 4. **Full numbering control**: CSI specifications use specific multilevel numbering (PART 1, 1.1, A., 1., a., 1), a)...) that must be reproduced exactly. "Close enough" numbering in a construction specification is a liability issue.
 
@@ -75,7 +77,7 @@ Effective paragraph formatting comes from six layers, applied in this order:
 5. Numbering definition direct properties (when `numPr` is applied directly)
 6. Direct formatting (inline on the paragraph)
 
-Each layer can set, override, or remove properties from lower layers. Toggle properties (bold, italic, caps) use XOR semantics across layers — bold inherited + bold applied = NOT bold. The ECMA-376 specification's own diagram showing this cascade was acknowledged to be wrong by Microsoft. If the standards body got it wrong, every third-party implementation is suspect.
+Each layer can set, override, or remove properties from lower layers. Toggle properties (bold, italic, caps) use XOR semantics across layers: bold inherited + bold applied = NOT bold. The cascade is intricate enough that the specification's own presentation of it is widely considered easy to misread, and implementations disagree in practice. If the standard itself is this hard to read correctly, every third-party implementation is suspect.
 
 ### The 276 Latent Built-In Styles
 
@@ -88,12 +90,12 @@ Numbering definitions have an abstraction layer:
 - `abstractNum`: defines formatting for up to 9 levels. Cannot be directly referenced by paragraphs.
 - `num`: an instance that references an `abstractNum` and CAN be referenced. Can override specific levels via `lvlOverride`.
 
-Multiple `num` instances can reference the same `abstractNum` with different overrides. A single document can have dozens of numbering instances, some sharing formatting and some diverging. The `pStyle` element in a numbering level creates a bidirectional link between a style and a numbering level — but only if both sides agree. If either side is missing, behavior degrades silently.
+Multiple `num` instances can reference the same `abstractNum` with different overrides. A single document can have dozens of numbering instances, some sharing formatting and some diverging. The `pStyle` element in a numbering level creates a bidirectional link between a style and a numbering level, but only if both sides agree. If either side is missing, behavior degrades silently.
 
 ### What Nobody Tells You
 
 - `multiLevelType` is a UI hint only. The spec explicitly says it "shall not be used to limit the behavior of the list." A list marked `singleLevel` can use all 9 levels.
-- `numId="0"` is a sentinel that means "remove numbering from this paragraph" — it doesn't reference numbering definition zero.
+- `numId="0"` is a sentinel that means "remove numbering from this paragraph": it doesn't reference numbering definition zero.
 - Numbering inherited from a paragraph style has LOWER precedence than the paragraph style's own properties, but numbering applied directly to a paragraph has HIGHER precedence. This dual-source, split-precedence model is one of the most confusing aspects of OOXML.
 
 ---
@@ -104,18 +106,18 @@ We analyzed 60 specification files across three sources in the `SpecR/docs/refer
 
 ### ARCAT (23 files, manufacturer guide specs)
 
-ARCAT specs are **machine-generated** from ARCAT's content management system. Every element carries the revision ID `ABFFABFF` and metadata shows 1 minute of edit time. This makes them the cleanest to parse — but also the least representative of real-world editing.
+ARCAT specs are **machine-generated** from ARCAT's content management system. Every element carries the revision ID `ABFFABFF` and metadata shows 1 minute of edit time. This makes them the cleanest to parse, but also the least representative of real-world editing.
 
 **Key patterns:**
 - 14 custom styles, ALL root-level (no `basedOn` inheritance whatsoever)
-- Single `abstractNum` with single `num` instance — one numbering system for the entire document
+- Single `abstractNum` with single `num` instance: one numbering system for the entire document
 - Rigid 1:1 pStyle ↔ ilvl mapping: `ARCATPart`=ilvl 0, `ARCATArticle`=ilvl 1, `ARCATParagraph`=ilvl 2, etc.
-- **Redundant numPr everywhere**: both the style definition AND every paragraph carry explicit `numPr`. Defensive pattern — if one source breaks, the other still works.
-- No continuation styles — every content paragraph is numbered
-- 76% of content at SubSub1 or deeper (ilvl 4+) — manufacturer specs are bottom-heavy product data
+- **Redundant numPr everywhere**: both the style definition AND every paragraph carry explicit `numPr`. Defensive pattern: if one source breaks, the other still works.
+- No continuation styles: every content paragraph is numbered
+- 76% of content at SubSub1 or deeper (ilvl 4+): manufacturer specs are bottom-heavy product data
 - Zero content controls (`w:sdt`), zero custom XML parts
 - Specifier notes use `ARCATnote` style: red text, dotted red border, `w:vanish` (hidden)
-- Part numbering renders as `PART  1  GENERAL` (double-spaced, no dash) — differs from standard CSI `PART 1 - GENERAL`
+- Part numbering renders as `PART  1  GENERAL` (double-spaced, no dash): differs from standard CSI `PART 1 - GENERAL`
 
 **Numbering hierarchy (ilvl → format):**
 ```
@@ -136,15 +138,15 @@ Chatsworth Products Inc. (CPI) is a telecom equipment manufacturer whose guide s
 
 **Key patterns:**
 - Style naming in CPI files: `PRT`, `ART`, `PR1`-`PR5`, `SCT`, `EOS`, `CMT`
-- Numbering lives in style definitions — paragraphs do NOT redundantly carry numPr (opposite of ARCAT)
+- Numbering lives in style definitions: paragraphs do NOT redundantly carry numPr (opposite of ARCAT)
 - **Continuation styles (lc variants)**: `PR1lc` through `PR5lc` suppress numbering while maintaining indentation. 34% of content uses these. The `next` style property means pressing Enter after an lc paragraph switches to the numbered variant.
 - **Manual numbering in text is rampant**: People type "A." or "1.5" in the paragraph text on lc-styled paragraphs, defeating OOXML automatic numbering. A parser seeing `PR1lc` with text "A. ANSI/TIA-569..." must recognize the "A." is cosmetic, not structural.
-- **Override numbering**: Multiple numId values reference different abstractNums or the same abstractNum with different `lvlOverride` settings. Product section headers like "2.2 ZETAFRAME CABINET SYSTEM" use PR1 with numId=12 instead of the ART style — creating "fake" article headings outside the main numbering sequence.
+- **Override numbering**: Multiple numId values reference different abstractNums or the same abstractNum with different `lvlOverride` settings. Product section headers like "2.2 ZETAFRAME CABINET SYSTEM" use PR1 with numId=12 instead of the ART style, creating "fake" article headings outside the main numbering sequence.
 - **numId=0 for explicit suppression**: Some paragraphs explicitly disable numbering that their style would otherwise provide.
 - **ilvl gap**: CPI files reserve ilvl 1 and 2 for Schedule and Product Data Sheet (rarely used), so Article jumps to ilvl 3. PR1 is ilvl 4. This means the same logical CSI level maps to different ilvl values depending on which template authored the document.
 - **outlineLvl=9 overrides**: 307 paragraphs override their style's outline level to 9 (body text), suppressing them from the document outline.
 - **Unit markup**: Character styles `IP` (red) and `SI` (teal) mark Imperial/metric alternatives within the same paragraph, with `esUOMDelimiter` separating them. This is semantic markup that could be programmatically toggled.
-- 215 hidden `CMT` paragraphs (29% of document) — specifier notes in blue with `w:vanish`
+- 215 hidden `CMT` paragraphs (29% of document): specifier notes in blue with `w:vanish`
 - Zero content controls, but does have an empty `customXml/` with a bibliography placeholder
 
 **Numbering hierarchy (ilvl → format):**
@@ -162,23 +164,23 @@ Chatsworth Products Inc. (CPI) is a telecom equipment manufacturer whose guide s
 
 ### UFGS / SpecsIntact (31 directories by division, .SEC files)
 
-UFGS specifications are NOT DOCX files. They are SpecsIntact XML (`.SEC` format) — a purpose-built semantic XML schema developed by NASA/USACE. This is the most important finding of the analysis because UFGS is the richest potential seed data source and it already solves the hierarchy problem.
+UFGS specifications are NOT DOCX files. They are SpecsIntact XML (`.SEC` format): a purpose-built semantic XML schema from SpecsIntact, software originally developed by NASA (1963, long maintained at Kennedy Space Center; USACE took over program management in 2023) and used by USACE/NAVFAC/AFCEC. This is the most important finding of the analysis because UFGS is the richest potential seed data source and it already solves the hierarchy problem.
 
 **Key patterns:**
 - Files are XML with a `<SEC>` root element, using the schema at `specsintactSEC.xsd`
 - **Hierarchy IS the XML tree**: `<PRT>` (Part) contains `<SPT>` (Sub-Part/Article) contains `<TXT>` (body text) and `<LST>`/`<ITM>` (lists/items). No inference needed.
-- `<NTE>` wraps specifier notes with `<NPR>` for note paragraphs — equivalent to CMT/ARCATnote but semantically tagged
-- `<MET>`/`<ENG>` tags wrap metric/English unit alternatives — similar to IP/SI unit-alternation approaches in DOCX templates but as proper XML elements
+- `<NTE>` wraps specifier notes with `<NPR>` for note paragraphs, equivalent to CMT/ARCATnote but semantically tagged
+- `<MET>`/`<ENG>` tags wrap metric/English unit alternatives, similar to IP/SI unit-alternation approaches in DOCX templates but as proper XML elements
 - `<TAI OPT="ARMY">` elements mark service-branch-specific tailoring options
 - `<RID>` tags mark reference identifiers (linked to the References article)
 - `<URL>` tags with `HREF` attributes for linked resources
 - `<SRF>` for section cross-references
 - `<BRK>` and `<BRL>` for line/paragraph breaks
 - `AUTONUMBER="TRUE"` in metadata indicates automatic numbering
-- Files are dated as recently as November 2025 — current MasterFormat
+- Files are dated as recently as November 2025: current MasterFormat
 - US government work = public domain, no copyright restrictions
 
-**Why this matters:** UFGS .SEC files give us a pre-parsed, hierarchically structured, semantically tagged, public domain corpus of specification content across all CSI divisions. It's the perfect seed data source because we don't need to solve the parsing problem to ingest it — the hierarchy is explicit.
+**Why this matters:** UFGS .SEC files give us a pre-parsed, hierarchically structured, semantically tagged, public domain corpus of specification content across all CSI divisions. It's the perfect seed data source because we don't need to solve the parsing problem to ingest it: the hierarchy is explicit.
 
 ### The Universal CSI Numbering Pattern
 
@@ -222,7 +224,7 @@ The CPI analysis proved this. Even in a manufacturer-authored "clean" spec:
 - numId=0 was used to suppress numbering on paragraphs that should have been a different style
 - outlineLvl was overridden on 300+ paragraphs
 
-Now imagine what happens when a junior spec writer at a 50-person firm edits this document for 6 months. Styles get mixed. Numbering breaks. People "fix" it by hardcoding numbers. Format Painter smears properties across unrelated paragraphs. Paragraphs get pasted from other documents carrying foreign styles and numbering definitions. The document still looks correct when printed — Word's rendering engine is forgiving. But the underlying XML is a disaster.
+Now imagine what happens when a junior spec writer at a 50-person firm edits this document for 6 months. Styles get mixed. Numbering breaks. People "fix" it by hardcoding numbers. Format Painter smears properties across unrelated paragraphs. Paragraphs get pasted from other documents carrying foreign styles and numbering definitions. The document still looks correct when printed: Word's rendering engine is forgiving. But the underlying XML is a disaster.
 
 ### 3. The "Looks Right, Parses Wrong" Problem
 
@@ -285,7 +287,7 @@ Instead of named adapters, the parser needs a **multi-signal inference engine**:
 
 **Signal 5: Indentation analysis.** Even when numbering is absent, left indent values often follow the CSI staircase pattern (each level adds ~576 twips / 0.4"). Indentation can be a fallback signal for hierarchy depth.
 
-These signals must be weighted, combined, and capable of disagreeing. A paragraph with style PR1lc (signal 2 says "no number, PR1 level") that has text starting with "A." (signal 4 says "looks like A. numbering") and left indent of 1152 twips (signal 5 says "level 2") should be classified as a PR1-level paragraph with manually hardcoded numbering. The parser should strip the leading "A." and let the numbering engine handle it on regeneration — or preserve it if round-trip fidelity requires it.
+These signals must be weighted, combined, and capable of disagreeing. A paragraph with style PR1lc (signal 2 says "no number, PR1 level") that has text starting with "A." (signal 4 says "looks like A. numbering") and left indent of 1152 twips (signal 5 says "level 2") should be classified as a PR1-level paragraph with manually hardcoded numbering. The parser should strip the leading "A." and let the numbering engine handle it on regeneration, or preserve it if round-trip fidelity requires it.
 
 ---
 
@@ -298,13 +300,12 @@ Out of dozens of DOCX libraries across all languages, only four resolve the styl
 | Library | Language | License | What It Does |
 |---|---|---|---|
 | **docx4j** `PropertyResolver` | Java | Apache 2.0 | Full ECMA-376 style resolution. Walks basedOn chain, caches results. Gold standard. |
-| **Clippit** (ex-Open-Xml-PowerTools) | C# | MIT | Full style resolution + `ListItemRetriever` for hierarchy. Only library that builds the paragraph tree. |
+| **Clippit** (ex-Open-Xml-PowerTools) | C# | MIT | Full style resolution + `ListItemRetriever` for hierarchy. The one library that reconstructs Word's OOXML-numbering-faithful list tree. |
 | **docx-parser-converter** | Python | MIT | 3-phase parse→resolve→convert with Pydantic models. 22 GitHub stars but architecturally sound. |
-| **docx-parser-converter** handles resolve phase explicitly | | | |
 
 ### Libraries That Infer List Hierarchy
 
-Only Clippit's `ListItemRetriever` builds the actual parent/child tree with `LevelNumbers` arrays. Everything else gives you flat paragraphs with ilvl values and says "good luck."
+Only Clippit's `ListItemRetriever` reconstructs Word's numbering-faithful parent/child list tree with `LevelNumbers` arrays (Docling and Dedoc build heuristic/semantic section trees instead). Everything else gives you flat paragraphs with ilvl values and says "good luck."
 
 ### Libraries for DOCX Generation
 
@@ -329,7 +330,7 @@ Only Clippit's `ListItemRetriever` builds the actual parent/child tree with `Lev
 
 ### The Gap
 
-No TypeScript/JavaScript library resolves DOCX style inheritance or builds list hierarchy from flat paragraphs. The JS ecosystem has good writers (dolanmiu/docx) and decent readers (officeParser) but nothing that does the hard inference work. Building SpecR in TypeScript means porting the inference algorithms from Clippit (C#) or docx4j (Java).
+No permissively licensed, headless TypeScript/JavaScript library exposes a fully resolved style cascade plus a numbering-faithful paragraph tree as a consumable AST (docx-preview resolves styles only to render HTML; officeParser emits a structural AST but doesn't walk the full `basedOn` chain), and none does heuristic inference when numbering is absent — the hard part. Building SpecR in TypeScript means porting the inference algorithms from Clippit (C#) or docx4j (Java).
 
 ### Document Assembly Tools
 
@@ -343,7 +344,7 @@ No TypeScript/JavaScript library resolves DOCX style inheritance or builds list 
 ### Office Add-ins (Office.js)
 
 The Word JavaScript API provides paragraph, style, and list control from within Word Online and Desktop:
-- `Word.Style.baseStyle`, `linkToListTemplate()` (WordApi 1.5+)
+- `Word.Style.baseStyle` (WordApi 1.5), `linkToListTemplate()` (WordApiDesktop 1.3 — desktop-only, unavailable in Word on the web)
 - `getOoxml()` / `insertOoxml()` for full OOXML round-trip from client-side
 - NPM packages (JSZip, docxtemplater, dolanmiu/docx) work inside the add-in sandbox
 - **Critical limitation**: `Word.ListLevel` and `Word.ListTemplate` are Desktop-only. No custom list level manipulation in Word Online.
@@ -356,7 +357,7 @@ These were confirmed during the research session and should be treated as requir
 
 1. **API-first (headless)**: No UI in the core. REST API that any client can consume. Primary clients will be a Revit add-in and a web interface.
 
-2. **Revit add-in calls API directly**: Not file export → upload. Direct API calls from within Revit. Web interface shows incoming diffs and change review. Autodesk Platform Services (APS/Forge cloud) as later-stage goal — architecture must support it from start.
+2. **Revit add-in calls API directly**: Not file export → upload. Direct API calls from within Revit. Web interface shows incoming diffs and change review. Autodesk Platform Services (APS/Forge cloud) as later-stage goal. Architecture must support it from start.
 
 3. **Git-style 3-way merge**: Not "last writer wins." Full conflict detection and resolution. User can reject changes. Base version tracked for every paragraph.
 
@@ -444,11 +445,11 @@ MVP is the smallest thing that proves the core thesis: **specification documents
    - Apply accepted changes back to database
 
 5. **REST API** (no web UI in MVP)
-   - `POST /parse` — upload DOCX or .SEC, get AST back
-   - `GET /specs/{id}` — get spec tree from database
-   - `POST /generate` — generate DOCX from spec tree
-   - `POST /diff` — upload edited DOCX, get diff against stored version
-   - `POST /merge` — apply accepted changes
+   - `POST /parse`: upload DOCX or .SEC, get AST back
+   - `GET /specs/{id}`: get spec tree from database
+   - `POST /generate`: generate DOCX from spec tree
+   - `POST /diff`: upload edited DOCX, get diff against stored version
+   - `POST /merge`: apply accepted changes
 
 ### MVP Does NOT Include
 
@@ -543,7 +544,7 @@ Take a real ARCAT spec DOCX. Parse it. Store it. Regenerate it. Open in Word. Ed
 
 3. **Performance at scale**: A firm library might have 500+ sections with 50,000+ paragraphs. The merge engine must handle large diffs without degrading. PostgreSQL with proper indexing should handle this, but the tree queries (recursive CTEs for ancestor/descendant operations) need benchmarking.
 
-4. **Legal/licensing**: UFGS content is public domain. ARCAT specs may have usage restrictions despite being freely downloadable. MasterSpec content is copyrighted by Deltek. The paragraph library must be clearly separated from copyrighted source material — the tool processes documents, it doesn't redistribute their content.
+4. **Legal/licensing**: UFGS content is public domain. ARCAT specs may have usage restrictions despite being freely downloadable. MasterSpec content is copyrighted by the AIA and published/licensed by Deltek (Specpoint). The paragraph library must be clearly separated from copyrighted source material: the tool processes documents, it doesn't redistribute their content.
 
 5. **Adoption chicken-and-egg**: The tool is most valuable with a populated paragraph library, but building the library requires the tool. UFGS import partially solves this for the seed tier, but firm-specific content must be built by each firm.
 
@@ -554,9 +555,9 @@ Take a real ARCAT spec DOCX. Parse it. Store it. Regenerate it. Open in Word. Ed
 ## Reference Materials
 
 ### Specifications Analyzed
-- `docs/references/ARCAT/` — 23 DOCX files, ARCAT manufacturer guide specs
-- `docs/references/MANUFACTURER_CPI/` — 6 DOCX files, Chatsworth Products Inc. CSI MasterFormat specs
-- `docs/references/UFGS/` — 31 directories by division, SpecsIntact .SEC format
+- `docs/references/ARCAT/`: 23 DOCX files, ARCAT manufacturer guide specs
+- `docs/references/MANUFACTURER_CPI/`: 6 DOCX files, Chatsworth Products Inc. CSI MasterFormat specs
+- `docs/references/UFGS/`: 31 directories by division, SpecsIntact .SEC format
 
 ### Key Libraries (with repository links)
 - dolanmiu/docx (TS, MIT): https://github.com/dolanmiu/docx
