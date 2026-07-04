@@ -119,3 +119,44 @@ export function diffSnapshots(before: Snapshot, after: Snapshot): DiffResult {
   }
   return { changed, total: paths.length };
 }
+
+import { readFile, writeFile, mkdir, glob } from 'node:fs/promises';
+import { join } from 'node:path';
+import { parse } from '../parser/index.js';
+
+const PROJECT_ROOT = process.cwd();
+
+export async function snapshotCorpus(refDir = 'docs/references'): Promise<Snapshot> {
+  const snapshot: Snapshot = {};
+  for await (const rel of glob(`${refDir}/**/*.{docx,sec,SEC}`, { cwd: PROJECT_ROOT })) {
+    const abs = join(PROJECT_ROOT, rel);
+    try {
+      const { tree, refs } = await parse(await readFile(abs), abs);
+      snapshot[rel] = fixtureRecord(tree, refs);
+    } catch (err) {
+      snapshot[rel] = {
+        parts: -1,
+        noteLeaks: -1,
+        refs: [],
+        render: '',
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+  return snapshot;
+}
+
+export async function writeSnapshot(
+  snapshot: Snapshot,
+  outDir: string,
+  label: string
+): Promise<string> {
+  await mkdir(outDir, { recursive: true });
+  const path = join(outDir, `${label}.json`);
+  await writeFile(path, JSON.stringify(snapshot));
+  return path;
+}
+
+export async function readSnapshot(path: string): Promise<Snapshot> {
+  return JSON.parse(await readFile(path, 'utf8')) as Snapshot;
+}
