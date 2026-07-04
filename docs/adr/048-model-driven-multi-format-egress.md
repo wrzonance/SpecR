@@ -86,14 +86,15 @@ style-import phase, #150 (pixel-diff parity harness), #301/ADR-040 (header/foote
 
 **Positive**
 
-- Outputs are cleaner than inputs and **identical across formats**; DOCX↔PDF parity is guaranteed at
-  every specifiable layer (styles, numbering labels, content, page setup, header/footer, table
-  structure).
+- Outputs are cleaner than inputs and **consistent across formats at every model-mapped layer**
+  (styles, numbering labels, content, page setup, header/footer, table structure). The only residual is
+  engine-level wrap/pagination, which the semantic-parity bar declares out of scope — this is *not* a
+  claim of pixel-identical output across formats.
 - PDF egress is "just another renderer" over the resolved model — as are Markdown, HTML, and `.SEC`.
 - Clients control their own fidelity: defaults clean the mess, scoped rules preserve intentional
   deviation, warnings expose the unresolved, and custom-font/style opt-ins are self-service via the API.
 - Every correction is auditable (`conflicts`) and reversible; the pitch becomes *"we recover the
-  correct document from your messy one and emit it clean and identical across DOCX/PDF/… with a receipt
+  correct document from your messy one and emit it clean and consistent across DOCX/PDF/… with a receipt
   for every correction."*
 
 **Costs / boundaries**
@@ -101,10 +102,11 @@ style-import phase, #150 (pixel-diff parity harness), #301/ADR-040 (header/foote
 - The fidelity ceiling moves from **rendering** to **extraction coverage** (the ADR-021 style program):
   the decomposition algorithm must diligently cover the enumerable style space. Every facet it doesn't
   yet capture is a **documented, closeable gap** (per the OOXML-ambiguity rule), never silent divergence.
-- A residue of **non-style document mechanics** has no clean multi-format analog: live Word fields
-  (a self-recomputing TOC/cross-ref/page field cannot exist in a static PDF), OLE embeds, SmartArt,
-  macros. These **resolve to static values** (which a stamped artifact wants anyway) or fall outside the
-  declared faithful subset.
+- A residue of **non-style document mechanics** has no clean multi-format analog. Renderable-but-dynamic
+  content — live Word fields (a self-recomputing TOC/cross-ref/page field cannot exist in a static PDF),
+  OLE embeds, SmartArt — **resolves to static values** (which a stamped artifact wants anyway) or falls
+  outside the declared faithful subset. **Executable/active content — VBA macros — has no static
+  equivalent and is unsupported: it is stripped, never carried into a rendered artifact.**
 - **Font provisioning** becomes real: a truly complete model must carry font **assets**, not just font
   names, or the PDF substitutes and diverges from a Word machine that has the font installed. Embedding
   rights are a per-font licensing check.
