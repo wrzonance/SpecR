@@ -126,6 +126,15 @@ export type {
   RevitDirection,
   RevitTransformType,
 } from './queries/revit.js';
+export { getProjectRevitLinks } from './queries/revit-links.js';
+export type {
+  RevitLinkInventory,
+  RevitElementLinks,
+  RevitSpecLinks,
+  RevitLinkedSpec,
+  RevitLinkSummary,
+  RevitLinkFilter,
+} from './queries/revit-links.js';
 export {
   createLibrary,
   createClientLibrary,

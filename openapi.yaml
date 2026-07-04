@@ -3325,6 +3325,51 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /projects/{id}/revit-links:
+    get:
+      operationId: getProjectRevitLinks
+      summary: Project Revit link inventory — element↔spec mapping read model
+      description: >
+        Read-only inventory (#103) over revit_parameter_mappings joined through
+        paragraphs to project specs. Returns two pivots — byElement
+        (element→sections) and bySpec (section→elements) — plus summary counts,
+        including specsWithoutModelBacking. Optional revitInstanceId or specId
+        query params narrow the two pivots; the summary is always project-wide.
+        Note: unmappedElements is 0 under the current mappings-only substrate —
+        model-placed-but-unmapped elements are unobservable without a model-element
+        registry (ADR-029); the field is kept for forward contract stability.
+      tags: [projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: revitInstanceId
+          in: query
+          required: false
+          description: Filter the pivots to one Revit element instance id.
+          schema: { type: string, minLength: 1 }
+        - name: specId
+          in: query
+          required: false
+          description: Filter the pivots to one project spec.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Revit link inventory
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/RevitLinkInventory' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
   /reports/compare:
     post:
       operationId: postCompareReport
@@ -4111,6 +4156,88 @@ components:
         impliedRelatedSection: { type: integer }
         umbrellaNotCalledOut: { type: integer }
         total: { type: integer }
+    RevitLinkInventory:
+      type: object
+      description: Project-scoped Revit link inventory (#103) — element↔spec read model.
+      required: [projectId, byElement, bySpec, summary]
+      properties:
+        projectId: { type: string, format: uuid }
+        byElement:
+          type: array
+          description: One entry per Revit element, listing the specs it drives.
+          items: { $ref: '#/components/schemas/RevitElementLinks' }
+        bySpec:
+          type: array
+          description: One entry per present project spec, listing its linked elements.
+          items: { $ref: '#/components/schemas/RevitSpecLinks' }
+        summary: { $ref: '#/components/schemas/RevitLinkSummary' }
+    RevitElementLinks:
+      type: object
+      required: [revitInstanceId, specs, linkCount]
+      properties:
+        revitInstanceId:
+          type: string
+          description: Revit element (family instance) id, stable per element within a model.
+        specs:
+          type: array
+          items: { $ref: '#/components/schemas/RevitLinkedSpec' }
+        linkCount:
+          type: integer
+          description: Number of mapping rows for this element within the project scope.
+    RevitLinkedSpec:
+      type: object
+      required: [specId, section, title]
+      properties:
+        specId: { type: string, format: uuid }
+        section: { type: string }
+        title: { type: string }
+    RevitSpecLinks:
+      type: object
+      required: [specId, section, title, elements, linkCount]
+      properties:
+        specId: { type: string, format: uuid }
+        section: { type: string }
+        title: { type: string }
+        elements:
+          type: array
+          description: Distinct Revit element ids linked to this spec's paragraphs.
+          items: { type: string }
+        linkCount:
+          type: integer
+          description: Number of mapping rows targeting this spec within the project scope.
+    RevitLinkSummary:
+      type: object
+      required:
+        [
+          elementCount,
+          specCount,
+          mappedSpecCount,
+          specsWithoutModelBacking,
+          unmappedElements,
+          mappingCount,
+        ]
+      properties:
+        elementCount:
+          type: integer
+          description: Distinct Revit elements with at least one link in the project.
+        specCount:
+          type: integer
+          description: Total present project specs.
+        mappedSpecCount:
+          type: integer
+          description: Project specs with at least one linked element.
+        specsWithoutModelBacking:
+          type: integer
+          description: Project specs with no linked Revit element.
+        unmappedElements:
+          type: integer
+          description: >-
+            0 under the current mappings-only substrate — every mapped element
+            resolves to a present project spec. A true count needs the deferred
+            model-element registry (ADR-029 / ADR-049).
+        mappingCount:
+          type: integer
+          description: Total in-scope mapping rows.
     CoordinationFinding:
       oneOf:
         - $ref: '#/components/schemas/FindingRequiredNotPresent'
