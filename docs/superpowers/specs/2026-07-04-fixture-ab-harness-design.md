@@ -28,7 +28,8 @@ corpus is copyrighted and gitignored) and runs locally where the files are prese
 1. The **before/after diff** capability — a two-run comparison that shows *what a change dragged
    in*, not just whether an absolute invariant still holds.
 2. A **note-leak** assertion — the existing corpus test checks part count only, not that
-   specifier-note banners render as `> [NOTE]` and never as CSI body.
+   specifier-note banners render as `> **[NOTE]**` blockquotes (the exact form
+   `renderMarkdown` emits) and never as CSI body.
 3. A written **contributor rule** — "A/B the corpus before any parsing-regex change" lives only in
    an agent's memory.
 
@@ -54,21 +55,37 @@ that content, so **the baseline stays local and gitignored; only the script is c
 
 ## Design
 
-### Component 1 — `scripts/fixture-ab.ts` (the A/B tool)
+### Component 1 — the A/B tool (`scripts/fixture-ab.ts` + pure logic in `src/`)
 
-A single script with two subcommands (`scripts/**` is already lint-relaxed for `console` and line
-count in `eslint.config.js`).
+A thin CLI with two subcommands. The snapshot-record builder, diff logic, and banner matcher live
+under `src/` (exact home decided in the implementation plan); `scripts/fixture-ab.ts` is only the
+argv/IO wrapper, importing from `src/` the way `scripts/load-files.ts` already does. This split is
+forced, not stylistic: vitest's unit project only picks up `src/**/*.test.ts`, and a `src/` test
+cannot import from `scripts/` (`rootDir: "src"` — `pnpm build` compiles `src/` tests and errors on
+out-of-root imports), so the "unit-testable without the corpus" promise below and the matcher
+sharing with Component 2 both require the logic to live in `src/`. (`scripts/**` is outside the
+`pnpm lint` sweep — `eslint src/` — and its eslint block relaxes `no-console` only; the pure logic
+in `src/` obeys the full lint budget.)
 
 **`pnpm fixture:snapshot <label>`**
 - Globs `docs/references/**/*.{docx,sec,SEC}` (both formats; `.sec` is committed so it always
   contributes, docx only when present locally).
 - For each file: `parse()` → `renderMarkdown(tree)`. Records per fixture:
   - `parts` — count of visible part-type root nodes (the 3-part signal).
-  - `noteLeaks` — count of rendered lines that contain a specifier-note **banner**
-    (`NOTE TO SPECIFIER` / `SPECIFIER NOTE` / `HIDDEN NOTES TO SPECIFIER`, matched case- and
-    decoration-insensitively) but are **not** a `> [NOTE]` line. A non-zero value is a real leak.
-  - `refs` — sorted list of extracted `targetSection` values (so reference-regex changes, e.g. the
-    strong-context section-number work, are diffable too).
+  - `noteLeaks` — count of rendered lines that contain a specifier-note **banner** but are **not**
+    a `> **[NOTE]**` note line. Matched contains-style (anywhere in the line, not just line-start),
+    case- and decoration-insensitively, mirroring **both** parser patterns in
+    `src/parser/docx/heuristics.ts` (`NOTES? TO (THE )?SPEC(IFIER|S| WRITER)?S?` and
+    `SPEC(IFIER)?S? NOTES?`) so every variant the parser recognizes ("NOTES TO SPEC WRITER",
+    "SPEC NOTES", …) is covered — a matcher narrower than the parser's would go blind exactly where
+    the parser regresses. Those patterns are already mirrored into migration 024 (ADR-022 D3) with
+    a keep-in-sync note; this matcher joins that sync set (or imports a shared export — implementer's
+    call). Contains-style matching also catches the Fix A toggle line ("Display hidden notes to
+    specifier…"). A non-zero value is a real leak.
+  - `refs` — sorted list of extracted refs from the `parse()` result (`SecRef` is a discriminated
+    union: record `targetType` plus `targetSpecSection` for section refs / `standardCode` for
+    standard refs — note the field is `targetSpecSection`, not `targetSection`), so reference-regex
+    changes, e.g. the strong-context section-number work, are diffable too.
   - `render` — the full markdown (line-level diff source; local/gitignored, so embedding
     copyrighted content is acceptable exactly as the docx themselves already are).
   - `error` — the parse error message when a file is rejected (corrupt/non-docx).
@@ -92,8 +109,10 @@ pnpm fixture:diff before after    # only the intended fixtures should move
 ### Component 2 — note-leak invariant (extend `corpus-parts.integration.test.ts`)
 
 Add, alongside the existing 3-part assertion, a per-fixture check: render the spec to markdown and
-assert **no specifier-note banner** appears on a non-`> [NOTE]` line. The banner matcher is shared
-with the snapshot script (Component 1) so the two agree by construction.
+assert **no specifier-note banner** appears on a non-`> **[NOTE]**` line. The banner matcher is
+imported from its `src/` home (Component 1) so the two agree by construction. Prefer folding the
+check into the existing per-fixture `it()` (or caching the parse) — a separate `it()` re-parses
+all ~36 local docx and doubles the sweep's runtime for no coverage gain.
 
 Scoped to **banners** deliberately: the open **#292** asterisk-`[OR]` option-delimiters render as
 visible content but are not banners, so this assertion stays green on them (they are tracked
@@ -115,9 +134,11 @@ Component 2 after #367.
 
 - **Diff logic** (Component 1) — unit-tested with two hand-authored in-memory snapshots covering:
   unchanged fixture, changed `render`, changed `parts`, changed `refs`, note-leak delta, and a
-  fixture present in only one side. No corpus needed.
+  fixture present in only one side. No corpus needed. Tests live in `src/` next to the pure logic
+  (the unit project's `src/**/*.test.ts` glob is why the logic can't live only in `scripts/`).
 - **Snapshot I/O** — a smoke test that snapshotting a single committed `.sec` fixture writes a
-  well-formed record; the heavy end-to-end sweep is the manual workflow, not a CI test.
+  well-formed record; the writer takes an output directory parameter so the test targets a temp
+  dir, not `.fixture-snapshots/`. The heavy end-to-end sweep is the manual workflow, not a CI test.
 - **Note-leak invariant** (Component 2) — rides the existing fixture-gated integration lane; skips
   in CI, runs locally.
 
@@ -130,3 +151,6 @@ Component 2 after #367.
   surgical-diff instrument for intentional changes.
 - **`render` embeds copyrighted text** — mitigated by keeping snapshots gitignored (identical
   posture to the docx corpus itself); the committed script contains none.
+- **Snapshot size** — full renders of the whole corpus (666 committed `.sec` + ~36 local docx,
+  ~60 MB of sources) put each snapshot JSON in the tens of MB. Acceptable for a local, gitignored
+  artifact; noted so nobody "optimizes" the render field away — it is the line-diff source.
