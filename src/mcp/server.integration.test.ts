@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import express from 'express';
 import type { Server } from 'http';
+import { Document, Paragraph, TextRun, Packer } from 'docx';
 import { pool, createSpec, insertTree } from '../db/index.js';
 import { registerMcpRoutes } from './server.js';
 
@@ -547,6 +548,55 @@ describe('tool: parse_document', () => {
     const b = body as Record<string, unknown>;
     const result = b['result'] as Record<string, unknown>;
     expect(result['isError']).toBe(true);
+  });
+
+  it('parse_document: DOCX upload persists spec_references (was refs: [])', async () => {
+    // DOCX with a unique section header (99 99 97 → no seed-corpus collision), a
+    // "See Section …" CSI cross-ref, and an ASTM standard citation. Before the fix
+    // the .docx branch of dispatchParse hard-coded refs: [], so DOCX uploads via
+    // parse_document persisted zero spec_references regardless of content (#332).
+    const doc = new Document({
+      sections: [
+        {
+          children: [
+            'SECTION 99 99 97 - MCP DOCX REFS TEST',
+            'PART 1 - GENERAL',
+            '1.1 REFERENCES',
+            'A. See Section 09 91 00 for paint and coating requirements.',
+            'B. Comply with ASTM C150 for cement.',
+          ].map((l) => new Paragraph({ children: [new TextRun(l)] })),
+        },
+      ],
+    });
+    const docxBase64 = (await Packer.toBuffer(doc)).toString('base64');
+
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'parse_document',
+      arguments: { filename: 'mcp-docx-refs.docx', contentBase64: docxBase64 },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    const content = result['content'] as { type: string; text: string }[];
+    expect(result['isError'], content[0]?.text).not.toBe(true);
+    const data = JSON.parse(content[0]!.text) as { specId: string };
+
+    const refRows = await pool.query<{
+      target_type: string;
+      target_spec_section: string | null;
+      standard_code: string | null;
+    }>(
+      'SELECT target_type, target_spec_section, standard_code FROM spec_references WHERE source_spec_id = $1',
+      [data.specId]
+    );
+    expect(refRows.rows.length).toBeGreaterThan(0);
+    const sectionRefs = refRows.rows
+      .filter((r) => r.target_type === 'section')
+      .map((r) => r.target_spec_section);
+    expect(sectionRefs).toContain('09 91 00');
+    const standardRefs = refRows.rows
+      .filter((r) => r.target_type === 'standard')
+      .map((r) => r.standard_code);
+    expect(standardRefs).toContain('ASTM C150');
   });
 });
 
