@@ -11,6 +11,8 @@ import {
   estimateTokens,
   buildReportMessages,
   runReport,
+  clampToolText,
+  MAX_TOOL_RESULT_CHARS,
   REPORT_SYSTEM_PROMPT,
 } from './report-bridge.mjs';
 
@@ -278,4 +280,78 @@ test('stops mid-batch when maxToolCalls budget is exhausted — excess calls nev
   assert.equal(skipped.length, 3);
   assert.equal(typeof out.reply, 'string');
   assert.ok(out.reply.length > 0);
+});
+
+test('clampToolText truncates an oversized MCP result with an explicit marker', () => {
+  assert.equal(clampToolText('short'), 'short');
+  assert.equal(clampToolText(null), '');
+  const big = 'x'.repeat(MAX_TOOL_RESULT_CHARS + 500);
+  const out = clampToolText(big);
+  assert.ok(out.length < big.length);
+  assert.match(out, /truncated 500 chars/);
+});
+
+test('runReport clamps a broad tool result so it cannot blow the token budget', async () => {
+  const huge = 'y'.repeat(200_000); // ~50k tokens unclamped; clamped it stays small
+  const deps = {
+    listTools: async () => [{ function: { name: 'coordination_report' }, __readOnly: true }],
+    callModel: async (messages) => {
+      const sawTool = messages.some((m) => m.role === 'tool');
+      return sawTool
+        ? { choices: [{ message: { role: 'assistant', content: 'summary.' } }] }
+        : {
+            choices: [
+              {
+                message: {
+                  role: 'assistant',
+                  content: null,
+                  tool_calls: [
+                    { id: 't', function: { name: 'coordination_report', arguments: '{}' } },
+                  ],
+                },
+              },
+            ],
+          };
+    },
+    execTool: async () => ({ text: huge, ok: true, anchors: [] }),
+  };
+  const out = await runReport({
+    request: 'coordination report',
+    scope: undefined,
+    deps,
+    limits: { maxRounds: 4, maxToolCalls: 8, tokenBudget: 120000 },
+    emit: () => {},
+  });
+  assert.ok(out.usage.tokens < 4000, `tokens should stay bounded, got ${out.usage.tokens}`);
+  assert.match(out.reply, /summary/);
+});
+
+test('runReport reports the ACTUAL rounds used after a budget break, not the max', async () => {
+  // Budget (2 calls) trips at round 2 of a max-10 loop; usage.rounds must read 2.
+  const deps = {
+    listTools: async () => [{ function: { name: 'list_projects' }, __readOnly: true }],
+    callModel: async (_messages, tools) =>
+      tools.length === 0
+        ? { choices: [{ message: { role: 'assistant', content: 'capped.' } }] }
+        : {
+            choices: [
+              {
+                message: {
+                  role: 'assistant',
+                  content: null,
+                  tool_calls: [{ id: 't', function: { name: 'list_projects', arguments: '{}' } }],
+                },
+              },
+            ],
+          },
+    execTool: async () => ({ text: '[]', ok: true, anchors: [] }),
+  };
+  const out = await runReport({
+    request: 'x',
+    scope: undefined,
+    deps,
+    limits: { maxRounds: 10, maxToolCalls: 2, tokenBudget: 100000 },
+    emit: () => {},
+  });
+  assert.equal(out.usage.rounds, 2, `expected 2 rounds, got ${out.usage.rounds}`);
 });

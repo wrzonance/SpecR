@@ -52,6 +52,10 @@ const REPORT_MAX_ROUNDS = 8;
 const REPORT_MAX_TOOL_CALLS = 12;
 const REPORT_TOKEN_BUDGET = 120_000;
 const REPORT_MAX_REQUEST_CHARS = 4000;
+// Hard byte cap on the /report request body, enforced DURING accumulation so an
+// oversized payload is rejected before it is fully buffered (the request string
+// caps at 4000 chars; 16 KiB leaves ample room for the JSON envelope + scope).
+const REPORT_MAX_BODY_BYTES = 16 * 1024;
 
 const API_PREFIXES = [
   '/health',
@@ -91,6 +95,24 @@ function sendJson(res, status, payload) {
 async function readRequestBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
+  return chunks.length > 0 ? Buffer.concat(chunks) : undefined;
+}
+
+// Like readRequestBody, but stops accumulating and throws once `maxBytes` is
+// crossed — so an oversized body can't be fully buffered into memory before it
+// is rejected. Used by /report (small JSON envelopes only).
+async function readBoundedBody(req, maxBytes) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) {
+      const err = new Error('request body too large');
+      err.code = 'BODY_TOO_LARGE';
+      throw err;
+    }
+    chunks.push(chunk);
+  }
   return chunks.length > 0 ? Buffer.concat(chunks) : undefined;
 }
 
@@ -421,10 +443,11 @@ async function handleReport(req, res) {
   }
   let payload;
   try {
-    const raw = await readRequestBody(req);
+    const raw = await readBoundedBody(req, REPORT_MAX_BODY_BYTES);
     payload = raw ? JSON.parse(raw.toString('utf8')) : null;
-  } catch {
-    emit({ type: 'error', error: 'invalid JSON body' });
+  } catch (err) {
+    const message = err?.code === 'BODY_TOO_LARGE' ? 'request body too large' : 'invalid JSON body';
+    emit({ type: 'error', error: message });
     res.end();
     return;
   }

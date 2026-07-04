@@ -105,6 +105,18 @@ export function buildReportMessages(request, scope, systemPrompt) {
   ];
 }
 
+// A single MCP result is clamped before it is appended to the running messages,
+// so one broad tool payload cannot blow the token budget or bloat the forced
+// final compose turn. Fail-closed at the module boundary — independent of any
+// truncation the transport (server.mjs) also applies.
+export const MAX_TOOL_RESULT_CHARS = 8000;
+
+export function clampToolText(text) {
+  const s = typeof text === 'string' ? text : '';
+  if (s.length <= MAX_TOOL_RESULT_CHARS) return s;
+  return `${s.slice(0, MAX_TOOL_RESULT_CHARS)}\n…[truncated ${s.length - MAX_TOOL_RESULT_CHARS} chars]`;
+}
+
 // Execute one allow-listed model tool call against MCP via the injected exec,
 // emit the paired running/done step events, and fold its anchors + trace into the
 // accumulators. Only reached after the deny-by-default + budget gates pass.
@@ -121,7 +133,7 @@ async function executeToolCall(call, ctx) {
   const { text, ok, anchors } = await ctx.deps.execTool(call);
   ctx.toolCalls.push({ name, ok });
   if (Array.isArray(anchors)) ctx.anchors.push(...anchors);
-  ctx.messages.push({ role: 'tool', tool_call_id: call.id, content: text });
+  ctx.messages.push({ role: 'tool', tool_call_id: call.id, content: clampToolText(text) });
   ctx.emit({ ...step, status: ok ? 'done' : 'error' });
 }
 
@@ -205,7 +217,9 @@ export async function runReport({ request, scope, deps, limits, emit }) {
   const messages = buildReportMessages(request, scope, REPORT_SYSTEM_PROMPT);
   const ctx = { deps, emit, messages, toolCalls: [], anchors: [], stepNo: 0, allowed };
 
+  let roundsUsed = 0;
   for (let round = 1; round <= limits.maxRounds; round++) {
+    roundsUsed = round;
     const completion = await deps.callModel(messages, tools);
     const message = completion.choices?.[0]?.message;
     if (!message) throw new Error('model returned no message');
@@ -218,12 +232,14 @@ export async function runReport({ request, scope, deps, limits, emit }) {
     emit({ type: 'usage', ...usageOf(ctx, round) });
     if (overBudget(ctx, limits)) break;
   }
-  // Guardrail or round cap tripped — force a closing answer with tools disabled.
+  // Guardrail or round cap tripped — force ONE closing answer with tools disabled
+  // (no further tool calls possible; its input is bounded by the clamped tool
+  // results above and the request cap). Report the actual rounds used, not the max.
   const final = await deps.callModel(messages, []);
   return finish(
     final.choices?.[0]?.message?.content || 'Reached the report scope limit.',
     ctx,
-    limits.maxRounds
+    roundsUsed
   );
 }
 

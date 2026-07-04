@@ -210,6 +210,48 @@ test('POST /report — a model-emitted write tool never reaches MCP (deny-by-def
   assert.ok(events.some((e) => e.type === 'done'));
 });
 
+test('POST /report rejects an oversized body without buffering it whole', async (t) => {
+  const captured = { openaiBodies: [], mcpToolCalls: [] };
+  const mock = startMock(captured);
+  const mockPort = await listen(mock);
+  const demoPort = 3000 + (process.pid % 500) + 9;
+
+  const child = spawn(process.execPath, [SERVER], {
+    env: {
+      ...process.env,
+      PORT: String(demoPort),
+      HOST: '127.0.0.1',
+      OPENAI_API_KEY: 'test-key',
+      OPENAI_BASE_URL: `http://127.0.0.1:${mockPort}/v1`,
+      SPECR_API_BASE: `http://127.0.0.1:${mockPort}`,
+    },
+    stdio: 'ignore',
+  });
+  t.after(() => {
+    child.kill();
+    mock.close();
+  });
+  await waitForPort(demoPort);
+
+  // ~1 MiB body — far over the 16 KiB cap.
+  const huge = 'z'.repeat(1024 * 1024);
+  const res = await fetch(`http://127.0.0.1:${demoPort}/report`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ request: huge }),
+  });
+  const events = (await res.text())
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .map((l) => JSON.parse(l));
+
+  const err = events.find((e) => e.type === 'error');
+  assert.ok(err, 'expected an error event');
+  assert.match(err.error, /too large/i);
+  // The oversized request never reached the model.
+  assert.equal(captured.openaiBodies.length, 0);
+});
+
 async function waitForPort(port) {
   for (let i = 0; i < 50; i++) {
     try {

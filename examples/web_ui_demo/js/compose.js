@@ -37,6 +37,9 @@ async function readNdjson(response, onEvent) {
       if (line) onEvent(safeParse(line));
     }
   }
+  // Flush any bytes the streaming decoder was still holding (a multi-byte char
+  // split across the final chunk boundary), then emit the trailing line.
+  buf += decoder.decode();
   const tail = buf.trim();
   if (tail) onEvent(safeParse(tail));
 }

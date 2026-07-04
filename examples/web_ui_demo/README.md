@@ -145,9 +145,9 @@ Compose uses the **same** `OPENAI_API_KEY` as Ask SpecR (above) and is likewise
 "not configured" note. The key stays server-side; the browser never sees it.
 
 **Not yet: the PDF.** The vision includes a grounded **PDF artifact** of the
-composed report. That depends on PDF egress (#352), which is still open, so the
-**Download PDF** button is present but **disabled** with a tooltip pointing at
-#352. The cited on-screen report is the deliverable for now.
+composed report. That depends on PDF egress (issue #352), which is still open, so
+the **Download PDF** button ships **disabled**, with a tooltip that points at the
+same issue. The cited on-screen report is the deliverable for now.
 
 ## One-Command Demo Launchers
 
