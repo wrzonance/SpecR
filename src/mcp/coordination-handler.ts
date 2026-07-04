@@ -1,16 +1,7 @@
 // src/mcp/coordination-handler.ts
 import { getCoordinationReport, ProjectNotFoundError, PackageNotFoundError } from '../db/index.js';
 import { anchorsFromReport, anchorsMeta } from './anchors.js';
-
-type ToolOk = {
-  readonly content: { readonly type: 'text'; readonly text: string }[];
-  readonly _meta?: Record<string, unknown>;
-};
-type ToolError = {
-  readonly isError: true;
-  readonly content: { readonly type: 'text'; readonly text: string }[];
-};
-type ToolResult = ToolOk | ToolError;
+import type { ToolError, ToolResult } from './tool-result.js';
 
 function toolErr(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };

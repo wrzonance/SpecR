@@ -2,16 +2,7 @@ import { buildComparisonReport, ReportingError, SpecNotFoundError } from '../rep
 import { logger } from '../lib/logger.js';
 import { anchorsMeta, type McpAnchor } from './anchors.js';
 import type { ComparisonReport } from '../reporting/index.js';
-
-type ToolOk = {
-  readonly content: { readonly type: 'text'; readonly text: string }[];
-  readonly _meta?: Record<string, unknown>;
-};
-type ToolError = {
-  readonly isError: true;
-  readonly content: { readonly type: 'text'; readonly text: string }[];
-};
-type ToolResult = ToolOk | ToolError;
+import type { ToolError, ToolResult } from './tool-result.js';
 
 function toolErr(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };

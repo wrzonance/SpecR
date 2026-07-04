@@ -1,11 +1,11 @@
 // src/mcp/parse-document-handler.ts
 // Extracted from handlers.ts (file-size budget, CLAUDE.md max-lines=400) — the
 // parse_document tool is a self-contained decode → parse → infer → persist
-// pipeline. Local ToolOk/ToolError/toolErr/isToolError mirror the pattern
-// already used by the other standalone handler files (coordination-handler.ts,
+// pipeline. ToolOk/ToolError/ToolResult come from the shared ./tool-result.js
+// module; the local toolErr/isToolError helpers mirror the pattern used by the
+// other standalone handler files (coordination-handler.ts,
 // submittal-register-handler.ts, numbering-profile-handler.ts,
-// open-comments-handler.ts) — duplicated shapes, not shared imports, so this
-// file has no dependency back on handlers.ts.
+// open-comments-handler.ts).
 import path from 'node:path';
 import type { SpecNode, SpecTree, SecRef } from '../ast/types.js';
 import { persistParsedSpec, lookupSpecSectionTitle } from '../db/index.js';
@@ -25,13 +25,7 @@ import { decodeBase64Payload } from '../lib/decode-base64.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
-
-type ToolError = {
-  readonly isError: true;
-  readonly content: { readonly type: 'text'; readonly text: string }[];
-};
-type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
-type ToolResult = ToolError | ToolOk;
+import type { ToolError, ToolResult } from './tool-result.js';
 
 function toolErr(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };

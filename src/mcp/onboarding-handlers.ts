@@ -23,13 +23,7 @@ import type { OwnershipResult } from '../db/index.js';
 import { summarizeEditability } from '../lib/editability-summary.js';
 import { logger } from '../lib/logger.js';
 import { toolError } from './handlers.js';
-
-type ToolError = {
-  readonly isError: true;
-  readonly content: { readonly type: 'text'; readonly text: string }[];
-};
-type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
-type ToolResult = ToolError | ToolOk;
+import type { ToolError, ToolOk, ToolResult } from './tool-result.js';
 
 function jsonResult(payload: unknown): ToolOk {
   return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };

@@ -28,16 +28,12 @@ import {
   anchorsFromReferences,
   anchorsMeta,
 } from './anchors.js';
+import type { ToolError, ToolResult } from './tool-result.js';
 
-type ToolError = {
-  readonly isError: true;
-  readonly content: { readonly type: 'text'; readonly text: string }[];
-};
-type ToolOk = {
-  readonly content: { readonly type: 'text'; readonly text: string }[];
-  readonly _meta?: Record<string, unknown>;
-};
-export type ToolResult = ToolError | ToolOk;
+// Re-exported so the ~18 downstream modules/tests that import `type ToolResult`
+// from './handlers.js' keep working without re-pointing every importer.
+export type { ToolResult };
+
 type ReferenceDirection = 'from' | 'to' | 'both';
 
 export function toolError(text: string): ToolError {
