@@ -18,7 +18,11 @@ interface Inventory {
   readonly projectId: string;
   readonly byElement: readonly { readonly revitInstanceId: string }[];
   readonly bySpec: readonly { readonly specId: string; readonly elements: readonly string[] }[];
-  readonly summary: { readonly specsWithoutModelBacking: number; readonly mappingCount: number };
+  readonly summary: {
+    readonly specsWithoutModelBacking: number;
+    readonly unmappedElements: number;
+    readonly mappingCount: number;
+  };
 }
 
 async function seed(): Promise<void> {
@@ -91,6 +95,9 @@ describe('GET /projects/:id/revit-links', () => {
     expect(body.data.projectId).toBe(projectId);
     expect(body.data.byElement.map((e) => e.revitInstanceId)).toContain(element);
     expect(body.data.summary.specsWithoutModelBacking).toBe(1);
+    // Pinned per ADR-049: 0 by construction under the mappings-only substrate.
+    // A non-zero value here means a model-element registry now exists — revisit ADR-049.
+    expect(body.data.summary.unmappedElements).toBe(0);
     expect(body.data.summary.mappingCount).toBe(1);
     expect(body.data.bySpec.find((s) => s.specId === specId)?.elements).toEqual([element]);
   });
