@@ -39,6 +39,7 @@ import { renderOpenComments } from './open-comments.js';
 import { renderSubmittalRegister } from './submittal.js';
 import { initNumbering } from './numbering.js';
 import { initChat } from './chat.js';
+import { initCompose } from './compose.js';
 import { initDropzone } from './dropzone.js';
 import { initRefPopover } from './popover.js';
 import { initAudit } from './audit.js';
@@ -54,6 +55,7 @@ let projects = [];
 let currentView = 'map';
 let numberingPanel = null; // numbering-profile workspace controller (initNumbering)
 let audit = null; // live coordination audit view controller (initAudit, ADR-041)
+let composePanel = null; // agent-driven grounded reporting controller (initCompose, #353)
 let tocSections = [];
 const tocCollapsedDivisions = new Set();
 let libraries = [];
@@ -117,6 +119,7 @@ function showView(view) {
   }
   if (view === 'numbering') void numberingPanel?.refresh();
   if (view === 'submittal') void refreshSubmittalRegister();
+  if (view === 'compose') composePanel?.refresh();
   // The audit's findings already repaint on workspace load / spec mutations;
   // opening the tab just needs a height re-measure. (A refetch here would wipe
   // the current finding selection and desync the two panes.)
@@ -1925,6 +1928,24 @@ function applyFocus(anchors) {
   focusToast(sections.length);
 }
 
+// A human-readable summary of what's loaded, handed to the Compose agent as a
+// scope hint. The agent still discovers real UUIDs via grounded tools; this only
+// steers it toward the sections/projects the user actually has open.
+function composeScopeLabel() {
+  const sections = [...loadedSections().keys()].sort().map(displaySection);
+  const loaded = sections.length > 0 ? sections.join(', ') : 'no sections loaded yet';
+  return `active project "${activeProjectName()}"; loaded sections: ${loaded}`;
+}
+
+// A Compose citation click opens its source in the Report/audit view — the exact
+// paragraph when the anchor carries one, reusing the same machinery as the chat
+// focus channel and the coordination audit.
+function onComposeCite(anchor) {
+  if (!anchor || typeof anchor.section !== 'string') return;
+  showView('report');
+  if (audit) void audit.showAnchor(anchor);
+}
+
 function onLibraryRef(section) {
   toast(`Section ${section} is in the SpecR library — drop its file to load it`, 'warn');
 }
@@ -2091,6 +2112,11 @@ async function boot() {
   });
   numberingPanel = initNumbering({ getLibraries: () => libraries, toast });
   initChat({ onFocus: applyFocus });
+  composePanel = initCompose({
+    getScopeLabel: composeScopeLabel,
+    onCite: onComposeCite,
+    displaySection,
+  });
 
   const health = document.getElementById('health-dot');
   const healthCell = health.closest('.tb-cell');

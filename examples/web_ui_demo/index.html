@@ -58,6 +58,7 @@
       <button class="view-tab" type="button" data-view="numbering">Numbering</button>
       <button class="view-tab" type="button" data-view="report">Report</button>
       <button class="view-tab" type="button" data-view="submittal">Submittal</button>
+      <button class="view-tab" type="button" data-view="compose">Compose</button>
     </nav>
 
     <section class="project-bar" aria-label="Active project controls">
@@ -387,6 +388,96 @@
         </div>
         <div id="submittal-register-body" class="coord-report-body"></div>
       </section>
+    </section>
+
+    <section class="app-view" id="view-compose" data-view-panel="compose" hidden>
+      <div class="compose">
+        <div class="band-rule">
+          <h2 class="band-title">COMPOSE REPORT</h2>
+          <p class="band-hint">agent-driven · grounded in your specs · reads only, never edits</p>
+        </div>
+
+        <p class="compose-lede">
+          Ask for a report that spans several specs or projects. The agent calls SpecR's
+          deterministic MCP tools, streams each step on the left, and cites every claim back to a
+          real paragraph on the right — click a source to open it. The facts come from the tools;
+          only the wording changes between runs, so a report is reproducible.
+        </p>
+
+        <div class="compose-scope" id="compose-scope" aria-live="polite"></div>
+
+        <label class="compose-field">
+          <span>REQUEST</span>
+          <textarea
+            id="compose-input"
+            rows="3"
+            placeholder="e.g. Compare 03 30 00 across the loaded projects and tell me where they diverge."
+          ></textarea>
+        </label>
+
+        <div class="compose-examples" id="compose-examples" aria-label="Example requests">
+          <button
+            class="compose-chip"
+            type="button"
+            data-example="Give me the coordination (errors and omissions) report for the active project and summarize the most important issues."
+          >
+            Coordination E&amp;O
+          </button>
+          <button
+            class="compose-chip"
+            type="button"
+            data-example="Compare section 03 30 00 across the loaded projects and tell me where they diverge."
+          >
+            Compare a section
+          </button>
+          <button
+            class="compose-chip"
+            type="button"
+            data-example="Which sections cite 09 22 00, and are any of those cross-references dangling?"
+          >
+            Cross-reference audit
+          </button>
+          <button
+            class="compose-chip"
+            type="button"
+            data-example="Summarize the open review comments across the project, grouped by section."
+          >
+            Open-comments digest
+          </button>
+        </div>
+
+        <div class="compose-actions">
+          <button class="toc-btn is-primary" id="compose-run" type="button">Compose report</button>
+          <button class="toc-btn" id="compose-regenerate" type="button" hidden>Regenerate</button>
+          <button
+            class="toc-btn compose-pdf"
+            id="compose-pdf"
+            type="button"
+            disabled
+            title="PDF export lands with #352 (grounded PDF egress)"
+          >
+            Download PDF
+          </button>
+          <span
+            class="compose-readonly"
+            title="The reporting agent is handed only read-only MCP tools"
+            >● read-only</span
+          >
+        </div>
+
+        <div class="compose-meter" id="compose-meter" hidden aria-live="polite"></div>
+
+        <div class="compose-body">
+          <section class="compose-col" aria-label="Grounding steps">
+            <h3 class="compose-subhead">GROUNDING STEPS</h3>
+            <ol class="compose-steps" id="compose-steps"></ol>
+          </section>
+          <section class="compose-col" aria-label="Composed report">
+            <h3 class="compose-subhead">REPORT</h3>
+            <div class="compose-output" id="compose-output"></div>
+          </section>
+        </div>
+      </div>
     </section>
 
     <input type="file" id="file-input" multiple accept=".sec,.SEC,.docx,.txt" hidden />
