@@ -56,3 +56,6 @@ tmp/
 
 # Vendored CDN assets (produced by pnpm vendor:scalar; never committed)
 public/
+
+# Fixture A/B snapshots (copyright-derived parse renders; never committed)
+.fixture-snapshots/
