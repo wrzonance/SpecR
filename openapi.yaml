@@ -3294,6 +3294,37 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /projects/{id}/keynotes:
+    get:
+      operationId: getProjectKeynotes
+      summary: Project keynote table export (tab-delimited, Revit format)
+      description: >
+        Exports the project's valid keynotes as the flat, tab-delimited text table
+        BIM authoring tools consume (ADR-016 D3). Deterministic — a pure rendering
+        of the project-filtered keynote query: a master keynote qualifies when its
+        source library feeds the project and its target section is present in the
+        project TOC (ADR-016 D2). Each row is `code<TAB>description` for a top-level
+        keynote, or `code<TAB>description<TAB>parentCode` when it has a parent, so
+        the keynote hierarchy is preserved. Rows are ordered by code; a code carried
+        by two source libraries resolves to the higher-priority one. A project with
+        no valid keynotes returns an empty body (200). Unknown project → 404.
+      tags: [projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Tab-delimited keynote table
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
   /reports/compare:
     post:
       operationId: postCompareReport

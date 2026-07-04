@@ -470,7 +470,7 @@ Later migrations add these tables (see the migration files and cited ADRs for co
 | `editing_conventions` | Built-in + library-scoped editability convention profiles | ADR-022 |
 | `paragraph_associations` | Paragraph ↔ external document reference links | #242 |
 | `required_sections` | Authored required-sections substrate (project + package scope) | ADR-028 |
-| `keynotes` | Keynote master table + project-filtered query (**storage only**, no API/render yet) | ADR-016 |
+| `keynotes` | Keynote master table + project-filtered query; exported as the tab-delimited Revit keynote table (`GET /projects/:id/keynotes`, `get_project_keynotes`) | ADR-016 |
 | `header_footer_configs` | Scoped header/footer overrides (**foundation only**, no resolution/render yet) | ADR-017, ADR-040 |
 | `numbering_profiles` | Saved structural numbering profiles, library-scoped | #299 |
 | `revision_nomenclature_profiles` | Structured revision/addendum naming, built-in + project override | ADR-025 |
