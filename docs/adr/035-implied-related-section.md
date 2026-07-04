@@ -51,12 +51,24 @@ Keyword normalization is deterministic:
 The confidence model is intentionally simple. A one-keyword title hit emits
 `0.72`; each additional distinct title keyword found in the same paragraph adds
 `0.08`, capped at `0.92`. This is not a probability. It is a stable advisory
-score for ordering and UI tone.
+score for ordering and UI tone. Confidence is **not** a display gate — every
+finding surfaces unconditionally — so suppression happens at match time, not in
+the score (see the coverage gate below and ADR-050).
+
+Coverage gate (ADR-050): **a lone keyword fires only when it is the title's sole
+discriminating keyword; otherwise at least two of the title's keywords must
+appear in the paragraph.** A single-keyword title (`Firestopping` → `firestop`)
+still fires on one hit, but a multi-keyword title (`ARCHITECTURAL LIGHTING
+CONTROL SYSTEM`) is no longer implied by a lone polysemous token like `control`.
+This favors precision over recall, consistent with the bias stated above: a body
+that echoes only one keyword of a multi-keyword title stops firing, which is
+acceptable because that single word is by construction ambiguous.
 
 False-positive suppression rules:
 
 - do not emit a spec's own section;
 - do not emit a section already listed under that spec's Related Sections article;
+- require the coverage gate above (multi-keyword titles need `>= 2` matches);
 - emit at most one finding per source spec and implied section, using the first
   matching paragraph as the locator;
 - ignore hidden (`vanish`) and empty paragraphs;

@@ -78,6 +78,69 @@ describe('implied related-section title keyword matching', () => {
     expect(findings).toEqual([]);
   });
 
+  it('coordination: parking-gate control board body does NOT imply 26 09 33 lighting control system (single polysemous keyword)', () => {
+    const index = buildTitleKeywordIndex([
+      { section: '26 09 33', title: 'ARCHITECTURAL LIGHTING CONTROL SYSTEM' },
+    ]);
+
+    const findings = findImpliedRelatedSections({
+      catalog: index,
+      specs: [
+        {
+          specId: 'spec-gate',
+          section: '11 12 33',
+          relatedSections: [],
+          bodyCitedSections: [],
+          paragraphs: [
+            {
+              id: 'para-gate',
+              text: 'Operators for Overhead Gates: DoorKing Vehicular Overhead Gate Operator; Microprocessor based solid-state control board; duty cycle of 60 cycles per hour; adjustable automatic timer; heavy duty trolley assembly',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(findings).toEqual([]);
+  });
+
+  it('coordination: body naming BOTH lighting and control DOES imply 26 09 33 (two-keyword match)', () => {
+    const index = buildTitleKeywordIndex([
+      { section: '26 09 33', title: 'ARCHITECTURAL LIGHTING CONTROL SYSTEM' },
+    ]);
+
+    const findings = findImpliedRelatedSections({
+      catalog: index,
+      specs: [
+        {
+          specId: 'spec-lighting',
+          section: '11 12 33',
+          relatedSections: [],
+          bodyCitedSections: [],
+          paragraphs: [
+            {
+              id: 'para-lighting',
+              text: 'Coordinate the lighting control zones with the low-voltage dimming panel.',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(findings).toEqual([
+      {
+        type: 'implied_related_section',
+        sourceSpecId: 'spec-lighting',
+        sourceSpecSection: '11 12 33',
+        sourceParagraphId: 'para-lighting',
+        impliedSection: '26 09 33',
+        impliedTitle: 'ARCHITECTURAL LIGHTING CONTROL SYSTEM',
+        matchedKeyword: 'control',
+        confidence: 0.8,
+      },
+    ]);
+  });
+
   it('coordination: generic title words such as general do not imply related sections', () => {
     const index = buildTitleKeywordIndex([
       { section: '01 00 00', title: 'General Requirements' },
