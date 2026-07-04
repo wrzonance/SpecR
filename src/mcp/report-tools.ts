@@ -1,13 +1,37 @@
 import { z } from 'zod';
 import { handleCoordinationReport } from './handlers.js';
 import { handleCompareSpecs } from './reporting-handler.js';
+import { handleGetProjectKeynotes } from './keynotes-handler.js';
 import type { ToolRegistrar } from './tool-registry.js';
 
 /** Cross-cutting read-only report tools: project coordination (errors &
- *  omissions) and cross-spec comparison (ADR-047). Both are `read` tier. */
+ *  omissions), cross-spec comparison (ADR-047), and keynote export (ADR-016).
+ *  All `read` tier. */
 export function registerReportTools(reg: ToolRegistrar): void {
   registerCoordinationTool(reg);
   registerCompareTool(reg);
+  registerKeynotesTool(reg);
+}
+
+function registerKeynotesTool(reg: ToolRegistrar): void {
+  reg.register(
+    'get_project_keynotes',
+    {
+      description:
+        'Project keynote table (ADR-016 D3), structured. Returns the project’s ' +
+        'valid keynotes — a master keynote whose source library feeds the project ' +
+        'and whose target section is present in the project TOC (ADR-016 D2) — as ' +
+        'rows of { code, description, parentCode, targetSection, targetParagraphId, ' +
+        'libraryId, id }, ordered by code, one row per code (higher-priority source ' +
+        'wins a duplicate). parentCode preserves the keynote hierarchy. The REST ' +
+        'route GET /projects/:id/keynotes renders these same rows as the flat ' +
+        'tab-delimited file Revit imports. Requires a projectId (see list_projects).',
+      inputSchema: {
+        projectId: z.uuid().describe('Project UUID (from list_projects)'),
+      },
+    },
+    handleGetProjectKeynotes
+  );
 }
 
 function registerCoordinationTool(reg: ToolRegistrar): void {
