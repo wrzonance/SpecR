@@ -825,7 +825,9 @@ paths:
         slice of #125's style sources. Both the spec and the template must
         already exist — either missing → 404 (pre-checked, never via the FK error).
         A template assigned to any spec cannot be deleted (DELETE /templates/{id}
-        → 409).
+        → 409). Library scoping (#318): the template must be a built-in / global
+        template (`libraryId: null`) or owned by the spec's own library; a template
+        from another library is rejected with 409.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -858,6 +860,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
@@ -2870,6 +2874,12 @@ paths:
                   type: string
                   minLength: 1
                   description: Optional firm / owner label
+                libraryId:
+                  type: string
+                  format: uuid
+                  description: >
+                    Optional owning library (#318). Omit for a built-in / global
+                    template. A libraryId for a non-existent library → 404.
       responses:
         '201':
           description: Template created
@@ -2885,6 +2895,8 @@ paths:
                         $ref: '#/components/schemas/TemplateMeta'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
         '500':
@@ -5784,7 +5796,7 @@ components:
 
     TemplateMeta:
       type: object
-      required: [id, name, owner, createdAt]
+      required: [id, name, owner, libraryId, createdAt]
       description: Template identity and metadata without style rules
       properties:
         id:
@@ -5796,6 +5808,15 @@ components:
         owner:
           type: [string, 'null']
           description: Firm / owner label, or null if not provided
+        libraryId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            Owning library (#318). `null` = a built-in / global template (the
+            seeded default, plus templates that predate library scoping).
+            Onboarded templates are created with the spec's own `library_id`,
+            not `null`. A library-scoped template can only be assigned to a spec
+            in that same library.
         createdAt:
           type: string
           format: date-time

@@ -153,7 +153,8 @@ async function runParseAndPersist(
 async function upsertOnboardedTemplate(
   specId: string,
   name: string,
-  rules: readonly StyleRule[]
+  rules: readonly StyleRule[],
+  libraryId: string
 ): Promise<string> {
   const existing = await getTemplateByName(name);
   if (existing) {
@@ -161,7 +162,10 @@ async function upsertOnboardedTemplate(
     return existing.id;
   }
   try {
-    const template = await createTemplateWithRules(name, null, rules);
+    // #318 — the onboarded template belongs to the spec's OWN library, not the
+    // global built-in pool; otherwise every onboarded template would be a global
+    // default and setSpecStyleSource's library scope could never bind it.
+    const template = await createTemplateWithRules(name, null, rules, libraryId);
     return template.id;
   } catch (err) {
     // Lost a create race: another import inserted the row first. Refresh it.
@@ -181,15 +185,27 @@ async function deriveStyleIfDocx(
   buffer: Buffer,
   ext: string,
   specId: string,
-  section: string
+  section: string,
+  libraryId: string
 ): Promise<{ templateId: string | null; report: OnboardingReport['styleDerivation'] }> {
   if (ext !== '.docx') return { templateId: null, report: null };
   progress(jobId, 'deriving-style', 70);
   const analysis = await analyzeDocxStyles(buffer);
   const { rules, report } = deriveTemplate(analysis.classified, analysis.effectiveStyles);
   if (rules.length === 0) return { templateId: null, report };
-  const templateId = await upsertOnboardedTemplate(specId, `onboarded:${specId}:${section}`, rules);
-  await setSpecStyleSource(specId, templateId);
+  const templateId = await upsertOnboardedTemplate(
+    specId,
+    `onboarded:${specId}:${section}`,
+    rules,
+    libraryId
+  );
+  const assigned = await setSpecStyleSource(specId, templateId);
+  // The onboarded template is created in the spec's own library, so this is
+  // 'assigned' in practice — but surface any scope failure rather than silently
+  // leaving the spec without its just-derived style (#318).
+  if (assigned !== 'assigned') {
+    throw new Error(`style-source assignment failed for onboarded spec ${specId}: ${assigned}`);
+  }
   return { templateId, report };
 }
 
@@ -217,7 +233,7 @@ async function processOnboardingJob(
 ): Promise<void> {
   try {
     const { specId, tree } = await runParseAndPersist(jobId, buffer, ext, libraryId, filename);
-    const style = await deriveStyleIfDocx(jobId, buffer, ext, specId, tree.section);
+    const style = await deriveStyleIfDocx(jobId, buffer, ext, specId, tree.section, libraryId);
     const editability = await classifyAndSummarize(jobId, specId);
     const report: OnboardingReport = {
       styleDerivation: style.report,

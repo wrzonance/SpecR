@@ -489,6 +489,9 @@ export const CreateTemplateBodySchema = z.object({
   // (same pattern as CreateNumberingProfileBodySchema).
   name: z.string().trim().check(z.minLength(1)),
   owner: z.string().check(z.minLength(1)).exactOptional(),
+  // #318 — scope the template to a library; omit for a built-in / global template
+  // (preserves the pre-#318 default where every created template was global).
+  libraryId: z.uuid().exactOptional(),
 });
 
 export type CreateTemplateBody = z.infer<typeof CreateTemplateBodySchema>;

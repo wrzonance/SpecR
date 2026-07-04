@@ -30,9 +30,18 @@ export async function setStyleSourceHandler(req: Request, res: Response): Promis
       res.status(404).json({ success: false, error: 'template not found' });
       return;
     }
-    const assigned = await setSpecStyleSource(specId, templateId);
-    if (!assigned) {
+    const outcome = await setSpecStyleSource(specId, templateId);
+    if (outcome === 'spec-not-found') {
       res.status(404).json({ success: false, error: 'spec not found' });
+      return;
+    }
+    if (outcome === 'library-mismatch') {
+      // Status set at the handler (the error middleware only maps .status on thrown
+      // boundary errors) — mirrors the numbering-profile assign 409.
+      res.status(409).json({
+        success: false,
+        error: 'style template belongs to a different library than the spec',
+      });
       return;
     }
     res.status(200).json({ success: true, data: { templateId, templateName: template.name } });
