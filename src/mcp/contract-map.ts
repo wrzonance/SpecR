@@ -16,6 +16,7 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['post /parse', 'parse_document'],
   ['get /projects/{}/coordination-report', 'coordination_report'],
   ['get /projects/{}/keynotes', 'get_project_keynotes'],
+  ['get /projects/{}/revit-links', 'list_revit_links'], // #103 — element<->spec inventory
   ['post /reports/compare', 'compare_specs'],
   ['post /projects/{}/submittal-register', 'submittal_register'],
   ['get /specs/{}/open-comments', 'open_comments_report'],

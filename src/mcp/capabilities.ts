@@ -50,6 +50,7 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['generate_docx', 'read'],
   ['coordination_report', 'read'],
   ['get_project_keynotes', 'read'],
+  ['list_revit_links', 'read'],
   ['compare_specs', 'read'],
   ['submittal_register', 'read'],
   ['open_comments_report', 'read'],
