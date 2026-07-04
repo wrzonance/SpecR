@@ -305,7 +305,7 @@ Out of dozens of DOCX libraries across all languages, only four resolve the styl
 
 ### Libraries That Infer List Hierarchy
 
-Only Clippit's `ListItemRetriever` reconstructs Word's numbering-faithful parent/child list tree with `LevelNumbers` arrays (Docling and Dedoc build heuristic/semantic section trees instead). Everything else gives you flat paragraphs with ilvl values and says "good luck."
+Only Clippit's `ListItemRetriever` reconstructs Word's numbering-faithful parent/child list tree with `LevelNumbers` arrays (Docling and Dedoc build heuristic/semantic section trees instead; `docx-parser-converter` and `officeParser` expose list/`ilvl` metadata but not a numbering-faithful tree). Most other libraries give you flat paragraphs with ilvl values and say "good luck."
 
 ### Libraries for DOCX Generation
 
@@ -445,11 +445,12 @@ MVP is the smallest thing that proves the core thesis: **specification documents
    - Apply accepted changes back to database
 
 5. **REST API** (no web UI in MVP)
-   - `POST /parse`: upload DOCX or .SEC, get AST back
+   - `POST /parse`: upload DOCX or .SEC → returns a parse job (async)
+   - `GET /parse/jobs/{jobId}`: poll parse status, get AST back
    - `GET /specs/{id}`: get spec tree from database
-   - `POST /generate`: generate DOCX from spec tree
-   - `POST /diff`: upload edited DOCX, get diff against stored version
-   - `POST /merge`: apply accepted changes
+   - `POST /specs/{id}/generate`: generate DOCX from spec tree
+   - `POST /specs/{id}/diff`: upload edited DOCX, get diff against stored version
+   - `POST /specs/{id}/merge`: apply accepted changes
 
 ### MVP Does NOT Include
 
