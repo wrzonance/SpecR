@@ -24,6 +24,8 @@
     "migrate:down": "node-pg-migrate --tsx --migrations-dir src/db/migrations --envPath .env down 1",
     "seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "load:files": "tsx --env-file-if-exists=.env scripts/load-files.ts",
+    "fixture:snapshot": "tsx scripts/fixture-ab.ts snapshot",
+    "fixture:diff": "tsx scripts/fixture-ab.ts diff",
     "seed:corpus": "pnpm load:files 'docs/references/UFGS/**/*.SEC' 'docs/references/UFGS/**/*.sec'"
   },
   "dependencies": {
