@@ -80,9 +80,9 @@ Verify that **only the fixtures you intended to change** moved, that every real 
 still resolves to 3 parts, and that no specifier-note banner leaked into body text
 (`noteLeaks` must not rise). The reference corpus is copyrighted and gitignored, so the
 tool runs locally — snapshots are written to `.fixture-snapshots/` (also gitignored).
-The always-on guard for the 3-part invariant is `corpus-parts.integration.test.ts`,
-which also asserts no banner leaks; run it with `pnpm test:integration` where the
-corpus is present.
+The always-on guard for the 3-part invariant is `corpus-parts.integration.test.ts`;
+run it with `pnpm test:integration` where the corpus is present. A committed
+banner-leak assertion is being folded into that same test as a follow-up.
 
 ## Documentation
 
