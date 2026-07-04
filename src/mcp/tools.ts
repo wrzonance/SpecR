@@ -41,13 +41,8 @@ import { registerRevitLinksTools } from './revit-links-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
+import type { ToolError, ToolResult } from './tool-result.js';
 
-type ToolError = {
-  readonly isError: true;
-  readonly content: { readonly type: 'text'; readonly text: string }[];
-};
-type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
-type ToolResult = ToolError | ToolOk;
 type PathResolution = { readonly ok: true; readonly paths: string[] } | ToolError;
 
 function isToolError(v: Buffer | string | ToolError | PathResolution): v is ToolError {

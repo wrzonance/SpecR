@@ -3,13 +3,7 @@ import {
   SubmittalRegisterProjectNotFoundError,
   SubmittalRegisterSpecNotInProjectError,
 } from '../db/index.js';
-
-type ToolOk = { readonly content: { readonly type: 'text'; readonly text: string }[] };
-type ToolError = {
-  readonly isError: true;
-  readonly content: { readonly type: 'text'; readonly text: string }[];
-};
-type ToolResult = ToolOk | ToolError;
+import type { ToolError, ToolResult } from './tool-result.js';
 
 function toolErr(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };
