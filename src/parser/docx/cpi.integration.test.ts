@@ -101,7 +101,10 @@ describe.skipIf(!FIXTURES_AVAILABLE)('reserved-low-level corpus fixture parsing'
     const buffer = readFileSync(resolve(CPI_DIR, 'CPI_BUSBAR_CSIMFS.docx'));
     const { tree } = await parse(buffer, 'CPI_BUSBAR_CSIMFS.docx');
     const articles = allNodes(tree.parts).filter((n) => n.type === 'article');
-    expect(articles.length).toBeGreaterThan(0);
-    expect(articles.every((n) => n.type === 'article')).toBe(true);
+    // Non-vacuous: a correctly-normalized reserved-low-level file distributes
+    // multiple articles across its parts, so articles must outnumber parts — this
+    // fails if the offset normalization collapsed articles into parts/continuations.
+    expect(tree.parts.length).toBeGreaterThan(0);
+    expect(articles.length).toBeGreaterThan(tree.parts.length);
   });
 });
