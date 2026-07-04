@@ -18,6 +18,8 @@ const UUID_SCHEMA = z.uuid();
 const TEMPLATE_PG_MESSAGES = {
   '23505': 'template name already exists',
   '23514': 'rule violates check constraint',
+  // #318 — a create with a libraryId for a non-existent library (FK violation).
+  '23503': 'library not found',
 } as const;
 
 function parseId(req: Request, res: Response): string | null {
@@ -42,9 +44,11 @@ function sendDbError(err: unknown, res: Response, logMsg: string): void {
 
 export async function createTemplateHandler(req: Request, res: Response): Promise<void> {
   // Body already validated + parsed by validateBody middleware.
-  const { name, owner } = req.body as CreateTemplateBody;
+  const { name, owner, libraryId } = req.body as CreateTemplateBody;
   try {
-    const meta = await createTemplate(name, owner);
+    // #318 — libraryId scopes the template; omitted → NULL (built-in / global).
+    // A libraryId for a non-existent library surfaces as pg 23503 → 404 via sendDbError.
+    const meta = await createTemplate(name, owner, libraryId);
     res.status(201).json({ success: true, data: meta });
   } catch (err) {
     sendDbError(err, res, 'create template failed');

@@ -4,13 +4,14 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool } from '../db/index.js';
+import { pool, createLibrary, createSpec } from '../db/index.js';
 
 let server: Server;
 let baseUrl: string;
 
 const createdSpecIds: string[] = [];
 const createdTemplateNames: string[] = [];
+const createdLibraryIds: string[] = [];
 
 beforeAll(async () => {
   const app = express();
@@ -40,6 +41,12 @@ afterEach(async () => {
   if (createdTemplateNames.length > 0) {
     await pool.query(`DELETE FROM style_templates WHERE name = ANY($1::text[])`, [
       createdTemplateNames.splice(0),
+    ]);
+  }
+  // Libraries last — CASCADEs to any library-scoped templates (specs already gone).
+  if (createdLibraryIds.length > 0) {
+    await pool.query(`DELETE FROM libraries WHERE id = ANY($1::uuid[])`, [
+      createdLibraryIds.splice(0),
     ]);
   }
 });
@@ -76,9 +83,10 @@ async function makeSpec(sourcePrefix = 'ufgs'): Promise<string> {
   return id;
 }
 
-async function makeTemplate(name: string): Promise<string> {
+async function makeTemplate(name: string, libraryId?: string): Promise<string> {
   createdTemplateNames.push(name);
-  const result = await post('/templates', { name });
+  const body = libraryId === undefined ? { name } : { name, libraryId };
+  const result = await post('/templates', body);
   if (!result.ok) {
     throw new Error(`failed to create template (${result.status}): ${await result.text()}`);
   }
@@ -162,6 +170,33 @@ describe('POST /specs/:id/style-source', () => {
     const specId = await makeSpec();
     const res = await post(`/specs/${specId}/style-source`, {});
     expect(res.status).toBe(422);
+  });
+
+  it('409 — template owned by a different library than the spec (#318)', async () => {
+    // Scoped template in a fresh library; spec lives in UFGS Reference → mismatch.
+    const otherLib = await createLibrary({
+      tier: 'client',
+      name: `ss-api-xlib-${randomUUID().slice(0, 8)}`,
+    });
+    createdLibraryIds.push(otherLib.id);
+    const scopedSpecId = await createSpec({
+      section: '27 21 00',
+      title: 'ss-api-xlib-spec',
+      source: `xlib-${randomUUID().slice(0, 8)}`,
+      libraryId: otherLib.id,
+    });
+    createdSpecIds.push(scopedSpecId);
+    // Assign a same-library template first so we know the template is valid…
+    const name = `ss-api-xlib-tpl-${randomUUID().slice(0, 8)}`;
+    const scopedTemplateId = await makeTemplate(name, otherLib.id);
+    // …then try to bind it to a spec in a DIFFERENT library (UFGS Reference).
+    const specElsewhere = await makeSpec();
+    const res = await post(`/specs/${specElsewhere}/style-source`, {
+      templateId: scopedTemplateId,
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('style template belongs to a different library than the spec');
   });
 });
 

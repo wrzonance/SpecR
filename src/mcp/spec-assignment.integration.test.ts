@@ -22,6 +22,7 @@ let libraryId: string;
 let otherLibraryId: string;
 let specId: string;
 let templateId: string;
+let otherTemplateId: string;
 let profileId: string;
 let otherProfileId: string;
 
@@ -30,6 +31,9 @@ function isToolError(res: ToolResult): boolean {
 }
 function parse<T>(res: ToolResult): T {
   return JSON.parse(res.content[0]!.text) as T;
+}
+function errorText(res: ToolResult): string {
+  return res.content[0]!.text;
 }
 
 async function insertLibrary(): Promise<string> {
@@ -50,6 +54,10 @@ beforeAll(async () => {
   );
   specId = spec.rows[0]!.id;
   templateId = (await createTemplate(`wave6-tmpl-${randomUUID().slice(0, 8)}`)).id;
+  // #318 — a template scoped to the OTHER library, to prove the cross-library guard.
+  otherTemplateId = (
+    await createTemplate(`wave6-other-tmpl-${randomUUID().slice(0, 8)}`, undefined, otherLibraryId)
+  ).id;
   profileId = (
     await createNumberingProfile(libraryId, `wave6-prof-${randomUUID().slice(0, 8)}`, MINIMAL_RULES)
   ).id;
@@ -68,7 +76,9 @@ afterAll(async () => {
   await pool.query('DELETE FROM numbering_profiles WHERE id = ANY($1::uuid[])', [
     [profileId, otherProfileId],
   ]);
-  await pool.query('DELETE FROM style_templates WHERE id = $1', [templateId]);
+  await pool.query('DELETE FROM style_templates WHERE id = ANY($1::uuid[])', [
+    [templateId, otherTemplateId],
+  ]);
   await pool.query('DELETE FROM libraries WHERE id = ANY($1::uuid[])', [
     [libraryId, otherLibraryId],
   ]);
@@ -116,6 +126,12 @@ describe('style-source MCP tools', () => {
   it('assign with an unknown template and clear on a missing spec are tool errors', async () => {
     expect(isToolError(await handleAssignStyleSource({ specId, templateId: MISSING }))).toBe(true);
     expect(isToolError(await handleClearStyleSource({ specId: MISSING }))).toBe(true);
+  });
+
+  it('a template from a different library is rejected (library mismatch) (#318)', async () => {
+    const res = await handleAssignStyleSource({ specId, templateId: otherTemplateId });
+    expect(isToolError(res)).toBe(true);
+    expect(errorText(res)).toContain('style template belongs to a different library than the spec');
   });
 });
 

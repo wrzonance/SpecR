@@ -83,11 +83,14 @@ export async function handleGetTemplate(args: unknown): Promise<ToolResult> {
 export async function handleCreateTemplate(args: unknown): Promise<ToolResult> {
   const parsed = CreateTemplateBodySchema.safeParse(args);
   if (!parsed.success) return toolError(`invalid create_template input: ${issues(parsed.error)}`);
-  const { name, owner } = parsed.data;
+  const { name, owner, libraryId } = parsed.data;
   try {
-    return ok(await createTemplate(name, owner));
+    // #318 — libraryId scopes the template; omitted → NULL (built-in / global).
+    return ok(await createTemplate(name, owner, libraryId));
   } catch (err) {
     if (getPgCode(err) === '23505') return toolError('template name already exists');
+    // A libraryId for a non-existent library surfaces as an FK violation (23503).
+    if (getPgCode(err) === '23503') return toolError('library not found');
     logger.error({ err }, 'mcp tool create_template failed');
     return toolError('Internal error — template create failed');
   }

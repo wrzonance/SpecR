@@ -7,9 +7,12 @@ import {
   clearSpecStyleSource,
   countSpecsUsingTemplate,
 } from './style-source.js';
+import { createLibrary } from './libraries.js';
+import { createSpec } from './specs.js';
 
 const CREATED_TEMPLATE_NAMES: string[] = [];
 const CREATED_SPEC_IDS: string[] = [];
+const CREATED_LIBRARY_IDS: string[] = [];
 
 afterEach(async () => {
   // Specs first — they reference templates (RESTRICT).
@@ -23,8 +26,15 @@ afterEach(async () => {
     ]);
     CREATED_TEMPLATE_NAMES.length = 0;
   }
+  // Libraries last — deleting one CASCADEs to its (library-scoped) style_templates,
+  // now that the specs referencing them are gone (RESTRICT satisfied).
+  if (CREATED_LIBRARY_IDS.length > 0) {
+    await pool.query(`DELETE FROM libraries WHERE id = ANY($1::uuid[])`, [CREATED_LIBRARY_IDS]);
+    CREATED_LIBRARY_IDS.length = 0;
+  }
 });
 
+// Built-in / global template (library_id NULL) — the pre-#318 default.
 async function makeTemplate(name: string): Promise<string> {
   CREATED_TEMPLATE_NAMES.push(name);
   const result = await pool.query<{ id: string }>(
@@ -33,6 +43,35 @@ async function makeTemplate(name: string): Promise<string> {
   );
   const id = result.rows[0]?.id;
   if (!id) throw new Error('failed to insert template');
+  return id;
+}
+
+// Library-scoped template (#318): library_id set, so it only binds that library's specs.
+async function makeScopedTemplate(name: string, libraryId: string): Promise<string> {
+  CREATED_TEMPLATE_NAMES.push(name);
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO style_templates (name, library_id) VALUES ($1, $2) RETURNING id`,
+    [name, libraryId]
+  );
+  const id = result.rows[0]?.id;
+  if (!id) throw new Error('failed to insert scoped template');
+  return id;
+}
+
+async function makeLibrary(name: string): Promise<string> {
+  const lib = await createLibrary({ tier: 'client', name });
+  CREATED_LIBRARY_IDS.push(lib.id);
+  return lib.id;
+}
+
+async function makeSpecInLibrary(libraryId: string): Promise<string> {
+  const id = await createSpec({
+    section: '27 21 00',
+    title: 'ss-test-scoped-spec',
+    source: `ss-${randomUUID().slice(0, 8)}`,
+    libraryId,
+  });
+  CREATED_SPEC_IDS.push(id);
   return id;
 }
 
@@ -74,11 +113,17 @@ describe('getSpecStyleSource', () => {
 });
 
 describe('setSpecStyleSource', () => {
-  it('returns false for a non-existent spec', async () => {
+  it("returns 'spec-not-found' for a non-existent spec", async () => {
     const templateId = await makeTemplate(`ss-set-missing-spec-${randomUUID().slice(0, 8)}`);
     expect(await setSpecStyleSource('00000000-0000-0000-0000-000000000000', templateId)).toBe(
-      false
+      'spec-not-found'
     );
+  });
+
+  it("assigns a built-in (library_id NULL) template to any spec ('assigned')", async () => {
+    const specId = await makeSpec();
+    const templateId = await makeTemplate(`ss-builtin-${randomUUID().slice(0, 8)}`);
+    expect(await setSpecStyleSource(specId, templateId)).toBe('assigned');
   });
 
   it('re-assign replaces the previous template', async () => {
@@ -86,10 +131,40 @@ describe('setSpecStyleSource', () => {
     const first = await makeTemplate(`ss-replace-a-${randomUUID().slice(0, 8)}`);
     const second = await makeTemplate(`ss-replace-b-${randomUUID().slice(0, 8)}`);
 
-    await setSpecStyleSource(specId, first);
-    await setSpecStyleSource(specId, second);
+    expect(await setSpecStyleSource(specId, first)).toBe('assigned');
+    expect(await setSpecStyleSource(specId, second)).toBe('assigned');
 
     expect((await getSpecStyleSource(specId))?.templateId).toBe(second);
+  });
+});
+
+describe('setSpecStyleSource — library scoping (#318)', () => {
+  it("assigns a template owned by the spec's OWN library ('assigned')", async () => {
+    const libId = await makeLibrary(`ss-scope-same-${randomUUID().slice(0, 8)}`);
+    const specId = await makeSpecInLibrary(libId);
+    const templateId = await makeScopedTemplate(`ss-same-lib-${randomUUID().slice(0, 8)}`, libId);
+
+    expect(await setSpecStyleSource(specId, templateId)).toBe('assigned');
+    expect((await getSpecStyleSource(specId))?.templateId).toBe(templateId);
+  });
+
+  it("rejects a template owned by a DIFFERENT library ('library-mismatch'), no write", async () => {
+    const libA = await makeLibrary(`ss-scope-a-${randomUUID().slice(0, 8)}`);
+    const libB = await makeLibrary(`ss-scope-b-${randomUUID().slice(0, 8)}`);
+    const templateA = await makeScopedTemplate(`ss-lib-a-${randomUUID().slice(0, 8)}`, libA);
+    const specB = await makeSpecInLibrary(libB);
+
+    expect(await setSpecStyleSource(specB, templateA)).toBe('library-mismatch');
+    // The rejected assignment did NOT write — the spec still has no style source.
+    expect(await getSpecStyleSource(specB)).toBeNull();
+  });
+
+  it("allows a built-in (library_id NULL) template on a scoped-library spec ('assigned')", async () => {
+    const libId = await makeLibrary(`ss-scope-builtin-${randomUUID().slice(0, 8)}`);
+    const specId = await makeSpecInLibrary(libId);
+    const builtIn = await makeTemplate(`ss-builtin-scope-${randomUUID().slice(0, 8)}`);
+
+    expect(await setSpecStyleSource(specId, builtIn)).toBe('assigned');
   });
 });
 

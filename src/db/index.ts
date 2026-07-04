@@ -239,7 +239,7 @@ export {
   clearSpecStyleSource,
   countSpecsUsingTemplate,
 } from './queries/style-source.js';
-export type { SpecStyleSource } from './queries/style-source.js';
+export type { SpecStyleSource, SetSpecStyleResult } from './queries/style-source.js';
 export { acquireLock, releaseLock, getLock, DEFAULT_LOCK_TTL_SECONDS } from './queries/locks.js';
 export type { LockState, AcquireLockResult } from './queries/locks.js';
 export {

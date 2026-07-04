@@ -36,18 +36,44 @@ export async function getSpecStyleSource(specId: string): Promise<SpecStyleSourc
   }
 }
 
+/** Outcome of assigning a style template to a spec (library scoping enforced, #318). */
+export type SetSpecStyleResult = 'assigned' | 'spec-not-found' | 'library-mismatch';
+
 /**
- * Assign (or replace) the spec's style template. Returns false when the spec
- * does not exist; FK violations (unknown template) surface as DatabaseError —
- * the caller pre-checks template existence to return the right 404.
+ * Assign (or replace) the spec's style template, enforcing library scoping (#318,
+ * mirrors setSpecNumberingProfile): a spec may be assigned only a built-in / global
+ * template (library_id IS NULL) or one owned by its OWN library. The scope predicate
+ * lives in the UPDATE's WHERE so a cross-library assignment matches zero rows
+ * atomically — otherwise a library-A template could bind a library-B spec, hiding
+ * it from B's scoped view and blocking A's deletion via the RESTRICT FK.
+ *
+ * A PROJECT spec has library_id NULL (specs_owner_xor constraint), so the predicate
+ * admits only built-in templates for it — identical to the numbering precedent; no
+ * separate project-spec policy is invented.
+ *
+ * Assumes the caller has already checked that the template exists (the handler
+ * does); a missing template also yields 'library-mismatch'.
  */
-export async function setSpecStyleSource(specId: string, templateId: string): Promise<boolean> {
+export async function setSpecStyleSource(
+  specId: string,
+  templateId: string
+): Promise<SetSpecStyleResult> {
   try {
-    const result = await pool.query(`UPDATE specs SET style_template_id = $2 WHERE id = $1`, [
-      specId,
-      templateId,
-    ]);
-    return (result.rowCount ?? 0) === 1;
+    const upd = await pool.query(
+      `UPDATE specs s
+          SET style_template_id = $2
+        WHERE s.id = $1
+          AND EXISTS (
+            SELECT 1 FROM style_templates t
+            WHERE t.id = $2 AND (t.library_id IS NULL OR t.library_id = s.library_id)
+          )`,
+      [specId, templateId]
+    );
+    if ((upd.rowCount ?? 0) === 1) return 'assigned';
+    // No row updated — distinguish a missing spec (→404) from an existing spec
+    // whose scope rejects the template (→409) so the handler can map each cleanly.
+    const specExists = await pool.query(`SELECT 1 FROM specs WHERE id = $1`, [specId]);
+    return (specExists.rowCount ?? 0) === 1 ? 'library-mismatch' : 'spec-not-found';
   } catch (err) {
     throw new DatabaseError('failed to set spec style source', { cause: err });
   }

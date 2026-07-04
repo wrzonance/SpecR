@@ -35,8 +35,11 @@ export async function handleAssignStyleSource(args: unknown): Promise<ToolResult
     // decide — a missing template here is a clean not-found (mirrors the REST route).
     const template = await getTemplate(templateId);
     if (!template) return toolError(`template not found: id=${templateId}`);
-    const assigned = await setSpecStyleSource(specId, templateId);
-    if (!assigned) return toolError(`spec not found: id=${specId}`);
+    const outcome = await setSpecStyleSource(specId, templateId);
+    if (outcome === 'spec-not-found') return toolError(`spec not found: id=${specId}`);
+    if (outcome === 'library-mismatch') {
+      return toolError('style template belongs to a different library than the spec');
+    }
     return ok({ templateId, templateName: template.name });
   } catch (err) {
     // Race: template deleted between the pre-check and the UPDATE → 23503 FK violation.

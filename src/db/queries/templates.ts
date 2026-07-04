@@ -14,6 +14,8 @@ export interface TemplateMeta {
   readonly id: string;
   readonly name: string;
   readonly owner: string | null;
+  // ADR-051 / #318 — library scope: NULL = built-in / global default.
+  readonly libraryId: string | null;
   readonly createdAt: Date;
 }
 
@@ -25,6 +27,7 @@ interface TemplateRow {
   readonly id: string;
   readonly name: string;
   readonly owner: string | null;
+  readonly library_id: string | null;
   readonly created_at: Date;
 }
 
@@ -41,8 +44,17 @@ function mapRuleRow(row: StyleRuleRow): StyleRule {
 }
 
 function mapMetaRow(row: TemplateRow): TemplateMeta {
-  return { id: row.id, name: row.name, owner: row.owner, createdAt: row.created_at };
+  return {
+    id: row.id,
+    name: row.name,
+    owner: row.owner,
+    libraryId: row.library_id,
+    createdAt: row.created_at,
+  };
 }
+
+// Shared SELECT list — keep every read exposing library_id (#318) in lockstep.
+const META_COLUMNS = 'id, name, owner, library_id, created_at';
 
 interface Queryable {
   query: Pool['query'];
@@ -63,7 +75,7 @@ async function loadRules(templateId: string, client?: Queryable): Promise<readon
 async function selectTemplateMeta(id: string, client?: Queryable): Promise<TemplateMeta | null> {
   const q = client ?? pool;
   const result = await q.query<TemplateRow>(
-    `SELECT id, name, owner, created_at FROM style_templates WHERE id = $1`,
+    `SELECT ${META_COLUMNS} FROM style_templates WHERE id = $1`,
     [id]
   );
   const row = result.rows[0];
@@ -73,7 +85,7 @@ async function selectTemplateMeta(id: string, client?: Queryable): Promise<Templ
 export async function getTemplate(id: string): Promise<Template | null> {
   try {
     const result = await pool.query<TemplateRow>(
-      `SELECT id, name, owner, created_at FROM style_templates WHERE id = $1`,
+      `SELECT ${META_COLUMNS} FROM style_templates WHERE id = $1`,
       [id]
     );
     const row = result.rows[0];
@@ -88,7 +100,7 @@ export async function getTemplate(id: string): Promise<Template | null> {
 export async function getTemplateByName(name: string): Promise<Template | null> {
   try {
     const result = await pool.query<TemplateRow>(
-      `SELECT id, name, owner, created_at FROM style_templates WHERE name = $1`,
+      `SELECT ${META_COLUMNS} FROM style_templates WHERE name = $1`,
       [name]
     );
     const row = result.rows[0];
@@ -103,7 +115,7 @@ export async function getTemplateByName(name: string): Promise<Template | null> 
 export async function listTemplates(): Promise<readonly TemplateMeta[]> {
   try {
     const result = await pool.query<TemplateRow>(
-      `SELECT id, name, owner, created_at FROM style_templates ORDER BY name`
+      `SELECT ${META_COLUMNS} FROM style_templates ORDER BY name`
     );
     return result.rows.map(mapMetaRow);
   } catch (err) {
@@ -111,12 +123,17 @@ export async function listTemplates(): Promise<readonly TemplateMeta[]> {
   }
 }
 
-export async function createTemplate(name: string, owner?: string): Promise<TemplateMeta> {
+export async function createTemplate(
+  name: string,
+  owner?: string,
+  // #318 — NULL (default) = built-in / global template; a library UUID scopes it.
+  libraryId?: string | null
+): Promise<TemplateMeta> {
   try {
     const result = await pool.query<TemplateRow>(
-      `INSERT INTO style_templates (name, owner) VALUES ($1, $2)
-       RETURNING id, name, owner, created_at`,
-      [name, owner ?? null]
+      `INSERT INTO style_templates (name, owner, library_id) VALUES ($1, $2, $3)
+       RETURNING ${META_COLUMNS}`,
+      [name, owner ?? null, libraryId ?? null]
     );
     const row = result.rows[0];
     if (!row) throw new DatabaseError('createTemplate: no row returned');
@@ -130,7 +147,10 @@ export async function createTemplate(name: string, owner?: string): Promise<Temp
 export async function createTemplateWithRules(
   name: string,
   owner: string | null,
-  rules: readonly StyleRule[]
+  rules: readonly StyleRule[],
+  // #318 — NULL (default) = built-in / global template; a library UUID scopes it
+  // (onboarding passes the spec's library so its template is not a global built-in).
+  libraryId: string | null = null
 ): Promise<Template> {
   // Parse up front so the stored and returned rules are the SAME validated values,
   // and so a validation throw never opens a transaction.
@@ -142,9 +162,9 @@ export async function createTemplateWithRules(
   try {
     await client.query('BEGIN');
     const result = await client.query<TemplateRow>(
-      `INSERT INTO style_templates (name, owner) VALUES ($1, $2)
-       RETURNING id, name, owner, created_at`,
-      [name, owner]
+      `INSERT INTO style_templates (name, owner, library_id) VALUES ($1, $2, $3)
+       RETURNING ${META_COLUMNS}`,
+      [name, owner, libraryId]
     );
     const row = result.rows[0];
     if (!row) throw new DatabaseError('createTemplateWithRules: no row returned');
@@ -217,7 +237,7 @@ export async function updateTemplateMeta(
   values.push(id);
   const sql = `UPDATE style_templates SET ${fields.join(', ')}
                WHERE id = $${values.length}
-               RETURNING id, name, owner, created_at`;
+               RETURNING ${META_COLUMNS}`;
   try {
     const result = await pool.query<TemplateRow>(sql, values);
     const row = result.rows[0];
