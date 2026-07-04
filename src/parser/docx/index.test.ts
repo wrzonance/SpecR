@@ -199,6 +199,40 @@ describe('parseDocx — happy path', () => {
     const hidden = allNodes(tree.parts).find((n) => n.text.includes('PROJECT SPEC SIGN-OFF'));
     expect(hidden?.meta.vanish).toBe(true);
   });
+
+  it('reserved-low-level PRT+ART synthetic: tags source=cpi and derives SUMMARY role=summary', async () => {
+    // Committed synthetic standing in for the copyrighted CPI v2 fixtures (#321):
+    // PRT/ART short-form styles are the CPI style fingerprint, and the Article tier
+    // is reserved at ilvl=3 (Schedule/PDS occupy ilvl 1–2). This pins the REAL
+    // invariant in CI without a fixture — (1) detectSource tags PRT+ART as 'cpi';
+    // (2) the reserved-ilvl offset is normalized into node_type='article' so a
+    // standard heading (SUMMARY) still derives its CSI role.
+    const cpiStyles = `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:style w:styleId="PRT" w:type="paragraph"><w:name w:val="PRT"/></w:style>
+      <w:style w:styleId="ART" w:type="paragraph"><w:name w:val="ART"/><w:pPr><w:numPr><w:ilvl w:val="3"/><w:numId w:val="1"/></w:numPr></w:pPr></w:style>
+    </w:styles>`;
+    const doc = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+    <w:p><w:pPr><w:pStyle w:val="PRT"/></w:pPr><w:r><w:t>PART 1 - GENERAL</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="ART"/><w:numPr><w:ilvl w:val="3"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>SUMMARY</w:t></w:r></w:p>
+  </w:body></w:document>`;
+    const buffer = await makeDocx({
+      documentXml: doc,
+      stylesXml: cpiStyles,
+      numberingXml: STRUCTURED_NUMBERING,
+    });
+
+    // meta.source is set by detectSource in the parseDocx pipeline — safe to read here.
+    const tree = await parseDocx(buffer);
+    expect(allNodes(tree.parts).every((n) => n.meta.source === 'cpi')).toBe(true);
+
+    // GOTCHA: articleRole is tagged in parse() (parser/index.ts), NOT parseDocx —
+    // route this assertion through parse() or articleRole reads undefined.
+    const { tree: parsed } = await parse(buffer, 'cpi-v2-synthetic.docx');
+    const summary = allNodes(parsed.parts).find(
+      (n) => n.type === 'article' && n.text === 'SUMMARY'
+    );
+    expect(summary?.meta.articleRole).toBe('summary');
+  });
 });
 
 describe('parseDocx — error handling', () => {
