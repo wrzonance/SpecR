@@ -95,6 +95,30 @@ export function isSpecifierNote(text: string): boolean {
   return NOTE_TO_SPECIFIER_PATTERN.test(undecorated) || SPECIFIER_NOTES_PATTERN.test(undecorated);
 }
 
+// The visible editorial instruction that points AT the hidden specifier notes,
+// distinct from a note BANNER (isSpecifierNote, which opens a note). ARCAT emits
+// "Display hidden notes to specifier. (Don't know how? Click Here)" as a visible
+// preamble line: it is NOT w:vanish, carries no banner, and its style is not
+// note-named, so it otherwise falls through every structural signal and leaks
+// into CSI body as a continuation.
+//
+// Keyed on the "hidden notes to (the) specifier" phrase — inherently editorial
+// chrome that never appears in real spec content — NOT on any vendor/source label.
+// The phrase must stay tight: a non-anchored "notes to specifier" match flips real
+// product content ("...set pressure.** NOTE TO SPECIFIER **...") and review
+// instructions ('Delete all "Specifier Notes"...') into notes (verified against the
+// full docx corpus). "hidden notes to specifier" matches neither.
+const REVEAL_SPECIFIER_NOTES_PATTERN = /\bHIDDEN NOTES? TO (?:THE )?SPECIFIER/;
+
+/**
+ * Returns true for an editorial instruction telling the reader to reveal the
+ * document's hidden specifier notes (Word hidden-text chrome). This is metadata
+ * about the note apparatus, not a note banner and not spec content.
+ */
+export function isSpecifierNoteInstruction(text: string): boolean {
+  return REVEAL_SPECIFIER_NOTES_PATTERN.test(text.replace(/\s+/g, ' ').toUpperCase());
+}
+
 // A horizontal rule made only of decoration chars (asterisks, dashes, equals,
 // bullets) — 3+ so a stray "--" or "==" arrow isn't caught. Spaces allowed so
 // spaced rules ("* * *") match; a trimmed non-empty match always holds a real

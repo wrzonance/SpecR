@@ -9,11 +9,30 @@ import { getLabel } from './labels.js';
 // non-breaking spaces or doubled spaces (\s covers   in JS). The server
 // extractor normalizes those at ingest, so the stored targetSection has single
 // spaces — matched text must be normalized the same way before lookups.
+// Two tiers, mirroring the server (lib/section-number.ts): the canonical
+// three-group form is matched anywhere in prose; the mis-grouped DISPLAY variants
+// a spec author (or OCR) can produce — spaced-compact "01 8813", compact "271123",
+// dotted "01.88.13" — are admitted ONLY right after a "SECTION" keyword, the same
+// strong context the server trusts. Without that gate a bare 6-digit number in
+// prose would read as a phantom section. normalizeSection() re-groups whatever
+// matched into the canonical shape, and the statusFor() gate in linkifyText means
+// only numbers that resolve to a real section are ever linked or re-rendered.
 const SECTION_PATTERN =
-  /(?<![\d.])\d{2}\s+\d{2}\s+\d{2}(?:\.\d{2}(?!\d)(?:[^\S\r\n]+\d{2}(?!\d))?)?(?!\d)/g;
+  /(?<![\d.])(?:\d{2}\s+\d{2}\s+\d{2}(?:\.\d{2}(?!\d)(?:[^\S\r\n]+\d{2}(?!\d))?)?|(?<=\bSECTION\s{1,4})(?:\d{2}\s+\d{4}|\d{6}|\d{2}\.\d{2}\.\d{2})(?:\.\d{2}(?!\d))?(?:[^\S\r\n]+\d{2}(?!\d))?)(?!\.?\d)/gi;
 
+// Canonicalize a matched section number to the expanded CSI shape
+// "NN NN NN(.NN)( NN)": collapse whitespace, then re-group the strong-context
+// display variants (spaced-compact / compact / dotted) so both the status lookup
+// and the rendered label use the canonical form the server stores. An already
+// canonical value (or anything unrecognized) is returned whitespace-collapsed.
 function normalizeSection(text) {
-  return text.replace(/\s+/g, ' ');
+  const s = text.replace(/\s+/g, ' ').trim();
+  if (/^\d{2} \d{2} \d{2}(?:\.\d{2})?(?: \d{2})?$/.test(s)) return s;
+  let m;
+  if ((m = /^(\d{2}) (\d{2})(\d{2})((?:\.\d{2})?(?: \d{2})?)$/.exec(s))) return `${m[1]} ${m[2]} ${m[3]}${m[4]}`;
+  if ((m = /^(\d{2})(\d{2})(\d{2})((?:\.\d{2})?(?: \d{2})?)$/.exec(s))) return `${m[1]} ${m[2]} ${m[3]}${m[4]}`;
+  if ((m = /^(\d{2})\.(\d{2})\.(\d{2})((?:\.\d{2})?(?: \d{2})?)$/.exec(s))) return `${m[1]} ${m[2]} ${m[3]}${m[4]}`;
+  return s;
 }
 
 function el(tag, className, text) {

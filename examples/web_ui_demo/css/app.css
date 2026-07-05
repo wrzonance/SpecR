@@ -1686,6 +1686,12 @@ body {
   padding: 0.6rem 1.1rem 1rem;
   font-size: 0.93rem;
   line-height: 1.5;
+  /* Spec content is untrusted, unbroken tokens — 140-char product URLs, asterisk
+     decoration runs (** …), fill-in blanks (____) — must wrap inside the sheet
+     instead of overflowing off the "paper". overflow-wrap is inherited, so one
+     rule at the content root covers front-matter, node text, and notes; `anywhere`
+     (not break-word) also lets flexed .node-text / heading bars shrink to fit. */
+  overflow-wrap: anywhere;
 }
 
 /* Root-level non-part content (document front matter: title lines, copyright) */

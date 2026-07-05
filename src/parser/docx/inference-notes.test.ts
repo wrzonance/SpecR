@@ -92,6 +92,29 @@ describe('classifyParagraphs + buildTree — specifier notes become vanish notes
     expect(node?.text).toBe('PART 3 - EXECUTION');
   });
 
+  // The ARCAT preamble line "Display hidden notes to specifier. (Click Here)" is
+  // VISIBLE (not w:vanish), carries no note banner, and its style is not note-named,
+  // so before the isSpecifierNoteInstruction signal it leaked into CSI body as a
+  // visible continuation. It must classify as a note (editorial), never as content.
+  it('visible "Display hidden notes to specifier" instruction → note node, not CSI content', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({
+          text: "Display hidden notes to specifier. (Don't know how? Click Here)",
+        }),
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    // classified as a note (isNote), routed to the note branch, never a visible node
+    expect(classified[0]?.isNote).toBe(true);
+    const tree = buildTree(classified, '26 09 33', 'T', 'arcat');
+    const root = tree.parts[0];
+    expect(root?.type).toBe('note');
+    expect(root?.type).not.toBe('continuation');
+  });
+
   it('FootnoteText style is NOT a specifier note', () => {
     const styleMap: StyleMap = {
       styles: new Map([['FootnoteText', { styleId: 'FootnoteText', name: 'footnote text' }]]),
