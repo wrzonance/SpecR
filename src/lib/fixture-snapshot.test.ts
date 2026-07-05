@@ -99,4 +99,40 @@ describe('diffSnapshots', () => {
     const d = diffSnapshots(base, after);
     expect(d.changed.find((c) => c.path === 'B.docx')?.presence).toBe('only-before');
   });
+
+  // Regression: an error-only change (both sides parse-error, identical
+  // parts/noteLeaks/render) used to yield a delta with every array empty and no
+  // scalar fields — a silent, uninformative "changed" row. Surface the transition.
+  it('surfaces an error-only change instead of an empty delta', () => {
+    const errBase: Snapshot = {
+      'X.docx': { parts: -1, noteLeaks: -1, refs: [], render: '', error: 'zip: bad EOCD' },
+    };
+    const errAfter: Snapshot = {
+      'X.docx': { parts: -1, noteLeaks: -1, refs: [], render: '', error: 'zip: truncated' },
+    };
+    const d = diffSnapshots(errBase, errAfter);
+    expect(d.changed).toHaveLength(1);
+    expect(d.changed[0]?.error).toEqual(['zip: bad EOCD', 'zip: truncated']);
+    expect(d.changed[0]?.parts).toBeUndefined();
+  });
+
+  // Regression: a pure line REORDER (identical line multiset) leaves parts/
+  // noteLeaks/refs unchanged and yields the same Set of lines — a set-based diff
+  // called it "unchanged", defeating the render guard. Direct render compare catches it.
+  it('detects a render reorder even when the line multiset is identical', () => {
+    const reBase: Snapshot = { 'A.docx': { parts: 3, noteLeaks: 0, refs: [], render: 'x\ny\nz' } };
+    const reAfter: Snapshot = { 'A.docx': { parts: 3, noteLeaks: 0, refs: [], render: 'z\ny\nx' } };
+    const d = diffSnapshots(reBase, reAfter);
+    expect(d.changed).toHaveLength(1);
+    expect(d.changed[0]?.path).toBe('A.docx');
+  });
+
+  // Multiset-aware: one occurrence removed of a line that still appears elsewhere
+  // must surface, where a Set diff would see the same line present on both sides.
+  it('surfaces a removed duplicate-line occurrence', () => {
+    const dupBase: Snapshot = { 'A.docx': { parts: 3, noteLeaks: 0, refs: [], render: 'a\na\nb' } };
+    const dupAfter: Snapshot = { 'A.docx': { parts: 3, noteLeaks: 0, refs: [], render: 'a\nb' } };
+    const d = diffSnapshots(dupBase, dupAfter);
+    expect(d.changed[0]?.linesRemoved).toEqual(['a']);
+  });
 });

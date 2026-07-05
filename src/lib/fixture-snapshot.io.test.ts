@@ -1,6 +1,6 @@
 // src/lib/fixture-snapshot.io.test.ts
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, globSync, readFileSync } from 'node:fs';
+import { mkdtempSync, globSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSnapshot, readSnapshot, fixtureRecord } from './fixture-snapshot.js';
@@ -16,6 +16,13 @@ describe('writeSnapshot / readSnapshot round-trip', () => {
     const path = await writeSnapshot(snap, out, 'smoke');
     expect(path).toBe(join(out, 'smoke.json'));
     expect(await readSnapshot(path)).toEqual(snap);
+  });
+
+  it('rejects a malformed snapshot file at the boundary (not a silent cast)', async () => {
+    const out = mkdtempSync(join(tmpdir(), 'fx-'));
+    const bad = join(out, 'bad.json');
+    writeFileSync(bad, JSON.stringify({ 'X.docx': { parts: 'three', noteLeaks: 0 } }));
+    await expect(readSnapshot(bad)).rejects.toThrow(/invalid snapshot file/);
   });
 });
 

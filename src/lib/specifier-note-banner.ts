@@ -8,6 +8,9 @@ const SPECIFIER_NOTES = /SPEC(?:IFIER)?S? NOTES?\b/;
 
 /** True if the text contains a specifier-note banner in any decoration variant. */
 export function containsSpecifierNoteBanner(text: string): boolean {
-  const upper = text.toUpperCase();
+  // Collapse runs of whitespace first, exactly as the parser's isSpecifierNote
+  // does — otherwise "NOTE   TO   SPECIFIER" (multi-space) would slip past these
+  // single-space patterns and leak undetected, the blind spot this guard exists to close.
+  const upper = text.replace(/\s+/g, ' ').toUpperCase();
   return NOTE_TO_SPECIFIER.test(upper) || SPECIFIER_NOTES.test(upper);
 }

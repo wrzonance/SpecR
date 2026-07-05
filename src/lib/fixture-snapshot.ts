@@ -1,6 +1,8 @@
 // src/lib/fixture-snapshot.ts (partial — record builder)
+import * as z from 'zod';
 import { renderMarkdown } from '../generator/markdown.js';
 import { containsSpecifierNoteBanner } from './specifier-note-banner.js';
+import { SpecrError } from './errors.js';
 import type { SpecTree, SecRef, SpecNode } from '../ast/types.js';
 
 export interface FixtureRecord {
@@ -8,7 +10,9 @@ export interface FixtureRecord {
   readonly noteLeaks: number;
   readonly refs: readonly string[];
   readonly render: string;
-  readonly error?: string;
+  // string | undefined (not just optional): a snapshot read back from disk is
+  // Zod-validated, and z.string().optional() admits an explicit undefined.
+  readonly error?: string | undefined;
 }
 
 export type Snapshot = Record<string, FixtureRecord>;
@@ -45,6 +49,7 @@ export interface FixtureDelta {
   readonly presence?: 'only-before' | 'only-after';
   readonly parts?: readonly [number, number];
   readonly noteLeaks?: readonly [number, number];
+  readonly error?: readonly [string | undefined, string | undefined];
   readonly refsAdded: readonly string[];
   readonly refsRemoved: readonly string[];
   readonly linesAdded: readonly string[];
@@ -56,6 +61,15 @@ export interface DiffResult {
   readonly total: number;
 }
 
+function countBy(items: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const x of items) counts.set(x, (counts.get(x) ?? 0) + 1);
+  return counts;
+}
+
+// Multiset difference: a line added/removed N times surfaces N times, even when
+// it still appears elsewhere. A plain Set diff misses duplicate-occurrence changes
+// (and pure reorders — those are caught by the direct render compare in delta()).
 function diffLists(
   before: readonly string[],
   after: readonly string[]
@@ -63,12 +77,14 @@ function diffLists(
   added: string[];
   removed: string[];
 } {
-  const b = new Set(before);
-  const a = new Set(after);
-  return {
-    added: after.filter((x) => !b.has(x)),
-    removed: before.filter((x) => !a.has(x)),
+  const b = countBy(before);
+  const a = countBy(after);
+  const surplus = (from: Map<string, number>, other: Map<string, number>): string[] => {
+    const out: string[] = [];
+    for (const [x, n] of from) for (let i = 0; i < n - (other.get(x) ?? 0); i++) out.push(x);
+    return out;
   };
+  return { added: surplus(a, b), removed: surplus(b, a) };
 }
 
 function delta(path: string, before: FixtureRecord, after: FixtureRecord): FixtureDelta | null {
@@ -77,7 +93,8 @@ function delta(path: string, before: FixtureRecord, after: FixtureRecord): Fixtu
   const changed =
     before.parts !== after.parts ||
     before.noteLeaks !== after.noteLeaks ||
-    refs.added.length + refs.removed.length + lines.added.length + lines.removed.length > 0 ||
+    before.render !== after.render || // direct compare catches reorders a line diff can't
+    refs.added.length + refs.removed.length > 0 ||
     before.error !== after.error;
   if (!changed) return null;
   return {
@@ -86,6 +103,7 @@ function delta(path: string, before: FixtureRecord, after: FixtureRecord): Fixtu
     ...(before.noteLeaks !== after.noteLeaks
       ? { noteLeaks: [before.noteLeaks, after.noteLeaks] as const }
       : {}),
+    ...(before.error !== after.error ? { error: [before.error, after.error] as const } : {}),
     refsAdded: refs.added,
     refsRemoved: refs.removed,
     linesAdded: lines.added,
@@ -157,6 +175,23 @@ export async function writeSnapshot(
   return path;
 }
 
+// A snapshot is read back from disk (external, possibly stale/hand-edited) before
+// diffing, so validate its shape at the boundary rather than trusting a bare
+// `as Snapshot` assertion — a corrupt render/parts field must fail loud here, not
+// silently corrupt diffSnapshots downstream.
+const FixtureRecordSchema = z.object({
+  parts: z.number(),
+  noteLeaks: z.number(),
+  refs: z.array(z.string()),
+  render: z.string(),
+  error: z.string().optional(),
+});
+const SnapshotSchema: z.ZodType<Snapshot> = z.record(z.string(), FixtureRecordSchema);
+
 export async function readSnapshot(path: string): Promise<Snapshot> {
-  return JSON.parse(await readFile(path, 'utf8')) as Snapshot;
+  const parsed = SnapshotSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
+  if (!parsed.success) {
+    throw new SpecrError(`invalid snapshot file: ${path}`, { cause: parsed.error });
+  }
+  return parsed.data;
 }

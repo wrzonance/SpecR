@@ -9,6 +9,7 @@ describe('containsSpecifierNoteBanner', () => {
     'SPECIFIER NOTES: coordinate with Division 26',
     'NOTES TO SPEC WRITER — choose one',
     'trailing banner then SPEC NOTE here',
+    'NOTE   TO   THE   SPECIFIER — multi-space, must still match', // whitespace collapsed like the parser
   ];
   for (const t of hits) {
     it(`matches: ${t.slice(0, 40)}`, () => expect(containsSpecifierNoteBanner(t)).toBe(true));

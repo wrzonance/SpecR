@@ -99,7 +99,7 @@ in `src/` obeys the full lint budget.)
 - Pure comparison over two JSON inputs — unit-testable without the corpus.
 
 **Workflow (the whole point):**
-```
+```bash
 pnpm fixture:snapshot before      # known-good baseline
 # …tweak the regex / signal…
 pnpm fixture:snapshot after

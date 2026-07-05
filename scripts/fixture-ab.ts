@@ -25,12 +25,20 @@ async function diff(a: string, b: string): Promise<number> {
     const bits = [
       c.parts ? `parts ${c.parts[0]}→${c.parts[1]}` : '',
       c.noteLeaks ? `noteLeaks ${c.noteLeaks[0]}→${c.noteLeaks[1]}` : '',
+      c.error ? `error ${c.error[0] ?? 'none'}→${c.error[1] ?? 'none'}` : '',
     ].filter(Boolean).join(' ');
     console.log(`\n=== ${c.path} ${bits} ===`);
     c.refsRemoved.forEach((r) => console.log(`  - ref ${r}`));
     c.refsAdded.forEach((r) => console.log(`  + ref ${r}`));
     c.linesRemoved.slice(0, 8).forEach((l) => console.log(`  - ${l.slice(0, 100)}`));
     c.linesAdded.slice(0, 8).forEach((l) => console.log(`  + ${l.slice(0, 100)}`));
+    const noDetail =
+      !bits &&
+      !c.refsRemoved.length &&
+      !c.refsAdded.length &&
+      !c.linesRemoved.length &&
+      !c.linesAdded.length;
+    if (noDetail) console.log('  (render changed with no net line add/remove — reordered or whitespace-only)');
   }
   console.log(`\n${changed.length}/${total} fixtures changed`);
   return 0;
