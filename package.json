@@ -4,7 +4,7 @@
   "description": "Headless REST API for round-trip automation of CSI MasterFormat®-compatible specification documents (UFGS, generic DOCX). Independent project; not affiliated with CSI.",
   "type": "module",
   "engines": {
-    "node": ">=22.13.0",
+    "node": ">=22.17.0",
     "pnpm": ">=11.0.0"
   },
   "scripts": {
@@ -24,6 +24,8 @@
     "migrate:down": "node-pg-migrate --tsx --migrations-dir src/db/migrations --envPath .env down 1",
     "seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "load:files": "tsx --env-file-if-exists=.env scripts/load-files.ts",
+    "fixture:snapshot": "tsx scripts/fixture-ab.ts snapshot",
+    "fixture:diff": "tsx scripts/fixture-ab.ts diff",
     "seed:corpus": "pnpm load:files 'docs/references/UFGS/**/*.SEC' 'docs/references/UFGS/**/*.sec'"
   },
   "dependencies": {
