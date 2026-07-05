@@ -18,7 +18,7 @@ import { getLabel } from './labels.js';
 // matched into the canonical shape, and the statusFor() gate in linkifyText means
 // only numbers that resolve to a real section are ever linked or re-rendered.
 const SECTION_PATTERN =
-  /(?<![\d.])(?:\d{2}\s+\d{2}\s+\d{2}(?:\.\d{2}(?!\d)(?:[^\S\r\n]+\d{2}(?!\d))?)?|(?<=\bSECTION\s{1,4})(?:\d{2}\s+\d{4}|\d{6}|\d{2}\.\d{2}\.\d{2})(?:\.\d{2}(?!\d))?)(?!\d)/gi;
+  /(?<![\d.])(?:\d{2}\s+\d{2}\s+\d{2}(?:\.\d{2}(?!\d)(?:[^\S\r\n]+\d{2}(?!\d))?)?|(?<=\bSECTION\s{1,4})(?:\d{2}\s+\d{4}|\d{6}|\d{2}\.\d{2}\.\d{2})(?:\.\d{2}(?!\d))?(?:[^\S\r\n]+\d{2}(?!\d))?)(?!\.?\d)/gi;
 
 // Canonicalize a matched section number to the expanded CSI shape
 // "NN NN NN(.NN)( NN)": collapse whitespace, then re-group the strong-context
