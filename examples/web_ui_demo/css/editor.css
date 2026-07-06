@@ -742,11 +742,11 @@
   vertical-align: baseline;
 }
 
-/* Enter-inserted drafts: held locally until the API can create paragraphs
-   (#372) — amber-dashed like the preview chip so the state reads instantly */
+/* Enter-inserted drafts: a continuous amber structure rule (a dashed border
+   this short renders as broken fragments); the DRAFT · LOCAL chip carries the
+   dashed "not persisted yet" language (#372). */
 .tree-node.is-local-draft {
   border-left-color: #d97706;
-  border-left-style: dashed;
 }
 
 .draft-tag {
