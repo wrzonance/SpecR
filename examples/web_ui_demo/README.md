@@ -66,12 +66,15 @@ inbound CITED BY, editability tallies when the API provides them).
   focused one — a new empty article when pressed in an article heading —
   caret ready, sheet renumbered. (Text does not split at the caret; the
   current paragraph commits as-is.) Parts are the exception: CSI's three-part
-  format is preserved.
-- The API has no restructure (#371) or paragraph-creation (#372) endpoint
-  yet, so Tab/Shift+Tab moves and Enter-drafts are held as an
-  explicitly-labeled **LOCAL PREVIEW** (with a RESET) that re-applies over
-  server truth — text edits on real paragraphs inside a preview still persist
-  for real, and drafts wear a `DRAFT · LOCAL` tag.
+  format is preserved. When the connected build serves
+  `POST /specs/:id/paragraphs` (#372, `API_FEATURES.paragraphCreate`), a
+  draft **persists for real** as soon as it has text and a server-side
+  anchor — chained drafts cascade as their anchors persist. Without the
+  endpoint, drafts stay local and wear a `DRAFT · LOCAL` tag.
+- The API has no restructure endpoint yet (#371), so Tab/Shift+Tab moves
+  (and any not-yet-persisted drafts) are held as an explicitly-labeled
+  **LOCAL PREVIEW** (with a RESET) that re-applies over server truth — text
+  edits on real paragraphs inside a preview still persist for real.
 - **Citations render as chips** inside the editable text — click to jump,
   **×** to remove (tracked references go through the removed-reference dialog;
   anything else asks a plain confirm first).

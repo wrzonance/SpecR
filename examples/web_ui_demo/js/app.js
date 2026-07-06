@@ -23,6 +23,7 @@ import {
   listLibrarySpecs,
   addSpecToProject,
   removeSpecFromProject,
+  insertParagraph,
   getBrokenRefs,
   getCoordinationReport,
   getSubmittalRegister,
@@ -2018,6 +2019,20 @@ function findLibrarySpec(section) {
   return tocLibrarySpecs.find((spec) => spec.section === section) ?? null;
 }
 
+// Persists an editor Enter-draft through POST /specs/:id/paragraphs (#372),
+// then refreshes the workspace the same way a text commit does. Returns the
+// created SpecNode so the editor can swap its local draft id for the real one.
+async function persistDraftParagraph(spec, { anchorNodeId, text, nodeType }) {
+  const created = await insertParagraph(spec.tree.id, anchorNodeId, text, nodeType);
+  await reloadSpec(spec.tree.id);
+  renderBoard();
+  await refreshBrokenCount();
+  await refreshCoordination();
+  await refreshOpenComments();
+  toast('Paragraph created');
+  return created;
+}
+
 const sheetCtx = {
   displaySection,
   statusFor,
@@ -2225,6 +2240,7 @@ async function boot() {
     }),
     addSection: addSectionFromMasters,
     removeSection: removeSectionFromProject,
+    ...(API_FEATURES.paragraphCreate ? { persistDraft: persistDraftParagraph } : {}),
     isActive: () => currentView === 'editor',
     toast,
   });

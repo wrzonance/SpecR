@@ -315,10 +315,10 @@ export function initEditor(ctx) {
       ...ops,
       { op: 'insert', afterId: node.id, nodeId: draftId, nodeType: node.type, text: '' },
     ]);
-    if (!insertNoticeShown) {
+    if (!insertNoticeShown && typeof ctx.persistDraft !== 'function') {
       insertNoticeShown = true;
       ctx.toast(
-        'New paragraph added as a local draft — the API has no paragraph-creation endpoint yet (#372)',
+        'New paragraph added as a local draft — this API build has no paragraph-creation endpoint (#372)',
         'info'
       );
     }
@@ -326,13 +326,58 @@ export function initEditor(ctx) {
     render();
   }
 
-  // Text typed into a draft lives in its insert op so it survives replays.
+  // Text typed into a draft lives in its insert op so it survives replays;
+  // when the API serves paragraph creation (#372), a draft with real content
+  // and a real (non-draft) anchor is persisted immediately.
   function updateLocalDraft(spec, node, newText) {
     const ops = restructureOps.get(spec.tree.id) ?? [];
     const op = ops.find((entry) => entry.op === 'insert' && entry.nodeId === node.id);
     if (!op) return;
     op.text = newText;
     node.text = newText;
+    void persistEligibleDrafts(spec);
+  }
+
+  // Persists drafts through POST /specs/:id/paragraphs, oldest-eligible first.
+  // A draft is eligible once it has non-empty text and its anchor is a real
+  // server node — a chained draft becomes eligible when its anchor persists
+  // (the remap below), so the loop cascades. On failure the draft stays local
+  // and replayable; nothing is lost.
+  async function persistEligibleDrafts(spec) {
+    if (typeof ctx.persistDraft !== 'function') return;
+    const specId = spec.tree.id;
+    for (;;) {
+      const ops = restructureOps.get(specId) ?? [];
+      const op = ops.find(
+        (entry) =>
+          entry.op === 'insert' &&
+          !entry.afterId.startsWith('local-') &&
+          entry.text.trim().length > 0
+      );
+      if (!op) return;
+      try {
+        const created = await ctx.persistDraft(spec, {
+          anchorNodeId: op.afterId,
+          text: op.text,
+          nodeType: op.nodeType,
+        });
+        // The node is server truth now: drop the insert op and point any ops
+        // that referenced the draft id (moves on it, drafts anchored on it) at
+        // the real node so the preview replays cleanly.
+        const remaining = (restructureOps.get(specId) ?? []).filter((entry) => entry !== op);
+        for (const entry of remaining) {
+          if (entry.nodeId === op.nodeId) entry.nodeId = created.id;
+          if (entry.op === 'insert' && entry.afterId === op.nodeId) entry.afterId = created.id;
+        }
+        restructureOps.set(specId, remaining);
+        // The persist pipeline's own repaint ran while the insert op still
+        // existed (draft + real node both drawn) — replay now that it's gone.
+        requestRender();
+      } catch (err) {
+        ctx.toast(`draft not saved: ${err.message} — kept as a local draft`, 'warn');
+        return;
+      }
+    }
   }
 
   // The spec to draw: server truth, or the restructure-preview overlay when
@@ -555,6 +600,17 @@ export function initEditor(ctx) {
 
   // ── controller ────────────────────────────────────────────────────────────
 
+  // Render now unless it would destroy in-progress typing — then defer to the
+  // focusout replay. Shared by onDataChanged and the draft-persist loop.
+  function requestRender() {
+    if (!ctx.isActive()) return;
+    if (editingRunIsFocused()) {
+      deferredRender = true;
+      return;
+    }
+    render();
+  }
+
   // True while the caret sits in one of the sheet's inline-editable runs —
   // re-rendering then would detach the focused element and eat the typing.
   function editingRunIsFocused() {
@@ -612,12 +668,7 @@ export function initEditor(ctx) {
     // Mid-edit refreshes (another paragraph's blur-save landing) are deferred
     // until the caret leaves the sheet, or they would destroy typing.
     onDataChanged() {
-      if (!ctx.isActive()) return;
-      if (editingRunIsFocused()) {
-        deferredRender = true;
-        return;
-      }
-      render();
+      requestRender();
     },
     // Workspace swap (project switch/create/delete/restore): flags and
     // selection belong to the old project — drop them.
