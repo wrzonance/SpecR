@@ -54,17 +54,24 @@ inbound CITED BY, editability tallies when the API provides them).
 
 - **Click into any text to edit it in place** — paragraphs, article and part
   headings alike. Changes save when you click away (`PATCH
-  /specs/:id/paragraphs/:nodeId`); Enter/Escape also commits. A paragraph the
+  /specs/:id/paragraphs/:nodeId`); Escape also commits. A paragraph the
   editability program classified `locked` stays read-only and says so with a
   chip.
 - **Tab / Shift+Tab indents and outdents the focused paragraph** through the
   CSI tier ladder with live renumbering — labels are render-derived, so the
   whole sheet renumbers instantly. `Shift+Tab` on a top-tier paragraph promotes
   it to an **article** (its following siblings become its children); an
-  article's hover **⇥** demotes it back under the previous article. The API
-  has no restructure endpoint yet (#371), so structure ops are held as an
-  explicitly-labeled **RENUMBER PREVIEW** (with a RESET) that re-applies over
-  server truth — text edits inside a preview still persist for real.
+  article's hover **⇥** demotes it back under the previous article.
+- **Enter starts a new paragraph of the same CSI level** right below the
+  focused one — a new empty article when pressed in an article heading —
+  caret ready, sheet renumbered. (Text does not split at the caret; the
+  current paragraph commits as-is.) Parts are the exception: CSI's three-part
+  format is preserved.
+- The API has no restructure (#371) or paragraph-creation (#372) endpoint
+  yet, so Tab/Shift+Tab moves and Enter-drafts are held as an
+  explicitly-labeled **LOCAL PREVIEW** (with a RESET) that re-applies over
+  server truth — text edits on real paragraphs inside a preview still persist
+  for real, and drafts wear a `DRAFT · LOCAL` tag.
 - **Citations render as chips** inside the editable text — click to jump,
   **×** to remove (tracked references go through the removed-reference dialog;
   anything else asks a plain confirm first).

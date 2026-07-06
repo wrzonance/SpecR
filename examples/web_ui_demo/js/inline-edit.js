@@ -75,6 +75,13 @@ function reconstruct(ownText) {
 async function commit(node, ownText, ctx, newTextOverride) {
   const newText = newTextOverride ?? reconstruct(ownText);
   if (newText === node.text) return;
+  // Enter-inserted drafts have no server row to PATCH (#372) — their text
+  // lives in the editor's structure op until an endpoint exists. Empty is
+  // fine for a draft; it starts that way.
+  if (node.meta && node.meta.localDraft) {
+    if (typeof ctx.onLocalDraftEdit === 'function') ctx.onLocalDraftEdit(node, newText);
+    return;
+  }
   if (newText.trim().length === 0) {
     if (ctx.toast) ctx.toast('A paragraph cannot be empty — use ⊘ to remove it instead', 'warn');
     renderInlineText(node, ownText, ctx); // restore the last saved text
@@ -89,7 +96,11 @@ async function commit(node, ownText, ctx, newTextOverride) {
   const outcome = await ctx.onSaveParagraphEdit({ spec: ctx.spec, node, newText, removedRefs: removed });
   if (outcome === 'cancelled') {
     node.text = oldText;
-    renderInlineText(node, ownText, ctx);
+    // The editor may have mirrored the pending text onto server-truth state
+    // and re-rendered (Enter/Tab) before this dialog resolved — let it roll
+    // that back and redraw; otherwise restore this row's text in place.
+    if (typeof ctx.onEditCancelled === 'function') ctx.onEditCancelled(node, oldText);
+    else renderInlineText(node, ownText, ctx);
   }
 }
 
@@ -109,9 +120,23 @@ function makeRun(text, node, ownText, ctx) {
     void commit(node, ownText, ctx);
   });
   run.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === 'Escape') {
+    if (event.key === 'Escape') {
       event.preventDefault();
       run.blur();
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (typeof ctx.onInsertAfter === 'function') {
+        // Same capture-before-blur dance as Tab: blur's commit mutates
+        // node.text synchronously, so decide the pending payload first.
+        const newText = reconstruct(ownText);
+        const pendingText = newText !== node.text && newText.trim().length > 0 ? newText : null;
+        run.blur();
+        ctx.onInsertAfter(node, pendingText);
+      } else {
+        run.blur();
+      }
       return;
     }
     if (event.key === 'Tab' && typeof ctx.onRestructure === 'function') {

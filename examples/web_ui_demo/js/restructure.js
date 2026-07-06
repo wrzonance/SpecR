@@ -110,21 +110,45 @@ function outdent(forest, nodeId) {
   return { ok: true };
 }
 
-// Replays ops over a clone of `parts`. Ops whose node has disappeared (or that
-// no longer apply after a server reload) are dropped silently — the preview
-// always reflects what still holds against current truth.
-// Returns { parts, applied } where applied is the surviving op list.
+// Enter inserts a new empty sibling draft of the same tier right after its
+// anchor. Drafts exist only in the preview (no creation endpoint yet, #372) —
+// meta.localDraft marks them so the renderer and the save pipeline treat them
+// as client-only until the API can persist them.
+function insertAfter(forest, op) {
+  const path = findPath(forest, op.afterId);
+  if (!path) return { ok: false, reason: 'anchor paragraph no longer exists' };
+  path.siblings.splice(path.index + 1, 0, {
+    id: op.nodeId,
+    type: op.nodeType,
+    text: op.text ?? '',
+    children: [],
+    meta: { localDraft: true },
+  });
+  return { ok: true };
+}
+
+// Replays ops over a clone of `parts`. Two shapes:
+//   { op: 'move',   nodeId, dir }                       — Tab / Shift+Tab
+//   { op: 'insert', afterId, nodeId, nodeType, text }   — Enter drafts
+// Ops whose node has disappeared (or that no longer apply after a server
+// reload) are dropped silently — the preview always reflects what still holds
+// against current truth. Returns { parts, applied }.
 export function applyRestructureOps(parts, ops) {
   const forest = deepClone(parts);
   const applied = [];
   for (const op of ops) {
-    const result = op.dir > 0 ? indent(forest, op.nodeId) : outdent(forest, op.nodeId);
+    const result =
+      op.op === 'insert'
+        ? insertAfter(forest, op)
+        : op.dir > 0
+          ? indent(forest, op.nodeId)
+          : outdent(forest, op.nodeId);
     if (result.ok) applied.push(op);
   }
   return { parts: forest, applied };
 }
 
-// Validates one new op against the current preview state without committing.
+// Validates one new move against the current preview state without committing.
 export function tryRestructure(parts, ops, nodeId, dir) {
   const { parts: forest } = applyRestructureOps(parts, ops);
   return dir > 0 ? indent(forest, nodeId) : outdent(forest, nodeId);

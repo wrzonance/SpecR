@@ -37,11 +37,13 @@ export function initEditor(ctx) {
   let deferredRender = false; // a data refresh arrived mid-inline-edit — replay on blur
   const flagged = new Set(); // sections staged for removal (demo-local review queue)
   const collapsed = new Set(); // divisions the user closed in the rail
-  // Tab/Shift+Tab structure ops per spec id, replayed over a clone of the
-  // server tree (restructure.js). Local preview only — no API persistence yet
-  // (#371); node ids stay stable so text PATCHes compose with the overlay.
+  // Structure ops per spec id — Tab/Shift+Tab moves and Enter-inserted
+  // drafts — replayed over a clone of the server tree (restructure.js).
+  // Local preview only: no restructure (#371) or creation (#372) endpoint
+  // yet; node ids stay stable so text PATCHes compose with the overlay.
   const restructureOps = new Map();
   let restructureNoticeShown = false;
+  let insertNoticeShown = false;
   let addValue = '';
   let addError = '';
 
@@ -273,7 +275,7 @@ export function initEditor(ctx) {
       ctx.toast(probe.reason, 'warn');
       return;
     }
-    restructureOps.set(specId, [...ops, { nodeId: node.id, dir }]);
+    restructureOps.set(specId, [...ops, { op: 'move', nodeId: node.id, dir }]);
     if (!restructureNoticeShown) {
       restructureNoticeShown = true;
       ctx.toast(
@@ -283,6 +285,54 @@ export function initEditor(ctx) {
     }
     focusNodeId = node.id;
     render();
+  }
+
+  // Enter: a new empty sibling of the same CSI tier, caret ready. Drafts are
+  // preview-only until the API can create paragraphs (#372).
+  function handleInsertAfter(spec, node, pendingText) {
+    const specId = spec.tree.id;
+    const base = ctx.getSpecs().get(specId);
+    if (!base) return;
+    if (node.type === 'part') {
+      ctx.toast(
+        'CSI sections keep their three-part format — press Enter inside an article instead',
+        'warn'
+      );
+      return;
+    }
+    if (pendingText && !node.meta?.localDraft) {
+      const baseNode = findBaseNode(base.tree.parts, node.id);
+      if (baseNode) baseNode.text = pendingText;
+    }
+    const ops = restructureOps.get(specId) ?? [];
+    // crypto.randomUUID is secure-context-only — absent over plain-HTTP LAN
+    // access (HOST=0.0.0.0, server.mjs); any demo-locally-unique id works.
+    const draftId =
+      typeof crypto.randomUUID === 'function'
+        ? `local-${crypto.randomUUID()}`
+        : `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    restructureOps.set(specId, [
+      ...ops,
+      { op: 'insert', afterId: node.id, nodeId: draftId, nodeType: node.type, text: '' },
+    ]);
+    if (!insertNoticeShown) {
+      insertNoticeShown = true;
+      ctx.toast(
+        'New paragraph added as a local draft — the API has no paragraph-creation endpoint yet (#372)',
+        'info'
+      );
+    }
+    focusNodeId = draftId;
+    render();
+  }
+
+  // Text typed into a draft lives in its insert op so it survives replays.
+  function updateLocalDraft(spec, node, newText) {
+    const ops = restructureOps.get(spec.tree.id) ?? [];
+    const op = ops.find((entry) => entry.op === 'insert' && entry.nodeId === node.id);
+    if (!op) return;
+    op.text = newText;
+    node.text = newText;
   }
 
   // The spec to draw: server truth, or the restructure-preview overlay when
@@ -302,13 +352,13 @@ export function initEditor(ctx) {
 
   function renderPreviewChip(toolbar, specId, previewCount) {
     const wrap = el('span', 'ed-preview');
-    const chip = el('span', 'ed-preview-chip', `RENUMBER PREVIEW · ${previewCount}`);
+    const chip = el('span', 'ed-preview-chip', `LOCAL PREVIEW · ${previewCount}`);
     chip.title =
-      'Tab/Shift+Tab restructuring is applied locally and renumbered live; the API has no restructure endpoint yet (#371), so it is not persisted.';
+      'Tab/Shift+Tab restructuring and Enter-inserted paragraphs are applied locally and renumbered live; the API has no restructure (#371) or paragraph-creation (#372) endpoint yet, so they are not persisted.';
     wrap.appendChild(chip);
     const reset = el('button', 'ed-preview-reset', 'RESET');
     reset.type = 'button';
-    reset.title = 'Discard the local structure preview and show server truth';
+    reset.title = 'Discard the local structure preview (including drafts) and show server truth';
     reset.addEventListener('click', () => {
       restructureOps.delete(specId);
       render();
@@ -365,6 +415,17 @@ export function initEditor(ctx) {
       inlineEditing: true,
       onRestructure: (node, dir, pendingText = null) =>
         handleRestructure(spec, node, dir, pendingText),
+      onInsertAfter: (node, pendingText = null) => handleInsertAfter(spec, node, pendingText),
+      onLocalDraftEdit: (node, newText) => updateLocalDraft(spec, node, newText),
+      // A cancelled removed-reference dialog must also undo the pendingText
+      // mirror handleRestructure/handleInsertAfter wrote onto server truth.
+      onEditCancelled: (node, oldText) => {
+        const base = ctx.getSpecs().get(spec.tree.id);
+        const baseNode = base ? findBaseNode(base.tree.parts, node.id) : null;
+        if (baseNode) baseNode.text = oldText;
+        focusNodeId = node.id;
+        render();
+      },
     });
     const sheet = renderSpecSheet(spec, sheetCtx);
     // The map board renders this same spec with id `sheet-<id>`; re-id the
@@ -375,6 +436,7 @@ export function initEditor(ctx) {
     const hints = el('div', 'ed-hints');
     hints.appendChild(el('span', null, 'CLICK INTO ANY TEXT TO EDIT'));
     hints.appendChild(el('span', null, 'TAB / SHIFT+TAB · INDENT & RENUMBER'));
+    hints.appendChild(el('span', null, 'ENTER · NEW PARAGRAPH, SAME LEVEL'));
     hints.appendChild(el('span', null, 'CHANGES SAVE WHEN YOU CLICK AWAY'));
     hints.appendChild(el('span', null, '⊘ REMOVE IS REVERSIBLE (OWNER RENDERS ONLY)'));
     hints.appendChild(el('span', null, "BOLDING / UNDERLINING INDIVIDUAL WORDS ISN'T SUPPORTED"));

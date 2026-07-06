@@ -114,8 +114,10 @@ function makeParaActions(node, row, ctx) {
   }
   // Gate on the SERVER-truth type (baseType survives the editor's local
   // restructure preview) — the removal PATCH 422s on a real heading, and a
-  // preview-demoted article is still a heading in the database.
-  if (ctx.removalEnabled && REMOVABLE_TYPES.has(node.baseType ?? node.type)) {
+  // preview-demoted article is still a heading in the database. Enter-drafts
+  // have no server row at all, so no removal affordance either.
+  const isLocalDraft = Boolean(node.meta && node.meta.localDraft);
+  if (ctx.removalEnabled && !isLocalDraft && REMOVABLE_TYPES.has(node.baseType ?? node.type)) {
     actions.appendChild(makeRemovalButton(node, ctx));
   }
   if (ctx.deleteEnabled) {
@@ -193,6 +195,7 @@ function renderPrNode(node, index, ctx) {
   const row = el('div', 'tree-node');
   row.dataset.nodeId = node.id;
   if (node.meta && node.meta.vanish) row.classList.add('is-vanish');
+  if (node.meta && node.meta.localDraft) row.classList.add('is-local-draft');
   if (node.type === 'continuation') {
     row.classList.add('tree-continuation');
     row.appendChild(el('span', 'node-label', ''));
@@ -210,6 +213,11 @@ function renderPrNode(node, index, ctx) {
   body.appendChild(ownText);
   if (node.meta && node.meta.vanish) {
     body.appendChild(el('span', 'vanish-tag', 'VANISH'));
+  }
+  if (node.meta && node.meta.localDraft) {
+    const tag = el('span', 'draft-tag', 'DRAFT · LOCAL');
+    tag.title = 'Enter-inserted paragraph — held locally until the API can create paragraphs (#372)';
+    body.appendChild(tag);
   }
   appendNumberedChildren(body, node.children, (child, ordinal) =>
     renderPrNode(child, ordinal, ctx)
@@ -260,7 +268,14 @@ function makeCollapsible(container, barClass, labelText, node, ctx, startClosed)
   }
   // A body paragraph promoted to an article in the restructure preview is
   // still removable server-side — keep its ⊘ reachable on the heading bar.
-  if (ctx.removalEnabled && REMOVABLE_TYPES.has(node.baseType ?? node.type)) {
+  // (Enter-drafts have no server row; nothing to remove.)
+  const isLocalDraft = Boolean(node.meta && node.meta.localDraft);
+  if (isLocalDraft) {
+    const tag = el('span', 'draft-tag', 'DRAFT · LOCAL');
+    tag.title = 'Enter-inserted article — held locally until the API can create paragraphs (#372)';
+    bar.appendChild(tag);
+  }
+  if (ctx.removalEnabled && !isLocalDraft && REMOVABLE_TYPES.has(node.baseType ?? node.type)) {
     bar.appendChild(makeRemovalButton(node, ctx));
   }
   return bar;

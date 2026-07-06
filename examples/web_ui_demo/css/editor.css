@@ -741,3 +741,26 @@
   min-height: 1em;
   vertical-align: baseline;
 }
+
+/* Enter-inserted drafts: held locally until the API can create paragraphs
+   (#372) — amber-dashed like the preview chip so the state reads instantly */
+.tree-node.is-local-draft {
+  border-left-color: #d97706;
+  border-left-style: dashed;
+}
+
+.draft-tag {
+  font-family: var(--mono);
+  font-style: normal;
+  font-weight: 400;
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  color: #8a5b00;
+  border: 1px dashed #d97706;
+  background: rgba(217, 119, 6, 0.08);
+  padding: 0 0.3em;
+  margin-left: 0.4em;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: help;
+}
