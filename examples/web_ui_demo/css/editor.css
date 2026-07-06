@@ -561,3 +561,183 @@
     max-height: none;
   }
 }
+
+/* ── WYSIWYG inline editing (reference-design treatment) ───────────────── */
+
+.wys-run {
+  outline: none;
+  cursor: text;
+}
+
+.wys-run:focus {
+  background: rgba(37, 99, 235, 0.06);
+  box-shadow: 0 1.5px 0 var(--amber);
+}
+
+/* citation chip + its remove affordance stay a single non-editable unit */
+.wys-ref {
+  display: inline;
+  margin: 0 1px;
+  white-space: nowrap;
+}
+
+.wys-ref-x {
+  border: none;
+  background: transparent;
+  color: #1d567f;
+  font-size: 0.8em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2em;
+}
+
+.wys-ref-x:hover {
+  background: #b3261e;
+  color: #ffffff;
+}
+
+.tree-node.is-inline-editing {
+  border-left-color: var(--amber);
+  background: rgba(37, 99, 235, 0.04);
+}
+
+.tree-node.is-inline-editing > .node-text > .node-own-text::after,
+.part-bar.is-inline-editing::after,
+.article-bar.is-inline-editing::after {
+  content: 'EDITING · SAVES WHEN YOU CLICK AWAY';
+  font-family: var(--mono);
+  font-style: normal;
+  font-weight: 400;
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  padding: 0.05rem 0.35rem;
+  margin-left: 0.5em;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* per-paragraph editability chip (shown only while inline editing is on) */
+.wys-ed-chip {
+  align-self: flex-start;
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--vellum-edge);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.wys-ed-chip.is-locked {
+  border-style: dashed;
+}
+
+.wys-ed-chip.is-editable {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.wys-ed-chip.is-choice {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+/* heading bars in WYSIWYG mode: the twist+label button still collapses, the
+   title itself is an editable segment, an article grows a ⇥ demote action */
+.part-bar.is-wys,
+.article-bar.is-wys {
+  display: flex;
+  align-items: baseline;
+  cursor: default;
+}
+
+.bar-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55em;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.part-bar.is-wys .node-own-text,
+.article-bar.is-wys .node-own-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.bar-demote {
+  border: 1px solid var(--vellum-edge);
+  background: var(--sheet);
+  color: var(--ink-on-vellum-dim);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0.14rem 0.36rem;
+  cursor: pointer;
+  border-radius: 2px;
+  align-self: center;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.article-bar.is-wys:hover .bar-demote,
+.bar-demote:focus-visible {
+  opacity: 1;
+}
+
+.bar-demote:hover {
+  color: #7a4f00;
+  border-color: #d97706;
+  background: rgba(217, 119, 6, 0.15);
+}
+
+/* renumber-preview chip (Tab/Shift+Tab ops held locally — #371) */
+.ed-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.ed-preview-chip {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  color: #8a5b00;
+  border: 1px dashed #d97706;
+  background: rgba(217, 119, 6, 0.08);
+  padding: 4px 8px;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.ed-preview-reset {
+  border: 1px solid var(--line-dim);
+  background: transparent;
+  color: var(--line);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.ed-preview-reset:hover {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+/* a paragraph that starts/ends at a citation still needs a caret target */
+.wys-run:empty {
+  display: inline-block;
+  min-width: 6px;
+  min-height: 1em;
+  vertical-align: baseline;
+}

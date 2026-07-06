@@ -2201,6 +2201,25 @@ async function boot() {
       onWalkMiss: sheetCtx.onWalkMiss,
       onSaveParagraphEdit,
       ...(API_FEATURES.paragraphRemoval ? { onToggleParagraphRemoval } : {}),
+      // WYSIWYG chip removal of an untracked citation (self-reference or a
+      // number the extractor didn't index) — the tracked path already runs
+      // through onSaveParagraphEdit's removed-reference dialog.
+      confirmRefRemoval: (section) =>
+        openConfirm({
+          title: 'Remove cross-reference',
+          body: [
+            {
+              text: `Remove the citation of Section ${displaySection(section)} from this paragraph?`,
+              kind: 'strong',
+            },
+            {
+              text: 'Only the citation text is removed — the paragraph and the cited section stay.',
+              kind: 'muted',
+            },
+          ],
+          confirmLabel: 'Remove reference',
+          danger: true,
+        }),
       toast,
       ...overrides,
     }),

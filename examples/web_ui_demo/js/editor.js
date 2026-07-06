@@ -5,8 +5,9 @@
 // section inspector (outbound CITES / inbound CITED BY, editability tallies).
 // All text reaches the DOM via textContent — spec content is untrusted.
 
-import { renderSpecSheet, locateLink } from './tree.js';
+import { renderSpecSheet, locateLink, expandAncestors } from './tree.js';
 import { divisionOf, divisionName } from './divisions.js';
+import { applyRestructureOps, tryRestructure } from './restructure.js';
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -32,8 +33,15 @@ export function initEditor(ctx) {
 
   let selectedSection = null;
   let walkTarget = null; // section to locate inside the sheet after render
+  let focusNodeId = null; // paragraph to refocus after a restructure re-render
+  let deferredRender = false; // a data refresh arrived mid-inline-edit — replay on blur
   const flagged = new Set(); // sections staged for removal (demo-local review queue)
   const collapsed = new Set(); // divisions the user closed in the rail
+  // Tab/Shift+Tab structure ops per spec id, replayed over a clone of the
+  // server tree (restructure.js). Local preview only — no API persistence yet
+  // (#371); node ids stay stable so text PATCHes compose with the overlay.
+  const restructureOps = new Map();
+  let restructureNoticeShown = false;
   let addValue = '';
   let addError = '';
 
@@ -237,10 +245,82 @@ export function initEditor(ctx) {
 
   // ── center sheet ──────────────────────────────────────────────────────────
 
+  // Locates a node in the (server-truth) tree so optimistic text edits made on
+  // the preview overlay can be mirrored back before the PATCH round-trips.
+  function findBaseNode(forest, nodeId) {
+    for (const node of forest) {
+      if (node.id === nodeId) return node;
+      const hit = findBaseNode(node.children, nodeId);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  // Tab / Shift+Tab (and the article ⇥ demote). `pendingText` carries an
+  // uncommitted inline edit — mirrored onto the base tree so the immediate
+  // re-render doesn't flash the old text while the PATCH is in flight.
+  function handleRestructure(spec, node, dir, pendingText) {
+    const specId = spec.tree.id;
+    const base = ctx.getSpecs().get(specId);
+    if (!base) return;
+    if (pendingText) {
+      const baseNode = findBaseNode(base.tree.parts, node.id);
+      if (baseNode) baseNode.text = pendingText;
+    }
+    const ops = restructureOps.get(specId) ?? [];
+    const probe = tryRestructure(base.tree.parts, ops, node.id, dir);
+    if (!probe.ok) {
+      ctx.toast(probe.reason, 'warn');
+      return;
+    }
+    restructureOps.set(specId, [...ops, { nodeId: node.id, dir }]);
+    if (!restructureNoticeShown) {
+      restructureNoticeShown = true;
+      ctx.toast(
+        'Renumbered — structure changes are a local preview until the API grows a restructure endpoint (#371)',
+        'info'
+      );
+    }
+    focusNodeId = node.id;
+    render();
+  }
+
+  // The spec to draw: server truth, or the restructure-preview overlay when
+  // this spec has surviving ops. Ops that stopped applying (node deleted
+  // server-side) are pruned here so the count stays honest.
+  function overlaidSpec(baseSpec) {
+    const ops = restructureOps.get(baseSpec.tree.id) ?? [];
+    if (ops.length === 0) return { spec: baseSpec, previewCount: 0 };
+    const { parts, applied } = applyRestructureOps(baseSpec.tree.parts, ops);
+    if (applied.length !== ops.length) restructureOps.set(baseSpec.tree.id, applied);
+    if (applied.length === 0) return { spec: baseSpec, previewCount: 0 };
+    return {
+      spec: { ...baseSpec, tree: { ...baseSpec.tree, parts } },
+      previewCount: applied.length,
+    };
+  }
+
+  function renderPreviewChip(toolbar, specId, previewCount) {
+    const wrap = el('span', 'ed-preview');
+    const chip = el('span', 'ed-preview-chip', `RENUMBER PREVIEW · ${previewCount}`);
+    chip.title =
+      'Tab/Shift+Tab restructuring is applied locally and renumbered live; the API has no restructure endpoint yet (#371), so it is not persisted.';
+    wrap.appendChild(chip);
+    const reset = el('button', 'ed-preview-reset', 'RESET');
+    reset.type = 'button';
+    reset.title = 'Discard the local structure preview and show server truth';
+    reset.addEventListener('click', () => {
+      restructureOps.delete(specId);
+      render();
+    });
+    wrap.appendChild(reset);
+    toolbar.prepend(wrap);
+  }
+
   function renderMain() {
     main.replaceChildren();
-    const spec = selectedSection ? specFor(selectedSection) : null;
-    if (!spec) {
+    const baseSpec = selectedSection ? specFor(selectedSection) : null;
+    if (!baseSpec) {
       const empty = el('div', 'ed-empty');
       empty.appendChild(el('h2', null, 'NO SECTION SELECTED'));
       empty.appendChild(
@@ -249,6 +329,7 @@ export function initEditor(ctx) {
       main.appendChild(empty);
       return;
     }
+    const { spec, previewCount } = overlaidSpec(baseSpec);
 
     const toolbar = el('div', 'ed-toolbar');
     if (flagged.has(selectedSection)) {
@@ -266,6 +347,7 @@ export function initEditor(ctx) {
       });
       toolbar.appendChild(flag);
     }
+    if (previewCount > 0) renderPreviewChip(toolbar, spec.tree.id, previewCount);
     main.appendChild(toolbar);
 
     if (flagged.has(selectedSection)) {
@@ -280,6 +362,9 @@ export function initEditor(ctx) {
 
     const sheetCtx = ctx.makeSheetCtx({
       onNavigate: (section) => openSection(section),
+      inlineEditing: true,
+      onRestructure: (node, dir, pendingText = null) =>
+        handleRestructure(spec, node, dir, pendingText),
     });
     const sheet = renderSpecSheet(spec, sheetCtx);
     // The map board renders this same spec with id `sheet-<id>`; re-id the
@@ -288,9 +373,11 @@ export function initEditor(ctx) {
     main.appendChild(sheet);
 
     const hints = el('div', 'ed-hints');
-    hints.appendChild(el('span', null, '✎ EDIT ANY PARAGRAPH — SAVES TO THE API'));
+    hints.appendChild(el('span', null, 'CLICK INTO ANY TEXT TO EDIT'));
+    hints.appendChild(el('span', null, 'TAB / SHIFT+TAB · INDENT & RENUMBER'));
+    hints.appendChild(el('span', null, 'CHANGES SAVE WHEN YOU CLICK AWAY'));
     hints.appendChild(el('span', null, '⊘ REMOVE IS REVERSIBLE (OWNER RENDERS ONLY)'));
-    hints.appendChild(el('span', null, 'CITATION CHIPS WALK TO EACH IN-BODY REFERENCE'));
+    hints.appendChild(el('span', null, "BOLDING / UNDERLINING INDIVIDUAL WORDS ISN'T SUPPORTED"));
     main.appendChild(hints);
 
     if (walkTarget) {
@@ -299,6 +386,16 @@ export function initEditor(ctx) {
       requestAnimationFrame(() => {
         const link = sheet.querySelector(`.ref-link[data-section="${CSS.escape(target)}"]`);
         if (link) locateLink(link);
+      });
+    }
+    if (focusNodeId) {
+      const target = focusNodeId;
+      focusNodeId = null;
+      requestAnimationFrame(() => {
+        const host = sheet.querySelector(`[data-node-id="${CSS.escape(target)}"]`);
+        if (!host) return;
+        expandAncestors(host);
+        host.querySelector('.wys-run')?.focus();
       });
     }
   }
@@ -396,7 +493,17 @@ export function initEditor(ctx) {
 
   // ── controller ────────────────────────────────────────────────────────────
 
+  // True while the caret sits in one of the sheet's inline-editable runs —
+  // re-rendering then would detach the focused element and eat the typing.
+  function editingRunIsFocused() {
+    const active = document.activeElement;
+    return (
+      active instanceof Element && active.classList.contains('wys-run') && main.contains(active)
+    );
+  }
+
   function render() {
+    deferredRender = false;
     // A section removed from another view (map DELETE, project switch) must
     // not linger as a ghost flag or a stale selection.
     const live = new Set(entries().map((e) => e.section));
@@ -408,6 +515,18 @@ export function initEditor(ctx) {
     renderMain();
     renderInspector();
   }
+
+  // Replays a deferred refresh once the caret leaves the sheet. The timeout
+  // lets the run's own blur handler commit first; if focus just moved to
+  // another run, stay deferred until that edit finishes too.
+  main.addEventListener('focusout', () => {
+    if (!deferredRender) return;
+    setTimeout(() => {
+      if (!deferredRender || editingRunIsFocused()) return;
+      if (ctx.isActive()) render();
+      else deferredRender = false;
+    }, 0);
+  });
 
   function openSection(section, { walkTo = null } = {}) {
     selectedSection = section;
@@ -428,16 +547,25 @@ export function initEditor(ctx) {
     isFlagged: (section) => flagged.has(section),
     // Board mutations re-render only when the view is visible; entering the
     // view calls refresh(), so a hidden editor never renders stale state.
+    // Mid-edit refreshes (another paragraph's blur-save landing) are deferred
+    // until the caret leaves the sheet, or they would destroy typing.
     onDataChanged() {
-      if (ctx.isActive()) render();
+      if (!ctx.isActive()) return;
+      if (editingRunIsFocused()) {
+        deferredRender = true;
+        return;
+      }
+      render();
     },
     // Workspace swap (project switch/create/delete/restore): flags and
     // selection belong to the old project — drop them.
     reset() {
       flagged.clear();
       collapsed.clear();
+      restructureOps.clear();
       selectedSection = null;
       walkTarget = null;
+      focusNodeId = null;
       if (ctx.isActive()) render();
     },
   };

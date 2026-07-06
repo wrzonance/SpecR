@@ -47,13 +47,27 @@ Settings**, **Library** (company + client masters), **Numbering**, **Report**
 
 ### Editor view (#369)
 
-The **Editor** tab is a focused writing surface for one section at a time: a
+The **Editor** tab is a WYSIWYG writing surface for one section at a time: a
 project TOC rail grouped by MasterFormat division on the left, the live spec
-sheet in the middle (same paragraph editing, reversible removal, and citation
-walking as the map — every save is a real `PATCH`), and a section inspector on
-the right (outbound CITES / inbound CITED BY, editability tallies when the
-API provides them).
+sheet in the middle, and a section inspector on the right (outbound CITES /
+inbound CITED BY, editability tallies when the API provides them).
 
+- **Click into any text to edit it in place** — paragraphs, article and part
+  headings alike. Changes save when you click away (`PATCH
+  /specs/:id/paragraphs/:nodeId`); Enter/Escape also commits. A paragraph the
+  editability program classified `locked` stays read-only and says so with a
+  chip.
+- **Tab / Shift+Tab indents and outdents the focused paragraph** through the
+  CSI tier ladder with live renumbering — labels are render-derived, so the
+  whole sheet renumbers instantly. `Shift+Tab` on a top-tier paragraph promotes
+  it to an **article** (its following siblings become its children); an
+  article's hover **⇥** demotes it back under the previous article. The API
+  has no restructure endpoint yet (#371), so structure ops are held as an
+  explicitly-labeled **RENUMBER PREVIEW** (with a RESET) that re-applies over
+  server truth — text edits inside a preview still persist for real.
+- **Citations render as chips** inside the editable text — click to jump,
+  **×** to remove (tracked references go through the removed-reference dialog;
+  anything else asks a plain confirm first).
 - **Add a section** by number in the rail — it resolves out of the project's
   source libraries (company + selected client masters) via
   `POST /projects/:id/specs`.
@@ -62,8 +76,6 @@ API provides them).
   (which actually removes it from the project and lets the server recompute
   broken inbound references) or **RESTORE** it. Flags are demo-local staging —
   nothing changes server-side until confirmed.
-- Citation links navigate within the editor; the inspector rows jump between
-  citing/cited sections.
 
 ### Constellation view (#369)
 
