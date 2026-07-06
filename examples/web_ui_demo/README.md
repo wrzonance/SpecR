@@ -39,10 +39,52 @@ assets or add CORS just for this example.
 ## Workspace views
 
 The nav bar switches between: **Project Spec Map** (drop specs, watch the
-cross-reference web knit), **TOC** builder, **Project Settings**, **Library**
-(company + client masters), **Numbering**, **Report** (the live coordination
-audit), **Submittal** (the submittal register), and **Compose** (agent-driven
-grounded reporting).
+cross-reference web knit), **Editor** (full-page document editing), **Constellation**
+(the project corpus as division solar systems), **TOC** builder, **Project
+Settings**, **Library** (company + client masters), **Numbering**, **Report**
+(the live coordination audit), **Submittal** (the submittal register), and
+**Compose** (agent-driven grounded reporting).
+
+### Editor view (#369)
+
+The **Editor** tab is a focused writing surface for one section at a time: a
+project TOC rail grouped by MasterFormat division on the left, the live spec
+sheet in the middle (same paragraph editing, reversible removal, and citation
+walking as the map — every save is a real `PATCH`), and a section inspector on
+the right (outbound CITES / inbound CITED BY, editability tallies when the
+API provides them).
+
+- **Add a section** by number in the rail — it resolves out of the project's
+  source libraries (company + selected client masters) via
+  `POST /projects/:id/specs`.
+- **REMOVE SECTION** flags the open section instead of deleting it: it is
+  struck in the rail and held in a review queue until you **CONFIRM REMOVAL**
+  (which actually removes it from the project and lets the server recompute
+  broken inbound references) or **RESTORE** it. Flags are demo-local staging —
+  nothing changes server-side until confirmed.
+- Citation links navigate within the editor; the inspector rows jump between
+  citing/cited sections.
+
+### Constellation view (#369)
+
+The **Constellation** tab draws the whole project corpus as one sky: each
+division is a solar system whose umbrella section (`NN 00 00`) is the sun —
+brighter the more other divisions cite into it — or a **black hole** when the
+project defines no umbrella (click it to add one from your masters). Sections
+orbit as planets sized by inbound citations; orphans get an amber dashed ring;
+sections flagged in the Editor turn amber.
+
+- **Citation sightlines** run planet-to-planet. A citation with no target in
+  the project ends in a red ✕ (unresolved) or an amber ghost dot (the target
+  is in a source library, one click from being added).
+- **Hover a planet** to light its sightlines and dim the rest; **click a
+  sightline** to open the citing paragraph in the Editor; **click a planet**
+  for a detail panel (status, cites, cited-by, OPEN IN EDITOR).
+- **Focus one system** via the SYSTEM select (or a portal): the division
+  becomes a star-system view with portals to every system it trades citations
+  with. Lane chips filter to CROSS-SYSTEM or BROKEN ONLY.
+- The map reads the same client state as the Reference Web, so edits, flags,
+  additions, and removals reshape it immediately.
 
 ### Coordination audit view (ADR-041)
 

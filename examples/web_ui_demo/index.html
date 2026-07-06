@@ -15,6 +15,8 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="css/editor.css" />
+    <link rel="stylesheet" href="css/constellation.css" />
   </head>
   <body>
     <div id="grid-overlay" aria-hidden="true"></div>
@@ -53,6 +55,8 @@
     <nav class="view-nav" aria-label="Workspace views">
       <button class="view-tab" type="button" data-view="toc">TOC</button>
       <button class="view-tab is-active" type="button" data-view="map">Project Spec Map</button>
+      <button class="view-tab" type="button" data-view="editor">Editor</button>
+      <button class="view-tab" type="button" data-view="constellation">Constellation</button>
       <button class="view-tab" type="button" data-view="settings">Project Settings</button>
       <button class="view-tab" type="button" data-view="library">Library</button>
       <button class="view-tab" type="button" data-view="numbering">Numbering</button>
@@ -169,6 +173,33 @@
           <button class="pick-btn" id="pick-btn" type="button">— OR BROWSE FOR FILES —</button>
         </div>
       </main>
+    </section>
+
+    <section class="app-view" id="view-editor" data-view-panel="editor" hidden>
+      <div class="editor-layout">
+        <aside class="editor-rail" id="editor-rail" aria-label="Project TOC tree"></aside>
+        <div class="editor-main" id="editor-main"></div>
+        <aside class="editor-inspector" id="editor-inspector" aria-label="Section inspector"></aside>
+      </div>
+    </section>
+
+    <section class="app-view" id="view-constellation" data-view-panel="constellation" hidden>
+      <div class="const-layout">
+        <div class="const-stage">
+          <div class="const-legend" aria-label="Constellation legend">
+            <span class="lg"
+              ><span class="lg-sun"></span>SUN = UMBRELLA · BRIGHTER = DIVISION CITED MORE FROM
+              OUTSIDE</span
+            >
+            <span class="lg"><span class="lg-hole"></span>BLACK HOLE = UMBRELLA NOT DEFINED</span>
+            <span class="lg"><span class="lg-broken"></span>MISSING TARGET ✕ · AMBER = IN LIBRARY</span>
+            <span class="lg">BIGGER PLANET = MORE CITATIONS · HOVER TO TRACE · CLICK FOR DETAILS</span>
+          </div>
+          <div class="const-toolbar" id="const-toolbar" aria-label="Constellation controls"></div>
+          <div class="const-canvas" id="const-canvas"></div>
+        </div>
+        <aside class="const-panel" id="const-panel" aria-label="Constellation detail panel"></aside>
+      </div>
     </section>
 
     <section class="app-view" id="view-settings" data-view-panel="settings" hidden>

@@ -1,0 +1,648 @@
+/* Constellation view — the project corpus as division solar systems on a
+   dark sky. Palette from the design: sky #0b1220, panel #0f1728, suns
+   #7fb3ff/#cfe3ff, amber audit cues #d9a13d, broken red #e0523f. */
+
+.const-layout {
+  display: flex;
+  align-items: stretch;
+  min-height: calc(100vh - 210px);
+}
+
+.const-stage {
+  flex: 1;
+  min-width: 0;
+  background: #0b1220;
+  display: flex;
+  flex-direction: column;
+}
+
+/* legend + toolbar strips */
+
+.const-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  padding: 11px 20px;
+  border-bottom: 1px solid #1d2c42;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  color: #7d94ad;
+}
+
+.const-legend .lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.const-legend .lg-sun {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #cfe3ff;
+  box-shadow: 0 0 6px #7fb3ff;
+}
+
+.const-legend .lg-hole {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #05070d;
+  border: 1.5px dashed #d9a13d;
+}
+
+.const-legend .lg-broken {
+  width: 20px;
+  border-top: 2px dashed #e0523f;
+}
+
+.const-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 20px;
+  border-bottom: 1px solid #1d2c42;
+}
+
+.cst-back {
+  border: 1px solid #48648a;
+  background: transparent;
+  color: #9fc0e8;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.cst-back:hover {
+  background: #48648a;
+  color: #ffffff;
+}
+
+.cst-tool-cap {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.18em;
+  color: #7d94ad;
+}
+
+.cst-sys-select {
+  border: 1px solid #1d2c42;
+  background: #0f1728;
+  color: #c7d5e6;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  padding: 6px 8px;
+  outline: none;
+  cursor: pointer;
+}
+
+.cst-tool-spacer {
+  flex: 1;
+}
+
+.cst-lane-chips {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.cst-lane-chip {
+  border: 1px solid #1d2c42;
+  background: transparent;
+  color: #7d94ad;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+.cst-lane-chip:hover {
+  border-color: #7fb3ff;
+}
+
+.cst-lane-chip.is-active {
+  border-color: #7fb3ff;
+  background: #7fb3ff;
+  color: #0b1220;
+}
+
+/* the sky */
+
+.const-canvas {
+  flex: 1;
+  overflow: auto;
+  padding: 0 0 30px;
+}
+
+.cst-svg {
+  display: block;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  height: auto;
+}
+
+.cst-empty {
+  margin: 80px 20px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.2em;
+  color: #48648a;
+}
+
+.cst-orbit {
+  fill: none;
+  stroke: #1d2c42;
+  stroke-width: 1;
+}
+
+/* lanes */
+
+.cst-edge {
+  stroke-width: 1;
+  transition: opacity 140ms ease;
+}
+
+.cst-edge.is-spoke {
+  stroke: #22344e;
+  stroke-dasharray: 2 3;
+  opacity: 0.55;
+}
+
+.cst-edge.is-lane {
+  stroke: #3b5a86;
+  opacity: 0.5;
+}
+
+.cst-edge.is-brokenlane {
+  stroke: #e0523f;
+  opacity: 0.85;
+  stroke-width: 1.2;
+}
+
+.cst-edge.is-ghostlane {
+  stroke: #d9a13d;
+  opacity: 0.6;
+  stroke-width: 1.1;
+}
+
+/* hover trace: light the hovered planet's lanes, dim everything else */
+
+.cst-svg.has-hover .cst-edge {
+  opacity: 0.07;
+}
+
+.cst-svg.has-hover .cst-edge.is-brokenlane,
+.cst-svg.has-hover .cst-edge.is-ghostlane {
+  opacity: 0.15;
+}
+
+.cst-svg.has-hover .cst-edge.is-lit {
+  opacity: 0.95;
+  stroke: #7fb3ff;
+  stroke-width: 1.6;
+}
+
+.cst-svg.has-hover .cst-edge.is-brokenlane.is-lit {
+  stroke: #e0523f;
+  stroke-width: 1.8;
+}
+
+.cst-svg.has-hover .cst-edge.is-ghostlane.is-lit {
+  stroke: #d9a13d;
+  stroke-width: 1.6;
+}
+
+.cst-svg.has-hover .cst-star {
+  opacity: 0.22;
+}
+
+.cst-svg.has-hover .cst-star.is-near {
+  opacity: 1;
+}
+
+.cst-svg.has-hover text {
+  opacity: 0.25;
+}
+
+.cst-svg.has-hover text.is-near,
+.cst-svg.has-hover .cst-lbl-div,
+.cst-svg.has-hover .cst-mark {
+  opacity: 1;
+}
+
+.cst-hit {
+  stroke: rgba(0, 0, 0, 0);
+  stroke-width: 10;
+  cursor: pointer;
+}
+
+/* Interactive bodies paint above the hit lanes; their decorative halo/glow
+   circles must not swallow lane clicks. */
+.cst-star-glow,
+.cst-sun-glow,
+.cst-sel-pulse,
+.cst-hole-ring,
+.cst-portal-halo {
+  pointer-events: none;
+}
+
+/* suns / black holes / planets / portals */
+
+.cst-sun-glow {
+  fill: #7fb3ff;
+}
+
+.cst-sun-core {
+  fill: #cfe3ff;
+  cursor: pointer;
+}
+
+.cst-sun-core.is-bright {
+  fill: #eaf3ff;
+}
+
+.cst-hole-ring {
+  fill: none;
+  stroke: #d9a13d;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 4;
+}
+
+.cst-hole-core {
+  fill: #05070d;
+  stroke: #48648a;
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.cst-star {
+  transition: opacity 140ms ease;
+}
+
+.cst-star-glow {
+  fill: #dfe8f4;
+  opacity: 0.07;
+}
+
+.cst-star.is-hub .cst-star-glow {
+  fill: #7fb3ff;
+  opacity: 0.16;
+}
+
+.cst-star.is-orphan .cst-star-glow {
+  opacity: 0;
+}
+
+.cst-star-body {
+  fill: #dfe8f4;
+  cursor: pointer;
+}
+
+.cst-star.is-hub .cst-star-body {
+  fill: #7fb3ff;
+}
+
+.cst-star.is-orphan .cst-star-body {
+  fill: none;
+  stroke: #d9a13d;
+  stroke-width: 1.5;
+  stroke-dasharray: 2 3;
+}
+
+.cst-star.is-flagged .cst-star-body {
+  fill: #d9a13d;
+}
+
+.cst-sel-pulse {
+  fill: none;
+  stroke: #7fb3ff;
+  stroke-width: 2;
+  animation: cstSelPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes cstSelPulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.cst-ghost-dot {
+  fill: #131f33;
+  stroke: #d9a13d;
+  stroke-width: 1.5;
+  stroke-dasharray: 2 3;
+  cursor: pointer;
+}
+
+.cst-portal-halo {
+  fill: none;
+  stroke: #48648a;
+  stroke-width: 0.75;
+  stroke-dasharray: 2 4;
+  opacity: 0.7;
+}
+
+.cst-portal-core {
+  fill: #131f33;
+  stroke: #48648a;
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+
+.cst-portal.is-void .cst-portal-core {
+  stroke: #d9a13d;
+  stroke-dasharray: 3 3;
+  cursor: default;
+}
+
+.cst-portal.is-broken .cst-portal-halo,
+.cst-portal.is-broken .cst-portal-core {
+  stroke: #e0523f;
+}
+
+/* SVG labels */
+
+.cst-svg text {
+  font-family: var(--mono);
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.cst-lbl-div {
+  font-size: 10px;
+  letter-spacing: 2px;
+  fill: #48648a;
+}
+
+.cst-lbl-sun {
+  font-size: 9.5px;
+  fill: #cfe3ff;
+}
+
+.cst-lbl-hole {
+  font-size: 9px;
+  fill: #d9a13d;
+}
+
+.cst-lbl-hole.is-small {
+  font-size: 7.5px;
+}
+
+.cst-lbl-star {
+  font-size: 9.5px;
+  fill: #7d94ad;
+}
+
+.cst-lbl-star.is-hub {
+  fill: #9fc0e8;
+}
+
+.cst-lbl-star.is-orphan,
+.cst-lbl-star.is-flagged {
+  fill: #d9a13d;
+}
+
+.cst-lbl-title {
+  font-size: 8px;
+  letter-spacing: 0.3px;
+  fill: #56718c;
+}
+
+.cst-lbl-broken {
+  font-size: 9px;
+  fill: #c96a5c;
+}
+
+.cst-lbl-ghost {
+  font-size: 9px;
+  fill: #d9a13d;
+}
+
+.cst-lbl-portal {
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  fill: #7d94ad;
+}
+
+.cst-lbl-portal.is-broken {
+  fill: #c96a5c;
+}
+
+.cst-mark {
+  font-size: 13px;
+  fill: #e0523f;
+}
+
+/* ── detail panel ──────────────────────────────────────────────────────── */
+
+.const-panel {
+  width: 300px;
+  flex: none;
+  border-left: 1px solid #1d2c42;
+  background: #0f1728;
+  overflow-y: auto;
+  padding: 16px;
+  color: #c7d5e6;
+  max-height: calc(100vh - 180px);
+  position: sticky;
+  top: 0;
+}
+
+.cst-panel-head {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  color: #7fb3ff;
+  border-bottom: 1px dashed #1d2c42;
+  padding-bottom: 9px;
+  margin-bottom: 11px;
+}
+
+.cst-panel-head.is-selected {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.cst-panel-secnum {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #7fb3ff;
+}
+
+.cst-panel-secnum.is-amber {
+  color: #d9a13d;
+}
+
+.cst-panel-close {
+  border: none;
+  background: transparent;
+  color: #7d94ad;
+  font-size: 0.88rem;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.cst-panel-close:hover {
+  color: #ffffff;
+}
+
+.cst-panel-title {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #eaf1f9;
+}
+
+.cst-panel-status {
+  margin: 0 0 12px;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+}
+
+.cst-panel-status.is-ok {
+  color: #5fae7f;
+}
+
+.cst-panel-status.is-amber {
+  color: #d9a13d;
+}
+
+.cst-panel-status.is-broken {
+  color: #e0523f;
+}
+
+.cst-panel-body {
+  margin: 0 0 14px;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: #8fa4ba;
+}
+
+.cst-panel-body p {
+  margin: 0 0 10px;
+}
+
+.cst-panel-cap {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.18em;
+  color: #7d94ad;
+  margin: 0 0 6px;
+}
+
+.cst-panel-list {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.cst-panel-ref {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  text-align: left;
+  width: 100%;
+  border: 1px solid #1d2c42;
+  background: transparent;
+  padding: 5px 7px;
+  cursor: pointer;
+  color: #c7d5e6;
+}
+
+.cst-panel-ref:hover:not(:disabled) {
+  border-color: #7fb3ff;
+}
+
+.cst-panel-ref:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.cst-panel-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7fb3ff;
+  flex: none;
+}
+
+.cst-panel-ref.is-broken .cst-panel-dot {
+  background: #e0523f;
+}
+
+.cst-panel-num {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.cst-panel-reftitle {
+  flex: 1;
+  font-size: 0.68rem;
+  color: #8fa4ba;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cst-panel-action {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  padding: 9px 12px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.cst-panel-action.is-primary {
+  border: 1px solid #7fb3ff;
+  background: #7fb3ff;
+  color: #0b1220;
+}
+
+.cst-panel-action.is-amber {
+  border: 1px solid #d9a13d;
+  background: #d9a13d;
+  color: #0b1220;
+}
+
+.cst-panel-action:disabled {
+  background: transparent;
+  color: #d9a13d;
+  cursor: default;
+}
+
+.cst-panel-action:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+/* ── responsive ────────────────────────────────────────────────────────── */
+
+@media (max-width: 980px) {
+  .const-layout {
+    flex-direction: column;
+  }
+
+  .const-panel {
+    width: 100%;
+    max-height: none;
+    position: static;
+    border-left: none;
+    border-top: 1px solid #1d2c42;
+  }
+}
