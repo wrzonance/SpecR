@@ -23,6 +23,7 @@ import {
   listLibrarySpecs,
   addSpecToProject,
   removeSpecFromProject,
+  insertParagraph,
   getBrokenRefs,
   getCoordinationReport,
   getSubmittalRegister,
@@ -43,6 +44,8 @@ import { initCompose } from './compose.js';
 import { initDropzone } from './dropzone.js';
 import { initRefPopover } from './popover.js';
 import { initAudit } from './audit.js';
+import { initEditor } from './editor.js';
+import { initConstellation } from './constellation.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
 
 const specs = new Map(); // specId -> { tree, references, warnings?, capabilities? }
@@ -56,6 +59,8 @@ let currentView = 'map';
 let numberingPanel = null; // numbering-profile workspace controller (initNumbering)
 let audit = null; // live coordination audit view controller (initAudit, ADR-041)
 let composePanel = null; // agent-driven grounded reporting controller (initCompose, #353)
+let editorPanel = null; // full-page document editor controller (initEditor, #369)
+let constellationPanel = null; // division solar-system map controller (initConstellation, #369)
 let tocSections = [];
 const tocCollapsedDivisions = new Set();
 let libraries = [];
@@ -124,6 +129,8 @@ function showView(view) {
   // opening the tab just needs a height re-measure. (A refetch here would wipe
   // the current finding selection and desync the two panes.)
   if (view === 'report') audit?.fit();
+  if (view === 'editor') editorPanel?.refresh();
+  if (view === 'constellation') constellationPanel?.refresh();
   updateAddFabVisibility();
 }
 
@@ -406,6 +413,7 @@ async function saveProjectSettings() {
 }
 
 async function loadActiveProjectWorkspace() {
+  editorPanel?.reset();
   specs.clear();
   projectMembers.clear();
   tocSections = [];
@@ -1916,6 +1924,18 @@ function applyFocusOnReport(anchors) {
   }
 }
 
+function applyFocusOnEditor(sections) {
+  const loadedSet = loadedSections();
+  const loaded = sections.filter((section) => loadedSet.has(section));
+  if (loaded.length === 0) {
+    const s = sections.length === 1 ? '' : 's';
+    toast(`${sections.length} section${s} found — none are loaded in this project`, 'info');
+    return;
+  }
+  editorPanel.open(loaded[0]);
+  if (loaded.length > 1) toast(`${loaded.length} sections found — showing the first`, 'info');
+}
+
 function applyFocus(anchors) {
   if (!Array.isArray(anchors) || anchors.length === 0) return;
   const clean = anchors.filter((a) => a && typeof a.section === 'string' && a.section !== '');
@@ -1925,6 +1945,7 @@ function applyFocus(anchors) {
   // paragraph, so it needs the full anchors (specId + paragraphId), not sections.
   if (currentView === 'map') return applyFocusOnMap(sections);
   if (currentView === 'report' && audit) return applyFocusOnReport(clean);
+  if (currentView === 'editor' && editorPanel) return applyFocusOnEditor(sections);
   focusToast(sections.length);
 }
 
@@ -1948,6 +1969,68 @@ function onComposeCite(anchor) {
 
 function onLibraryRef(section) {
   toast(`Section ${section} is in the SpecR library — drop its file to load it`, 'warn');
+}
+
+// ── Editor + Constellation wiring (#369) ────────────────────────────────────
+
+// Resolves `section` from the project's source libraries into the project and
+// loads its sheet. Errors propagate with .status so callers can phrase them
+// (404 not in masters, 409 already in project).
+async function addSectionFromMasters(section) {
+  if (!activeProjectId) throw new Error('no active project');
+  const result = await addSpecToProject(activeProjectId, section);
+  projectMembers.add(result.specId);
+  await addSpec(result.specId);
+  // The arrival can heal other sections' broken refs — refetch everyone's
+  // references before the caller re-renders from the shared specs map.
+  await reloadAllSpecs();
+  renderBoard();
+  await refreshBrokenCount();
+  await refreshCoordination();
+  await refreshOpenComments();
+  toast(`Section ${displaySection(section)} added from source libraries`);
+}
+
+// Removes every loaded copy of `section` from the project — the editor
+// review-queue's CONFIRM REMOVAL. The server recomputes broken inbound
+// references; the refreshed count lands in the masthead and the toast.
+async function removeSectionFromProject(section) {
+  const specIds = loadedSections().get(section) ?? [];
+  for (const specId of specIds) {
+    if (activeProjectId) await removeSpecFromProjectIfPresent(specId);
+    projectMembers.delete(specId);
+    specs.delete(specId);
+  }
+  await reloadAllSpecs();
+  renderBoard();
+  const brokenCount = await refreshBrokenCount();
+  await refreshCoordination();
+  await refreshOpenComments();
+  await refreshSubmittalRegister();
+  toast(
+    `Section ${displaySection(section)} removed from project${brokenCount ? ` — ${brokenCount} broken refs` : ''}`,
+    brokenCount ? 'warn' : 'info'
+  );
+}
+
+// A section available in the project's source libraries (company + selected
+// clients) — powers "ADD FROM MASTERS" in both new views.
+function findLibrarySpec(section) {
+  return tocLibrarySpecs.find((spec) => spec.section === section) ?? null;
+}
+
+// Persists an editor Enter-draft through POST /specs/:id/paragraphs (#372),
+// then refreshes the workspace the same way a text commit does. Returns the
+// created SpecNode so the editor can swap its local draft id for the real one.
+async function persistDraftParagraph(spec, { anchorNodeId, text, nodeType }) {
+  const created = await insertParagraph(spec.tree.id, anchorNodeId, text, nodeType);
+  await reloadSpec(spec.tree.id);
+  renderBoard();
+  await refreshBrokenCount();
+  await refreshCoordination();
+  await refreshOpenComments();
+  toast('Paragraph created');
+  return created;
 }
 
 const sheetCtx = {
@@ -2000,6 +2083,9 @@ function renderBoard() {
   }
   refreshWeb();
   renderTocBuilder();
+  // The editor and constellation read the same specs Map — keep them current.
+  editorPanel?.onDataChanged();
+  constellationPanel?.onDataChanged();
 }
 
 async function addSpec(specId, extras = {}) {
@@ -2116,6 +2202,64 @@ async function boot() {
     getScopeLabel: composeScopeLabel,
     onCite: onComposeCite,
     displaySection,
+  });
+  editorPanel = initEditor({
+    getSpecs: () => specs,
+    displaySection,
+    // Same edit affordances as the map board, but navigation stays in-editor
+    // and the sheet header stays clean (no DELETE / ADD TO TOC buttons —
+    // section membership is the rail's flag-queue job here).
+    makeSheetCtx: (overrides) => ({
+      displaySection,
+      statusFor,
+      onLibraryRef,
+      onWalkMiss: sheetCtx.onWalkMiss,
+      onSaveParagraphEdit,
+      ...(API_FEATURES.paragraphRemoval ? { onToggleParagraphRemoval } : {}),
+      // WYSIWYG chip removal of an untracked citation (self-reference or a
+      // number the extractor didn't index) — the tracked path already runs
+      // through onSaveParagraphEdit's removed-reference dialog.
+      confirmRefRemoval: (section) =>
+        openConfirm({
+          title: 'Remove cross-reference',
+          body: [
+            {
+              text: `Remove the citation of Section ${displaySection(section)} from this paragraph?`,
+              kind: 'strong',
+            },
+            {
+              text: 'Only the citation text is removed — the paragraph and the cited section stay.',
+              kind: 'muted',
+            },
+          ],
+          confirmLabel: 'Remove reference',
+          danger: true,
+        }),
+      toast,
+      ...overrides,
+    }),
+    addSection: addSectionFromMasters,
+    removeSection: removeSectionFromProject,
+    ...(API_FEATURES.paragraphCreate ? { persistDraft: persistDraftParagraph } : {}),
+    isActive: () => currentView === 'editor',
+    toast,
+  });
+  constellationPanel = initConstellation({
+    getSpecs: () => specs,
+    displaySection,
+    isFlagged: (section) => editorPanel.isFlagged(section),
+    findInMasters: findLibrarySpec,
+    addSection: addSectionFromMasters,
+    openInEditor: (section) => {
+      showView('editor');
+      editorPanel.open(section);
+    },
+    openCitation: (from, to) => {
+      showView('editor');
+      editorPanel.open(from, { walkTo: to });
+    },
+    isActive: () => currentView === 'constellation',
+    toast,
   });
 
   const health = document.getElementById('health-dot');

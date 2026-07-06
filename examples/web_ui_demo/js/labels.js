@@ -27,8 +27,10 @@ export function getLabel(type, index, partNumber = 1) {
     case 'pr3':
       return `${alphaLabel(index, false)}.`;
     case 'pr4':
+    case 'pr6':
       return `${index + 1})`;
     case 'pr5':
+    case 'pr7':
       return `${alphaLabel(index, false)})`;
     default:
       return '';

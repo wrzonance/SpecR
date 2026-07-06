@@ -1813,9 +1813,14 @@ body {
   display: flex;
   gap: 0.55rem;
   padding: 0.16rem 0;
-  border-left: 1px solid rgba(43, 42, 35, 0.16);
+  /* Reference-design row treatment (shared by map / report / editor sheets):
+     a 3px structure rule that carries the focus/editing accent states. */
+  border-left: 3px solid rgba(27, 39, 50, 0.16);
   margin-left: 0.4rem;
   padding-left: 0.75rem;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
 }
 
 .tree-node > .node-text {

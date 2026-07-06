@@ -156,6 +156,16 @@ export function updateParagraph(specId, paragraphId, text) {
   return sendJson('PATCH', `/specs/${enc(specId)}/paragraphs/${enc(paragraphId)}`, { text });
 }
 
+// Creates a paragraph immediately after `anchorNodeId`, as its sibling (#372).
+// nodeType defaults server-side to the anchor's own type; only article,
+// pr1..pr7, and continuation are insertable. Resolves with the created
+// SpecNode; 404 unknown anchor, 403 wrong spec, 422 uninsertable type.
+export function insertParagraph(specId, anchorNodeId, text, nodeType) {
+  const body = { anchorNodeId, text };
+  if (nodeType) body.nodeType = nodeType;
+  return sendJson('POST', `/specs/${enc(specId)}/paragraphs`, body);
+}
+
 // Soft, reversible paragraph removal (#251). `removed: true` sets the node's
 // vanish flag (suppressed from owner-facing renders); `false` restores it. The
 // subtree and any contained references stay intact. Only body paragraphs

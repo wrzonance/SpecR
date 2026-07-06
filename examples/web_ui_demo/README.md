@@ -39,10 +39,74 @@ assets or add CORS just for this example.
 ## Workspace views
 
 The nav bar switches between: **Project Spec Map** (drop specs, watch the
-cross-reference web knit), **TOC** builder, **Project Settings**, **Library**
-(company + client masters), **Numbering**, **Report** (the live coordination
-audit), **Submittal** (the submittal register), and **Compose** (agent-driven
-grounded reporting).
+cross-reference web knit), **Editor** (full-page document editing), **Constellation**
+(the project corpus as division solar systems), **TOC** builder, **Project
+Settings**, **Library** (company + client masters), **Numbering**, **Report**
+(the live coordination audit), **Submittal** (the submittal register), and
+**Compose** (agent-driven grounded reporting).
+
+### Editor view (#369)
+
+The **Editor** tab is a WYSIWYG writing surface for one section at a time: a
+project TOC rail grouped by MasterFormat division on the left, the live spec
+sheet in the middle, and a section inspector on the right (outbound CITES /
+inbound CITED BY, editability tallies when the API provides them).
+
+- **Click into any text to edit it in place** — paragraphs, article and part
+  headings alike. Changes save when you click away (`PATCH
+  /specs/:id/paragraphs/:nodeId`); Escape also commits. A paragraph the
+  editability program classified `locked` stays read-only and says so with a
+  chip.
+- **Tab / Shift+Tab indents and outdents the focused paragraph** through the
+  CSI tier ladder with live renumbering — labels are render-derived, so the
+  whole sheet renumbers instantly. `Shift+Tab` on a top-tier paragraph promotes
+  it to an **article** (its following siblings become its children); an
+  article's hover **⇥** demotes it back under the previous article.
+- **Enter starts a new paragraph of the same CSI level** right below the
+  focused one — a new empty article when pressed in an article heading —
+  caret ready, sheet renumbered. (Text does not split at the caret; the
+  current paragraph commits as-is.) Parts are the exception: CSI's three-part
+  format is preserved. When the connected build serves
+  `POST /specs/:id/paragraphs` (#372, `API_FEATURES.paragraphCreate`), a
+  draft **persists for real** as soon as it has text and a server-side
+  anchor — chained drafts cascade as their anchors persist. Without the
+  endpoint, drafts stay local and wear a `DRAFT · LOCAL` tag.
+- The API has no restructure endpoint yet (#371), so Tab/Shift+Tab moves
+  (and any not-yet-persisted drafts) are held as an explicitly-labeled
+  **LOCAL PREVIEW** (with a RESET) that re-applies over server truth — text
+  edits on real paragraphs inside a preview still persist for real.
+- **Citations render as chips** inside the editable text — click to jump,
+  **×** to remove (tracked references go through the removed-reference dialog;
+  anything else asks a plain confirm first).
+- **Add a section** by number in the rail — it resolves out of the project's
+  source libraries (company + selected client masters) via
+  `POST /projects/:id/specs`.
+- **REMOVE SECTION** flags the open section instead of deleting it: it is
+  struck in the rail and held in a review queue until you **CONFIRM REMOVAL**
+  (which actually removes it from the project and lets the server recompute
+  broken inbound references) or **RESTORE** it. Flags are demo-local staging —
+  nothing changes server-side until confirmed.
+
+### Constellation view (#369)
+
+The **Constellation** tab draws the whole project corpus as one sky: each
+division is a solar system whose umbrella section (`NN 00 00`) is the sun —
+brighter the more other divisions cite into it — or a **black hole** when the
+project defines no umbrella (click it to add one from your masters). Sections
+orbit as planets sized by inbound citations; orphans get an amber dashed ring;
+sections flagged in the Editor turn amber.
+
+- **Citation sightlines** run planet-to-planet. A citation with no target in
+  the project ends in a red ✕ (unresolved) or an amber ghost dot (the target
+  is in a source library, one click from being added).
+- **Hover a planet** to light its sightlines and dim the rest; **click a
+  sightline** to open the citing paragraph in the Editor; **click a planet**
+  for a detail panel (status, cites, cited-by, OPEN IN EDITOR).
+- **Focus one system** via the SYSTEM select (or a portal): the division
+  becomes a star-system view with portals to every system it trades citations
+  with. Lane chips filter to CROSS-SYSTEM or BROKEN ONLY.
+- The map reads the same client state as the Reference Web, so edits, flags,
+  additions, and removals reshape it immediately.
 
 ### Coordination audit view (ADR-041)
 

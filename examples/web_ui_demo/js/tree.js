@@ -1,39 +1,19 @@
 // Renders one parsed spec as a vellum "sheet": CSI-labelled hierarchy tree
 // plus a cross-reference footer. All text goes through textContent — spec
 // content is untrusted input and must never reach innerHTML.
+//
+// The citation matcher/normalizer lives in refs-text.js (shared with the
+// WYSIWYG inline editor); the inline-editing segment machinery is
+// inline-edit.js, activated per-sheet via ctx.inlineEditing (the Editor view).
 
 import { getLabel } from './labels.js';
-
-// Matches CSI section numbers, including UFGS agency variants (01 32 01.00 10).
-// Whitespace-tolerant: Word text routinely separates the digit groups with
-// non-breaking spaces or doubled spaces (\s covers   in JS). The server
-// extractor normalizes those at ingest, so the stored targetSection has single
-// spaces — matched text must be normalized the same way before lookups.
-// Two tiers, mirroring the server (lib/section-number.ts): the canonical
-// three-group form is matched anywhere in prose; the mis-grouped DISPLAY variants
-// a spec author (or OCR) can produce — spaced-compact "01 8813", compact "271123",
-// dotted "01.88.13" — are admitted ONLY right after a "SECTION" keyword, the same
-// strong context the server trusts. Without that gate a bare 6-digit number in
-// prose would read as a phantom section. normalizeSection() re-groups whatever
-// matched into the canonical shape, and the statusFor() gate in linkifyText means
-// only numbers that resolve to a real section are ever linked or re-rendered.
-const SECTION_PATTERN =
-  /(?<![\d.])(?:\d{2}\s+\d{2}\s+\d{2}(?:\.\d{2}(?!\d)(?:[^\S\r\n]+\d{2}(?!\d))?)?|(?<=\bSECTION\s{1,4})(?:\d{2}\s+\d{4}|\d{6}|\d{2}\.\d{2}\.\d{2})(?:\.\d{2}(?!\d))?(?:[^\S\r\n]+\d{2}(?!\d))?)(?!\.?\d)/gi;
-
-// Canonicalize a matched section number to the expanded CSI shape
-// "NN NN NN(.NN)( NN)": collapse whitespace, then re-group the strong-context
-// display variants (spaced-compact / compact / dotted) so both the status lookup
-// and the rendered label use the canonical form the server stores. An already
-// canonical value (or anything unrecognized) is returned whitespace-collapsed.
-function normalizeSection(text) {
-  const s = text.replace(/\s+/g, ' ').trim();
-  if (/^\d{2} \d{2} \d{2}(?:\.\d{2})?(?: \d{2})?$/.test(s)) return s;
-  let m;
-  if ((m = /^(\d{2}) (\d{2})(\d{2})((?:\.\d{2})?(?: \d{2})?)$/.exec(s))) return `${m[1]} ${m[2]} ${m[3]}${m[4]}`;
-  if ((m = /^(\d{2})(\d{2})(\d{2})((?:\.\d{2})?(?: \d{2})?)$/.exec(s))) return `${m[1]} ${m[2]} ${m[3]}${m[4]}`;
-  if ((m = /^(\d{2})\.(\d{2})\.(\d{2})((?:\.\d{2})?(?: \d{2})?)$/.exec(s))) return `${m[1]} ${m[2]} ${m[3]}${m[4]}`;
-  return s;
-}
+import { SECTION_PATTERN, normalizeSection, removedReferences } from './refs-text.js';
+import {
+  makeRefLink,
+  renderInlineText,
+  isInlineEditable,
+  editabilityChip,
+} from './inline-edit.js';
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -57,26 +37,8 @@ function linkifyText(text, ctx) {
     const status = ctx.statusFor(section);
     if (!status) continue;
     frag.appendChild(document.createTextNode(text.slice(last, match.index)));
-    // display the original text verbatim; navigate/walk by normalized section
-    const link = el('button', 'ref-link', sectionLabel(section, ctx));
-    link.type = 'button';
-    link.dataset.section = section;
-    if (status === 'loaded') {
-      link.title = `Jump to Section ${sectionLabel(section, ctx)}`;
-      link.addEventListener('click', () => ctx.onNavigate(section));
-    } else if (status === 'library') {
-      link.classList.add('is-library');
-      link.title = `Section ${sectionLabel(section, ctx)} is in the SpecR library but not loaded here`;
-      link.addEventListener('click', () => ctx.onLibraryRef(section));
-    } else {
-      link.classList.add('is-unresolved');
-      link.title = `Section ${sectionLabel(section, ctx)} — unresolved (not in library)`;
-    }
-    if (ctx.brokenSections && ctx.brokenSections.has(section)) {
-      link.classList.add('is-broken');
-      link.title = `Section ${sectionLabel(section, ctx)} — broken reference (target removed from project)`;
-    }
-    frag.appendChild(link);
+    // display the project format; navigate/walk by normalized section
+    frag.appendChild(makeRefLink(section, ctx));
     last = match.index + match[0].length;
   }
   frag.appendChild(document.createTextNode(text.slice(last)));
@@ -114,36 +76,6 @@ function appendNumberedChildren(container, children, render) {
 
 // ── Inline edit + delete affordances (mockup demo) ──────────────────────────
 
-// How many times each normalized section number appears in a block of text.
-function sectionCounts(text) {
-  const counts = new Map();
-  for (const match of text.matchAll(SECTION_PATTERN)) {
-    const section = normalizeSection(match[0]);
-    counts.set(section, (counts.get(section) ?? 0) + 1);
-  }
-  return counts;
-}
-
-// References this edit removed. Compares per-section OCCURRENCE counts (not mere
-// presence) so deleting ONE of two identical citations in a paragraph is still
-// detected — set membership can't express that delta. Only references whose
-// number actually appeared in the original body can be judged from text alone.
-function removedReferences(originalText, newText, paraRefs) {
-  const before = sectionCounts(originalText);
-  const after = sectionCounts(newText);
-  const bySection = new Map();
-  for (const ref of paraRefs) {
-    if (!ref.targetSection) continue;
-    bySection.set(ref.targetSection, [...(bySection.get(ref.targetSection) ?? []), ref]);
-  }
-  const removed = [];
-  for (const [section, refs] of bySection) {
-    const delta = (before.get(section) ?? 0) - (after.get(section) ?? 0);
-    if (delta > 0) removed.push(...refs.slice(0, delta));
-  }
-  return removed;
-}
-
 function autosize(textarea) {
   textarea.style.height = 'auto';
   textarea.style.height = `${textarea.scrollHeight}px`;
@@ -171,14 +103,21 @@ function makeRemovalButton(node, ctx) {
 
 function makeParaActions(node, row, ctx) {
   const actions = el('div', 'para-actions');
-  if (ctx.editEnabled) {
+  // WYSIWYG sheets edit by clicking into the text — the ✎ textarea flow is
+  // the fallback for the board views only.
+  if (ctx.editEnabled && !ctx.inlineEditing) {
     const edit = el('button', 'para-act para-edit', '✎');
     edit.type = 'button';
     edit.title = 'Edit this paragraph';
     edit.addEventListener('click', () => beginEdit(node, row, ctx));
     actions.appendChild(edit);
   }
-  if (ctx.removalEnabled && REMOVABLE_TYPES.has(node.type)) {
+  // Gate on the SERVER-truth type (baseType survives the editor's local
+  // restructure preview) — the removal PATCH 422s on a real heading, and a
+  // preview-demoted article is still a heading in the database. Enter-drafts
+  // have no server row at all, so no removal affordance either.
+  const isLocalDraft = Boolean(node.meta && node.meta.localDraft);
+  if (ctx.removalEnabled && !isLocalDraft && REMOVABLE_TYPES.has(node.baseType ?? node.type)) {
     actions.appendChild(makeRemovalButton(node, ctx));
   }
   if (ctx.deleteEnabled) {
@@ -256,6 +195,7 @@ function renderPrNode(node, index, ctx) {
   const row = el('div', 'tree-node');
   row.dataset.nodeId = node.id;
   if (node.meta && node.meta.vanish) row.classList.add('is-vanish');
+  if (node.meta && node.meta.localDraft) row.classList.add('is-local-draft');
   if (node.type === 'continuation') {
     row.classList.add('tree-continuation');
     row.appendChild(el('span', 'node-label', ''));
@@ -265,27 +205,79 @@ function renderPrNode(node, index, ctx) {
 
   const body = el('div', 'node-text');
   const ownText = el('span', 'node-own-text');
-  ownText.appendChild(linkifyText(node.text, ctx));
+  if (isInlineEditable(node, ctx)) {
+    renderInlineText(node, ownText, ctx);
+  } else {
+    ownText.appendChild(linkifyText(node.text, ctx));
+  }
   body.appendChild(ownText);
   if (node.meta && node.meta.vanish) {
     body.appendChild(el('span', 'vanish-tag', 'VANISH'));
+  }
+  if (node.meta && node.meta.localDraft) {
+    const tag = el('span', 'draft-tag', 'DRAFT · LOCAL');
+    tag.title = 'Enter-inserted paragraph — held locally until the API can create paragraphs (#372)';
+    body.appendChild(tag);
   }
   appendNumberedChildren(body, node.children, (child, ordinal) =>
     renderPrNode(child, ordinal, ctx)
   );
   row.appendChild(body);
+  if (ctx.inlineEditing) {
+    const chip = editabilityChip(node);
+    if (chip) row.appendChild(chip);
+  }
   if (ctx.actionsEnabled) row.appendChild(makeParaActions(node, row, ctx));
   return row;
 }
 
-function makeCollapsible(container, barClass, labelText, titleText, startClosed) {
-  const bar = el('button', barClass);
-  bar.type = 'button';
-  bar.appendChild(el('span', 'twist', '▼'));
-  bar.appendChild(el('span', 'node-label', labelText));
-  bar.appendChild(el('span', null, titleText));
-  bar.addEventListener('click', () => container.classList.toggle('is-closed'));
+// Part/article heading bar. Read views render one collapse button; the
+// WYSIWYG editor splits it — twist+label still toggles, but the heading text
+// becomes an inline-editable segment and an article gains a ⇥ demote action
+// (same operation as Tab inside it).
+function makeCollapsible(container, barClass, labelText, node, ctx, startClosed) {
   if (startClosed) container.classList.add('is-closed');
+  if (!ctx.inlineEditing) {
+    const bar = el('button', barClass);
+    bar.type = 'button';
+    bar.appendChild(el('span', 'twist', '▼'));
+    bar.appendChild(el('span', 'node-label', labelText));
+    bar.appendChild(el('span', null, node.text));
+    bar.addEventListener('click', () => container.classList.toggle('is-closed'));
+    return bar;
+  }
+  const bar = el('div', `${barClass} is-wys`);
+  bar.dataset.nodeId = node.id;
+  const toggle = el('button', 'bar-toggle');
+  toggle.type = 'button';
+  toggle.title = 'Collapse / expand';
+  toggle.appendChild(el('span', 'twist', '▼'));
+  toggle.appendChild(el('span', 'node-label', labelText));
+  toggle.addEventListener('click', () => container.classList.toggle('is-closed'));
+  bar.appendChild(toggle);
+  const ownText = el('span', 'node-own-text');
+  if (isInlineEditable(node, ctx)) renderInlineText(node, ownText, ctx);
+  else ownText.appendChild(linkifyText(node.text, ctx));
+  bar.appendChild(ownText);
+  if (node.type === 'article' && typeof ctx.onRestructure === 'function') {
+    const demote = el('button', 'bar-demote', '⇥');
+    demote.type = 'button';
+    demote.title = 'Demote this article to a paragraph under the previous article (Tab inside it)';
+    demote.addEventListener('click', () => ctx.onRestructure(node, 1, null));
+    bar.appendChild(demote);
+  }
+  // A body paragraph promoted to an article in the restructure preview is
+  // still removable server-side — keep its ⊘ reachable on the heading bar.
+  // (Enter-drafts have no server row; nothing to remove.)
+  const isLocalDraft = Boolean(node.meta && node.meta.localDraft);
+  if (isLocalDraft) {
+    const tag = el('span', 'draft-tag', 'DRAFT · LOCAL');
+    tag.title = 'Enter-inserted article — held locally until the API can create paragraphs (#372)';
+    bar.appendChild(tag);
+  }
+  if (ctx.removalEnabled && !isLocalDraft && REMOVABLE_TYPES.has(node.baseType ?? node.type)) {
+    bar.appendChild(makeRemovalButton(node, ctx));
+  }
   return bar;
 }
 
@@ -312,7 +304,7 @@ function articleRoleChip(node) {
 function renderArticle(node, index, partNumber, ctx) {
   const wrap = el('div', 'tree-article');
   const label = getLabel('article', index, partNumber);
-  const bar = makeCollapsible(wrap, 'article-bar', label, node.text, true);
+  const bar = makeCollapsible(wrap, 'article-bar', label, node, ctx, true);
   const chip = articleRoleChip(node);
   if (chip) bar.appendChild(chip);
   wrap.appendChild(bar);
@@ -326,7 +318,7 @@ function renderArticle(node, index, partNumber, ctx) {
 
 function renderPart(node, index, ctx) {
   const wrap = el('div', 'tree-part');
-  wrap.appendChild(makeCollapsible(wrap, 'part-bar', getLabel('part', index), node.text, false));
+  wrap.appendChild(makeCollapsible(wrap, 'part-bar', getLabel('part', index), node, ctx, false));
   const children = el('div', 'part-children');
   appendNumberedChildren(children, node.children, (child, ordinal) =>
     child.type === 'article'
