@@ -308,6 +308,85 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/paragraphs:
+    post:
+      operationId: insertParagraph
+      summary: Insert a new paragraph after an anchor node
+      description: >
+        Inserts a new paragraph immediately after `anchorNodeId`, as its
+        sibling (same parent), shifting the following siblings' positions
+        (#372). CSI labels are render-derived from node type + sibling
+        ordinal, so consumers renumber automatically. `nodeType` defaults to
+        the anchor's own type; only `article`, `pr1`–`pr7`, and `continuation`
+        are insertable — an anchor whose type falls outside that set (a part
+        or note) requires an explicit `nodeType`, otherwise the request is
+        rejected 422. Parts are never insertable (a CSI section keeps its
+        three-part shape) and notes materialize via accept-as-note instead.
+
+
+        Inserting is a content write: it passes the composed edit gate
+        (ADR-018) and bumps the spec's `contentVersion`. Supply
+        `expectedVersion` to make the write conditional — a stale value is
+        rejected 409 with the current version. The anchor must belong to the
+        spec in the path; otherwise the request is rejected with 403.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [anchorNodeId, text]
+              properties:
+                anchorNodeId:
+                  type: string
+                  format: uuid
+                  description: >
+                    The paragraph the new node is inserted after (same
+                    parent, next position).
+                text:
+                  type: string
+                  minLength: 1
+                  description: New paragraph text (must be non-empty).
+                nodeType:
+                  type: string
+                  enum: [article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, continuation]
+                  description: >
+                    Node type for the new paragraph. Defaults to the anchor's
+                    own type.
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+                  description: >
+                    Optional optimistic-concurrency precondition — the spec
+                    `contentVersion` the caller read. Stale → 409.
+      responses:
+        '201':
+          description: Created paragraph node
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecNode'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/WriteConflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /specs/{id}/paragraphs/{nodeId}:
     patch:
       operationId: updateParagraph

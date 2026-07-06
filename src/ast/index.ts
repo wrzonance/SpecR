@@ -92,6 +92,8 @@ export {
   ReclassifyBodySchema,
 } from './schemas.js';
 export type { PatchEditabilityBody, PatchRemovalBody, ReclassifyBody } from './schemas.js';
+export { InsertParagraphBodySchema, InsertableNodeTypeSchema } from './paragraph-schemas.js';
+export type { InsertParagraphBody, InsertableNodeType } from './paragraph-schemas.js';
 export {
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,

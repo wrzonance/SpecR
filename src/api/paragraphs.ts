@@ -1,9 +1,69 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { UpdateParagraphBodySchema, PatchRemovalBodySchema } from '../ast/index.js';
-import { updateParagraphText, setParagraphVanish } from '../db/index.js';
+import {
+  UpdateParagraphBodySchema,
+  PatchRemovalBodySchema,
+  InsertParagraphBodySchema,
+} from '../ast/index.js';
+import { updateParagraphText, setParagraphVanish, insertParagraphAfter } from '../db/index.js';
 import { gateErrorResponse } from './edit-gate-response.js';
 import { logger } from '../lib/logger.js';
+
+/**
+ * POST /specs/:id/paragraphs — insert a new paragraph immediately after an
+ * anchor node, as its sibling (#372). The node type defaults to the anchor's
+ * own; a default outside the insertable set (the anchor is a part or note) is
+ * rejected 422 so callers choose explicitly. Passes the composed edit gate
+ * (ADR-018) and bumps the spec's contentVersion; responds 201 with the created
+ * SpecNode.
+ */
+export async function insertParagraphHandler(req: Request, res: Response): Promise<void> {
+  const specId = z.uuid().safeParse(req.params['id']);
+  if (!specId.success) {
+    res.status(400).json({ success: false, error: 'invalid spec id' });
+    return;
+  }
+  const body = InsertParagraphBodySchema.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({
+      success: false,
+      error:
+        'anchorNodeId (uuid) and non-empty text are required; nodeType must be article, pr1–pr7, or continuation',
+    });
+    return;
+  }
+
+  try {
+    const result = await insertParagraphAfter(specId.data, body.data);
+    switch (result.status) {
+      case 'not-found':
+        res.status(404).json({ success: false, error: 'anchor paragraph not found' });
+        return;
+      case 'wrong-spec':
+        res
+          .status(403)
+          .json({ success: false, error: 'anchor paragraph does not belong to this spec' });
+        return;
+      case 'invalid-type':
+        res.status(422).json({
+          success: false,
+          error: `node type "${result.nodeType}" cannot be inserted — pass nodeType (article, pr1–pr7, or continuation)`,
+        });
+        return;
+      case 'created':
+        res.status(201).json({ success: true, data: result.node });
+        return;
+    }
+  } catch (err) {
+    const gate = gateErrorResponse(err);
+    if (gate) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
+    logger.error({ err }, 'insert paragraph failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
 
 /**
  * PATCH /specs/:id/paragraphs/:nodeId — update a single paragraph's text by UUID
