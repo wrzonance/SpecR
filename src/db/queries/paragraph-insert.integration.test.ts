@@ -95,6 +95,24 @@ describe('insertParagraphAfter', () => {
     expect(await contentVersion(SPEC_ID)).toBe(versionBefore + 1);
   });
 
+  it('shifts every follower, not just one, when inserting before multiple siblings', async () => {
+    // anchor is the FIRST paragraph, so both middle and last are followers —
+    // exercises the multi-row `position > $anchorPosition` shift a single
+    // trailing follower can't catch.
+    const middlePosBefore = await positionOf(PR1_MIDDLE_ID);
+    const lastPosBefore = await positionOf(PR1_LAST_ID);
+
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: PR1_FIRST_ID,
+      text: 'Inserted after first.',
+    });
+
+    expect(result.status).toBe('created');
+    if (result.status !== 'created') return;
+    expect(await positionOf(PR1_MIDDLE_ID)).toBe(middlePosBefore + 1);
+    expect(await positionOf(PR1_LAST_ID)).toBe(lastPosBefore + 1);
+  });
+
   it('honors an explicit nodeType', async () => {
     const result = await insertParagraphAfter(SPEC_ID, {
       anchorNodeId: PR1_FIRST_ID,
@@ -143,6 +161,17 @@ describe('insertParagraphAfter', () => {
       text: 'Wrong spec.',
     });
     expect(result).toEqual({ status: 'wrong-spec' });
+  });
+
+  it('accepts an uppercase specId — pg returns spec_id lowercased, so an unfolded compare would false-403', async () => {
+    // z.uuid() preserves an uppercase specId, but `pg` hands back
+    // anchor.spec_id lowercased; without case-folding both sides the string
+    // compare misfires and a valid write reports wrong-spec.
+    const result = await insertParagraphAfter(SPEC_ID.toUpperCase(), {
+      anchorNodeId: PR1_FIRST_ID,
+      text: 'Uppercase specId.',
+    });
+    expect(result.status).toBe('created');
   });
 
   it('rejects a stale expectedVersion with StaleVersionError', async () => {
