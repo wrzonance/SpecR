@@ -10,7 +10,11 @@ import {
   restoreSpecHandler,
 } from './specs.js';
 import { setStyleSourceHandler, clearStyleSourceHandler } from './style-source.js';
-import { updateParagraphHandler, removeParagraphHandler } from './paragraphs.js';
+import {
+  updateParagraphHandler,
+  removeParagraphHandler,
+  insertParagraphHandler,
+} from './paragraphs.js';
 import { acquireLockHandler, releaseLockHandler, getLockHandler } from './locks.js';
 import {
   createProjectHandler,
@@ -144,6 +148,7 @@ router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.delete('/specs/:id', withdrawSpecHandler);
 router.post('/specs/:id/restore', restoreSpecHandler);
+router.post('/specs/:id/paragraphs', insertParagraphHandler);
 router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
 router.patch('/specs/:id/paragraphs/:nodeId/removal', removeParagraphHandler);
 router.patch('/specs/:id/paragraphs/:nodeId/editability', patchEditabilityHandler);

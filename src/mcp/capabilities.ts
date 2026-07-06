@@ -67,6 +67,7 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['reclassify_spec', 'write'],
   // wave 3 — paragraphs, associations, comment resolution
   ['update_paragraph', 'write'],
+  ['insert_paragraph', 'write'], // sibling insert after an anchor (#372)
   ['remove_paragraph', 'write'], // reversible soft removal (vanish), not a hard delete
   ['list_associations', 'read'],
   ['create_association', 'write'],

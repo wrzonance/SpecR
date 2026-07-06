@@ -3,6 +3,7 @@ import { pool } from '../db/index.js';
 import {
   handleUpdateParagraph,
   handleRemoveParagraph,
+  handleInsertParagraph,
   handleAcceptCommentAsNote,
 } from './paragraph-handlers.js';
 import {
@@ -108,6 +109,48 @@ describe('update_paragraph MCP tool', () => {
       expectedVersion: current + 100, // mismatch → StaleVersionError → tool error
     });
     expect(isToolError(res)).toBe(true);
+  });
+});
+
+describe('insert_paragraph MCP tool', () => {
+  it('inserts a sibling after the anchor and returns the created SpecNode', async () => {
+    const res = await handleInsertParagraph({
+      specId,
+      anchorNodeId: bodyId,
+      text: 'Inserted via MCP.',
+    });
+    expect(isToolError(res)).toBe(false);
+    const node = parse<{ id: string; type: string; text: string }>(res);
+    expect(node.type).toBe('pr1'); // defaulted to the anchor's type
+    expect(node.text).toBe('Inserted via MCP.');
+    const row = await pool.query<{ position: number }>(
+      'SELECT position FROM paragraphs WHERE id = $1',
+      [node.id]
+    );
+    expect(row.rows[0]?.position).toBeGreaterThan(0);
+  });
+
+  it('rejects an anchor from a different spec and a missing anchor', async () => {
+    expect(
+      isToolError(
+        await handleInsertParagraph({ specId: otherSpecId, anchorNodeId: bodyId, text: 'x' })
+      )
+    ).toBe(true);
+    expect(
+      isToolError(await handleInsertParagraph({ specId, anchorNodeId: MISSING, text: 'x' }))
+    ).toBe(true);
+  });
+
+  it('refuses the defaulted type for a note anchor unless nodeType is explicit', async () => {
+    const defaulted = await handleInsertParagraph({ specId, anchorNodeId: noteId, text: 'x' });
+    expect(isToolError(defaulted)).toBe(true);
+    const explicit = await handleInsertParagraph({
+      specId,
+      anchorNodeId: noteId,
+      text: 'Explicit pr1 after a note.',
+      nodeType: 'pr1',
+    });
+    expect(isToolError(explicit)).toBe(false);
   });
 });
 
