@@ -1,9 +1,11 @@
 import {
   handleUpdateParagraph,
   handleRemoveParagraph,
+  handleInsertParagraph,
   handleAcceptCommentAsNote,
   UpdateParagraphShape,
   RemoveParagraphShape,
+  InsertParagraphShape,
   AcceptCommentShape,
 } from './paragraph-handlers.js';
 import {
@@ -18,6 +20,7 @@ import type { ToolRegistrar } from './tool-registry.js';
 
 export function registerParagraphTools(reg: ToolRegistrar): void {
   registerParagraphContentTools(reg);
+  registerCommentResolutionTools(reg);
   registerAssociationTools(reg);
 }
 
@@ -49,6 +52,22 @@ function registerParagraphContentTools(reg: ToolRegistrar): void {
     handleRemoveParagraph
   );
 
+  reg.register(
+    'insert_paragraph',
+    {
+      description:
+        'Insert a new paragraph immediately after anchorNodeId, as its sibling (#372) — ' +
+        'the WYSIWYG Enter gesture. nodeType defaults to the anchor’s own type; only ' +
+        'article, pr1–pr7, and continuation are insertable (never part or note). Bumps ' +
+        'the spec’s contentVersion; pass expectedVersion for the optimistic-concurrency ' +
+        'check. Returns the created SpecNode.',
+      inputSchema: InsertParagraphShape,
+    },
+    handleInsertParagraph
+  );
+}
+
+function registerCommentResolutionTools(reg: ToolRegistrar): void {
   reg.register(
     'accept_comment_as_note',
     {

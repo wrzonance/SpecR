@@ -31,6 +31,7 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['delete /projects/{}', 'delete_project'], // destructive tier (gated off by default)
   ['post /projects/{}/restore', 'restore_project'],
   // wave 3 — paragraphs, associations, comment resolution
+  ['post /specs/{}/paragraphs', 'insert_paragraph'],
   ['patch /specs/{}/paragraphs/{}', 'update_paragraph'],
   ['patch /specs/{}/paragraphs/{}/removal', 'remove_paragraph'],
   ['get /specs/{}/paragraphs/{}/associations', 'list_associations'],

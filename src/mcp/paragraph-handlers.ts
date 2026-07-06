@@ -3,11 +3,16 @@ import {
   updateParagraphText,
   setParagraphVanish,
   acceptCommentAsNote,
+  insertParagraphAfter,
   StaleVersionError,
   SpecWriteForbiddenError,
   SpecNotFoundError,
 } from '../db/index.js';
-import { UpdateParagraphBodySchema, PatchRemovalBodySchema } from '../ast/index.js';
+import {
+  UpdateParagraphBodySchema,
+  PatchRemovalBodySchema,
+  InsertParagraphBodySchema,
+} from '../ast/index.js';
 import { logger } from '../lib/logger.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
 
@@ -53,6 +58,44 @@ export async function handleUpdateParagraph(args: unknown): Promise<ToolResult> 
     if (gate) return gate;
     logger.error({ err }, 'mcp tool update_paragraph failed');
     return toolError('Internal error — paragraph update failed');
+  }
+}
+
+// Path param (specId) plus the REST body shape, reused verbatim so the tool
+// advertises exactly the constraints the handler validates — no drift (#372).
+export const InsertParagraphShape = {
+  specId: z.uuid().describe('Spec UUID (from get_spec / list_sections)'),
+  ...InsertParagraphBodySchema.shape,
+};
+const InsertParagraphArgs = z.object(InsertParagraphShape);
+
+export async function handleInsertParagraph(args: unknown): Promise<ToolResult> {
+  const parsed = InsertParagraphArgs.safeParse(args);
+  if (!parsed.success) {
+    return toolError(
+      `invalid insert_paragraph input: ${parsed.error.issues.map((i) => i.message).join('; ')}`
+    );
+  }
+  const { specId, ...input } = parsed.data;
+  try {
+    const result = await insertParagraphAfter(specId, input);
+    if (result.status === 'not-found') {
+      return toolError(`anchor paragraph not found: id=${input.anchorNodeId}`);
+    }
+    if (result.status === 'wrong-spec') {
+      return toolError('anchor paragraph does not belong to this spec');
+    }
+    if (result.status === 'invalid-type') {
+      return toolError(
+        `node type "${result.nodeType}" cannot be inserted — pass nodeType (article, pr1–pr7, or continuation)`
+      );
+    }
+    return ok(result.node);
+  } catch (err) {
+    const gate = gateToolError(err);
+    if (gate) return gate;
+    logger.error({ err }, 'mcp tool insert_paragraph failed');
+    return toolError('Internal error — paragraph insert failed');
   }
 }
 

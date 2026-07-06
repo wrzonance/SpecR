@@ -58,6 +58,8 @@ export type {
   UpdateParagraphResult,
   SetVanishResult,
 } from './queries/paragraphs.js';
+export { insertParagraphAfter } from './queries/paragraph-insert.js';
+export type { InsertParagraphResult, InsertParagraphInput } from './queries/paragraph-insert.js';
 export {
   insertRefs,
   getInboundReferences,

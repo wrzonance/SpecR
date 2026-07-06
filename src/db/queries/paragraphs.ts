@@ -12,7 +12,7 @@ import type {
 } from '../../ast/index.js';
 import { listAssociationsForParagraph } from './associations.js';
 
-interface Queryable {
+export interface Queryable {
   query: Pool['query'];
 }
 import { logger } from '../../lib/logger.js';
@@ -245,7 +245,9 @@ export type UpdateParagraphResult =
   | { readonly status: 'not-found' }
   | { readonly status: 'wrong-spec' };
 
-async function fetchSubtreeNode(
+// Exported for the sibling-insert module (paragraph-insert.ts, #372) — every
+// paragraph write path returns the same reconstructed SpecNode shape.
+export async function fetchSubtreeNode(
   db: Queryable,
   specId: string,
   nodeId: string
