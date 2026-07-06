@@ -542,14 +542,16 @@ export function initEditor(ctx) {
   }
 
   function refRow(section, title, { broken = false } = {}) {
-    const row = el('button', 'ed-ref');
-    row.type = 'button';
+    // A ghost ref (target not loaded) has no click handler — render it as a
+    // plain div, not a focusable button that does nothing.
+    const loaded = specFor(section) !== null;
+    const row = el(loaded ? 'button' : 'div', 'ed-ref');
+    if (loaded) row.type = 'button';
     if (broken) row.classList.add('is-broken');
     const dot = el('span', 'ed-ref-dot');
     row.appendChild(dot);
     row.appendChild(el('span', 'ed-ref-num', ctx.displaySection(section)));
     row.appendChild(el('span', 'ed-ref-title', title));
-    const loaded = specFor(section) !== null;
     if (loaded) {
       row.title = `Open Section ${ctx.displaySection(section)} in the editor`;
       row.addEventListener('click', () => openSection(section));

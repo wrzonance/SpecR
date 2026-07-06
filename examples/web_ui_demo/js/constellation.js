@@ -21,6 +21,8 @@ const PER_RING_ALL = 10;
 const FOCUS_CX = 600;
 const FOCUS_CY = 385;
 const FOCUS_H = 780;
+// Inbound-citation count at/above which a section reads as a "hub" (bright sun / hub star).
+const HUB_INBOUND_THRESHOLD = 3;
 
 function svgEl(tag, attrs, text) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -260,7 +262,7 @@ export function initConstellation(ctx) {
       cx,
       cy,
       r: 10,
-      class: `cst-sun-core${crossIn >= 3 ? ' is-bright' : ''}`,
+      class: `cst-sun-core${crossIn >= HUB_INBOUND_THRESHOLD ? ' is-bright' : ''}`,
     });
     const umbrella = umbrellaSection(division);
     core.appendChild(
@@ -291,7 +293,7 @@ export function initConstellation(ctx) {
     const inboundCount = model.inbound.get(section) ?? 0;
     const orphan = !model.touched.has(section);
     const flagged = ctx.isFlagged(section);
-    const hub = inboundCount >= 3;
+    const hub = inboundCount >= HUB_INBOUND_THRESHOLD;
     const r = starRadius(inboundCount);
     const star = svgEl('g', { class: 'cst-star' });
     star.dataset.section = section;
@@ -419,7 +421,7 @@ export function initConstellation(ctx) {
   function starLabelClass(section, model) {
     if (ctx.isFlagged(section)) return 'cst-lbl-star is-flagged';
     if (!model.touched.has(section)) return 'cst-lbl-star is-orphan';
-    if ((model.inbound.get(section) ?? 0) >= 3) return 'cst-lbl-star is-hub';
+    if ((model.inbound.get(section) ?? 0) >= HUB_INBOUND_THRESHOLD) return 'cst-lbl-star is-hub';
     return 'cst-lbl-star';
   }
 
