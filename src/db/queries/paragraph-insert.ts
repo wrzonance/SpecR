@@ -13,9 +13,10 @@ import { fetchSubtreeNode } from './paragraphs.js';
 // caller-chosen body/heading types.
 
 /** Outcome of {@link insertParagraphAfter}. `invalid-type` carries the type
- *  that was refused — either an explicit request outside the insertable set
- *  (schema-blocked at the API, but the DB revalidates) or a defaulted anchor
- *  type (part/note) the caller must override explicitly. */
+ *  that was refused — an explicit request outside the insertable set
+ *  (schema-blocked at the API, but the DB revalidates), a defaulted non-
+ *  insertable anchor type (part/note), or a root (PART) anchor, which has no
+ *  insertable sibling regardless of an explicit override. */
 export type InsertParagraphResult =
   | { readonly status: 'created'; readonly node: SpecNode }
   | { readonly status: 'not-found' }
@@ -59,7 +60,14 @@ async function runInsert(
   if (anchor.spec_id.toLowerCase() !== specId.toLowerCase()) return { status: 'wrong-spec' };
 
   const nodeType = input.nodeType ?? anchor.node_type;
-  if (!InsertableNodeTypeSchema.safeParse(nodeType).success) {
+  // A PART has no insertable sibling — the only valid sibling of a part is
+  // another part, which is deliberately non-insertable. Guard the anchor type
+  // too, else an explicit nodeType (e.g. 'article') slips past the insertable
+  // check and lands a non-part node beside the part at parent_id = NULL, which
+  // the renderers then mislabel as a PART and round-trip breaks.
+  const insertable =
+    anchor.node_type !== 'part' && InsertableNodeTypeSchema.safeParse(nodeType).success;
+  if (!insertable) {
     return { status: 'invalid-type', nodeType };
   }
 
