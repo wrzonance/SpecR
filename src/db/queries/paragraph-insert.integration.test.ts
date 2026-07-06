@@ -147,6 +147,18 @@ describe('insertParagraphAfter', () => {
     expect(result).toEqual({ status: 'invalid-type', nodeType: 'part' });
   });
 
+  it('refuses an explicit insertable type when the anchor is a part — a root node has no sibling', async () => {
+    // Without the root guard, an explicit nodeType slips past the insertable
+    // check and lands an article at parent_id = NULL — a root node the
+    // renderers mislabel as a PART, breaking round-trip.
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: PART_ID,
+      text: 'Should not become a root-level article.',
+      nodeType: 'article',
+    });
+    expect(result).toEqual({ status: 'invalid-type', nodeType: 'article' });
+  });
+
   it('reports not-found for an unknown anchor', async () => {
     const result = await insertParagraphAfter(SPEC_ID, {
       anchorNodeId: 'c1000000-0000-0000-0000-0000000000aa',
