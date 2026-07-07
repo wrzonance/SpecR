@@ -136,6 +136,7 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['create_package', 'write'],
   ['set_package_specs', 'write'],
   // wave 2c — package revisions (issue / read) — final ops for full REST↔MCP parity
+  ['list_package_revisions', 'read'],
   ['get_revision', 'read'],
   ['issue_package_revision', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)

@@ -1,0 +1,161 @@
+/* Rendered-markdown styling for the demo's two LLM-output surfaces: the Ask-SpecR
+ * chat bubbles (.chat-markdown) and the Compose view's composed-report pane
+ * (.compose-report-text). Both hold sanitized markdown produced by
+ * js/render-markdown.mjs; these rules only style the resulting block elements.
+ *
+ * Everything is expressed through the demo's design-system tokens (--vellum,
+ * --muted, --line-dim, --amber, --mono, …). The demo currently ships a single
+ * light theme (no prefers-color-scheme / data-theme mechanism exists), so styling
+ * from tokens is what makes this markdown "theme-aware": it tracks the active
+ * palette and would follow a future dark theme automatically, with no markdown-only
+ * override to clash. Scope is limited to the two panes — deterministic/server-data
+ * panes (tree, audit, coordination) are untouched.
+ */
+
+/* The plain-text containers use white-space: pre-wrap; markdown lays out its own
+ * blocks, so switch back to normal flow and collapse the outer margins. */
+.chat-markdown,
+.compose-report-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown > :first-child,
+.compose-report-text > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child,
+.compose-report-text > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p,
+.compose-report-text p {
+  margin: 0 0 0.6em;
+}
+
+/* Headings */
+.chat-markdown :is(h1, h2, h3, h4, h5, h6),
+.compose-report-text :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1em 0 0.4em;
+  line-height: 1.25;
+  font-weight: 650;
+  color: var(--vellum);
+}
+.chat-markdown h1,
+.compose-report-text h1 {
+  font-size: 1.3em;
+}
+.chat-markdown h2,
+.compose-report-text h2 {
+  font-size: 1.18em;
+}
+.chat-markdown h3,
+.compose-report-text h3 {
+  font-size: 1.06em;
+}
+.chat-markdown :is(h4, h5, h6),
+.compose-report-text :is(h4, h5, h6) {
+  font-size: 1em;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Links — forced to rel/target in the renderer; the accent + underline are cosmetic. */
+.chat-markdown a,
+.compose-report-text a {
+  color: var(--amber);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-markdown a:hover,
+.compose-report-text a:hover {
+  color: var(--orange);
+}
+
+/* Lists, including nesting */
+.chat-markdown :is(ul, ol),
+.compose-report-text :is(ul, ol) {
+  margin: 0 0 0.6em;
+  padding-left: 1.4em;
+}
+.chat-markdown li,
+.compose-report-text li {
+  margin: 0.15em 0;
+}
+.chat-markdown li > :is(ul, ol),
+.compose-report-text li > :is(ul, ol) {
+  margin: 0.15em 0;
+}
+
+/* Inline code */
+.chat-markdown code,
+.compose-report-text code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: var(--vellum-dim);
+  border: 1px solid var(--vellum-edge);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+}
+
+/* Fenced code blocks — wide code scrolls inside its own box, never the page. */
+.chat-markdown pre,
+.compose-report-text pre {
+  margin: 0 0 0.6em;
+  padding: 0.7em 0.85em;
+  background: var(--vellum-dim);
+  border: 1px solid var(--vellum-edge);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.chat-markdown pre code,
+.compose-report-text pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 0.82em;
+  color: var(--ink-on-vellum);
+}
+
+/* Tables — scroll horizontally within their own block on narrow panes. */
+.chat-markdown table,
+.compose-report-text table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0 0 0.6em;
+  font-size: 0.9em;
+}
+.chat-markdown :is(th, td),
+.compose-report-text :is(th, td) {
+  border: 1px solid var(--line-dim);
+  padding: 0.35em 0.55em;
+  text-align: left;
+}
+.chat-markdown th,
+.compose-report-text th {
+  background: var(--sheet-dim);
+  font-weight: 650;
+}
+
+/* Blockquotes */
+.chat-markdown blockquote,
+.compose-report-text blockquote {
+  margin: 0 0 0.6em;
+  padding: 0.2em 0 0.2em 0.8em;
+  border-left: 3px solid var(--line-dim);
+  color: var(--muted);
+}
+
+/* Horizontal rule */
+.chat-markdown hr,
+.compose-report-text hr {
+  border: 0;
+  border-top: 1px solid var(--line-dim);
+  margin: 0.9em 0;
+}

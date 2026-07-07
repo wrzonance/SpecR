@@ -17,6 +17,7 @@
     <link rel="stylesheet" href="css/app.css" />
     <link rel="stylesheet" href="css/editor.css" />
     <link rel="stylesheet" href="css/constellation.css" />
+    <link rel="stylesheet" href="css/markdown.css" />
   </head>
   <body>
     <div id="grid-overlay" aria-hidden="true"></div>
@@ -624,6 +625,10 @@
       </form>
     </aside>
 
+    <!-- markdown-it UMD bundle (lockfile-pinned; served from the /vendor allowlist in
+         server.mjs). A classic script so it sets window.markdownit synchronously, before
+         the deferred module graph runs; js/render-markdown.mjs wraps that global. -->
+    <script src="/vendor/markdown-it.min.js"></script>
     <script type="module" src="js/app.js"></script>
   </body>
 </html>

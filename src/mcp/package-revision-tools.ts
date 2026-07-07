@@ -1,12 +1,27 @@
 import {
   handleIssuePackageRevision,
   handleGetRevision,
+  handleListPackageRevisions,
   IssuePackageRevisionShape,
   GetRevisionShape,
+  ListPackageRevisionsShape,
 } from './package-revision-handlers.js';
 import type { ToolRegistrar } from './tool-registry.js';
 
 export function registerPackageRevisionTools(reg: ToolRegistrar): void {
+  reg.register(
+    'list_package_revisions',
+    {
+      description:
+        'List a design package’s issued revisions as light summaries (metadata only), ordered by ' +
+        'sortOrder — the per-package issuance clock (50% DD … IFC, addenda, bulletins). Read a ' +
+        'single revision’s frozen trees with get_revision. Returns isError when the package UUID ' +
+        'is not found.',
+      inputSchema: ListPackageRevisionsShape,
+    },
+    handleListPackageRevisions
+  );
+
   reg.register(
     'get_revision',
     {

@@ -6,6 +6,8 @@
 // OpenAI tool-calling loop, and bridges each tool call to SpecR's POST /mcp. We
 // render the final assistant message plus a small trace of which MCP tools ran.
 
+import { renderMarkdownInto } from './render-markdown.mjs';
+
 const CHAT_ENDPOINT = '/chat';
 // Persist the running conversation so a page reload keeps context. The demo has
 // no user identity or DB, so localStorage is the right layer. We keep the FULL
@@ -78,10 +80,19 @@ export function initChat(opts = {}) {
     list.scrollTop = list.scrollHeight;
   }
 
-  function addBubble(role, text, { pending = false } = {}) {
+  // `markdown` renders the text as sanitized markdown (assistant replies only — LLM
+  // output). User input, the "Thinking…" placeholder, and error strings stay plain
+  // textContent. renderMarkdownInto is the sole audited markup insertion point.
+  function addBubble(role, text, { pending = false, markdown = false } = {}) {
     const bubble = el('div', `chat-bubble is-${role}${pending ? ' is-pending' : ''}`);
     bubble.appendChild(el('span', 'chat-role', role === 'user' ? 'YOU' : 'SpecR'));
-    bubble.appendChild(el('p', 'chat-text', text));
+    if (markdown) {
+      const body = el('div', 'chat-text chat-markdown');
+      renderMarkdownInto(body, text);
+      bubble.appendChild(body);
+    } else {
+      bubble.appendChild(el('p', 'chat-text', text));
+    }
     list.appendChild(bubble);
     scrollToEnd();
     return bubble;
@@ -121,7 +132,7 @@ export function initChat(opts = {}) {
       const reply = body.data.reply || '(no response)';
       history.push({ role: 'assistant', content: reply });
       saveHistory(history);
-      const bubble = addBubble('assistant', reply);
+      const bubble = addBubble('assistant', reply, { markdown: true });
       addToolTrace(bubble, body.data.toolCalls);
       const anchors = body.data.focus?.anchors;
       if (onFocus && Array.isArray(anchors) && anchors.length > 0) onFocus(anchors);
@@ -141,8 +152,10 @@ export function initChat(opts = {}) {
     input.focus();
   }
 
-  // Replay a persisted conversation so a reload keeps the context visible.
-  for (const message of history) addBubble(message.role, message.content);
+  // Replay a persisted conversation so a reload keeps the context visible. Assistant
+  // turns were markdown; user turns stay plain text.
+  for (const message of history)
+    addBubble(message.role, message.content, { markdown: message.role === 'assistant' });
 
   toggle.addEventListener('click', () => {
     if (sidebar.classList.contains('is-open')) closeSidebar();
