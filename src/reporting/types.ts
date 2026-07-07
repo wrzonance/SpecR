@@ -7,8 +7,9 @@ import { z } from 'zod';
  *  (ADR-053). */
 export type AlignmentMode = 'origin' | 'structure';
 
-/** What the caller may request; `auto` resolves to `origin` when the sources
- *  share a cross-source origin key, else `structure`. */
+/** What the caller may request; `auto` resolves to `origin` when the sources share
+ *  a cross-source origin key, to `structure` when they share none but are the same
+ *  section, else `origin` (unrelated sections are never falsely paired). */
 export type AlignmentRequest = AlignmentMode | 'auto';
 
 // ── Request (external input — validated at the boundary) ─────────────────────

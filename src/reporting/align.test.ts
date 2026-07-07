@@ -182,11 +182,15 @@ describe('projectBaseline', () => {
 describe('alignTrees — alignment mode', () => {
   // Two independently-ingested specs: no shared origin (all NULL → key = own id),
   // identical structure (PART/article/pr1).
-  function indieSource(specId: string, texts: readonly string[]): AlignSource {
+  function indieSource(
+    specId: string,
+    texts: readonly string[],
+    section = '07 21 00'
+  ): AlignSource {
     const partId = `${specId}-part`;
     const artId = `${specId}-art`;
     return {
-      column: { specId, section: '07 21 00', title: 'T' },
+      column: { specId, section, title: 'T' },
       rows: [
         para({ specId, id: partId, text: 'PART 1', nodeType: 'part', position: 0 }),
         para({
@@ -226,6 +230,25 @@ describe('alignTrees — alignment mode', () => {
   it('auto uses origin when sources share a cross-source origin key (shared master)', () => {
     const { alignedBy } = alignTrees([p1(), p2()]);
     expect(alignedBy).toBe('origin');
+  });
+
+  it('auto stays on origin for different-section sources — coincidental addresses are not paired', () => {
+    // No shared origin AND different CSI sections. Both trees have a part:0|article:0
+    // address, but 07 21 00 and 09 91 00 are unrelated — pairing them would fabricate
+    // identical/modified rows. auto must NOT fall back to structure here (ADR-053).
+    const a = indieSource('a', ['Alpha'], '07 21 00');
+    const b = indieSource('b', ['Beta'], '09 91 00');
+    const { matrix, alignedBy } = alignTrees([a, b]);
+    expect(alignedBy).toBe('origin');
+    // Nothing aligns across unrelated sections: every row is present in exactly one column.
+    expect(matrix.rows.every((r) => r.cells.filter((c) => c.present).length === 1)).toBe(true);
+  });
+
+  it('explicit alignment: "structure" still applies across different sections (caller opted in)', () => {
+    const a = indieSource('a', ['Alpha'], '07 21 00');
+    const b = indieSource('b', ['Beta'], '09 91 00');
+    const { alignedBy } = alignTrees([a, b], { alignment: 'structure' });
+    expect(alignedBy).toBe('structure'); // the section gate only guards the auto fallback
   });
 
   it('explicit alignment: "origin" forces origin even for independently-ingested specs', () => {

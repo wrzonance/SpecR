@@ -40,12 +40,23 @@ function sharesCrossSourceOrigin(sources: readonly AlignSource[]): boolean {
   return false;
 }
 
+/** True iff every source is the same CSI section — the precondition for a meaningful
+ *  structural fallback (ADR-053 targets independently-ingested specs of the SAME
+ *  section). Unrelated sections share structural addresses (both have a
+ *  `part:0|article:0`) but nothing semantic, so `auto` must not pair them. */
+function sourcesShareSection(sources: readonly AlignSource[]): boolean {
+  return new Set(sources.map((s) => s.column.section)).size <= 1;
+}
+
 function resolveAlignment(
   sources: readonly AlignSource[],
   requested: AlignmentRequest
 ): AlignmentMode {
   if (requested !== 'auto') return requested;
-  return sharesCrossSourceOrigin(sources) ? 'origin' : 'structure';
+  if (sharesCrossSourceOrigin(sources)) return 'origin';
+  // No shared origin: fall back to structure only for same-section peers. Different
+  // sections stay on origin (→ all only-in rows), never falsely paired by address.
+  return sourcesShareSection(sources) ? 'structure' : 'origin';
 }
 
 /** Structural keyer (ADR-053) over ALL sources at once — paragraph ids are

@@ -46,10 +46,15 @@ Two secondary gaps blocked agent consumption of the tool over `compare_specs`:
 2. **`alignment: 'origin' | 'structure' | 'auto'` (default `auto`).** `auto` picks
    `origin` iff the two sources **share at least one cross-source origin key** (some
    `originParagraphId ?? id` value occurs in ≥2 sources — true for shared-master clones and
-   for project↔its-own-master), else `structure`. The mode actually used is echoed back as
-   `alignedBy`. The pure aligner reuses ADR-047's Map-hash-join + first-occurrence sweep
-   unchanged; only the keyer is swapped, so origin behavior is byte-identical for
-   `alignment: 'origin'` and for shared-master pairs under `auto`.
+   for project↔its-own-master). With no shared origin it falls back to `structure` **only
+   when the sources are the same CSI `section`**; different-section pairs stay on `origin`
+   so their coincidentally-identical structural addresses (`part:0|article:0`) are not
+   falsely paired — they surface as only-in-X on each side instead. An explicit
+   `alignment: 'structure'` still applies across sections (the gate guards only the `auto`
+   fallback). The mode actually used is echoed back as `alignedBy`. The pure aligner reuses
+   ADR-047's Map-hash-join + first-occurrence sweep unchanged; only the keyer is swapped, so
+   origin behavior is byte-identical for `alignment: 'origin'` and for shared-master pairs
+   under `auto`.
 
 3. **`include: 'all' | 'differences'` (default `all`).** `differences` returns only rows
    that are **not identical** — a row is identical iff present in every column with equal

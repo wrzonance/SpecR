@@ -4088,7 +4088,8 @@ components:
             (clones of a shared master); `structure` keys on the canonical structural
             address (independently-ingested specs of the same section); `auto`
             (default) uses origin when the sources share a cross-source origin key,
-            else structure. The mode actually used is echoed as `alignedBy`.
+            structure when they share none but are the same section, else origin.
+            The mode actually used is echoed as `alignedBy`.
         include:
           type: string
           enum: [all, differences]
@@ -4127,7 +4128,9 @@ components:
       properties:
         originId:
           type: string
-          description: Resolved-origin alignment key (a real paragraph UUID).
+          description: >
+            Row alignment key. A real paragraph UUID under `origin` alignment; a
+            canonical structural-address string under `structure` (see `alignedBy`).
         cells:
           type: array
           description: Index-aligned to `columns`.

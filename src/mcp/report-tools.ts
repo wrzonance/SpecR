@@ -97,7 +97,8 @@ function registerCompareTool(reg: ToolRegistrar): void {
             'How to align rows. "origin": resolved paragraph origin (clones of a shared ' +
               'master). "structure": canonical structural address (independently-ingested ' +
               'specs of the same section). "auto" (default): origin when the sources share ' +
-              'a cross-source origin, else structure. The mode used is echoed as alignedBy.'
+              'a cross-source origin; structure when they share none but are the same ' +
+              'section; otherwise origin. The mode used is echoed as alignedBy.'
           ),
         include: z
           .enum(['all', 'differences'])
