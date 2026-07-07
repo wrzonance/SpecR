@@ -624,7 +624,7 @@ git commit -m "feat(example): Compare tab markup + styles"
   - `getCatalog() => { specId, section, title, origin }[]` — live specs to populate the pickers (built by app.js from projects + libraries).
   - `displaySection(section) => string`.
   - `onCite(anchor) => void` — `anchor = { section, specId, paragraphId }`; opens the Report/audit pane (reuses `onComposeCite`).
-  - `onHandoff({ sources, sections, labels }) => void` — switches to Compose and pre-fills prompt + scope.
+  - `onHandoff({ sources, sections, labels }) => void` — switches to Compose and prefills prompt + scope.
 
 - [ ] **Step 1: Write the controller** (`js/compare.js`). Keep each function ≤50 lines; split rendering from wiring.
 
@@ -907,7 +907,7 @@ let comparePanel = null; // deterministic side-by-side comparison controller (in
   if (view === 'compare') comparePanel?.refresh();
 ```
 
-- [ ] **Step 6: Add the catalog builder + handoff helpers** near `composeScopeLabel`/`onComposeCite` (~line 1955). The catalog lists every live spec loaded on the board, tagged by project/library origin; the handoff pre-fills Compose and switches to it.
+- [ ] **Step 6: Add the catalog builder + handoff helpers** near `composeScopeLabel`/`onComposeCite` (~line 1955). The catalog lists every live spec loaded on the board, tagged by project/library origin; the handoff prefills Compose and switches to it.
 
 ```javascript
 // Live specs available to the Compare pickers — every loaded board spec,
@@ -1040,4 +1040,3 @@ git commit -m "docs(example): Compare view two-fixture walkthrough"
 **Type consistency:** `postCompareReport(sources, {baseline})` (Task 3) matches its call in Task 5. `buildCompareView`/`cellState`/`detectCompareFeatures`/`baselineStatesFor` signatures (Task 2) match their use in Task 5. `diffWords` return `{a,b}` of `{text,changed}` (Task 1) matches `renderCell`/`renderRow` use (Task 5). `initCompare(opts)` `{getCatalog,displaySection,onCite,onHandoff}` (Task 5) matches the `boot` wiring (Task 6). `prefill(text)` (Task 6 compose change) matches `onCompareHandoff` call (Task 6). ✓
 
 **Note on baseline lens rendering:** Task 2 surfaces `baselineStates` per row and Task 5 stores it via `buildCompareView`, but Task 5's cell renderer colors by `row.state` (identical/differing/only-one), not by the baseline lens states. The baseline toggle still exercises the endpoint's baseline path and the status line notes it; a richer per-cell baseline recoloring is deferred (not required by acceptance — acceptance asks for the toggle + word-highlights + click-through, all present). This is an intentional scope boundary, documented in the PR body.
-```
