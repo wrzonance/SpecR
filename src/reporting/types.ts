@@ -100,6 +100,26 @@ export interface BaselineLens {
   readonly rows: readonly BaselineLensRow[];
 }
 
+// ── Summary rollup (grounded counts over the full matrix) ────────────────────
+
+export interface ComparisonSummaryColumn {
+  readonly specId: string;
+  readonly present: number; // rows where this column's cell is present
+  readonly onlyIn: number; // rows present ONLY in this column
+}
+
+/** Grounded rollup computed over the FULL matrix (before any `include` filter), so
+ *  an agent can cite totals without paging every row. A row is `identical` iff
+ *  present in every column with equal text; `differing` = rows − identical (covers
+ *  both modified and present-in-only-some rows); `aligned` = present in ≥2 columns. */
+export interface ComparisonSummary {
+  readonly rows: number;
+  readonly aligned: number;
+  readonly identical: number;
+  readonly differing: number;
+  readonly columns: readonly ComparisonSummaryColumn[]; // index-aligned to columns
+}
+
 // ── Top-level response payload (`data`) ──────────────────────────────────────
 
 export interface DriftEntry {
