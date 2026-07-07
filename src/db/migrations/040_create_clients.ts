@@ -17,6 +17,8 @@ export const up = (pgm: MigrationBuilder): void => {
   });
   pgm.addConstraint('clients', 'clients_name_unique', 'UNIQUE (name)');
   pgm.addConstraint('clients', 'clients_name_nonempty', 'CHECK (length(trim(name)) > 0)');
+  // Index the FK: ON DELETE SET NULL makes a library delete scan clients for referencers.
+  pgm.createIndex('clients', 'library_id', { name: 'clients_library_id_idx' });
 
   pgm.addColumns('projects', {
     client_id: { type: 'uuid', references: 'clients', onDelete: 'RESTRICT' },
@@ -27,5 +29,6 @@ export const up = (pgm: MigrationBuilder): void => {
 export const down = (pgm: MigrationBuilder): void => {
   pgm.dropIndex('projects', 'client_id', { name: 'projects_client_id_idx' });
   pgm.dropColumns('projects', ['client_id']);
+  pgm.dropIndex('clients', 'library_id', { name: 'clients_library_id_idx' });
   pgm.dropTable('clients', { cascade: true });
 };
