@@ -125,6 +125,21 @@ test('adversarial: a control-char-obfuscated javascript: scheme is dropped', () 
   assert.doesNotMatch(html, DANGEROUS_HREF);
 });
 
+test('adversarial: a mixed-case javascript: scheme is dropped', () => {
+  // isSafeLink lowercases before matching, so case-variation cannot evade the check.
+  const html = md.render('[click](JavaScript:alert(1))');
+  assert.doesNotMatch(html, ACTIVE_ANCHOR);
+  assert.doesNotMatch(html, DANGEROUS_HREF);
+});
+
+test('adversarial: an HTML-entity-encoded javascript: scheme is dropped', () => {
+  // CommonMark decodes character references (&#106; -> "j") in a link destination
+  // BEFORE validateLink runs, so the decoded "javascript:" is what isSafeLink sees.
+  const html = md.render('[click](&#106;avascript:alert(1))');
+  assert.doesNotMatch(html, ACTIVE_ANCHOR);
+  assert.doesNotMatch(html, DANGEROUS_HREF);
+});
+
 test('adversarial: a data: link is dropped', () => {
   const html = md.render('[d](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)');
   assert.doesNotMatch(html, ACTIVE_ANCHOR);
