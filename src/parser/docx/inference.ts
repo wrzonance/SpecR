@@ -17,42 +17,18 @@ import type {
   StyleNumPr,
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
-import { getLabel, consumesNumber } from '../../ast/index.js';
+import {
+  getLabel,
+  consumesNumber,
+  nodeTypeToNormalizedIlvl,
+  NODE_TYPES_BY_NORMALIZED_ILVL,
+} from '../../ast/index.js';
 import {
   planPartStrip,
   planOutlineNumberStrip,
   planLabelStrip,
   rebaseSourceFacts,
 } from '../part-prefix.js';
-
-// Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
-const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
-  part: 0,
-  article: 1,
-  pr1: 2,
-  pr2: 3,
-  pr3: 4,
-  pr4: 5,
-  pr5: 6,
-  pr6: 7,
-  pr7: 8,
-};
-
-const NODE_TYPES_BY_ILVL: readonly NodeType[] = [
-  'part',
-  'article',
-  'pr1',
-  'pr2',
-  'pr3',
-  'pr4',
-  'pr5',
-  'pr6',
-  'pr7',
-];
-
-function toNormalizedIlvl(nodeType: NodeType): number {
-  return NODE_TYPE_TO_NORMALIZED[nodeType] ?? 0;
-}
 
 interface SignalHit {
   readonly nodeType: NodeType;
@@ -79,7 +55,7 @@ function trySignal1(para: DocxParagraph, numberingMap: NumberingMap): SignalHit 
   ) {
     return null;
   }
-  return { nodeType, normalizedIlvl: toNormalizedIlvl(nodeType), signal: 1 };
+  return { nodeType, normalizedIlvl: nodeTypeToNormalizedIlvl(nodeType), signal: 1 };
 }
 
 // Lead-in styles PR1lc..PR7lc ("lead-in copy") carry no numbering of their own
@@ -117,7 +93,7 @@ function trySignal2(
   if (!resolved) return null;
   const nodeType = ilvlToNodeType(resolved.ilvl, numberingMap.articleIlvl);
   if (nodeType === 'continuation') return null;
-  return { nodeType, normalizedIlvl: toNormalizedIlvl(nodeType), signal: 2 };
+  return { nodeType, normalizedIlvl: nodeTypeToNormalizedIlvl(nodeType), signal: 2 };
 }
 
 function trySignal4(para: DocxParagraph): SignalHit | null {
@@ -129,7 +105,7 @@ function trySignal4(para: DocxParagraph): SignalHit | null {
 function trySignal5(para: DocxParagraph): SignalHit | null {
   const estimated = matchIndentSignal(para.leftIndent);
   if (estimated === null) return null;
-  const nodeType = NODE_TYPES_BY_ILVL[estimated];
+  const nodeType = NODE_TYPES_BY_NORMALIZED_ILVL[estimated];
   if (!nodeType) return null;
   return { nodeType, normalizedIlvl: estimated, signal: 5 };
 }
