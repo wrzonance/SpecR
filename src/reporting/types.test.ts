@@ -22,3 +22,27 @@ describe('CompareRequestSchema', () => {
     expect(CompareRequestSchema.safeParse({ sources: [A, B], baseline: A }).success).toBe(true);
   });
 });
+
+describe('CompareRequestSchema — alignment & include', () => {
+  it('defaults alignment to "auto" and include to "all"', () => {
+    const parsed = CompareRequestSchema.parse({ sources: [A, B] });
+    expect(parsed.alignment).toBe('auto');
+    expect(parsed.include).toBe('all');
+  });
+
+  it('accepts explicit alignment and include', () => {
+    const parsed = CompareRequestSchema.parse({
+      sources: [A, B],
+      alignment: 'structure',
+      include: 'differences',
+    });
+    expect(parsed.alignment).toBe('structure');
+    expect(parsed.include).toBe('differences');
+  });
+
+  it('rejects an unknown alignment mode', () => {
+    expect(CompareRequestSchema.safeParse({ sources: [A, B], alignment: 'fuzzy' }).success).toBe(
+      false
+    );
+  });
+});

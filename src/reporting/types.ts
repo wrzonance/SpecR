@@ -20,6 +20,8 @@ export const CompareRequestSchema = z
   .object({
     sources: z.array(z.uuid()).length(2),
     baseline: z.uuid().optional(),
+    alignment: z.enum(['origin', 'structure', 'auto']).default('auto'),
+    include: z.enum(['all', 'differences']).default('all'),
   })
   .superRefine((v, ctx) => {
     if (new Set(v.sources).size !== v.sources.length) {
