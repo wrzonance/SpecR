@@ -63,6 +63,7 @@
       <button class="view-tab" type="button" data-view="report">Report</button>
       <button class="view-tab" type="button" data-view="submittal">Submittal</button>
       <button class="view-tab" type="button" data-view="compose">Compose</button>
+      <button class="view-tab" type="button" data-view="compare">Compare</button>
     </nav>
 
     <section class="project-bar" aria-label="Active project controls">
@@ -464,6 +465,13 @@
           <button
             class="compose-chip"
             type="button"
+            data-example="Summarize the differences of this spec between these two projects, citing the specific paragraphs that diverge."
+          >
+            Compare two projects
+          </button>
+          <button
+            class="compose-chip"
+            type="button"
             data-example="Which sections cite 09 22 00, and are any of those cross-references dangling?"
           >
             Cross-reference audit
@@ -508,6 +516,44 @@
             <div class="compose-output" id="compose-output"></div>
           </section>
         </div>
+      </div>
+    </section>
+
+    <section class="app-view" id="view-compare" data-view-panel="compare" hidden>
+      <div class="compare">
+        <div class="band-rule">
+          <h2 class="band-title">COMPARE SPECS</h2>
+          <p class="band-hint">deterministic · grounded matrix · aligned by resolved origin</p>
+        </div>
+        <p class="compare-lede">
+          Pick two live specs — the same section held by two projects, or a project against its
+          master — and see a grounded, paragraph-aligned matrix. Differing paragraphs are
+          highlighted word by word; every present cell clicks through to the exact paragraph in the
+          Report pane. Hand the whole comparison to the agent to narrate it.
+        </p>
+        <div class="compare-pickers">
+          <label class="compare-field">
+            <span>SOURCE A</span>
+            <select id="compare-source-a"></select>
+          </label>
+          <label class="compare-field">
+            <span>SOURCE B</span>
+            <select id="compare-source-b"></select>
+          </label>
+          <label class="compare-baseline-toggle">
+            <input type="checkbox" id="compare-baseline" />
+            <span>Use Source A as baseline (added / removed / modified lens)</span>
+          </label>
+        </div>
+        <div class="compare-actions">
+          <button class="toc-btn is-primary" id="compare-run" type="button">Run comparison</button>
+          <button class="toc-btn" id="compare-handoff" type="button" hidden>
+            Ask SpecR to summarize
+          </button>
+        </div>
+        <div class="compare-status" id="compare-status" aria-live="polite"></div>
+        <div class="compare-legend" id="compare-legend" hidden></div>
+        <div class="compare-matrix" id="compare-matrix"></div>
       </div>
     </section>
 

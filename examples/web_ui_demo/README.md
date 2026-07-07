@@ -42,8 +42,9 @@ The nav bar switches between: **Project Spec Map** (drop specs, watch the
 cross-reference web knit), **Editor** (full-page document editing), **Constellation**
 (the project corpus as division solar systems), **TOC** builder, **Project
 Settings**, **Library** (company + client masters), **Numbering**, **Report**
-(the live coordination audit), **Submittal** (the submittal register), and
-**Compose** (agent-driven grounded reporting).
+(the live coordination audit), **Submittal** (the submittal register),
+**Compose** (agent-driven grounded reporting), and **Compare** (a deterministic
+side-by-side matrix of two specs).
 
 ### Editor view (#369)
 
@@ -212,6 +213,52 @@ Compose uses the **same** `OPENAI_API_KEY` as Ask SpecR (above) and is likewise
 composed report. That depends on PDF egress (issue #352), which is still open, so
 the **Download PDF** button ships **disabled**, with a tooltip that points at the
 same issue. The cited on-screen report is the deliverable for now.
+
+## Compare — two-fixture comparison demo (#385)
+
+The **Compare** tab renders the grounded `POST /reports/compare` matrix (ADR-047)
+side by side: two live specs aligned by resolved paragraph origin, differing
+paragraphs highlighted word by word, every present cell a click-through into the
+Report pane. It is the deterministic surface behind the demo scenario
+"summarize the differences of this spec between these two projects" — the matrix
+is the button; the **Ask SpecR to summarize** handoff lets the agent narrate it.
+
+Per the demo's footgun rule ("everything a button already does stays a button"),
+the grounded matrix belongs to a button and the agent only adds the narration.
+
+Reproduce it end to end:
+
+1. **Load a project copy and a master copy of the same section.** Upload two
+   `.docx` fixtures of the same section (e.g. an ARCAT `03 30 00` and a CPI
+   `03 30 00`) — one into the project via the map's **Upload Spec**, and one into
+   the **Company Master** (or a client library the project already sources) via
+   the **Library** tab's add-specs flow. The project copy loads on the board; the
+   master joins the Compare catalog from the project's scoped libraries — so both
+   show up as distinct live specs (distinct UUIDs, same section).
+2. **Open Compare.** Both specs appear in the two source pickers, tagged by
+   origin (the active project's name for the board copy, the owning library's
+   name for a master). Pick one in **Source A** and the other in **Source B**.
+3. **Run comparison.** The matrix renders: identical rows read plain, differing
+   rows are amber with word-level highlights, one-sided rows are tinted red. The
+   status line reports the aligned / differing / only-in-one counts. Optionally
+   tick **Use Source A as baseline** for the added / removed / modified lens
+   (the request then carries a `baseline`, and the server returns the lens when
+   it supports it).
+4. **Click any present cell** to open that exact paragraph in the **Report**
+   audit pane — the same anchor channel the Compose Sources chips use. Cells for
+   the on-board project copy land in the audit pane; a library-master cell isn't
+   loaded on the board, so its click-through only resolves if that paragraph is
+   also present in the loaded project.
+5. **Ask SpecR to summarize.** The handoff switches to **Compose** with the
+   prompt and both spec ids pre-filled — press **Compose report** and the agent
+   calls `compare_specs` and narrates the differences, each claim cited. A
+   matching **Compare two projects** example chip is also in Compose.
+
+The view consumes the `POST /reports/compare` contract read-only. It works
+against today's contract and light-touch feature-detects the additive fields
+from the companion backend issue #384 (`summary` / `alignedBy` in the response
+by presence; the `alignment` / `include` request options stay behind the
+`compareAlignment` feature flag in `js/features.js`, off until they land).
 
 ## One-Command Demo Launchers
 

@@ -3624,3 +3624,168 @@ body {
     padding-right: 1rem;
   }
 }
+
+/* ── Compare view (#385) ─────────────────────────────────────────────────── */
+.compare {
+  position: relative;
+  z-index: 1;
+  padding: 0.9rem 2rem 8rem;
+  display: grid;
+  gap: 0.85rem;
+}
+.compare-lede {
+  margin: 0;
+  max-width: 74ch;
+  font-family: var(--serif);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-on-vellum);
+}
+.compare-pickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: end;
+}
+.compare-field {
+  display: grid;
+  gap: 0.3rem;
+  font: 0.62rem var(--mono);
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  min-width: 22ch;
+  flex: 1 1 26ch;
+}
+.compare-field select {
+  font: 0.8rem var(--mono);
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--line-dim);
+  background: var(--sheet);
+  color: var(--vellum);
+}
+.compare-baseline-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: 0.7rem var(--mono);
+  color: var(--muted);
+}
+.compare-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.compare-status {
+  font: 0.66rem var(--mono);
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  min-height: 1rem;
+}
+.compare-status.is-error {
+  color: var(--err);
+}
+.compare-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  font: 0.62rem var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.compare-legend-swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-right: 0.3rem;
+  vertical-align: -1px;
+  border: 1px solid var(--line-dim);
+}
+/* The swatch is not a .compare-cell, so it needs its own fill matching each
+   row-state's cell background — otherwise the legend renders as empty boxes. */
+.compare-legend-swatch.is-identical {
+  background: color-mix(in srgb, var(--ok) 7%, var(--sheet));
+}
+.compare-legend-swatch.is-differing {
+  background: color-mix(in srgb, var(--amber) 9%, var(--sheet));
+}
+.compare-legend-swatch.is-only-a {
+  background: color-mix(in srgb, var(--err) 7%, var(--sheet));
+}
+.compare-matrix {
+  overflow-x: auto;
+}
+.compare-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--serif);
+}
+.compare-table th,
+.compare-table td {
+  border: 1px solid var(--line-dim);
+  padding: 0.5rem 0.6rem;
+  vertical-align: top;
+  text-align: left;
+}
+.compare-col-head {
+  background: var(--sheet-dim);
+  position: sticky;
+  top: 0;
+}
+.compare-col-section {
+  font: 0.72rem var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--line);
+}
+.compare-col-title {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.compare-cell {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  cursor: pointer;
+  background: var(--sheet);
+}
+.compare-cell:hover {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+.compare-cell.is-absent {
+  background: var(--sheet-dim);
+  color: var(--muted);
+  font-style: italic;
+  cursor: default;
+}
+.compare-row.is-identical .compare-cell {
+  background: color-mix(in srgb, var(--ok) 7%, var(--sheet));
+}
+.compare-row.is-differing .compare-cell {
+  background: color-mix(in srgb, var(--amber) 9%, var(--sheet));
+}
+.compare-row.is-only-a .compare-cell,
+.compare-row.is-only-b .compare-cell {
+  background: color-mix(in srgb, var(--err) 7%, var(--sheet));
+}
+.compare-diff {
+  background: color-mix(in srgb, var(--amber) 30%, transparent);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.compare-state {
+  font: 0.58rem var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.compare-empty {
+  font-family: var(--serif);
+  color: var(--muted);
+  padding: 1rem 0;
+}
+@media (max-width: 720px) {
+  .compare {
+    padding: 0.9rem 1rem 8rem;
+  }
+}
