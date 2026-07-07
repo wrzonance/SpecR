@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   createPackageRevision,
   getPackageRevision,
+  listPackageRevisions,
   PackageNotFoundError,
   SnapshotValidationError,
   RevisionNomenclatureValidationError,
@@ -31,6 +32,11 @@ export const GetRevisionShape = {
 };
 const GetArgs = z.object(GetRevisionShape);
 
+export const ListPackageRevisionsShape = {
+  packageId: z.uuid().describe('Design package UUID (from list_packages)'),
+};
+const ListArgs = z.object(ListPackageRevisionsShape);
+
 function issues(err: z.ZodError): string {
   return err.issues.map((i) => i.message).join('; ');
 }
@@ -56,6 +62,20 @@ export async function handleIssuePackageRevision(args: unknown): Promise<ToolRes
     if (err instanceof RevisionNomenclatureValidationError) return toolError(err.message);
     if (getPgCode(err) === '23505') return toolError('revision already exists for this package');
     return internalError(err, 'issue_package_revision');
+  }
+}
+
+export async function handleListPackageRevisions(args: unknown): Promise<ToolResult> {
+  const parsed = ListArgs.safeParse(args);
+  if (!parsed.success) {
+    return toolError('invalid list_package_revisions input: packageId must be a UUID');
+  }
+  try {
+    const revisions = await listPackageRevisions(parsed.data.packageId, pool);
+    if (revisions === null) return toolError(`package not found: id=${parsed.data.packageId}`);
+    return ok(revisions);
+  } catch (err) {
+    return internalError(err, 'list_package_revisions');
   }
 }
 

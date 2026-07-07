@@ -104,6 +104,7 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['put /packages/{}/specs', 'set_package_specs'],
   ['delete /packages/{}', 'delete_package'], // destructive tier
   // wave 2c — package revisions (issue / read) — LAST ops; full REST↔MCP parity reached
+  ['get /packages/{}/revisions', 'list_package_revisions'],
   ['post /packages/{}/revisions', 'issue_package_revision'],
   ['get /revisions/{}', 'get_revision'],
 ]);
