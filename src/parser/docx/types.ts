@@ -87,8 +87,12 @@ export interface DocxParagraph {
 
 // ─── inference.ts output ──────────────────────────────────────────────────────
 
+// The 5 inference signals: 1=numbering.xml, 2=style chain, 3=document order
+// (continuation), 4=text regex, 5=indentation.
+export type SignalId = 1 | 2 | 3 | 4 | 5;
+
 export interface SignalConflict {
-  readonly signal: 1 | 2 | 3 | 4 | 5;
+  readonly signal: SignalId;
   readonly reportedIlvl: number;
   readonly reportedNodeType: NodeType;
 }
@@ -98,8 +102,12 @@ export interface ClassifiedParagraph {
   // Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
   readonly resolvedIlvl: number;
   readonly nodeType: NodeType;
-  readonly signalUsed: 1 | 2 | 3 | 4 | 5;
+  readonly signalUsed: SignalId;
   readonly conflicts: readonly SignalConflict[];
+  // Signals whose vote matched the FINAL resolved (nodeType, normalizedIlvl) —
+  // post-correctMisalignedArticle. The winner itself is excluded; disagreeing
+  // losers are in `conflicts`; signals that never fired appear in neither.
+  readonly agreed: readonly SignalId[];
   readonly isVanish: boolean;
   // A genuine specifier note (banner text or a note-named style) — editorial
   // metadata rendered as [NOTE]. Distinct from isVanish (merely hidden): hidden

@@ -21,6 +21,7 @@ function para(
     nodeType,
     signalUsed: 1,
     conflicts: [],
+    agreed: [],
     isVanish,
   };
 }

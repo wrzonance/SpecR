@@ -13,6 +13,7 @@ import type {
   DocxParagraph,
   NumberingMap,
   SignalConflict,
+  SignalId,
   StyleMap,
   StyleNumPr,
 } from './types.js';
@@ -33,7 +34,7 @@ import {
 interface SignalHit {
   readonly nodeType: NodeType;
   readonly normalizedIlvl: number;
-  readonly signal: 1 | 2 | 3 | 4 | 5;
+  readonly signal: SignalId;
 }
 
 function trySignal1(para: DocxParagraph, numberingMap: NumberingMap): SignalHit | null {
@@ -120,6 +121,15 @@ function buildConflicts(winner: SignalHit, hits: readonly SignalHit[]): readonly
     }));
 }
 
+function buildAgreed(winner: SignalHit, hits: readonly SignalHit[]): readonly SignalId[] {
+  return hits
+    .filter(
+      (h) =>
+        h !== winner && h.nodeType === winner.nodeType && h.normalizedIlvl === winner.normalizedIlvl
+    )
+    .map((h) => h.signal);
+}
+
 // An article is the top content tier under a PART, so it cannot be deeply indented.
 // Hand-authored docs reuse numIds with inconsistent ilvl baselines, so
 // a nested list item can resolve to 'article' via the global articleIlvl offset
@@ -180,6 +190,7 @@ function continuationResult(
     nodeType: 'continuation',
     signalUsed: 3,
     conflicts: [],
+    agreed: [],
     isVanish,
     isNote,
   };
@@ -227,6 +238,7 @@ function classifyOne(
   }
   const winner = correctMisalignedArticle(rawWinner, hits);
   const conflicts = buildConflicts(winner, hits);
+  const agreed = buildAgreed(winner, hits);
 
   return {
     paragraph: para,
@@ -234,6 +246,7 @@ function classifyOne(
     nodeType: winner.nodeType,
     signalUsed: winner.signal,
     conflicts,
+    agreed,
     isVanish: para.isVanish,
   };
 }

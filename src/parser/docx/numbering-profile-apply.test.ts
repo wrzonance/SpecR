@@ -163,6 +163,7 @@ function cp(
     nodeType,
     signalUsed,
     conflicts,
+    agreed: [],
     isVanish: false,
   };
 }
