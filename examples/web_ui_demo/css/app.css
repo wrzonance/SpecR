@@ -623,6 +623,52 @@ body {
   color: var(--muted);
 }
 
+/* Ordered source-chain editor (#413) */
+.source-row.is-ordered {
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+}
+
+.source-row.is-available {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  opacity: 0.62;
+}
+
+.source-priority {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--amber);
+  min-width: 1.1rem;
+  text-align: center;
+}
+
+.source-ctl {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.28rem 0.45rem;
+  background: none;
+  border: 1px solid var(--line-dim);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.source-ctl:hover:not(:disabled) {
+  color: var(--vellum);
+  border-color: var(--amber);
+}
+
+.source-ctl:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.settings-source-hint {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+
 /* ── Library manager ────────────────────────────────────────────────────── */
 
 .library-workspace {

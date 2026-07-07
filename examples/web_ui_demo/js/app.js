@@ -48,6 +48,7 @@ import { initAudit } from './audit.js';
 import { initEditor } from './editor.js';
 import { initConstellation } from './constellation.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
+import { mergeSourcesWithScope, moveSource, resolutionNotice } from './source-order.mjs';
 
 const specs = new Map(); // specId -> { tree, references, warnings?, capabilities? }
 const ACTIVE_PROJECT_KEY = 'specr-active-project';
@@ -69,7 +70,10 @@ let libraries = [];
 let selectedLibraryId = null;
 let selectedLibrarySpecs = [];
 let projectClientLibraryIds = [];
+let sourceDraft = null; // Settings-view ordered source chain being edited (#413)
+let sourceDraftProjectId = null; // draft belongs to this project; stale drafts rebuild
 let tocLibrarySpecs = [];
+let crossProjectSpecs = []; // other projects' TOC copies, for cross-project Compare (#413)
 const board = document.getElementById('spec-board');
 const emptyState = document.getElementById('empty-state');
 const webCanvas = document.getElementById('ref-web-canvas');
@@ -127,7 +131,12 @@ function showView(view) {
   if (view === 'numbering') void numberingPanel?.refresh();
   if (view === 'submittal') void refreshSubmittalRegister();
   if (view === 'compose') composePanel?.refresh();
-  if (view === 'compare') comparePanel?.refresh();
+  if (view === 'compare') {
+    // Re-pull other projects' TOCs so copies added since the last workspace
+    // load are pickable, then repaint with whatever is already cached.
+    void refreshCrossProjectSpecs().then(() => comparePanel?.refresh());
+    comparePanel?.refresh();
+  }
   // The audit's findings already repaint on workspace load / spec mutations;
   // opening the tab just needs a height re-measure. (A refetch here would wipe
   // the current finding selection and desync the two panes.)
@@ -209,15 +218,10 @@ function projectClientSourceIds(project = activeProject) {
     .map((source) => source.libraryId);
 }
 
-function projectSourceIds() {
-  const company = companyMaster();
-  return [...new Set([...projectClientLibraryIds, ...(company ? [company.id] : [])])];
-}
-
 function projectSourceLabel() {
-  const clientCount = projectClientLibraryIds.length;
-  if (clientCount === 0) return 'Company Masters';
-  return `${clientCount} Client Master${clientCount === 1 ? '' : 's'} + Company Masters`;
+  const sources = activeProject?.sources ?? [];
+  if (sources.length === 0) return 'Company Masters';
+  return sources.map((source) => source.name).join(' › ');
 }
 
 async function refreshProjectList(preferredId = activeProjectId) {
@@ -288,45 +292,102 @@ function renderProjectSettings() {
   renderProjectSourceList();
 }
 
+// The Settings draft mirrors the server's ordered source chain; edits stay
+// local until Save Settings PUTs the exact order (priority = array index + 1).
+function currentSourceDraft() {
+  if (sourceDraft && sourceDraftProjectId === activeProjectId) return sourceDraft;
+  sourceDraft = (activeProject?.sources ?? []).map((source) => ({
+    libraryId: source.libraryId,
+    name: source.name,
+    tier: source.tier,
+  }));
+  sourceDraftProjectId = activeProjectId;
+  return sourceDraft;
+}
+
+function setSourceDraftOrder(ids) {
+  const byId = new Map(currentSourceDraft().map((entry) => [entry.libraryId, entry]));
+  sourceDraft = ids.map((id) => byId.get(id)).filter(Boolean);
+  renderProjectSourceList();
+}
+
+function sourceControlButton(label, title, onClick, disabled = false) {
+  const btn = makeNode('button', 'source-ctl', label);
+  btn.type = 'button';
+  btn.title = title;
+  btn.disabled = disabled;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function renderDraftSourceRow(entry, index, draft) {
+  const row = makeNode('div', 'source-row is-ordered');
+  row.appendChild(makeNode('span', 'source-priority', String(index + 1)));
+  row.appendChild(makeNode('span', 'source-name', entry.name));
+  row.appendChild(
+    makeNode('span', 'source-tier', entry.tier === 'client' ? 'CLIENT' : 'COMPANY')
+  );
+  const ids = draft.map((source) => source.libraryId);
+  row.appendChild(
+    sourceControlButton(
+      '▲',
+      'Raise priority',
+      () => setSourceDraftOrder(moveSource(ids, entry.libraryId, -1)),
+      index === 0
+    )
+  );
+  row.appendChild(
+    sourceControlButton(
+      '▼',
+      'Lower priority',
+      () => setSourceDraftOrder(moveSource(ids, entry.libraryId, 1)),
+      index === draft.length - 1
+    )
+  );
+  row.appendChild(
+    sourceControlButton(
+      '✕',
+      'Remove from project sources',
+      () => setSourceDraftOrder(ids.filter((id) => id !== entry.libraryId)),
+      draft.length === 1
+    )
+  );
+  return row;
+}
+
+function renderAvailableSourceRow(library) {
+  const row = makeNode('div', 'source-row is-available');
+  row.appendChild(makeNode('span', 'source-priority', '·'));
+  row.appendChild(makeNode('span', 'source-name', library.name));
+  row.appendChild(
+    makeNode('span', 'source-tier', library.tier === 'client' ? 'CLIENT' : 'COMPANY')
+  );
+  row.appendChild(
+    sourceControlButton('+', 'Add as lowest-priority source', () => {
+      sourceDraft = [
+        ...currentSourceDraft(),
+        { libraryId: library.id, name: library.name, tier: library.tier },
+      ];
+      renderProjectSourceList();
+    })
+  );
+  return row;
+}
+
 function renderProjectSourceList() {
   const list = document.getElementById('project-source-list');
   if (!list) return;
   list.replaceChildren();
-  const company = companyMaster();
-  if (company) {
-    const companyRow = renderSourceRow(company, true, true);
-    list.appendChild(companyRow);
-  }
-  const clients = clientLibraries();
-  if (clients.length === 0) {
-    list.appendChild(makeNode('p', 'library-empty', 'No client libraries yet.'));
-    return;
-  }
-  for (const client of clients) {
-    list.appendChild(renderSourceRow(client, projectClientLibraryIds.includes(client.id), false));
-  }
-}
-
-function renderSourceRow(library, checked, disabled) {
-  const label = makeNode('label', 'source-row');
-  const input = document.createElement('input');
-  input.type = 'checkbox';
-  input.value = library.id;
-  input.checked = checked;
-  input.disabled = disabled;
-  input.dataset.projectSource = library.id;
-  label.appendChild(input);
-  label.appendChild(makeNode('span', 'source-name', library.name));
-  label.appendChild(
-    makeNode('span', 'source-tier', library.tier === 'client' ? 'CLIENT' : 'COMPANY')
+  const draft = currentSourceDraft();
+  draft.forEach((entry, index) => list.appendChild(renderDraftSourceRow(entry, index, draft)));
+  const included = new Set(draft.map((entry) => entry.libraryId));
+  const available = [companyMaster(), ...clientLibraries()].filter(
+    (library) => library && !included.has(library.id)
   );
-  return label;
-}
-
-function checkedProjectClientIds() {
-  return [...document.querySelectorAll('[data-project-source]')]
-    .filter((input) => input instanceof HTMLInputElement && input.checked && !input.disabled)
-    .map((input) => input.value);
+  for (const library of available) list.appendChild(renderAvailableSourceRow(library));
+  if (draft.length === 0 && available.length === 0) {
+    list.appendChild(makeNode('p', 'library-empty', 'No libraries yet.'));
+  }
 }
 
 async function switchProject(projectId) {
@@ -394,10 +455,9 @@ async function saveProjectSettings() {
   const name = document.getElementById('project-name-input')?.value.trim() || activeProjectName();
   const formatSelect = document.getElementById('project-format-select');
   const sectionNumberFormat = formatSelect?.value || activeSectionNumberFormat();
-  projectClientLibraryIds = checkedProjectClientIds();
   try {
     await patchProject(activeProjectId, { name, sectionNumberFormat });
-    await syncProjectSourcesToTocScope();
+    await saveSourceDraft();
     await refreshProjectList(activeProjectId);
     activeProject = await getProject(activeProjectId);
     projectClientLibraryIds = projectClientSourceIds(activeProject);
@@ -433,6 +493,7 @@ async function loadActiveProjectWorkspace() {
     await refreshTocLibrarySpecs();
     await refreshTocBuilder();
     await restoreProjectSpecs(activeProject);
+    await refreshCrossProjectSpecs();
   } catch (err) {
     toast(`could not load project: ${err.message}`, 'warn');
   }
@@ -521,13 +582,15 @@ function initProjectManager() {
   });
 }
 
-async function joinProject(specId) {
+async function joinProject(specId, uploadedLibraryId = null) {
   if (!activeProjectId || projectMembers.has(specId)) return specId;
   const spec = specs.get(specId);
   const section = spec?.tree?.section;
   if (!section) return specId;
   try {
     const result = await addSpecToProject(activeProjectId, section);
+    const notice = resolutionNotice(result, uploadedLibraryId);
+    if (notice) toast(notice.message, notice.kind);
     projectMembers.add(result.specId);
     if (result.specId !== specId) {
       specs.delete(specId);
@@ -1009,14 +1072,31 @@ async function refreshTocLibrarySpecs() {
 async function syncProjectSourcesToTocScope() {
   if (!activeProjectId) return;
   if (!API_FEATURES.projectSources) return;
-  const uniqueIds = projectSourceIds();
+  // Order-preserving merge (#413): scope changes append or drop sources but
+  // never reprioritize an explicitly ordered chain.
+  const uniqueIds = mergeSourcesWithScope(
+    activeProject?.sources ?? [],
+    projectClientLibraryIds,
+    companyMaster()?.id ?? null
+  );
   if (uniqueIds.length === 0) return;
   try {
     const result = await setProjectSources(activeProjectId, uniqueIds);
     if (activeProject) activeProject = { ...activeProject, sources: result.sources ?? [] };
+    sourceDraft = null;
   } catch (err) {
     toast(`could not update project source libraries: ${err.message}`, 'warn');
   }
+}
+
+// Persist the Settings-view source order exactly as drafted (priority = order).
+async function saveSourceDraft() {
+  if (!activeProjectId || !API_FEATURES.projectSources) return;
+  const ids = currentSourceDraft().map((entry) => entry.libraryId);
+  if (ids.length === 0) return;
+  const result = await setProjectSources(activeProjectId, ids);
+  if (activeProject) activeProject = { ...activeProject, sources: result.sources ?? [] };
+  sourceDraft = null;
 }
 
 async function saveTocBuilder({ toastMessage = 'TOC saved' } = {}) {
@@ -1183,6 +1263,8 @@ async function addMapSpecFromLibrary() {
     }
     await setProjectSourcesForMapLibrary(library);
     const result = await addSpecToProject(activeProjectId, spec.section);
+    const notice = resolutionNotice(result, library.id);
+    if (notice) toast(notice.message, notice.kind);
     projectMembers.add(result.specId);
     await addSpec(result.specId);
     await reloadAllSpecs();
@@ -1970,12 +2052,38 @@ function onComposeCite(anchor) {
   if (audit) void audit.showAnchor(anchor);
 }
 
+// Other projects' TOC copies for the Compare pickers (#413). The same section
+// can carry a different version per project — comparing those versions across
+// projects is the point of per-project copies, so the catalog must reach past
+// the active project. Failure just narrows Compare to the active project.
+async function refreshCrossProjectSpecs() {
+  const others = projects.filter((project) => project.id !== activeProjectId);
+  try {
+    const loaded = await Promise.all(
+      others.map(async (project) => {
+        const detail = await getProject(project.id);
+        return (detail.toc ?? []).map((entry) => ({
+          specId: entry.specId,
+          section: entry.section,
+          title: entry.title,
+          origin: project.name,
+        }));
+      })
+    );
+    crossProjectSpecs = loaded.flat();
+  } catch (err) {
+    console.warn('SpecR: could not load cross-project compare catalog', err);
+    crossProjectSpecs = [];
+  }
+}
+
 // Live specs available to the Compare pickers — every loaded board spec (a
 // project copy) plus every scoped library master, each tagged by origin so two
 // same-section copies read distinctly. The board dedups sections, so the
 // showcase "project copy vs its master" comparison means picking a loaded
 // project spec against its library master: two distinct live specs (distinct
-// UUIDs) the /reports/compare endpoint can align.
+// UUIDs) the /reports/compare endpoint can align. Other projects' copies join
+// the catalog tagged by their project name (#413).
 function buildCompareCatalog() {
   const projectName = activeProjectName();
   const libraryName = (id) => libraries.find((lib) => lib.id === id)?.name;
@@ -1996,6 +2104,9 @@ function buildCompareCatalog() {
       title: spec.title,
       origin: libraryName(spec.libraryId) ?? spec.clientName ?? 'Library master',
     });
+  }
+  for (const spec of crossProjectSpecs) {
+    if (!byId.has(spec.specId)) byId.set(spec.specId, spec);
   }
   return [...byId.values()].sort(
     (a, b) => a.section.localeCompare(b.section) || a.origin.localeCompare(b.origin)
@@ -2164,7 +2275,7 @@ async function onSpecReady(result, context = { destination: 'project' }) {
   });
   // Join the active project — re-adding a previously-removed section also heals
   // any references the server had marked broken, so reload + recount.
-  await joinProject(result.specId);
+  await joinProject(result.specId, context.libraryId ?? null);
   await reloadAllSpecs();
   renderBoard();
   await refreshBrokenCount();
@@ -2192,23 +2303,51 @@ async function onMapAddSectionsClick({ chooseFiles, defaultContext }) {
   if (action === 'library') {
     await addMapSpecFromLibrary();
   } else if (action === 'upload') {
-    // Onboard a brand-new spec into the project's base source library
-    // (Company Masters) first, then resolve a project copy from it — the same
-    // model as "Add from Library". POST /projects/:id/specs resolves sections
-    // only from a project's source libraries, so a standalone /parse would
-    // orphan the spec and 422 on join. Without a company master, fall back to
-    // the standalone parse (no source library to onboard into).
-    const company = companyMaster();
-    const uploadContext = company
+    // Onboard the upload into one of the project's source libraries, then
+    // resolve a project copy from it — the same model as "Add from Library".
+    // POST /projects/:id/specs resolves sections only from a project's source
+    // libraries, so a standalone /parse would orphan the spec and 422 on join.
+    // The priority-1 source is the default target; if a higher-priority source
+    // still shadows the chosen library, joinProject warns with the winner.
+    const target = await chooseUploadSourceLibrary();
+    if (target === null) return;
+    const uploadContext = target
       ? {
           destination: 'project',
-          source: 'master',
-          libraryId: company.id,
-          libraryName: company.name,
+          source: target.tier === 'client' ? 'client' : 'master',
+          ...(target.tier === 'client' ? { client: target.name } : {}),
+          libraryId: target.libraryId,
+          libraryName: target.name,
         }
       : defaultContext;
     chooseFiles(uploadContext);
   }
+}
+
+// Pick which source library receives a Spec Map upload. Returns the source
+// entry ({ libraryId, name, tier }), null on cancel, or undefined when there
+// is no library at all (caller falls back to a standalone parse).
+async function chooseUploadSourceLibrary() {
+  const sources = activeProject?.sources ?? [];
+  if (sources.length === 0) {
+    const company = companyMaster();
+    return company ? { libraryId: company.id, name: company.name, tier: company.tier } : undefined;
+  }
+  if (sources.length === 1) return sources[0];
+  const value = await openChoice({
+    title: 'Upload into which source library?',
+    body: 'The file onboards into the chosen library; the project copy then resolves by source priority (Project Settings).',
+    choices: [
+      { label: 'Cancel', value: null, kind: 'ghost' },
+      ...sources.map((source, index) => ({
+        label: `${index + 1} · ${source.name}${source.tier === 'client' ? ' (client)' : ''}`,
+        value: source.libraryId,
+        kind: index === 0 ? 'primary' : 'ghost',
+      })),
+    ],
+  });
+  if (!value) return null;
+  return sources.find((source) => source.libraryId === value) ?? null;
 }
 
 function initMapActions() {
