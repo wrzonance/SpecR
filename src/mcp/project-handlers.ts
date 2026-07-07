@@ -4,6 +4,7 @@ import {
   updateProject,
   softDeleteProject,
   restoreProject,
+  ClientNotFoundError,
   pool,
 } from '../db/index.js';
 import type { UpdateProjectInput } from '../db/index.js';
@@ -37,12 +38,18 @@ export const UpdateProjectShape = {
   sectionNumberFormat: SectionNumberFormatSchema.optional().describe(
     'Project section-number display format'
   ),
+  clientId: z
+    .uuid()
+    .nullable()
+    .optional()
+    .describe('Associate with a client (uuid, from list_clients) or disassociate (null); ADR-054'),
 };
 const UpdateProjectArgs = z
   .object(UpdateProjectShape)
-  .refine((v) => v.name !== undefined || v.sectionNumberFormat !== undefined, {
-    message: 'at least one of name or sectionNumberFormat is required',
-  });
+  .refine(
+    (v) => v.name !== undefined || v.sectionNumberFormat !== undefined || v.clientId !== undefined,
+    { message: 'at least one of name, sectionNumberFormat, or clientId is required' }
+  );
 
 export async function handleUpdateProject(args: unknown): Promise<ToolResult> {
   const parsed = UpdateProjectArgs.safeParse(args);
@@ -51,10 +58,11 @@ export async function handleUpdateProject(args: unknown): Promise<ToolResult> {
       `invalid update_project input: ${parsed.error.issues.map((i) => i.message).join('; ')}`
     );
   }
-  const { projectId, name, sectionNumberFormat } = parsed.data;
+  const { projectId, name, sectionNumberFormat, clientId } = parsed.data;
   const input: UpdateProjectInput = {
     ...(name !== undefined ? { name } : {}),
     ...(sectionNumberFormat !== undefined ? { sectionNumberFormat } : {}),
+    ...(clientId !== undefined ? { clientId } : {}),
   };
   try {
     const updated = await updateProject(projectId, input, pool);
@@ -65,8 +73,11 @@ export async function handleUpdateProject(args: unknown): Promise<ToolResult> {
       projectId: updated.id,
       name: updated.name,
       sectionNumberFormat: updated.sectionNumberFormat,
+      clientId: updated.clientId,
     });
   } catch (err) {
+    // Unknown client on association → surface the validation message (mirrors REST 422).
+    if (err instanceof ClientNotFoundError) return toolError(err.message);
     logger.error({ err }, 'mcp tool update_project failed');
     return toolError('Internal error — project update failed');
   }

@@ -106,6 +106,10 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   // wave 2c — package revisions (issue / read) — LAST ops; full REST↔MCP parity reached
   ['post /packages/{}/revisions', 'issue_package_revision'],
   ['get /revisions/{}', 'get_revision'],
+  // first-class clients (#391 / ADR-054); project association rides update_project
+  ['get /clients', 'list_clients'],
+  ['post /clients', 'create_client'],
+  ['get /clients/{}', 'get_client'],
 ]);
 
 /**
