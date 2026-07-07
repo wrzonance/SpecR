@@ -159,7 +159,12 @@ initialize_docker_database() {
   port="$(find_free_port "${SPECR_DB_HOST_PORT:-5432}" "$API_PORT" "$WEB_PORT")"
   printf '==> Starting bundled PostgreSQL (docker compose) on host port %s\n' "$port"
   export SPECR_DB_HOST_PORT="$port"
-  docker compose up -d postgres
+  # We only get here when no compose PostgreSQL is reachable, so an existing
+  # container is stale (stopped, or "running" but detached from its network so it
+  # publishes no host port). --force-recreate reconciles it to a working state —
+  # plain `up -d` would skip a config-unchanged-but-broken container and the wait
+  # below would then hang for ~60s. The named volume (specr_pgdata) is preserved.
+  docker compose up -d --force-recreate postgres
 
   printf '==> Waiting for PostgreSQL on localhost:%s\n' "$port"
   for i in $(seq 1 60); do
