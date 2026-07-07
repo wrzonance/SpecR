@@ -213,6 +213,8 @@ Note: the `A. → 1. → a. → 1) → a)` rendering is the CSI PageFormat conve
 
 **Conflict persistence (#56):** when multiple signals fire and disagree, the losing signals are recorded as `{ signal, reportedIlvl, reportedNodeType }` and persisted to `paragraphs.conflicts` (JSONB, `NOT NULL DEFAULT '[]'`). They surface as `meta.conflicts` on tree nodes (`get_spec` MCP tool and the shared `getSpecTree` query) and as a top-level `conflicts` field on the node and each ancestor returned by the `get_paragraph` MCP tool. Empty arrays are omitted on the wire. This makes inference ambiguity transparent to agents and the future UI instead of silently picking a winner.
 
+Winner provenance is persisted alongside conflicts (ADR-055): `paragraphs.signal_provenance` (nullable JSONB) records `{ signalUsed, agreed }` — which signal won and which independently agreed with the final resolution. A pure read-time scorer (`src/parser/docx/hierarchy-confidence.ts`, exported via the parser barrel) derives `meta.inference` = `{ confidence 0–1, signalUsed, agreed, evidence[] }` from provenance + conflicts on every read, so the formula can improve without migration or reparse. NULL provenance = honestly unscored (pre-provenance parse or explicit-structure source), never a fake number. The onboarding report's `hierarchy` section (`src/lib/hierarchy-summary.ts`, review threshold 0.6) triages scored paragraphs worst-first.
+
 ## Canonical CSI AST
 
 Internal representation shared by all modules. Not OOXML. Renders to: DOCX, JSON, Markdown (Phase 6), HTML.
@@ -667,7 +669,7 @@ Each module in `src/` is a self-contained unit: a typed error class, a public AP
 parser/    ← knows about AST types; nothing about DB or API
 generator/ ← knows about AST types and dolanmiu/docx; nothing else
 merge/     ← knows about AST types and DB queries; nothing about parsing
-db/        ← knows about AST types and pg; nothing about domain logic
+db/        ← knows about AST types and pg; domain engines only via barrels (conventions classify, parser read-time scorer — ADR-055)
 api/       ← orchestrates all modules; owns HTTP concerns only
 mcp/       ← imports from db/index, generator/index, parser/index; no api/ internals
 lib/       ← format-agnostic utilities (errors, logging, encoding); usable by any module
