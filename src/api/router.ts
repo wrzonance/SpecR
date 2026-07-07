@@ -29,6 +29,7 @@ import {
   getBrokenRefsHandler,
 } from './projects.js';
 import { getInboundReferencesHandler, getOutboundReferencesHandler } from './references.js';
+import { createClientHandler, listClientsHandler, getClientHandler } from './clients.js';
 import {
   getLibraryDivisionGeneralSpecHandler,
   setLibraryDivisionGeneralSpecHandler,
@@ -176,6 +177,9 @@ router.delete('/projects/:id', deleteProjectHandler);
 router.post('/projects/:id/restore', restoreProjectHandler);
 router.put('/projects/:id/sources', setProjectSourcesHandler);
 router.post('/projects/:id/generate', generateManualHandler);
+router.post('/clients', createClientHandler);
+router.get('/clients', listClientsHandler);
+router.get('/clients/:id', getClientHandler);
 router.get(
   '/libraries/:libraryId/divisions/:division/general-spec',
   getLibraryDivisionGeneralSpecHandler
