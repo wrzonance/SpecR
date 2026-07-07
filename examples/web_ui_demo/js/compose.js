@@ -11,6 +11,8 @@
 // opens it in the Report/audit view. Facts come from the tools; only the prose
 // varies between runs, so "Regenerate" demonstrates reproducibility.
 
+import { renderMarkdownInto } from './render-markdown.mjs';
+
 const REPORT_ENDPOINT = '/report';
 
 function el(tag, className, text) {
@@ -125,7 +127,11 @@ export function initCompose(opts = {}) {
 
   function renderDone(evt) {
     outputEl.replaceChildren();
-    outputEl.appendChild(el('div', 'compose-report-text', evt.reply || '(no narrative)'));
+    // The composed narrative is LLM output — render it as sanitized markdown. The
+    // citation chips below stay deterministic DOM built from the tool anchors.
+    const narrative = el('div', 'compose-report-text');
+    renderMarkdownInto(narrative, evt.reply || '(no narrative)');
+    outputEl.appendChild(narrative);
     renderCitations(evt.citations);
     regenBtn.hidden = false;
   }

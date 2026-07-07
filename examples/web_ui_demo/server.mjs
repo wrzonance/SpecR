@@ -1,6 +1,7 @@
 import { createReadStream, readFileSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
@@ -77,9 +78,36 @@ const MIME_TYPES = new Map([
   ['.js', 'text/javascript; charset=utf-8'],
   ['.mjs', 'text/javascript; charset=utf-8'],
   ['.json', 'application/json; charset=utf-8'],
+  ['.map', 'application/json; charset=utf-8'],
   ['.svg', 'image/svg+xml'],
   ['.ico', 'image/x-icon'],
 ]);
+
+// Explicit, lockfile-pinned vendor allowlist. Each entry maps an EXACT request path
+// to an EXACT file resolved out of node_modules — the request path is only ever a Map
+// key, never joined into a filesystem path, so there is no traversal surface. markdown-it
+// ships no single-file ESM bundle (its ESM entry is a multi-file graph), so we serve its
+// self-contained UMD bundle, which sets window.markdownit for the browser (see index.html).
+const require = createRequire(import.meta.url);
+function resolveVendor(specifier) {
+  try {
+    return require.resolve(specifier);
+  } catch {
+    return null; // not installed — the /vendor route 404s and the renderer degrades safely
+  }
+}
+const VENDOR_ROUTES = new Map(
+  [
+    ['/vendor/markdown-it.min.js', resolveVendor('markdown-it/dist/markdown-it.min.js')],
+    ['/vendor/markdown-it.min.js.map', resolveVendor('markdown-it/dist/markdown-it.min.js.map')],
+  ].filter(([, file]) => file !== null)
+);
+
+function serveVendor(res, file) {
+  const mime = MIME_TYPES.get(extname(file)) || 'application/octet-stream';
+  res.writeHead(200, { 'content-type': mime, 'cache-control': 'public, max-age=3600' });
+  createReadStream(file).pipe(res);
+}
 
 function isApiPath(pathname) {
   return API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -499,6 +527,11 @@ createServer((req, res) => {
       return;
     }
     void handleChat(req, res);
+    return;
+  }
+  const vendorFile = VENDOR_ROUTES.get(url.pathname);
+  if (vendorFile) {
+    serveVendor(res, vendorFile);
     return;
   }
   if (isApiPath(url.pathname)) {
