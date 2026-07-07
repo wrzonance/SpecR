@@ -60,8 +60,8 @@ test('resolveCounts falls back to computed counts when no summary', () => {
   assert.deepEqual(resolveCounts(rows, null), { all: 3, changes: 2, 'only-a': 1, 'only-b': 0 });
 });
 
-test('resolveCounts prefers the server summary (ADR-053 full-matrix totals)', () => {
-  const rows = [row('identical'), row('differing')]; // stale/truncated client view
+test('resolveCounts prefers the server summary for presence-based totals (ADR-053)', () => {
+  const rows = [row('identical'), row('differing')]; // client changes = 1
   const summary = {
     rows: 340,
     differing: 12,
@@ -71,11 +71,20 @@ test('resolveCounts prefers the server summary (ADR-053 full-matrix totals)', ()
     ],
   };
   assert.deepEqual(resolveCounts(rows, summary), {
-    all: 340,
-    changes: 12,
+    all: 340, // presence/row-count total — server authoritative
+    changes: 1, // normalization-dependent — always the client's rendered count, never summary.differing
     'only-a': 3,
     'only-b': 4,
   });
+});
+
+test('resolveCounts: changes badge matches the rows the filter renders, not summary.differing (#395 whitespace split-brain)', () => {
+  // A whitespace-only delta is exact-differing to the server but normalizes to
+  // identical client-side, so the Changes-only filter collapses it. Were the badge
+  // sourced from summary.differing it would claim a change the filter never shows.
+  const rows = [row('identical'), row('identical'), row('differing')]; // client renders 1 change
+  const summary = { rows: 3, differing: 2 }; // server exact-text counts 2
+  assert.equal(resolveCounts(rows, summary).changes, 1);
 });
 
 test('resolveCounts falls back per-field when summary is partial', () => {
