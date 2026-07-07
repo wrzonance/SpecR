@@ -995,3 +995,57 @@ describe('agreed signals (hierarchy-confidence provenance)', () => {
     expect(result[0]?.conflicts).toEqual([]);
   });
 });
+
+describe('meta.inference (parse-time scoring)', () => {
+  it('structural nodes carry meta.inference with confidence in [0,1]', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ numId: 1, ilvl: 1, text: '1.1 SUMMARY' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const part = tree.parts[0];
+    expect(part?.meta.inference).toBeDefined();
+    expect(part?.meta.inference?.confidence).toBeGreaterThanOrEqual(0);
+    expect(part?.meta.inference?.confidence).toBeLessThanOrEqual(1);
+    const article = part?.children[0];
+    expect(article?.meta.inference?.signalUsed).toBe(1);
+  });
+
+  it('non-structural nodes (notes, continuations) never carry meta.inference', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: 'plain continuation body text' }),
+        makePara({ text: '** NOTE TO SPECIFIER ** pick one', isVanish: true }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const children = tree.parts[0]?.children ?? [];
+    expect(children.length).toBeGreaterThan(0);
+    for (const child of children) {
+      expect(child.meta.inference).toBeUndefined();
+    }
+  });
+
+  it('lone-indentation node scores below the 0.6 review threshold', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ leftIndent: 1152, text: 'Loose indented fragment' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const indented = tree.parts[0]?.children[0];
+    expect(indented?.meta.inference?.signalUsed).toBe(5);
+    expect(indented?.meta.inference?.confidence).toBeLessThan(0.6);
+    expect(indented?.meta.inference?.evidence).toContain('indentation won alone');
+  });
+});

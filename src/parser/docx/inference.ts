@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ilvlToNodeType } from './rules.js';
+import { scoreHierarchyConfidence } from './hierarchy-confidence.js';
 import {
   matchTextSignal,
   matchIndentSignal,
@@ -346,6 +347,11 @@ function makeNode(
   s4ArticleIds: Set<string>
 ): SpecNode {
   const content = nodeContent(cp);
+  const inference = scoreHierarchyConfidence(
+    { signalUsed: cp.signalUsed, agreed: cp.agreed },
+    cp.conflicts,
+    cp.nodeType
+  );
   const node: SpecNode = {
     id: uuidv4(),
     type: cp.nodeType,
@@ -355,6 +361,7 @@ function makeNode(
       source,
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
       ...(content.sourceFacts ? { sourceFacts: content.sourceFacts } : {}),
+      ...(inference ? { inference } : {}),
     },
   };
   if (cp.signalUsed === 4 && cp.nodeType === 'article') s4ArticleIds.add(node.id);
