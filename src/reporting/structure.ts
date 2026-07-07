@@ -1,5 +1,12 @@
 import type { ComparisonParagraph } from './types.js';
 
+/** Deterministic sibling order: by position, then id as a stable tie-break. */
+function byPositionThenId(a: ComparisonParagraph, b: ComparisonParagraph): number {
+  if (a.position !== b.position) return a.position - b.position;
+  if (a.id === b.id) return 0;
+  return a.id < b.id ? -1 : 1;
+}
+
 /** Children grouped by parentId (`''` bucket = roots), each list sorted by the
  *  deterministic (position, id) order the loader already emits. */
 function groupChildren(
@@ -13,7 +20,7 @@ function groupChildren(
     else bucket.push(row);
   }
   for (const bucket of byParent.values()) {
-    bucket.sort((a, b) => a.position - b.position || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    bucket.sort(byPositionThenId);
   }
   return byParent;
 }

@@ -58,24 +58,26 @@ function registerCoordinationTool(reg: ToolRegistrar): void {
   );
 }
 
+const COMPARE_DESCRIPTION =
+  'Grounded, deterministic cross-spec comparison matrix. Aligns exactly two ' +
+  'live specs and returns a symmetric matrix — one row per aligned paragraph, ' +
+  'one column per source, each cell the source’s verbatim text or absent. Every ' +
+  'present cell traces to a real specId + paragraph UUID; nothing is synthesized. ' +
+  'Alignment (see `alignment`): by resolved paragraph origin for clones of a ' +
+  'shared master (project↔project / project↔master, surfacing behindBy drift), or ' +
+  'by canonical structural address for independently-ingested specs of the same ' +
+  'section. Set `include: "differences"` to return only non-identical rows (keeps ' +
+  'the agent within a token budget); a `summary` rollup ({rows, aligned, identical, ' +
+  'differing} + per-column {present, onlyIn}) is ALWAYS emitted over the full ' +
+  'matrix, and `alignedBy` echoes the mode used. Optionally designate one source ' +
+  'as the baseline to reframe cells as added/removed/modified/unchanged. Returns ' +
+  'isError when a source id is not a live spec (frozen package/revision ids 404).';
+
 function registerCompareTool(reg: ToolRegistrar): void {
   reg.register(
     'compare_specs',
     {
-      description:
-        'Grounded, deterministic cross-spec comparison matrix. Aligns exactly two ' +
-        'live specs and returns a symmetric matrix — one row per aligned paragraph, ' +
-        'one column per source, each cell the source’s verbatim text or absent. Every ' +
-        'present cell traces to a real specId + paragraph UUID; nothing is synthesized. ' +
-        'Alignment (see `alignment`): by resolved paragraph origin for clones of a ' +
-        'shared master (project↔project / project↔master, surfacing behindBy drift), or ' +
-        'by canonical structural address for independently-ingested specs of the same ' +
-        'section. Set `include: "differences"` to return only non-identical rows (keeps ' +
-        'the agent within a token budget); a `summary` rollup ({rows, aligned, identical, ' +
-        'differing} + per-column {present, onlyIn}) is ALWAYS emitted over the full ' +
-        'matrix, and `alignedBy` echoes the mode used. Optionally designate one source ' +
-        'as the baseline to reframe cells as added/removed/modified/unchanged. Returns ' +
-        'isError when a source id is not a live spec (frozen package/revision ids 404).',
+      description: COMPARE_DESCRIPTION,
       inputSchema: {
         sources: z
           .array(z.uuid())

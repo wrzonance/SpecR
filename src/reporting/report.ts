@@ -90,10 +90,15 @@ export async function buildComparisonReport(
     ...(options.baseline !== undefined ? { baseline: options.baseline } : {}),
     ...(options.alignment !== undefined ? { alignment: options.alignment } : {}),
   };
-  const { matrix, baseline, alignedBy } = alignTrees(buildSources(sources, metaMap, rows), alignOpts);
+  const { matrix, baseline, alignedBy } = alignTrees(
+    buildSources(sources, metaMap, rows),
+    alignOpts
+  );
   const summary = summarize(matrix); // full matrix — never the filtered view
   const view =
-    options.include === 'differences' ? filterToDifferences(matrix, baseline) : { matrix, baseline };
+    options.include === 'differences'
+      ? filterToDifferences(matrix, baseline)
+      : { matrix, baseline };
 
   // Drift follows request/column order (via metaMap), not DB row order, so the
   // serialized `drift` array is byte-identical every run — the deterministic
