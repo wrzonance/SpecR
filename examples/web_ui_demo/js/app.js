@@ -1970,21 +1970,36 @@ function onComposeCite(anchor) {
   if (audit) void audit.showAnchor(anchor);
 }
 
-// Live specs available to the Compare pickers — every loaded board spec, tagged
-// by origin so two same-section copies read distinctly. The board holds one
-// project's specs at a time, so comparing a section across projects means
-// loading each into the board (or a project copy vs a Library master copy).
+// Live specs available to the Compare pickers — every loaded board spec (a
+// project copy) plus every scoped library master, each tagged by origin so two
+// same-section copies read distinctly. The board dedups sections, so the
+// showcase "project copy vs its master" comparison means picking a loaded
+// project spec against its library master: two distinct live specs (distinct
+// UUIDs) the /reports/compare endpoint can align.
 function buildCompareCatalog() {
   const projectName = activeProjectName();
-  const libraryOnly = readLibraryOnlyIds();
-  return [...specs.values()]
-    .map((spec) => ({
+  const libraryName = (id) => libraries.find((lib) => lib.id === id)?.name;
+  const byId = new Map();
+  for (const spec of specs.values()) {
+    byId.set(spec.tree.id, {
       specId: spec.tree.id,
       section: spec.tree.section,
       title: spec.tree.title,
-      origin: libraryOnly.has(spec.tree.id) ? 'Library copy' : projectName,
-    }))
-    .sort((a, b) => a.section.localeCompare(b.section) || a.origin.localeCompare(b.origin));
+      origin: projectName,
+    });
+  }
+  for (const spec of tocLibrarySpecs) {
+    if (byId.has(spec.specId)) continue; // a loaded project copy already stands in for it
+    byId.set(spec.specId, {
+      specId: spec.specId,
+      section: spec.section,
+      title: spec.title,
+      origin: libraryName(spec.libraryId) ?? spec.clientName ?? 'Library master',
+    });
+  }
+  return [...byId.values()].sort(
+    (a, b) => a.section.localeCompare(b.section) || a.origin.localeCompare(b.origin)
+  );
 }
 
 // Compare → Compose handoff: pre-fill a grounded summarize prompt naming the two

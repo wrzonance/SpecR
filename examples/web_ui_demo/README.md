@@ -228,15 +228,16 @@ the grounded matrix belongs to a button and the agent only adds the narration.
 
 Reproduce it end to end:
 
-1. **Load two copies of the same section.** Either put the same CSI section in two
-   projects, or load one project copy and one master copy from the **Library**.
-   The quickest path for a demo: upload two `.docx` fixtures of the same section
-   (e.g. an ARCAT `03 30 00` and a CPI `03 30 00`) — one into the project via the
-   map's **Upload Spec**, one into a client master via the **Library** tab's add-
-   specs flow — so both show up as distinct live specs.
+1. **Load a project copy and a master copy of the same section.** Upload two
+   `.docx` fixtures of the same section (e.g. an ARCAT `03 30 00` and a CPI
+   `03 30 00`) — one into the project via the map's **Upload Spec**, and one into
+   the **Company Master** (or a client library the project already sources) via
+   the **Library** tab's add-specs flow. The project copy loads on the board; the
+   master joins the Compare catalog from the project's scoped libraries — so both
+   show up as distinct live specs (distinct UUIDs, same section).
 2. **Open Compare.** Both specs appear in the two source pickers, tagged by
-   origin (project name or "Library copy"). Pick one in **Source A** and the
-   other in **Source B**.
+   origin (the active project's name for the board copy, the owning library's
+   name for a master). Pick one in **Source A** and the other in **Source B**.
 3. **Run comparison.** The matrix renders: identical rows read plain, differing
    rows are amber with word-level highlights, one-sided rows are tinted red. The
    status line reports the aligned / differing / only-in-one counts. Optionally
@@ -244,7 +245,10 @@ Reproduce it end to end:
    (the request then carries a `baseline`, and the server returns the lens when
    it supports it).
 4. **Click any present cell** to open that exact paragraph in the **Report**
-   audit pane — the same anchor channel the Compose Sources chips use.
+   audit pane — the same anchor channel the Compose Sources chips use. Cells for
+   the on-board project copy land in the audit pane; a library-master cell isn't
+   loaded on the board, so its click-through only resolves if that paragraph is
+   also present in the loaded project.
 5. **Ask SpecR to summarize.** The handoff switches to **Compose** with the
    prompt and both spec ids pre-filled — press **Compose report** and the agent
    calls `compare_specs` and narrates the differences, each claim cited. A
