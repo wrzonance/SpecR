@@ -1,5 +1,16 @@
 import { z } from 'zod';
 
+// ── Alignment mode ───────────────────────────────────────────────────────────
+
+/** The alignment strategy actually applied. `origin` keys on resolved paragraph
+ *  origin (ADR-047); `structure` keys on the canonical structural address
+ *  (ADR-053). */
+export type AlignmentMode = 'origin' | 'structure';
+
+/** What the caller may request; `auto` resolves to `origin` when the sources
+ *  share a cross-source origin key, else `structure`. */
+export type AlignmentRequest = AlignmentMode | 'auto';
+
 // ── Request (external input — validated at the boundary) ─────────────────────
 
 /** Exactly two sources: the two supported comparisons (project↔project,

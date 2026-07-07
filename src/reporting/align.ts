@@ -1,5 +1,8 @@
 import { ReportingError } from './error.js';
+import { computeStructuralKeys } from './structure.js';
 import type {
+  AlignmentMode,
+  AlignmentRequest,
   AlignSource,
   BaselineLens,
   BaselineLensRow,
@@ -11,18 +14,62 @@ import type {
   ComparisonParagraph,
 } from './types.js';
 
-/** The alignment key. One COALESCE covers both slice comparisons (ADR-047):
- *  a cloned paragraph aligns on its master origin; a NULL-origin paragraph
- *  (added-after-clone or origin-deleted, or a root master) keys on its own id
- *  and surfaces as only-in-X. */
-const keyOf = (p: ComparisonParagraph): string => p.originParagraphId ?? p.id;
+/** The per-row alignment key: two rows in different sources align iff their keys
+ *  match. `origin` and `structure` keyers below produce comparable keys. */
+type Keyer = (p: ComparisonParagraph) => string;
+
+/** Origin keyer (ADR-047). One COALESCE covers both slice comparisons: a cloned
+ *  paragraph aligns on its master origin; a NULL-origin paragraph (added-after-
+ *  clone or origin-deleted, or a root master) keys on its own id and surfaces as
+ *  only-in-X. */
+const originKeyOf: Keyer = (p) => p.originParagraphId ?? p.id;
+
+/** True iff any origin key occurs in ≥2 distinct sources — i.e. the pair descends
+ *  from a shared master (project↔project) or is project↔its-own-master. Drives the
+ *  `auto` fallback: no cross-source origin overlap → independently-ingested. */
+function sharesCrossSourceOrigin(sources: readonly AlignSource[]): boolean {
+  const firstSeenIn = new Map<string, number>();
+  for (let i = 0; i < sources.length; i += 1) {
+    for (const row of sources[i]?.rows ?? []) {
+      const k = originKeyOf(row);
+      const seen = firstSeenIn.get(k);
+      if (seen !== undefined && seen !== i) return true;
+      if (seen === undefined) firstSeenIn.set(k, i);
+    }
+  }
+  return false;
+}
+
+function resolveAlignment(
+  sources: readonly AlignSource[],
+  requested: AlignmentRequest
+): AlignmentMode {
+  if (requested !== 'auto') return requested;
+  return sharesCrossSourceOrigin(sources) ? 'origin' : 'structure';
+}
+
+/** Structural keyer (ADR-053) over ALL sources at once — paragraph ids are
+ *  globally unique, and identical structural addresses across sources are exactly
+ *  what aligns them. A row with no computed address falls back to its own id. */
+function structuralKeyer(sources: readonly AlignSource[]): Keyer {
+  const merged = new Map<string, string>();
+  for (const source of sources) {
+    for (const [id, address] of computeStructuralKeys(source.rows)) merged.set(id, address);
+  }
+  return (p) => merged.get(p.id) ?? p.id;
+}
+
+function keyerFor(sources: readonly AlignSource[], mode: AlignmentMode): Keyer {
+  return mode === 'origin' ? originKeyOf : structuralKeyer(sources);
+}
 
 /** First-wins on collision. Rows arrive pre-sorted by (position, id) so the
  *  winner is deterministic.
- *  // KNOWN AMBIGUITY: two paragraphs in one source resolving to the same origin
+ *  // KNOWN AMBIGUITY: two paragraphs in one source resolving to the same key
  *  // — first by (position, id) wins; the loser is dropped from that column. */
 function buildSourceMap(
-  rows: readonly ComparisonParagraph[]
+  rows: readonly ComparisonParagraph[],
+  keyOf: Keyer
 ): ReadonlyMap<string, ComparisonParagraph> {
   const map = new Map<string, ComparisonParagraph>();
   for (const row of rows) {
@@ -34,7 +81,7 @@ function buildSourceMap(
 
 /** The deterministic row order: first-occurrence sweep, left-to-right across
  *  sources and top-to-bottom within each source's (position, id) order. */
-function sweepOrderedKeys(sources: readonly AlignSource[]): readonly string[] {
+function sweepOrderedKeys(sources: readonly AlignSource[], keyOf: Keyer): readonly string[] {
   const seen = new Set<string>();
   const ordered: string[] = [];
   for (const source of sources) {
@@ -55,23 +102,31 @@ function cellFor(map: ReadonlyMap<string, ComparisonParagraph>, key: string): Co
   return { present: true, specId: p.specId, paragraphUuid: p.id, text: p.text };
 }
 
-/** Build the symmetric matrix; when `options.baseline` is set, project a baseline
- *  lens over it (a projection, not a second alignment pass — ADR-047). */
+/** Build the symmetric matrix. `alignment` (default `auto`) selects the keyer and
+ *  the resolved mode is echoed as `alignedBy`. When `options.baseline` is set,
+ *  project a baseline lens over the matrix (a projection, not a second alignment
+ *  pass — ADR-047). */
 export function alignTrees(
   sources: readonly AlignSource[],
-  options?: { readonly baseline?: string }
-): { readonly matrix: ComparisonMatrix; readonly baseline?: BaselineLens } {
+  options?: { readonly baseline?: string; readonly alignment?: AlignmentRequest }
+): {
+  readonly matrix: ComparisonMatrix;
+  readonly baseline?: BaselineLens;
+  readonly alignedBy: AlignmentMode;
+} {
+  const alignedBy = resolveAlignment(sources, options?.alignment ?? 'auto');
+  const keyOf = keyerFor(sources, alignedBy);
   const columns: readonly ComparisonColumn[] = sources.map((s) => s.column);
-  const maps = sources.map((s) => buildSourceMap(s.rows));
-  const orderedKeys = sweepOrderedKeys(sources);
+  const maps = sources.map((s) => buildSourceMap(s.rows, keyOf));
+  const orderedKeys = sweepOrderedKeys(sources, keyOf);
   const rows: readonly ComparisonMatrixRow[] = orderedKeys.map((key) => ({
     originId: key,
     cells: maps.map((m) => cellFor(m, key)),
   }));
   const matrix: ComparisonMatrix = { columns, rows };
   const baseline = options?.baseline;
-  if (baseline === undefined) return { matrix };
-  return { matrix, baseline: projectBaseline(matrix, baseline) };
+  if (baseline === undefined) return { matrix, alignedBy };
+  return { matrix, baseline: projectBaseline(matrix, baseline), alignedBy };
 }
 
 function classifyState(
