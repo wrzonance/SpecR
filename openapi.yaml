@@ -1462,10 +1462,10 @@ paths:
       operationId: patchProject
       summary: Update project settings
       description: >
-        Updates a project's mutable settings. At least one of `name` or
-        `sectionNumberFormat` must be provided. The name must be non-empty.
-        There is no uniqueness constraint on project names, so there is no 409
-        path.
+        Updates a project's mutable settings. At least one of `name`,
+        `sectionNumberFormat`, or `clientId` must be provided. The name must be
+        non-empty. There is no uniqueness constraint on project names, so there
+        is no 409 path.
       tags: [projects]
       parameters:
         - $ref: '#/components/parameters/ProjectId'
