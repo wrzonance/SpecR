@@ -116,6 +116,10 @@ export function initCompare(opts = {}) {
       return el('td', 'compare-cell is-absent', '— not present —');
     }
     const td = el('td', 'compare-cell');
+    // The click-through citation is a core feature — make it keyboard-operable
+    // too (focusable button semantics + Enter/Space), not mouse-only.
+    td.tabIndex = 0;
+    td.setAttribute('role', 'button');
     for (const token of tokens) {
       if (token.changed && token.text.trim() !== '') {
         td.appendChild(el('span', 'compare-diff', token.text));
@@ -123,8 +127,14 @@ export function initCompare(opts = {}) {
         td.appendChild(document.createTextNode(token.text));
       }
     }
-    td.addEventListener('click', () => {
+    const cite = () =>
       onCite?.({ section: column.section, specId: cell.specId, paragraphId: cell.paragraphUuid });
+    td.addEventListener('click', cite);
+    td.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        cite();
+      }
     });
     return td;
   }
@@ -182,7 +192,7 @@ export function initCompare(opts = {}) {
     busy = true;
     runBtn.disabled = true;
     runBtn.textContent = 'Comparing…';
-    handoffBtn.hidden = true;
+    if (handoffBtn) handoffBtn.hidden = true;
     matrixEl.replaceChildren();
     setStatus('Running grounded comparison…');
     try {
@@ -190,7 +200,7 @@ export function initCompare(opts = {}) {
       const report = await postCompareReport([a, b], options);
       renderMatrix(report);
       lastSources = [specById(a), specById(b)].filter(Boolean);
-      handoffBtn.hidden = lastSources.length !== 2;
+      if (handoffBtn) handoffBtn.hidden = lastSources.length !== 2;
     } catch (err) {
       setStatus(`comparison failed: ${err.message}`, true);
     } finally {
