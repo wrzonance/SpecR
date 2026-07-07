@@ -41,6 +41,7 @@ import { renderSubmittalRegister } from './submittal.js';
 import { initNumbering } from './numbering.js';
 import { initChat } from './chat.js';
 import { initCompose } from './compose.js';
+import { initCompare } from './compare.js';
 import { initDropzone } from './dropzone.js';
 import { initRefPopover } from './popover.js';
 import { initAudit } from './audit.js';
@@ -59,6 +60,7 @@ let currentView = 'map';
 let numberingPanel = null; // numbering-profile workspace controller (initNumbering)
 let audit = null; // live coordination audit view controller (initAudit, ADR-041)
 let composePanel = null; // agent-driven grounded reporting controller (initCompose, #353)
+let comparePanel = null; // deterministic side-by-side comparison controller (initCompare, #385)
 let editorPanel = null; // full-page document editor controller (initEditor, #369)
 let constellationPanel = null; // division solar-system map controller (initConstellation, #369)
 let tocSections = [];
@@ -125,6 +127,7 @@ function showView(view) {
   if (view === 'numbering') void numberingPanel?.refresh();
   if (view === 'submittal') void refreshSubmittalRegister();
   if (view === 'compose') composePanel?.refresh();
+  if (view === 'compare') comparePanel?.refresh();
   // The audit's findings already repaint on workspace load / spec mutations;
   // opening the tab just needs a height re-measure. (A refetch here would wipe
   // the current finding selection and desync the two panes.)
@@ -1967,6 +1970,37 @@ function onComposeCite(anchor) {
   if (audit) void audit.showAnchor(anchor);
 }
 
+// Live specs available to the Compare pickers — every loaded board spec, tagged
+// by origin so two same-section copies read distinctly. The board holds one
+// project's specs at a time, so comparing a section across projects means
+// loading each into the board (or a project copy vs a Library master copy).
+function buildCompareCatalog() {
+  const projectName = activeProjectName();
+  const libraryOnly = readLibraryOnlyIds();
+  return [...specs.values()]
+    .map((spec) => ({
+      specId: spec.tree.id,
+      section: spec.tree.section,
+      title: spec.tree.title,
+      origin: libraryOnly.has(spec.tree.id) ? 'Library copy' : projectName,
+    }))
+    .sort((a, b) => a.section.localeCompare(b.section) || a.origin.localeCompare(b.origin));
+}
+
+// Compare → Compose handoff: pre-fill a grounded summarize prompt naming the two
+// spec UUIDs (so the agent calls compare_specs deterministically), then switch
+// to the Compose tab.
+function onCompareHandoff({ sources, sections, labels }) {
+  const [idA, idB] = sources;
+  const sectionLabel = displaySection(sections[0]);
+  const prompt =
+    `Summarize the differences of Section ${sectionLabel} between ${labels[0]} and ${labels[1]}. ` +
+    `Compare these two specs with the compare_specs tool — spec ids ${idA} and ${idB} — ` +
+    `then narrate the key differences, citing the specific paragraphs that diverge.`;
+  showView('compose');
+  composePanel?.prefill(prompt);
+}
+
 function onLibraryRef(section) {
   toast(`Section ${section} is in the SpecR library — drop its file to load it`, 'warn');
 }
@@ -2086,6 +2120,8 @@ function renderBoard() {
   // The editor and constellation read the same specs Map — keep them current.
   editorPanel?.onDataChanged();
   constellationPanel?.onDataChanged();
+  // Keep the Compare pickers in sync with what's loaded on the board.
+  comparePanel?.refresh();
 }
 
 async function addSpec(specId, extras = {}) {
@@ -2202,6 +2238,12 @@ async function boot() {
     getScopeLabel: composeScopeLabel,
     onCite: onComposeCite,
     displaySection,
+  });
+  comparePanel = initCompare({
+    getCatalog: buildCompareCatalog,
+    displaySection,
+    onCite: onComposeCite,
+    onHandoff: onCompareHandoff,
   });
   editorPanel = initEditor({
     getSpecs: () => specs,

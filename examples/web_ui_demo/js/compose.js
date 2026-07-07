@@ -179,6 +179,14 @@ export function initCompose(opts = {}) {
     input.focus();
   });
 
+  // Pre-fill the request box from another view (the Compare → Compose handoff,
+  // #385) and focus it, so the user only has to press "Compose report".
+  function prefill(text) {
+    if (typeof text !== 'string') return;
+    input.value = text;
+    input.focus();
+  }
+
   refresh();
-  return { refresh };
+  return { refresh, prefill };
 }
