@@ -52,6 +52,22 @@ describe('computeStructuralKeys', () => {
     expect(computeStructuralKeys(shuffled)).toEqual(computeStructuralKeys(base));
   });
 
+  it('// KNOWN AMBIGUITY: a node whose parentId is absent from rows is addressed as a root — colliding with a real root of the same (nodeType, ordinal)', () => {
+    // The loader's parent self-FK guarantees a parent row is always loaded, so a
+    // dangling parentId cannot occur in production. For this malformed input the
+    // function does NOT throw: with the parent unresolved it emits only the node's
+    // own segment — i.e. addresses it as a root. A real root of the same nodeType
+    // then shares that address. Accepted because it is unreachable via the loader.
+    const rows = [
+      p({ id: 'realRoot', nodeType: 'part', parentId: null, position: 0 }),
+      p({ id: 'orphan', nodeType: 'part', parentId: 'ghost', position: 0 }),
+    ];
+    const keys = computeStructuralKeys(rows);
+    expect(keys.get('orphan')).toBe('part:0'); // segment only — treated as a root
+    expect(keys.get('realRoot')).toBe('part:0'); // real root — identical address
+    expect(keys.get('orphan')).toBe(keys.get('realRoot')); // the accepted collision
+  });
+
   it('assigns a distinct address to every node within a source (no intra-source collisions)', () => {
     const rows = [
       p({ id: 'part1', nodeType: 'part', position: 0 }),

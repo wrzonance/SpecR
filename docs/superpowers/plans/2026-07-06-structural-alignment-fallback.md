@@ -6,6 +6,8 @@
 
 **Architecture:** ADR-047 shipped origin-key alignment (`originParagraphId ?? id`). This slice lifts its fuzzy/content-alignment non-goal with a *structural* fallback: the alignment key becomes the root-to-node path of `(nodeType, sibling-ordinal)` (sibling-ordinal = 0-based index among same-`nodeType` siblings in `(position, id)` order — the same tree address render-derived CSI numbering comes from; no rendered label is ever stored or compared). `alignment: 'origin' | 'structure' | 'auto'` (default `auto`) selects the keyer; `auto` picks `origin` iff the sources share ≥1 cross-source origin key, else `structure`, and the resolved mode echoes back as `alignedBy`. `summary` is computed over the full matrix; `include: 'differences'` trims the returned rows (and baseline-lens rows) to non-identical ones while `summary` still reports full-matrix totals.
 
+> **Post-review correction (ADR-053, commit c4a78e1).** The shipped `auto` adds one guard the wording above and the Task 6 Step-4 openapi snippet below omit: with **no** shared cross-source origin key it falls back to `structure` **only when the two sources are the same CSI `section`** — different-section pairs stay on `origin`, so unrelated specs (whose `part:0|article:0` addresses coincide) are never falsely paired. An explicit `alignment: 'structure'` is unaffected. This plan preserves its original point-in-time text; `openapi.yaml` + ADR-053 are authoritative for the final rule.
+
 **Tech Stack:** TypeScript/Node 22 (ESM, `.js` import suffixes, `import type`), Zod v4 (`z.uuid()`), vitest (unit `--project unit`, integration needs Postgres), Express, `@modelcontextprotocol/sdk`, hand-authored `openapi.yaml` (CI-enforced contract gate), ajv (`strict:false`) response validation.
 
 ## Global Constraints
@@ -836,6 +838,8 @@ Extend the tool description to mention structural alignment, the differences fil
             returns only non-identical rows (modified / present-in-one). `summary`
             always reports full-matrix totals regardless of this filter.
 ```
+
+> _Post-review (ADR-053, c4a78e1): the shipped `alignment` description gates the `auto` → `structure` fallback on the two sources being the **same CSI section**; the snippet above keeps its original point-in-time wording. See the correction note near the top and the authoritative `openapi.yaml`._
 
 - [ ] **Step 5: openapi.yaml — `ComparisonReport`** (add `summary` + `alignedBy`; mark required):
 
