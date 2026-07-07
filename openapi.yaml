@@ -2887,6 +2887,43 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /packages/{id}/revisions:
+    get:
+      operationId: listPackageRevisions
+      summary: List a package's issued revisions (metadata only, ordered by sortOrder)
+      description: >
+        The package's issuance timeline — every issued revision as a light
+        summary in sortOrder (the per-package issuance clock: 50% DD … IFC,
+        addenda, bulletins). Metadata only; the frozen trees are read per
+        revision via GET /revisions/{id}. Returns an empty array for a package
+        that has issued nothing yet, and 404 for an unknown package.
+      tags: [packages]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Package UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Revision summaries in sortOrder
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RevisionSummary'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     post:
       operationId: createPackageRevision
       summary: Issue an immutable revision snapshot of a package (ADR-015 D5)

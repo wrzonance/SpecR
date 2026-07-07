@@ -42,7 +42,11 @@ import {
   setPackageSpecsHandler,
   deletePackageHandler,
 } from './packages.js';
-import { createRevisionHandler, getRevisionHandler } from './revisions.js';
+import {
+  createRevisionHandler,
+  getRevisionHandler,
+  listPackageRevisionsHandler,
+} from './revisions.js';
 import { validateBody } from './middleware/validate.js';
 import {
   PatchSpecBodySchema,
@@ -221,6 +225,7 @@ router.post('/projects/:id/packages', validateBody(CreatePackageBodySchema), cre
 router.get('/projects/:id/packages', listPackagesHandler);
 router.put('/packages/:id/specs', validateBody(SetPackageSpecsBodySchema), setPackageSpecsHandler);
 router.delete('/packages/:id', deletePackageHandler);
+router.get('/packages/:id/revisions', listPackageRevisionsHandler);
 router.post(
   '/packages/:id/revisions',
   validateBody(CreateRevisionBodySchema),

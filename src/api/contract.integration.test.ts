@@ -45,6 +45,7 @@ const RESPONSE_ALLOWLIST = new Set([
   'get /parse/jobs/{}',
   'get /projects/{}',
   'get /projects/{}/divisions/{}/general-spec',
+  'get /packages/{}/revisions',
   'get /projects/{}/packages',
   'get /projects/{}/references/broken',
   'get /projects/{}/references/inbound',
