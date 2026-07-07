@@ -3700,6 +3700,17 @@ body {
   vertical-align: -1px;
   border: 1px solid var(--line-dim);
 }
+/* The swatch is not a .compare-cell, so it needs its own fill matching each
+   row-state's cell background — otherwise the legend renders as empty boxes. */
+.compare-legend-swatch.is-identical {
+  background: color-mix(in srgb, var(--ok) 7%, var(--sheet));
+}
+.compare-legend-swatch.is-differing {
+  background: color-mix(in srgb, var(--amber) 9%, var(--sheet));
+}
+.compare-legend-swatch.is-only-a {
+  background: color-mix(in srgb, var(--err) 7%, var(--sheet));
+}
 .compare-matrix {
   overflow-x: auto;
 }
