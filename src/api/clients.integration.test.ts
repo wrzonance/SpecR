@@ -79,12 +79,18 @@ describe('POST /clients', () => {
   });
 
   it('rejects an unknown libraryId with 422', async () => {
-    const res = await req('POST', '/clients', { name: 'api-client-badlib', libraryId: randomUUID() });
+    const res = await req('POST', '/clients', {
+      name: 'api-client-badlib',
+      libraryId: randomUUID(),
+    });
     expect(res.status).toBe(422);
   });
 
   it('links a real libraryId', async () => {
-    const res = await req('POST', '/clients', { name: 'api-client-linked', libraryId: companyLibId });
+    const res = await req('POST', '/clients', {
+      name: 'api-client-linked',
+      libraryId: companyLibId,
+    });
     expect(res.status).toBe(201);
     const data = (await json(res))['data'] as Record<string, unknown>;
     expect(data['libraryId']).toBe(companyLibId);

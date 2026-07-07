@@ -9,6 +9,7 @@ import {
 } from './clients.js';
 import { createProject, updateProject, softDeleteProject } from './projects.js';
 import { findLibraryByName, DEFAULT_COMPANY_LIBRARY } from './libraries.js';
+import { getPgCode } from '../../lib/pg-errors.js';
 
 // Namespaces reserved by this file: clients and projects named 'client-it-%'.
 // FK-safe cleanup: projects first (cascades project_sources; also releases the
@@ -44,9 +45,8 @@ describe('clients query module (integration)', () => {
 
   it('a duplicate client name violates the UNIQUE constraint (pg 23505)', async () => {
     await createClient({ name: 'client-it-dup' });
-    await expect(createClient({ name: 'client-it-dup' })).rejects.toMatchObject({
-      cause: expect.objectContaining({ code: '23505' }),
-    });
+    const err = await createClient({ name: 'client-it-dup' }).catch((e: unknown) => e);
+    expect(getPgCode(err)).toBe('23505');
   });
 
   it('getClient returns an associated project with its sources, clientId and clientName', async () => {
