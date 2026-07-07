@@ -11,7 +11,8 @@ import {
   deleteParagraph,
   setParagraphRemoved,
   updateParagraph,
-  deleteSpec,
+  withdrawSpec,
+  restoreSpec,
   createProject,
   listProjects,
   getProject,
@@ -49,6 +50,7 @@ import { initEditor } from './editor.js';
 import { initConstellation } from './constellation.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
 import { mergeSourcesWithScope, moveSource, resolutionNotice } from './source-order.mjs';
+import { classifyRemovalConflict } from './spec-removal.mjs';
 
 const specs = new Map(); // specId -> { tree, references, warnings?, capabilities? }
 const ACTIVE_PROJECT_KEY = 'specr-active-project';
@@ -92,6 +94,26 @@ function toast(message, kind = 'info') {
   node.textContent = message;
   rack.appendChild(node);
   setTimeout(() => node.remove(), 5200);
+}
+
+// A toast carrying one action button (e.g. Undo). Longer-lived than toast()
+// so the action stays reachable; clicking it dismisses the toast.
+function toastWithAction(message, kind, actionLabel, onAction) {
+  const rack = document.getElementById('toast-rack');
+  const node = document.createElement('div');
+  node.className = `toast${kind === 'warn' ? ' is-warn' : ''}${kind === 'err' ? ' is-err' : ''}`;
+  node.textContent = message;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'toast-action';
+  btn.textContent = actionLabel;
+  btn.addEventListener('click', () => {
+    node.remove();
+    void onAction();
+  });
+  node.appendChild(btn);
+  rack.appendChild(node);
+  setTimeout(() => node.remove(), 10000);
 }
 
 function readLibraryOnlyIds() {
@@ -1416,9 +1438,15 @@ function renderLibrarySpecRow(spec) {
   row.appendChild(makeNode('span', 'library-spec-section', spec.section));
   row.appendChild(makeNode('span', 'library-spec-title', spec.title || 'Untitled section'));
   row.appendChild(makeNode('span', 'library-spec-count', `${spec.nodeCount} nodes`));
-  const remove = makeNode('button', 'library-remove', 'Remove');
+  const reparse = makeNode('button', 'library-reparse', 'Re-parse');
+  reparse.type = 'button';
+  reparse.title = 'Admin: delete this master’s parsed content and rebuild it from a fresh file parse';
+  reparse.addEventListener('click', () => void reparseLibrarySpec(spec));
+  row.appendChild(reparse);
+  const remove = makeNode('button', 'library-remove', 'Withdraw');
   remove.type = 'button';
-  remove.addEventListener('click', () => void removeSpecFromLibrary(spec));
+  remove.title = 'Soft-withdraw from this library (restorable)';
+  remove.addEventListener('click', () => void withdrawSpecFromLibrary(spec));
   row.appendChild(remove);
   return row;
 }
@@ -1470,26 +1498,30 @@ async function renameSelectedClient() {
   }
 }
 
-async function removeSpecFromLibrary(spec) {
-  if (!API_FEATURES.specDelete) {
-    toast('Deleting library specs is not available in this API build', 'warn');
+async function withdrawSpecFromLibrary(spec) {
+  if (!API_FEATURES.specWithdraw) {
+    toast('Withdrawing library specs is not available in this API build', 'warn');
     return;
   }
+  const library = selectedLibrary();
   const ok = await openConfirm({
-    title: 'Remove library specification',
+    title: 'Withdraw library master',
     body: [
       {
-        text: `Remove Section ${spec.section} from ${selectedLibrary()?.name || 'this library'}?`,
+        text: `Withdraw Section ${spec.section} from ${library?.name || 'this library'}?`,
         kind: 'strong',
       },
-      { text: 'This deletes the library copy. Project TOCs are unchanged.', kind: 'warn' },
+      {
+        text: 'Soft delete (ADR-030): the master leaves listings and project source resolution but keeps its lineage and can be restored. Existing project copies are unchanged.',
+        kind: 'muted',
+      },
     ],
-    confirmLabel: 'Remove spec',
+    confirmLabel: 'Withdraw',
     danger: true,
   });
   if (!ok) return;
   try {
-    await deleteSpec(spec.specId);
+    await withdrawSpec(spec.specId);
     specs.delete(spec.specId);
     projectMembers.delete(spec.specId);
     await refreshSelectedLibrarySpecs();
@@ -1498,10 +1530,53 @@ async function removeSpecFromLibrary(spec) {
     renderBoard();
     await refreshCoordination();
     await refreshOpenComments();
-    toast(`Section ${spec.section} removed from library`);
+    toastWithAction(
+      `Section ${spec.section} withdrawn from ${library?.name || 'library'}`,
+      'warn',
+      'Undo',
+      async () => {
+        try {
+          await restoreSpec(spec.specId);
+          await refreshSelectedLibrarySpecs();
+          renderLibraryView();
+          await refreshTocLibrarySpecs();
+          toast(`Section ${spec.section} restored`);
+        } catch (err) {
+          toast(`restore failed: ${err.message}`, 'err');
+        }
+      }
+    );
   } catch (err) {
-    toast(`remove failed: ${err.message}`, 'err');
+    toast(`withdraw failed: ${err.message}`, 'err');
   }
+}
+
+// Admin full reset (#413): re-importing a master's source file hard-deletes
+// ALL of its parsed paragraphs and references server-side and rebuilds them
+// with a fresh inference pass (content_version bumps, spec id survives). The
+// picker is pre-targeted at the selected library, so the import upserts onto
+// this master by (section, source, library).
+async function reparseLibrarySpec(spec) {
+  const library = selectedLibrary();
+  if (!library) return;
+  const ok = await openConfirm({
+    title: 'Re-parse from scratch (admin)',
+    body: [
+      { text: `Fully re-parse Section ${spec.section} in ${library.name}?`, kind: 'strong' },
+      {
+        text: "Pick this section's source file next. All of the master's parsed paragraphs and references are deleted and rebuilt by a fresh inference pass — the previous parse is unrecoverable.",
+        kind: 'warn',
+      },
+      {
+        text: 'Project copies keep the old content until removed and re-added.',
+        kind: 'muted',
+      },
+    ],
+    confirmLabel: 'Pick file & re-parse',
+    danger: true,
+  });
+  if (!ok) return;
+  addSpecsToSelectedLibrary();
 }
 
 function addSpecsToSelectedLibrary() {
@@ -1779,9 +1854,9 @@ async function commitTextEdit(specId, nodeId, newText, removedRefs, alsoRemoveSp
   }
 }
 
-// Removes each loaded target spec from the project (broken-ref cascade), then
-// deletes it outright so its sheet leaves the board. Never touches the spec
-// being edited (removableTargetIds excludes ownSpecId).
+// Removes each loaded target spec from the project (broken-ref cascade) and
+// drops its sheet from the board. Never touches the spec being edited
+// (removableTargetIds excludes ownSpecId).
 async function removeTargetSpecs(removedRefs, ownSpecId) {
   const targetIds = removableTargetIds(removedRefs, ownSpecId);
   for (const targetId of targetIds) {
@@ -1794,21 +1869,11 @@ async function removeTargetSpecs(removedRefs, ownSpecId) {
     }
     projectMembers.delete(targetId);
     // It has left the project, so drop its sheet from the board regardless of
-    // what happens next.
+    // what happens next. Its library master stays put — the REST contract has
+    // no hard spec delete (ADR-030 keeps masters as withdrawable tombstones),
+    // and withdrawing a master as a side effect of a paragraph edit would be
+    // surprising. Withdraw deliberately from the Library view instead.
     specs.delete(targetId);
-    // Best-effort hard delete from the library too — may 409 if the spec is
-    // still pinned to another project; that's fine, the sheet is already gone.
-    // DELETE /specs/:id isn't on main yet (gated), so skip the library purge.
-    if (API_FEATURES.specDelete) {
-      try {
-        await deleteSpec(targetId);
-      } catch (err) {
-        console.warn(
-          `SpecR: ${targetId} left the project but was not deleted from the library`,
-          err
-        );
-      }
-    }
   }
 }
 
@@ -1848,8 +1913,9 @@ async function onRemoveSpecFromProject(spec) {
   if (!ok) return;
   try {
     const removedFromProject = activeProjectId
-      ? await removeSpecFromProjectIfPresent(specId)
+      ? await removeProjectCopyGuarded(specId, spec.tree.section)
       : false;
+    if (removedFromProject === 'cancelled') return;
     projectMembers.delete(specId);
     specs.delete(specId);
     await reloadAllSpecs();
@@ -1875,6 +1941,40 @@ async function removeSpecFromProjectIfPresent(specId) {
   } catch (err) {
     if (err.message === 'spec not in project') return false;
     throw err;
+  }
+}
+
+// Remove a project copy, walking the admin force path when the server reports
+// project edits (classifyRemovalConflict): confirm, then repeat with
+// ?force=true. Returns true (removed), false (not in project), or 'cancelled'.
+async function removeProjectCopyGuarded(specId, section) {
+  try {
+    return await removeSpecFromProjectIfPresent(specId);
+  } catch (err) {
+    const conflict = classifyRemovalConflict(err);
+    if (conflict === 'in-package') {
+      toast(
+        `Section ${section} belongs to a design package — remove it from the package first`,
+        'warn'
+      );
+      return 'cancelled';
+    }
+    if (conflict !== 'force-retry') throw err;
+    const ok = await openConfirm({
+      title: 'Force delete edited copy (admin)',
+      body: [
+        { text: `Section ${section} has project edits.`, kind: 'strong' },
+        {
+          text: 'Force-deleting discards those edits permanently. The library master is untouched; re-adding the section derives a fresh, unedited copy.',
+          kind: 'warn',
+        },
+      ],
+      confirmLabel: 'Force delete',
+      danger: true,
+    });
+    if (!ok) return 'cancelled';
+    await removeSpecFromProject(activeProjectId, specId, { force: true });
+    return true;
   }
 }
 
