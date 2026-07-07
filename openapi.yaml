@@ -1258,6 +1258,106 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /clients:
+    get:
+      operationId: listClients
+      summary: List all clients
+      description: Returns every client as a summary (id, name, libraryId, timestamps), ordered by name.
+      tags: [clients]
+      responses:
+        '200':
+          description: All clients
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ClientSummary'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createClient
+      summary: Create a client
+      description: >
+        Creates a first-class client (ADR-054): an organizational entity that groups
+        projects. `name` is unique. An optional `libraryId` links the client to its
+        client-tier master library (a link, not a merge) — an unknown `libraryId` is
+        rejected 422.
+      tags: [clients]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                libraryId:
+                  type: string
+                  format: uuid
+                  description: Optional link to the client's client-tier master library
+      responses:
+        '201':
+          description: Client created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ClientSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /clients/{id}:
+    get:
+      operationId: getClient
+      summary: Retrieve a client with its projects
+      description: >
+        Returns the client plus its associated active projects (each a full
+        ProjectSummary carrying its own `clientId`/`clientName`). Soft-deleted
+        projects are excluded, matching `GET /projects`.
+      tags: [clients]
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: Client with its associated projects
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ClientDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /projects:
     get:
       operationId: listProjects
@@ -1362,10 +1462,10 @@ paths:
       operationId: patchProject
       summary: Update project settings
       description: >
-        Updates a project's mutable settings. At least one of `name` or
-        `sectionNumberFormat` must be provided. The name must be non-empty.
-        There is no uniqueness constraint on project names, so there is no 409
-        path.
+        Updates a project's mutable settings. At least one of `name`,
+        `sectionNumberFormat`, or `clientId` must be provided. The name must be
+        non-empty. There is no uniqueness constraint on project names, so there
+        is no 409 path.
       tags: [projects]
       parameters:
         - $ref: '#/components/parameters/ProjectId'
@@ -1378,6 +1478,7 @@ paths:
               anyOf:
                 - required: [name]
                 - required: [sectionNumberFormat]
+                - required: [clientId]
               properties:
                 name:
                   type: string
@@ -1388,6 +1489,12 @@ paths:
                   description: >
                     Default section-number display format for generate requests
                     on this project.
+                clientId:
+                  type: [string, 'null']
+                  format: uuid
+                  description: >
+                    Associate the project with a client (ADR-054). Explicit null
+                    disassociates; an unknown client is rejected 422.
       responses:
         '200':
           description: Updated project settings
@@ -1401,7 +1508,7 @@ paths:
                     properties:
                       data:
                         type: object
-                        required: [projectId, name, sectionNumberFormat]
+                        required: [projectId, name, sectionNumberFormat, clientId]
                         properties:
                           projectId:
                             type: string
@@ -1411,10 +1518,16 @@ paths:
                           sectionNumberFormat:
                             type: string
                             enum: [canonical, dots, compact, spaced-compact]
+                          clientId:
+                            type: [string, 'null']
+                            format: uuid
+                            description: Associated client (ADR-054), or null when unassociated
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
@@ -3977,6 +4090,14 @@ components:
       schema:
         type: string
         format: uuid
+    ClientId:
+      name: id
+      in: path
+      required: true
+      description: Client UUID
+      schema:
+        type: string
+        format: uuid
     LibraryId:
       name: libraryId
       in: path
@@ -5451,9 +5572,41 @@ components:
         name:
           type: string
 
+    ClientSummary:
+      type: object
+      required: [id, name, libraryId, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        libraryId:
+          type: [string, 'null']
+          format: uuid
+          description: The client's client-tier master library (a link, not a merge), or null
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ClientDetail:
+      allOf:
+        - $ref: '#/components/schemas/ClientSummary'
+        - type: object
+          required: [projects]
+          properties:
+            projects:
+              type: array
+              description: The client's associated active projects
+              items:
+                $ref: '#/components/schemas/ProjectSummary'
+
     ProjectSummary:
       type: object
-      required: [projectId, name, description, sources]
+      required: [projectId, name, description, clientId, clientName, sources]
       properties:
         projectId:
           type: string
@@ -5462,6 +5615,13 @@ components:
           type: string
         description:
           type: [string, 'null']
+        clientId:
+          type: [string, 'null']
+          format: uuid
+          description: Associated client (ADR-054), or null when the project has no client
+        clientName:
+          type: [string, 'null']
+          description: Associated client's name (denormalized for lists), or null
         sources:
           type: array
           description: Ordered source libraries (priority ascending)

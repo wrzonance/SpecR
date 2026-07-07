@@ -92,6 +92,15 @@ export type {
 } from './queries/projects.js';
 export { getBrokenRefs } from './queries/project-refs.js';
 export type { BrokenRef } from './queries/project-refs.js';
+export {
+  createClient,
+  listClients,
+  getClient,
+  assertClientExists,
+  ClientNotFoundError,
+  ClientLibraryNotFoundError,
+} from './queries/clients.js';
+export type { ClientSummary, ClientDetail, CreateClientInput } from './queries/clients.js';
 export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
 export { getParagraphSnapshots, getCurrentParagraphSnapshots } from './queries/versions.js';
 export type { ParagraphSearchResult, SpecSectionResult } from './queries/search.js';

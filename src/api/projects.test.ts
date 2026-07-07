@@ -42,6 +42,8 @@ describe('createProjectHandler', () => {
       projectId: 'p1',
       name: 'Test',
       description: null,
+      clientId: null,
+      clientName: null,
       sources: [],
     });
     const { createProjectHandler } = await import('./projects.js');

@@ -34,6 +34,7 @@ import { registerNumberingProfileCrudTools } from './numbering-profile-crud-tool
 import { registerLibraryManagementTools } from './library-management-tools.js';
 import { registerDivisionGeneralTools } from './division-general-tools.js';
 import { registerProjectMembershipTools } from './project-membership-tools.js';
+import { registerClientTools } from './clients-tools.js';
 import { registerPackageTools } from './package-tools.js';
 import { registerPackageRevisionTools } from './package-revision-tools.js';
 import { registerReportTools } from './report-tools.js';
@@ -381,6 +382,7 @@ export function registerTools(
   registerLibraryManagementTools(reg);
   registerDivisionGeneralTools(reg);
   registerProjectMembershipTools(reg);
+  registerClientTools(reg);
   registerPackageTools(reg);
   registerPackageRevisionTools(reg);
   registerSpecTools(reg);

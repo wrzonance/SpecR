@@ -19,6 +19,14 @@ vi.mock('../index.js', () => ({
   pool: { query: vi.fn() },
 }));
 
+// updateProject validates a non-null clientId via assertClientExists; stub it so this
+// suite tests the update path, not the clients module (covered by clients.test.ts).
+// ClientNotFoundError is re-thrown on the TOCTOU FK path, so it must be a real class here.
+vi.mock('./clients.js', () => ({
+  assertClientExists: vi.fn(),
+  ClientNotFoundError: class ClientNotFoundError extends MockDatabaseError {},
+}));
+
 vi.mock('../../lib/logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
@@ -212,6 +220,61 @@ describe('listProjects', () => {
     vi.mocked(pool.query).mockRejectedValueOnce(new Error('db down'));
     const { listProjects } = await import('./projects.js');
     await expect(listProjects(pool)).rejects.toBeInstanceOf(DatabaseError);
+  });
+});
+
+describe('updateProject client association', () => {
+  it('sets client_id and returns clientId when a client is provided', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [{ id: 'p1', name: 'P', section_number_format: 'canonical', client_id: 'c1' }],
+      rowCount: 1,
+    } as never);
+    const { updateProject } = await import('./projects.js');
+    const { assertClientExists } = await import('./clients.js');
+    const result = await updateProject('p1', { clientId: 'c1' }, pool);
+    expect(result?.clientId).toBe('c1');
+    expect(assertClientExists).toHaveBeenCalledWith('c1', pool);
+    const sql = vi.mocked(pool.query).mock.calls[0]?.[0];
+    expect(sql).toContain('client_id = $2');
+    expect(sql).toContain('RETURNING id, name, section_number_format, client_id');
+  });
+
+  it('clears the association on clientId null without validating', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [{ id: 'p1', name: 'P', section_number_format: 'canonical', client_id: null }],
+      rowCount: 1,
+    } as never);
+    const { updateProject } = await import('./projects.js');
+    const { assertClientExists } = await import('./clients.js');
+    const result = await updateProject('p1', { clientId: null }, pool);
+    expect(result?.clientId).toBeNull();
+    expect(assertClientExists).not.toHaveBeenCalled();
+  });
+
+  it('rejects (before UPDATE) when the client does not exist', async () => {
+    const { pool, DatabaseError } = await import('../index.js');
+    const { assertClientExists } = await import('./clients.js');
+    vi.mocked(assertClientExists).mockRejectedValueOnce(new DatabaseError('client x not found'));
+    const { updateProject } = await import('./projects.js');
+    await expect(updateProject('p1', { clientId: 'x' }, pool)).rejects.toBeInstanceOf(
+      DatabaseError
+    );
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('TOCTOU: FK 23503 on UPDATE (client deleted mid-race) → ClientNotFoundError', async () => {
+    const { pool } = await import('../index.js');
+    const { ClientNotFoundError } = await import('./clients.js');
+    // assertClientExists (default vi.fn()) resolves, then the UPDATE races a client
+    // delete and the ON DELETE RESTRICT FK raises 23503 — must surface as 422, not 500.
+    const pgErr = Object.assign(new Error('fk violation'), { code: '23503' });
+    vi.mocked(pool.query).mockRejectedValueOnce(pgErr);
+    const { updateProject } = await import('./projects.js');
+    const err = await updateProject('p1', { clientId: 'c1' }, pool).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ClientNotFoundError);
+    expect((err as { cause?: unknown }).cause).toBe(pgErr);
   });
 });
 

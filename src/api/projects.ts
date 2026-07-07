@@ -14,6 +14,7 @@ import {
   InvalidSourceLibraryError,
   ProjectNotFoundError,
   SectionUnresolvedError,
+  ClientNotFoundError,
   pool,
 } from '../db/index.js';
 import { SetProjectSourcesBodySchema } from '../ast/index.js';
@@ -26,13 +27,19 @@ const PatchProjectBody = z
   .object({
     name: z.string().check(z.minLength(1)).optional(),
     sectionNumberFormat: SectionNumberFormatSchema.optional(),
+    // Absent = leave association unchanged; null = disassociate; uuid = associate (ADR-054).
+    clientId: z.uuid().nullable().optional(),
   })
   .check((ctx) => {
-    if (ctx.value.name === undefined && ctx.value.sectionNumberFormat === undefined) {
+    if (
+      ctx.value.name === undefined &&
+      ctx.value.sectionNumberFormat === undefined &&
+      ctx.value.clientId === undefined
+    ) {
       ctx.issues.push({
         code: 'custom',
         input: ctx.value,
-        message: 'at least one of name or sectionNumberFormat is required',
+        message: 'at least one of name, sectionNumberFormat, or clientId is required',
       });
     }
   });
@@ -217,7 +224,7 @@ export async function patchProjectHandler(req: Request, res: Response): Promise<
   if (!parsed.success) {
     res.status(400).json({
       success: false,
-      error: 'at least one of name or sectionNumberFormat is required',
+      error: 'at least one of name, sectionNumberFormat, or clientId is required',
     });
     return;
   }
@@ -227,6 +234,7 @@ export async function patchProjectHandler(req: Request, res: Response): Promise<
       ...(parsed.data.sectionNumberFormat !== undefined
         ? { sectionNumberFormat: parsed.data.sectionNumberFormat }
         : {}),
+      ...(parsed.data.clientId !== undefined ? { clientId: parsed.data.clientId } : {}),
     };
     const updated = await updateProject(id, patch, pool);
     if (!updated) {
@@ -239,9 +247,15 @@ export async function patchProjectHandler(req: Request, res: Response): Promise<
         projectId: updated.id,
         name: updated.name,
         sectionNumberFormat: updated.sectionNumberFormat,
+        clientId: updated.clientId,
       },
     });
   } catch (err) {
+    // Unknown client on association → 422 (FK-validation convention, ADR-054).
+    if (err instanceof ClientNotFoundError) {
+      res.status(422).json({ success: false, error: err.message });
+      return;
+    }
     logger.error({ err }, 'patch project failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
