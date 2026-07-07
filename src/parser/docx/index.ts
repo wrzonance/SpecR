@@ -241,6 +241,7 @@ function buildClassification(
 
 export { assertDocxSafe } from './safety.js';
 export { resolveStyleCascade } from './resolver.js';
+export { scoreHierarchyConfidence } from './hierarchy-confidence.js';
 export type { ClassifiedParagraph } from './types.js';
 export { deriveTemplate } from './derive-template.js';
 export { extractNumberingProfile };

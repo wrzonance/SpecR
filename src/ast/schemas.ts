@@ -3,6 +3,7 @@ import type { SpecNode, SourceFacts } from './types.js';
 import { SectionNumberInputSchema, SectionNumberSchema } from '../lib/section-number.js';
 import { textEndsWithClosed } from './comment-closure.js';
 import { NumberingProfileSchema } from './numbering-profile-schema.js';
+import { SignalNumberSchema, SpecNodeInferenceSchema } from './inference-schemas.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -33,7 +34,7 @@ export const ArticleRoleSchema = z.enum([
 ]);
 
 export const SignalConflictSchema = z.object({
-  signal: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+  signal: SignalNumberSchema,
   reportedIlvl: z.number().int(),
   reportedNodeType: NodeTypeSchema,
 });
@@ -205,6 +206,7 @@ export const SpecNodeMetaSchema = z.object({
   revitParam: z.string().exactOptional(),
   baseVersion: z.number().int().nonnegative().exactOptional(),
   conflicts: z.array(SignalConflictSchema).exactOptional(),
+  inference: SpecNodeInferenceSchema.exactOptional(),
   sourceFacts: SourceFactsSchema.exactOptional(),
   editability: SpecNodeEditabilitySchema.exactOptional(),
   articleRole: ArticleRoleSchema.exactOptional(),

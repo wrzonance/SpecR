@@ -1,6 +1,9 @@
 export type {
   NodeType,
   SignalConflict,
+  SignalNumber,
+  SignalProvenance,
+  SpecNodeInference,
   SourceFacts,
   SourceColorFact,
   SourceChoiceTokenFact,
@@ -14,6 +17,11 @@ export type {
   SpecNodeEditability,
   ArticleRole,
 } from './types.js';
+export {
+  SignalNumberSchema,
+  SignalProvenanceSchema,
+  SpecNodeInferenceSchema,
+} from './inference-schemas.js';
 export {
   NodeTypeSchema,
   SignalConflictSchema,

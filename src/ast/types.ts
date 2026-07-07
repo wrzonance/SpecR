@@ -24,6 +24,30 @@ export interface SignalConflict {
   readonly reportedNodeType: NodeType;
 }
 
+export type SignalNumber = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * Persisted 5-signal inference provenance (paragraphs.signal_provenance, ADR-055):
+ * which signal won and which independently agreed with the final resolution.
+ * The confidence score is derived from this at read time, never persisted.
+ */
+export interface SignalProvenance {
+  readonly signalUsed: SignalNumber;
+  readonly agreed: readonly SignalNumber[];
+}
+
+/**
+ * Hierarchy-inference confidence surfaced on a paragraph (ADR-055) — derived at
+ * read time from persisted provenance + conflicts. Absent === unscored (null
+ * provenance: pre-provenance parse or non-DOCX source) or non-structural node.
+ */
+export interface SpecNodeInference {
+  readonly confidence: number;
+  readonly signalUsed: SignalNumber;
+  readonly agreed: readonly SignalNumber[];
+  readonly evidence: readonly string[];
+}
+
 export interface SourceCommentFact {
   readonly author: string;
   readonly text: string;
@@ -88,6 +112,8 @@ export interface SpecNodeMeta {
   readonly baseVersion?: number;
   /** Inference signal disagreements. Absent === no conflicts (empty array never serialized). */
   readonly conflicts?: readonly SignalConflict[];
+  /** Hierarchy-inference confidence (ADR-055). Absent === unscored or non-structural. */
+  readonly inference?: SpecNodeInference;
   readonly sourceFacts?: SourceFacts;
   /** Effective editability + machine why-chain. Absent === not yet classified. */
   readonly editability?: SpecNodeEditability;
