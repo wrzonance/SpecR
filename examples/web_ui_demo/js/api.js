@@ -243,9 +243,15 @@ export function getSubmittalRegister(projectId, specIds) {
 // UUIDs; optional `baseline` must be one of them. Resolves with the
 // ComparisonReport { columns, rows, baseline?, drift? }. 404 if a source id is
 // not a live spec; 422 on a malformed request.
-export function postCompareReport(sources, { baseline } = {}) {
+export function postCompareReport(sources, { baseline, include } = {}) {
   const body = { sources };
   if (baseline) body.baseline = baseline;
+  // The demo deliberately fetches the FULL matrix (default include='all', so we
+  // omit it): the 'Changes only' context expander reveals collapsed identical
+  // rows in place, which requires them present client-side. `include` is plumbed
+  // for parity with the #384 option but not sent by default (ADR-053 synergy —
+  // `summary` still reports full-matrix totals regardless of this filter).
+  if (include) body.include = include;
   return sendJson('POST', '/reports/compare', body);
 }
 

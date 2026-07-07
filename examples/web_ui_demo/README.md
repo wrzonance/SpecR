@@ -254,11 +254,33 @@ Reproduce it end to end:
    calls `compare_specs` and narrates the differences, each claim cited. A
    matching **Compare two projects** example chip is also in Compose.
 
+### View modes and filters (#395)
+
+The rendered comparison offers two lenses that share one filter state; switching
+between them keeps your active filter.
+
+- **Side-by-side** (default) — the aligned matrix above.
+- **Inline review** — a track-changes single-pager in matrix row order: differing
+  paragraphs read as one merged redline (A-only words struck through as `<del>`,
+  B-only words inserted as `<ins>`, shared words rendered once), one-sided
+  paragraphs are wholly struck or inserted, identical paragraphs read plain. Each
+  paragraph carries small **A** / **B** chips that click through to that side's
+  paragraph in the Report pane — the same anchor channel as the table cells.
+
+**Filter chips** — `All` / `Changes only` / `Only in A` / `Only in B`, each
+showing its count — narrow both lenses. In **Changes only**, each run of identical
+paragraphs collapses into a `· N unchanged paragraphs ·` divider that expands in
+place (GitHub context-expander pattern). Counts come from the server `summary`
+full-matrix totals when present, else are computed client-side.
+
 The view consumes the `POST /reports/compare` contract read-only. It works
 against today's contract and light-touch feature-detects the additive fields
 from the companion backend issue #384 (`summary` / `alignedBy` in the response
 by presence; the `alignment` / `include` request options stay behind the
-`compareAlignment` feature flag in `js/features.js`, off until they land).
+`compareAlignment` feature flag in `js/features.js`, off until they land). The
+demo deliberately fetches the **full** matrix (never `include: 'differences'`) so
+the Changes-only context expander always has the collapsed rows to reveal — the
+`summary` still reports true full-matrix totals regardless.
 
 ## One-Command Demo Launchers
 

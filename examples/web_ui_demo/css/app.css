@@ -3784,6 +3784,168 @@ body {
   color: var(--muted);
   padding: 1rem 0;
 }
+
+/* --- View-mode toolbar (#395): mode toggle + filter chips ----------------- */
+.compare-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 1.4rem;
+  align-items: center;
+}
+.compare-modes {
+  display: inline-flex;
+  border: 1px solid var(--line-dim);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.compare-mode-btn {
+  font: 0.64rem var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.75rem;
+  border: 0;
+  background: var(--sheet);
+  color: var(--muted);
+  cursor: pointer;
+}
+.compare-mode-btn + .compare-mode-btn {
+  border-left: 1px solid var(--line-dim);
+}
+.compare-mode-btn.is-active {
+  background: var(--amber);
+  color: var(--sheet);
+}
+.compare-mode-btn:focus-visible,
+.compare-chip:focus-visible,
+.compare-gap:focus-visible,
+.compare-inline-chip:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+.compare-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.compare-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: 0.62rem var(--mono);
+  letter-spacing: 0.05em;
+  padding: 0.32rem 0.6rem;
+  border: 1px solid var(--line-dim);
+  border-radius: 999px;
+  background: var(--sheet);
+  color: var(--muted);
+  cursor: pointer;
+}
+.compare-chip.is-active {
+  border-color: var(--amber);
+  color: var(--vellum);
+  background: color-mix(in srgb, var(--amber) 12%, var(--sheet));
+}
+.compare-chip-count {
+  font-size: 0.6rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--sheet-dim);
+  color: var(--muted);
+}
+.compare-chip.is-active .compare-chip-count {
+  background: var(--amber);
+  color: var(--sheet);
+}
+
+/* --- Expandable context divider (collapsed identical run) ----------------- */
+.compare-gap {
+  width: 100%;
+  display: block;
+  font: 0.62rem var(--mono);
+  letter-spacing: 0.08em;
+  text-align: center;
+  padding: 0.4rem 0.6rem;
+  margin: 0.15rem 0;
+  border: 1px dashed var(--line-dim);
+  border-radius: 3px;
+  background: var(--sheet-dim);
+  color: var(--muted);
+  cursor: pointer;
+}
+.compare-gap:hover {
+  border-color: var(--amber);
+  color: var(--vellum);
+}
+/* As a table row the divider spans every column; strip the cell chrome. */
+tr.compare-gap-row > td {
+  padding: 0;
+  border: 0;
+}
+
+/* --- Inline review (track-changes single-pager) -------------------------- */
+.compare-inline {
+  display: grid;
+  gap: 0.5rem;
+  font-family: var(--serif);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  max-width: 82ch;
+}
+.compare-inline-para {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.35rem 0.5rem;
+  border-left: 3px solid transparent;
+  background: var(--sheet);
+}
+.compare-inline-para.is-differing {
+  border-left-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 6%, var(--sheet));
+}
+.compare-inline-para.is-only-a,
+.compare-inline-para.is-only-b {
+  border-left-color: var(--err);
+  background: color-mix(in srgb, var(--err) 5%, var(--sheet));
+}
+.compare-inline-para.is-identical {
+  border-left-color: var(--line-dim);
+  color: var(--muted);
+}
+.compare-inline-gutter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.compare-inline-chip {
+  font: 0.56rem var(--mono);
+  line-height: 1;
+  padding: 0.2rem 0.36rem;
+  border: 1px solid var(--line-dim);
+  border-radius: 3px;
+  background: var(--sheet);
+  color: var(--muted);
+  cursor: pointer;
+}
+.compare-inline-chip:hover {
+  border-color: var(--amber);
+  color: var(--vellum);
+}
+/* Non-color signifiers: deletions are struck through, insertions underlined —
+   legible even without the red/green tint. */
+.compare-inline-text del.compare-del {
+  text-decoration: line-through;
+  text-decoration-color: var(--err);
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 10%, transparent);
+}
+.compare-inline-text ins.compare-ins {
+  text-decoration: underline;
+  text-decoration-color: var(--ok);
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
 @media (max-width: 720px) {
   .compare {
     padding: 0.9rem 1rem 8rem;
