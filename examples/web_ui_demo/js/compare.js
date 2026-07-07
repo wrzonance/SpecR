@@ -1,22 +1,33 @@
-// Compare view — deterministic side-by-side matrix (#385).
+// Compare view — deterministic side-by-side matrix + inline review (#385, #395).
 //
-// Picks exactly two live specs, POSTs POST /reports/compare, and renders the
-// grounded ComparisonReport as an aligned matrix: one column per source, one
-// row per resolved-origin paragraph. Differing cells are word-diff highlighted;
-// every present cell clicks through to the exact paragraph in the Report/audit
-// pane (same anchor channel as the Compose Sources chips). A one-click handoff
-// pre-fills the Compose agent to narrate the differences.
+// Picks exactly two live specs, POSTs POST /reports/compare, and caches the
+// grounded ComparisonReport client-side. From that one full matrix it renders
+// two lenses that share filter + collapse state:
+//   • Side-by-side — the aligned table (one column per source, word-diff cells).
+//   • Inline review — a track-changes single-pager: differing rows merge into one
+//     del/ins/shared flow, one-sided rows are wholly struck/inserted.
+// Filter chips (All / Changes only / Only in A / Only in B) narrow both lenses;
+// in "Changes only" each run of identical rows collapses into a divider that
+// expands in place. Every present paragraph clicks through to the exact paragraph
+// in the Report/audit pane (same anchor channel as the Compose Sources chips).
 //
 // Facts are computed by the endpoint; this view only renders and routes them.
 
 import { postCompareReport } from './api.js';
 import { buildCompareView, detectCompareFeatures } from './compare-model.mjs';
 import { diffWords } from './word-diff.mjs';
+import { COMPARE_FILTERS, resolveCounts, buildSegments } from './compare-filter.mjs';
+import { buildInlineTokens } from './compare-inline.mjs';
 
 const LEGEND = [
   ['is-identical', 'identical'],
   ['is-differing', 'differing'],
   ['is-only-a', 'only in one'],
+];
+
+const VIEW_MODES = [
+  { id: 'side-by-side', label: 'Side-by-side' },
+  { id: 'inline', label: 'Inline review' },
 ];
 
 function el(tag, className, text) {
@@ -44,10 +55,18 @@ export function initCompare(opts = {}) {
   const statusEl = document.getElementById('compare-status');
   const legendEl = document.getElementById('compare-legend');
   const matrixEl = document.getElementById('compare-matrix');
+  const toolbarEl = document.getElementById('compare-toolbar');
+  const modesEl = document.getElementById('compare-modes');
+  const filtersEl = document.getElementById('compare-filters');
   if (!selA || !selB || !runBtn || !matrixEl) return { refresh() {} };
 
   let busy = false;
   let lastSources = null; // [{specId, section, title, origin}] for the handoff
+  let view = null; // buildCompareView result — the full matrix, cached for re-render
+  let lastReport = null; // raw report, for the server summary counts
+  let viewMode = 'side-by-side';
+  let activeFilter = 'all';
+  const expandedGaps = new Set(); // matrix keys of context gaps the user opened
 
   function setStatus(text, isError = false) {
     if (!statusEl) return;
@@ -96,6 +115,56 @@ export function initCompare(opts = {}) {
     }
     legendEl.hidden = false;
   }
+
+  // --- Toolbar: view-mode segmented control + filter chips ------------------
+
+  function renderModes() {
+    if (!modesEl) return;
+    modesEl.replaceChildren();
+    for (const mode of VIEW_MODES) {
+      const active = mode.id === viewMode;
+      const btn = el('button', 'compare-mode-btn', mode.label);
+      btn.type = 'button';
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', String(active));
+      btn.classList.toggle('is-active', active);
+      btn.addEventListener('click', () => setMode(mode.id));
+      modesEl.appendChild(btn);
+    }
+  }
+
+  function renderFilters(counts) {
+    if (!filtersEl) return;
+    filtersEl.replaceChildren();
+    for (const filter of COMPARE_FILTERS) {
+      const active = filter.id === activeFilter;
+      const count = counts[filter.id] ?? 0;
+      const btn = el('button', 'compare-chip');
+      btn.type = 'button';
+      btn.setAttribute('aria-pressed', String(active));
+      btn.setAttribute('aria-label', `${filter.label}, ${count} paragraphs`);
+      btn.classList.toggle('is-active', active);
+      btn.append(document.createTextNode(filter.label), el('span', 'compare-chip-count', String(count)));
+      btn.addEventListener('click', () => setFilter(filter.id));
+      filtersEl.appendChild(btn);
+    }
+  }
+
+  function setMode(mode) {
+    if (mode === viewMode) return;
+    viewMode = mode;
+    expandedGaps.clear();
+    render();
+  }
+
+  function setFilter(filter) {
+    if (filter === activeFilter) return;
+    activeFilter = filter;
+    expandedGaps.clear();
+    render();
+  }
+
+  // --- Side-by-side table ---------------------------------------------------
 
   function headRow(columns) {
     const tr = document.createElement('tr');
@@ -152,8 +221,94 @@ export function initCompare(opts = {}) {
     return tr;
   }
 
-  function reportSummary(view, report) {
-    const features = detectCompareFeatures(report);
+  function gapTableRow(segment) {
+    const tr = el('tr', 'compare-gap-row');
+    const td = document.createElement('td');
+    td.colSpan = view.columns.length + 1; // + the ALIGNED ¶ state column
+    td.appendChild(gapDivider(segment));
+    tr.appendChild(td);
+    return tr;
+  }
+
+  function renderTable(segments) {
+    const table = el('table', 'compare-table');
+    const thead = document.createElement('thead');
+    thead.appendChild(headRow(view.columns));
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    for (const segment of segments) {
+      if (segment.kind === 'row') tbody.appendChild(renderRow(segment.row, view.columns));
+      else if (expandedGaps.has(segment.key)) {
+        for (const row of segment.rows) tbody.appendChild(renderRow(row, view.columns));
+      } else tbody.appendChild(gapTableRow(segment));
+    }
+    table.appendChild(tbody);
+    return table;
+  }
+
+  // --- Inline review (track-changes single-pager) --------------------------
+
+  function inlineToken(token) {
+    if (token.kind === 'del') return el('del', 'compare-del', token.text);
+    if (token.kind === 'ins') return el('ins', 'compare-ins', token.text);
+    return document.createTextNode(token.text);
+  }
+
+  // A small A/B chip per present side routes into the Report pane — same anchor
+  // channel as the table cells, keyboard-operable as a native button.
+  function citeChip(label, cell, column) {
+    const btn = el('button', 'compare-inline-chip', label);
+    btn.type = 'button';
+    btn.setAttribute('aria-label', `Open source ${label} paragraph in the Report pane`);
+    btn.addEventListener('click', () =>
+      onCite?.({ section: column.section, specId: cell.specId, paragraphId: cell.paragraphUuid })
+    );
+    return btn;
+  }
+
+  function inlinePara(row) {
+    const para = el('div', `compare-inline-para is-${row.state}`);
+    const gutter = el('span', 'compare-inline-gutter');
+    const [colA, colB] = view.columns;
+    if (row.cells?.[0]?.present && colA) gutter.appendChild(citeChip('A', row.cells[0], colA));
+    if (row.cells?.[1]?.present && colB) gutter.appendChild(citeChip('B', row.cells[1], colB));
+    para.appendChild(gutter);
+    const text = el('span', 'compare-inline-text');
+    for (const token of buildInlineTokens(row)) text.appendChild(inlineToken(token));
+    para.appendChild(text);
+    return para;
+  }
+
+  function renderInline(segments) {
+    const flow = el('div', 'compare-inline');
+    for (const segment of segments) {
+      if (segment.kind === 'row') flow.appendChild(inlinePara(segment.row));
+      else if (expandedGaps.has(segment.key)) {
+        for (const row of segment.rows) flow.appendChild(inlinePara(row));
+      } else flow.appendChild(gapDivider(segment));
+    }
+    return flow;
+  }
+
+  // --- Shared context expander ---------------------------------------------
+
+  function gapDivider(segment) {
+    const count = segment.rows.length;
+    const label = `· ${count} unchanged paragraph${count === 1 ? '' : 's'} — click to expand ·`;
+    const btn = el('button', 'compare-gap', label);
+    btn.type = 'button';
+    btn.setAttribute('aria-expanded', 'false');
+    btn.addEventListener('click', () => {
+      expandedGaps.add(segment.key);
+      render();
+    });
+    return btn;
+  }
+
+  // --- Render dispatch + status --------------------------------------------
+
+  function reportStatus() {
+    const features = detectCompareFeatures(lastReport);
     const differing = view.rows.filter((r) => r.state === 'differing').length;
     const oneSided = view.rows.filter((r) => r.state === 'only-a' || r.state === 'only-b').length;
     const base = `${view.rows.length} aligned ¶ · ${differing} differing · ${oneSided} only-in-one`;
@@ -161,24 +316,25 @@ export function initCompare(opts = {}) {
     setStatus(features.summary ? `${base}${baseline} · server summary attached` : `${base}${baseline}`);
   }
 
-  function renderMatrix(report) {
-    const view = buildCompareView(report);
+  function render() {
+    if (!view) return;
+    const counts = resolveCounts(view.rows, lastReport?.summary ?? null);
+    renderModes();
+    renderFilters(counts);
     matrixEl.replaceChildren();
     if (view.columns.length < 2 || view.rows.length === 0) {
       matrixEl.appendChild(el('p', 'compare-empty', 'No aligned paragraphs to compare.'));
       setStatus('No aligned paragraphs to compare.');
       return;
     }
-    const table = el('table', 'compare-table');
-    const thead = document.createElement('thead');
-    thead.appendChild(headRow(view.columns));
-    table.appendChild(thead);
-    const tbody = document.createElement('tbody');
-    for (const row of view.rows) tbody.appendChild(renderRow(row, view.columns));
-    table.appendChild(tbody);
-    matrixEl.appendChild(table);
+    const segments = buildSegments(view.rows, activeFilter);
+    if (segments.length === 0) {
+      matrixEl.appendChild(el('p', 'compare-empty', 'No paragraphs match this filter.'));
+    } else {
+      matrixEl.appendChild(viewMode === 'inline' ? renderInline(segments) : renderTable(segments));
+    }
     renderLegend();
-    reportSummary(view, report);
+    reportStatus();
   }
 
   async function run() {
@@ -193,12 +349,17 @@ export function initCompare(opts = {}) {
     runBtn.disabled = true;
     runBtn.textContent = 'Comparing…';
     if (handoffBtn) handoffBtn.hidden = true;
+    if (toolbarEl) toolbarEl.hidden = true;
     matrixEl.replaceChildren();
     setStatus('Running grounded comparison…');
     try {
       const options = baselineToggle?.checked ? { baseline: a } : {};
       const report = await postCompareReport([a, b], options);
-      renderMatrix(report);
+      lastReport = report;
+      view = buildCompareView(report);
+      expandedGaps.clear();
+      if (toolbarEl) toolbarEl.hidden = !(view.columns.length >= 2 && view.rows.length > 0);
+      render();
       lastSources = [specById(a), specById(b)].filter(Boolean);
       if (handoffBtn) handoffBtn.hidden = lastSources.length !== 2;
     } catch (err) {
