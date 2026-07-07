@@ -184,6 +184,7 @@ export {
   RevisionNomenclatureValidationError,
   RevisionComparisonError,
 } from './queries/revisions.js';
+export { listPackageRevisions } from './queries/revision-list.js';
 export type {
   RevisionSummary,
   RevisionSpecEntry,

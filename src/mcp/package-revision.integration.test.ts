@@ -1,7 +1,11 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { pool, addSectionToProject, createPackage, setPackageSpecs } from '../db/index.js';
-import { handleIssuePackageRevision, handleGetRevision } from './package-revision-handlers.js';
+import {
+  handleIssuePackageRevision,
+  handleGetRevision,
+  handleListPackageRevisions,
+} from './package-revision-handlers.js';
 import type { ToolResult } from './handlers.js';
 
 const MISSING = '00000000-0000-4000-8000-000000000099';
@@ -151,5 +155,25 @@ describe('package revision MCP tools', () => {
   it('get_revision rejects a bad UUID and an unknown id', async () => {
     expect(isToolError(await handleGetRevision({ revisionId: 'nope' }))).toBe(true);
     expect(isToolError(await handleGetRevision({ revisionId: MISSING }))).toBe(true);
+  });
+
+  it('list_package_revisions returns issued summaries; empty array before any issuance', async () => {
+    const packageId = await packageWithMember('05 50 00');
+    const before = await handleListPackageRevisions({ packageId });
+    expect(isToolError(before)).toBe(false);
+    expect(parse<RevisionSummary[]>(before).length).toBe(0);
+
+    await handleIssuePackageRevision({ packageId, type: 'addendum', attributes: { number: 1 } });
+    const after = await handleListPackageRevisions({ packageId });
+    expect(isToolError(after)).toBe(false);
+    const list = parse<RevisionSummary[]>(after);
+    expect(list.length).toBe(1);
+    expect(list[0]!.type).toBe('addendum');
+    expect(list[0]!.specCount).toBe(1);
+  });
+
+  it('list_package_revisions rejects an unknown package and a bad UUID', async () => {
+    expect(isToolError(await handleListPackageRevisions({ packageId: MISSING }))).toBe(true);
+    expect(isToolError(await handleListPackageRevisions({ packageId: 'nope' }))).toBe(true);
   });
 });

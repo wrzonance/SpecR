@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import {
   createPackageRevision,
   getPackageRevision,
+  listPackageRevisions,
   PackageNotFoundError,
   RevisionNomenclatureValidationError,
   SnapshotValidationError,
@@ -44,6 +45,28 @@ export async function createRevisionHandler(req: Request, res: Response): Promis
       return;
     }
     logger.error({ err }, 'create revision failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+/** GET /packages/:id/revisions — the package's issuance timeline as light
+ *  summaries, ordered by sortOrder. Metadata only; frozen trees are read per
+ *  revision via GET /revisions/:id. 404 when the package is unknown. */
+export async function listPackageRevisionsHandler(req: Request, res: Response): Promise<void> {
+  const id = req.params['id'];
+  if (!id || typeof id !== 'string') {
+    res.status(400).json({ success: false, error: 'missing package id' });
+    return;
+  }
+  try {
+    const revisions = await listPackageRevisions(id, pool);
+    if (revisions === null) {
+      res.status(404).json({ success: false, error: 'package not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: revisions });
+  } catch (err) {
+    logger.error({ err }, 'list package revisions failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }

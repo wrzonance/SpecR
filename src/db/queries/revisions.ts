@@ -80,7 +80,7 @@ export interface RevisionAddendumManualData extends RevisionManualData {
   readonly changedSpecs: readonly RevisionSpecEntry[];
 }
 
-interface RevisionRow {
+export interface RevisionRow {
   readonly id: string;
   readonly package_id: string;
   readonly label: string;
@@ -220,7 +220,7 @@ function parseAttributes(candidate: unknown): RevisionAttributes {
   return RevisionAttributesSchema.parse(candidate);
 }
 
-function mapSummary(
+export function mapSummary(
   row: RevisionRow,
   profile: RevisionNomenclatureProfile | null,
   specCount: number

@@ -230,6 +230,52 @@ describe('GET /revisions/:id', () => {
   });
 });
 
+describe('GET /packages/:id/revisions', () => {
+  let timelinePkg: string;
+  let emptyPkg: string;
+  let expected: Array<Record<string, unknown>>; // create-time summaries in sortOrder
+
+  async function issue(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const res = await json('POST', `/packages/${timelinePkg}/revisions`, body);
+    if (res.status !== 201) throw new Error(`issue failed: ${res.status}`);
+    return data(res);
+  }
+
+  beforeAll(async () => {
+    timelinePkg = await createPackage(p1, `Timeline ${Date.now()}`);
+    await json('PUT', `/packages/${timelinePkg}/specs`, { specIds: [steel1, hvac1] });
+    emptyPkg = await createPackage(p1, `No Issuances ${Date.now()}`);
+    // Issue with explicit sortOrder OUT OF insertion order (3, 1, 2) so a list
+    // ordered by sortOrder differs from insertion order — this pins the ORDER BY.
+    const s3 = await issue({ type: 'addendum', sortOrder: 3, attributes: { number: 3 } });
+    const s1 = await issue({ type: 'addendum', sortOrder: 1, attributes: { number: 1 } });
+    const s2 = await issue({ type: 'bulletin', sortOrder: 2, attributes: { number: 2 } });
+    expected = [s1, s2, s3];
+  });
+
+  it('returns every issued revision as a summary, ordered by sortOrder', async () => {
+    const res = await json('GET', `/packages/${timelinePkg}/revisions`);
+    expect(res.status).toBe(200);
+    const list = ((await res.json()) as { data: Array<Record<string, unknown>> }).data;
+    expect(list.map((r) => r['sortOrder'])).toEqual([1, 2, 3]);
+    // Each summary equals exactly what POST returned — same RevisionSummary shape,
+    // specCount included (2 members frozen), just re-ordered by the issuance clock.
+    expect(list).toEqual(expected);
+    expect(list.every((r) => r['specCount'] === 2)).toBe(true);
+  });
+
+  it('returns an empty array for a package that has issued nothing yet', async () => {
+    const res = await json('GET', `/packages/${emptyPkg}/revisions`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
+  });
+
+  it('404 for an unknown package', async () => {
+    const res = await json('GET', `/packages/${ZERO}/revisions`);
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('cascade (migration 021)', () => {
   it('deleting a package removes its revisions and snapshot rows; specs survive', async () => {
     const pkgId = await createPackage(p1, 'Doomed Pkg');
