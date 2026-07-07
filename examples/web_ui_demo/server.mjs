@@ -67,6 +67,7 @@ const API_PREFIXES = [
   '/revisions',
   '/templates',
   '/numbering-profiles',
+  '/reports',
   '/mcp',
 ];
 

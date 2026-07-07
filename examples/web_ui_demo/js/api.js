@@ -239,6 +239,16 @@ export function getSubmittalRegister(projectId, specIds) {
   return sendJson('POST', `/projects/${enc(projectId)}/submittal-register`, { specIds });
 }
 
+// Grounded cross-spec comparison (ADR-047). `sources` is exactly two live spec
+// UUIDs; optional `baseline` must be one of them. Resolves with the
+// ComparisonReport { columns, rows, baseline?, drift? }. 404 if a source id is
+// not a live spec; 422 on a malformed request.
+export function postCompareReport(sources, { baseline } = {}) {
+  const body = { sources };
+  if (baseline) body.baseline = baseline;
+  return sendJson('POST', '/reports/compare', body);
+}
+
 export function deleteProject(projectId, deletedBy) {
   return sendJson('DELETE', `/projects/${enc(projectId)}`, { deletedBy });
 }
