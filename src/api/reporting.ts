@@ -22,11 +22,16 @@ function mapError(err: unknown, res: Response): void {
   res.status(500).json({ success: false, error: 'compare report failed' });
 }
 
-/** POST /reports/compare — body already validated by validateBody(CompareRequestSchema). */
+/** POST /reports/compare — body already validated by validateBody(CompareRequestSchema),
+ *  which applies the alignment/include defaults. */
 export async function compareReportHandler(req: Request, res: Response): Promise<void> {
-  const { sources, baseline } = req.body as CompareRequest;
+  const { sources, baseline, alignment, include } = req.body as CompareRequest;
   try {
-    const report = await buildComparisonReport(sources, baseline !== undefined ? { baseline } : {});
+    const report = await buildComparisonReport(sources, {
+      ...(baseline !== undefined ? { baseline } : {}),
+      alignment,
+      include,
+    });
     res.status(200).json({ success: true, data: report });
   } catch (err) {
     mapError(err, res);

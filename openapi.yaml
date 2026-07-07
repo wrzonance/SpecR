@@ -3464,17 +3464,20 @@ paths:
   /reports/compare:
     post:
       operationId: postCompareReport
-      summary: Cross-spec comparison matrix — align two live specs by resolved origin, with optional baseline lens
+      summary: Cross-spec comparison matrix — align two live specs by origin or structure, with summary, differences filter, and optional baseline lens
       description: >
-        Grounded, deterministic cross-spec comparison (ADR-047). Aligns exactly two
-        live specs by resolved paragraph origin (origin_paragraph_id ?? id) and returns
-        a symmetric matrix: one row per aligned paragraph (keyed by resolved origin),
-        one column per source, each cell the source's verbatim text or absent. Every
-        present cell traces to a real specId + paragraph UUID; nothing is synthesized.
-        Supports project↔project (shared master program) and project↔master
-        (drift-from-master, surfacing behindBy version drift). Optionally designate one
-        source as the baseline to reframe cells as added/removed/modified/unchanged. A
-        source id that is not a live spec (frozen package/revision ids) returns 404.
+        Grounded, deterministic cross-spec comparison (ADR-047/053). Aligns exactly two
+        live specs and returns a symmetric matrix: one row per aligned paragraph, one
+        column per source, each cell the source's verbatim text or absent. Every present
+        cell traces to a real specId + paragraph UUID; nothing is synthesized. Alignment
+        is by resolved paragraph origin for clones of a shared master (project↔project,
+        project↔master with behindBy drift) or by canonical structural address for
+        independently-ingested specs of the same section — selected via `alignment`
+        (default `auto`) and echoed as `alignedBy`. `include: differences` returns only
+        non-identical rows; a `summary` rollup is always emitted over the full matrix.
+        Optionally designate one source as the baseline to reframe cells as
+        added/removed/modified/unchanged. A source id that is not a live spec (frozen
+        package/revision ids) returns 404.
       tags: [reports]
       requestBody:
         required: true
@@ -4076,6 +4079,25 @@ components:
           type: string
           format: uuid
           description: Optional — must be one of `sources`; projects a baseline lens over the matrix.
+        alignment:
+          type: string
+          enum: [origin, structure, auto]
+          default: auto
+          description: >
+            Row alignment strategy. `origin` keys on resolved paragraph origin
+            (clones of a shared master); `structure` keys on the canonical structural
+            address (independently-ingested specs of the same section); `auto`
+            (default) uses origin when the sources share a cross-source origin key,
+            structure when they share none but are the same section, else origin.
+            The mode actually used is echoed as `alignedBy`.
+        include:
+          type: string
+          enum: [all, differences]
+          default: all
+          description: >
+            Row scope. `all` (default) returns the full matrix; `differences` returns
+            only non-identical rows (modified / present-in-one). `summary` always
+            reports full-matrix totals regardless of this filter.
 
     ComparisonColumn:
       type: object
@@ -4106,7 +4128,9 @@ components:
       properties:
         originId:
           type: string
-          description: Resolved-origin alignment key (a real paragraph UUID).
+          description: >
+            Row alignment key. A real paragraph UUID under `origin` alignment; a
+            canonical structural-address string under `structure` (see `alignedBy`).
         cells:
           type: array
           description: Index-aligned to `columns`.
@@ -4142,9 +4166,31 @@ components:
           type: integer
           description: Versions this cloned source is behind its master parent (lineage chain).
 
+    ComparisonSummary:
+      type: object
+      required: [rows, aligned, identical, differing, columns]
+      description: Grounded rollup over the full matrix (before any `include` filter).
+      properties:
+        rows: { type: integer, description: Total aligned rows in the full matrix. }
+        aligned: { type: integer, description: Rows present in ≥2 columns. }
+        identical:
+          { type: integer, description: Rows present in all columns with identical text. }
+        differing:
+          { type: integer, description: Rows that are not identical (rows − identical). }
+        columns:
+          type: array
+          description: Per-column counts, index-aligned to `columns`.
+          items:
+            type: object
+            required: [specId, present, onlyIn]
+            properties:
+              specId: { type: string, format: uuid }
+              present: { type: integer, description: Rows where this column's cell is present. }
+              onlyIn: { type: integer, description: Rows present ONLY in this column. }
+
     ComparisonReport:
       type: object
-      required: [columns, rows]
+      required: [columns, rows, summary, alignedBy]
       properties:
         columns:
           type: array
@@ -4152,6 +4198,15 @@ components:
         rows:
           type: array
           items: { $ref: '#/components/schemas/ComparisonMatrixRow' }
+        alignedBy:
+          type: string
+          enum: [origin, structure]
+          description: >
+            The alignment mode actually used. Under `structure`,
+            `ComparisonMatrixRow.originId` is a canonical structural-address string,
+            not a paragraph UUID.
+        summary:
+          $ref: '#/components/schemas/ComparisonSummary'
         baseline:
           $ref: '#/components/schemas/BaselineLens'
         drift:

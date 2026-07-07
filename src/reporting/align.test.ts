@@ -96,7 +96,7 @@ describe('alignTrees', () => {
         para({ specId: 'p3', id: 'p3-second', text: 'Second', originParagraphId: MA, position: 1 }),
       ],
     };
-    const { matrix } = alignTrees([collide]);
+    const { matrix } = alignTrees([collide], { alignment: 'origin' });
     // Single aligned row keyed MA; the winner is the first (position 0).
     expect(matrix.rows).toHaveLength(1);
     const cell = matrix.rows[0]?.cells[0];
@@ -176,6 +176,115 @@ describe('projectBaseline', () => {
   it('throws ReportingError when the baseline is not a column', () => {
     const { matrix } = alignTrees([p1(), p2()]);
     expect(() => projectBaseline(matrix, 'nope')).toThrow(ReportingError);
+  });
+});
+
+describe('alignTrees — alignment mode', () => {
+  // Two independently-ingested specs: no shared origin (all NULL → key = own id),
+  // identical structure (PART/article/pr1).
+  function indieSource(
+    specId: string,
+    texts: readonly string[],
+    section = '07 21 00'
+  ): AlignSource {
+    const partId = `${specId}-part`;
+    const artId = `${specId}-art`;
+    return {
+      column: { specId, section, title: 'T' },
+      rows: [
+        para({ specId, id: partId, text: 'PART 1', nodeType: 'part', position: 0 }),
+        para({
+          specId,
+          id: artId,
+          text: 'SUMMARY',
+          nodeType: 'article',
+          parentId: partId,
+          position: 0,
+        }),
+        ...texts.map((t, i) =>
+          para({
+            specId,
+            id: `${specId}-c${i}`,
+            text: t,
+            nodeType: 'pr1',
+            parentId: artId,
+            position: i,
+          })
+        ),
+      ],
+    };
+  }
+
+  it('auto falls back to structure when sources share no cross-source origin key', () => {
+    const a = indieSource('a', ['Alpha', 'Bravo']);
+    const b = indieSource('b', ['Alpha', 'Bravo EDITED']);
+    const { matrix, alignedBy } = alignTrees([a, b]);
+    expect(alignedBy).toBe('structure');
+    // Every row aligns both columns (identical structure): part, article, 2 pr1.
+    expect(matrix.rows).toHaveLength(4);
+    expect(matrix.rows.every((r) => r.cells[0]?.present && r.cells[1]?.present)).toBe(true);
+    const bravo = matrix.rows.find((r) => r.cells[0]?.present && r.cells[0].text === 'Bravo');
+    expect(bravo?.cells[1]).toMatchObject({ present: true, text: 'Bravo EDITED' });
+  });
+
+  it('auto uses origin when sources share a cross-source origin key (shared master)', () => {
+    const { alignedBy } = alignTrees([p1(), p2()]);
+    expect(alignedBy).toBe('origin');
+  });
+
+  it('auto stays on origin for different-section sources — coincidental addresses are not paired', () => {
+    // No shared origin AND different CSI sections. Both trees have a part:0|article:0
+    // address, but 07 21 00 and 09 91 00 are unrelated — pairing them would fabricate
+    // identical/modified rows. auto must NOT fall back to structure here (ADR-053).
+    const a = indieSource('a', ['Alpha'], '07 21 00');
+    const b = indieSource('b', ['Beta'], '09 91 00');
+    const { matrix, alignedBy } = alignTrees([a, b]);
+    expect(alignedBy).toBe('origin');
+    // Nothing aligns across unrelated sections: every row is present in exactly one column.
+    expect(matrix.rows.every((r) => r.cells.filter((c) => c.present).length === 1)).toBe(true);
+  });
+
+  it('explicit alignment: "structure" still applies across different sections (caller opted in)', () => {
+    const a = indieSource('a', ['Alpha'], '07 21 00');
+    const b = indieSource('b', ['Beta'], '09 91 00');
+    const { alignedBy } = alignTrees([a, b], { alignment: 'structure' });
+    expect(alignedBy).toBe('structure'); // the section gate only guards the auto fallback
+  });
+
+  it('explicit alignment: "origin" forces origin even for independently-ingested specs', () => {
+    const a = indieSource('a', ['Alpha']);
+    const b = indieSource('b', ['Alpha']);
+    const { matrix, alignedBy } = alignTrees([a, b], { alignment: 'origin' });
+    expect(alignedBy).toBe('origin');
+    // No shared origin → nothing aligns → every row present in exactly one column.
+    expect(matrix.rows.every((r) => r.cells.filter((c) => c.present).length === 1)).toBe(true);
+  });
+
+  it('explicit alignment: "structure" forces structure even for shared-master clones', () => {
+    const { alignedBy } = alignTrees([p1(), p2()], { alignment: 'structure' });
+    expect(alignedBy).toBe('structure');
+  });
+
+  it('structure alignment is deterministic: run1 deep-equals run2', () => {
+    const mk = (): readonly AlignSource[] => [
+      indieSource('a', ['x', 'y']),
+      indieSource('b', ['x', 'z']),
+    ];
+    expect(alignTrees(mk(), { alignment: 'structure' })).toEqual(
+      alignTrees(mk(), { alignment: 'structure' })
+    );
+  });
+
+  it('// KNOWN AMBIGUITY: an inserted sibling shifts downstream ordinals — structural alignment mispairs by position', () => {
+    // b inserts a new first clause; structure keys on ordinal, so b-c0(New) aligns
+    // with a-c0(Alpha), a-c1(Bravo) with b-c1(Alpha), etc. This ordinal-shift
+    // misalignment is accepted for this slice (ADR-053) — assert the accepted shape.
+    const a = indieSource('a', ['Alpha', 'Bravo']);
+    const b = indieSource('b', ['New', 'Alpha', 'Bravo']);
+    const { matrix } = alignTrees([a, b], { alignment: 'structure' });
+    const first = matrix.rows.find((r) => r.cells[0]?.present && r.cells[0].text === 'Alpha');
+    // 'Alpha' (a, ordinal 0) pairs with b's ordinal-0 clause 'New', not b's 'Alpha'.
+    expect(first?.cells[1]).toMatchObject({ present: true, text: 'New' });
   });
 });
 

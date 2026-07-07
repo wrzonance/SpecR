@@ -210,6 +210,32 @@ describe('POST /reports/compare — project↔project', () => {
     expect(a.body).toEqual(b.body);
   });
 
+  it('always emits alignedBy=origin and a summary consistent with the matrix (shared master)', async () => {
+    const { body } = await post({ sources: [p1Spec, p2Spec] });
+    const report = okData(body);
+    expect(report.alignedBy).toBe('origin');
+    expect(report.summary).toBeDefined();
+    expect(report.summary.rows).toBe(report.rows.length);
+    expect(report.summary.identical + report.summary.differing).toBe(report.summary.rows);
+    const bothPresent = report.rows.filter(
+      (r) => r.cells[0]?.present && r.cells[1]?.present
+    ).length;
+    expect(report.summary.aligned).toBe(bothPresent);
+  });
+
+  it('include=differences drops identical rows but summary still reports full-matrix totals', async () => {
+    const full = okData((await post({ sources: [p1Spec, p2Spec] })).body);
+    const diff = okData((await post({ sources: [p1Spec, p2Spec], include: 'differences' })).body);
+    expect(diff.summary).toEqual(full.summary); // summary is full-matrix
+    expect(diff.rows.length).toBe(full.summary.differing);
+    expect(diff.rows.length).toBeLessThan(full.rows.length);
+    // no returned row is identical (present in both with equal text)
+    const anyIdentical = diff.rows.some(
+      (r) => r.cells[0]?.present && r.cells[1]?.present && cellText(r, 0) === cellText(r, 1)
+    );
+    expect(anyIdentical).toBe(false);
+  });
+
   it('baseline lens tags the modified cell as modified', async () => {
     const { body } = await post({ sources: [p1Spec, p2Spec], baseline: p1Spec });
     const report = okData(body);
@@ -243,6 +269,70 @@ describe('POST /reports/compare — project↔master and guards', () => {
   it('returns 422 when a baseline is not one of the sources', async () => {
     const { status } = await post({ sources: [p1Spec, p2Spec], baseline: randomUUID() });
     expect(status).toBe(422);
+  });
+});
+
+describe('POST /reports/compare — independently-ingested (structural fallback)', () => {
+  let indieLibA: string;
+  let indieLibB: string;
+  let indieA: string;
+  let indieB: string;
+
+  beforeAll(async () => {
+    // Two masters ingested independently (NOT cloned) → every origin_paragraph_id
+    // is NULL → no cross-source origin key → auto falls back to structure. Same
+    // CSI structure (PART 1 → SUMMARY → clauses); B edits clause 2 and adds one.
+    // Separate libraries because (section, source, library) is uniquely constrained.
+    indieLibA = await insertLibrary(`Indie A ${suffix}`);
+    indieA = await insertMaster(indieLibA, '07 21 00');
+    const partA = await insertPara(indieA, null, 'part', 'PART 1 GENERAL', 1);
+    const artA = await insertPara(indieA, partA, 'article', 'SUMMARY', 1);
+    await insertPara(indieA, artA, 'pr1', 'Section includes thermal insulation.', 1);
+    await insertPara(indieA, artA, 'pr1', 'Comply with referenced standards.', 2);
+
+    indieLibB = await insertLibrary(`Indie B ${suffix}`);
+    indieB = await insertMaster(indieLibB, '07 21 00');
+    const partB = await insertPara(indieB, null, 'part', 'PART 1 GENERAL', 1);
+    const artB = await insertPara(indieB, partB, 'article', 'SUMMARY', 1);
+    await insertPara(indieB, artB, 'pr1', 'Section includes thermal insulation.', 1);
+    await insertPara(indieB, artB, 'pr1', 'Comply with referenced standards AS AMENDED.', 2);
+    await insertPara(indieB, artB, 'pr1', 'Submit product data.', 3);
+  });
+
+  afterAll(async () => {
+    const libs = [indieLibA, indieLibB];
+    await pool.query(
+      'DELETE FROM paragraphs WHERE spec_id IN (SELECT id FROM specs WHERE library_id = ANY($1))',
+      [libs]
+    );
+    await pool.query('DELETE FROM specs WHERE library_id = ANY($1)', [libs]);
+    await pool.query('DELETE FROM libraries WHERE id = ANY($1)', [libs]);
+  });
+
+  it('aligns two independently-ingested specs of the same section by structure', async () => {
+    const { status, body } = await post({ sources: [indieA, indieB] });
+    expect(status).toBe(200);
+    const report = okData(body);
+    expect(report.alignedBy).toBe('structure');
+
+    // PART and SUMMARY article pair up (both present) despite sharing no UUID.
+    const part = report.rows.find((r) => cellText(r, 0) === 'PART 1 GENERAL');
+    expect(part?.cells[1]?.present).toBe(true);
+    const summaryArt = report.rows.find((r) => cellText(r, 0) === 'SUMMARY');
+    expect(summaryArt?.cells[1]?.present).toBe(true);
+
+    // The edited clause aligns and shows both cells.
+    const edited = report.rows.find((r) => cellText(r, 0) === 'Comply with referenced standards.');
+    expect(edited && cellText(edited, 1)).toBe('Comply with referenced standards AS AMENDED.');
+
+    // The extra clause in B is only-in-B.
+    const extra = report.rows.find((r) => cellText(r, 1) === 'Submit product data.');
+    expect(extra?.cells[0]?.present).toBe(false);
+
+    // Summary grounds the counts: aligned = part + article + 2 clauses; B has 1 extra.
+    const colB = report.summary.columns.find((c) => c.specId === indieB);
+    expect(colB?.onlyIn).toBe(1);
+    expect(report.summary.aligned).toBe(4);
   });
 });
 

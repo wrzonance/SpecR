@@ -6,8 +6,15 @@ import {
   type ComparisonParagraphRow,
 } from '../db/index.js';
 import { alignTrees } from './align.js';
+import { summarize, filterToDifferences } from './summary.js';
 import { SpecNotFoundError } from './error.js';
-import type { AlignSource, ComparisonColumn, ComparisonReport, DriftEntry } from './types.js';
+import type {
+  AlignmentRequest,
+  AlignSource,
+  ComparisonColumn,
+  ComparisonReport,
+  DriftEntry,
+} from './types.js';
 
 function toColumn(meta: ComparisonColumnMeta): ComparisonColumn {
   return { specId: meta.specId, section: meta.section, title: meta.title };
@@ -61,11 +68,17 @@ async function computeDrift(
   return entries.filter((e): e is DriftEntry => e !== null);
 }
 
-/** Fetch → guard → align → project → drift. Impure orchestrator; all facts are
- *  computed (set-join over stored paragraphs), never synthesized (ADR-047). */
+/** Fetch → guard → align → summarize → (filter) → drift. Impure orchestrator; all
+ *  facts are computed (set-join over stored paragraphs), never synthesized. The
+ *  summary is grounded on the FULL matrix even when `include: 'differences'` trims
+ *  the returned rows (ADR-047/053). */
 export async function buildComparisonReport(
   sources: readonly string[],
-  options: { readonly baseline?: string } = {}
+  options: {
+    readonly baseline?: string;
+    readonly alignment?: AlignmentRequest;
+    readonly include?: 'all' | 'differences';
+  } = {}
 ): Promise<ComparisonReport> {
   const distinct = [...new Set(sources)];
   const metas = await getComparisonColumns(distinct);
@@ -73,7 +86,20 @@ export async function buildComparisonReport(
   assertAllFound(sources, metaMap);
 
   const rows = await getComparisonParagraphs(distinct);
-  const { matrix, baseline } = alignTrees(buildSources(sources, metaMap, rows), options);
+  const alignOpts = {
+    ...(options.baseline !== undefined ? { baseline: options.baseline } : {}),
+    ...(options.alignment !== undefined ? { alignment: options.alignment } : {}),
+  };
+  const { matrix, baseline, alignedBy } = alignTrees(
+    buildSources(sources, metaMap, rows),
+    alignOpts
+  );
+  const summary = summarize(matrix); // full matrix — never the filtered view
+  const view =
+    options.include === 'differences'
+      ? filterToDifferences(matrix, baseline)
+      : { matrix, baseline };
+
   // Drift follows request/column order (via metaMap), not DB row order, so the
   // serialized `drift` array is byte-identical every run — the deterministic
   // report guarantee (ADR-047) covers the whole body, not just the matrix.
@@ -83,9 +109,11 @@ export async function buildComparisonReport(
   const drift = await computeDrift(orderedMetas);
 
   return {
-    columns: matrix.columns,
-    rows: matrix.rows,
-    ...(baseline ? { baseline } : {}),
+    columns: view.matrix.columns,
+    rows: view.matrix.rows,
+    summary,
+    alignedBy,
+    ...(view.baseline ? { baseline: view.baseline } : {}),
     ...(drift.length > 0 ? { drift } : {}),
   };
 }

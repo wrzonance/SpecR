@@ -28,12 +28,20 @@ function anchorsFromReport(report: ComparisonReport): McpAnchor[] {
 export async function handleCompareSpecs({
   sources,
   baseline,
+  alignment,
+  include,
 }: {
   sources: string[];
   baseline?: string | undefined;
+  alignment?: 'origin' | 'structure' | 'auto' | undefined;
+  include?: 'all' | 'differences' | undefined;
 }): Promise<ToolResult> {
   try {
-    const report = await buildComparisonReport(sources, baseline !== undefined ? { baseline } : {});
+    const report = await buildComparisonReport(sources, {
+      ...(baseline !== undefined ? { baseline } : {}),
+      ...(alignment !== undefined ? { alignment } : {}),
+      ...(include !== undefined ? { include } : {}),
+    });
     const meta = anchorsMeta(anchorsFromReport(report));
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],

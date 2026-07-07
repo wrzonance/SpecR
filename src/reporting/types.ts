@@ -1,5 +1,17 @@
 import { z } from 'zod';
 
+// ── Alignment mode ───────────────────────────────────────────────────────────
+
+/** The alignment strategy actually applied. `origin` keys on resolved paragraph
+ *  origin (ADR-047); `structure` keys on the canonical structural address
+ *  (ADR-053). */
+export type AlignmentMode = 'origin' | 'structure';
+
+/** What the caller may request; `auto` resolves to `origin` when the sources share
+ *  a cross-source origin key, to `structure` when they share none but are the same
+ *  section, else `origin` (unrelated sections are never falsely paired). */
+export type AlignmentRequest = AlignmentMode | 'auto';
+
 // ── Request (external input — validated at the boundary) ─────────────────────
 
 /** Exactly two sources: the two supported comparisons (project↔project,
@@ -9,6 +21,8 @@ export const CompareRequestSchema = z
   .object({
     sources: z.array(z.uuid()).length(2),
     baseline: z.uuid().optional(),
+    alignment: z.enum(['origin', 'structure', 'auto']).default('auto'),
+    include: z.enum(['all', 'differences']).default('all'),
   })
   .superRefine((v, ctx) => {
     if (new Set(v.sources).size !== v.sources.length) {
@@ -89,6 +103,26 @@ export interface BaselineLens {
   readonly rows: readonly BaselineLensRow[];
 }
 
+// ── Summary rollup (grounded counts over the full matrix) ────────────────────
+
+export interface ComparisonSummaryColumn {
+  readonly specId: string;
+  readonly present: number; // rows where this column's cell is present
+  readonly onlyIn: number; // rows present ONLY in this column
+}
+
+/** Grounded rollup computed over the FULL matrix (before any `include` filter), so
+ *  an agent can cite totals without paging every row. A row is `identical` iff
+ *  present in every column with equal text; `differing` = rows − identical (covers
+ *  both modified and present-in-only-some rows); `aligned` = present in ≥2 columns. */
+export interface ComparisonSummary {
+  readonly rows: number;
+  readonly aligned: number;
+  readonly identical: number;
+  readonly differing: number;
+  readonly columns: readonly ComparisonSummaryColumn[]; // index-aligned to columns
+}
+
 // ── Top-level response payload (`data`) ──────────────────────────────────────
 
 export interface DriftEntry {
@@ -99,6 +133,8 @@ export interface DriftEntry {
 export interface ComparisonReport {
   readonly columns: readonly ComparisonColumn[];
   readonly rows: readonly ComparisonMatrixRow[];
+  readonly summary: ComparisonSummary; // always emitted (full-matrix rollup)
+  readonly alignedBy: AlignmentMode; // the mode actually used
   readonly baseline?: BaselineLens; // present iff request.baseline given
   readonly drift?: readonly DriftEntry[]; // version drift from the lineage chain
 }
