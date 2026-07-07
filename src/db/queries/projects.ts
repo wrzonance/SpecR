@@ -1,6 +1,7 @@
 import { DatabaseError } from '../errors.js';
 import type { Pool, PoolClient } from 'pg';
-import { assertClientExists } from './clients.js';
+import { assertClientExists, ClientNotFoundError } from './clients.js';
+import { getPgCode } from '../../lib/pg-errors.js';
 import type { LibraryTier } from './libraries.js';
 import { SECTION_NUMBER_FORMATS } from '../../lib/section-number.js';
 import type { SectionNumberFormat } from '../../lib/section-number.js';
@@ -412,7 +413,14 @@ export async function updateProject(
     };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
-    throw new DatabaseError(`updateProject: update failed for ${id}`, { cause: err });
+    const wrapped = new DatabaseError(`updateProject: update failed for ${id}`, { cause: err });
+    // TOCTOU: assertClientExists passed, but the client can be deleted before this
+    // UPDATE runs; the ON DELETE RESTRICT FK then raises 23503. Map it to the same
+    // clean 422 (ClientNotFoundError) as the fast-path check, never a generic 500.
+    if (typeof input.clientId === 'string' && getPgCode(wrapped) === '23503') {
+      throw new ClientNotFoundError(`client ${input.clientId} not found`, { cause: err });
+    }
+    throw wrapped;
   }
 }
 

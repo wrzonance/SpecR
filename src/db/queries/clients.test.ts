@@ -79,6 +79,20 @@ describe('createClient', () => {
     expect(err).toBeInstanceOf(DatabaseError);
     expect((err as { cause?: unknown }).cause).toBe(pgErr);
   });
+
+  it('TOCTOU: FK 23503 on insert (library deleted mid-race) → ClientLibraryNotFoundError', async () => {
+    const { pool } = await import('../index.js');
+    const pgErr = Object.assign(new Error('fk violation'), { code: '23503' });
+    vi.mocked(pool.query)
+      .mockResolvedValueOnce({ rows: [{ one: 1 }], rowCount: 1 } as never) // fast path: library exists
+      .mockRejectedValueOnce(pgErr); // INSERT races a library delete → FK 23503
+    const { createClient, ClientLibraryNotFoundError } = await import('./clients.js');
+    const err = await createClient({ name: 'Acme', libraryId: 'lib-1' }, pool).catch(
+      (e: unknown) => e
+    );
+    expect(err).toBeInstanceOf(ClientLibraryNotFoundError);
+    expect((err as { cause?: unknown }).cause).toBe(pgErr);
+  });
 });
 
 describe('listClients', () => {

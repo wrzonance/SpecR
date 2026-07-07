@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { pool, DatabaseError } from '../index.js';
+import { getPgCode } from '../../lib/pg-errors.js';
 import type { ProjectSummary, ProjectSource } from './projects.js';
 
 interface Queryable {
@@ -111,7 +112,17 @@ export async function createClient(
     // ClientLibraryNotFoundError / DatabaseError re-throw unwrapped; a raw pg error
     // (e.g. 23505 unique name) is wrapped with its cause so getPgCode → 409 at the handler.
     if (err instanceof DatabaseError) throw err;
-    throw new DatabaseError(`createClient: insert failed for "${input.name}"`, { cause: err });
+    const wrapped = new DatabaseError(`createClient: insert failed for "${input.name}"`, {
+      cause: err,
+    });
+    // TOCTOU: assertLibraryExists passed, but the library can be deleted before this
+    // INSERT; the FK then raises 23503 — map it to the same clean 422
+    // (ClientLibraryNotFoundError) as the fast-path check. A 23505 (duplicate name)
+    // keeps the generic wrap → 409 at the handler.
+    if (input.libraryId && getPgCode(wrapped) === '23503') {
+      throw new ClientLibraryNotFoundError(`library ${input.libraryId} not found`, { cause: err });
+    }
+    throw wrapped;
   }
 }
 
