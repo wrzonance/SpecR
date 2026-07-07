@@ -230,6 +230,16 @@ export function initCompare(opts = {}) {
     return tr;
   }
 
+  // Append an expanded gap's revealed rows, tagging the first so keyboard focus can
+  // land on it once the divider that revealed them is gone (see restoreFocus).
+  function appendRevealed(container, segment, buildNode) {
+    segment.rows.forEach((row, index) => {
+      const node = buildNode(row);
+      if (index === 0) node.dataset.revealedFrom = String(segment.key);
+      container.appendChild(node);
+    });
+  }
+
   function renderTable(segments) {
     const table = el('table', 'compare-table');
     const thead = document.createElement('thead');
@@ -238,9 +248,9 @@ export function initCompare(opts = {}) {
     const tbody = document.createElement('tbody');
     for (const segment of segments) {
       if (segment.kind === 'row') tbody.appendChild(renderRow(segment.row, view.columns));
-      else if (expandedGaps.has(segment.key)) {
-        for (const row of segment.rows) tbody.appendChild(renderRow(row, view.columns));
-      } else tbody.appendChild(gapTableRow(segment));
+      else if (expandedGaps.has(segment.key))
+        appendRevealed(tbody, segment, (row) => renderRow(row, view.columns));
+      else tbody.appendChild(gapTableRow(segment));
     }
     table.appendChild(tbody);
     return table;
@@ -283,9 +293,8 @@ export function initCompare(opts = {}) {
     const flow = el('div', 'compare-inline');
     for (const segment of segments) {
       if (segment.kind === 'row') flow.appendChild(inlinePara(segment.row));
-      else if (expandedGaps.has(segment.key)) {
-        for (const row of segment.rows) flow.appendChild(inlinePara(row));
-      } else flow.appendChild(gapDivider(segment));
+      else if (expandedGaps.has(segment.key)) appendRevealed(flow, segment, inlinePara);
+      else flow.appendChild(gapDivider(segment));
     }
     return flow;
   }
@@ -297,6 +306,7 @@ export function initCompare(opts = {}) {
     const label = `· ${count} unchanged paragraph${count === 1 ? '' : 's'} — click to expand ·`;
     const btn = el('button', 'compare-gap', label);
     btn.type = 'button';
+    btn.dataset.gapKey = String(segment.key);
     btn.setAttribute('aria-expanded', 'false');
     btn.addEventListener('click', () => {
       expandedGaps.add(segment.key);
@@ -316,8 +326,36 @@ export function initCompare(opts = {}) {
     setStatus(features.summary ? `${base}${baseline} · server summary attached` : `${base}${baseline}`);
   }
 
+  // render() runs from a clicked control's OWN handler (mode tab, filter chip, gap
+  // divider), and it tears down + rebuilds modes/filters/matrix via replaceChildren,
+  // detaching that button mid-click so focus falls to <body>. Snapshot what held
+  // focus before teardown; restoreFocus lands it on the logical successor after.
+  function focusAnchor() {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement)) return null;
+    if (modesEl?.contains(active)) return { kind: 'mode' };
+    if (filtersEl?.contains(active)) return { kind: 'filter' };
+    if (active.classList.contains('compare-gap'))
+      return { kind: 'gap', key: active.dataset.gapKey };
+    return null;
+  }
+
+  function restoreFocus(anchor) {
+    if (anchor?.kind === 'mode') return void modesEl?.querySelector('.is-active')?.focus();
+    if (anchor?.kind === 'filter') return void filtersEl?.querySelector('.is-active')?.focus();
+    if (anchor?.kind !== 'gap' || anchor.key == null) return;
+    // The expanded divider is gone — land on the first paragraph it revealed,
+    // made programmatically focusable for this one move (standard disclosure).
+    const revealed = matrixEl.querySelector(`[data-revealed-from="${anchor.key}"]`);
+    if (revealed) {
+      revealed.tabIndex = -1;
+      revealed.focus();
+    }
+  }
+
   function render() {
     if (!view) return;
+    const anchor = focusAnchor();
     const counts = resolveCounts(view.rows, lastReport?.summary ?? null);
     renderModes();
     renderFilters(counts);
@@ -325,6 +363,7 @@ export function initCompare(opts = {}) {
     if (view.columns.length < 2 || view.rows.length === 0) {
       matrixEl.appendChild(el('p', 'compare-empty', 'No aligned paragraphs to compare.'));
       setStatus('No aligned paragraphs to compare.');
+      if (legendEl) legendEl.hidden = true;
       return;
     }
     const segments = buildSegments(view.rows, activeFilter);
@@ -335,6 +374,7 @@ export function initCompare(opts = {}) {
     }
     renderLegend();
     reportStatus();
+    restoreFocus(anchor);
   }
 
   async function run() {
