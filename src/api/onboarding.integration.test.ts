@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool, createLibrary } from '../db/index.js';
+import type { SpecNode } from '../ast/index.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -121,6 +122,25 @@ describe('POST /libraries/:id/import (O-8)', () => {
       [r.specId]
     );
     expect(parseInt(classified.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
+    // ADR-055 roundtrip: provenance persisted, meta.inference derived on read
+    const treeRes = await fetch(`${baseUrl}/specs/${r.specId}`);
+    expect(treeRes.status).toBe(200);
+    const treeBody = (await treeRes.json()) as { data: { parts: SpecNode[] } };
+    const collect = (nodes: readonly SpecNode[]): SpecNode[] =>
+      nodes.flatMap((n) => [n, ...collect(n.children)]);
+    const nodes = collect(treeBody.data.parts);
+    const structural = nodes.filter(
+      (n) => !['note', 'continuation'].includes(n.type) && n.meta.vanish !== true
+    );
+    expect(structural.length).toBeGreaterThan(0);
+    for (const n of structural) {
+      expect(n.meta.inference, `node ${n.id} (${n.type}) unscored`).toBeDefined();
+      expect(n.meta.inference!.confidence).toBeGreaterThanOrEqual(0);
+      expect(n.meta.inference!.confidence).toBeLessThanOrEqual(1);
+    }
+    for (const n of nodes.filter((x) => ['note', 'continuation'].includes(x.type))) {
+      expect(n.meta.inference).toBeUndefined();
+    }
   }, 40_000);
 
   it('.sec import works and flags styleSourceNeeded instead of failing', async () => {

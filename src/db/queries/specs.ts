@@ -18,6 +18,7 @@ import { resolveDefaultLibraryId } from './libraries.js';
 import { reconcileLibraryDivisionGeneralSpec } from './division-general.js';
 import { ClassificationSchema, OverrideSchema } from './editability.js';
 import { listAssociationsForSpec } from './associations.js';
+import { deriveInference } from './inference-meta.js';
 
 interface SpecRow {
   readonly id: string;
@@ -115,6 +116,7 @@ export interface ParagraphTreeRow {
   readonly vanish: boolean;
   readonly conflicts: readonly SignalConflict[];
   readonly source_facts: SourceFacts;
+  readonly signal_provenance: unknown;
   readonly classification: unknown;
   readonly editability_override: unknown;
 }
@@ -169,6 +171,11 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
     // `closed` flag before they reach the API response (#262).
     const sourceFacts = parseSourceFacts(row.source_facts);
     const articleRole = row.node_type === 'article' ? deriveArticleRole(row.text) : undefined;
+    const inference = deriveInference(
+      row.signal_provenance,
+      row.conflicts,
+      row.node_type as NodeType
+    );
     return {
       id: row.id,
       type: row.node_type as NodeType,
@@ -178,6 +185,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
         ...(row.vanish ? { vanish: true } : {}),
         ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
         ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
+        ...(inference ? { inference } : {}),
         ...(editability ? { editability } : {}),
         ...(articleRole !== undefined ? { articleRole } : {}),
       },
@@ -216,7 +224,7 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
 
     const paraResult = await pool.query<ParagraphTreeRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              classification, editability_override
+              signal_provenance, classification, editability_override
        FROM paragraphs WHERE spec_id = $1`,
       [id]
     );
@@ -372,6 +380,20 @@ export async function restoreSpec(id: string): Promise<RestoreSpecOutcome> {
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError(`restoreSpec: update failed for ${id}`, { cause: err });
+  }
+}
+
+/** The spec's persisted source label ('ufgs' | 'arcat' | 'cpi' | 'unknown'),
+ *  or null when the spec does not exist. Used by the onboarding report to
+ *  distinguish explicit-structure sources from unscored DOCX (ADR-055). */
+export async function getSpecSource(id: string): Promise<string | null> {
+  try {
+    const result = await pool.query<{ source: string }>('SELECT source FROM specs WHERE id = $1', [
+      id,
+    ]);
+    return result.rows[0]?.source ?? null;
+  } catch (err) {
+    throw new DatabaseError('getSpecSource failed', { cause: err });
   }
 }
 

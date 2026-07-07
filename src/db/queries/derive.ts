@@ -110,9 +110,9 @@ async function cloneParagraphs(
      )
      INSERT INTO paragraphs
        (id, spec_id, parent_id, node_type, text, position, vanish, revit_param,
-        base_version, conflicts, source_facts, origin_paragraph_id)
+        base_version, conflicts, source_facts, signal_provenance, origin_paragraph_id)
      SELECT m.new_id, $2, pm.new_id, p.node_type, p.text, p.position, p.vanish,
-            p.revit_param, p.base_version, p.conflicts, p.source_facts, p.id
+            p.revit_param, p.base_version, p.conflicts, p.source_facts, p.signal_provenance, p.id
      FROM paragraphs p
      JOIN map m ON m.old_id = p.id
      LEFT JOIN map pm ON pm.old_id = p.parent_id`,

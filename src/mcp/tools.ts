@@ -121,7 +121,7 @@ function registerSpecTools(reg: ToolRegistrar): void {
     'get_paragraph',
     {
       description:
-        'Return a single paragraph with its full ancestor chain (root to immediate parent). Use to get context around a search_library result. The node and each ancestor may carry conflicts — inference signal disagreements recorded at DOCX parse time; absent means the hierarchy was unambiguous.',
+        'Return a single paragraph with its full ancestor chain (root to immediate parent). Use to get context around a search_library result. The node and each ancestor may carry conflicts — inference signal disagreements recorded at DOCX parse time; absent means the hierarchy was unambiguous. Scored paragraphs also carry inference — { confidence 0–1, signalUsed, agreed, evidence } derived from parse-time signal provenance; absent means unscored (pre-provenance parse or non-DOCX source).',
       inputSchema: {
         paragraphId: z.uuid().describe('Paragraph UUID (from search_library or get_spec)'),
       },

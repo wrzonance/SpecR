@@ -6,11 +6,14 @@ import type {
   NodeType,
   ParagraphAssociation,
   SignalConflict,
+  SignalProvenance,
   SourceFacts,
   SpecNode,
+  SpecNodeInference,
   SpecTree,
 } from '../../ast/index.js';
 import { listAssociationsForParagraph } from './associations.js';
+import { deriveInference } from './inference-meta.js';
 
 export interface Queryable {
   query: Pool['query'];
@@ -27,6 +30,7 @@ interface FlatRow {
   readonly vanish: boolean;
   readonly conflicts: readonly SignalConflict[];
   readonly sourceFacts: SourceFacts;
+  readonly signalProvenance: SignalProvenance | null;
 }
 
 function hasSourceFacts(sourceFacts: SourceFacts): boolean {
@@ -50,6 +54,9 @@ function flattenDfs(
       vanish: node.meta.vanish ?? false,
       conflicts: node.meta.conflicts ?? [],
       sourceFacts: node.meta.sourceFacts ?? {},
+      signalProvenance: node.meta.inference
+        ? { signalUsed: node.meta.inference.signalUsed, agreed: node.meta.inference.agreed }
+        : null,
     });
     flattenDfs(node.children, specId, node.id, rows);
   });
@@ -68,8 +75,9 @@ export async function insertTree(tree: SpecTree, specId: string, pool: Queryable
     try {
       await pool.query(
         `INSERT INTO paragraphs
-           (id, spec_id, parent_id, node_type, text, position, vanish, conflicts, source_facts)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)`,
+           (id, spec_id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
+            signal_provenance)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)`,
         [
           row.id,
           row.specId,
@@ -80,6 +88,7 @@ export async function insertTree(tree: SpecTree, specId: string, pool: Queryable
           row.vanish,
           JSON.stringify(row.conflicts),
           JSON.stringify(row.sourceFacts),
+          row.signalProvenance ? JSON.stringify(row.signalProvenance) : null,
         ]
       );
     } catch (err) {
@@ -98,6 +107,8 @@ export interface ParagraphRow {
   readonly conflicts?: readonly SignalConflict[];
   /** Parser source facts (#131). Present only when non-empty. */
   readonly sourceFacts?: SourceFacts;
+  /** Hierarchy-inference confidence (ADR-055). Present only when scored. */
+  readonly inference?: SpecNodeInference;
   /** External content associations (#109). Present only when non-empty. */
   readonly associations?: readonly ParagraphAssociation[];
 }
@@ -114,6 +125,7 @@ interface ChainRow {
   readonly vanish: boolean;
   readonly conflicts: readonly SignalConflict[];
   readonly sourceFacts: SourceFacts;
+  readonly signalProvenance: unknown;
   readonly depth: number;
 }
 
@@ -121,6 +133,13 @@ function toParagraphRow(r: ChainRow): ParagraphRow {
   // Normalize through the schema so legacy comment facts gain the backfilled
   // `closed` flag before they reach the API response (#262).
   const sourceFacts = parseSourceFacts(r.sourceFacts);
+  // ParagraphRow.nodeType is a plain string and paragraphs.node_type carries no
+  // CHECK, so a non-enum row must pass through unscored (inference omitted) —
+  // never fail the whole ancestor read over a value this surface never typed.
+  const nodeType = NodeTypeSchema.safeParse(r.nodeType);
+  const inference = nodeType.success
+    ? deriveInference(r.signalProvenance, r.conflicts, nodeType.data)
+    : undefined;
   return {
     id: r.id,
     nodeType: r.nodeType,
@@ -128,6 +147,7 @@ function toParagraphRow(r: ChainRow): ParagraphRow {
     vanish: r.vanish,
     ...(r.conflicts.length > 0 ? { conflicts: r.conflicts } : {}),
     ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
+    ...(inference ? { inference } : {}),
   };
 }
 
@@ -151,16 +171,17 @@ export async function getParagraphWithAncestors(
   try {
     const result = await pool.query<ChainRow>(
       `WITH RECURSIVE chain AS (
-         SELECT id, node_type, text, vanish, conflicts, source_facts, parent_id, 0 AS depth
+         SELECT id, node_type, text, vanish, conflicts, source_facts, signal_provenance,
+                parent_id, 0 AS depth
          FROM paragraphs WHERE id = $1
          UNION ALL
          SELECT p.id, p.node_type, p.text, p.vanish, p.conflicts, p.source_facts,
-                p.parent_id, c.depth + 1
+                p.signal_provenance, p.parent_id, c.depth + 1
          FROM paragraphs p JOIN chain c ON p.id = c.parent_id
          WHERE c.depth + 1 < 10
        )
        SELECT id, node_type AS "nodeType", text, vanish, conflicts,
-              source_facts AS "sourceFacts", depth
+              source_facts AS "sourceFacts", signal_provenance AS "signalProvenance", depth
        FROM chain ORDER BY depth DESC`,
       [id]
     );
@@ -188,6 +209,7 @@ interface SubtreeRow {
   readonly vanish: boolean;
   readonly conflicts: readonly SignalConflict[];
   readonly sourceFacts: SourceFacts;
+  readonly signalProvenance: unknown;
 }
 
 /** Validate a raw DB `node_type` string against the canonical AST enum before it
@@ -219,9 +241,11 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
     // `closed` flag before they reach the API response (#262).
     const sourceFacts = parseSourceFacts(row.sourceFacts);
     const articleRole = row.nodeType === 'article' ? deriveArticleRole(row.text) : undefined;
+    const nodeType = parseNodeType(row.nodeType);
+    const inference = deriveInference(row.signalProvenance, row.conflicts, nodeType);
     return {
       id: row.id,
-      type: parseNodeType(row.nodeType),
+      type: nodeType,
       text: row.text,
       children: (childrenByParent.get(row.id) ?? [])
         .sort((a, b) => a.position - b.position)
@@ -231,6 +255,7 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
         ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
         ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
         ...(articleRole !== undefined ? { articleRole } : {}),
+        ...(inference ? { inference } : {}),
       },
     };
   };
@@ -254,16 +279,18 @@ export async function fetchSubtreeNode(
 ): Promise<SpecNode | null> {
   const result = await db.query<SubtreeRow>(
     `WITH RECURSIVE subtree AS (
-       SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts
+       SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
+              signal_provenance
        FROM paragraphs WHERE id = $1 AND spec_id = $2
        UNION ALL
        SELECT p.id, p.parent_id, p.node_type, p.text, p.position, p.vanish,
-              p.conflicts, p.source_facts
+              p.conflicts, p.source_facts, p.signal_provenance
        FROM paragraphs p JOIN subtree s ON p.parent_id = s.id
        WHERE p.spec_id = $2
      )
      SELECT id, parent_id AS "parentId", node_type AS "nodeType", text, position,
-            vanish, conflicts, source_facts AS "sourceFacts"
+            vanish, conflicts, source_facts AS "sourceFacts",
+            signal_provenance AS "signalProvenance"
      FROM subtree`,
     [nodeId, specId]
   );

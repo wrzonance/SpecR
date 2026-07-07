@@ -135,6 +135,7 @@ describe('buildNodeTree editability derivation', () => {
     vanish: false,
     conflicts: [],
     source_facts: {},
+    signal_provenance: null,
     classification: null,
     editability_override: null,
   } as const;
@@ -162,6 +163,7 @@ function row(
     vanish: false,
     conflicts: [],
     source_facts: {},
+    signal_provenance: null,
     classification: null,
     editability_override: null,
     ...p,
