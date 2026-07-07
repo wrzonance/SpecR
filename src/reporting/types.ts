@@ -132,6 +132,8 @@ export interface DriftEntry {
 export interface ComparisonReport {
   readonly columns: readonly ComparisonColumn[];
   readonly rows: readonly ComparisonMatrixRow[];
+  readonly summary: ComparisonSummary; // always emitted (full-matrix rollup)
+  readonly alignedBy: AlignmentMode; // the mode actually used
   readonly baseline?: BaselineLens; // present iff request.baseline given
   readonly drift?: readonly DriftEntry[]; // version drift from the lineage chain
 }
