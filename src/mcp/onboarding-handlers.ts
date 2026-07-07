@@ -13,6 +13,7 @@ import type {
 import {
   getSpecTree,
   getSpecStyleSource,
+  getSpecSource,
   getOnboardingStatus,
   setSpecEditabilityOverride,
   clearSpecEditabilityOverride,
@@ -21,6 +22,7 @@ import {
 } from '../db/index.js';
 import type { OwnershipResult } from '../db/index.js';
 import { summarizeEditability } from '../lib/editability-summary.js';
+import { summarizeHierarchy } from '../lib/hierarchy-summary.js';
 import { logger } from '../lib/logger.js';
 import { toolError } from './handlers.js';
 import type { ToolError, ToolOk, ToolResult } from './tool-result.js';
@@ -98,7 +100,8 @@ function buildReport(
   specId: string,
   tree: SpecTree,
   styleSource: Awaited<ReturnType<typeof getSpecStyleSource>>,
-  onboardingStatus: Awaited<ReturnType<typeof getOnboardingStatus>>
+  onboardingStatus: Awaited<ReturnType<typeof getOnboardingStatus>>,
+  source: string | null
 ): unknown {
   return {
     specId,
@@ -108,6 +111,7 @@ function buildReport(
     styleSource,
     styleSourceNeeded: styleSource === null,
     editability: summarizeEditability(tree),
+    hierarchy: summarizeHierarchy(tree, source),
     note:
       'styleDerivation and parseWarnings are import-time-only (the raw uploaded ' +
       'bytes are not persisted); re-import the master to regenerate them.',
@@ -124,7 +128,8 @@ export async function handleGetOnboardingReport({
     if (!result) return toolError(`Spec not found: id=${specId}`);
     const styleSource = await getSpecStyleSource(specId);
     const onboardingStatus = await getOnboardingStatus(specId);
-    return jsonResult(buildReport(specId, result.tree, styleSource, onboardingStatus));
+    const source = await getSpecSource(specId);
+    return jsonResult(buildReport(specId, result.tree, styleSource, onboardingStatus, source));
   } catch (err) {
     logger.error({ err }, 'mcp tool get_onboarding_report failed');
     return toolError('Internal error — onboarding report failed');

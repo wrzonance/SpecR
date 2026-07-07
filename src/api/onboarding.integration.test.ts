@@ -60,6 +60,11 @@ interface OnboardingJobData {
       styleDerivation: unknown;
       styleSourceNeeded: boolean;
       editability: { counts: Record<string, number>; lowConfidence: unknown[] };
+      hierarchy: {
+        counts: { scored: number; unscored: number; belowThreshold: number };
+        unscoredReason?: string;
+        lowConfidence: unknown[];
+      };
       parseWarnings: unknown[];
     };
   };
@@ -108,6 +113,10 @@ describe('POST /libraries/:id/import (O-8)', () => {
     expect(r.report.styleSourceNeeded).toBe(false);
     expect(r.report.editability).toBeDefined();
     expect(Array.isArray(r.report.parseWarnings)).toBe(true);
+    // ADR-055 hierarchy section: every structural DOCX paragraph is scored
+    expect(r.report.hierarchy.counts.scored).toBeGreaterThan(0);
+    expect(r.report.hierarchy.counts.unscored).toBe(0);
+    expect(r.report.hierarchy.counts.belowThreshold).toBeGreaterThanOrEqual(0);
     expect(r.templateId).not.toBeNull();
     // spec landed in the target library with the derived template linked
     const spec = await pool.query<{ library_id: string; style_template_id: string | null }>(
@@ -152,6 +161,10 @@ describe('POST /libraries/:id/import (O-8)', () => {
     expect(job.result?.report.styleSourceNeeded).toBe(true);
     expect(job.result?.report.styleDerivation).toBeNull();
     expect(job.result?.templateId).toBeNull();
+    // ADR-055: SEC structure is explicit — unscored by design, never suspect
+    expect(job.result?.report.hierarchy.counts.scored).toBe(0);
+    expect(job.result?.report.hierarchy.counts.unscored).toBeGreaterThan(0);
+    expect(job.result?.report.hierarchy.unscoredReason).toContain('explicit structure');
   }, 40_000);
 
   it('re-import: editing a DOCX master updates the style template + report shows styleSourceNeeded:false', async () => {

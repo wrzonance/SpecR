@@ -179,11 +179,15 @@ describe('tool: get_onboarding_report', () => {
       styleSourceNeeded: boolean;
       onboardingStatus: string;
       editability: { counts: Record<string, number> };
+      hierarchy: { counts: Record<string, number> };
     }>(result);
     expect(data.specId).toBe(specId);
     expect(data.styleSource).toBeNull();
     expect(data.styleSourceNeeded).toBe(true);
     expect(data.editability.counts).toMatchObject({ editable: 1, locked: 1 });
+    expect(data.hierarchy.counts['scored']).toBeTypeOf('number');
+    expect(data.hierarchy.counts['unscored']).toBeTypeOf('number');
+    expect(data.hierarchy.counts['belowThreshold']).toBeTypeOf('number');
   });
 
   it('returns isError for an unknown specId', async () => {

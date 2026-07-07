@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { DerivationReport } from '../parser/index.js';
 import type { ParseWarning, Editability } from '../ast/index.js';
+import type { HierarchySummary } from './hierarchy-summary.js';
 
 export type ParseStage =
   | 'queued'
@@ -106,6 +107,8 @@ export interface OnboardingReport {
   /** True when no style template was derived (non-DOCX) — assign via O-12 later. */
   readonly styleSourceNeeded: boolean;
   readonly editability: EditabilitySummary;
+  /** Hierarchy-inference confidence summary (ADR-055). */
+  readonly hierarchy: HierarchySummary;
   readonly parseWarnings: readonly ParseWarning[];
 }
 
