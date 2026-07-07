@@ -5012,9 +5012,43 @@ components:
               value: { $ref: '#/components/schemas/EditabilityValue' }
               confidence: { type: number, minimum: 0, maximum: 1 }
 
+    HierarchySummary:
+      type: object
+      required: [counts, lowConfidence]
+      properties:
+        counts:
+          type: object
+          required: [scored, unscored, belowThreshold]
+          properties:
+            scored: { type: integer }
+            unscored: { type: integer }
+            belowThreshold: { type: integer }
+        unscoredReason:
+          type: string
+          description: >-
+            Present when unscored > 0 — why those paragraphs carry no score
+            (explicit-structure source vs pre-provenance parse). Never folded
+            into another bucket.
+        lowConfidence:
+          type: array
+          description: Scored paragraphs below the hierarchy review threshold (0.6), worst-first.
+          items:
+            type: object
+            required: [nodeId, nodeType, ilvl, confidence, evidence]
+            properties:
+              nodeId: { type: string, format: uuid }
+              nodeType:
+                type: string
+                enum: [part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7]
+              ilvl: { type: integer, minimum: 0, maximum: 8 }
+              confidence: { type: number, minimum: 0, maximum: 1 }
+              evidence:
+                type: array
+                items: { type: string }
+
     OnboardingReport:
       type: object
-      required: [styleDerivation, styleSourceNeeded, editability, parseWarnings]
+      required: [styleDerivation, styleSourceNeeded, editability, hierarchy, parseWarnings]
       properties:
         styleDerivation:
           oneOf:
@@ -5026,6 +5060,8 @@ components:
           description: True when no style template was derived (non-DOCX) — assign via O-12.
         editability:
           $ref: '#/components/schemas/EditabilitySummary'
+        hierarchy:
+          $ref: '#/components/schemas/HierarchySummary'
         parseWarnings:
           type: array
           items:
@@ -5080,6 +5116,35 @@ components:
         reportedNodeType:
           type: string
           enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation]
+
+    SpecNodeInference:
+      type: object
+      required: [confidence, signalUsed, agreed, evidence]
+      description: >-
+        Hierarchy-inference confidence for this paragraph (ADR-055), derived at
+        read time from persisted signal provenance and conflicts. Absent when
+        the paragraph has no provenance (pre-provenance parse or non-DOCX
+        source) or is non-structural (note/continuation/hidden).
+      properties:
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        signalUsed:
+          type: integer
+          enum: [1, 2, 3, 4, 5]
+          description: The winning inference signal (1 numbering.xml, 2 style chain, 3 document order, 4 text pattern, 5 indentation)
+        agreed:
+          type: array
+          description: Signals whose vote matched the final resolved classification
+          items:
+            type: integer
+            enum: [1, 2, 3, 4, 5]
+        evidence:
+          type: array
+          description: Human-readable why-chain. Names signals, never source vendors.
+          items:
+            type: string
 
     SourceTextSpan:
       type: array
@@ -5205,6 +5270,8 @@ components:
               $ref: '#/components/schemas/SourceFacts'
             editability:
               $ref: '#/components/schemas/SpecNodeEditability'
+            inference:
+              $ref: '#/components/schemas/SpecNodeInference'
             associations:
               type: array
               description: >-
