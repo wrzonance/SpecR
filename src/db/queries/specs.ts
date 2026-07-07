@@ -391,6 +391,36 @@ export async function getSpecWithdrawnAt(id: string): Promise<string | null> {
   }
 }
 
+/** Upsert the master row for a parsed import. New imports land at
+ *  onboarding_status 'review' (O-8/#135 → O-11/#139) awaiting a human's
+ *  first-pass review. On re-import (ON CONFLICT) the status is intentionally
+ *  NOT reset — a prior finalize stands — but a withdrawn master IS revived
+ *  (#415): without withdrawn_at = NULL the fresh parse lands invisibly in the
+ *  tombstoned row. */
+async function upsertParsedSpecRow(
+  tree: SpecTree,
+  originMeta: OriginMeta | undefined,
+  source: string,
+  libraryId: string,
+  db: Queryable
+): Promise<string> {
+  const res = await db.query<{ id: string }>(
+    `INSERT INTO specs (section, title, source, library_id, origin_meta, onboarding_status)
+     VALUES ($1, $2, $3, $4, $5::jsonb, 'review')
+     ON CONFLICT (section, source, library_id) WHERE library_id IS NOT NULL DO UPDATE
+       SET title = EXCLUDED.title,
+           updated_at = now(),
+           content_version = specs.content_version + 1,
+           origin_meta = COALESCE(EXCLUDED.origin_meta, specs.origin_meta),
+           withdrawn_at = NULL
+     RETURNING id`,
+    [tree.section, tree.title, source, libraryId, originMeta ? JSON.stringify(originMeta) : null]
+  );
+  const specId = res.rows[0]?.id;
+  if (!specId) throw new DatabaseError('upsert spec returned no id');
+  return specId;
+}
+
 export async function persistParsedSpec(result: {
   readonly tree: SpecTree;
   readonly refs: readonly SecRef[];
@@ -405,28 +435,13 @@ export async function persistParsedSpec(result: {
     // TODO: source should be a top-level SpecTree field — parts[0].meta.source is a stopgap
     const source = result.tree.parts[0]?.meta.source ?? 'unknown';
     const libraryId = result.libraryId ?? (await resolveDefaultLibraryId(source, client));
-    const res = await client.query<{ id: string }>(
-      // New imports land at onboarding_status 'review' (O-8/#135 → O-11/#139):
-      // they await a human's first-pass review. On re-import (ON CONFLICT) the
-      // status is intentionally NOT reset — a prior finalize stands.
-      `INSERT INTO specs (section, title, source, library_id, origin_meta, onboarding_status)
-       VALUES ($1, $2, $3, $4, $5::jsonb, 'review')
-       ON CONFLICT (section, source, library_id) WHERE library_id IS NOT NULL DO UPDATE
-         SET title = EXCLUDED.title,
-             updated_at = now(),
-             content_version = specs.content_version + 1,
-             origin_meta = COALESCE(EXCLUDED.origin_meta, specs.origin_meta)
-       RETURNING id`,
-      [
-        result.tree.section,
-        result.tree.title,
-        source,
-        libraryId,
-        result.originMeta ? JSON.stringify(result.originMeta) : null,
-      ]
+    const specId = await upsertParsedSpecRow(
+      result.tree,
+      result.originMeta,
+      source,
+      libraryId,
+      client
     );
-    const specId = res.rows[0]?.id;
-    if (!specId) throw new DatabaseError('upsert spec returned no id');
     await client.query(`DELETE FROM spec_references WHERE source_spec_id = $1`, [specId]);
     await client.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);
     const treeWithId: SpecTree = { ...result.tree, id: specId };
