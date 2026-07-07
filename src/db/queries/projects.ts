@@ -1,5 +1,6 @@
 import { DatabaseError } from '../errors.js';
 import type { Pool, PoolClient } from 'pg';
+import { assertClientExists } from './clients.js';
 import type { LibraryTier } from './libraries.js';
 import { SECTION_NUMBER_FORMATS } from '../../lib/section-number.js';
 import type { SectionNumberFormat } from '../../lib/section-number.js';
@@ -61,6 +62,10 @@ export interface ProjectSummary {
   readonly projectId: string;
   readonly name: string;
   readonly description: string | null;
+  /** Associated client (ADR-054), or null when the project has no client. */
+  readonly clientId: string | null;
+  /** Associated client's name, denormalized for list ergonomics; null when unassociated. */
+  readonly clientName: string | null;
   readonly sources: readonly ProjectSource[];
 }
 
@@ -153,7 +158,15 @@ export async function createProject(
       tier: lib.tier,
       priority: i + 1,
     }));
-    return { projectId: row.id, name: row.name, description: row.description, sources };
+    // A newly created project has no client association (set later via PATCH /projects).
+    return {
+      projectId: row.id,
+      name: row.name,
+      description: row.description,
+      clientId: null,
+      clientName: null,
+      sources,
+    };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError('createProject: insert failed', { cause: err });
@@ -332,26 +345,31 @@ export async function findSoleProjectSectionNumberFormat(
 export interface UpdateProjectInput {
   readonly name?: string;
   readonly sectionNumberFormat?: SectionNumberFormat;
+  /** Absent = leave association unchanged; null = disassociate; uuid = associate (ADR-054). */
+  readonly clientId?: string | null;
 }
 
 export interface UpdateProjectResult {
   readonly id: string;
   readonly name: string;
   readonly sectionNumberFormat: SectionNumberFormat;
+  readonly clientId: string | null;
 }
 
-/**
- * Partial update of a project's mutable settings. At least one field must be
- * provided; only provided fields are SET. Returns null when the project does
- * not exist (→ 404 at the handler).
- */
-export async function updateProject(
+interface UpdateProjectRow {
+  readonly id: string;
+  readonly name: string;
+  readonly section_number_format: string;
+  readonly client_id: string | null;
+}
+
+/** Build the ordered SET clauses + params for the provided fields (id is always $1). */
+function buildProjectUpdate(
   id: string,
-  input: UpdateProjectInput,
-  pool: Queryable
-): Promise<UpdateProjectResult | null> {
+  input: UpdateProjectInput
+): { setClauses: string[]; params: (string | null)[] } {
   const setClauses: string[] = ['updated_at = now()'];
-  const params: string[] = [id];
+  const params: (string | null)[] = [id];
   if (input.name !== undefined) {
     params.push(input.name);
     setClauses.push(`name = $${params.length}`);
@@ -360,19 +378,37 @@ export async function updateProject(
     params.push(input.sectionNumberFormat);
     setClauses.push(`section_number_format = $${params.length}`);
   }
-  const sql = `UPDATE projects SET ${setClauses.join(', ')} WHERE id = $1 RETURNING id, name, section_number_format`;
+  if (input.clientId !== undefined) {
+    params.push(input.clientId);
+    setClauses.push(`client_id = $${params.length}`);
+  }
+  return { setClauses, params };
+}
+
+/**
+ * Partial update of a project's mutable settings. At least one field must be
+ * provided; only provided fields are SET. A non-null `clientId` is validated to
+ * exist first (→ ClientNotFoundError → 422), so an unknown client is a clean 422
+ * rather than a raw FK error; `clientId: null` disassociates. Returns null when
+ * the project does not exist (→ 404 at the handler).
+ */
+export async function updateProject(
+  id: string,
+  input: UpdateProjectInput,
+  pool: Queryable
+): Promise<UpdateProjectResult | null> {
+  const { setClauses, params } = buildProjectUpdate(id, input);
+  const sql = `UPDATE projects SET ${setClauses.join(', ')} WHERE id = $1 RETURNING id, name, section_number_format, client_id`;
   try {
-    const { rows } = await pool.query<{
-      id: string;
-      name: string;
-      section_number_format: string;
-    }>(sql, params);
+    if (typeof input.clientId === 'string') await assertClientExists(input.clientId, pool);
+    const { rows } = await pool.query<UpdateProjectRow>(sql, params);
     const row = rows[0];
     if (!row) return null;
     return {
       id: row.id,
       name: row.name,
       sectionNumberFormat: parseSectionNumberFormat(row.section_number_format),
+      clientId: row.client_id,
     };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
