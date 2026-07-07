@@ -22,7 +22,7 @@ describe('examples/web_ui_demo/Start-SpecR.sh', () => {
     const migrateCall = script.indexOf('\nrun_pnpm migrate\n');
 
     expect(script).toContain('DATABASE_URL_WAS_SUPPLIED=');
-    expect(script).toContain('docker compose up -d postgres');
+    expect(script).toContain('docker compose up -d --force-recreate postgres');
     expect(script).toContain('SPECR_DB_HOST_PORT="$port"');
     expect(script).toContain('docker compose version');
     expect(script).toContain(
