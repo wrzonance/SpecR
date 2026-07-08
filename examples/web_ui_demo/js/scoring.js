@@ -330,6 +330,7 @@ export function initScoring(opts) {
     }
     const spec = getSpecs().get(selectedSpecId);
     if (!spec || !spec.tree) {
+      requestGuard.bump(); // invalidate any in-flight fetch — this spec is gone
       showEmptyPane('This spec is no longer loaded in the project.');
       return;
     }
