@@ -53,6 +53,22 @@ describe('summarizeHierarchy', () => {
     });
   });
 
+  it('vanish: a soft-removed subtree is pruned — hidden descendants are not scored or flagged', () => {
+    // Removal sets vanish on one node only (no cascade); the renderers suppress the
+    // whole subtree, so a scored, low-confidence descendant under a removed parent
+    // must NOT surface in the report (it no longer renders).
+    const t = tree([
+      node('p1', 'part', { inference: inf(0.9) }, [
+        node('pr1', 'pr1', { vanish: true, inference: inf(0.9) }, [
+          node('pr2', 'pr2', { inference: inf(0.2) }),
+        ]),
+      ]),
+    ]);
+    const s = summarizeHierarchy(t, 'unknown');
+    expect(s.counts).toEqual({ scored: 1, unscored: 0, belowThreshold: 0 });
+    expect(s.lowConfidence).toEqual([]);
+  });
+
   it('unscoredReason absent when everything is scored', () => {
     const t = tree([node('p1', 'part', { inference: inf(0.9) })]);
     expect(summarizeHierarchy(t, 'unknown').unscoredReason).toBeUndefined();

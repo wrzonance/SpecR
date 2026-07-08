@@ -26,8 +26,7 @@ export interface HierarchySummary {
   readonly lowConfidence: readonly HierarchyLowConfidenceEntry[];
 }
 
-// Non-structural node types are never scored (same skip-set the renderers use);
-// vanish nodes are skipped via the meta flag.
+// Non-structural node types are never scored (same skip-set the renderers use).
 const NON_STRUCTURAL = new Set<NodeType>(['spec', 'note', 'continuation']);
 
 const EXPLICIT_STRUCTURE_REASON = 'explicit structure from source markup — no inference to score';
@@ -64,7 +63,12 @@ function tally(n: SpecNode, acc: Acc, threshold: number): void {
 
 function walk(nodes: readonly SpecNode[], acc: Acc, threshold: number): void {
   for (const n of nodes) {
-    if (!NON_STRUCTURAL.has(n.type) && n.meta.vanish !== true) {
+    // A soft-removed (vanish) node hides its ENTIRE subtree in the owner-facing
+    // renderers, and removal never cascades the flag to descendants — so prune the
+    // whole subtree here rather than scoring/flagging paragraphs that no longer
+    // render (matches reporting.ts's "vanish ∪ descendants" exclusion).
+    if (n.meta.vanish === true) continue;
+    if (!NON_STRUCTURAL.has(n.type)) {
       tally(n, acc, threshold);
     }
     walk(n.children, acc, threshold);
