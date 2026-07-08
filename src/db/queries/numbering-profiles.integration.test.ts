@@ -227,6 +227,28 @@ describe('setSpecNumberingProfile / clearSpecNumberingProfile', () => {
     expect(effective?.tiers.part.maxCount).toBe(5);
   });
 
+  it("(#366) race: profile deleted after the pre-check yields 'profile-not-found' (→404), not 'library-mismatch' (→409)", async () => {
+    // Simulate the delete-after-precheck race at the query boundary: the handler
+    // pre-checks the profile, then it is deleted before this UPDATE runs. The
+    // EXISTS scope predicate now matches zero rows (no 23503 thrown), so the
+    // zero-row disambiguation must recognise the profile is gone (→404) rather
+    // than blaming library scope (→409). The profile is same-library, so absent
+    // the deletion it would bind cleanly ('assigned').
+    const lib = await createLibrary({ tier: 'client', name: 'np-test-race-del' });
+    const profile = await createNumberingProfile(lib.id, 'Doomed Profile', MINIMAL_RULES);
+    const specId = await createSpec({
+      section: '07 21 23',
+      title: 'np-test-race-spec',
+      source: 'arcat',
+      libraryId: lib.id,
+    });
+
+    expect(await deleteNumberingProfile(profile.id)).toBe(true);
+
+    const outcome = await setSpecNumberingProfile(specId, profile.id);
+    expect(outcome).toBe('profile-not-found');
+  });
+
   it('(#317) allows assigning the built-in CSI Default to any library’s spec', async () => {
     const lib = await createLibrary({ tier: 'client', name: 'np-test-builtin-assign' });
     const spec = await createSpec({

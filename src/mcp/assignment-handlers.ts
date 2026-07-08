@@ -37,12 +37,19 @@ export async function handleAssignStyleSource(args: unknown): Promise<ToolResult
     if (!template) return toolError(`template not found: id=${templateId}`);
     const outcome = await setSpecStyleSource(specId, templateId);
     if (outcome === 'spec-not-found') return toolError(`spec not found: id=${specId}`);
+    if (outcome === 'template-not-found') {
+      // Race: template deleted between the pre-check and the UPDATE (#366); the
+      // EXISTS predicate matched zero rows, so surface it as not-found, not a scope error.
+      return toolError(`template not found: id=${templateId}`);
+    }
     if (outcome === 'library-mismatch') {
       return toolError('style template belongs to a different library than the spec');
     }
     return ok({ templateId, templateName: template.name });
   } catch (err) {
-    // Race: template deleted between the pre-check and the UPDATE → 23503 FK violation.
+    // Backstop for the same race in its ultra-narrow window: EXISTS (statement
+    // snapshot) still sees the template but the RI FK trigger finds it gone → 23503.
+    // The common race is handled by 'template-not-found' above (#366).
     if (getPgCode(err) === '23503') return toolError(`template not found: id=${templateId}`);
     logger.error({ err }, 'mcp tool assign_style_source failed');
     return toolError('Internal error — style source assign failed');
@@ -79,11 +86,22 @@ export async function handleAssignNumberingProfile(args: unknown): Promise<ToolR
     if (!profile) return toolError(`numbering profile not found: id=${profileId}`);
     const outcome = await setSpecNumberingProfile(specId, profileId);
     if (outcome === 'spec-not-found') return toolError(`spec not found: id=${specId}`);
+    if (outcome === 'profile-not-found') {
+      // Race: profile deleted between the pre-check and the UPDATE (#366); the
+      // EXISTS predicate matched zero rows, so surface it as not-found, not a scope error.
+      return toolError(`numbering profile not found: id=${profileId}`);
+    }
     if (outcome === 'library-mismatch') {
       return toolError('numbering profile belongs to a different library than the spec');
     }
     return ok({ profileId, name: profile.name });
   } catch (err) {
+    // Backstop for the same race in its ultra-narrow window: EXISTS (statement
+    // snapshot) still sees the profile but the RI FK trigger finds it gone → 23503.
+    // The common race is handled by 'profile-not-found' above (#366) — mirrors the
+    // assign_style_source backstop so both tools honour the concurrent-delete 404.
+    if (getPgCode(err) === '23503')
+      return toolError(`numbering profile not found: id=${profileId}`);
     logger.error({ err }, 'mcp tool assign_numbering_profile failed');
     return toolError('Internal error — numbering profile assign failed');
   }

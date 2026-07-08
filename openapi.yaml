@@ -905,10 +905,11 @@ paths:
         masters carry no adopted visual style, so this is the narrowest useful
         slice of #125's style sources. Both the spec and the template must
         already exist — either missing → 404 (pre-checked, never via the FK error).
-        A template assigned to any spec cannot be deleted (DELETE /templates/{id}
-        → 409). Library scoping (#318): the template must be a built-in / global
-        template (`libraryId: null`) or owned by the spec's own library; a template
-        from another library is rejected with 409.
+        A template concurrently deleted during assignment is also reported as 404,
+        not a scope conflict (#366). A template assigned to any spec cannot be
+        deleted (DELETE /templates/{id} → 409). Library scoping (#318): the template
+        must be a built-in / global template (`libraryId: null`) or owned by the
+        spec's own library; a template from another library is rejected with 409.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -3999,9 +4000,11 @@ paths:
         Associates an existing numbering profile with the spec so the parser
         uses it as a deterministic numbering override (#299). One profile per
         spec; re-assigning replaces the previous one. Both the spec and the
-        profile must exist (either missing → 404, pre-checked). Library scoping:
-        the profile must be the built-in CSI Default or owned by the spec's own
-        library; a profile from another library is rejected with 409.
+        profile must exist (either missing → 404, pre-checked; a profile
+        concurrently deleted during assignment is also reported as 404, not a
+        scope conflict, #366). Library scoping: the profile must be the built-in
+        CSI Default or owned by the spec's own library; a profile from another
+        library is rejected with 409.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
