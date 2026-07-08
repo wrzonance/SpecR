@@ -68,7 +68,7 @@ interface Acc {
 type LabelCtx =
   | { readonly kind: 'part'; readonly index: number }
   | { readonly kind: 'article'; readonly index: number; readonly partNumber: number }
-  | { readonly kind: 'pr'; readonly index: number; readonly depth: number };
+  | { readonly kind: 'pr'; readonly index: number };
 
 function computeLabel(ctx: LabelCtx, nodeType: NodeType): string {
   if (ctx.kind === 'part') return getLabel('part', ctx.index);
@@ -84,11 +84,10 @@ function childContext(ctx: LabelCtx): (index: number) => LabelCtx {
     const partNumber = ctx.index + 1;
     return (index) => ({ kind: 'article', index, partNumber });
   }
-  if (ctx.kind === 'article') {
-    return (index) => ({ kind: 'pr', index, depth: 0 });
-  }
-  const depth = ctx.depth + 1;
-  return (index) => ({ kind: 'pr', index, depth });
+  // Article and pr tiers both descend into pr-tier children (position-based, like
+  // renderArticle/renderPrNode); a pr label needs only its index + node type, never
+  // a depth — so both cases share one pr-context factory.
+  return (index) => ({ kind: 'pr', index });
 }
 
 function previewText(text: string): string {
@@ -154,6 +153,12 @@ function visitNode(node: SpecNode, ctx: LabelCtx, acc: Acc, threshold: number): 
   // hierarchy-summary.ts's prune and the markdown renderer's vanish short-circuit.
   if (node.meta.vanish) return;
   if (NON_STRUCTURAL.has(node.type)) {
+    // Recurse for COUNT parity with hierarchy-summary.ts (it recurses into all
+    // non-vanished children), passing ctx unchanged. INVARIANT: this is only safe
+    // because parsers emit note/continuation with children:[] and 'spec' never
+    // appears in tree.parts, so no *structural* child ever inherits this constant
+    // ctx — which would otherwise collide labels. Give real child contexts if that
+    // parser invariant ever changes.
     walkSiblings(node.children, () => ctx, acc, threshold);
     return;
   }
