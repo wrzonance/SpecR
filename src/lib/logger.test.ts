@@ -22,6 +22,13 @@ describe('logger', () => {
 
     expect(logger.level).toBe(config.LOG_LEVEL);
   });
+
+  it('closeLogger resolves as a no-op when logging to stdout (no transport worker)', async () => {
+    // In the test env there is no file transport, so closeLogger must not try to
+    // end/await a non-existent worker — it has to resolve immediately.
+    const { closeLogger } = await import('./logger.js');
+    await expect(closeLogger()).resolves.toBeUndefined();
+  });
 });
 
 const base = {

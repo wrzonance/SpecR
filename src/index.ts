@@ -1,6 +1,6 @@
 import express from 'express';
 import { config } from './lib/env.js';
-import { logger } from './lib/logger.js';
+import { logger, closeLogger } from './lib/logger.js';
 import { pool } from './db/index.js';
 import { router } from './api/router.js';
 import { errorHandler } from './api/middleware/error.js';
@@ -30,7 +30,13 @@ async function shutdown(): Promise<void> {
   server.close();
   await pool.end();
   logger.info('shutdown complete');
-  process.exit(0);
+  // Drain the file-transport worker (if any) so buffered JSONL lines survive
+  // exit; always terminate even if the flush itself fails.
+  try {
+    await closeLogger();
+  } finally {
+    process.exit(0);
+  }
 }
 
 process.on('SIGTERM', () => {

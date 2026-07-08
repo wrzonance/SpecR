@@ -78,7 +78,15 @@ logrotate later as a config, not code, change).
 
 - **P0** — file sink (1) + child logger (2) + warning surfacing (3).
 - **P1** — failure taxonomy (4) + swallow→warning conversion (5).
-- **P2 (deferred, follow-on ADR/PR)** — a per-document `logs/parse-diagnostics-<runId>.jsonl`
+- **P2 (deferred, follow-on ADR/PR)** — _first item:_ **carry the underlying error
+  cause on `ParseWarning`.** Today the `core-metadata-unreadable` warning (and the
+  swallow→warning conversions below) discards the caught error and emits only a static
+  `suggestion` string — so a corrupt-`core.xml` reports _that_ it failed but not _why_
+  (malformed tag, encoding, truncation). Extend the `ParseWarning` shape
+  (`src/ast/types.ts` + `src/ast/schemas.ts`, and the `openapi.yaml` schema) with an
+  optional `detail`/`cause` field and bind the caught error into it at each conversion
+  site. Deferred here because it is an AST/contract change beyond this PR's boundary-only
+  scope. Also in P2: a per-document `logs/parse-diagnostics-<runId>.jsonl`
   (`outcome: clean|warnings|failed` per file — the DLQ/quarantine record the autonomous
   loop tails, modelled on `lib/fixture-snapshot.ts`'s Zod'd record shape); the
   `inferSectionMeta` and PDF cause-summary swallow→warning conversions (worker-boundary
@@ -103,6 +111,15 @@ logrotate later as a config, not code, change).
   (contract gate + ADR-044 MCP parity).
 - No change to the AST itself or to inference behaviour — existing parser/inference tests
   stay green; this is additive observability.
+- **Retention & redaction.** The per-document child logger binds the user/document-supplied
+  `filename` under an app-controlled `doc` key (so it can never overwrite reserved pino
+  fields), and this value now lands in durable JSONL rather than only ephemeral stdout.
+  Retention is bounded by `pino-roll`'s rotation (`size: 20m` + `frequency: daily`) — logs
+  do not grow unbounded. Spec filenames are document names, not secrets or PII, so no
+  redaction is applied by default; a deployment that considers filenames sensitive can add
+  a pino `redact` path for `doc.filename` (part of the deferred `redact`/serializer config
+  in P2). Graceful shutdown drains the transport worker (`closeLogger` in `logger.ts`,
+  awaited in `index.ts`) so buffered lines are not lost on exit.
 
 ## Invariants (become the tests)
 
