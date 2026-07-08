@@ -242,6 +242,13 @@ describe('parseDocx — error handling', () => {
     );
   });
 
+  it('throws ParserError with DOCX_ARCHIVE_UNREADABLE code on a non-zip buffer', async () => {
+    await expect(parseDocx(Buffer.from('not a zip'), () => {})).rejects.toMatchObject({
+      name: 'ParserError',
+      code: 'DOCX_ARCHIVE_UNREADABLE',
+    });
+  });
+
   it('throws ParserError when word/styles.xml missing', async () => {
     const buffer = await makeDocx({ omitStyles: true });
     await expect(parseDocx(buffer)).rejects.toThrow('DOCX missing word/styles.xml');
@@ -279,6 +286,15 @@ describe('parseDocx — error handling', () => {
   it('uses unknown for section/title when docProps absent', async () => {
     const buffer = await makeDocx({});
     const tree = await parseDocx(buffer);
+    expect(tree.section).toBe('unknown');
+    expect(tree.title).toBe('unknown');
+  });
+
+  it('emits core-metadata-unreadable warning when docProps/core.xml is malformed', async () => {
+    // Otherwise-valid docx (default MINIMAL_DOC/MINIMAL_STYLES) — only core.xml is broken.
+    const buffer = await makeDocx({ coreXml: '<<<not xml' });
+    const tree = await parseDocx(buffer);
+    expect(tree.warnings?.some((w) => w.type === 'core-metadata-unreadable')).toBe(true);
     expect(tree.section).toBe('unknown');
     expect(tree.title).toBe('unknown');
   });

@@ -58,6 +58,13 @@ describe('assertDocxSafe — non-zip rejection', () => {
   it('rejects an empty buffer', async () => {
     await expect(assertDocxSafe(Buffer.alloc(0))).rejects.toThrow('not a zip');
   });
+
+  it('codes a non-zip buffer as DOCX_ARCHIVE_UNREADABLE — the safety gate runs before parseDocx', async () => {
+    await expect(assertDocxSafe(Buffer.from('not a zip'))).rejects.toMatchObject({
+      name: 'ParserError',
+      code: 'DOCX_ARCHIVE_UNREADABLE',
+    });
+  });
 });
 
 describe('assertDocxSafe — structural rejection', () => {

@@ -32,6 +32,7 @@ import { workerOutputSchema, type WorkerOutput } from '../lib/parse-worker.js';
 import { summarizeEditability } from './onboarding-report.js';
 import { summarizeHierarchy } from '../lib/hierarchy-summary.js';
 import { logger } from '../lib/logger.js';
+import { parseLog, logParseWarnings } from '../lib/log-context.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
@@ -237,8 +238,19 @@ async function processOnboardingJob(
   libraryId: string,
   filename: string
 ): Promise<void> {
+  // Hashed once, up front, so the success child logger AND the failure catch below
+  // share the same sha256 — no double-hashing (the catch fires before persist).
+  const docFields = {
+    filename: sanitizeFilename(filename),
+    sha256: sha256Hex(buffer),
+    loader: 'rest:onboarding',
+    jobId,
+  };
+  let specId: string | undefined;
   try {
-    const { specId, tree } = await runParseAndPersist(jobId, buffer, ext, libraryId, filename);
+    const persisted = await runParseAndPersist(jobId, buffer, ext, libraryId, filename);
+    specId = persisted.specId;
+    const { tree } = persisted;
     const style = await deriveStyleIfDocx(jobId, buffer, ext, specId, tree.section, libraryId);
     const summaries = await classifyAndSummarize(jobId, specId);
     const report: OnboardingReport = {
@@ -248,6 +260,7 @@ async function processOnboardingJob(
       hierarchy: summaries.hierarchy,
       parseWarnings: tree.warnings ?? [],
     };
+    logParseWarnings(parseLog({ ...docFields, specId }), tree.warnings ?? []);
     const result: OnboardingJobResult = {
       specId,
       section: tree.section,
@@ -258,7 +271,9 @@ async function processOnboardingJob(
     };
     updateOnboardingJob(jobId, { status: 'complete', stage: 'complete', pct: 100, result });
   } catch (err) {
-    logger.error({ err, jobId }, 'onboarding job failed');
+    // specId is set once runParseAndPersist resolves; a failure before that point
+    // (e.g. worker parse error) still has no spec yet, so it is omitted.
+    parseLog(specId ? { ...docFields, specId } : docFields).error({ err }, 'onboarding job failed');
     // Set the terminal stage too, so a polling client never sees status:'failed'
     // stranded on the last running stage (e.g. 'deriving-style').
     updateOnboardingJob(jobId, {

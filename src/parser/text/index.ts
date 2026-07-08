@@ -45,6 +45,10 @@ const WARNING_SUGGESTIONS: Readonly<Record<ParseWarningType, string>> = {
   // Emitted via the shared auditPartNumbering helper (not makeWarning), but the record is
   // exhaustive over ParseWarningType — keep the single source of truth for the suggestion.
   'non-conforming-part-numbering': NON_CONFORMING_PART_SUGGESTION,
+  // Emitted directly by the DOCX parser (docx/index.ts parseCoreMetadata), not via
+  // makeWarning — the record stays exhaustive over ParseWarningType regardless of origin.
+  'core-metadata-unreadable':
+    'docProps/core.xml could not be parsed; section/title fell back to content inference.',
   'pdf-degraded-extraction':
     'Primary PDF text extraction was incomplete or failed, so the low-level fallback extractor was used.',
   'pdf-ocr-applied':

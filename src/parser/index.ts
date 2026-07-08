@@ -155,5 +155,5 @@ export async function parse(
   if (ext === '.docx') return parseDocxBuffer(buffer, options);
   if (ext === '.txt') return parseTxtBuffer(buffer);
   if (ext === '.pdf') return parsePdfBuffer(buffer, options);
-  throw new ParserError(`unsupported format: ${ext}`);
+  throw new ParserError(`unsupported format: ${ext}`, { code: 'UNSUPPORTED_FORMAT' });
 }

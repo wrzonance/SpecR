@@ -5,6 +5,10 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   NODE_ENV: z.enum(['development', 'test', 'production']),
   LOG_LEVEL: z.string().default('info'),
+  LOG_DIR: z.string().default('logs'),
+  // When true, tee logs to a rotating JSONL file under LOG_DIR (pino-roll). Off by
+  // default so tests/CI stay stdout-only; the corpus runner sets it true.
+  LOG_TO_FILE: z.stringbool().default(false),
   OCR_MIN_CHARS_PER_PAGE: z.coerce.number().int().positive().default(16),
   OCR_LOW_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(100).default(70),
   OCR_LANG_PATH: z.string().min(1).optional(),

@@ -48,6 +48,9 @@ docs/references/UFGS/**/*.docx
 # Test output
 coverage/
 
+# Rotating JSONL log files (pino-roll; see src/lib/logger.ts)
+logs/
+
 # Temporary/working files
 tmp/
 *.tmp

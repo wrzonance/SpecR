@@ -12,7 +12,7 @@ import {
   mergeProfileConflicts,
   extractNumberingProfile,
 } from './numbering-profile.js';
-import type { SpecTree, StyleProperties } from '../../ast/types.js';
+import type { ParseWarning, SpecTree, StyleProperties } from '../../ast/types.js';
 import type { NumberingProfile } from '../../ast/index.js';
 import type { NumberingMap, StyleMap, ClassifiedParagraph, DocxParagraph } from './types.js';
 import { resolveStyleCascade } from './resolver.js';
@@ -29,7 +29,11 @@ const coreParser = new XMLParser({
   textNodeName: '#text',
 });
 
-function parseCoreMetadata(xml: string): { section: string; title: string } {
+function parseCoreMetadata(xml: string): {
+  section: string;
+  title: string;
+  warning?: ParseWarning;
+} {
   try {
     const parsed = coreParser.parse(xml) as Record<string, unknown>;
     const props = parsed['cp:coreProperties'] as Record<string, unknown> | undefined;
@@ -46,7 +50,17 @@ function parseCoreMetadata(xml: string): { section: string; title: string } {
       title: typeof titleVal === 'string' && titleVal.trim() ? titleVal.trim() : 'unknown',
     };
   } catch {
-    return { section: 'unknown', title: 'unknown' };
+    // Corrupt/unparseable core.xml previously degraded silently to 'unknown'.
+    // Surface it as a tree warning so it flows to logs/API/MCP responses instead.
+    return {
+      section: 'unknown',
+      title: 'unknown',
+      warning: {
+        type: 'core-metadata-unreadable',
+        suggestion:
+          'docProps/core.xml could not be parsed; section/title fell back to content inference.',
+      },
+    };
   }
 }
 
@@ -125,13 +139,15 @@ function runPipeline(
   // Section/title from core.xml only; when absent, the parse() orchestrator's
   // inferSectionMeta (lib/infer-section.ts) recovers them from tree content
   // with method/confidence reporting — do not duplicate that here.
-  const meta = entries.coreXml
+  const meta: { section: string; title: string; warning?: ParseWarning } = entries.coreXml
     ? parseCoreMetadata(entries.coreXml)
     : { section: 'unknown', title: 'unknown' };
 
   onProgress?.('complete', 100);
   const tree = buildTree(classified, meta.section, meta.title, source);
-  const warnings = auditTreeStructure(tree.parts);
+  const structuralWarnings = auditTreeStructure(tree.parts);
+  // core-metadata-unreadable fires at most once per parse — appended, not deduped.
+  const warnings = meta.warning ? [...structuralWarnings, meta.warning] : structuralWarnings;
   return warnings.length > 0 ? { ...tree, warnings } : tree;
 }
 
@@ -152,7 +168,7 @@ function parseParagraphsOrThrow(
 ): readonly DocxParagraph[] {
   const paragraphs = parseDocument(documentXml, numberingMap, styleMap, commentsById);
   if (paragraphs.length === 0) {
-    throw new ParserError('document contains no paragraphs');
+    throw new ParserError('document contains no paragraphs', { code: 'DOCX_NO_PARAGRAPHS' });
   }
   return paragraphs;
 }
@@ -270,11 +286,18 @@ export async function analyzeDocxStyles(buffer: Buffer): Promise<DocxStyleAnalys
   try {
     zip = await JSZip.loadAsync(buffer);
   } catch (err) {
-    throw new ParserError('failed to read DOCX archive', { cause: err });
+    throw new ParserError('failed to read DOCX archive', {
+      code: 'DOCX_ARCHIVE_UNREADABLE',
+      cause: err,
+    });
   }
   const { numberingXml, stylesXml, documentXml, themeXml } = await extractEntries(zip);
-  if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
-  if (!documentXml) throw new ParserError('DOCX missing word/document.xml');
+  if (!stylesXml) {
+    throw new ParserError('DOCX missing word/styles.xml', { code: 'DOCX_MISSING_STYLES' });
+  }
+  if (!documentXml) {
+    throw new ParserError('DOCX missing word/document.xml', { code: 'DOCX_MISSING_DOCUMENT' });
+  }
   const { classified } = buildClassification({ numberingXml, stylesXml, documentXml });
   return {
     classified,
@@ -291,14 +314,21 @@ export async function parseDocx(
   try {
     zip = await JSZip.loadAsync(buffer);
   } catch (err) {
-    throw new ParserError('failed to read DOCX archive', { cause: err });
+    throw new ParserError('failed to read DOCX archive', {
+      code: 'DOCX_ARCHIVE_UNREADABLE',
+      cause: err,
+    });
   }
 
   onProgress?.('extracting', 10);
   const { numberingXml, stylesXml, documentXml, commentsXml, coreXml } = await extractEntries(zip);
 
-  if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
-  if (!documentXml) throw new ParserError('DOCX missing word/document.xml');
+  if (!stylesXml) {
+    throw new ParserError('DOCX missing word/styles.xml', { code: 'DOCX_MISSING_STYLES' });
+  }
+  if (!documentXml) {
+    throw new ParserError('DOCX missing word/document.xml', { code: 'DOCX_MISSING_DOCUMENT' });
+  }
 
   return runPipeline(
     { numberingXml, stylesXml, documentXml, commentsXml, coreXml },
@@ -317,10 +347,15 @@ export async function extractNumberingProfileFromDocx(buffer: Buffer): Promise<N
   try {
     zip = await JSZip.loadAsync(buffer);
   } catch (err) {
-    throw new ParserError('failed to read DOCX archive', { cause: err });
+    throw new ParserError('failed to read DOCX archive', {
+      code: 'DOCX_ARCHIVE_UNREADABLE',
+      cause: err,
+    });
   }
   const { numberingXml, stylesXml } = await extractEntries(zip);
-  if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
+  if (!stylesXml) {
+    throw new ParserError('DOCX missing word/styles.xml', { code: 'DOCX_MISSING_STYLES' });
+  }
   const numberingMap = numberingXml ? buildNumberingMap(numberingXml) : emptyNumberingMap();
   const styleMap = buildStyleMap(stylesXml);
   const articleIlvl = detectArticleIlvl(styleMap, numberingMap);

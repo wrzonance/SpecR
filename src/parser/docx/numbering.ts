@@ -149,7 +149,10 @@ export function buildNumberingMap(xml: string): NumberingMap {
   try {
     parsed = xmlParser.parse(xml);
   } catch (err) {
-    throw new ParserError('failed to parse numbering.xml', { cause: err });
+    throw new ParserError('failed to parse numbering.xml', {
+      code: 'NUMBERING_XML_INVALID',
+      cause: err,
+    });
   }
   const root = (parsed as Record<string, unknown>)['w:numbering'] as
     | Record<string, unknown>

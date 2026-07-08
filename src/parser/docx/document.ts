@@ -214,14 +214,21 @@ export function parseDocument(
   try {
     parsed = xmlParser.parse(xml);
   } catch (err) {
-    throw new ParserError('failed to parse word/document.xml', { cause: err });
+    throw new ParserError('failed to parse word/document.xml', {
+      code: 'DOCX_MISSING_DOCUMENT',
+      cause: err,
+    });
   }
 
   const doc = (parsed as Record<string, unknown>)['w:document'] as
     | Record<string, unknown>
     | undefined;
   const body = doc?.['w:body'] as Record<string, unknown> | undefined;
-  if (!body) throw new ParserError('word/document.xml missing w:body element');
+  if (!body) {
+    throw new ParserError('word/document.xml missing w:body element', {
+      code: 'DOCX_MISSING_DOCUMENT',
+    });
+  }
 
   const paragraphSources = parseParagraphSources(xml, commentsById);
   return toArray<Record<string, unknown>>(

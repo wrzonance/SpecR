@@ -202,7 +202,7 @@ export function buildStyleMap(xml: string): StyleMap {
   try {
     parsed = xmlParser.parse(xml);
   } catch (err) {
-    throw new ParserError('failed to parse styles.xml', { cause: err });
+    throw new ParserError('failed to parse styles.xml', { code: 'STYLES_XML_INVALID', cause: err });
   }
 
   const root = (parsed as Record<string, unknown>)['w:styles'] as

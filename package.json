@@ -43,6 +43,7 @@
     "pdfjs-dist": "^6.0.227",
     "pg": "^8.20.0",
     "pino": "^10.3.1",
+    "pino-roll": "^4.0.0",
     "piscina": "^5.1.4",
     "tesseract.js": "^7.0.0",
     "unpdf": "^1.6.2",
