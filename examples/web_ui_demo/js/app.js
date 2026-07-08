@@ -7,6 +7,7 @@
 import {
   checkHealth,
   getSpecTree,
+  getHierarchyReport,
   getOutboundReferences,
   deleteParagraph,
   setParagraphRemoved,
@@ -46,6 +47,7 @@ import { initCompare } from './compare.js';
 import { initDropzone } from './dropzone.js';
 import { initRefPopover } from './popover.js';
 import { initAudit } from './audit.js';
+import { initScoring } from './scoring.js';
 import { initEditor } from './editor.js';
 import { initConstellation } from './constellation.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
@@ -62,6 +64,7 @@ let projects = [];
 let currentView = 'map';
 let numberingPanel = null; // numbering-profile workspace controller (initNumbering)
 let audit = null; // live coordination audit view controller (initAudit, ADR-041)
+let scoringPanel = null; // per-paragraph hierarchy-scoring view controller (initScoring, WS2/#424)
 let composePanel = null; // agent-driven grounded reporting controller (initCompose, #353)
 let comparePanel = null; // deterministic side-by-side comparison controller (initCompare, #385)
 let editorPanel = null; // full-page document editor controller (initEditor, #369)
@@ -163,6 +166,7 @@ function showView(view) {
   // opening the tab just needs a height re-measure. (A refetch here would wipe
   // the current finding selection and desync the two panes.)
   if (view === 'report') audit?.fit();
+  if (view === 'scoring') scoringPanel?.refresh();
   if (view === 'editor') editorPanel?.refresh();
   if (view === 'constellation') constellationPanel?.refresh();
   updateAddFabVisibility();
@@ -2517,6 +2521,29 @@ async function boot() {
     renderSheet: (spec, onRefNavigate) =>
       renderSpecSheet(spec, { displaySection, statusFor, onLibraryRef, onNavigate: onRefNavigate }),
     displaySection,
+  });
+  scoringPanel = initScoring({
+    specSelect: document.getElementById('scoring-spec-select'),
+    filtersEl: document.getElementById('scoring-filters'),
+    summaryEl: document.getElementById('scoring-summary'),
+    rowsEl: document.getElementById('scoring-rows-body'),
+    specPane: document.getElementById('scoring-spec-pane'),
+    specTitleEl: document.getElementById('scoring-spec-title'),
+    specHintEl: document.getElementById('scoring-spec-hint'),
+    split: document.getElementById('scoring-split'),
+    getSpecs: () => specs,
+    fetchHierarchyReport: getHierarchyReport,
+    // Read-only sheet: no edit/remove/toc callbacks; a citation click falls
+    // back to the same cross-reference jump every other read-only sheet uses.
+    renderSheet: (spec) =>
+      renderSpecSheet(spec, {
+        displaySection,
+        statusFor,
+        onLibraryRef,
+        onNavigate: navigateToSection,
+      }),
+    displaySection,
+    toast,
   });
   numberingPanel = initNumbering({ getLibraries: () => libraries, toast });
   initChat({ onFocus: applyFocus });
