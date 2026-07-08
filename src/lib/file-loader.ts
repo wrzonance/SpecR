@@ -106,10 +106,12 @@ async function processFile(
   const result = await parse(buffer, file);
   const fw = fileParseWarnings(file, result.tree);
   logParseWarnings(log, fw?.warnings ?? []);
+  // Collect before the dry-run return: a preview must still report parse warnings —
+  // surfacing problems before committing is the whole point of dry-run (#422).
+  if (fw) parseWarnings.push(fw);
   if (dryRun) return;
   const originMeta: OriginMeta = { filename: path.basename(file), sha256, loader: 'load_files' };
   const specId = await persistParsedSpec({ ...result, originMeta });
-  if (fw) parseWarnings.push(fw);
   const warning = await buildInferenceWarning(file, specId, result.sectionInference);
   if (warning) inferenceWarnings.push(warning);
 }

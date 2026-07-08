@@ -243,6 +243,19 @@ describe('loadFiles()', () => {
     expect(vi.mocked(logParseWarnings)).toHaveBeenCalledWith(expect.anything(), warnings);
   });
 
+  it('surfaces parse warnings during dryRun — a preview must not hide problems (#422)', async () => {
+    vi.mocked(readFile).mockResolvedValue(mockBuf);
+    const warnings = [{ type: 'unusual-part-count' as const }];
+    vi.mocked(parse).mockResolvedValue({
+      tree: { ...mockTree, warnings },
+      refs: [],
+      sectionInference: contentInference,
+    });
+    const result = await loadFiles(['/a/spec.docx'], { dryRun: true });
+    expect(persistParsedSpec).not.toHaveBeenCalled();
+    expect(result.parseWarnings).toEqual([{ file: '/a/spec.docx', warnings }]);
+  });
+
   it('omits parseWarnings entries for files with no warnings', async () => {
     vi.mocked(readFile).mockResolvedValue(mockBuf);
     vi.mocked(parse).mockResolvedValue({

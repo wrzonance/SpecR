@@ -1,12 +1,26 @@
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import type { Logger } from 'pino';
 
-describe('parseLog', () => {
-  beforeAll(() => {
-    process.env['NODE_ENV'] = 'test';
-    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
-  });
+// These suites import modules that transitively load env.ts, which validates
+// process.env at import time. Set the minimal valid env before the dynamic
+// imports and restore the prior values afterwards, so we never leak
+// NODE_ENV/DATABASE_URL into later test files sharing this Vitest worker.
+const previousNodeEnv = process.env['NODE_ENV'];
+const previousDatabaseUrl = process.env['DATABASE_URL'];
 
+beforeAll(() => {
+  process.env['NODE_ENV'] = 'test';
+  process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+});
+
+afterAll(() => {
+  if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
+  else process.env['NODE_ENV'] = previousNodeEnv;
+  if (previousDatabaseUrl === undefined) delete process.env['DATABASE_URL'];
+  else process.env['DATABASE_URL'] = previousDatabaseUrl;
+});
+
+describe('parseLog', () => {
   it('binds document context under an app-controlled `doc` key', async () => {
     const { parseLog } = await import('./log-context.js');
     const child = parseLog({ filename: 'a.docx', sha256: 'deadbeef', loader: 'load_files' });
@@ -26,11 +40,6 @@ describe('parseLog', () => {
 });
 
 describe('logParseWarnings', () => {
-  beforeAll(() => {
-    process.env['NODE_ENV'] = 'test';
-    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
-  });
-
   it('emits the parse-warning event on the given logger when warnings are present', async () => {
     const { logParseWarnings } = await import('./log-context.js');
     const warn = vi.fn();

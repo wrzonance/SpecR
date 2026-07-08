@@ -43,7 +43,7 @@ mechanism; pino's `err` serializer already walks the `cause` chain and emits an 
 1. **File sink — JSONL to `logs/`, rotated by `pino-roll`.** Reshape `logger.ts` to a
    `pino.transport({ targets })` with (a) stdout/`pino-pretty` as today and (b) a
    `pino/file` (worker-thread) destination wrapped by `pino-roll` (size + daily). Gate
-   the file target behind new `LOG_DIR`/`LOG_FILE` env (Zod-validated in `env.ts`,
+   the file target behind new `LOG_DIR`/`LOG_TO_FILE` env (Zod-validated in `env.ts`,
    fail-fast, disabled in `test`). Add `logs/` to `.gitignore`.
 2. **Per-document child logger.** At each of the four boundaries, derive
    `logger.child({ filename, sha256, loader, specId|jobId })` once and use it for every
@@ -113,7 +113,7 @@ logrotate later as a config, not code, change).
 3. A thrown `ParserError` carrying a `code` serialises that `code` into the log line.
 4. A corrupt `core.xml` produces a `core-metadata-unreadable` `ParseWarning` rather than
    a silent `unknown` (the `inferSectionMeta` swallow is deferred to P2).
-5. With `LOG_FILE` set, a run writes valid JSONL (one object per line) to `logs/`; with
+5. With `LOG_TO_FILE` set, a run writes valid JSONL (one object per line) to `logs/`; with
    the test env, the file target is disabled.
 6. `openapi.yaml`/MCP contract tests stay green after the `parse_document` response gains
    `warnings`.

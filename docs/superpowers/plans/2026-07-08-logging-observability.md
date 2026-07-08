@@ -43,7 +43,7 @@ Confirm before continuing: `pino-roll` license is MIT and publisher is the pino 
 
 - [ ] **Step 2: Add env config (write the failing test first)**
 
-Add to `src/lib/env.test.ts` (create if absent):
+Add to `src/lib/logger.test.ts` (create if absent — keep the options test beside `logger.ts`):
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -322,10 +322,11 @@ async function processFile(
   const result = await parse(buffer, file);
   const fw = fileParseWarnings(file, result.tree);
   if (fw) log.warn({ warnings: fw.warnings }, 'parse produced warnings');
+  // Collect before the dry-run return so a preview still reports warnings (#422).
+  if (fw) parseWarnings.push(fw);
   if (dryRun) return;
   const originMeta: OriginMeta = { filename: path.basename(file), sha256, loader: 'load_files' };
   const specId = await persistParsedSpec({ ...result, originMeta });
-  if (fw) parseWarnings.push(fw);
   const warning = await buildInferenceWarning(file, specId, result.sectionInference);
   if (warning) inferenceWarnings.push(warning);
 }
