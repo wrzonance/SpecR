@@ -16,6 +16,7 @@ import type {
 } from '../../ast/types.js';
 import { classifyLine } from './signals.js';
 import type { LineType } from './signals.js';
+import { auditPartNumbering, NON_CONFORMING_PART_SUGGESTION } from '../part-prefix.js';
 
 type StructuralType = Exclude<LineType, 'blank' | 'header' | 'continuation'>;
 
@@ -41,6 +42,9 @@ const WARNING_SUGGESTIONS: Readonly<Record<ParseWarningType, string>> = {
     'Continuation text appeared before first structural heading and was dropped. Possible noise-prefix bleed; consider whether this line should be a heading.',
   'unusual-part-count':
     'More PART headings than a CSI spec normally has (typically 3). Headings may be over-matched.',
+  // Emitted via the shared auditPartNumbering helper (not makeWarning), but the record is
+  // exhaustive over ParseWarningType — keep the single source of truth for the suggestion.
+  'non-conforming-part-numbering': NON_CONFORMING_PART_SUGGESTION,
   'pdf-degraded-extraction':
     'Primary PDF text extraction was incomplete or failed, so the low-level fallback extractor was used.',
   'pdf-ocr-applied':
@@ -199,6 +203,7 @@ function detectWarnings(result: BuildResult): readonly ParseWarning[] {
   if (result.parts.length === 0) warnings.push(makeWarning('no-structure-found'));
   warnings.push(...detectEmptyPartWarnings(result));
   warnings.push(...detectRootContinuationWarnings(result));
+  warnings.push(...auditPartNumbering(result.parts));
   return warnings;
 }
 

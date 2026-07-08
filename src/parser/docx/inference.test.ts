@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { classifyParagraphs, buildTree } from './inference.js';
+import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
 import { emptyNumberingMap } from './numbering.js';
 import type { ClassifiedParagraph, DocxParagraph, NumberingMap, StyleMap } from './types.js';
-import type { NodeType } from '../../ast/types.js';
+import type { NodeType, SpecNode } from '../../ast/types.js';
 
 function emptyStyleMap(): StyleMap {
   return {
@@ -1047,5 +1047,39 @@ describe('meta.inference (parse-time scoring)', () => {
     expect(indented?.meta.inference?.signalUsed).toBe(5);
     expect(indented?.meta.inference?.confidence).toBeLessThan(0.6);
     expect(indented?.meta.inference?.evidence).toContain('indentation won alone');
+  });
+});
+
+describe('auditTreeStructure — non-conforming part numbering (#316)', () => {
+  const rootPart = (text: string): SpecNode => ({
+    id: text,
+    type: 'part',
+    text,
+    children: [],
+    meta: {},
+  });
+
+  it('warns: PART 1.1 decimal part heading is non-conforming — with lineHint', () => {
+    const warnings = auditTreeStructure([rootPart('PART 1.1 GENERAL'), rootPart('PRODUCTS')]);
+    const nonConforming = warnings.filter((w) => w.type === 'non-conforming-part-numbering');
+    expect(nonConforming).toHaveLength(1);
+    expect(nonConforming[0]?.lineHint).toBe('PART 1.1 GENERAL');
+  });
+
+  it('conforming parts (stripped names) yield no non-conforming-part-numbering warning', () => {
+    const warnings = auditTreeStructure([
+      rootPart('GENERAL'),
+      rootPart('PRODUCTS'),
+      rootPart('EXECUTION'),
+    ]);
+    expect(warnings.some((w) => w.type === 'non-conforming-part-numbering')).toBe(false);
+  });
+
+  it('>5 parts stays owned by unusual-part-count, not the new warning (distinct signals)', () => {
+    const warnings = auditTreeStructure(
+      Array.from({ length: 6 }, (_, i) => rootPart(`NAME ${i + 1}`))
+    );
+    expect(warnings.some((w) => w.type === 'unusual-part-count')).toBe(true);
+    expect(warnings.some((w) => w.type === 'non-conforming-part-numbering')).toBe(false);
   });
 });

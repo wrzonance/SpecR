@@ -87,6 +87,56 @@ describe('parseText — anomaly warnings', () => {
     expect(result.capabilities).not.toContain('parse-warnings');
   });
 
+  it('warns: PART 1.1 decimal part heading is non-conforming — one warning, structure intact', () => {
+    const text = [
+      'SECTION 09 91 00 - PAINTING',
+      'PART 1.1 GENERAL',
+      '1.1 SCOPE',
+      'Hello.',
+      'PART 2 - PRODUCTS',
+      '2.1 MATERIALS',
+      'Materials.',
+    ].join('\n');
+    const result = parseText(text);
+    const nonConforming =
+      result.tree.warnings?.filter((w) => w.type === 'non-conforming-part-numbering') ?? [];
+    expect(nonConforming).toHaveLength(1);
+    expect(nonConforming[0]?.lineHint).toBe('PART 1.1 GENERAL');
+    expect(nonConforming[0]?.suggestion).toMatch(/integers 1–5/);
+    expect(result.capabilities).toContain('parse-warnings');
+    // No structural change vs PR #297: both PART headings still classify as parts.
+    expect(result.tree.parts.filter((p) => p.type === 'part')).toHaveLength(2);
+  });
+
+  it('warns on PART 1.0 (whole-number decimal written with the PART keyword)', () => {
+    const text = ['SECTION 09 91 00 - PAINTING', 'PART 1.0 GENERAL', '1.1 SCOPE', 'Hello.'].join(
+      '\n'
+    );
+    const result = parseText(text);
+    expect(result.tree.warnings?.some((w) => w.type === 'non-conforming-part-numbering')).toBe(
+      true
+    );
+  });
+
+  it('conforming PART 1…PART 3 → no non-conforming-part-numbering warning', () => {
+    const text = [
+      'SECTION 09 91 00 - PAINTING',
+      'PART 1 - GENERAL',
+      '1.1 SCOPE',
+      'Hello.',
+      'PART 2 - PRODUCTS',
+      '2.1 MATERIALS',
+      'Materials.',
+      'PART 3 - EXECUTION',
+      '3.1 INSTALLATION',
+      'Install.',
+    ].join('\n');
+    const result = parseText(text);
+    expect(
+      result.tree.warnings?.some((w) => w.type === 'non-conforming-part-numbering') ?? false
+    ).toBe(false);
+  });
+
   it('capabilities array unchanged on no-anomaly path (still ["read-only"])', () => {
     const text = [
       'SECTION 09 91 00 - PAINTING',

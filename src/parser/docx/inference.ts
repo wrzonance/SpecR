@@ -30,6 +30,7 @@ import {
   planOutlineNumberStrip,
   planLabelStrip,
   rebaseSourceFacts,
+  auditPartNumbering,
 } from '../part-prefix.js';
 
 interface SignalHit {
@@ -426,6 +427,7 @@ export function auditTreeStructure(roots: readonly SpecNode[]): ParseWarning[] {
   }
   const countWarning = partCountWarning(partCount);
   if (countWarning) warnings.push(countWarning);
+  warnings.push(...auditPartNumbering(visible));
   return warnings;
 }
 

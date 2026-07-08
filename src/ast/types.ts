@@ -136,6 +136,7 @@ export type ParseWarningType =
   | 'empty-part'
   | 'no-structure-found'
   | 'unusual-part-count'
+  | 'non-conforming-part-numbering'
   | 'pdf-degraded-extraction'
   | 'pdf-ocr-applied'
   | 'pdf-ocr-low-confidence'

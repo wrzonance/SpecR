@@ -1,4 +1,4 @@
-import type { SourceFacts, SourceColorFact } from '../ast/types.js';
+import type { SourceFacts, SourceColorFact, SpecNode, ParseWarning } from '../ast/types.js';
 
 // Strip a render-derived CSI "PART n -" prefix from a heading's text, leaving
 // only the part name (e.g. "PART 3 - EXECUTION" → "EXECUTION", "PART 1 – GENERAL"
@@ -40,6 +40,49 @@ function matchPartPrefix(text: string): RegExpExecArray | null {
 export function stripPartPrefix(text: string): string {
   const match = matchPartPrefix(text);
   return (match ? text.slice(match[0].length) : text).trim();
+}
+
+// A PART heading whose number is decimal/dotted ("PART 1.1", "PART 1.0") instead of a
+// plain CSI integer (parts are 1–5). stripPartPrefix deliberately LEAVES such a number in
+// the heading text — PART_PREFIX above requires a LETTER after the separators, so a decimal
+// is never consumed (#297) — so a non-conforming number survives into the PART node's text
+// on every parser path (.SEC / text / DOCX) and can be recognized here after the fact.
+// Anchored at ^: a decimal opening the NAME (not the number) can never trip it.
+const NON_CONFORMING_PART_NUMBER = /^\s*PART\s+\d+\.\d/i;
+
+export const NON_CONFORMING_PART_SUGGESTION =
+  "CSI parts are integers 1–5; a decimal PART number (e.g. 'PART 1.1') is likely a numbering error";
+
+/**
+ * True when a PART heading's number is decimal/dotted ("PART 1.1", "PART 1.0") — a
+ * non-conforming CSI part number (#316). False for a conforming "PART 1"/"PART 3", a
+ * bare name ("GENERAL"), or a whole-number "N.0 NAME" convention (which carries no
+ * literal "PART" keyword and is stripped to its name by stripPartPrefix).
+ */
+export function hasNonConformingPartNumber(text: string): boolean {
+  return NON_CONFORMING_PART_NUMBER.test(text);
+}
+
+/**
+ * Surface non-conforming CSI part numbering (#316): one `non-conforming-part-numbering`
+ * ParseWarning per visible top-level PART node whose number is decimal/dotted, with the
+ * offending heading text as the lineHint. Shared by every parser that assembles
+ * SpecTree.warnings (.SEC / text / DOCX). Purely additive — it surfaces the signal that
+ * #297 deliberately leaves in the text and never changes structure. Part *count*
+ * over-match is a separate, orthogonal signal owned by `unusual-part-count`, not folded
+ * in here (a document can trip both independently).
+ */
+export function auditPartNumbering(parts: readonly SpecNode[]): ParseWarning[] {
+  return parts
+    .filter(
+      (part) =>
+        part.type === 'part' && part.meta.vanish !== true && hasNonConformingPartNumber(part.text)
+    )
+    .map((part) => ({
+      type: 'non-conforming-part-numbering',
+      lineHint: part.text,
+      suggestion: NON_CONFORMING_PART_SUGGESTION,
+    }));
 }
 
 /**
