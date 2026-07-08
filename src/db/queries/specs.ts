@@ -1,5 +1,5 @@
 import { pool, DatabaseError } from '../index.js';
-import { parseSourceFacts } from '../../ast/index.js';
+import { parseSourceFacts, NodeTypeSchema } from '../../ast/index.js';
 import type {
   ParagraphAssociation,
   SignalConflict,
@@ -154,6 +154,21 @@ function deriveEditability(
   };
 }
 
+/** Validate a raw DB `node_type` string against the canonical AST enum before it
+ *  crosses into a `SpecNode`. Mirrors paragraphs.ts (parseNodeType) — guards
+ *  against drift between the DB CHECK and the AST type without a cross-boundary
+ *  assertion, and fails loud rather than feeding an unvalidated value to
+ *  deriveInference. */
+function parseNodeType(nodeType: string): NodeType {
+  const parsed = NodeTypeSchema.safeParse(nodeType);
+  if (!parsed.success) {
+    throw new DatabaseError(`buildNodeTree: unexpected node_type "${nodeType}"`, {
+      cause: parsed.error,
+    });
+  }
+  return parsed.data;
+}
+
 /** Assemble flat paragraph rows into a SpecNode forest. Exported for reuse
  *  inside the db module (revisions snapshotting) — not part of the barrel. */
 export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecNode[] {
@@ -170,15 +185,12 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
     // Normalize through the schema so legacy comment facts gain the backfilled
     // `closed` flag before they reach the API response (#262).
     const sourceFacts = parseSourceFacts(row.source_facts);
-    const articleRole = row.node_type === 'article' ? deriveArticleRole(row.text) : undefined;
-    const inference = deriveInference(
-      row.signal_provenance,
-      row.conflicts,
-      row.node_type as NodeType
-    );
+    const nodeType = parseNodeType(row.node_type);
+    const articleRole = nodeType === 'article' ? deriveArticleRole(row.text) : undefined;
+    const inference = deriveInference(row.signal_provenance, row.conflicts, nodeType);
     return {
       id: row.id,
-      type: row.node_type as NodeType,
+      type: nodeType,
       text: row.text,
       children,
       meta: {

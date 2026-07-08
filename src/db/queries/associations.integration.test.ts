@@ -22,7 +22,7 @@ async function seedSpecWithParagraph(): Promise<{ specId: string; paragraphId: s
   const sId = spec.rows[0]!.id;
   const para = await pool.query<{ id: string }>(
     `INSERT INTO paragraphs (spec_id, node_type, text, position)
-     VALUES ($1, 'paragraph', 'Provide products as scheduled.', 1) RETURNING id`,
+     VALUES ($1, 'pr1', 'Provide products as scheduled.', 1) RETURNING id`,
     [sId]
   );
   return { specId: sId, paragraphId: para.rows[0]!.id };
@@ -158,7 +158,7 @@ describe('associations surface in reads', () => {
     // assertion below is meaningful (not a vacuous empty-array pass).
     const child = await pool.query<{ id: string }>(
       `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
-       VALUES ($1, $2, 'paragraph', 'Child paragraph.', 2) RETURNING id`,
+       VALUES ($1, $2, 'pr1', 'Child paragraph.', 2) RETURNING id`,
       [specId, paragraphId]
     );
     const childId = child.rows[0]!.id;

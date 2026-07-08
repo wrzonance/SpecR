@@ -109,7 +109,7 @@ function registerSpecTools(reg: ToolRegistrar): void {
     'get_spec',
     {
       description:
-        'Return the full spec paragraph tree with cross-reference resolution status. Use references[].isResolved to check if referenced specs are loaded. Nodes parsed from DOCX may carry meta.conflicts — inference signal disagreements ({signal, reportedIlvl, reportedNodeType}) indicating the hierarchy level was ambiguous; absent means no disagreement. styleSource is the manually assigned style template ({templateId, templateName}) or null when none is set.',
+        'Return the full spec paragraph tree with cross-reference resolution status. Use references[].isResolved to check if referenced specs are loaded. Nodes parsed from DOCX may carry meta.conflicts — inference signal disagreements ({signal, reportedIlvl, reportedNodeType}) indicating the hierarchy level was ambiguous; absent means no disagreement. Structural nodes may also carry inference — { confidence 0–1, signalUsed, agreed, evidence } derived from parse-time signal provenance; absent means unscored (pre-provenance parse or non-DOCX source) or non-structural. styleSource is the manually assigned style template ({templateId, templateName}) or null when none is set.',
       inputSchema: {
         specId: z.uuid().describe('Spec UUID (from search_library or list_sections)'),
       },

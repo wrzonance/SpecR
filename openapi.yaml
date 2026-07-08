@@ -2058,9 +2058,11 @@ paths:
         ADR-015 library. Returns 202 with a `jobId`; poll
         `/libraries/import/jobs/{jobId}` for progress and the onboarding report.
         The pipeline parses (capturing source facts), persists the spec into the
-        library, derives a style template (DOCX only), and classifies editability
-        using the library's convention profile or the built-in default. Source
-        bytes are discarded after parse (ADR-021). Rate-limited per IP (default
+        library, derives a style template (DOCX only), classifies editability
+        using the library's convention profile or the built-in default, and
+        summarizes hierarchy-inference confidence (ADR-055) into the report's
+        hierarchy section. Source bytes are discarded after parse (ADR-021).
+        Rate-limited per IP (default
         10 requests/minute, shared with `POST /parse`; configurable, can be disabled).
       tags: [libraries]
       parameters:
@@ -5027,8 +5029,8 @@ components:
           type: string
           description: >-
             Present when unscored > 0 — why those paragraphs carry no score
-            (explicit-structure source vs pre-provenance parse). Never folded
-            into another bucket.
+            (explicit-structure source, pre-provenance parse, non-DOCX source,
+            or manually inserted). Never folded into another bucket.
         lowConfidence:
           type: array
           description: Scored paragraphs below the hierarchy review threshold (0.6), worst-first.
@@ -5123,8 +5125,9 @@ components:
       description: >-
         Hierarchy-inference confidence for this paragraph (ADR-055), derived at
         read time from persisted signal provenance and conflicts. Absent when
-        the paragraph has no provenance (pre-provenance parse or non-DOCX
-        source) or is non-structural (note/continuation/hidden).
+        the paragraph has no provenance (pre-provenance parse, non-DOCX source,
+        or a manually inserted paragraph — no parse-time signals ran) or is
+        non-structural (note/continuation).
       properties:
         confidence:
           type: number

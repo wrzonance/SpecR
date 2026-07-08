@@ -129,7 +129,7 @@ describe('buildNodeTree editability derivation', () => {
   const baseRow = {
     id: 'pr-1',
     parent_id: null,
-    node_type: 'paragraph',
+    node_type: 'pr1',
     text: 'x',
     position: 0,
     vanish: false,

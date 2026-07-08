@@ -32,7 +32,9 @@ const NON_STRUCTURAL = new Set<NodeType>(['spec', 'note', 'continuation']);
 
 const EXPLICIT_STRUCTURE_REASON = 'explicit structure from source markup — no inference to score';
 const PRE_PROVENANCE_REASON =
-  'no inference provenance recorded (pre-provenance parse or manually inserted paragraph) — re-import the master to score';
+  'no inference provenance recorded — the 5-signal engine did not score these paragraphs ' +
+  '(pre-provenance parse, non-DOCX source, or manually inserted); re-importing a DOCX master ' +
+  'regenerates scores';
 
 interface Acc {
   scored: number;

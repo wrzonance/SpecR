@@ -276,6 +276,39 @@ describe('GET /packages/:id/revisions', () => {
   });
 });
 
+describe('hierarchy-inference provenance in snapshots', () => {
+  it('revision snapshot retains meta.inference (signal_provenance selected)', async () => {
+    // Regression: snapshotMemberTrees must SELECT signal_provenance so the frozen
+    // tree carries meta.inference. Seed 5-signal provenance on a structural node,
+    // issue, and assert the snapshot surfaces the derived inference.
+    const section = '09 91 00';
+    await insertMasterWithTree(section, 'Painting', 'Field-applied paint.');
+    const addPaint = await json('POST', `/projects/${p1}/specs`, { section });
+    const paint1 = (await data(addPaint))['specId'] as string;
+    const upd = await pool.query(
+      `UPDATE paragraphs SET signal_provenance = $1::jsonb
+       WHERE spec_id = $2 AND node_type = 'part'`,
+      [JSON.stringify({ signalUsed: 1, agreed: [1, 2] }), paint1]
+    );
+    expect(upd.rowCount).toBeGreaterThan(0);
+
+    const pkg = await createPackage(p1, `Inference Snapshot ${Date.now()}`);
+    await json('PUT', `/packages/${pkg}/specs`, { specIds: [paint1] });
+    const issued = await json('POST', `/packages/${pkg}/revisions`, { label: 'Inference Snap' });
+    expect(issued.status).toBe(201);
+    const revisionId = (await data(issued))['revisionId'] as string;
+
+    const res = await json('GET', `/revisions/${revisionId}`);
+    expect(res.status).toBe(200);
+    const specs = (await data(res))['specs'] as Array<Record<string, unknown>>;
+    const tree = SpecTreeSchema.parse(specs[0]?.['tree']);
+    const part = tree.parts[0];
+    expect(part?.meta.inference).toBeDefined();
+    expect(part?.meta.inference?.confidence).toBeGreaterThan(0);
+    expect(part?.meta.inference?.signalUsed).toBe(1);
+  });
+});
+
 describe('cascade (migration 021)', () => {
   it('deleting a package removes its revisions and snapshot rows; specs survive', async () => {
     const pkgId = await createPackage(p1, 'Doomed Pkg');
