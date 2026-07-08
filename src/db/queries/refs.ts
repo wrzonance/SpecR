@@ -9,6 +9,7 @@ interface Queryable {
 
 interface OutboundReferenceRow {
   readonly source_spec_id: string;
+  readonly source_paragraph_id: string;
   readonly reference_text: string;
   readonly target_spec_section: string | null;
   readonly target_spec_id: string | null;
@@ -27,6 +28,9 @@ interface InboundReferenceRow {
 
 export interface OutboundReference {
   readonly sourceSpecId: string;
+  /** Paragraph the reference sits in — the paragraph-level locator (issue #373).
+   *  Lets a client index references per paragraph (web_ui_demo removed-citation flow). */
+  readonly sourceParagraphId: string;
   readonly referenceText: string;
   readonly targetSection: string | null;
   readonly targetSpecId: string | null;
@@ -47,6 +51,7 @@ export interface InboundReference {
 function mapOutbound(row: OutboundReferenceRow): OutboundReference {
   return {
     sourceSpecId: row.source_spec_id,
+    sourceParagraphId: row.source_paragraph_id,
     referenceText: row.reference_text,
     targetSection: row.target_spec_section,
     targetSpecId: row.target_spec_id,
@@ -145,8 +150,8 @@ export async function getOutboundReferences(
 ): Promise<readonly OutboundReference[]> {
   try {
     const result = await pool.query<OutboundReferenceRow>(
-      `SELECT sr.source_spec_id, sr.reference_text, sr.target_spec_section,
-              sr.target_spec_id, sr.is_broken
+      `SELECT sr.source_spec_id, sr.source_paragraph_id, sr.reference_text,
+              sr.target_spec_section, sr.target_spec_id, sr.is_broken
        FROM spec_references sr
        JOIN project_specs ps ON ps.spec_id = sr.source_spec_id
        WHERE sr.source_spec_id = $1 AND ps.project_id = $2

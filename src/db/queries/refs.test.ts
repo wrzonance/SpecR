@@ -208,6 +208,7 @@ describe('reference traversal queries', () => {
       rows: [
         {
           source_spec_id: 'spec-1',
+          source_paragraph_id: 'para-9',
           reference_text: 'See Section 99 99 99',
           target_spec_section: '99 99 99',
           target_spec_id: null,
@@ -223,6 +224,7 @@ describe('reference traversal queries', () => {
     expect(result).toEqual([
       {
         sourceSpecId: 'spec-1',
+        sourceParagraphId: 'para-9',
         referenceText: 'See Section 99 99 99',
         targetSection: '99 99 99',
         targetSpecId: null,
@@ -230,6 +232,31 @@ describe('reference traversal queries', () => {
         isBroken: true,
       },
     ]);
+  });
+
+  it('outbound references carry sourceParagraphId (was empty → demo removed-citation flow disarmed)', async () => {
+    const { pool } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        {
+          source_spec_id: 'spec-1',
+          source_paragraph_id: 'para-7',
+          reference_text: 'See Section 03 30 00',
+          target_spec_section: '03 30 00',
+          target_spec_id: 'target-1',
+          is_broken: false,
+        },
+      ],
+    } as never);
+
+    const { getOutboundReferences } = await import('./refs.js');
+    const result = await getOutboundReferences('spec-1', 'project-1', pool);
+
+    // The query must SELECT the paragraph locator so the client can build a
+    // per-paragraph reference index (tree.js buildSheetCtx → refsByParagraph).
+    expect(vi.mocked(query).mock.calls[0]?.[0]).toContain('sr.source_paragraph_id');
+    expect(result[0]?.sourceParagraphId).toBe('para-7');
   });
 
   it('findProjectSpecIdsBySection returns ordered ids from the query result', async () => {

@@ -125,6 +125,9 @@ describe('project-scoped reference traversal', () => {
     expect(refs.map((ref) => ref.referenceText)).toEqual(
       expect.arrayContaining(['A1 cites painting', 'A1 cites unloaded section'])
     );
+    // Every outbound ref must carry its paragraph locator (issue #373) so a
+    // client can index references per paragraph, not just per spec.
+    expect(refs.every((ref) => typeof ref.sourceParagraphId === 'string')).toBe(true);
     await expect(getOutboundReferences(sourceA1, projectB, pool)).resolves.toEqual([]);
   });
 
