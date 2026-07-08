@@ -82,6 +82,10 @@ describe('onboarding job lifecycle (O-8)', () => {
             counts: { locked: 0, editable: 0, choice: 0, note: 0 },
             lowConfidence: [],
           },
+          hierarchy: {
+            counts: { scored: 0, unscored: 0, belowThreshold: 0 },
+            lowConfidence: [],
+          },
           parseWarnings: [],
         },
       },

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ilvlToNodeType } from './rules.js';
+import { scoreHierarchyConfidence } from './hierarchy-confidence.js';
 import {
   matchTextSignal,
   matchIndentSignal,
@@ -13,11 +14,17 @@ import type {
   DocxParagraph,
   NumberingMap,
   SignalConflict,
+  SignalId,
   StyleMap,
   StyleNumPr,
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
-import { getLabel, consumesNumber } from '../../ast/index.js';
+import {
+  getLabel,
+  consumesNumber,
+  nodeTypeToNormalizedIlvl,
+  NODE_TYPES_BY_NORMALIZED_ILVL,
+} from '../../ast/index.js';
 import {
   planPartStrip,
   planOutlineNumberStrip,
@@ -25,39 +32,10 @@ import {
   rebaseSourceFacts,
 } from '../part-prefix.js';
 
-// Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8
-const NODE_TYPE_TO_NORMALIZED: Partial<Record<NodeType, number>> = {
-  part: 0,
-  article: 1,
-  pr1: 2,
-  pr2: 3,
-  pr3: 4,
-  pr4: 5,
-  pr5: 6,
-  pr6: 7,
-  pr7: 8,
-};
-
-const NODE_TYPES_BY_ILVL: readonly NodeType[] = [
-  'part',
-  'article',
-  'pr1',
-  'pr2',
-  'pr3',
-  'pr4',
-  'pr5',
-  'pr6',
-  'pr7',
-];
-
-function toNormalizedIlvl(nodeType: NodeType): number {
-  return NODE_TYPE_TO_NORMALIZED[nodeType] ?? 0;
-}
-
 interface SignalHit {
   readonly nodeType: NodeType;
   readonly normalizedIlvl: number;
-  readonly signal: 1 | 2 | 3 | 4 | 5;
+  readonly signal: SignalId;
 }
 
 function trySignal1(para: DocxParagraph, numberingMap: NumberingMap): SignalHit | null {
@@ -79,7 +57,7 @@ function trySignal1(para: DocxParagraph, numberingMap: NumberingMap): SignalHit 
   ) {
     return null;
   }
-  return { nodeType, normalizedIlvl: toNormalizedIlvl(nodeType), signal: 1 };
+  return { nodeType, normalizedIlvl: nodeTypeToNormalizedIlvl(nodeType), signal: 1 };
 }
 
 // Lead-in styles PR1lc..PR7lc ("lead-in copy") carry no numbering of their own
@@ -117,7 +95,7 @@ function trySignal2(
   if (!resolved) return null;
   const nodeType = ilvlToNodeType(resolved.ilvl, numberingMap.articleIlvl);
   if (nodeType === 'continuation') return null;
-  return { nodeType, normalizedIlvl: toNormalizedIlvl(nodeType), signal: 2 };
+  return { nodeType, normalizedIlvl: nodeTypeToNormalizedIlvl(nodeType), signal: 2 };
 }
 
 function trySignal4(para: DocxParagraph): SignalHit | null {
@@ -129,7 +107,7 @@ function trySignal4(para: DocxParagraph): SignalHit | null {
 function trySignal5(para: DocxParagraph): SignalHit | null {
   const estimated = matchIndentSignal(para.leftIndent);
   if (estimated === null) return null;
-  const nodeType = NODE_TYPES_BY_ILVL[estimated];
+  const nodeType = NODE_TYPES_BY_NORMALIZED_ILVL[estimated];
   if (!nodeType) return null;
   return { nodeType, normalizedIlvl: estimated, signal: 5 };
 }
@@ -142,6 +120,15 @@ function buildConflicts(winner: SignalHit, hits: readonly SignalHit[]): readonly
       reportedIlvl: h.normalizedIlvl,
       reportedNodeType: h.nodeType,
     }));
+}
+
+function buildAgreed(winner: SignalHit, hits: readonly SignalHit[]): readonly SignalId[] {
+  return hits
+    .filter(
+      (h) =>
+        h !== winner && h.nodeType === winner.nodeType && h.normalizedIlvl === winner.normalizedIlvl
+    )
+    .map((h) => h.signal);
 }
 
 // An article is the top content tier under a PART, so it cannot be deeply indented.
@@ -204,6 +191,7 @@ function continuationResult(
     nodeType: 'continuation',
     signalUsed: 3,
     conflicts: [],
+    agreed: [],
     isVanish,
     isNote,
   };
@@ -251,6 +239,7 @@ function classifyOne(
   }
   const winner = correctMisalignedArticle(rawWinner, hits);
   const conflicts = buildConflicts(winner, hits);
+  const agreed = buildAgreed(winner, hits);
 
   return {
     paragraph: para,
@@ -258,6 +247,7 @@ function classifyOne(
     nodeType: winner.nodeType,
     signalUsed: winner.signal,
     conflicts,
+    agreed,
     isVanish: para.isVanish,
   };
 }
@@ -357,6 +347,11 @@ function makeNode(
   s4ArticleIds: Set<string>
 ): SpecNode {
   const content = nodeContent(cp);
+  const inference = scoreHierarchyConfidence(
+    { signalUsed: cp.signalUsed, agreed: cp.agreed },
+    cp.conflicts,
+    cp.nodeType
+  );
   const node: SpecNode = {
     id: uuidv4(),
     type: cp.nodeType,
@@ -366,6 +361,7 @@ function makeNode(
       source,
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
       ...(content.sourceFacts ? { sourceFacts: content.sourceFacts } : {}),
+      ...(inference ? { inference } : {}),
     },
   };
   if (cp.signalUsed === 4 && cp.nodeType === 'article') s4ArticleIds.add(node.id);

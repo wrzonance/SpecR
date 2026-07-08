@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool, createLibrary } from '../db/index.js';
+import type { SpecNode } from '../ast/index.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -59,6 +60,11 @@ interface OnboardingJobData {
       styleDerivation: unknown;
       styleSourceNeeded: boolean;
       editability: { counts: Record<string, number>; lowConfidence: unknown[] };
+      hierarchy: {
+        counts: { scored: number; unscored: number; belowThreshold: number };
+        unscoredReason?: string;
+        lowConfidence: unknown[];
+      };
       parseWarnings: unknown[];
     };
   };
@@ -107,6 +113,10 @@ describe('POST /libraries/:id/import (O-8)', () => {
     expect(r.report.styleSourceNeeded).toBe(false);
     expect(r.report.editability).toBeDefined();
     expect(Array.isArray(r.report.parseWarnings)).toBe(true);
+    // ADR-055 hierarchy section: every structural DOCX paragraph is scored
+    expect(r.report.hierarchy.counts.scored).toBeGreaterThan(0);
+    expect(r.report.hierarchy.counts.unscored).toBe(0);
+    expect(r.report.hierarchy.counts.belowThreshold).toBeGreaterThanOrEqual(0);
     expect(r.templateId).not.toBeNull();
     // spec landed in the target library with the derived template linked
     const spec = await pool.query<{ library_id: string; style_template_id: string | null }>(
@@ -121,6 +131,25 @@ describe('POST /libraries/:id/import (O-8)', () => {
       [r.specId]
     );
     expect(parseInt(classified.rows[0]?.count ?? '0', 10)).toBeGreaterThan(0);
+    // ADR-055 roundtrip: provenance persisted, meta.inference derived on read
+    const treeRes = await fetch(`${baseUrl}/specs/${r.specId}`);
+    expect(treeRes.status).toBe(200);
+    const treeBody = (await treeRes.json()) as { data: { parts: SpecNode[] } };
+    const collect = (nodes: readonly SpecNode[]): SpecNode[] =>
+      nodes.flatMap((n) => [n, ...collect(n.children)]);
+    const nodes = collect(treeBody.data.parts);
+    const structural = nodes.filter(
+      (n) => !['note', 'continuation'].includes(n.type) && n.meta.vanish !== true
+    );
+    expect(structural.length).toBeGreaterThan(0);
+    for (const n of structural) {
+      expect(n.meta.inference, `node ${n.id} (${n.type}) unscored`).toBeDefined();
+      expect(n.meta.inference!.confidence).toBeGreaterThanOrEqual(0);
+      expect(n.meta.inference!.confidence).toBeLessThanOrEqual(1);
+    }
+    for (const n of nodes.filter((x) => ['note', 'continuation'].includes(x.type))) {
+      expect(n.meta.inference).toBeUndefined();
+    }
   }, 40_000);
 
   it('.sec import works and flags styleSourceNeeded instead of failing', async () => {
@@ -132,6 +161,10 @@ describe('POST /libraries/:id/import (O-8)', () => {
     expect(job.result?.report.styleSourceNeeded).toBe(true);
     expect(job.result?.report.styleDerivation).toBeNull();
     expect(job.result?.templateId).toBeNull();
+    // ADR-055: SEC structure is explicit — unscored by design, never suspect
+    expect(job.result?.report.hierarchy.counts.scored).toBe(0);
+    expect(job.result?.report.hierarchy.counts.unscored).toBeGreaterThan(0);
+    expect(job.result?.report.hierarchy.unscoredReason).toContain('explicit structure');
   }, 40_000);
 
   it('re-import: editing a DOCX master updates the style template + report shows styleSourceNeeded:false', async () => {

@@ -462,6 +462,7 @@ function makeClassified(
     nodeType,
     signalUsed: 1,
     conflicts: [],
+    agreed: [],
     isVanish,
   };
 }
@@ -714,6 +715,7 @@ describe('buildTree — Pass 2: tree structure', () => {
       nodeType: 'part',
       signalUsed: 1,
       conflicts: [],
+      agreed: [],
       isVanish: false,
     };
     const tree = buildTree([cp], '01', 'T', 'cpi');
@@ -792,6 +794,7 @@ describe('buildTree — Pass 2: edge cases and meta', () => {
       nodeType: 'continuation',
       signalUsed: 3,
       conflicts: [],
+      agreed: [],
       isVanish: false,
     };
     const classified = [
@@ -869,6 +872,7 @@ describe('buildTree — conflicts propagation (#56)', () => {
       nodeType: 'continuation',
       signalUsed: 3,
       conflicts: [],
+      agreed: [],
       isVanish: false,
     };
     const tree = buildTree([makeClassified('part', 0, 'PART 1'), cont], '01', 'T', 'arcat');
@@ -909,5 +913,139 @@ describe('classifyParagraphs — numbering-generated PART headings (spec-shaped 
       emptyStyleMap()
     );
     expect(result[0]?.nodeType).toBe('part');
+  });
+});
+
+describe('agreed signals (hierarchy-confidence provenance)', () => {
+  it('signal that matches the winner nodeType+ilvl lands in agreed, not conflicts', () => {
+    // S1: numId=1 ilvl=2, articleIlvl=1 → pr1 (normalized 2). S4: "A. " → pr1 (2).
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 2, text: 'A. Provide products as specified' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.signalUsed).toBe(1);
+    expect(result[0]?.agreed).toEqual([4]);
+    expect(result[0]?.conflicts).toEqual([]);
+  });
+
+  it('disagreeing signal lands in conflicts, never in agreed', () => {
+    // S1: ilvl=1 → article (1). S4: "A. " → pr1 (2) — disagrees.
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 1, text: 'A. Provide products as specified' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.agreed).toEqual([]);
+    expect(result[0]?.conflicts.map((c) => c.signal)).toEqual([4]);
+  });
+
+  it('indentation corroboration: matching indent tier lands in agreed', () => {
+    // S1: ilvl=2 → pr1 (2). S5: 1152 twips / 576 = tier 2 → pr1. No S4 pattern.
+    const result = classifyParagraphs(
+      [makePara({ numId: 1, ilvl: 2, leftIndent: 1152, text: 'Some content here' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.signalUsed).toBe(1);
+    expect(result[0]?.agreed).toEqual([5]);
+  });
+
+  it('agreed is computed against the POST-correctMisalignedArticle resolution', () => {
+    // S1 says article (ilvl=1) but indentation sits at tier 3 (1728 twips) with no
+    // second article vote → demoted to the first non-article hit: S4 "1. " → pr2 (3).
+    // S5 (tier 3 → pr2) matches the FINAL type → agreed; the losing S1 article → conflicts.
+    const result = classifyParagraphs(
+      [
+        makePara({
+          numId: 13,
+          ilvl: 1,
+          leftIndent: 1728,
+          text: '1. Normal street clothes and shoes',
+        }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('pr2');
+    expect(result[0]?.signalUsed).toBe(4);
+    expect(result[0]?.agreed).toEqual([5]);
+    expect(result[0]?.conflicts.map((c) => c.signal)).toContain(1);
+  });
+
+  it('continuation (no signal fired) carries an empty agreed set', () => {
+    const result = classifyParagraphs(
+      [makePara({ text: 'unclassifiable' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.agreed).toEqual([]);
+  });
+
+  it('lone indentation win: empty agreed, empty conflicts', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 1152, text: 'Loose trailing fragment' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.signalUsed).toBe(5);
+    expect(result[0]?.agreed).toEqual([]);
+    expect(result[0]?.conflicts).toEqual([]);
+  });
+});
+
+describe('meta.inference (parse-time scoring)', () => {
+  it('structural nodes carry meta.inference with confidence in [0,1]', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ numId: 1, ilvl: 1, text: '1.1 SUMMARY' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const part = tree.parts[0];
+    expect(part?.meta.inference).toBeDefined();
+    expect(part?.meta.inference?.confidence).toBeGreaterThanOrEqual(0);
+    expect(part?.meta.inference?.confidence).toBeLessThanOrEqual(1);
+    const article = part?.children[0];
+    expect(article?.meta.inference?.signalUsed).toBe(1);
+  });
+
+  it('non-structural nodes (notes, continuations) never carry meta.inference', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: 'plain continuation body text' }),
+        makePara({ text: '** NOTE TO SPECIFIER ** pick one', isVanish: true }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const children = tree.parts[0]?.children ?? [];
+    expect(children.length).toBeGreaterThan(0);
+    for (const child of children) {
+      expect(child.meta.inference).toBeUndefined();
+    }
+  });
+
+  it('lone-indentation node scores below the 0.6 review threshold', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ leftIndent: 1152, text: 'Loose indented fragment' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const indented = tree.parts[0]?.children[0];
+    expect(indented?.meta.inference?.signalUsed).toBe(5);
+    expect(indented?.meta.inference?.confidence).toBeLessThan(0.6);
+    expect(indented?.meta.inference?.evidence).toContain('indentation won alone');
   });
 });

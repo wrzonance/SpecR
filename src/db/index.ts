@@ -28,6 +28,7 @@ export {
   updateSpec,
   createSpec,
   getSpecTree,
+  getSpecSource,
   persistParsedSpec,
   withdrawSpec,
   restoreSpec,

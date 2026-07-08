@@ -22,6 +22,7 @@ export {
   deriveTemplate,
   extractNumberingProfile,
   extractNumberingProfileFromDocx,
+  scoreHierarchyConfidence,
 } from './docx/index.js';
 export type {
   DocxStyleAnalysis,

@@ -156,7 +156,7 @@ async function snapshotMemberTrees(
   for (const member of members.rows) {
     const paras = await client.query<ParagraphTreeRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              classification, editability_override
+              signal_provenance, classification, editability_override
        FROM paragraphs WHERE spec_id = $1`,
       [member.spec_id]
     );

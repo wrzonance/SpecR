@@ -16,6 +16,7 @@ import {
   setSpecStyleSource,
   reclassifySpec,
   getSpecTree,
+  getSpecSource,
 } from '../db/index.js';
 import type { OriginMeta, StyleRule } from '../db/index.js';
 import {
@@ -29,6 +30,7 @@ import {
 import { parsePool } from '../lib/parse-pool.js';
 import { workerOutputSchema, type WorkerOutput } from '../lib/parse-worker.js';
 import { summarizeEditability } from './onboarding-report.js';
+import { summarizeHierarchy } from '../lib/hierarchy-summary.js';
 import { logger } from '../lib/logger.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
@@ -216,12 +218,16 @@ async function deriveStyleIfDocx(
 async function classifyAndSummarize(
   jobId: string,
   specId: string
-): Promise<OnboardingReport['editability']> {
+): Promise<Pick<OnboardingReport, 'editability' | 'hierarchy'>> {
   progress(jobId, 'classifying', 85);
   await reclassifySpec(specId, {});
   const treeResult = await getSpecTree(specId);
   if (!treeResult) throw new Error('classified spec vanished before summary');
-  return summarizeEditability(treeResult.tree);
+  const source = await getSpecSource(specId);
+  return {
+    editability: summarizeEditability(treeResult.tree),
+    hierarchy: summarizeHierarchy(treeResult.tree, source),
+  };
 }
 
 async function processOnboardingJob(
@@ -234,11 +240,12 @@ async function processOnboardingJob(
   try {
     const { specId, tree } = await runParseAndPersist(jobId, buffer, ext, libraryId, filename);
     const style = await deriveStyleIfDocx(jobId, buffer, ext, specId, tree.section, libraryId);
-    const editability = await classifyAndSummarize(jobId, specId);
+    const summaries = await classifyAndSummarize(jobId, specId);
     const report: OnboardingReport = {
       styleDerivation: style.report,
       styleSourceNeeded: style.templateId === null,
-      editability,
+      editability: summaries.editability,
+      hierarchy: summaries.hierarchy,
       parseWarnings: tree.warnings ?? [],
     };
     const result: OnboardingJobResult = {
