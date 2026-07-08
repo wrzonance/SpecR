@@ -5,8 +5,20 @@ import {
   planOutlineNumberStrip,
   planLabelStrip,
   rebaseSourceFacts,
+  hasNonConformingPartNumber,
+  auditPartNumbering,
 } from './part-prefix.js';
-import type { SourceFacts } from '../ast/types.js';
+import type { SourceFacts, SpecNode } from '../ast/types.js';
+
+function partNode(text: string, vanish = false): SpecNode {
+  return {
+    id: text,
+    type: 'part',
+    text,
+    children: [],
+    meta: vanish ? { vanish: true } : {},
+  };
+}
 
 describe('stripPartPrefix', () => {
   it('strips "PART n -" and any dash variant, leaving the name', () => {
@@ -234,5 +246,68 @@ describe('rebaseSourceFacts (Codex review: keep fact offsets valid after prefix 
     const facts: SourceFacts = { banner: 'NOTE TO SPECIFIER', vanish: true };
     expect(rebaseSourceFacts(facts, 0, 5)).toBe(facts);
     expect(rebaseSourceFacts(facts, 9, 9).banner).toBe('NOTE TO SPECIFIER');
+  });
+});
+
+describe('hasNonConformingPartNumber (#316)', () => {
+  it('is true for a decimal/dotted PART number ("PART 1.1", "PART 1.0")', () => {
+    expect(hasNonConformingPartNumber('PART 1.1 GENERAL')).toBe(true);
+    expect(hasNonConformingPartNumber('PART 1.0 GENERAL')).toBe(true);
+    expect(hasNonConformingPartNumber('PART 12.3 SPECIAL')).toBe(true);
+    expect(hasNonConformingPartNumber('  part 2.1 products')).toBe(true); // case + leading ws
+  });
+
+  it('is false for a conforming integer PART, a bare name, or "N.0 NAME" (no PART keyword)', () => {
+    expect(hasNonConformingPartNumber('PART 1 GENERAL')).toBe(false);
+    expect(hasNonConformingPartNumber('PART 3 - EXECUTION')).toBe(false);
+    expect(hasNonConformingPartNumber('PART 1')).toBe(false);
+    expect(hasNonConformingPartNumber('GENERAL')).toBe(false);
+    expect(hasNonConformingPartNumber('2.0 PRODUCTS')).toBe(false); // stripped to name elsewhere
+  });
+
+  it('is false for a period-then-space punctuation style ("PART 1. GENERAL"), not a decimal', () => {
+    expect(hasNonConformingPartNumber('PART 1. GENERAL')).toBe(false);
+  });
+});
+
+describe('auditPartNumbering (#316)', () => {
+  it('warns: PART 1.1 decimal part heading is non-conforming — one warning, lineHint is the heading', () => {
+    const warnings = auditPartNumbering([partNode('PART 1.1 GENERAL')]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.type).toBe('non-conforming-part-numbering');
+    expect(warnings[0]?.lineHint).toBe('PART 1.1 GENERAL');
+    expect(warnings[0]?.suggestion).toMatch(/integers 1–5/);
+  });
+
+  it('emits one warning per offending heading, and none for conforming siblings', () => {
+    const warnings = auditPartNumbering([
+      partNode('GENERAL'),
+      partNode('PART 1.0 GENERAL'),
+      partNode('PRODUCTS'),
+      partNode('PART 3.2 EXECUTION'),
+    ]);
+    expect(warnings).toHaveLength(2);
+    expect(warnings.map((w) => w.lineHint)).toEqual(['PART 1.0 GENERAL', 'PART 3.2 EXECUTION']);
+  });
+
+  it('conforming PART 1…PART 3 headings yield no warning', () => {
+    const warnings = auditPartNumbering([
+      partNode('GENERAL'),
+      partNode('PRODUCTS'),
+      partNode('EXECUTION'),
+    ]);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('ignores vanished (hidden) part nodes and non-part nodes', () => {
+    const article: SpecNode = {
+      id: 'a',
+      type: 'article',
+      text: 'PART 1.1 X',
+      children: [],
+      meta: {},
+    };
+    const warnings = auditPartNumbering([partNode('PART 1.1 GENERAL', true), article]);
+    expect(warnings).toHaveLength(0);
   });
 });

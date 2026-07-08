@@ -2,7 +2,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { v4 as uuidv4 } from 'uuid';
 import type { SpecNode, SpecTree, NodeType, SecRef } from '../../ast/types.js';
 import { ParserError } from '../error.js';
-import { stripPartPrefix } from '../part-prefix.js';
+import { stripPartPrefix, auditPartNumbering } from '../part-prefix.js';
 import type { NteNode, PrtNode, RefNode, SptNode } from './elements.js';
 import { decodeXmlEntities } from './entities.js';
 import { parseSectionNumberCandidate } from '../../lib/section-number.js';
@@ -259,7 +259,18 @@ export function parseSec(xml: string): ParsedSec {
     walkPrt(prt, refs)
   );
 
-  return { tree: { id: uuidv4(), section, title, parts }, refs };
+  // Non-conforming part numbering (#316). UFGS carries the part number structurally
+  // (PRT ordering), not in the TTL text, so this is empty for real .SEC files and the
+  // tree stays byte-for-byte unchanged; only a TTL authored as "PART 1.1 …" trips it.
+  const warnings = auditPartNumbering(parts);
+  const tree: SpecTree = {
+    id: uuidv4(),
+    section,
+    title,
+    parts,
+    ...(warnings.length > 0 ? { warnings } : {}),
+  };
+  return { tree, refs };
 }
 
 export { assertSecSafe } from './safety.js';

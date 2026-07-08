@@ -191,6 +191,34 @@ describe('parseSec — PRT structure', () => {
   });
 });
 
+describe('parseSec — non-conforming part numbering (#316)', () => {
+  const DECIMAL_PART = `<?xml version="1.0" encoding="windows-1252"?>
+<SEC>
+  <SCN>SECTION 27 10 00</SCN>
+  <STL>BUILDING TELECOMMUNICATIONS CABLING SYSTEM</STL>
+  <PRT>
+    <TTL>PART 1.1 GENERAL</TTL>
+    <SPT><TTL>REFERENCES</TTL><TXT>Publications.</TXT></SPT>
+  </PRT>
+</SEC>`;
+
+  it('warns: PART 1.1 decimal part heading is non-conforming — one warning, structure intact', () => {
+    const { tree } = parseSec(DECIMAL_PART);
+    const nonConforming =
+      tree.warnings?.filter((w) => w.type === 'non-conforming-part-numbering') ?? [];
+    expect(nonConforming).toHaveLength(1);
+    expect(nonConforming[0]?.lineHint).toBe('PART 1.1 GENERAL');
+    // The decimal number is deliberately left in the title (stripPartPrefix, #297).
+    expect(tree.parts).toHaveLength(1);
+    expect(tree.parts[0]?.type).toBe('part');
+  });
+
+  it('conforming UFGS parts (number is structural, not in TTL) → no warnings field', () => {
+    const { tree } = parseSec(WITH_PARTS);
+    expect(tree.warnings).toBeUndefined();
+  });
+});
+
 describe('parseSec — SPT content nodes', () => {
   it('maps TXT to continuation nodes', () => {
     const { tree } = parseSec(WITH_PARTS);
