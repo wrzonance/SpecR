@@ -197,7 +197,7 @@ function walkPrt(prt: PrtNode, refs: SecRef[]): SpecNode {
 
 function requireString(val: unknown, fieldName: string): string {
   if (typeof val !== 'string' || !val.trim()) {
-    throw new ParserError(`SEC file missing <${fieldName}> element`);
+    throw new ParserError(`SEC file missing <${fieldName}> element`, { code: 'SEC_XML_INVALID' });
   }
   return val.trim();
 }
@@ -236,11 +236,11 @@ export function parseSec(xml: string): ParsedSec {
   try {
     root = xmlParser.parse(xml) as unknown;
   } catch (err) {
-    throw new ParserError('failed to parse SEC XML', { cause: err });
+    throw new ParserError('failed to parse SEC XML', { code: 'SEC_XML_INVALID', cause: err });
   }
 
   const sec = (root as Record<string, unknown>)['SEC'] as Record<string, unknown> | undefined;
-  if (!sec) throw new ParserError('SEC root element not found');
+  if (!sec) throw new ParserError('SEC root element not found', { code: 'SEC_XML_INVALID' });
 
   // SCN/STL are parsed with processEntities: false — decode here.
   // Normalize-or-verbatim: canonicalize section whitespace when the value is a

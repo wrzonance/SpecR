@@ -152,7 +152,7 @@ function parseParagraphsOrThrow(
 ): readonly DocxParagraph[] {
   const paragraphs = parseDocument(documentXml, numberingMap, styleMap, commentsById);
   if (paragraphs.length === 0) {
-    throw new ParserError('document contains no paragraphs');
+    throw new ParserError('document contains no paragraphs', { code: 'DOCX_NO_PARAGRAPHS' });
   }
   return paragraphs;
 }
@@ -270,11 +270,16 @@ export async function analyzeDocxStyles(buffer: Buffer): Promise<DocxStyleAnalys
   try {
     zip = await JSZip.loadAsync(buffer);
   } catch (err) {
-    throw new ParserError('failed to read DOCX archive', { cause: err });
+    throw new ParserError('failed to read DOCX archive', {
+      code: 'DOCX_ARCHIVE_UNREADABLE',
+      cause: err,
+    });
   }
   const { numberingXml, stylesXml, documentXml, themeXml } = await extractEntries(zip);
   if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
-  if (!documentXml) throw new ParserError('DOCX missing word/document.xml');
+  if (!documentXml) {
+    throw new ParserError('DOCX missing word/document.xml', { code: 'DOCX_MISSING_DOCUMENT' });
+  }
   const { classified } = buildClassification({ numberingXml, stylesXml, documentXml });
   return {
     classified,
@@ -291,14 +296,19 @@ export async function parseDocx(
   try {
     zip = await JSZip.loadAsync(buffer);
   } catch (err) {
-    throw new ParserError('failed to read DOCX archive', { cause: err });
+    throw new ParserError('failed to read DOCX archive', {
+      code: 'DOCX_ARCHIVE_UNREADABLE',
+      cause: err,
+    });
   }
 
   onProgress?.('extracting', 10);
   const { numberingXml, stylesXml, documentXml, commentsXml, coreXml } = await extractEntries(zip);
 
   if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
-  if (!documentXml) throw new ParserError('DOCX missing word/document.xml');
+  if (!documentXml) {
+    throw new ParserError('DOCX missing word/document.xml', { code: 'DOCX_MISSING_DOCUMENT' });
+  }
 
   return runPipeline(
     { numberingXml, stylesXml, documentXml, commentsXml, coreXml },
@@ -317,7 +327,10 @@ export async function extractNumberingProfileFromDocx(buffer: Buffer): Promise<N
   try {
     zip = await JSZip.loadAsync(buffer);
   } catch (err) {
-    throw new ParserError('failed to read DOCX archive', { cause: err });
+    throw new ParserError('failed to read DOCX archive', {
+      code: 'DOCX_ARCHIVE_UNREADABLE',
+      cause: err,
+    });
   }
   const { numberingXml, stylesXml } = await extractEntries(zip);
   if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');

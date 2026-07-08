@@ -219,7 +219,10 @@ export async function extractPdfText(
       const fallback = await extractFallback(pdfData(buffer), deps);
       return { ...fallback, warnings: [degradedWarning('primary extractor failed')] };
     } catch (fallbackErr) {
-      throw new ParserError('failed to extract PDF text layer', { cause: fallbackErr ?? err });
+      throw new ParserError('failed to extract PDF text layer', {
+        code: 'PDF_TEXT_LAYER_UNEXTRACTABLE',
+        cause: fallbackErr ?? err,
+      });
     }
   }
 }

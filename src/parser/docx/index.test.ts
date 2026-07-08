@@ -242,6 +242,13 @@ describe('parseDocx — error handling', () => {
     );
   });
 
+  it('throws ParserError with DOCX_ARCHIVE_UNREADABLE code on a non-zip buffer', async () => {
+    await expect(parseDocx(Buffer.from('not a zip'), () => {})).rejects.toMatchObject({
+      name: 'ParserError',
+      code: 'DOCX_ARCHIVE_UNREADABLE',
+    });
+  });
+
   it('throws ParserError when word/styles.xml missing', async () => {
     const buffer = await makeDocx({ omitStyles: true });
     await expect(parseDocx(buffer)).rejects.toThrow('DOCX missing word/styles.xml');
