@@ -52,6 +52,7 @@ const RESPONSE_ALLOWLIST = new Set([
   'get /projects/{}/specs/{}/references',
   'get /revisions/{}',
   'get /specs/{}',
+  'get /specs/{}/hierarchy-report',
   'get /specs/{}/lineage',
   'get /specs/{}/lock',
   'get /templates/{}',
