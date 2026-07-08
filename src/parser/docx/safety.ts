@@ -235,12 +235,13 @@ async function checkExternalRelationships(
 }
 
 export async function assertDocxSafe(buf: Buffer): Promise<void> {
-  if (!hasDocxMagicBytes(buf)) throw new ParserError('not a zip');
+  if (!hasDocxMagicBytes(buf))
+    throw new ParserError('not a zip', { code: 'DOCX_ARCHIVE_UNREADABLE' });
   let zip: yauzl.ZipFile;
   try {
     zip = await openZip(buf);
   } catch (err) {
-    throw new ParserError('invalid zip archive', { cause: err });
+    throw new ParserError('invalid zip archive', { cause: err, code: 'DOCX_ARCHIVE_UNREADABLE' });
   }
   let relEntries: readonly yauzl.Entry[];
   try {

@@ -13,6 +13,9 @@ describe('parseLog', () => {
     const b = child.bindings() as { doc?: { sha256?: string; filename?: string } };
     expect(b.doc?.sha256).toBe('deadbeef');
     expect(b.doc?.filename).toBe('a.docx');
+    // exactOptionalPropertyTypes: omitted optional fields must be ABSENT, not `undefined`.
+    expect('specId' in (b.doc ?? {})).toBe(false);
+    expect('jobId' in (b.doc ?? {})).toBe(false);
   });
 
   it('includes specId when provided', async () => {

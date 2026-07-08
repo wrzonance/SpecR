@@ -246,8 +246,11 @@ async function processOnboardingJob(
     loader: 'rest:onboarding',
     jobId,
   };
+  let specId: string | undefined;
   try {
-    const { specId, tree } = await runParseAndPersist(jobId, buffer, ext, libraryId, filename);
+    const persisted = await runParseAndPersist(jobId, buffer, ext, libraryId, filename);
+    specId = persisted.specId;
+    const { tree } = persisted;
     const style = await deriveStyleIfDocx(jobId, buffer, ext, specId, tree.section, libraryId);
     const summaries = await classifyAndSummarize(jobId, specId);
     const report: OnboardingReport = {
@@ -268,8 +271,9 @@ async function processOnboardingJob(
     };
     updateOnboardingJob(jobId, { status: 'complete', stage: 'complete', pct: 100, result });
   } catch (err) {
-    // specId omitted: a parse failure fires before persist, so there is no spec yet.
-    parseLog(docFields).error({ err }, 'onboarding job failed');
+    // specId is set once runParseAndPersist resolves; a failure before that point
+    // (e.g. worker parse error) still has no spec yet, so it is omitted.
+    parseLog(specId ? { ...docFields, specId } : docFields).error({ err }, 'onboarding job failed');
     // Set the terminal stage too, so a polling client never sees status:'failed'
     // stranded on the last running stage (e.g. 'deriving-style').
     updateOnboardingJob(jobId, {

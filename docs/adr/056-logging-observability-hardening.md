@@ -82,7 +82,12 @@ logrotate later as a config, not code, change).
   (`outcome: clean|warnings|failed` per file — the DLQ/quarantine record the autonomous
   loop tails, modelled on `lib/fixture-snapshot.ts`'s Zod'd record shape); the
   `inferSectionMeta` and PDF cause-summary swallow→warning conversions (worker-boundary
-  entanglement); optional `x-request-id` middleware; `redact`/serializer config.
+  entanglement); optional `x-request-id` middleware; `redact`/serializer config. Also
+  deferred: extend the error-`code` taxonomy to the remaining uncoded throw sites —
+  `docx/safety.ts` zip-scan/SSRF throws (`:249`, `:254`), `sec/safety.ts`,
+  `pdf/safety.ts`, `pdf/ocr.ts`, `source-facts.ts`, `resolver.ts`, `comments.ts`,
+  `theme.ts` — so a malformed-corpus agent can branch on every parser failure, not
+  just the parseDocx-internal ones coded in P1.
 
 ## Consequences
 
