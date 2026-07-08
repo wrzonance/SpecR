@@ -60,12 +60,11 @@ mechanism; pino's `err` serializer already walks the `cause` chain and emits an 
    thread it into existing `throw new ParserError(...)` sites. pino's std `err`
    serializer emits `code` for free, so an agent branches on `err.code`, not prose.
    Optionally centralise the `code → HTTP status` map in `api/middleware/error.ts`.
-5. **Convert the worst silent swallows into signal.** Keeping the parser log-free, turn
-   the no-signal degradations into `ParseWarning`s (data on the tree, which then ride
-   step 3 into the logs): add `core-metadata-unreadable` (docx corrupt `core.xml`) and a
-   warning when `inferSectionMeta` throws (distinguish "errored" from "found nothing");
-   for the PDF swallows that already warn, attach a short path-sanitised cause summary to
-   `ParseWarning.suggestion`.
+5. **Convert the worst silent swallow into signal.** Keeping the parser log-free, turn
+   the corrupt-`core.xml` degradation (`docx/index.ts` `parseCoreMetadata`) into a
+   `core-metadata-unreadable` `ParseWarning` — data on the tree, which then rides step 3
+   into the logs. (The `inferSectionMeta` swallow and the PDF cause-summary swallows are
+   entangled with the worker-thread boundary and are deferred to P2.)
 
 **Rejected alternatives:** a DB `parse_runs` table (couples parse-observability to the
 very DB whose failure we want to log; no cross-run-SQL need for a single-box corpus run —
@@ -81,8 +80,9 @@ logrotate later as a config, not code, change).
 - **P1** — failure taxonomy (4) + swallow→warning conversion (5).
 - **P2 (deferred, follow-on ADR/PR)** — a per-document `logs/parse-diagnostics-<runId>.jsonl`
   (`outcome: clean|warnings|failed` per file — the DLQ/quarantine record the autonomous
-  loop tails, modelled on `lib/fixture-snapshot.ts`'s Zod'd record shape); optional
-  `x-request-id` middleware; `redact`/serializer config.
+  loop tails, modelled on `lib/fixture-snapshot.ts`'s Zod'd record shape); the
+  `inferSectionMeta` and PDF cause-summary swallow→warning conversions (worker-boundary
+  entanglement); optional `x-request-id` middleware; `redact`/serializer config.
 
 ## Consequences
 
@@ -106,8 +106,8 @@ logrotate later as a config, not code, change).
 2. `load_files`/`LoadResult` includes `warnings` per file; MCP `parse_document` response
    includes `warnings`.
 3. A thrown `ParserError` carrying a `code` serialises that `code` into the log line.
-4. A corrupt `core.xml` (and an `inferSectionMeta` throw) produces a `ParseWarning`
-   rather than a silent `unknown`/`NONE_RESULT`.
+4. A corrupt `core.xml` produces a `core-metadata-unreadable` `ParseWarning` rather than
+   a silent `unknown` (the `inferSectionMeta` swallow is deferred to P2).
 5. With `LOG_FILE` set, a run writes valid JSONL (one object per line) to `logs/`; with
    the test env, the file target is disabled.
 6. `openapi.yaml`/MCP contract tests stay green after the `parse_document` response gains
