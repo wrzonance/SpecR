@@ -43,6 +43,40 @@ function attrSelector(attr, value) {
   return value.includes('"') ? null : `[${attr}="${value}"]`;
 }
 
+// Resolves the right-pane element a scored row should locate to, mirroring
+// audit.js's openSheet 3-tier fallback (exact node -> sheet head -> nothing).
+// The read-only render path (tree.js renderSpecSheet, no inline editing) only
+// stamps [data-node-id] on body paragraph/note rows — part and article
+// heading bars carry no anchor — so a scored heading row needs the same
+// "you are here" degrade audit.js findings get, not a silent no-op. Takes a
+// sheet-like object (anything exposing querySelector) so this stays testable
+// without a real DOM.
+export function resolveLocateTarget(sheet, nodeId) {
+  if (!sheet) return { node: null, tier: 'none' };
+  const selector = nodeId ? attrSelector('data-node-id', nodeId) : null;
+  const node = selector ? sheet.querySelector(selector) : null;
+  if (node) return { node, tier: 'exact' };
+  const head = sheet.querySelector('.sheet-head');
+  if (head) return { node: head, tier: 'head' };
+  return { node: null, tier: 'none' };
+}
+
+// Monotonic stale-response guard for loadSelected: `next()` issues a token for
+// a new in-flight request; `bump()` invalidates whatever is in flight WITHOUT
+// issuing a new token — used when a refresh leaves no selection at all, so an
+// older fetch can't repopulate a pane that now has nothing selected;
+// `isCurrent()` reports whether a token is still the newest issued.
+export function createRequestGuard() {
+  let current = 0;
+  return {
+    next: () => (current += 1),
+    bump: () => {
+      current += 1;
+    },
+    isCurrent: (token) => token === current,
+  };
+}
+
 function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
@@ -77,7 +111,7 @@ export function initScoring(opts) {
   // equal "nothing loaded yet"). Real loads always set this to null or an id.
   const NEVER_LOADED = Symbol('scoring-never-loaded');
   let loadedSpecId = NEVER_LOADED; // spec the report/pane were last loaded for
-  let requestId = 0; // monotonic guard against a stale fetch clobbering a newer pick
+  const requestGuard = createRequestGuard(); // monotonic guard against a stale fetch clobbering a newer pick
   let currentReport = null;
   let currentPositions = new Map();
   let currentFilter = 'all';
@@ -242,6 +276,19 @@ export function initScoring(opts) {
     pulseNode(node);
   }
 
+  // Fallback target when a row has no [data-node-id] anchor of its own (part/
+  // article heading rows — see resolveLocateTarget). Anchors to the sheet head
+  // instead of the exact paragraph, mirroring audit.js's locateHead.
+  function locateHead(head) {
+    if (locatedNode && locatedNode !== head) {
+      locatedNode.classList.remove('is-audit-target', 'is-audit-pulse');
+    }
+    locatedNode = head;
+    head.classList.add('is-audit-target');
+    head.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+    pulseNode(head);
+  }
+
   function selectRow(row) {
     if (selectedRow && selectedRow !== row) selectedRow.classList.remove('is-selected');
     selectedRow = row;
@@ -251,17 +298,30 @@ export function initScoring(opts) {
 
   function locateRow(row) {
     selectRow(row);
-    const nodeId = row.dataset.nodeId;
     const sheet = specPane.querySelector('.spec-sheet');
-    const selector = sheet && nodeId ? attrSelector('data-node-id', nodeId) : null;
-    const node = selector ? sheet.querySelector(selector) : null;
-    if (node) locateNode(node);
+    const { node, tier } = resolveLocateTarget(sheet, row.dataset.nodeId);
+    if (tier === 'exact') {
+      locateNode(node);
+      return;
+    }
+    if (tier === 'head') {
+      locateHead(node);
+      return;
+    }
+    // No anchor at all — clear any stale highlight and scroll the pane to top
+    // so the click still gives a "you are here" signal, never a silent no-op.
+    if (locatedNode) {
+      locatedNode.classList.remove('is-audit-target', 'is-audit-pulse');
+      locatedNode = null;
+    }
+    specPane.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   }
 
   // ── Load / refresh ───────────────────────────────────────────────────────
 
   async function loadSelected() {
     if (!selectedSpecId) {
+      requestGuard.bump(); // invalidate any in-flight fetch — nothing is selected now
       currentReport = null;
       renderSummary(null);
       renderRows();
@@ -273,17 +333,25 @@ export function initScoring(opts) {
       showEmptyPane('This spec is no longer loaded in the project.');
       return;
     }
-    const thisRequest = ++requestId;
+    const thisRequest = requestGuard.next();
     try {
       const report = await fetchHierarchyReport(selectedSpecId);
-      if (thisRequest !== requestId) return; // superseded by a newer pick
+      if (!requestGuard.isCurrent(thisRequest)) return; // superseded by a newer pick
       currentReport = report;
       currentPositions = buildPositionMap(spec.tree);
       renderSummary(report);
       renderRows();
       renderSpecPane(spec);
     } catch (err) {
-      if (thisRequest !== requestId) return;
+      if (!requestGuard.isCurrent(thisRequest)) return;
+      // A failed load must leave the WHOLE view consistent with the failed
+      // selection, not just the right pane — otherwise the left list/summary
+      // keep showing the previously loaded spec's rows while the picker and
+      // error message refer to the spec that just failed.
+      currentReport = null;
+      currentPositions = new Map();
+      renderSummary(null);
+      renderRows();
       toast?.(`Could not load the scoring report: ${err.message}`, 'err');
       showEmptyPane('Could not load the scoring report for this spec.');
     }

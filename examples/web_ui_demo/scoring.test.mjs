@@ -11,6 +11,7 @@ import {
   selectScoringRows,
   buildPositionMap,
 } from './js/scoring-filter.mjs';
+import { resolveLocateTarget, createRequestGuard } from './js/scoring.js';
 
 const paragraph = (nodeId, confidence) => ({
   nodeId,
@@ -137,4 +138,81 @@ test('buildPositionMap: depth-first document order, part -> article -> pr childr
 test('buildPositionMap: empty/missing tree yields an empty map', () => {
   assert.deepEqual(buildPositionMap({ parts: [] }), new Map());
   assert.deepEqual(buildPositionMap({}), new Map());
+});
+
+// Minimal sheet-like stub exercising resolveLocateTarget's 3-tier fallback
+// (exact node -> sheet head -> none) without a real DOM. `nodesById` models
+// the read-only render path (tree.js renderSpecSheet): only body paragraph/
+// note rows carry [data-node-id] — part/article heading bars never do — so a
+// missing id here is exactly the P2 bug's reproduction, not a test artifact.
+function fakeSheet({ nodesById = {}, head = null } = {}) {
+  return {
+    querySelector(selector) {
+      if (selector === '.sheet-head') return head;
+      const match = /^\[data-node-id="([^"]+)"\]$/.exec(selector ?? '');
+      return match ? (nodesById[match[1]] ?? null) : null;
+    },
+  };
+}
+
+test('resolveLocateTarget: exact node hit returns tier "exact"', () => {
+  const node = { id: 'node-1' };
+  const sheet = fakeSheet({ nodesById: { 'node-1': node }, head: { id: 'head' } });
+  assert.deepEqual(resolveLocateTarget(sheet, 'node-1'), { node, tier: 'exact' });
+});
+
+test('resolveLocateTarget: heading row with no [data-node-id] anchor falls back to the sheet head', () => {
+  const head = { id: 'head' };
+  const sheet = fakeSheet({ nodesById: {}, head });
+  // Mirrors a scored part/article row: nodeId is set on the row, but the
+  // read-only sheet never stamped it on the heading bar, so the exact-node
+  // query misses and the fallback must still resolve to something.
+  assert.deepEqual(resolveLocateTarget(sheet, 'part-1'), { node: head, tier: 'head' });
+});
+
+test('resolveLocateTarget: no anchor and no sheet head resolves to tier "none"', () => {
+  const sheet = fakeSheet({ nodesById: {}, head: null });
+  assert.deepEqual(resolveLocateTarget(sheet, 'missing-node'), { node: null, tier: 'none' });
+});
+
+test('resolveLocateTarget: no sheet at all resolves to tier "none"', () => {
+  assert.deepEqual(resolveLocateTarget(null, 'node-1'), { node: null, tier: 'none' });
+});
+
+test('resolveLocateTarget: a stray double-quote in the nodeId never builds an unsafe selector', () => {
+  // attrSelector's quote guard: a malformed id must not blow up querySelector
+  // or match unrelated content — it degrades to the same fallback as a miss.
+  const head = { id: 'head' };
+  const sheet = fakeSheet({ nodesById: {}, head });
+  assert.deepEqual(resolveLocateTarget(sheet, 'weird"id'), { node: head, tier: 'head' });
+});
+
+test('createRequestGuard: next() issues increasing tokens, each current until superseded', () => {
+  const guard = createRequestGuard();
+  const first = guard.next();
+  assert.equal(guard.isCurrent(first), true);
+  const second = guard.next();
+  assert.equal(guard.isCurrent(first), false);
+  assert.equal(guard.isCurrent(second), true);
+});
+
+test('createRequestGuard: bump() invalidates an in-flight token without issuing a new one', () => {
+  // Regression for the P2 clear-selection bug: a refresh that leaves nothing
+  // selected must still invalidate whatever fetch is already in flight, even
+  // though it issues no new request of its own.
+  const guard = createRequestGuard();
+  const inFlight = guard.next();
+  assert.equal(guard.isCurrent(inFlight), true);
+  guard.bump();
+  assert.equal(guard.isCurrent(inFlight), false);
+});
+
+test('createRequestGuard: bump() after several next() calls still invalidates the latest token', () => {
+  const guard = createRequestGuard();
+  guard.next();
+  guard.next();
+  const latest = guard.next();
+  assert.equal(guard.isCurrent(latest), true);
+  guard.bump();
+  assert.equal(guard.isCurrent(latest), false);
 });
