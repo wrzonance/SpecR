@@ -50,6 +50,7 @@ describe('anchorsFromReferences', () => {
       outbound: [
         {
           sourceSpecId: 's1',
+          sourceParagraphId: 's1-p1',
           referenceText: 'x',
           targetSection: '07 84 00',
           targetSpecId: 't1',
@@ -58,6 +59,7 @@ describe('anchorsFromReferences', () => {
         },
         {
           sourceSpecId: 's1',
+          sourceParagraphId: 's1-p2',
           referenceText: 'y',
           targetSection: null,
           targetSpecId: null,

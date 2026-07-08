@@ -5832,11 +5832,24 @@ components:
 
     OutboundReference:
       type: object
-      required: [sourceSpecId, referenceText, targetSection, targetSpecId, isResolved, isBroken]
+      required:
+        [
+          sourceSpecId,
+          sourceParagraphId,
+          referenceText,
+          targetSection,
+          targetSpecId,
+          isResolved,
+          isBroken,
+        ]
       properties:
         sourceSpecId:
           type: string
           format: uuid
+        sourceParagraphId:
+          type: string
+          format: uuid
+          description: Paragraph the reference sits in — the paragraph-level locator
         referenceText:
           type: string
         targetSection:
