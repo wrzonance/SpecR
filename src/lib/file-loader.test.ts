@@ -8,7 +8,10 @@ vi.mock('../db/index.js', () => ({
 }));
 vi.mock('node:fs/promises', () => ({ readFile: vi.fn() }));
 vi.mock('./logger.js', () => ({ logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } }));
-vi.mock('./log-context.js', () => ({ parseLog: vi.fn(() => ({ warn: vi.fn(), error: vi.fn() })) }));
+vi.mock('./log-context.js', () => ({
+  parseLog: vi.fn(() => ({ warn: vi.fn(), error: vi.fn() })),
+  logParseWarnings: vi.fn(),
+}));
 
 import { loadFiles, fileParseWarnings } from './file-loader.js';
 import { parse } from '../parser/index.js';
@@ -219,7 +222,7 @@ describe('loadFiles()', () => {
     );
   });
 
-  it('surfaces file-scoped parse warnings in the result and logs them (#422)', async () => {
+  it('surfaces file-scoped parse warnings in the result and delegates logging (#422)', async () => {
     vi.mocked(readFile).mockResolvedValue(mockBuf);
     const warnings = [{ type: 'unusual-part-count' as const }];
     vi.mocked(parse).mockResolvedValue({
@@ -228,12 +231,16 @@ describe('loadFiles()', () => {
       sectionInference: metadataInference,
     });
     vi.mocked(persistParsedSpec).mockResolvedValue('spec-id-warn');
-    const { parseLog } = await import('./log-context.js');
+    const { parseLog, logParseWarnings } = await import('./log-context.js');
     const result = await loadFiles(['/a/spec.sec']);
     expect(result.parseWarnings).toEqual([{ file: '/a/spec.sec', warnings }]);
+    // The child logger is built with document context, and the warning side-effect
+    // is delegated to the shared logParseWarnings helper (its emission is unit-tested
+    // directly in log-context.test.ts).
     expect(vi.mocked(parseLog)).toHaveBeenCalledWith(
       expect.objectContaining({ filename: 'spec.sec', loader: 'load_files' })
     );
+    expect(vi.mocked(logParseWarnings)).toHaveBeenCalledWith(expect.anything(), warnings);
   });
 
   it('omits parseWarnings entries for files with no warnings', async () => {

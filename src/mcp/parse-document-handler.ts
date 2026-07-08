@@ -23,7 +23,7 @@ import {
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { decodeBase64Payload } from '../lib/decode-base64.js';
 import { logger } from '../lib/logger.js';
-import { parseLog } from '../lib/log-context.js';
+import { parseLog, logParseWarnings } from '../lib/log-context.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
 import type { ToolError, ToolResult } from './tool-result.js';
@@ -174,9 +174,7 @@ export async function handleParseDocument({
       enriched.sectionInference,
       nodeCount
     );
-    const log = parseLog({ ...originMeta, specId });
-    if (enriched.tree.warnings?.length)
-      log.warn({ warnings: enriched.tree.warnings }, 'parse produced warnings');
+    logParseWarnings(parseLog({ ...originMeta, specId }), enriched.tree.warnings ?? []);
     return { content: [{ type: 'text' as const, text: JSON.stringify(response, null, 2) }] };
   } catch (err) {
     logger.error({ err }, 'mcp tool parse_document failed');

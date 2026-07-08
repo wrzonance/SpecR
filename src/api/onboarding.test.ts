@@ -36,6 +36,7 @@ vi.mock('../lib/logger.js', () => ({
 }));
 vi.mock('../lib/log-context.js', () => ({
   parseLog: vi.fn(() => ({ warn: vi.fn(), error: vi.fn() })),
+  logParseWarnings: vi.fn(),
 }));
 
 function makeRes(): Response {

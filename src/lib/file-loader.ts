@@ -5,7 +5,7 @@ import { persistParsedSpec, lookupSpecSectionTitle } from '../db/index.js';
 import type { OriginMeta } from '../db/index.js';
 import { computeTitleMatch } from './infer-section.js';
 import { logger } from './logger.js';
-import { parseLog } from './log-context.js';
+import { parseLog, logParseWarnings } from './log-context.js';
 import { sha256Hex } from './hash.js';
 import type { SectionInference } from './infer-section.js';
 import type { ParseWarning } from '../ast/types.js';
@@ -105,7 +105,7 @@ async function processFile(
   const log = parseLog({ filename: path.basename(file), sha256, loader: 'load_files' });
   const result = await parse(buffer, file);
   const fw = fileParseWarnings(file, result.tree);
-  if (fw) log.warn({ warnings: fw.warnings }, 'parse produced warnings');
+  logParseWarnings(log, fw?.warnings ?? []);
   if (dryRun) return;
   const originMeta: OriginMeta = { filename: path.basename(file), sha256, loader: 'load_files' };
   const specId = await persistParsedSpec({ ...result, originMeta });
