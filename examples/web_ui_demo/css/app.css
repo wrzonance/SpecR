@@ -623,6 +623,52 @@ body {
   color: var(--muted);
 }
 
+/* Ordered source-chain editor (#413) */
+.source-row.is-ordered {
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+}
+
+.source-row.is-available {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  opacity: 0.62;
+}
+
+.source-priority {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--amber);
+  min-width: 1.1rem;
+  text-align: center;
+}
+
+.source-ctl {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.28rem 0.45rem;
+  background: none;
+  border: 1px solid var(--line-dim);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.source-ctl:hover:not(:disabled) {
+  color: var(--vellum);
+  border-color: var(--amber);
+}
+
+.source-ctl:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.settings-source-hint {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+
 /* ── Library manager ────────────────────────────────────────────────────── */
 
 .library-workspace {
@@ -654,7 +700,8 @@ body {
 .library-master,
 .client-item,
 .client-add button,
-.library-remove {
+.library-remove,
+.library-reparse {
   border: 1px solid var(--line-dim);
   background: transparent;
   color: var(--line);
@@ -771,7 +818,7 @@ body {
 
 .library-spec-row {
   display: grid;
-  grid-template-columns: 7rem minmax(10rem, 1fr) auto auto;
+  grid-template-columns: 7rem minmax(10rem, 1fr) auto auto auto;
   gap: 0.55rem;
   align-items: center;
   color: rgba(27, 39, 50, 0.9);
@@ -803,6 +850,16 @@ body {
 
 .library-remove:hover {
   background: #b3261e;
+  color: #ffffff;
+}
+
+.library-reparse {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.library-reparse:hover {
+  background: var(--amber);
   color: #ffffff;
 }
 
@@ -2371,6 +2428,18 @@ body {
 
 .toast.is-err {
   border-left-color: var(--err);
+}
+
+.toast-action {
+  margin-left: 0.7rem;
+  border: 1px solid var(--line-dim);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 @keyframes toast-in {
