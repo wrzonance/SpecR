@@ -9,6 +9,7 @@ import { workerOutputSchema, type WorkerOutput } from '../lib/parse-worker.js';
 import { persistParsedSpec, getNumberingProfile } from '../db/index.js';
 import type { OriginMeta } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+import { parseLog } from '../lib/log-context.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
@@ -196,6 +197,21 @@ async function runParseWorker(
   return workerOutputSchema.parse(workerRaw) as WorkerOutput;
 }
 
+// Logs to the per-document child logger only when the tree actually carries
+// warnings — keeps the success path in processParseJob a single call.
+function logParseWarnings(
+  originMeta: OriginMeta,
+  jobId: string,
+  specId: string,
+  tree: SpecTree
+): void {
+  if (!tree.warnings?.length) return;
+  parseLog({ ...originMeta, jobId, specId }).warn(
+    { warnings: tree.warnings },
+    'parse produced warnings'
+  );
+}
+
 async function processParseJob(
   jobId: string,
   buffer: Buffer,
@@ -204,6 +220,9 @@ async function processParseJob(
   filename: string,
   numberingProfile?: NumberingProfile
 ): Promise<void> {
+  // Computed once, up front, so both persistParsedSpec and the child logger
+  // (success AND failure paths below) share the same sha256 — no double-hashing.
+  const originMeta = buildOriginMeta(filename, buffer);
   try {
     const onProgress = (stage: string, pct: number): void => {
       updateJob(jobId, { stage: stage as ParseStage, pct, status: 'running' });
@@ -220,12 +239,9 @@ async function processParseJob(
     };
 
     updateJob(jobId, { stage: 'persisting', pct: 90, status: 'running' });
-    const specId = await persistParsedSpec({
-      tree: finalTree,
-      refs,
-      originMeta: buildOriginMeta(filename, buffer),
-    });
+    const specId = await persistParsedSpec({ tree: finalTree, refs, originMeta });
     const nodeCount = countNodes(finalTree.parts);
+    logParseWarnings(originMeta, jobId, specId, finalTree);
 
     updateJob(jobId, {
       status: 'complete',
@@ -241,7 +257,7 @@ async function processParseJob(
       },
     });
   } catch (err) {
-    logger.error({ err, jobId }, 'parse job failed');
+    parseLog({ ...originMeta, jobId }).error({ err }, 'parse job failed');
     updateJob(jobId, {
       status: 'failed',
       error: jobErrorMessage(err),

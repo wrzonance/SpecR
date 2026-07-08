@@ -32,6 +32,7 @@ import { workerOutputSchema, type WorkerOutput } from '../lib/parse-worker.js';
 import { summarizeEditability } from './onboarding-report.js';
 import { summarizeHierarchy } from '../lib/hierarchy-summary.js';
 import { logger } from '../lib/logger.js';
+import { parseLog } from '../lib/log-context.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
@@ -248,6 +249,16 @@ async function processOnboardingJob(
       hierarchy: summaries.hierarchy,
       parseWarnings: tree.warnings ?? [],
     };
+    if (tree.warnings?.length) {
+      const log = parseLog({
+        filename: sanitizeFilename(filename),
+        sha256: sha256Hex(buffer),
+        loader: 'rest:onboarding',
+        jobId,
+        specId,
+      });
+      log.warn({ warnings: tree.warnings }, 'parse produced warnings');
+    }
     const result: OnboardingJobResult = {
       specId,
       section: tree.section,

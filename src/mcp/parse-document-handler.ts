@@ -23,9 +23,14 @@ import {
 import { decodeTextBuffer } from '../lib/decode-text.js';
 import { decodeBase64Payload } from '../lib/decode-base64.js';
 import { logger } from '../lib/logger.js';
+import { parseLog } from '../lib/log-context.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
 import type { ToolError, ToolResult } from './tool-result.js';
+
+// Sourced from UFGS reference corpus — not authoritative CSI MasterFormat.
+const INFERENCE_NOTE =
+  'Section metadata missing. Section number and title inferred from document content. Standard title (if present) sourced from UFGS reference corpus — not authoritative CSI MasterFormat. Please verify.';
 
 function toolErr(text: string): ToolError {
   return { isError: true, content: [{ type: 'text' as const, text }] };
@@ -122,6 +127,27 @@ function buildMcpOriginMeta(filename: string, contentBase64: string): OriginMeta
   };
 }
 
+// Pure — assembles the tool response payload from already-computed pieces, so
+// it is testable without stubbing parse/persist/DB.
+export function buildParseResponse(
+  specId: string,
+  tree: SpecTree,
+  sectionInference: SectionInference,
+  nodeCount: number
+): Record<string, unknown> {
+  const response: Record<string, unknown> = {
+    specId,
+    section: tree.section,
+    title: tree.title,
+    nodeCount,
+  };
+  if (tree.warnings && tree.warnings.length > 0) response['warnings'] = tree.warnings;
+  if (sectionInference.method !== 'metadata') {
+    response['sectionInference'] = { ...sectionInference, note: INFERENCE_NOTE };
+  }
+  return response;
+}
+
 export async function handleParseDocument({
   filename,
   contentBase64,
@@ -142,18 +168,15 @@ export async function handleParseDocument({
     const originMeta = buildMcpOriginMeta(filename, contentBase64);
     const specId = await persistParsedSpec({ ...enriched, originMeta });
     const nodeCount = countNodes(enriched.tree.parts);
-    const response: Record<string, unknown> = {
+    const response = buildParseResponse(
       specId,
-      section: enriched.tree.section,
-      title: enriched.tree.title,
-      nodeCount,
-    };
-    if (enriched.sectionInference.method !== 'metadata') {
-      response['sectionInference'] = {
-        ...enriched.sectionInference,
-        note: 'Section metadata missing. Section number and title inferred from document content. Standard title (if present) sourced from UFGS reference corpus — not authoritative CSI MasterFormat. Please verify.',
-      };
-    }
+      enriched.tree,
+      enriched.sectionInference,
+      nodeCount
+    );
+    const log = parseLog({ ...originMeta, specId });
+    if (enriched.tree.warnings?.length)
+      log.warn({ warnings: enriched.tree.warnings }, 'parse produced warnings');
     return { content: [{ type: 'text' as const, text: JSON.stringify(response, null, 2) }] };
   } catch (err) {
     logger.error({ err }, 'mcp tool parse_document failed');

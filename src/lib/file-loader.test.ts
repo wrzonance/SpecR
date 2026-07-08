@@ -8,8 +8,9 @@ vi.mock('../db/index.js', () => ({
 }));
 vi.mock('node:fs/promises', () => ({ readFile: vi.fn() }));
 vi.mock('./logger.js', () => ({ logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+vi.mock('./log-context.js', () => ({ parseLog: vi.fn(() => ({ warn: vi.fn(), error: vi.fn() })) }));
 
-import { loadFiles } from './file-loader.js';
+import { loadFiles, fileParseWarnings } from './file-loader.js';
 import { parse } from '../parser/index.js';
 import { persistParsedSpec, lookupSpecSectionTitle } from '../db/index.js';
 import { readFile } from 'node:fs/promises';
@@ -36,6 +37,19 @@ const contentInference: SectionInference = {
 
 beforeEach(() => vi.clearAllMocks());
 
+describe('fileParseWarnings', () => {
+  it('returns null when the tree has no warnings', () => {
+    expect(fileParseWarnings('a.docx', mockTree)).toBeNull();
+  });
+  it('returns file-scoped warnings when present', () => {
+    const w = [{ type: 'unusual-part-count' as const, suggestion: 's' }];
+    expect(fileParseWarnings('a.docx', { ...mockTree, warnings: w })).toEqual({
+      file: 'a.docx',
+      warnings: w,
+    });
+  });
+});
+
 describe('loadFiles()', () => {
   it('returns zero-result for empty path list', async () => {
     const result = await loadFiles([]);
@@ -45,6 +59,7 @@ describe('loadFiles()', () => {
       failed: 0,
       errors: [],
       inferenceWarnings: [],
+      parseWarnings: [],
     });
     expect(parse).not.toHaveBeenCalled();
   });
@@ -202,5 +217,34 @@ describe('loadFiles()', () => {
         },
       })
     );
+  });
+
+  it('surfaces file-scoped parse warnings in the result and logs them (#422)', async () => {
+    vi.mocked(readFile).mockResolvedValue(mockBuf);
+    const warnings = [{ type: 'unusual-part-count' as const }];
+    vi.mocked(parse).mockResolvedValue({
+      tree: { ...mockTree, warnings },
+      refs: [],
+      sectionInference: metadataInference,
+    });
+    vi.mocked(persistParsedSpec).mockResolvedValue('spec-id-warn');
+    const { parseLog } = await import('./log-context.js');
+    const result = await loadFiles(['/a/spec.sec']);
+    expect(result.parseWarnings).toEqual([{ file: '/a/spec.sec', warnings }]);
+    expect(vi.mocked(parseLog)).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: 'spec.sec', loader: 'load_files' })
+    );
+  });
+
+  it('omits parseWarnings entries for files with no warnings', async () => {
+    vi.mocked(readFile).mockResolvedValue(mockBuf);
+    vi.mocked(parse).mockResolvedValue({
+      tree: mockTree,
+      refs: [],
+      sectionInference: metadataInference,
+    });
+    vi.mocked(persistParsedSpec).mockResolvedValue('spec-id-nowarn');
+    const result = await loadFiles(['/a/spec.sec']);
+    expect(result.parseWarnings).toEqual([]);
   });
 });

@@ -34,6 +34,9 @@ vi.mock('../db/index.js', () => ({
 vi.mock('../lib/logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
+vi.mock('../lib/log-context.js', () => ({
+  parseLog: vi.fn(() => ({ warn: vi.fn(), error: vi.fn() })),
+}));
 
 function makeRes(): Response {
   return {
