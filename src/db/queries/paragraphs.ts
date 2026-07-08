@@ -3,7 +3,6 @@ import { assertSpecWritable } from './edit-gate.js';
 import type { Pool, PoolClient } from 'pg';
 import { NodeTypeSchema, parseSourceFacts, deriveArticleRole } from '../../ast/index.js';
 import type {
-  NodeType,
   ParagraphAssociation,
   SignalConflict,
   SignalProvenance,
@@ -13,6 +12,7 @@ import type {
   SpecTree,
 } from '../../ast/index.js';
 import { listAssociationsForParagraph } from './associations.js';
+import { parseNodeType } from './node-type.js';
 import { deriveInference } from './inference-meta.js';
 
 export interface Queryable {
@@ -212,19 +212,6 @@ interface SubtreeRow {
   readonly signalProvenance: unknown;
 }
 
-/** Validate a raw DB `node_type` string against the canonical AST enum before it
- *  crosses into a `SpecNode`. Guards against drift between the DB CHECK and the
- *  AST type without a cross-boundary assertion. */
-function parseNodeType(nodeType: string): NodeType {
-  const parsed = NodeTypeSchema.safeParse(nodeType);
-  if (!parsed.success) {
-    throw new DatabaseError(`buildSubtree: unexpected node_type "${nodeType}"`, {
-      cause: parsed.error,
-    });
-  }
-  return parsed.data;
-}
-
 /** Assemble subtree rows (a node plus all its descendants) into one SpecNode
  *  rooted at `rootId`. Mirrors buildNodeTree's meta shaping (specs.ts) but roots
  *  at a non-null parent rather than the forest roots. */
@@ -241,7 +228,7 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
     // `closed` flag before they reach the API response (#262).
     const sourceFacts = parseSourceFacts(row.sourceFacts);
     const articleRole = row.nodeType === 'article' ? deriveArticleRole(row.text) : undefined;
-    const nodeType = parseNodeType(row.nodeType);
+    const nodeType = parseNodeType(row.nodeType, 'buildSubtree');
     const inference = deriveInference(row.signalProvenance, row.conflicts, nodeType);
     return {
       id: row.id,

@@ -29,5 +29,12 @@ export const NODE_TYPES_BY_NORMALIZED_ILVL: readonly NodeType[] = [
 ];
 
 export function nodeTypeToNormalizedIlvl(nodeType: NodeType): number {
-  return NODE_TYPE_TO_NORMALIZED_ILVL[nodeType] ?? 0;
+  const ilvl = NODE_TYPE_TO_NORMALIZED_ILVL[nodeType];
+  if (ilvl === undefined) {
+    // Fail loud: a silent 0 would alias non-structural/future types onto 'part'
+    // and corrupt conflict ilvl-distance penalties instead of surfacing the
+    // missing mapping (callers filter to structural types before calling).
+    throw new Error(`nodeTypeToNormalizedIlvl: no normalized ilvl for node type "${nodeType}"`);
+  }
+  return ilvl;
 }
