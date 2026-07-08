@@ -11,6 +11,7 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /projects', 'list_projects'],
   ['get /specs/{}', 'get_spec'],
   ['get /specs/{}/lineage', 'get_spec_lineage'],
+  ['get /specs/{}/hierarchy-report', 'get_hierarchy_report'], // WS2 #424 scoring report
   ['post /specs/{}/diff', 'get_spec_diff'],
   ['post /specs/{}/generate', 'generate_docx'],
   ['post /parse', 'parse_document'],

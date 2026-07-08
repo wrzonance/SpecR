@@ -39,6 +39,7 @@ import { registerPackageTools } from './package-tools.js';
 import { registerPackageRevisionTools } from './package-revision-tools.js';
 import { registerReportTools } from './report-tools.js';
 import { registerRevitLinksTools } from './revit-links-tools.js';
+import { registerHierarchyReportTools } from './hierarchy-report-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
@@ -392,6 +393,7 @@ export function registerTools(
   registerLoaderTools(reg);
   registerReportTools(reg);
   registerRevitLinksTools(reg);
+  registerHierarchyReportTools(reg);
   registerSubmittalTools(reg);
   registerOpenCommentsTools(reg);
   registerOnboardingTools(reg);
