@@ -305,7 +305,15 @@ describe('persistParsedSpec — lineage (#93)', () => {
 
   it('re-import after withdraw: upload landed hidden in the tombstoned row — revives instead (#415)', async () => {
     const specId = await persistParsedSpec(input());
-    await withdrawSpec(specId);
+    await expect(withdrawSpec(specId)).resolves.toMatchObject({
+      kind: 'withdrawn',
+      specId,
+    });
+    const withdrawn = await pool.query<{ withdrawn_at: Date | null }>(
+      'SELECT withdrawn_at FROM specs WHERE id = $1',
+      [specId]
+    );
+    expect(withdrawn.rows[0]?.withdrawn_at).not.toBeNull();
     const reimportedId = await persistParsedSpec(input());
     expect(reimportedId).toBe(specId); // same upsert target, not a duplicate row
     const r = await pool.query('SELECT withdrawn_at, content_version FROM specs WHERE id = $1', [
