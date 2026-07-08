@@ -479,7 +479,13 @@ async function saveProjectSettings() {
   const sectionNumberFormat = formatSelect?.value || activeSectionNumberFormat();
   try {
     await patchProject(activeProjectId, { name, sectionNumberFormat });
-    await saveSourceDraft();
+    // The project patch has already persisted; a source-order failure must not
+    // masquerade as a total save failure, so report it distinctly (#413).
+    try {
+      await saveSourceDraft();
+    } catch (err) {
+      toast(`settings saved, but source order failed: ${err.message}`, 'warn');
+    }
     await refreshProjectList(activeProjectId);
     activeProject = await getProject(activeProjectId);
     projectClientLibraryIds = projectClientSourceIds(activeProject);
@@ -502,6 +508,11 @@ async function loadActiveProjectWorkspace() {
   specs.clear();
   projectMembers.clear();
   tocSections = [];
+  // Drop any Settings source-draft cached before project details loaded — on
+  // boot the draft can be built from an empty activeProject and then reused,
+  // hiding the real chain and risking an overwrite on save (#413).
+  sourceDraft = null;
+  sourceDraftProjectId = null;
   try {
     activeProject = activeProjectId ? await getProject(activeProjectId) : null;
     projectClientLibraryIds = projectClientSourceIds(activeProject);
@@ -1065,7 +1076,15 @@ async function refreshTocLibrarySpecs() {
   const selectedClients = projectClientLibraryIds
     .map((id) => libraries.find((lib) => lib.id === id))
     .filter(Boolean);
-  const companySpecs = company ? await listLibrarySpecs(company.id) : [];
+  // Honor the saved source chain (#413): once a project sets its sources, only
+  // surface the company master when it is still in that chain — otherwise the
+  // TOC would offer specs addSpecToProject cannot resolve from a removed source.
+  const sourceLibraryIds = new Set(
+    (activeProject?.sources ?? []).map((source) => source.libraryId)
+  );
+  const includeCompany =
+    company && (sourceLibraryIds.size === 0 || sourceLibraryIds.has(company.id));
+  const companySpecs = includeCompany ? await listLibrarySpecs(company.id) : [];
   const clientSpecGroups = await Promise.all(
     selectedClients.map(async (client) => ({
       client,
@@ -1520,35 +1539,46 @@ async function withdrawSpecFromLibrary(spec) {
     danger: true,
   });
   if (!ok) return;
+  // Isolate the actual withdraw so a later view-refresh failure is not
+  // misreported as a failed withdraw — the server-side soft delete has already
+  // persisted, and reporting it as failed invites a confusing retry (#413).
   try {
     await withdrawSpec(spec.specId);
-    specs.delete(spec.specId);
-    projectMembers.delete(spec.specId);
+  } catch (err) {
+    toast(`withdraw failed: ${err.message}`, 'err');
+    return;
+  }
+  specs.delete(spec.specId);
+  projectMembers.delete(spec.specId);
+  try {
     await refreshSelectedLibrarySpecs();
     renderLibraryView();
     await refreshTocLibrarySpecs();
     renderBoard();
     await refreshCoordination();
     await refreshOpenComments();
-    toastWithAction(
-      `Section ${spec.section} withdrawn from ${library?.name || 'library'}`,
-      'warn',
-      'Undo',
-      async () => {
-        try {
-          await restoreSpec(spec.specId);
-          await refreshSelectedLibrarySpecs();
-          renderLibraryView();
-          await refreshTocLibrarySpecs();
-          toast(`Section ${spec.section} restored`);
-        } catch (err) {
-          toast(`restore failed: ${err.message}`, 'err');
-        }
-      }
-    );
   } catch (err) {
-    toast(`withdraw failed: ${err.message}`, 'err');
+    toast(
+      `Section ${spec.section} withdrawn, but the view failed to refresh: ${err.message}`,
+      'warn'
+    );
   }
+  toastWithAction(
+    `Section ${spec.section} withdrawn from ${library?.name || 'library'}`,
+    'warn',
+    'Undo',
+    async () => {
+      try {
+        await restoreSpec(spec.specId);
+        await refreshSelectedLibrarySpecs();
+        renderLibraryView();
+        await refreshTocLibrarySpecs();
+        toast(`Section ${spec.section} restored`);
+      } catch (err) {
+        toast(`restore failed: ${err.message}`, 'err');
+      }
+    }
+  );
 }
 
 // Admin full reset (#413): re-importing a master's source file hard-deletes
@@ -2159,7 +2189,7 @@ function onComposeCite(anchor) {
 async function refreshCrossProjectSpecs() {
   const others = projects.filter((project) => project.id !== activeProjectId);
   try {
-    const loaded = await Promise.all(
+    const results = await Promise.allSettled(
       others.map(async (project) => {
         const detail = await getProject(project.id);
         return (detail.toc ?? []).map((entry) => ({
@@ -2170,7 +2200,9 @@ async function refreshCrossProjectSpecs() {
         }));
       })
     );
-    crossProjectSpecs = loaded.flat();
+    crossProjectSpecs = results
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value);
   } catch (err) {
     console.warn('SpecR: could not load cross-project compare catalog', err);
     crossProjectSpecs = [];
