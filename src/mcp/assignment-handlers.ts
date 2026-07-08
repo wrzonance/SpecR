@@ -96,6 +96,12 @@ export async function handleAssignNumberingProfile(args: unknown): Promise<ToolR
     }
     return ok({ profileId, name: profile.name });
   } catch (err) {
+    // Backstop for the same race in its ultra-narrow window: EXISTS (statement
+    // snapshot) still sees the profile but the RI FK trigger finds it gone → 23503.
+    // The common race is handled by 'profile-not-found' above (#366) — mirrors the
+    // assign_style_source backstop so both tools honour the concurrent-delete 404.
+    if (getPgCode(err) === '23503')
+      return toolError(`numbering profile not found: id=${profileId}`);
     logger.error({ err }, 'mcp tool assign_numbering_profile failed');
     return toolError('Internal error — numbering profile assign failed');
   }

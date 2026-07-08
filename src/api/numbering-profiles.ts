@@ -181,6 +181,15 @@ export async function setSpecProfileHandler(req: Request, res: Response): Promis
     }
     res.status(200).json({ success: true, data: { profileId, name: profile.name } });
   } catch (err) {
+    // Backstop for the same delete race in its ultra-narrow window: the EXISTS
+    // subquery (statement snapshot) still sees the profile but the RI FK trigger's
+    // up-to-date check finds it concurrently deleted → 23503. Map that to the same
+    // 404 rather than leaking a 500. The common race is handled by
+    // 'profile-not-found' above (#366) — mirrors the style-source assign backstop.
+    if (getPgCode(err) === '23503') {
+      res.status(404).json({ success: false, error: 'numbering profile not found' });
+      return;
+    }
     logger.error({ err }, 'set spec numbering profile failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
