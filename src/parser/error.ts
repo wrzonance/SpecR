@@ -4,6 +4,7 @@ import type { SpecrErrorOptions } from '../lib/errors.js';
 export type ParserErrorCode =
   | 'DOCX_ARCHIVE_UNREADABLE'
   | 'DOCX_MISSING_DOCUMENT'
+  | 'DOCX_MISSING_STYLES'
   | 'DOCX_NO_PARAGRAPHS'
   | 'NUMBERING_XML_INVALID'
   | 'STYLES_XML_INVALID'

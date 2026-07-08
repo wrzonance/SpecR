@@ -276,7 +276,9 @@ export async function analyzeDocxStyles(buffer: Buffer): Promise<DocxStyleAnalys
     });
   }
   const { numberingXml, stylesXml, documentXml, themeXml } = await extractEntries(zip);
-  if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
+  if (!stylesXml) {
+    throw new ParserError('DOCX missing word/styles.xml', { code: 'DOCX_MISSING_STYLES' });
+  }
   if (!documentXml) {
     throw new ParserError('DOCX missing word/document.xml', { code: 'DOCX_MISSING_DOCUMENT' });
   }
@@ -305,7 +307,9 @@ export async function parseDocx(
   onProgress?.('extracting', 10);
   const { numberingXml, stylesXml, documentXml, commentsXml, coreXml } = await extractEntries(zip);
 
-  if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
+  if (!stylesXml) {
+    throw new ParserError('DOCX missing word/styles.xml', { code: 'DOCX_MISSING_STYLES' });
+  }
   if (!documentXml) {
     throw new ParserError('DOCX missing word/document.xml', { code: 'DOCX_MISSING_DOCUMENT' });
   }
@@ -333,7 +337,9 @@ export async function extractNumberingProfileFromDocx(buffer: Buffer): Promise<N
     });
   }
   const { numberingXml, stylesXml } = await extractEntries(zip);
-  if (!stylesXml) throw new ParserError('DOCX missing word/styles.xml');
+  if (!stylesXml) {
+    throw new ParserError('DOCX missing word/styles.xml', { code: 'DOCX_MISSING_STYLES' });
+  }
   const numberingMap = numberingXml ? buildNumberingMap(numberingXml) : emptyNumberingMap();
   const styleMap = buildStyleMap(stylesXml);
   const articleIlvl = detectArticleIlvl(styleMap, numberingMap);

@@ -14,4 +14,7 @@ describe('error codes', () => {
     expect(e.code).toBe('DOCX_NO_PARAGRAPHS');
     expect(e.cause).toBe(cause);
   });
+  it('ParserError with no code option leaves code undefined (field initializer does not clobber)', () => {
+    expect(new ParserError('x').code).toBeUndefined();
+  });
 });
