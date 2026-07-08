@@ -220,9 +220,11 @@ paths:
         (`GET /libraries/{id}/specs`, project source resolution, broken-ref
         `availableFrom`, the coordination present set) but remains retrievable
         by id (with `withdrawnAt` surfaced) and reversible via
-        `POST /specs/{id}/restore`. Idempotent — a re-withdraw returns the
-        EXISTING `withdrawnAt`, never a new timestamp. Withdrawal targets
-        library masters only; on a project copy it returns 409.
+        `POST /specs/{id}/restore` — and a re-import of the same section/source
+        into the library also revives it (#415), replacing its content. Idempotent —
+        a re-withdraw returns the EXISTING `withdrawnAt`, never a new
+        timestamp. Withdrawal targets library masters only; on a project copy
+        it returns 409.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -2059,7 +2061,10 @@ paths:
         `/libraries/import/jobs/{jobId}` for progress and the onboarding report.
         The pipeline parses (capturing source facts), persists the spec into the
         library, derives a style template (DOCX only), and classifies editability
-        using the library's convention profile or the built-in default. Source
+        using the library's convention profile or the built-in default. Importing
+        a section/source the library already holds replaces that master's parsed
+        content in place (`content_version` bumps) — and if the master was withdrawn, the
+        re-import revives it (clears `withdrawnAt`, #415). Source
         bytes are discarded after parse (ADR-021). Rate-limited per IP (default
         10 requests/minute, shared with `POST /parse`; configurable, can be disabled).
       tags: [libraries]

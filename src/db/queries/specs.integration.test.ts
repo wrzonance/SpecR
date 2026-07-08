@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { pool, createLibrary } from '../index.js';
-import { createSpec, persistParsedSpec, updateSpec } from './specs.js';
+import { createSpec, persistParsedSpec, updateSpec, withdrawSpec } from './specs.js';
 import type { OriginMeta } from './specs.js';
 import { insertTree } from './paragraphs.js';
 import { getSpecTree } from './specs.js';
@@ -301,6 +301,25 @@ describe('persistParsedSpec — lineage (#93)', () => {
     await persistParsedSpec(input());
     const r2 = await pool.query('SELECT content_version FROM specs WHERE id = $1', [specId]);
     expect(r2.rows[0]).toMatchObject({ content_version: 2 });
+  });
+
+  it('re-import after withdraw: upload landed hidden in the tombstoned row — revives instead (#415)', async () => {
+    const specId = await persistParsedSpec(input());
+    await expect(withdrawSpec(specId)).resolves.toMatchObject({
+      kind: 'withdrawn',
+      specId,
+    });
+    const withdrawn = await pool.query<{ withdrawn_at: Date | null }>(
+      'SELECT withdrawn_at FROM specs WHERE id = $1',
+      [specId]
+    );
+    expect(withdrawn.rows[0]?.withdrawn_at).not.toBeNull();
+    const reimportedId = await persistParsedSpec(input());
+    expect(reimportedId).toBe(specId); // same upsert target, not a duplicate row
+    const r = await pool.query('SELECT withdrawn_at, content_version FROM specs WHERE id = $1', [
+      specId,
+    ]);
+    expect(r.rows[0]).toMatchObject({ withdrawn_at: null, content_version: 2 });
   });
 
   it('stores origin_meta on insert and replaces it on re-upsert when provided', async () => {
