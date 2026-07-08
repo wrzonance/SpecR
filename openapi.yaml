@@ -894,6 +894,41 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/hierarchy-report:
+    get:
+      operationId: getSpecHierarchyReport
+      summary: Per-paragraph hierarchy-inference scoring report
+      description: >
+        Every scored structural paragraph in the spec, worst confidence first,
+        labeled exactly as a client would see it in the rendered markdown
+        (WS2, #424). `counts` and `unscoredReason` mirror the `hierarchy` field
+        of `OnboardingReport` (ADR-055) exactly; `paragraphs` carries ALL scored
+        nodes (not just the below-threshold subset) so a caller can review the
+        full confidence distribution, not only what already tripped the review
+        threshold.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Hierarchy-inference scoring report, worst-first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/HierarchyReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/style-source:
     post:
       operationId: setSpecStyleSource
@@ -5158,6 +5193,80 @@ components:
           description: Human-readable why-chain. Names signals, never source vendors.
           items:
             type: string
+
+    ScoredParagraph:
+      type: object
+      required:
+        [nodeId, nodeType, ilvl, label, preview, confidence, signalUsed, agreed, evidence]
+      description: >-
+        One scored structural paragraph in a GET /specs/{id}/hierarchy-report
+        response (WS2, #424) — the same inference provenance as
+        `SpecNodeInference`, plus the paragraph's identity, CSI label, and a
+        text preview.
+      properties:
+        nodeId: { type: string, format: uuid }
+        nodeType:
+          type: string
+          enum: [part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7]
+        ilvl: { type: integer, minimum: 0, maximum: 8 }
+        label:
+          type: string
+          description: CSI render label exactly as the markdown renderer would show it (e.g. "1.2", "PART 1").
+        preview:
+          type: string
+          description: Paragraph text, truncated to 80 characters (no ellipsis — a straight prefix).
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        signalUsed:
+          type: integer
+          enum: [1, 2, 3, 4, 5]
+          description: The winning inference signal (1 numbering.xml, 2 style chain, 3 document order, 4 text pattern, 5 indentation)
+        agreed:
+          type: array
+          description: Signals whose vote matched the final resolved classification
+          items:
+            type: integer
+            enum: [1, 2, 3, 4, 5]
+        evidence:
+          type: array
+          description: Human-readable why-chain. Names signals, never source vendors.
+          items:
+            type: string
+        conflicts:
+          type: array
+          description: Losing signals that disagreed with the winner. Omitted when there are none.
+          items:
+            $ref: '#/components/schemas/SignalConflict'
+
+    HierarchyReport:
+      type: object
+      required: [counts, paragraphs]
+      description: >-
+        Per-paragraph hierarchy-inference scoring report (WS2, #424). `counts`
+        and `unscoredReason` mirror `HierarchySummary` (the `hierarchy` field
+        of `OnboardingReport`) exactly; `paragraphs` carries ALL scored nodes,
+        worst confidence first, not just the below-threshold subset.
+      properties:
+        counts:
+          type: object
+          required: [scored, unscored, belowThreshold]
+          properties:
+            scored: { type: integer }
+            unscored: { type: integer }
+            belowThreshold: { type: integer }
+        unscoredReason:
+          type: string
+          description: >-
+            Present when unscored > 0 — why those paragraphs carry no score
+            (explicit-structure source, pre-provenance parse, non-DOCX source,
+            or manually inserted). Never folded into another bucket.
+        paragraphs:
+          type: array
+          description: ALL scored structural paragraphs, worst confidence first.
+          items:
+            $ref: '#/components/schemas/ScoredParagraph'
 
     SourceTextSpan:
       type: array

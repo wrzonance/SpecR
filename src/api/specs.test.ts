@@ -10,10 +10,15 @@ vi.mock('../db/index.js', () => ({
   getSpecWithdrawnAt: vi.fn(),
   withdrawSpec: vi.fn(),
   restoreSpec: vi.fn(),
+  getSpecSource: vi.fn(),
 }));
 
 vi.mock('../lib/logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
+}));
+
+vi.mock('../lib/hierarchy-report.js', () => ({
+  buildHierarchyReport: vi.fn(),
 }));
 
 function makeRes(): {
@@ -38,6 +43,8 @@ beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
 });
+
+const VALID_ID = '123e4567-e89b-42d3-a456-426614174000';
 
 describe('getSpecHandler', () => {
   it('returns 200 with reconstructed SpecTree, styleSource, onboardingStatus and withdrawnAt when spec exists', async () => {
@@ -172,6 +179,104 @@ describe('getSpecHandler', () => {
   });
 });
 
+describe('getHierarchyReportHandler', () => {
+  it('returns 400 on a malformed (non-UUID) id', async () => {
+    const { getHierarchyReportHandler } = await import('./specs.js');
+    const res = makeRes();
+    await getHierarchyReportHandler(
+      { params: { id: 'nope' } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['error']).toBe('invalid spec id');
+  });
+
+  it('returns 404 when spec not found', async () => {
+    const { getSpecTree } = await import('../db/index.js');
+    vi.mocked(getSpecTree).mockResolvedValueOnce(null);
+    const { getHierarchyReportHandler } = await import('./specs.js');
+    const res = makeRes();
+    await getHierarchyReportHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(404);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['error']).toBe('spec not found');
+  });
+
+  it('returns 200 with worst-first paragraphs and counts for a valid spec', async () => {
+    const { getSpecTree, getSpecSource } = await import('../db/index.js');
+    const { buildHierarchyReport } = await import('../lib/hierarchy-report.js');
+    const tree = {
+      id: VALID_ID,
+      section: '27 21 00',
+      title: 'Cabling',
+      parts: [],
+    };
+    vi.mocked(getSpecTree).mockResolvedValueOnce({ tree, references: [] });
+    vi.mocked(getSpecSource).mockResolvedValueOnce('arcat');
+    const report = {
+      counts: { scored: 2, unscored: 0, belowThreshold: 1 },
+      paragraphs: [
+        {
+          nodeId: 'p2',
+          nodeType: 'article' as const,
+          ilvl: 1,
+          label: '1.2',
+          preview: 'Worst paragraph',
+          confidence: 0.2,
+          signalUsed: 3 as const,
+          agreed: [3 as const],
+          evidence: ['document order'],
+        },
+        {
+          nodeId: 'p1',
+          nodeType: 'part' as const,
+          ilvl: 0,
+          label: 'PART 1',
+          preview: 'Best paragraph',
+          confidence: 0.9,
+          signalUsed: 1 as const,
+          agreed: [1 as const, 2 as const],
+          evidence: ['numbering.xml'],
+        },
+      ],
+    };
+    vi.mocked(buildHierarchyReport).mockReturnValueOnce(report);
+    const { getHierarchyReportHandler } = await import('./specs.js');
+    const res = makeRes();
+    await getHierarchyReportHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(getSpecSource).toHaveBeenCalledWith(VALID_ID);
+    expect(buildHierarchyReport).toHaveBeenCalledWith(tree, 'arcat');
+    expect(res.status).toHaveBeenCalledWith(200);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['success']).toBe(true);
+    const data = body['data'] as Record<string, unknown>;
+    expect(data['counts']).toEqual({ scored: 2, unscored: 0, belowThreshold: 1 });
+    const paragraphs = data['paragraphs'] as Array<Record<string, unknown>>;
+    expect(paragraphs.map((p) => p['nodeId'])).toEqual(['p2', 'p1']);
+  });
+
+  it('returns 500 on database error', async () => {
+    const { getSpecTree } = await import('../db/index.js');
+    vi.mocked(getSpecTree).mockRejectedValueOnce(new Error('db down'));
+    const { getHierarchyReportHandler } = await import('./specs.js');
+    const res = makeRes();
+    await getHierarchyReportHandler(
+      { params: { id: VALID_ID } } as unknown as Request,
+      res as unknown as Response
+    );
+    expect(res.status).toHaveBeenCalledWith(500);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['error']).toBe('internal server error');
+  });
+});
+
 describe('updateSpecHandler', () => {
   it('returns 200 with SpecSummary when update succeeds', async () => {
     const { updateSpec } = await import('../db/index.js');
@@ -219,8 +324,6 @@ describe('updateSpecHandler', () => {
     expect(body['error']).toBe('missing spec id');
   });
 });
-
-const VALID_ID = '123e4567-e89b-42d3-a456-426614174000';
 
 describe('withdrawSpecHandler', () => {
   it('returns 200 with {specId, withdrawnAt} on a master', async () => {

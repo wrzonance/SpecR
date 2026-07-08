@@ -5,6 +5,7 @@ import { healthHandler } from './health.js';
 import {
   getSpecHandler,
   getSpecLineageHandler,
+  getHierarchyReportHandler,
   updateSpecHandler,
   withdrawSpecHandler,
   restoreSpecHandler,
@@ -150,6 +151,7 @@ router.get('/health', healthHandler);
 router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/open-comments', getSpecOpenCommentsHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
+router.get('/specs/:id/hierarchy-report', getHierarchyReportHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.delete('/specs/:id', withdrawSpecHandler);
 router.post('/specs/:id/restore', restoreSpecHandler);
