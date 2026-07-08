@@ -12,7 +12,7 @@ import {
   mergeProfileConflicts,
   extractNumberingProfile,
 } from './numbering-profile.js';
-import type { SpecTree, StyleProperties } from '../../ast/types.js';
+import type { ParseWarning, SpecTree, StyleProperties } from '../../ast/types.js';
 import type { NumberingProfile } from '../../ast/index.js';
 import type { NumberingMap, StyleMap, ClassifiedParagraph, DocxParagraph } from './types.js';
 import { resolveStyleCascade } from './resolver.js';
@@ -29,7 +29,11 @@ const coreParser = new XMLParser({
   textNodeName: '#text',
 });
 
-function parseCoreMetadata(xml: string): { section: string; title: string } {
+function parseCoreMetadata(xml: string): {
+  section: string;
+  title: string;
+  warning?: ParseWarning;
+} {
   try {
     const parsed = coreParser.parse(xml) as Record<string, unknown>;
     const props = parsed['cp:coreProperties'] as Record<string, unknown> | undefined;
@@ -46,7 +50,17 @@ function parseCoreMetadata(xml: string): { section: string; title: string } {
       title: typeof titleVal === 'string' && titleVal.trim() ? titleVal.trim() : 'unknown',
     };
   } catch {
-    return { section: 'unknown', title: 'unknown' };
+    // Corrupt/unparseable core.xml previously degraded silently to 'unknown'.
+    // Surface it as a tree warning so it flows to logs/API/MCP responses instead.
+    return {
+      section: 'unknown',
+      title: 'unknown',
+      warning: {
+        type: 'core-metadata-unreadable',
+        suggestion:
+          'docProps/core.xml could not be parsed; section/title fell back to content inference.',
+      },
+    };
   }
 }
 
@@ -125,13 +139,15 @@ function runPipeline(
   // Section/title from core.xml only; when absent, the parse() orchestrator's
   // inferSectionMeta (lib/infer-section.ts) recovers them from tree content
   // with method/confidence reporting — do not duplicate that here.
-  const meta = entries.coreXml
+  const meta: { section: string; title: string; warning?: ParseWarning } = entries.coreXml
     ? parseCoreMetadata(entries.coreXml)
     : { section: 'unknown', title: 'unknown' };
 
   onProgress?.('complete', 100);
   const tree = buildTree(classified, meta.section, meta.title, source);
-  const warnings = auditTreeStructure(tree.parts);
+  const structuralWarnings = auditTreeStructure(tree.parts);
+  // core-metadata-unreadable fires at most once per parse — appended, not deduped.
+  const warnings = meta.warning ? [...structuralWarnings, meta.warning] : structuralWarnings;
   return warnings.length > 0 ? { ...tree, warnings } : tree;
 }
 

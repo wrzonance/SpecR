@@ -289,6 +289,15 @@ describe('parseDocx — error handling', () => {
     expect(tree.section).toBe('unknown');
     expect(tree.title).toBe('unknown');
   });
+
+  it('emits core-metadata-unreadable warning when docProps/core.xml is malformed', async () => {
+    // Otherwise-valid docx (default MINIMAL_DOC/MINIMAL_STYLES) — only core.xml is broken.
+    const buffer = await makeDocx({ coreXml: '<<<not xml' });
+    const tree = await parseDocx(buffer);
+    expect(tree.warnings?.some((w) => w.type === 'core-metadata-unreadable')).toBe(true);
+    expect(tree.section).toBe('unknown');
+    expect(tree.title).toBe('unknown');
+  });
 });
 
 describe('parseDocx — source facts: comments (#128)', () => {

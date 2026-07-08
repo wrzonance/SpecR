@@ -245,6 +245,7 @@ export const ParseWarningTypeSchema = z.enum([
   'no-structure-found',
   'unusual-part-count',
   'non-conforming-part-numbering',
+  'core-metadata-unreadable',
   'pdf-degraded-extraction',
   'pdf-ocr-applied',
   'pdf-ocr-low-confidence',
