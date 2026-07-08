@@ -166,6 +166,22 @@ describe('setSpecStyleSource — library scoping (#318)', () => {
 
     expect(await setSpecStyleSource(specId, builtIn)).toBe('assigned');
   });
+
+  it("(#366) race: template deleted after the pre-check yields 'template-not-found' (→404), not 'library-mismatch' (→409)", async () => {
+    // Simulate the delete-after-precheck race at the query boundary: the handler
+    // pre-checks the template, then it is deleted before this UPDATE runs. The
+    // EXISTS scope predicate now matches zero rows (no 23503 thrown), so the
+    // zero-row disambiguation must recognise the template is gone (→404) rather
+    // than blaming library scope (→409). The template is same-library, so absent
+    // the deletion it would bind cleanly ('assigned').
+    const libId = await makeLibrary(`ss-race-${randomUUID().slice(0, 8)}`);
+    const specId = await makeSpecInLibrary(libId);
+    const templateId = await makeScopedTemplate(`ss-doomed-${randomUUID().slice(0, 8)}`, libId);
+
+    await pool.query(`DELETE FROM style_templates WHERE id = $1`, [templateId]);
+
+    expect(await setSpecStyleSource(specId, templateId)).toBe('template-not-found');
+  });
 });
 
 describe('clearSpecStyleSource', () => {

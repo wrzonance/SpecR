@@ -177,7 +177,11 @@ export async function deleteNumberingProfile(id: string): Promise<boolean> {
 }
 
 /** Outcome of assigning a numbering profile to a spec (library scoping enforced). */
-export type SetSpecProfileResult = 'assigned' | 'spec-not-found' | 'library-mismatch';
+export type SetSpecProfileResult =
+  | 'assigned'
+  | 'spec-not-found'
+  | 'profile-not-found'
+  | 'library-mismatch';
 
 /**
  * Assign (or replace) a spec's numbering profile, enforcing library scoping: a
@@ -186,8 +190,10 @@ export type SetSpecProfileResult = 'assigned' | 'spec-not-found' | 'library-mism
  * WHERE so a cross-library assignment matches zero rows atomically — otherwise a
  * library-A profile could bind a library-B spec, hiding it from B's scoped
  * `listNumberingProfiles` and blocking A's deletion via the RESTRICT FK (#317).
- * Assumes the caller has already checked that the profile exists (the handler
- * does); a missing profile also yields 'library-mismatch'.
+ * The handler pre-checks that the profile exists; a profile deleted in the window
+ * between that pre-check and this UPDATE yields 'profile-not-found' (→404), NOT
+ * 'library-mismatch' — the EXISTS predicate matches zero rows instead of throwing
+ * a 23503, so the disambiguation must check the profile too, not only the spec (#366).
  */
 export async function setSpecNumberingProfile(
   specId: string,
@@ -205,10 +211,15 @@ export async function setSpecNumberingProfile(
       [specId, profileId]
     );
     if ((upd.rowCount ?? 0) === 1) return 'assigned';
-    // No row updated — distinguish a missing spec (→404) from an existing spec
-    // whose scope rejects the profile (→409) so the handler can map each cleanly.
+    // No row updated — disambiguate in precedence order so the handler maps each
+    // cleanly: a missing spec (→404) first, then a profile that vanished after the
+    // pre-check (→404, #366), else a genuine cross-library scope rejection (→409).
     const specExists = await pool.query(`SELECT 1 FROM specs WHERE id = $1`, [specId]);
-    return (specExists.rowCount ?? 0) === 1 ? 'library-mismatch' : 'spec-not-found';
+    if ((specExists.rowCount ?? 0) === 0) return 'spec-not-found';
+    const profileExists = await pool.query(`SELECT 1 FROM numbering_profiles WHERE id = $1`, [
+      profileId,
+    ]);
+    return (profileExists.rowCount ?? 0) === 1 ? 'library-mismatch' : 'profile-not-found';
   } catch (err) {
     throw new DatabaseError('setSpecNumberingProfile: update failed', { cause: err });
   }

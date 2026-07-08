@@ -35,6 +35,13 @@ export async function setStyleSourceHandler(req: Request, res: Response): Promis
       res.status(404).json({ success: false, error: 'spec not found' });
       return;
     }
+    if (outcome === 'template-not-found') {
+      // Race: the template was deleted between the pre-check above and the UPDATE
+      // (#366). The EXISTS predicate matched zero rows, so surface the same clean
+      // 404 as the pre-check, not a 409 scope error.
+      res.status(404).json({ success: false, error: 'template not found' });
+      return;
+    }
     if (outcome === 'library-mismatch') {
       // Status set at the handler (the error middleware only maps .status on thrown
       // boundary errors) — mirrors the numbering-profile assign 409.
@@ -46,9 +53,10 @@ export async function setStyleSourceHandler(req: Request, res: Response): Promis
     }
     res.status(200).json({ success: true, data: { templateId, templateName: template.name } });
   } catch (err) {
-    // Race: the template can be deleted between the existence pre-check and the
-    // UPDATE, surfacing as a 23503 FK violation. Map it to the same 404 as the
-    // pre-check rather than leaking a 500.
+    // Backstop for the same delete race in its ultra-narrow window: the EXISTS
+    // subquery (statement snapshot) still sees the template but the RI FK trigger's
+    // up-to-date check finds it gone → 23503. Map that to the same 404 rather than
+    // leaking a 500. The common race is handled by 'template-not-found' above (#366).
     if (getPgCode(err) === '23503') {
       res.status(404).json({ success: false, error: 'template not found' });
       return;

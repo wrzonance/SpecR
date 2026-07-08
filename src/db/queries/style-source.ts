@@ -37,7 +37,11 @@ export async function getSpecStyleSource(specId: string): Promise<SpecStyleSourc
 }
 
 /** Outcome of assigning a style template to a spec (library scoping enforced, #318). */
-export type SetSpecStyleResult = 'assigned' | 'spec-not-found' | 'library-mismatch';
+export type SetSpecStyleResult =
+  | 'assigned'
+  | 'spec-not-found'
+  | 'template-not-found'
+  | 'library-mismatch';
 
 /**
  * Assign (or replace) the spec's style template, enforcing library scoping (#318,
@@ -51,8 +55,10 @@ export type SetSpecStyleResult = 'assigned' | 'spec-not-found' | 'library-mismat
  * admits only built-in templates for it — identical to the numbering precedent; no
  * separate project-spec policy is invented.
  *
- * Assumes the caller has already checked that the template exists (the handler
- * does); a missing template also yields 'library-mismatch'.
+ * The handler pre-checks that the template exists; a template deleted in the window
+ * between that pre-check and this UPDATE yields 'template-not-found' (→404), NOT
+ * 'library-mismatch' — the EXISTS predicate matches zero rows instead of throwing
+ * a 23503, so the disambiguation must check the template too, not only the spec (#366).
  */
 export async function setSpecStyleSource(
   specId: string,
@@ -70,10 +76,15 @@ export async function setSpecStyleSource(
       [specId, templateId]
     );
     if ((upd.rowCount ?? 0) === 1) return 'assigned';
-    // No row updated — distinguish a missing spec (→404) from an existing spec
-    // whose scope rejects the template (→409) so the handler can map each cleanly.
+    // No row updated — disambiguate in precedence order so the handler maps each
+    // cleanly: a missing spec (→404) first, then a template that vanished after the
+    // pre-check (→404, #366), else a genuine cross-library scope rejection (→409).
     const specExists = await pool.query(`SELECT 1 FROM specs WHERE id = $1`, [specId]);
-    return (specExists.rowCount ?? 0) === 1 ? 'library-mismatch' : 'spec-not-found';
+    if ((specExists.rowCount ?? 0) === 0) return 'spec-not-found';
+    const templateExists = await pool.query(`SELECT 1 FROM style_templates WHERE id = $1`, [
+      templateId,
+    ]);
+    return (templateExists.rowCount ?? 0) === 1 ? 'library-mismatch' : 'template-not-found';
   } catch (err) {
     throw new DatabaseError('failed to set spec style source', { cause: err });
   }

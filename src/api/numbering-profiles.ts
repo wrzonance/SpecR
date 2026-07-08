@@ -166,6 +166,12 @@ export async function setSpecProfileHandler(req: Request, res: Response): Promis
       res.status(404).json({ success: false, error: 'spec not found' });
       return;
     }
+    if (outcome === 'profile-not-found') {
+      // Race: the profile was deleted between the pre-check above and the UPDATE
+      // (#366). Report the same clean 404 as the pre-check, not a 409 scope error.
+      res.status(404).json({ success: false, error: 'numbering profile not found' });
+      return;
+    }
     if (outcome === 'library-mismatch') {
       res.status(409).json({
         success: false,
