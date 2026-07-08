@@ -45,6 +45,7 @@ export {
   ArticleRoleSchema,
 } from './schemas.js';
 export { deriveArticleRole, tagArticleRoles, ARTICLE_ROLE_RULES } from './article-role.js';
+export { AstError } from './error.js';
 export {
   NODE_TYPE_TO_NORMALIZED_ILVL,
   NODE_TYPES_BY_NORMALIZED_ILVL,

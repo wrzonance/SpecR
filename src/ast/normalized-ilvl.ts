@@ -1,3 +1,4 @@
+import { AstError } from './error.js';
 import type { NodeType } from './types.js';
 
 // Canonical normalized ilvl: part=0, article=1, pr1=2, ..., pr7=8.
@@ -34,7 +35,7 @@ export function nodeTypeToNormalizedIlvl(nodeType: NodeType): number {
     // Fail loud: a silent 0 would alias non-structural/future types onto 'part'
     // and corrupt conflict ilvl-distance penalties instead of surfacing the
     // missing mapping (callers filter to structural types before calling).
-    throw new Error(`nodeTypeToNormalizedIlvl: no normalized ilvl for node type "${nodeType}"`);
+    throw new AstError(`nodeTypeToNormalizedIlvl: no normalized ilvl for node type "${nodeType}"`);
   }
   return ilvl;
 }
