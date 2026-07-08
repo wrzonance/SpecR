@@ -23,7 +23,7 @@ export function buildLoggerOptions(cfg: Config): pino.LoggerOptions {
       level: cfg.LOG_LEVEL,
       options: {
         // pino-roll@4.0.0's `extension` option is silently ignored (sanitizeFile()
-        // is called without forwarding it — see pino-roll.js:94), so the extension
+        // is called without forwarding it — see pino-roll.js:92), so the extension
         // must be embedded in `file` itself to actually get .jsonl output.
         file: join(cfg.LOG_DIR, 'specr.jsonl'),
         frequency: 'daily',

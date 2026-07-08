@@ -61,4 +61,18 @@ describe('buildLoggerOptions', () => {
     expect(targets.some((t) => t.target === 'pino-roll')).toBe(true);
     expect(targets.some((t) => t.target === 'pino/file')).toBe(true); // stdout mirror
   });
+
+  it('buildLoggerOptions: pino-roll target embeds .jsonl in file path (pino-roll@4 drops the extension option)', async () => {
+    const { buildLoggerOptions } = await import('./logger.js');
+    const opts = buildLoggerOptions({ ...base, LOG_TO_FILE: true } as never);
+    const targets = (
+      opts.transport as { targets: Array<{ target: string; options: Record<string, unknown> }> }
+    ).targets;
+    const rollTarget = targets.find((t) => t.target === 'pino-roll');
+    expect(rollTarget).toBeDefined();
+    // pino-roll@4.0.0 silently ignores the `extension` option (see logger.ts), so
+    // the .jsonl extension MUST live in `file`. A "cleanup" that moves it back to a
+    // separate `extension` key would regress output files to .log — this pins it.
+    expect(String(rollTarget?.options.file)).toMatch(/\.jsonl$/);
+  });
 });
