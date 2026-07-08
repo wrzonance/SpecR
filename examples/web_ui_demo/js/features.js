@@ -11,7 +11,7 @@ export const API_FEATURES = {
   projectsList: true, // GET /projects                                       (landed #229)
   projectSettings: true, // PATCH /projects/:id {name}                          (landed)
   projectSources: true, // PUT /projects/:id/sources                            (landed #235)
-  specDelete: false, // DELETE /specs/:id                                   (Phase 4)
+  specWithdraw: true, // DELETE /specs/:id soft-withdraw + POST /specs/:id/restore (landed ADR-030)
   paragraphDelete: false, // DELETE /specs/:id/paragraphs/:nodeId               (Phase 4, hard delete)
   paragraphRemoval: true, // PATCH /specs/:id/paragraphs/:nodeId/removal        (landed #251 — soft, reversible)
   paragraphCreate: true, // POST /specs/:id/paragraphs (insert after anchor)      (landed #372)

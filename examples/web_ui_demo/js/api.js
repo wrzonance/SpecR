@@ -180,9 +180,18 @@ export function deleteReference(specId, refId) {
   return sendJson('DELETE', `/specs/${enc(specId)}/references/${enc(refId)}`);
 }
 
-// Hard-deletes a spec (and everything it owns).
-export function deleteSpec(specId) {
+// Soft-withdraws a library master (ADR-030): tombstones it with withdrawnAt,
+// hiding it from listings and project source resolution while keeping the row
+// and clone lineage intact. Reversible via restoreSpec. 409 on a project copy
+// (those are removed via removeSpecFromProject).
+export function withdrawSpec(specId) {
   return sendJson('DELETE', `/specs/${enc(specId)}`);
+}
+
+// Clears a master's withdrawal tombstone — it reappears in listings and
+// resolution. Idempotent.
+export function restoreSpec(specId) {
+  return sendJson('POST', `/specs/${enc(specId)}/restore`);
 }
 
 // ── Project membership (backs the demo board's broken-ref cascade) ─────────
@@ -214,8 +223,11 @@ export function addSpecToProject(projectId, section) {
   return sendJson('POST', `/projects/${enc(projectId)}/specs`, { section });
 }
 
-export function removeSpecFromProject(projectId, specId) {
-  return sendJson('DELETE', `/projects/${enc(projectId)}/specs/${enc(specId)}`);
+// Removes a project-owned section copy. An edited copy (content_version > 1)
+// answers 409 unless force — the admin path that discards its project edits.
+export function removeSpecFromProject(projectId, specId, { force = false } = {}) {
+  const query = force ? '?force=true' : '';
+  return sendJson('DELETE', `/projects/${enc(projectId)}/specs/${enc(specId)}${query}`);
 }
 
 export function getBrokenRefs(projectId) {

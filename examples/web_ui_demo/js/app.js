@@ -11,7 +11,8 @@ import {
   deleteParagraph,
   setParagraphRemoved,
   updateParagraph,
-  deleteSpec,
+  withdrawSpec,
+  restoreSpec,
   createProject,
   listProjects,
   getProject,
@@ -48,6 +49,8 @@ import { initAudit } from './audit.js';
 import { initEditor } from './editor.js';
 import { initConstellation } from './constellation.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
+import { mergeSourcesWithScope, moveSource, resolutionNotice } from './source-order.mjs';
+import { classifyRemovalConflict } from './spec-removal.mjs';
 
 const specs = new Map(); // specId -> { tree, references, warnings?, capabilities? }
 const ACTIVE_PROJECT_KEY = 'specr-active-project';
@@ -69,7 +72,10 @@ let libraries = [];
 let selectedLibraryId = null;
 let selectedLibrarySpecs = [];
 let projectClientLibraryIds = [];
+let sourceDraft = null; // Settings-view ordered source chain being edited (#413)
+let sourceDraftProjectId = null; // draft belongs to this project; stale drafts rebuild
 let tocLibrarySpecs = [];
+let crossProjectSpecs = []; // other projects' TOC copies, for cross-project Compare (#413)
 const board = document.getElementById('spec-board');
 const emptyState = document.getElementById('empty-state');
 const webCanvas = document.getElementById('ref-web-canvas');
@@ -88,6 +94,26 @@ function toast(message, kind = 'info') {
   node.textContent = message;
   rack.appendChild(node);
   setTimeout(() => node.remove(), 5200);
+}
+
+// A toast carrying one action button (e.g. Undo). Longer-lived than toast()
+// so the action stays reachable; clicking it dismisses the toast.
+function toastWithAction(message, kind, actionLabel, onAction) {
+  const rack = document.getElementById('toast-rack');
+  const node = document.createElement('div');
+  node.className = `toast${kind === 'warn' ? ' is-warn' : ''}${kind === 'err' ? ' is-err' : ''}`;
+  node.textContent = message;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'toast-action';
+  btn.textContent = actionLabel;
+  btn.addEventListener('click', () => {
+    node.remove();
+    void onAction();
+  });
+  node.appendChild(btn);
+  rack.appendChild(node);
+  setTimeout(() => node.remove(), 10000);
 }
 
 function readLibraryOnlyIds() {
@@ -127,7 +153,12 @@ function showView(view) {
   if (view === 'numbering') void numberingPanel?.refresh();
   if (view === 'submittal') void refreshSubmittalRegister();
   if (view === 'compose') composePanel?.refresh();
-  if (view === 'compare') comparePanel?.refresh();
+  if (view === 'compare') {
+    // Re-pull other projects' TOCs so copies added since the last workspace
+    // load are pickable, then repaint with whatever is already cached.
+    void refreshCrossProjectSpecs().then(() => comparePanel?.refresh());
+    comparePanel?.refresh();
+  }
   // The audit's findings already repaint on workspace load / spec mutations;
   // opening the tab just needs a height re-measure. (A refetch here would wipe
   // the current finding selection and desync the two panes.)
@@ -209,15 +240,10 @@ function projectClientSourceIds(project = activeProject) {
     .map((source) => source.libraryId);
 }
 
-function projectSourceIds() {
-  const company = companyMaster();
-  return [...new Set([...projectClientLibraryIds, ...(company ? [company.id] : [])])];
-}
-
 function projectSourceLabel() {
-  const clientCount = projectClientLibraryIds.length;
-  if (clientCount === 0) return 'Company Masters';
-  return `${clientCount} Client Master${clientCount === 1 ? '' : 's'} + Company Masters`;
+  const sources = activeProject?.sources ?? [];
+  if (sources.length === 0) return 'Company Masters';
+  return sources.map((source) => source.name).join(' › ');
 }
 
 async function refreshProjectList(preferredId = activeProjectId) {
@@ -288,45 +314,102 @@ function renderProjectSettings() {
   renderProjectSourceList();
 }
 
+// The Settings draft mirrors the server's ordered source chain; edits stay
+// local until Save Settings PUTs the exact order (priority = array index + 1).
+function currentSourceDraft() {
+  if (sourceDraft && sourceDraftProjectId === activeProjectId) return sourceDraft;
+  sourceDraft = (activeProject?.sources ?? []).map((source) => ({
+    libraryId: source.libraryId,
+    name: source.name,
+    tier: source.tier,
+  }));
+  sourceDraftProjectId = activeProjectId;
+  return sourceDraft;
+}
+
+function setSourceDraftOrder(ids) {
+  const byId = new Map(currentSourceDraft().map((entry) => [entry.libraryId, entry]));
+  sourceDraft = ids.map((id) => byId.get(id)).filter(Boolean);
+  renderProjectSourceList();
+}
+
+function sourceControlButton(label, title, onClick, disabled = false) {
+  const btn = makeNode('button', 'source-ctl', label);
+  btn.type = 'button';
+  btn.title = title;
+  btn.disabled = disabled;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function renderDraftSourceRow(entry, index, draft) {
+  const row = makeNode('div', 'source-row is-ordered');
+  row.appendChild(makeNode('span', 'source-priority', String(index + 1)));
+  row.appendChild(makeNode('span', 'source-name', entry.name));
+  row.appendChild(
+    makeNode('span', 'source-tier', entry.tier === 'client' ? 'CLIENT' : 'COMPANY')
+  );
+  const ids = draft.map((source) => source.libraryId);
+  row.appendChild(
+    sourceControlButton(
+      '▲',
+      'Raise priority',
+      () => setSourceDraftOrder(moveSource(ids, entry.libraryId, -1)),
+      index === 0
+    )
+  );
+  row.appendChild(
+    sourceControlButton(
+      '▼',
+      'Lower priority',
+      () => setSourceDraftOrder(moveSource(ids, entry.libraryId, 1)),
+      index === draft.length - 1
+    )
+  );
+  row.appendChild(
+    sourceControlButton(
+      '✕',
+      'Remove from project sources',
+      () => setSourceDraftOrder(ids.filter((id) => id !== entry.libraryId)),
+      draft.length === 1
+    )
+  );
+  return row;
+}
+
+function renderAvailableSourceRow(library) {
+  const row = makeNode('div', 'source-row is-available');
+  row.appendChild(makeNode('span', 'source-priority', '·'));
+  row.appendChild(makeNode('span', 'source-name', library.name));
+  row.appendChild(
+    makeNode('span', 'source-tier', library.tier === 'client' ? 'CLIENT' : 'COMPANY')
+  );
+  row.appendChild(
+    sourceControlButton('+', 'Add as lowest-priority source', () => {
+      sourceDraft = [
+        ...currentSourceDraft(),
+        { libraryId: library.id, name: library.name, tier: library.tier },
+      ];
+      renderProjectSourceList();
+    })
+  );
+  return row;
+}
+
 function renderProjectSourceList() {
   const list = document.getElementById('project-source-list');
   if (!list) return;
   list.replaceChildren();
-  const company = companyMaster();
-  if (company) {
-    const companyRow = renderSourceRow(company, true, true);
-    list.appendChild(companyRow);
-  }
-  const clients = clientLibraries();
-  if (clients.length === 0) {
-    list.appendChild(makeNode('p', 'library-empty', 'No client libraries yet.'));
-    return;
-  }
-  for (const client of clients) {
-    list.appendChild(renderSourceRow(client, projectClientLibraryIds.includes(client.id), false));
-  }
-}
-
-function renderSourceRow(library, checked, disabled) {
-  const label = makeNode('label', 'source-row');
-  const input = document.createElement('input');
-  input.type = 'checkbox';
-  input.value = library.id;
-  input.checked = checked;
-  input.disabled = disabled;
-  input.dataset.projectSource = library.id;
-  label.appendChild(input);
-  label.appendChild(makeNode('span', 'source-name', library.name));
-  label.appendChild(
-    makeNode('span', 'source-tier', library.tier === 'client' ? 'CLIENT' : 'COMPANY')
+  const draft = currentSourceDraft();
+  draft.forEach((entry, index) => list.appendChild(renderDraftSourceRow(entry, index, draft)));
+  const included = new Set(draft.map((entry) => entry.libraryId));
+  const available = [companyMaster(), ...clientLibraries()].filter(
+    (library) => library && !included.has(library.id)
   );
-  return label;
-}
-
-function checkedProjectClientIds() {
-  return [...document.querySelectorAll('[data-project-source]')]
-    .filter((input) => input instanceof HTMLInputElement && input.checked && !input.disabled)
-    .map((input) => input.value);
+  for (const library of available) list.appendChild(renderAvailableSourceRow(library));
+  if (draft.length === 0 && available.length === 0) {
+    list.appendChild(makeNode('p', 'library-empty', 'No libraries yet.'));
+  }
 }
 
 async function switchProject(projectId) {
@@ -394,10 +477,15 @@ async function saveProjectSettings() {
   const name = document.getElementById('project-name-input')?.value.trim() || activeProjectName();
   const formatSelect = document.getElementById('project-format-select');
   const sectionNumberFormat = formatSelect?.value || activeSectionNumberFormat();
-  projectClientLibraryIds = checkedProjectClientIds();
   try {
     await patchProject(activeProjectId, { name, sectionNumberFormat });
-    await syncProjectSourcesToTocScope();
+    // The project patch has already persisted; a source-order failure must not
+    // masquerade as a total save failure, so report it distinctly (#413).
+    try {
+      await saveSourceDraft();
+    } catch (err) {
+      toast(`settings saved, but source order failed: ${err.message}`, 'warn');
+    }
     await refreshProjectList(activeProjectId);
     activeProject = await getProject(activeProjectId);
     projectClientLibraryIds = projectClientSourceIds(activeProject);
@@ -420,6 +508,11 @@ async function loadActiveProjectWorkspace() {
   specs.clear();
   projectMembers.clear();
   tocSections = [];
+  // Drop any Settings source-draft cached before project details loaded — on
+  // boot the draft can be built from an empty activeProject and then reused,
+  // hiding the real chain and risking an overwrite on save (#413).
+  sourceDraft = null;
+  sourceDraftProjectId = null;
   try {
     activeProject = activeProjectId ? await getProject(activeProjectId) : null;
     projectClientLibraryIds = projectClientSourceIds(activeProject);
@@ -433,6 +526,7 @@ async function loadActiveProjectWorkspace() {
     await refreshTocLibrarySpecs();
     await refreshTocBuilder();
     await restoreProjectSpecs(activeProject);
+    await refreshCrossProjectSpecs();
   } catch (err) {
     toast(`could not load project: ${err.message}`, 'warn');
   }
@@ -521,13 +615,15 @@ function initProjectManager() {
   });
 }
 
-async function joinProject(specId) {
+async function joinProject(specId, uploadedLibraryId = null) {
   if (!activeProjectId || projectMembers.has(specId)) return specId;
   const spec = specs.get(specId);
   const section = spec?.tree?.section;
   if (!section) return specId;
   try {
     const result = await addSpecToProject(activeProjectId, section);
+    const notice = resolutionNotice(result, uploadedLibraryId);
+    if (notice) toast(notice.message, notice.kind);
     projectMembers.add(result.specId);
     if (result.specId !== specId) {
       specs.delete(specId);
@@ -980,7 +1076,15 @@ async function refreshTocLibrarySpecs() {
   const selectedClients = projectClientLibraryIds
     .map((id) => libraries.find((lib) => lib.id === id))
     .filter(Boolean);
-  const companySpecs = company ? await listLibrarySpecs(company.id) : [];
+  // Honor the saved source chain (#413): once a project sets its sources, only
+  // surface the company master when it is still in that chain — otherwise the
+  // TOC would offer specs addSpecToProject cannot resolve from a removed source.
+  const sourceLibraryIds = new Set(
+    (activeProject?.sources ?? []).map((source) => source.libraryId)
+  );
+  const includeCompany =
+    company && (sourceLibraryIds.size === 0 || sourceLibraryIds.has(company.id));
+  const companySpecs = includeCompany ? await listLibrarySpecs(company.id) : [];
   const clientSpecGroups = await Promise.all(
     selectedClients.map(async (client) => ({
       client,
@@ -1009,14 +1113,31 @@ async function refreshTocLibrarySpecs() {
 async function syncProjectSourcesToTocScope() {
   if (!activeProjectId) return;
   if (!API_FEATURES.projectSources) return;
-  const uniqueIds = projectSourceIds();
+  // Order-preserving merge (#413): scope changes append or drop sources but
+  // never reprioritize an explicitly ordered chain.
+  const uniqueIds = mergeSourcesWithScope(
+    activeProject?.sources ?? [],
+    projectClientLibraryIds,
+    companyMaster()?.id ?? null
+  );
   if (uniqueIds.length === 0) return;
   try {
     const result = await setProjectSources(activeProjectId, uniqueIds);
     if (activeProject) activeProject = { ...activeProject, sources: result.sources ?? [] };
+    sourceDraft = null;
   } catch (err) {
     toast(`could not update project source libraries: ${err.message}`, 'warn');
   }
+}
+
+// Persist the Settings-view source order exactly as drafted (priority = order).
+async function saveSourceDraft() {
+  if (!activeProjectId || !API_FEATURES.projectSources) return;
+  const ids = currentSourceDraft().map((entry) => entry.libraryId);
+  if (ids.length === 0) return;
+  const result = await setProjectSources(activeProjectId, ids);
+  if (activeProject) activeProject = { ...activeProject, sources: result.sources ?? [] };
+  sourceDraft = null;
 }
 
 async function saveTocBuilder({ toastMessage = 'TOC saved' } = {}) {
@@ -1183,6 +1304,8 @@ async function addMapSpecFromLibrary() {
     }
     await setProjectSourcesForMapLibrary(library);
     const result = await addSpecToProject(activeProjectId, spec.section);
+    const notice = resolutionNotice(result, library.id);
+    if (notice) toast(notice.message, notice.kind);
     projectMembers.add(result.specId);
     await addSpec(result.specId);
     await reloadAllSpecs();
@@ -1334,9 +1457,15 @@ function renderLibrarySpecRow(spec) {
   row.appendChild(makeNode('span', 'library-spec-section', spec.section));
   row.appendChild(makeNode('span', 'library-spec-title', spec.title || 'Untitled section'));
   row.appendChild(makeNode('span', 'library-spec-count', `${spec.nodeCount} nodes`));
-  const remove = makeNode('button', 'library-remove', 'Remove');
+  const reparse = makeNode('button', 'library-reparse', 'Re-parse');
+  reparse.type = 'button';
+  reparse.title = 'Admin: delete this master’s parsed content and rebuild it from a fresh file parse';
+  reparse.addEventListener('click', () => void reparseLibrarySpec(spec));
+  row.appendChild(reparse);
+  const remove = makeNode('button', 'library-remove', 'Withdraw');
   remove.type = 'button';
-  remove.addEventListener('click', () => void removeSpecFromLibrary(spec));
+  remove.title = 'Soft-withdraw from this library (restorable)';
+  remove.addEventListener('click', () => void withdrawSpecFromLibrary(spec));
   row.appendChild(remove);
   return row;
 }
@@ -1388,38 +1517,96 @@ async function renameSelectedClient() {
   }
 }
 
-async function removeSpecFromLibrary(spec) {
-  if (!API_FEATURES.specDelete) {
-    toast('Deleting library specs is not available in this API build', 'warn');
+async function withdrawSpecFromLibrary(spec) {
+  if (!API_FEATURES.specWithdraw) {
+    toast('Withdrawing library specs is not available in this API build', 'warn');
     return;
   }
+  const library = selectedLibrary();
   const ok = await openConfirm({
-    title: 'Remove library specification',
+    title: 'Withdraw library master',
     body: [
       {
-        text: `Remove Section ${spec.section} from ${selectedLibrary()?.name || 'this library'}?`,
+        text: `Withdraw Section ${spec.section} from ${library?.name || 'this library'}?`,
         kind: 'strong',
       },
-      { text: 'This deletes the library copy. Project TOCs are unchanged.', kind: 'warn' },
+      {
+        text: 'Soft delete (ADR-030): the master leaves listings and project source resolution but keeps its lineage and can be restored. Existing project copies are unchanged.',
+        kind: 'muted',
+      },
     ],
-    confirmLabel: 'Remove spec',
+    confirmLabel: 'Withdraw',
     danger: true,
   });
   if (!ok) return;
+  // Isolate the actual withdraw so a later view-refresh failure is not
+  // misreported as a failed withdraw — the server-side soft delete has already
+  // persisted, and reporting it as failed invites a confusing retry (#413).
   try {
-    await deleteSpec(spec.specId);
-    specs.delete(spec.specId);
-    projectMembers.delete(spec.specId);
+    await withdrawSpec(spec.specId);
+  } catch (err) {
+    toast(`withdraw failed: ${err.message}`, 'err');
+    return;
+  }
+  specs.delete(spec.specId);
+  projectMembers.delete(spec.specId);
+  try {
     await refreshSelectedLibrarySpecs();
     renderLibraryView();
     await refreshTocLibrarySpecs();
     renderBoard();
     await refreshCoordination();
     await refreshOpenComments();
-    toast(`Section ${spec.section} removed from library`);
   } catch (err) {
-    toast(`remove failed: ${err.message}`, 'err');
+    toast(
+      `Section ${spec.section} withdrawn, but the view failed to refresh: ${err.message}`,
+      'warn'
+    );
   }
+  toastWithAction(
+    `Section ${spec.section} withdrawn from ${library?.name || 'library'}`,
+    'warn',
+    'Undo',
+    async () => {
+      try {
+        await restoreSpec(spec.specId);
+        await refreshSelectedLibrarySpecs();
+        renderLibraryView();
+        await refreshTocLibrarySpecs();
+        toast(`Section ${spec.section} restored`);
+      } catch (err) {
+        toast(`restore failed: ${err.message}`, 'err');
+      }
+    }
+  );
+}
+
+// Admin full reset (#413): re-importing a master's source file hard-deletes
+// ALL of its parsed paragraphs and references server-side and rebuilds them
+// with a fresh inference pass (content_version bumps, spec id survives). The
+// picker is pre-targeted at the selected library, so the import upserts onto
+// this master by (section, source, library).
+async function reparseLibrarySpec(spec) {
+  const library = selectedLibrary();
+  if (!library) return;
+  const ok = await openConfirm({
+    title: 'Re-parse from scratch (admin)',
+    body: [
+      { text: `Fully re-parse Section ${spec.section} in ${library.name}?`, kind: 'strong' },
+      {
+        text: "Pick this section's source file next. All of the master's parsed paragraphs and references are deleted and rebuilt by a fresh inference pass — the previous parse is unrecoverable.",
+        kind: 'warn',
+      },
+      {
+        text: 'Project copies keep the old content until removed and re-added.',
+        kind: 'muted',
+      },
+    ],
+    confirmLabel: 'Pick file & re-parse',
+    danger: true,
+  });
+  if (!ok) return;
+  addSpecsToSelectedLibrary();
 }
 
 function addSpecsToSelectedLibrary() {
@@ -1697,9 +1884,9 @@ async function commitTextEdit(specId, nodeId, newText, removedRefs, alsoRemoveSp
   }
 }
 
-// Removes each loaded target spec from the project (broken-ref cascade), then
-// deletes it outright so its sheet leaves the board. Never touches the spec
-// being edited (removableTargetIds excludes ownSpecId).
+// Removes each loaded target spec from the project (broken-ref cascade) and
+// drops its sheet from the board. Never touches the spec being edited
+// (removableTargetIds excludes ownSpecId).
 async function removeTargetSpecs(removedRefs, ownSpecId) {
   const targetIds = removableTargetIds(removedRefs, ownSpecId);
   for (const targetId of targetIds) {
@@ -1712,21 +1899,11 @@ async function removeTargetSpecs(removedRefs, ownSpecId) {
     }
     projectMembers.delete(targetId);
     // It has left the project, so drop its sheet from the board regardless of
-    // what happens next.
+    // what happens next. Its library master stays put — the REST contract has
+    // no hard spec delete (ADR-030 keeps masters as withdrawable tombstones),
+    // and withdrawing a master as a side effect of a paragraph edit would be
+    // surprising. Withdraw deliberately from the Library view instead.
     specs.delete(targetId);
-    // Best-effort hard delete from the library too — may 409 if the spec is
-    // still pinned to another project; that's fine, the sheet is already gone.
-    // DELETE /specs/:id isn't on main yet (gated), so skip the library purge.
-    if (API_FEATURES.specDelete) {
-      try {
-        await deleteSpec(targetId);
-      } catch (err) {
-        console.warn(
-          `SpecR: ${targetId} left the project but was not deleted from the library`,
-          err
-        );
-      }
-    }
   }
 }
 
@@ -1766,8 +1943,9 @@ async function onRemoveSpecFromProject(spec) {
   if (!ok) return;
   try {
     const removedFromProject = activeProjectId
-      ? await removeSpecFromProjectIfPresent(specId)
+      ? await removeProjectCopyGuarded(specId, spec.tree.section)
       : false;
+    if (removedFromProject === 'cancelled') return;
     projectMembers.delete(specId);
     specs.delete(specId);
     await reloadAllSpecs();
@@ -1793,6 +1971,40 @@ async function removeSpecFromProjectIfPresent(specId) {
   } catch (err) {
     if (err.message === 'spec not in project') return false;
     throw err;
+  }
+}
+
+// Remove a project copy, walking the admin force path when the server reports
+// project edits (classifyRemovalConflict): confirm, then repeat with
+// ?force=true. Returns true (removed), false (not in project), or 'cancelled'.
+async function removeProjectCopyGuarded(specId, section) {
+  try {
+    return await removeSpecFromProjectIfPresent(specId);
+  } catch (err) {
+    const conflict = classifyRemovalConflict(err);
+    if (conflict === 'in-package') {
+      toast(
+        `Section ${section} belongs to a design package — remove it from the package first`,
+        'warn'
+      );
+      return 'cancelled';
+    }
+    if (conflict !== 'force-retry') throw err;
+    const ok = await openConfirm({
+      title: 'Force delete edited copy (admin)',
+      body: [
+        { text: `Section ${section} has project edits.`, kind: 'strong' },
+        {
+          text: 'Force-deleting discards those edits permanently. The library master is untouched; re-adding the section derives a fresh, unedited copy.',
+          kind: 'warn',
+        },
+      ],
+      confirmLabel: 'Force delete',
+      danger: true,
+    });
+    if (!ok) return 'cancelled';
+    await removeSpecFromProject(activeProjectId, specId, { force: true });
+    return true;
   }
 }
 
@@ -1970,12 +2182,40 @@ function onComposeCite(anchor) {
   if (audit) void audit.showAnchor(anchor);
 }
 
+// Other projects' TOC copies for the Compare pickers (#413). The same section
+// can carry a different version per project — comparing those versions across
+// projects is the point of per-project copies, so the catalog must reach past
+// the active project. Failure just narrows Compare to the active project.
+async function refreshCrossProjectSpecs() {
+  const others = projects.filter((project) => project.id !== activeProjectId);
+  try {
+    const results = await Promise.allSettled(
+      others.map(async (project) => {
+        const detail = await getProject(project.id);
+        return (detail.toc ?? []).map((entry) => ({
+          specId: entry.specId,
+          section: entry.section,
+          title: entry.title,
+          origin: project.name,
+        }));
+      })
+    );
+    crossProjectSpecs = results
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap((result) => result.value);
+  } catch (err) {
+    console.warn('SpecR: could not load cross-project compare catalog', err);
+    crossProjectSpecs = [];
+  }
+}
+
 // Live specs available to the Compare pickers — every loaded board spec (a
 // project copy) plus every scoped library master, each tagged by origin so two
 // same-section copies read distinctly. The board dedups sections, so the
 // showcase "project copy vs its master" comparison means picking a loaded
 // project spec against its library master: two distinct live specs (distinct
-// UUIDs) the /reports/compare endpoint can align.
+// UUIDs) the /reports/compare endpoint can align. Other projects' copies join
+// the catalog tagged by their project name (#413).
 function buildCompareCatalog() {
   const projectName = activeProjectName();
   const libraryName = (id) => libraries.find((lib) => lib.id === id)?.name;
@@ -1996,6 +2236,9 @@ function buildCompareCatalog() {
       title: spec.title,
       origin: libraryName(spec.libraryId) ?? spec.clientName ?? 'Library master',
     });
+  }
+  for (const spec of crossProjectSpecs) {
+    if (!byId.has(spec.specId)) byId.set(spec.specId, spec);
   }
   return [...byId.values()].sort(
     (a, b) => a.section.localeCompare(b.section) || a.origin.localeCompare(b.origin)
@@ -2164,7 +2407,7 @@ async function onSpecReady(result, context = { destination: 'project' }) {
   });
   // Join the active project — re-adding a previously-removed section also heals
   // any references the server had marked broken, so reload + recount.
-  await joinProject(result.specId);
+  await joinProject(result.specId, context.libraryId ?? null);
   await reloadAllSpecs();
   renderBoard();
   await refreshBrokenCount();
@@ -2192,23 +2435,51 @@ async function onMapAddSectionsClick({ chooseFiles, defaultContext }) {
   if (action === 'library') {
     await addMapSpecFromLibrary();
   } else if (action === 'upload') {
-    // Onboard a brand-new spec into the project's base source library
-    // (Company Masters) first, then resolve a project copy from it — the same
-    // model as "Add from Library". POST /projects/:id/specs resolves sections
-    // only from a project's source libraries, so a standalone /parse would
-    // orphan the spec and 422 on join. Without a company master, fall back to
-    // the standalone parse (no source library to onboard into).
-    const company = companyMaster();
-    const uploadContext = company
+    // Onboard the upload into one of the project's source libraries, then
+    // resolve a project copy from it — the same model as "Add from Library".
+    // POST /projects/:id/specs resolves sections only from a project's source
+    // libraries, so a standalone /parse would orphan the spec and 422 on join.
+    // The priority-1 source is the default target; if a higher-priority source
+    // still shadows the chosen library, joinProject warns with the winner.
+    const target = await chooseUploadSourceLibrary();
+    if (target === null) return;
+    const uploadContext = target
       ? {
           destination: 'project',
-          source: 'master',
-          libraryId: company.id,
-          libraryName: company.name,
+          source: target.tier === 'client' ? 'client' : 'master',
+          ...(target.tier === 'client' ? { client: target.name } : {}),
+          libraryId: target.libraryId,
+          libraryName: target.name,
         }
       : defaultContext;
     chooseFiles(uploadContext);
   }
+}
+
+// Pick which source library receives a Spec Map upload. Returns the source
+// entry ({ libraryId, name, tier }), null on cancel, or undefined when there
+// is no library at all (caller falls back to a standalone parse).
+async function chooseUploadSourceLibrary() {
+  const sources = activeProject?.sources ?? [];
+  if (sources.length === 0) {
+    const company = companyMaster();
+    return company ? { libraryId: company.id, name: company.name, tier: company.tier } : undefined;
+  }
+  if (sources.length === 1) return sources[0];
+  const value = await openChoice({
+    title: 'Upload into which source library?',
+    body: 'The file onboards into the chosen library; the project copy then resolves by source priority (Project Settings).',
+    choices: [
+      { label: 'Cancel', value: null, kind: 'ghost' },
+      ...sources.map((source, index) => ({
+        label: `${index + 1} · ${source.name}${source.tier === 'client' ? ' (client)' : ''}`,
+        value: source.libraryId,
+        kind: index === 0 ? 'primary' : 'ghost',
+      })),
+    ],
+  });
+  if (!value) return null;
+  return sources.find((source) => source.libraryId === value) ?? null;
 }
 
 function initMapActions() {
