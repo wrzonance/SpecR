@@ -18,6 +18,7 @@ const entry = (section: string) => ({
     maxDepth: 2,
     partShape: [[1], [2], []],
     confidenceBands: { high: 5, review: 1, low: 0 },
+    contentChars: [42, 88, 0],
   },
   source: 'ARCAT',
   blessedAt: '2026-07-08T00:00:00.000Z',
