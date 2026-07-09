@@ -17,7 +17,11 @@ const blessed = (parts: number): GoldStore['x'] => ({
   source: 'ARCAT',
   blessedAt: '2026-07-08T00:00:00.000Z',
 });
-const ok = (path: string, parts: number): CorpusResult => ({ path, ok: true, fingerprint: fp(parts) });
+const ok = (path: string, parts: number): CorpusResult => ({
+  path,
+  ok: true,
+  fingerprint: fp(parts),
+});
 const fail = (path: string, error: string): CorpusResult => ({ path, ok: false, error });
 
 describe('verifyCorpus', () => {
