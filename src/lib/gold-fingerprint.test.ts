@@ -133,6 +133,20 @@ describe('computeFingerprint', () => {
     expect(fp.contentChars[0]).toBe(51); // 43 + 'and more'(8)
   });
 
+  it('counts a real paragraph mis-nested under a note (note own-text skipped, children recursed)', () => {
+    const t = sampleTree();
+    const p1 = t.parts[0]!;
+    // Give the 'editorial' note a real pr1 child; the note's own text stays
+    // excluded, but the mis-nested real paragraph's text must still count.
+    const children = p1.children.map((c) =>
+      c.type === 'note'
+        ? { ...c, children: [...c.children, node('mn', 'pr1', 'Buried but real', [])] }
+        : c
+    );
+    const fp = computeFingerprint({ ...t, parts: [{ ...p1, children }, t.parts[1]!] }, []);
+    expect(fp.contentChars[0]).toBe(58); // 43 + 'Buried but real'(15)
+  });
+
   it('is immune to whitespace jitter in real-content text', () => {
     const t = sampleTree();
     const p1 = t.parts[0]!;
