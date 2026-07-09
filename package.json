@@ -26,6 +26,8 @@
     "load:files": "tsx --env-file-if-exists=.env scripts/load-files.ts",
     "fixture:snapshot": "tsx scripts/fixture-ab.ts snapshot",
     "fixture:diff": "tsx scripts/fixture-ab.ts diff",
+    "gold:verify": "tsx scripts/gold.ts verify",
+    "gold:bless": "tsx scripts/gold.ts bless",
     "seed:corpus": "pnpm load:files 'docs/references/UFGS/**/*.SEC' 'docs/references/UFGS/**/*.sec'"
   },
   "dependencies": {
