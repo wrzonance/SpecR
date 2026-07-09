@@ -133,6 +133,8 @@ describe('computeFingerprint', () => {
     expect(fp.contentChars[0]).toBe(51); // 43 + 'and more'(8)
   });
 
+  // KNOWN AMBIGUITY: OOXML content mis-nested under an editorial note is treated
+  // as real content by recursing note children while skipping the note own-text.
   it('counts a real paragraph mis-nested under a note (note own-text skipped, children recursed)', () => {
     const t = sampleTree();
     const p1 = t.parts[0]!;

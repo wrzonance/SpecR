@@ -10,7 +10,7 @@ Teach the gold gate to fail on **silent real-paragraph text loss**. WS3's `gold:
 
 WS3 reduces each parsed corpus file to a coarse `GoldFingerprint`:
 
-```
+```text
 GoldFingerprint { section, parts, noteLeaks, maxDepth, partShape, confidenceBands }
 ```
 
