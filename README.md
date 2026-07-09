@@ -129,6 +129,21 @@ Module boundaries are intentionally strict: import sibling modules through their
 - `docs/references/UFGS/` contains public-domain UFGS `.SEC` seed data.
 - `docs/references/ARCAT/README.md` and `docs/references/MANUFACTURER_CPI/README.md` describe fixture acquisition for copyrighted vendor samples that are not stored in this repository.
 
+### Gold-corpus regression gate (local, maintainer-only)
+
+The `.docx` reference corpus is gitignored, so its inference safety nets skip in CI.
+`gold:verify` is a local binary veto against a maintainer-blessed baseline
+(`gold/expectations.json`, committed — fingerprints are facts, the docs are not):
+
+```bash
+pnpm gold:verify              # before merging any inference change — non-zero exit on drift
+pnpm gold:bless               # after confirming parses in the web UI — bless the whole corpus
+pnpm gold:bless 'docs/references/ARCAT/**/*.docx'   # bless one vendor/section
+```
+
+Bless loop: open a spec in the demo → confirm the parse is correct → `gold:bless <glob>`.
+Only blessed files gate; an un-blessed file is reported, not failed. See ADR-057.
+
 ## License
 
 See [LICENSE](LICENSE) and [NOTICES](NOTICES).
