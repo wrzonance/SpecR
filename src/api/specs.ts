@@ -9,7 +9,9 @@ import {
   getSpecWithdrawnAt,
   withdrawSpec,
   restoreSpec,
+  getSpecSource,
 } from '../db/index.js';
+import { buildHierarchyReport } from '../lib/hierarchy-report.js';
 import { logger } from '../lib/logger.js';
 
 // A project copy is the wrong target for spec withdrawal/restore (ADR-030) —
@@ -67,6 +69,27 @@ export async function getSpecLineageHandler(req: Request, res: Response): Promis
     res.status(200).json({ success: true, data: lineage });
   } catch (err) {
     logger.error({ err }, 'get spec lineage failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function getHierarchyReportHandler(req: Request, res: Response): Promise<void> {
+  const idResult = z.uuid().safeParse(req.params['id']);
+  if (!idResult.success) {
+    res.status(400).json({ success: false, error: 'invalid spec id' });
+    return;
+  }
+  try {
+    const result = await getSpecTree(idResult.data);
+    if (!result) {
+      res.status(404).json({ success: false, error: 'spec not found' });
+      return;
+    }
+    const source = await getSpecSource(idResult.data);
+    const report = buildHierarchyReport(result.tree, source);
+    res.status(200).json({ success: true, data: report });
+  } catch (err) {
+    logger.error({ err }, 'get hierarchy report failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }

@@ -1391,6 +1391,166 @@ body {
   }
 }
 
+/* ── Scoring view (WS2, #424) ───────────────────────────────────────────────
+   Per-paragraph hierarchy-inference confidence, worst-first, beside the spec
+   it scores. Reuses the .audit-split/.audit-findings/.audit-spec/.audit-divider/
+   .audit-spec-pane layout + locate-target/pulse treatment byte-for-byte — only
+   the row list, spec picker, and filter chips (which reuse .compare-filters/
+   .compare-chip from the Compare view) are new. */
+.scoring-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0.5rem 0 0.7rem;
+}
+
+.scoring-spec-picker {
+  display: grid;
+  gap: 0.25rem;
+  font: 0.62rem var(--mono);
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  flex: 1 1 22ch;
+  min-width: 18ch;
+}
+
+.scoring-spec-picker select {
+  font: 0.8rem var(--mono);
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line-dim);
+  background: var(--sheet);
+  color: var(--vellum);
+}
+
+.scoring-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  font: 0.68rem var(--mono);
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.scoring-count {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--line-dim);
+  background: var(--sheet-dim);
+}
+
+.scoring-count.is-unscored {
+  color: #8a5b00;
+  border-color: #d9a93f;
+}
+
+.scoring-reason {
+  flex-basis: 100%;
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 0.82rem;
+  font-style: italic;
+  color: rgba(27, 39, 50, 0.74);
+}
+
+.scoring-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.scoring-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 0.3rem 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line-dim);
+  border-left: 3px solid var(--line-dim);
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: rgba(27, 39, 50, 0.86);
+}
+
+.scoring-row:hover {
+  background: rgba(37, 99, 235, 0.07);
+}
+
+.scoring-row.is-selected {
+  background: rgba(37, 99, 235, 0.14);
+  outline: 1px solid var(--amber);
+  outline-offset: 1px;
+}
+
+.scoring-row.is-low {
+  border-left-color: var(--err);
+}
+
+.scoring-row.is-mid {
+  border-left-color: #d9a93f;
+}
+
+.scoring-row.is-high {
+  border-left-color: var(--ok);
+}
+
+.scoring-badge {
+  grid-row: 1;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  color: var(--sheet);
+}
+
+.scoring-badge.is-low {
+  background: var(--err);
+}
+
+.scoring-badge.is-mid {
+  background: #b3790a;
+}
+
+.scoring-badge.is-high {
+  background: var(--ok);
+}
+
+.scoring-label {
+  grid-row: 1;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: #1d567f;
+}
+
+.scoring-preview {
+  grid-row: 1;
+  grid-column: 3;
+  overflow-wrap: anywhere;
+}
+
+.scoring-signal,
+.scoring-conflict {
+  grid-column: 1 / -1;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.scoring-conflict {
+  color: #8a5b00;
+}
+
+.scoring-empty {
+  font-size: 0.9rem;
+  color: var(--muted);
+  padding: 0.6rem 0;
+}
+
 /* ── Open review comments (#262/#272) ──────────────────────────────────────
    Reuses the coordination summary/section vocabulary; adds a per-section
    grouped comment list. The report panel reuses .coord-report wrappers. */

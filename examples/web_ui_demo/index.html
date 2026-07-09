@@ -62,6 +62,7 @@
       <button class="view-tab" type="button" data-view="library">Library</button>
       <button class="view-tab" type="button" data-view="numbering">Numbering</button>
       <button class="view-tab" type="button" data-view="report">Report</button>
+      <button class="view-tab" type="button" data-view="scoring">Scoring</button>
       <button class="view-tab" type="button" data-view="submittal">Submittal</button>
       <button class="view-tab" type="button" data-view="compose">Compose</button>
       <button class="view-tab" type="button" data-view="compare">Compare</button>
@@ -407,6 +408,44 @@
             id="audit-spec-pane"
             tabindex="0"
             aria-label="Cited spec section"
+          ></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="app-view" id="view-scoring" data-view-panel="scoring" hidden>
+      <div class="audit-split" id="scoring-split">
+        <div class="audit-findings" id="scoring-rows-pane" aria-label="Paragraph confidence scores">
+          <section class="coord-report" id="scoring-report" aria-labelledby="scoring-title">
+            <div class="band-rule">
+              <h2 class="band-title" id="scoring-title">HIERARCHY SCORING</h2>
+              <p class="band-hint" id="scoring-hint">
+                per-paragraph inference confidence, worst first — click a row to open it on the
+                right, hover for prev / next
+              </p>
+            </div>
+            <div class="scoring-controls">
+              <label class="scoring-spec-picker">
+                <span>SPEC</span>
+                <select id="scoring-spec-select" aria-label="Spec to score"></select>
+              </label>
+              <div class="compare-filters" id="scoring-filters" role="group" aria-label="Confidence filter"></div>
+            </div>
+            <div class="scoring-summary" id="scoring-summary" aria-live="polite"></div>
+            <ol class="scoring-rows" id="scoring-rows-body"></ol>
+          </section>
+        </div>
+        <div class="audit-divider" aria-hidden="true"></div>
+        <div class="audit-spec" id="scoring-spec">
+          <div class="band-rule audit-spec-head">
+            <h2 class="band-title" id="scoring-spec-title">SPEC</h2>
+            <p class="band-hint" id="scoring-spec-hint">select a spec to review its scoring</p>
+          </div>
+          <div
+            class="audit-spec-pane"
+            id="scoring-spec-pane"
+            tabindex="0"
+            aria-label="Scored spec section"
           ></div>
         </div>
       </div>

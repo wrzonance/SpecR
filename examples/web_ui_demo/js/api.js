@@ -54,6 +54,13 @@ export async function getSpecTree(specId) {
   return { tree, references: [] };
 }
 
+// Per-paragraph hierarchy-inference scoring report (WS2, #424): every scored
+// structural paragraph, worst confidence first, plus counts and (when any
+// paragraph carries no inference provenance) an unscoredReason explaining why.
+export function getHierarchyReport(specId) {
+  return getJson(`/specs/${encodeURIComponent(specId)}/hierarchy-report`);
+}
+
 export function listLibraries() {
   return getJson('/libraries');
 }
