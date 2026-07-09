@@ -28,8 +28,11 @@ Add a private, local-only runner:
   (Feist v. Rural — facts are not copyrightable), so committing them is clean while the
   source docs stay gitignored. Only blessed entries gate; coverage grows as files are
   blessed.
-- **Never wired into cloud CI.** The corpus isn't present there and must not be shipped;
-  `gold:verify` is a maintainer command that no-ops when `docs/references` is absent.
+- **Never wired into cloud CI** — no `.github` workflow invokes `gold:verify`; it is a
+  maintainer command run by hand. (The gitignored `.docx` corpus isn't present in CI
+  anyway, and the runner no-ops entirely when `docs/references` is absent — but note the
+  public UFGS `.SEC` corpus _is_ committed, so that guard would not itself fire in CI; the
+  gate stays out of CI because nothing there calls it, not because the directory is empty.)
 
 The fingerprint reuses `fixtureRecord` (parts/note-leak) and `buildHierarchyReport`
 (confidence bands) rather than duplicating either, so it cannot drift from the renderers
