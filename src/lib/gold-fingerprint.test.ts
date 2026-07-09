@@ -91,6 +91,60 @@ describe('computeFingerprint', () => {
     expect(fp.maxDepth).toBe(-1);
     expect(fp.partShape).toEqual([]);
   });
+
+  it('sums normalized real-content characters per visible part (contentChars)', () => {
+    const fp = computeFingerprint(sampleTree(), []);
+    // PART 1: 'GENERAL'(7)+'SUMMARY'(7)+'Provide unit prices'(19)+'REFERENCES'(10)=43;
+    //   the 'editorial' note is excluded. PART 2: 'PRODUCTS'(8).
+    expect(fp.contentChars).toEqual([43, 8]);
+  });
+
+  it('excludes note text from contentChars regardless of note size', () => {
+    const t = sampleTree();
+    const p1 = t.parts[0]!;
+    const children = p1.children.map((c) =>
+      c.type === 'note' ? { ...c, text: 'x'.repeat(500) } : c
+    );
+    const fp = computeFingerprint({ ...t, parts: [{ ...p1, children }, t.parts[1]!] }, []);
+    expect(fp.contentChars[0]).toBe(43);
+  });
+
+  it('excludes a vanished subtree from contentChars', () => {
+    const t = sampleTree();
+    const p1 = t.parts[0]!;
+    // Vanish the SUMMARY article: removes 'SUMMARY'(7) + 'Provide unit prices'(19) = 26.
+    const children = p1.children.map((c) =>
+      c.id === 'a1' ? { ...c, meta: { ...c.meta, vanish: true } } : c
+    );
+    const fp = computeFingerprint({ ...t, parts: [{ ...p1, children }, t.parts[1]!] }, []);
+    expect(fp.contentChars[0]).toBe(17); // 'GENERAL'(7) + 'REFERENCES'(10)
+  });
+
+  it('counts continuation body text as real content', () => {
+    const t = sampleTree();
+    const p1 = t.parts[0]!;
+    const a1 = p1.children.find((c) => c.id === 'a1')!;
+    const a1cont = {
+      ...a1,
+      children: [...a1.children, node('c1', 'continuation', 'and more', [])],
+    };
+    const children = p1.children.map((c) => (c.id === 'a1' ? a1cont : c));
+    const fp = computeFingerprint({ ...t, parts: [{ ...p1, children }, t.parts[1]!] }, []);
+    expect(fp.contentChars[0]).toBe(51); // 43 + 'and more'(8)
+  });
+
+  it('is immune to whitespace jitter in real-content text', () => {
+    const t = sampleTree();
+    const p1 = t.parts[0]!;
+    const a1 = p1.children.find((c) => c.id === 'a1')!;
+    const jittered = {
+      ...a1,
+      children: [{ ...a1.children[0]!, text: '  Provide   unit\tprices  ' }],
+    };
+    const children = p1.children.map((c) => (c.id === 'a1' ? jittered : c));
+    const fp = computeFingerprint({ ...t, parts: [{ ...p1, children }, t.parts[1]!] }, []);
+    expect(fp.contentChars).toEqual([43, 8]);
+  });
 });
 
 describe('diffFingerprint', () => {
@@ -117,5 +171,19 @@ describe('diffFingerprint', () => {
       .map((d) => d.field)
       .sort((a, b) => a.localeCompare(b));
     expect(fields).toEqual(['confidenceBands', 'partShape']);
+  });
+
+  it('flags text loss as a contentChars delta while structure stays quiet', () => {
+    const t = sampleTree();
+    const p1 = t.parts[0]!;
+    const a1 = p1.children.find((c) => c.id === 'a1')!;
+    // Truncate the pr1 body (19 → 7); the node survives at the same level.
+    const truncated = { ...a1, children: [{ ...a1.children[0]!, text: 'Provide' }] };
+    const children = p1.children.map((c) => (c.id === 'a1' ? truncated : c));
+    const actual = computeFingerprint({ ...t, parts: [{ ...p1, children }, t.parts[1]!] }, []);
+    const fields = diffFingerprint(base(), actual).map((d) => d.field);
+    expect(fields).toContain('contentChars'); // the loss is caught
+    expect(fields).not.toContain('partShape'); // structure unchanged
+    expect(fields).not.toContain('parts');
   });
 });

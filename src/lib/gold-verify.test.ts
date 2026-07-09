@@ -11,6 +11,7 @@ const fp = (parts: number): GoldFingerprint => ({
   maxDepth: 2,
   partShape: [[1], [2], []],
   confidenceBands: { high: 5, review: 1, low: 0 },
+  contentChars: [10, 20, 0],
 });
 const blessed = (parts: number): GoldStore['x'] => ({
   fingerprint: fp(parts),

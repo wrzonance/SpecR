@@ -14,6 +14,28 @@ export const LOW_CONFIDENCE_BAND = 0.3;
 // hierarchy-summary.ts / the markdown renderer).
 const NON_STRUCTURAL = new Set<NodeType>(['spec', 'note', 'continuation']);
 
+// Real-content exclusions: a note's own text is editorial ("junk today"); the
+// `spec` root is a wrapper. Unlike NON_STRUCTURAL, `continuation` is NOT here —
+// its wrapped body text is real content that can be silently truncated.
+const NON_CONTENT = new Set<NodeType>(['spec', 'note']);
+
+// Normalized character length: whitespace runs collapsed to one space and
+// trimmed, so benign reflow/whitespace jitter never changes the count.
+function normalizedLen(text: string): number {
+  return text.trim().replace(/\s+/g, ' ').length;
+}
+
+// Sum normalized real-content character length over `node` (inclusive) and its
+// descendants. Prunes vanish subtrees; skips a note's/spec-root's OWN text but
+// still recurses children — a real paragraph mis-nested under a note is still
+// real content.
+function contentCharsOf(node: SpecNode): number {
+  if (node.meta.vanish === true) return 0;
+  let sum = NON_CONTENT.has(node.type) ? 0 : normalizedLen(node.text);
+  for (const child of node.children) sum += contentCharsOf(child);
+  return sum;
+}
+
 export interface ConfidenceBands {
   readonly high: number;
   readonly review: number;
@@ -27,6 +49,7 @@ export interface GoldFingerprint {
   readonly maxDepth: number;
   readonly partShape: readonly (readonly number[])[];
   readonly confidenceBands: ConfidenceBands;
+  readonly contentChars: readonly number[];
 }
 
 export interface FingerprintDelta {
@@ -89,13 +112,15 @@ function computeBands(tree: SpecTree): ConfidenceBands {
  */
 export function computeFingerprint(tree: SpecTree, refs: readonly SecRef[]): GoldFingerprint {
   const { parts, noteLeaks } = fixtureRecord(tree, refs);
+  const visible = visibleParts(tree);
   return {
     section: tree.section,
     parts,
     noteLeaks,
     maxDepth: maxDepthOf(tree),
-    partShape: visibleParts(tree).map(partShapeOf),
+    partShape: visible.map(partShapeOf),
     confidenceBands: computeBands(tree),
+    contentChars: visible.map(contentCharsOf),
   };
 }
 
@@ -106,6 +131,7 @@ const FINGERPRINT_FIELDS = [
   'maxDepth',
   'partShape',
   'confidenceBands',
+  'contentChars',
 ] as const satisfies readonly (keyof GoldFingerprint)[];
 
 // Exhaustiveness guard: if a new GoldFingerprint key is added without a matching entry

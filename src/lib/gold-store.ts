@@ -37,6 +37,7 @@ const GoldFingerprintSchema = z.object({
   maxDepth: z.number(),
   partShape: z.array(z.array(z.number())),
   confidenceBands: ConfidenceBandsSchema,
+  contentChars: z.array(z.number()),
 });
 const GoldEntrySchema = z.object({
   fingerprint: GoldFingerprintSchema,
