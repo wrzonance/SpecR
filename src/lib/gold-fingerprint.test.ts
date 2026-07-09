@@ -85,6 +85,12 @@ describe('computeFingerprint', () => {
     expect(fp.parts).toBe(1);
     expect(fp.partShape).toEqual([[2, 1]]);
   });
+
+  it('yields the -1 maxDepth sentinel for a parts-less tree', () => {
+    const fp = computeFingerprint({ ...sampleTree(), parts: [] }, []);
+    expect(fp.maxDepth).toBe(-1);
+    expect(fp.partShape).toEqual([]);
+  });
 });
 
 describe('diffFingerprint', () => {

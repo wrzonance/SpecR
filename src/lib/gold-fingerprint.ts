@@ -60,6 +60,8 @@ function partShapeOf(part: SpecNode): number[] {
   return trimTrailingZeros(counts.slice(1));
 }
 
+// Returns the highest normalized ilvl present; -1 is a deterministic sentinel meaning
+// "no structural nodes" (e.g. a parts-less or all-vanish tree), not an error.
 function maxDepthOf(tree: SpecTree): number {
   const counts: number[] = [];
   for (const part of tree.parts) bucketByIlvl(part, counts);
@@ -79,6 +81,10 @@ function computeBands(tree: SpecTree): ConfidenceBands {
   return { high, review, low };
 }
 
+// Predicate MUST mirror fixtureRecord's part filter (fixture-snapshot.ts) — the two
+// are independently maintained (fixtureRecord doesn't expose its filtered node list),
+// so drift here would make fp.parts (from fixtureRecord) disagree with
+// fp.partShape.length (from visibleParts) and undermine the fingerprint.
 function visibleParts(tree: SpecTree): SpecNode[] {
   return tree.parts.filter((n) => n.type === 'part' && n.meta.vanish !== true);
 }
@@ -101,14 +107,21 @@ export function computeFingerprint(tree: SpecTree, refs: readonly SecRef[]): Gol
   };
 }
 
-const FINGERPRINT_FIELDS: readonly (keyof GoldFingerprint)[] = [
+const FINGERPRINT_FIELDS = [
   'section',
   'parts',
   'noteLeaks',
   'maxDepth',
   'partShape',
   'confidenceBands',
-];
+] as const satisfies readonly (keyof GoldFingerprint)[];
+
+// Exhaustiveness guard: if a new GoldFingerprint key is added without a matching entry
+// above, `Exclude<...>` is no longer `never` and this line fails to type-check — so
+// diffFingerprint can never silently stop checking a field.
+type _MissingFingerprintField = Exclude<keyof GoldFingerprint, (typeof FINGERPRINT_FIELDS)[number]>;
+export const _fingerprintFieldsExhaustive: _MissingFingerprintField extends never ? true : never =
+  true;
 
 /** Field-by-field diff of two fingerprints; `[]` when identical. Values are
  *  JSON-stringified for a stable, printable comparison of the nested shapes. */

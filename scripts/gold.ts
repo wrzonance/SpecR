@@ -20,11 +20,19 @@ async function fingerprintCorpus(pattern: string): Promise<CorpusResult[]> {
   const results: CorpusResult[] = [];
   for await (const rel of glob(pattern, { cwd: PROJECT_ROOT })) {
     const abs = join(PROJECT_ROOT, rel);
+    // Store keys are documented as POSIX-normalized; glob's `rel` is already forward-slash
+    // on POSIX platforms, but normalize explicitly so the committed store stays portable
+    // (and verify/bless key identically) if this ever runs on Windows.
+    const key = rel.replaceAll('\\', '/');
     try {
       const { tree, refs } = await parse(await readFile(abs), abs);
-      results.push({ path: rel, ok: true, fingerprint: computeFingerprint(tree, refs) });
+      results.push({ path: key, ok: true, fingerprint: computeFingerprint(tree, refs) });
     } catch (err) {
-      results.push({ path: rel, ok: false, error: err instanceof Error ? err.message : String(err) });
+      results.push({
+        path: key,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   return results;
@@ -39,7 +47,8 @@ async function verify(): Promise<number> {
   const { failures, gated, ungated, missingLocally } = verifyCorpus(results, await readGoldStore());
   for (const f of failures) {
     console.log(`\n✗ ${f.path}`);
-    for (const d of f.deltas) console.log(`    ${d.field}: blessed ${d.expected} → got ${d.actual}`);
+    for (const d of f.deltas)
+      console.log(`    ${d.field}: blessed ${d.expected} → got ${d.actual}`);
   }
   for (const path of missingLocally) console.log(`\n? ${path} (blessed but absent locally)`);
   console.log(
