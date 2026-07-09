@@ -31,11 +31,16 @@ function refKey(ref: SecRef): string {
   return ref.targetType === 'section' ? `sec:${ref.targetSpecSection}` : `std:${ref.standardCode}`;
 }
 
+// Visible (non-vanish) part-type roots — the single source of truth for "how many
+// parts". gold-fingerprint's partShape reuses this so its `parts` and `partShape.length`
+// can never disagree with `fixtureRecord`'s count.
+export function visibleParts(tree: SpecTree): SpecNode[] {
+  return tree.parts.filter((n: SpecNode) => n.type === 'part' && n.meta.vanish !== true);
+}
+
 export function fixtureRecord(tree: SpecTree, refs: readonly SecRef[]): FixtureRecord {
   const render = renderMarkdown(tree);
-  const parts = tree.parts.filter(
-    (n: SpecNode) => n.type === 'part' && n.meta.vanish !== true
-  ).length;
+  const parts = visibleParts(tree).length;
   return {
     parts,
     noteLeaks: countNoteLeaks(render),

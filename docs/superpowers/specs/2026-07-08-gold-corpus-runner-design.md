@@ -42,11 +42,11 @@ command the maintainer runs before merging inference changes. It compares each f
 
 ## Architecture
 
-```
+```text
 docs/references/**/*.{docx,sec,SEC}   (gitignored .docx present only locally)
         │  parse()  (tree carries meta.inference at parse time)
         ▼
-computeFingerprint(tree, refs, source)      ← src/lib/gold-fingerprint.ts (NEW)
+computeFingerprint(tree, refs)              ← src/lib/gold-fingerprint.ts (NEW)
         │  reuses fixture-snapshot primitives + buildHierarchyReport (WS2)
         ▼
 GoldFingerprint { section, parts, noteLeaks, maxDepth, partShape, confidenceBands }
@@ -72,7 +72,7 @@ export interface GoldFingerprint {
 // Bands: scored paragraphs bucketed around HIERARCHY_REVIEW_THRESHOLD (0.6) —
 //   review = confidence < threshold; a second low cut (e.g. < 0.3) splits review/low; rest = high.
 export function computeFingerprint(
-  tree: SpecTree, refs: readonly SecRef[], source: string | null,
+  tree: SpecTree, refs: readonly SecRef[],
 ): GoldFingerprint;
 ```
 
@@ -107,8 +107,9 @@ export type GoldStore = Record<string, GoldEntry>;   // keyed by corpus-relative
   field diff (expected vs actual) for every mismatch — the "fix-loop reads this" surface.
 - Un-blessed corpus files → a coverage summary line (`N gated, M ungated`), **not** a failure.
 - Blessed entries whose file is absent locally → reported as `missing-locally`.
-- **No corpus present → exit 0 with a skip notice** (mirrors `corpus-parts`), so it is a clean no-op
-  in any cloud context and never leaks a requirement to ship the docs.
+- **If `docs/references` is absent, exit 0 with a skip notice** (mirrors `corpus-parts`). The CI
+  guarantee comes from never wiring the runner into CI — not from the corpus being absent: the public
+  UFGS `.SEC` files are committed, so `docs/references` exists in CI too.
 - Honors the documented exceptions the corpus test already encodes (fragment/invalid files) via the
   gold entry (a fragment is blessed with its real `parts`, an invalid file is not a corpus member).
 

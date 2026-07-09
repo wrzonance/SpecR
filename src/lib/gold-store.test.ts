@@ -2,8 +2,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { rm, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readGoldStore, writeGoldStore, type GoldStore } from './gold-store.js';
-import { SpecrError } from './errors.js';
+import { readGoldStore, writeGoldStore, GoldStoreError, type GoldStore } from './gold-store.js';
 
 const TMP = join(tmpdir(), 'specr-gold-store-test');
 
@@ -45,10 +44,18 @@ describe('gold-store', () => {
     expect(raw.indexOf('A/a.docx')).toBeLessThan(raw.indexOf('B/b.docx'));
   });
 
-  it('fails loud (SpecrError) on a structurally invalid store', async () => {
+  it('fails loud (GoldStoreError) on a structurally invalid store', async () => {
     const path = join(TMP, 'bad.json');
     await mkdir(TMP, { recursive: true });
     await writeFile(path, JSON.stringify({ 'x.docx': { fingerprint: { parts: 'three' } } }));
-    await expect(readGoldStore(path)).rejects.toBeInstanceOf(SpecrError);
+    await expect(readGoldStore(path)).rejects.toBeInstanceOf(GoldStoreError);
+  });
+
+  it('fails loud (GoldStoreError) on malformed (non-JSON) input', async () => {
+    const path = join(TMP, 'malformed.json');
+    await mkdir(TMP, { recursive: true });
+    // A truncated / merge-conflicted store: valid file, invalid JSON.
+    await writeFile(path, '{ "a.docx": { "fingerprint": ');
+    await expect(readGoldStore(path)).rejects.toBeInstanceOf(GoldStoreError);
   });
 });

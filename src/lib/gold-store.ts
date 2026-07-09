@@ -5,6 +5,10 @@ import * as z from 'zod';
 import { SpecrError } from './errors.js';
 import type { GoldFingerprint } from './gold-fingerprint.js';
 
+/** Module-owned typed error (per the SpecrError-subclass-per-module convention).
+ *  Thrown when the committed store is unreadable, malformed, or schema-invalid. */
+export class GoldStoreError extends SpecrError {}
+
 /** Repo-relative path of the committed blessed-fingerprint store. */
 export const GOLD_STORE_PATH = 'gold/expectations.json';
 
@@ -46,9 +50,18 @@ const GoldStoreSchema: z.ZodType<GoldStore> = z.record(z.string(), GoldEntrySche
  *  a corrupt/invalid one fails loud rather than silently gating on garbage. */
 export async function readGoldStore(path: string = GOLD_STORE_PATH): Promise<GoldStore> {
   if (!existsSync(path)) return {};
-  const parsed = GoldStoreSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
+  // Malformed JSON must fail loud through the typed error too — a raw SyntaxError
+  // would bypass the "never silently gate on garbage" contract (a merge-conflicted
+  // or truncated store is a realistic corruption mode for a hand-editable data file).
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(path, 'utf8'));
+  } catch (cause) {
+    throw new GoldStoreError(`invalid JSON in gold store: ${path}`, { cause });
+  }
+  const parsed = GoldStoreSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new SpecrError(`invalid gold store: ${path}`, { cause: parsed.error });
+    throw new GoldStoreError(`invalid gold store: ${path}`, { cause: parsed.error });
   }
   return parsed.data;
 }

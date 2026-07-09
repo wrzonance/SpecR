@@ -1,7 +1,7 @@
 // src/lib/gold-fingerprint.ts
 import type { NodeType, SecRef, SpecNode, SpecTree } from '../ast/index.js';
 import { nodeTypeToNormalizedIlvl } from '../ast/index.js';
-import { fixtureRecord } from './fixture-snapshot.js';
+import { fixtureRecord, visibleParts } from './fixture-snapshot.js';
 import { buildHierarchyReport } from './hierarchy-report.js';
 import { HIERARCHY_REVIEW_THRESHOLD } from './hierarchy-summary.js';
 
@@ -79,14 +79,6 @@ function computeBands(tree: SpecTree): ConfidenceBands {
     else high += 1;
   }
   return { high, review, low };
-}
-
-// Predicate MUST mirror fixtureRecord's part filter (fixture-snapshot.ts) — the two
-// are independently maintained (fixtureRecord doesn't expose its filtered node list),
-// so drift here would make fp.parts (from fixtureRecord) disagree with
-// fp.partShape.length (from visibleParts) and undermine the fingerprint.
-function visibleParts(tree: SpecTree): SpecNode[] {
-  return tree.parts.filter((n) => n.type === 'part' && n.meta.vanish !== true);
 }
 
 /**
