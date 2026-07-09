@@ -47,7 +47,7 @@ getSpec (existing, derives meta.inference)
         ▼
 buildHierarchyReport(tree, source, threshold?)   ← src/lib/hierarchy-report.ts (NEW, shared)
         │        ▲
-        │        └── walkScored(tree)  ← ONE walk; summarizeHierarchy refactored to consume it
+        │        └── walkScored(tree)  ← independent ordinal-aware walk (summarizeHierarchy untouched)
         ▼
 HierarchyReport { counts, unscoredReason?, paragraphs[] }
         │
@@ -91,17 +91,22 @@ export function buildHierarchyReport(
 ): HierarchyReport;
 ```
 
-### DRY: one walk, two projections
+### Consistency without refactoring `summarizeHierarchy`
 
-- Extract a private **`walkScored(tree)`** that walks parts once, prunes vanished subtrees (the
-  existing `vanish ∪ descendants` rule), skips `NON_STRUCTURAL` types, and yields a rich entry per
-  scored node **plus** tallies of `scored`/`unscored`. Label + preview are computed in this walk.
+> Revised during planning. An earlier draft had `summarizeHierarchy` consume one shared `walkScored`;
+> that was reversed — see the plan's "DRY without the knot" note. The final decision is below.
+
+- `buildHierarchyReport` uses a private **`walkScored(tree)`** that walks parts once, prunes vanished
+  subtrees (the existing `vanish ∪ descendants` rule), skips `NON_STRUCTURAL` types, and yields a rich
+  entry per scored node **plus** tallies of `scored`/`unscored`. Label + preview are computed in this walk.
 - `buildHierarchyReport` = `walkScored` → sort all entries worst-first (tie-break `nodeId.localeCompare`)
   → attach counts + `unscoredReason`.
-- **`summarizeHierarchy` is refactored to consume `walkScored`** and project to its **existing output
-  shape** (`counts`, `unscoredReason`, `lowConfidence` = entries `< threshold` mapped to the current
-  `HierarchyLowConfidenceEntry`). Its public output is byte-for-byte unchanged — the onboarding report
-  and MCP tool contracts do not move. This removes the duplicated walk/tally/vanish logic.
+- **`summarizeHierarchy` is left untouched.** Its walk is a flat tally-recurse; the report's must be
+  ordinal-aware (it tracks per-tier sibling indices to compute labels). Folding them into one
+  parameterized walk would serve neither cleanly and would perturb a shipped contract (the onboarding
+  report + MCP `get_onboarding_report`). Instead, a **counts-equivalence invariant test** pins
+  `buildHierarchyReport(...).counts` deep-equal to `summarizeHierarchy(...).counts` (and the
+  below-threshold subset), so the two independent implementations can never silently drift.
 
 ### Labels — the one real risk
 
@@ -174,8 +179,8 @@ Stack traces never leave the process. MCP mirrors via `{ isError }`. Zod-validat
 | File | Change |
 |------|--------|
 | `src/lib/hierarchy-report.ts` | **new** — `buildHierarchyReport`, `walkScored`, shapes |
-| `src/lib/hierarchy-summary.ts` | refactor to consume `walkScored` (output shape unchanged) |
-| `src/ast/schemas.ts` (or sibling) | Zod schema for `HierarchyReport`/`ScoredParagraph` (boundary + openapi mirror) |
+| `src/lib/hierarchy-summary.ts` | **unchanged** — kept independent; consistency pinned by a counts-equivalence test |
+| `src/ast/schemas.ts` | **none** — report GETs here use TS interfaces + `openapi.yaml`, not a runtime Zod response schema |
 | `src/api/specs.ts` (or a report handler file) | `getHierarchyReportHandler` |
 | `src/api/router.ts` | register `GET /specs/:id/hierarchy-report` |
 | `openapi.yaml` | path + schemas |

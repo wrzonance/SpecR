@@ -390,6 +390,18 @@ export function initScoring(opts) {
     if (row && rowsEl.contains(row)) locateRow(row);
   });
 
+  // Rows are tabIndex=0 but the hover-walker only binds Arrow/Escape, so a
+  // keyboard user who Tabs onto a row still needs Enter/Space to trigger the
+  // jump (preventDefault stops Space from scrolling the pane).
+  rowsEl.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const row = event.target.closest?.('.scoring-row');
+    if (row && rowsEl.contains(row)) {
+      event.preventDefault();
+      locateRow(row);
+    }
+  });
+
   createHoverWalker({
     itemSelector: '.scoring-row',
     listFor: (anchor) => [...(anchor.closest('.scoring-rows')?.querySelectorAll('.scoring-row') ?? [])],

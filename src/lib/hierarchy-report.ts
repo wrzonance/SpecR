@@ -139,8 +139,12 @@ function walkSiblings(
     visitNode(node, ctxAt(ordinal), acc, threshold);
     // Advance the CSI ordinal only past consumesNumber siblings, so an
     // interleaved note/continuation/vanish node never shifts a real sibling's
-    // label — the same rule renderChildren() uses.
-    if (consumesNumber(node)) ordinal += 1;
+    // label — the same rule renderChildren() uses. The extra NON_STRUCTURAL guard
+    // keeps the ordinal-advance set identical to visitNode's skip set: consumesNumber
+    // does NOT exclude 'spec', so without it a (currently impossible) 'spec' sibling
+    // would advance the ordinal while being skipped for labeling. Inert today ('spec'
+    // never appears in tree.parts) but defensive if that parser invariant relaxes.
+    if (consumesNumber(node) && !NON_STRUCTURAL.has(node.type)) ordinal += 1;
   }
 }
 
