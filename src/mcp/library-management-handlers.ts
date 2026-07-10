@@ -59,7 +59,7 @@ function internalError(err: unknown, tool: string): ToolResult {
 export async function handleListLibrarySpecs(args: unknown): Promise<ToolResult> {
   const parsed = ListLibrarySpecsArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError('invalid list_library_specs input: libraryId must be a UUID');
+    return toolError(`invalid list_library_specs input: ${issues(parsed.error)}`);
   }
   const { libraryId, includeWithdrawn } = parsed.data;
   try {
