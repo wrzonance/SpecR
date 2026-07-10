@@ -122,6 +122,10 @@ export async function listLibraries(db: Queryable = pool): Promise<readonly Libr
   }
 }
 
+// Raised when a library id has no matching row — mapped to 404 (REST) / tool
+// error (MCP) by callers that need a whole-library scope (e.g. reference-graph).
+export class LibraryNotFoundError extends DatabaseError {}
+
 // Parent-resolution failures for createClientLibrary. Callers map each to their
 // own surface — REST to an HTTP status, MCP to a tool error.
 export class ParentLibraryNotFoundError extends DatabaseError {}
