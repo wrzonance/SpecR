@@ -107,4 +107,26 @@ describe('NumberingProfileReadSchema (read-tolerant — #323)', () => {
       })
     ).toThrow();
   });
+
+  // #323 (Codex): the read schema relaxes to the STRUCTURAL FLOOR, not below it. A
+  // negative level is corruption (never valid under any historical contract), and
+  // ilvlToNodeType uses articleIlvl as a subtraction offset — a negative would silently
+  // shift every tier. So sub-structural values must still throw, not read back.
+  it('still rejects a negative articleIlvl (corruption, not a legacy shape)', () => {
+    expect(() => NumberingProfileReadSchema.parse({ ...valid, articleIlvl: -1 })).toThrow();
+  });
+
+  it('still rejects a negative ilvl in a numbering level (structural floor is 0)', () => {
+    expect(() =>
+      NumberingProfileReadSchema.parse({
+        ...valid,
+        numbering: [{ numId: 1, levels: [{ ilvl: -1, tier: 'part' }] }],
+      })
+    ).toThrow();
+  });
+
+  it('still rejects a non-positive part maxCount (a tier size must be >= 1)', () => {
+    const broken = { ...valid, tiers: { part: { numberStyle: 'integer', maxCount: 0 } } };
+    expect(() => NumberingProfileReadSchema.parse(broken)).toThrow();
+  });
 });

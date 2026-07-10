@@ -62,26 +62,39 @@ export const NumberingProfileSchema = z
 // any *tightening* of the write schema (e.g. articleIlvl min(0)→min(1), #322) could
 // retroactively turn a previously-valid row into a 500 on read. The read schema is
 // the same SHAPE as the write schema with the numeric POLICY bounds relaxed to their
-// structural floor, so historical rows load cleanly while writes stay strict at
-// ingress. It is NOT a rubber stamp: field presence, JS types, and the closed tier
-// vocabulary are still enforced, so a genuinely-corrupt row still throws. See ADR-061.
+// STRUCTURAL FLOOR, so historical rows load cleanly while writes stay strict at
+// ingress. It is NOT a rubber stamp: field presence, JS types, the closed tier
+// vocabulary, AND the structural floor of each numeric field are still enforced, so a
+// genuinely-corrupt row still throws. See ADR-061.
 //
-// Maintenance rule: a future write-side tightening that is a numeric bound is already
-// covered here (read drops all bounds). A tightening of a *different* kind — narrowing
-// a literal/enum, or adding a required field — must be mirrored as a relaxation here,
-// or it reintroduces the read-500 risk. The read-tolerance tests are the guardrail.
+// "Relax to the structural floor" is deliberate, not "drop all bounds": an `ilvl` is a
+// 0-based level index and a `maxCount` is a tier size, so `ilvl >= 0` / `count >= 1`
+// are not policy — they are the meaning of the field. A negative `articleIlvl` was
+// never valid under any historical contract; admitting it would let a corrupt row flow
+// into the parser, where `ilvlToNodeType` uses articleIlvl as a subtraction offset and
+// would silently shift every tier instead of surfacing the corruption (#323, Codex).
+// So the read schema keeps the floors and drops only the POLICY bounds that a tightening
+// could newly impose: `part.maxCount`'s CSI ceiling of 5, and `articleIlvl`'s min(1)
+// (relaxed to its structural floor min(0), which is the legacy #320 case).
+//
+// Maintenance rule: a future write-side tightening that RAISES a policy floor above the
+// structural minimum, LOWERS a ceiling, narrows a literal/enum, or adds a required field
+// must be mirrored as a relaxation here (down to the structural floor, no further), or it
+// reintroduces the read-500 risk. The read-tolerance tests are the guardrail.
 
 const PartTierReadSchema = z
-  .object({ numberStyle: z.literal('integer'), maxCount: z.number().int() })
+  // drop only the CSI policy ceiling max(5); keep the structural floor min(1)
+  .object({ numberStyle: z.literal('integer'), maxCount: z.number().int().min(1) })
   .catchall(JsonValue);
 
 const TierShapeReadSchema = z
-  .object({ maxCount: z.number().int().exactOptional() })
+  // maxCount is a tier size — positive is structural, not policy; keep it
+  .object({ maxCount: z.number().int().positive().exactOptional() })
   .catchall(JsonValue);
 
 const NumberingLevelReadSchema = z
   .object({
-    ilvl: z.number().int(),
+    ilvl: z.number().int().min(0), // structural floor: an ilvl is a 0-based level index
     tier: TierNameSchema,
     labelTemplate: z.string().exactOptional(),
     numFmt: z.string().exactOptional(),
@@ -96,7 +109,7 @@ const StyleLadderEntryReadSchema = z
   .object({
     styleId: z.string(),
     numId: z.number().int(),
-    ilvl: z.number().int(),
+    ilvl: z.number().int().min(0), // structural floor: an ilvl is a 0-based level index
     tier: TierNameSchema,
   })
   .catchall(JsonValue);
@@ -113,7 +126,8 @@ export const NumberingProfileReadSchema = z
       .catchall(JsonValue),
     numbering: z.array(NumberingGroupReadSchema),
     styleLadder: z.array(StyleLadderEntryReadSchema),
-    articleIlvl: z.number().int().exactOptional(),
+    // structural floor min(0) (legacy #320 case), not the write-side policy min(1)
+    articleIlvl: z.number().int().min(0).exactOptional(),
   })
   .catchall(JsonValue);
 

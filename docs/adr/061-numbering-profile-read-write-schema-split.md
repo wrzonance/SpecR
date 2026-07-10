@@ -43,9 +43,15 @@ Adopt option **(3): split the read and write schemas.**
 - `NumberingProfileReadSchema` — a **lenient READ** contract, new. Same *shape* as the
   write schema (field presence, JS types, the closed `tier` vocabulary, the
   `numberStyle: 'integer'` literal, `.catchall(JsonValue)` passthrough) with the numeric
-  **policy bounds relaxed to their structural floor** (`min`/`max`/`positive` dropped).
-  Used only on the read paths: `rowToProfile` and the `getEffectiveNumberingProfile`
-  fallback.
+  **policy bounds relaxed to their structural floor** — the CSI `part.maxCount` ceiling
+  of 5 is dropped, and `articleIlvl` relaxes from `min(1)` to `min(0)`. The structural
+  floors are *retained*: an `ilvl` is a 0-based level index (`min(0)`) and a `maxCount`
+  is a tier size (`>= 1`), so a value below them was never valid under any historical
+  contract and is corruption, not a legacy shape. This is stricter than "drop all
+  bounds": admitting a negative `articleIlvl` would let a corrupt row reach the parser,
+  where `ilvlToNodeType` uses it as a subtraction offset and would silently shift every
+  tier instead of surfacing the corruption. Used only on the read paths: `rowToProfile`
+  and the `getEffectiveNumberingProfile` fallback.
 
 Read and write schemas differ only in refinements (`min`/`max`/`positive`), which do not
 affect `z.infer`, so both yield the identical runtime type. `NumberingProfile` remains
@@ -53,8 +59,10 @@ the canonical type, inferred from the write schema; a read parse produces an ass
 value. This keeps the split zero-churn for every downstream consumer of the type.
 
 The read schema is deliberately **not** a rubber stamp: a structurally-broken row
-(missing the required `part` tier, an unknown `tier` name, a wrong JS type) still throws,
-so genuine corruption surfaces as an error rather than propagating silently.
+(missing the required `part` tier, an unknown `tier` name, a wrong JS type, a negative
+`ilvl`/`articleIlvl`, or a non-positive `maxCount`) still throws, so genuine corruption
+surfaces as an error rather than propagating silently — including corruption that would
+otherwise misparse downstream.
 
 Options (1) and (2) were rejected. (1)'s coerce-to-nearest-valid silently rewrites the
 meaning of stored data on read; its quarantine-as-4xx variant makes a legacy profile
@@ -79,12 +87,15 @@ historical rows structurally, with no per-change migration.
   keep referencing the strict `NumberingProfile`. The maintenance rule below therefore
   extends to the spec: a non-numeric write-side tightening must be relaxed in *both*
   `NumberingProfileReadSchema` and the `NumberingProfileRead` OpenAPI schema.
-- **Maintenance rule.** A future write-side tightening that is a *numeric bound* is
-  already covered — the read schema drops all bounds. A tightening of a *different* kind
-  (narrowing a literal/enum, adding a required field) must be mirrored as a relaxation in
-  `NumberingProfileReadSchema`, or it reintroduces the read-500 risk. The read-tolerance
-  tests (`numbering-profile-schema.test.ts`, `numbering-profiles.integration.test.ts`)
-  are the guardrail: they assert legacy shapes read back cleanly while writes reject them.
+- **Maintenance rule.** A future write-side tightening that RAISES a policy floor above
+  the structural minimum, LOWERS a ceiling, narrows a literal/enum, or adds a required
+  field must be mirrored as a relaxation in `NumberingProfileReadSchema` — down to the
+  structural floor, no further — or it reintroduces the read-500 risk. A tightening that
+  merely re-imposes the structural floor is a no-op here (the read schema already sits at
+  it). The read-tolerance tests (`numbering-profile-schema.test.ts`,
+  `numbering-profiles.integration.test.ts`) are the guardrail: they assert legacy shapes
+  read back cleanly while both writes *and* the read schema reject sub-structural
+  corruption.
 - The two schemas can drift in principle. They are kept adjacent in one file with the
   shared sub-schema shape visible on a single screen, and the tests pin the read
   tolerance, so drift is caught rather than latent.

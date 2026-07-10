@@ -6894,14 +6894,18 @@ components:
       description: >
         Lenient READ contract for a persisted numbering profile (ADR-061, #323).
         Same shape as `NumberingProfile` — required fields, JS types, the closed
-        `tier` vocabulary, the `numberStyle: integer` literal, and open-schema
-        passthrough are all still enforced — but the numeric POLICY bounds
-        (`part.maxCount` 1..5, `articleIlvl` >= 1, the `minimum` floors) are
-        relaxed to their structural floor. Reads re-validate stored JSONB, so a
-        row persisted under an older, looser write contract reads back cleanly
-        instead of 500ing once the write schema tightens; writes stay strict at
-        ingress against `NumberingProfile`. This is the response shape for
-        numbering-profile reads (`NumberingProfileRow.rules`).
+        `tier` vocabulary, the `numberStyle: integer` literal, open-schema
+        passthrough, AND the structural floor of every numeric field (`ilvl >= 0`,
+        counts `>= 1`) are all still enforced — but the numeric POLICY bounds a
+        write-side tightening could newly impose are relaxed to that structural
+        floor: `part.maxCount` drops the CSI ceiling of 5, and `articleIlvl`
+        relaxes from `>= 1` to `>= 0` (the legacy #320 case). It is NOT a rubber
+        stamp — a sub-structural value like a negative `articleIlvl` is corruption
+        (it would misparse downstream) and still fails. Reads re-validate stored
+        JSONB, so a row persisted under an older, looser write contract reads back
+        cleanly instead of 500ing once the write schema tightens; writes stay
+        strict at ingress against `NumberingProfile`. This is the response shape
+        for numbering-profile reads (`NumberingProfileRow.rules`).
       additionalProperties: true
       required: [tiers, numbering, styleLadder]
       properties:
@@ -6926,25 +6930,31 @@ components:
                   description: CSI parts are integer-numbered.
                 maxCount:
                   type: integer
-                  description: Maximum PART count (read-lenient — the CSI 1..5 bound is write-only).
+                  minimum: 1
+                  description: >
+                    Maximum PART count. Read-lenient — the CSI policy ceiling of 5 is
+                    write-only, but the structural floor (>= 1) is still enforced.
             article:
               type: object
               additionalProperties: true
               properties:
                 maxCount:
                   type: integer
+                  minimum: 1
             paragraph:
               type: object
               additionalProperties: true
               properties:
                 maxCount:
                   type: integer
+                  minimum: 1
             subparagraph:
               type: object
               additionalProperties: true
               properties:
                 maxCount:
                   type: integer
+                  minimum: 1
         numbering:
           type: array
           description: Per-numId level definitions.
@@ -6964,6 +6974,7 @@ components:
                   properties:
                     ilvl:
                       type: integer
+                      minimum: 0
                     tier:
                       type: string
                       enum: [part, article, paragraph, subparagraph]
@@ -6985,14 +6996,18 @@ components:
                 type: integer
               ilvl:
                 type: integer
+                minimum: 0
               tier:
                 type: string
                 enum: [part, article, paragraph, subparagraph]
         articleIlvl:
           type: integer
+          minimum: 0
           description: >
-            Ilvl of the Article tier. Read-lenient — the write-side `>= 1` bound is
-            not enforced here so a legacy `articleIlvl: 0` row reads back cleanly.
+            Ilvl of the Article tier. Read-lenient — the write-side policy bound is
+            relaxed from `>= 1` to its structural floor `>= 0`, so a legacy
+            `articleIlvl: 0` row reads back cleanly while a negative (corrupt) value
+            still fails.
 
     NumberingProfileRow:
       type: object
