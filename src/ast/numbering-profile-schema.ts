@@ -64,7 +64,7 @@ export const NumberingProfileSchema = z
 // the same SHAPE as the write schema with the numeric POLICY bounds relaxed to their
 // structural floor, so historical rows load cleanly while writes stay strict at
 // ingress. It is NOT a rubber stamp: field presence, JS types, and the closed tier
-// vocabulary are still enforced, so a genuinely-corrupt row still throws. See ADR-060.
+// vocabulary are still enforced, so a genuinely-corrupt row still throws. See ADR-061.
 //
 // Maintenance rule: a future write-side tightening that is a numeric bound is already
 // covered here (read drops all bounds). A tightening of a *different* kind — narrowing
