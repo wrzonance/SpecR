@@ -81,7 +81,8 @@ describe('library-management MCP tools', () => {
     const all = parse<Row[]>(
       await handleListLibrarySpecs({ libraryId: lib.id, includeWithdrawn: true })
     );
-    expect(all.map((r) => r.specId).sort()).toEqual([active, withdrawn].sort());
+    const byId = (a: string, b: string): number => a.localeCompare(b);
+    expect(all.map((r) => r.specId).sort(byId)).toEqual([active, withdrawn].sort(byId));
     expect(typeof all.find((r) => r.specId === withdrawn)?.withdrawnAt).toBe('string');
   });
 
