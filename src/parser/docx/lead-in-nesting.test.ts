@@ -14,7 +14,8 @@ function cp(
   resolvedIlvl: number,
   nodeType: NodeType,
   signalUsed: SignalId,
-  conflicts: readonly SignalConflict[] = []
+  conflicts: readonly SignalConflict[] = [],
+  agreed: readonly SignalId[] = []
 ): ClassifiedParagraph {
   return {
     paragraph: { text, isVanish: false },
@@ -22,7 +23,7 @@ function cp(
     nodeType,
     signalUsed,
     conflicts,
-    agreed: [],
+    agreed,
     isVanish: false,
   };
 }
@@ -126,6 +127,75 @@ describe('nestLeadInSublists', () => {
     ];
     const out = nestLeadInSublists(input);
     expect(out[1]?.resolvedIlvl).toBe(PR2);
+  });
+
+  // P2-A: a node can WIN via Signal 1/2 (Word/style numbering) yet still carry a
+  // literal "1." that Signal 4 recorded in agreed/conflicts. Promoting it would
+  // double-label ("A. 1. Group:") because buildTree only strips a Signal-4 winner.
+  it('P2-A: Signal-1 winner whose text Signal-4 also saw (agreed) is not a candidate', () => {
+    const input = [
+      cp('REFERENCES', ARTICLE, 'article', 4),
+      cp('1.\tGroup:', PR2, 'pr2', 1, [], [4]), // Signal-1 winner, Signal-4 agreed at pr2
+      cp('1.\ta', PR2, 'pr2', 4),
+      cp('2.\tb', PR2, 'pr2', 4),
+    ];
+    const out = nestLeadInSublists(input);
+    expect(out[1]?.resolvedIlvl).toBe(PR2);
+  });
+
+  it('P2-A: Signal-2 winner whose text Signal-4 saw at another tier (conflict) is not a candidate', () => {
+    const input = [
+      cp('REFERENCES', ARTICLE, 'article', 4),
+      // Signal-2 winner at pr2; Signal-4 read the literal "A." as pr1 (recorded as a conflict).
+      cp('A.\tGroup:', PR2, 'pr2', 2, [{ signal: 4, reportedIlvl: PR1, reportedNodeType: 'pr1' }]),
+      cp('1.\ta', PR2, 'pr2', 4),
+      cp('2.\tb', PR2, 'pr2', 4),
+    ];
+    const out = nestLeadInSublists(input);
+    expect(out[1]?.resolvedIlvl).toBe(PR2);
+  });
+
+  // Don't-strand-peers: a same-tier peer lead-in ending ":" that FOLLOWS a promoted
+  // primary (sharing its parent) is promoted too — even without a sub-list of its own
+  // — so it stays a sibling (A./B./C.), not a child of the last promoted sibling.
+  it('promotes a stranded same-tier peer lead-in so it stays a sibling, not a child', () => {
+    const input = [
+      cp('REFERENCES', ARTICLE, 'article', 4),
+      cp('Abbreviations:', PR2, 'pr2', 5), // primary (owns the 1./2. run)
+      cp('1.\ta', PR2, 'pr2', 4),
+      cp('2.\tb', PR2, 'pr2', 4),
+      cp('References Standards:', PR2, 'pr2', 5), // peer — its follower is a continuation
+      cp('1 Cable:', PR2, 'continuation', 3),
+    ];
+    const out = nestLeadInSublists(input);
+    expect(out[1]?.resolvedIlvl).toBe(PR1); // primary promoted
+    expect(out[4]?.resolvedIlvl).toBe(PR1); // stranded peer promoted to match
+    expect(out[4]?.nodeType).toBe('pr1');
+  });
+
+  it('does not promote a peer lead-in with no preceding same-tier primary in scope', () => {
+    const input = [
+      cp('REFERENCES', ARTICLE, 'article', 4),
+      cp('Standalone lead-in:', PR2, 'pr2', 5), // no primary anywhere → untouched
+      cp('body text continues', PR2, 'continuation', 3),
+    ];
+    const out = nestLeadInSublists(input);
+    expect(out[1]?.resolvedIlvl).toBe(PR2);
+  });
+
+  // P2-C: buildTree drops blank paragraphs, so a blank between the lead-in and its
+  // "1." list must not defeat the same-tier adjacency check.
+  it('P2-C: a blank paragraph between the lead-in and its list does not defeat detection', () => {
+    const input = [
+      cp('REFERENCES', ARTICLE, 'article', 4),
+      cp('Abbreviations:', PR2, 'pr2', 5),
+      cp('   ', PR2, 'continuation', 3), // blank spacer — dropped by the content filter
+      cp('1.\ta', PR2, 'pr2', 4),
+      cp('2.\tb', PR2, 'pr2', 4),
+    ];
+    const out = nestLeadInSublists(input);
+    expect(out[1]?.resolvedIlvl).toBe(PR1);
+    expect(out[2]?.paragraph.text).toBe('   '); // blank left untouched in the output
   });
 
   it('is pure: returns a new array, leaves input objects unmutated, reuses unchanged references', () => {

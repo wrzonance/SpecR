@@ -62,12 +62,25 @@ describe.skipIf(!AVAILABLE)(
       expect(items[1]).toBe('ICEA: Insulated Cable Engineers Association.');
     });
 
-    it('renders A./B. lead-ins with clean 1..n children — no double-label', async () => {
+    it('1.2 REFERENCES has three peer lead-ins A./B./C. as direct children', async () => {
+      const refs = findArticle(await parseFixture(), 'REFERENCES');
+      // The author's structure (verified against Word) is three PEER lead-ins, all
+      // direct children of the article — References Standards must NOT be vacuumed
+      // under B. Definitions when A/B promote (don't-strand-peers rule).
+      expect(childTexts(refs, 'pr1')).toEqual([
+        'Abbreviations and Acronyms:',
+        'Definitions:',
+        'References Standards:',
+      ]);
+    });
+
+    it('renders A./B./C. lead-ins with clean 1..n children — no double-label', async () => {
       const md = renderMarkdown(await parseFixture());
       expect(md).toMatch(/^A\. Abbreviations and Acronyms:$/m);
       expect(md).toMatch(/^ {3}1\. Authority having jurisdiction \(AHJ\)$/m);
       expect(md).toMatch(/^ {3}5\. Underwriters Laboratories Inc\. \(UL\)$/m);
       expect(md).toMatch(/^B\. Definitions:$/m);
+      expect(md).toMatch(/^C\. References Standards:$/m);
       // The bug symptom was a "2. 1. Authority" double-label; the rendered line is now
       // exactly "1. Authority…" with no outer sibling number in front.
       const authorityLine = md.split('\n').find((l) => l.includes('Authority having jurisdiction'));
@@ -85,19 +98,20 @@ describe.skipIf(!AVAILABLE)(
       expect(abbrev?.children[0]?.text.startsWith('1.')).toBe(false);
     });
 
-    // KNOWN AMBIGUITY: the "References Standards:" subtree is a different mixed-scheme
-    // tangle (a stray "1 Cable:" parsed as a continuation, pr4 depth) whose following
-    // run is NOT a Signal-4 restart, so the pass does not promote it. Once Definitions
-    // is promoted to pr1, "References Standards:" (still pr2) nests under Definitions
-    // rather than remaining a REFERENCES-level peer. Pinning current behavior — a
-    // correct fix for this subtree is out of scope for #431.
-    it('KNOWN AMBIGUITY: References Standards subtree nests under Definitions, not promoted', async () => {
+    // References Standards' PLACEMENT is now correct: it is C., a direct child of the
+    // article (peer of A/B). Only its SUBTREE remains a KNOWN AMBIGUITY (issue #436):
+    // an editor typo "1 Cable:" (missing period) parses as a continuation instead of a
+    // "1." restart, and the intentional category breakouts (Cable Sizing:/Splicing:/…)
+    // land at pr4 depth. The pass promotes the peer lead-in without touching that
+    // internal tangle — a correct fix for the subtree is deferred to #436.
+    it('KNOWN AMBIGUITY (#436): References Standards is C. but its subtree stays tangled', async () => {
       const refs = findArticle(await parseFixture(), 'REFERENCES');
-      const definitions = refs?.children.find((c) => c.text === 'Definitions:');
-      const refStd = definitions?.children.find((c) => c.text === 'References Standards:');
-      expect(refStd?.type).toBe('pr2');
-      // It keeps its own (messy) subtree — it was not flattened or promoted.
-      expect(refStd?.children.length ?? 0).toBeGreaterThan(0);
+      const refStd = refs?.children.find((c) => c.text === 'References Standards:');
+      expect(refStd?.type).toBe('pr1'); // placement fixed — peer of A/B
+      // The messy internal structure is retained as-is, not resolved by this pass.
+      expect(refStd?.children.some((c) => c.type === 'continuation' && c.text === '1 Cable:')).toBe(
+        true
+      );
     });
   }
 );
