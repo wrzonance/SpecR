@@ -34,6 +34,9 @@ docker() {
     else
       r="\${PROBE_RESULTS[\${#PROBE_RESULTS[@]} - 1]}"
     fi
+    # Echo the full argv so a test can assert the probe targets TCP (-h), not the
+    # unix socket — a socket probe races the initdb temp server (see #405).
+    printf 'EXEC %s\\n' "$*"
     printf 'PROBE %s %s\\n' "$CALLS" "$r"
     [[ "$r" == "1" ]] && return 0
     return 1
@@ -131,6 +134,18 @@ describe('examples/web_ui_demo/Start-SpecR.sh', () => {
     expect(callCount(stdout)).toBe(4);
     // It slept between probes rather than busy-returning.
     expect(stdout).toMatch(/^SLEEPS ([1-9]\d*)$/m);
+  });
+
+  it('regression: pg_isready probes the TCP path (-h 127.0.0.1 -p 5432), not the unix socket', () => {
+    // A socket probe (no -h) succeeds against the initdb temp server, which listens
+    // on the socket only (listen_addresses=''), so it would re-open the very race
+    // #405 fixes. The probe must hit TCP — the same path pnpm migrate connects over.
+    const { stdout } = runHarness('confirm', { PROBE_PATTERN: '1 1' });
+
+    const execLine = /^EXEC .*$/m.exec(stdout)?.[0] ?? '';
+    expect(execLine).toContain('pg_isready');
+    expect(execLine).toContain('-h 127.0.0.1');
+    expect(execLine).toContain('-p 5432');
   });
 
   it('regression: readiness gate returns non-zero if pg_isready never succeeds within the budget', () => {

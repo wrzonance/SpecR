@@ -148,17 +148,21 @@ get_compose_postgres_port() {
 
 # A TCP-open published port only proves docker-proxy is forwarding it — not that
 # PostgreSQL is accepting SQL. On a fresh specr_pgdata volume the postgres image
-# first runs initdb behind a throwaway server bound to the unix socket
+# first runs initdb behind a throwaway server bound to the unix socket ONLY
 # (listen_addresses=''), then restarts into the real server; the host port answers
 # TCP that whole time, so `pnpm migrate` connects to the transient server and dies
-# with "Connection terminated unexpectedly". Confirm the protocol with pg_isready,
-# and require two consecutive successes a short sleep apart so a single probe can't
-# succeed against the transient initdb server just before it hands off. Only usable
-# for the bundled container the script started — never for an external DATABASE_URL.
+# with "Connection terminated unexpectedly". Confirm the protocol with pg_isready —
+# but over TCP (-h 127.0.0.1 -p 5432, the container-internal port), the SAME path
+# migrate uses. A default socket probe (no -h) would succeed against the initdb
+# temp server (socket-only), reopening the very race we are closing; the temp server
+# has no TCP listener, so a TCP probe fails until the real server is up. Require two
+# consecutive successes a short sleep apart to rule out a lone transient answer.
+# Only usable for the bundled container the script started — never for an external
+# DATABASE_URL.
 confirm_compose_postgres_ready() {
   local attempts="${1:-60}" i streak=0
   for i in $(seq 1 "$attempts"); do
-    if docker compose exec -T postgres pg_isready -U specr -d specr -q; then
+    if docker compose exec -T postgres pg_isready -h 127.0.0.1 -p 5432 -U specr -d specr -q; then
       streak=$((streak + 1))
       if ((streak >= 2)); then
         return 0
