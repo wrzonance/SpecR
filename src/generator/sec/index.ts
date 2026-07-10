@@ -71,13 +71,17 @@ function renderRef(ref: SecRef): string {
   return `<REF>${rid}${rtl}</REF>`;
 }
 
-// A structural child renders as a nested <SPT> when it carries any children of
-// its own (structural, continuation, or note) — only an SPT can hold child
-// content (and only a nested SPT can carry a <REF>). A truly childless node
-// with no refs becomes a leaf list/item whose element is chosen by its tier
-// offset from the parent SPT (+1 → LST, +2 → ITM).
+// A structural child renders as a nested <SPT> when it carries any child that
+// will actually render (structural, continuation, or note) — only an SPT can
+// hold child content (and only a nested SPT can carry a <REF>). A node with no
+// rendered children (truly childless, OR every child filtered as hidden) and no
+// refs becomes a leaf list/item whose element is chosen by its tier offset from
+// the parent SPT (+1 → LST, +2 → ITM). Excluding hidden children here keeps the
+// filter self-consistent: a filtered subtree must not force a tier-gap node onto
+// the nested-<SPT> path (which re-parses one tier shallower) when it is really a
+// leaf after removal (#278, ADR-060).
 function isLeaf(node: SpecNode, refs: RefIndex): boolean {
-  return node.children.length === 0 && !refs.has(node.id);
+  return node.children.every(isHidden) && !refs.has(node.id);
 }
 
 function leafElement(offset: number, text: string): string {

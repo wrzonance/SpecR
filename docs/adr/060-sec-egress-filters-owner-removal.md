@@ -38,8 +38,11 @@ ADR-030 (soft-delete symmetry). Concerns: `#278`.
 A single `isHidden(node)` predicate — `node.type !== 'note' && node.meta.vanish === true` — is applied
 at every `.SEC` render site (roots, part children/articles, and structural children). A hidden node,
 with its whole subtree, is dropped; a `note` is never filtered (SEC notes are `vanish` by definition
-and always export as `<NTE>`). This makes the three model-driven owner-facing renderers — DOCX,
-Markdown, `.SEC` — behave identically: **removed content appears in no exported document.**
+and always export as `<NTE>`). Leaf detection consults the same predicate: a node whose children are
+*all* hidden is a leaf after filtering, so it emits the correct childless `<LST>/<ITM>` element rather
+than a nested `<SPT>` that would re-parse one tier shallower — the filter governs structure as well as
+content. This makes the three model-driven owner-facing renderers — DOCX, Markdown, `.SEC` — behave
+identically: **removed content appears in no exported document.**
 
 **Rejected alternative — encode an owner-removal marker** (true lossless reversibility through
 `.SEC`): rejected because it would (a) **collide** with the established `<NTE>`/`vanish` note mapping,

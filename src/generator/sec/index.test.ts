@@ -196,6 +196,59 @@ describe('generateSec — entity and note round-trip', () => {
     expect(xml).not.toContain('child of removed article');
     expect(xml).toContain('<TTL>KEPT ARTICLE</TTL>');
   });
+
+  // Regression: a filtered subtree must not influence the parent's leaf-vs-SPT
+  // choice. A tier-gap paragraph (article → pr2, offset 2) whose only child is
+  // owner-removed is a leaf AFTER filtering, so it must emit a childless <ITM>
+  // and re-parse back as pr2 — not a nested <SPT>, which re-parses one tier
+  // shallower as pr1 (#278, ADR-060; Codex adversarial review).
+  it('SEC egress: a tier-gap node whose only children are hidden re-parses at its own tier, not one shallower (#278)', () => {
+    const tree: SpecTree = {
+      id: 't3',
+      section: '27 10 00',
+      title: 'T',
+      parts: [
+        {
+          id: 'p1',
+          type: 'part',
+          text: 'GENERAL',
+          children: [
+            {
+              id: 'a1',
+              type: 'article',
+              text: 'SUMMARY',
+              meta: {},
+              children: [
+                {
+                  id: 'gap',
+                  type: 'pr2',
+                  text: 'visible tier-gap paragraph',
+                  meta: {},
+                  children: [
+                    {
+                      id: 'gone',
+                      type: 'pr3',
+                      text: 'Removed child.',
+                      children: [],
+                      meta: { vanish: true },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          meta: {},
+        },
+      ],
+    };
+    const xml = generateSec(tree);
+    expect(xml).not.toContain('Removed child.');
+    expect(xml).toContain('<ITM>visible tier-gap paragraph</ITM>');
+    const after = parseSec(xml).tree;
+    const gap = after.parts[0]?.children[0]?.children[0];
+    expect(gap?.type).toBe('pr2');
+    expect(gap?.children).toHaveLength(0);
+  });
 });
 
 describe('generateSec — standard reference round-trip', () => {
