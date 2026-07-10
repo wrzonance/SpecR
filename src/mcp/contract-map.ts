@@ -166,3 +166,52 @@ export const MCP_NATIVE: ReadonlySet<string> = new Set([
   'review_editability',
   'clear_editability_override',
 ]);
+
+/**
+ * INV-5 (ADR-044 response-shape gap, #403). Tools whose success output legitimately RESHAPES
+ * its mapped REST op's body — it does not return the REST `data` 1:1, so INV-5 does not
+ * schema-validate it against that op. Each entry carries a reason, mirroring how MCP_UNEXPOSED
+ * documents coverage exemptions. Never silent.
+ */
+export const INV5_SHAPE_EXEMPT: ReadonlyMap<string, string> = new Map([
+  [
+    'get_spec',
+    'reshapes: returns { tree, references } nested plus MCP _meta navigation anchors, whereas ' +
+      'REST GET /specs/{id} returns the flattened spec tree with styleSource/onboardingStatus/' +
+      'withdrawnAt at the top level — a deliberately different agent-facing shape, not the REST ' +
+      'body 1:1.',
+  ],
+]);
+
+/**
+ * INV-5 burn-down. Read tools that DO mirror their mapped REST op's body but are not yet driven
+ * by INV-5 because they need a seeded fixture graph (a parsed spec, a project, a template, …)
+ * beyond `pnpm seed`. This is the same posture ADR-044 takes with MCP_UNEXPOSED's `pending`
+ * entries: entries graduate into INV-5's driven set as fixtures land. INV-5's completeness
+ * invariant proves no read-mapped tool is silently absent from both the driven set and these maps.
+ */
+export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
+  'get_spec_lineage',
+  'get_hierarchy_report',
+  'coordination_report',
+  'get_project_keynotes',
+  'list_revit_links',
+  'open_comments_report',
+  'get_project',
+  'list_associations',
+  'get_spec_lock',
+  'get_template',
+  'get_library_conventions',
+  'get_required_sections',
+  'get_package_required_sections',
+  'get_project_revision_nomenclature',
+  'list_library_numbering_profiles',
+  'get_numbering_profile_by_id',
+  'list_library_specs',
+  'get_library_general_spec',
+  'get_project_general_spec',
+  'list_packages',
+  'list_package_revisions',
+  'get_revision',
+  'get_client',
+]);
