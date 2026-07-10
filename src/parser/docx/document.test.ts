@@ -146,6 +146,37 @@ describe('parseDocument — pPr field extraction', () => {
     expect(result[0]?.leftIndent).toBe(3859);
   });
 
+  // Codex adversarial review (PR #432): Word commonly stores a title's centering in its
+  // paragraph STYLE, not the paragraph. When there is no direct w:jc, resolve the
+  // style's basedOn-resolved alignment so Signal 5 still ignores a style-centered title's
+  // indent (which would otherwise become a spurious deep-pr node).
+  it('resolves style-inherited justification when the paragraph has no direct w:jc', () => {
+    const styles = buildStyleMap(
+      `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+        `<w:style w:styleId="Title" w:type="paragraph"><w:name w:val="Title"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style>` +
+        `</w:styles>`
+    );
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:pStyle w:val="Title"/><w:ind w:left="3859"/></w:pPr>` +
+        `<w:r><w:t>SECTION 26 0513.01</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), styles);
+    expect(result[0]?.jc).toBe('center');
+  });
+
+  it('prefers a direct w:jc over the paragraph style alignment', () => {
+    const styles = buildStyleMap(
+      `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+        `<w:style w:styleId="Title" w:type="paragraph"><w:name w:val="Title"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style>` +
+        `</w:styles>`
+    );
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:pStyle w:val="Title"/><w:jc w:val="left"/></w:pPr><w:r><w:t>text</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), styles);
+    expect(result[0]?.jc).toBe('left');
+  });
+
   it('detects vanish', () => {
     const xml = makeDocXml(makePara({ text: 'hidden', vanish: true }));
     const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);

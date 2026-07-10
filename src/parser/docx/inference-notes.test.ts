@@ -8,6 +8,7 @@ function emptyStyleMap(): StyleMap {
   return {
     styles: new Map(),
     resolvedNumPr: new Map(),
+    resolvedJc: new Map(),
     vanishStyleIds: new Set(),
     vanishCharStyleIds: new Set(),
   };
@@ -39,6 +40,7 @@ describe('classifyParagraphs + buildTree — specifier notes become vanish notes
     const styleMap: StyleMap = {
       styles: new Map([['ARCATnote', { styleId: 'ARCATnote', name: 'ARCATnote' }]]),
       resolvedNumPr: new Map(),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -119,6 +121,7 @@ describe('classifyParagraphs + buildTree — specifier notes become vanish notes
     const styleMap: StyleMap = {
       styles: new Map([['FootnoteText', { styleId: 'FootnoteText', name: 'footnote text' }]]),
       resolvedNumPr: new Map(),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -197,6 +200,7 @@ describe('classifyParagraphs — note-style name matching (CodeRabbit #113)', ()
     const styleMap: StyleMap = {
       styles: new Map([['AppendixNote', { styleId: 'AppendixNote', name: 'AppendixNote' }]]),
       resolvedNumPr: new Map(),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -216,6 +220,7 @@ describe('classifyParagraphs — note-style name matching (CodeRabbit #113)', ()
     const styleMap: StyleMap = {
       styles: new Map([['EndnoteText', { styleId: 'EndnoteText', name: 'endnote text' }]]),
       resolvedNumPr: new Map(),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };

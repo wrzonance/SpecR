@@ -8,6 +8,7 @@ function emptyStyleMap(): StyleMap {
   return {
     styles: new Map(),
     resolvedNumPr: new Map(),
+    resolvedJc: new Map(),
     vanishStyleIds: new Set(),
     vanishCharStyleIds: new Set(),
   };
@@ -86,6 +87,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['Heading1', { styleId: 'Heading1', name: 'heading 1' }]]),
       resolvedNumPr: new Map([['Heading1', { numId: 1, ilvl: 0 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -102,6 +104,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', suppressesNumbering: true }]]),
       resolvedNumPr: new Map([['PR1lc', { numId: 1, ilvl: 4 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -125,6 +128,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
       resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -146,6 +150,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
       resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -165,6 +170,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
       resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -183,6 +189,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
       resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -199,6 +206,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['Heading2', { styleId: 'Heading2', name: 'heading 2' }]]),
       resolvedNumPr: new Map([['Heading2', { numId: 1, ilvl: 1 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -360,6 +368,7 @@ describe('classifyParagraphs — reserved-low-level (articleIlvl=3) regressions'
         ['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', suppressesNumbering: true, basedOn: 'PR1' }],
       ]),
       resolvedNumPr: new Map([['PR1', { numId: 2, ilvl: 4 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -384,6 +393,7 @@ describe('classifyParagraphs — reserved-low-level (articleIlvl=3) regressions'
         ['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', next: 'PR1' }],
       ]),
       resolvedNumPr: new Map([['PR1', { numId: 1, ilvl: 4 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -403,6 +413,7 @@ describe('classifyParagraphs — reserved-low-level (articleIlvl=3) regressions'
         ['PR2lc', { styleId: 'PR2lc', name: 'PR2lc', next: 'PR2' }],
       ]),
       resolvedNumPr: new Map([['PR2', { numId: 1, ilvl: 5 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -418,6 +429,7 @@ describe('classifyParagraphs — reserved-low-level (articleIlvl=3) regressions'
     const styleMap: StyleMap = {
       styles: new Map([['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', next: 'PR1' }]]),
       resolvedNumPr: new Map(), // no base PR1 numbering to inherit
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };

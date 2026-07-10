@@ -102,12 +102,19 @@ function resolveOutlineLvl(pPr: Record<string, unknown> | undefined): number | u
   return isNaN(n) ? undefined : n;
 }
 
-// Paragraph alignment (w:jc @w:val). A centered/right-aligned paragraph's leftIndent
-// is horizontal positioning, not outline depth — the inference engine (Signal 5) reads
-// this to avoid promoting a centered title to a spurious deep-pr node.
-function resolveJustification(pPr: Record<string, unknown> | undefined): string | undefined {
-  if (!pPr) return undefined;
-  return getAttrVal(pPr['w:jc']) || undefined;
+// Effective paragraph alignment (w:jc @w:val), direct pPr first, then the paragraph
+// style's basedOn-resolved alignment — Word commonly stores a title's centering in the
+// style, not the paragraph (Codex adversarial review). A centered/right-aligned
+// paragraph's leftIndent is horizontal positioning, not outline depth; the inference
+// engine (Signal 5) reads this to avoid promoting a centered title to a spurious pr node.
+function resolveJustification(
+  pPr: Record<string, unknown> | undefined,
+  styleId: string | undefined,
+  styleMap: StyleMap
+): string | undefined {
+  const direct = pPr ? getAttrVal(pPr['w:jc']) : '';
+  if (direct) return direct;
+  return styleId ? styleMap.resolvedJc.get(styleId) : undefined;
 }
 
 function runIsVanish(
@@ -200,7 +207,7 @@ function parseParagraph(
   const { numId, ilvl } = resolveNumPr(pPr, styleId, numberingMap);
   const leftIndent = resolveLeftIndent(pPr);
   const outlineLvl = resolveOutlineLvl(pPr);
-  const jc = resolveJustification(pPr);
+  const jc = resolveJustification(pPr, styleId, styleMap);
   const para: DocxParagraph = {
     text: source?.text ?? extractText(raw),
     isVanish: resolveParagraphVanish(raw, pPr, styleId, styleMap),

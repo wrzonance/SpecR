@@ -66,6 +66,28 @@ function numPrFields(result: NumPrResult): Pick<StyleInfo, 'numPr' | 'suppresses
   return {};
 }
 
+// The optional StyleInfo fields (everything but styleId/name), assembled with
+// exactOptionalPropertyTypes-friendly conditional spreads. Split out of parseStyleInfo
+// to keep each function's cognitive complexity within budget.
+function optionalStyleFields(
+  raw: Record<string, unknown>,
+  pPr: Record<string, unknown> | undefined
+): Partial<StyleInfo> {
+  const basedOn = getAttrVal(raw['w:basedOn']);
+  const next = getAttrVal(raw['w:next']);
+  const numPrResult = pPr ? parseNumPr(pPr) : ({ kind: 'absent' } as const);
+  const outlineLvl = parseOutlineLvl(pPr);
+  const jc = pPr ? getAttrVal(pPr['w:jc']) : '';
+  return {
+    ...(basedOn ? { basedOn } : {}),
+    ...(next ? { next } : {}),
+    ...numPrFields(numPrResult),
+    ...(parseVanish(raw) ? { isVanish: true as const } : {}),
+    ...(outlineLvl !== undefined ? { outlineLvl } : {}),
+    ...(jc ? { jc } : {}),
+  };
+}
+
 function parseStyleInfo(raw: Record<string, unknown>): StyleInfo | null {
   const styleType = extractAttrStr(raw, '@_w:type') || 'paragraph';
   if (styleType !== 'paragraph') return null;
@@ -73,19 +95,10 @@ function parseStyleInfo(raw: Record<string, unknown>): StyleInfo | null {
   if (!styleId) return null;
 
   const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
-  const basedOn = getAttrVal(raw['w:basedOn']);
-  const next = getAttrVal(raw['w:next']);
-  const numPrResult = pPr ? parseNumPr(pPr) : ({ kind: 'absent' } as const);
-  const outlineLvl = parseOutlineLvl(pPr);
-
   return {
     styleId,
     name: resolvedName(raw, styleId),
-    ...(basedOn ? { basedOn } : {}),
-    ...(next ? { next } : {}),
-    ...numPrFields(numPrResult),
-    ...(parseVanish(raw) ? { isVanish: true as const } : {}),
-    ...(outlineLvl !== undefined ? { outlineLvl } : {}),
+    ...optionalStyleFields(raw, pPr),
   };
 }
 
@@ -101,6 +114,20 @@ function resolveNumPrChain(
   if (style.numPr) return style.numPr;
   if (style.basedOn) return resolveNumPrChain(style.basedOn, styles, depth + 1);
   return undefined;
+}
+
+// Effective alignment for a style: its own w:jc, else the nearest basedOn ancestor's.
+// Mirrors resolveNumPrChain; no suppress sentinel exists for alignment.
+function resolveJcChain(
+  styleId: string,
+  styles: ReadonlyMap<string, StyleInfo>,
+  depth: number
+): string | undefined {
+  if (depth > MAX_BASED_ON_DEPTH) return undefined;
+  const style = styles.get(styleId);
+  if (!style) return undefined;
+  if (style.jc) return style.jc;
+  return style.basedOn ? resolveJcChain(style.basedOn, styles, depth + 1) : undefined;
 }
 
 function resolveVanishChain(
@@ -165,6 +192,7 @@ function emptyStyleMap(): StyleMap {
   return {
     styles: new Map(),
     resolvedNumPr: new Map(),
+    resolvedJc: new Map(),
     vanishStyleIds: new Set(),
     vanishCharStyleIds: new Set(),
   };
@@ -187,6 +215,15 @@ function resolvedNumPrMap(styles: ReadonlyMap<string, StyleInfo>): Map<string, S
     if (resolved) resolvedNumPr.set(styleId, resolved);
   }
   return resolvedNumPr;
+}
+
+function resolvedJcMap(styles: ReadonlyMap<string, StyleInfo>): Map<string, string> {
+  const resolvedJc = new Map<string, string>();
+  for (const styleId of styles.keys()) {
+    const resolved = resolveJcChain(styleId, styles, 0);
+    if (resolved) resolvedJc.set(styleId, resolved);
+  }
+  return resolvedJc;
 }
 
 function vanishStyleIdSet(styles: ReadonlyMap<string, StyleInfo>): Set<string> {
@@ -214,6 +251,7 @@ export function buildStyleMap(xml: string): StyleMap {
   return {
     styles,
     resolvedNumPr: resolvedNumPrMap(styles),
+    resolvedJc: resolvedJcMap(styles),
     vanishStyleIds: vanishStyleIdSet(styles),
     vanishCharStyleIds: characterStyleVanishIds(root),
   };

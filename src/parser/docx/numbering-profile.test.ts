@@ -37,6 +37,7 @@ function arcatFixture(): { map: NumberingMap; styles: StyleMap } {
   const styles: StyleMap = {
     styles: new Map(),
     resolvedNumPr: new Map([['ARCATParagraph', { numId: 1, ilvl: 2 }]]),
+    resolvedJc: new Map(),
     vanishStyleIds: new Set(),
     vanishCharStyleIds: new Set(),
   };
@@ -77,6 +78,7 @@ function cpiFixture(): { map: NumberingMap; styles: StyleMap } {
   const styles: StyleMap = {
     styles: new Map(),
     resolvedNumPr: new Map([['PR1', { numId: 2, ilvl: 4 }]]),
+    resolvedJc: new Map(),
     vanishStyleIds: new Set(),
     vanishCharStyleIds: new Set(),
   };
@@ -196,6 +198,7 @@ describe('extractNumberingProfile — edge cases', () => {
     const styles: StyleMap = {
       styles: new Map(),
       resolvedNumPr: new Map(),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -224,6 +227,7 @@ describe('extractNumberingProfile — edge cases', () => {
     const styles: StyleMap = {
       styles: new Map(),
       resolvedNumPr: new Map(),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -246,6 +250,7 @@ describe('extractNumberingProfile — edge cases', () => {
       styles: new Map(),
       // resolvedNumPr has same style but different ilvl — pStyle wins
       resolvedNumPr: new Map([['MyStyle', { numId: 1, ilvl: 2 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
