@@ -1,6 +1,6 @@
 import { NODE_TYPES_BY_NORMALIZED_ILVL } from '../../ast/index.js';
 import { leadingMarkerOrdinal } from './heuristics.js';
-import type { ClassifiedParagraph } from './types.js';
+import type { ClassifiedParagraph, SignalConflict } from './types.js';
 
 // Post-classification sequence pass (ADR-059). A no-typed-label lead-in — a
 // numbering/style/indent-classified paragraph that INTRODUCES a manual sub-list —
@@ -124,22 +124,30 @@ function isStrandedPeer(
   return false;
 }
 
-// Promote by one tier, recording the pre-promotion tier as a conflict so the
-// inferred correction is persisted (never dropped) and lowers hierarchy
-// confidence. Provenance (signalUsed/agreed) is preserved as an honest record of
-// how the tier was originally read.
+// Promote by one tier, RECOMPUTING provenance so it reflects an inferred structural
+// correction, not a signal consensus. Every signal that fired (the winner AND every
+// prior `agreed`) reported the OLD tier T; after promoting to T−1 none corroborates
+// the node's final tier. So `agreed` becomes [] and all old-tier votes are folded
+// into `conflicts` at the old tier — losing votes persisted (never dropped), and
+// scoreHierarchyConfidence then sees no corroboration + N conflicts → an honestly
+// LOW confidence for the promotion, instead of a bonus from now-stale agreement.
+// signalUsed is kept (there is no signal id for the pass); the scorer reads it only
+// as a base reliability tier, not as agreement with the new tier.
 function promote(x: ClassifiedParagraph): ClassifiedParagraph {
   const promotedIlvl = x.resolvedIlvl - 1;
   const promotedType = NODE_TYPES_BY_NORMALIZED_ILVL[promotedIlvl];
   if (promotedType === undefined) return x; // unreachable: candidate tier ≥ 2
+  const oldTierVotes: SignalConflict[] = [x.signalUsed, ...x.agreed].map((signal) => ({
+    signal,
+    reportedIlvl: x.resolvedIlvl,
+    reportedNodeType: x.nodeType,
+  }));
   return {
     ...x,
     resolvedIlvl: promotedIlvl,
     nodeType: promotedType,
-    conflicts: [
-      ...x.conflicts,
-      { signal: x.signalUsed, reportedIlvl: x.resolvedIlvl, reportedNodeType: x.nodeType },
-    ],
+    agreed: [],
+    conflicts: [...x.conflicts, ...oldTierVotes],
   };
 }
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { nestLeadInSublists } from './lead-in-nesting.js';
+import { scoreHierarchyConfidence } from './hierarchy-confidence.js';
 import type { ClassifiedParagraph, SignalConflict, SignalId } from './types.js';
 import type { NodeType } from '../../ast/types.js';
 
@@ -47,7 +48,7 @@ describe('nestLeadInSublists', () => {
     const lead = out[1];
     expect(lead?.resolvedIlvl).toBe(PR1);
     expect(lead?.nodeType).toBe('pr1');
-    expect(lead?.signalUsed).toBe(5); // provenance preserved; promotion is an overlay
+    expect(lead?.signalUsed).toBe(5); // signalUsed kept as the base-reliability tier
   });
 
   it('invariant 1: the Signal-4 run stays at T (nests under the promoted lead-in via buildTree)', () => {
@@ -116,6 +117,49 @@ describe('nestLeadInSublists', () => {
       reportedIlvl: PR2,
       reportedNodeType: 'pr2',
     });
+  });
+
+  // Provenance is RECOMPUTED on promotion: every signal that fired reported the OLD
+  // tier, so none corroborates the promoted tier. `agreed` must clear and its votes
+  // fold into conflicts — otherwise scoreHierarchyConfidence hands a promoted node a
+  // corroboration bonus for a tier it no longer occupies (overstated confidence).
+  it('recomputes provenance: clears agreed, folds old-tier votes into conflicts, no overstated confidence', () => {
+    // A lead-in the style chain (Signal 2) resolved AND indentation (Signal 5)
+    // corroborated at the original tier pr2, then promoted to pr1.
+    const input = [
+      cp('REFERENCES', ARTICLE, 'article', 4),
+      cp('Grouping:', PR2, 'pr2', 2, [], [5]),
+      cp('1.\ta', PR2, 'pr2', 4),
+      cp('2.\tb', PR2, 'pr2', 4),
+    ];
+    const out = nestLeadInSublists(input);
+    const promoted = out[1];
+    expect(promoted).toBeDefined();
+    if (!promoted) return;
+
+    expect(promoted.resolvedIlvl).toBe(PR1);
+    expect(promoted.agreed).toEqual([]); // stale corroboration cleared
+    // Winner (2) AND the corroborating signal (5) are persisted as old-tier conflicts.
+    expect(promoted.conflicts).toContainEqual({
+      signal: 2,
+      reportedIlvl: PR2,
+      reportedNodeType: 'pr2',
+    });
+    expect(promoted.conflicts).toContainEqual({
+      signal: 5,
+      reportedIlvl: PR2,
+      reportedNodeType: 'pr2',
+    });
+
+    // Confidence is not overstated: the promoted node scores no higher than an
+    // equivalent clean single-signal node at the new tier (base minus its conflicts).
+    const promotedScore = scoreHierarchyConfidence(
+      { signalUsed: promoted.signalUsed, agreed: promoted.agreed },
+      promoted.conflicts,
+      promoted.nodeType
+    );
+    const cleanScore = scoreHierarchyConfidence({ signalUsed: 2, agreed: [] }, [], 'pr1');
+    expect(promotedScore?.confidence ?? 1).toBeLessThanOrEqual(cleanScore?.confidence ?? 0);
   });
 
   it('a Signal-4 lead-in (its own typed label) is never a candidate — would double-label if promoted', () => {

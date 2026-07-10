@@ -90,12 +90,19 @@ required. Keying the trigger on the same-tier collision (not the colon) is what
 keeps clean documents untouched; the colon only tunes how much evidence a
 colon-less lead-in ("Abbreviations and Acronyms" with no trailing colon) needs.
 
-### Recorded conflict
+### Recomputed provenance (not preserved)
 
-The pre-promotion tier is appended to X's `conflicts` (`{ signal, reportedIlvl,
-reportedNodeType }`) — conflicts are persisted, never dropped — which also lowers
-X's hierarchy-confidence score, correctly reflecting that the promotion is an
-inferred correction rather than a directly observed tier.
+Promotion **recomputes** X's provenance so it reflects an inferred structural
+correction, not a signal consensus. Every signal that fired — the winner AND every
+prior `agreed` — reported the OLD tier T; after promoting to T−1 none corroborates
+the node's final tier. So `agreed` is cleared to `[]` and all old-tier votes are
+folded into `conflicts` (`{ signal, reportedIlvl: T, reportedNodeType: old }`) —
+losing votes persisted, never dropped. `signalUsed` is kept (there is no signal id
+for the pass); `scoreHierarchyConfidence` reads it only as a base reliability tier,
+not as agreement with the new tier. The net: no corroboration bonus + N conflicts →
+an honestly low confidence. Preserving the old `agreed` instead would hand a
+promoted node a corroboration bonus for a tier it no longer occupies — overstated
+confidence (Codex P2, #431).
 
 ### Predicate deviation from the brainstorm spec
 
