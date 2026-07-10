@@ -674,6 +674,85 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(tree.parts[0]?.children[0]?.text).toBe('1.9 RELATED SECTIONS');
   });
 
+  // The same label-match strip extends BELOW the article tier: a hand-authored
+  // manufacturer list types its pr-label ("A. General Cable"), which the renderer's own
+  // getLabel re-prepends, doubling to "A. A. General Cable". Strip the typed label when it
+  // equals the pr node's sibling-derived CSI label ("A." at ord 0), mirroring the article
+  // rule. Only Signal-4 (manual text-outline) pr nodes are eligible.
+  it('strips a manual pr-label when it equals the computed label ("A. General" → "General")', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 ACCEPTABLE MANUFACTURERS' }),
+        makePara({ text: 'A. General Cable' }), // pr1 ord 0 → label "A." → strip
+        makePara({ text: 'B. Okonite Company' }), // pr1 ord 1 → label "B." → strip
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    expect(classified[2]?.signalUsed).toBe(4);
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children.map((c) => c.text)).toEqual(['General Cable', 'Okonite Company']);
+  });
+
+  // Multi-tier: a numbered sub-list ("1. Authority …") that genuinely sits at its typed
+  // position ("1." at ord 0) loses its duplicate; the position must match the CSI label.
+  it('strips manual pr2 numeric labels at their matching position ("1. Authority" → "Authority")', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 DEFINITIONS' }),
+        makePara({ text: '1. Authority having jurisdiction' }), // pr2 ord 0 → label "1." → strip
+        makePara({ text: '2. Ethylene-propylene rubber' }), // pr2 ord 1 → label "2." → strip
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children.map((c) => c.text)).toEqual([
+      'Authority having jurisdiction',
+      'Ethylene-propylene rubber',
+    ]);
+  });
+
+  // Safety: a pr-label that is NOT the node's computed label at its position is kept
+  // verbatim (never guess a strip).
+  it('does NOT strip a pr-label that is not the computed label at its position', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 SUMMARY' }),
+        makePara({ text: 'C. Misnumbered item at first position' }), // pr1 ord 0 → "A." ≠ "C." → keep
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const pr = tree.parts[0]?.children[0]?.children[0];
+    expect(pr?.text).toBe('C. Misnumbered item at first position');
+  });
+
+  // Safety: a Word/style-NUMBERED pr item (Signal 1/2) gets its "A." from the numbering
+  // definition, so its VISIBLE text is content — never stripped, even when it opens with a
+  // letter that matches its label. Only manual (Signal-4) outlines are touched.
+  it('does NOT strip a NUMBERED pr item whose text opens with its label letter (content)', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 SUMMARY' }),
+        makePara({ text: 'A. Datum reference frame', numId: 5, ilvl: 2 }), // Signal 1 → pr1, content
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    expect(classified[2]?.signalUsed).toBe(1);
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const pr = tree.parts[0]?.children[0]?.children[0];
+    expect(pr?.text).toBe('A. Datum reference frame');
+  });
+
   // Codex adversarial review (P2 data-loss): the label-match strip must run ONLY on
   // Signal-4 (manual text-outline) articles. A Word/style-NUMBERED article (Signal 1/2)
   // gets its number from the numbering definition, so its VISIBLE text is pure content —
