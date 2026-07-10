@@ -729,6 +729,37 @@ describe('buildTree — Pass 2: tree structure', () => {
     ]);
   });
 
+  // Codex PR #432: a pr item's content often starts lowercase/numeric ("1. clean the
+  // surface", "a. install anchors"). The article-only uppercase guard would leave the
+  // matching label un-stripped and doubled; pr items strip on label-equality alone.
+  it('strips a manual pr-label even when the content starts lowercase ("1. clean" → "clean")', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 EXECUTION' }),
+        makePara({ text: '1. clean the surface' }), // pr2 ord 0 → label "1.", lowercase content
+        makePara({ text: '2. apply primer' }), // pr2 ord 1 → label "2."
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children.map((c) => c.text)).toEqual(['clean the surface', 'apply primer']);
+  });
+
+  // The article uppercase guard is UNCHANGED: a lowercase decimal-prose line at its
+  // coincidental label position is still preserved (no data loss on measurements).
+  it('still preserves a lowercase decimal-prose article at its label position (guard intact)', () => {
+    const classified = classifyParagraphs(
+      [makePara({ text: 'PART 1 - GENERAL' }), makePara({ text: '1.1 inches of clearance min' })],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    expect(tree.parts[0]?.children[0]?.text).toBe('1.1 inches of clearance min');
+  });
+
   // Safety: a pr-label that is NOT the node's computed label at its position is kept
   // verbatim (never guess a strip).
   it('does NOT strip a pr-label that is not the computed label at its position', () => {

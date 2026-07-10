@@ -448,7 +448,10 @@ export function auditTreeStructure(roots: readonly SpecNode[]): ParseWarning[] {
 // label, so a coincidental value is left verbatim. Source-fact offsets rebase onto the
 // shorter text.
 function stripNodeLabel(node: SpecNode, label: string): SpecNode {
-  const plan = planLabelStrip(node.text, label);
+  // The uppercase-title guard is an ARTICLE concern (tell a heading from a decimal value);
+  // pr items are classified by their opening marker and often carry lowercase/numeric
+  // content, so they strip on label-equality alone (Codex PR #432).
+  const plan = planLabelStrip(node.text, label, node.type === 'article');
   if (!plan) return node;
   const facts = node.meta.sourceFacts;
   const meta = facts
