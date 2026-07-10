@@ -72,6 +72,13 @@ historical rows structurally, with no per-change migration.
 - This establishes a **table-wide convention** for `numbering_profiles`: reads validate
   with the lenient schema, writes with the strict one. It generalizes to any future
   stored-JSONB contract with the same read/write asymmetry.
+- The **OpenAPI contract mirrors the split** (`openapi.yaml`). The read/write asymmetry
+  is a response-shape change: read endpoints can now return values outside the strict
+  bounds, so `NumberingProfileRow.rules` refs a lenient `NumberingProfileRead` schema
+  (same shape, numeric policy bounds dropped) while the create/update **request** bodies
+  keep referencing the strict `NumberingProfile`. The maintenance rule below therefore
+  extends to the spec: a non-numeric write-side tightening must be relaxed in *both*
+  `NumberingProfileReadSchema` and the `NumberingProfileRead` OpenAPI schema.
 - **Maintenance rule.** A future write-side tightening that is a *numeric bound* is
   already covered — the read schema drops all bounds. A tightening of a *different* kind
   (narrowing a literal/enum, adding a required field) must be mirrored as a relaxation in
