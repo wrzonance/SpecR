@@ -6,6 +6,7 @@ import {
   isSpecifierNoteInstruction,
   isPartHeading,
   isDecorationSeparator,
+  leadingMarkerOrdinal,
 } from './heuristics.js';
 
 describe('matchTextSignal', () => {
@@ -275,6 +276,37 @@ describe('isSpecifierNoteInstruction — reveal-the-hidden-notes editorial chrom
   for (const text of negatives) {
     it(`rejects: ${text.slice(0, 44)}`, () => {
       expect(isSpecifierNoteInstruction(text)).toBe(false);
+    });
+  }
+});
+
+describe('leadingMarkerOrdinal', () => {
+  // Ordinal within the marker's own scheme — used by the lead-in-nesting pass to
+  // detect a sub-list that RESTARTS at 1 (see lead-in-nesting.ts). A tab or space
+  // after the marker is required, matching Signal-4's own patterns.
+  const cases: readonly [string, number][] = [
+    ['1.\tAuthority having jurisdiction', 1],
+    ['2.\tEthylene-propylene rubber', 2],
+    ['10. Tenth item', 10],
+    ['A. General', 1],
+    ['B. Products', 2],
+    ['a. lowercase alpha', 1],
+    ['b. second lowercase', 2],
+    ['1) paren decimal', 1],
+    ['c) paren alpha', 3],
+  ];
+  for (const [text, ordinal] of cases) {
+    it(`"${text.slice(0, 24)}" → ${ordinal}`, () => {
+      expect(leadingMarkerOrdinal(text)).toBe(ordinal);
+    });
+  }
+
+  // null: not a single-token pr-marker. "1.1" is a decimal value/article number
+  // (second dot, no whitespace after the first) — never a restart marker.
+  const nulls = ['1.1 GHz', '2.1.3 nested', 'Abbreviations and Acronyms:', 'plain prose', '', '5.'];
+  for (const text of nulls) {
+    it(`"${text.slice(0, 24)}" → null`, () => {
+      expect(leadingMarkerOrdinal(text)).toBeNull();
     });
   }
 });

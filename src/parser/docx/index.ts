@@ -7,6 +7,7 @@ import { parseDocument } from './document.js';
 import { parseCommentsXml } from './comments.js';
 import type { DocxComment } from './comments.js';
 import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
+import { nestLeadInSublists } from './lead-in-nesting.js';
 import {
   applyNumberingProfile,
   mergeProfileConflicts,
@@ -241,16 +242,23 @@ function buildClassification(
     : new Map<string, DocxComment>();
 
   onProgress?.('classifying', 75);
-  return {
-    classified: classifyWithOptionalProfile(
+  // Post-classification pass (ADR-059): promote a no-typed-label lead-in that
+  // collides at its tier with a following Signal-4 restart sub-list (and any
+  // stranded same-tier peer lead-in), so the sub-list nests as children and its
+  // typed labels strip clean in buildTree. Applied HERE, at the shared
+  // classification seam, so the parse AST and analyzeDocxStyles/deriveTemplate see
+  // the SAME promoted tiers — deriving a template off unpromoted classifications
+  // would emit pr2 rules for lead-ins the parser AST places at pr1 (#431 P2).
+  const classified = nestLeadInSublists(
+    classifyWithOptionalProfile(
       entries.documentXml,
       resolvedNumberingMap,
       styleMap,
       commentsById,
       numberingProfile
-    ),
-    styleMap,
-  };
+    )
+  );
+  return { classified, styleMap };
 }
 
 // ─── Public exports ───────────────────────────────────────────────────────────
