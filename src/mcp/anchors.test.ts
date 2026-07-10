@@ -18,6 +18,8 @@ describe('anchorsFromSearch', () => {
         specId: 's1',
         specSection: '07 84 00',
         specTitle: 'Firestopping',
+        snippet: 't',
+        rank: 0.1,
       },
       {
         paragraphId: 'p2',
@@ -26,6 +28,8 @@ describe('anchorsFromSearch', () => {
         specId: 's2',
         specSection: '',
         specTitle: '',
+        snippet: 't',
+        rank: 0.1,
       },
     ]);
     expect(anchors).toEqual([{ section: '07 84 00', specId: 's1', paragraphId: 'p1' }]);

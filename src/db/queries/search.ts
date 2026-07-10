@@ -1,14 +1,9 @@
 // src/db/queries/search.ts
 import { pool, DatabaseError } from '../index.js';
+import { buildParagraphSearch } from './search-query.js';
+import type { ParagraphSearchOptions, ParagraphSearchResult } from './search-query.js';
 
-export interface ParagraphSearchResult {
-  readonly paragraphId: string;
-  readonly text: string;
-  readonly nodeType: string;
-  readonly specId: string;
-  readonly specSection: string;
-  readonly specTitle: string;
-}
+export type { ParagraphSearchOptions, ParagraphSearchResult } from './search-query.js';
 
 export interface SpecSectionResult {
   readonly section: string;
@@ -17,26 +12,42 @@ export interface SpecSectionResult {
   readonly inDatabase: boolean;
 }
 
+/**
+ * Omit-undefined constructor for {@link ParagraphSearchOptions}. Under
+ * `exactOptionalPropertyTypes` an optional prop may be absent but not explicitly
+ * `undefined`, so the REST/MCP layers — which hold validated-but-optional fields —
+ * route through this to build the options object without leaking `undefined`.
+ */
+export function toSearchOptions(input: {
+  readonly libraryId?: string | undefined;
+  readonly projectId?: string | undefined;
+  readonly division?: string | undefined;
+  readonly part?: number | undefined;
+  readonly nodeType?: string | undefined;
+  readonly limit?: number | undefined;
+}): ParagraphSearchOptions {
+  return {
+    ...(input.libraryId !== undefined ? { libraryId: input.libraryId } : {}),
+    ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+    ...(input.division !== undefined ? { division: input.division } : {}),
+    ...(input.part !== undefined ? { part: input.part } : {}),
+    ...(input.nodeType !== undefined ? { nodeType: input.nodeType } : {}),
+    ...(input.limit !== undefined ? { limit: input.limit } : {}),
+  };
+}
+
+/**
+ * Ranked full-text paragraph search (ADR-062): `websearch_to_tsquery` + `ts_rank_cd`
+ * + `ts_headline`, scoped by library/project/division/part/nodeType. A blank query
+ * returns `[]`; a degenerate (no-lexeme) query falls back to an ILIKE substring scan.
+ */
 export async function searchParagraphs(
   query: string,
-  division?: string,
-  limit = 20
+  options: ParagraphSearchOptions = {}
 ): Promise<ParagraphSearchResult[]> {
+  if (query.trim() === '') return [];
   try {
-    const divisionClause = division !== undefined ? ` AND s.section LIKE $3` : '';
-    const params: unknown[] =
-      division !== undefined ? [`%${query}%`, limit, `${division} %`] : [`%${query}%`, limit];
-
-    const sql = `
-      SELECT p.id AS "paragraphId", p.text, p.node_type AS "nodeType",
-             s.id AS "specId",
-             COALESCE(s.section, '') AS "specSection",
-             COALESCE(s.title, '') AS "specTitle"
-      FROM paragraphs p
-      JOIN specs s ON p.spec_id = s.id
-      WHERE p.text ILIKE $1${divisionClause}
-      ORDER BY s.section, p.position LIMIT $2`;
-
+    const { sql, params } = buildParagraphSearch(query, options);
     const result = await pool.query<ParagraphSearchResult>(sql, params);
     return result.rows;
   } catch (err) {

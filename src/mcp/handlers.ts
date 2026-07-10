@@ -1,6 +1,7 @@
 // src/mcp/handlers.ts
 import {
   searchParagraphs,
+  toSearchOptions,
   listSpecSections,
   getSpecTree,
   getSpecStyleSource,
@@ -60,7 +61,7 @@ export async function handleSearchLibrary({
   limit: number;
 }): Promise<ToolResult> {
   try {
-    const results = await searchParagraphs(query, division, limit);
+    const results = await searchParagraphs(query, toSearchOptions({ division, limit }));
     const meta = anchorsMeta(anchorsFromSearch(results));
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(results, null, 2) }],

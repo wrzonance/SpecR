@@ -102,9 +102,18 @@ export {
   ClientLibraryNotFoundError,
 } from './queries/clients.js';
 export type { ClientSummary, ClientDetail, CreateClientInput } from './queries/clients.js';
-export { searchParagraphs, listSpecSections, lookupSpecSectionTitle } from './queries/search.js';
+export {
+  searchParagraphs,
+  toSearchOptions,
+  listSpecSections,
+  lookupSpecSectionTitle,
+} from './queries/search.js';
 export { getParagraphSnapshots, getCurrentParagraphSnapshots } from './queries/versions.js';
-export type { ParagraphSearchResult, SpecSectionResult } from './queries/search.js';
+export type {
+  ParagraphSearchResult,
+  ParagraphSearchOptions,
+  SpecSectionResult,
+} from './queries/search.js';
 export {
   getTemplate,
   getTemplateByName,
