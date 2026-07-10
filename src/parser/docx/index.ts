@@ -7,6 +7,7 @@ import { parseDocument } from './document.js';
 import { parseCommentsXml } from './comments.js';
 import type { DocxComment } from './comments.js';
 import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
+import { nestLeadInSublists } from './lead-in-nesting.js';
 import {
   applyNumberingProfile,
   mergeProfileConflicts,
@@ -144,7 +145,11 @@ function runPipeline(
     : { section: 'unknown', title: 'unknown' };
 
   onProgress?.('complete', 100);
-  const tree = buildTree(classified, meta.section, meta.title, source);
+  // Post-classification pass (ADR-059): promote a no-typed-label lead-in that
+  // collides at its tier with a following Signal-4 restart sub-list, so the
+  // sub-list nests as children and its typed labels strip clean in buildTree.
+  const nested = nestLeadInSublists(classified);
+  const tree = buildTree(nested, meta.section, meta.title, source);
   const structuralWarnings = auditTreeStructure(tree.parts);
   // core-metadata-unreadable fires at most once per parse — appended, not deduped.
   const warnings = meta.warning ? [...structuralWarnings, meta.warning] : structuralWarnings;
