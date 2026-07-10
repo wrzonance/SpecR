@@ -6,7 +6,12 @@ import { tierOf } from './tier.js';
 // AST → SpecsIntact .SEC renderer — the inverse of parser/sec/index.ts.
 //
 // Faithfulness is defined as AST round-trip: parse → generateSec → re-parse
-// yields the same tree (section, title, and every node's type/text/vanish).
+// yields the same tree (section, title, and every node's type/text/vanish),
+// EXCEPT an owner-removed/hidden non-note node (meta.vanish, #251/#278/#296),
+// which is filtered along with its subtree by design — see ADR-060 and isHidden.
+// A note is always kept (it is vanish by definition). SEC-origin trees carry
+// vanish only on notes, so their round-trip is unaffected; the filter matters
+// only for DOCX-origin trees that reach .SEC egress.
 // The parser is deliberately lossy (it drops MTA/HDR/BRK chrome, URL/SCP inline
 // wrappers, and SRF inline section numbers), so this renderer emits a clean
 // canonical .SEC rather than reproducing the original bytes.
@@ -41,6 +46,17 @@ function escape(text: string): string {
 
 function renderNote(node: SpecNode): string {
   return `<NTE><NPR>${escape(node.text)}</NPR></NTE>`;
+}
+
+// A non-note node flagged vanish is owner-removed (#251/#278) or hidden (#296):
+// it — and its whole subtree — are filtered from SEC egress, matching the DOCX and
+// Markdown renderers, so removed content never appears in a .SEC export. This is a
+// FILTER, not an encode: SEC's `vanish` column already means "specifier note" (the
+// parser sets it for <NTE>), so an owner-removal marker distinct from that would have
+// to be invented — filtering is the AST-honoring choice (ADR-060). A note is never
+// filtered: SEC notes are vanish by definition and always export as <NTE>.
+function isHidden(node: SpecNode): boolean {
+  return node.type !== 'note' && node.meta.vanish === true;
 }
 
 function renderRef(ref: SecRef): string {
@@ -83,15 +99,14 @@ function renderStructuralChild(child: SpecNode, parentTier: number, refs: RefInd
 
 function renderChildren(node: SpecNode, tier: number, refs: RefIndex): string {
   const out: string[] = [];
+  // A note is always kept as <NTE>. Any other vanished node — a hidden continuation
+  // (#296) or an owner-removed structural body node (#278) — is filtered along with
+  // its subtree; the remainder render as their normal <TXT>/<LST>/<SPT>/<ITM>.
   for (const child of node.children) {
     if (child.type === 'note') out.push(renderNote(child));
-    // A hidden non-note continuation is suppressed (#296). A note is always kept
-    // as <NTE> (SEC notes are vanish by definition), and a structural node keeps
-    // rendering even when vanish — owner-removal (vanish on a body node) is the
-    // separate, still-lossy #278 case the round-trip tests pin.
-    else if (child.type === 'continuation') {
-      if (child.meta.vanish !== true) out.push(`<TXT>${escape(child.text)}</TXT>`);
-    } else if (tierOf(child.type) !== null) out.push(renderStructuralChild(child, tier, refs));
+    else if (isHidden(child)) continue;
+    else if (child.type === 'continuation') out.push(`<TXT>${escape(child.text)}</TXT>`);
+    else if (tierOf(child.type) !== null) out.push(renderStructuralChild(child, tier, refs));
   }
   return out.join('');
 }
@@ -108,6 +123,8 @@ function renderPart(node: SpecNode, index: number, refs: RefIndex): string {
   const body = node.children
     .map((child) => {
       if (child.type === 'note') return renderNote(child);
+      // An owner-removed (#278) or hidden article is filtered with its subtree.
+      if (isHidden(child)) return '';
       if (tierOf(child.type) !== null) return renderSpt(child, refs);
       return '';
     })
@@ -116,18 +133,18 @@ function renderPart(node: SpecNode, index: number, refs: RefIndex): string {
 }
 
 // A tree root carries the same rule as a deeper node (#296): a note root is a
-// <NTE>, a hidden non-note root is suppressed, a visible continuation root is
-// plain <TXT>, and only a visible structural root becomes a <PRT>. The root level
+// <NTE>, a hidden non-note root is filtered (#278/#296), a visible continuation root
+// is plain <TXT>, and only a visible structural root becomes a <PRT>. The root level
 // previously mapped EVERY root through renderPart, so a note/continuation/vanish
 // root rendered as a fake "PART n" and shifted real PART numbering.
 //
-// KNOWN LIMITATION (adjacent to #278): root-level <NTE>/<TXT> chrome is emitted for
-// export fidelity but is NOT re-parseable — parseSec rebuilds roots only from <PRT>,
-// so a DOCX-origin tree's root note/continuation is lost on generate → parse. The
-// fix is parser-side and out of scope here; pinned by a KNOWN LIMITATION test.
+// KNOWN LIMITATION: root-level <NTE>/<TXT> chrome is emitted for export fidelity but
+// is NOT re-parseable — parseSec rebuilds roots only from <PRT>, so a DOCX-origin
+// tree's root note/continuation is lost on generate → parse. The fix is parser-side
+// and out of scope here; pinned by a KNOWN LIMITATION test.
 function renderRoot(node: SpecNode, partIndex: number, refs: RefIndex): string {
   if (node.type === 'note') return renderNote(node);
-  if (node.meta.vanish === true) return '';
+  if (isHidden(node)) return '';
   if (node.type === 'continuation') {
     return `<TXT>${escape(node.text)}</TXT>`;
   }
@@ -153,7 +170,9 @@ function renderRoots(parts: readonly SpecNode[], refs: RefIndex): string {
 /**
  * Render a spec tree (and optional standard refs) to a SpecsIntact .SEC XML
  * string. The output is the canonical inverse of the SEC parser: re-parsing it
- * reproduces the same AST.
+ * reproduces the same AST — except owner-removed/hidden non-note nodes
+ * (`meta.vanish`), which are filtered with their subtrees, so they do not
+ * reappear on re-parse (filter, not lossless encode; #278, ADR-060).
  */
 export function generateSec(tree: SpecTree, refs: readonly SecRef[] = []): string {
   try {
