@@ -18,7 +18,17 @@ import { toolError, ok, type ToolResult } from './handlers.js';
 export const LibraryIdShape = {
   libraryId: z.uuid().describe('Library UUID (from list_libraries)'),
 };
-const LibraryIdArgs = z.object(LibraryIdShape);
+
+// list_library_specs adds an opt-in for withdrawn masters (ADR-030) so an agent
+// can discover the spec UUID that restore_spec needs (#416).
+export const ListLibrarySpecsShape = {
+  ...LibraryIdShape,
+  includeWithdrawn: z
+    .boolean()
+    .describe('Include withdrawn masters (default false), each with its withdrawnAt timestamp')
+    .optional(),
+};
+const ListLibrarySpecsArgs = z.object(ListLibrarySpecsShape);
 
 export const RenameLibraryShape = {
   ...LibraryIdShape,
@@ -47,14 +57,15 @@ function internalError(err: unknown, tool: string): ToolResult {
 }
 
 export async function handleListLibrarySpecs(args: unknown): Promise<ToolResult> {
-  const parsed = LibraryIdArgs.safeParse(args);
+  const parsed = ListLibrarySpecsArgs.safeParse(args);
   if (!parsed.success) {
     return toolError('invalid list_library_specs input: libraryId must be a UUID');
   }
+  const { libraryId, includeWithdrawn } = parsed.data;
   try {
-    const library = await findLibraryById(parsed.data.libraryId);
-    if (!library) return toolError(`library not found: id=${parsed.data.libraryId}`);
-    return ok(await listLibrarySpecs(parsed.data.libraryId));
+    const library = await findLibraryById(libraryId);
+    if (!library) return toolError(`library not found: id=${libraryId}`);
+    return ok(await listLibrarySpecs(libraryId, includeWithdrawn ?? false));
   } catch (err) {
     return internalError(err, 'list_library_specs');
   }

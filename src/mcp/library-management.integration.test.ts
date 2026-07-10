@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { pool, createLibrary, createSpec } from '../db/index.js';
+import { pool, createLibrary, createSpec, withdrawSpec } from '../db/index.js';
 import {
   handleListLibrarySpecs,
   handleRenameLibrary,
@@ -55,6 +55,34 @@ describe('library-management MCP tools', () => {
   it('list_library_specs rejects a bad UUID and an unknown library', async () => {
     expect(isToolError(await handleListLibrarySpecs({ libraryId: 'nope' }))).toBe(true);
     expect(isToolError(await handleListLibrarySpecs({ libraryId: MISSING }))).toBe(true);
+  });
+
+  it('list_library_specs hides withdrawn masters by default, surfaces them with includeWithdrawn', async () => {
+    const lib = await createLibrary({ tier: 'client', name: uniq('withdrawn') });
+    const active = await createSpec({
+      section: '07 21 00',
+      title: uniq('active'),
+      source: 'arcat',
+      libraryId: lib.id,
+    });
+    const withdrawn = await createSpec({
+      section: '07 21 16',
+      title: uniq('withdrawn'),
+      source: 'arcat',
+      libraryId: lib.id,
+    });
+    await withdrawSpec(withdrawn);
+
+    type Row = { specId: string; withdrawnAt: string | null };
+    const byDefault = parse<Row[]>(await handleListLibrarySpecs({ libraryId: lib.id }));
+    expect(byDefault.map((r) => r.specId)).toEqual([active]);
+    expect(byDefault[0]?.withdrawnAt).toBeNull();
+
+    const all = parse<Row[]>(
+      await handleListLibrarySpecs({ libraryId: lib.id, includeWithdrawn: true })
+    );
+    expect(all.map((r) => r.specId).sort()).toEqual([active, withdrawn].sort());
+    expect(typeof all.find((r) => r.specId === withdrawn)?.withdrawnAt).toBe('string');
   });
 
   it('renames a client library', async () => {

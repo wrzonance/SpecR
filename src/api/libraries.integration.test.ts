@@ -9,6 +9,7 @@ import {
   createLibrary,
   createSpec,
   insertTree,
+  withdrawSpec,
   DEFAULT_COMPANY_LIBRARY,
 } from '../db/index.js';
 
@@ -148,6 +149,7 @@ interface LibrarySpec {
   readonly section: string;
   readonly title: string;
   readonly nodeCount: number;
+  readonly withdrawnAt: string | null;
 }
 interface Ok<T> {
   readonly success: true;
@@ -187,6 +189,42 @@ describe('GET /libraries/:id/specs', () => {
     const row = json.data[0];
     expect(typeof row?.specId).toBe('string');
     expect(row).toMatchObject({ section: '01 23 45', title: 'Alpha Spec', nodeCount: 3 });
+  });
+
+  it('200 — active specs surface withdrawnAt: null', async () => {
+    const libraryId = await makeLibrary();
+    await makeSpecInLibrary(libraryId, '01 23 45', 'Alpha Spec');
+    const res = await get(`/libraries/${libraryId}/specs`);
+    const json = (await res.json()) as Ok<LibrarySpec[]>;
+    expect(json.data[0]?.withdrawnAt).toBeNull();
+  });
+
+  it('200 — default listing hides withdrawn masters (ADR-030)', async () => {
+    const libraryId = await makeLibrary();
+    await makeSpecInLibrary(libraryId, '01 23 45', 'Active Spec');
+    const withdrawnId = await makeSpecInLibrary(libraryId, '01 23 46', 'Withdrawn Spec');
+    await withdrawSpec(withdrawnId);
+
+    const res = await get(`/libraries/${libraryId}/specs`);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Ok<LibrarySpec[]>;
+    expect(json.data.map((s) => s.section)).toEqual(['01 23 45']);
+  });
+
+  it('200 — includeWithdrawn=true surfaces withdrawn masters with a withdrawnAt timestamp', async () => {
+    const libraryId = await makeLibrary();
+    await makeSpecInLibrary(libraryId, '01 23 45', 'Active Spec');
+    const withdrawnId = await makeSpecInLibrary(libraryId, '01 23 46', 'Withdrawn Spec');
+    await withdrawSpec(withdrawnId);
+
+    const res = await get(`/libraries/${libraryId}/specs?includeWithdrawn=true`);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Ok<LibrarySpec[]>;
+    expect(json.data.map((s) => s.section)).toEqual(['01 23 45', '01 23 46']);
+    const withdrawn = json.data.find((s) => s.specId === withdrawnId);
+    expect(typeof withdrawn?.withdrawnAt).toBe('string');
+    // The surfaced UUID is exactly what POST /specs/:id/restore needs.
+    expect(withdrawn?.specId).toBe(withdrawnId);
   });
 
   it('200 — empty array for a library with no specs', async () => {

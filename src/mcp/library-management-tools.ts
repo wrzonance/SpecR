@@ -2,7 +2,7 @@ import {
   handleListLibrarySpecs,
   handleRenameLibrary,
   handleCreateClientLibrary,
-  LibraryIdShape,
+  ListLibrarySpecsShape,
   RenameLibraryShape,
   CreateClientLibraryShape,
 } from './library-management-handlers.js';
@@ -18,9 +18,11 @@ function registerLibraryManagementReadTools(reg: ToolRegistrar): void {
     'list_library_specs',
     {
       description:
-        'List the specs a library owns (specId, section, title, node count), ordered by section; ' +
-        'withdrawn specs excluded. Returns isError when the library UUID is not found.',
-      inputSchema: LibraryIdShape,
+        'List the specs a library owns (specId, section, title, node count, withdrawnAt), ordered ' +
+        'by section. Withdrawn masters are excluded by default; pass includeWithdrawn=true to ' +
+        'surface them (each with a withdrawnAt timestamp) so restore_spec can find their UUID. ' +
+        'Returns isError when the library UUID is not found.',
+      inputSchema: ListLibrarySpecsShape,
     },
     handleListLibrarySpecs
   );
