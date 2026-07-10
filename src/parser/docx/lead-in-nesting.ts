@@ -16,13 +16,23 @@ import type { ClassifiedParagraph } from './types.js';
 // unstripped under a different scheme. This is the text/structure sibling of the
 // style-based LEAD_IN_STYLE mechanism in inference.ts.
 
-// A promotable lead-in has NO typed label of its own (Signal 1/2/5 — numbering,
-// style, or indentation), so promoting it never double-labels. A Signal-4 node
-// carries a typed marker that IS its label, so it is excluded. Continuations have
-// no independent tier. Only pr1+ (ilvl ≥ 2) qualifies — an article is never
+// The real candidacy invariant: the paragraph carries NO typed outline label of
+// its own. Signal 4 is the ONLY classifier that reads a marker ("1.", "A.") from
+// the text; every other signal (numbering.xml, style, document order, indentation)
+// derives the tier without a marker, so the text is pure content. Promoting a
+// labelled node would double-label it (its own "1." plus the promoted tier's
+// computed label); promoting an unlabelled lead-in stays clean. Keyed on this
+// property, NOT a signal-number list — the lead-ins that actually hit this defect
+// resolve via Signal 5 (indentation), not the numbering signals (ADR-059).
+function hasNoTypedLabel(cp: ClassifiedParagraph): boolean {
+  return cp.signalUsed !== 4;
+}
+
+// A promotable lead-in has no typed label of its own, is structural (a continuation
+// has no independent tier), and sits at pr1+ (ilvl ≥ 2) — an article is never
 // promoted to a PART.
 function isLeadInCandidate(cp: ClassifiedParagraph): boolean {
-  return cp.nodeType !== 'continuation' && cp.signalUsed !== 4 && cp.resolvedIlvl >= 2;
+  return cp.nodeType !== 'continuation' && hasNoTypedLabel(cp) && cp.resolvedIlvl >= 2;
 }
 
 // Length of the consecutive Signal-4 run at exactly `tier`, starting at `from`.
