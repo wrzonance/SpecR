@@ -195,6 +195,8 @@ describe('generateSec — entity and note round-trip', () => {
     expect(xml).not.toContain('REMOVED ARTICLE');
     expect(xml).not.toContain('child of removed article');
     expect(xml).toContain('<TTL>KEPT ARTICLE</TTL>');
+    const after = parseSec(xml).tree;
+    expect(after.parts[0]?.children.map((c) => c.text)).toEqual(['KEPT ARTICLE']);
   });
 
   // Regression: a filtered subtree must not influence the parent's leaf-vs-SPT

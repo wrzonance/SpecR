@@ -158,7 +158,7 @@ function renderRoot(node: SpecNode, partIndex: number, refs: RefIndex): string {
 // Only visible structural roots take a "PART n" ordinal — note/continuation/vanish
 // roots are chrome and must not advance it (mirrors markdown.ts consumesNumber).
 function isPartRoot(node: SpecNode): boolean {
-  return node.type !== 'note' && node.type !== 'continuation' && node.meta.vanish !== true;
+  return node.type !== 'note' && node.type !== 'continuation' && !isHidden(node);
 }
 
 function renderRoots(parts: readonly SpecNode[], refs: RefIndex): string {
