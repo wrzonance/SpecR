@@ -226,6 +226,22 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
     expect(result[0]?.signalUsed).toBe(4);
   });
 
+  // Regression (tab-delimited manual outline): a hand-authored article uses a TAB
+  // between the typed number and the title ("1.1<tab>SUMMARY"), the only delimiter.
+  // The Signal-4 patterns require \s after the number — a tab is \s, so the article is
+  // recognized. This pins the paired fix in text extraction (source-facts.ts / document.ts):
+  // when the tab was dropped, text became "1.1SUMMARY" and this fell through to a wrong
+  // signal. Article via Signal 4 is what lets its outline label strip downstream.
+  it('signal 4: a tab-delimited manual outline "1.1\\tSUMMARY" classifies as article', () => {
+    const result = classifyParagraphs(
+      [makePara({ text: '1.1\tSUMMARY' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(4);
+  });
+
   it('signal 5: classifies via indentation when signals 1+2+4 absent', () => {
     const result = classifyParagraphs(
       [makePara({ leftIndent: 576, text: 'Lorem ipsum dolor sit amet.' })],

@@ -136,6 +136,49 @@ function appendText(state: InlineState, text: string, colors: readonly string[])
   colors.forEach((color) => state.colorSpans.push({ color, start, end }));
 }
 
+// Formatting-property subtrees that must never contribute text content: a
+// w:pPr > w:tabs > w:tab (a tab-STOP definition) would otherwise inject a phantom
+// tab now that w:tab renders as whitespace. Mirrors merge/extract.ts PROPERTY_TAGS.
+const PROPERTY_TAGS = new Set(['w:pPr', 'w:rPr', 'w:sdtPr', 'w:sdtEndPr']);
+
+// Handle a non-#text element that contributes text WITHOUT recursion (or that must be
+// skipped entirely). Returns true when the element was consumed here.
+//   • property subtrees (w:pPr/w:rPr/…) never contribute text.
+//   • a run's <w:tab/> is real whitespace in the rendered text — often the sole delimiter
+//     in hand-authored outlines ("1.1<tab>SUMMARY", "A.<tab>General"). Dropping it
+//     de-spaced the number into the title ("1.1SUMMARY"), defeating every Signal-4 text
+//     pattern (all require \s after the number) and the outline-strip logic, and silently
+//     concatenated words across the corpus ("wireless<tab>signals"). Emit a tab so those
+//     paragraphs classify and strip as authored. Uncolored (a structural delimiter carries
+//     no ink), so run color coverage is unaffected. Mirrors merge/extract.ts's w:tab → '\t'
+//     (w:br/w:cr line breaks are a separate word-joining concern, left as-is here).
+function collectLayoutElement(name: string, state: InlineState): boolean {
+  if (PROPERTY_TAGS.has(name)) return true;
+  if (name === 'w:tab') {
+    state.text += '\t';
+    return true;
+  }
+  return false;
+}
+
+function collectOne(
+  record: Record<string, unknown>,
+  state: InlineState,
+  colors: readonly string[]
+): void {
+  const text = record['#text'];
+  if (typeof text === 'string') {
+    appendText(state, text, colors);
+    return;
+  }
+  const name = elementName(record);
+  if (!name) return;
+  if (collectLayoutElement(name, state)) return;
+  appendMarker(name, record, state);
+  const children = childNodes(record, name);
+  collectInline(children, state, name === 'w:r' ? runColorTokens(children) : colors);
+}
+
 function collectInline(
   nodes: readonly unknown[],
   state: InlineState,
@@ -143,17 +186,7 @@ function collectInline(
 ): void {
   for (const raw of nodes) {
     const record = asRecord(raw);
-    if (!record) continue;
-    const text = record['#text'];
-    if (typeof text === 'string') {
-      appendText(state, text, colors);
-      continue;
-    }
-    const name = elementName(record);
-    if (!name) continue;
-    appendMarker(name, record, state);
-    const children = childNodes(record, name);
-    collectInline(children, state, name === 'w:r' ? runColorTokens(children) : colors);
+    if (record) collectOne(record, state, colors);
   }
 }
 
