@@ -181,6 +181,22 @@ export const INV5_SHAPE_EXEMPT: ReadonlyMap<string, string> = new Map([
       'withdrawnAt at the top level — a deliberately different agent-facing shape, not the REST ' +
       'body 1:1.',
   ],
+  [
+    'get_library_conventions',
+    'reshapes: embeds `inherited` INSIDE the data payload, whereas REST GET ' +
+      '/libraries/{id}/conventions returns the raw resolved convention as `data` and the flag as ' +
+      '`meta.inherited` at the envelope top level — the tool does not mirror the REST body 1:1, so ' +
+      'wrapping it as { success, data } would never match the mapped op schema. (Reconciling the ' +
+      'MCP shape toward REST would mutate shipping tool output — deferred to a follow-up.)',
+  ],
+  [
+    'get_project_revision_nomenclature',
+    'reshapes: embeds `inherited` INSIDE the data payload, whereas REST GET ' +
+      '/projects/{id}/revision-nomenclature returns the raw profile as `data` and the flag as ' +
+      '`meta.inherited` at the envelope top level — the tool does not mirror the REST body 1:1. ' +
+      '(Reconciling the MCP shape toward REST would mutate shipping tool output — deferred to a ' +
+      'follow-up.)',
+  ],
 ]);
 
 /**
@@ -201,10 +217,8 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'list_associations',
   'get_spec_lock',
   'get_template',
-  'get_library_conventions',
   'get_required_sections',
   'get_package_required_sections',
-  'get_project_revision_nomenclature',
   'list_library_numbering_profiles',
   'get_numbering_profile_by_id',
   'list_library_specs',
