@@ -528,10 +528,12 @@ paths:
         returns the node unchanged without minting a new content version. The node
         must belong to the spec in the path (else 403). The composed edit gate
         (ADR-018) rejects an archived spec or one locked upstream in a DMS (409).
-        Known limitation: the canonical `.SEC` serialization is not yet
-        removal-aware, so a removed paragraph survives a `.SEC` export→import
-        round-trip (tracked in #278). This is latent — there is no `.SEC` export
-        endpoint today.
+        Every model-driven render honors removal: the `.SEC` egress filters an
+        owner-removed body paragraph (and its subtree), consistent with DOCX and
+        Markdown (#278, ADR-060), so removed content never appears in an export.
+        This is a filter, not a lossless encode — SEC's hidden marker already means
+        "specifier note", so removal is not round-tripped back as `vanish` — and it
+        is latent regardless, as there is no `.SEC` export endpoint today.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'

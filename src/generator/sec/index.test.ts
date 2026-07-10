@@ -114,17 +114,15 @@ describe('generateSec — entity and note round-trip', () => {
     expect(note?.text).toContain('O&M data');
   });
 
-  // KNOWN LIMITATION (#278, from #251): the SEC generator does NOT encode
-  // owner-removal. A body paragraph removed via the /removal endpoint (meta.vanish)
-  // is written as an ordinary <LST>/<SPT>/<TXT> with no marker, so vanish is LOST on
-  // a SEC round-trip and the removed text reappears. Removal is honored only in the
-  // owner-facing DOCX/Markdown renders; in SEC the `vanish` flag already means
-  // "specifier note" (the parser sets it for <NTE>), so the two uses collide.
-  // This is latent — there is no .SEC export endpoint today (generateSec is a
-  // parser round-trip utility), so removed content cannot leak to a user via SEC.
-  // When a SEC export ships, #278 must filter or encode owner-removed nodes.
-  // This test pins the *current* behavior so the regression is explicit, not silent.
-  it('KNOWN LIMITATION (#278): owner-removal (vanish) is NOT preserved across a SEC round-trip', () => {
+  // #278 (from #251): the SEC generator FILTERS owner-removal. A body paragraph
+  // removed via the /removal endpoint (meta.vanish) — and its whole subtree — is
+  // dropped from the SEC egress, matching the owner-facing DOCX/Markdown renders,
+  // so removed content never appears in a .SEC export. This is a FILTER, not an
+  // encode: SEC's `vanish` column already means "specifier note" (the parser sets
+  // it for <NTE>), so an owner-removal marker distinct from that would have to be
+  // invented — filtering is the AST-honoring choice (ADR-060). A `note` is never
+  // filtered (SEC notes are vanish by definition and always export as <NTE>).
+  it('SEC egress: owner-removal (vanish) filters a body paragraph and its subtree (#278)', () => {
     const tree: SpecTree = {
       id: 't1',
       section: '27 10 00',
@@ -140,12 +138,15 @@ describe('generateSec — entity and note round-trip', () => {
               type: 'article',
               text: 'SUMMARY',
               children: [
+                { id: 'keep', type: 'pr1', text: 'Kept paragraph.', children: [], meta: {} },
                 {
                   id: 'r1',
                   type: 'pr1',
                   text: 'Removed paragraph.',
-                  children: [],
                   meta: { vanish: true },
+                  children: [
+                    { id: 'r1a', type: 'pr2', text: 'Removed child.', children: [], meta: {} },
+                  ],
                 },
               ],
               meta: {},
@@ -155,11 +156,100 @@ describe('generateSec — entity and note round-trip', () => {
         },
       ],
     };
-    const after = parseSec(generateSec(tree)).tree;
-    const reparsed = after.parts[0]?.children[0]?.children[0];
-    expect(reparsed?.text).toBe('Removed paragraph.');
-    // vanish is lost on the body paragraph — documents the #278 gap, not desired.
-    expect(reparsed?.meta.vanish).toBeUndefined();
+    const xml = generateSec(tree);
+    expect(xml).not.toContain('Removed paragraph.');
+    expect(xml).not.toContain('Removed child.');
+    expect(xml).toContain('Kept paragraph.');
+    const after = parseSec(xml).tree;
+    const summary = after.parts[0]?.children[0];
+    expect(summary?.children.map((c) => c.text)).toEqual(['Kept paragraph.']);
+  });
+
+  it('SEC egress: a vanished article and its whole subtree are filtered; visible peers survive (#278)', () => {
+    const tree: SpecTree = {
+      id: 't2',
+      section: '27 10 00',
+      title: 'T',
+      parts: [
+        {
+          id: 'p1',
+          type: 'part',
+          text: 'GENERAL',
+          children: [
+            {
+              id: 'hidden',
+              type: 'article',
+              text: 'REMOVED ARTICLE',
+              meta: { vanish: true },
+              children: [
+                { id: 'x', type: 'pr1', text: 'child of removed article', children: [], meta: {} },
+              ],
+            },
+            { id: 'shown', type: 'article', text: 'KEPT ARTICLE', meta: {}, children: [] },
+          ],
+          meta: {},
+        },
+      ],
+    };
+    const xml = generateSec(tree);
+    expect(xml).not.toContain('REMOVED ARTICLE');
+    expect(xml).not.toContain('child of removed article');
+    expect(xml).toContain('<TTL>KEPT ARTICLE</TTL>');
+    const after = parseSec(xml).tree;
+    expect(after.parts[0]?.children.map((c) => c.text)).toEqual(['KEPT ARTICLE']);
+  });
+
+  // Regression: a filtered subtree must not influence the parent's leaf-vs-SPT
+  // choice. A tier-gap paragraph (article → pr2, offset 2) whose only child is
+  // owner-removed is a leaf AFTER filtering, so it must emit a childless <ITM>
+  // and re-parse back as pr2 — not a nested <SPT>, which re-parses one tier
+  // shallower as pr1 (#278, ADR-060; Codex adversarial review).
+  it('SEC egress: a tier-gap node whose only children are hidden re-parses at its own tier, not one shallower (#278)', () => {
+    const tree: SpecTree = {
+      id: 't3',
+      section: '27 10 00',
+      title: 'T',
+      parts: [
+        {
+          id: 'p1',
+          type: 'part',
+          text: 'GENERAL',
+          children: [
+            {
+              id: 'a1',
+              type: 'article',
+              text: 'SUMMARY',
+              meta: {},
+              children: [
+                {
+                  id: 'gap',
+                  type: 'pr2',
+                  text: 'visible tier-gap paragraph',
+                  meta: {},
+                  children: [
+                    {
+                      id: 'gone',
+                      type: 'pr3',
+                      text: 'Removed child.',
+                      children: [],
+                      meta: { vanish: true },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          meta: {},
+        },
+      ],
+    };
+    const xml = generateSec(tree);
+    expect(xml).not.toContain('Removed child.');
+    expect(xml).toContain('<ITM>visible tier-gap paragraph</ITM>');
+    const after = parseSec(xml).tree;
+    const gap = after.parts[0]?.children[0]?.children[0];
+    expect(gap?.type).toBe('pr2');
+    expect(gap?.children).toHaveLength(0);
   });
 });
 
