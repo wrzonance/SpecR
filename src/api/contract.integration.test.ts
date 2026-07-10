@@ -26,6 +26,7 @@ const RESPONSE_COVERED = new Set([
   'get /projects',
   'get /projects/{}/revision-nomenclature',
   'get /revision-nomenclature-profiles',
+  'get /search',
   'get /templates',
   'post /specs/{}/restore',
   'post /projects/{}/revision-nomenclature/clone',
@@ -245,5 +246,11 @@ describe('response contract (covered endpoints)', () => {
     const res = await fetch(`${baseUrl}/projects`);
     expect(res.status).toBe(200);
     await assertResponse('get', '/projects', 200, await res.json());
+  });
+
+  it('GET /search matches its documented 200 schema', async () => {
+    const res = await fetch(`${baseUrl}/search?q=firestopping`);
+    expect(res.status).toBe(200);
+    await assertResponse('get', '/search', 200, await res.json());
   });
 });

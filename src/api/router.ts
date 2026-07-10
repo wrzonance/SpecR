@@ -2,6 +2,7 @@ import { type Router as RouterType, Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { config } from '../lib/env.js';
 import { healthHandler } from './health.js';
+import { searchHandler } from './search.js';
 import {
   getSpecHandler,
   getSpecLineageHandler,
@@ -148,6 +149,7 @@ const parseRateLimit = rateLimit({
 export const router: RouterType = Router();
 
 router.get('/health', healthHandler);
+router.get('/search', searchHandler);
 router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/open-comments', getSpecOpenCommentsHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
