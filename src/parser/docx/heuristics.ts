@@ -167,6 +167,33 @@ export function matchTextSignal(
   return null;
 }
 
+// A single-token pr-tier list marker at the very start: a decimal ("1.", "10)")
+// or a single letter ("A.", "b)"), immediately followed by whitespace. The
+// trailing-whitespace lookahead is load-bearing — it separates a marker from a
+// decimal value ("2.1 GHz", "1.1" article number), exactly as Signal-4's own
+// patterns require `\s` after the token.
+const LEADING_MARKER = /^(?:(\d+)|([A-Za-z]))[.)](?=\s)/;
+
+/**
+ * The 1-based ordinal of a text's leading list marker within its own numbering
+ * scheme — `"1.\tx" → 1`, `"A. x" → 1`, `"b) x" → 2`, `"10. x" → 10` — or `null`
+ * when the text does not open with a single-token pr-marker. Used by the
+ * lead-in-nesting pass to detect a sub-list that RESTARTS at ordinal 1.
+ */
+export function leadingMarkerOrdinal(text: string): number | null {
+  const match = LEADING_MARKER.exec(text.trimStart());
+  if (!match) return null;
+  const [, digits, letter] = match;
+  if (digits !== undefined) {
+    const n = Number.parseInt(digits, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  if (letter !== undefined) {
+    return letter.toLowerCase().charCodeAt(0) - 96; // 'a' → 1, 'b' → 2, …
+  }
+  return null;
+}
+
 /**
  * Signal 5: Indentation heuristic.
  * Converts twips left indent to normalized ilvl estimate.
