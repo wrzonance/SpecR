@@ -40,16 +40,39 @@ it returns a new array, reuses unchanged element references, and never mutates t
 input — and computes every decision against the **original** array so an earlier
 promotion cannot mis-parent a later lead-in.
 
-### Trigger (same-tier collision) — all must hold, on the original array
+Decisions are computed over the **non-empty content view** — the same filter
+buildTree applies (`text.trim().length > 0`) — so a blank spacer paragraph between
+the lead-in and its list cannot defeat the adjacency check while the assembled tree
+still shows the collision.
+
+### Primary trigger (same-tier collision) — all must hold
 
 1. Candidate **X** has **no typed label of its own** and is structural at pr1 or
-   deeper (`signalUsed !== 4`, `nodeType !== 'continuation'`, `resolvedIlvl ≥ 2`).
-2. The **immediately following** item is a Signal-4 item at the **same resolved
-   tier T** as X.
+   deeper (`nodeType !== 'continuation'`, `resolvedIlvl ≥ 2`, and **Signal 4 did not
+   fire at all**). Signal 4 is the only classifier that reads a marker from the
+   text, so a node that WON via Signal 1/2 numbering but whose text Signal 4 also
+   matched (recorded in `agreed`/`conflicts`) still carries a typed label — promoting
+   it would double-label (`A. 1. Group:`), because buildTree's strip only fires on a
+   Signal-4 winner. Candidacy therefore checks `signalUsed !== 4 && !agreed.has(4) &&
+   !conflicts.has(4)`, not merely the winning signal.
+2. The **immediately following** content item is a Signal-4 item at the **same
+   resolved tier T** as X.
 3. That run **restarts**: its first typed marker is ordinal 1 (`leadingMarkerOrdinal === 1`).
 4. **Colon modulator** (below) is satisfied by the run length.
 5. **Promotion room:** X's structural parent (nearest preceding non-continuation
    with tier < T) sits at tier `< T − 1`. No room → skip (KNOWN AMBIGUITY).
+
+### Don't strand peer lead-ins
+
+Promoting a primary lead-in X must not re-parent a subsequent **same-tier peer
+lead-in** under it. A peer Y — a lead-in candidate ending `:` at X's tier that
+follows X with no shallower node between them (so it shares X's parent) — is
+promoted to T−1 as well, **even without a Signal-4 sub-list of its own**, so the
+author's peer group stays a peer group (`A./B./C.`) instead of Y being vacuumed
+under the last promoted sibling. Y's own sub-content stays at its tiers and nests
+under Y. Room is inherited from the primary (same parent), so no separate room
+check is needed. Signal-4 sub-items and continuations are never peers. This is the
+narrow widening; it is held to the corpus A/B gate (below).
 
 ### Promote, not demote
 
@@ -84,22 +107,34 @@ lead-ins as "Word-numbered (numId 9)". In reality the lead-ins classify via
 for the `ListParagraph` style — the paragraph falls through to Signal 5. Under the
 literal `{1,2}` predicate the pass would never fire and the design's own
 acceptance test would be impossible. We therefore broadened the predicate to the
-design's stated **rationale** — "has no typed label of its own" — i.e.
-`signalUsed !== 4` (Signal 1, 2, or 5). This matches intent exactly; a Signal-4
-candidate is still excluded because it *does* carry a typed label.
+design's stated **rationale** — "has no typed label of its own" — realized as
+"**Signal 4 did not fire at all**" (see Primary trigger #1). This matches intent
+exactly; a Signal-4 winner is excluded, and so is a Signal-1/2 winner whose text
+Signal 4 also matched.
+
+### Applied at the shared classification seam
+
+The pass runs inside `buildClassification` (the seam feeding both `parse` →
+buildTree AND `analyzeDocxStyles` → `deriveTemplate`), not only on the parse path.
+Deriving a numbering template off the un-promoted classifications would emit pr2
+rules for lead-ins the parser AST now places at pr1 — the template and the AST must
+agree. The pass is idempotent, so a single application point is safe.
 
 ## Consequences
 
-- **Fixes** the mixed-scheme double-label: `1.2 REFERENCES` now renders
-  `A. Abbreviations {1..5}`, `B. Definitions {1,2}` with markers stripped.
+- **Fixes** the mixed-scheme double-label: `1.2 REFERENCES` now renders three peer
+  lead-ins — `A. Abbreviations {1..5}`, `B. Definitions {1,2}`, `C. References
+  Standards {…}` — all direct children of the article, markers stripped.
 - **Surgical.** Keying on the same-tier collision leaves clean documents (no
-  collision) untouched. Corpus A/B (`pnpm fixture:snapshot`/`fixture:diff`):
-  **0 structural regressions**; only the target fixture changes.
-- **Out of scope (pinned as KNOWN AMBIGUITY tests):** the messier
-  `References Standards:` subtree (a stray `1 Cable:` parsed as a continuation,
-  pr4 depth) whose following run is not a Signal-4 restart is not promoted; once
-  Definitions is promoted it nests under Definitions rather than remaining a
-  REFERENCES-level peer. The no-promotion-room case is likewise left as-is. A
-  correct fix for those tangles is a separate slice.
+  collision) untouched. Even with the peer widening, corpus A/B
+  (`pnpm fixture:snapshot`/`fixture:diff`): **0 structural regressions across 674
+  fixtures**; only the target fixture changes.
+- **Out of scope (pinned as a KNOWN AMBIGUITY test, issue #436):** `References
+  Standards:` placement is now correct (C., a peer of A/B), but its **subtree**
+  stays tangled — an editor typo `1 Cable:` (missing period) parses as a
+  continuation instead of a `1.` restart, and the intentional category breakouts
+  (`Cable Sizing:` / `Splicing:` / …) land at pr4 depth. The pass promotes the peer
+  lead-in without touching that internal tangle; a correct fix is deferred to #436.
+  The no-promotion-room case is likewise left as-is.
 - **Confidence.** Promoted lead-ins carry a low confidence (base Signal-5 tier
   minus the recorded conflict), surfacing the inferred correction to reviewers.

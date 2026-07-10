@@ -101,12 +101,20 @@ typed markers. Record X's **original tier as a `SignalConflict`** on X (repo rul
 persisted, never dropped") — which also correctly lowers X's hierarchy-confidence score, since
 the promotion is an inferred correction.
 
-## Explicitly out of scope (pin as KNOWN AMBIGUITY, do not fix here)
+**Don't strand peers (impl refinement, verified against Word):** the three lead-ins under
+REFERENCES are author PEERS — `A. Abbreviations`, `B. Definitions`, `C. References Standards` —
+all direct children of the article. Promoting only the two with Signal-4 sub-lists would vacuum
+`References Standards:` (still pr2) under `B. Definitions`. So a same-tier peer lead-in ending
+`:` that follows a promoted primary (sharing its parent) is promoted too, even without a sub-list
+of its own, keeping the peer group intact.
 
-The messier `References Standards:` subtree (stray `1 Cable:` continuations parsed as
-continuation, pr4 depth, a stray `1.3` merged into prose) is a *different* mixed-scheme
-tangle. Pin it with a `// KNOWN AMBIGUITY` test documenting current behavior. Keeps this a
-small, correct slice.
+## Explicitly out of scope (pin as KNOWN AMBIGUITY, do not fix here — issue #436)
+
+`References Standards:` PLACEMENT is now correct (C., a peer of A/B via the peer rule above); only
+its **subtree** is out of scope: an editor typo `1 Cable:` (missing period) parses as a
+continuation instead of a `1.` restart, and the intentional category breakouts
+(`Cable Sizing:`/`Splicing:`/…) land at pr4 depth. Pin it with a `// KNOWN AMBIGUITY` test; a
+correct fix for the subtree is deferred to **#436**. Keeps this a small, correct slice.
 
 ## Data shapes
 
