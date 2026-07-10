@@ -18,7 +18,7 @@ All references land in `spec_references` at parse time. `target_spec_id` is reso
 
 ### Two operation contexts — different cascade behaviors
 
-**TOC edit (intentional):** Spec manager edits the project table of contents. Removing a section is a deliberate act: no warning prompt. System auto-cascades: `spec_references` rows pointing to the removed section are deleted; surviving paragraphs that referenced it have their `is_broken` flag set to `true`. Re-adding the section restores the resolved `target_spec_id` and clears `is_broken`.
+**TOC edit (intentional):** Spec manager edits the project table of contents. Removing a section is a deliberate act: no warning prompt. System auto-cascades: `spec_references` rows pointing to the removed section are **retained but marked `is_broken = true`** (with `target_spec_id` cleared) rather than deleted, so re-adding the section can restore the resolved `target_spec_id` and clear `is_broken`.
 
 **In-flight paragraph edit:** Granular changes during spec authoring. Broken references are flagged and surfaced via `GET /projects/:id/references/broken`. Spec writer resolves manually. 3-way merge history provides recovery if content was deleted by mistake.
 

@@ -2,6 +2,8 @@
 
 > ↩ [Architecture index](../../ARCHITECTURE.md)
 
+> **Illustrative overview.** These `CREATE TABLE` statements show the shape of the data grouped by concern — not in dependency/creation order, and omitting some constraints and indexes (e.g. the `library_id` XOR `project_id` ownership check and the `(project_id, position)` / `(project_id, priority)` uniqueness constraints). The authoritative, ordered, fully-constrained schema is the reversible `node-pg-migrate` migration files — the migrations are the schema of record, not this summary.
+
 ```sql
 -- Library owners for reference, company, and client masters
 CREATE TABLE libraries (
@@ -183,7 +185,7 @@ Later migrations add these tables (see the migration files and cited ADRs for co
 | `numbering_profiles` | Saved structural numbering profiles, library-scoped | #299 |
 | `revision_nomenclature_profiles` | Structured revision/addendum naming, built-in + project override | ADR-025 |
 
-Concurrency/versioning also add advisory lock and lifecycle-state storage (ADR-018). Style storage moved to a JSONB payload on `style_rules` (ADR-021).
+Concurrency/versioning also add advisory lock and lifecycle-state storage (ADR-018). **Style storage:** the scalar `style_rules` columns shown above are the Phase-2c-i shape; ADR-021 (migration 014) superseded them with a single JSONB `properties` payload on `style_rules` — the JSONB payload is the current representation.
 
 ## Composite Revit identity
 

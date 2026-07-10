@@ -44,7 +44,7 @@ Sub-MVP 1c-iii: DOCX cross-reference extraction (follow-up)
 ## Phase 2: Generator + MCP Foundation (Weeks 5–7, overlaps Phase 1)
 
 **Phase 2a: MCP server + Markdown renderer**
-- MCP server integrated into Express via Streamable HTTP (`POST /mcp`, `GET /mcp` 405 stub, `DELETE /mcp` 405 stub): stateless `StreamableHTTPServerTransport` with `sessionIdGenerator: undefined`, one `McpServer` instance per request. Supersedes ADR-010's original stdio/SSE stance; see ADR-010 Decision Update.
+- MCP server integrated into Express via Streamable HTTP (`POST /mcp`, `GET /mcp` 405 stub, `DELETE /mcp` terminates a stateful session — see Phase 5h below): stateless `StreamableHTTPServerTransport` with `sessionIdGenerator: undefined`, one `McpServer` instance per request. Supersedes ADR-010's original stdio/SSE stance; see ADR-010 Decision Update.
 - `src/generator/markdown.ts`: pure function `renderMarkdown(CsiTree): string` + `getLabel(NodeType, index, partNumber?)`. `note` nodes render as `> **[NOTE]**` blockquotes (not hidden) in MCP output, while `meta.vanish` on non-note nodes is suppressed. Shared with future DOCX generator and Phase 6.
 - MCP tools (read-only Phase 2a scope): `search_library(query, division?, limit?)`, `get_spec(specId)` → `{ tree: CsiTree, references: SpecReference[] }` (each reference includes `isResolved: boolean`), `list_sections(division?)`
 - MCP resources: `specr://specs/{id}` (Markdown), `specr://sections` (Markdown table)

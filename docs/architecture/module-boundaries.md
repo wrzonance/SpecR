@@ -32,7 +32,7 @@ Every error carries the full "why" chain from origin to surface. The pattern:
 
 - One custom error class per module boundary, extending `SpecrError` (`src/lib/errors.ts`): `ParserError`, `GeneratorError`, `MergeError`.
 - `cause` chaining at every catch site where the caller adds meaning.
-- Zod for all external-input validation (request bodies, env vars, parsed XML/OOXML); chain the `ZodError` as `cause`.
+- Zod for all external-input validation (request bodies, env vars, parsed XML/OOXML). When a thrown boundary error **wraps** a Zod failure (the parser/generator/merge OOXML paths), chain the `ZodError` as `cause`. The API request-body validator (`src/api/middleware/validate.ts`) instead responds `422` directly and `src/lib/env.ts` exits the process — neither throws, so neither chains a cause.
 
 ```typescript
 // src/lib/errors.ts

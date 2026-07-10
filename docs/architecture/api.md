@@ -2,7 +2,7 @@
 
 > ↩ [Architecture index](../../ARCHITECTURE.md)
 
-All responses follow `ApiResponse<T>`:
+All **JSON REST** responses follow `ApiResponse<T>` (binary/DOCX-buffer downloads, MCP JSON-RPC, and bare `204`/`405` responses excepted):
 ```typescript
 interface ApiResponse<T> {
   success: boolean

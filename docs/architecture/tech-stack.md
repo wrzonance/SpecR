@@ -7,7 +7,7 @@
 | Component | Technology | Why |
 |-----------|------------|-----|
 | Language | **TypeScript** | One language across the server and a future Word add-in. The best DOCX-writing library (dolanmiu/docx) is TypeScript, and Office add-ins are written in JavaScript/TypeScript too. |
-| Runtime | **Node.js 22 LTS** | Long-term-support release (maintenance until April 2027), with a built-in `fetch` and native TypeScript type-stripping. |
+| Runtime | **Node.js 22 LTS** | Long-term-support release (maintenance until April 2027), with a built-in `fetch` and native TypeScript type-stripping (unflagged since 22.18). |
 | API framework | **Express** | A small, widely used web framework with no hidden behavior, so it's easy to read and reason about. |
 | Database | **PostgreSQL** | Walks the paragraph tree in a single query (recursive CTEs), stores each spec's document tree as JSON (JSONB), and keeps a version history of every row. |
 | Input validation | **Zod** | Checks that incoming data is the right shape at every edge of the system: API requests, environment config, and parsed XML. |
@@ -28,7 +28,7 @@ docx-parser-converter and Docling are better *parsers* than anything in the TS e
 
 docx4j's `PropertyResolver` is the gold-standard ECMA-376 style resolver. But the JVM is a heavy runtime for a headless API, Java has no path into Office Add-in client code (add-ins run JavaScript/TypeScript in a webview), and the ecosystem investment is wrong for a TypeScript/Node-first architecture. The algorithms we need (Clippit's `ListItemRetriever`, docx4j's style cascade) are portable: we port them, not the runtime.
 
-### Why not C#
+### Why not C# / .NET
 
 Clippit is the only open-source library that builds the actual parent/child paragraph tree. We will port its `ListItemRetriever` algorithm to TypeScript. Running a .NET service alongside Node adds operational complexity with no benefit once the algorithm is ported.
 

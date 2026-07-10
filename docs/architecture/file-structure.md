@@ -2,7 +2,7 @@
 
 > ↩ [Architecture index](../../ARCHITECTURE.md)
 
-```
+```text
 specr/
 ├── src/                         # All TypeScript source
 │   ├── index.ts                 # Entry: Express, env validation, graceful shutdown

@@ -2,7 +2,7 @@
 
 > ↩ [Architecture index](../../ARCHITECTURE.md)
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────────┐
 │                    Client Surfaces                                     │
 │                                                                        │
@@ -52,7 +52,7 @@
 
 ## Data Flow: Parse
 
-```
+```text
 DOCX upload
     ↓
 JSZip: extract document.xml, numbering.xml, styles.xml
@@ -75,7 +75,7 @@ Return spec ID + summary
 
 ## Data Flow: Generate
 
-```
+```text
 GET /specs/:id from PostgreSQL
     ↓
 Reconstruct CsiTree from paragraph rows (recursive CTE → tree)
@@ -91,7 +91,7 @@ Return DOCX buffer
 
 ## Data Flow: Round-Trip Merge
 
-```
+```text
 Client: POST /specs/:id/diff  (upload edited DOCX)
     ↓
 Parse edited DOCX → new AST

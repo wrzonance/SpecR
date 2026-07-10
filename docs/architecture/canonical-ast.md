@@ -40,3 +40,5 @@ interface CsiTree {
   parts: CsiNode[]     // root-level Part nodes
 }
 ```
+
+> **Runtime types.** The authoritative shapes are `SpecNode` / `SpecNodeMeta` / `SpecTree` in `src/ast/types.ts`. `CsiNode`/`CsiTree` above are the conceptual model; the runtime `SpecNodeMeta` additionally carries `conflicts`, `inference`, `sourceFacts`, `editability`, and `associations`, and types `articleRole` as the shared `ArticleRole` (not a bare `string`).
