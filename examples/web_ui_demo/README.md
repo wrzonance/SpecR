@@ -173,7 +173,7 @@ SpecR adds tools. No admin controls or per-user permissions — it's an MVP.
 ## Compose — agent-driven grounded reporting (#353)
 
 The **Compose** tab is the demo's flagship showcase of SpecR's differentiator:
-**deterministic-first, not RAG** (see `ARCHITECTURE.md` → "Deterministic-First:
+**deterministic-first, not RAG** (see `docs/architecture/data-strategy.md` → "Deterministic-First:
 Grounded Data, Not RAG"). Instead of a deterministic button, an LLM agent _drives_
 report composition — it calls SpecR's grounded MCP tools, gets computed ground
 truth, and synthesizes a cited narrative. It appears here precisely because this

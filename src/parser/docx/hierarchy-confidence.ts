@@ -15,7 +15,7 @@ import type {
 import { nodeTypeToNormalizedIlvl } from '../../ast/index.js';
 
 // ── Formula v1 constants (ADR-055) — acknowledged heuristics, tunable here ────
-// Base = the winning signal's reliability tier (ARCHITECTURE.md 5-signal table).
+// Base = the winning signal's reliability tier (docs/architecture/inference-engine.md 5-signal table).
 const SIGNAL_TIER: Record<SignalNumber, number> = {
   1: 0.95, // numbering.xml — what Word actually respects
   2: 0.85, // style chain
