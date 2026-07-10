@@ -30,3 +30,22 @@ describe('contract validate-response helper', () => {
     expect(successJsonOps(doc)).toContain('get /health');
   });
 });
+
+// INV-5 (#403) drives an MCP tool, wraps its BARE payload as the REST envelope
+// `{ success: true, data: <payload> }`, and reuses assertResponse to validate it against the
+// mapped op's OpenAPI response schema. These pin that the reuse has teeth for an array-typed
+// `data` schema (the shape the driven list-read tools return) — a malformed payload must fail.
+describe('INV-5 envelope-wrap reuse (assertResponse teeth)', () => {
+  it('rejects a malformed enveloped tool payload against an array data schema', async () => {
+    // GET /projects `data` is an array of ProjectListItem — a string must not validate.
+    await expect(
+      assertResponse('get', '/projects', 200, { success: true, data: 'not-an-array' })
+    ).rejects.toThrow(/does not match/i);
+  });
+
+  it('accepts a well-formed enveloped tool payload against an array data schema', async () => {
+    await expect(
+      assertResponse('get', '/projects', 200, { success: true, data: [] })
+    ).resolves.toBeUndefined();
+  });
+});
