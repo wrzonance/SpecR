@@ -1,6 +1,7 @@
 import express from 'express';
 import { config } from './lib/env.js';
 import { logger, closeLogger } from './lib/logger.js';
+import { isAuthConfigured, logStartupSecurityWarning } from './lib/security-posture.js';
 import { pool } from './db/index.js';
 import { router } from './api/router.js';
 import { errorHandler } from './api/middleware/error.js';
@@ -20,6 +21,13 @@ app.use(router);
 registerMcpRoutes(app);
 registerDocsRoutes(app);
 app.use(errorHandler);
+
+// Honest guard until auth lands (#43): the surface binds all interfaces and is
+// unauthenticated by design, so warn loudly before we accept traffic.
+logStartupSecurityWarning(logger, {
+  authConfigured: isAuthConfigured(config),
+  mcpTiers: config.MCP_ALLOWED_TIERS,
+});
 
 const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT }, 'specr started');
