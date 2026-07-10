@@ -6908,6 +6908,126 @@ components:
             Ilvl of the Article tier. Always >= 1 — ilvl 0 is reserved for the
             PART tier, so the Article level can never be 0.
 
+    NumberingProfileRead:
+      type: object
+      description: >
+        Lenient READ contract for a persisted numbering profile (ADR-061, #323).
+        Same shape as `NumberingProfile` — required fields, JS types, the closed
+        `tier` vocabulary, the `numberStyle: integer` literal, open-schema
+        passthrough, AND the structural floor of every numeric field (`ilvl >= 0`,
+        counts `>= 1`) are all still enforced — but the numeric POLICY bounds a
+        write-side tightening could newly impose are relaxed to that structural
+        floor: `part.maxCount` drops the CSI ceiling of 5, and `articleIlvl`
+        relaxes from `>= 1` to `>= 0` (the legacy #320 case). It is NOT a rubber
+        stamp — a sub-structural value like a negative `articleIlvl` is corruption
+        (it would misparse downstream) and still fails. Reads re-validate stored
+        JSONB, so a row persisted under an older, looser write contract reads back
+        cleanly instead of 500ing once the write schema tightens; writes stay
+        strict at ingress against `NumberingProfile`. This is the response shape
+        for numbering-profile reads (`NumberingProfileRow.rules`).
+      additionalProperties: true
+      required: [tiers, numbering, styleLadder]
+      properties:
+        tiers:
+          type: object
+          additionalProperties: true
+          required: [part]
+          description: >
+            CSI tier shape. `part` is required and pinned to the CSI integer model
+            (integer style); article/paragraph/subparagraph are optional. Numeric
+            bounds are relaxed on read (see schema description). Unknown keys are
+            preserved (open schema).
+          properties:
+            part:
+              type: object
+              additionalProperties: true
+              required: [numberStyle, maxCount]
+              properties:
+                numberStyle:
+                  type: string
+                  enum: [integer]
+                  description: CSI parts are integer-numbered.
+                maxCount:
+                  type: integer
+                  minimum: 1
+                  description: >
+                    Maximum PART count. Read-lenient — the CSI policy ceiling of 5 is
+                    write-only, but the structural floor (>= 1) is still enforced.
+            article:
+              type: object
+              additionalProperties: true
+              properties:
+                maxCount:
+                  type: integer
+                  minimum: 1
+            paragraph:
+              type: object
+              additionalProperties: true
+              properties:
+                maxCount:
+                  type: integer
+                  minimum: 1
+            subparagraph:
+              type: object
+              additionalProperties: true
+              properties:
+                maxCount:
+                  type: integer
+                  minimum: 1
+        numbering:
+          type: array
+          description: Per-numId level definitions.
+          items:
+            type: object
+            additionalProperties: true
+            required: [numId, levels]
+            properties:
+              numId:
+                type: integer
+              levels:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                  required: [ilvl, tier]
+                  properties:
+                    ilvl:
+                      type: integer
+                      minimum: 0
+                    tier:
+                      type: string
+                      enum: [part, article, paragraph, subparagraph]
+                    labelTemplate:
+                      type: string
+                    numFmt:
+                      type: string
+        styleLadder:
+          type: array
+          description: Per-styleId tier assignment derived from the style cascade.
+          items:
+            type: object
+            additionalProperties: true
+            required: [styleId, numId, ilvl, tier]
+            properties:
+              styleId:
+                type: string
+              numId:
+                type: integer
+              ilvl:
+                type: integer
+                minimum: 0
+              tier:
+                type: string
+                enum: [part, article, paragraph, subparagraph]
+        articleIlvl:
+          type: integer
+          minimum: 0
+          description: >
+            Ilvl of the Article tier. Read-lenient — the write-side policy bound is
+            relaxed from `>= 1` to its structural floor `>= 0`, so a legacy
+            `articleIlvl: 0` row reads back cleanly while a negative (corrupt) value
+            still fails.
+
     NumberingProfileRow:
       type: object
       description: A persisted numbering profile row from the database.
@@ -6923,7 +7043,10 @@ components:
         name:
           type: string
         rules:
-          $ref: '#/components/schemas/NumberingProfile'
+          # Read-lenient (ADR-061, #323): reads re-validate stored JSONB, so this
+          # response can carry a legacy row whose values fall outside the strict
+          # write bounds. Write request bodies still ref the strict NumberingProfile.
+          $ref: '#/components/schemas/NumberingProfileRead'
         createdAt:
           type: string
           format: date-time

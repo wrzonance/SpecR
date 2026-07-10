@@ -268,6 +268,70 @@ describe('setSpecNumberingProfile / clearSpecNumberingProfile', () => {
   });
 });
 
+// #323: reads re-validate stored JSONB, so tightening the write schema could turn a
+// previously-valid row into a 500 on read. These persist rows RAW (bypassing the
+// strict write path, exactly as an older schema version would have) and assert every
+// read path returns them instead of throwing. Named for the symptom: read-500-on-tightening.
+describe('#323 read-tolerance — legacy rows that violate the current strict write schema', () => {
+  // A shape the strict NumberingProfileSchema now rejects (articleIlvl 0 < min(1);
+  // part maxCount 7 > max(5)) but that was valid under an older contract.
+  const LEGACY_RULES = {
+    tiers: { part: { numberStyle: 'integer', maxCount: 7 } },
+    numbering: [],
+    styleLadder: [],
+    articleIlvl: 0,
+  };
+
+  async function insertLegacyProfile(libraryId: string, name: string): Promise<string> {
+    // Raw INSERT so the strict write-path validation never runs — this is precisely
+    // what a row persisted under a looser historical schema looks like on disk.
+    const res = await pool.query<{ id: string }>(
+      `INSERT INTO numbering_profiles (library_id, name, rules) VALUES ($1, $2, $3) RETURNING id`,
+      [libraryId, name, JSON.stringify(LEGACY_RULES)]
+    );
+    return res.rows[0]!.id;
+  }
+
+  it('getNumberingProfile returns a legacy row instead of throwing a 500', async () => {
+    const lib = await createLibrary({ tier: 'client', name: 'np-test-legacy-get' });
+    const id = await insertLegacyProfile(lib.id, 'Legacy Get');
+    const found = await getNumberingProfile(id);
+    expect(found).not.toBeNull();
+    expect(found?.rules).toEqual(LEGACY_RULES);
+  });
+
+  it('listNumberingProfiles returns a legacy row instead of throwing a 500', async () => {
+    const lib = await createLibrary({ tier: 'client', name: 'np-test-legacy-list' });
+    await insertLegacyProfile(lib.id, 'Legacy List');
+    const profiles = await listNumberingProfiles(lib.id);
+    const legacy = profiles.find((p) => p.name === 'Legacy List');
+    expect(legacy).toBeDefined();
+    expect(legacy?.rules).toEqual(LEGACY_RULES);
+  });
+
+  it('getEffectiveNumberingProfile resolves a spec assigned a legacy profile instead of throwing', async () => {
+    const lib = await createLibrary({ tier: 'client', name: 'np-test-legacy-eff' });
+    const id = await insertLegacyProfile(lib.id, 'Legacy Effective');
+    const specId = await createSpec({
+      section: '07 21 24',
+      title: 'np-test-legacy-eff-spec',
+      source: 'arcat',
+      libraryId: lib.id,
+    });
+    await setSpecNumberingProfile(specId, id);
+
+    const effective = await getEffectiveNumberingProfile(specId);
+    expect(effective).toEqual(LEGACY_RULES);
+  });
+
+  it('writes stay strict: createNumberingProfile still rejects the legacy shape (422 at ingress)', async () => {
+    const lib = await createLibrary({ tier: 'client', name: 'np-test-legacy-write' });
+    await expect(
+      createNumberingProfile(lib.id, 'Should Reject', LEGACY_RULES as never)
+    ).rejects.toThrow();
+  });
+});
+
 describe('getEffectiveNumberingProfile', () => {
   it('(a) returns the CSI Default when the spec has no assignment', async () => {
     const lib = await createLibrary({ tier: 'client', name: 'np-test-eff-default' });

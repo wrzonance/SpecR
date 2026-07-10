@@ -1,5 +1,5 @@
 import { pool, DatabaseError } from '../index.js';
-import { NumberingProfileSchema } from '../../ast/index.js';
+import { NumberingProfileSchema, NumberingProfileReadSchema } from '../../ast/index.js';
 import type { NumberingProfile } from '../../ast/index.js';
 import { getPgCode } from '../../lib/pg-errors.js';
 
@@ -31,7 +31,10 @@ function rowToProfile(row: RawRow): NumberingProfileRow {
     id: row.id,
     libraryId: row.library_id,
     name: row.name,
-    rules: NumberingProfileSchema.parse(row.rules),
+    // Reads use the lenient schema (#323, ADR-061): re-validating persisted JSONB
+    // against the strict WRITE schema would 500 a historical row the moment that
+    // schema tightens. Writes still validate strict at ingress (create/update below).
+    rules: NumberingProfileReadSchema.parse(row.rules),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -40,7 +43,8 @@ function rowToProfile(row: RawRow): NumberingProfileRow {
 /** Parse raw JSONB rules; wraps ZodError as DatabaseError so callers get typed failures. */
 function parseRules(specId: string, raw: unknown): NumberingProfile {
   try {
-    return NumberingProfileSchema.parse(raw);
+    // Read path — tolerant of historical shapes (#323, ADR-061), see rowToProfile.
+    return NumberingProfileReadSchema.parse(raw);
   } catch (zodErr) {
     throw new DatabaseError(`getEffectiveNumberingProfile: invalid rules for spec ${specId}`, {
       cause: zodErr,
