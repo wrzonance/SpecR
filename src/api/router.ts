@@ -30,6 +30,10 @@ import {
   getBrokenRefsHandler,
 } from './projects.js';
 import { getInboundReferencesHandler, getOutboundReferencesHandler } from './references.js';
+import {
+  getProjectReferenceGraphHandler,
+  getLibraryReferenceGraphHandler,
+} from './reference-graph.js';
 import { createClientHandler, listClientsHandler, getClientHandler } from './clients.js';
 import {
   getLibraryDivisionGeneralSpecHandler,
@@ -222,6 +226,7 @@ router.post(
 );
 router.get('/projects/:id/open-comments', getProjectOpenCommentsHandler);
 router.get('/projects/:id/references/inbound', getInboundReferencesHandler);
+router.get('/projects/:id/reference-graph', getProjectReferenceGraphHandler);
 router.get('/projects/:id/specs/:specId/references', getOutboundReferencesHandler);
 router.post('/projects/:id/packages', validateBody(CreatePackageBodySchema), createPackageHandler);
 router.get('/projects/:id/packages', listPackagesHandler);
@@ -256,6 +261,7 @@ router.post('/libraries/clients', createClientLibraryHandler);
 router.get('/libraries/import/jobs/:jobId', importJobHandler);
 router.post('/libraries/:id/import', parseRateLimit, upload.single('file'), importLibraryHandler);
 router.get('/libraries/:id/specs', listLibrarySpecsHandler);
+router.get('/libraries/:id/reference-graph', getLibraryReferenceGraphHandler);
 router.patch('/libraries/:id', renameLibraryHandler);
 router.get('/libraries/:id/conventions', getLibraryConventionHandler);
 router.put('/libraries/:id/conventions', putLibraryConventionHandler);

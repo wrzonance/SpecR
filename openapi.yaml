@@ -2069,6 +2069,41 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /libraries/{id}/reference-graph:
+    get:
+      operationId: getLibraryReferenceGraph
+      summary: Library section-reference graph (nodes, edges, umbrella annotations)
+      tags: [libraries]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Library UUID
+          schema: { type: string, format: uuid }
+        - name: includeAnchors
+          in: query
+          required: false
+          description: Add capped per-edge paragraph anchor lists (see ReferenceGraph.anchorCap).
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Reference graph for the library
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ReferenceGraph' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /libraries/import/jobs/{jobId}:
     get:
       operationId: getOnboardingJob
@@ -3590,6 +3625,34 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /projects/{id}/reference-graph:
+    get:
+      operationId: getProjectReferenceGraph
+      summary: Project section-reference graph (nodes, edges, umbrella annotations)
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: includeAnchors
+          in: query
+          required: false
+          description: Add capped per-edge paragraph anchor lists (see ReferenceGraph.anchorCap).
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Reference graph for the project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ReferenceGraph' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
   /projects/{id}/keynotes:
     get:
       operationId: getProjectKeynotes
@@ -4474,6 +4537,80 @@ components:
 
     # ── Coordination Report ────────────────────────────────────────────────────
 
+    ReferenceGraph:
+      type: object
+      description: >
+        One-call section-reference graph for a project or library (#447). Edges
+        resolve scope-relative: a target section is resolved to the in-scope node
+        that owns it, or null (dangling).
+      required: [scope, nodes, edges, umbrella, anchorCap, notes]
+      properties:
+        scope:
+          type: object
+          required: [type, id]
+          properties:
+            type: { type: string, enum: [project, library] }
+            id: { type: string, format: uuid }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/ReferenceGraphNode' }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/ReferenceGraphEdge' }
+        umbrella:
+          type: array
+          items: { $ref: '#/components/schemas/ReferenceGraphUmbrellaDivision' }
+        anchorCap:
+          type: integer
+          description: Max paragraph anchors emitted per edge when includeAnchors=true.
+        notes:
+          type: array
+          items: { type: string }
+    ReferenceGraphNode:
+      type: object
+      required: [specId, section, title, division, isUmbrella]
+      properties:
+        specId: { type: string, format: uuid }
+        section: { type: string }
+        title: { type: string }
+        division: { type: [string, 'null'] }
+        isUmbrella:
+          type: boolean
+          description: True when section equals "{division} 00 00".
+    ReferenceGraphEdge:
+      type: object
+      required: [sourceSpecId, targetSection, targetSpecId, citationCount]
+      properties:
+        sourceSpecId: { type: string, format: uuid }
+        targetSection: { type: string }
+        targetSpecId:
+          type: [string, 'null']
+          format: uuid
+          description: In-scope spec that owns targetSection, or null when dangling.
+        citationCount: { type: integer }
+        anchors:
+          type: array
+          description: Paragraph UUIDs citing the target (only when includeAnchors=true; capped at anchorCap).
+          items: { type: string, format: uuid }
+        anchorsTruncated:
+          type: boolean
+          description: True when citationCount exceeded anchorCap (only when includeAnchors=true).
+    ReferenceGraphUmbrellaDivision:
+      type: object
+      required: [division, umbrellaSpecId, umbrellaPresent, notCalledOut]
+      properties:
+        division: { type: string }
+        umbrellaSpecId: { type: [string, 'null'], format: uuid }
+        umbrellaPresent: { type: boolean }
+        notCalledOut:
+          type: array
+          description: In-scope specs in the division that never cite its "{division} 00 00" umbrella.
+          items:
+            type: object
+            required: [specId, section]
+            properties:
+              specId: { type: string, format: uuid }
+              section: { type: string }
     CoordinationReport:
       type: object
       required: [projectId, packageId, findings, summary, notes]
