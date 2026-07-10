@@ -68,6 +68,7 @@ case "\${1:-confirm}" in
 esac
 `;
 
+/** Run the bash harness for the given scenario with extra env vars, returning its stdout and exit status. */
 function runHarness(
   scenario: 'confirm' | 'external',
   env: Record<string, string> = {}
@@ -80,6 +81,7 @@ function runHarness(
   return { stdout: result.stdout ?? '', status: result.status };
 }
 
+/** Parse the harness's `CALLS <n>` line into the number of pg_isready probes made (-1 if absent). */
 function callCount(stdout: string): number {
   const match = /^CALLS (\d+)$/m.exec(stdout);
   return match ? Number(match[1]) : -1;
