@@ -59,6 +59,22 @@ mirroring ADR-026:
    - Write tools additionally pin **INV-4** (the tool's input schema covers the
      OpenAPI required request fields) in their own integration test — see
      `create-project.integration.test.ts`.
+   - **INV-5** (#403) — tool **response** shapes. For each driven read tool the
+     gate invokes the handler against seeded data, wraps its bare payload as the
+     REST envelope (`{ success: true, data }` — `SuccessResponse` is just
+     `{ success: true }`), and **reuses the REST `assertResponse` validator** to
+     check it against the mapped op's OpenAPI response schema (no second
+     validator). Because each driven read returns the REST route's own `data`,
+     validation is correct by construction and auto-tracks REST drift. Coverage
+     is a burn-down mirroring `MCP_UNEXPOSED`: the seed-only list reads are
+     driven live; read tools that mirror but need a fixture graph sit in
+     `INV5_READ_PENDING` (graduating in as fixtures land); tools whose output
+     legitimately reshapes (e.g. `get_spec`, which nests `{ tree, references }`
+     plus MCP `_meta` anchors) sit in `INV5_SHAPE_EXEMPT` with a reason. A
+     completeness invariant asserts every read-mapped (GET) tool is in exactly
+     one bucket, so no read tool drifts silently. Scoped to reads: write/
+     destructive tools return mutation results whose request contract INV-4
+     already pins.
 
 Generation-from-spec is rejected (option a). The operation-id format
 (`"method /path"` with every path param collapsed to `{}`) matches
@@ -76,9 +92,12 @@ Generation-from-spec is rejected (option a). The operation-id format
 - **The test is an integration test** because importing `registerTools`
   transitively imports `../db/index.js` → `../lib/env.js`, which needs
   `DATABASE_URL` present at import (it never queries; no SQL runs).
-- Enforcement covers **operation ↔ tool coverage**, not tool *response* shapes
-  (INV-4 covers write-tool request fields). Response-shape validation for tools
-  is a tracked future gap, not silent coverage — the same posture ADR-026 takes.
+- Enforcement covers **operation ↔ tool coverage** and, via **INV-5** (#403),
+  driven read tools' **response** shapes against the mapped op's OpenAPI schema
+  (INV-4 covers write-tool request fields). INV-5's read coverage is a burn-down
+  (`INV5_READ_PENDING`) with reasoned reshape exemptions (`INV5_SHAPE_EXEMPT`)
+  and a completeness invariant, so what is not yet driven is explicit, not
+  silent — the same posture ADR-026 takes with its response allowlist.
 
 ## Related
 
