@@ -146,6 +146,35 @@ get_compose_postgres_port() {
   return 1
 }
 
+# A TCP-open published port only proves docker-proxy is forwarding it — not that
+# PostgreSQL is accepting SQL. On a fresh specr_pgdata volume the postgres image
+# first runs initdb behind a throwaway server bound to the unix socket ONLY
+# (listen_addresses=''), then restarts into the real server; the host port answers
+# TCP that whole time, so `pnpm migrate` connects to the transient server and dies
+# with "Connection terminated unexpectedly". Confirm the protocol with pg_isready —
+# but over TCP (-h 127.0.0.1 -p 5432, the container-internal port), the SAME path
+# migrate uses. A default socket probe (no -h) would succeed against the initdb
+# temp server (socket-only), reopening the very race we are closing; the temp server
+# has no TCP listener, so a TCP probe fails until the real server is up. Require two
+# consecutive successes a short sleep apart to rule out a lone transient answer.
+# Only usable for the bundled container the script started — never for an external
+# DATABASE_URL.
+confirm_compose_postgres_ready() {
+  local attempts="${1:-60}" i streak=0
+  for i in $(seq 1 "$attempts"); do
+    if docker compose exec -T postgres pg_isready -h 127.0.0.1 -p 5432 -U specr -d specr -q; then
+      streak=$((streak + 1))
+      if ((streak >= 2)); then
+        return 0
+      fi
+    else
+      streak=0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 DOCKER_DATABASE_PORT=""
 initialize_docker_database() {
   local running="" port="" i
@@ -169,8 +198,15 @@ initialize_docker_database() {
   printf '==> Waiting for PostgreSQL on localhost:%s\n' "$port"
   for i in $(seq 1 60); do
     if tcp_is_open localhost "$port"; then
-      DOCKER_DATABASE_PORT="$port"
-      return 0
+      # Port is published, but TCP-open != accepting SQL on a fresh volume — see
+      # confirm_compose_postgres_ready. Confirm the protocol before returning so
+      # `pnpm migrate` never races the initdb temp-server restart.
+      printf '==> Port %s open; confirming PostgreSQL is accepting connections\n' "$port"
+      if confirm_compose_postgres_ready; then
+        DOCKER_DATABASE_PORT="$port"
+        return 0
+      fi
+      break
     fi
     sleep 1
   done
@@ -212,6 +248,13 @@ initialize_database() {
   export DATABASE_URL="postgres://specr:specr@localhost:$DOCKER_DATABASE_PORT/specr"
   printf '==> SpecR API will use %s\n' "$DATABASE_URL"
 }
+
+# When sourced (e.g. by the shell regression test) rather than executed, stop
+# here: the caller wants the function definitions above, not the startup
+# sequence below. `return` only succeeds inside a sourced file.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  return 0
+fi
 
 API_PORT_WANTED="${SPECR_PORT:-3000}"
 WEB_PORT_WANTED="${SPECR_WEB_PORT:-3001}"
