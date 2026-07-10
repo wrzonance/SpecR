@@ -105,7 +105,15 @@ function trySignal4(para: DocxParagraph): SignalHit | null {
   return { nodeType: match.nodeType, normalizedIlvl: match.normalizedIlvl, signal: 4 };
 }
 
+// w:jc alignments whose leftIndent is horizontal positioning, not outline depth:
+// centered and right-aligned (end === right in LTR) paragraphs. A centered title carries
+// a large symmetric indent purely to center it; reading a level from that indent
+// promoted the section header to a spurious deep-pr root. Left/start/both/distribute are
+// normal flow where indentation genuinely signals nesting, so Signal 5 still runs.
+const NON_OUTLINE_JC = new Set(['center', 'right', 'end']);
+
 function trySignal5(para: DocxParagraph): SignalHit | null {
+  if (para.jc !== undefined && NON_OUTLINE_JC.has(para.jc)) return null;
   const estimated = matchIndentSignal(para.leftIndent);
   if (estimated === null) return null;
   const nodeType = NODE_TYPES_BY_NORMALIZED_ILVL[estimated];

@@ -81,6 +81,10 @@ export interface DocxParagraph {
   readonly ilvl?: number;
   readonly leftIndent?: number; // twips (1/1440 inch)
   readonly outlineLvl?: number;
+  // w:jc alignment ('center' | 'right' | 'end' | 'both' | 'left' | 'start' | …). A
+  // centered/right-aligned paragraph's leftIndent is horizontal positioning, not outline
+  // depth, so Signal 5 (indentation) must not read a level from it.
+  readonly jc?: string;
   readonly isVanish: boolean;
   readonly sourceFacts?: SourceFacts;
 }

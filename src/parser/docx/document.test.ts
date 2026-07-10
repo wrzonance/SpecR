@@ -136,6 +136,16 @@ describe('parseDocument — pPr field extraction', () => {
     expect(result[0]?.outlineLvl).toBe(2);
   });
 
+  it('extracts justification (w:jc) so Signal 5 can ignore a centered indent', () => {
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:jc w:val="center"/><w:ind w:left="3859"/></w:pPr>` +
+        `<w:r><w:t>SECTION 26 0513.01</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.jc).toBe('center');
+    expect(result[0]?.leftIndent).toBe(3859);
+  });
+
   it('detects vanish', () => {
     const xml = makeDocXml(makePara({ text: 'hidden', vanish: true }));
     const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);

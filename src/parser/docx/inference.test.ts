@@ -252,6 +252,44 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
     expect(result[0]?.signalUsed).toBe(5);
   });
 
+  // Regression (centered-title junk root): a centered heading ("SECTION 26 0513.01",
+  // the section title) carries a large SYMMETRIC w:ind (centering padding), not outline
+  // depth. Signal 5 rounded 3859/576 ≈ 7 → pr6, making the section header a spurious
+  // deep-pr root that inflated the part ordinal downstream (article labels rendered
+  // "3.1" instead of "1.1" and never stripped). A centered/right-aligned paragraph is
+  // never a hierarchy node, so indentation must not fire for it.
+  it('signal 5: a CENTERED paragraph indent is positioning, not a level (no pr node)', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 3859, jc: 'center', text: 'SECTION 26 0513.01' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.signalUsed).toBe(3);
+  });
+
+  it('signal 5: a RIGHT-aligned paragraph indent is positioning, not a level', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 1728, jc: 'right', text: 'Right aligned footer-ish line.' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.signalUsed).toBe(3);
+  });
+
+  // A JUSTIFIED (both) paragraph is normal flow — its indent IS meaningful, so Signal 5
+  // must still fire (only center/right positioning is excluded).
+  it('signal 5: a JUSTIFIED (both) paragraph still classifies from indentation', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 576, jc: 'both', text: 'Justified body paragraph text.' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(5);
+  });
+
   it('indent alone never creates a PART — negative-indent "SUMMARY OF CHANGE(S):" preamble (08 14 16)', () => {
     // Regression (08 1416 Flush Wood Doors.docx): a preamble line "SUMMARY OF
     // CHANGE(S):" with a slight NEGATIVE left indent (-86 twips), no numbering, no

@@ -33,6 +33,7 @@ interface ParagraphFields {
   readonly ilvl: number | undefined;
   readonly leftIndent: number | undefined;
   readonly outlineLvl: number | undefined;
+  readonly jc: string | undefined;
   readonly sourceFacts: SourceFacts | undefined;
 }
 
@@ -99,6 +100,14 @@ function resolveOutlineLvl(pPr: Record<string, unknown> | undefined): number | u
   if (!str) return undefined;
   const n = parseInt(str, 10);
   return isNaN(n) ? undefined : n;
+}
+
+// Paragraph alignment (w:jc @w:val). A centered/right-aligned paragraph's leftIndent
+// is horizontal positioning, not outline depth — the inference engine (Signal 5) reads
+// this to avoid promoting a centered title to a spurious deep-pr node.
+function resolveJustification(pPr: Record<string, unknown> | undefined): string | undefined {
+  if (!pPr) return undefined;
+  return getAttrVal(pPr['w:jc']) || undefined;
 }
 
 function runIsVanish(
@@ -174,6 +183,7 @@ function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxP
     ...(fields.ilvl !== undefined ? { ilvl: fields.ilvl } : {}),
     ...(fields.leftIndent !== undefined ? { leftIndent: fields.leftIndent } : {}),
     ...(fields.outlineLvl !== undefined ? { outlineLvl: fields.outlineLvl } : {}),
+    ...(fields.jc !== undefined ? { jc: fields.jc } : {}),
     ...(fields.sourceFacts !== undefined ? { sourceFacts: fields.sourceFacts } : {}),
   };
 }
@@ -190,6 +200,7 @@ function parseParagraph(
   const { numId, ilvl } = resolveNumPr(pPr, styleId, numberingMap);
   const leftIndent = resolveLeftIndent(pPr);
   const outlineLvl = resolveOutlineLvl(pPr);
+  const jc = resolveJustification(pPr);
   const para: DocxParagraph = {
     text: source?.text ?? extractText(raw),
     isVanish: resolveParagraphVanish(raw, pPr, styleId, styleMap),
@@ -200,6 +211,7 @@ function parseParagraph(
     ilvl,
     leftIndent,
     outlineLvl,
+    jc,
     sourceFacts: source?.sourceFacts,
   });
 }
