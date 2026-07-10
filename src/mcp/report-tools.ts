@@ -2,15 +2,43 @@ import { z } from 'zod';
 import { handleCoordinationReport } from './handlers.js';
 import { handleCompareSpecs } from './reporting-handler.js';
 import { handleGetProjectKeynotes } from './keynotes-handler.js';
+import { handleGetReferenceGraph } from './reference-graph-handler.js';
 import type { ToolRegistrar } from './tool-registry.js';
 
 /** Cross-cutting read-only report tools: project coordination (errors &
- *  omissions), cross-spec comparison (ADR-047), and keynote export (ADR-016).
- *  All `read` tier. */
+ *  omissions), cross-spec comparison (ADR-047), keynote export (ADR-016), and
+ *  the project/library reference graph (#447). All `read` tier. */
 export function registerReportTools(reg: ToolRegistrar): void {
   registerCoordinationTool(reg);
   registerCompareTool(reg);
   registerKeynotesTool(reg);
+  registerReferenceGraphTool(reg);
+}
+
+function registerReferenceGraphTool(reg: ToolRegistrar): void {
+  reg.register(
+    'get_reference_graph',
+    {
+      description:
+        'One-call section-reference graph for a whole project or library (#447). ' +
+        'Returns nodes (in-scope specs: specId, section, title, division, isUmbrella ' +
+        'for a "{division} 00 00" section), edges (section references: sourceSpecId, ' +
+        'targetSection, scope-resolved targetSpecId or null when dangling, citationCount), ' +
+        'and umbrella annotations per division (umbrella present/absent + subordinate ' +
+        'specs that never call it out). Set includeAnchors=true to add capped per-edge ' +
+        'paragraph-anchor lists (see anchorCap in the result). Provide EXACTLY ONE of ' +
+        'projectId (see list_projects) or libraryId (see list_libraries).',
+      inputSchema: {
+        projectId: z.uuid().optional().describe('Project UUID — graph for this project'),
+        libraryId: z.uuid().optional().describe('Library UUID — graph for this library'),
+        includeAnchors: z
+          .boolean()
+          .optional()
+          .describe('Add capped per-edge paragraph anchor lists (default false)'),
+      },
+    },
+    handleGetReferenceGraph
+  );
 }
 
 function registerKeynotesTool(reg: ToolRegistrar): void {

@@ -50,6 +50,7 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['generate_docx', 'read'],
   ['get_hierarchy_report', 'read'], // per-paragraph 5-signal inference scoring (WS2 #424)
   ['coordination_report', 'read'],
+  ['get_reference_graph', 'read'],
   ['get_project_keynotes', 'read'],
   ['list_revit_links', 'read'],
   ['compare_specs', 'read'],
