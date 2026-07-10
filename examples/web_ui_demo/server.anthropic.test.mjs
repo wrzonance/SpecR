@@ -295,3 +295,39 @@ test('an invalid LLM_PROVIDER exits at boot with code 1', async () => {
   const [code] = await once(child, 'exit');
   assert.equal(code, 1);
 });
+
+test('POST /report round cap forces a final turn with tools + tool_choice none', async (t) => {
+  const captured = freshCaptured();
+  captured.alwaysToolUse = true; // model asks for a tool every round
+  const mock = startMock(captured);
+  const mockPort = await listen(mock);
+  const demoPort = 3000 + (process.pid % 500) + 26;
+  const child = spawnDemo(mockPort, demoPort);
+  t.after(() => stopDemo(child, mock));
+  await waitForPort(demoPort);
+
+  const res = await fetch(`http://127.0.0.1:${demoPort}/report`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ request: 'audit the coordination report exhaustively' }),
+  });
+  const events = (await res.text())
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .map((l) => JSON.parse(l));
+
+  const done = events.find((e) => e.type === 'done');
+  assert.ok(done, 'expected a done event');
+  assert.match(done.reply, /^Final:/);
+  assert.equal(done.provider, 'anthropic');
+
+  // runReport wires its own per-request callModel and signals the forced
+  // final turn with [] (not undefined) — pin that this path also re-sends the
+  // remembered tools and forbids new calls, keeping the tool history valid.
+  const finalBody = captured.anthropicBodies[captured.anthropicBodies.length - 1];
+  assert.deepEqual(finalBody.tool_choice, { type: 'none' });
+  assert.ok(finalBody.tools.length > 0, 'final turn must still define tools');
+  for (const earlier of captured.anthropicBodies.slice(0, -1)) {
+    assert.ok(!('tool_choice' in earlier), 'normal report rounds let the model decide');
+  }
+});
