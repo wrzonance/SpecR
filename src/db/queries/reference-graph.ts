@@ -149,7 +149,10 @@ function umbrellaAnnotations(
   refRows: readonly GraphRefRowInput[]
 ): UmbrellaDivision[] {
   const present = nodes.map((n) => ({ specId: n.specId, section: n.section }));
-  const sectionRefs = refRows.map((r) => ({ sourceSpecId: r.sourceSpecId, value: r.targetSection }));
+  const sectionRefs = refRows.map((r) => ({
+    sourceSpecId: r.sourceSpecId,
+    value: r.targetSection,
+  }));
   const notCalledOut = notCalledOutByDivision(
     buildUmbrellaCalloutFindings(present, sectionRefs).findings
   );

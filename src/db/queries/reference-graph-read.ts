@@ -81,7 +81,9 @@ async function assembleGraph(
     nodes.map((n) => n.specId),
     client
   );
-  return buildReferenceGraph({ type: scope.kind, id: scope.id }, nodes, refRows, { includeAnchors });
+  return buildReferenceGraph({ type: scope.kind, id: scope.id }, nodes, refRows, {
+    includeAnchors,
+  });
 }
 
 /**

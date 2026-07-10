@@ -46,7 +46,14 @@ async function insertRef(
   await pool.query(
     `INSERT INTO spec_references (source_spec_id, source_paragraph_id, target_type, target_spec_section, target_spec_id, reference_text, is_broken)
      VALUES ($1,$2,'section',$3,$4,$5,$6)`,
-    [sourceSpecId, paragraphId, targetSection, targetSpecId, `ref ${targetSection}`, targetSpecId === null]
+    [
+      sourceSpecId,
+      paragraphId,
+      targetSection,
+      targetSpecId,
+      `ref ${targetSection}`,
+      targetSpecId === null,
+    ]
   );
 }
 
