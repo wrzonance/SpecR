@@ -25,12 +25,15 @@ export interface CreateLibraryInput {
 }
 
 // A spec owned by a library, with its paragraph count — the shape a library
-// browser lists (GET /libraries/:id/specs).
+// browser lists (GET /libraries/:id/specs). `withdrawnAt` is the ADR-030
+// tombstone: null for an active master, an ISO-8601 timestamp for a withdrawn
+// one (only surfaced when the listing opts into withdrawn masters).
 export interface LibrarySpec {
   readonly specId: string;
   readonly section: string;
   readonly title: string;
   readonly nodeCount: number;
+  readonly withdrawnAt: string | null;
 }
 
 interface LibraryRow {
@@ -203,33 +206,39 @@ interface LibrarySpecRow {
   readonly section: string;
   readonly title: string;
   readonly node_count: number;
+  readonly withdrawn_at: Date | null;
 }
 
 /**
  * Lists the specs owned by a library with each spec's paragraph node count,
  * ordered by section. The library's existence is the caller's concern (404).
+ *
+ * Withdrawn masters (ADR-030) are hidden by default — they remain GET-able by
+ * id and restorable via `POST /specs/:id/restore`. Pass `includeWithdrawn` to
+ * surface them (with a non-null `withdrawnAt`) so a browse-and-restore flow can
+ * discover the spec UUID `restore` needs (#416).
  */
 export async function listLibrarySpecs(
   libraryId: string,
+  includeWithdrawn = false,
   db: Queryable = pool
 ): Promise<readonly LibrarySpec[]> {
   try {
     const result = await db.query<LibrarySpecRow>(
-      // Withdrawn masters (ADR-030) are hidden from the library listing — they
-      // remain GET-able by id (with withdrawnAt surfaced) and restorable.
-      `SELECT s.id, s.section, s.title, COUNT(p.id)::int AS node_count
+      `SELECT s.id, s.section, s.title, s.withdrawn_at, COUNT(p.id)::int AS node_count
          FROM specs s
          LEFT JOIN paragraphs p ON p.spec_id = s.id
-        WHERE s.library_id = $1 AND s.withdrawn_at IS NULL
-        GROUP BY s.id, s.section, s.title
+        WHERE s.library_id = $1 AND ($2 OR s.withdrawn_at IS NULL)
+        GROUP BY s.id, s.section, s.title, s.withdrawn_at
         ORDER BY s.section`,
-      [libraryId]
+      [libraryId, includeWithdrawn]
     );
     return result.rows.map((row) => ({
       specId: row.id,
       section: row.section,
       title: row.title,
       nodeCount: row.node_count,
+      withdrawnAt: row.withdrawn_at ? row.withdrawn_at.toISOString() : null,
     }));
   } catch (err) {
     throw new DatabaseError(`listLibrarySpecs: query failed for library ${libraryId}`, {

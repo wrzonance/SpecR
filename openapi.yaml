@@ -2027,7 +2027,10 @@ paths:
       summary: List the specs owned by a library
       description: >
         Returns the specs owned by the library, each with its paragraph node
-        count, ordered by section.
+        count and `withdrawnAt` tombstone, ordered by section. Withdrawn masters
+        (ADR-030) are hidden by default; pass `includeWithdrawn=true` to surface
+        them so a browse-and-restore flow can discover the spec UUID that
+        `POST /specs/{id}/restore` needs.
       tags: [libraries]
       parameters:
         - name: id
@@ -2037,6 +2040,13 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: includeWithdrawn
+          in: query
+          required: false
+          description: Include withdrawn masters (ADR-030), each with its withdrawnAt timestamp.
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Specs owned by the library
@@ -6580,7 +6590,7 @@ components:
 
     LibrarySpec:
       type: object
-      required: [specId, section, title, nodeCount]
+      required: [specId, section, title, nodeCount, withdrawnAt]
       properties:
         specId:
           type: string
@@ -6592,6 +6602,13 @@ components:
         nodeCount:
           type: integer
           description: Number of paragraph nodes in the spec's tree
+        withdrawnAt:
+          type: [string, 'null']
+          format: date-time
+          description: >
+            Soft-delete (withdraw) tombstone (ADR-030): ISO-8601 when the master
+            is withdrawn, `null` when active. Withdrawn rows appear only when the
+            request passes `includeWithdrawn=true`.
 
     EditingConvention:
       type: object
