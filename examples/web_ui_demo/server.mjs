@@ -223,11 +223,11 @@ async function serveStatic(req, res, url) {
   }
 }
 
-// ── OpenAI ⇄ MCP chat bridge ───────────────────────────────────────────────
-// The browser POSTs its conversation to /chat. We run OpenAI chat-completions
-// with tool-calling, and every tool call the model makes is executed against
-// SpecR's stateless MCP endpoint (POST {API_BASE}/mcp). The key never leaves
-// this process. MVP: non-streaming, read-and-write MCP tools as SpecR exposes.
+// ── LLM ⇄ MCP chat bridge ─────────────────────────────────────────────────
+// The browser POSTs its conversation to /chat. We run the active provider's
+// chat loop (OpenAI or Anthropic) with tool-calling, and every tool call the
+// model makes is executed against SpecR's stateless MCP endpoint (POST {API_BASE}/mcp).
+// The key never leaves this process. MVP: non-streaming, read-and-write MCP tools as SpecR exposes.
 
 const SYSTEM_PROMPT = [
   'You are the SpecR assistant, embedded in a CSI MasterFormat specification tool.',
@@ -433,7 +433,7 @@ function dedupeAnchors(anchors) {
   return out;
 }
 
-// The tool-calling loop: ask OpenAI, run any tool calls against MCP, feed results
+// The tool-calling loop: ask the active provider's model, run any tool calls against MCP, feed results
 // back, repeat until the model answers with plain text or we hit the round cap.
 // The answering turn's navigation anchors (last successful enriched tool call)
 // ride back as `focus` so the browser can highlight the sections in the active tab.
@@ -445,7 +445,7 @@ async function runChat(userMessages, callModel) {
   for (let round = 0; round < CHAT_MAX_TOOL_ROUNDS; round++) {
     const completion = await callModel(messages, tools);
     const message = completion.choices?.[0]?.message;
-    if (!message) throw new Error('OpenAI returned no message');
+    if (!message) throw new Error('model returned no message');
     messages.push(message);
     const calls = message.tool_calls;
     if (!calls || calls.length === 0) {
@@ -527,7 +527,7 @@ async function handleChat(req, res) {
 // ── Grounded reporting bridge (#353) ────────────────────────────────────────
 // POST /report streams the agent's tool-calling steps live as newline-delimited
 // JSON (one object per line: step | usage | done | error). It reuses the same
-// MCP + OpenAI plumbing as /chat, but hands the model only read-only tools — the
+// MCP + LLM plumbing as /chat, but hands the model only read-only tools — the
 // composer cannot mutate state, and every citation traces to a real paragraph.
 
 function reportEmitter(res) {
