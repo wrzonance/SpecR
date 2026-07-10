@@ -105,6 +105,10 @@ pnpm load:files 'docs/references/UFGS/**/*.SEC'
 
 Development workflow, testing rules, and local Postgres notes live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
+### Deployment & security
+
+The API is **unauthenticated** until auth lands (#43): both the REST surface and the write-capable MCP tools accept any request, and the server binds all interfaces. **Keep it behind a trusted network** (localhost, a private LAN, or a VPN) — do not expose it to the public internet. At startup SpecR logs a `warn` restating this whenever no authentication is configured; the warning goes silent automatically once #43 adds real auth.
+
 ## Architecture
 
 The full design is in [ARCHITECTURE.md](ARCHITECTURE.md). The short version:
