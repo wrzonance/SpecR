@@ -180,6 +180,25 @@ describe('planLabelStrip (single-dot article number — only when it IS the labe
     expect(planLabelStrip('2.1 kHz reference clock', '2.1')).toBeNull();
   });
 
+  // Codex PR #432: pr-tier callers pass requireUpper=false. A pr item is classified by
+  // its opening marker and its content is arbitrary prose that often starts lowercase or
+  // numeric, so the article uppercase guard must NOT apply — strip on label-equality alone.
+  it('requireUpper=false strips a matching label before lowercase/numeric content (pr items)', () => {
+    expect(planLabelStrip('a. install anchors', 'a.', false)?.text).toBe('install anchors');
+    expect(planLabelStrip('1. clean the surface', '1.', false)?.text).toBe('clean the surface');
+    expect(planLabelStrip('B. Okonite Company', 'B.', false)?.text).toBe('Okonite Company');
+  });
+
+  it('default (requireUpper=true) still keeps the article guard for lowercase content', () => {
+    expect(planLabelStrip('a. install anchors', 'a.')).toBeNull();
+    expect(planLabelStrip('1. clean the surface', '1.')).toBeNull();
+  });
+
+  it('requireUpper=false still needs the label to equal the token, and content to remain', () => {
+    expect(planLabelStrip('a. install anchors', 'b.', false)).toBeNull(); // wrong label
+    expect(planLabelStrip('a.', 'a.', false)).toBeNull(); // no content
+  });
+
   // KNOWN AMBIGUITY: a title starting with a digit ("1.2 600 V Power Receptacle") is
   // indistinguishable from a measurement ("1.2 600 volts minimum") — so it is left intact
   // rather than risk destroying a value. No data loss — a genuine digit-leading heading

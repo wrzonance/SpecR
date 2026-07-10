@@ -72,6 +72,42 @@ describe('parseDocument — text extraction', () => {
     const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
     expect(result[0]?.text).toBe('09 91 26');
   });
+
+  // Regression: a run <w:tab/> is real whitespace in the rendered text — often the ONLY
+  // delimiter in hand-authored outlines ("1.1<tab>SUMMARY", "A.<tab>General"). Dropping it
+  // de-spaced the number into the title ("1.1SUMMARY"), defeating every Signal-4 text
+  // pattern (all require \s after the number) so the heading fell through to a wrong
+  // signal and its outline label never stripped.
+  it('preserves a run <w:tab/> as a tab (manual-outline delimiter, not dropped)', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>1.1</w:t></w:r><w:r><w:tab/><w:t>SUMMARY</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.text).toBe('1.1\tSUMMARY');
+  });
+
+  // The same drop silently CONCATENATED words split across a tab in body prose
+  // ("wireless<tab>signals" → "wirelesssignals") across the DOCX corpus — a content-
+  // fidelity loss, not just a hierarchy miss.
+  it('does not concatenate words separated by a <w:tab/> (content fidelity)', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>wireless</w:t></w:r><w:r><w:tab/><w:t>signals</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.text).toBe('wireless\tsignals');
+  });
+
+  // A pPr > w:tabs > w:tab is a tab-STOP DEFINITION, not content: it must never inject a
+  // phantom tab into paragraph text now that a content <w:tab/> renders as whitespace
+  // (mirrors merge/extract.ts PROPERTY_TAGS guard).
+  it('does NOT inject a phantom tab from a pPr tab-stop definition', () => {
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="720"/></w:tabs></w:pPr>` +
+        `<w:r><w:t>clean</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.text).toBe('clean');
+  });
 });
 
 describe('parseDocument — pPr field extraction', () => {
@@ -98,6 +134,47 @@ describe('parseDocument — pPr field extraction', () => {
     const xml = makeDocXml(makePara({ text: 'text', outlineLvl: 2 }));
     const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
     expect(result[0]?.outlineLvl).toBe(2);
+  });
+
+  it('extracts justification (w:jc) so Signal 5 can ignore a centered indent', () => {
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:jc w:val="center"/><w:ind w:left="3859"/></w:pPr>` +
+        `<w:r><w:t>SECTION 26 0513.01</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.jc).toBe('center');
+    expect(result[0]?.leftIndent).toBe(3859);
+  });
+
+  // Codex adversarial review (PR #432): Word commonly stores a title's centering in its
+  // paragraph STYLE, not the paragraph. When there is no direct w:jc, resolve the
+  // style's basedOn-resolved alignment so Signal 5 still ignores a style-centered title's
+  // indent (which would otherwise become a spurious deep-pr node).
+  it('resolves style-inherited justification when the paragraph has no direct w:jc', () => {
+    const styles = buildStyleMap(
+      `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+        `<w:style w:styleId="Title" w:type="paragraph"><w:name w:val="Title"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style>` +
+        `</w:styles>`
+    );
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:pStyle w:val="Title"/><w:ind w:left="3859"/></w:pPr>` +
+        `<w:r><w:t>SECTION 26 0513.01</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), styles);
+    expect(result[0]?.jc).toBe('center');
+  });
+
+  it('prefers a direct w:jc over the paragraph style alignment', () => {
+    const styles = buildStyleMap(
+      `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+        `<w:style w:styleId="Title" w:type="paragraph"><w:name w:val="Title"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style>` +
+        `</w:styles>`
+    );
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:pStyle w:val="Title"/><w:jc w:val="left"/></w:pPr><w:r><w:t>text</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), styles);
+    expect(result[0]?.jc).toBe('left');
   });
 
   it('detects vanish', () => {

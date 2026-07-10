@@ -145,14 +145,24 @@ function escapeRegExp(s: string): string {
  * open with a lowercase word or a digit. Requiring `[A-Z]` after the label therefore
  * strips genuine headings while preserving values — and it is strictly MORE
  * conservative than a bare match, so it can only ever keep more data, never lose more.
- * Returns null when the leading number is not this node's label, when a non-uppercase
- * character follows, or when stripping would empty the text.
+ * Returns null when the leading number is not this node's label, when the uppercase
+ * guard is on and a non-uppercase character follows, or when stripping would empty text.
+ *
+ * `requireUpper` (default true) is the article guard above. Pr-tier items pass it FALSE
+ * (Codex PR #432): a pr node was classified Signal-4 BECAUSE its text opens with a list
+ * marker ("A.", "1.", "a."), and the label-equality gate already confirms that marker is
+ * this node's label — but pr content is arbitrary prose that commonly starts lowercase or
+ * numeric ("a. install anchors", "1. acceptance criteria"), so the uppercase guard would
+ * wrongly leave those labels un-stripped and doubled. Pr items only require that some
+ * content follows the label.
  */
 export function planLabelStrip(
   text: string,
-  label: string
+  label: string,
+  requireUpper = true
 ): { text: string; removed: number } | null {
-  const re = new RegExp(`^\\s*${escapeRegExp(label)}[\\s.:—–-]+(?=[A-Z])`);
+  const lookahead = requireUpper ? '(?=[A-Z])' : '(?=\\S)';
+  const re = new RegExp(`^\\s*${escapeRegExp(label)}[\\s.:—–-]+${lookahead}`);
   const match = re.exec(text);
   if (!match) return null;
   const stripped = text.slice(match[0].length).trim();

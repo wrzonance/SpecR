@@ -8,6 +8,7 @@ function emptyStyleMap(): StyleMap {
   return {
     styles: new Map(),
     resolvedNumPr: new Map(),
+    resolvedJc: new Map(),
     vanishStyleIds: new Set(),
     vanishCharStyleIds: new Set(),
   };
@@ -86,6 +87,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['Heading1', { styleId: 'Heading1', name: 'heading 1' }]]),
       resolvedNumPr: new Map([['Heading1', { numId: 1, ilvl: 0 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -102,6 +104,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', suppressesNumbering: true }]]),
       resolvedNumPr: new Map([['PR1lc', { numId: 1, ilvl: 4 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -125,6 +128,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
       resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -146,6 +150,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
       resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -165,6 +170,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
       resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -183,6 +189,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['SPECText1', { styleId: 'SPECText1', name: 'SPEC Text 1' }]]),
       resolvedNumPr: new Map([['SPECText1', { numId: 2, ilvl: 0 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -199,6 +206,7 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     const styleMap: StyleMap = {
       styles: new Map([['Heading2', { styleId: 'Heading2', name: 'heading 2' }]]),
       resolvedNumPr: new Map([['Heading2', { numId: 1, ilvl: 1 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -226,9 +234,63 @@ describe('classifyParagraphs — signals 4, 5, and fallback', () => {
     expect(result[0]?.signalUsed).toBe(4);
   });
 
+  // Regression (tab-delimited manual outline): a hand-authored article uses a TAB
+  // between the typed number and the title ("1.1<tab>SUMMARY"), the only delimiter.
+  // The Signal-4 patterns require \s after the number — a tab is \s, so the article is
+  // recognized. This pins the paired fix in text extraction (source-facts.ts / document.ts):
+  // when the tab was dropped, text became "1.1SUMMARY" and this fell through to a wrong
+  // signal. Article via Signal 4 is what lets its outline label strip downstream.
+  it('signal 4: a tab-delimited manual outline "1.1\\tSUMMARY" classifies as article', () => {
+    const result = classifyParagraphs(
+      [makePara({ text: '1.1\tSUMMARY' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(4);
+  });
+
   it('signal 5: classifies via indentation when signals 1+2+4 absent', () => {
     const result = classifyParagraphs(
       [makePara({ leftIndent: 576, text: 'Lorem ipsum dolor sit amet.' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('article');
+    expect(result[0]?.signalUsed).toBe(5);
+  });
+
+  // Regression (centered-title junk root): a centered heading ("SECTION 26 0513.01",
+  // the section title) carries a large SYMMETRIC w:ind (centering padding), not outline
+  // depth. Signal 5 rounded 3859/576 ≈ 7 → pr6, making the section header a spurious
+  // deep-pr root that inflated the part ordinal downstream (article labels rendered
+  // "3.1" instead of "1.1" and never stripped). A centered/right-aligned paragraph is
+  // never a hierarchy node, so indentation must not fire for it.
+  it('signal 5: a CENTERED paragraph indent is positioning, not a level (no pr node)', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 3859, jc: 'center', text: 'SECTION 26 0513.01' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.signalUsed).toBe(3);
+  });
+
+  it('signal 5: a RIGHT-aligned paragraph indent is positioning, not a level', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 1728, jc: 'right', text: 'Right aligned footer-ish line.' })],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(result[0]?.nodeType).toBe('continuation');
+    expect(result[0]?.signalUsed).toBe(3);
+  });
+
+  // A JUSTIFIED (both) paragraph is normal flow — its indent IS meaningful, so Signal 5
+  // must still fire (only center/right positioning is excluded).
+  it('signal 5: a JUSTIFIED (both) paragraph still classifies from indentation', () => {
+    const result = classifyParagraphs(
+      [makePara({ leftIndent: 576, jc: 'both', text: 'Justified body paragraph text.' })],
       numMap(1),
       emptyStyleMap()
     );
@@ -306,6 +368,7 @@ describe('classifyParagraphs — reserved-low-level (articleIlvl=3) regressions'
         ['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', suppressesNumbering: true, basedOn: 'PR1' }],
       ]),
       resolvedNumPr: new Map([['PR1', { numId: 2, ilvl: 4 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -330,6 +393,7 @@ describe('classifyParagraphs — reserved-low-level (articleIlvl=3) regressions'
         ['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', next: 'PR1' }],
       ]),
       resolvedNumPr: new Map([['PR1', { numId: 1, ilvl: 4 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -349,6 +413,7 @@ describe('classifyParagraphs — reserved-low-level (articleIlvl=3) regressions'
         ['PR2lc', { styleId: 'PR2lc', name: 'PR2lc', next: 'PR2' }],
       ]),
       resolvedNumPr: new Map([['PR2', { numId: 1, ilvl: 5 }]]),
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -364,6 +429,7 @@ describe('classifyParagraphs — reserved-low-level (articleIlvl=3) regressions'
     const styleMap: StyleMap = {
       styles: new Map([['PR1lc', { styleId: 'PR1lc', name: 'PR1lc', next: 'PR1' }]]),
       resolvedNumPr: new Map(), // no base PR1 numbering to inherit
+      resolvedJc: new Map(),
       vanishStyleIds: new Set(),
       vanishCharStyleIds: new Set(),
     };
@@ -618,6 +684,116 @@ describe('buildTree — Pass 2: tree structure', () => {
     const tree = buildTree(classified, '01', 'T', 'unknown');
     // first article's label is "1.1"; typed "1.9" ≠ label → kept verbatim
     expect(tree.parts[0]?.children[0]?.text).toBe('1.9 RELATED SECTIONS');
+  });
+
+  // The same label-match strip extends BELOW the article tier: a hand-authored
+  // manufacturer list types its pr-label ("A. General Cable"), which the renderer's own
+  // getLabel re-prepends, doubling to "A. A. General Cable". Strip the typed label when it
+  // equals the pr node's sibling-derived CSI label ("A." at ord 0), mirroring the article
+  // rule. Only Signal-4 (manual text-outline) pr nodes are eligible.
+  it('strips a manual pr-label when it equals the computed label ("A. General" → "General")', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 ACCEPTABLE MANUFACTURERS' }),
+        makePara({ text: 'A. General Cable' }), // pr1 ord 0 → label "A." → strip
+        makePara({ text: 'B. Okonite Company' }), // pr1 ord 1 → label "B." → strip
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    expect(classified[2]?.signalUsed).toBe(4);
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children.map((c) => c.text)).toEqual(['General Cable', 'Okonite Company']);
+  });
+
+  // Multi-tier: a numbered sub-list ("1. Authority …") that genuinely sits at its typed
+  // position ("1." at ord 0) loses its duplicate; the position must match the CSI label.
+  it('strips manual pr2 numeric labels at their matching position ("1. Authority" → "Authority")', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 DEFINITIONS' }),
+        makePara({ text: '1. Authority having jurisdiction' }), // pr2 ord 0 → label "1." → strip
+        makePara({ text: '2. Ethylene-propylene rubber' }), // pr2 ord 1 → label "2." → strip
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children.map((c) => c.text)).toEqual([
+      'Authority having jurisdiction',
+      'Ethylene-propylene rubber',
+    ]);
+  });
+
+  // Codex PR #432: a pr item's content often starts lowercase/numeric ("1. clean the
+  // surface", "a. install anchors"). The article-only uppercase guard would leave the
+  // matching label un-stripped and doubled; pr items strip on label-equality alone.
+  it('strips a manual pr-label even when the content starts lowercase ("1. clean" → "clean")', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 EXECUTION' }),
+        makePara({ text: '1. clean the surface' }), // pr2 ord 0 → label "1.", lowercase content
+        makePara({ text: '2. apply primer' }), // pr2 ord 1 → label "2."
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children.map((c) => c.text)).toEqual(['clean the surface', 'apply primer']);
+  });
+
+  // The article uppercase guard is UNCHANGED: a lowercase decimal-prose line at its
+  // coincidental label position is still preserved (no data loss on measurements).
+  it('still preserves a lowercase decimal-prose article at its label position (guard intact)', () => {
+    const classified = classifyParagraphs(
+      [makePara({ text: 'PART 1 - GENERAL' }), makePara({ text: '1.1 inches of clearance min' })],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    expect(tree.parts[0]?.children[0]?.text).toBe('1.1 inches of clearance min');
+  });
+
+  // Safety: a pr-label that is NOT the node's computed label at its position is kept
+  // verbatim (never guess a strip).
+  it('does NOT strip a pr-label that is not the computed label at its position', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 SUMMARY' }),
+        makePara({ text: 'C. Misnumbered item at first position' }), // pr1 ord 0 → "A." ≠ "C." → keep
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const pr = tree.parts[0]?.children[0]?.children[0];
+    expect(pr?.text).toBe('C. Misnumbered item at first position');
+  });
+
+  // Safety: a Word/style-NUMBERED pr item (Signal 1/2) gets its "A." from the numbering
+  // definition, so its VISIBLE text is content — never stripped, even when it opens with a
+  // letter that matches its label. Only manual (Signal-4) outlines are touched.
+  it('does NOT strip a NUMBERED pr item whose text opens with its label letter (content)', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 SUMMARY' }),
+        makePara({ text: 'A. Datum reference frame', numId: 5, ilvl: 2 }), // Signal 1 → pr1, content
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    expect(classified[2]?.signalUsed).toBe(1);
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const pr = tree.parts[0]?.children[0]?.children[0];
+    expect(pr?.text).toBe('A. Datum reference frame');
   });
 
   // Codex adversarial review (P2 data-loss): the label-match strip must run ONLY on

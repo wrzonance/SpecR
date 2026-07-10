@@ -61,6 +61,10 @@ export interface StyleInfo {
   readonly suppressesNumbering?: boolean;
   readonly isVanish?: boolean;
   readonly outlineLvl?: number;
+  // w:jc alignment declared in the style's own pPr (Word commonly stores title
+  // alignment in the style, not the paragraph). Resolved through basedOn into
+  // StyleMap.resolvedJc so Signal 5 can ignore a style-centered paragraph's indent.
+  readonly jc?: string;
   readonly next?: string;
 }
 
@@ -68,6 +72,8 @@ export interface StyleMap {
   readonly styles: ReadonlyMap<string, StyleInfo>;
   // Effective numPr for each style after walking basedOn chain
   readonly resolvedNumPr: ReadonlyMap<string, StyleNumPr>;
+  // Effective w:jc alignment for each style after walking basedOn chain
+  readonly resolvedJc: ReadonlyMap<string, string>;
   readonly vanishStyleIds: ReadonlySet<string>;
   readonly vanishCharStyleIds: ReadonlySet<string>;
 }
@@ -81,6 +87,10 @@ export interface DocxParagraph {
   readonly ilvl?: number;
   readonly leftIndent?: number; // twips (1/1440 inch)
   readonly outlineLvl?: number;
+  // w:jc alignment ('center' | 'right' | 'end' | 'both' | 'left' | 'start' | …). A
+  // centered/right-aligned paragraph's leftIndent is horizontal positioning, not outline
+  // depth, so Signal 5 (indentation) must not read a level from it.
+  readonly jc?: string;
   readonly isVanish: boolean;
   readonly sourceFacts?: SourceFacts;
 }

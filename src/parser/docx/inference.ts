@@ -105,7 +105,15 @@ function trySignal4(para: DocxParagraph): SignalHit | null {
   return { nodeType: match.nodeType, normalizedIlvl: match.normalizedIlvl, signal: 4 };
 }
 
+// w:jc alignments whose leftIndent is horizontal positioning, not outline depth:
+// centered and right-aligned (end === right in LTR) paragraphs. A centered title carries
+// a large symmetric indent purely to center it; reading a level from that indent
+// promoted the section header to a spurious deep-pr root. Left/start/both/distribute are
+// normal flow where indentation genuinely signals nesting, so Signal 5 still runs.
+const NON_OUTLINE_JC = new Set(['center', 'right', 'end']);
+
 function trySignal5(para: DocxParagraph): SignalHit | null {
+  if (para.jc !== undefined && NON_OUTLINE_JC.has(para.jc)) return null;
   const estimated = matchIndentSignal(para.leftIndent);
   if (estimated === null) return null;
   const nodeType = NODE_TYPES_BY_NORMALIZED_ILVL[estimated];
@@ -338,14 +346,15 @@ function nodeContent(cp: ClassifiedParagraph): {
 // Structural nodes only. classifyParagraphs routes every vanish/note paragraph to
 // a 'continuation' (handled by makeContinuationNode), so a cp reaching makeNode is
 // always visible, non-note, structural content — its type maps straight through.
-// A Signal-4 (manual text-outline) article records its id in `s4ArticleIds` so the
-// label-strip post-pass touches ONLY manual outlines — a Word/style-numbered article's
-// visible text is real content, never a typed label (Codex adversarial review).
+// A Signal-4 (manual text-outline) article OR pr node records its id in `s4NodeIds` so
+// the label-strip post-pass touches ONLY manual outlines — a Word/style-numbered node's
+// visible text is real content, never a typed label (Codex adversarial review). Parts are
+// excluded: their "PART n -" prefix is stripped inline (planPartStrip), not by label match.
 function makeNode(
   cp: ClassifiedParagraph,
   children: SpecNode[],
   source: Source,
-  s4ArticleIds: Set<string>
+  s4NodeIds: Set<string>
 ): SpecNode {
   const content = nodeContent(cp);
   const inference = scoreHierarchyConfidence(
@@ -365,7 +374,7 @@ function makeNode(
       ...(inference ? { inference } : {}),
     },
   };
-  if (cp.signalUsed === 4 && cp.nodeType === 'article') s4ArticleIds.add(node.id);
+  if (cp.signalUsed === 4 && cp.nodeType !== 'part') s4NodeIds.add(node.id);
   return node;
 }
 
@@ -377,11 +386,11 @@ function drainTop(
   stack: StackEntry[],
   roots: SpecNode[],
   source: Source,
-  s4ArticleIds: Set<string>
+  s4NodeIds: Set<string>
 ): void {
   const popped = stack.pop();
   if (!popped) return;
-  const node = makeNode(popped.cp, popped.children, source, s4ArticleIds);
+  const node = makeNode(popped.cp, popped.children, source, s4NodeIds);
   const top = stack[stack.length - 1];
   const parentChildren = top !== undefined ? top.children : roots;
   parentChildren.push(node);
@@ -431,58 +440,61 @@ export function auditTreeStructure(roots: readonly SpecNode[]): ParseWarning[] {
   return warnings;
 }
 
-// Strip an article's author-typed outline number IFF it equals the article's own
-// render-derived CSI label ("P.n"). This is the only reliable way to tell an outline
-// LABEL ("1.2 RELATED SECTIONS", where 1.2 IS the article's position) from a decimal
-// VALUE that merely opens the text ("2.1 GHz frequency band"): the value is stripped
-// only in the impossible-to-avoid coincidence that it equals the article's position.
-// Source-fact offsets are rebased onto the shorter text.
-function stripArticleLabel(article: SpecNode, partNumber: number, ordinal: number): SpecNode {
-  const plan = planLabelStrip(article.text, getLabel('article', ordinal, partNumber));
-  if (!plan) return article;
-  const facts = article.meta.sourceFacts;
+// Strip a node's author-typed outline label IFF it equals the node's own render-derived
+// CSI label — the article's "P.n" ("1.2 RELATED SECTIONS") or a pr tier's "A." / "1." /
+// "a." ("A. General Cable"). This is the only reliable way to tell an outline LABEL (which
+// IS the node's position) from a value/content that merely opens with it ("2.1 GHz", "A.
+// Datum reference frame"): the strip fires only when the typed token equals the position's
+// label, so a coincidental value is left verbatim. Source-fact offsets rebase onto the
+// shorter text.
+function stripNodeLabel(node: SpecNode, label: string): SpecNode {
+  // The uppercase-title guard is an ARTICLE concern (tell a heading from a decimal value);
+  // pr items are classified by their opening marker and often carry lowercase/numeric
+  // content, so they strip on label-equality alone (Codex PR #432).
+  const plan = planLabelStrip(node.text, label, node.type === 'article');
+  if (!plan) return node;
+  const facts = node.meta.sourceFacts;
   const meta = facts
-    ? { ...article.meta, sourceFacts: rebaseSourceFacts(facts, plan.removed, plan.text.length) }
-    : article.meta;
-  return { ...article, text: plan.text, meta };
+    ? { ...node.meta, sourceFacts: rebaseSourceFacts(facts, plan.removed, plan.text.length) }
+    : node.meta;
+  return { ...node, text: plan.text, meta };
 }
 
-// Walk a part's children, advancing the CSI ordinal only past numbered siblings
-// (consumesNumber) — exactly as the renderer does — so each article's computed label
-// matches what getLabel would prepend at render time. Only Signal-4 (manual-outline)
-// articles are eligible to strip; a numbered/style-derived article's text is content.
-function stripLabelsUnderPart(
-  part: SpecNode,
-  partNumber: number,
-  s4ArticleIds: ReadonlySet<string>
-): SpecNode {
-  let ordinal = 0;
-  const children = part.children.map((child) => {
-    const next =
-      consumesNumber(child) && child.type === 'article' && s4ArticleIds.has(child.id)
-        ? stripArticleLabel(child, partNumber, ordinal)
-        : child;
-    if (consumesNumber(child)) ordinal += 1;
-    return next;
-  });
-  return { ...part, children };
+// The CSI label a structural node renders with, from its type and sibling ordinal. The
+// article label needs the enclosing part's 1-based number ("1.2"); pr tiers ("A.", "1.",
+// "a.") do not.
+function labelFor(node: SpecNode, ordinal: number, partNumber: number): string {
+  return node.type === 'article'
+    ? getLabel('article', ordinal, partNumber)
+    : getLabel(node.type, ordinal);
 }
 
-// Post-pass over the assembled tree: single-dot article numbers are stripped here (not
-// inline) because a node's position — and therefore its label — is only known once the
-// whole tree exists. Multi-dot pr numbers are already stripped inline (unambiguous).
-function stripArticleOutlineLabels(
-  roots: readonly SpecNode[],
-  s4ArticleIds: ReadonlySet<string>
+// Post-pass over the assembled tree: a node's position — and therefore its label — is only
+// known once the whole tree exists, so single-token article/pr labels ("1.1", "A.", "1.")
+// are stripped here, recursively. (Multi-dot pr numbers were already stripped inline.) The
+// walk mirrors the renderer's renderChildren: advance the ordinal only past numbered
+// siblings (consumesNumber) so each node's computed label equals what getLabel prepends at
+// render. Only Signal-4 (manual-outline) nodes strip; a numbered/style node's text is
+// content. `partNumber` is the enclosing part's 1-based number, threaded to the article
+// label and unused below it.
+function stripOutlineLabels(
+  nodes: readonly SpecNode[],
+  s4NodeIds: ReadonlySet<string>,
+  partNumber: number
 ): SpecNode[] {
-  let partOrdinal = 0;
-  return roots.map((root) => {
-    const next =
-      consumesNumber(root) && root.type === 'part'
-        ? stripLabelsUnderPart(root, partOrdinal + 1, s4ArticleIds)
-        : root;
-    if (consumesNumber(root)) partOrdinal += 1;
-    return next;
+  let ordinal = 0;
+  return nodes.map((node) => {
+    const labeled =
+      consumesNumber(node) && s4NodeIds.has(node.id)
+        ? stripNodeLabel(node, labelFor(node, ordinal, partNumber))
+        : node;
+    const childPartNumber = node.type === 'part' ? ordinal + 1 : partNumber;
+    const withChildren: SpecNode = {
+      ...labeled,
+      children: stripOutlineLabels(labeled.children, s4NodeIds, childPartNumber),
+    };
+    if (consumesNumber(node)) ordinal += 1;
+    return withChildren;
   });
 }
 
@@ -494,9 +506,9 @@ export function buildTree(
 ): SpecTree {
   const roots: SpecNode[] = [];
   const stack: StackEntry[] = [];
-  // Node ids of Signal-4 (manual text-outline) articles — the only articles whose
-  // leading number may be an author-typed label the strip post-pass should remove.
-  const s4ArticleIds = new Set<string>();
+  // Node ids of Signal-4 (manual text-outline) article/pr nodes — the only nodes whose
+  // leading number/letter may be an author-typed label the strip post-pass should remove.
+  const s4NodeIds = new Set<string>();
   let lastNonContChildren: SpecNode[] = roots;
 
   // Empty paragraphs are layout spacing, not content — drop before structuring.
@@ -514,7 +526,7 @@ export function buildTree(
     while (stack.length > 0) {
       const top = stack[stack.length - 1];
       if (top === undefined || top.cp.resolvedIlvl < cp.resolvedIlvl) break;
-      drainTop(stack, roots, source, s4ArticleIds);
+      drainTop(stack, roots, source, s4NodeIds);
     }
 
     const entry: StackEntry = { cp, children: [] };
@@ -523,8 +535,8 @@ export function buildTree(
   }
 
   while (stack.length > 0) {
-    drainTop(stack, roots, source, s4ArticleIds);
+    drainTop(stack, roots, source, s4NodeIds);
   }
 
-  return { id: uuidv4(), section, title, parts: stripArticleOutlineLabels(roots, s4ArticleIds) };
+  return { id: uuidv4(), section, title, parts: stripOutlineLabels(roots, s4NodeIds, 1) };
 }

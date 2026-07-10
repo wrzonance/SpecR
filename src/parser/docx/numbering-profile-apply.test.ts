@@ -40,6 +40,7 @@ function emptyStyleMap(): StyleMap {
   return {
     styles: new Map(),
     resolvedNumPr: new Map(),
+    resolvedJc: new Map(),
     vanishStyleIds: new Set(),
     vanishCharStyleIds: new Set(),
   };

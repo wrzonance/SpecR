@@ -139,6 +139,27 @@ describe('buildStyleMap — basedOn chain resolution', () => {
   });
 });
 
+describe('buildStyleMap — alignment (w:jc) resolution (Codex PR #432)', () => {
+  const JC_STYLES = `<?xml version="1.0"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:styleId="Title" w:type="paragraph"><w:name w:val="Title"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style>
+  <w:style w:styleId="Subtitle" w:type="paragraph"><w:name w:val="Subtitle"/><w:basedOn w:val="Title"/></w:style>
+  <w:style w:styleId="Body" w:type="paragraph"><w:name w:val="Body"/></w:style>
+</w:styles>`;
+
+  it('resolves a direct style w:jc', () => {
+    expect(buildStyleMap(JC_STYLES).resolvedJc.get('Title')).toBe('center');
+  });
+
+  it('resolves inherited w:jc through basedOn (Subtitle → Title)', () => {
+    expect(buildStyleMap(JC_STYLES).resolvedJc.get('Subtitle')).toBe('center');
+  });
+
+  it('styles with no w:jc in chain have no resolvedJc entry', () => {
+    expect(buildStyleMap(JC_STYLES).resolvedJc.has('Body')).toBe(false);
+  });
+});
+
 describe('buildStyleMap — vanish detection', () => {
   it('marks CMT style as vanish from pPr/rPr', () => {
     const map = buildStyleMap(MASTERSPEC_STYLES);
