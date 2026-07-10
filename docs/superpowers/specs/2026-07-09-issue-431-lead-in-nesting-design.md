@@ -69,21 +69,28 @@ typed `1.` unstripped → `a. 1. Authority`. Rejected for that reason.)
 
 ## Where it lives
 
-A new **post-classification sequence pass** — `nestLeadInSublists(classified)` — running
-**between** `classifyParagraphs` and `buildTree` in `inference.ts`. It needs look-ahead
-(the following run) and look-back (the lead-in's structural parent tier), which the
-per-paragraph `classifyOne` cannot provide. It returns a **new** array (immutability) and
-only ever *promotes* lead-in entries. It composes with the existing style-based lead-in
-mechanism (`LEAD_IN_STYLE` / `resolveLeadInNumPr`) — this is the *text/structure*-based
-sibling of that *style*-based one; align naming and placement.
+A new **post-classification sequence pass** — `nestLeadInSublists(classified)` — living in
+its own file `src/parser/docx/lead-in-nesting.ts` and applied at the shared classification
+seam `buildClassification` in `src/parser/docx/index.ts` (which feeds BOTH `parse` →
+`buildTree` and `analyzeDocxStyles` → `deriveTemplate`; see P2-B in ADR-059). It runs
+**after** `classifyParagraphs` and **before** `buildTree`. It needs look-ahead (the following
+run) and look-back (the lead-in's structural parent tier), which the per-paragraph
+`classifyOne` cannot provide. It returns a **new** array (immutability) and only ever
+*promotes* lead-in entries. It composes with the existing style-based lead-in mechanism
+(`LEAD_IN_STYLE` / `resolveLeadInNumPr` in `inference.ts`) — this is the
+*text/structure*-based sibling of that *style*-based one.
 
 ## Trigger (all must hold)
 
-1. Candidate **X** has **no typed outline label of its own** = `signalUsed !== 4` (Signal 4 is
-   the only classifier that reads a marker from the text; Signal 1/2/5 derive the tier without
-   one, so X's text is pure content). Promoting an unlabelled lead-in stays clean; a Signal-4
-   lead-in would double-label itself if promoted. *(The brainstorm wrote `signalUsed ∈ {1,2}`
-   assuming the lead-ins were Word-numbered; they resolve via Signal 5 — see CORRECTION above.)*
+1. Candidate **X** has **no typed outline label of its own** — Signal 4 (the only classifier
+   that reads a marker from the text) **did not fire at all**. That is the COMPLETE predicate:
+   `signalUsed !== 4 && !agreed.includes(4) && !conflicts.some(c => c.signal === 4)`. Signal 4
+   can win, OR merely corroborate (`agreed`), OR dissent (`conflicts`) while Signal 1/2 wins — a
+   `signalUsed !== 4` check alone would let a Word/style-numbered `1. Group:` through and promote
+   it, and `buildTree` would not strip its typed `1.` (strip is gated on a Signal-4 winner) →
+   `A. 1. Group:`. Excluding whenever Signal 4 fired keeps X's text pure content. Signal 1/2/5
+   derive the tier without a marker. *(The brainstorm wrote `signalUsed ∈ {1,2}` assuming the
+   lead-ins were Word-numbered; they resolve via Signal 5 — see CORRECTION above.)*
 2. Immediately followed by a run of **Signal-4** items at the **same resolved tier T** as X.
 3. The run **restarts**: its first item's typed marker is ordinal 1 (`1.`/`A.`/`a.`).
 4. **Promotion room**: T−1 must remain strictly deeper than X's structural parent (the

@@ -130,8 +130,10 @@ agree. The pass is idempotent, so a single application point is safe.
 ## Consequences
 
 - **Fixes** the mixed-scheme double-label: `1.2 REFERENCES` now renders three peer
-  lead-ins — `A. Abbreviations {1..5}`, `B. Definitions {1,2}`, `C. References
-  Standards {…}` — all direct children of the article, markers stripped.
+  lead-ins as direct children of the article. `A. Abbreviations` and `B. Definitions`
+  each nest their `1.`/`2.` sub-list with the typed markers stripped/cleaned; `C.
+  References Standards` is promoted **only** to the correct peer placement — its
+  tangled internal subtree is preserved as-is (#436), not re-labeled.
 - **Surgical.** Keying on the same-tier collision leaves clean documents (no
   collision) untouched. Even with the peer widening, corpus A/B
   (`pnpm fixture:snapshot`/`fixture:diff`): **0 structural regressions across 674
