@@ -16,25 +16,34 @@ Ground-truth current parse of `1.2 REFERENCES`:
 
 ```
 <article> "REFERENCES"
-  <pr2> "Abbreviations and Acronyms:"            ← Word-numbered (numId 9), ends ":"
+  <pr2> "Abbreviations and Acronyms:"            ← Signal 5 (indent); see CORRECTION below
   <pr2> [conf:pr3] "1.  Authority having jurisdiction (AHJ)"   ← typed "1.", Signal-4=pr2, Signal-5(indent)=pr3
   <pr2> [conf:pr3] "2.  Ethylene-propylene rubber (EPR)"
   ... (3.,4.,5. — a self-contained 1–5 restart)
-  <pr2> "Definitions:"                           ← Word-numbered, ends ":"
+  <pr2> "Definitions:"                           ← Signal 5 (indent), ends ":"
   <pr2> [conf:pr3] "1.  NETA ATS: ..."           ← another restart 1–2
   <pr2> [conf:pr3] "2.  ICEA: ..."
-  <pr2> "References Standards:"                   ← Word-numbered, ends ":" (messier subtree — out of scope)
+  <pr2> "References Standards:"                   ← Signal 5 (indent), ends ":" (messier subtree — out of scope)
 ```
 
+**CORRECTION (implementation, 2026-07-09):** the ground-truth above originally called
+the lead-ins "Word-numbered (numId 9)". Verified against the real DOCX, they resolve
+via **Signal 5 (indentation)**, not Signal 1/2: they carry `numId=9` at `ilvl=0`, where
+`ilvlToNodeType(0,…)` returns `'part'`, so Signal 1's PART-heading guard bails (not a PART
+heading, `numId 9` not spec-shaped) and Signal 2 finds no numbering for the `ListParagraph`
+style. The candidacy invariant is therefore **"no typed outline label of its own"** =
+`signalUsed !== 4` (Signal 4 is the only classifier that reads a marker from the text) —
+see the corrected Trigger #1 below and ADR-059.
+
 The author intends the typed `1./2./…` items as **children** of the `":"`-terminated
-lead-in. But the lead-in is Word-numbered at pr2 and the manual items also map to pr2
+lead-in. But the lead-in resolves (via indentation) at pr2 and the manual items also map to pr2
 (`^\d+\.\s` → pr2), so they land as **siblings**. The renderer then labels the manual
 items by position (`2.`,`3.`…) while the typed `1.`,`2.` remain — rendering `2. 1. Authority`.
 
 ## The core insight (why this is surgical)
 
-The defect exists **only** when a Word/style-numbered lead-in and a manual Signal-4
-restart sub-list **collide at the same resolved tier** (both pr2 here). If the sub-list
+The defect exists **only** when a no-typed-label lead-in (numbering/style/indent) and a
+manual Signal-4 restart sub-list **collide at the same resolved tier** (both pr2 here). If the sub-list
 were already deeper, `buildTree` nests it correctly and there is nothing to fix. Keying
 the trigger on that **same-tier collision** means clean documents (no collision) are never
 touched — this is what keeps corpus regressions near zero without using the colon as a hard gate.
@@ -70,8 +79,11 @@ sibling of that *style*-based one; align naming and placement.
 
 ## Trigger (all must hold)
 
-1. Candidate **X** is `signalUsed ∈ {1,2}` (Word/style-numbered — has no typed label of its
-   own, so promoting it stays clean; a Signal-4 lead-in would double-label itself if promoted).
+1. Candidate **X** has **no typed outline label of its own** = `signalUsed !== 4` (Signal 4 is
+   the only classifier that reads a marker from the text; Signal 1/2/5 derive the tier without
+   one, so X's text is pure content). Promoting an unlabelled lead-in stays clean; a Signal-4
+   lead-in would double-label itself if promoted. *(The brainstorm wrote `signalUsed ∈ {1,2}`
+   assuming the lead-ins were Word-numbered; they resolve via Signal 5 — see CORRECTION above.)*
 2. Immediately followed by a run of **Signal-4** items at the **same resolved tier T** as X.
 3. The run **restarts**: its first item's typed marker is ordinal 1 (`1.`/`A.`/`a.`).
 4. **Promotion room**: T−1 must remain strictly deeper than X's structural parent (the
@@ -119,8 +131,8 @@ Wire into the pipeline: `classifyParagraphs → nestLeadInSublists → buildTree
 
 ## Invariants (these become the tests)
 
-1. Word/style lead-in colliding at tier T with a following Signal-4 restart run → lead-in
-   promoted to T−1, run nests as children, typed labels strip clean.
+1. No-typed-label lead-in (`signalUsed !== 4`) colliding at tier T with a following Signal-4
+   restart run → lead-in promoted to T−1, run nests as children, typed labels strip clean.
 2. No collision (sub-list already deeper) → untouched.
 3. Restart marker not ordinal 1 (continuation of outer sequence) → untouched.
 4. No promotion room (parent already at T−1) → untouched (KNOWN AMBIGUITY test).
