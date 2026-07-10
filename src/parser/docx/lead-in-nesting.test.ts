@@ -33,7 +33,9 @@ function scenario(leadInText: string, markers: readonly string[]): ClassifiedPar
   return [
     cp('REFERENCES', ARTICLE, 'article', 4),
     cp(leadInText, PR2, 'pr2', 5),
-    ...markers.map((m) => cp(m, PR2, 'pr2', 4, [{ signal: 5, reportedIlvl: PR3, reportedNodeType: 'pr3' }])),
+    ...markers.map((m) =>
+      cp(m, PR2, 'pr2', 4, [{ signal: 5, reportedIlvl: PR3, reportedNodeType: 'pr3' }])
+    ),
   ];
 }
 
