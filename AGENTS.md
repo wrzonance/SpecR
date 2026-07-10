@@ -6,7 +6,7 @@ Headless REST API for CSI MasterFormat specification automation: round-trip DOCX
 
 ## Talking to users
 
-Two audiences use this repo: **developers** debugging source, and **AEC specifiers / spec editors** who iterate on how their documents parse and may not read TypeScript or OOXML. Read which one is asking and match register.
+Two audiences use this repo: **developers** debugging source, and **AEC specifiers / spec editors / Autodesk Revit users** who iterate on how their documents parse and may not read TypeScript or OOXML. Read which one is asking and match register.
 
 **Scope:** this governs how you *present* a finished answer — not how you reason, read code, or diagnose. Reason at full technical precision and keep exact identifiers (`ilvl`, `w:sdt`, `numId`) verbatim in analysis, code, comments, and commits. Translate to plain terms only at the presentation layer, never in the thinking that gets you there.
 
