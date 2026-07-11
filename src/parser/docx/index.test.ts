@@ -771,6 +771,50 @@ const CPI_PART_DOC = `<?xml version="1.0" encoding="UTF-8"?>
   </w:body>
 </w:document>`;
 
+// ── End-to-end asterisk-rule note region (#292): PART heading, a paired rule-row
+//    delimiter enclosing prose, then ordinary trailing content — through the full
+//    parseDocx pipeline (extract → numbering → styles → document → classify → tree),
+//    not just the classifyParagraphs/buildTree unit boundary (inference-notes.test.ts). ──
+
+const RULE_ROW_DOC = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
+    <w:p><w:r><w:t>*****</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Delete items below not applicable to this project.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>*****</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Ordinary body text after the region closes.</w:t></w:r></w:p>
+  </w:body>
+</w:document>`;
+
+describe('parseDocx — end-to-end asterisk-rule note region (#292)', () => {
+  it('no rule-row text survives anywhere in the tree; enclosed prose is note; trailing content resumes as continuation', async () => {
+    const buffer = await makeDocx({
+      documentXml: RULE_ROW_DOC,
+      numberingXml: STRUCTURED_NUMBERING,
+    });
+    const tree = await parseDocx(buffer);
+
+    // Invariant: no node's full trimmed text anywhere in the tree is a bare
+    // 5-or-more-asterisk run — rule rows produce no SpecNode at all.
+    const ruleRowSurvivors = allNodes(tree.parts).filter((n) => /^\*{5,}$/.test(n.text.trim()));
+    expect(ruleRowSurvivors).toEqual([]);
+
+    const general = tree.parts.find((n) => n.type === 'part' && n.text === 'GENERAL');
+    expect(general).toBeDefined();
+    const children = general?.children ?? [];
+    expect(children).toHaveLength(2);
+
+    const note = children.find(
+      (n) => n.text === 'Delete items below not applicable to this project.'
+    );
+    expect(note?.type).toBe('note');
+
+    const trailing = children.find((n) => n.text === 'Ordinary body text after the region closes.');
+    expect(trailing?.type).toBe('continuation');
+  });
+});
+
 describe('parseDocx — numbering-lvlText PART inference (lvlText "PART %1 -", 0 pStyle links)', () => {
   async function parseCpi() {
     const buffer = await makeDocx({
