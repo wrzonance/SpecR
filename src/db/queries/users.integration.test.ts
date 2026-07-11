@@ -59,6 +59,26 @@ describe('users query module (integration)', () => {
   });
 
   it(
+    'users.label uniqueness is byte-exact, not case-folded: labels differing only in ' +
+      'case resolve to two distinct rows (openapi.yaml: "label is case-sensitive")',
+    async () => {
+      const lowerLabel = label('case-alice');
+      const upperLabel = label('case-ALICE');
+
+      const lower = await resolveOrCreateUserByLabel(lowerLabel);
+      const upper = await resolveOrCreateUserByLabel(upperLabel);
+
+      expect(lower.id).not.toBe(upper.id);
+
+      const { rows } = await pool.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM users WHERE label IN ($1, $2)`,
+        [lowerLabel, upperLabel]
+      );
+      expect(rows[0]?.count).toBe('2');
+    }
+  );
+
+  it(
     'listUsers is deterministic and total: orders by label and reflects every created ' +
       'user, not a subset',
     async () => {

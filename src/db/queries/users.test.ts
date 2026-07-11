@@ -53,14 +53,16 @@ describe('resolveOrCreateUserByLabel', () => {
     expect(first.id).toBe(second.id);
   });
 
-  it('upserts via ON CONFLICT DO UPDATE on the label unique constraint', async () => {
+  it('resolves via a single query call, not check-then-insert (race-free by construction)', async () => {
     const { pool } = await import('../index.js');
     vi.mocked(pool.query).mockResolvedValueOnce({ rows: [userRow()], rowCount: 1 } as never);
     const { resolveOrCreateUserByLabel } = await import('./users.js');
     await resolveOrCreateUserByLabel('Alice', pool);
-    const sql = vi.mocked(pool.query).mock.calls[0]?.[0];
-    expect(sql).toContain('ON CONFLICT');
-    expect(sql).toContain('DO UPDATE');
+    // The invariant this guards: a check-then-insert (SELECT, then conditional INSERT)
+    // would need two round trips and race under concurrent calls for the same label.
+    // A single query call is what makes the upsert race-free — see the integration test
+    // 'concurrent calls for the same label race-free onto a single row'.
+    expect(vi.mocked(pool.query).mock.calls.length).toBe(1);
   });
 
   it('throws DatabaseError with the pg error chained as cause on query failure', async () => {
