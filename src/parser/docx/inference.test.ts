@@ -142,6 +142,17 @@ describe('classifyParagraphs — signal 2 (style resolvedNumPr)', () => {
     expect(result[0]?.signalUsed).toBe(3);
   });
 
+  // #292: isRuleRow requires >=5 bare asterisks and nothing else, so "****** [OR]
+  // ******" is deliberately OUTSIDE its scope (it carries "[OR]" text, not a pure
+  // asterisk run) — it stays on this existing isDecorationSeparator path, unsuppressed,
+  // exactly as asserted above and below.
+  it("#292: a 4-asterisk run is below isRuleRow's 5-asterisk minimum — stays on the decoration path, unsuppressed", () => {
+    const result = classifyParagraphs([makePara({ text: '****' })], numMap(1), emptyStyleMap());
+    expect(result[0]?.suppressed).not.toBe(true);
+    expect(result[0]?.isNote).not.toBe(true);
+    expect(result[0]?.nodeType).toBe('continuation');
+  });
+
   it('decoration separator with a LIVE-numbered part style is still not a part (defense-in-depth)', () => {
     // The numId=0 guard catches DE-numbered separators, but a separator that kept BOTH
     // a part-tier style AND live numbering (numId != 0) would resurrect as a spurious

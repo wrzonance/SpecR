@@ -5,10 +5,10 @@ import {
   matchTextSignal,
   matchIndentSignal,
   isPartHeading,
-  isSpecifierNote,
-  isSpecifierNoteInstruction,
   isDecorationSeparator,
 } from './heuristics.js';
+import { computeNoteRoles, isNoteParagraph } from './note-roles.js';
+import type { NoteRole } from '../../lib/note-delimiters.js';
 import type {
   ClassifiedParagraph,
   DocxParagraph,
@@ -173,21 +173,6 @@ function correctMisalignedArticle(winner: SignalHit, hits: readonly SignalHit[])
   return hits.find((h) => h.nodeType !== 'article') ?? indentHit;
 }
 
-// Specifier notes are editorial metadata, not spec content: banner text in any
-// decoration variant, the visible "reveal the hidden notes" instruction chrome, or
-// a note-named paragraph style (name contains "note"). Footnote/endnote styles are
-// document apparatus, not specifier notes.
-function isNoteParagraph(para: DocxParagraph, styleMap: StyleMap): boolean {
-  if (isSpecifierNote(para.text)) return true;
-  if (isSpecifierNoteInstruction(para.text)) return true;
-  if (!para.styleId) return false;
-  const style = styleMap.styles.get(para.styleId);
-  const label = `${para.styleId} ${style?.name ?? ''}`;
-  // exclusion targets Word's built-in FootnoteText/EndnoteText styles —
-  // bare /foot|end/ would also exclude e.g. AppendixNote ("app-END-ix")
-  return /note/i.test(label) && !/footnote|endnote/i.test(label);
-}
-
 function continuationResult(
   para: DocxParagraph,
   prevNonContIlvl: number,
@@ -206,18 +191,53 @@ function continuationResult(
   };
 }
 
+// The 5-signal cascade (Signals 1/2/4/5 — Signal 3 is the continuation fallback
+// classifyOne applies when this returns no hits). Extracted out of classifyOne so
+// the role/vanish/note/decoration guard clauses above it stay under the ESLint
+// complexity/cognitive-complexity budget (10) — same inputs/outputs as the inline
+// cascade it replaces, no new branching.
+function collectSignalHits(
+  para: DocxParagraph,
+  numberingMap: NumberingMap,
+  styleMap: StyleMap
+): SignalHit[] {
+  const hits: SignalHit[] = [];
+  const s1 = trySignal1(para, numberingMap);
+  if (s1) hits.push(s1);
+  const s2 = trySignal2(para, styleMap, numberingMap);
+  if (s2) hits.push(s2);
+  const s4 = trySignal4(para);
+  if (s4) hits.push(s4);
+  const s5 = trySignal5(para);
+  if (s5) hits.push(s5);
+  return hits;
+}
+
 function classifyOne(
   para: DocxParagraph,
   numberingMap: NumberingMap,
   styleMap: StyleMap,
-  prevNonContIlvl: number
+  prevNonContIlvl: number,
+  role: NoteRole
 ): ClassifiedParagraph {
+  // A rule-row delimiter (an asterisk-only line marking an asterisk-rule-delimited
+  // note region's boundary, #292) is never structural content: it produces NO
+  // SpecNode at all — buildTree drops any paragraph with suppressed: true before
+  // tree assembly. Checked first, ahead of the vanish/note/decoration guards below,
+  // since a rule row can otherwise be vanish- or decoration-shaped and must not fall
+  // through to those branches instead.
+  if (role === 'rule') {
+    return { ...continuationResult(para, prevNonContIlvl, para.isVanish, false), suppressed: true };
+  }
+
   // Hidden + specifier-note paragraphs are non-structural. Both carry meta.vanish
   // (a specifier note is editorial content hidden in the published spec, matching
   // SEC <NTE> semantics), but isNote splits them: a genuine note becomes a 'note'
   // AST node ([NOTE]); hidden non-note body content becomes a suppressed
   // 'continuation' so renderers drop it instead of leaking it as a note (#296).
-  const isNote = isNoteParagraph(para, styleMap);
+  // role === 'note' extends this: a paragraph enclosed by a paired rule-row region
+  // (#292) is a note even when isNoteParagraph's banner/style checks miss it.
+  const isNote = role === 'note' || isNoteParagraph(para, styleMap);
   if (para.isVanish || isNote) {
     return continuationResult(para, prevNonContIlvl, true, isNote);
   }
@@ -231,16 +251,7 @@ function classifyOne(
     return continuationResult(para, prevNonContIlvl, para.isVanish, false);
   }
 
-  const hits: SignalHit[] = [];
-
-  const s1 = trySignal1(para, numberingMap);
-  if (s1) hits.push(s1);
-  const s2 = trySignal2(para, styleMap, numberingMap);
-  if (s2) hits.push(s2);
-  const s4 = trySignal4(para);
-  if (s4) hits.push(s4);
-  const s5 = trySignal5(para);
-  if (s5) hits.push(s5);
+  const hits = collectSignalHits(para, numberingMap, styleMap);
 
   const rawWinner = hits[0];
   if (!rawWinner) {
@@ -261,15 +272,35 @@ function classifyOne(
   };
 }
 
+// The note-region drift signal (#292): a paragraph "carries its own structural
+// numbering" — the proof that an open asterisk wall has drifted out of phase and is
+// swallowing real content — when EITHER Signal 1 (a live positive numId) OR Signal 2
+// (its style resolves to a real tier via trySignal2) fires. Signal 2 is what a
+// text-pattern heading gate cannot see: a style-numbered PART/article/list item with
+// no literal "PART n" text and no direct numId (Codex PR #461). Reuses trySignal2 so
+// the numId=0 / suppressesNumbering / lead-in opt-out logic is never duplicated.
+function hasStructuralNumbering(
+  para: DocxParagraph,
+  numberingMap: NumberingMap,
+  styleMap: StyleMap
+): boolean {
+  if (para.numId !== undefined && para.numId > 0) return true;
+  return trySignal2(para, styleMap, numberingMap) !== null;
+}
+
 export function classifyParagraphs(
   paragraphs: readonly DocxParagraph[],
   numberingMap: NumberingMap,
   styleMap: StyleMap
 ): ClassifiedParagraph[] {
   let prevNonContIlvl = 0;
+  const roles = computeNoteRoles(paragraphs, (para) =>
+    hasStructuralNumbering(para, numberingMap, styleMap)
+  );
 
-  return paragraphs.map((para): ClassifiedParagraph => {
-    const classified = classifyOne(para, numberingMap, styleMap, prevNonContIlvl);
+  return paragraphs.map((para, i): ClassifiedParagraph => {
+    const role = roles[i] ?? 'none';
+    const classified = classifyOne(para, numberingMap, styleMap, prevNonContIlvl, role);
     if (classified.nodeType !== 'continuation') {
       prevNonContIlvl = classified.resolvedIlvl;
     }
@@ -514,8 +545,11 @@ export function buildTree(
   // Empty paragraphs are layout spacing, not content — drop before structuring.
   // A blank that inherited a numbered style (Signal 2) otherwise became an empty
   // numbered node (#122): a phantom row consuming a CSI number; an empty paragraph
-  // at root previously rendered as a phantom PART.
-  const content = classified.filter((cp) => cp.paragraph.text.trim().length > 0);
+  // at root previously rendered as a phantom PART. A suppressed rule-row delimiter
+  // (#292) is dropped the same way — it produces no SpecNode at all.
+  const content = classified.filter(
+    (cp) => cp.paragraph.text.trim().length > 0 && cp.suppressed !== true
+  );
 
   for (const cp of content) {
     if (cp.nodeType === 'continuation') {

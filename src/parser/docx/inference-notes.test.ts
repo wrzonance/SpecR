@@ -195,6 +195,143 @@ describe('buildTree — empty paragraphs are dropped', () => {
   });
 });
 
+describe('classifyParagraphs + buildTree — asterisk-rule note regions (#292)', () => {
+  it('a paired rule-row pair suppresses the rows and classifies enclosed prose as note', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ text: '*****' }),
+        makePara({ text: 'Delete items below not applicable to this project.' }),
+        makePara({ text: '*****' }),
+        makePara({ text: 'Ordinary body text after the region closes.' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    // Both rule rows produce no SpecNode at all.
+    expect(classified[1]!.suppressed).toBe(true);
+    expect(classified[3]!.suppressed).toBe(true);
+    expect(classified[2]!.isNote).toBe(true);
+
+    const tree = buildTree(classified, '01 00 00', 'T', 'arcat');
+    const children = tree.parts[0]!.children;
+    expect(children).toHaveLength(2);
+    // No rule-row text survives into the tree, in any node.
+    expect(children.some((n) => n.text === '*****')).toBe(false);
+    expect(children[0]!.type).toBe('note');
+    expect(children[0]!.text).toBe('Delete items below not applicable to this project.');
+    expect(children[1]!.type).toBe('continuation');
+    expect(children[1]!.text).toBe('Ordinary body text after the region closes.');
+  });
+
+  // Codex (PR #461): a paragraph structural ONLY via Signal 2 (its STYLE resolves to a
+  // real tier through resolvedNumPr) — no direct numId and no literal "PART n"/"N.N"
+  // text — is invisible to BOTH the Signal-1 numbering drift check and the text-pattern
+  // heading gate. Inside a drifted (unpaired) asterisk wall it was swallowed as a
+  // [NOTE], the exact structure-loss class the drift guard exists to prevent. The drift
+  // signal now also consults Signal 2 (trySignal2), so such a heading trips the guard
+  // and the convention disengages document-wide — the paragraph classifies normally.
+  it('#292 (Codex #461): a style-numbered structural paragraph (no numId) inside a drifted wall trips the drift guard, not swallowed as a note', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([['ARCATArticle', { styleId: 'ARCATArticle', name: 'ARCATArticle' }]]),
+      resolvedNumPr: new Map([['ARCATArticle', { numId: 5, ilvl: 1 }]]),
+      resolvedJc: new Map(),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ text: '*****' }), // unpaired opener — the wall has drifted out of phase
+        makePara({ styleId: 'ARCATArticle', text: 'Submittals shall include product data.' }),
+      ],
+      numMap(1),
+      styleMap
+    );
+    // The style-numbered paragraph is NOT a swallowed note; it resolves via Signal 2.
+    expect(classified[2]?.isNote).not.toBe(true);
+    expect(classified[2]?.nodeType).toBe('article');
+    expect(classified[2]?.signalUsed).toBe(2);
+  });
+
+  // KNOWN AMBIGUITY (mirrors note-roles.test.ts): an unpaired opener with no closing
+  // rule row is force-closed only by a literal PART/article heading. When one appears,
+  // everything from the opener through the paragraph before the heading becomes a
+  // suppressed rule / note; the heading itself and everything after resume normal
+  // inference untouched.
+  it('an unpaired opener force-closed by a PART heading suppresses the opener and notes the interior; the heading resumes normal inference', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ text: '*****' }),
+        makePara({ text: 'Coordinate with the owner before proceeding.' }),
+        makePara({ numId: 1, ilvl: 0, text: 'PART 2 - PRODUCTS' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(classified[1]?.suppressed).toBe(true);
+    expect(classified[2]?.isNote).toBe(true);
+    // The heading paragraph is untouched by the note-region scan — it still resolves
+    // via the 5-signal engine, not forced to 'none'/continuation.
+    expect(classified[3]?.nodeType).toBe('part');
+    expect(classified[3]?.signalUsed).toBe(1);
+
+    const tree = buildTree(classified, '01 00 00', 'T', 'arcat');
+    expect(tree.parts).toHaveLength(2);
+    expect(tree.parts[0]?.children).toHaveLength(1);
+    expect(tree.parts[0]?.children[0]?.type).toBe('note');
+    expect(tree.parts[1]?.type).toBe('part');
+  });
+
+  // classifyOne checks role === 'rule' FIRST, ahead of the isVanish guard (see the
+  // comment at that call site) — a rule row that also happens to carry w:vanish must
+  // still be suppressed, not fall through to the vanish/continuation branch instead.
+  it('#292: a rule row is suppressed regardless of vanish state — the rule-row check runs ahead of the vanish guard', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ isVanish: true, text: '*****' }),
+        makePara({ text: 'Delete items below not applicable to this project.' }),
+        makePara({ text: '*****' }),
+        makePara({ text: 'Ordinary body text after the region closes.' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(classified[1]!.suppressed).toBe(true);
+    expect(classified[1]!.isVanish).toBe(true); // isVanish still recorded verbatim
+    expect(classified[3]!.suppressed).toBe(true);
+
+    const tree = buildTree(classified, '01 00 00', 'T', 'arcat');
+    const children = tree.parts[0]!.children;
+    // The vanish rule row produces no SpecNode, same as a non-vanish one.
+    expect(children.some((n) => n.text === '*****')).toBe(false);
+    expect(children).toHaveLength(2);
+  });
+
+  // Regression guard: dash/equals decoration rules (e.g. "----", "====") are handled
+  // exclusively by the existing isDecorationSeparator path (heuristics.ts) and must
+  // NOT be affected by the new rule-row-first check — isRuleRow is asterisk-only.
+  it('dash and equals decoration rules are unaffected — still a plain continuation, never suppressed or note', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ text: '----------' }),
+        makePara({ text: '==========' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(classified[1]?.suppressed).not.toBe(true);
+    expect(classified[1]?.isNote).not.toBe(true);
+    expect(classified[1]?.nodeType).toBe('continuation');
+    expect(classified[2]?.suppressed).not.toBe(true);
+    expect(classified[2]?.isNote).not.toBe(true);
+    expect(classified[2]?.nodeType).toBe('continuation');
+  });
+});
+
 describe('classifyParagraphs — note-style name matching (CodeRabbit #113)', () => {
   it('regression: AppendixNote style IS a note — "append" contains "end" and must not be excluded', () => {
     const styleMap: StyleMap = {

@@ -156,7 +156,8 @@ function cp(
   nodeType: ClassifiedParagraph['nodeType'],
   resolvedIlvl: number,
   signalUsed: ClassifiedParagraph['signalUsed'],
-  conflicts: readonly SignalConflict[] = []
+  conflicts: readonly SignalConflict[] = [],
+  suppressed?: boolean
 ): ClassifiedParagraph {
   return {
     paragraph: para({ text: 'x' }),
@@ -166,6 +167,7 @@ function cp(
     conflicts,
     agreed: [],
     isVanish: false,
+    ...(suppressed !== undefined ? { suppressed } : {}),
   };
 }
 
@@ -204,6 +206,27 @@ describe('#299 INV4 — mergeProfileConflicts records the losing base classifica
       existing,
       { signal: 2, reportedIlvl: 3, reportedNodeType: 'pr2' },
     ]);
+  });
+});
+
+// ─── #292 — mergeProfileConflicts preserves suppressed on both paths ─────────────
+
+describe('#292 mergeProfileConflicts preserves the suppressed field unchanged', () => {
+  it('equal-reference path: agreeing paragraphs return the same object, suppressed carries through', () => {
+    const withProfile = [cp('pr2', 3, 1, [], true)];
+    const base = [cp('pr2', 3, 1, [], true)]; // same nodeType/resolvedIlvl → no conflict
+    const merged = mergeProfileConflicts(withProfile, base);
+    expect(merged[0]).toBe(withProfile[0]); // untouched — same reference
+    expect(merged[0]?.suppressed).toBe(true);
+  });
+
+  it('conflict-append path: suppressed:true survives the { ...cp } spread when nodeType/ilvl differ', () => {
+    const withProfile = [cp('article', 1, 1, [], true)];
+    const base = [cp('pr2', 3, 2)];
+    const merged = mergeProfileConflicts(withProfile, base);
+    expect(merged[0]).not.toBe(withProfile[0]); // new object — conflict was appended
+    expect(merged[0]?.suppressed).toBe(true);
+    expect(merged[0]?.conflicts).toEqual([{ signal: 2, reportedIlvl: 3, reportedNodeType: 'pr2' }]);
   });
 });
 
