@@ -121,5 +121,23 @@ describe('discipline MCP tools', () => {
   it('rejects unknown library / project ids', async () => {
     expect(isToolError(await handleClearLibraryDisciplines({ libraryId: MISSING }))).toBe(true);
     expect(isToolError(await handleListProjectSpecs({ projectId: MISSING }))).toBe(true);
+    expect(isToolError(await handleListDisciplines({ libraryId: MISSING }))).toBe(true);
+    // A valid (non-empty) rule set, so the failure is the missing library — not empty-rules validation.
+    expect(
+      isToolError(
+        await handleSetLibraryDisciplines({
+          libraryId: MISSING,
+          rules: [{ discipline: 'electrical', divisionStart: '26', divisionEnd: '26' }],
+        })
+      )
+    ).toBe(true);
+  });
+
+  it('clear_library_disciplines is idempotent when no override exists', async () => {
+    const lib = await createLibrary({ tier: 'client', name: `disc-mcp-${randomUUID()}` });
+    const cleared = parse<{ cleared: boolean }>(
+      await handleClearLibraryDisciplines({ libraryId: lib.id })
+    );
+    expect(cleared.cleared).toBe(false);
   });
 });
