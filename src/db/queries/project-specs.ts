@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { DatabaseError } from '../errors.js';
+import { DatabaseError } from '../index.js';
 import { resolveEffectiveRules, disciplineForSection } from './disciplines.js';
 
 interface Queryable {

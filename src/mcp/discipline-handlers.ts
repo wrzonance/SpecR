@@ -91,7 +91,8 @@ export async function handleSetLibraryDisciplines(args: unknown): Promise<ToolRe
 export async function handleClearLibraryDisciplines(args: unknown): Promise<ToolResult> {
   const parsed = ClearLibraryDisciplinesArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid clear_library_disciplines input: ${issues(parsed.error)}`);
+    // Single-UUID input → fixed message, matching the other single-UUID MCP handlers.
+    return toolError('invalid clear_library_disciplines input: libraryId must be a UUID');
   }
   const { libraryId } = parsed.data;
   try {
