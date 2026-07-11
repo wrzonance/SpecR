@@ -1489,6 +1489,97 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /users:
+    get:
+      operationId: listUsers
+      summary: List all users
+      description: Returns every user as a summary (id, label, createdAt), ordered by label.
+      tags: [users]
+      responses:
+        '200':
+          description: All users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/UserSummary'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: resolveUser
+      summary: Resolve or create a user by label
+      description: >
+        Idempotently resolves a user by exact-match `label` (ADR-052 D6), creating
+        one if none exists. Always 200 — a repeat call with the same label returns
+        the same `id`. `label` is case-sensitive and not yet authenticated identity
+        (spoofable pre-#43); it carries the same trust tier as the ADR-018 lock
+        holder today.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+      responses:
+        '200':
+          description: User resolved (existing or newly created)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      summary: Retrieve a user
+      description: Returns a single user by id.
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: The user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /projects:
     get:
       operationId: listProjects
@@ -4638,6 +4729,14 @@ components:
       schema:
         type: string
         format: uuid
+    UserId:
+      name: id
+      in: path
+      required: true
+      description: User UUID
+      schema:
+        type: string
+        format: uuid
   responses:
     BadRequest:
       description: Bad request — validation error or unsupported file type
@@ -6341,6 +6440,20 @@ components:
           type: string
           format: date-time
         updatedAt:
+          type: string
+          format: date-time
+
+    UserSummary:
+      type: object
+      required: [id, label, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+          description: Case-sensitive, exact-match actor identity (ADR-052 D6)
+        createdAt:
           type: string
           format: date-time
 
