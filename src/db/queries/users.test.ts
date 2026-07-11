@@ -42,27 +42,30 @@ describe('resolveOrCreateUserByLabel', () => {
     expect(result).toEqual({ id: 'u1', label: 'Alice', createdAt: NOW });
   });
 
-  it('is idempotent: the same label upserts to the same id across two calls', async () => {
-    const { pool } = await import('../index.js');
-    vi.mocked(pool.query)
-      .mockResolvedValueOnce({ rows: [userRow()], rowCount: 1 } as never)
-      .mockResolvedValueOnce({ rows: [userRow()], rowCount: 1 } as never);
-    const { resolveOrCreateUserByLabel } = await import('./users.js');
-    const first = await resolveOrCreateUserByLabel('Alice', pool);
-    const second = await resolveOrCreateUserByLabel('Alice', pool);
-    expect(first.id).toBe(second.id);
-  });
-
-  it('resolves via a single query call, not check-then-insert (race-free by construction)', async () => {
+  // Real idempotency/race-freeness (does a second call for the same label actually resolve
+  // to the same row, incl. under concurrency) can only be pinned against a real ON CONFLICT
+  // constraint — see the integration tests 'resolveOrCreateUserByLabel is a pure idempotent
+  // upsert...' and '...concurrent calls for the same label race-free onto a single row' in
+  // users.integration.test.ts. A mock-based unit test that queues two byte-identical canned
+  // responses can't fail regardless of what the SQL says, so it belongs at the query-shape
+  // level instead: assert the statement issued is actually the race-free upsert, not a
+  // regression to check-then-insert or to ON CONFLICT DO NOTHING (which would return the
+  // pre-existing row unmodified on a conflict rather than upserting it, and — for a fresh
+  // label — return no row at all, which the "no row returned" branch below already guards).
+  it('issues a single ON CONFLICT ... DO UPDATE statement, not check-then-insert or DO NOTHING', async () => {
     const { pool } = await import('../index.js');
     vi.mocked(pool.query).mockResolvedValueOnce({ rows: [userRow()], rowCount: 1 } as never);
     const { resolveOrCreateUserByLabel } = await import('./users.js');
     await resolveOrCreateUserByLabel('Alice', pool);
-    // The invariant this guards: a check-then-insert (SELECT, then conditional INSERT)
-    // would need two round trips and race under concurrent calls for the same label.
-    // A single query call is what makes the upsert race-free — see the integration test
-    // 'concurrent calls for the same label race-free onto a single row'.
-    expect(vi.mocked(pool.query).mock.calls.length).toBe(1);
+
+    const calls = vi.mocked(pool.query).mock.calls;
+    // A single round trip is what makes the upsert race-free under concurrency: a
+    // check-then-insert (SELECT, then conditional INSERT) would need two.
+    expect(calls.length).toBe(1);
+    const sql = calls[0]?.[0];
+    expect(sql).toContain('ON CONFLICT (label) DO UPDATE');
+    expect(sql).not.toContain('DO NOTHING');
+    expect(calls[0]?.[1]).toEqual(['Alice']);
   });
 
   it('throws DatabaseError with the pg error chained as cause on query failure', async () => {
