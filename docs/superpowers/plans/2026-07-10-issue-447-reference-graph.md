@@ -24,7 +24,8 @@
 
 ## File Structure
 
-- `src/db/queries/reference-graph.ts` (create) — types, pure `buildReferenceGraph`, DB `getReferenceGraph` + scope reads. One file; if it approaches 400 lines, extract the pure builder to `reference-graph-build.ts`.
+- `src/db/queries/reference-graph.ts` (create) — types + pure `buildReferenceGraph` (no DB, no env).
+- `src/db/queries/reference-graph-read.ts` (create) — DB read layer: `GraphScope`, `getReferenceGraph` + scope reads, assembled via the pure builder. (Split out of `reference-graph.ts` to keep the pure builder DB-free and each file under the 400-line cap.)
 - `src/db/queries/libraries.ts` (modify) — add `LibraryNotFoundError`.
 - `src/db/index.ts` (modify) — barrel-export the new symbols.
 - `src/db/queries/reference-graph.test.ts` (create) — unit tests for the pure builder.
@@ -348,7 +349,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ## Task 2: DB read layer + scope-relative fetch
 
 **Files:**
-- Modify: `src/db/queries/reference-graph.ts` (append DB layer)
+- Create: `src/db/queries/reference-graph-read.ts` (DB read layer; keeps `reference-graph.ts` pure)
 - Modify: `src/db/queries/libraries.ts` (add `LibraryNotFoundError`)
 - Modify: `src/db/index.ts` (barrel exports)
 - Test: `src/db/queries/reference-graph.integration.test.ts`
@@ -1331,4 +1332,3 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - MCP `get_reference_graph` (read tier) + contract-map entry → Task 4.
 - Tests: dangling ref, umbrella not-called-out, citation-count>1, anchor cap → Task 1 unit; agreement with per-spec endpoints → Task 2 integration.
 - Sized for 100+ specs → edges aggregated per (source,target); anchors capped at 50.
-```

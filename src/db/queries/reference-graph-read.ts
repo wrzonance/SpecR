@@ -55,12 +55,16 @@ async function readSectionRefs(
   client: PoolClient
 ): Promise<GraphRefRowInput[]> {
   if (specIds.length === 0) return [];
+  // Ordered so the per-edge anchor cap (ANCHOR_CAP) yields a deterministic
+  // subset for high-citation edges — without ORDER BY, Postgres row order (and
+  // thus which anchors survive slice(0, ANCHOR_CAP)) is not guaranteed stable.
   const r = await client.query<RefRow>(
     `SELECT source_spec_id, target_spec_section, source_paragraph_id
        FROM spec_references
       WHERE source_spec_id = ANY($1::uuid[])
         AND target_type = 'section'
-        AND target_spec_section IS NOT NULL`,
+        AND target_spec_section IS NOT NULL
+      ORDER BY source_spec_id, target_spec_section, source_paragraph_id`,
     [specIds]
   );
   return r.rows.map((row) => ({

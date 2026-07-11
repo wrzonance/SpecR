@@ -114,18 +114,22 @@ describe('getReferenceGraph (project scope)', () => {
 
   it('agrees with getOutboundReferences for each source spec (section refs)', async () => {
     const g = await getReferenceGraph({ kind: 'project', id: projectId });
-    const outbound = await getOutboundReferences(painting, projectId, pool);
-    const bySection = new Map<string, { count: number; targetSpecId: string | null }>();
-    for (const o of outbound) {
-      if (o.targetSection === null) continue;
-      const cur = bySection.get(o.targetSection) ?? { count: 0, targetSpecId: o.targetSpecId };
-      bySection.set(o.targetSection, { count: cur.count + 1, targetSpecId: o.targetSpecId });
-    }
-    expect(bySection.size).toBeGreaterThan(0);
-    for (const [section, expected] of bySection) {
-      const edge = g.edges.find((e) => e.sourceSpecId === painting && e.targetSection === section);
-      expect(edge?.citationCount).toBe(expected.count);
-      expect(edge?.targetSpecId ?? null).toBe(expected.targetSpecId ?? null);
+    // Cover every source spec — painting (resolved + dangling refs) and gypsum
+    // (dangling only) — so the dangling-edge agreement case is exercised too.
+    for (const specId of [painting, gypsum]) {
+      const outbound = await getOutboundReferences(specId, projectId, pool);
+      const bySection = new Map<string, { count: number; targetSpecId: string | null }>();
+      for (const o of outbound) {
+        if (o.targetSection === null) continue;
+        const cur = bySection.get(o.targetSection) ?? { count: 0, targetSpecId: o.targetSpecId };
+        bySection.set(o.targetSection, { count: cur.count + 1, targetSpecId: o.targetSpecId });
+      }
+      expect(bySection.size).toBeGreaterThan(0);
+      for (const [section, expected] of bySection) {
+        const edge = g.edges.find((e) => e.sourceSpecId === specId && e.targetSection === section);
+        expect(edge?.citationCount).toBe(expected.count);
+        expect(edge?.targetSpecId ?? null).toBe(expected.targetSpecId ?? null);
+      }
     }
   });
 
