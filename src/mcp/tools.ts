@@ -36,6 +36,7 @@ import { registerClientTools } from './clients-tools.js';
 import { registerPackageTools } from './package-tools.js';
 import { registerPackageRevisionTools } from './package-revision-tools.js';
 import { registerReportTools } from './report-tools.js';
+import { registerStandardsTools } from './standards-tools.js';
 import { registerRevitLinksTools } from './revit-links-tools.js';
 import { registerHierarchyReportTools } from './hierarchy-report-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
@@ -340,6 +341,7 @@ export function registerTools(
   registerGeneratorTools(reg);
   registerLoaderTools(reg);
   registerReportTools(reg);
+  registerStandardsTools(reg);
   registerRevitLinksTools(reg);
   registerHierarchyReportTools(reg);
   registerSubmittalTools(reg);

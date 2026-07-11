@@ -145,6 +145,10 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['list_clients', 'read'],
   ['get_client', 'read'],
   ['create_client', 'write'],
+  // standards registry (#446 / ADR-064)
+  ['list_library_standards', 'read'],
+  ['list_project_standards', 'read'],
+  ['record_standard_verification', 'write'],
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row

@@ -4273,6 +4273,102 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  # ─── Standards registry (#446, ADR-064) ──────────────────────────────────────
+  /libraries/{id}/standards:
+    get:
+      operationId: getLibraryStandards
+      summary: Library standards rollup (distinct cited standards + registry verdict)
+      tags: [libraries]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Library UUID
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Standards rollup for the library
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/StandardsRollup' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/standards:
+    get:
+      operationId: getProjectStandards
+      summary: Project standards rollup (distinct cited standards + registry verdict)
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Standards rollup for the project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/StandardsRollup' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /standards/{orgCode}/{standardCode}:
+    put:
+      operationId: recordStandardVerification
+      summary: Record a standards verification verdict (upsert; server stamps last verified)
+      description: >
+        Upserts the registry record for one standard, keyed on (orgCode,
+        standardCode). PUT-replace (ADR-064 §3): the body fully describes the
+        verdict — omitted optional fields reset to null, status defaults to
+        'unknown' — and the server stamps last_verified_at = now() on every write.
+        orgCode is normalized to uppercase; standardCode is stored verbatim and
+        must be percent-encoded in the path when it contains reserved characters
+        (e.g. a slash in A653/A653M).
+      tags: [standards]
+      parameters:
+        - name: orgCode
+          in: path
+          required: true
+          description: Standards organization code (e.g. ASTM); normalized to uppercase.
+          schema: { type: string, minLength: 1 }
+        - name: standardCode
+          in: path
+          required: true
+          description: Standard identifier within the org (e.g. C150). Percent-encode reserved chars.
+          schema: { type: string, minLength: 1 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StandardVerificationBody' }
+      responses:
+        '200':
+          description: The upserted registry record
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/StandardRecord' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
 # ─── Components ───────────────────────────────────────────────────────────────
 
 components:
@@ -7316,3 +7412,136 @@ components:
         updatedAt:
           type: string
           format: date-time
+    # ─── Standards registry (#446, ADR-064) ─────────────────────────────────────
+    StandardStatus:
+      type: string
+      enum: [current, superseded, withdrawn, unknown]
+      description: Registry currency verdict; 'unknown' until a client records one.
+    StandardCitingSpec:
+      type: object
+      required: [specId, section]
+      properties:
+        specId: { type: string, format: uuid }
+        section: { type: string }
+    StandardsRollup:
+      type: object
+      description: >
+        One-call standards rollup for a project or library (#446). Compiles the
+        distinct standards cited in scope, each joined to its global registry
+        verdict, plus superseded/withdrawn findings and summary counts.
+      required: [scope, standards, findings, summary, anchorCap, notes]
+      properties:
+        scope:
+          type: object
+          required: [type, id]
+          properties:
+            type: { type: string, enum: [project, library] }
+            id: { type: string, format: uuid }
+        standards:
+          type: array
+          items: { $ref: '#/components/schemas/StandardRollupRow' }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/StandardFinding' }
+        summary: { $ref: '#/components/schemas/StandardsSummary' }
+        anchorCap:
+          type: integer
+          description: Max paragraph anchors emitted per standard.
+        notes:
+          type: array
+          items: { type: string }
+    StandardRollupRow:
+      type: object
+      required:
+        [
+          orgCode,
+          standardCode,
+          citationCount,
+          citingSpecs,
+          anchors,
+          anchorsTruncated,
+          registered,
+          status,
+          currentVersion,
+          sourceUrl,
+          title,
+          lastVerifiedAt,
+          notes,
+        ]
+      properties:
+        orgCode: { type: string }
+        standardCode: { type: string }
+        citationCount: { type: integer }
+        citingSpecs:
+          type: array
+          items: { $ref: '#/components/schemas/StandardCitingSpec' }
+        anchors:
+          type: array
+          description: Paragraph UUIDs citing the standard, capped at anchorCap.
+          items: { type: string, format: uuid }
+        anchorsTruncated:
+          type: boolean
+          description: True when citationCount exceeded anchorCap.
+        registered:
+          type: boolean
+          description: True when a registry verdict exists for this standard.
+        status: { $ref: '#/components/schemas/StandardStatus' }
+        currentVersion: { type: [string, 'null'] }
+        sourceUrl: { type: [string, 'null'] }
+        title: { type: [string, 'null'] }
+        lastVerifiedAt: { type: [string, 'null'], format: date-time }
+        notes: { type: [string, 'null'] }
+    StandardFinding:
+      type: object
+      description: A cited standard the registry marks superseded or withdrawn.
+      required: [type, orgCode, standardCode, status, citingSpecs, anchors]
+      properties:
+        type: { type: string, enum: [standard_superseded, standard_withdrawn] }
+        orgCode: { type: string }
+        standardCode: { type: string }
+        status: { $ref: '#/components/schemas/StandardStatus' }
+        citingSpecs:
+          type: array
+          items: { $ref: '#/components/schemas/StandardCitingSpec' }
+        anchors:
+          type: array
+          items: { type: string, format: uuid }
+    StandardsSummary:
+      type: object
+      required: [standards, registered, superseded, withdrawn, unverified, findings]
+      properties:
+        standards: { type: integer, description: Distinct cited standards. }
+        registered: { type: integer, description: Cited standards with a registry verdict. }
+        superseded: { type: integer }
+        withdrawn: { type: integer }
+        unverified: { type: integer, description: Cited standards with no last-verified timestamp. }
+        findings: { type: integer }
+    StandardRecord:
+      type: object
+      description: A registry record (the PUT verdict response).
+      required:
+        [id, orgCode, standardCode, title, currentVersion, sourceUrl, status, lastVerifiedAt, notes, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        orgCode: { type: string }
+        standardCode: { type: string }
+        title: { type: [string, 'null'] }
+        currentVersion: { type: [string, 'null'] }
+        sourceUrl: { type: [string, 'null'] }
+        status: { $ref: '#/components/schemas/StandardStatus' }
+        lastVerifiedAt: { type: [string, 'null'], format: date-time }
+        notes: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    StandardVerificationBody:
+      type: object
+      description: >
+        A standards verdict (PUT-replace, ADR-064 §3). Omitted optional fields
+        reset to null; status defaults to 'unknown'. The server stamps
+        last_verified_at on every write.
+      properties:
+        status: { $ref: '#/components/schemas/StandardStatus' }
+        currentVersion: { type: [string, 'null'], minLength: 1, maxLength: 200 }
+        sourceUrl: { type: [string, 'null'], format: uri, maxLength: 2000 }
+        title: { type: [string, 'null'], minLength: 1, maxLength: 500 }
+        notes: { type: [string, 'null'], maxLength: 5000 }

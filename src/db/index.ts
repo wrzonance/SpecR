@@ -371,3 +371,23 @@ export { getProjectKeynotes } from './queries/keynotes.js';
 export type { ProjectKeynote } from './queries/keynotes.js';
 export { getComparisonColumns, getComparisonParagraphs } from './queries/reporting.js';
 export type { ComparisonColumnMeta, ComparisonParagraphRow } from './queries/reporting.js';
+// Standards registry (#446, ADR-064)
+export { getStandardsRollup, recordStandardVerification } from './queries/standards-read.js';
+export type {
+  StandardsScope,
+  StandardRecord,
+  RecordVerificationInput,
+} from './queries/standards-read.js';
+export {
+  buildStandardsRollup,
+  parseStandardCitation,
+  STANDARD_ANCHOR_CAP,
+} from './queries/standards.js';
+export type {
+  StandardsRollup,
+  StandardRollupRow,
+  StandardFinding,
+  StandardsSummary,
+  StandardStatus,
+  CitingSpec,
+} from './queries/standards.js';
