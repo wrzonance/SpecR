@@ -195,6 +195,87 @@ describe('buildTree — empty paragraphs are dropped', () => {
   });
 });
 
+describe('classifyParagraphs + buildTree — asterisk-rule note regions (#292)', () => {
+  it('a paired rule-row pair suppresses the rows and classifies enclosed prose as note', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ text: '*****' }),
+        makePara({ text: 'Delete items below not applicable to this project.' }),
+        makePara({ text: '*****' }),
+        makePara({ text: 'Ordinary body text after the region closes.' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    // Both rule rows produce no SpecNode at all.
+    expect(classified[1]!.suppressed).toBe(true);
+    expect(classified[3]!.suppressed).toBe(true);
+    expect(classified[2]!.isNote).toBe(true);
+
+    const tree = buildTree(classified, '01 00 00', 'T', 'arcat');
+    const children = tree.parts[0]!.children;
+    expect(children).toHaveLength(2);
+    // No rule-row text survives into the tree, in any node.
+    expect(children.some((n) => n.text === '*****')).toBe(false);
+    expect(children[0]!.type).toBe('note');
+    expect(children[0]!.text).toBe('Delete items below not applicable to this project.');
+    expect(children[1]!.type).toBe('continuation');
+    expect(children[1]!.text).toBe('Ordinary body text after the region closes.');
+  });
+
+  // KNOWN AMBIGUITY (mirrors note-roles.test.ts): an unpaired opener with no closing
+  // rule row is force-closed only by a literal PART/article heading. When one appears,
+  // everything from the opener through the paragraph before the heading becomes a
+  // suppressed rule / note; the heading itself and everything after resume normal
+  // inference untouched.
+  it('an unpaired opener force-closed by a PART heading suppresses the opener and notes the interior; the heading resumes normal inference', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ text: '*****' }),
+        makePara({ text: 'Coordinate with the owner before proceeding.' }),
+        makePara({ numId: 1, ilvl: 0, text: 'PART 2 - PRODUCTS' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(classified[1]?.suppressed).toBe(true);
+    expect(classified[2]?.isNote).toBe(true);
+    // The heading paragraph is untouched by the note-region scan — it still resolves
+    // via the 5-signal engine, not forced to 'none'/continuation.
+    expect(classified[3]?.nodeType).toBe('part');
+    expect(classified[3]?.signalUsed).toBe(1);
+
+    const tree = buildTree(classified, '01 00 00', 'T', 'arcat');
+    expect(tree.parts).toHaveLength(2);
+    expect(tree.parts[0]?.children).toHaveLength(1);
+    expect(tree.parts[0]?.children[0]?.type).toBe('note');
+    expect(tree.parts[1]?.type).toBe('part');
+  });
+
+  // Regression guard: dash/equals decoration rules (e.g. "----", "====") are handled
+  // exclusively by the existing isDecorationSeparator path (heuristics.ts) and must
+  // NOT be affected by the new rule-row-first check — isRuleRow is asterisk-only.
+  it('dash and equals decoration rules are unaffected — still a plain continuation, never suppressed or note', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ text: '----------' }),
+        makePara({ text: '==========' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(classified[1]?.suppressed).not.toBe(true);
+    expect(classified[1]?.isNote).not.toBe(true);
+    expect(classified[1]?.nodeType).toBe('continuation');
+    expect(classified[2]?.suppressed).not.toBe(true);
+    expect(classified[2]?.isNote).not.toBe(true);
+    expect(classified[2]?.nodeType).toBe('continuation');
+  });
+});
+
 describe('classifyParagraphs — note-style name matching (CodeRabbit #113)', () => {
   it('regression: AppendixNote style IS a note — "append" contains "end" and must not be excluded', () => {
     const styleMap: StyleMap = {
