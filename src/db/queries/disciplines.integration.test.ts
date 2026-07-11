@@ -21,24 +21,37 @@ afterEach(async () => {
 });
 
 describe('migration 044 — built-in default discipline mapping', () => {
-  it('db: catalog and default rules seed the CSI-division mapping', async () => {
+  it('db: the default maps every active division; reserved divisions stay unmapped', async () => {
     const resolved = await listDisciplines();
     expect(resolved.inherited).toBe(true);
     const byKey = new Map(resolved.disciplines.map((d) => [d.key, d]));
+    // Every active division carries its single-division rule — a representative spread across
+    // the general, facility-construction, facility-services, site, and process groups.
+    expect(byKey.get('procurement-contracting')?.rules).toEqual([
+      { divisionStart: '00', divisionEnd: '00' },
+    ]);
+    expect(byKey.get('concrete')?.rules).toEqual([{ divisionStart: '03', divisionEnd: '03' }]);
+    expect(byKey.get('finishes')?.rules).toEqual([{ divisionStart: '09', divisionEnd: '09' }]);
     expect(byKey.get('electrical')?.rules).toEqual([{ divisionStart: '26', divisionEnd: '26' }]);
-    expect(byKey.get('hvac')?.rules).toEqual([{ divisionStart: '23', divisionEnd: '23' }]);
-    expect(byKey.get('plumbing')?.rules).toEqual([{ divisionStart: '22', divisionEnd: '22' }]);
-    // Mechanical is in the catalog but unmapped by the default rules (override target).
+    expect(byKey.get('utilities')?.rules).toEqual([{ divisionStart: '33', divisionEnd: '33' }]);
+    expect(byKey.get('electrical-power-generation')?.rules).toEqual([
+      { divisionStart: '48', divisionEnd: '48' },
+    ]);
+    // 34 active Specifications-Group divisions + Division 00 = 35 mapped; "mechanical" is the
+    // only catalog discipline the default leaves unmapped (an override target).
+    expect(resolved.disciplines.filter((d) => d.rules.length > 0)).toHaveLength(35);
     expect(byKey.get('mechanical')?.rules).toEqual([]);
   });
 
-  it('db: disciplineForSection resolves seeded divisions and leaves unmapped ones null', async () => {
+  it('db: disciplineForSection resolves active divisions and leaves reserved ones null', async () => {
     const rules = await resolveEffectiveRules(undefined);
+    expect(disciplineForSection('03 30 00', rules)).toBe('concrete');
+    expect(disciplineForSection('09 91 26', rules)).toBe('finishes');
     expect(disciplineForSection('26 05 19', rules)).toBe('electrical');
-    expect(disciplineForSection('23 07 00', rules)).toBe('hvac');
-    expect(disciplineForSection('28 23 00', rules)).toBe('electronic-safety-security');
-    // Division 09 (finishes) is intentionally unmapped.
-    expect(disciplineForSection('09 91 26', rules)).toBeNull();
+    expect(disciplineForSection('48 14 00', rules)).toBe('electrical-power-generation');
+    // Reserved divisions (15–20, 24, 29, 30, 36–39, 47, 49) have no rule → null discipline.
+    expect(disciplineForSection('15 05 00', rules)).toBeNull();
+    expect(disciplineForSection('24 00 00', rules)).toBeNull();
   });
 });
 

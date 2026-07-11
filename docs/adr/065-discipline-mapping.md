@@ -42,14 +42,23 @@ tools (`list_disciplines`, `list_project_specs`, `set_library_disciplines`,
    issue's "section prefix or range" is satisfied without lexicographic
    string-range ambiguity. A single division is `start == end`.
 
-2. **CSI-accurate default 21/22/23 split.** The issue delegated this split. The
-   built-in default is 21=Fire Suppression, 22=Plumbing, 23=HVAC (plus
-   25=Integrated Automation for I&C, 26=Electrical, 27=Communications,
-   28=Electronic Safety & Security). A firm that groups all mechanical trades under
-   one "Mechanical" discipline overrides with a single range rule `21–23 →
-   Mechanical` — the exact per-library override this feature ships, so the
-   ambiguity becomes a demonstration of it. "Mechanical" is seeded in the catalog
-   (unmapped by default) as that override target.
+2. **The built-in default is the full standardized MasterFormat division list.**
+   Every active division maps to a discipline named by its official MasterFormat
+   division title — 34 active Specifications-Group divisions (01–14, 21–23, 25–28,
+   31–35, 40–46, 48) plus Division 00 (Procurement and Contracting Requirements) =
+   35 mapped divisions. Division numbers/titles are standardized and stable since
+   MasterFormat 2004 (Division 40 was renamed "Process Interconnections" in the 2018
+   edition — that current title is used). **Reserved** divisions receive NO rule, so
+   a section in one resolves to a null discipline: 15–20, 24, 29, 30, 36–39, 47, 49.
+
+   The issue delegated only the 21/22/23 split; it is realized CSI-accurately
+   (21=Fire Suppression, 22=Plumbing, 23=HVAC). Trade groupings that collapse
+   multiple divisions into one discipline — 03–14 → Architectural, or 21–23 →
+   Mechanical — are exactly what the per-library override is for: a firm regroups
+   with a single range rule (e.g. `21–23 → Mechanical`), demonstrating the override
+   mechanism. "Mechanical" is seeded in the catalog (unmapped by the default) as
+   that override target; a firm needing a brand-new discipline name is the one
+   documented future enhancement (no add-discipline endpoint in scope).
 
 3. **Disciplines are a global catalog.** Overrides remap divisions to existing
    catalog disciplines; there is no add-discipline endpoint in scope. A brand-new

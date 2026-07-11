@@ -79,7 +79,8 @@ async function seedLibraryWithSpecs(): Promise<string> {
     libraryId: lib.id,
   });
   await createSpec({ section: '23 07 00', title: 'HVAC', source: 'arcat', libraryId: lib.id });
-  await createSpec({ section: '09 91 26', title: 'Painting', source: 'arcat', libraryId: lib.id });
+  // Division 24 is reserved in MasterFormat, so it maps to no discipline (null).
+  await createSpec({ section: '24 05 00', title: 'Reserved', source: 'arcat', libraryId: lib.id });
   return lib.id;
 }
 
@@ -113,7 +114,7 @@ describe('GET /libraries/{id}/specs — discipline field + filter', () => {
     const bySection = new Map(body.data.map((s) => [s.section, s.discipline]));
     expect(bySection.get('26 05 19')).toBe('electrical');
     expect(bySection.get('23 07 00')).toBe('hvac');
-    expect(bySection.get('09 91 26')).toBeNull();
+    expect(bySection.get('24 05 00')).toBeNull();
   });
 
   it('200 — ?discipline= keeps only matching specs', async () => {
