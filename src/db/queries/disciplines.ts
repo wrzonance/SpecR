@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import type { DisciplineRuleInput } from '../../ast/index.js';
 
@@ -49,6 +49,7 @@ interface CatalogRow {
   readonly key: string;
   readonly name: string;
   readonly rules: unknown;
+  readonly inherited: boolean;
 }
 
 interface EffectiveRuleRow {
@@ -57,52 +58,47 @@ interface EffectiveRuleRow {
   readonly division_end: string;
 }
 
-/**
- * Resolve the scope a library's disciplines read against: the library's own id when it has
- * rules, otherwise null (the built-in default). `inherited` is true whenever the built-in
- * default backs the result — no libraryId, or a library with no rules of its own.
- */
-async function resolveScope(
-  libraryId: string | undefined,
-  db: Queryable
-): Promise<{ scope: string | null; inherited: boolean }> {
-  if (!libraryId) return { scope: null, inherited: true };
-  const res = await db.query(
-    `SELECT 1 FROM discipline_section_rules WHERE library_id = $1 LIMIT 1`,
-    [libraryId]
-  );
-  return (res.rowCount ?? 0) > 0
-    ? { scope: libraryId, inherited: false }
-    : { scope: null, inherited: true };
-}
+// The library scope a read resolves against, computed inside the SAME statement as the rules
+// it selects — so a concurrent clear/replace cannot commit between a scope lookup and the rules
+// query and yield an inconsistent read (e.g. inherited=false with no override rows). A library
+// with its own rules resolves to its id; otherwise (no libraryId, or none of its own) to NULL,
+// the built-in default. Under READ COMMITTED successive statements can see different snapshots,
+// so scope selection must live in the rules statement, not a separate one.
+const SCOPE_CTE = `scope AS (
+  SELECT EXISTS (SELECT 1 FROM discipline_section_rules WHERE library_id = $1::uuid) AS has_own
+)`;
+const SCOPE_LIBRARY_FILTER = `r.library_id IS NOT DISTINCT FROM
+  (CASE WHEN (SELECT has_own FROM scope) THEN $1::uuid ELSE NULL END)`;
 
 /**
  * The full discipline catalog with each discipline's division rules resolved for `libraryId`
  * (built-in default when omitted or when the library has no rules of its own). Unmapped
- * disciplines carry an empty `rules` array. Backs GET /disciplines.
+ * disciplines carry an empty `rules` array. `inherited` is derived from the same snapshot as
+ * the rules. Backs GET /disciplines.
  */
 export async function listDisciplines(
   libraryId?: string,
   db: Queryable = pool
 ): Promise<ResolvedDisciplines> {
   try {
-    const { scope, inherited } = await resolveScope(libraryId, db);
     const res = await db.query<CatalogRow>(
-      `SELECT d.id, d.key, d.name,
+      `WITH ${SCOPE_CTE}
+       SELECT d.id, d.key, d.name,
               COALESCE(
                 json_agg(
                   json_build_object('divisionStart', r.division_start, 'divisionEnd', r.division_end)
                   ORDER BY r.division_start
                 ) FILTER (WHERE r.id IS NOT NULL),
                 '[]'
-              ) AS rules
+              ) AS rules,
+              NOT (SELECT has_own FROM scope) AS inherited
          FROM disciplines d
          LEFT JOIN discipline_section_rules r
            ON r.discipline_id = d.id
-          AND (($1::uuid IS NULL AND r.library_id IS NULL) OR r.library_id = $1::uuid)
+          AND ${SCOPE_LIBRARY_FILTER}
         GROUP BY d.id, d.key, d.name
         ORDER BY d.name`,
-      [scope]
+      [libraryId ?? null]
     );
     const disciplines = res.rows.map((row) => ({
       id: row.id,
@@ -110,6 +106,8 @@ export async function listDisciplines(
       name: row.name,
       rules: RulesViewSchema.parse(row.rules),
     }));
+    // `inherited` is a per-library value repeated on every row; the catalog is always non-empty.
+    const inherited = res.rows[0]?.inherited ?? true;
     return { disciplines, inherited };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
@@ -128,14 +126,14 @@ export async function resolveEffectiveRules(
   db: Queryable = pool
 ): Promise<readonly EffectiveRule[]> {
   try {
-    const { scope } = await resolveScope(libraryId, db);
     const res = await db.query<EffectiveRuleRow>(
-      `SELECT d.key AS discipline_key, r.division_start, r.division_end
+      `WITH ${SCOPE_CTE}
+       SELECT d.key AS discipline_key, r.division_start, r.division_end
          FROM discipline_section_rules r
          JOIN disciplines d ON d.id = r.discipline_id
-        WHERE ($1::uuid IS NULL AND r.library_id IS NULL) OR r.library_id = $1::uuid
+        WHERE ${SCOPE_LIBRARY_FILTER}
         ORDER BY r.division_start`,
-      [scope]
+      [libraryId ?? null]
     );
     return res.rows.map((row) => ({
       disciplineKey: row.discipline_key,
@@ -172,8 +170,9 @@ export async function replaceLibraryDisciplineRules(
   libraryId: string,
   rules: readonly DisciplineRuleInput[]
 ): Promise<void> {
-  const client = await pool.connect();
+  let client: PoolClient | undefined;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     // Serialize concurrent replacements for the same library: take the library row lock
     // before the wholesale delete+insert. Without it, two racing PUTs under READ COMMITTED
@@ -194,7 +193,7 @@ export async function replaceLibraryDisciplineRules(
     await client.query('COMMIT');
   } catch (err) {
     try {
-      await client.query('ROLLBACK');
+      await client?.query('ROLLBACK');
     } catch {
       /* best-effort */
     }
@@ -203,7 +202,7 @@ export async function replaceLibraryDisciplineRules(
       cause: err,
     });
   } finally {
-    client.release();
+    client?.release();
   }
 }
 
@@ -214,8 +213,9 @@ export async function replaceLibraryDisciplineRules(
  * report `false` (no override) while the replacement's freshly-inserted rows remain.
  */
 export async function clearLibraryDisciplineRules(libraryId: string): Promise<boolean> {
-  const client = await pool.connect();
+  let client: PoolClient | undefined;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     await client.query('SELECT 1 FROM libraries WHERE id = $1 FOR UPDATE', [libraryId]);
     const res = await client.query('DELETE FROM discipline_section_rules WHERE library_id = $1', [
@@ -225,7 +225,7 @@ export async function clearLibraryDisciplineRules(libraryId: string): Promise<bo
     return (res.rowCount ?? 0) > 0;
   } catch (err) {
     try {
-      await client.query('ROLLBACK');
+      await client?.query('ROLLBACK');
     } catch {
       /* best-effort */
     }
@@ -234,6 +234,6 @@ export async function clearLibraryDisciplineRules(libraryId: string): Promise<bo
       cause: err,
     });
   } finally {
-    client.release();
+    client?.release();
   }
 }
