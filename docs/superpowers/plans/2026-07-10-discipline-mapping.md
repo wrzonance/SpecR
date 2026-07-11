@@ -57,8 +57,8 @@
 
 - `disciplines`: `id uuid pk`, `key text unique notNull`, `name text notNull`, `created_at`. CHECK key/name non-empty.
 - `discipline_section_rules`: `id uuid pk`, `discipline_id uuid notNull → disciplines ON DELETE CASCADE`, `library_id uuid → libraries ON DELETE CASCADE` (NULL = built-in default), `division_start char(2) notNull`, `division_end char(2) notNull`. CHECK `division_start <= division_end` and both `~ '^\d{2}$'`. Index on `library_id`. Partial unique index preventing duplicate `(library_id, division_start, division_end)`.
-- Seed catalog (global): fire-suppression, plumbing, hvac, mechanical, integrated-automation, electrical, communications, electronic-safety-security.
-- Seed built-in default rules (`library_id NULL`): 21→fire-suppression, 22→plumbing, 23→hvac, 25→integrated-automation, 26→electrical, 27→communications, 28→electronic-safety-security.
+- Seed catalog (global): one discipline per active CSI MasterFormat division (00–14, 21–23, 25–28, 31–35, 40–46, 48), each named by its official division title, plus a seeded-but-unmapped `mechanical` override target. (See migration 044 for the authoritative list.)
+- Seed built-in default rules (`library_id NULL`): every active division maps to its own discipline at single-division granularity; reserved divisions (15–20, 24, 29, 30, 36–39, 47, 49) get no rule and resolve to a null discipline.
 - `down`: drop both tables.
 
 Verify: `pnpm migrate` then `pnpm migrate:down` then `pnpm migrate` round-trips clean against the isolated DB.
@@ -92,7 +92,7 @@ Verify: `pnpm migrate` then `pnpm migrate:down` then `pnpm migrate` round-trips 
 
 **Files:** `src/api/disciplines.ts`, `src/api/libraries.ts`, `src/api/projects.ts`, `src/api/router.ts`, `openapi.yaml`.
 - `GET /disciplines?libraryId=` → `{ data: ResolvedDiscipline[], meta: { inherited } }`.
-- `PUT /libraries/:id/disciplines` (SetDisciplinesBody) → replace; 404 unknown library, 422 unknown discipline key / bad body.
+- `PUT /libraries/:id/disciplines` (SetDisciplinesBody) → replace; 400 malformed body, 404 unknown library, 422 unknown discipline key.
 - `DELETE /libraries/:id/disciplines` → clear override (200 always when library exists; 404 unknown library).
 - `GET /libraries/:id/specs?discipline=` and new `GET /projects/:id/specs?discipline=` carry `discipline` on rows.
 
