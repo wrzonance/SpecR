@@ -133,6 +133,22 @@ export function cellIsEmpty(cell: HeaderFooterCell | undefined): boolean {
   return cell?.content === undefined || cell.content.length === 0;
 }
 
+/**
+ * True iff `cell` resolves to at least one real field value for `ctx` — not
+ * merely a non-empty `content` array. A field can be structurally present
+ * yet resolve to nothing (`{ kind: 'literal' }` with no `text`, or a value
+ * field whose key is absent from `ctx.current`/`ctx.issuance`), and regions
+ * need to know whether a cell would actually render before deciding to emit
+ * a paragraph or a tab stop for it.
+ */
+export function cellHasContent(
+  cell: HeaderFooterCell | undefined,
+  ctx: HeaderFooterFieldContext
+): boolean {
+  if (cellIsEmpty(cell)) return false;
+  return (cell?.content ?? []).some((field) => resolveFieldChildren(field, ctx).length > 0);
+}
+
 /** docx TextRun run-property options mapped from a resolved visual style. */
 export interface HeaderFooterRunOptions {
   readonly font?: string;

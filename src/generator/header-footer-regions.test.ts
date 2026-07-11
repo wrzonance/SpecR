@@ -95,6 +95,28 @@ describe('buildRegionParagraph — presence invariant', () => {
     expect(buildRegionParagraph(region, undefined, CTX, 'bottom')).toBeUndefined();
   });
 
+  it('is undefined when the only cell content resolves to nothing (literal field with no text)', () => {
+    const region: HeaderFooterRegion = { center: { content: [{ kind: 'literal' }] } };
+    expect(buildRegionParagraph(region, undefined, CTX, 'bottom')).toBeUndefined();
+  });
+
+  it('is undefined when every cell resolves to nothing, even with a mix of empty-array and empty-field cells', () => {
+    const region: HeaderFooterRegion = {
+      left: { content: [] },
+      center: { content: [{ kind: 'literal' }] },
+    };
+    expect(buildRegionParagraph(region, undefined, CTX, 'bottom')).toBeUndefined();
+  });
+
+  it('still renders when at least one cell resolves to real output alongside an empty-resolving one', () => {
+    const region: HeaderFooterRegion = {
+      left: { content: [{ kind: 'literal' }] },
+      right: literalCell('RIGHT'),
+    };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    expect(paragraph).toBeInstanceOf(Paragraph);
+  });
+
   it('emits exactly one bordered, contentless paragraph when the rule line is enabled but every cell is empty', async () => {
     const region: HeaderFooterRegion = { ruleLine: { enabled: true, widthTwips: 8 } };
     const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');

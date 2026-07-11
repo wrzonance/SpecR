@@ -3,7 +3,7 @@ import type { IBorderOptions, IBordersOptions, TabStopDefinition } from 'docx';
 import type { HeaderFooterVariant } from '../ast/index.js';
 import {
   cascadeStyle,
-  cellIsEmpty,
+  cellHasContent,
   renderCellRuns,
   type HeaderFooterFieldContext,
   type HeaderFooterVisualStyle,
@@ -102,8 +102,8 @@ function regionChildren(
   ctx: HeaderFooterFieldContext,
   style: HeaderFooterVisualStyle | undefined
 ): readonly TextRun[] {
-  const needsCenterTab = !cellIsEmpty(region?.center) || !cellIsEmpty(region?.right);
-  const needsRightTab = !cellIsEmpty(region?.right);
+  const needsCenterTab = cellHasContent(region?.center, ctx) || cellHasContent(region?.right, ctx);
+  const needsRightTab = cellHasContent(region?.right, ctx);
   return [
     ...renderCellRuns(region?.left, ctx, style),
     ...(needsCenterTab ? [tabRun()] : []),
@@ -113,8 +113,15 @@ function regionChildren(
   ];
 }
 
-function regionHasContent(region: HeaderFooterRegion | undefined): boolean {
-  return !cellIsEmpty(region?.left) || !cellIsEmpty(region?.center) || !cellIsEmpty(region?.right);
+function regionHasContent(
+  region: HeaderFooterRegion | undefined,
+  ctx: HeaderFooterFieldContext
+): boolean {
+  return (
+    cellHasContent(region?.left, ctx) ||
+    cellHasContent(region?.center, ctx) ||
+    cellHasContent(region?.right, ctx)
+  );
 }
 
 // `Paragraph`'s `border` option is a full `IBordersOptions` map (top/bottom/
@@ -146,7 +153,7 @@ export function buildRegionParagraph(
   ruleLineEdge: RuleLineEdge
 ): Paragraph | undefined {
   const border = ruleLineBorder(region?.ruleLine);
-  if (!regionHasContent(region) && border === undefined) return undefined;
+  if (!regionHasContent(region, ctx) && border === undefined) return undefined;
 
   const style = cascadeStyle(region?.style, inheritedStyle);
   return new Paragraph({

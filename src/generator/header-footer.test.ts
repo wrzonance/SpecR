@@ -15,11 +15,11 @@ const CTX: HeaderFooterFieldContext = {
 // Renders headers/footers through a real Document + Packer round-trip so
 // assertions inspect actual generated OOXML parts, mirroring the
 // front-matter.test.ts / manual.test.ts JSZip idiom.
-async function unzipParts(
+function docWithHeadersFooters(
   headers: HeaderFooterRenderResult['headers'],
   footers: HeaderFooterRenderResult['footers']
-): Promise<Set<string>> {
-  const doc = new Document({
+): Document {
+  return new Document({
     sections: [
       {
         ...(headers !== undefined ? { headers } : {}),
@@ -28,8 +28,37 @@ async function unzipParts(
       },
     ],
   });
-  const zip = await JSZip.loadAsync(await Packer.toBuffer(doc));
+}
+
+async function unzipParts(
+  headers: HeaderFooterRenderResult['headers'],
+  footers: HeaderFooterRenderResult['footers']
+): Promise<Set<string>> {
+  const zip = await JSZip.loadAsync(await Packer.toBuffer(docWithHeadersFooters(headers, footers)));
   return new Set(Object.keys(zip.files).filter((name) => !zip.files[name]?.dir));
+}
+
+// Extracts the rendered XML text of every word/header*.xml + word/footer*.xml
+// part, keyed by part name — used to compare two renders' actual
+// headers/footers *payload* (not just their presence) for structural
+// equivalence, since `Header`/`Footer` are docx class instances that
+// `toEqual` can't meaningfully diff on their own.
+async function extractHeaderFooterXml(
+  headers: HeaderFooterRenderResult['headers'],
+  footers: HeaderFooterRenderResult['footers']
+): Promise<Record<string, string>> {
+  const zip = await JSZip.loadAsync(await Packer.toBuffer(docWithHeadersFooters(headers, footers)));
+  const names = Object.keys(zip.files).filter((name) =>
+    /^word\/(header|footer)\d+\.xml$/.test(name)
+  );
+  const entries = await Promise.all(
+    names.map(async (name) => {
+      const file = zip.file(name);
+      const xml = file === null ? '' : await file.async('string');
+      return [name, xml] as const;
+    })
+  );
+  return Object.fromEntries(entries);
 }
 
 describe('renderHeaderFooterComposition — purity and totality', () => {
@@ -47,6 +76,32 @@ describe('renderHeaderFooterComposition — purity and totality', () => {
     expect(second.evenAndOddHeaders).toBe(first.evenAndOddHeaders);
     expect(second.pageNumberStart).toBe(first.pageNumberStart);
     expect(second.warnings).toEqual(first.warnings);
+  });
+
+  it('is pure: never mutates composition or ctx, and repeat calls render structurally-equivalent headers/footers XML', async () => {
+    const composition: HeaderFooterComposition = {
+      style: { bold: true },
+      header: { center: { content: [{ kind: 'sectionTitle' }] } },
+      footer: { right: { content: [{ kind: 'pageNumber' }] } },
+      variants: {
+        first: { header: { center: { content: [{ kind: 'literal', text: 'COVER' }] } } },
+      },
+      pageNumbering: { mode: 'restartPerSpec', startAt: 3 },
+      raw: { warnings: ['unsupported watermark'] },
+    };
+    const compositionSnapshot = structuredClone(composition);
+    const ctxSnapshot = structuredClone(CTX);
+
+    const first = renderHeaderFooterComposition(composition, CTX);
+    const second = renderHeaderFooterComposition(composition, CTX);
+
+    expect(composition).toEqual(compositionSnapshot);
+    expect(CTX).toEqual(ctxSnapshot);
+
+    const firstXml = await extractHeaderFooterXml(first.headers, first.footers);
+    const secondXml = await extractHeaderFooterXml(second.headers, second.footers);
+    expect(secondXml).toEqual(firstXml);
+    expect(Object.keys(firstXml)).not.toHaveLength(0);
   });
 
   it('never throws across a battery of shapes: v1, v2 variants, empty, malformed-adjacent', () => {
@@ -154,6 +209,15 @@ describe('renderHeaderFooterComposition — warnings', () => {
   it('is exactly composition.raw.warnings when present', () => {
     const warnings = ['unsupported watermark', 'dropped legacy field code'];
     expect(renderHeaderFooterComposition({ raw: { warnings } }, CTX).warnings).toEqual(warnings);
+  });
+
+  it('never aliases composition.raw.warnings — returns a defensive copy', () => {
+    const warnings = ['unsupported watermark'];
+    const composition: HeaderFooterComposition = { raw: { warnings } };
+    const result = renderHeaderFooterComposition(composition, CTX);
+    expect(result.warnings).toEqual(warnings);
+    expect(result.warnings).not.toBe(warnings);
+    expect(composition.raw?.warnings).not.toBe(result.warnings);
   });
 
   it('is always an array (never undefined) across every shape', () => {

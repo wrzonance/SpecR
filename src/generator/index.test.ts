@@ -490,12 +490,30 @@ describe('generateDocx — #303 header/footer wiring', () => {
     expect(footerFile).toBeDefined();
   });
 
-  it('options.headerFooter omitted — no header/footer parts emitted (pre-#303 baseline)', async () => {
+  it('options.headerFooter omitted — no header/footer parts, titlePage, evenAndOddHeaders, or pageNumberStart override emitted (pre-#303 baseline)', async () => {
     const buffer = await generateDocx(SYNTHETIC_TREE);
     const zip = await JSZip.loadAsync(buffer);
     const headerFooterParts = Object.keys(zip.files).filter((name) =>
       /^word\/(header|footer)\d+\.xml$/.test(name)
     );
     expect(headerFooterParts).toEqual([]);
+
+    const documentFile = zip.file('word/document.xml');
+    if (!documentFile) throw new Error('word/document.xml missing');
+    const documentXml = await documentFile.async('string');
+    // titlePage: no <w:titlePg> at all — #303's `properties.titlePage` gate
+    // stayed closed.
+    expect(documentXml).not.toContain('<w:titlePg');
+    // pageNumberStart: docx always emits a bare <w:pgNumType/>, but a
+    // `w:start` attribute only appears when #303 sets `properties.page`.
+    expect(documentXml).not.toMatch(/<w:pgNumType[^/>]*\sw:start=/);
+
+    const settingsFile = zip.file('word/settings.xml');
+    if (!settingsFile) throw new Error('word/settings.xml missing');
+    const settingsXml = await settingsFile.async('string');
+    // evenAndOddHeaders: docx's own default-false form always self-closes
+    // with `w:val="false"`; the attribute-less self-closing form only
+    // appears when #303's `documentLevelOptions` forces it true.
+    expect(settingsXml).not.toMatch(/<w:evenAndOddHeaders\/>/);
   });
 });

@@ -10,6 +10,7 @@ import {
   headerFooterRunOptions,
   cascadeStyle,
   cellIsEmpty,
+  cellHasContent,
   type HeaderFooterField,
   type HeaderFooterFieldContext,
   type HeaderFooterCell,
@@ -195,6 +196,36 @@ describe('cellIsEmpty', () => {
 
   it('is false for a cell with at least one field', () => {
     expect(cellIsEmpty({ content: [{ kind: 'literal', text: 'x' }] })).toBe(false);
+  });
+});
+
+describe('cellHasContent — resolved-output emptiness, not just content-array length', () => {
+  it('is false for an undefined cell', () => {
+    expect(cellHasContent(undefined, CTX)).toBe(false);
+  });
+
+  it('is false for a cell with an empty content array', () => {
+    expect(cellHasContent({ content: [] }, CTX)).toBe(false);
+  });
+
+  it('is false when the only field resolves to no output (literal with no text)', () => {
+    expect(cellHasContent({ content: [{ kind: 'literal' }] }, CTX)).toBe(false);
+  });
+
+  it('is false when a value field key is absent from ctx everywhere', () => {
+    const empty: HeaderFooterFieldContext = { sectionNumber: '', sectionTitle: '', current: {} };
+    expect(cellHasContent({ content: [{ kind: 'clientNumber' }] }, empty)).toBe(false);
+  });
+
+  it('is true when at least one field resolves to output', () => {
+    expect(cellHasContent({ content: [{ kind: 'literal', text: 'x' }] }, CTX)).toBe(true);
+  });
+
+  it('is true when a mix of empty and non-empty fields is present', () => {
+    const cell: HeaderFooterCell = {
+      content: [{ kind: 'literal' }, { kind: 'literal', text: 'x' }],
+    };
+    expect(cellHasContent(cell, CTX)).toBe(true);
   });
 });
 

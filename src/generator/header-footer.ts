@@ -136,6 +136,6 @@ export function renderHeaderFooterComposition(
     titlePage: firstV !== undefined,
     evenAndOddHeaders: evenV !== undefined,
     ...(pageNumberStart !== undefined ? { pageNumberStart } : {}),
-    warnings: composition.raw?.warnings ?? [],
+    warnings: composition.raw?.warnings !== undefined ? [...composition.raw.warnings] : [],
   };
 }
