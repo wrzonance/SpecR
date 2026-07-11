@@ -37,6 +37,16 @@ export const up = (pgm: MigrationBuilder): void => {
     'standards_org_code_nonempty',
     'CHECK (length(trim(org_code)) > 0)'
   );
+  // The unique key's determinism depends on org_code always uppercase and
+  // standard_code never blank (else a blank code collides with the org-only key
+  // ADR-064 §2 reserves). The write path enforces both; these make a bypass —
+  // raw SQL, a backfill, a future bug — fail loudly instead of breaking the JOIN.
+  pgm.addConstraint(
+    'standards',
+    'standards_standard_code_nonempty',
+    'CHECK (length(trim(standard_code)) > 0)'
+  );
+  pgm.addConstraint('standards', 'standards_org_code_upper', 'CHECK (org_code = upper(org_code))');
 };
 
 export const down = (pgm: MigrationBuilder): void => {

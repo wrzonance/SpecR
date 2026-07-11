@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { pool } from '../index.js';
+import { pool, DatabaseError } from '../index.js';
 import { getStandardsRollup, recordStandardVerification } from './standards-read.js';
 import { ProjectNotFoundError } from './derive.js';
 import { LibraryNotFoundError } from './libraries.js';
@@ -145,5 +145,16 @@ describe('recordStandardVerification + rollup round-trip', () => {
     expect(second.id).toBe(first.id); // same row, not a duplicate
     expect(second.status).toBe('withdrawn');
     expect(second.currentVersion).toBeNull(); // PUT-replace: omitted field reset
+  });
+
+  // A whitespace-only code trims to '' — the org-only key ADR-064 §2 reserves for
+  // ambiguous citations. The guard rejects it before the INSERT ever runs.
+  it('rejects a blank (whitespace-only) orgCode or standardCode before the upsert', async () => {
+    await expect(
+      recordStandardVerification({ orgCode: '   ', standardCode: 'C150' })
+    ).rejects.toBeInstanceOf(DatabaseError);
+    await expect(
+      recordStandardVerification({ orgCode: ORG, standardCode: '   ' })
+    ).rejects.toBeInstanceOf(DatabaseError);
   });
 });

@@ -177,6 +177,24 @@ function mapRecord(row: RegistryRecordRow): StandardRecord {
   };
 }
 
+// Normalize the registry key to match parseStandardCitation's rollup key (org
+// uppercased/trimmed, code trimmed) and backstop the two API boundaries: a blank
+// code would upsert the org-only key ADR-064 §2 reserves for ambiguous citations,
+// wrongly attaching a verdict to every ambiguous citation for that org.
+function normalizeVerificationKey(input: RecordVerificationInput): {
+  readonly orgCode: string;
+  readonly standardCode: string;
+} {
+  const orgCode = input.orgCode.trim().toUpperCase();
+  const standardCode = input.standardCode.trim();
+  if (orgCode === '' || standardCode === '') {
+    throw new DatabaseError(
+      'recordStandardVerification: orgCode and standardCode must not be blank'
+    );
+  }
+  return { orgCode, standardCode };
+}
+
 /**
  * Upsert a standards verdict (ADR-064 §3). Normalizes orgCode to uppercase/trimmed
  * and trims standardCode so the key matches parseStandardCitation's rollup key, then
@@ -186,8 +204,7 @@ export async function recordStandardVerification(
   input: RecordVerificationInput,
   db: Pool = pool
 ): Promise<StandardRecord> {
-  const orgCode = input.orgCode.trim().toUpperCase();
-  const standardCode = input.standardCode.trim();
+  const { orgCode, standardCode } = normalizeVerificationKey(input);
   try {
     const r = await db.query<RegistryRecordRow>(
       `INSERT INTO standards

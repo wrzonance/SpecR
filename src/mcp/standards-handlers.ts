@@ -21,8 +21,14 @@ export const ListProjectStandardsShape = {
 const ListProjectStandardsArgs = z.object(ListProjectStandardsShape);
 
 export const RecordStandardVerificationShape = {
-  orgCode: z.string().min(1).describe('Standards org code, e.g. ASTM (normalized to uppercase)'),
-  standardCode: z.string().min(1).describe('Standard identifier within the org, e.g. C150'),
+  // trim before min(1): a whitespace-only code trims to '' downstream, colliding
+  // with the org-only key ADR-064 §2 reserves for ambiguous citations.
+  orgCode: z
+    .string()
+    .trim()
+    .min(1)
+    .describe('Standards org code, e.g. ASTM (normalized to uppercase)'),
+  standardCode: z.string().trim().min(1).describe('Standard identifier within the org, e.g. C150'),
   status: z
     .enum(['current', 'superseded', 'withdrawn', 'unknown'])
     .optional()

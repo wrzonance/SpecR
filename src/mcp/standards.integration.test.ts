@@ -94,4 +94,15 @@ describe('standards MCP tools', () => {
       'isError' in (await handleRecordStandardVerification({ orgCode: '', standardCode: '70' }))
     ).toBe(true);
   });
+
+  // A whitespace-only code passed z.string().min(1), then trimmed to '' downstream —
+  // colliding with the org-only key ADR-064 §2 reserves. trim().min(1) rejects it.
+  it('rejects whitespace-only orgCode/standardCode instead of upserting a blank key', async () => {
+    const blankOrg = await handleRecordStandardVerification({ orgCode: '   ', standardCode: '70' });
+    expect('isError' in blankOrg && blankOrg.isError).toBe(true);
+    const blankCode = await handleRecordStandardVerification({ orgCode: ORG, standardCode: '  ' });
+    expect('isError' in blankCode && blankCode.isError).toBe(true);
+    const rollup = parse<StandardsRollup>(await handleListLibraryStandards({ libraryId }));
+    expect(rollup.standards.every((s) => s.standardCode.trim() !== '')).toBe(true);
+  });
 });
