@@ -404,3 +404,7 @@ export type {
   StandardStatus,
   CitingSpec,
 } from './queries/standards.js';
+// Actor identity substrate (#381, ADR-052 D6). role_assignments (migration 045) ships
+// schema-only — its query/REST/MCP layer is a deferred follow-up, not exported here.
+export { resolveOrCreateUserByLabel, listUsers, getUser } from './queries/users.js';
+export type { UserSummary } from './queries/users.js';

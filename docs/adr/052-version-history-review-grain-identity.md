@@ -1,6 +1,10 @@
 # ADR-052: Paragraph Version History, Review Grain, and Actor Identity
 
-## Status: Proposed
+## Status: Partially Accepted
+
+Accepted (D6 — users, fully implemented in #381). D7 (role_assignments) —
+schema Accepted in #381 (migration 045); query/API/MCP layer lands in the
+immediate follow-up PR. D1-D5, D8-D9 remain Proposed, pending #377/#380/#382.
 
 Drafted 2026-07-06 from the version-history brainstorm (issues #377, #378, #379,
 #380, #381, #382). Review before implementation begins; the decision register
@@ -111,17 +115,23 @@ survival across master re-ingest requires identity-preserving re-ingest
 (#375): today's wipe-and-reinsert severs every chain — hard interlock, not
 optional.
 
-### D6 — Actor identity: a users table from day one, never bare strings
+### D6 — Actor identity: a users table from day one, never bare strings — IMPLEMENTED (#381)
 
-`users (id UUID, label TEXT UNIQUE, created_at)`. Every history row,
-checkpoint, lock, and suggestion branch references `users.id`. The claim
-ladder: **label-claimed** now (spoofable, stated openly — the ADR-018 `holder`
-trust posture), → **externally associated** (Revit `Application.Username`
-mapped to a user row so add-in edits attribute), → **SSO-verified** (#43's
-OAuth flow *claims* existing rows, so a firm hosting behind SSO inherits all
-pre-auth history instead of orphaning it).
+`users (id UUID, label TEXT UNIQUE, created_at)`, migration 045. Shipped as
+designed: 3 columns, `label` unique so `resolveOrCreateUserByLabel` is a
+race-free upsert (`ON CONFLICT (label) DO UPDATE SET label = EXCLUDED.label
+RETURNING id, label, created_at`) rather than a check-then-insert. `POST /users` resolves-or-creates
+by label; `GET /users` and `GET /users/:id` list/read; MCP mirrors 1:1
+(`resolve_user` write-tier, `list_users`/`get_user` read-tier). Every history
+row, checkpoint, lock, and suggestion branch will reference `users.id` once
+D1/D8 land. The claim ladder is unchanged from the original design:
+**label-claimed** now (spoofable, stated openly — the ADR-018 `holder` trust
+posture), → **externally associated** (Revit `Application.Username` mapped to
+a user row so add-in edits attribute), → **SSO-verified** (#43's OAuth flow
+*claims* existing rows, so a firm hosting behind SSO inherits all pre-auth
+history instead of orphaning it).
 
-### D7 — Roles: scoped assignments, enforcement points built now
+### D7 — Roles: scoped assignments, enforcement hooks already exist — SCHEMA IMPLEMENTED (#381); role queries/API/MCP + authorization checks follow
 
 `role_assignments (user_id, scope_type project | library, scope_id, role)` with
 the v1 closed vocabulary `viewer | editor | spec-editor | admin`:
@@ -134,11 +144,49 @@ the v1 closed vocabulary `viewer | editor | spec-editor | admin`:
 | `admin` | Lifecycle, checkpoints, issuances, role grants, destructive ops. |
 
 Scoping is per project and per library (masters are their own reviewed track).
-Pre-#43 identity is label-claimed, so roles are honor-system — but the
-enforcement points (edit gate, divert logic, destructive gating) are built now
-so #43 hardens identity without retrofitting authorization. Roles are the
+Pre-#43 identity is label-claimed, so roles are honor-system — and role-based
+authorization is not yet enforced at all: the `role_assignments` query layer and
+`hasAtLeastRole` are deferred (below). What already exists are the enforcement
+*points* (edit gate, divert logic, destructive gating), so when the role checks
+land they slot into those existing hooks and #43 hardens identity without
+retrofitting authorization. Roles are the
 human analog of the MCP capability tiers (ADR-045); the symmetry is
 deliberate.
+
+**Storage vs. wire vocabulary.** The `role_assignments` table itself shipped in
+issue #381's migration 045, alongside `users` (schema-only; no rows can be written
+until the query layer below lands). It stores scope as **two nullable FK
+columns** (`project_id`, `library_id`) with an XOR `CHECK`
+(`(project_id IS NULL) <> (library_id IS NULL)`), not a single
+`scope_type`/`scope_id` pair — the same precedent as
+`division_general_specs` (migration 022, ADR pending at the time, now
+documented here): a real FK per scope type gets `ON DELETE CASCADE` and
+referential integrity for free, where a polymorphic `scope_id` would need an
+application-level check no database constraint can enforce. The **API and MCP
+wire shape stays `scopeType: 'project' | 'library'` + `scopeId: UUID`** as
+originally designed — callers never see the two-column split; the query layer
+translates at the boundary (`scopeType === 'project' ? { project_id: scopeId }
+: { library_id: scopeId }`).
+
+**Why the split.** #381 shipped the `users` vertical end-to-end (migration,
+query layer, `POST/GET /users`, `GET /users/:id`, MCP tools) plus the
+`role_assignments` table (schema only, via the same migration 045 — bundling
+both tables in one migration is cheap and migrations are excluded from the
+lint/LOC budget). The `role_assignments` **query layer, REST resource
+(`/role-assignments`), MCP tools, and `lib/roles.ts` (`hasAtLeastRole`)** move
+to an immediate same-day follow-up PR. This was not a scope call — it was
+forced by `src/db/index.ts`'s ESLint `max-lines: 400` cap (project override,
+`CLAUDE.md`): the file measured 395 ESLint-counted lines before this work (5
+lines of headroom), and adding both the `users` and `role_assignments`
+barrel-export blocks together pushed it to 413, confirmed by running
+`npx eslint src/db/index.ts` against the real file — not estimated. Trimming
+comments saves nothing (`skipComments`/`skipBlankLines` already exclude them
+from the count) and the file is already `prettier --check`'s canonical
+minimal-line rendering at `printWidth: 100`, so no formatting trick reclaims
+lines. The only two real levers were "add fewer lines" or "split the PR";
+`role_assignments`' query/API/MCP surface — the newest, least-depended-on
+layer, and the one whose only planned consumer (`hasAtLeastRole`) has zero
+callers until it exists — was the cleanest cut.
 
 ### D8 — Consistency review: enforced lockout with per-user suggestion branches
 

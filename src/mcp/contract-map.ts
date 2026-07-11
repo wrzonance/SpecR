@@ -114,6 +114,10 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /clients', 'list_clients'],
   ['post /clients', 'create_client'],
   ['get /clients/{}', 'get_client'],
+  // actor identity substrate (#381 / ADR-052 D6)
+  ['get /users', 'list_users'],
+  ['post /users', 'resolve_user'],
+  ['get /users/{}', 'get_user'],
   // ranked full-text search (#445 / ADR-062) — REST twin of the existing tool
   ['get /search', 'search_library'],
   // discipline mapping (#448 / ADR-065) — read catalog, project spec listing, per-library rules
@@ -255,6 +259,12 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'list_package_revisions',
   'get_revision',
   'get_client',
+  // actor identity substrate (#381 / ADR-052 D6): mirrors GET /users/{id} 1:1. Read-pending,
+  // not driven: INV5_DRIVEN's harness invokes arg-less list handlers and asserts a non-empty
+  // array, whereas get_user takes a userId and returns a single object — a different driven
+  // path. Its response shape (UserSummary) is already validated by the driven `list_users`
+  // case, which returns UserSummary[]; a dedicated single-object case is deferred to #464.
+  'get_user',
   // standards rollups (#446): mirror GET /…/standards 1:1 but need a seeded
   // citation graph (a parsed spec citing standards) beyond `pnpm seed`.
   'list_library_standards',
