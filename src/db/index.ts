@@ -91,6 +91,8 @@ export type {
   UpdateProjectInput,
   UpdateProjectResult,
 } from './queries/projects.js';
+export { listProjectSpecs } from './queries/project-specs.js';
+export type { ProjectSpec, ProjectSpecListOptions } from './queries/project-specs.js';
 export { getBrokenRefs } from './queries/project-refs.js';
 export type { BrokenRef } from './queries/project-refs.js';
 export {
@@ -178,6 +180,7 @@ export type {
   CreateLibraryInput,
   CreateClientLibraryInput,
   LibrarySpec,
+  LibrarySpecListOptions,
 } from './queries/libraries.js';
 export { getReferenceGraph } from './queries/reference-graph-read.js';
 export type { GraphScope } from './queries/reference-graph-read.js';

@@ -42,9 +42,7 @@ export interface EffectiveRule {
   readonly divisionEnd: string;
 }
 
-const RulesViewSchema = z.array(
-  z.object({ divisionStart: z.string(), divisionEnd: z.string() })
-);
+const RulesViewSchema = z.array(z.object({ divisionStart: z.string(), divisionEnd: z.string() }));
 
 interface CatalogRow {
   readonly id: string;

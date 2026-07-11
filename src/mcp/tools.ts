@@ -30,6 +30,7 @@ import { registerRequiredSectionsTools } from './required-sections-tools.js';
 import { registerRevisionNomenclatureTools } from './revision-nomenclature-tools.js';
 import { registerNumberingProfileCrudTools } from './numbering-profile-crud-tools.js';
 import { registerLibraryManagementTools } from './library-management-tools.js';
+import { registerDisciplineTools } from './discipline-tools.js';
 import { registerDivisionGeneralTools } from './division-general-tools.js';
 import { registerProjectMembershipTools } from './project-membership-tools.js';
 import { registerClientTools } from './clients-tools.js';
@@ -330,6 +331,7 @@ export function registerTools(
   registerRevisionNomenclatureTools(reg);
   registerNumberingProfileCrudTools(reg);
   registerLibraryManagementTools(reg);
+  registerDisciplineTools(reg);
   registerDivisionGeneralTools(reg);
   registerProjectMembershipTools(reg);
   registerClientTools(reg);

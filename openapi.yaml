@@ -2138,6 +2138,14 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: discipline
+          in: query
+          required: false
+          description: >
+            Discipline key (from GET /disciplines) to filter the listing by, resolved
+            under the library's mapping (ADR-065).
+          schema:
+            type: string
       responses:
         '200':
           description: Specs owned by the library
@@ -2415,6 +2423,152 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /disciplines:
+    get:
+      operationId: listDisciplines
+      summary: List disciplines with their resolved section mapping
+      description: >
+        Returns the discipline catalog, each discipline with its CSI division
+        rules resolved for an optional `libraryId` (ADR-065). With no `libraryId`,
+        or when the library has no rules of its own, the built-in default mapping
+        is returned and `meta.inherited` is `true`. Unmapped disciplines carry an
+        empty `rules` array.
+      tags: [disciplines]
+      parameters:
+        - name: libraryId
+          in: query
+          required: false
+          description: Resolve the mapping for this library (falls back to the built-in default).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Resolved discipline catalog with fallback flag
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data, meta]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ResolvedDiscipline'
+                      meta:
+                        type: object
+                        required: [inherited]
+                        properties:
+                          inherited:
+                            type: boolean
+                            description: True when the built-in default backs the result
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /libraries/{id}/disciplines:
+    put:
+      operationId: putLibraryDisciplines
+      summary: Replace a library's discipline rule set
+      description: >
+        Replaces the library's discipline rule set wholesale (ADR-065). Each rule
+        maps an inclusive CSI division range to a discipline `key` from
+        GET /disciplines; ranges must not overlap. A malformed body → 400, an
+        unknown discipline key → 422. The library then owns its mapping
+        (`meta.inherited: false`). Clear the override with DELETE.
+      tags: [disciplines]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Library UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetDisciplinesBody'
+      responses:
+        '200':
+          description: Discipline rule set replaced; resolved catalog returned
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data, meta]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ResolvedDiscipline'
+                      meta:
+                        type: object
+                        required: [inherited]
+                        properties:
+                          inherited:
+                            type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Unknown discipline key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: clearLibraryDisciplines
+      summary: Clear a library's discipline override
+      description: >
+        Removes the library's own discipline rules, reverting it to the built-in
+        default (ADR-065). Idempotent: `data.cleared` is `true` when an override
+        was removed, `false` when the library already had none.
+      tags: [disciplines]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Library UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Override cleared (or already absent)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [cleared]
+                        properties:
+                          cleared:
+                            type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /revision-nomenclature-profiles:
     get:
       operationId: listRevisionNomenclatureProfiles
@@ -2639,6 +2793,44 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   /projects/{id}/specs:
+    get:
+      operationId: listProjectSpecs
+      summary: List a project's specs with resolved disciplines
+      description: >
+        Returns the project's specs (its table-of-contents rows), each with its
+        resolved `discipline` (ADR-065). Project copies belong to no single
+        library, so disciplines resolve against the built-in default mapping.
+        Pass `discipline` to keep only specs resolving to that discipline key.
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: discipline
+          in: query
+          required: false
+          description: Discipline key (from GET /disciplines) to filter the listing by.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Specs in the project TOC
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ProjectSpec'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     post:
       operationId: addSectionToProject
       summary: Add a section to a project TOC (copy-on-derive clone)
@@ -6949,7 +7141,7 @@ components:
 
     LibrarySpec:
       type: object
-      required: [specId, section, title, nodeCount, withdrawnAt]
+      required: [specId, section, title, nodeCount, withdrawnAt, discipline]
       properties:
         specId:
           type: string
@@ -6968,6 +7160,89 @@ components:
             Soft-delete (withdraw) tombstone (ADR-030): ISO-8601 when the master
             is withdrawn, `null` when active. Withdrawn rows appear only when the
             request passes `includeWithdrawn=true`.
+        discipline:
+          type: [string, 'null']
+          description: >
+            Resolved discipline key under the library's mapping (ADR-065), or
+            `null` when the spec's CSI division is unmapped.
+
+    ProjectSpec:
+      type: object
+      required: [specId, section, title, position, discipline]
+      properties:
+        specId:
+          type: string
+          format: uuid
+        section:
+          type: string
+        title:
+          type: string
+        position:
+          type: integer
+          description: 1-based TOC position within the project
+        discipline:
+          type: [string, 'null']
+          description: >
+            Resolved discipline key under the built-in default mapping (ADR-065),
+            or `null` when the spec's CSI division is unmapped.
+
+    DisciplineRuleView:
+      type: object
+      required: [divisionStart, divisionEnd]
+      description: An inclusive CSI division range (2-digit) mapped to a discipline.
+      properties:
+        divisionStart:
+          type: string
+          pattern: '^\d{2}$'
+        divisionEnd:
+          type: string
+          pattern: '^\d{2}$'
+
+    ResolvedDiscipline:
+      type: object
+      required: [id, key, name, rules]
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+          description: Stable slug used as the filter value on spec listings
+        name:
+          type: string
+          description: Display label
+        rules:
+          type: array
+          description: Division ranges mapped to this discipline under the resolved scope (may be empty)
+          items:
+            $ref: '#/components/schemas/DisciplineRuleView'
+
+    DisciplineRuleInput:
+      type: object
+      required: [discipline, divisionStart, divisionEnd]
+      properties:
+        discipline:
+          type: string
+          minLength: 1
+          description: Discipline key from GET /disciplines
+        divisionStart:
+          type: string
+          pattern: '^\d{2}$'
+        divisionEnd:
+          type: string
+          pattern: '^\d{2}$'
+          description: Must be >= divisionStart
+
+    SetDisciplinesBody:
+      type: object
+      required: [rules]
+      properties:
+        rules:
+          type: array
+          minItems: 1
+          description: Complete replacement rule set; division ranges must not overlap
+          items:
+            $ref: '#/components/schemas/DisciplineRuleInput'
 
     EditingConvention:
       type: object

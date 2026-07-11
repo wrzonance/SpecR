@@ -4,6 +4,7 @@ import {
   createProject,
   findProjectById,
   listProjects,
+  listProjectSpecs,
   setProjectSources,
   updateProject,
   softDeleteProject,
@@ -126,6 +127,36 @@ export async function getProjectHandler(req: Request, res: Response): Promise<vo
     res.status(200).json({ success: true, data: project });
   } catch (err) {
     logger.error({ err }, 'get project failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+/**
+ * GET /projects/{id}/specs — list a project's specs, each with its resolved discipline
+ * (ADR-065, built-in default mapping). Optional `discipline` query param filters by key.
+ */
+export async function listProjectSpecsHandler(req: Request, res: Response): Promise<void> {
+  const parsedId = z.uuid().safeParse(req.params['id']);
+  if (!parsedId.success) {
+    res.status(400).json({ success: false, error: 'invalid project id' });
+    return;
+  }
+  const discipline =
+    typeof req.query['discipline'] === 'string' ? req.query['discipline'] : undefined;
+  try {
+    const project = await findProjectById(parsedId.data, pool);
+    if (!project) {
+      res.status(404).json({ success: false, error: 'project not found' });
+      return;
+    }
+    const specs = await listProjectSpecs(
+      parsedId.data,
+      discipline !== undefined ? { discipline } : {},
+      pool
+    );
+    res.status(200).json({ success: true, data: specs });
+  } catch (err) {
+    logger.error({ err }, 'list project specs failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }

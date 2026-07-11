@@ -36,9 +36,7 @@ const DEFAULT_RULES: readonly { key: string; start: string; end: string }[] = [
 
 function seedCatalog(pgm: MigrationBuilder): void {
   for (const { key, name } of DISCIPLINES) {
-    pgm.sql(
-      `INSERT INTO disciplines (key, name) VALUES ('${key}', '${name.replace(/'/g, "''")}')`
-    );
+    pgm.sql(`INSERT INTO disciplines (key, name) VALUES ('${key}', '${name.replace(/'/g, "''")}')`);
   }
 }
 

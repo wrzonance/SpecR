@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { pool, DatabaseError } from '../index.js';
+import { resolveEffectiveRules, disciplineForSection } from './disciplines.js';
 
 export type LibraryTier = 'reference' | 'company' | 'client';
 
@@ -28,12 +29,24 @@ export interface CreateLibraryInput {
 // browser lists (GET /libraries/:id/specs). `withdrawnAt` is the ADR-030
 // tombstone: null for an active master, an ISO-8601 timestamp for a withdrawn
 // one (only surfaced when the listing opts into withdrawn masters).
+// `discipline` is the spec's resolved discipline key under the library's mapping
+// (built-in default unless the library overrides it), or null when its division
+// is unmapped (ADR-065).
 export interface LibrarySpec {
   readonly specId: string;
   readonly section: string;
   readonly title: string;
   readonly nodeCount: number;
   readonly withdrawnAt: string | null;
+  readonly discipline: string | null;
+}
+
+/** Optional filters for a library's spec listing. */
+export interface LibrarySpecListOptions {
+  /** Surface withdrawn masters (ADR-030), each with a withdrawnAt timestamp. */
+  readonly includeWithdrawn?: boolean;
+  /** Keep only specs whose resolved discipline key equals this value (ADR-065). */
+  readonly discipline?: string;
 }
 
 interface LibraryRow {
@@ -221,12 +234,16 @@ interface LibrarySpecRow {
  * id and restorable via `POST /specs/:id/restore`. Pass `includeWithdrawn` to
  * surface them (with a non-null `withdrawnAt`) so a browse-and-restore flow can
  * discover the spec UUID `restore` needs (#416).
+ *
+ * Each row carries its resolved `discipline` under the library's mapping (ADR-065).
+ * Pass `discipline` to keep only specs that resolve to that discipline key.
  */
 export async function listLibrarySpecs(
   libraryId: string,
-  includeWithdrawn = false,
+  options: LibrarySpecListOptions = {},
   db: Queryable = pool
 ): Promise<readonly LibrarySpec[]> {
+  const { includeWithdrawn = false, discipline } = options;
   try {
     const result = await db.query<LibrarySpecRow>(
       `SELECT s.id, s.section, s.title, s.withdrawn_at, COUNT(p.id)::int AS node_count
@@ -237,13 +254,16 @@ export async function listLibrarySpecs(
         ORDER BY s.section`,
       [libraryId, includeWithdrawn]
     );
-    return result.rows.map((row) => ({
+    const rules = await resolveEffectiveRules(libraryId, db);
+    const specs = result.rows.map((row) => ({
       specId: row.id,
       section: row.section,
       title: row.title,
       nodeCount: row.node_count,
       withdrawnAt: row.withdrawn_at ? row.withdrawn_at.toISOString() : null,
+      discipline: disciplineForSection(row.section, rules),
     }));
+    return discipline === undefined ? specs : specs.filter((s) => s.discipline === discipline);
   } catch (err) {
     throw new DatabaseError(`listLibrarySpecs: query failed for library ${libraryId}`, {
       cause: err,
