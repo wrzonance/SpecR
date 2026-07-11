@@ -47,12 +47,12 @@ export async function listLibrarySpecsHandler(req: Request, res: Response): Prom
   // the spec UUID that POST /specs/:id/restore needs (#416); default hides them.
   const includeWithdrawn = req.query['includeWithdrawn'] === 'true';
   // Optional discipline filter (ADR-065): a discipline key from GET /disciplines.
-  const rawDiscipline = req.query['discipline'];
-  if (rawDiscipline !== undefined && typeof rawDiscipline !== 'string') {
+  const parsedDiscipline = z.string().optional().safeParse(req.query['discipline']);
+  if (!parsedDiscipline.success) {
     res.status(400).json({ success: false, error: 'discipline filter must be a single value' });
     return;
   }
-  const discipline = rawDiscipline;
+  const discipline = parsedDiscipline.data;
   try {
     const library = await findLibraryById(libraryId);
     if (!library) {

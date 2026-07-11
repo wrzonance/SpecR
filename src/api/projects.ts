@@ -141,12 +141,12 @@ export async function listProjectSpecsHandler(req: Request, res: Response): Prom
     res.status(400).json({ success: false, error: 'invalid project id' });
     return;
   }
-  const rawDiscipline = req.query['discipline'];
-  if (rawDiscipline !== undefined && typeof rawDiscipline !== 'string') {
+  const parsedDiscipline = z.string().optional().safeParse(req.query['discipline']);
+  if (!parsedDiscipline.success) {
     res.status(400).json({ success: false, error: 'discipline filter must be a single value' });
     return;
   }
-  const discipline = rawDiscipline;
+  const discipline = parsedDiscipline.data;
   try {
     const project = await findProjectById(parsedId.data, pool);
     if (!project) {
