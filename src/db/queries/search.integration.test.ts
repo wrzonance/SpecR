@@ -18,6 +18,11 @@ const TIGHT = 'Firestopping at conduit penetrations shall be installed per teste
 // appears nowhere else in the shared test DB, keeping that assertion deterministic.
 const SCATTERED = `Firestopping is required throughout the project. ${FILLER}. Route each conduit run as shown on the drawings. ${FILLER}. Seal all remaining wall penetrations after inspection ~^~.`;
 const PRODUCTS_HIT = 'Firestop sealant products for conduit penetrations at each rated opening.';
+// Paragraph text carrying raw HTML plus a unique punctuation-only marker (<=@=>) so
+// both snippet paths can be exercised: a word query hits ts_headline, the marker (an
+// empty tsquery) hits the ILIKE fallback. Uploaded text like this must never reach a
+// consumer as live markup.
+const XSS_TEXT = 'Grounding electrode <img src=x onerror=alert(1)> bonding marker <=@=> conductor.';
 
 beforeAll(async () => {
   searchSpecId = await createSpec({
@@ -59,6 +64,13 @@ beforeAll(async () => {
                   id: '30000000-0000-0000-0000-000000000012',
                   type: 'pr1',
                   text: SCATTERED,
+                  children: [],
+                  meta: {},
+                },
+                {
+                  id: '30000000-0000-0000-0000-000000000013',
+                  type: 'pr1',
+                  text: XSS_TEXT,
                   children: [],
                   meta: {},
                 },
@@ -167,6 +179,27 @@ describe('searchParagraphs (full-text)', () => {
 
   it('returns an empty array for a genuine no-match', async () => {
     expect(await search('xyznonexistentquery12345')).toEqual([]);
+  });
+
+  it('HTML-escapes source text in the ts_headline snippet (no stored XSS)', async () => {
+    const results = await search('grounding electrode bonding');
+    const match = results.find((r) => r.paragraphId === '30000000-0000-0000-0000-000000000013');
+    expect(match).toBeDefined();
+    // Highlight tags are preserved, but uploaded <img …> is escaped, not live markup.
+    expect(match!.snippet).toContain('<mark>');
+    expect(match!.snippet).toContain('&lt;img');
+    expect(match!.snippet).not.toContain('<img');
+  });
+
+  it('HTML-escapes source text in the ILIKE-fallback snippet (no stored XSS)', async () => {
+    // The punctuation-only marker yields an empty tsquery, so only the substring
+    // fallback (left(p.text, 200)) can match — its snippet must escape too.
+    const results = await search('<=@=>');
+    const match = results.find((r) => r.paragraphId === '30000000-0000-0000-0000-000000000013');
+    expect(match).toBeDefined();
+    expect(match!.rank).toBe(0);
+    expect(match!.snippet).toContain('&lt;img');
+    expect(match!.snippet).not.toContain('<img');
   });
 
   it('falls back to ILIKE substring for a degenerate (no-lexeme) query', async () => {

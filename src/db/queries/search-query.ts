@@ -10,7 +10,11 @@ export interface ParagraphSearchResult {
   readonly specId: string;
   readonly specSection: string;
   readonly specTitle: string;
-  /** ts_headline excerpt with matched lexemes wrapped in <mark>…</mark>. */
+  /**
+   * ts_headline excerpt with matched lexemes wrapped in <mark>…</mark>. The source
+   * paragraph text is HTML-escaped before the tags are inserted, so <mark> is the
+   * only live markup — safe for a consumer to render as HTML.
+   */
   readonly snippet: string;
   /** ts_rank_cd cover-density score; 0 on the degenerate ILIKE fallback path. */
   readonly rank: number;
@@ -43,6 +47,16 @@ const HEADLINE_OPTS = 'StartSel=<mark>, StopSel=</mark>, MaxWords=28, MinWords=1
 function likePattern(query: string): string {
   const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
   return `%${escaped}%`;
+}
+
+// Postgres core has no HTML-escape, and both ts_headline and the substring fallback
+// return the source text verbatim. `snippet` carries <mark> tags and is meant to
+// render as HTML, so escape &,<,> in the paragraph text FIRST — otherwise uploaded
+// content like `<img onerror=…>` becomes live markup (stored XSS) in any consumer.
+// ts_headline inserts the literal <mark> StartSel/StopSel afterward, so they stay
+// intact. Order matters: & before < and > so the introduced entities aren't re-escaped.
+function htmlEscapeSql(expr: string): string {
+  return `replace(replace(replace(${expr}, '&', '&amp;'), '<', '&lt;'), '>', '&gt;')`;
 }
 
 // Column-predicate scope filters (library / project / division / nodeType). Appends
@@ -116,8 +130,8 @@ export function buildParagraphSearch(query: string, options: ParagraphSearchOpti
              CASE WHEN numnode(q.tsq) > 0
                   THEN ts_rank_cd(p.search_vector, q.tsq) ELSE 0 END AS rank,
              CASE WHEN numnode(q.tsq) > 0
-                  THEN ts_headline('english', p.text, q.tsq, '${HEADLINE_OPTS}')
-                  ELSE left(p.text, 200) END AS snippet
+                  THEN ts_headline('english', ${htmlEscapeSql('p.text')}, q.tsq, '${HEADLINE_OPTS}')
+                  ELSE ${htmlEscapeSql('left(p.text, 200)')} END AS snippet
       FROM paragraphs p
       CROSS JOIN q
       JOIN specs s ON p.spec_id = s.id

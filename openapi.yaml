@@ -208,6 +208,8 @@ paths:
           description: Restrict to a paragraph node type (part, article, pr1…pr7, note).
           schema:
             type: string
+            enum:
+              [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation]
         - name: limit
           in: query
           required: false
