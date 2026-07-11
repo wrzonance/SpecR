@@ -10,7 +10,7 @@ permissions:
 
 env:
   NODE_VERSION: "22"
-  PNPM_VERSION: "11"
+  PNPM_VERSION: "11.11.0"
 
 jobs:
   create-release:
