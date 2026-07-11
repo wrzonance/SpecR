@@ -86,7 +86,7 @@ Verify: `pnpm migrate` then `pnpm migrate:down` then `pnpm migrate` round-trips 
 
 ### Task 4: Discipline-annotated listings
 
-**Files:** `src/db/queries/libraries.ts` (`listLibrarySpecs` + `discipline?` filter, `discipline` on `LibrarySpec`), `src/db/queries/projects.ts` (new `listProjectSpecs(projectId, discipline?, db?)` returning TOC rows + `discipline`, resolved against built-in default).
+**Files:** `src/db/queries/libraries.ts` (`listLibrarySpecs` + `discipline?` filter, `discipline` on `LibrarySpec`), `src/db/queries/project-specs.ts` (new `listProjectSpecs(projectId, discipline?, db?)` returning TOC rows + `discipline`, resolved against built-in default).
 
 ### Task 5: REST handlers + routes + openapi
 

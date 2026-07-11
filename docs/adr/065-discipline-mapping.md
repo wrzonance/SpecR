@@ -53,12 +53,12 @@ tools (`list_disciplines`, `list_project_specs`, `set_library_disciplines`,
 
    The issue delegated only the 21/22/23 split; it is realized CSI-accurately
    (21=Fire Suppression, 22=Plumbing, 23=HVAC). Trade groupings that collapse
-   multiple divisions into one discipline — 03–14 → Architectural, or 21–23 →
-   Mechanical — are exactly what the per-library override is for: a firm regroups
-   with a single range rule (e.g. `21–23 → Mechanical`), demonstrating the override
-   mechanism. "Mechanical" is seeded in the catalog (unmapped by the default) as
-   that override target; a firm needing a brand-new discipline name is the one
-   documented future enhancement (no add-discipline endpoint in scope).
+   multiple divisions into one discipline are exactly what the per-library
+   override is for: a firm regroups with a single range rule. "Mechanical" is
+   seeded in the catalog (unmapped by the default) as a ready override target, so
+   `21–23 → Mechanical` works today. Grouping onto a name the catalog does not yet
+   hold — e.g. `03–14 → Architectural` — first needs that discipline created, which
+   is the one documented future enhancement (no add-discipline endpoint in scope).
 
 3. **Disciplines are a global catalog.** Overrides remap divisions to existing
    catalog disciplines; there is no add-discipline endpoint in scope. A brand-new

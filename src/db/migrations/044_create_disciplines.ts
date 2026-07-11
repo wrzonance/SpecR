@@ -66,8 +66,9 @@ const DISCIPLINES: readonly { key: string; name: string }[] = [
 // Built-in default mapping (library_id IS NULL): every active MasterFormat division →
 // its own discipline, at single-division granularity. Reserved divisions (15–20, 24, 29,
 // 30, 36–39, 47, 49) get NO rule, so a section in one resolves to a null discipline. Trade
-// groupings like 03–14 → Architectural or 21–23 → Mechanical are exactly what per-library
-// overrides are for (ADR-065).
+// groupings are exactly what per-library overrides are for: 21–23 → "Mechanical" works today
+// (that override target is seeded, unmapped); grouping onto a not-yet-seeded name is a
+// documented future enhancement (ADR-065).
 const DEFAULT_RULES: readonly { key: string; start: string; end: string }[] = [
   { key: 'procurement-contracting', start: '00', end: '00' },
   { key: 'general-requirements', start: '01', end: '01' },
