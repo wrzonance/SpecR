@@ -138,6 +138,21 @@ describe('applyAccepted — validation (#374)', () => {
     expect(await paragraphVersions(pr1Id)).toEqual([]);
   });
 
+  it('resolves a case-variant accepted uuid to its diff entry (uuids are case-insensitive)', async () => {
+    // get_spec_diff emits canonical lowercase uuids; a client that re-cases one in
+    // `accept` must still resolve to the same entry, not be rejected as unknown —
+    // PostgreSQL and z.uuid() both treat the two casings as one uuid.
+    const { specId, pr1Id } = await createFixture();
+    const diff = diffWith({ deleted: [pr1Id] });
+
+    const result = await runInTransaction((client) =>
+      applyAccepted(specId, [pr1Id.toUpperCase()], diff, client)
+    );
+
+    expect(result).toEqual({ applied: 1, rejected: 0 });
+    expect((await paragraphRow(pr1Id)).vanish).toBe(true);
+  });
+
   it('rejected = applicable.size - accepted.length', async () => {
     const { specId, pr1Id, pr1SecondId, articleId } = await createFixture();
     const addedUuid = randomUUID();

@@ -25,17 +25,32 @@ type ApplicableChange =
   | { readonly kind: 'added'; readonly change: ParagraphDiff }
   | { readonly kind: 'deleted' };
 
+// UUIDs are case-insensitive (z.uuid() accepts either case, PostgreSQL's uuid type
+// compares canonically), so accept-array and diff-bucket lookups are keyed on a
+// case-folded form — otherwise a case-variant accepted uuid is rejected as unknown
+// even though it names a real diff entry. Mirrors the DiffResultSchema dedup guard.
+const uuidKey = (uuid: string): string => uuid.toLowerCase();
+
 function applicableChanges(diff: DiffResult): ReadonlyMap<string, ApplicableChange> {
   return new Map<string, ApplicableChange>([
-    ...diff.modified.map((c): [string, ApplicableChange] => [c.uuid, { kind: 'text', change: c }]),
-    ...diff.conflicts.map((c): [string, ApplicableChange] => [c.uuid, { kind: 'text', change: c }]),
-    ...diff.added.map((c): [string, ApplicableChange] => [c.uuid, { kind: 'added', change: c }]),
-    ...diff.deleted.map((uuid): [string, ApplicableChange] => [uuid, { kind: 'deleted' }]),
+    ...diff.modified.map((c): [string, ApplicableChange] => [
+      uuidKey(c.uuid),
+      { kind: 'text', change: c },
+    ]),
+    ...diff.conflicts.map((c): [string, ApplicableChange] => [
+      uuidKey(c.uuid),
+      { kind: 'text', change: c },
+    ]),
+    ...diff.added.map((c): [string, ApplicableChange] => [
+      uuidKey(c.uuid),
+      { kind: 'added', change: c },
+    ]),
+    ...diff.deleted.map((uuid): [string, ApplicableChange] => [uuidKey(uuid), { kind: 'deleted' }]),
   ]);
 }
 
 function uniqueAccepted(acceptedIds: readonly string[]): readonly string[] {
-  return [...new Set(acceptedIds)];
+  return [...new Set(acceptedIds.map(uuidKey))];
 }
 
 function validateAccepted(
