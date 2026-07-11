@@ -60,21 +60,34 @@ describe('computeNoteRoles', () => {
     expect(computeNoteRoles([para('Ordinary paragraph text.')])).toEqual(['none']);
   });
 
-  // KNOWN AMBIGUITY: isHeadingParagraph is text-pattern-only (Signal 4 shape), so a
-  // heading whose PART/article status is carried entirely by numbering.xml or a
-  // style (Signal 1/2) — with no literal "PART n" / "N.N" text, e.g. a bare
-  // "GENERAL" title under a spec-shaped numId — is invisible to it. An unpaired
-  // opener is NOT force-closed by such a paragraph and continues to swallow it,
-  // and everything after it through end-of-stream, as 'note'. This is a deliberate
-  // boundary, not an oversight: note-role classification runs on raw paragraph
-  // text ahead of the 5-signal engine, so numbering/style facts are not yet
-  // available to it.
-  it('KNOWN AMBIGUITY: a numbering-only heading with no literal PART/article text is not recognized as a heading', () => {
+  // note-region: numbering-only PART heading (bare "GENERAL" under a spec-shaped
+  // numId) enclosed by an unpaired asterisk opener must NOT be swallowed.
+  // isHeadingParagraph is text-pattern-only, so it does not force-close on the bare
+  // word — but hasStructuralNumbering marks the paragraph structural, tripping the
+  // classifier's drift guard: the asterisk convention disengages for the whole
+  // document (every role 'none') rather than swallow the heading. This is the exact
+  // #292 regression (a numbering-only PART lost into a note) resolved.
+  it('note-region: a numbering-only PART heading inside an open region trips the drift guard, not swallowed', () => {
     const paragraphs = [
       para('*****'),
       para('Coordinate with the owner before proceeding.'),
       para('GENERAL', { numId: 9, ilvl: 0 }),
     ];
-    expect(computeNoteRoles(paragraphs)).toEqual(['rule', 'note', 'note']);
+    expect(computeNoteRoles(paragraphs)).toEqual(['none', 'none', 'none']);
+  });
+
+  // The drift guard keys on the numbering signal, not on the mere presence of a
+  // rule row: a cleanly paired region enclosing ONLY un-numbered note prose stays a
+  // real note region (walls suppressed, prose noted) even though the same document
+  // has numbered structural content OUTSIDE the region.
+  it('note-region: numbered content OUTSIDE a cleanly-paired region does not trip the drift guard', () => {
+    const paragraphs = [
+      para('PART 1 - GENERAL', { numId: 9, ilvl: 0 }),
+      para('*****'),
+      para('Delete items below not applicable to this project.'),
+      para('*****'),
+      para('Section includes the requirements for widgets.', { numId: 9, ilvl: 2 }),
+    ];
+    expect(computeNoteRoles(paragraphs)).toEqual(['none', 'rule', 'note', 'rule', 'none']);
   });
 });

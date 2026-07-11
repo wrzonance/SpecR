@@ -20,6 +20,14 @@ export function isRuleRow(text: string): boolean {
 export interface NoteScanItem {
   readonly text: string;
   readonly isHeading: boolean;
+  // The item carries its own structural list numbering (a numbered heading or list
+  // item). A specifier note never encloses numbered structural content, so such an
+  // item appearing INSIDE an open rule-row region is proof the asterisk pairing has
+  // drifted — an unpaired or content-merged wall (e.g. "…Waste Management *****")
+  // left the open/closed toggle out of phase. Stronger than isHeading, which is a
+  // text-shape guess: this is independent numbering evidence. Optional so callers
+  // that carry no numbering signal (and the format-agnostic unit tests) omit it.
+  readonly isStructural?: boolean;
 }
 
 /** The role a scanned item plays relative to an asterisk-rule-delimited note region. */
@@ -33,10 +41,29 @@ export type NoteRole = 'rule' | 'note' | 'none';
  * 'rule' whether it opens or closes a region). While open, ordinary items are tagged
  * 'note'. A heading force-closes an open region as a safety break and is itself
  * tagged 'none' — see the KNOWN AMBIGUITY cases pinned in note-delimiters.test.ts for
- * the two edge cases this resolves (heading-closed and end-of-stream-closed unpaired
+ * the edge cases this resolves (heading-closed and end-of-stream-closed unpaired
  * openers) and why they are documented rather than "fixed".
+ *
+ * DRIFT GUARD (#292): if a structural (numbered) item is ever enclosed by an open
+ * region, the asterisk pairing has drifted out of phase — hand-authored docs merge a
+ * closing wall into note prose or drop one entirely, so the naive toggle swallows
+ * real PART/article/list content it should never touch. There is no per-region
+ * recovery that stays byte-faithful to the pre-feature classification (every wall the
+ * feature suppresses is a change), so the only safe response is to disengage for the
+ * whole document: fall back to per-paragraph classification (every role 'none'). The
+ * document's notes are still recovered downstream by style/banner signals exactly as
+ * before the asterisk convention existed.
  */
 export function classifyNoteRoles(items: readonly NoteScanItem[]): NoteRole[] {
+  const roles = assignRoles(items);
+  // A structural item that landed in a 'note' role WAS enclosed by an open region
+  // (only an open, non-heading, non-rule item is tagged 'note') — the drift proof.
+  const drifted = items.some((item, i) => roles[i] === 'note' && item.isStructural === true);
+  return drifted ? roles.map(() => 'none') : roles;
+}
+
+/** The clean single-pass toggle — rule rows flip open/closed, headings force-close. */
+function assignRoles(items: readonly NoteScanItem[]): NoteRole[] {
   const roles: NoteRole[] = [];
   let open = false;
 

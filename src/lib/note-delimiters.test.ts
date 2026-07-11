@@ -122,4 +122,58 @@ describe('classifyNoteRoles', () => {
     expect(result).toEqual(['none', 'none', 'rule', 'note', 'rule', 'none']);
     expect(result).toHaveLength(6);
   });
+
+  // ─── Drift guard (#292) ───────────────────────────────────────────────────
+  // Hand-authored docs merge a closing wall into note prose ("…Waste Management
+  // *****") or drop one, so the open/close toggle drifts out of phase and a "region"
+  // swallows real numbered structure. A structural item enclosed by an open region is
+  // that proof; the classifier then disengages for the whole document (every role
+  // 'none') so no PART/article/list item is ever misread as a note.
+  const structural = (text: string): NoteScanItem => ({
+    text,
+    isHeading: false,
+    isStructural: true,
+  });
+
+  it('drift guard: a structural item inside a paired region disengages the whole document', () => {
+    const result = classifyNoteRoles([
+      { text: '*****', isHeading: false },
+      { text: 'Editorial note prose.', isHeading: false },
+      structural('A. Numbered list item that drifted inside the region.'),
+      { text: '*****', isHeading: false },
+      { text: 'Body text after the region.', isHeading: false },
+    ]);
+    expect(result).toEqual(['none', 'none', 'none', 'none', 'none']);
+  });
+
+  it('drift guard: also fires for a structural item under an unpaired (never-closed) opener', () => {
+    const result = classifyNoteRoles([
+      { text: '*****', isHeading: false },
+      { text: 'Editorial note prose.', isHeading: false },
+      structural('PRODUCTS'),
+    ]);
+    expect(result).toEqual(['none', 'none', 'none']);
+  });
+
+  it('drift guard: dormant when every structural item sits OUTSIDE the rule pair', () => {
+    const result = classifyNoteRoles([
+      structural('PART 1 - GENERAL'),
+      { text: '*****', isHeading: false },
+      { text: 'Editorial note prose.', isHeading: false },
+      { text: '*****', isHeading: false },
+      structural('A. Section includes the requirements for widgets.'),
+    ]);
+    expect(result).toEqual(['none', 'rule', 'note', 'rule', 'none']);
+  });
+
+  it('drift guard: dormant when a structural item is not enclosed (region already closed)', () => {
+    const result = classifyNoteRoles([
+      { text: '*****', isHeading: false },
+      { text: 'Editorial note prose.', isHeading: false },
+      { text: '*****', isHeading: false },
+      structural('A. First real list item.'),
+      structural('B. Second real list item.'),
+    ]);
+    expect(result).toEqual(['rule', 'note', 'rule', 'none', 'none']);
+  });
 });
