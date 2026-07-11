@@ -76,6 +76,8 @@ export async function getUser(id: string, db: Queryable = pool): Promise<UserSum
     const row = result.rows[0];
     return row ? mapUserRow(row) : null;
   } catch (err) {
-    throw new DatabaseError(`getUser: query failed for ${id}`, { cause: err });
+    // Keep the requested id out of the message (it reaches logger.error at the edge) for a
+    // uniform error posture with resolveOrCreateUserByLabel; the pg cause is chained internally.
+    throw new DatabaseError('getUser: query failed', { cause: err });
   }
 }

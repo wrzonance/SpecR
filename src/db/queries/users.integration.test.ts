@@ -83,16 +83,15 @@ describe('users query module (integration)', () => {
     'listUsers is deterministic and total: orders by label and reflects every created ' +
       'user, not a subset',
     async () => {
-      const before = await listUsers();
-
       // Created out of alphabetical order to prove the ORDER BY, not insertion order, wins.
       await resolveOrCreateUserByLabel(label('list-b'));
       await resolveOrCreateUserByLabel(label('list-a'));
       await resolveOrCreateUserByLabel(label('list-c'));
 
+      // Assert only this run's rows: a global count (before/after) races concurrent workers
+      // on the shared Postgres, and the run-scoped ordered-label check below already proves
+      // listUsers reflects every created fixture in label order.
       const after = await listUsers();
-      expect(after.length).toBe(before.length + 3);
-
       const created = after.filter((u) => u.label.startsWith(label('list-')));
       expect(created.map((u) => u.label)).toEqual([
         label('list-a'),

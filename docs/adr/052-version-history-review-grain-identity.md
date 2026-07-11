@@ -120,7 +120,7 @@ optional.
 `users (id UUID, label TEXT UNIQUE, created_at)`, migration 045. Shipped as
 designed: 3 columns, `label` unique so `resolveOrCreateUserByLabel` is a
 race-free upsert (`ON CONFLICT (label) DO UPDATE SET label = EXCLUDED.label
-RETURNING *`) rather than a check-then-insert. `POST /users` resolves-or-creates
+RETURNING id, label, created_at`) rather than a check-then-insert. `POST /users` resolves-or-creates
 by label; `GET /users` and `GET /users/:id` list/read; MCP mirrors 1:1
 (`resolve_user` write-tier, `list_users`/`get_user` read-tier). Every history
 row, checkpoint, lock, and suggestion branch will reference `users.id` once
@@ -131,7 +131,7 @@ a user row so add-in edits attribute), → **SSO-verified** (#43's OAuth flow
 *claims* existing rows, so a firm hosting behind SSO inherits all pre-auth
 history instead of orphaning it).
 
-### D7 — Roles: scoped assignments, enforcement points built now — SCHEMA IMPLEMENTED (#381), query/API/MCP layer follows
+### D7 — Roles: scoped assignments, enforcement hooks already exist — SCHEMA IMPLEMENTED (#381); role queries/API/MCP + authorization checks follow
 
 `role_assignments (user_id, scope_type project | library, scope_id, role)` with
 the v1 closed vocabulary `viewer | editor | spec-editor | admin`:
@@ -144,9 +144,12 @@ the v1 closed vocabulary `viewer | editor | spec-editor | admin`:
 | `admin` | Lifecycle, checkpoints, issuances, role grants, destructive ops. |
 
 Scoping is per project and per library (masters are their own reviewed track).
-Pre-#43 identity is label-claimed, so roles are honor-system — but the
-enforcement points (edit gate, divert logic, destructive gating) are built now
-so #43 hardens identity without retrofitting authorization. Roles are the
+Pre-#43 identity is label-claimed, so roles are honor-system — and role-based
+authorization is not yet enforced at all: the `role_assignments` query layer and
+`hasAtLeastRole` are deferred (below). What already exists are the enforcement
+*points* (edit gate, divert logic, destructive gating), so when the role checks
+land they slot into those existing hooks and #43 hardens identity without
+retrofitting authorization. Roles are the
 human analog of the MCP capability tiers (ADR-045); the symmetry is
 deliberate.
 

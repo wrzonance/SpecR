@@ -10,6 +10,9 @@ function isToolError(res: ToolResult): boolean {
   return 'isError' in res && res.isError === true;
 }
 function parse<T>(res: ToolResult): T {
+  // Reject tool errors before casting: two failed calls could both yield payloads without `id`,
+  // letting an idempotency assertion pass on `undefined === undefined`.
+  expect(isToolError(res)).toBe(false);
   return JSON.parse(res.content[0]!.text) as T;
 }
 
