@@ -7,10 +7,7 @@ import { loadFiles } from '../lib/file-loader.js';
 import { logger } from '../lib/logger.js';
 import {
   toolError,
-  handleSearchLibrary,
-  handleListLibraries,
   handleGetSpec,
-  handleListSections,
   handleGetParagraph,
   handleParseDocument,
   handleGenerateDocx,
@@ -20,6 +17,7 @@ import {
   handleOpenCommentsReport,
   handleGetNumberingProfile,
 } from './handlers.js';
+import { registerLibraryTools } from './library-tools.js';
 import { registerOnboardingTools } from './onboarding-tools.js';
 import { registerProjectTools } from './project-tools.js';
 import { registerParagraphTools } from './paragraph-tools.js';
@@ -53,56 +51,6 @@ function isToolError(v: Buffer | string | ToolError | PathResolution): v is Tool
 
 function pathOk(paths: string[]): PathResolution {
   return { ok: true, paths };
-}
-
-const divisionSchema = z
-  .string()
-  .regex(/^\d{2}$/)
-  .optional()
-  .describe('Filter by 2-digit CSI division, e.g. "27"');
-
-function registerLibraryTools(reg: ToolRegistrar): void {
-  reg.register(
-    'search_library',
-    {
-      description:
-        'Search the CSI paragraph library by text content. Returns matching paragraphs with spec context (section, title, node type).',
-      inputSchema: {
-        query: z.string().min(1).describe('Text to search for in paragraph content'),
-        division: divisionSchema,
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(100)
-          .optional()
-          .default(20)
-          .describe('Maximum results to return (1–100, default 20)'),
-      },
-    },
-    handleSearchLibrary
-  );
-
-  reg.register(
-    'list_libraries',
-    {
-      description:
-        'List all paragraph libraries (id, name, tier). Use to obtain the sourceLibraryIds ' +
-        'required by create_project — no other tool surfaces library UUIDs.',
-      inputSchema: {},
-    },
-    handleListLibraries
-  );
-
-  reg.register(
-    'list_sections',
-    {
-      description:
-        'List CSI MasterFormat sections with inDatabase flag. Use to discover which specs are loaded and identify library gaps.',
-      inputSchema: { division: divisionSchema },
-    },
-    handleListSections
-  );
 }
 
 function registerSpecTools(reg: ToolRegistrar): void {

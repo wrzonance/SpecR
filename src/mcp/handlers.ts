@@ -51,17 +51,18 @@ function isToolError(v: unknown): v is ToolError {
   return typeof v === 'object' && v !== null && 'isError' in v;
 }
 
-export async function handleSearchLibrary({
-  query,
-  division,
-  limit,
-}: {
+export async function handleSearchLibrary(args: {
   query: string;
-  division: string | undefined;
+  libraryId?: string | undefined;
+  projectId?: string | undefined;
+  division?: string | undefined;
+  part?: number | undefined;
+  nodeType?: string | undefined;
   limit: number;
 }): Promise<ToolResult> {
+  const { query, ...filters } = args;
   try {
-    const results = await searchParagraphs(query, toSearchOptions({ division, limit }));
+    const results = await searchParagraphs(query, toSearchOptions(filters));
     const meta = anchorsMeta(anchorsFromSearch(results));
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(results, null, 2) }],
