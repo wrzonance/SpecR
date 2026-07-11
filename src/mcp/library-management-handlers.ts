@@ -20,12 +20,17 @@ export const LibraryIdShape = {
 };
 
 // list_library_specs adds an opt-in for withdrawn masters (ADR-030) so an agent
-// can discover the spec UUID that restore_spec needs (#416).
+// can discover the spec UUID that restore_spec needs (#416), and a discipline
+// filter (ADR-065) keyed on a discipline from list_disciplines.
 export const ListLibrarySpecsShape = {
   ...LibraryIdShape,
   includeWithdrawn: z
     .boolean()
     .describe('Include withdrawn masters (default false), each with its withdrawnAt timestamp')
+    .optional(),
+  discipline: z
+    .string()
+    .describe('Keep only specs resolving to this discipline key (from list_disciplines)')
     .optional(),
 };
 const ListLibrarySpecsArgs = z.object(ListLibrarySpecsShape);
@@ -61,11 +66,16 @@ export async function handleListLibrarySpecs(args: unknown): Promise<ToolResult>
   if (!parsed.success) {
     return toolError(`invalid list_library_specs input: ${issues(parsed.error)}`);
   }
-  const { libraryId, includeWithdrawn } = parsed.data;
+  const { libraryId, includeWithdrawn, discipline } = parsed.data;
   try {
     const library = await findLibraryById(libraryId);
     if (!library) return toolError(`library not found: id=${libraryId}`);
-    return ok(await listLibrarySpecs(libraryId, includeWithdrawn ?? false));
+    return ok(
+      await listLibrarySpecs(libraryId, {
+        includeWithdrawn: includeWithdrawn ?? false,
+        ...(discipline !== undefined ? { discipline } : {}),
+      })
+    );
   } catch (err) {
     return internalError(err, 'list_library_specs');
   }

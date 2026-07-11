@@ -21,13 +21,17 @@ const RESPONSE_COVERED = new Set([
   'delete /specs/{}',
   'get /health',
   'get /conventions',
+  'get /disciplines',
   'get /libraries',
   'get /libraries/{}/specs',
   'get /projects',
   'get /projects/{}/revision-nomenclature',
+  'get /projects/{}/specs',
   'get /revision-nomenclature-profiles',
   'get /search',
   'get /templates',
+  'put /libraries/{}/disciplines',
+  'delete /libraries/{}/disciplines',
   'post /specs/{}/restore',
   'post /projects/{}/revision-nomenclature/clone',
   'put /projects/{}/revision-nomenclature',
@@ -122,6 +126,7 @@ const RESPONSE_ALLOWLIST = new Set([
 let server: Server;
 let baseUrl: string;
 let projectId: string;
+let disciplineLibraryId: string;
 
 beforeAll(async () => {
   const app = express();
@@ -142,9 +147,22 @@ beforeAll(async () => {
   const row = project.rows[0];
   if (!row) throw new Error('failed to create contract project');
   projectId = row.id;
+  const lib = await pool.query<{ id: string }>(
+    `INSERT INTO libraries (tier, name) VALUES ('client', $1) RETURNING id`,
+    [`contract-disciplines-${Date.now()}`]
+  );
+  const libRow = lib.rows[0];
+  if (!libRow) throw new Error('failed to create contract discipline library');
+  disciplineLibraryId = libRow.id;
 });
 
 afterAll(async () => {
+  if (disciplineLibraryId) {
+    await pool.query('DELETE FROM discipline_section_rules WHERE library_id = $1', [
+      disciplineLibraryId,
+    ]);
+    await pool.query('DELETE FROM libraries WHERE id = $1', [disciplineLibraryId]);
+  }
   if (projectId) await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
@@ -257,5 +275,35 @@ describe('response contract (covered endpoints)', () => {
     const res = await fetch(`${baseUrl}/search?q=firestopping`);
     expect(res.status).toBe(200);
     await assertResponse('get', '/search', 200, await res.json());
+  });
+
+  it('discipline endpoints match their documented schemas', async () => {
+    // Built-in default catalog.
+    const list = await fetch(`${baseUrl}/disciplines`);
+    expect(list.status).toBe(200);
+    await assertResponse('get', '/disciplines', 200, await list.json());
+
+    // Replace a library's rule set, then clear it.
+    const put = await fetch(`${baseUrl}/libraries/${disciplineLibraryId}/disciplines`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rules: [{ discipline: 'mechanical', divisionStart: '21', divisionEnd: '23' }],
+      }),
+    });
+    expect(put.status).toBe(200);
+    await assertResponse('put', '/libraries/{id}/disciplines', 200, await put.json());
+
+    const del = await fetch(`${baseUrl}/libraries/${disciplineLibraryId}/disciplines`, {
+      method: 'DELETE',
+    });
+    expect(del.status).toBe(200);
+    await assertResponse('delete', '/libraries/{id}/disciplines', 200, await del.json());
+  });
+
+  it('GET /projects/{id}/specs matches its documented 200 schema', async () => {
+    const res = await fetch(`${baseUrl}/projects/${projectId}/specs`);
+    expect(res.status).toBe(200);
+    await assertResponse('get', '/projects/{id}/specs', 200, await res.json());
   });
 });

@@ -145,6 +145,11 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['list_clients', 'read'],
   ['get_client', 'read'],
   ['create_client', 'write'],
+  // discipline mapping (#448 / ADR-065)
+  ['list_disciplines', 'read'],
+  ['list_project_specs', 'read'],
+  ['set_library_disciplines', 'write'],
+  ['clear_library_disciplines', 'write'],
   // standards registry (#446 / ADR-064)
   ['list_library_standards', 'read'],
   ['list_project_standards', 'read'],

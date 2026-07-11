@@ -46,13 +46,23 @@ export async function listLibrarySpecsHandler(req: Request, res: Response): Prom
   // Opt-in to withdrawn masters (ADR-030) so a browse-and-restore flow can find
   // the spec UUID that POST /specs/:id/restore needs (#416); default hides them.
   const includeWithdrawn = req.query['includeWithdrawn'] === 'true';
+  // Optional discipline filter (ADR-065): a discipline key from GET /disciplines.
+  const parsedDiscipline = z.string().optional().safeParse(req.query['discipline']);
+  if (!parsedDiscipline.success) {
+    res.status(400).json({ success: false, error: 'discipline filter must be a single value' });
+    return;
+  }
+  const discipline = parsedDiscipline.data;
   try {
     const library = await findLibraryById(libraryId);
     if (!library) {
       res.status(404).json({ success: false, error: 'library not found' });
       return;
     }
-    const specs = await listLibrarySpecs(libraryId, includeWithdrawn);
+    const specs = await listLibrarySpecs(libraryId, {
+      includeWithdrawn,
+      ...(discipline !== undefined ? { discipline } : {}),
+    });
     res.status(200).json({ success: true, data: specs });
   } catch (err) {
     logger.error({ err }, 'list library specs failed');

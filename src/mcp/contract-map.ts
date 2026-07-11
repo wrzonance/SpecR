@@ -116,6 +116,11 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /clients/{}', 'get_client'],
   // ranked full-text search (#445 / ADR-062) — REST twin of the existing tool
   ['get /search', 'search_library'],
+  // discipline mapping (#448 / ADR-065) — read catalog, project spec listing, per-library rules
+  ['get /disciplines', 'list_disciplines'],
+  ['get /projects/{}/specs', 'list_project_specs'],
+  ['put /libraries/{}/disciplines', 'set_library_disciplines'],
+  ['delete /libraries/{}/disciplines', 'clear_library_disciplines'],
   // standards registry (#446 / ADR-064) — rollup reads + verdict upsert
   ['get /libraries/{}/standards', 'list_library_standards'],
   ['get /projects/{}/standards', 'list_project_standards'],
@@ -205,6 +210,13 @@ export const INV5_SHAPE_EXEMPT: ReadonlyMap<string, string> = new Map([
       '(Reconciling the MCP shape toward REST would mutate shipping tool output — deferred to a ' +
       'follow-up.)',
   ],
+  [
+    'list_disciplines',
+    'reshapes: returns just the resolved disciplines array, whereas REST GET /disciplines returns ' +
+      'that array as `data` PLUS `meta.inherited` at the envelope top level (a required field). ' +
+      'Wrapping the bare array as { success, data } therefore never satisfies the mapped op schema, ' +
+      'which requires meta — same posture as get_library_conventions (#448 / ADR-065).',
+  ],
 ]);
 
 /**
@@ -234,6 +246,9 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'list_library_numbering_profiles',
   'get_numbering_profile_by_id',
   'list_library_specs',
+  // list_project_specs mirrors GET /projects/{id}/specs 1:1, but a non-vacuous assertion needs a
+  // project with a spec in its TOC (an imported spec beyond `pnpm seed`) — same as list_library_specs.
+  'list_project_specs',
   'get_library_general_spec',
   'get_project_general_spec',
   'list_packages',

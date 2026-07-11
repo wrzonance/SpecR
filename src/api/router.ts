@@ -22,6 +22,7 @@ import {
   createProjectHandler,
   listProjectsHandler,
   getProjectHandler,
+  listProjectSpecsHandler,
   setProjectSourcesHandler,
   patchProjectHandler,
   deleteProjectHandler,
@@ -30,6 +31,11 @@ import {
   removeSectionFromProjectHandler,
   getBrokenRefsHandler,
 } from './projects.js';
+import {
+  listDisciplinesHandler,
+  putLibraryDisciplinesHandler,
+  clearLibraryDisciplinesHandler,
+} from './disciplines.js';
 import { getInboundReferencesHandler, getOutboundReferencesHandler } from './references.js';
 import {
   getProjectReferenceGraphHandler,
@@ -215,6 +221,7 @@ router.put(
   validateBody(SetDivisionGeneralSpecBodySchema),
   setProjectDivisionGeneralSpecHandler
 );
+router.get('/projects/:id/specs', listProjectSpecsHandler);
 router.post(
   '/projects/:id/specs',
   validateBody(AddSectionToProjectBodySchema),
@@ -262,6 +269,7 @@ router.post(
   upsertTemplateRulesHandler
 );
 router.get('/conventions', listConventionsHandler);
+router.get('/disciplines', listDisciplinesHandler);
 router.get('/libraries', listLibrariesHandler);
 router.post('/libraries/clients', createClientLibraryHandler);
 // Literal `/libraries/import/jobs/:jobId` is 3 segments, so it never collides
@@ -278,6 +286,8 @@ router.patch('/libraries/:id', renameLibraryHandler);
 router.get('/libraries/:id/conventions', getLibraryConventionHandler);
 router.put('/libraries/:id/conventions', putLibraryConventionHandler);
 router.post('/libraries/:id/conventions/clone', cloneLibraryConventionHandler);
+router.put('/libraries/:id/disciplines', putLibraryDisciplinesHandler);
+router.delete('/libraries/:id/disciplines', clearLibraryDisciplinesHandler);
 router.get('/revision-nomenclature-profiles', listRevisionNomenclatureProfilesHandler);
 router.get('/projects/:id/revision-nomenclature', getProjectRevisionNomenclatureHandler);
 router.put(

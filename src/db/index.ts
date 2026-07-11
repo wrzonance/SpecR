@@ -91,6 +91,8 @@ export type {
   UpdateProjectInput,
   UpdateProjectResult,
 } from './queries/projects.js';
+export { listProjectSpecs } from './queries/project-specs.js';
+export type { ProjectSpec, ProjectSpecListOptions } from './queries/project-specs.js';
 export { getBrokenRefs } from './queries/project-refs.js';
 export type { BrokenRef } from './queries/project-refs.js';
 export {
@@ -178,6 +180,7 @@ export type {
   CreateLibraryInput,
   CreateClientLibraryInput,
   LibrarySpec,
+  LibrarySpecListOptions,
 } from './queries/libraries.js';
 export { getReferenceGraph } from './queries/reference-graph-read.js';
 export type { GraphScope } from './queries/reference-graph-read.js';
@@ -371,6 +374,16 @@ export { getProjectKeynotes } from './queries/keynotes.js';
 export type { ProjectKeynote } from './queries/keynotes.js';
 export { getComparisonColumns, getComparisonParagraphs } from './queries/reporting.js';
 export type { ComparisonColumnMeta, ComparisonParagraphRow } from './queries/reporting.js';
+// ADR-065 — discipline mapping (scoped-profile: built-in default + per-library override).
+// resolveEffectiveRules/disciplineForSection and the resolved-view types stay internal to the
+// db module (used by the listing queries via relative import), so only the externally-consumed
+// symbols are surfaced here.
+export {
+  listDisciplines,
+  replaceLibraryDisciplineRules,
+  clearLibraryDisciplineRules,
+  DisciplineNotFoundError,
+} from './queries/disciplines.js';
 // Standards registry (#446, ADR-064)
 export { getStandardsRollup, recordStandardVerification } from './queries/standards-read.js';
 export type {
