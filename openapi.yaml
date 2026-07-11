@@ -4280,7 +4280,11 @@ paths:
       summary: Library standards rollup (distinct cited standards + registry verdict)
       tags: [libraries]
       parameters:
-        - $ref: '#/components/parameters/LibraryId'
+        - name: id
+          in: path
+          required: true
+          description: Library UUID
+          schema: { type: string, format: uuid }
       responses:
         '200':
           description: Standards rollup for the library
