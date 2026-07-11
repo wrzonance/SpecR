@@ -224,6 +224,36 @@ describe('classifyParagraphs + buildTree — asterisk-rule note regions (#292)',
     expect(children[1]!.text).toBe('Ordinary body text after the region closes.');
   });
 
+  // Codex (PR #461): a paragraph structural ONLY via Signal 2 (its STYLE resolves to a
+  // real tier through resolvedNumPr) — no direct numId and no literal "PART n"/"N.N"
+  // text — is invisible to BOTH the Signal-1 numbering drift check and the text-pattern
+  // heading gate. Inside a drifted (unpaired) asterisk wall it was swallowed as a
+  // [NOTE], the exact structure-loss class the drift guard exists to prevent. The drift
+  // signal now also consults Signal 2 (trySignal2), so such a heading trips the guard
+  // and the convention disengages document-wide — the paragraph classifies normally.
+  it('#292 (Codex #461): a style-numbered structural paragraph (no numId) inside a drifted wall trips the drift guard, not swallowed as a note', () => {
+    const styleMap: StyleMap = {
+      styles: new Map([['ARCATArticle', { styleId: 'ARCATArticle', name: 'ARCATArticle' }]]),
+      resolvedNumPr: new Map([['ARCATArticle', { numId: 5, ilvl: 1 }]]),
+      resolvedJc: new Map(),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ text: '*****' }), // unpaired opener — the wall has drifted out of phase
+        makePara({ styleId: 'ARCATArticle', text: 'Submittals shall include product data.' }),
+      ],
+      numMap(1),
+      styleMap
+    );
+    // The style-numbered paragraph is NOT a swallowed note; it resolves via Signal 2.
+    expect(classified[2]?.isNote).not.toBe(true);
+    expect(classified[2]?.nodeType).toBe('article');
+    expect(classified[2]?.signalUsed).toBe(2);
+  });
+
   // KNOWN AMBIGUITY (mirrors note-roles.test.ts): an unpaired opener with no closing
   // rule row is force-closed only by a literal PART/article heading. When one appears,
   // everything from the opener through the paragraph before the heading becomes a

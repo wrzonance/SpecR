@@ -6,9 +6,14 @@ function para(text: string, overrides: Partial<DocxParagraph> = {}): DocxParagra
   return { text, isVanish: false, ...overrides };
 }
 
+// The Signal-1 structural predicate the DOCX driver injects for a numId-only stream.
+// The full driver predicate (Signal 1 OR Signal 2 via trySignal2) is exercised with
+// real style/numbering maps in inference-notes.test.ts.
+const byNumId = (p: DocxParagraph): boolean => p.numId !== undefined && p.numId > 0;
+
 describe('computeNoteRoles', () => {
   it('is total — returns one role per paragraph, even for an empty document', () => {
-    expect(computeNoteRoles([])).toEqual([]);
+    expect(computeNoteRoles([], byNumId)).toEqual([]);
   });
 
   it('is pure — identical input produces identical output across repeated calls', () => {
@@ -17,8 +22,8 @@ describe('computeNoteRoles', () => {
       para('Coordinate with the owner before proceeding.'),
       para('*****'),
     ];
-    const first = computeNoteRoles(paragraphs);
-    const second = computeNoteRoles(paragraphs);
+    const first = computeNoteRoles(paragraphs, byNumId);
+    const second = computeNoteRoles(paragraphs, byNumId);
     expect(second).toEqual(first);
     expect(second).toEqual(['rule', 'note', 'rule']);
   });
@@ -29,7 +34,7 @@ describe('computeNoteRoles', () => {
       para('Delete items below not applicable to this project.'),
       para('*****'),
     ];
-    expect(computeNoteRoles(paragraphs)).toEqual(['rule', 'note', 'rule']);
+    expect(computeNoteRoles(paragraphs, byNumId)).toEqual(['rule', 'note', 'rule']);
   });
 
   it('treats a literal "PART n" heading as heading text — force-closes an open note region', () => {
@@ -39,7 +44,7 @@ describe('computeNoteRoles', () => {
       para('PART 2 - PRODUCTS'),
       para('Normal body text after the heading.'),
     ];
-    expect(computeNoteRoles(paragraphs)).toEqual(['rule', 'note', 'none', 'none']);
+    expect(computeNoteRoles(paragraphs, byNumId)).toEqual(['rule', 'note', 'none', 'none']);
   });
 
   it('treats an "N.N" article heading as heading text — force-closes an open note region', () => {
@@ -49,31 +54,32 @@ describe('computeNoteRoles', () => {
       para('1.2 REFERENCES'),
       para('Normal body text after the heading.'),
     ];
-    expect(computeNoteRoles(paragraphs)).toEqual(['rule', 'note', 'none', 'none']);
+    expect(computeNoteRoles(paragraphs, byNumId)).toEqual(['rule', 'note', 'none', 'none']);
   });
 
   it('a heading paragraph with no open region is tagged none, not note', () => {
-    expect(computeNoteRoles([para('PART 1 - GENERAL')])).toEqual(['none']);
+    expect(computeNoteRoles([para('PART 1 - GENERAL')], byNumId)).toEqual(['none']);
   });
 
   it('a plain body paragraph outside any rule pair is tagged none', () => {
-    expect(computeNoteRoles([para('Ordinary paragraph text.')])).toEqual(['none']);
+    expect(computeNoteRoles([para('Ordinary paragraph text.')], byNumId)).toEqual(['none']);
   });
 
   // note-region: numbering-only PART heading (bare "GENERAL" under a spec-shaped
   // numId) enclosed by an unpaired asterisk opener must NOT be swallowed.
   // isHeadingParagraph is text-pattern-only, so it does not force-close on the bare
-  // word — but hasStructuralNumbering marks the paragraph structural, tripping the
-  // classifier's drift guard: the asterisk convention disengages for the whole
-  // document (every role 'none') rather than swallow the heading. This is the exact
-  // #292 regression (a numbering-only PART lost into a note) resolved.
+  // word — but the injected structural predicate (byNumId here) marks the paragraph
+  // structural, tripping the classifier's drift guard: the asterisk convention
+  // disengages for the whole document (every role 'none') rather than swallow the
+  // heading. This is the exact #292 regression (a numbering-only PART lost into a
+  // note) resolved.
   it('note-region: a numbering-only PART heading inside an open region trips the drift guard, not swallowed', () => {
     const paragraphs = [
       para('*****'),
       para('Coordinate with the owner before proceeding.'),
       para('GENERAL', { numId: 9, ilvl: 0 }),
     ];
-    expect(computeNoteRoles(paragraphs)).toEqual(['none', 'none', 'none']);
+    expect(computeNoteRoles(paragraphs, byNumId)).toEqual(['none', 'none', 'none']);
   });
 
   // The drift guard keys on the numbering signal, not on the mere presence of a
@@ -88,6 +94,6 @@ describe('computeNoteRoles', () => {
       para('*****'),
       para('Section includes the requirements for widgets.', { numId: 9, ilvl: 2 }),
     ];
-    expect(computeNoteRoles(paragraphs)).toEqual(['none', 'rule', 'note', 'rule', 'none']);
+    expect(computeNoteRoles(paragraphs, byNumId)).toEqual(['none', 'rule', 'note', 'rule', 'none']);
   });
 });

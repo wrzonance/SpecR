@@ -5,11 +5,9 @@ import {
   matchTextSignal,
   matchIndentSignal,
   isPartHeading,
-  isSpecifierNote,
-  isSpecifierNoteInstruction,
   isDecorationSeparator,
 } from './heuristics.js';
-import { computeNoteRoles } from './note-roles.js';
+import { computeNoteRoles, isNoteParagraph } from './note-roles.js';
 import type { NoteRole } from '../../lib/note-delimiters.js';
 import type {
   ClassifiedParagraph,
@@ -175,21 +173,6 @@ function correctMisalignedArticle(winner: SignalHit, hits: readonly SignalHit[])
   return hits.find((h) => h.nodeType !== 'article') ?? indentHit;
 }
 
-// Specifier notes are editorial metadata, not spec content: banner text in any
-// decoration variant, the visible "reveal the hidden notes" instruction chrome, or
-// a note-named paragraph style (name contains "note"). Footnote/endnote styles are
-// document apparatus, not specifier notes.
-function isNoteParagraph(para: DocxParagraph, styleMap: StyleMap): boolean {
-  if (isSpecifierNote(para.text)) return true;
-  if (isSpecifierNoteInstruction(para.text)) return true;
-  if (!para.styleId) return false;
-  const style = styleMap.styles.get(para.styleId);
-  const label = `${para.styleId} ${style?.name ?? ''}`;
-  // exclusion targets Word's built-in FootnoteText/EndnoteText styles —
-  // bare /foot|end/ would also exclude e.g. AppendixNote ("app-END-ix")
-  return /note/i.test(label) && !/footnote|endnote/i.test(label);
-}
-
 function continuationResult(
   para: DocxParagraph,
   prevNonContIlvl: number,
@@ -289,13 +272,31 @@ function classifyOne(
   };
 }
 
+// The note-region drift signal (#292): a paragraph "carries its own structural
+// numbering" — the proof that an open asterisk wall has drifted out of phase and is
+// swallowing real content — when EITHER Signal 1 (a live positive numId) OR Signal 2
+// (its style resolves to a real tier via trySignal2) fires. Signal 2 is what a
+// text-pattern heading gate cannot see: a style-numbered PART/article/list item with
+// no literal "PART n" text and no direct numId (Codex PR #461). Reuses trySignal2 so
+// the numId=0 / suppressesNumbering / lead-in opt-out logic is never duplicated.
+function hasStructuralNumbering(
+  para: DocxParagraph,
+  numberingMap: NumberingMap,
+  styleMap: StyleMap
+): boolean {
+  if (para.numId !== undefined && para.numId > 0) return true;
+  return trySignal2(para, styleMap, numberingMap) !== null;
+}
+
 export function classifyParagraphs(
   paragraphs: readonly DocxParagraph[],
   numberingMap: NumberingMap,
   styleMap: StyleMap
 ): ClassifiedParagraph[] {
   let prevNonContIlvl = 0;
-  const roles = computeNoteRoles(paragraphs);
+  const roles = computeNoteRoles(paragraphs, (para) =>
+    hasStructuralNumbering(para, numberingMap, styleMap)
+  );
 
   return paragraphs.map((para, i): ClassifiedParagraph => {
     const role = roles[i] ?? 'none';
