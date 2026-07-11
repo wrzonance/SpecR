@@ -302,16 +302,27 @@ describe('renderHeaderFooterComposition — JSZip round-trip (default/first/even
     const result = renderHeaderFooterComposition(
       {
         variants: {
-          default: { header: { center: { content: [{ kind: 'literal', text: 'DEFAULT' }] } } },
-          first: { header: { center: { content: [{ kind: 'literal', text: 'COVER' }] } } },
-          even: { header: { center: { content: [{ kind: 'literal', text: 'EVEN' }] } } },
+          default: {
+            header: { center: { content: [{ kind: 'literal', text: 'DEFAULT' }] } },
+            footer: { right: { content: [{ kind: 'pageNumber' }] } },
+          },
+          first: {
+            header: { center: { content: [{ kind: 'literal', text: 'COVER' }] } },
+            footer: { right: { content: [{ kind: 'literal', text: 'COVER PAGE' }] } },
+          },
+          even: {
+            header: { center: { content: [{ kind: 'literal', text: 'EVEN' }] } },
+            footer: { right: { content: [{ kind: 'pageNumber' }] } },
+          },
         },
       },
       CTX
     );
-    const parts = await unzipParts(result.headers, undefined);
+    const parts = await unzipParts(result.headers, result.footers);
     const headerParts = [...parts].filter((name) => /^word\/header\d+\.xml$/.test(name));
+    const footerParts = [...parts].filter((name) => /^word\/footer\d+\.xml$/.test(name));
     expect(headerParts).toHaveLength(3);
+    expect(footerParts).toHaveLength(3);
   });
 });
 

@@ -42,14 +42,29 @@ export interface HeaderFooterFieldContext {
 
 type PageNumberToken = (typeof PageNumber)[keyof typeof PageNumber];
 
-// A resolved field value is either literal text or a docx Word-field
-// sentinel (PageNumber.CURRENT and friends) — never a literal numeric string
-// standing in for a real field. The union is kept (not collapsed to
-// `string`) so callers can still tell "this is a field code" apart from
-// "this is text", even though PageNumberToken is structurally a subset of
-// string.
-// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents -- see comment above
-export type FieldValue = string | PageNumberToken;
+/**
+ * A resolved field value, tagged so the renderer can never mistake literal
+ * text for a docx Word-field sentinel. `PageNumberToken` is structurally
+ * just a plain string (`'CURRENT'`, `'TOTAL_PAGES'`,
+ * `'TOTAL_PAGES_IN_SECTION'`, `'SECTION'`) — docx's own `Run` constructor
+ * pattern-matches any *raw string* passed via its `children` array against
+ * those four values and silently swaps in a Word field code, regardless of
+ * whether the string is a real sentinel or a literal/value field's text that
+ * happens to collide with one. Tagging every value with its origin (`'text'`
+ * vs `'pageField'`) at the type level is what lets `renderFieldRun` route
+ * each one through the correct, collision-proof docx API (see there).
+ */
+export type FieldValue =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'pageField'; readonly token: PageNumberToken };
+
+function textValue(text: string): FieldValue {
+  return { kind: 'text', text };
+}
+
+function pageFieldValue(token: PageNumberToken): FieldValue {
+  return { kind: 'pageField', token };
+}
 
 type FieldResolver = (
   field: HeaderFooterField,
@@ -60,7 +75,7 @@ function resolveValueField(key: keyof HeaderFooterFieldValues): FieldResolver {
   return (field, ctx) => {
     const value =
       field.source === 'issuance' ? (ctx.issuance?.[key] ?? ctx.current[key]) : ctx.current[key];
-    return value === undefined ? [] : [value];
+    return value === undefined ? [] : [textValue(value)];
   };
 }
 
@@ -68,27 +83,29 @@ function resolveSectionNumber(
   _field: HeaderFooterField,
   ctx: HeaderFooterFieldContext
 ): readonly FieldValue[] {
-  return [ctx.sectionNumber];
+  return [textValue(ctx.sectionNumber)];
 }
 
 function resolveSectionTitle(
   _field: HeaderFooterField,
   ctx: HeaderFooterFieldContext
 ): readonly FieldValue[] {
-  return [ctx.sectionTitle];
+  return [textValue(ctx.sectionTitle)];
 }
 
 // Word field code, never a literal number — the page is unknown until Word
 // paginates the document (#303 acceptance: "Page number renders as a Word
 // field, not a literal number"). `field.label`, when set, prefixes the field
-// with literal text (e.g. label: 'Page' -> "Page" + <PAGE field>).
+// with literal text (e.g. label: 'Page' -> "Page" + <PAGE field>). The label
+// is tagged `'text'` even when it happens to equal a sentinel string (e.g.
+// label: 'SECTION') — see the FieldValue doc comment.
 function resolvePageNumber(field: HeaderFooterField): readonly FieldValue[] {
-  const token: FieldValue = PageNumber.CURRENT;
-  return field.label === undefined ? [token] : [field.label, token];
+  const token = pageFieldValue(PageNumber.CURRENT);
+  return field.label === undefined ? [token] : [textValue(field.label), token];
 }
 
 function resolveLiteral(field: HeaderFooterField): readonly FieldValue[] {
-  return field.text === undefined ? [] : [field.text];
+  return field.text === undefined ? [] : [textValue(field.text)];
 }
 
 // Every HeaderFooterFieldKind has exactly one resolver here, enforced at
@@ -189,22 +206,40 @@ export function cascadeStyle(
   );
 }
 
-/** One TextRun for a single field; its resolved children carry the cascaded style. */
+/**
+ * One TextRun per resolved value in `field`'s children — usually exactly
+ * one, but a `pageNumber` field with a `label` resolves to two: a literal
+ * label run followed by the real Word PAGE-field run. `[]` when the field
+ * resolves to nothing.
+ *
+ * Every `'text'`-tagged value is passed through TextRun's `text` option —
+ * never `children` — which builds a plain `<w:t>` run directly and never
+ * runs docx's Run-constructor sentinel switch (see the `FieldValue` doc
+ * comment). Only a `'pageField'`-tagged value goes through `children`, and
+ * that value is always the real `PageNumber.CURRENT` token `resolvePageNumber`
+ * produced, never spec-author text.
+ */
 export function renderFieldRun(
   field: HeaderFooterField,
   ctx: HeaderFooterFieldContext,
   style: HeaderFooterVisualStyle | undefined
-): TextRun {
-  return new TextRun({
-    children: [...resolveFieldChildren(field, ctx)],
-    ...headerFooterRunOptions(style),
-  });
+): readonly TextRun[] {
+  const options = headerFooterRunOptions(style);
+  return resolveFieldChildren(field, ctx).map((value) =>
+    value.kind === 'pageField'
+      ? new TextRun({ children: [value.token], ...options })
+      : new TextRun({ text: value.text, ...options })
+  );
 }
 
 /**
  * Render one cell's fields in order, interleaving `cell.separator` (default a
- * single space) between entries. A cell with zero or one resolved fields
- * never needs — and never emits — a separator. `[]` for an absent/empty cell.
+ * single space) between entries that actually resolve to output. A field
+ * that resolves to nothing (e.g. `{ kind: 'literal' }` with no `text`, or a
+ * value field whose key is absent from `ctx`) is skipped entirely and never
+ * triggers a separator on either side — the separator count always tracks
+ * resolved output, not `cell.content`'s structural length. `[]` for an
+ * absent/empty cell.
  *
  * The default separator can visually double up with a literal field's own
  * trailing space (e.g. a literal "Page " immediately followed by a
@@ -221,9 +256,13 @@ export function renderCellRuns(
   const style = cascadeStyle(cell.style, inheritedStyle);
   const separator = cell.separator ?? ' ';
   const runs: TextRun[] = [];
-  cell.content.forEach((field, index) => {
-    if (index > 0) runs.push(new TextRun({ text: separator }));
-    runs.push(renderFieldRun(field, ctx, style));
-  });
+  let hasRenderedField = false;
+  for (const field of cell.content) {
+    const fieldRuns = renderFieldRun(field, ctx, style);
+    if (fieldRuns.length === 0) continue;
+    if (hasRenderedField) runs.push(new TextRun({ text: separator }));
+    runs.push(...fieldRuns);
+    hasRenderedField = true;
+  }
   return runs;
 }

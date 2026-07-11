@@ -60,8 +60,13 @@ async function renderRunsToXml(runs: readonly TextRun[]): Promise<string> {
   return file.async('string');
 }
 
+/** Every `<w:t>` run's text content, in document order. */
+function textRunContents(xml: string): readonly string[] {
+  return [...xml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((match) => match[1] ?? '');
+}
+
 describe('resolveFieldChildren — pageNumber invariant', () => {
-  it('always resolves to PageNumber.CURRENT, never a literal numeric string, regardless of style, format, or source', () => {
+  it('always resolves to a pageField token, never a literal numeric string, regardless of style, format, or source', () => {
     const variants: readonly HeaderFooterField[] = [
       { kind: 'pageNumber' },
       { kind: 'pageNumber', format: 'roman' },
@@ -71,24 +76,65 @@ describe('resolveFieldChildren — pageNumber invariant', () => {
     ];
     for (const field of variants) {
       const children = resolveFieldChildren(field, CTX);
-      expect(children).toContain(PageNumber.CURRENT);
+      expect(children).toContainEqual({ kind: 'pageField', token: PageNumber.CURRENT });
       for (const value of children) {
-        expect(typeof value === 'string' && /^\d+$/.test(value)).toBe(false);
+        expect(value.kind === 'text' && /^\d+$/.test(value.text)).toBe(false);
       }
     }
   });
 
   it('label prefixes the field with literal text but still carries the field code', () => {
     expect(resolveFieldChildren({ kind: 'pageNumber', label: 'Page' }, CTX)).toEqual([
-      'Page',
-      PageNumber.CURRENT,
+      { kind: 'text', text: 'Page' },
+      { kind: 'pageField', token: PageNumber.CURRENT },
     ]);
   });
 
   it('renders as a real Word PAGE field instruction, not literal page-number text', async () => {
-    const run = renderFieldRun({ kind: 'pageNumber' }, CTX, undefined);
-    const xml = await renderRunsToXml([run]);
+    const runs = renderFieldRun({ kind: 'pageNumber' }, CTX, undefined);
+    const xml = await renderRunsToXml(runs);
     expect(xml).toMatch(/instrText[^>]*>PAGE</);
+  });
+});
+
+describe('renderFieldRun — literal/value field text never collides with a docx field sentinel (#regression)', () => {
+  // docx's own Run constructor pattern-matches any raw string passed through
+  // `children` against these four PageNumber sentinel values and silently
+  // swaps in a Word field code. A literal or resolved value field whose text
+  // happens to equal one of them must still render as plain `<w:t>` text.
+  const SENTINEL_STRINGS = ['CURRENT', 'TOTAL_PAGES', 'TOTAL_PAGES_IN_SECTION', 'SECTION'] as const;
+
+  it.each(SENTINEL_STRINGS)(
+    'a literal field with text %s renders as literal text',
+    async (text) => {
+      const runs = renderFieldRun({ kind: 'literal', text }, CTX, undefined);
+      const xml = await renderRunsToXml(runs);
+      expect(xml).not.toContain('instrText');
+      expect(xml).not.toContain('fldChar');
+      expect(textRunContents(xml)).toEqual([text]);
+    }
+  );
+
+  it.each(SENTINEL_STRINGS)(
+    'a value field resolving to %s renders as literal text',
+    async (text) => {
+      const ctx: HeaderFooterFieldContext = {
+        ...CTX,
+        current: { ...CTX.current, revisionLabel: text },
+      };
+      const runs = renderFieldRun({ kind: 'revisionLabel' }, ctx, undefined);
+      const xml = await renderRunsToXml(runs);
+      expect(xml).not.toContain('instrText');
+      expect(xml).not.toContain('fldChar');
+      expect(textRunContents(xml)).toEqual([text]);
+    }
+  );
+
+  it('a pageNumber label equal to a sentinel string renders as literal text alongside exactly one real field code', async () => {
+    const runs = renderFieldRun({ kind: 'pageNumber', label: 'SECTION' }, CTX, undefined);
+    const xml = await renderRunsToXml(runs);
+    expect((xml.match(/w:fldCharType="begin"/g) ?? []).length).toBe(1);
+    expect(textRunContents(xml)).toEqual(['SECTION']);
   });
 });
 
@@ -109,25 +155,27 @@ describe('resolveFieldChildren field-kind coverage', () => {
 describe('resolveFieldChildren — sectionNumber/sectionTitle source isolation', () => {
   it('sectionNumber and sectionTitle read only ctx, never field.text', () => {
     expect(resolveFieldChildren({ kind: 'sectionNumber', text: '00 00 00' }, CTX)).toEqual([
-      CTX.sectionNumber,
+      { kind: 'text', text: CTX.sectionNumber },
     ]);
     expect(resolveFieldChildren({ kind: 'sectionTitle', text: 'WRONG TITLE' }, CTX)).toEqual([
-      CTX.sectionTitle,
+      { kind: 'text', text: CTX.sectionTitle },
     ]);
   });
 
   it('every other kind ignores ctx.sectionNumber/ctx.sectionTitle', () => {
     for (const kind of OTHER_KINDS) {
       const children = resolveFieldChildren({ kind }, CTX);
-      expect(children).not.toContain(CTX.sectionNumber);
-      expect(children).not.toContain(CTX.sectionTitle);
+      expect(children).not.toContainEqual({ kind: 'text', text: CTX.sectionNumber });
+      expect(children).not.toContainEqual({ kind: 'text', text: CTX.sectionTitle });
     }
   });
 });
 
 describe('resolveFieldChildren — value fields (current/issuance)', () => {
   it('reads from ctx.current by default (no field.source)', () => {
-    expect(resolveFieldChildren({ kind: 'projectName' }, CTX)).toEqual(['Riverside HQ']);
+    expect(resolveFieldChildren({ kind: 'projectName' }, CTX)).toEqual([
+      { kind: 'text', text: 'Riverside HQ' },
+    ]);
   });
 
   it('field.source: "issuance" reads ctx.issuance when present', () => {
@@ -136,20 +184,20 @@ describe('resolveFieldChildren — value fields (current/issuance)', () => {
       issuance: { ...CTX.current, projectName: 'Riverside HQ (Issuance Snapshot)' },
     };
     expect(resolveFieldChildren({ kind: 'projectName', source: 'issuance' }, withIssuance)).toEqual(
-      ['Riverside HQ (Issuance Snapshot)']
+      [{ kind: 'text', text: 'Riverside HQ (Issuance Snapshot)' }]
     );
   });
 
   it('field.source: "issuance" falls back to ctx.current when the key is absent from issuance', () => {
     const withIssuance: HeaderFooterFieldContext = { ...CTX, issuance: { date: '2026-08-01' } };
     expect(resolveFieldChildren({ kind: 'projectName', source: 'issuance' }, withIssuance)).toEqual(
-      ['Riverside HQ']
+      [{ kind: 'text', text: 'Riverside HQ' }]
     );
   });
 
   it('field.source: "issuance" falls back to ctx.current when ctx.issuance is undefined', () => {
     expect(resolveFieldChildren({ kind: 'projectName', source: 'issuance' }, CTX)).toEqual([
-      'Riverside HQ',
+      { kind: 'text', text: 'Riverside HQ' },
     ]);
   });
 
@@ -162,7 +210,7 @@ describe('resolveFieldChildren — value fields (current/issuance)', () => {
 describe('resolveFieldChildren — literal', () => {
   it('passes field.text through verbatim', () => {
     expect(resolveFieldChildren({ kind: 'literal', text: 'CONFIDENTIAL' }, CTX)).toEqual([
-      'CONFIDENTIAL',
+      { kind: 'text', text: 'CONFIDENTIAL' },
     ]);
   });
 
@@ -177,7 +225,7 @@ describe('resolveFieldChildren — deferred field knobs (#303 scope)', () => {
       { kind: 'literal', text: 'DRAFT', format: 'upper', prefix: '[', suffix: ']' },
       CTX
     );
-    expect(children).toEqual(['DRAFT']);
+    expect(children).toEqual([{ kind: 'text', text: 'DRAFT' }]);
   });
 });
 
@@ -329,5 +377,40 @@ describe('renderCellRuns', () => {
     const xml = await renderRunsToXml(runs);
     expect(xml).toContain(' | ');
     expect(xml).toMatch(/<w:b\/>/);
+  });
+});
+
+describe('renderCellRuns — separator tracks resolved output, not content-array length (#regression)', () => {
+  it('emits no separator when a leading field resolves to nothing', async () => {
+    const cell: HeaderFooterCell = {
+      content: [{ kind: 'literal' }, { kind: 'literal', text: 'B' }],
+    };
+    const runs = renderCellRuns(cell, CTX, undefined);
+    expect(runs).toHaveLength(1);
+    const xml = await renderRunsToXml(runs);
+    expect(textRunContents(xml)).toEqual(['B']);
+  });
+
+  it('emits no separator when a trailing field resolves to nothing', async () => {
+    const cell: HeaderFooterCell = {
+      content: [{ kind: 'literal', text: 'A' }, { kind: 'literal' }],
+    };
+    const runs = renderCellRuns(cell, CTX, undefined);
+    expect(runs).toHaveLength(1);
+    const xml = await renderRunsToXml(runs);
+    expect(textRunContents(xml)).toEqual(['A']);
+  });
+
+  it('emits exactly one separator between two resolving fields even with an empty field between them', async () => {
+    const cell: HeaderFooterCell = {
+      content: [
+        { kind: 'literal', text: 'A' },
+        { kind: 'literal' },
+        { kind: 'literal', text: 'B' },
+      ],
+    };
+    const runs = renderCellRuns(cell, CTX, undefined);
+    const xml = await renderRunsToXml(runs);
+    expect(textRunContents(xml)).toEqual(['A', ' ', 'B']);
   });
 });
