@@ -114,6 +114,8 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /clients', 'list_clients'],
   ['post /clients', 'create_client'],
   ['get /clients/{}', 'get_client'],
+  // ranked full-text search (#445 / ADR-062) — REST twin of the existing tool
+  ['get /search', 'search_library'],
 ]);
 
 /**
@@ -158,7 +160,7 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
 
 /** Tools with no single REST equivalent — allowed to map to nothing (INV-2). */
 export const MCP_NATIVE: ReadonlySet<string> = new Set([
-  'search_library', // no /search route; MCP-native affordance
+  // search_library now pairs with GET /search (see OP_TO_TOOL, #445).
   'load_files', // bulk file loader (CLI-style), no REST equivalent
   'list_sections', // CSI section index with inDatabase flag
   'get_paragraph', // single paragraph + ancestor chain, no dedicated REST route
@@ -209,6 +211,9 @@ export const INV5_SHAPE_EXEMPT: ReadonlyMap<string, string> = new Map([
  * invariant proves no read-mapped tool is silently absent from both the driven set and these maps.
  */
 export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
+  // search_library returns the same rows as GET /search 1:1, but a non-vacuous
+  // assertion needs seeded paragraph content (a parsed spec) beyond `pnpm seed`.
+  'search_library',
   'get_spec_lineage',
   'get_hierarchy_report',
   'coordination_report',

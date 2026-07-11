@@ -149,6 +149,97 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /search:
+    get:
+      operationId: searchParagraphs
+      summary: Ranked full-text paragraph search
+      description: >
+        Ranked full-text search over paragraph content (ADR-062): PostgreSQL
+        `websearch_to_tsquery` + `ts_rank_cd` (proximity-aware, so a tight cluster
+        of the query terms outranks the same terms scattered across a long
+        paragraph) with `ts_headline` snippets. A degenerate (no-lexeme) query
+        falls back to a substring scan. Every hit carries stable anchors — spec id,
+        section, title, and paragraph UUID — so a client can navigate straight to
+        the result. Scope with `libraryId`/`projectId` (a spec is a library master
+        or a project working copy), `division`, `part` (CSI PART 1/2/3), and
+        `nodeType`. Hidden (`meta.vanish`) content is not filtered — retrieval
+        surfaces all stored text; suppression is a render concern.
+      tags: [search]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search text (natural language or keywords; supports quoted phrases, `or`, `-negation`).
+          schema:
+            type: string
+            minLength: 1
+        - name: libraryId
+          in: query
+          required: false
+          description: Scope to specs owned by this library master.
+          schema:
+            type: string
+            format: uuid
+        - name: projectId
+          in: query
+          required: false
+          description: Scope to specs owned by this project.
+          schema:
+            type: string
+            format: uuid
+        - name: division
+          in: query
+          required: false
+          description: 2-digit CSI division, e.g. "27".
+          schema:
+            type: string
+            pattern: '^\d{2}$'
+        - name: part
+          in: query
+          required: false
+          description: CSI PART ordinal — 1 (General), 2 (Products), or 3 (Execution).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 3
+        - name: nodeType
+          in: query
+          required: false
+          description: Restrict to a paragraph node type (part, article, pr1…pr7, note).
+          schema:
+            type: string
+            enum:
+              [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation]
+        - name: limit
+          in: query
+          required: false
+          description: Maximum results (1–100, default 20).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Ranked paragraph hits (highest rank first)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        maxItems: 100
+                        items:
+                          $ref: '#/components/schemas/SearchHit'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}:
     get:
       operationId: getSpec
@@ -4340,6 +4431,41 @@ components:
           enum: [false]
         error:
           type: string
+
+    # ── Full-text search (ADR-062) ─────────────────────────────────────────────
+
+    SearchHit:
+      type: object
+      description: One ranked paragraph match with stable navigation anchors.
+      required:
+        [paragraphId, text, nodeType, specId, specSection, specTitle, snippet, rank]
+      properties:
+        paragraphId:
+          type: string
+          format: uuid
+          description: Paragraph UUID — the stable anchor for this hit.
+        text:
+          type: string
+          description: Full paragraph text.
+        nodeType:
+          type: string
+          description: CSI node type (part, article, pr1…pr7, note).
+        specId:
+          type: string
+          format: uuid
+          description: UUID of the owning spec.
+        specSection:
+          type: string
+          description: CSI section number of the owning spec, e.g. "07 84 00".
+        specTitle:
+          type: string
+          description: Title of the owning spec.
+        snippet:
+          type: string
+          description: ts_headline excerpt with matched terms wrapped in <mark>…</mark>.
+        rank:
+          type: number
+          description: ts_rank_cd relevance score; 0 on the degenerate substring-fallback path.
 
     # ── Cross-spec comparison (reports) ────────────────────────────────────────
 
