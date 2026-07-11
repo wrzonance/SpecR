@@ -8,6 +8,8 @@ const ParagraphDiffSchema = z.object({
   uuid: z.uuid(),
   text: z.string(),
   index: z.number().int().min(0),
+  /** nearest preceding controlled uuid in document order, absent if none */
+  afterUuid: z.uuid().optional(),
 });
 
 const ModifiedDiffSchema = z.object({
@@ -43,3 +45,11 @@ export const MergeFieldsShape = {
 // REST body is strict (unknown keys rejected); specId travels in the path, not the body.
 export const MergeBodySchema = z.strictObject(MergeFieldsShape);
 export type MergeBody = z.infer<typeof MergeBodySchema>;
+
+// Zod-inferred parse-boundary shapes: afterUuid is an OPTIONAL KEY here (may be absent
+// entirely). The internal merge/types.ts DiffResult/ParagraphDiff instead require the key
+// always present (value may be undefined) — exactOptionalPropertyTypes treats these as
+// distinct shapes, so callers must reconcile them via merge/types.ts's toDiffResult /
+// toParagraphDiff mappers rather than an implicit/structural assignment.
+export type DiffResultInput = z.infer<typeof DiffResultSchema>;
+export type ParagraphDiffInput = DiffResultInput['added'][number];

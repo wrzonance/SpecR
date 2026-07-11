@@ -1,7 +1,12 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { MergeBodySchema } from '../ast/index.js';
-import { applyMerge, InvalidAcceptedChangeError, MergeError } from '../merge/index.js';
+import {
+  applyMerge,
+  InvalidAcceptedChangeError,
+  MergeError,
+  toDiffResult,
+} from '../merge/index.js';
 import { gateErrorResponse } from './edit-gate-response.js';
 import { logger } from '../lib/logger.js';
 
@@ -39,7 +44,7 @@ export async function mergeHandler(req: Request, res: Response): Promise<void> {
     const outcome = await applyMerge(
       idResult.data,
       bodyResult.data.accept,
-      bodyResult.data.diff,
+      toDiffResult(bodyResult.data.diff),
       bodyResult.data.expectedVersion
     );
     if (outcome.kind === 'not-found') {

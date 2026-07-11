@@ -146,7 +146,7 @@ export type { RequiredSectionsBody } from './required-sections-schemas.js';
 export { CreateAssociationBodySchema } from './association-schemas.js';
 export type { CreateAssociationBody } from './association-schemas.js';
 export { DiffResultSchema, MergeFieldsShape, MergeBodySchema } from './merge-schemas.js';
-export type { MergeBody } from './merge-schemas.js';
+export type { MergeBody, DiffResultInput, ParagraphDiffInput } from './merge-schemas.js';
 export { SubmittalRegisterBodySchema } from './submittal-register-schemas.js';
 export type { SubmittalRegisterBody } from './submittal-register-schemas.js';
 export type { ParagraphAssociation } from './types.js';
