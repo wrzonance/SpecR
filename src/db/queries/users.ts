@@ -53,9 +53,10 @@ export async function resolveOrCreateUserByLabel(
     return mapUserRow(row);
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
-    throw new DatabaseError(`resolveOrCreateUserByLabel: upsert failed for "${label}"`, {
-      cause: err,
-    });
+    // Deliberately omit `label` from the message: it is claimed actor identity (potentially an
+    // email) and this error reaches logger.error at the REST/MCP edge — the pg cause is chained
+    // internally for debugging without persisting the identifier to logs.
+    throw new DatabaseError('resolveOrCreateUserByLabel: upsert failed', { cause: err });
   }
 }
 

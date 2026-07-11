@@ -13,14 +13,19 @@ function parse<T>(res: ToolResult): T {
   return JSON.parse(res.content[0]!.text) as T;
 }
 
+// Per-run prefix scopes both the generated labels and cleanup to this test run, so a
+// concurrent worker or another process sharing the same Postgres never deletes rows it
+// does not own (the broad 'users-mcp-test-%' predicate could).
+const runPrefix = `users-mcp-test-${randomUUID().slice(0, 8)}`;
+
 let seq = 0;
 const uniq = (part: string): string => {
   seq += 1;
-  return `users-mcp-test-${part}-${seq}-${randomUUID().slice(0, 8)}`;
+  return `${runPrefix}-${part}-${seq}`;
 };
 
 afterAll(async () => {
-  await pool.query(`DELETE FROM users WHERE label LIKE 'users-mcp-test-%'`);
+  await pool.query(`DELETE FROM users WHERE label LIKE $1`, [`${runPrefix}-%`]);
 });
 
 describe('users MCP tools', () => {

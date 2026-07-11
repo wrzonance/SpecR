@@ -151,7 +151,7 @@ human analog of the MCP capability tiers (ADR-045); the symmetry is
 deliberate.
 
 **Storage vs. wire vocabulary.** The `role_assignments` table itself shipped in
-#381's migration 045, alongside `users` (schema-only; no rows can be written
+issue #381's migration 045, alongside `users` (schema-only; no rows can be written
 until the query layer below lands). It stores scope as **two nullable FK
 columns** (`project_id`, `library_id`) with an XOR `CHECK`
 (`(project_id IS NULL) <> (library_id IS NULL)`), not a single

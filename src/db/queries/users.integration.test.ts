@@ -5,12 +5,13 @@ import { resolveOrCreateUserByLabel, listUsers, getUser } from './users.js';
 
 // Namespace reserved by this file: labels 'users-test-<suffix>-...'. The per-file random
 // suffix (mirrors coordination.integration.test.ts) keeps this run's rows distinguishable
-// from any other; the shared 'users-test-%' prefix is what afterEach cleans up.
+// from any other, and cleanup is scoped to that suffix so a concurrent worker or another
+// integration run sharing the same Postgres never deletes this run's — or another's — rows.
 const suffix = randomUUID().slice(0, 8);
 const label = (name: string): string => `users-test-${suffix}-${name}`;
 
 afterEach(async () => {
-  await pool.query(`DELETE FROM users WHERE label LIKE 'users-test-%'`);
+  await pool.query(`DELETE FROM users WHERE label LIKE $1`, [`users-test-${suffix}-%`]);
 });
 
 describe('users query module (integration)', () => {

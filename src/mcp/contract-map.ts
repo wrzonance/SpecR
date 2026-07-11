@@ -259,8 +259,11 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'list_package_revisions',
   'get_revision',
   'get_client',
-  // actor identity substrate (#381 / ADR-052 D6): mirrors GET /users/{id} 1:1, but a
-  // non-vacuous assertion needs a seeded user row beyond `pnpm seed`.
+  // actor identity substrate (#381 / ADR-052 D6): mirrors GET /users/{id} 1:1. Read-pending,
+  // not driven: INV5_DRIVEN's harness invokes arg-less list handlers and asserts a non-empty
+  // array, whereas get_user takes a userId and returns a single object — a different driven
+  // path. Its response shape (UserSummary) is already validated by the driven `list_users`
+  // case, which returns UserSummary[]; a dedicated single-object case is deferred to #464.
   'get_user',
   // standards rollups (#446): mirror GET /…/standards 1:1 but need a seeded
   // citation graph (a parsed spec citing standards) beyond `pnpm seed`.

@@ -1534,6 +1534,11 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 200
+                  pattern: '[\s\S]*\S[\s\S]*'
+                  description: >
+                    Leading/trailing whitespace is trimmed before resolution, and
+                    whitespace-only values are rejected; the 1-200 length bounds apply
+                    to the trimmed value.
       responses:
         '200':
           description: User resolved (existing or newly created)
