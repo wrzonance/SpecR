@@ -80,6 +80,21 @@ describe('computeDiff', () => {
     expect(result.conflicts).toEqual([]);
   });
 
+  it('theirs-deletes a paragraph ours edited since base → classified as a plain delete', () => {
+    // KNOWN AMBIGUITY (#465): classifyBase checks "missing from theirs → deleted"
+    // BEFORE consulting ours, so an owner delete of a paragraph the spec writer
+    // edited in the DB since base (ours "writer edit" ≠ base "base text") is emitted
+    // as a plain delete, not the git-style delete/modify conflict ADR-005 line 29
+    // implies. Accepting it (since #374) vanishes the writer's edit — reversibly
+    // (setVanishRow + paragraph_versions snapshot), but without surfacing the
+    // divergence. Pinned here as current behavior; the fix (a delete/modify-conflict
+    // category + apply-time guard) is a /diff contract change tracked in #465.
+    const result = computeDiff([snap(U1, 'base text')], [snap(U1, 'writer edit')], extract([]));
+    expect(result.deleted).toEqual([U1]);
+    expect(result.conflicts).toEqual([]);
+    expect(result.modified).toEqual([]);
+  });
+
   it('paragraph absent from ours falls back to base text → theirs change is modified, not conflict', () => {
     const result = computeDiff([snap(U1, 'base text')], [], extract([[U1, 'owner edit']]));
     expect(result.modified).toEqual([
