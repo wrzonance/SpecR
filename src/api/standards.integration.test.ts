@@ -186,4 +186,18 @@ describe('PUT /standards/{orgCode}/{standardCode}', () => {
     expect(body.data.status).toBe('unknown');
     expect(body.data.lastVerifiedAt).not.toBeNull();
   });
+
+  // Only an absent body (undefined) is the documented no-body case: an explicit
+  // JSON null must never be silently accepted as an empty verdict. express.json()
+  // strict mode (the app default) rejects a top-level null at the body-parser
+  // layer with 400 before the handler runs; the handler's undefined-only guard is
+  // the backstop if strict mode is ever relaxed. Either way, null is not a reset.
+  it('an explicit JSON null body is rejected, not treated as absent', async () => {
+    const res = await fetch(`${baseUrl}/standards/${ORG}/E120`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'null',
+    });
+    expect(res.status).toBe(400);
+  });
 });
