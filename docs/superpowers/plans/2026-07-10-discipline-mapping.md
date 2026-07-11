@@ -37,7 +37,7 @@
 - `src/ast/discipline-schemas.ts` — Zod schemas for rules + write body; exported via `src/ast/index.ts`.
 - `src/db/queries/disciplines.ts` — resolution chain + rule-set write/clear + discipline-annotated listings helpers. Exported via `src/db/index.ts` (append).
 - `src/db/queries/libraries.ts` — extend `listLibrarySpecs` with discipline field + filter.
-- `src/db/queries/projects.ts` — new `listProjectSpecs` with discipline field + filter.
+- `src/db/queries/project-specs.ts` — new `listProjectSpecs` with discipline field + filter.
 - `src/api/disciplines.ts` — handlers: `GET /disciplines`, `PUT`/`DELETE /libraries/:id/disciplines`.
 - `src/api/libraries.ts` — thread `discipline` query param into `listLibrarySpecsHandler`.
 - `src/api/projects.ts` — new `listProjectSpecsHandler`.
