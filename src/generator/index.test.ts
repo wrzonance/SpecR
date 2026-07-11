@@ -487,7 +487,26 @@ describe('generateDocx — #303 header/footer wiring', () => {
     expect(headerXml).not.toContain('Should never appear');
 
     const footerFile = zip.file('word/footer1.xml');
-    expect(footerFile).toBeDefined();
+    if (!footerFile) throw new Error('word/footer1.xml missing from generated DOCX');
+    const footerXml = await footerFile.async('string');
+    // The pageNumber field must render as a real Word PAGE field code — an
+    // empty or field-less footer would slip past a mere existence check.
+    expect(footerXml).toMatch(/instrText[^>]*>PAGE</);
+  });
+
+  it('header sectionNumber respects a non-default sectionNumberFormat', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE, undefined, {
+      sectionNumberFormat: 'compact',
+      headerFooter: { composition: HEADER_FOOTER_COMPOSITION, current: {} },
+    });
+    const zip = await JSZip.loadAsync(buffer);
+    const headerFile = zip.file('word/header1.xml');
+    if (!headerFile) throw new Error('word/header1.xml missing from generated DOCX');
+    const headerXml = await headerFile.async('string');
+    // '27 21 00' formatted 'compact' → '272100'; the canonical spaced form
+    // must not leak through — the header honors the same format as the body.
+    expect(headerXml).toContain('272100');
+    expect(headerXml).not.toContain(SYNTHETIC_TREE.section);
   });
 
   it('options.headerFooter omitted — no header/footer parts, titlePage, evenAndOddHeaders, or pageNumberStart override emitted (pre-#303 baseline)', async () => {
