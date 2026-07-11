@@ -209,20 +209,31 @@ export async function replaceLibraryDisciplineRules(
 
 /**
  * Clear a library's own discipline rules, reverting it to the built-in default. Returns true
- * when at least one rule was removed, false when the library had no override.
+ * when at least one rule was removed, false when the library had no override. Serialized on the
+ * library row (same lock as replaceLibraryDisciplineRules) so a clear racing a replacement can't
+ * report `false` (no override) while the replacement's freshly-inserted rows remain.
  */
-export async function clearLibraryDisciplineRules(
-  libraryId: string,
-  db: Queryable = pool
-): Promise<boolean> {
+export async function clearLibraryDisciplineRules(libraryId: string): Promise<boolean> {
+  const client = await pool.connect();
   try {
-    const res = await db.query('DELETE FROM discipline_section_rules WHERE library_id = $1', [
+    await client.query('BEGIN');
+    await client.query('SELECT 1 FROM libraries WHERE id = $1 FOR UPDATE', [libraryId]);
+    const res = await client.query('DELETE FROM discipline_section_rules WHERE library_id = $1', [
       libraryId,
     ]);
+    await client.query('COMMIT');
     return (res.rowCount ?? 0) > 0;
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* best-effort */
+    }
+    if (err instanceof DatabaseError) throw err;
     throw new DatabaseError(`clearLibraryDisciplineRules: failed for library ${libraryId}`, {
       cause: err,
     });
+  } finally {
+    client.release();
   }
 }

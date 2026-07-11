@@ -136,4 +136,38 @@ describe('per-library discipline override', () => {
     // Clearing again is a no-op.
     expect(await clearLibraryDisciplineRules(lib.id)).toBe(false);
   });
+
+  it('db: a clear racing an in-flight replace serializes, never a stale false no-op', async () => {
+    const lib = await createLibrary({ tier: 'client', name: 'disc-test-clear-race' });
+    await replaceLibraryDisciplineRules(lib.id, [
+      { discipline: 'electrical', divisionStart: '26', divisionEnd: '26' },
+    ]);
+    // Simulate an in-flight replace holding the library row lock: delete the old rule and
+    // insert a distinguishable override (mechanical 21–23), uncommitted.
+    const holder = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM libraries WHERE id = $1 FOR UPDATE', [lib.id]);
+      await holder.query('DELETE FROM discipline_section_rules WHERE library_id = $1', [lib.id]);
+      await holder.query(
+        `INSERT INTO discipline_section_rules (discipline_id, library_id, division_start, division_end)
+         SELECT id, $1, '21', '23' FROM disciplines WHERE key = 'mechanical'`,
+        [lib.id]
+      );
+      // Start the clear and let it reach its lock wait before the holder commits, forcing the
+      // interleaving. Without the row lock the clear observes the pre-insert set, deletes zero,
+      // returns false, and the mechanical override survives (23→mechanical, inherited=false).
+      const clearPromise = clearLibraryDisciplineRules(lib.id);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await holder.query('COMMIT');
+      expect(await clearPromise).toBe(true);
+    } finally {
+      holder.release();
+    }
+    // With the lock the clear waited, saw the committed override, and removed it — the library
+    // is back on the built-in default (23→hvac), not stranded on a leftover mechanical rule.
+    const resolved = await listDisciplines(lib.id);
+    expect(resolved.inherited).toBe(true);
+    expect(disciplineForSection('23 07 00', await resolveEffectiveRules(lib.id))).toBe('hvac');
+  });
 });
