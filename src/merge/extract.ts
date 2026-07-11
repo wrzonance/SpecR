@@ -168,7 +168,8 @@ function visitParagraph(
   node: OrderedNode,
   uuid: string | undefined,
   acc: ExtractAcc,
-  state: WalkState
+  state: WalkState,
+  inTable: boolean
 ): WalkState {
   const text = visibleText(childrenOf(node, 'w:p'), { uuid, records: acc.records });
   if (!text.trim()) return state; // whitespace-only spacer paragraphs ignored
@@ -176,27 +177,37 @@ function visitParagraph(
     setControlledText(acc.controlled, uuid, text);
     return { index: state.index + 1, lastControlledUuid: uuid };
   }
-  acc.orphans.push({ text, index: state.index, afterUuid: state.lastControlledUuid });
+  // A table-cell paragraph has no CSI tier, so it must never anchor a merge
+  // addition (flattening it into a body sibling would corrupt structure, #374):
+  // keep it anchorless (afterUuid undefined) EVEN when a controlled paragraph
+  // precedes the table, so it flows into the merge's anchorless-addition
+  // rejection instead of silently applying. See the KNOWN AMBIGUITY test.
+  const afterUuid = inTable ? undefined : state.lastControlledUuid;
+  acc.orphans.push({ text, index: state.index, afterUuid });
   return { index: state.index + 1, lastControlledUuid: state.lastControlledUuid };
 }
 
-/** Walk block-level nodes in document order, tracking the enclosing sdt uuid. */
+/** Walk block-level nodes in document order, tracking the enclosing sdt uuid
+ *  and whether the walk has descended into a w:tbl (table cells never anchor). */
 function walkBlocks(
   nodes: readonly OrderedNode[],
   uuid: string | undefined,
   acc: ExtractAcc,
-  state: WalkState
+  state: WalkState,
+  inTable: boolean
 ): WalkState {
   let s = state;
   for (const node of nodes) {
     const tag = tagOf(node);
     if (tag === undefined || tag === '#text' || PROPERTY_TAGS.has(tag)) continue;
     if (tag === 'w:sdt') {
-      s = walkBlocks(childrenOf(node, tag), readSdtUuid(node) ?? uuid, acc, s);
+      s = walkBlocks(childrenOf(node, tag), readSdtUuid(node) ?? uuid, acc, s, inTable);
     } else if (tag === 'w:p') {
-      s = visitParagraph(node, uuid, acc, s);
+      s = visitParagraph(node, uuid, acc, s, inTable);
     } else {
-      s = walkBlocks(childrenOf(node, tag), uuid, acc, s); // w:document, w:body, w:sdtContent, w:tbl, …
+      // w:document, w:body, w:sdtContent, w:tbl, … — a w:tbl marks its whole
+      // subtree as table-descended so its cell paragraphs stay anchorless.
+      s = walkBlocks(childrenOf(node, tag), uuid, acc, s, inTable || tag === 'w:tbl');
     }
   }
   return s;
@@ -234,7 +245,7 @@ export async function extractContentControls(docxBuffer: Buffer): Promise<Extrac
   const nodes = parseDocumentXml(xml);
 
   const acc: ExtractAcc = { controlled: new Map(), orphans: [], records: [] };
-  walkBlocks(nodes, undefined, acc, { index: 0, lastControlledUuid: undefined });
+  walkBlocks(nodes, undefined, acc, { index: 0, lastControlledUuid: undefined }, false);
 
   return {
     controlled: acc.controlled,

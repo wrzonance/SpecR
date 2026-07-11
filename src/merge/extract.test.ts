@@ -217,17 +217,24 @@ describe('extractContentControls', () => {
     expect(result.orphans).toEqual([{ text: 'tail', index: 2, afterUuid: U1 }]);
   });
 
-  // KNOWN AMBIGUITY: table-cell paragraphs are not generator output; they surface
-  // as individual orphans with document-order indexes (never silently dropped).
-  it('table cell paragraphs surface as orphans with document-order indexes', async () => {
+  // KNOWN AMBIGUITY: table-cell paragraphs are not generator output. They surface
+  // as orphans but are deliberately kept ANCHORLESS (afterUuid undefined) even when
+  // a controlled paragraph precedes the table (#374): a w:tbl cell has no CSI tier,
+  // so anchoring — and later flattening — it onto a body sibling would corrupt
+  // structure. Anchorless orphans flow into the merge's anchorless-addition
+  // rejection instead of silently applying. The non-table paragraph after the table
+  // anchors normally, proving the flag scopes to the table subtree only.
+  it('table-cell paragraphs stay anchorless even when a controlled paragraph precedes the table', async () => {
     const body =
+      sdt(U1, para(run('controlled before table'))) +
       `<w:tbl><w:tr><w:tc>${para(run('cell A'))}</w:tc><w:tc>${para(run('cell B'))}</w:tc></w:tr></w:tbl>` +
       para(run('after table'));
     const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('controlled before table');
     expect(result.orphans).toEqual([
-      { text: 'cell A', index: 0, afterUuid: undefined },
-      { text: 'cell B', index: 1, afterUuid: undefined },
-      { text: 'after table', index: 2, afterUuid: undefined },
+      { text: 'cell A', index: 1, afterUuid: undefined },
+      { text: 'cell B', index: 2, afterUuid: undefined },
+      { text: 'after table', index: 3, afterUuid: U1 },
     ]);
   });
 });

@@ -90,14 +90,6 @@ export async function handleInsertParagraph(args: unknown): Promise<ToolResult> 
         `node type "${result.nodeType}" cannot be inserted — pass nodeType (article, pr1–pr7, or continuation)`
       );
     }
-    if (result.status === 'exists') {
-      // Structurally unreachable from this tool: 'exists' only fires when the
-      // caller sets explicitId, which insertParagraphAfter never does (only
-      // the merge engine's added-op apply does, #374) — InsertParagraphResult
-      // is a shared type, so this branch exists for exhaustiveness, not because
-      // it can actually be hit here.
-      return toolError('Internal error — unexpected duplicate paragraph id');
-    }
     return ok(result.node);
   } catch (err) {
     const gate = gateToolError(err);

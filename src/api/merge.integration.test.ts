@@ -205,6 +205,36 @@ describe('POST /specs/:id/merge (integration)', () => {
     expect(body.error).toBe('invalid merge request body');
   });
 
+  it('an addition reusing a uuid from another spec returns 400, not 500', async () => {
+    const target = await createSpecFixture();
+    const other = await createSpecFixture();
+    // other.paragraphId is a real row in `other`; reuse it as the explicit id of an
+    // addition into `target`. The global-id pre-check must reject it (400) rather
+    // than let ON CONFLICT DO NOTHING surface as an internal error (500).
+    const diff: DiffResult = {
+      added: [
+        {
+          uuid: other.paragraphId,
+          text: 'Cross-spec orphan',
+          index: 0,
+          afterUuid: target.paragraphId,
+        },
+      ],
+      modified: [],
+      deleted: [],
+      conflicts: [],
+      warnings: [],
+    };
+    const { status, body } = await postMerge(target.specId, {
+      accept: [other.paragraphId],
+      diff,
+    });
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain(other.paragraphId);
+  });
+
   it('applying the same accepted UUID twice is a no-op on the second call', async () => {
     const { specId, paragraphId } = await createSpecFixture();
     const diff = diffFor(paragraphId);

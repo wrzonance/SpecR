@@ -221,6 +221,126 @@ describe('applyAccepted — added-op apply', () => {
     );
     expect(article.rows[0]?.node_type).toBe('article'); // sanity: fixture intact
   });
+
+  it('rejects an added-op anchored on a structural (article) node instead of minting a sibling article', async () => {
+    const { specId, articleId } = await createFixture();
+    const addedUuid = randomUUID();
+    const diff = diffWith({
+      added: [
+        {
+          uuid: addedUuid,
+          text: 'Orphan after the article heading',
+          index: 0,
+          afterUuid: articleId,
+        },
+      ],
+    });
+
+    await expect(
+      runInTransaction((client) => applyAccepted(specId, [addedUuid], diff, client))
+    ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
+
+    expect((await paragraphRow(addedUuid)).exists).toBe(false);
+    // the fixture's single article is untouched — no second sibling article was minted
+    const articles = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM paragraphs WHERE spec_id = $1 AND node_type = 'article'`,
+      [specId]
+    );
+    expect(articles.rows[0]?.count).toBe('1');
+  });
+
+  it('rejects a table-cell orphan the extractor left anchorless (afterUuid undefined), never flattening it', async () => {
+    const { specId } = await createFixture();
+    const cellUuid = randomUUID();
+    // extract.ts gives every table-cell paragraph afterUuid undefined (#374); such an
+    // addition must be rejected at apply, not silently placed as a body sibling.
+    const diff = diffWith({
+      added: [{ uuid: cellUuid, text: 'Table cell content', index: 0, afterUuid: undefined }],
+    });
+
+    await expect(
+      runInTransaction((client) => applyAccepted(specId, [cellUuid], diff, client))
+    ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
+
+    expect((await paragraphRow(cellUuid)).exists).toBe(false);
+  });
+
+  it('rejects an added-op whose uuid already exists in a DIFFERENT spec (400-class, not a 500)', async () => {
+    const target = await createFixture();
+    const other = await createFixture();
+    // Reuse a paragraph id living in `other` as the explicit id of an addition into
+    // `target`. The paragraphs PK is global, so the pre-check must catch the foreign
+    // row rather than let ON CONFLICT DO NOTHING surface as a DatabaseError → 500.
+    const diff = diffWith({
+      added: [{ uuid: other.pr1Id, text: 'Cross-spec orphan', index: 0, afterUuid: target.pr1Id }],
+    });
+
+    await expect(
+      runInTransaction((client) => applyAccepted(target.specId, [other.pr1Id], diff, client))
+    ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
+  });
+
+  it('rejects an added-op reusing a same-spec uuid with different text (a stale/tampered diff, not a retry)', async () => {
+    const { specId, pr1Id, pr1SecondId } = await createFixture();
+    // pr1Id already exists with PR1_TEXT; an addition claiming that uuid but other
+    // text is not an idempotent retry (which matches text) — reject it.
+    const diff = diffWith({
+      added: [{ uuid: pr1Id, text: 'Totally different text', index: 0, afterUuid: pr1SecondId }],
+    });
+
+    await expect(
+      runInTransaction((client) => applyAccepted(specId, [pr1Id], diff, client))
+    ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
+    // the existing row is untouched
+    expect((await paragraphRow(pr1Id)).text).toBe(PR1_TEXT);
+  });
+});
+
+describe('applyAccepted — split / re-submitted added-op accept (#374)', () => {
+  it('accepting [A] then [B] across two calls still lands P, A, B in diff.index order', async () => {
+    const { specId, pr1Id } = await createFixture();
+    const uuidA = randomUUID(); // index 3 — earlier in document order
+    const uuidB = randomUUID(); // index 7 — later
+    const diff = diffWith({
+      added: [
+        { uuid: uuidA, text: 'A', index: 3, afterUuid: pr1Id },
+        { uuid: uuidB, text: 'B', index: 7, afterUuid: pr1Id },
+      ],
+    });
+
+    const first = await runInTransaction((c) => applyAccepted(specId, [uuidA], diff, c));
+    const second = await runInTransaction((c) => applyAccepted(specId, [uuidB], diff, c));
+
+    expect(first).toEqual({ applied: 1, rejected: 1 });
+    expect(second).toEqual({ applied: 1, rejected: 1 });
+    const anchorPos = (await paragraphRow(pr1Id)).position;
+    // B chains off A (resolved from committed DB state) rather than re-anchoring on
+    // P — without the fix a split accept lands P, B, A (inverted).
+    expect((await paragraphRow(uuidA)).position).toBe(anchorPos + 1);
+    expect((await paragraphRow(uuidB)).position).toBe(anchorPos + 2);
+  });
+
+  it('re-submitting [A, B] after A already applied inserts only B and keeps P, A, B order', async () => {
+    const { specId, pr1Id } = await createFixture();
+    const uuidA = randomUUID();
+    const uuidB = randomUUID();
+    const diff = diffWith({
+      added: [
+        { uuid: uuidA, text: 'A', index: 3, afterUuid: pr1Id },
+        { uuid: uuidB, text: 'B', index: 7, afterUuid: pr1Id },
+      ],
+    });
+
+    const first = await runInTransaction((c) => applyAccepted(specId, [uuidA], diff, c));
+    const second = await runInTransaction((c) => applyAccepted(specId, [uuidA, uuidB], diff, c));
+
+    expect(first).toEqual({ applied: 1, rejected: 1 });
+    // A is an idempotent no-op (exists), B inserts → applied 1, rejected 0.
+    expect(second).toEqual({ applied: 1, rejected: 0 });
+    const anchorPos = (await paragraphRow(pr1Id)).position;
+    expect((await paragraphRow(uuidA)).position).toBe(anchorPos + 1);
+    expect((await paragraphRow(uuidB)).position).toBe(anchorPos + 2);
+  });
 });
 
 describe('applyAccepted — deleted-op apply', () => {

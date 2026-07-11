@@ -1,5 +1,6 @@
 import { pool, DatabaseError } from '../index.js';
 import { assertSpecWritable } from './edit-gate.js';
+import { bumpSpecContentVersion } from './content-version.js';
 import type { PoolClient } from 'pg';
 import type { InsertableNodeType, SpecNode } from '../../ast/index.js';
 import { InsertableNodeTypeSchema } from '../../ast/index.js';
@@ -12,21 +13,58 @@ import { fetchSubtreeNode } from './paragraphs.js';
 // the accept-comment-as-note materialization (reclassify.ts), generalized to
 // caller-chosen body/heading types.
 
-/** Outcome of {@link insertParagraphAfter} and {@link insertSiblingRow}.
- *  `invalid-type` carries the type that was refused — an explicit request
- *  outside the insertable set (schema-blocked at the API, but the DB
- *  revalidates), a defaulted non-insertable anchor type (part/note), or a
- *  root (PART) anchor, which has no insertable sibling regardless of an
- *  explicit override. `exists` is only reachable when `input.explicitId` is
- *  set (the merge engine's added-op apply, #374) — the standalone endpoint
- *  never sets it, so `insertParagraphAfter` never observes this variant, but
- *  the type is shared so every caller must still handle it. */
+/** Outcome of {@link insertSiblingRow}. `invalid-type` carries the type that
+ *  was refused — an explicit request outside the insertable set (schema-blocked
+ *  at the API, but the DB revalidates), a defaulted non-insertable anchor type
+ *  (part/note), or a root (PART) anchor, which has no insertable sibling
+ *  regardless of an explicit override.
+ *
+ *  The last four statuses are only reachable when `input.explicitId` is set —
+ *  the merge engine's added-op apply (#374). The standalone
+ *  {@link insertParagraphAfter} never sets it, so its narrowed return type
+ *  ({@link StandaloneInsertResult}) excludes them and the REST/MCP insert
+ *  callers stay exhaustive without dead branches:
+ *  - `exists` — the explicit id already names a same-spec row with matching
+ *    text (an idempotent re-submitted accept); a no-op, not a duplicate.
+ *  - `structural-anchor` — the anchor is a structural node (part/article/note);
+ *    an orphan addition carries no tier information, so it cannot be inferred as
+ *    that node's sibling (a documented KNOWN AMBIGUITY, ADR-005).
+ *  - `id-collision` — the explicit id already names a row in a DIFFERENT spec
+ *    (the PK is global); reusing it here is never valid.
+ *  - `id-mismatch` — the explicit id names a same-spec row whose text differs
+ *    from the addition's, so the diff no longer matches current state. */
 export type InsertParagraphResult =
   | { readonly status: 'created'; readonly node: SpecNode }
-  | { readonly status: 'exists'; readonly id: string }
   | { readonly status: 'not-found' }
   | { readonly status: 'wrong-spec' }
-  | { readonly status: 'invalid-type'; readonly nodeType: string };
+  | { readonly status: 'invalid-type'; readonly nodeType: string }
+  | { readonly status: 'exists'; readonly id: string }
+  | { readonly status: 'structural-anchor'; readonly nodeType: string }
+  | { readonly status: 'id-collision'; readonly ownerSpecId: string }
+  | { readonly status: 'id-mismatch' };
+
+/** The subset of {@link InsertParagraphResult} the standalone
+ *  {@link insertParagraphAfter} can return: it never sets `input.explicitId`,
+ *  so the four merge-only statuses above are unreachable and excluded here,
+ *  keeping the REST switch and MCP handler exhaustive over exactly these. */
+export type StandaloneInsertResult = Exclude<
+  InsertParagraphResult,
+  { readonly status: 'exists' | 'structural-anchor' | 'id-collision' | 'id-mismatch' }
+>;
+
+// Body/leaf tiers (pr1–pr7 + continuation) — the only anchor types an orphan
+// merge addition can safely become a sibling of. Anything else (part/article/
+// note) is structural: it carries a fixed CSI role the orphan cannot inherit.
+const BODY_TIER_NODE_TYPES: ReadonlySet<string> = new Set([
+  'pr1',
+  'pr2',
+  'pr3',
+  'pr4',
+  'pr5',
+  'pr6',
+  'pr7',
+  'continuation',
+]);
 
 export interface InsertParagraphInput {
   readonly anchorNodeId: string;
@@ -51,22 +89,14 @@ type NodeTypeResolution =
   | { readonly ok: true; readonly nodeType: string }
   | { readonly ok: false; readonly result: InsertParagraphResult };
 
-/** Wrong-spec ownership check + insertable-type membership check on the
- *  already-locked anchor row. Factored out of {@link insertSiblingRow} to
- *  keep its cyclomatic complexity under the enforced max (measured 11 when
- *  inlined). Pure — no I/O. */
+/** Insertable-type membership check on the already-locked, ownership-verified
+ *  anchor row (spec ownership is checked upstream in {@link insertSiblingRow}).
+ *  Factored out to keep the caller's cyclomatic complexity under the enforced
+ *  max. Pure — no I/O. */
 function resolveInsertableNodeType(
   anchor: AnchorRow,
-  specId: string,
   input: InsertParagraphInput
 ): NodeTypeResolution {
-  // UUIDs compare case-insensitively in PostgreSQL but `pg` returns spec_id
-  // lowercased, while z.uuid() accepts (and preserves) an uppercase input —
-  // normalize both sides, else an uppercase specId false-403s.
-  if (anchor.spec_id.toLowerCase() !== specId.toLowerCase()) {
-    return { ok: false, result: { status: 'wrong-spec' } };
-  }
-
   const nodeType = input.nodeType ?? anchor.node_type;
   // A PART has no insertable sibling — the only valid sibling of a part is
   // another part, which is deliberately non-insertable. Guard the anchor type
@@ -79,6 +109,44 @@ function resolveInsertableNodeType(
     return { ok: false, result: { status: 'invalid-type', nodeType } };
   }
   return { ok: true, nodeType };
+}
+
+type ExplicitIdResolution =
+  | { readonly proceed: true }
+  | { readonly proceed: false; readonly result: InsertParagraphResult };
+
+/** Resolve an `input.explicitId` (the merge added-op apply, #374) against
+ *  global DB state, under the anchor `FOR UPDATE` lock already held. The
+ *  paragraphs PK is global, so a diff-synthesized uuid may name a row in ANY
+ *  spec — the earlier spec-scoped pre-check missed a foreign-spec row and let
+ *  the INSERT's `ON CONFLICT DO NOTHING` return no row (surfacing as a 500).
+ *  A single global lookup classifies it instead:
+ *  - a row in a DIFFERENT spec → `id-collision` (never insertable here);
+ *  - a same-spec row with different text → `id-mismatch` (the diff is stale/tampered);
+ *  - a same-spec row with matching text → `exists` (an idempotent re-submit, no-op);
+ *  - no row → proceed to insert.
+ *  Returns `{ proceed: true }` when `explicitId` is unset (the standalone path). */
+async function resolveExplicitId(
+  client: PoolClient,
+  specId: string,
+  input: InsertParagraphInput
+): Promise<ExplicitIdResolution> {
+  const explicitId = input.explicitId;
+  if (explicitId === undefined) return { proceed: true };
+  const existing = await client.query<{ spec_id: string; text: string }>(
+    `SELECT spec_id, text FROM paragraphs WHERE id = $1 FOR UPDATE`,
+    [explicitId]
+  );
+  const row = existing.rows[0];
+  if (!row) return { proceed: true };
+  // pg lowercases spec_id; z.uuid() preserves an uppercase input — normalize both.
+  if (row.spec_id.toLowerCase() !== specId.toLowerCase()) {
+    return { proceed: false, result: { status: 'id-collision', ownerSpecId: row.spec_id } };
+  }
+  if (row.text !== input.text) {
+    return { proceed: false, result: { status: 'id-mismatch' } };
+  }
+  return { proceed: false, result: { status: 'exists', id: explicitId } };
 }
 
 /**
@@ -109,25 +177,33 @@ export async function insertSiblingRow(
   );
   const anchor = anchorRes.rows[0];
   if (!anchor) return { status: 'not-found' };
+  // pg lowercases spec_id; z.uuid() preserves an uppercase input — normalize both.
+  if (anchor.spec_id.toLowerCase() !== specId.toLowerCase()) return { status: 'wrong-spec' };
 
-  const resolution = resolveInsertableNodeType(anchor, specId, input);
+  // Merge added-op apply only (explicitId set): an orphan carries no tier
+  // information, so it can only be placed as a body-tier sibling. A structural
+  // anchor (part/article/note) has no safe body-tier inference — reject it as
+  // structural-anchor (a documented KNOWN AMBIGUITY, #374) rather than silently
+  // cloning the anchor's structural type or aborting the whole merge. The
+  // standalone endpoint (no explicitId) still inserts an explicit-typed sibling
+  // of any non-part anchor, including article-after-article (#372).
+  if (input.explicitId !== undefined && !BODY_TIER_NODE_TYPES.has(anchor.node_type)) {
+    return { status: 'structural-anchor', nodeType: anchor.node_type };
+  }
+
+  const resolution = resolveInsertableNodeType(anchor, input);
   if (!resolution.ok) return resolution.result;
   const { nodeType } = resolution;
 
-  // The explicitId existence pre-check runs under the SAME anchor FOR UPDATE
-  // lock acquired above, and strictly before the sibling-position shift below
-  // — a concurrent/retried apply of the same added-op serializes on the
-  // anchor lock and observes the first attempt's row before it would
-  // otherwise shift positions (or insert) a second time. This is the sole
-  // idempotency mechanism; the ON CONFLICT DO NOTHING on the INSERT below is
-  // a last-ditch DB-level guard that should never fire in practice.
-  if (input.explicitId !== undefined) {
-    const existing = await client.query(
-      `SELECT 1 FROM paragraphs WHERE spec_id = $1 AND id = $2 FOR UPDATE`,
-      [specId, input.explicitId]
-    );
-    if ((existing.rowCount ?? 0) > 0) return { status: 'exists', id: input.explicitId };
-  }
+  // The explicitId resolution runs under the SAME anchor FOR UPDATE lock
+  // acquired above, and strictly before the sibling-position shift below — a
+  // concurrent/retried apply of the same added-op serializes on the anchor lock
+  // and observes the first attempt's row before it would otherwise shift
+  // positions (or insert) a second time. This is the sole idempotency
+  // mechanism; the ON CONFLICT DO NOTHING on the INSERT below is a last-ditch
+  // DB-level guard that should never fire in practice.
+  const explicit = await resolveExplicitId(client, specId, input);
+  if (!explicit.proceed) return explicit.result;
 
   await client.query(
     `UPDATE paragraphs SET position = position + 1
@@ -167,18 +243,29 @@ async function runInsert(
   client: PoolClient,
   specId: string,
   input: InsertParagraphInput
-): Promise<InsertParagraphResult> {
+): Promise<StandaloneInsertResult> {
   await assertSpecWritable(client, specId, input.expectedVersion);
 
   const result = await insertSiblingRow(client, specId, input);
+  if (
+    result.status === 'exists' ||
+    result.status === 'structural-anchor' ||
+    result.status === 'id-collision' ||
+    result.status === 'id-mismatch'
+  ) {
+    // Unreachable: these four statuses require input.explicitId, which the
+    // standalone insert never sets. A raw throw keeps the public return type
+    // exhaustive (StandaloneInsertResult) rather than leaking a merge-only
+    // variant a REST/MCP caller would then have to handle.
+    throw new DatabaseError(
+      `insertParagraphAfter: unexpected '${result.status}' from a non-explicitId insert`
+    );
+  }
   if (result.status === 'created') {
     // A new node is a content write — bump content_version so the next
     // optimistic precondition (and project-copy drift detection) sees it,
     // mirroring updateParagraphText / insertNoteSibling.
-    await client.query(
-      `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
-      [specId]
-    );
+    await bumpSpecContentVersion(client, specId);
   }
   return result;
 }
@@ -196,7 +283,7 @@ async function runInsert(
 export async function insertParagraphAfter(
   specId: string,
   input: InsertParagraphInput
-): Promise<InsertParagraphResult> {
+): Promise<StandaloneInsertResult> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
