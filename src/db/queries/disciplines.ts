@@ -175,6 +175,11 @@ export async function replaceLibraryDisciplineRules(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Serialize concurrent replacements for the same library: take the library row lock
+    // before the wholesale delete+insert. Without it, two racing PUTs under READ COMMITTED
+    // can each DELETE before seeing the other's not-yet-committed INSERTs, so their rule
+    // sets union (violating wholesale replacement) or collide on the range unique index (500).
+    await client.query('SELECT 1 FROM libraries WHERE id = $1 FOR UPDATE', [libraryId]);
     await client.query('DELETE FROM discipline_section_rules WHERE library_id = $1', [libraryId]);
     for (const rule of rules) {
       const res = await client.query(

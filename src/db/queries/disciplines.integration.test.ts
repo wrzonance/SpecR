@@ -10,10 +10,13 @@ import {
   DisciplineNotFoundError,
 } from './disciplines.js';
 
-// Reserved namespaces: every library-scoped rule (library_id NOT NULL) and test libraries
-// named 'disc-test-*'. FK-safe order: rules reference libraries, so rules first.
+// Scope teardown to this suite's own 'disc-test-*' libraries so it never deletes overrides
+// owned by other integration files sharing this Postgres. FK-safe order: rules first.
 afterEach(async () => {
-  await pool.query(`DELETE FROM discipline_section_rules WHERE library_id IS NOT NULL`);
+  await pool.query(
+    `DELETE FROM discipline_section_rules
+      WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'disc-test-%')`
+  );
   await pool.query(`DELETE FROM libraries WHERE name LIKE 'disc-test-%'`);
 });
 
@@ -74,6 +77,24 @@ describe('per-library discipline override', () => {
     expect(rules).toEqual([{ disciplineKey: 'plumbing', divisionStart: '22', divisionEnd: '22' }]);
   });
 
+  it('db: concurrent replacements for one library commit a single set, never a union', async () => {
+    const lib = await createLibrary({ tier: 'client', name: 'disc-test-concurrent' });
+    // Two racing PUTs with disjoint rule sets. Under READ COMMITTED without the library-row
+    // lock, both DELETEs see an empty own-rule set and both INSERTs commit — the result unions
+    // to two rows. The lock serializes them so exactly one complete set survives (last wins).
+    await Promise.all([
+      replaceLibraryDisciplineRules(lib.id, [
+        { discipline: 'electrical', divisionStart: '26', divisionEnd: '26' },
+      ]),
+      replaceLibraryDisciplineRules(lib.id, [
+        { discipline: 'plumbing', divisionStart: '22', divisionEnd: '22' },
+      ]),
+    ]);
+    const rules = await resolveEffectiveRules(lib.id);
+    expect(rules).toHaveLength(1);
+    expect(['electrical', 'plumbing']).toContain(rules[0]?.disciplineKey);
+  });
+
   it('db: an unknown discipline key rejects the whole write atomically', async () => {
     const lib = await createLibrary({ tier: 'client', name: 'disc-test-atomic' });
     await expect(
@@ -82,9 +103,11 @@ describe('per-library discipline override', () => {
         { discipline: 'not-a-discipline', divisionStart: '27', divisionEnd: '27' },
       ])
     ).rejects.toBeInstanceOf(DisciplineNotFoundError);
-    // Rollback left no partial rows — the library still inherits the default.
+    // Rollback left no partial rows — the library still inherits the default. Assert a
+    // division ONLY the intact built-in maps (23→hvac): a partial write of just the first
+    // (electrical) rule would suppress every built-in rule, so 23 would resolve to null.
     const rules = await resolveEffectiveRules(lib.id);
-    expect(rules.some((r) => r.divisionStart === '26')).toBe(true); // built-in electrical
+    expect(disciplineForSection('23 07 00', rules)).toBe('hvac');
   });
 
   it('db: clearing an override reverts the library to the built-in default', async () => {
