@@ -123,6 +123,12 @@ describe('GET /libraries/{id}/specs — discipline field + filter', () => {
     const body = (await res.json()) as { data: SpecRow[] };
     expect(body.data.map((s) => s.section)).toEqual(['26 05 19']);
   });
+
+  it('400 — a repeated (non-scalar) discipline filter is rejected, not silently ignored', async () => {
+    const libId = await seedLibraryWithSpecs();
+    const res = await get(`/libraries/${libId}/specs?discipline=electrical&discipline=hvac`);
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('PUT/DELETE /libraries/{id}/disciplines — per-library override', () => {
@@ -152,6 +158,13 @@ describe('PUT/DELETE /libraries/{id}/disciplines — per-library override', () =
     const del1 = await del(`/libraries/${libId}/disciplines`);
     expect(del1.status).toBe(200);
     expect(((await del1.json()) as { data: { cleared: boolean } }).data.cleared).toBe(true);
+    // A `cleared: true` flag alone can't prove the override is gone — re-list and confirm the
+    // built-in mapping actually resolves again (23→hvac, 26→electrical) after the clear.
+    const reverted = (await (await get(`/libraries/${libId}/specs`)).json()) as {
+      data: SpecRow[];
+    };
+    expect(reverted.data.find((s) => s.section === '23 07 00')?.discipline).toBe('hvac');
+    expect(reverted.data.find((s) => s.section === '26 05 19')?.discipline).toBe('electrical');
     const del2 = await del(`/libraries/${libId}/disciplines`);
     expect(((await del2.json()) as { data: { cleared: boolean } }).data.cleared).toBe(false);
   });
@@ -230,5 +243,11 @@ describe('GET /projects/{id}/specs — discipline field + filter', () => {
   it('404 — an unknown project', async () => {
     const res = await get(`/projects/${randomUUID()}/specs`);
     expect(res.status).toBe(404);
+  });
+
+  it('400 — a repeated (non-scalar) discipline filter is rejected, not silently ignored', async () => {
+    const projectId = await seedProjectWithSpecs();
+    const res = await get(`/projects/${projectId}/specs?discipline=hvac&discipline=electrical`);
+    expect(res.status).toBe(400);
   });
 });
