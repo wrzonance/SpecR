@@ -1,7 +1,7 @@
 // src/mcp/contract.integration.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { createProject, createClient, pool } from '../db/index.js';
+import { createProject, createClient, resolveOrCreateUserByLabel, pool } from '../db/index.js';
 import {
   loadSpec,
   specOperationManifest,
@@ -20,6 +20,7 @@ import { handleListTemplates } from './template-handlers.js';
 import { handleListConventions } from './convention-handlers.js';
 import { handleListRevisionNomenclatureProfiles } from './revision-nomenclature-handlers.js';
 import { handleListClients } from './clients-handlers.js';
+import { handleListUsers } from './users-handlers.js';
 import type { ToolResult } from './tool-result.js';
 
 // REST ops that are never agent actions (asserted, not silently skipped).
@@ -40,7 +41,7 @@ function declaredToolNames(): readonly string[] {
 // ── INV-5 (#403): tool response-shape validation ─────────────────────────────
 // A driven case invokes a read tool against seeded data; INV-5 wraps its BARE payload as the REST
 // envelope `{ success: true, data }` and reuses assertResponse to validate it against the mapped
-// op's OpenAPI response schema. These six handlers return `ok(await listX())`, and each REST route
+// op's OpenAPI response schema. These handlers return `ok(await listX())`, and each REST route
 // returns `{ success: true, data: <same listX()> }`, so the wrapped payload is byte-identical to
 // the REST body the REST contract gate already validates — correct by construction.
 interface DrivenCase {
@@ -88,6 +89,7 @@ const INV5_DRIVEN: readonly DrivenCase[] = [
     invoke: handleListRevisionNomenclatureProfiles,
   },
   { tool: 'list_clients', method: 'get', path: '/clients', status: 200, invoke: handleListClients },
+  { tool: 'list_users', method: 'get', path: '/users', status: 200, invoke: handleListUsers },
 ];
 
 function parsePayload(res: ToolResult): unknown {
@@ -103,10 +105,11 @@ function readMappedTools(): ReadonlySet<string> {
 }
 
 describe('MCP contract (REST <-> MCP parity)', () => {
-  // `pnpm seed` creates no projects or clients, so list_projects/list_clients would validate an
-  // empty `[]` — trivially passing without ever exercising ProjectListItem/ClientSummary. Seed one
-  // minimal row of each so INV-5 validates a NON-EMPTY payload with real teeth.
-  const inv5Seeded: { projectId?: string; clientId?: string } = {};
+  // `pnpm seed` creates no projects, clients, or users, so list_projects/list_clients/list_users
+  // would validate an empty `[]` — trivially passing without ever exercising
+  // ProjectListItem/ClientSummary/UserSummary. Seed one minimal row of each so INV-5 validates a
+  // NON-EMPTY payload with real teeth.
+  const inv5Seeded: { projectId?: string; clientId?: string; userId?: string } = {};
 
   beforeAll(async () => {
     const lib = await pool.query<{ id: string }>(
@@ -121,6 +124,8 @@ describe('MCP contract (REST <-> MCP parity)', () => {
     inv5Seeded.projectId = project.projectId;
     const client = await createClient({ name: `inv5-contract-${Date.now()}` });
     inv5Seeded.clientId = client.id;
+    const user = await resolveOrCreateUserByLabel(`inv5-contract-${Date.now()}`);
+    inv5Seeded.userId = user.id;
   });
 
   afterAll(async () => {
@@ -128,6 +133,7 @@ describe('MCP contract (REST <-> MCP parity)', () => {
       await pool.query('DELETE FROM projects WHERE id = $1', [inv5Seeded.projectId]);
     if (inv5Seeded.clientId)
       await pool.query('DELETE FROM clients WHERE id = $1', [inv5Seeded.clientId]);
+    if (inv5Seeded.userId) await pool.query('DELETE FROM users WHERE id = $1', [inv5Seeded.userId]);
   });
 
   it('INV-1: every user-facing REST op maps to a tool or is explicitly unexposed', async () => {

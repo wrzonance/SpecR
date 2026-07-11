@@ -114,6 +114,10 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /clients', 'list_clients'],
   ['post /clients', 'create_client'],
   ['get /clients/{}', 'get_client'],
+  // actor identity substrate (#381 / ADR-052 D6)
+  ['get /users', 'list_users'],
+  ['post /users', 'resolve_user'],
+  ['get /users/{}', 'get_user'],
   // ranked full-text search (#445 / ADR-062) — REST twin of the existing tool
   ['get /search', 'search_library'],
   // discipline mapping (#448 / ADR-065) — read catalog, project spec listing, per-library rules
@@ -255,6 +259,9 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'list_package_revisions',
   'get_revision',
   'get_client',
+  // actor identity substrate (#381 / ADR-052 D6): mirrors GET /users/{id} 1:1, but a
+  // non-vacuous assertion needs a seeded user row beyond `pnpm seed`.
+  'get_user',
   // standards rollups (#446): mirror GET /…/standards 1:1 but need a seeded
   // citation graph (a parsed spec citing standards) beyond `pnpm seed`.
   'list_library_standards',

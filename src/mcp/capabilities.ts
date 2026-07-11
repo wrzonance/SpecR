@@ -145,6 +145,10 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['list_clients', 'read'],
   ['get_client', 'read'],
   ['create_client', 'write'],
+  // actor identity substrate (#381 / ADR-052 D6)
+  ['list_users', 'read'],
+  ['get_user', 'read'],
+  ['resolve_user', 'write'],
   // discipline mapping (#448 / ADR-065)
   ['list_disciplines', 'read'],
   ['list_project_specs', 'read'],

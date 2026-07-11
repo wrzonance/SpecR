@@ -34,6 +34,7 @@ import { registerDisciplineTools } from './discipline-tools.js';
 import { registerDivisionGeneralTools } from './division-general-tools.js';
 import { registerProjectMembershipTools } from './project-membership-tools.js';
 import { registerClientTools } from './clients-tools.js';
+import { registerUserTools } from './users-tools.js';
 import { registerPackageTools } from './package-tools.js';
 import { registerPackageRevisionTools } from './package-revision-tools.js';
 import { registerReportTools } from './report-tools.js';
@@ -335,6 +336,7 @@ export function registerTools(
   registerDivisionGeneralTools(reg);
   registerProjectMembershipTools(reg);
   registerClientTools(reg);
+  registerUserTools(reg);
   registerPackageTools(reg);
   registerPackageRevisionTools(reg);
   registerSpecTools(reg);
