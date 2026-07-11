@@ -101,6 +101,12 @@ export type { Editability, ConventionRules, ClassificationEvidence } from './sch
 export { PutConventionBodySchema, CloneConventionBodySchema } from './schemas.js';
 export type { PutConventionBody, CloneConventionBody } from './schemas.js';
 export {
+  DivisionSchema,
+  DisciplineRuleInputSchema,
+  SetDisciplinesBodySchema,
+} from './discipline-schemas.js';
+export type { DisciplineRuleInput, SetDisciplinesBody } from './discipline-schemas.js';
+export {
   PatchEditabilityBodySchema,
   PatchRemovalBodySchema,
   ReclassifyBodySchema,
