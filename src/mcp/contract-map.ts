@@ -116,6 +116,10 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /clients/{}', 'get_client'],
   // ranked full-text search (#445 / ADR-062) — REST twin of the existing tool
   ['get /search', 'search_library'],
+  // standards registry (#446 / ADR-064) — rollup reads + verdict upsert
+  ['get /libraries/{}/standards', 'list_library_standards'],
+  ['get /projects/{}/standards', 'list_project_standards'],
+  ['put /standards/{}/{}', 'record_standard_verification'],
 ]);
 
 /**
@@ -236,4 +240,8 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'list_package_revisions',
   'get_revision',
   'get_client',
+  // standards rollups (#446): mirror GET /…/standards 1:1 but need a seeded
+  // citation graph (a parsed spec citing standards) beyond `pnpm seed`.
+  'list_library_standards',
+  'list_project_standards',
 ]);

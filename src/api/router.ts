@@ -35,6 +35,11 @@ import {
   getProjectReferenceGraphHandler,
   getLibraryReferenceGraphHandler,
 } from './reference-graph.js';
+import {
+  getProjectStandardsHandler,
+  getLibraryStandardsHandler,
+  recordStandardVerificationHandler,
+} from './standards.js';
 import { createClientHandler, listClientsHandler, getClientHandler } from './clients.js';
 import {
   getLibraryDivisionGeneralSpecHandler,
@@ -229,6 +234,7 @@ router.post(
 router.get('/projects/:id/open-comments', getProjectOpenCommentsHandler);
 router.get('/projects/:id/references/inbound', getInboundReferencesHandler);
 router.get('/projects/:id/reference-graph', getProjectReferenceGraphHandler);
+router.get('/projects/:id/standards', getProjectStandardsHandler);
 router.get('/projects/:id/specs/:specId/references', getOutboundReferencesHandler);
 router.post('/projects/:id/packages', validateBody(CreatePackageBodySchema), createPackageHandler);
 router.get('/projects/:id/packages', listPackagesHandler);
@@ -264,6 +270,10 @@ router.get('/libraries/import/jobs/:jobId', importJobHandler);
 router.post('/libraries/:id/import', parseRateLimit, upload.single('file'), importLibraryHandler);
 router.get('/libraries/:id/specs', listLibrarySpecsHandler);
 router.get('/libraries/:id/reference-graph', getLibraryReferenceGraphHandler);
+router.get('/libraries/:id/standards', getLibraryStandardsHandler);
+// Standards registry verdict (#446, ADR-064). standardCode may contain reserved URL
+// chars (e.g. a slash in A653/A653M) — clients percent-encode it in the path.
+router.put('/standards/:orgCode/:standardCode', recordStandardVerificationHandler);
 router.patch('/libraries/:id', renameLibraryHandler);
 router.get('/libraries/:id/conventions', getLibraryConventionHandler);
 router.put('/libraries/:id/conventions', putLibraryConventionHandler);
