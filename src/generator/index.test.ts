@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
 import { generateDocx } from './index.js';
 import type { SpecTree } from '../ast/types.js';
-import type { StyleRule } from '../ast/index.js';
+import type { StyleRule, HeaderFooterComposition } from '../ast/index.js';
 
 // Covers: part, article, pr1, pr2, note, continuation, vanish
 const SYNTHETIC_TREE: SpecTree = {
@@ -449,5 +449,53 @@ describe('generateDocx — style rules', () => {
       /<w:r>(<w:rPr>.*?<\/w:rPr>)?<w:t[^>]*>Continued text here\.<\/w:t><\/w:r>/s.exec(xml);
     expect(contRunMatch).not.toBeNull();
     expect(contRunMatch?.[1]).toBeUndefined(); // no <w:rPr> captured
+  });
+});
+
+const HEADER_FOOTER_COMPOSITION: HeaderFooterComposition = {
+  header: {
+    center: {
+      content: [
+        { kind: 'sectionNumber' },
+        { kind: 'literal', text: ' — ' },
+        { kind: 'sectionTitle' },
+      ],
+    },
+  },
+  footer: {
+    right: { content: [{ kind: 'pageNumber' }] },
+  },
+};
+
+describe('generateDocx — #303 header/footer wiring', () => {
+  it('renders header/footer parts sourced from the passed SpecTree, never a duplicated config literal', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE, undefined, {
+      headerFooter: {
+        composition: HEADER_FOOTER_COMPOSITION,
+        // Deliberately different from SYNTHETIC_TREE.section/title — proves
+        // sectionNumber/sectionTitle come from the SpecTree being generated,
+        // never from field-value config passed alongside it (#303 acceptance).
+        current: { projectName: 'Should never appear in header or footer' },
+      },
+    });
+    const zip = await JSZip.loadAsync(buffer);
+    const headerFile = zip.file('word/header1.xml');
+    if (!headerFile) throw new Error('word/header1.xml missing from generated DOCX');
+    const headerXml = await headerFile.async('string');
+    expect(headerXml).toContain(SYNTHETIC_TREE.section);
+    expect(headerXml).toContain(SYNTHETIC_TREE.title);
+    expect(headerXml).not.toContain('Should never appear');
+
+    const footerFile = zip.file('word/footer1.xml');
+    expect(footerFile).toBeDefined();
+  });
+
+  it('options.headerFooter omitted — no header/footer parts emitted (pre-#303 baseline)', async () => {
+    const buffer = await generateDocx(SYNTHETIC_TREE);
+    const zip = await JSZip.loadAsync(buffer);
+    const headerFooterParts = Object.keys(zip.files).filter((name) =>
+      /^word\/(header|footer)\d+\.xml$/.test(name)
+    );
+    expect(headerFooterParts).toEqual([]);
   });
 });

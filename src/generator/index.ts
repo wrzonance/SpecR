@@ -1,7 +1,13 @@
 import { Document, Paragraph, TextRun, Packer, HeadingLevel } from 'docx';
 import { wrapWithControl, SdtBlock } from './controls.js';
 import { buildFrontMatter, type ManualMeta } from './front-matter.js';
-import type { SpecNode, SpecTree, StyleProperties, StyleRule } from '../ast/index.js';
+import type {
+  SpecNode,
+  SpecTree,
+  StyleProperties,
+  StyleRule,
+  HeaderFooterComposition,
+} from '../ast/index.js';
 import { GeneratorError } from './error.js';
 import { buildSpecNumberingConfig, getNodeLevel } from './numbering.js';
 import { buildRuleMap, paragraphStyleOptions, runStyleOptions } from './styles.js';
@@ -11,15 +17,33 @@ import {
   formatSectionReferences,
   type SectionNumberFormat,
 } from '../lib/section-number.js';
+import { renderHeaderFooterComposition } from './header-footer.js';
+import type { HeaderFooterRenderResult } from './header-footer.js';
+import type { HeaderFooterFieldContext, HeaderFooterFieldValues } from './header-footer-fields.js';
 
 export { generateSec } from './sec/index.js';
 export { renderMarkdown } from './markdown.js';
+export { renderHeaderFooterComposition } from './header-footer.js';
 export type { ManualMeta, ManualSectionListing } from './front-matter.js';
+export type { HeaderFooterRenderResult } from './header-footer.js';
+export type { HeaderFooterFieldContext, HeaderFooterFieldValues } from './header-footer-fields.js';
 
 const SPEC_NUM_REF = 'spec-numbering' as const;
 
+/** Header/footer generation input (#303): the composition to render plus the
+ * field-value sources (`current` / `issuance`) it may draw on. `sectionNumber`
+ * / `sectionTitle` are never taken from here — they always come from the
+ * `SpecTree` being generated, so a generated header/footer can't drift from
+ * the section it's attached to. */
+export interface HeaderFooterGenerationInput {
+  readonly composition: HeaderFooterComposition;
+  readonly current: HeaderFooterFieldValues;
+  readonly issuance?: HeaderFooterFieldValues;
+}
+
 export interface GenerateDocxOptions {
   readonly sectionNumberFormat?: SectionNumberFormat;
+  readonly headerFooter?: HeaderFooterGenerationInput;
 }
 
 // Per-section rendering context. `reference` selects the numbering instance so a
@@ -106,11 +130,72 @@ function buildSectionChildren(tree: SpecTree, ctx: SectionContext): (Paragraph |
   return children;
 }
 
+// Resolves `options.headerFooter` (#303) into a HeaderFooterRenderResult, or
+// undefined when the caller didn't ask for one — the single gate that keeps
+// generateDocx's output byte-identical to the pre-#303 baseline when the
+// option is omitted. `sectionNumber`/`sectionTitle` are sourced only from
+// `tree` (via the same `format` the body uses), never from the caller's
+// field-value config, so a generated header/footer can't drift from the
+// section it's attached to.
+function renderOptionalHeaderFooter(
+  tree: SpecTree,
+  format: SectionNumberFormat,
+  options: GenerateDocxOptions | undefined
+): HeaderFooterRenderResult | undefined {
+  if (options?.headerFooter === undefined) return undefined;
+  const { composition, current, issuance } = options.headerFooter;
+  const ctx: HeaderFooterFieldContext = {
+    sectionNumber: displaySectionNumber(tree.section, format),
+    sectionTitle: tree.title,
+    current,
+    ...(issuance !== undefined ? { issuance } : {}),
+  };
+  return renderHeaderFooterComposition(composition, ctx);
+}
+
+// Document()-level options driven by a header/footer render — currently just
+// evenAndOddHeaderAndFooters, which docx models at the document (not
+// section) level.
+function documentLevelOptions(render: HeaderFooterRenderResult | undefined): {
+  readonly evenAndOddHeaderAndFooters?: boolean;
+} {
+  return render?.evenAndOddHeaders ? { evenAndOddHeaderAndFooters: true } : {};
+}
+
+// Section-level options driven by a header/footer render: docx's
+// ISectionOptions carries `headers`/`footers` as siblings of `properties`,
+// while titlePage/page-number-start live inside `properties` — this bundles
+// both so the call site can spread `{ ...sectionHeaderFooterOptions(render),
+// children }` without any conditional branching of its own.
+function sectionHeaderFooterOptions(render: HeaderFooterRenderResult | undefined): {
+  readonly headers?: NonNullable<HeaderFooterRenderResult['headers']>;
+  readonly footers?: NonNullable<HeaderFooterRenderResult['footers']>;
+  readonly properties: { readonly titlePage?: boolean; readonly page?: PageNumberStartOption };
+} {
+  return {
+    ...(render?.headers !== undefined ? { headers: render.headers } : {}),
+    ...(render?.footers !== undefined ? { footers: render.footers } : {}),
+    properties: {
+      ...(render?.titlePage ? { titlePage: true } : {}),
+      ...(render?.pageNumberStart !== undefined
+        ? { page: { pageNumbers: { start: render.pageNumberStart } } }
+        : {}),
+    },
+  };
+}
+
+interface PageNumberStartOption {
+  readonly pageNumbers: { readonly start: number };
+}
+
 /**
  * Render the spec tree to DOCX. `styleRules` (from a style template, ADR-021)
  * applies per-NodeType font/spacing/indent to styled paragraphs and
  * numFmt/lvlText/start overrides to the numbering definition. Title, note,
  * and continuation paragraphs are not StyleNodeTypes and stay unstyled.
+ * `options.headerFooter` (#303), when set, renders a resolved header/footer
+ * composition onto the document's single section; omitted, output is
+ * unchanged from the pre-#303 baseline.
  */
 export async function generateDocx(
   tree: SpecTree,
@@ -122,9 +207,11 @@ export async function generateDocx(
     const format = options?.sectionNumberFormat ?? 'canonical';
     const ctx = sectionContext(format, SPEC_NUM_REF, rules);
     const children = buildSectionChildren(tree, ctx);
+    const render = renderOptionalHeaderFooter(tree, format, options);
     const doc = new Document({
+      ...documentLevelOptions(render),
       numbering: { config: [buildSpecNumberingConfig(rules, SPEC_NUM_REF)] },
-      sections: [{ properties: {}, children }],
+      sections: [{ ...sectionHeaderFooterOptions(render), children }],
     });
     return await Packer.toBuffer(doc);
   } catch (err) {
@@ -146,6 +233,13 @@ export async function generateDocx(
  * `meta`, style-template applied) and a Word TOC field over the Heading1 section
  * titles (ADR-017 D1). Word computes the TOC entries + pagination on open; SpecR
  * emits the field + headings (structure), never page numbers.
+ *
+ * `options.headerFooter` (#303) is deliberately NOT wired here — the issue's
+ * acceptance criteria describe header/footer rendering for standalone
+ * generated specs (`generateDocx`), and a manual's own front-matter cover
+ * page + per-section OOXML-section split need a header/footer story of their
+ * own (running headers across sections, cover-page suppression) that's out
+ * of scope for this PR.
  */
 export async function generateManual(
   trees: readonly SpecTree[],
