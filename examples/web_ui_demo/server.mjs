@@ -6,15 +6,16 @@ import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import { runReport } from './report-bridge.mjs';
+import { fromAnthropicResponse, toAnthropicRequest, toAnthropicTools } from './llm-providers.mjs';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 
 // Load a local .env sitting next to this server (examples/web_ui_demo/.env) so
-// the demo is configured from its own folder — OpenAI key, model, ports — rather
-// than the repo root. A missing .env is fine (the defaults below apply); a real
-// shell/CI environment variable always wins over a value set in the file, so the
-// one-command launchers (which pass PORT/SPECR_API_BASE inline) keep control of
-// the ports while .env supplies the OpenAI settings.
+// the demo is configured from its own folder — LLM provider key, model, ports —
+// rather than the repo root. A missing .env is fine (the defaults below apply); a
+// real shell/CI environment variable always wins over a value set in the file, so
+// the one-command launchers (which pass PORT/SPECR_API_BASE inline) keep control
+// of the ports while .env supplies the LLM provider settings.
 function loadLocalEnv(path) {
   let raw;
   try {
@@ -33,16 +34,36 @@ const ENV_LOADED = loadLocalEnv(ENV_FILE);
 const PORT = Number.parseInt(process.env.PORT || '3001', 10);
 // Bind address. Defaults to loopback so the demo stays private to this machine;
 // set HOST=0.0.0.0 to reach it from other machines on your LAN. That also exposes
-// the proxied SpecR API and the OpenAI-backed /chat endpoint, so only opt in on a
+// the proxied SpecR API and the LLM-backed /chat endpoint, so only opt in on a
 // network you trust.
 const HOST = process.env.HOST || '127.0.0.1';
 const API_BASE = process.env.SPECR_API_BASE || 'http://127.0.0.1:3000';
 
-// OpenAI chat bridge config — the key lives ONLY here (server-side); the browser
-// never sees it. Absent key ⇒ /chat degrades to a clear "not configured" reply.
+// LLM chat bridge config — the demo speaks to exactly ONE provider, chosen
+// explicitly by LLM_PROVIDER (keys alone never switch it). Keys live ONLY here
+// (server-side); the browser never sees them. A missing key for the selected
+// provider ⇒ /chat and /report degrade to a clear "not configured" reply.
+const LLM_PROVIDER = (process.env.LLM_PROVIDER || 'openai').toLowerCase();
+if (LLM_PROVIDER !== 'openai' && LLM_PROVIDER !== 'anthropic') {
+  console.error(
+    `SpecR demo: invalid LLM_PROVIDER "${process.env.LLM_PROVIDER}" — use "openai" or "anthropic".`
+  );
+  process.exit(1);
+}
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_BASE = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+// No /v1 suffix here — callAnthropic appends /v1/messages. Trailing slashes
+// are stripped so a gateway URL like "https://proxy/anthropic/" cannot yield
+// a "//v1/messages" path.
+const ANTHROPIC_BASE = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(
+  /\/+$/,
+  ''
+);
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-4-8';
+const ANTHROPIC_VERSION = '2023-06-01';
+const ANTHROPIC_MAX_TOKENS = 16_000; // Messages API requires max_tokens; ample for concise replies
 const CHAT_MAX_TOOL_ROUNDS = 6; // cap the tool-call loop so a model can't spin forever
 const CHAT_MAX_MESSAGES = 40; // reject oversized histories
 
@@ -207,11 +228,11 @@ async function serveStatic(req, res, url) {
   }
 }
 
-// ── OpenAI ⇄ MCP chat bridge ───────────────────────────────────────────────
-// The browser POSTs its conversation to /chat. We run OpenAI chat-completions
-// with tool-calling, and every tool call the model makes is executed against
-// SpecR's stateless MCP endpoint (POST {API_BASE}/mcp). The key never leaves
-// this process. MVP: non-streaming, read-and-write MCP tools as SpecR exposes.
+// ── LLM ⇄ MCP chat bridge ─────────────────────────────────────────────────
+// The browser POSTs its conversation to /chat. We run the active provider's
+// chat loop (OpenAI or Anthropic) with tool-calling, and every tool call the
+// model makes is executed against SpecR's stateless MCP endpoint (POST {API_BASE}/mcp).
+// The key never leaves this process. MVP: non-streaming, read-and-write MCP tools as SpecR exposes.
 
 const SYSTEM_PROMPT = [
   'You are the SpecR assistant, embedded in a CSI MasterFormat specification tool.',
@@ -330,6 +351,77 @@ async function callOpenAI(messages, tools) {
   }
 }
 
+// Anthropic Messages API call, symmetric to callOpenAI. Accepts and returns
+// the demo's internal OpenAI chat-completions shapes; llm-providers.mjs
+// translates at the wire. toolChoice is Anthropic-shaped ({type:'none'}) or
+// undefined to let the model decide.
+async function callAnthropic(openAiMessages, openAiTools, toolChoice) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  try {
+    const { system, messages } = toAnthropicRequest(openAiMessages);
+    const body = { model: ANTHROPIC_MODEL, max_tokens: ANTHROPIC_MAX_TOKENS, messages };
+    if (system) body.system = system;
+    const tools = toAnthropicTools(openAiTools);
+    if (tools.length > 0) {
+      body.tools = tools;
+      if (toolChoice) body.tool_choice = toolChoice;
+    }
+    const res = await fetch(`${ANTHROPIC_BASE}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Anthropic ${res.status}: ${detail.slice(0, 300)}`);
+    }
+    return fromAnthropicResponse(await res.json());
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Per-request callModel factory. The Anthropic wrapper remembers the last
+// non-empty tool list: the loops signal "final answer, no more tools" by
+// passing empty tools, but the Messages API rejects tool_use/tool_result
+// history when the request defines no tools — so the wrapper re-sends the
+// tools it saw and forbids new calls with tool_choice {type:'none'}.
+function makeAnthropicCallModel() {
+  let lastTools = [];
+  return (messages, tools) => {
+    if (tools && tools.length > 0) {
+      lastTools = tools;
+      return callAnthropic(messages, tools, undefined);
+    }
+    return callAnthropic(messages, lastTools, { type: 'none' });
+  };
+}
+
+// The single active provider, resolved once at boot from LLM_PROVIDER.
+const PROVIDERS = {
+  openai: {
+    name: 'openai',
+    model: OPENAI_MODEL,
+    keyName: 'OPENAI_API_KEY',
+    hasKey: OPENAI_API_KEY !== '',
+    makeCallModel: () => (messages, tools) => callOpenAI(messages, tools),
+  },
+  anthropic: {
+    name: 'anthropic',
+    model: ANTHROPIC_MODEL,
+    keyName: 'ANTHROPIC_API_KEY',
+    hasKey: ANTHROPIC_API_KEY !== '',
+    makeCallModel: makeAnthropicCallModel,
+  },
+};
+const PROVIDER = PROVIDERS[LLM_PROVIDER];
+
 // Collapse duplicate navigation anchors (a search may return the same section
 // many times) and cap the payload so a broad answer can't flood the UI.
 function dedupeAnchors(anchors) {
@@ -346,19 +438,19 @@ function dedupeAnchors(anchors) {
   return out;
 }
 
-// The tool-calling loop: ask OpenAI, run any tool calls against MCP, feed results
+// The tool-calling loop: ask the active provider's model, run any tool calls against MCP, feed results
 // back, repeat until the model answers with plain text or we hit the round cap.
 // The answering turn's navigation anchors (last successful enriched tool call)
 // ride back as `focus` so the browser can highlight the sections in the active tab.
-async function runChat(userMessages) {
+async function runChat(userMessages, callModel) {
   const tools = await listOpenAiTools();
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...userMessages];
   const toolCalls = [];
   let focusAnchors = [];
   for (let round = 0; round < CHAT_MAX_TOOL_ROUNDS; round++) {
-    const completion = await callOpenAI(messages, tools);
+    const completion = await callModel(messages, tools);
     const message = completion.choices?.[0]?.message;
-    if (!message) throw new Error('OpenAI returned no message');
+    if (!message) throw new Error('model returned no message');
     messages.push(message);
     const calls = message.tool_calls;
     if (!calls || calls.length === 0) {
@@ -376,7 +468,7 @@ async function runChat(userMessages) {
     }
   }
   // Round cap reached — force a final answer with tools disabled.
-  const finalMessage = (await callOpenAI(messages, undefined)).choices?.[0]?.message;
+  const finalMessage = (await callModel(messages, undefined)).choices?.[0]?.message;
   return {
     reply: finalMessage?.content || 'Reached the tool-call limit.',
     toolCalls,
@@ -396,11 +488,11 @@ function sanitizeMessages(messages) {
 }
 
 async function handleChat(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!PROVIDER.hasKey) {
     sendJson(res, 200, {
       success: false,
       code: 'no-key',
-      error: 'OPENAI_API_KEY not configured on the demo server',
+      error: `${PROVIDER.keyName} not configured on the demo server`,
     });
     return;
   }
@@ -427,8 +519,11 @@ async function handleChat(req, res) {
     return;
   }
   try {
-    const { reply, toolCalls, focus } = await runChat(clean);
-    sendJson(res, 200, { success: true, data: { reply, toolCalls, focus, model: OPENAI_MODEL } });
+    const { reply, toolCalls, focus } = await runChat(clean, PROVIDER.makeCallModel());
+    sendJson(res, 200, {
+      success: true,
+      data: { reply, toolCalls, focus, provider: PROVIDER.name, model: PROVIDER.model },
+    });
   } catch (err) {
     sendJson(res, 502, { success: false, error: `chat failed: ${err.message}` });
   }
@@ -437,7 +532,7 @@ async function handleChat(req, res) {
 // ── Grounded reporting bridge (#353) ────────────────────────────────────────
 // POST /report streams the agent's tool-calling steps live as newline-delimited
 // JSON (one object per line: step | usage | done | error). It reuses the same
-// MCP + OpenAI plumbing as /chat, but hands the model only read-only tools — the
+// MCP + LLM plumbing as /chat, but hands the model only read-only tools — the
 // composer cannot mutate state, and every citation traces to a real paragraph.
 
 function reportEmitter(res) {
@@ -462,11 +557,11 @@ async function handleReport(req, res) {
     connection: 'keep-alive',
   });
   const emit = reportEmitter(res);
-  if (!OPENAI_API_KEY) {
+  if (!PROVIDER.hasKey) {
     emit({
       type: 'error',
       code: 'no-key',
-      error: 'OPENAI_API_KEY not configured on the demo server',
+      error: `${PROVIDER.keyName} not configured on the demo server`,
     });
     res.end();
     return;
@@ -499,11 +594,11 @@ async function handleReport(req, res) {
       },
       deps: {
         listTools: listOpenAiTools,
-        callModel: (messages, tools) => callOpenAI(messages, tools),
+        callModel: PROVIDER.makeCallModel(),
         execTool: execToolCall,
       },
     });
-    emit({ type: 'done', ...result, model: OPENAI_MODEL });
+    emit({ type: 'done', ...result, provider: PROVIDER.name, model: PROVIDER.model });
   } catch (err) {
     emit({ type: 'error', error: `report failed: ${err.message}` });
   } finally {
@@ -550,6 +645,10 @@ createServer((req, res) => {
     `Config: ${ENV_LOADED ? `loaded ${ENV_FILE}` : `no .env at ${ENV_FILE} (using defaults + real env)`}`
   );
   console.log(
-    `Chat bridge: ${OPENAI_API_KEY ? `enabled (model ${OPENAI_MODEL})` : 'disabled (set OPENAI_API_KEY in .env)'}`
+    `Chat bridge: ${
+      PROVIDER.hasKey
+        ? `enabled (${PROVIDER.name}, model ${PROVIDER.model})`
+        : `disabled (set ${PROVIDER.keyName} in .env)`
+    }`
   );
 });

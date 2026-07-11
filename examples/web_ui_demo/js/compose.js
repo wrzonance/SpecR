@@ -1,7 +1,7 @@
 // Compose view — agent-driven grounded reporting (#353).
 //
 // The browser holds NO API key. It POSTs a report request to the demo server's
-// /report endpoint (server.mjs), which runs a READ-ONLY OpenAI tool-calling loop
+// /report endpoint (server.mjs), which runs a READ-ONLY LLM tool-calling loop (OpenAI or Anthropic)
 // over SpecR's MCP tools and streams newline-delimited JSON events back: one
 // `step` per grounded tool call (running → done/error), periodic `usage`, and a
 // final `done` carrying the composed narrative plus deterministic citations.
@@ -139,7 +139,8 @@ export function initCompose(opts = {}) {
   function renderError(evt) {
     const message =
       evt.code === 'no-key'
-        ? 'Compose is not configured — set OPENAI_API_KEY on the demo server (server.mjs) to enable it.'
+        ? evt.error ||
+          'Compose is not configured — set the selected provider key (OPENAI_API_KEY or ANTHROPIC_API_KEY) on the demo server.'
         : evt.error || 'report failed';
     outputEl.appendChild(el('p', 'compose-error', message));
   }

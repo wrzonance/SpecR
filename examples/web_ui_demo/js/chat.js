@@ -1,9 +1,9 @@
-// MCP chat sidebar — an OpenAI-backed assistant that answers questions about
+// MCP chat sidebar — an LLM-backed assistant (OpenAI or Anthropic) that answers questions about
 // the loaded specs/projects/libraries by calling SpecR's MCP tools.
 //
 // The browser holds NO API key. It POSTs the running conversation to the demo
-// server's /chat endpoint (server.mjs), which owns the OPENAI_API_KEY, runs the
-// OpenAI tool-calling loop, and bridges each tool call to SpecR's POST /mcp. We
+// server's /chat endpoint (server.mjs), which owns the provider key, runs the
+// tool-calling loop, and bridges each tool call to SpecR's POST /mcp. We
 // render the final assistant message plus a small trace of which MCP tools ran.
 
 import { renderMarkdownInto } from './render-markdown.mjs';
@@ -124,7 +124,8 @@ export function initChat(opts = {}) {
         const code = body?.code;
         const message =
           code === 'no-key'
-            ? 'Chat is not configured — set OPENAI_API_KEY on the demo server (server.mjs) to enable it.'
+            ? body?.error ||
+              'Chat is not configured — set the selected provider key (OPENAI_API_KEY or ANTHROPIC_API_KEY) on the demo server.'
             : body?.error || `chat failed: ${res.status}`;
         addBubble('assistant', message);
         return;

@@ -27,7 +27,7 @@ node server.mjs
 Open `http://127.0.0.1:3001`.
 
 `server.mjs` auto-loads `.env` from **this** folder for its configuration —
-`OPENAI_API_KEY` / `OPENAI_MODEL`, `PORT`, and `SPECR_API_BASE`. `.env` is
+`LLM_PROVIDER` plus the provider key/model (OpenAI or Anthropic), `PORT`, and `SPECR_API_BASE`. `.env` is
 gitignored; `.env.example` is the committed template documenting every setting. A
 real shell/CI environment variable always overrides the file, so a one-off like
 `PORT=3002 node server.mjs` still works.
@@ -151,18 +151,29 @@ Applying a profile at parse time is a `POST /parse` capability
 The **💬 Ask SpecR** button opens an assistant that answers questions about your
 loaded specs by calling SpecR's **MCP** tools (`POST /mcp`). The browser holds no
 key: it POSTs the conversation to the demo server's `/chat` endpoint, which runs
-the OpenAI tool-calling loop and bridges each tool call to the MCP endpoint.
+the LLM tool-calling loop (OpenAI or Anthropic, chosen by `LLM_PROVIDER`) and bridges each tool call to the MCP endpoint.
 
 It is **off until you provide a key** — without one the sidebar shows a clear
-"not configured" note. Enable it by setting `OPENAI_API_KEY` in `.env` (this
+"not configured" note. Enable it by setting the selected provider's key in `.env` (this
 folder):
 
 ```ini
-# examples/web_ui_demo/.env
-OPENAI_API_KEY=sk-...                       # required — stays server-side, never sent to the browser
+# examples/web_ui_demo/.env — OpenAI
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...                        # required — stays server-side, never sent to the browser
 OPENAI_MODEL=gpt-5.4                         # optional (default gpt-4o-mini; any tool-calling model)
-OPENAI_BASE_URL=https://api.openai.com/v1   # optional — point at an OpenAI-compatible server
+OPENAI_BASE_URL=https://api.openai.com/v1    # optional — point at an OpenAI-compatible server
+
+# …or Anthropic
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...                 # required — stays server-side, never sent to the browser
+ANTHROPIC_MODEL=claude-opus-4-8              # optional (default claude-opus-4-8; any tool-calling model)
+ANTHROPIC_BASE_URL=https://api.anthropic.com # optional — enterprise gateway/proxy (no /v1 suffix)
 ```
+
+Both providers support usage-based enterprise API keys under data-protection
+agreements — point the demo at whichever provider your organization's agreement
+covers to iterate the MCP tooling against proprietary specifications.
 
 Restart `node server.mjs` after editing `.env`. The startup log prints which
 config file it loaded and whether the chat bridge is enabled.
@@ -184,7 +195,7 @@ Everything a single button already does stays a button.
 Type a request (or pick an example), press **Compose report**, and:
 
 - The browser POSTs to the demo server's `/report` endpoint, which runs a
-  **read-only** OpenAI tool-calling loop over the MCP tools and streams progress
+  **read-only** LLM tool-calling loop over the MCP tools and streams progress
   back as newline-delimited JSON.
 - **The grounding is shown.** Each grounded tool call streams into the left column
   as a live step ("Reading the coordination report…", "Comparing 2 specs…").
@@ -205,7 +216,7 @@ Type a request (or pick an example), press **Compose report**, and:
   answer to the human-in-the-loop-for-writes concern; edits stay in the deterministic
   views and the free-form **Ask SpecR** chat (which keeps the read+write tier).
 
-Compose uses the **same** `OPENAI_API_KEY` as Ask SpecR (above) and is likewise
+Compose uses the **same** provider key as Ask SpecR (above — `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, per `LLM_PROVIDER`) and is likewise
 **off until you provide a key** — without one, pressing Compose shows the same
 "not configured" note. The key stays server-side; the browser never sees it.
 
