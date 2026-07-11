@@ -19,13 +19,36 @@ const ModifiedDiffSchema = z.object({
   ours: z.string(),
 });
 
-export const DiffResultSchema = z.object({
-  added: z.array(ParagraphDiffSchema),
-  modified: z.array(ModifiedDiffSchema),
-  deleted: z.array(z.uuid()),
-  conflicts: z.array(ModifiedDiffSchema),
-  warnings: z.array(z.string()),
-});
+export const DiffResultSchema = z
+  .object({
+    added: z.array(ParagraphDiffSchema),
+    modified: z.array(ModifiedDiffSchema),
+    deleted: z.array(z.uuid()),
+    conflicts: z.array(ModifiedDiffSchema),
+    warnings: z.array(z.string()),
+  })
+  // A uuid must classify as exactly ONE change kind. computeDiff never emits a
+  // uuid in two buckets, but applyAccepted builds a uuid→change map by spreading
+  // modified/conflicts/added/deleted in order, so a client-supplied duplicate
+  // would silently last-win (e.g. deleted shadowing an accepted modified → an
+  // edit becomes a removal). Reject it at the parse boundary instead (#374).
+  .superRefine((diff, ctx) => {
+    const seen = new Set<string>();
+    const visit = (uuid: string, bucket: string): void => {
+      if (seen.has(uuid)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `duplicate diff uuid ${uuid} in bucket "${bucket}" — a uuid must appear in exactly one of modified/conflicts/added/deleted`,
+        });
+        return;
+      }
+      seen.add(uuid);
+    };
+    diff.modified.forEach((c) => visit(c.uuid, 'modified'));
+    diff.conflicts.forEach((c) => visit(c.uuid, 'conflicts'));
+    diff.added.forEach((c) => visit(c.uuid, 'added'));
+    diff.deleted.forEach((u) => visit(u, 'deleted'));
+  });
 
 // Shared field shape so REST (strict body) and the MCP tool (which also carries specId)
 // validate identical merge fields — the big DiffResultSchema lives in exactly one place.
@@ -45,11 +68,3 @@ export const MergeFieldsShape = {
 // REST body is strict (unknown keys rejected); specId travels in the path, not the body.
 export const MergeBodySchema = z.strictObject(MergeFieldsShape);
 export type MergeBody = z.infer<typeof MergeBodySchema>;
-
-// Zod-inferred parse-boundary shapes: afterUuid is an OPTIONAL KEY here (may be absent
-// entirely). The internal merge/types.ts DiffResult/ParagraphDiff instead require the key
-// always present (value may be undefined) — exactOptionalPropertyTypes treats these as
-// distinct shapes, so callers must reconcile them via merge/types.ts's toDiffResult /
-// toParagraphDiff mappers rather than an implicit/structural assignment.
-export type DiffResultInput = z.infer<typeof DiffResultSchema>;
-export type ParagraphDiffInput = DiffResultInput['added'][number];

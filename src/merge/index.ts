@@ -7,7 +7,6 @@ export { applyMerge } from './apply-merge.js';
 export type { ApplyMergeOutcome } from './apply-merge.js';
 export type { DiffOptions } from './diff.js';
 export { extractContentControls } from './extract.js';
-export { toDiffResult } from './types.js';
 export type {
   ParagraphSnapshot,
   TrackChangeRecord,

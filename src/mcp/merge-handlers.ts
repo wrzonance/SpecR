@@ -1,10 +1,5 @@
 import { z } from 'zod';
-import {
-  applyMerge,
-  InvalidAcceptedChangeError,
-  MergeError,
-  toDiffResult,
-} from '../merge/index.js';
+import { applyMerge, InvalidAcceptedChangeError, MergeError } from '../merge/index.js';
 import { StaleVersionError, SpecWriteForbiddenError, SpecNotFoundError } from '../db/index.js';
 import { MergeFieldsShape } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
@@ -44,7 +39,7 @@ export async function handleApplyMerge(args: unknown): Promise<ToolResult> {
   }
   const { specId, accept, diff, expectedVersion } = parsed.data;
   try {
-    const outcome = await applyMerge(specId, accept, toDiffResult(diff), expectedVersion);
+    const outcome = await applyMerge(specId, accept, diff, expectedVersion);
     if (outcome.kind === 'not-found') return toolError(`spec not found: id=${specId}`);
     return ok({ applied: outcome.applied, rejected: outcome.rejected });
   } catch (err) {

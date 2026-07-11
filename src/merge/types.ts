@@ -1,5 +1,3 @@
-import type { DiffResultInput, ParagraphDiffInput } from '../ast/index.js';
-
 // Re-exported for merge consumers' convenience; canonical definition is src/ast/types.ts
 export type { ParagraphSnapshot } from '../ast/types.js';
 
@@ -33,8 +31,10 @@ export interface ParagraphDiff {
   readonly text: string;
   /** document order in theirs */
   readonly index: number;
-  /** nearest preceding controlled uuid in document order, undefined if none */
-  readonly afterUuid: string | undefined;
+  /** nearest preceding controlled uuid in document order; the key is optional so
+   *  the Zod merge-request parse shape (afterUuid an optional key) is directly
+   *  assignable to this internal shape — no reconciling mapper needed. */
+  readonly afterUuid?: string | undefined;
 }
 
 export interface ModifiedDiff {
@@ -57,27 +57,3 @@ export interface DiffResult {
 }
 
 export type UuidGen = () => string;
-
-// Reconciles the Zod-inferred parse-boundary shape (afterUuid an OPTIONAL KEY, may be
-// absent) with the internal shape above (afterUuid a REQUIRED key, value may be
-// undefined) — the two are distinct under exactOptionalPropertyTypes. Every parse
-// boundary (REST body, MCP tool input) must go through these mappers rather than
-// pass the parsed Zod output through structurally.
-export function toParagraphDiff(entry: ParagraphDiffInput): ParagraphDiff {
-  return {
-    uuid: entry.uuid,
-    text: entry.text,
-    index: entry.index,
-    afterUuid: entry.afterUuid,
-  };
-}
-
-export function toDiffResult(parsed: DiffResultInput): DiffResult {
-  return {
-    added: parsed.added.map(toParagraphDiff),
-    modified: parsed.modified,
-    deleted: parsed.deleted,
-    conflicts: parsed.conflicts,
-    warnings: parsed.warnings,
-  };
-}
