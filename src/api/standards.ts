@@ -68,7 +68,10 @@ export async function recordStandardVerificationHandler(
     res.status(400).json({ success: false, error: 'orgCode and standardCode are required' });
     return;
   }
-  const body = VerificationBodySchema.safeParse(req.body);
+  // Body is optional (OpenAPI requestBody.required=false, ADR-064 §3): a no-body
+  // PUT leaves req.body undefined when no application/json header is sent — treat
+  // it as an empty verdict ({} → all fields reset, status defaults to 'unknown').
+  const body = VerificationBodySchema.safeParse(req.body ?? {});
   if (!body.success) {
     res.status(422).json({ success: false, error: 'validation failed' });
     return;

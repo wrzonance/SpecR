@@ -175,4 +175,15 @@ describe('PUT /standards/{orgCode}/{standardCode}', () => {
     });
     expect(res.status).toBe(422);
   });
+
+  // OpenAPI requestBody.required=false (ADR-064 §3): a no-body PUT (no
+  // application/json header → req.body undefined) must record an empty verdict,
+  // not 422. Regression for the missing-body path rejected by z.object().
+  it('a no-body PUT records a verdict and defaults status to unknown', async () => {
+    const res = await fetch(`${baseUrl}/standards/${ORG}/E119`, { method: 'PUT' });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { status: string; lastVerifiedAt: string | null } };
+    expect(body.data.status).toBe('unknown');
+    expect(body.data.lastVerifiedAt).not.toBeNull();
+  });
 });
