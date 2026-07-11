@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { PoolClient } from 'pg';
-import { pool, setParagraphVanish } from '../index.js';
-// setVanishRow is the reusable DB core (#374) — not yet in the db/index.ts
-// barrel (that lands with its first cross-module consumer, the merge engine's
-// deleted-op apply); imported directly from its sibling file within this module.
-import { setVanishRow } from './paragraph-vanish.js';
+import { pool, setParagraphVanish, setVanishRow } from '../index.js';
 
 async function runInTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();

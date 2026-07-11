@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { PoolClient } from 'pg';
-import { pool, insertParagraphAfter, StaleVersionError } from '../index.js';
-// insertSiblingRow is the reusable DB core (#374) — not yet in the db/index.ts
-// barrel (that lands with its first cross-module consumer, the merge engine's
-// added-op apply); imported directly from its sibling file within this module.
-import { insertSiblingRow } from './paragraph-insert.js';
+import { pool, insertParagraphAfter, insertSiblingRow, StaleVersionError } from '../index.js';
 
 const SPEC_ID = 'c1000000-0000-0000-0000-000000000000';
 const OTHER_SPEC_ID = 'c1000000-0000-0000-0000-00000000000f';

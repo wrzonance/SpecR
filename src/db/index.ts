@@ -57,14 +57,13 @@ export type {
   ParagraphWithAncestors,
   UpdateParagraphResult,
 } from './queries/paragraphs.js';
-export { insertParagraphAfter } from './queries/paragraph-insert.js';
+// insertSiblingRow / setVanishRow are the gate-free DB cores behind
+// insertParagraphAfter / setParagraphVanish AND the merge engine's added/deleted-op
+// apply (src/merge/conflict.ts, #374) — its first cross-module consumer.
+export { insertParagraphAfter, insertSiblingRow } from './queries/paragraph-insert.js';
 export type { InsertParagraphResult, InsertParagraphInput } from './queries/paragraph-insert.js';
-// setVanishRow (the gate-free DB core, #374) is deliberately NOT exported here
-// yet — same deferral as insertSiblingRow (paragraph-insert.js): it lands in
-// the barrel with its first cross-module consumer, the merge engine's
-// deleted-op apply (src/merge/conflict.ts).
-export { setParagraphVanish } from './queries/paragraph-vanish.js';
-export type { SetVanishResult } from './queries/paragraph-vanish.js';
+export { setParagraphVanish, setVanishRow } from './queries/paragraph-vanish.js';
+export type { SetVanishResult, SetVanishRowResult } from './queries/paragraph-vanish.js';
 export {
   insertRefs,
   getInboundReferences,
