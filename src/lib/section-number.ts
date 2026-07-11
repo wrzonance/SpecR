@@ -176,6 +176,16 @@ export function formatSectionNumber(canonical: string, format: SectionNumberForm
   return exhaustive;
 }
 
+/**
+ * Format a section number for display, tolerating input that isn't (yet)
+ * canonical. Normalizes `section` and formats it when possible; otherwise
+ * returns `section` verbatim rather than throwing or guessing.
+ */
+export function displaySectionNumber(section: string, format: SectionNumberFormat): string {
+  const canonical = normalizeSectionNumber(section);
+  return canonical === null ? section : formatSectionNumber(canonical, format);
+}
+
 export function formatSectionReferences(text: string, format: SectionNumberFormat): string {
   const re = new RegExp(String.raw`\b(Section\s+)${STRONG_FRAGMENT}`, 'gi');
   let out = '';

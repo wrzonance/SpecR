@@ -124,4 +124,10 @@ export interface ClassifiedParagraph {
   // non-note content is a suppressed 'continuation', a note renders (#296).
   // Absent === not a note.
   readonly isNote?: boolean;
+  // A rule-row delimiter (e.g. "*****") for an asterisk-rule-delimited note region
+  // (#292). Different in KIND from isVanish/isNote: those govern how a RETAINED
+  // node renders (hidden vs. shown-as-[NOTE]); suppressed means the paragraph
+  // produces NO SpecNode at all — buildTree drops it before tree assembly.
+  // Absent/false === retained normally.
+  readonly suppressed?: boolean;
 }

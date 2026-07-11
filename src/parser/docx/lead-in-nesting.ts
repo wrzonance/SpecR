@@ -162,7 +162,12 @@ function promote(x: ClassifiedParagraph): ClassifiedParagraph {
 export function nestLeadInSublists(
   classified: readonly ClassifiedParagraph[]
 ): ClassifiedParagraph[] {
-  const content = classified.filter((cp) => cp.paragraph.text.trim().length > 0);
+  // Must match buildTree's content view exactly (inference.ts): drop blanks AND
+  // suppressed rule-row delimiters (#292), or a rule row between a lead-in and its
+  // Signal-4 restart run defeats the same-tier adjacency check below.
+  const content = classified.filter(
+    (cp) => cp.paragraph.text.trim().length > 0 && cp.suppressed !== true
+  );
   const primary = content.map((_cp, index) => isPrimaryPromotion(content, index));
   const toPromote = new Set<ClassifiedParagraph>();
   content.forEach((cp, index) => {

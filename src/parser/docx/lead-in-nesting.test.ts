@@ -242,6 +242,23 @@ describe('nestLeadInSublists', () => {
     expect(out[2]?.paragraph.text).toBe('   '); // blank left untouched in the output
   });
 
+  // #292: buildTree's content view drops suppressed paragraphs (asterisk rule-row
+  // delimiters) as well as blanks — nestLeadInSublists' own content view must match,
+  // or a rule row sitting between a lead-in and its Signal-4 restart run defeats the
+  // adjacency check the same way an un-dropped blank would.
+  it('#292: a suppressed rule-row paragraph between the lead-in and its list does not defeat detection', () => {
+    const input = [
+      cp('REFERENCES', ARTICLE, 'article', 4),
+      cp('Abbreviations:', PR2, 'pr2', 5),
+      { ...cp('*****', PR2, 'continuation', 3), suppressed: true }, // rule row — dropped by the content filter
+      cp('1.\ta', PR2, 'pr2', 4),
+      cp('2.\tb', PR2, 'pr2', 4),
+    ];
+    const out = nestLeadInSublists(input);
+    expect(out[1]?.resolvedIlvl).toBe(PR1);
+    expect(out[2]?.suppressed).toBe(true); // rule row left untouched in the output
+  });
+
   it('is pure: returns a new array, leaves input objects unmutated, reuses unchanged references', () => {
     const input = scenario('Abbreviations:', ['1.\ta', '2.\tb']);
     const out = nestLeadInSublists(input);
