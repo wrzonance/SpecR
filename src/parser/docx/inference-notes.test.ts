@@ -254,6 +254,32 @@ describe('classifyParagraphs + buildTree — asterisk-rule note regions (#292)',
     expect(tree.parts[1]?.type).toBe('part');
   });
 
+  // classifyOne checks role === 'rule' FIRST, ahead of the isVanish guard (see the
+  // comment at that call site) — a rule row that also happens to carry w:vanish must
+  // still be suppressed, not fall through to the vanish/continuation branch instead.
+  it('#292: a rule row is suppressed regardless of vanish state — the rule-row check runs ahead of the vanish guard', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ isVanish: true, text: '*****' }),
+        makePara({ text: 'Delete items below not applicable to this project.' }),
+        makePara({ text: '*****' }),
+        makePara({ text: 'Ordinary body text after the region closes.' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    expect(classified[1]!.suppressed).toBe(true);
+    expect(classified[1]!.isVanish).toBe(true); // isVanish still recorded verbatim
+    expect(classified[3]!.suppressed).toBe(true);
+
+    const tree = buildTree(classified, '01 00 00', 'T', 'arcat');
+    const children = tree.parts[0]!.children;
+    // The vanish rule row produces no SpecNode, same as a non-vanish one.
+    expect(children.some((n) => n.text === '*****')).toBe(false);
+    expect(children).toHaveLength(2);
+  });
+
   // Regression guard: dash/equals decoration rules (e.g. "----", "====") are handled
   // exclusively by the existing isDecorationSeparator path (heuristics.ts) and must
   // NOT be affected by the new rule-row-first check — isRuleRow is asterisk-only.
