@@ -1217,8 +1217,9 @@ paths:
         `paragraphs.text`, insert a `paragraph_versions` snapshot for the new
         base version, and increment `paragraphs.base_version`. Rejected entries
         are discarded by omission. A successful merge bumps the spec's
-        `contentVersion` exactly once, regardless of how many entries were
-        applied.
+        `contentVersion` at most once — not once per applied entry — and only
+        when at least one change is actually applied; a no-op merge (nothing
+        accepted) leaves `contentVersion` unchanged.
 
 
         Accepted `diff.added` entries insert the new paragraph immediately
