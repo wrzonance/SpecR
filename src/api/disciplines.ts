@@ -40,7 +40,14 @@ async function requireLibrary(libraryId: string, res: Response): Promise<boolean
 export async function listDisciplinesHandler(req: Request, res: Response): Promise<void> {
   const raw = req.query['libraryId'];
   let libraryId: string | undefined;
-  if (typeof raw === 'string') {
+  if (raw !== undefined) {
+    // A repeated/structured libraryId parses to an array/object — reject it rather than
+    // silently dropping the filter and resolving the built-in default (matches the discipline
+    // filter guard on the spec listings).
+    if (typeof raw !== 'string') {
+      res.status(400).json({ success: false, error: 'libraryId must be a single value' });
+      return;
+    }
     const parsed = UUID_SCHEMA.safeParse(raw);
     if (!parsed.success) {
       res.status(400).json({ success: false, error: 'invalid libraryId' });

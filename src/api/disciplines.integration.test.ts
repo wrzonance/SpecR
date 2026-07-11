@@ -99,6 +99,11 @@ describe('GET /disciplines', () => {
     expect(res.status).toBe(400);
   });
 
+  it('400 — a repeated (non-scalar) libraryId is rejected, not silently ignored', async () => {
+    const res = await get(`/disciplines?libraryId=${randomUUID()}&libraryId=${randomUUID()}`);
+    expect(res.status).toBe(400);
+  });
+
   it('404 — an unknown libraryId', async () => {
     const res = await get(`/disciplines?libraryId=${randomUUID()}`);
     expect(res.status).toBe(404);
