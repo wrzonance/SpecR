@@ -32,8 +32,18 @@ interface ParaContext {
 
 interface ExtractAcc {
   readonly controlled: Map<string, string>;
-  readonly orphans: { readonly text: string; readonly index: number }[];
+  readonly orphans: {
+    readonly text: string;
+    readonly index: number;
+    readonly afterUuid: string | undefined;
+  }[];
   readonly records: TrackChangeRecord[];
+}
+
+/** Document-order walk position: next orphan index + nearest preceding controlled uuid. */
+interface WalkState {
+  readonly index: number;
+  readonly lastControlledUuid: string | undefined;
 }
 
 // Formatting-property subtrees that must never contribute text content
@@ -158,13 +168,16 @@ function visitParagraph(
   node: OrderedNode,
   uuid: string | undefined,
   acc: ExtractAcc,
-  index: number
-): number {
+  state: WalkState
+): WalkState {
   const text = visibleText(childrenOf(node, 'w:p'), { uuid, records: acc.records });
-  if (!text.trim()) return index; // whitespace-only spacer paragraphs ignored
-  if (uuid !== undefined) setControlledText(acc.controlled, uuid, text);
-  else acc.orphans.push({ text, index });
-  return index + 1;
+  if (!text.trim()) return state; // whitespace-only spacer paragraphs ignored
+  if (uuid !== undefined) {
+    setControlledText(acc.controlled, uuid, text);
+    return { index: state.index + 1, lastControlledUuid: uuid };
+  }
+  acc.orphans.push({ text, index: state.index, afterUuid: state.lastControlledUuid });
+  return { index: state.index + 1, lastControlledUuid: state.lastControlledUuid };
 }
 
 /** Walk block-level nodes in document order, tracking the enclosing sdt uuid. */
@@ -172,21 +185,21 @@ function walkBlocks(
   nodes: readonly OrderedNode[],
   uuid: string | undefined,
   acc: ExtractAcc,
-  index: number
-): number {
-  let i = index;
+  state: WalkState
+): WalkState {
+  let s = state;
   for (const node of nodes) {
     const tag = tagOf(node);
     if (tag === undefined || tag === '#text' || PROPERTY_TAGS.has(tag)) continue;
     if (tag === 'w:sdt') {
-      i = walkBlocks(childrenOf(node, tag), readSdtUuid(node) ?? uuid, acc, i);
+      s = walkBlocks(childrenOf(node, tag), readSdtUuid(node) ?? uuid, acc, s);
     } else if (tag === 'w:p') {
-      i = visitParagraph(node, uuid, acc, i);
+      s = visitParagraph(node, uuid, acc, s);
     } else {
-      i = walkBlocks(childrenOf(node, tag), uuid, acc, i); // w:document, w:body, w:sdtContent, w:tbl, …
+      s = walkBlocks(childrenOf(node, tag), uuid, acc, s); // w:document, w:body, w:sdtContent, w:tbl, …
     }
   }
-  return i;
+  return s;
 }
 
 async function loadZip(buffer: Buffer): Promise<JSZip> {
@@ -221,7 +234,7 @@ export async function extractContentControls(docxBuffer: Buffer): Promise<Extrac
   const nodes = parseDocumentXml(xml);
 
   const acc: ExtractAcc = { controlled: new Map(), orphans: [], records: [] };
-  walkBlocks(nodes, undefined, acc, 0);
+  walkBlocks(nodes, undefined, acc, { index: 0, lastControlledUuid: undefined });
 
   return {
     controlled: acc.controlled,

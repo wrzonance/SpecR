@@ -88,6 +88,7 @@ export function computeDiff(
     uuid: uuidGen(),
     text: o.text,
     index: o.index,
+    afterUuid: o.afterUuid,
   }));
 
   const warnings: string[] = [];
