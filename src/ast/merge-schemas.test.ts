@@ -36,6 +36,20 @@ describe('DiffResultSchema — cross-bucket uuid uniqueness (#374)', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejects a case-variant duplicate across buckets (UUIDs are case-insensitive — same row)', () => {
+    // z.uuid() accepts either case and PostgreSQL treats "ABC…" and "abc…" as the
+    // same uuid row, so a case-only difference must not slip a duplicate past the
+    // cross-bucket guard (otherwise one paragraph gets both an edit and a removal).
+    const result = DiffResultSchema.safeParse({
+      added: [],
+      modified: [{ uuid: U1.toUpperCase(), base: 'b', theirs: 't', ours: 'o' }],
+      deleted: [U1],
+      conflicts: [],
+      warnings: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('accepts a diff whose buckets use distinct uuids', () => {
     const result = DiffResultSchema.safeParse({
       added: [{ uuid: U1, text: 'x', index: 0 }],

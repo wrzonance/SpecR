@@ -34,15 +34,21 @@ export const DiffResultSchema = z
   // edit becomes a removal). Reject it at the parse boundary instead (#374).
   .superRefine((diff, ctx) => {
     const seen = new Set<string>();
+    // UUIDs are case-insensitive: z.uuid() accepts either case and PostgreSQL's
+    // uuid type stores/compares them canonically, so "ABC…" and "abc…" are the
+    // same row. Compare on a case-folded key or a client could evade this check
+    // with a case-variant duplicate (edit "ABC…" + delete "abc…" → one row, two
+    // change kinds).
     const visit = (uuid: string, bucket: string): void => {
-      if (seen.has(uuid)) {
+      const key = uuid.toLowerCase();
+      if (seen.has(key)) {
         ctx.addIssue({
           code: 'custom',
           message: `duplicate diff uuid ${uuid} in bucket "${bucket}" — a uuid must appear in exactly one of modified/conflicts/added/deleted`,
         });
         return;
       }
-      seen.add(uuid);
+      seen.add(key);
     };
     diff.modified.forEach((c) => visit(c.uuid, 'modified'));
     diff.conflicts.forEach((c) => visit(c.uuid, 'conflicts'));
