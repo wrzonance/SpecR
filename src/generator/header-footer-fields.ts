@@ -241,6 +241,10 @@ export function renderFieldRun(
  * resolved output, not `cell.content`'s structural length. `[]` for an
  * absent/empty cell.
  *
+ * The separator run carries the same cascaded cell style as the field runs it
+ * divides — so a bold/red/Arial cell's ` | ` divider (and even the default
+ * space's font-derived width) stays visually consistent with its fields.
+ *
  * The default separator can visually double up with a literal field's own
  * trailing space (e.g. a literal "Page " immediately followed by a
  * pageNumber field). This is not auto-corrected: the separator is explicit
@@ -254,13 +258,14 @@ export function renderCellRuns(
 ): readonly TextRun[] {
   if (cell === undefined || cell.content === undefined || cell.content.length === 0) return [];
   const style = cascadeStyle(cell.style, inheritedStyle);
+  const separatorOptions = headerFooterRunOptions(style);
   const separator = cell.separator ?? ' ';
   const runs: TextRun[] = [];
   let hasRenderedField = false;
   for (const field of cell.content) {
     const fieldRuns = renderFieldRun(field, ctx, style);
     if (fieldRuns.length === 0) continue;
-    if (hasRenderedField) runs.push(new TextRun({ text: separator }));
+    if (hasRenderedField) runs.push(new TextRun({ text: separator, ...separatorOptions }));
     runs.push(...fieldRuns);
     hasRenderedField = true;
   }

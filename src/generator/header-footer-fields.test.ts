@@ -378,6 +378,26 @@ describe('renderCellRuns', () => {
     expect(xml).toContain(' | ');
     expect(xml).toMatch(/<w:b\/>/);
   });
+
+  it('applies the cascaded cell style to the separator run, not just the fields (#regression)', async () => {
+    const cell: HeaderFooterCell = {
+      content: [
+        { kind: 'literal', text: 'A' },
+        { kind: 'literal', text: 'B' },
+      ],
+      separator: ' | ',
+      style: { bold: true, italic: true, fontFamily: 'Arial' },
+    };
+    const runs = renderCellRuns(cell, CTX, undefined);
+    expect(runs).toHaveLength(3);
+    const xml = await renderRunsToXml(runs);
+    // One property element per run — both field runs AND the separator between
+    // them carry the cell's font/bold/italic, so a styled cell's divider isn't
+    // left rendering in default formatting.
+    expect((xml.match(/<w:b\/>/g) ?? []).length).toBe(3);
+    expect((xml.match(/<w:i\/>/g) ?? []).length).toBe(3);
+    expect((xml.match(/w:ascii="Arial"/g) ?? []).length).toBe(3);
+  });
 });
 
 describe('renderCellRuns — separator tracks resolved output, not content-array length (#regression)', () => {
