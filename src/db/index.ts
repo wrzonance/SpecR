@@ -162,6 +162,7 @@ export {
   UFGS_REFERENCE_LIBRARY,
   DEFAULT_COMPANY_LIBRARY,
 } from './queries/libraries.js';
+export { LibraryNotFoundError } from './queries/libraries.js';
 export type {
   Library,
   LibraryTier,
@@ -169,6 +170,15 @@ export type {
   CreateClientLibraryInput,
   LibrarySpec,
 } from './queries/libraries.js';
+export { getReferenceGraph } from './queries/reference-graph-read.js';
+export type { GraphScope } from './queries/reference-graph-read.js';
+export type {
+  ReferenceGraph,
+  GraphNode,
+  GraphEdge,
+  UmbrellaDivision,
+  GraphScopeRef,
+} from './queries/reference-graph.js';
 export {
   addSectionToProject,
   removeSectionFromProject,

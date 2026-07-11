@@ -16,6 +16,8 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['post /specs/{}/generate', 'generate_docx'],
   ['post /parse', 'parse_document'],
   ['get /projects/{}/coordination-report', 'coordination_report'],
+  ['get /projects/{}/reference-graph', 'get_reference_graph'], // #447 read model
+  ['get /libraries/{}/reference-graph', 'get_reference_graph'],
   ['get /projects/{}/keynotes', 'get_project_keynotes'],
   ['get /projects/{}/revit-links', 'list_revit_links'], // #103 — element<->spec inventory
   ['post /reports/compare', 'compare_specs'],
@@ -210,6 +212,7 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'get_spec_lineage',
   'get_hierarchy_report',
   'coordination_report',
+  'get_reference_graph',
   'get_project_keynotes',
   'list_revit_links',
   'open_comments_report',
