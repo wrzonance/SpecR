@@ -9,6 +9,7 @@ import {
   formatSectionNumber,
   formatSectionReferences,
   findSectionNumbers,
+  displaySectionNumber,
   SectionNumberSchema,
 } from './section-number.js';
 
@@ -132,6 +133,24 @@ describe('formatSectionNumber', () => {
 
   it('rejects noncanonical input instead of guessing', () => {
     expect(() => formatSectionNumber('099100', 'dots')).toThrow(/canonical/);
+  });
+});
+
+describe('displaySectionNumber', () => {
+  it('normalizes a raw section number and formats it', () => {
+    expect(displaySectionNumber('26  00 13', 'dots')).toBe('26.00.13');
+  });
+
+  it('passes an already-canonical section number through the requested format', () => {
+    expect(displaySectionNumber('09 91 00', 'compact')).toBe('099100');
+  });
+
+  it('falls back to the raw string verbatim when it is not a valid section number', () => {
+    expect(displaySectionNumber('unknown', 'dots')).toBe('unknown');
+  });
+
+  it('never throws on unformattable input', () => {
+    expect(() => displaySectionNumber('', 'canonical')).not.toThrow();
   });
 });
 

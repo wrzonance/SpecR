@@ -7,9 +7,8 @@ import { buildSpecNumberingConfig, getNodeLevel } from './numbering.js';
 import { buildRuleMap, paragraphStyleOptions, runStyleOptions } from './styles.js';
 import type { StyleRuleMap } from './styles.js';
 import {
-  formatSectionNumber,
+  displaySectionNumber,
   formatSectionReferences,
-  normalizeSectionNumber,
   type SectionNumberFormat,
 } from '../lib/section-number.js';
 
@@ -67,11 +66,6 @@ function titleParagraph(text: string): Paragraph {
   return new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(text)] });
 }
 
-function displaySection(section: string, format: SectionNumberFormat): string {
-  const canonical = normalizeSectionNumber(section);
-  return canonical === null ? section : formatSectionNumber(canonical, format);
-}
-
 function emitNode(node: SpecNode, out: (Paragraph | SdtBlock)[], ctx: SectionContext): boolean {
   const text = formatSectionReferences(node.text, ctx.format);
   if (node.type === 'note') {
@@ -106,7 +100,7 @@ function collectParagraphs(
 // Build one section's paragraph list: synthetic title (no anchor) + anchored body.
 function buildSectionChildren(tree: SpecTree, ctx: SectionContext): (Paragraph | SdtBlock)[] {
   const children: (Paragraph | SdtBlock)[] = [
-    titleParagraph(`SECTION ${displaySection(tree.section, ctx.format)} — ${tree.title}`),
+    titleParagraph(`SECTION ${displaySectionNumber(tree.section, ctx.format)} — ${tree.title}`),
   ];
   collectParagraphs(tree.parts, children, ctx);
   return children;
