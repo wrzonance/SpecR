@@ -163,3 +163,21 @@ test('fromAnthropicResponse tolerates an empty/missing content array', () => {
     content: '',
   });
 });
+
+test('a history sliced to start on an assistant reply drops the leading assistant turns', () => {
+  // chat.js sends history.slice(-CONTEXT_WINDOW): after enough exchanges the
+  // window starts on an assistant reply, which the Messages API rejects.
+  const { messages } = toAnthropicRequest([
+    { role: 'system', content: 'You are the SpecR assistant.' },
+    { role: 'assistant', content: 'orphaned reply from a truncated exchange' },
+    { role: 'user', content: 'next question' },
+    { role: 'assistant', content: 'answer' },
+    { role: 'user', content: 'latest question' },
+  ]);
+  assert.equal(messages[0].role, 'user');
+  assert.deepEqual(messages, [
+    { role: 'user', content: 'next question' },
+    { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+    { role: 'user', content: 'latest question' },
+  ]);
+});

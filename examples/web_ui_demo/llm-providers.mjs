@@ -94,6 +94,11 @@ export function toAnthropicRequest(messages) {
       appendUserText(out, typeof message.content === 'string' ? message.content : '');
     }
   }
+  // The Messages API requires the first message to be a user turn. A fixed-size
+  // browser context window (chat.js history.slice) can cut the history so it
+  // starts on an assistant reply — drop leading assistant turns rather than
+  // fail the whole conversation with a 400.
+  while (out.length > 0 && out[0].role === 'assistant') out.shift();
   return { system, messages: out };
 }
 
