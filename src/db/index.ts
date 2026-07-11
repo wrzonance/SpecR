@@ -4,6 +4,7 @@ import { logger } from '../lib/logger.js';
 import { DatabaseError } from './errors.js';
 
 export { DatabaseError } from './errors.js';
+export { bumpSpecContentVersion } from './queries/content-version.js';
 
 export function createPool(): Pool {
   return new Pool({ connectionString: config.DATABASE_URL });

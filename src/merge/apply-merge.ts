@@ -1,4 +1,4 @@
-import { pool, findSpecById, assertSpecWritable } from '../db/index.js';
+import { pool, findSpecById, assertSpecWritable, bumpSpecContentVersion } from '../db/index.js';
 import { applyAccepted, type ApplyAcceptedResult } from './conflict.js';
 import type { DiffResult } from './types.js';
 
@@ -32,10 +32,7 @@ export async function applyMerge(
     // a no-op merge (applied === 0) must not bump content_version, or it would
     // invalidate every other client's precondition and trigger avoidable 409s.
     if (result.applied > 0) {
-      await client.query(
-        `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
-        [specId]
-      );
+      await bumpSpecContentVersion(client, specId);
     }
     await client.query('COMMIT');
     return { kind: 'applied', ...result };

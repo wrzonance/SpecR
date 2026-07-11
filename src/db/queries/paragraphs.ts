@@ -1,5 +1,6 @@
 import { pool, DatabaseError } from '../index.js';
 import { assertSpecWritable } from './edit-gate.js';
+import { bumpSpecContentVersion } from './content-version.js';
 import type { Pool, PoolClient } from 'pg';
 import { NodeTypeSchema, parseSourceFacts, deriveArticleRole } from '../../ast/index.js';
 import type {
@@ -326,10 +327,7 @@ async function applyParagraphUpdate(
      WHERE id = $1`,
     [nodeId, text]
   );
-  await client.query(
-    `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
-    [specId]
-  );
+  await bumpSpecContentVersion(client, specId);
 
   const node = await fetchSubtreeNode(client, specId, nodeId);
   if (!node) throw new DatabaseError('updateParagraphText: updated node vanished mid-transaction');

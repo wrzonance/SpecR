@@ -1,5 +1,6 @@
 import { pool, DatabaseError } from '../index.js';
 import { assertSpecWritable } from './edit-gate.js';
+import { bumpSpecContentVersion } from './content-version.js';
 import type { PoolClient } from 'pg';
 import type { SpecNode } from '../../ast/index.js';
 import { fetchSubtreeNode } from './paragraphs.js';
@@ -139,10 +140,7 @@ async function applyVanish(
   if (result.status !== 'updated') return result;
 
   if (result.changed) {
-    await client.query(
-      `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
-      [specId]
-    );
+    await bumpSpecContentVersion(client, specId);
   }
 
   return { status: 'updated', node: result.node };
