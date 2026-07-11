@@ -1217,7 +1217,21 @@ paths:
         `paragraphs.text`, insert a `paragraph_versions` snapshot for the new
         base version, and increment `paragraphs.base_version`. Rejected entries
         are discarded by omission. A successful merge bumps the spec's
-        `contentVersion`.
+        `contentVersion` exactly once, regardless of how many entries were
+        applied.
+
+
+        Accepted `diff.added` entries insert the new paragraph immediately
+        after `afterUuid` (the nearest preceding controlled paragraph in
+        document order) — the same sibling-insert primitive `POST
+        /specs/{id}/paragraphs` uses. An addition with no `afterUuid` (nothing
+        precedes it) cannot currently be applied and is rejected 400; accept
+        the redlined DOCX to capture it by hand instead. Re-submitting an
+        already-applied addition is a no-op, not a duplicate. Accepted
+        `diff.deleted` entries reversibly `vanish` the paragraph (ADR-022) —
+        the same as `PATCH .../removal` — snapshotting its prior text into
+        `paragraph_versions`; only body paragraphs are removable this way, a
+        `part`/`article`/`note` uuid in `diff.deleted` is rejected 400.
 
 
         Optimistic concurrency (ADR-018): supply `expectedVersion` to make the
@@ -6059,6 +6073,14 @@ components:
           type: integer
           minimum: 0
           description: Document-order index in the returned DOCX
+        afterUuid:
+          type: string
+          format: uuid
+          description: >
+            Nearest preceding controlled-paragraph UUID in document order,
+            omitted when the addition precedes every known control. Anchors
+            where `/specs/{id}/merge` inserts this paragraph if the UUID is
+            accepted; an addition with no anchor cannot be applied (400).
 
     ModifiedDiff:
       type: object
@@ -6114,7 +6136,9 @@ components:
           items:
             type: string
             format: uuid
-          description: UUIDs from `diff.modified` or `diff.conflicts` to apply
+          description: >
+            UUIDs from `diff.modified`, `diff.conflicts`, `diff.added`, or
+            `diff.deleted` to apply.
         diff:
           $ref: '#/components/schemas/DiffResult'
         expectedVersion:
