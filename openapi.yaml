@@ -3461,7 +3461,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Validation failed, or a member tree cannot be snapshotted losslessly
+          description: >
+            Validation failed, a member tree cannot be snapshotted losslessly,
+            or parentRevisionId fails a custody rule (ADR-066): the parent
+            revision does not exist, belongs to a different package, or
+            already has a parent of its own (nesting depth cannot exceed 1).
           content:
             application/json:
               schema:
@@ -6806,6 +6810,13 @@ components:
           minimum: 1
         attributes:
           $ref: '#/components/schemas/RevisionAttributes'
+        parentRevisionId:
+          type: string
+          format: uuid
+          description: >
+            UUID of the revision this one was issued from (ADR-066 custody).
+            Must belong to the same package and itself be a root revision —
+            nesting depth cannot exceed 1. Omit for a root revision.
 
     RevisionSummary:
       type: object
@@ -6822,6 +6833,7 @@ components:
           attributes,
           issuedAt,
           specCount,
+          parentRevisionId,
         ]
       properties:
         revisionId:
@@ -6857,6 +6869,12 @@ components:
         specCount:
           type: integer
           description: Number of member sections frozen in this revision
+        parentRevisionId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            UUID of the revision this one was issued from (ADR-066 custody),
+            or null for a root revision.
 
     RevisionSpecEntry:
       type: object
@@ -6886,6 +6904,7 @@ components:
           attributes,
           issuedAt,
           specs,
+          parentRevisionId,
         ]
       properties:
         revisionId:
@@ -6917,6 +6936,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RevisionSpecEntry'
+        parentRevisionId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            UUID of the revision this one was issued from (ADR-066 custody),
+            or null for a root revision.
 
     # ── Templates ──────────────────────────────────────────────────────────────
 
