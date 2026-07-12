@@ -122,6 +122,34 @@ describe('extractTables — hidden vs visible classification', () => {
     expect(result.hiddenTables[0]?.rows).toEqual([['linked secret']]);
   });
 
+  // Regression (Codex #293): a hidden cell whose run lives inside a w:sdt content control
+  // — the wrapper SpecR's OWN generator emits as round-trip merge anchors — must be
+  // retained, not dropped. isParagraphVanish already recurses through w:sdt (via
+  // collectRuns), but the old direct+hyperlink text reader returned '' for it, so
+  // classifyTable saw no text-bearing evidence and misclassified the fully-hidden table
+  // as visible: the hidden content was silently discarded (never retained, no warning of
+  // loss). extractParagraphText now walks the same wrappers, keeping text and hiddenness
+  // symmetric so the table is both classified hidden AND retained with its real text.
+  it('retains a hidden table whose cell text is inside a w:sdt content control (not dropped as visible)', () => {
+    const sdtVanish = `<w:p><w:sdt><w:sdtContent><w:r><w:rPr><w:vanish/></w:rPr><w:t>sdt secret</w:t></w:r></w:sdtContent></w:sdt></w:p>`;
+    const xml = makeDocXml(table(row(cell(sdtVanish))));
+    const result = extractTables(xml, EMPTY_STYLES);
+    expect(result.hiddenTables).toHaveLength(1);
+    expect(result.hiddenTables[0]?.rows).toEqual([['sdt secret']]);
+    expect(result.visibleCount).toBe(0);
+  });
+
+  // Same asymmetry via a w:ins tracked-change wrapper (owner/editor redlines are a core
+  // SpecR use case, so a redlined hidden table cell is realistic, not contrived).
+  it('retains a hidden table whose cell text is inside a w:ins tracked-change wrapper', () => {
+    const insVanish = `<w:p><w:ins><w:r><w:rPr><w:vanish/></w:rPr><w:t>inserted secret</w:t></w:r></w:ins></w:p>`;
+    const xml = makeDocXml(table(row(cell(insVanish))));
+    const result = extractTables(xml, EMPTY_STYLES);
+    expect(result.hiddenTables).toHaveLength(1);
+    expect(result.hiddenTables[0]?.rows).toEqual([['inserted secret']]);
+    expect(result.visibleCount).toBe(0);
+  });
+
   // KNOWN AMBIGUITY: a w:tbl nested inside a cell (table-within-a-table) is not
   // walked — findTopLevelTables only scans w:body's direct w:tbl children, and
   // parseTableCell only reads a cell's w:p paragraphs, never its w:tbl. The nested

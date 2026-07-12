@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDocument, extractText, isParagraphVanish } from './document.js';
+import { parseDocument, extractParagraphText, isParagraphVanish } from './document.js';
 import { emptyNumberingMap } from './numbering.js';
 import { buildStyleMap } from './styles.js';
 
@@ -265,24 +265,48 @@ describe('parseDocument — numbering inheritance', () => {
   });
 });
 
-// #293: extractText and isParagraphVanish are widened from module-private to exported
-// so the DOCX table extractor (parses word/document.xml separately, table-scoped) can
-// reuse the exact same text/vanish resolution as ordinary paragraphs, instead of
-// re-implementing it. These tests pin the exported surface directly against raw
-// fast-xml-parser-shaped nodes (mirrors the xml-utils.test.ts convention), independent
-// of the parseDocument pipeline above, so the widening itself is a zero-behavior-diff
-// change and the new export delegates to the same 3-signal vanish resolution.
-describe('extractText — exported for table extraction reuse (#293)', () => {
+// #293: extractParagraphText and isParagraphVanish are exported so the DOCX table
+// extractor (parses word/document.xml separately, table-scoped) can reuse the exact
+// same text/vanish resolution as ordinary paragraphs, instead of re-implementing it.
+// These tests pin the exported surface directly against raw fast-xml-parser-shaped
+// nodes (mirrors the xml-utils.test.ts convention), independent of the parseDocument
+// pipeline above. extractParagraphText collects runs at ANY wrapper depth — the same
+// collectRuns traversal isParagraphVanish uses — so text and hiddenness stay symmetric.
+describe('extractParagraphText — exported for table extraction reuse (#293)', () => {
   it('extracts text from a direct run', () => {
-    expect(extractText({ 'w:r': [{ 'w:t': 'hello' }] })).toBe('hello');
+    expect(extractParagraphText({ 'w:r': [{ 'w:t': 'hello' }] })).toBe('hello');
   });
 
   it('extracts text from a hyperlink-wrapped run', () => {
-    expect(extractText({ 'w:hyperlink': [{ 'w:r': [{ 'w:t': 'linked' }] }] })).toBe('linked');
+    expect(extractParagraphText({ 'w:hyperlink': [{ 'w:r': [{ 'w:t': 'linked' }] }] })).toBe(
+      'linked'
+    );
   });
 
   it('returns empty string for a paragraph node with no runs', () => {
-    expect(extractText({})).toBe('');
+    expect(extractParagraphText({})).toBe('');
+  });
+
+  // Regression (Codex #293): a run wrapped in a w:sdt content control (SpecR's own
+  // round-trip merge anchors) must still be extracted. The narrow direct+hyperlink
+  // reader returned '' here, which made classifyTable see no evidence and misclassify a
+  // fully-hidden wrapped table as visible — dropping content it is meant to retain.
+  it('extracts text from a run nested in a w:sdt content control', () => {
+    const raw = { 'w:sdt': { 'w:sdtContent': { 'w:r': [{ 'w:t': 'sdt secret' }] } } };
+    expect(extractParagraphText(raw)).toBe('sdt secret');
+  });
+
+  it('extracts text from a run nested in a w:ins tracked-change wrapper', () => {
+    const raw = { 'w:ins': { 'w:r': [{ 'w:t': 'inserted' }] } };
+    expect(extractParagraphText(raw)).toBe('inserted');
+  });
+
+  // Symmetry with isParagraphVanish: both must read the SAME wrapped run, so a hidden
+  // w:sdt-wrapped cell reports non-empty text AND isVanish=true.
+  it('stays symmetric with isParagraphVanish on a hidden w:sdt-wrapped run', () => {
+    const raw = { 'w:sdt': { 'w:r': [{ 'w:rPr': { 'w:vanish': '' }, 'w:t': 'hidden sdt' }] } };
+    expect(extractParagraphText(raw)).toBe('hidden sdt');
+    expect(isParagraphVanish(raw, EMPTY_STYLES)).toBe(true);
   });
 });
 

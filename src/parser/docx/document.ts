@@ -47,7 +47,7 @@ function extractRunText(run: Record<string, unknown>): string {
   return '';
 }
 
-export function extractText(para: Record<string, unknown>): string {
+function extractText(para: Record<string, unknown>): string {
   const directRuns = toArray<Record<string, unknown>>(
     para['w:r'] as readonly Record<string, unknown>[] | undefined
   );
@@ -192,6 +192,20 @@ export function isParagraphVanish(raw: Record<string, unknown>, styleMap: StyleM
   const styleVal = pPr ? getAttrVal(pPr['w:pStyle']) : '';
   const styleId = styleVal || undefined;
   return resolveParagraphVanish(raw, pPr, styleId, styleMap);
+}
+
+// Exported alongside isParagraphVanish for document.xml-scoped scanners (the table
+// extractor, #293) that have no ordered-source text to fall back on. Collects runs at
+// any depth via collectRuns — the SAME traversal isParagraphVanish uses — so a cell
+// whose text sits inside a w:sdt content control (SpecR's own merge anchors) or a
+// w:ins/w:del tracked-change wrapper is both classified AND retained with its text,
+// never dropped. (extractText reads only direct + hyperlink runs, which suffices for
+// the body path's `parseParagraphSources ?? extractText` fallback but would silently
+// lose wrapped runs here, misclassifying a fully-hidden wrapped table as visible.)
+export function extractParagraphText(para: Record<string, unknown>): string {
+  const runs: Record<string, unknown>[] = [];
+  collectRuns(para, runs);
+  return runs.map(extractRunText).join('');
 }
 
 function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxParagraph {

@@ -8,13 +8,13 @@
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { toArray } from './xml-utils.js';
-import { extractText, isParagraphVanish } from './document.js';
+import { extractParagraphText, isParagraphVanish } from './document.js';
 import type { RetainedTable } from '../../ast/types.js';
 import type { StyleMap } from './types.js';
 
 // Mirrors document.ts's parser config (entity/whitespace/numeric-coercion guards —
-// see document.ts's own comment for the #22/#120 rationale) so extractText and
-// isParagraphVanish, both written against that shape, behave identically here.
+// see document.ts's own comment for the #22/#120 rationale) so extractParagraphText
+// and isParagraphVanish, both written against that shape, behave identically here.
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -68,7 +68,7 @@ function parseTableCellParagraph(
   p: Record<string, unknown>,
   styleMap: StyleMap
 ): TableCellParagraph {
-  return { text: extractText(p), isVanish: isParagraphVanish(p, styleMap) };
+  return { text: extractParagraphText(p), isVanish: isParagraphVanish(p, styleMap) };
 }
 
 function parseTableCell(tc: Record<string, unknown>, styleMap: StyleMap): TableCell {
