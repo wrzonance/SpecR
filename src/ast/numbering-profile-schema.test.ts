@@ -213,4 +213,33 @@ describe('NumberingProfileReadSchema (read-tolerant — #323)', () => {
     const broken = { ...valid, tiers: { part: { numberStyle: 'integer', maxCount: 0 } } };
     expect(() => NumberingProfileReadSchema.parse(broken)).toThrow();
   });
+
+  // The read schema deliberately does NOT run checkTierEntriesMatchDerived (#319):
+  // a persisted row was already validated as consistent at write time, so read never
+  // re-derives or re-checks tier — it trusts the stored value verbatim. Pin that the
+  // exact declared-vs-derived divergence the write schema rejects (see the
+  // 'tier derivation (#319)' describe block above) still reads back unchanged.
+  it('accepts a styleLadder entry whose declared tier disagrees with the derivation (read trusts the stored tier, #319)', () => {
+    const divergent = {
+      ...valid,
+      styleLadder: [{ styleId: 'ARTICLE', numId: 12, ilvl: 1, tier: 'part' }],
+    };
+    expect(() => NumberingProfileSchema.parse(divergent)).toThrow(
+      /styleLadder\[styleId=ARTICLE\].*derives to 'article'/
+    );
+    const parsed = NumberingProfileReadSchema.parse(divergent);
+    expect(parsed.styleLadder[0]?.tier).toBe('part');
+  });
+
+  it('accepts a numbering.levels entry whose declared tier disagrees with the derivation (read trusts the stored tier, #319)', () => {
+    const divergent = {
+      ...valid,
+      numbering: [{ numId: 12, levels: [{ ilvl: 1, tier: 'part' }] }],
+    };
+    expect(() => NumberingProfileSchema.parse(divergent)).toThrow(
+      /numbering\[numId=12\].*derives to 'article'/
+    );
+    const parsed = NumberingProfileReadSchema.parse(divergent);
+    expect(parsed.numbering[0]?.levels[0]?.tier).toBe('part');
+  });
 });
