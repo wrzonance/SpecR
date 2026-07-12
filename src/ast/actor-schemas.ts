@@ -14,7 +14,13 @@ import { z } from 'zod';
 // under `exactOptionalPropertyTypes: true`. Omitted → the query layer falls
 // back to the SYSTEM_ACTOR_LABEL sentinel; this schema never rejects a
 // missing label.
-export const ActorLabelSchema = z.string().trim().check(z.minLength(1));
+// Bounded 1-200 to match users.label: an actorLabel resolves to a users row via
+// resolveOrCreateUserByLabel, so it must obey the SAME 1-200 contract POST /users
+// enforces (src/api/users.ts). Without the max, a >200-char actorLabel would mint a
+// users row the public user API rejects, and GET /users would then surface a label it
+// calls invalid. users.label is a bare `text` column (migration 045 CHECKs only
+// non-empty), so this app-layer bound is the only thing enforcing the ceiling.
+export const ActorLabelSchema = z.string().trim().check(z.minLength(1), z.maxLength(200));
 
 // Accept-as-note (#251/#377) had no request body before #377 — the target
 // comment is identified entirely by path params (nodeId, index). actorLabel

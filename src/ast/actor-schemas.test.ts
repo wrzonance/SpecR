@@ -24,6 +24,14 @@ describe('ActorLabelSchema (#377)', () => {
   it('rejects a non-string value', () => {
     expect(ActorLabelSchema.safeParse(42).success).toBe(false);
   });
+  it('accepts a label at the 200-char users.label bound', () => {
+    expect(ActorLabelSchema.safeParse('a'.repeat(200)).success).toBe(true);
+  });
+  it('rejects a label over 200 chars — an actorLabel becomes a users.label (POST /users bound)', () => {
+    // Without this ceiling a long actorLabel would mint a users row that the
+    // public user API (1-200) rejects; keep the two in lockstep.
+    expect(ActorLabelSchema.safeParse('a'.repeat(201)).success).toBe(false);
+  });
 });
 
 // ── AcceptNoteBodySchema — accept-as-note's first-ever request body (#377) ──

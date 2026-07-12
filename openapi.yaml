@@ -458,12 +458,14 @@ paths:
                 actorLabel:
                   type: string
                   minLength: 1
-                  pattern: '\S'
+                  maxLength: 200
+                  pattern: '[\s\S]*\S[\s\S]*'
                   description: >
                     Optional caller identity attributed to this write in
                     paragraph history (#377); omitted falls back to a system
-                    sentinel. Trimmed server-side; must contain a non-whitespace
-                    character (whitespace-only → rejected).
+                    sentinel. Resolves to a users.label and shares its contract:
+                    trimmed before resolution, whitespace-only rejected, and the
+                    1-200 length bounds apply to the trimmed value.
       responses:
         '201':
           description: Created paragraph node
@@ -531,12 +533,14 @@ paths:
                 actorLabel:
                   type: string
                   minLength: 1
-                  pattern: '\S'
+                  maxLength: 200
+                  pattern: '[\s\S]*\S[\s\S]*'
                   description: >
                     Optional caller identity attributed to this write in
                     paragraph history (#377); omitted falls back to a system
-                    sentinel. Trimmed server-side; must contain a non-whitespace
-                    character (whitespace-only → rejected).
+                    sentinel. Resolves to a users.label and shares its contract:
+                    trimmed before resolution, whitespace-only rejected, and the
+                    1-200 length bounds apply to the trimmed value.
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -662,12 +666,14 @@ paths:
                 actorLabel:
                   type: string
                   minLength: 1
-                  pattern: '\S'
+                  maxLength: 200
+                  pattern: '[\s\S]*\S[\s\S]*'
                   description: >
                     Optional caller identity attributed to this write in
                     paragraph history (#377); omitted falls back to a system
-                    sentinel. Trimmed server-side; must contain a non-whitespace
-                    character (whitespace-only → rejected).
+                    sentinel. Resolves to a users.label and shares its contract:
+                    trimmed before resolution, whitespace-only rejected, and the
+                    1-200 length bounds apply to the trimmed value.
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -858,12 +864,14 @@ paths:
                 actorLabel:
                   type: string
                   minLength: 1
-                  pattern: '\S'
+                  maxLength: 200
+                  pattern: '[\s\S]*\S[\s\S]*'
                   description: >
                     Optional caller identity attributed to this write in
                     paragraph history; omitted falls back to a system sentinel.
-                    Trimmed server-side; must contain a non-whitespace character
-                    (whitespace-only → rejected).
+                    Resolves to a users.label and shares its contract: trimmed
+                    before resolution, whitespace-only rejected, and the 1-200
+                    length bounds apply to the trimmed value.
       responses:
         '201':
           description: Note node created
@@ -6308,12 +6316,14 @@ components:
         actorLabel:
           type: string
           minLength: 1
-          pattern: '\S'
+          maxLength: 200
+          pattern: '[\s\S]*\S[\s\S]*'
           description: >
             Optional caller identity attributed to this merge in paragraph
-            history (#377); omitted falls back to a system sentinel. Trimmed
-            server-side; must contain a non-whitespace character (whitespace-only
-            → rejected).
+            history (#377); omitted falls back to a system sentinel. Resolves to
+            a users.label and shares its contract: trimmed before resolution,
+            whitespace-only rejected, and the 1-200 length bounds apply to the
+            trimmed value.
 
     LockState:
       type: object
