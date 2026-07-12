@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DiffResultSchema } from './merge-schemas.js';
+import { DiffResultSchema, MergeBodySchema } from './merge-schemas.js';
 
 // Pins the cross-bucket uuid-uniqueness refinement (#374). applyAccepted builds a
 // uuid→change map by spreading modified/conflicts/added/deleted; a client-supplied
@@ -59,5 +59,27 @@ describe('DiffResultSchema — cross-bucket uuid uniqueness (#374)', () => {
       warnings: [],
     });
     expect(result.success).toBe(true);
+  });
+});
+
+// ── MergeBodySchema — actorLabel passthrough (#377) ─────────────────────────
+const EMPTY_DIFF = { added: [], modified: [], deleted: [], conflicts: [], warnings: [] };
+
+describe('MergeBodySchema — actorLabel (#377)', () => {
+  it('omitting actorLabel parses byte-identical to the pre-#377 shape', () => {
+    expect(MergeBodySchema.parse({ accept: [], diff: EMPTY_DIFF })).toEqual({
+      accept: [],
+      diff: EMPTY_DIFF,
+    });
+  });
+  it('accepts an explicit actorLabel', () => {
+    expect(MergeBodySchema.parse({ accept: [], diff: EMPTY_DIFF, actorLabel: 'jane.doe' })).toEqual(
+      { accept: [], diff: EMPTY_DIFF, actorLabel: 'jane.doe' }
+    );
+  });
+  it('rejects a whitespace-only actorLabel', () => {
+    expect(
+      MergeBodySchema.safeParse({ accept: [], diff: EMPTY_DIFF, actorLabel: '  ' }).success
+    ).toBe(false);
   });
 });
