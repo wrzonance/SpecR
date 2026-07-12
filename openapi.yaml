@@ -5707,6 +5707,7 @@ components:
             - pdf-ocr-unusable
             - pdf-font-encoding-remapped
             - pdf-font-encoding-unrecoverable
+            - table-content-skipped
         lineHint:
           type: string
           description: 'Source location hint (e.g. "line 12: <text>")'
@@ -6146,6 +6147,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ParseWarning'
+        hiddenTables:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetainedTable'
+          description: >
+            Hidden DOCX tables (all evidence-bearing cell paragraphs vanish)
+            retained out-of-band for future change-management (ADR-038).
+            Absent when the source has no hidden tables.
 
     StyleSource:
       type: object
@@ -6156,6 +6165,21 @@ components:
           format: uuid
         templateName:
           type: string
+
+    RetainedTable:
+      type: object
+      required: [rows]
+      description: >
+        A DOCX table classified as hidden and retained out-of-band for future
+        change-management (ADR-038). Rows are preserved as plain-text grids —
+        no per-cell structure inference.
+      properties:
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
 
     SpecSummary:
       type: object
