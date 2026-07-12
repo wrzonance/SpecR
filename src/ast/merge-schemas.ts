@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ActorLabelSchema } from './actor-schemas.js';
 
 // Request-body schema for applying an accepted merge (POST /specs/:id/merge and the
 // apply_merge MCP tool). The nested DiffResultSchema mirrors the merge module's
@@ -69,6 +70,15 @@ export const MergeFieldsShape = {
     .describe(
       'Optimistic-concurrency precondition — the contentVersion the diff was computed against; a stale value is rejected'
     ),
+  // #377 — caller-supplied actor identity, attributed on every history row this
+  // merge writes; omitted falls back to the SYSTEM_ACTOR_LABEL sentinel. Plain
+  // `.optional()` (not `.exactOptional()`) matches expectedVersion above — this
+  // shape is consumed by destructuring individual fields (REST + MCP handlers),
+  // never passed through as a whole object, so exactOptionalPropertyTypes is a
+  // non-issue here.
+  actorLabel: ActorLabelSchema.optional().describe(
+    'Caller identity attributed to this merge in paragraph history; omitted falls back to a system sentinel'
+  ),
 };
 
 // REST body is strict (unknown keys rejected); specId travels in the path, not the body.

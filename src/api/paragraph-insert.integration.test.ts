@@ -3,7 +3,8 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool } from '../db/index.js';
+import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import { historyActor } from '../test-utils/history-actor.js';
 
 let server: Server;
 let baseUrl: string;
@@ -134,5 +135,36 @@ describe('POST /specs/:id/paragraphs (integration)', () => {
     const body = (await res.json()) as { success: boolean; currentVersion?: number };
     expect(body.success).toBe(false);
     expect(body.currentVersion).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('POST /specs/:id/paragraphs — actorLabel attribution (#377)', () => {
+  // A fresh insert always snapshots at version 1 (base_version's column default).
+  it('a supplied actorLabel attributes the insert history row; response shape is unchanged', async () => {
+    const res = await postInsert(specId, {
+      anchorNodeId: anchorId,
+      text: 'Inserted with attribution.',
+      actorLabel: 'insert.bot',
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { success: boolean; data: Record<string, unknown> };
+    expect(Object.keys(body.data).sort((a, b) => a.localeCompare(b))).toEqual([
+      'children',
+      'id',
+      'meta',
+      'text',
+      'type',
+    ]);
+    expect(await historyActor(pool, body.data['id'] as string, 1)).toBe('insert.bot');
+  });
+
+  it('omitting actorLabel attributes the insert history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const res = await postInsert(specId, {
+      anchorNodeId: anchorId,
+      text: 'Inserted without attribution.',
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { id: string } };
+    expect(await historyActor(pool, body.data.id, 1)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

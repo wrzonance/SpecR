@@ -4,6 +4,7 @@ import { SectionNumberInputSchema, SectionNumberSchema } from '../lib/section-nu
 import { textEndsWithClosed } from './comment-closure.js';
 import { NumberingProfileSchema } from './numbering-profile-schema.js';
 import { SignalNumberSchema, SpecNodeInferenceSchema } from './inference-schemas.js';
+import { ActorLabelSchema } from './actor-schemas.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -185,6 +186,7 @@ export type PatchEditabilityBody = z.infer<typeof PatchEditabilityBodySchema>;
 // hard DELETE by design (ADR-022, symmetric with ADR-030 spec soft-delete).
 export const PatchRemovalBodySchema = z.object({
   removed: z.boolean(),
+  actorLabel: ActorLabelSchema.exactOptional(),
 });
 
 export type PatchRemovalBody = z.infer<typeof PatchRemovalBodySchema>;
@@ -284,6 +286,7 @@ export const PatchSpecBodySchema = z.object({
 export const UpdateParagraphBodySchema = z.object({
   text: z.string().check(z.minLength(1)),
   expectedVersion: z.number().int().min(1).exactOptional(),
+  actorLabel: ActorLabelSchema.exactOptional(),
 });
 
 export type UpdateParagraphBody = z.infer<typeof UpdateParagraphBodySchema>;
