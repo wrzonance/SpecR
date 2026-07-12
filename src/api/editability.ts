@@ -146,8 +146,12 @@ export async function acceptAsNoteHandler(req: Request, res: Response): Promise<
   }
   // The route was bodyless pre-#377 (the target comment is identified entirely by path
   // params); a truly absent body still resolves to {}, matching that contract byte for
-  // byte — actorLabel (#377) is the only field this schema accepts.
-  const body = AcceptNoteBodySchema.safeParse(req.body ?? {});
+  // byte — actorLabel (#377) is the only field this schema accepts. Only `undefined`
+  // (a genuinely absent body) coerces to {}; a literal JSON `null` falls through to the
+  // schema and is rejected, mirroring reclassifyHandler's guard above — the strict
+  // body-parser already 400s a bare `null` at parse time, so this is the same
+  // in-handler safety net, never a coercion to {}.
+  const body = AcceptNoteBodySchema.safeParse(req.body === undefined ? {} : req.body);
   if (!body.success) {
     res.status(400).json({ success: false, error: 'invalid accept-as-note body' });
     return;
