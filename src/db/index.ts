@@ -221,6 +221,7 @@ export {
   RevisionComparisonError,
   RevisionParentValidationError,
 } from './queries/revisions.js';
+export { isUnprocessableRevisionInputError } from './queries/revision-input-errors.js';
 export { listPackageRevisions } from './queries/revision-list.js';
 export type {
   RevisionSummary,

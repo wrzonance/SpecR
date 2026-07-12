@@ -4,9 +4,7 @@ import {
   getPackageRevision,
   listPackageRevisions,
   PackageNotFoundError,
-  RevisionNomenclatureValidationError,
-  RevisionParentValidationError,
-  SnapshotValidationError,
+  isUnprocessableRevisionInputError,
   pool,
 } from '../db/index.js';
 import type { CreateRevisionBody } from '../ast/index.js';
@@ -30,17 +28,13 @@ export async function createRevisionHandler(req: Request, res: Response): Promis
       res.status(404).json({ success: false, error: 'package not found' });
       return;
     }
-    // Same-shaped "unprocessable input" rejections — a member tree that can't be
-    // snapshotted losslessly, a type outside the project's nomenclature profile, or
-    // a parentRevisionId that fails a custody invariant (not found, cross-package,
-    // nesting depth > 1) — all map to 422 with the error's own message. Merged into
-    // one instanceof chain (not one `if` per class) to keep cognitive-complexity
-    // under the repo's ESLint cap as the error surface grows.
-    if (
-      err instanceof SnapshotValidationError ||
-      err instanceof RevisionNomenclatureValidationError ||
-      err instanceof RevisionParentValidationError
-    ) {
+    // Unprocessable input — a member tree that can't be snapshotted losslessly, a
+    // type outside the project's nomenclature profile, or a parentRevisionId that
+    // fails a custody invariant (not found, cross-package, nesting depth > 1) — all
+    // map to 422 with the error's own message. The 422 set lives in one predicate
+    // (isUnprocessableRevisionInputError) so this API boundary and the MCP handler
+    // stay in sync as error classes are added.
+    if (isUnprocessableRevisionInputError(err)) {
       res.status(422).json({ success: false, error: err.message });
       return;
     }

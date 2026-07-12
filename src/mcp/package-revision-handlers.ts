@@ -4,9 +4,7 @@ import {
   getPackageRevision,
   listPackageRevisions,
   PackageNotFoundError,
-  SnapshotValidationError,
-  RevisionNomenclatureValidationError,
-  RevisionParentValidationError,
+  isUnprocessableRevisionInputError,
   pool,
 } from '../db/index.js';
 import { StructuredCreateRevisionBodySchema } from '../ast/index.js';
@@ -57,17 +55,13 @@ export async function handleIssuePackageRevision(args: unknown): Promise<ToolRes
     return ok(await createPackageRevision(packageId, body, pool));
   } catch (err) {
     if (err instanceof PackageNotFoundError) return toolError(`package not found: id=${packageId}`);
-    // Same-shaped "unprocessable input" rejections — a member tree that can't be
-    // snapshotted losslessly, a type outside the project's nomenclature profile, or
-    // a parentRevisionId that fails a custody invariant (not found, cross-package,
-    // nesting depth > 1) — all surface the error's own message. Merged into one
-    // instanceof chain (not one `if` per class) to keep cognitive-complexity under
-    // the repo's ESLint cap as the error surface grows.
-    if (
-      err instanceof SnapshotValidationError ||
-      err instanceof RevisionNomenclatureValidationError ||
-      err instanceof RevisionParentValidationError
-    ) {
+    // Unprocessable input — a member tree that can't be snapshotted losslessly, a
+    // type outside the project's nomenclature profile, or a parentRevisionId that
+    // fails a custody invariant (not found, cross-package, nesting depth > 1) — all
+    // surface the error's own message. The 422 set lives in one predicate
+    // (isUnprocessableRevisionInputError) so this MCP handler and the REST boundary
+    // stay in sync as error classes are added.
+    if (isUnprocessableRevisionInputError(err)) {
       return toolError(err.message);
     }
     if (getPgCode(err) === '23505') return toolError('revision already exists for this package');
