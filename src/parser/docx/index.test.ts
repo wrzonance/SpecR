@@ -844,3 +844,101 @@ describe('parseDocx — numbering-lvlText PART inference (lvlText "PART %1 -", 0
     expect(general?.children.some((c) => c.type === 'article' && c.text === 'SUMMARY')).toBe(true);
   });
 });
+
+// ── Table extraction wiring (#293): extractTables runs alongside the paragraph
+//    walk and its results are folded into runPipeline's returned SpecTree — hidden
+//    tables retained (ADR-038), visible tables surfaced as a table-content-skipped
+//    warning. Table markup here mirrors tables.test.ts's own helper shapes. ──
+
+function tableCell(paragraphsXml: string): string {
+  return `<w:tc>${paragraphsXml}</w:tc>`;
+}
+
+function tableRow(cellsXml: string): string {
+  return `<w:tr>${cellsXml}</w:tr>`;
+}
+
+function docxTable(rowsXml: string): string {
+  return `<w:tbl>${rowsXml}</w:tbl>`;
+}
+
+function visibleTablePara(text: string): string {
+  return `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`;
+}
+
+function vanishTablePara(text: string): string {
+  return `<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>${text}</w:t></w:r></w:p>`;
+}
+
+function docWithTables(bodyXml: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>${bodyXml}</w:body>
+</w:document>`;
+}
+
+describe('parseDocx — table extraction wiring (#293)', () => {
+  it('INV-5: a hidden table is retained under tree.hiddenTables and emits no table-content-skipped warning', async () => {
+    const hiddenTable = docxTable(
+      tableRow(tableCell(vanishTablePara('secret A')) + tableCell(vanishTablePara('secret B')))
+    );
+    const documentXml = docWithTables(
+      `<w:p><w:r><w:t>Plain paragraph text.</w:t></w:r></w:p>${hiddenTable}`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+
+    expect(tree.hiddenTables).toEqual([{ rows: [['secret A', 'secret B']] }]);
+    expect((tree.warnings ?? []).some((w) => w.type === 'table-content-skipped')).toBe(false);
+  });
+
+  it('INV-7: a visible table emits an exact table-content-skipped warning message and no hiddenTables', async () => {
+    const visibleTable = docxTable(
+      tableRow(tableCell(visibleTablePara('a')) + tableCell(visibleTablePara('b')))
+    );
+    // STRUCTURED_DOC/STRUCTURED_NUMBERING already resolves cleanly (no root-continuation
+    // / no-structure-found) — isolates the assertion to exactly the table warning.
+    const documentXml = STRUCTURED_DOC.replace('</w:body>', `${visibleTable}</w:body>`);
+    const tree = await parseDocx(
+      await makeDocx({ documentXml, numberingXml: STRUCTURED_NUMBERING })
+    );
+
+    expect(tree.warnings).toEqual([
+      {
+        type: 'table-content-skipped',
+        suggestion: '1 visible table(s) detected but not yet modeled into the spec tree',
+      },
+    ]);
+    expect(tree.hiddenTables).toBeUndefined();
+  });
+
+  it('INV-8: a hidden table, malformed core.xml, and a structural warning together — all three warning sources compose', async () => {
+    const hiddenTable = docxTable(tableRow(tableCell(vanishTablePara('secret'))));
+    const visibleTable = docxTable(
+      tableRow(tableCell(visibleTablePara('shown a')) + tableCell(visibleTablePara('shown b')))
+    );
+    const documentXml = ARCAT_E2E_DOC.replace(
+      '</w:body>',
+      `${hiddenTable}${visibleTable}</w:body>`
+    );
+    const buffer = await makeDocx({
+      documentXml,
+      stylesXml: ARCAT_E2E_STYLES,
+      numberingXml: ARCAT_E2E_NUMBERING,
+      coreXml: '<<<not xml',
+    });
+    const tree = await parseDocx(buffer);
+
+    const warningTypes = (tree.warnings ?? []).map((w) => w.type);
+    expect(warningTypes).toContain('root-continuation');
+    expect(warningTypes).toContain('core-metadata-unreadable');
+    expect(warningTypes).toContain('table-content-skipped');
+    expect(tree.hiddenTables).toEqual([{ rows: [['secret']] }]);
+  });
+
+  it('INV-9: no tables present — hiddenTables key is absent, never an empty array', async () => {
+    const tree = await parseDocx(await makeDocx({}));
+
+    expect(Object.prototype.hasOwnProperty.call(tree, 'hiddenTables')).toBe(false);
+    expect((tree.warnings ?? []).some((w) => w.type === 'table-content-skipped')).toBe(false);
+  });
+});

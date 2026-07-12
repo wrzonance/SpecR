@@ -8,6 +8,7 @@ import { parseCommentsXml } from './comments.js';
 import type { DocxComment } from './comments.js';
 import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
 import { nestLeadInSublists } from './lead-in-nesting.js';
+import { extractTables } from './tables.js';
 import {
   applyNumberingProfile,
   mergeProfileConflicts,
@@ -147,9 +148,28 @@ function runPipeline(
   onProgress?.('complete', 100);
   const tree = buildTree(classified, meta.section, meta.title, source);
   const structuralWarnings = auditTreeStructure(tree.parts);
-  // core-metadata-unreadable fires at most once per parse — appended, not deduped.
-  const warnings = meta.warning ? [...structuralWarnings, meta.warning] : structuralWarnings;
-  return warnings.length > 0 ? { ...tree, warnings } : tree;
+
+  // Table scan (#293): a separate pass over the same document.xml — parseDocument
+  // never walks table-nested paragraphs (body['w:p'] only), so this cannot double-
+  // classify anything the paragraph walk already saw. Hidden tables are retained
+  // out-of-band (ADR-038); visible tables are counted only and surfaced as a warning.
+  const { hiddenTables, visibleCount } = extractTables(entries.documentXml, styleMap);
+  const tableWarning: ParseWarning | undefined =
+    visibleCount > 0
+      ? {
+          type: 'table-content-skipped',
+          suggestion: `${visibleCount} visible table(s) detected but not yet modeled into the spec tree`,
+        }
+      : undefined;
+
+  // Each source fires at most once per parse — appended, not deduped.
+  const warnings = [
+    ...structuralWarnings,
+    ...(meta.warning ? [meta.warning] : []),
+    ...(tableWarning ? [tableWarning] : []),
+  ];
+  const withWarnings = warnings.length > 0 ? { ...tree, warnings } : tree;
+  return hiddenTables.length > 0 ? { ...withWarnings, hiddenTables } : withWarnings;
 }
 
 // ─── Internal classification helper ──────────────────────────────────────────
