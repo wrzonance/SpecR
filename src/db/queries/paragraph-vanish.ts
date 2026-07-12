@@ -1,6 +1,7 @@
 import { pool, DatabaseError } from '../index.js';
 import { assertSpecWritable } from './edit-gate.js';
 import { bumpSpecContentVersion } from './content-version.js';
+import { recordParagraphHistory, resolveHistoryContext } from './paragraph-history.js';
 import type { PoolClient } from 'pg';
 import type { SpecNode } from '../../ast/index.js';
 import { fetchSubtreeNode } from './paragraphs.js';
@@ -123,23 +124,45 @@ export async function setVanishRow(
 }
 
 /** In-transaction body of {@link setParagraphVanish}: gate → delegate the
- *  toggle to {@link setVanishRow} → bump `content_version` once, only on an
- *  effective ('changed') write, then strip the extra pre-image fields before
- *  returning the public {@link SetVanishResult} shape. */
+ *  toggle to {@link setVanishRow} → snapshot the pre-toggle image (#377,
+ *  ADR-052 D1) under op `'remove'`/`'restore'` → bump `content_version` once,
+ *  only on an effective ('changed') write, then strip the extra pre-image
+ *  fields before returning the public {@link SetVanishResult} shape. A no-op
+ *  toggle (already at the requested value) snapshots nothing and does not
+ *  bump `content_version` — mirrors setVanishRow's own idempotency guard. */
 async function applyVanish(
   client: PoolClient,
   specId: string,
   nodeId: string,
-  vanish: boolean
+  vanish: boolean,
+  actorLabel?: string
 ): Promise<SetVanishResult> {
   // Gate first: row-locks the spec and validates lifecycle/external state
-  // before any paragraph write. Throws typed errors (forbidden).
-  await assertSpecWritable(client, specId);
+  // before any paragraph write. Throws typed errors (forbidden). The
+  // returned contentVersion is the pre-bump generation this write belongs to.
+  const gate = await assertSpecWritable(client, specId);
 
   const result = await setVanishRow(client, specId, nodeId, vanish);
   if (result.status !== 'updated') return result;
 
   if (result.changed) {
+    const historyContext = await resolveHistoryContext(client, gate.contentVersion, actorLabel);
+    await recordParagraphHistory(client, {
+      paragraphId: nodeId,
+      specId,
+      // The snapshot records the paragraph's PRE-toggle image — what it was
+      // before this write — mirroring updateParagraphText/insertSiblingRow's
+      // "always the paragraph's post-write state" contract inverted for a
+      // structural toggle: vanish/restore change no text, only visibility, so
+      // the pre-toggle text/node_type IS the state this row must describe.
+      version: result.previousBaseVersion + 1,
+      text: result.previousText,
+      nodeType: result.previousNodeType,
+      op: vanish ? 'remove' : 'restore',
+      contentVersion: historyContext.contentVersion,
+      userId: historyContext.userId,
+      payload: null,
+    });
     await bumpSpecContentVersion(client, specId);
   }
 
@@ -157,17 +180,21 @@ async function applyVanish(
  * verifies the (specId, nodeId) pairing under a row lock, so removal is
  * authorized exactly like any other content write. The toggle is idempotent — a
  * no-op (vanish already at the requested value) leaves the row untouched; an
- * effective change bumps `specs.content_version`.
+ * effective change bumps `specs.content_version` and snapshots a
+ * `paragraph_versions` row (#377, ADR-052 D1) under op `'remove'`/`'restore'`,
+ * attributed to `actorLabel` (falls back to the SYSTEM_ACTOR_LABEL sentinel,
+ * paragraph-history.ts, when omitted).
  */
 export async function setParagraphVanish(
   specId: string,
   nodeId: string,
-  vanish: boolean
+  vanish: boolean,
+  actorLabel?: string
 ): Promise<SetVanishResult> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const result = await applyVanish(client, specId, nodeId, vanish);
+    const result = await applyVanish(client, specId, nodeId, vanish, actorLabel);
     await client.query(result.status === 'updated' ? 'COMMIT' : 'ROLLBACK');
     return result;
   } catch (err) {
