@@ -3,16 +3,8 @@
 // No I/O, no mutation of inputs.
 
 import type { ClassifiedParagraph, NumberingMap, SignalConflict, StyleMap } from './types.js';
+import { tierForIlvl } from '../../ast/index.js';
 import type { NumberingProfile, TierName } from '../../ast/index.js';
-
-// ─── Tier assignment ──────────────────────────────────────────────────────────
-
-function tierForIlvl(ilvl: number, articleIlvl: number): TierName {
-  if (ilvl < articleIlvl) return 'part';
-  if (ilvl === articleIlvl) return 'article';
-  if (ilvl === articleIlvl + 1) return 'paragraph';
-  return 'subparagraph';
-}
 
 // ─── Numbering entries ────────────────────────────────────────────────────────
 

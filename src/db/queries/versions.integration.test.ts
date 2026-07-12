@@ -37,10 +37,10 @@ describe('getParagraphSnapshots', () => {
 
   it('returns the snapshot text when a paragraph_versions row matches base_version', async () => {
     await pool.query(
-      `INSERT INTO paragraph_versions (paragraph_id, version, text, node_type)
-       VALUES ($1, 1, 'Snapshot pr1 text.', 'pr1')
+      `INSERT INTO paragraph_versions (paragraph_id, spec_id, version, text, node_type, op)
+       VALUES ($1, $2, 1, 'Snapshot pr1 text.', 'pr1', 'merge')
        ON CONFLICT DO NOTHING`,
-      [PR1_ID]
+      [PR1_ID, SPEC_ID]
     );
     const rows = await getParagraphSnapshots(SPEC_ID);
     const pr1 = rows.find((r) => r.uuid === PR1_ID);
@@ -56,10 +56,10 @@ describe('getParagraphSnapshots', () => {
 
   it('ignores snapshot rows whose version does not match base_version', async () => {
     await pool.query(
-      `INSERT INTO paragraph_versions (paragraph_id, version, text, node_type)
-       VALUES ($1, 2, 'Future v2 text — must not be returned.', 'pr1')
+      `INSERT INTO paragraph_versions (paragraph_id, spec_id, version, text, node_type, op)
+       VALUES ($1, $2, 2, 'Future v2 text — must not be returned.', 'pr1', 'merge')
        ON CONFLICT DO NOTHING`,
-      [PR1_ID]
+      [PR1_ID, SPEC_ID]
     );
     const rows = await getParagraphSnapshots(SPEC_ID);
     // Without AND v.version = p.base_version the join produces a duplicate row for PR1
@@ -123,5 +123,94 @@ describe('merge snapshots exclude owner-removed subtrees (#251/#276)', () => {
     expect(ids).toContain(VANISHED_NOTE);
     expect(ids).not.toContain(REMOVED);
     expect(ids).not.toContain(REMOVED_CHILD);
+  });
+});
+
+// #377 / ADR-052 D1 — paragraph_versions capture extension (migration 046).
+describe('migration 046 — paragraph_versions capture columns', () => {
+  const CAP_SPEC = 'e3400000-0000-0000-0000-0000000000c0';
+  const CAP_PARA = 'e3400000-0000-0000-0000-0000000000c1';
+  const ALL_OPS = [
+    'edit',
+    'insert',
+    'remove',
+    'restore',
+    'merge',
+    'accept-note',
+    'restructure',
+  ] as const;
+
+  beforeAll(async () => {
+    await pool.query(
+      `INSERT INTO specs (id, section, title, source, library_id)
+       VALUES ($1, '99 99 37', 'Capture Columns Test', 'arcat',
+               (SELECT id FROM libraries WHERE name = 'Default Company Master'))
+       ON CONFLICT (id) DO NOTHING`,
+      [CAP_SPEC]
+    );
+    await pool.query(
+      `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
+       VALUES ($1, $2, NULL, 'pr1', 'Capture test paragraph.', 1)
+       ON CONFLICT (id) DO NOTHING`,
+      [CAP_PARA, CAP_SPEC]
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [CAP_SPEC]);
+  });
+
+  it('db: op CHECK rejects a value outside the ADR-052 D1 seven-value enum', async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO paragraph_versions (paragraph_id, spec_id, version, text, node_type, op)
+         VALUES ($1, $2, 999, 'x', 'pr1', 'not-a-real-op')`,
+        [CAP_PARA, CAP_SPEC]
+      )
+    ).rejects.toThrow(/paragraph_versions_op_check/);
+  });
+
+  it.each(ALL_OPS)('db: op CHECK accepts %s', async (op) => {
+    const inserted = await pool.query(
+      `INSERT INTO paragraph_versions (paragraph_id, spec_id, version, text, node_type, op)
+       VALUES ($1, $2, 100, 'x', 'pr1', $3) RETURNING op`,
+      [CAP_PARA, CAP_SPEC, op]
+    );
+    expect(inserted.rows[0]).toEqual({ op });
+    await pool.query('DELETE FROM paragraph_versions WHERE paragraph_id = $1 AND version = 100', [
+      CAP_PARA,
+    ]);
+  });
+
+  it('db: deleting a users row SETs paragraph_versions.user_id NULL, never touches its content', async () => {
+    // Defensive: a prior aborted run of this test can leave the label behind
+    // (users.label is UNIQUE) — clear it before (re-)claiming it.
+    await pool.query(`DELETE FROM users WHERE label = 'capture-test-actor'`);
+    const userResult = await pool.query<{ id: string }>(
+      `INSERT INTO users (label) VALUES ('capture-test-actor') RETURNING id`
+    );
+    const userId = userResult.rows[0]?.id;
+    expect(userId).toBeTruthy();
+    const versionResult = await pool.query<{ id: string }>(
+      `INSERT INTO paragraph_versions (paragraph_id, spec_id, version, text, node_type, op, user_id)
+       VALUES ($1, $2, 101, 'Attributed snapshot text.', 'pr1', 'edit', $3) RETURNING id`,
+      [CAP_PARA, CAP_SPEC, userId]
+    );
+    const versionId = versionResult.rows[0]?.id;
+
+    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+
+    const after = await pool.query<{ user_id: string | null; text: string; node_type: string }>(
+      'SELECT user_id, text, node_type FROM paragraph_versions WHERE id = $1',
+      [versionId]
+    );
+    expect(after.rows).toEqual([
+      { user_id: null, text: 'Attributed snapshot text.', node_type: 'pr1' },
+    ]);
+
+    const paragraphStillThere = await pool.query('SELECT id FROM paragraphs WHERE id = $1', [
+      CAP_PARA,
+    ]);
+    expect(paragraphStillThere.rows).toHaveLength(1);
   });
 });

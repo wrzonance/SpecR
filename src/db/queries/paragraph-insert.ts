@@ -1,6 +1,7 @@
 import { pool, DatabaseError } from '../index.js';
 import { assertSpecWritable } from './edit-gate.js';
 import { bumpSpecContentVersion } from './content-version.js';
+import { recordParagraphHistory, resolveHistoryContext } from './paragraph-history.js';
 import type { PoolClient } from 'pg';
 import type { InsertableNodeType, SpecNode } from '../../ast/index.js';
 import { InsertableNodeTypeSchema } from '../../ast/index.js';
@@ -34,7 +35,16 @@ import { fetchSubtreeNode } from './paragraphs.js';
  *  - `id-mismatch` — the explicit id names a same-spec row whose text differs
  *    from the addition's, so the diff no longer matches current state. */
 export type InsertParagraphResult =
-  | { readonly status: 'created'; readonly node: SpecNode }
+  | {
+      readonly status: 'created';
+      readonly node: SpecNode;
+      /** The new sibling's parent/position, sourced from the anchor row
+       *  {@link insertSiblingRow} already holds — SpecNode itself carries
+       *  neither, so the write-history payload (#377) widens the result here
+       *  instead of re-querying. */
+      readonly parentId: string | null;
+      readonly position: number;
+    }
   | { readonly status: 'not-found' }
   | { readonly status: 'wrong-spec' }
   | { readonly status: 'invalid-type'; readonly nodeType: string }
@@ -76,6 +86,10 @@ export interface InsertParagraphInput {
    *  the diff-synthesized uuid so a re-submitted/retried accept is
    *  idempotent (short-circuits to `exists`) rather than duplicating rows. */
   readonly explicitId?: string;
+  /** Attributes the write-history snapshot (#377) to a named actor; falls
+   *  back to the SYSTEM_ACTOR_LABEL sentinel (paragraph-history.ts) when
+   *  omitted. */
+  readonly actorLabel?: string;
 }
 
 interface AnchorRow {
@@ -229,22 +243,23 @@ export async function insertSiblingRow(
 
   const node = await fetchSubtreeNode(client, anchor.spec_id, row.id);
   if (!node) throw new DatabaseError('insertSiblingRow: inserted node vanished mid-transaction');
-  return { status: 'created', node };
+  return { status: 'created', node, parentId: anchor.parent_id, position: anchor.position + 1 };
 }
 
 /** In-transaction body of {@link insertParagraphAfter}: gate → delegate the
- *  write to {@link insertSiblingRow} → bump `content_version` once, only on
- *  an effective ('created') write. LOCK ORDER (invariant shared with
- *  updateParagraphText and acceptCommentAsNote): the spec row is
- *  gated/locked BEFORE the anchor paragraph `FOR UPDATE` inside
- *  insertSiblingRow — inverting it would let concurrent paragraph write
- *  paths deadlock holding one lock each. */
+ *  write to {@link insertSiblingRow} → snapshot the created node's history
+ *  (#377, ADR-052 D1) → bump `content_version` once, only on an effective
+ *  ('created') write. LOCK ORDER (invariant shared with updateParagraphText
+ *  and acceptCommentAsNote): the spec row is gated/locked BEFORE the anchor
+ *  paragraph `FOR UPDATE` inside insertSiblingRow — inverting it would let
+ *  concurrent paragraph write paths deadlock holding one lock each. */
 async function runInsert(
   client: PoolClient,
   specId: string,
   input: InsertParagraphInput
 ): Promise<StandaloneInsertResult> {
-  await assertSpecWritable(client, specId, input.expectedVersion);
+  // The returned contentVersion is the pre-bump generation this write belongs to.
+  const gate = await assertSpecWritable(client, specId, input.expectedVersion);
 
   const result = await insertSiblingRow(client, specId, input);
   if (
@@ -262,6 +277,24 @@ async function runInsert(
     );
   }
   if (result.status === 'created') {
+    const historyContext = await resolveHistoryContext(
+      client,
+      gate.contentVersion,
+      input.actorLabel
+    );
+    await recordParagraphHistory(client, {
+      paragraphId: result.node.id,
+      specId,
+      // paragraphs.base_version DEFAULTs to 1 (migration 003) — a freshly
+      // inserted row's very first snapshot is always version 1, no read needed.
+      version: 1,
+      text: result.node.text,
+      nodeType: result.node.type,
+      op: 'insert',
+      contentVersion: historyContext.contentVersion,
+      userId: historyContext.userId,
+      payload: { kind: 'insert', parentId: result.parentId, position: result.position },
+    });
     // A new node is a content write — bump content_version so the next
     // optimistic precondition (and project-copy drift detection) sees it,
     // mirroring updateParagraphText / insertNoteSibling.

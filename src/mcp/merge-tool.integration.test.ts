@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterAll } from 'vitest';
-import { createSpec, insertTree, pool } from '../db/index.js';
+import { createSpec, insertTree, pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import { historyActor } from '../test-utils/history-actor.js';
 import { handleApplyMerge } from './merge-handlers.js';
 import type { ToolResult } from './handlers.js';
 
@@ -134,5 +135,32 @@ describe('apply_merge MCP tool', () => {
     expect(
       isToolError(await handleApplyMerge({ specId: MISSING, accept: [], diff: { added: [] } }))
     ).toBe(true);
+  });
+});
+
+describe('apply_merge MCP tool — actorLabel attribution (#377)', () => {
+  it('a supplied actorLabel attributes the merge history row; response shape is unchanged', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    const res = await handleApplyMerge({
+      specId,
+      accept: [paragraphId],
+      diff: diffFor(paragraphId),
+      actorLabel: 'mcp.merge.bot',
+    });
+    expect(isToolError(res)).toBe(false);
+    const parsed = parse<{ applied: number; rejected: number }>(res);
+    expect(Object.keys(parsed).sort((a, b) => a.localeCompare(b))).toEqual(['applied', 'rejected']);
+    expect(await historyActor(pool, paragraphId, 2)).toBe('mcp.merge.bot');
+  });
+
+  it('omitting actorLabel attributes the merge history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    const res = await handleApplyMerge({
+      specId,
+      accept: [paragraphId],
+      diff: diffFor(paragraphId),
+    });
+    expect(isToolError(res)).toBe(false);
+    expect(await historyActor(pool, paragraphId, 2)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

@@ -455,6 +455,8 @@ paths:
                   description: >
                     Optional optimistic-concurrency precondition — the spec
                     `contentVersion` the caller read. Stale → 409.
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '201':
           description: Created paragraph node
@@ -519,6 +521,8 @@ paths:
                   description: >
                     Optional optimistic-concurrency precondition — the spec
                     `contentVersion` the caller read. Stale → 409.
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -641,6 +645,8 @@ paths:
                   type: boolean
                   description: >
                     true to remove (set vanish), false to restore (clear vanish).
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -818,6 +824,18 @@ paths:
             type: integer
             minimum: 0
           description: Zero-based index into the anchor's source_facts.comments.
+      requestBody:
+        required: false
+        description: >
+          Optional (#377) — the route was bodyless pre-#377 and a truly absent
+          body still resolves as if `{}` were sent (byte-identical behavior).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '201':
           description: Note node created
@@ -3461,7 +3479,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Validation failed, or a member tree cannot be snapshotted losslessly
+          description: >
+            Validation failed, a member tree cannot be snapshotted losslessly,
+            or parentRevisionId fails a custody rule (ADR-066): the parent
+            revision does not exist, belongs to a different package, or
+            already has a parent of its own (nesting depth cannot exceed 1).
           content:
             application/json:
               schema:
@@ -4303,8 +4325,11 @@ paths:
       summary: Create a numbering profile for a library
       description: >
         Creates a new named numbering profile owned by the library. The `rules`
-        object carries the NumberingProfile shape (tiers, numbering, styleLadder).
-        Library must exist (missing → 404).
+        object carries the NumberingProfile shape (tiers, numbering, styleLadder,
+        articleIlvl). Library must exist (missing → 404). Each entry's `tier` is
+        optional — the server derives it from ilvl + articleIlvl and rejects
+        (422) a declared value that disagrees; articleIlvl is required once
+        numbering or styleLadder is non-empty (ADR-067).
       tags: [numbering-profiles]
       parameters:
         - name: id
@@ -4431,8 +4456,12 @@ paths:
       description: >
         Partial update: omit a field to leave it unchanged. At least one of
         `name` or `rules` should be present (an empty body is accepted but is
-        a no-op). The built-in CSI Default (`libraryId: null`) is protected and
-        cannot be modified (→ 409) — it is the fallback for every unassigned spec.
+        a no-op). When `rules` is supplied, each entry's `tier` is optional —
+        the server derives it from ilvl + articleIlvl and rejects (422) a
+        declared value that disagrees; articleIlvl is required once numbering
+        or styleLadder is non-empty (ADR-067). The built-in CSI Default
+        (`libraryId: null`) is protected and cannot be modified (→ 409) — it
+        is the fallback for every unassigned spec.
       tags: [numbering-profiles]
       parameters:
         - name: id
@@ -4824,6 +4853,19 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
 
   schemas:
+    # ── Shared field schemas ───────────────────────────────────────────────────
+
+    ActorLabel:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: '[\s\S]*\S[\s\S]*'
+      description: >
+        Optional caller identity attributed to a paragraph-history write (#377);
+        omitted falls back to a system sentinel. Resolves to a users.label and
+        shares its contract: trimmed before resolution, whitespace-only rejected,
+        and the 1-200 length bounds apply to the trimmed value.
+
     # ── Envelope shapes ────────────────────────────────────────────────────────
 
     SuccessResponse:
@@ -6283,6 +6325,8 @@ components:
           description: >
             Optional optimistic-concurrency precondition (ADR-018) — the spec
             `contentVersion` the redline was diffed against. Stale → 409.
+        actorLabel:
+          $ref: '#/components/schemas/ActorLabel'
 
     LockState:
       type: object
@@ -6830,6 +6874,13 @@ components:
           minimum: 1
         attributes:
           $ref: '#/components/schemas/RevisionAttributes'
+        parentRevisionId:
+          type: string
+          format: uuid
+          description: >
+            UUID of the revision this one was issued from (ADR-066 custody).
+            Must belong to the same package and itself be a root revision —
+            nesting depth cannot exceed 1. Omit for a root revision.
 
     RevisionSummary:
       type: object
@@ -6846,6 +6897,7 @@ components:
           attributes,
           issuedAt,
           specCount,
+          parentRevisionId,
         ]
       properties:
         revisionId:
@@ -6881,6 +6933,12 @@ components:
         specCount:
           type: integer
           description: Number of member sections frozen in this revision
+        parentRevisionId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            UUID of the revision this one was issued from (ADR-066 custody),
+            or null for a root revision.
 
     RevisionSpecEntry:
       type: object
@@ -6910,6 +6968,7 @@ components:
           attributes,
           issuedAt,
           specs,
+          parentRevisionId,
         ]
       properties:
         revisionId:
@@ -6941,6 +7000,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RevisionSpecEntry'
+        parentRevisionId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            UUID of the revision this one was issued from (ADR-066 custody),
+            or null for a root revision.
 
     # ── Templates ──────────────────────────────────────────────────────────────
 
@@ -7612,11 +7677,22 @@ components:
     NumberingProfile:
       type: object
       description: >
-        Extracted numbering configuration from a DOCX file. Carries tiers
-        (CSI hierarchy), numbering (numId→levels map), styleLadder (style→tier
+        Extracted numbering configuration from a DOCX file, and the WRITE
+        contract for POST/PATCH /numbering-profiles. Carries tiers (CSI
+        hierarchy), numbering (numId→levels map), styleLadder (style→tier
         map), and articleIlvl (the ilvl at which the Article tier sits, always
         >= 1 — ilvl 0 is the PART tier). Open schema — unknown keys are
         preserved for forward-compatibility.
+
+
+        `tier` on each numbering[].levels[] and styleLadder[] entry is a
+        DERIVED annotation, not authoritative input (ADR-067): classification
+        is driven by ilvl + articleIlvl alone. Omit `tier` and the server
+        fills it from tierForIlvl(ilvl, articleIlvl); declare one that
+        disagrees with that derivation and the write is rejected (422,
+        entry-naming message). articleIlvl becomes required as soon as
+        numbering or styleLadder is non-empty, since the derivation is
+        undecidable without it.
       additionalProperties: true
       required: [tiers, numbering, styleLadder]
       properties:
@@ -7679,7 +7755,7 @@ components:
                 items:
                   type: object
                   additionalProperties: true
-                  required: [ilvl, tier]
+                  required: [ilvl]
                   properties:
                     ilvl:
                       type: integer
@@ -7687,6 +7763,10 @@ components:
                     tier:
                       type: string
                       enum: [part, article, paragraph, subparagraph]
+                      description: >
+                        Optional — derived from ilvl + articleIlvl when
+                        omitted (ADR-067); a declared value that disagrees
+                        with the derivation is rejected (422).
                     labelTemplate:
                       type: string
                     numFmt:
@@ -7697,7 +7777,7 @@ components:
           items:
             type: object
             additionalProperties: true
-            required: [styleId, numId, ilvl, tier]
+            required: [styleId, numId, ilvl]
             properties:
               styleId:
                 type: string
@@ -7709,12 +7789,19 @@ components:
               tier:
                 type: string
                 enum: [part, article, paragraph, subparagraph]
+                description: >
+                  Optional — derived from ilvl + articleIlvl when omitted
+                  (ADR-067); a declared value that disagrees with the
+                  derivation is rejected (422).
         articleIlvl:
           type: integer
           minimum: 1
           description: >
             Ilvl of the Article tier. Always >= 1 — ilvl 0 is reserved for the
-            PART tier, so the Article level can never be 0.
+            PART tier, so the Article level can never be 0. Required as soon
+            as numbering or styleLadder is non-empty — the server needs it to
+            derive (and validate) each entry's tier (ADR-067); a body that
+            supplies rules without it is rejected (422).
 
     NumberingProfileRead:
       type: object

@@ -159,6 +159,87 @@ describe('POST /packages/:id/revisions', () => {
     expect(res.status).toBe(422);
   });
 
+  it('422 for a malformed parentRevisionId (ADR-066 #389 — schema boundary)', async () => {
+    const res = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 900 },
+      parentRevisionId: 'not-a-uuid',
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('accepts a well-formed parentRevisionId and echoes it back (ADR-066 #389)', async () => {
+    const root = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 901 },
+    });
+    expect(root.status).toBe(201);
+    const rootId = (await data(root))['revisionId'] as string;
+    const child = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 902 },
+      parentRevisionId: rootId,
+    });
+    expect(child.status).toBe(201);
+    expect((await data(child))['parentRevisionId']).toBe(rootId);
+  });
+
+  it('422 for a nonexistent parentRevisionId (ADR-066 #389 — RevisionParentValidationError)', async () => {
+    const res = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 910 },
+      parentRevisionId: ZERO,
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('422 for a parentRevisionId belonging to a different package (ADR-066 #389)', async () => {
+    const foreign = await json('POST', `/packages/${pkgEmpty}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 911 },
+    });
+    expect(foreign.status).toBe(201);
+    const foreignId = (await data(foreign))['revisionId'] as string;
+    const res = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 912 },
+      parentRevisionId: foreignId,
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('422 for a parentRevisionId that already has a parent — nesting depth > 1 (ADR-066 #389)', async () => {
+    const root = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 913 },
+    });
+    expect(root.status).toBe(201);
+    const rootId = (await data(root))['revisionId'] as string;
+    const child = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 914 },
+      parentRevisionId: rootId,
+    });
+    expect(child.status).toBe(201);
+    const childId = (await data(child))['revisionId'] as string;
+    const grandchild = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 915 },
+      parentRevisionId: childId,
+    });
+    expect(grandchild.status).toBe(422);
+  });
+
+  it('legacy {label} body always yields parentRevisionId: null (ADR-066 #389)', async () => {
+    const res = await json('POST', `/packages/${pkgEmpty}/revisions`, {
+      label: `Legacy Null ${Date.now()}`,
+    });
+    expect(res.status).toBe(201);
+    const d = await data(res);
+    expect(d).toHaveProperty('parentRevisionId');
+    expect(d['parentRevisionId']).toBeNull();
+  });
+
   it('issuance flips member specs lifecycle_state to issued (ADR-018 D3)', async () => {
     async function lifecycle(id: string): Promise<string> {
       const r = await pool.query<{ lifecycle_state: string }>(
@@ -228,6 +309,29 @@ describe('GET /revisions/:id', () => {
     const res = await json('GET', `/revisions/${ZERO}`);
     expect(res.status).toBe(404);
   });
+
+  it('echoes parentRevisionId: null by default, present as a key (ADR-066 #389)', async () => {
+    const res = await json('GET', `/revisions/${revisionId}`);
+    const d = await data(res);
+    expect(d).toHaveProperty('parentRevisionId');
+    expect(d['parentRevisionId']).toBeNull();
+  });
+
+  it('echoes a non-null parentRevisionId for a revision issued with one (ADR-066 #389)', async () => {
+    const root = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 920 },
+    });
+    const rootId = (await data(root))['revisionId'] as string;
+    const child = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 921 },
+      parentRevisionId: rootId,
+    });
+    const childId = (await data(child))['revisionId'] as string;
+    const res = await json('GET', `/revisions/${childId}`);
+    expect((await data(res))['parentRevisionId']).toBe(rootId);
+  });
 });
 
 describe('GET /packages/:id/revisions', () => {
@@ -262,6 +366,41 @@ describe('GET /packages/:id/revisions', () => {
     // specCount included (2 members frozen), just re-ordered by the issuance clock.
     expect(list).toEqual(expected);
     expect(list.every((r) => r['specCount'] === 2)).toBe(true);
+  });
+
+  it('echoes parentRevisionId for every summary — always present, null default (ADR-066 #389)', async () => {
+    const res = await json('GET', `/packages/${timelinePkg}/revisions`);
+    const list = ((await res.json()) as { data: Array<Record<string, unknown>> }).data;
+    for (const rev of list) {
+      expect(rev).toHaveProperty('parentRevisionId');
+    }
+    expect(list.every((r) => r['parentRevisionId'] === null)).toBe(true);
+  });
+
+  it('echoes a non-null parentRevisionId for a child revision in the list response (ADR-066 #389)', async () => {
+    // The other list tests only ever issue root revisions (parentRevisionId
+    // null); this pins the non-null case at the HTTP list boundary too, not
+    // just at GET /revisions/:id and the DB query layer.
+    const parentedPkg = await createPackage(p1, `List Parent ${Date.now()}`);
+    const root = await json('POST', `/packages/${parentedPkg}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 930 },
+    });
+    const rootId = (await data(root))['revisionId'] as string;
+    const child = await json('POST', `/packages/${parentedPkg}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 931 },
+      parentRevisionId: rootId,
+    });
+    const childId = (await data(child))['revisionId'] as string;
+
+    const res = await json('GET', `/packages/${parentedPkg}/revisions`);
+    expect(res.status).toBe(200);
+    const list = ((await res.json()) as { data: Array<Record<string, unknown>> }).data;
+    const rootSummary = list.find((r) => r['revisionId'] === rootId);
+    const childSummary = list.find((r) => r['revisionId'] === childId);
+    expect(rootSummary?.['parentRevisionId']).toBeNull();
+    expect(childSummary?.['parentRevisionId']).toBe(rootId);
   });
 
   it('returns an empty array for a package that has issued nothing yet', async () => {

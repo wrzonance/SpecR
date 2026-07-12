@@ -40,7 +40,8 @@ export async function mergeHandler(req: Request, res: Response): Promise<void> {
       idResult.data,
       bodyResult.data.accept,
       bodyResult.data.diff,
-      bodyResult.data.expectedVersion
+      bodyResult.data.expectedVersion,
+      bodyResult.data.actorLabel
     );
     if (outcome.kind === 'not-found') {
       res.status(404).json({ success: false, error: 'spec not found' });

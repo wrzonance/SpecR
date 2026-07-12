@@ -300,13 +300,15 @@ describe('#317 makeContinuationNode — a demoted continuation keeps its conflic
 
 // ─── #317 / #319: profile `tier` is derived from ilvl, not independently authoritative ─
 
-describe('#317 KNOWN AMBIGUITY — profile `tier` is derived from ilvl, not authoritative', () => {
-  // KNOWN AMBIGUITY (#319): a styleLadder/numbering `tier` field is written by the
-  // extractor (tierForIlvl) and NOT read on apply — classification derives the node
-  // type from ilvl + articleIlvl. A manually-edited `tier` that disagrees with its
-  // `ilvl` is therefore a silent no-op. The design doc calls the profile
-  // "authoritative for the numId→tier mapping"; today that authority flows through
-  // ilvl+articleIlvl. Making `tier` independently authoritative is deferred to #319.
+describe('#317/#319 ADR-067 — profile `tier` is derived from ilvl, never authoritative', () => {
+  // DECIDED (ADR-067): a styleLadder/numbering `tier` field is written by the
+  // extractor (tierForIlvl) for read-side convenience only — it is NOT read on
+  // apply. Classification always derives the node type from ilvl + articleIlvl,
+  // so a stored/legacy `tier` that disagrees with its `ilvl` is a no-op here by
+  // design. ADR-067 rejects threading `tier` through classification as an
+  // authoritative input; on the write path (numbering-profile-schema.ts) a
+  // divergent declared `tier` is instead rejected at parse time (422), so this
+  // apply-level case only arises for rows written before that validation existed.
   it('a styleLadder entry with tier=article but ilvl=3 classifies by ilvl (→ pr2), not the declared tier', () => {
     const base: NumberingMap = {
       nums: new Map([[1, { numId: 1, abstractNumId: 0 }]]),

@@ -3,7 +3,8 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool } from '../db/index.js';
+import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import { historyActor } from '../test-utils/history-actor.js';
 
 // Minimal shape for recursively searching a SpecNode tree.
 interface SpecNodeLike {
@@ -359,6 +360,44 @@ describe('POST .../comments/:index/accept-as-note', () => {
   });
 });
 
+describe('POST .../accept-as-note — actorLabel attribution (#377)', () => {
+  async function acceptWithComment(body?: unknown): Promise<{
+    status: number;
+    noteId: string;
+  }> {
+    const a = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Anchor', 7, $2::jsonb) RETURNING id`,
+      [reclSpecId, JSON.stringify({ comments: [{ author: 'A', text: 'x', anchor: [0, 1] }] })]
+    );
+    const anchor = a.rows[0]!.id;
+    const r = await req(
+      'POST',
+      `/specs/${reclSpecId}/paragraphs/${anchor}/comments/0/accept-as-note`,
+      body
+    );
+    return { status: r.status, noteId: (r.body as { data: { noteId: string } }).data.noteId };
+  }
+
+  it('a supplied actorLabel attributes the note history row; response shape is unchanged', async () => {
+    const { status, noteId } = await acceptWithComment({ actorLabel: 'reviewer.jane' });
+    expect(status).toBe(201);
+    expect(await historyActor(pool, noteId, 1)).toBe('reviewer.jane');
+  });
+
+  it('a bodyless request (pre-#377 contract) attributes the note history to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const { status, noteId } = await acceptWithComment();
+    expect(status).toBe(201);
+    expect(await historyActor(pool, noteId, 1)).toBe(SYSTEM_ACTOR_LABEL);
+  });
+
+  it('an empty JSON body ({}) is equivalent to bodyless — SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const { status, noteId } = await acceptWithComment({});
+    expect(status).toBe(201);
+    expect(await historyActor(pool, noteId, 1)).toBe(SYSTEM_ACTOR_LABEL);
+  });
+});
+
 describe('PATCH /specs/:id/paragraphs/:nodeId/removal', () => {
   it('removes a paragraph via vanish and returns 200 with vanish:true', async () => {
     const r = await req('PATCH', `/specs/${specId}/paragraphs/${nodeId}/removal`, {
@@ -417,5 +456,37 @@ describe('PATCH /specs/:id/paragraphs/:nodeId/removal', () => {
       [noteId]
     );
     expect(row.rows[0]!.vanish).toBe(false); // flag never written
+  });
+});
+
+describe('PATCH .../removal — actorLabel attribution (#377)', () => {
+  async function insertFreshBody(): Promise<string> {
+    const row = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, NULL, 'pr1', 'Removable paragraph.', 50) RETURNING id`,
+      [specId]
+    );
+    return row.rows[0]!.id;
+  }
+
+  it('a supplied actorLabel attributes the remove history row; response shape is unchanged', async () => {
+    const target = await insertFreshBody();
+    const r = await req('PATCH', `/specs/${specId}/paragraphs/${target}/removal`, {
+      removed: true,
+      actorLabel: 'ops.crew',
+    });
+    expect(r.status).toBe(200);
+    const keys = Object.keys((r.body as { data: object }).data).sort((a, b) => a.localeCompare(b));
+    expect(keys).toEqual(['children', 'id', 'meta', 'text', 'type']);
+    expect(await historyActor(pool, target, 2)).toBe('ops.crew'); // base_version 1 → snapshot at 2
+  });
+
+  it('omitting actorLabel attributes the remove history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const target = await insertFreshBody();
+    const r = await req('PATCH', `/specs/${specId}/paragraphs/${target}/removal`, {
+      removed: true,
+    });
+    expect(r.status).toBe(200);
+    expect(await historyActor(pool, target, 2)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

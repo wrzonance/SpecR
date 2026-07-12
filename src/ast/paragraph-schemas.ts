@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ActorLabelSchema } from './actor-schemas.js';
 
 // Paragraph insertion (#372). The node types a caller may create: body
 // paragraphs, articles, and continuations. Never 'part' (a CSI section keeps
@@ -29,6 +30,7 @@ export const InsertParagraphBodySchema = z.object({
   text: z.string().check(z.minLength(1)),
   nodeType: InsertableNodeTypeSchema.exactOptional(),
   expectedVersion: z.number().int().min(1).exactOptional(),
+  actorLabel: ActorLabelSchema.exactOptional(),
 });
 
 export type InsertParagraphBody = z.infer<typeof InsertParagraphBodySchema>;

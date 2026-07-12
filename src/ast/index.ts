@@ -112,6 +112,8 @@ export {
   ReclassifyBodySchema,
 } from './schemas.js';
 export type { PatchEditabilityBody, PatchRemovalBody, ReclassifyBody } from './schemas.js';
+export { ActorLabelSchema, AcceptNoteBodySchema } from './actor-schemas.js';
+export type { AcceptNoteBody } from './actor-schemas.js';
 export { InsertParagraphBodySchema, InsertableNodeTypeSchema } from './paragraph-schemas.js';
 export type { InsertParagraphBody, InsertableNodeType } from './paragraph-schemas.js';
 export {
@@ -157,6 +159,7 @@ export {
   NumberingProfileSchema,
   NumberingProfileReadSchema,
   TierNameSchema,
+  tierForIlvl,
 } from './numbering-profile-schema.js';
 export type { NumberingProfile, TierName } from './numbering-profile-schema.js';
 export {

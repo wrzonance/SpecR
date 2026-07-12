@@ -20,6 +20,7 @@ import {
   ParseWarningTypeSchema,
   ParseWarningSchema,
   RetainedTableSchema,
+  UpdateParagraphBodySchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -578,5 +579,41 @@ describe('PatchRemovalBodySchema (#251)', () => {
   });
   it('rejects a non-boolean removed flag', () => {
     expect(PatchRemovalBodySchema.safeParse({ removed: 'yes' }).success).toBe(false);
+  });
+  it('omitting actorLabel parses byte-identical to the pre-#377 shape (#377)', () => {
+    expect(PatchRemovalBodySchema.parse({ removed: true })).toEqual({ removed: true });
+  });
+  it('accepts an explicit actorLabel alongside removed (#377)', () => {
+    expect(PatchRemovalBodySchema.parse({ removed: true, actorLabel: 'jane.doe' })).toEqual({
+      removed: true,
+      actorLabel: 'jane.doe',
+    });
+  });
+  it('rejects a whitespace-only actorLabel (#377)', () => {
+    expect(PatchRemovalBodySchema.safeParse({ removed: true, actorLabel: '   ' }).success).toBe(
+      false
+    );
+  });
+});
+
+// ActorLabelSchema and AcceptNoteBodySchema now live in actor-schemas.ts
+// (split out to keep this file under the 400-line cap) — their invariants
+// are pinned in actor-schemas.test.ts, not here.
+
+// ── UpdateParagraphBodySchema — actorLabel passthrough (#377) ───────────────
+describe('UpdateParagraphBodySchema — actorLabel (#377)', () => {
+  it('omitting actorLabel parses byte-identical to the pre-#377 shape', () => {
+    expect(UpdateParagraphBodySchema.parse({ text: 'hello' })).toEqual({ text: 'hello' });
+  });
+  it('accepts an explicit actorLabel', () => {
+    expect(UpdateParagraphBodySchema.parse({ text: 'hello', actorLabel: 'jane.doe' })).toEqual({
+      text: 'hello',
+      actorLabel: 'jane.doe',
+    });
+  });
+  it('rejects a whitespace-only actorLabel', () => {
+    expect(UpdateParagraphBodySchema.safeParse({ text: 'hello', actorLabel: '  ' }).success).toBe(
+      false
+    );
   });
 });

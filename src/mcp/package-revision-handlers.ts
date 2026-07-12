@@ -4,8 +4,7 @@ import {
   getPackageRevision,
   listPackageRevisions,
   PackageNotFoundError,
-  SnapshotValidationError,
-  RevisionNomenclatureValidationError,
+  isUnprocessableRevisionInputError,
   pool,
 } from '../db/index.js';
 import { StructuredCreateRevisionBodySchema } from '../ast/index.js';
@@ -56,10 +55,15 @@ export async function handleIssuePackageRevision(args: unknown): Promise<ToolRes
     return ok(await createPackageRevision(packageId, body, pool));
   } catch (err) {
     if (err instanceof PackageNotFoundError) return toolError(`package not found: id=${packageId}`);
-    // A member tree could not be snapshotted losslessly, or the type is not in the
-    // project's revision-nomenclature profile — both are unprocessable inputs.
-    if (err instanceof SnapshotValidationError) return toolError(err.message);
-    if (err instanceof RevisionNomenclatureValidationError) return toolError(err.message);
+    // Unprocessable input — a member tree that can't be snapshotted losslessly, a
+    // type outside the project's nomenclature profile, or a parentRevisionId that
+    // fails a custody invariant (not found, cross-package, nesting depth > 1) — all
+    // surface the error's own message. The 422 set lives in one predicate
+    // (isUnprocessableRevisionInputError) so this MCP handler and the REST boundary
+    // stay in sync as error classes are added.
+    if (isUnprocessableRevisionInputError(err)) {
+      return toolError(err.message);
+    }
     if (getPgCode(err) === '23505') return toolError('revision already exists for this package');
     return internalError(err, 'issue_package_revision');
   }

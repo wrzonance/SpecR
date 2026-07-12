@@ -189,6 +189,27 @@ describe('POST /libraries/:id/numbering-profiles', () => {
     const res = await post(`/libraries/${libraryId}/numbering-profiles`, { name: 'x' });
     expect(res.status).toBe(422);
   });
+
+  it('422 — divergent declared tier names the offending entry (#319)', async () => {
+    const name = `np-divergent-${randomUUID().slice(0, 8)}`;
+    const res = await post(`/libraries/${libraryId}/numbering-profiles`, {
+      name,
+      rules: {
+        tiers: { part: { numberStyle: 'integer', maxCount: 5 } },
+        // ilvl=1 with articleIlvl=1 derives to 'article' — the declared
+        // 'subparagraph' is inconsistent, so the parse must reject it (#319).
+        numbering: [{ numId: 1, levels: [{ ilvl: 1, tier: 'subparagraph' }] }],
+        styleLadder: [],
+        articleIlvl: 1,
+      },
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('numId=1');
+    expect(body.error).toContain("declares tier 'subparagraph'");
+    expect(body.error).toContain("derives to 'article'");
+  });
 });
 
 // ─── GET /numbering-profiles/:id ─────────────────────────────────────────────
@@ -234,6 +255,27 @@ describe('PATCH /numbering-profiles/:id', () => {
   it('404 — unknown profile', async () => {
     const res = await patch(`/numbering-profiles/${UNKNOWN_UUID}`, { name: 'x' });
     expect(res.status).toBe(404);
+  });
+
+  it('422 — divergent declared tier names the offending entry (#319)', async () => {
+    const profile = await makeProfile(`np-patch-divergent-${randomUUID().slice(0, 8)}`);
+
+    const res = await patch(`/numbering-profiles/${profile.id}`, {
+      rules: {
+        tiers: { part: { numberStyle: 'integer', maxCount: 5 } },
+        numbering: [],
+        // ilvl=2 with articleIlvl=1 derives to 'paragraph' — the declared
+        // 'part' is inconsistent, so the parse must reject it (#319).
+        styleLadder: [{ styleId: 'PR1', numId: 1, ilvl: 2, tier: 'part' }],
+        articleIlvl: 1,
+      },
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('styleId=PR1');
+    expect(body.error).toContain("declares tier 'part'");
+    expect(body.error).toContain("derives to 'paragraph'");
   });
 });
 
