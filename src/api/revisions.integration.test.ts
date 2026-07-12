@@ -184,6 +184,52 @@ describe('POST /packages/:id/revisions', () => {
     expect((await data(child))['parentRevisionId']).toBe(rootId);
   });
 
+  it('422 for a nonexistent parentRevisionId (ADR-066 #389 — RevisionParentValidationError)', async () => {
+    const res = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 910 },
+      parentRevisionId: ZERO,
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('422 for a parentRevisionId belonging to a different package (ADR-066 #389)', async () => {
+    const foreign = await json('POST', `/packages/${pkgEmpty}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 911 },
+    });
+    expect(foreign.status).toBe(201);
+    const foreignId = (await data(foreign))['revisionId'] as string;
+    const res = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 912 },
+      parentRevisionId: foreignId,
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('422 for a parentRevisionId that already has a parent — nesting depth > 1 (ADR-066 #389)', async () => {
+    const root = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 913 },
+    });
+    expect(root.status).toBe(201);
+    const rootId = (await data(root))['revisionId'] as string;
+    const child = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 914 },
+      parentRevisionId: rootId,
+    });
+    expect(child.status).toBe(201);
+    const childId = (await data(child))['revisionId'] as string;
+    const grandchild = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 915 },
+      parentRevisionId: childId,
+    });
+    expect(grandchild.status).toBe(422);
+  });
+
   it('issuance flips member specs lifecycle_state to issued (ADR-018 D3)', async () => {
     async function lifecycle(id: string): Promise<string> {
       const r = await pool.query<{ lifecycle_state: string }>(

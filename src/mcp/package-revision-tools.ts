@@ -14,7 +14,8 @@ export function registerPackageRevisionTools(reg: ToolRegistrar): void {
     {
       description:
         'List a design package’s issued revisions as light summaries (metadata only), ordered by ' +
-        'sortOrder — the per-package issuance clock (50% DD … IFC, addenda, bulletins). Read a ' +
+        'sortOrder — the per-package issuance clock (50% DD … IFC, addenda, bulletins). Each summary ' +
+        'echoes parentRevisionId (null unless issued from another revision — ADR-066). Read a ' +
         'single revision’s frozen trees with get_revision. Returns isError when the package UUID ' +
         'is not found.',
       inputSchema: ListPackageRevisionsShape,
@@ -27,8 +28,9 @@ export function registerPackageRevisionTools(reg: ToolRegistrar): void {
     {
       description:
         'Read an issued package revision by UUID — the immutable snapshot: revision metadata plus ' +
-        'every member spec’s frozen paragraph tree (in membership order). Note: the response can ' +
-        'be large (a full tree per member). Returns isError when the revision UUID is not found.',
+        'every member spec’s frozen paragraph tree (in membership order). Includes parentRevisionId ' +
+        '(null unless issued from another revision — ADR-066). Note: the response can be large (a ' +
+        'full tree per member). Returns isError when the revision UUID is not found.',
       inputSchema: GetRevisionShape,
     },
     handleGetRevision
@@ -41,9 +43,12 @@ export function registerPackageRevisionTools(reg: ToolRegistrar): void {
         'Issue an immutable revision of a design package: freeze a snapshot of every member spec’s ' +
         'tree and flip the members to "issued". Provide a `type` from the project’s revision ' +
         'nomenclature (e.g. "addendum", "bulletin") plus optional date, sortOrder, and an open ' +
-        'attributes bag (number/title/phase/…). Returns a light revision summary (read the frozen ' +
-        'trees with get_revision). isError when the package is unknown, a member cannot be ' +
-        'snapshotted, the type is not in the nomenclature, or the revision already exists.',
+        'attributes bag (number/title/phase/…). Optional parentRevisionId (ADR-066) names the ' +
+        'revision this one was issued from — it must belong to the same package and itself be a ' +
+        'root revision (nesting depth cannot exceed 1). Returns a light revision summary (read the ' +
+        'frozen trees with get_revision). isError when the package is unknown, a member cannot be ' +
+        'snapshotted, the type is not in the nomenclature, the revision already exists, or ' +
+        'parentRevisionId fails a custody rule (not found / different package / nesting too deep).',
       inputSchema: IssuePackageRevisionShape,
     },
     handleIssuePackageRevision
