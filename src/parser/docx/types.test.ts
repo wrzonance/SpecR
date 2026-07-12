@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { NodeTypeSchema, StyleNodeTypeSchema, ParseWarningTypeSchema } from '../../ast/schemas.js';
+import { NodeTypeSchema, ParseWarningTypeSchema } from '../../ast/schemas.js';
+import { StyleNodeTypeSchema } from '../../ast/style-schemas.js';
 
 // Boundary invariants for #292's ClassifiedParagraph.suppressed field (Phase 2 of 4:
 // asterisk-rule note regions). `suppressed` marks a paragraph that produces NO SpecNode

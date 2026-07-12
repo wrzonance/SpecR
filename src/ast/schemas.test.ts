@@ -15,13 +15,15 @@ import {
   PatchEditabilityBodySchema,
   PatchRemovalBodySchema,
   ReclassifyBodySchema,
-  CreateNumberingProfileBodySchema,
-  PatchNumberingProfileBodySchema,
   ParseWarningTypeSchema,
   ParseWarningSchema,
   RetainedTableSchema,
   UpdateParagraphBodySchema,
 } from './schemas.js';
+import {
+  CreateNumberingProfileBodySchema,
+  PatchNumberingProfileBodySchema,
+} from './style-schemas.js';
 
 const VALID_NODE_TYPES = [
   'spec',

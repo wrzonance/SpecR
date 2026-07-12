@@ -90,7 +90,7 @@ export type {
   NumberingDef,
 } from './types.js';
 export { STYLE_NODE_TYPES } from './types.js';
-export { StyleNodeTypeSchema, StylePropertiesSchema } from './schemas.js';
+export { StyleNodeTypeSchema, StylePropertiesSchema } from './style-schemas.js';
 export {
   EditabilitySchema,
   ConventionRulesSchema,
@@ -121,14 +121,14 @@ export {
   PatchTemplateBodySchema,
   UpsertStyleRulesBodySchema,
   SetStyleSourceBodySchema,
-} from './schemas.js';
+} from './style-schemas.js';
 export { GenerateBodySchema } from './generate-schemas.js';
 export type {
   CreateTemplateBody,
   PatchTemplateBody,
   UpsertStyleRulesBody,
   SetStyleSourceBody,
-} from './schemas.js';
+} from './style-schemas.js';
 export type { GenerateBody } from './generate-schemas.js';
 export {
   HeaderFooterCompositionSchema,
@@ -166,9 +166,9 @@ export {
   CreateNumberingProfileBodySchema,
   PatchNumberingProfileBodySchema,
   SetSpecNumberingProfileBodySchema,
-} from './schemas.js';
+} from './style-schemas.js';
 export type {
   CreateNumberingProfileBody,
   PatchNumberingProfileBody,
   SetSpecNumberingProfileBody,
-} from './schemas.js';
+} from './style-schemas.js';
