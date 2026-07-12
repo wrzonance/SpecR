@@ -70,6 +70,20 @@ describe('extractTables — hidden vs visible classification', () => {
     expect(result.visibleCount).toBe(1);
   });
 
+  // INV-4 cross-row: 'any single visible-text paragraph anywhere in the table
+  // forces the whole table visible' must hold across rows, not just within one
+  // row. Places the vanish evidence in row 1 and the visible evidence in row 2
+  // of the same table — a per-row classifier that decided row-by-row could
+  // still pass the same-row 'mixed' test above while misclassifying this case.
+  it('classifies a table visible when the visible evidence is in a different row than the vanish evidence', () => {
+    const xml = makeDocXml(
+      table(row(cell(vanishPara('hidden row'))) + row(cell(visiblePara('shown row'))))
+    );
+    const result = extractTables(xml, EMPTY_STYLES);
+    expect(result.hiddenTables).toHaveLength(0);
+    expect(result.visibleCount).toBe(1);
+  });
+
   it('classifies an empty table (no text-bearing paragraphs) as visible — no evidence', () => {
     const xml = makeDocXml(table(row(cell('<w:p/>') + cell('<w:p/>'))));
     const result = extractTables(xml, EMPTY_STYLES);

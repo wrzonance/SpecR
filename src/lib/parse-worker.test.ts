@@ -63,6 +63,29 @@ describe('workerOutputSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  // #293 regression: the worker's structured-clone boundary must round-trip
+  // tree.hiddenTables, not silently strip it. Zod objects drop unknown keys by
+  // default, so if workerOutputSchema's tree sub-schema doesn't declare
+  // hiddenTables, every hidden DOCX table retained by extractTables() vanishes
+  // here — the only path real uploads (parse, onboarding) actually exercise.
+  it('preserves tree.hiddenTables across the worker boundary instead of stripping it', async () => {
+    const { workerOutputSchema } = await import('./parse-worker.js');
+    const result = workerOutputSchema.safeParse({
+      tree: {
+        id: 's1',
+        section: '09 91 26',
+        title: 'Painting',
+        parts: [],
+        hiddenTables: [{ rows: [['secret A', 'secret B']] }],
+      },
+      refs: [],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.tree.hiddenTables).toEqual([{ rows: [['secret A', 'secret B']] }]);
+    }
+  });
 });
 
 describe('parseWorker', () => {

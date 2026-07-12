@@ -187,6 +187,17 @@ describe('SpecTreeSchema — hiddenTables (#293)', () => {
     expect('hiddenTables' in result).toBe(false);
   });
 
+  // INV-5: hiddenTables is .exactOptional(), not .optional() — it mirrors the
+  // exactOptionalPropertyTypes contract (CLAUDE.md), which distinguishes "key
+  // absent" from "key present with value undefined". A regression that swaps
+  // .exactOptional() for .optional() would still pass every other test in this
+  // block (they never pass the key at all) but would silently accept a
+  // present-but-undefined key here.
+  it('rejects an explicit hiddenTables: undefined (exactOptional, not optional)', () => {
+    const result = SpecTreeSchema.safeParse({ ...base, hiddenTables: undefined });
+    expect(result.success).toBe(false);
+  });
+
   it('rejects a hiddenTables row cell that is not a string', () => {
     expect(() =>
       SpecTreeSchema.parse({
