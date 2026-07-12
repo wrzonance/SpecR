@@ -34,16 +34,14 @@ export {
   withdrawSpec,
   restoreSpec,
   getSpecWithdrawnAt,
-} from './queries/specs.js';
-export type {
-  SpecSummary,
-  UpdateSpecInput,
-  CreateSpecInput,
-  SpecTreeResult,
-  SpecReference,
-  OriginMeta,
-  WithdrawSpecOutcome,
-  RestoreSpecOutcome,
+  type SpecSummary,
+  type UpdateSpecInput,
+  type CreateSpecInput,
+  type SpecTreeResult,
+  type SpecReference,
+  type OriginMeta,
+  type WithdrawSpecOutcome,
+  type RestoreSpecOutcome,
 } from './queries/specs.js';
 export { getOnboardingStatus, finalizeOnboarding, reopenOnboarding } from './queries/onboarding.js';
 export type { OnboardingStatus, FinalizeOutcome, ReopenOutcome } from './queries/onboarding.js';
@@ -52,11 +50,9 @@ export {
   getParagraphWithAncestors,
   getParagraphSpecId,
   updateParagraphText,
-} from './queries/paragraphs.js';
-export type {
-  ParagraphRow,
-  ParagraphWithAncestors,
-  UpdateParagraphResult,
+  type ParagraphRow,
+  type ParagraphWithAncestors,
+  type UpdateParagraphResult,
 } from './queries/paragraphs.js';
 // insertSiblingRow / setVanishRow are the gate-free DB cores behind
 // insertParagraphAfter / setParagraphVanish AND the merge engine's added/deleted-op
@@ -83,17 +79,15 @@ export {
   softDeleteProject,
   restoreProject,
   InvalidSourceLibraryError,
-} from './queries/projects.js';
-export type {
-  ProjectSummary,
-  ProjectListItem,
-  ProjectWithToc,
-  ProjectTocEntry,
-  ProjectSource,
-  ProjectTombstone,
-  CreateProjectInput,
-  UpdateProjectInput,
-  UpdateProjectResult,
+  type ProjectSummary,
+  type ProjectListItem,
+  type ProjectWithToc,
+  type ProjectTocEntry,
+  type ProjectSource,
+  type ProjectTombstone,
+  type CreateProjectInput,
+  type UpdateProjectInput,
+  type UpdateProjectResult,
 } from './queries/projects.js';
 export { listProjectSpecs } from './queries/project-specs.js';
 export type { ProjectSpec, ProjectSpecListOptions } from './queries/project-specs.js';
@@ -113,13 +107,11 @@ export {
   toSearchOptions,
   listSpecSections,
   lookupSpecSectionTitle,
+  type ParagraphSearchResult,
+  type ParagraphSearchOptions,
+  type SpecSectionResult,
 } from './queries/search.js';
 export { getParagraphSnapshots, getCurrentParagraphSnapshots } from './queries/versions.js';
-export type {
-  ParagraphSearchResult,
-  ParagraphSearchOptions,
-  SpecSectionResult,
-} from './queries/search.js';
 export {
   getTemplate,
   getTemplateByName,
@@ -130,15 +122,13 @@ export {
   updateTemplateMeta,
   deleteTemplate,
   bulkUpsertTemplateRules,
-} from './queries/templates.js';
-export { STYLE_NODE_TYPES } from './queries/templates.js';
-export type {
-  StyleNodeType,
-  StyleRule,
-  Template,
-  TemplateMeta,
-  StyleProperties,
-  DeleteTemplateResult,
+  STYLE_NODE_TYPES,
+  type StyleNodeType,
+  type StyleRule,
+  type Template,
+  type TemplateMeta,
+  type StyleProperties,
+  type DeleteTemplateResult,
 } from './queries/templates.js';
 export {
   upsertMapping,
@@ -146,12 +136,10 @@ export {
   getMappingsBySpec,
   getMappingsByInstance,
   getMappingsByParagraph,
-} from './queries/revit.js';
-export type {
-  RevitMapping,
-  RevitMappingInput,
-  RevitDirection,
-  RevitTransformType,
+  type RevitMapping,
+  type RevitMappingInput,
+  type RevitDirection,
+  type RevitTransformType,
 } from './queries/revit.js';
 export { getProjectRevitLinks } from './queries/revit-links.js';
 export type {
@@ -176,15 +164,13 @@ export {
   DefaultCompanyLibraryError,
   UFGS_REFERENCE_LIBRARY,
   DEFAULT_COMPANY_LIBRARY,
-} from './queries/libraries.js';
-export { LibraryNotFoundError } from './queries/libraries.js';
-export type {
-  Library,
-  LibraryTier,
-  CreateLibraryInput,
-  CreateClientLibraryInput,
-  LibrarySpec,
-  LibrarySpecListOptions,
+  LibraryNotFoundError,
+  type Library,
+  type LibraryTier,
+  type CreateLibraryInput,
+  type CreateClientLibraryInput,
+  type LibrarySpec,
+  type LibrarySpecListOptions,
 } from './queries/libraries.js';
 export { getReferenceGraph } from './queries/reference-graph-read.js';
 export type { GraphScope } from './queries/reference-graph-read.js';
@@ -219,15 +205,13 @@ export {
   SnapshotValidationError,
   RevisionNomenclatureValidationError,
   RevisionComparisonError,
+  type RevisionSummary,
+  type RevisionSpecEntry,
+  type RevisionWithTrees,
+  type RevisionManualData,
+  type RevisionAddendumManualData,
 } from './queries/revisions.js';
 export { listPackageRevisions } from './queries/revision-list.js';
-export type {
-  RevisionSummary,
-  RevisionSpecEntry,
-  RevisionWithTrees,
-  RevisionManualData,
-  RevisionAddendumManualData,
-} from './queries/revisions.js';
 export {
   insertConvention,
   updateConventionRules,
@@ -262,13 +246,11 @@ export {
   clearSpecEditabilityOverride,
   reclassifySpec,
   acceptCommentAsNote,
-} from './queries/reclassify.js';
-export type {
-  OwnershipResult,
-  EditabilityDiffEntry,
-  ReclassifyReport,
-  ReclassifyOutcome,
-  AcceptNoteOutcome,
+  type OwnershipResult,
+  type EditabilityDiffEntry,
+  type ReclassifyReport,
+  type ReclassifyOutcome,
+  type AcceptNoteOutcome,
 } from './queries/reclassify.js';
 export { getSpecLineage } from './queries/lineage.js';
 export type { SpecLineage, LineageHop, LineageScope } from './queries/lineage.js';
@@ -296,17 +278,15 @@ export {
   reconcileProjectDivisionGeneralSpec,
   DivisionGeneralOwnerNotFoundError,
   DivisionGeneralSpecNotInScopeError,
-} from './queries/division-general.js';
-export type {
-  DivisionGeneralSpecResult,
-  DivisionGeneralSpecRef,
-  DivisionGeneralCandidate,
-  DivisionGeneralScope,
-  DivisionGeneralStatus,
-  DivisionGeneralMethod,
-  DivisionGeneralCandidateReason,
-  DivisionGeneralConfidence,
-  SetDivisionGeneralSpecInput,
+  type DivisionGeneralSpecResult,
+  type DivisionGeneralSpecRef,
+  type DivisionGeneralCandidate,
+  type DivisionGeneralScope,
+  type DivisionGeneralStatus,
+  type DivisionGeneralMethod,
+  type DivisionGeneralCandidateReason,
+  type DivisionGeneralConfidence,
+  type SetDivisionGeneralSpecInput,
 } from './queries/division-general.js';
 export {
   upsertHeaderFooterConfig,
@@ -315,14 +295,12 @@ export {
   resolveHeaderFooterConfig,
   HeaderFooterValidationError,
   HeaderFooterScopeError,
-} from './queries/header-footer.js';
-export type {
-  HeaderFooterScopeInput,
-  HeaderFooterScope,
-  HeaderFooterConfig,
-  ResolveHeaderFooterConfigInput,
-  HeaderFooterResolutionContext,
-  ResolvedHeaderFooterConfig,
+  type HeaderFooterScopeInput,
+  type HeaderFooterScope,
+  type HeaderFooterConfig,
+  type ResolveHeaderFooterConfigInput,
+  type HeaderFooterResolutionContext,
+  type ResolvedHeaderFooterConfig,
 } from './queries/header-footer.js';
 export {
   listRequiredSections,
@@ -332,12 +310,10 @@ export {
   RequiredSectionsPackageNotFoundError,
   RequiredSectionsSeedConflictError,
   RequiredSectionsInvalidSeedError,
-} from './queries/required-sections.js';
-export type {
-  RequiredSection,
-  RequiredSectionInput,
-  RequiredScope,
-  SeedSource,
+  type RequiredSection,
+  type RequiredSectionInput,
+  type RequiredScope,
+  type SeedSource,
 } from './queries/required-sections.js';
 export {
   listNumberingProfiles,
@@ -399,16 +375,24 @@ export {
   buildStandardsRollup,
   parseStandardCitation,
   STANDARD_ANCHOR_CAP,
-} from './queries/standards.js';
-export type {
-  StandardsRollup,
-  StandardRollupRow,
-  StandardFinding,
-  StandardsSummary,
-  StandardStatus,
-  CitingSpec,
+  type StandardsRollup,
+  type StandardRollupRow,
+  type StandardFinding,
+  type StandardsSummary,
+  type StandardStatus,
+  type CitingSpec,
 } from './queries/standards.js';
 // Actor identity substrate (#381, ADR-052 D6). role_assignments (migration 045) ships
 // schema-only — its query/REST/MCP layer is a deferred follow-up, not exported here.
 export { resolveOrCreateUserByLabel, listUsers, getUser } from './queries/users.js';
 export type { UserSummary } from './queries/users.js';
+// Write-history capture core (#377, ADR-052 D1) — the merge engine's applyAccepted/
+// applyMerge (src/merge/) is the first cross-module consumer that threads a resolved
+// ParagraphHistoryContext through its own call graph rather than resolving it itself.
+export {
+  recordParagraphHistory,
+  resolveHistoryContext,
+  lazyHistoryContext,
+  SYSTEM_ACTOR_LABEL,
+} from './queries/paragraph-history.js';
+export type { ParagraphHistoryContext } from './queries/paragraph-history.js';

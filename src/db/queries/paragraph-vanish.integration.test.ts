@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { PoolClient } from 'pg';
 import { pool, setParagraphVanish, setVanishRow } from '../index.js';
+import { historyRowsFor } from '../../test-utils/history-rows.js';
+import { SYSTEM_ACTOR_LABEL } from './paragraph-history.js';
 
 async function runInTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
@@ -275,5 +277,117 @@ describe('setVanishRow (DB core, #374)', () => {
 
     // restore for isolation from any later tests
     await runInTransaction((client) => setVanishRow(client, specId, nodeId, false));
+  });
+});
+
+// setParagraphVanish's write-history capture (#377, ADR-052 D1): vanish and
+// restore each snapshot the paragraph's PRE-toggle image (the text/node_type
+// it had before this write) under op 'remove'/'restore' respectively, and a
+// no-op toggle (vanish already at the requested value) writes nothing — the
+// same idempotency contract setVanishRow's own describe block above pins for
+// base_version, extended here to paragraph_versions.
+describe('setParagraphVanish — version history capture (#377)', () => {
+  let specId: string;
+  let nodeId: string;
+
+  beforeAll(async () => {
+    const lib = await pool.query<{ id: string }>(
+      `SELECT id FROM libraries WHERE name = 'Default Company Master' LIMIT 1`
+    );
+    const libraryId = lib.rows[0]!.id;
+    const spec = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ('99 99 84', 'Vanish History Test', 'arcat', $1) RETURNING id`,
+      [libraryId]
+    );
+    specId = spec.rows[0]!.id;
+    const node = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, NULL, 'pr1', 'History-tracked removable paragraph.', 1) RETURNING id`,
+      [specId]
+    );
+    nodeId = node.rows[0]!.id;
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [specId]);
+  });
+
+  it('version-history: vanish/restore both snapshot, no-op toggle still writes nothing (#377)', async () => {
+    // vanish: true — an effective change — snapshots the pre-toggle image
+    // under op 'remove', bumps content_version exactly once.
+    const versionBeforeRemove = await contentVersion(specId);
+    const removed = await setParagraphVanish(specId, nodeId, true);
+    expect(removed.status).toBe('updated');
+
+    const afterRemove = await historyRowsFor(pool, nodeId);
+    expect(afterRemove).toHaveLength(1);
+    expect(afterRemove[0]).toMatchObject({
+      text: 'History-tracked removable paragraph.',
+      node_type: 'pr1',
+      op: 'remove',
+      spec_id: specId,
+      content_version: versionBeforeRemove + 1,
+    });
+    expect(afterRemove[0]?.payload).toBeNull();
+
+    // vanish: false — another effective change — snapshots the pre-toggle
+    // (still-vanished) image under op 'restore'.
+    const versionBeforeRestore = await contentVersion(specId);
+    const restored = await setParagraphVanish(specId, nodeId, false);
+    expect(restored.status).toBe('updated');
+
+    const afterRestore = await historyRowsFor(pool, nodeId);
+    expect(afterRestore).toHaveLength(2);
+    expect(afterRestore[1]).toMatchObject({
+      text: 'History-tracked removable paragraph.',
+      node_type: 'pr1',
+      op: 'restore',
+      spec_id: specId,
+      content_version: versionBeforeRestore + 1,
+    });
+    expect(afterRestore[1]?.payload).toBeNull();
+
+    // A no-op toggle (already restored, asking for false again) writes zero
+    // new paragraph_versions rows and does not bump content_version.
+    const versionBeforeNoop = await contentVersion(specId);
+    const noop = await setParagraphVanish(specId, nodeId, false);
+    expect(noop.status).toBe('updated');
+
+    const afterNoop = await historyRowsFor(pool, nodeId);
+    expect(afterNoop).toHaveLength(2); // unchanged — no third row
+    expect(await contentVersion(specId)).toBe(versionBeforeNoop); // unchanged
+  });
+
+  it('stamps the resolved actorLabel on the snapshot as a real users row', async () => {
+    const actorLabel = 'ph-actor-paragraph-vanish-test';
+    const result = await setParagraphVanish(specId, nodeId, true, actorLabel);
+    expect(result.status).toBe('updated');
+
+    const joined = await pool.query<{ label: string }>(
+      `SELECT u.label FROM paragraph_versions v
+       JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1
+       ORDER BY v.version DESC LIMIT 1`,
+      [nodeId]
+    );
+    expect(joined.rows[0]?.label).toBe(actorLabel);
+
+    await pool.query('DELETE FROM users WHERE label = $1', [actorLabel]);
+    await setParagraphVanish(specId, nodeId, false); // restore for isolation
+  });
+
+  it('falls back to SYSTEM_ACTOR_LABEL when no actorLabel is supplied', async () => {
+    const result = await setParagraphVanish(specId, nodeId, true);
+    expect(result.status).toBe('updated');
+
+    const joined = await pool.query<{ label: string }>(
+      `SELECT u.label FROM paragraph_versions v
+       JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1
+       ORDER BY v.version DESC LIMIT 1`,
+      [nodeId]
+    );
+    expect(joined.rows[0]?.label).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

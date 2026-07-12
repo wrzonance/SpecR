@@ -16,8 +16,10 @@ import { checkRegexPatterns } from '../../lib/regex-safety.js';
 import { classify } from '../../conventions/index.js';
 import { assertSpecWritable } from './edit-gate.js';
 import { bumpSpecContentVersion } from './content-version.js';
+import { recordParagraphHistory, resolveHistoryContext } from './paragraph-history.js';
 import { SourceFactsSchema } from '../../ast/index.js';
 import type { PoolClient } from 'pg';
+import type { ParagraphHistoryContext } from './paragraph-history.js';
 import type { ConventionRules, Editability } from '../../ast/index.js';
 import type { ClassifyResult } from '../../conventions/index.js';
 
@@ -273,7 +275,8 @@ async function insertNoteSibling(
   specId: string,
   anchorId: string,
   index: number,
-  text: string
+  text: string,
+  historyContext: ParagraphHistoryContext
 ): Promise<string> {
   await client.query(
     `UPDATE paragraphs SET position = position + 1
@@ -288,6 +291,21 @@ async function insertNoteSibling(
   );
   const row = inserted.rows[0];
   if (!row) throw new DatabaseError('acceptCommentAsNote: insert returned no row');
+  // Snapshot the created note's write-history (#377, ADR-052 D1) BEFORE the
+  // content_version bump below, mirroring insertSiblingRow's runInsert order.
+  await recordParagraphHistory(client, {
+    paragraphId: row.id,
+    specId,
+    // paragraphs.base_version DEFAULTs to 1 (migration 003) — a freshly
+    // inserted row's very first snapshot is always version 1, no read needed.
+    version: 1,
+    text,
+    nodeType: 'note',
+    op: 'accept-note',
+    contentVersion: historyContext.contentVersion,
+    userId: historyContext.userId,
+    payload: { kind: 'accept-note', anchorNodeId: anchorId, commentIndex: index },
+  });
   // Materializing a note mutates the tree — bump content_version so project-copy
   // clean/edited detection (which keys on it) sees the change (mirrors
   // updateParagraphText). The idempotent repeat path rolls back, so it never reaches here.
@@ -299,7 +317,8 @@ async function runAccept(
   client: PoolClient,
   specId: string,
   nodeId: string,
-  index: number
+  index: number,
+  actorLabel?: string
 ): Promise<AcceptNoteOutcome> {
   // Ownership gate (non-locking) BEFORE the fast path: a wrong (specId, nodeId)
   // pair must surface as not-found/wrong-spec, never an 'already-accepted' +
@@ -329,7 +348,8 @@ async function runAccept(
   // must take the spec lock first, then the paragraph lock; inverting it here
   // would let a concurrent paragraph PATCH and accept-as-note deadlock holding
   // one lock each.
-  await assertSpecWritable(client, specId);
+  // The returned contentVersion is the pre-bump generation this write belongs to.
+  const gate = await assertSpecWritable(client, specId);
 
   const anchorRes = await client.query<AnchorRow>(
     `SELECT spec_id, parent_id, position, source_facts FROM paragraphs WHERE id = $1 FOR UPDATE`,
@@ -345,22 +365,42 @@ async function runAccept(
   const existing = await findExistingNote(client, anchor.parent_id, nodeId, index);
   if (existing) return { status: 'already-accepted', noteId: existing };
 
+  const historyContext = await resolveHistoryContext(client, gate.contentVersion, actorLabel);
   // Persist the canonical spec_id (anchor.spec_id, lowercase from Postgres), not the
   // raw caller-supplied specId which may be uppercase — otherwise the new note row
   // carries a differently-cased spec_id than its siblings (CodeRabbit, data integrity).
-  const noteId = await insertNoteSibling(client, anchor, anchor.spec_id, nodeId, index, text);
+  const noteId = await insertNoteSibling(
+    client,
+    anchor,
+    anchor.spec_id,
+    nodeId,
+    index,
+    text,
+    historyContext
+  );
   return { status: 'created', noteId };
 }
 
+/**
+ * Materialize a source-document review comment as a standing editorial
+ * `note` sibling immediately after its anchor paragraph (ADR-022). Passes the
+ * composed edit gate (ADR-018) and snapshots the created note's write-history
+ * (#377, ADR-052 D1) under op `'accept-note'`, attributed to `actorLabel`
+ * (falls back to the SYSTEM_ACTOR_LABEL sentinel, paragraph-history.ts, when
+ * omitted). Idempotent by provenance: a repeat accept of the same
+ * (anchor, index) returns the existing note's id and writes nothing — no gate
+ * check, no history row.
+ */
 export async function acceptCommentAsNote(
   specId: string,
   nodeId: string,
-  index: number
+  index: number,
+  actorLabel?: string
 ): Promise<AcceptNoteOutcome> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const outcome = await runAccept(client, specId, nodeId, index);
+    const outcome = await runAccept(client, specId, nodeId, index, actorLabel);
     await client.query(outcome.status === 'created' ? 'COMMIT' : 'ROLLBACK');
     return outcome;
   } catch (err) {

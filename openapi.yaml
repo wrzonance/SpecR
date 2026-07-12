@@ -455,6 +455,8 @@ paths:
                   description: >
                     Optional optimistic-concurrency precondition — the spec
                     `contentVersion` the caller read. Stale → 409.
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '201':
           description: Created paragraph node
@@ -519,6 +521,8 @@ paths:
                   description: >
                     Optional optimistic-concurrency precondition — the spec
                     `contentVersion` the caller read. Stale → 409.
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -641,6 +645,8 @@ paths:
                   type: boolean
                   description: >
                     true to remove (set vanish), false to restore (clear vanish).
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -818,6 +824,18 @@ paths:
             type: integer
             minimum: 0
           description: Zero-based index into the anchor's source_facts.comments.
+      requestBody:
+        required: false
+        description: >
+          Optional (#377) — the route was bodyless pre-#377 and a truly absent
+          body still resolves as if `{}` were sent (byte-identical behavior).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '201':
           description: Note node created
@@ -4824,6 +4842,19 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
 
   schemas:
+    # ── Shared field schemas ───────────────────────────────────────────────────
+
+    ActorLabel:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: '[\s\S]*\S[\s\S]*'
+      description: >
+        Optional caller identity attributed to a paragraph-history write (#377);
+        omitted falls back to a system sentinel. Resolves to a users.label and
+        shares its contract: trimmed before resolution, whitespace-only rejected,
+        and the 1-200 length bounds apply to the trimmed value.
+
     # ── Envelope shapes ────────────────────────────────────────────────────────
 
     SuccessResponse:
@@ -6259,6 +6290,8 @@ components:
           description: >
             Optional optimistic-concurrency precondition (ADR-018) — the spec
             `contentVersion` the redline was diffed against. Stale → 409.
+        actorLabel:
+          $ref: '#/components/schemas/ActorLabel'
 
     LockState:
       type: object

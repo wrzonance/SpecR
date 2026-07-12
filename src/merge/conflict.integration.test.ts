@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { describe, it, expect, afterAll } from 'vitest';
-import { pool } from '../db/index.js';
+import { pool, lazyHistoryContext } from '../db/index.js';
+import type { ParagraphHistoryContext } from '../db/index.js';
 import { applyAccepted, InvalidAcceptedChangeError } from './conflict.js';
+import { applyMerge } from './apply-merge.js';
 import type { DiffResult } from './types.js';
 
-// Boundary tests for applyAccepted (#374's added/deleted merge-op support): the
-// public surface conflict.ts exposes. Internals (applyTextChange, applyAddedChange,
-// applyDeletedChange, sortedAcceptedAdded, describeInsertFailure, ...) are
-// deliberately untested directly — every invariant below is observable only
-// through applyAccepted's own inputs/outputs and the rows it leaves behind.
+// Boundary tests for applyAccepted (#374's added/deleted merge-op support) and,
+// for the write-history lockstep invariants (#377, ADR-052 D1), applyMerge — the
+// public surfaces conflict.ts and apply-merge.ts expose. Internals
+// (applyTextChange, applyAddedChange, applyDeletedChange, sortedAcceptedAdded,
+// describeInsertFailure, ...) are deliberately untested directly — every
+// invariant below is observable only through applyAccepted/applyMerge's own
+// inputs/outputs and the rows they leave behind.
 
 const PR1_TEXT = 'Original body text.';
 const PR1_SECOND_TEXT = 'Second body text.';
@@ -87,6 +91,75 @@ async function runInTransaction<T>(fn: (client: PoolClient) => Promise<T>): Prom
   }
 }
 
+/** Every applyAccepted call site in this file needs a lazy
+ *  ParagraphHistoryContext resolver (#377, ADR-052 D1) — real callers
+ *  (apply-merge.ts) build one exactly once per outer write, immediately after
+ *  the gate succeeds, via lazyHistoryContext. These tests bypass the gate
+ *  entirely (they call applyAccepted directly, not applyMerge), so there is
+ *  no real pre-bump content_version to resolve against; the exact number is
+ *  irrelevant to what this file's applyAccepted-level tests assert
+ *  (op/uuid/rejection-count/idempotency), so 0 is used uniformly. Tests that
+ *  DO care about the real specs.content_version lockstep go through
+ *  applyMerge instead (see the 'write-history lockstep' describe block below). */
+async function runApplyAccepted<T>(
+  fn: (client: PoolClient, resolveCtx: () => Promise<ParagraphHistoryContext>) => Promise<T>
+): Promise<T> {
+  return runInTransaction(async (client) => {
+    return fn(client, lazyHistoryContext(client, 0, undefined));
+  });
+}
+
+async function contentVersion(specId: string): Promise<number> {
+  const res = await pool.query<{ content_version: number }>(
+    'SELECT content_version FROM specs WHERE id = $1',
+    [specId]
+  );
+  return res.rows[0]?.content_version ?? -1;
+}
+
+/** True if `label` has ever been resolved through resolveOrCreateUserByLabel
+ *  (a row exists in `users`). Used to prove a no-effective-write merge never
+ *  triggers the actor upsert (#377 follow-up). */
+async function userExists(label: string): Promise<boolean> {
+  const res = await pool.query('SELECT 1 FROM users WHERE label = $1', [label]);
+  return res.rowCount !== null && res.rowCount > 0;
+}
+
+interface HistoryRow {
+  readonly version: number;
+  readonly text: string;
+  readonly nodeType: string;
+  readonly op: string;
+  readonly specId: string;
+  readonly contentVersion: number | null;
+  readonly payload: unknown;
+}
+
+async function historyRowsFor(paragraphId: string): Promise<readonly HistoryRow[]> {
+  const res = await pool.query<{
+    version: number;
+    text: string;
+    node_type: string;
+    op: string;
+    spec_id: string;
+    content_version: number | null;
+    payload: unknown;
+  }>(
+    `SELECT version, text, node_type, op, spec_id, content_version, payload
+     FROM paragraph_versions WHERE paragraph_id = $1 ORDER BY version`,
+    [paragraphId]
+  );
+  return res.rows.map((r) => ({
+    version: r.version,
+    text: r.text,
+    nodeType: r.node_type,
+    op: r.op,
+    specId: r.spec_id,
+    contentVersion: r.content_version,
+    payload: r.payload,
+  }));
+}
+
 async function paragraphRow(id: string): Promise<{
   readonly exists: boolean;
   readonly vanish: boolean;
@@ -130,7 +203,7 @@ describe('applyAccepted — validation (#374)', () => {
     const unknown = randomUUID();
 
     await expect(
-      runInTransaction((client) => applyAccepted(specId, [unknown], diff, client))
+      runApplyAccepted((client, ctx) => applyAccepted(specId, [unknown], diff, client, ctx))
     ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
 
     const row = await paragraphRow(pr1Id);
@@ -145,8 +218,8 @@ describe('applyAccepted — validation (#374)', () => {
     const { specId, pr1Id } = await createFixture();
     const diff = diffWith({ deleted: [pr1Id] });
 
-    const result = await runInTransaction((client) =>
-      applyAccepted(specId, [pr1Id.toUpperCase()], diff, client)
+    const result = await runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, [pr1Id.toUpperCase()], diff, client, ctx)
     );
 
     expect(result).toEqual({ applied: 1, rejected: 0 });
@@ -162,7 +235,9 @@ describe('applyAccepted — validation (#374)', () => {
       added: [{ uuid: addedUuid, text: 'New paragraph', index: 0, afterUuid: articleId }],
     });
 
-    const result = await runInTransaction((client) => applyAccepted(specId, [pr1Id], diff, client));
+    const result = await runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, [pr1Id], diff, client, ctx)
+    );
 
     expect(result).toEqual({ applied: 1, rejected: 2 });
   });
@@ -181,7 +256,9 @@ describe('applyAccepted — atomicity', () => {
     });
 
     await expect(
-      runInTransaction((client) => applyAccepted(specId, [pr1Id, orphanUuid], diff, client))
+      runApplyAccepted((client, ctx) =>
+        applyAccepted(specId, [pr1Id, orphanUuid], diff, client, ctx)
+      )
     ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
 
     const row = await paragraphRow(pr1Id);
@@ -199,7 +276,7 @@ describe('applyAccepted — added-op apply', () => {
     });
 
     await expect(
-      runInTransaction((client) => applyAccepted(specId, [orphanUuid], diff, client))
+      runApplyAccepted((client, ctx) => applyAccepted(specId, [orphanUuid], diff, client, ctx))
     ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
 
     expect((await paragraphRow(orphanUuid)).exists).toBe(false);
@@ -219,7 +296,9 @@ describe('applyAccepted — added-op apply', () => {
     // diff.index, not accept-array order.
     const accept = [uuidLater, uuidEarlier];
 
-    const result = await runInTransaction((client) => applyAccepted(specId, accept, diff, client));
+    const result = await runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, accept, diff, client, ctx)
+    );
 
     expect(result).toEqual({ applied: 2, rejected: 0 });
     const anchorPos = (await paragraphRow(pr1Id)).position;
@@ -252,7 +331,7 @@ describe('applyAccepted — added-op apply', () => {
     });
 
     await expect(
-      runInTransaction((client) => applyAccepted(specId, [addedUuid], diff, client))
+      runApplyAccepted((client, ctx) => applyAccepted(specId, [addedUuid], diff, client, ctx))
     ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
 
     expect((await paragraphRow(addedUuid)).exists).toBe(false);
@@ -274,7 +353,7 @@ describe('applyAccepted — added-op apply', () => {
     });
 
     await expect(
-      runInTransaction((client) => applyAccepted(specId, [cellUuid], diff, client))
+      runApplyAccepted((client, ctx) => applyAccepted(specId, [cellUuid], diff, client, ctx))
     ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
 
     expect((await paragraphRow(cellUuid)).exists).toBe(false);
@@ -291,7 +370,9 @@ describe('applyAccepted — added-op apply', () => {
     });
 
     await expect(
-      runInTransaction((client) => applyAccepted(target.specId, [other.pr1Id], diff, client))
+      runApplyAccepted((client, ctx) =>
+        applyAccepted(target.specId, [other.pr1Id], diff, client, ctx)
+      )
     ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
   });
 
@@ -304,7 +385,7 @@ describe('applyAccepted — added-op apply', () => {
     });
 
     await expect(
-      runInTransaction((client) => applyAccepted(specId, [pr1Id], diff, client))
+      runApplyAccepted((client, ctx) => applyAccepted(specId, [pr1Id], diff, client, ctx))
     ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
     // the existing row is untouched
     expect((await paragraphRow(pr1Id)).text).toBe(PR1_TEXT);
@@ -323,8 +404,8 @@ describe('applyAccepted — split / re-submitted added-op accept (#374)', () => 
       ],
     });
 
-    const first = await runInTransaction((c) => applyAccepted(specId, [uuidA], diff, c));
-    const second = await runInTransaction((c) => applyAccepted(specId, [uuidB], diff, c));
+    const first = await runApplyAccepted((c, ctx) => applyAccepted(specId, [uuidA], diff, c, ctx));
+    const second = await runApplyAccepted((c, ctx) => applyAccepted(specId, [uuidB], diff, c, ctx));
 
     expect(first).toEqual({ applied: 1, rejected: 1 });
     expect(second).toEqual({ applied: 1, rejected: 1 });
@@ -346,8 +427,10 @@ describe('applyAccepted — split / re-submitted added-op accept (#374)', () => 
       ],
     });
 
-    const first = await runInTransaction((c) => applyAccepted(specId, [uuidA], diff, c));
-    const second = await runInTransaction((c) => applyAccepted(specId, [uuidA, uuidB], diff, c));
+    const first = await runApplyAccepted((c, ctx) => applyAccepted(specId, [uuidA], diff, c, ctx));
+    const second = await runApplyAccepted((c, ctx) =>
+      applyAccepted(specId, [uuidA, uuidB], diff, c, ctx)
+    );
 
     expect(first).toEqual({ applied: 1, rejected: 1 });
     // A is an idempotent no-op (exists), B inserts → applied 1, rejected 0.
@@ -355,6 +438,10 @@ describe('applyAccepted — split / re-submitted added-op accept (#374)', () => 
     const anchorPos = (await paragraphRow(pr1Id)).position;
     expect((await paragraphRow(uuidA)).position).toBe(anchorPos + 1);
     expect((await paragraphRow(uuidB)).position).toBe(anchorPos + 2);
+    // A's re-submitted accept resolves to 'exists' (a no-op) — it must not mint
+    // a second paragraph_versions row on top of the one its first, real
+    // creation already wrote (#377).
+    expect(await paragraphVersions(uuidA)).toHaveLength(1);
   });
 });
 
@@ -363,7 +450,9 @@ describe('applyAccepted — deleted-op apply', () => {
     const { specId, pr1Id } = await createFixture();
     const diff = diffWith({ deleted: [pr1Id] });
 
-    const result = await runInTransaction((client) => applyAccepted(specId, [pr1Id], diff, client));
+    const result = await runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, [pr1Id], diff, client, ctx)
+    );
 
     expect(result).toEqual({ applied: 1, rejected: 0 });
     const row = await paragraphRow(pr1Id);
@@ -380,11 +469,208 @@ describe('applyAccepted — deleted-op apply', () => {
     const diff = diffWith({ deleted: [articleId] });
 
     await expect(
-      runInTransaction((client) => applyAccepted(specId, [articleId], diff, client))
+      runApplyAccepted((client, ctx) => applyAccepted(specId, [articleId], diff, client, ctx))
     ).rejects.toBeInstanceOf(InvalidAcceptedChangeError);
 
     const row = await paragraphRow(articleId);
     expect(row.vanish).toBe(false);
     expect(await paragraphVersions(articleId)).toEqual([]);
+  });
+});
+
+// applyAccepted's write-history capture (#377, ADR-052 D1): every apply
+// strategy (text-change, deleted-op, added-op) snapshots a paragraph_versions
+// row under op 'merge', tagged with a payload naming which diff bucket it
+// resolved. Prior to this, applyAddedChange's 'created' path recorded no
+// history at all — the gap #374 left open, closed here.
+describe('applyAccepted — write-history capture (#377)', () => {
+  it('merge: added-op creation now snapshots a paragraph_versions row (#377)', async () => {
+    const { specId, pr1Id } = await createFixture();
+    const addedUuid = randomUUID();
+    const diff = diffWith({
+      added: [{ uuid: addedUuid, text: 'New sibling paragraph', index: 0, afterUuid: pr1Id }],
+    });
+
+    const result = await runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, [addedUuid], diff, client, ctx)
+    );
+
+    expect(result).toEqual({ applied: 1, rejected: 0 });
+    const rows = await historyRowsFor(addedUuid);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      version: 1,
+      text: 'New sibling paragraph',
+      nodeType: 'pr1',
+      op: 'merge',
+      specId,
+    });
+    expect(rows[0]?.payload).toEqual({ kind: 'merge', diffKind: 'added' });
+  });
+
+  it('tags a modified-op snapshot payload diffKind "modified", a conflict-op "conflict"', async () => {
+    const { specId, pr1Id, pr1SecondId } = await createFixture();
+    const diff = diffWith({
+      modified: [{ uuid: pr1Id, base: PR1_TEXT, theirs: 'Modified via /diff', ours: PR1_TEXT }],
+      conflicts: [
+        {
+          uuid: pr1SecondId,
+          base: PR1_SECOND_TEXT,
+          theirs: 'Resolved conflict',
+          ours: PR1_SECOND_TEXT,
+        },
+      ],
+    });
+
+    const result = await runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, [pr1Id, pr1SecondId], diff, client, ctx)
+    );
+
+    expect(result).toEqual({ applied: 2, rejected: 0 });
+    const modifiedRows = await historyRowsFor(pr1Id);
+    expect(modifiedRows[0]?.payload).toEqual({ kind: 'merge', diffKind: 'modified' });
+    const conflictRows = await historyRowsFor(pr1SecondId);
+    expect(conflictRows[0]?.payload).toEqual({ kind: 'merge', diffKind: 'conflict' });
+  });
+});
+
+// applyMerge's write-history lockstep (#377, ADR-052 D1): unlike the
+// applyAccepted-level tests above (which resolve an arbitrary ctx to isolate
+// applyAccepted's own behavior), these go through the full engine — the real
+// composed edit gate + resolveHistoryContext + bumpSpecContentVersion — so the
+// content_version stamped on every row can be checked against the real,
+// post-commit specs.content_version.
+describe('applyMerge — write-history lockstep (#377)', () => {
+  it('every applied change in one merge call stamps content_version == specs.content_version post-commit, one row per paragraph', async () => {
+    const { specId, pr1Id, pr1SecondId } = await createFixture();
+    const addedUuid = randomUUID();
+    const diff = diffWith({
+      deleted: [pr1Id],
+      added: [{ uuid: addedUuid, text: 'Lockstep addition', index: 0, afterUuid: pr1SecondId }],
+    });
+
+    const before = await contentVersion(specId);
+    const outcome = await applyMerge(specId, [pr1Id, addedUuid], diff, undefined);
+    expect(outcome.kind).toBe('applied');
+    if (outcome.kind === 'applied') expect(outcome).toMatchObject({ applied: 2, rejected: 0 });
+
+    // ONE outer write → content_version advances exactly once, no matter how
+    // many paragraph_versions rows it produced.
+    const after = await contentVersion(specId);
+    expect(after).toBe(before + 1);
+
+    const deletedRows = await historyRowsFor(pr1Id);
+    expect(deletedRows).toHaveLength(1);
+    expect(deletedRows[0]?.contentVersion).toBe(after);
+
+    const addedRows = await historyRowsFor(addedUuid);
+    expect(addedRows).toHaveLength(1);
+    expect(addedRows[0]?.contentVersion).toBe(after);
+  });
+
+  it('a no-op merge apply (theirs already matches current text) writes zero paragraph_versions rows and does not bump content_version', async () => {
+    const { specId, pr1SecondId } = await createFixture();
+    const diff = diffWith({
+      modified: [
+        {
+          uuid: pr1SecondId,
+          base: PR1_SECOND_TEXT,
+          theirs: PR1_SECOND_TEXT,
+          ours: PR1_SECOND_TEXT,
+        },
+      ],
+    });
+
+    const before = await contentVersion(specId);
+    const outcome = await applyMerge(specId, [pr1SecondId], diff, undefined);
+
+    expect(outcome).toMatchObject({ kind: 'applied', applied: 0, rejected: 0 });
+    expect(await contentVersion(specId)).toBe(before); // no effective write → no bump
+    expect(await historyRowsFor(pr1SecondId)).toHaveLength(0);
+  });
+
+  it('a re-submitted added-op accept (exists — already materialized) writes zero additional rows', async () => {
+    const { specId, pr1Id } = await createFixture();
+    const addedUuid = randomUUID();
+    const diff = diffWith({
+      added: [{ uuid: addedUuid, text: 'Idempotent addition', index: 0, afterUuid: pr1Id }],
+    });
+
+    const first = await applyMerge(specId, [addedUuid], diff, undefined);
+    expect(first).toMatchObject({ kind: 'applied', applied: 1 });
+    expect(await historyRowsFor(addedUuid)).toHaveLength(1);
+
+    const before = await contentVersion(specId);
+    const second = await applyMerge(specId, [addedUuid], diff, undefined);
+
+    expect(second).toMatchObject({ kind: 'applied', applied: 0, rejected: 0 });
+    expect(await contentVersion(specId)).toBe(before); // no-op re-submit → no bump
+    expect(await historyRowsFor(addedUuid)).toHaveLength(1); // still exactly one row
+  });
+
+  it('a re-submitted deleted-op accept (already vanished) writes zero additional rows', async () => {
+    const { specId, pr1Id } = await createFixture();
+    const diff = diffWith({ deleted: [pr1Id] });
+
+    const first = await applyMerge(specId, [pr1Id], diff, undefined);
+    expect(first).toMatchObject({ kind: 'applied', applied: 1 });
+    expect(await historyRowsFor(pr1Id)).toHaveLength(1);
+
+    const before = await contentVersion(specId);
+    const second = await applyMerge(specId, [pr1Id], diff, undefined);
+
+    expect(second).toMatchObject({ kind: 'applied', applied: 0, rejected: 0 });
+    expect(await contentVersion(specId)).toBe(before); // no-op re-submit → no bump
+    expect(await historyRowsFor(pr1Id)).toHaveLength(1); // still exactly one row
+  });
+});
+
+// applyMerge must not resolve (and thereby upsert) an actor's users row until
+// it is known the merge makes an effective write — mirroring applyVanish/
+// runInsert/runAccept, which all defer resolveHistoryContext past their own
+// no-op guard. Resolving eagerly, right after the gate, would mint a users
+// row for actorLabel even when nothing in the accept array actually changes
+// anything (code review finding on #377, ADR-052 D1).
+describe('applyMerge — defers actor resolution until an effective write (#377 follow-up)', () => {
+  it('accept=[] resolves no actor and creates no users row', async () => {
+    const { specId } = await createFixture();
+    const actorLabel = `unused-actor-${randomUUID()}`;
+    const diff = diffWith({});
+
+    const outcome = await applyMerge(specId, [], diff, undefined, actorLabel);
+
+    expect(outcome).toMatchObject({ kind: 'applied', applied: 0, rejected: 0 });
+    expect(await userExists(actorLabel)).toBe(false);
+  });
+
+  it('a merge where every accepted change is a no-op creates no users row for a fresh actor', async () => {
+    const { specId, pr1SecondId } = await createFixture();
+    const actorLabel = `unused-actor-${randomUUID()}`;
+    const diff = diffWith({
+      modified: [
+        {
+          uuid: pr1SecondId,
+          base: PR1_SECOND_TEXT,
+          theirs: PR1_SECOND_TEXT,
+          ours: PR1_SECOND_TEXT,
+        },
+      ],
+    });
+
+    const outcome = await applyMerge(specId, [pr1SecondId], diff, undefined, actorLabel);
+
+    expect(outcome).toMatchObject({ kind: 'applied', applied: 0, rejected: 0 });
+    expect(await userExists(actorLabel)).toBe(false);
+  });
+
+  it('a merge with a real effective write still resolves and attributes the actor', async () => {
+    const { specId, pr1Id } = await createFixture();
+    const actorLabel = `real-actor-${randomUUID()}`;
+    const diff = diffWith({ deleted: [pr1Id] });
+
+    const outcome = await applyMerge(specId, [pr1Id], diff, undefined, actorLabel);
+
+    expect(outcome).toMatchObject({ kind: 'applied', applied: 1, rejected: 0 });
+    expect(await userExists(actorLabel)).toBe(true);
   });
 });

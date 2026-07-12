@@ -12,6 +12,7 @@ import {
   UpdateParagraphBodySchema,
   PatchRemovalBodySchema,
   InsertParagraphBodySchema,
+  ActorLabelSchema,
 } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
@@ -47,9 +48,9 @@ export async function handleUpdateParagraph(args: unknown): Promise<ToolResult> 
       `invalid update_paragraph input: ${parsed.error.issues.map((i) => i.message).join('; ')}`
     );
   }
-  const { specId, nodeId, text, expectedVersion } = parsed.data;
+  const { specId, nodeId, text, expectedVersion, actorLabel } = parsed.data;
   try {
-    const result = await updateParagraphText(specId, nodeId, text, expectedVersion);
+    const result = await updateParagraphText(specId, nodeId, text, expectedVersion, actorLabel);
     if (result.status === 'not-found') return toolError(`paragraph not found: id=${nodeId}`);
     if (result.status === 'wrong-spec') return toolError('paragraph does not belong to this spec');
     return ok(result.node);
@@ -113,10 +114,10 @@ export async function handleRemoveParagraph(args: unknown): Promise<ToolResult> 
       'invalid remove_paragraph input: specId, nodeId (UUIDs) and removed (boolean) are required'
     );
   }
-  const { specId, nodeId, removed } = parsed.data;
+  const { specId, nodeId, removed, actorLabel } = parsed.data;
   try {
     // Reversible soft removal (#251, ADR-022): sets meta.vanish, keeps the row + subtree.
-    const result = await setParagraphVanish(specId, nodeId, removed);
+    const result = await setParagraphVanish(specId, nodeId, removed, actorLabel);
     if (result.status === 'not-found') return toolError(`paragraph not found: id=${nodeId}`);
     if (result.status === 'wrong-spec') return toolError('paragraph does not belong to this spec');
     if (result.status === 'not-removable') {
@@ -141,6 +142,9 @@ export const AcceptCommentShape = {
     .int()
     .min(0)
     .describe('Zero-based index into the anchor paragraph’s source_facts.comments'),
+  actorLabel: ActorLabelSchema.optional().describe(
+    'Caller identity attributed to the resulting note in paragraph history; omitted falls back to a system sentinel'
+  ),
 };
 const AcceptCommentArgs = z.object(AcceptCommentShape);
 
@@ -151,11 +155,11 @@ export async function handleAcceptCommentAsNote(args: unknown): Promise<ToolResu
       'invalid accept_comment_as_note input: specId, nodeId (UUIDs) and index (integer ≥ 0) are required'
     );
   }
-  const { specId, nodeId, index } = parsed.data;
+  const { specId, nodeId, index, actorLabel } = parsed.data;
   try {
     // ADR-022 D4: materializes the margin comment as a note sibling. Idempotent —
     // a repeat returns the existing note's id rather than minting a duplicate.
-    const outcome = await acceptCommentAsNote(specId, nodeId, index);
+    const outcome = await acceptCommentAsNote(specId, nodeId, index, actorLabel);
     if (outcome.status === 'not-found') return toolError(`paragraph not found: id=${nodeId}`);
     if (outcome.status === 'wrong-spec') return toolError('paragraph does not belong to this spec');
     if (outcome.status === 'no-comment') return toolError(`no comment at index ${index}`);

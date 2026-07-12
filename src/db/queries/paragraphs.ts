@@ -1,6 +1,7 @@
 import { pool, DatabaseError } from '../index.js';
 import { assertSpecWritable } from './edit-gate.js';
 import { bumpSpecContentVersion } from './content-version.js';
+import { recordParagraphHistory, resolveHistoryContext } from './paragraph-history.js';
 import type { Pool, PoolClient } from 'pg';
 import { NodeTypeSchema, parseSourceFacts, deriveArticleRole } from '../../ast/index.js';
 import type {
@@ -298,21 +299,24 @@ export async function fetchSubtreeNode(
  * so the next optimistic precondition sees the change.
  */
 /** In-transaction body of {@link updateParagraphText}: gate → ownership check →
- *  write paragraph + bump specs.content_version. On a non-'updated' outcome the
- *  caller rolls back; on 'updated' the caller commits. */
+ *  write paragraph → snapshot the post-write text (#377, ADR-052 D1) → bump
+ *  specs.content_version. On a non-'updated' outcome the caller rolls back; on
+ *  'updated' the caller commits. */
 async function applyParagraphUpdate(
   client: PoolClient,
   specId: string,
   nodeId: string,
   text: string,
-  expectedVersion?: number
+  expectedVersion?: number,
+  actorLabel?: string
 ): Promise<UpdateParagraphResult> {
   // Gate first: row-locks the spec and validates lifecycle/external/version
-  // before any paragraph write. Throws typed errors (forbidden / stale).
-  await assertSpecWritable(client, specId, expectedVersion);
+  // before any paragraph write. Throws typed errors (forbidden / stale). The
+  // returned contentVersion is the pre-bump generation this write belongs to.
+  const gate = await assertSpecWritable(client, specId, expectedVersion);
 
-  const owner = await client.query<{ spec_id: string }>(
-    `SELECT spec_id FROM paragraphs WHERE id = $1 FOR UPDATE`,
+  const owner = await client.query<{ spec_id: string; node_type: string; base_version: number }>(
+    `SELECT spec_id, node_type, base_version FROM paragraphs WHERE id = $1 FOR UPDATE`,
     [nodeId]
   );
   const ownerRow = owner.rows[0];
@@ -322,11 +326,25 @@ async function applyParagraphUpdate(
   // normalize both sides before comparing, else an uppercase specId false-403s.
   if (ownerRow.spec_id.toLowerCase() !== specId.toLowerCase()) return { status: 'wrong-spec' };
 
+  const nextVersion = ownerRow.base_version + 1;
   await client.query(
-    `UPDATE paragraphs SET text = $2, base_version = base_version + 1, updated_at = now()
-     WHERE id = $1`,
-    [nodeId, text]
+    `UPDATE paragraphs SET text = $2, base_version = $3, updated_at = now() WHERE id = $1`,
+    [nodeId, text, nextVersion]
   );
+
+  const historyContext = await resolveHistoryContext(client, gate.contentVersion, actorLabel);
+  await recordParagraphHistory(client, {
+    paragraphId: nodeId,
+    specId,
+    version: nextVersion,
+    text,
+    nodeType: ownerRow.node_type,
+    op: 'edit',
+    contentVersion: historyContext.contentVersion,
+    userId: historyContext.userId,
+    payload: null,
+  });
+
   await bumpSpecContentVersion(client, specId);
 
   const node = await fetchSubtreeNode(client, specId, nodeId);
@@ -338,12 +356,20 @@ export async function updateParagraphText(
   specId: string,
   nodeId: string,
   text: string,
-  expectedVersion?: number
+  expectedVersion?: number,
+  actorLabel?: string
 ): Promise<UpdateParagraphResult> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const result = await applyParagraphUpdate(client, specId, nodeId, text, expectedVersion);
+    const result = await applyParagraphUpdate(
+      client,
+      specId,
+      nodeId,
+      text,
+      expectedVersion,
+      actorLabel
+    );
     await client.query(result.status === 'updated' ? 'COMMIT' : 'ROLLBACK');
     return result;
   } catch (err) {

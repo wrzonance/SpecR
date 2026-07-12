@@ -52,6 +52,18 @@ export function loadSpec(): Promise<OpenApiDoc> {
   return specPromise;
 }
 
+// Un-dereferenced parse: `$ref` pointers stay as literal `{ $ref: '#/...' }` strings rather
+// than being resolved into the full (and, for recursive shapes like SpecNode, self-referential)
+// target tree. Callers that only need to assert pointer identity — e.g. "this operation's
+// success response still targets the SpecNode component" or "this component schema's
+// `properties`/`required` set" — narrow the (deliberately untyped) result themselves, matching
+// the pattern already used for `doc.paths[...]` narrowing in create-project.integration.test.ts.
+let rawSpecPromise: Promise<unknown> | null = null;
+export function loadRawSpec(): Promise<unknown> {
+  rawSpecPromise ??= $RefParser.parse(SPEC_PATH);
+  return rawSpecPromise;
+}
+
 function getValidator(schema: AnySchemaObject): ValidateFunction {
   const cached = validators.get(schema);
   if (cached !== undefined) return cached;

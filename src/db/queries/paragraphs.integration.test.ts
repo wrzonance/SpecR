@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { pool, getParagraphWithAncestors, insertTree } from '../index.js';
+import { pool, getParagraphWithAncestors, insertTree, updateParagraphText } from '../index.js';
+import { SYSTEM_ACTOR_LABEL } from './paragraph-history.js';
 
 const SPEC_ID = 'b0000000-0000-0000-0000-000000000000';
 const PART_ID = 'b0000000-0000-0000-0000-000000000001';
@@ -243,5 +244,119 @@ describe('insertTree — source facts (#131)', () => {
       [INS_PART_ID]
     );
     expect(clean.rows[0]!.sourceFacts).toEqual({});
+  });
+});
+
+describe('updateParagraphText — version history capture (#377)', () => {
+  const HIST_SPEC_ID = 'b0000000-0000-0000-0000-00000000fe01';
+  const HIST_PAR_ID = 'b0000000-0000-0000-0000-00000000fe02';
+
+  beforeAll(async () => {
+    await pool.query(
+      `INSERT INTO specs (id, section, title, source, library_id)
+       VALUES ($1, '99 99 03', 'Version History Test', 'arcat',
+               (SELECT id FROM libraries WHERE name = 'Default Company Master'))
+       ON CONFLICT (id) DO NOTHING`,
+      [HIST_SPEC_ID]
+    );
+    await pool.query(
+      `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
+       VALUES ($1, $2, NULL, 'pr1', 'original text', 1) ON CONFLICT (id) DO NOTHING`,
+      [HIST_PAR_ID, HIST_SPEC_ID]
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [HIST_SPEC_ID]);
+  });
+
+  it('version-history: WYSIWYG blur-save now snapshots prior/new text (#377)', async () => {
+    const first = await updateParagraphText(HIST_SPEC_ID, HIST_PAR_ID, 'first blur-save text');
+    expect(first.status).toBe('updated');
+
+    const second = await updateParagraphText(HIST_SPEC_ID, HIST_PAR_ID, 'second blur-save text');
+    expect(second.status).toBe('updated');
+
+    const paragraphRow = await pool.query<{ base_version: number }>(
+      'SELECT base_version FROM paragraphs WHERE id = $1',
+      [HIST_PAR_ID]
+    );
+    // 1 (initial insert) -> 2 (first edit) -> 3 (second edit)
+    expect(paragraphRow.rows[0]!.base_version).toBe(3);
+
+    const history = await pool.query<{
+      version: number;
+      text: string;
+      op: string;
+      spec_id: string;
+      node_type: string;
+    }>(
+      `SELECT version, text, op, spec_id, node_type FROM paragraph_versions
+       WHERE paragraph_id = $1 ORDER BY version`,
+      [HIST_PAR_ID]
+    );
+
+    // Exactly one new row per write — never zero, never more than one.
+    expect(history.rows).toHaveLength(2);
+    expect(history.rows[0]).toMatchObject({
+      version: 2,
+      text: 'first blur-save text',
+      op: 'edit',
+      spec_id: HIST_SPEC_ID,
+      node_type: 'pr1',
+    });
+    expect(history.rows[1]).toMatchObject({
+      version: 3,
+      text: 'second blur-save text',
+      op: 'edit',
+      spec_id: HIST_SPEC_ID,
+      node_type: 'pr1',
+    });
+
+    // The prior snapshot (from the first edit) survives untouched once a second
+    // edit lands — a blur-save history shows both the prior and the new text.
+    expect(history.rows[0]!.text).toBe('first blur-save text');
+    expect(history.rows[1]!.text).toBe('second blur-save text');
+  });
+
+  it('stamps the resolved actorLabel on the snapshot as a real users row', async () => {
+    const actorLabel = 'ph-actor-paragraphs-test';
+    const result = await updateParagraphText(
+      HIST_SPEC_ID,
+      HIST_PAR_ID,
+      'edited by a named actor',
+      undefined,
+      actorLabel
+    );
+    expect(result.status).toBe('updated');
+
+    const joined = await pool.query<{ label: string }>(
+      `SELECT u.label FROM paragraph_versions v
+       JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1
+       ORDER BY v.version DESC LIMIT 1`,
+      [HIST_PAR_ID]
+    );
+    try {
+      expect(joined.rows[0]!.label).toBe(actorLabel);
+    } finally {
+      // Run cleanup even if the assertion throws — a leaked users row (label is
+      // UNIQUE) would fail later runs that re-claim it.
+      await pool.query('DELETE FROM users WHERE label = $1', [actorLabel]);
+    }
+  });
+
+  it('falls back to SYSTEM_ACTOR_LABEL when no actorLabel is supplied', async () => {
+    const result = await updateParagraphText(HIST_SPEC_ID, HIST_PAR_ID, 'edited by no one named');
+    expect(result.status).toBe('updated');
+
+    const joined = await pool.query<{ label: string }>(
+      `SELECT u.label FROM paragraph_versions v
+       JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1
+       ORDER BY v.version DESC LIMIT 1`,
+      [HIST_PAR_ID]
+    );
+    expect(joined.rows[0]!.label).toBe(SYSTEM_ACTOR_LABEL);
   });
 });
