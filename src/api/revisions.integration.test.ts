@@ -377,6 +377,32 @@ describe('GET /packages/:id/revisions', () => {
     expect(list.every((r) => r['parentRevisionId'] === null)).toBe(true);
   });
 
+  it('echoes a non-null parentRevisionId for a child revision in the list response (ADR-066 #389)', async () => {
+    // The other list tests only ever issue root revisions (parentRevisionId
+    // null); this pins the non-null case at the HTTP list boundary too, not
+    // just at GET /revisions/:id and the DB query layer.
+    const parentedPkg = await createPackage(p1, `List Parent ${Date.now()}`);
+    const root = await json('POST', `/packages/${parentedPkg}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 930 },
+    });
+    const rootId = (await data(root))['revisionId'] as string;
+    const child = await json('POST', `/packages/${parentedPkg}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 931 },
+      parentRevisionId: rootId,
+    });
+    const childId = (await data(child))['revisionId'] as string;
+
+    const res = await json('GET', `/packages/${parentedPkg}/revisions`);
+    expect(res.status).toBe(200);
+    const list = ((await res.json()) as { data: Array<Record<string, unknown>> }).data;
+    const rootSummary = list.find((r) => r['revisionId'] === rootId);
+    const childSummary = list.find((r) => r['revisionId'] === childId);
+    expect(rootSummary?.['parentRevisionId']).toBeNull();
+    expect(childSummary?.['parentRevisionId']).toBe(rootId);
+  });
+
   it('returns an empty array for a package that has issued nothing yet', async () => {
     const res = await json('GET', `/packages/${emptyPkg}/revisions`);
     expect(res.status).toBe(200);
