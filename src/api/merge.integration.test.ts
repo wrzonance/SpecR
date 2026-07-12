@@ -6,6 +6,7 @@ import { createSpec, insertTree, pool, SYSTEM_ACTOR_LABEL } from '../db/index.js
 import type { DiffResult } from '../merge/index.js';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
+import { historyActor } from '../test-utils/history-actor.js';
 
 const ORIGINAL_TEXT = 'Provide copper patch panels.';
 const REVISED_TEXT = 'Provide fiber patch panels.';
@@ -250,16 +251,6 @@ describe('POST /specs/:id/merge (integration)', () => {
 });
 
 describe('POST /specs/:id/merge — actorLabel attribution (#377)', () => {
-  async function historyActor(paragraphId: string, version: number): Promise<string | null> {
-    const row = await pool.query<{ label: string | null }>(
-      `SELECT u.label FROM paragraph_versions v
-       LEFT JOIN users u ON u.id = v.user_id
-       WHERE v.paragraph_id = $1 AND v.version = $2`,
-      [paragraphId, version]
-    );
-    return row.rows[0]?.label ?? null;
-  }
-
   it('a supplied actorLabel attributes the merge history row; response shape is unchanged', async () => {
     const { specId, paragraphId } = await createSpecFixture();
     const { status, body } = await postMerge(specId, {
@@ -273,7 +264,7 @@ describe('POST /specs/:id/merge — actorLabel attribution (#377)', () => {
       'applied',
       'rejected',
     ]);
-    expect(await historyActor(paragraphId, 2)).toBe('merge.bot');
+    expect(await historyActor(pool, paragraphId, 2)).toBe('merge.bot');
   });
 
   it('omitting actorLabel attributes the merge history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
@@ -283,7 +274,7 @@ describe('POST /specs/:id/merge — actorLabel attribution (#377)', () => {
       diff: diffFor(paragraphId),
     });
     expect(status).toBe(200);
-    expect(await historyActor(paragraphId, 2)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await historyActor(pool, paragraphId, 2)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });
 

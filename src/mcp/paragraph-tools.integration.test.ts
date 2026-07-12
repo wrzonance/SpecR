@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import { historyActor } from '../test-utils/history-actor.js';
 import {
   handleUpdateParagraph,
   handleRemoveParagraph,
@@ -50,17 +51,6 @@ async function insertParagraph(spec: string, nodeType: string, text: string): Pr
   const id = r.rows[0]?.id;
   if (!id) throw new Error('failed to insert test paragraph');
   return id;
-}
-
-// Resolve the actor label attributed to a paragraph's history row at a given version (#377).
-async function historyActor(paragraphId: string, version: number): Promise<string | null> {
-  const row = await pool.query<{ label: string | null }>(
-    `SELECT u.label FROM paragraph_versions v
-     LEFT JOIN users u ON u.id = v.user_id
-     WHERE v.paragraph_id = $1 AND v.version = $2`,
-    [paragraphId, version]
-  );
-  return row.rows[0]?.label ?? null;
 }
 
 beforeAll(async () => {
@@ -133,14 +123,14 @@ describe('update_paragraph MCP tool — actorLabel attribution (#377)', () => {
       actorLabel: 'mcp.bot',
     });
     expect(isToolError(res)).toBe(false);
-    expect(await historyActor(target, 2)).toBe('mcp.bot'); // base_version 1 → 2
+    expect(await historyActor(pool, target, 2)).toBe('mcp.bot'); // base_version 1 → 2
   });
 
   it('omitting actorLabel attributes the history row to the SYSTEM_ACTOR_LABEL sentinel — byte-identical to the pre-#377 path', async () => {
     const target = await insertParagraph(specId, 'pr1', 'Attribution target 2.');
     const res = await handleUpdateParagraph({ specId, nodeId: target, text: 'Updated, no actor.' });
     expect(isToolError(res)).toBe(false);
-    expect(await historyActor(target, 2)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await historyActor(pool, target, 2)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });
 
@@ -196,7 +186,7 @@ describe('insert_paragraph MCP tool — actorLabel attribution (#377)', () => {
     });
     expect(isToolError(res)).toBe(false);
     const node = parse<{ id: string }>(res);
-    expect(await historyActor(node.id, 1)).toBe('mcp.bot');
+    expect(await historyActor(pool, node.id, 1)).toBe('mcp.bot');
   });
 
   it('omitting actorLabel attributes the insert history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
@@ -207,7 +197,7 @@ describe('insert_paragraph MCP tool — actorLabel attribution (#377)', () => {
     });
     expect(isToolError(res)).toBe(false);
     const node = parse<{ id: string }>(res);
-    expect(await historyActor(node.id, 1)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await historyActor(pool, node.id, 1)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });
 
@@ -241,14 +231,14 @@ describe('remove_paragraph MCP tool — actorLabel attribution (#377)', () => {
       actorLabel: 'mcp.bot',
     });
     expect(isToolError(res)).toBe(false);
-    expect(await historyActor(target, 2)).toBe('mcp.bot'); // previousBaseVersion 1 → 2
+    expect(await historyActor(pool, target, 2)).toBe('mcp.bot'); // previousBaseVersion 1 → 2
   });
 
   it('omitting actorLabel attributes the remove history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
     const target = await insertParagraph(specId, 'pr1', 'Removable 2.');
     const res = await handleRemoveParagraph({ specId, nodeId: target, removed: true });
     expect(isToolError(res)).toBe(false);
-    expect(await historyActor(target, 2)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await historyActor(pool, target, 2)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });
 
@@ -383,7 +373,7 @@ describe('accept_comment_as_note MCP tool — actorLabel attribution (#377)', ()
     });
     expect(isToolError(res)).toBe(false);
     const noteId = parse<{ noteId: string }>(res).noteId;
-    expect(await historyActor(noteId, 1)).toBe('mcp.bot');
+    expect(await historyActor(pool, noteId, 1)).toBe('mcp.bot');
   });
 
   it('omitting actorLabel attributes the note history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
@@ -391,6 +381,6 @@ describe('accept_comment_as_note MCP tool — actorLabel attribution (#377)', ()
     const res = await handleAcceptCommentAsNote({ specId, nodeId: anchor, index: 0 });
     expect(isToolError(res)).toBe(false);
     const noteId = parse<{ noteId: string }>(res).noteId;
-    expect(await historyActor(noteId, 1)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await historyActor(pool, noteId, 1)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

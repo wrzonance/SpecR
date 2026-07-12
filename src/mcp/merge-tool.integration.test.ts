@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterAll } from 'vitest';
 import { createSpec, insertTree, pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import { historyActor } from '../test-utils/history-actor.js';
 import { handleApplyMerge } from './merge-handlers.js';
 import type { ToolResult } from './handlers.js';
 
@@ -138,16 +139,6 @@ describe('apply_merge MCP tool', () => {
 });
 
 describe('apply_merge MCP tool — actorLabel attribution (#377)', () => {
-  async function historyActor(paragraphId: string, version: number): Promise<string | null> {
-    const row = await pool.query<{ label: string | null }>(
-      `SELECT u.label FROM paragraph_versions v
-       LEFT JOIN users u ON u.id = v.user_id
-       WHERE v.paragraph_id = $1 AND v.version = $2`,
-      [paragraphId, version]
-    );
-    return row.rows[0]?.label ?? null;
-  }
-
   it('a supplied actorLabel attributes the merge history row; response shape is unchanged', async () => {
     const { specId, paragraphId } = await createSpecFixture();
     const res = await handleApplyMerge({
@@ -159,7 +150,7 @@ describe('apply_merge MCP tool — actorLabel attribution (#377)', () => {
     expect(isToolError(res)).toBe(false);
     const parsed = parse<{ applied: number; rejected: number }>(res);
     expect(Object.keys(parsed).sort((a, b) => a.localeCompare(b))).toEqual(['applied', 'rejected']);
-    expect(await historyActor(paragraphId, 2)).toBe('mcp.merge.bot');
+    expect(await historyActor(pool, paragraphId, 2)).toBe('mcp.merge.bot');
   });
 
   it('omitting actorLabel attributes the merge history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
@@ -170,6 +161,6 @@ describe('apply_merge MCP tool — actorLabel attribution (#377)', () => {
       diff: diffFor(paragraphId),
     });
     expect(isToolError(res)).toBe(false);
-    expect(await historyActor(paragraphId, 2)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await historyActor(pool, paragraphId, 2)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

@@ -4,17 +4,7 @@ import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
-
-// Resolve the actor label attributed to a paragraph's most recent history row.
-async function historyActor(paragraphId: string, version: number): Promise<string | null> {
-  const row = await pool.query<{ label: string | null }>(
-    `SELECT u.label FROM paragraph_versions v
-     LEFT JOIN users u ON u.id = v.user_id
-     WHERE v.paragraph_id = $1 AND v.version = $2`,
-    [paragraphId, version]
-  );
-  return row.rows[0]?.label ?? null;
-}
+import { historyActor } from '../test-utils/history-actor.js';
 
 // Minimal shape for recursively searching a SpecNode tree.
 interface SpecNodeLike {
@@ -392,19 +382,19 @@ describe('POST .../accept-as-note — actorLabel attribution (#377)', () => {
   it('a supplied actorLabel attributes the note history row; response shape is unchanged', async () => {
     const { status, noteId } = await acceptWithComment({ actorLabel: 'reviewer.jane' });
     expect(status).toBe(201);
-    expect(await historyActor(noteId, 1)).toBe('reviewer.jane');
+    expect(await historyActor(pool, noteId, 1)).toBe('reviewer.jane');
   });
 
   it('a bodyless request (pre-#377 contract) attributes the note history to the SYSTEM_ACTOR_LABEL sentinel', async () => {
     const { status, noteId } = await acceptWithComment();
     expect(status).toBe(201);
-    expect(await historyActor(noteId, 1)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await historyActor(pool, noteId, 1)).toBe(SYSTEM_ACTOR_LABEL);
   });
 
   it('an empty JSON body ({}) is equivalent to bodyless — SYSTEM_ACTOR_LABEL sentinel', async () => {
     const { status, noteId } = await acceptWithComment({});
     expect(status).toBe(201);
-    expect(await historyActor(noteId, 1)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await historyActor(pool, noteId, 1)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });
 
@@ -488,7 +478,7 @@ describe('PATCH .../removal — actorLabel attribution (#377)', () => {
     expect(r.status).toBe(200);
     const keys = Object.keys((r.body as { data: object }).data).sort((a, b) => a.localeCompare(b));
     expect(keys).toEqual(['children', 'id', 'meta', 'text', 'type']);
-    expect(await historyActor(target, 2)).toBe('ops.crew'); // base_version 1 → snapshot at 2
+    expect(await historyActor(pool, target, 2)).toBe('ops.crew'); // base_version 1 → snapshot at 2
   });
 
   it('omitting actorLabel attributes the remove history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
@@ -497,6 +487,6 @@ describe('PATCH .../removal — actorLabel attribution (#377)', () => {
       removed: true,
     });
     expect(r.status).toBe(200);
-    expect(await historyActor(target, 2)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await historyActor(pool, target, 2)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

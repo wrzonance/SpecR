@@ -4,6 +4,7 @@ import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import { historyActor } from '../test-utils/history-actor.js';
 
 let server: Server;
 let baseUrl: string;
@@ -138,16 +139,7 @@ describe('POST /specs/:id/paragraphs (integration)', () => {
 });
 
 describe('POST /specs/:id/paragraphs — actorLabel attribution (#377)', () => {
-  async function historyActor(paragraphId: string): Promise<string | null> {
-    const row = await pool.query<{ label: string | null }>(
-      `SELECT u.label FROM paragraph_versions v
-       LEFT JOIN users u ON u.id = v.user_id
-       WHERE v.paragraph_id = $1 AND v.version = 1`,
-      [paragraphId]
-    );
-    return row.rows[0]?.label ?? null;
-  }
-
+  // A fresh insert always snapshots at version 1 (base_version's column default).
   it('a supplied actorLabel attributes the insert history row; response shape is unchanged', async () => {
     const res = await postInsert(specId, {
       anchorNodeId: anchorId,
@@ -163,7 +155,7 @@ describe('POST /specs/:id/paragraphs — actorLabel attribution (#377)', () => {
       'text',
       'type',
     ]);
-    expect(await historyActor(body.data['id'] as string)).toBe('insert.bot');
+    expect(await historyActor(pool, body.data['id'] as string, 1)).toBe('insert.bot');
   });
 
   it('omitting actorLabel attributes the insert history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
@@ -173,6 +165,6 @@ describe('POST /specs/:id/paragraphs — actorLabel attribution (#377)', () => {
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { data: { id: string } };
-    expect(await historyActor(body.data.id)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await historyActor(pool, body.data.id, 1)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

@@ -4,6 +4,7 @@ import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import { historyActor } from '../test-utils/history-actor.js';
 
 let server: Server;
 let baseUrl: string;
@@ -206,18 +207,15 @@ describe('PATCH /specs/:id/paragraphs/:nodeId (integration)', () => {
 });
 
 describe('PATCH paragraph — actorLabel attribution (#377)', () => {
-  async function historyActor(paragraphId: string): Promise<string | null> {
-    const version = await pool.query<{ base_version: number }>(
+  // nodeId is a single fixture mutated across the whole suite, so its snapshot
+  // version is the live base_version, not a fixed number — resolve it, then
+  // delegate to the shared label lookup (src/test-utils/history-actor.ts).
+  async function actorAtLiveVersion(paragraphId: string): Promise<string | null> {
+    const v = await pool.query<{ base_version: number }>(
       'SELECT base_version FROM paragraphs WHERE id = $1',
       [paragraphId]
     );
-    const row = await pool.query<{ label: string | null }>(
-      `SELECT u.label FROM paragraph_versions v
-       LEFT JOIN users u ON u.id = v.user_id
-       WHERE v.paragraph_id = $1 AND v.version = $2`,
-      [paragraphId, version.rows[0]?.base_version]
-    );
-    return row.rows[0]?.label ?? null;
+    return historyActor(pool, paragraphId, v.rows[0]?.base_version ?? -1);
   }
 
   it('a supplied actorLabel attributes the history row; response shape is unchanged', async () => {
@@ -238,7 +236,7 @@ describe('PATCH paragraph — actorLabel attribution (#377)', () => {
       'type',
     ]);
 
-    expect(await historyActor(nodeId)).toBe('qa.bot');
+    expect(await actorAtLiveVersion(nodeId)).toBe('qa.bot');
   });
 
   it('omitting actorLabel attributes the history row to the SYSTEM_ACTOR_LABEL sentinel — byte-identical to the pre-#377 path', async () => {
@@ -248,7 +246,7 @@ describe('PATCH paragraph — actorLabel attribution (#377)', () => {
       body: JSON.stringify({ text: 'Provide unattributed cabling.' }),
     });
     expect(res.status).toBe(200);
-    expect(await historyActor(nodeId)).toBe(SYSTEM_ACTOR_LABEL);
+    expect(await actorAtLiveVersion(nodeId)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });
 
