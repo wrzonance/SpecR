@@ -458,10 +458,12 @@ paths:
                 actorLabel:
                   type: string
                   minLength: 1
+                  pattern: '\S'
                   description: >
                     Optional caller identity attributed to this write in
                     paragraph history (#377); omitted falls back to a system
-                    sentinel.
+                    sentinel. Trimmed server-side; must contain a non-whitespace
+                    character (whitespace-only → rejected).
       responses:
         '201':
           description: Created paragraph node
@@ -529,10 +531,12 @@ paths:
                 actorLabel:
                   type: string
                   minLength: 1
+                  pattern: '\S'
                   description: >
                     Optional caller identity attributed to this write in
                     paragraph history (#377); omitted falls back to a system
-                    sentinel.
+                    sentinel. Trimmed server-side; must contain a non-whitespace
+                    character (whitespace-only → rejected).
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -658,10 +662,12 @@ paths:
                 actorLabel:
                   type: string
                   minLength: 1
+                  pattern: '\S'
                   description: >
                     Optional caller identity attributed to this write in
                     paragraph history (#377); omitted falls back to a system
-                    sentinel.
+                    sentinel. Trimmed server-side; must contain a non-whitespace
+                    character (whitespace-only → rejected).
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -852,9 +858,12 @@ paths:
                 actorLabel:
                   type: string
                   minLength: 1
+                  pattern: '\S'
                   description: >
                     Optional caller identity attributed to this write in
                     paragraph history; omitted falls back to a system sentinel.
+                    Trimmed server-side; must contain a non-whitespace character
+                    (whitespace-only → rejected).
       responses:
         '201':
           description: Note node created
@@ -6299,9 +6308,12 @@ components:
         actorLabel:
           type: string
           minLength: 1
+          pattern: '\S'
           description: >
             Optional caller identity attributed to this merge in paragraph
-            history (#377); omitted falls back to a system sentinel.
+            history (#377); omitted falls back to a system sentinel. Trimmed
+            server-side; must contain a non-whitespace character (whitespace-only
+            → rejected).
 
     LockState:
       type: object
