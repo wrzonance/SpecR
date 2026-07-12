@@ -5,25 +5,16 @@
 // are counted only — not yet modeled into the spec tree (surfaced by the caller as a
 // table-content-skipped warning).
 
-import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
-import { toArray } from './xml-utils.js';
+import { createDocumentXmlParser, toArray } from './xml-utils.js';
 import { extractParagraphText, isParagraphVanish } from './document.js';
 import type { RetainedTable } from '../../ast/types.js';
 import type { StyleMap } from './types.js';
 
-// Mirrors document.ts's parser config (entity/whitespace/numeric-coercion guards —
-// see document.ts's own comment for the #22/#120 rationale) so extractParagraphText
-// and isParagraphVanish, both written against that shape, behave identically here.
-const xmlParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-  textNodeName: '#text',
-  processEntities: true,
-  trimValues: false,
-  parseTagValue: false,
-  isArray: (name) => ['w:tbl', 'w:tr', 'w:tc', 'w:p', 'w:r', 'w:hyperlink'].includes(name),
-});
+// Shares document.ts's exact document.xml parser config (createDocumentXmlParser, see
+// xml-utils for the #22/#120 rationale) — adding the table-structure tags to isArray — so
+// the reused extractParagraphText and isParagraphVanish behave identically here.
+const xmlParser = createDocumentXmlParser(['w:tbl', 'w:tr', 'w:tc', 'w:p', 'w:r', 'w:hyperlink']);
 
 interface TableCellParagraph {
   readonly text: string;

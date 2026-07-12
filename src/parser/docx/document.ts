@@ -1,31 +1,20 @@
-import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
-import { extractAttrStr, getAttrVal, getAttrNumVal, toArray } from './xml-utils.js';
+import {
+  createDocumentXmlParser,
+  extractAttrStr,
+  getAttrVal,
+  getAttrNumVal,
+  toArray,
+} from './xml-utils.js';
 import { parseParagraphSources } from './source-facts.js';
 import type { SourceFacts } from '../../ast/types.js';
 import type { DocxComment } from './comments.js';
 import type { DocxParagraph, NumberingMap, StyleMap } from './types.js';
 import type { ParagraphSource } from './source-facts.js';
 
-// Entity audit (issue #22): fxp v5 does not resolve custom or recursive entity declarations
-// — undefined/recursive &refs; are returned verbatim, not expanded (no billion-laughs risk).
-// processEntities: true is required: OOXML text content uses &amp; &lt; &gt; for ampersands
-// and angle brackets; setting false would corrupt those characters in paragraph text.
-// trimValues: false preserves trailing/leading spaces in w:t text nodes — trimming would
-// corrupt concatenated paragraph text across adjacent runs.
-// parseTagValue: false keeps w:t text as strings (#120): fxp's default numeric coercion
-// turns a bare-integer run (<w:t>9</w:t>) into the number 9, which extractRunText cannot
-// read and silently drops — deleting digits from numbers Word split across runs, e.g.
-// "09 91 26" stored as ["09 ", "9", "1 26"] rendered as "09 1 26".
-const xmlParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-  textNodeName: '#text',
-  processEntities: true,
-  trimValues: false,
-  parseTagValue: false,
-  isArray: (name) => ['w:p', 'w:r', 'w:hyperlink'].includes(name),
-});
+// See createDocumentXmlParser (xml-utils) for the #22/#120 config rationale. The table
+// extractor shares this exact config so their reused text/vanish helpers stay in lockstep.
+const xmlParser = createDocumentXmlParser(['w:p', 'w:r', 'w:hyperlink']);
 
 interface ParagraphFields {
   readonly styleId: string | undefined;
