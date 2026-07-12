@@ -28,4 +28,12 @@ describe('tierForIlvl re-export', () => {
     expect(tierForIlvl(2, 1)).toBe('paragraph');
     expect(tierForIlvl(3, 1)).toBe('subparagraph');
   });
+
+  it('bands relative to a non-default articleIlvl (proves the parameter is applied)', () => {
+    // articleIlvl=3: the whole band shifts up, so a hardcoded band around 1 would fail.
+    expect(tierForIlvl(2, 3)).toBe('part'); // below article → part
+    expect(tierForIlvl(3, 3)).toBe('article'); // == articleIlvl → article
+    expect(tierForIlvl(4, 3)).toBe('paragraph'); // one below → paragraph
+    expect(tierForIlvl(5, 3)).toBe('subparagraph'); // deeper → subparagraph
+  });
 });

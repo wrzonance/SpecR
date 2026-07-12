@@ -30,7 +30,8 @@ as #317 shipped. `tier` becomes an explicitly **derived annotation**:
 
 - Optional on write. When omitted, the server fills it with
   `tierForIlvl(ilvl, articleIlvl)` (`src/ast/numbering-profile-schema.ts`) so
-  GET → PUT round-trips never require the client to compute it.
+  valid read-to-write round-trips (GET → POST/PATCH) never require the client
+  to compute it.
 - Always present and internally consistent on a successful parse — the
   `NumberingProfile` output type pins `tier: TierName` (never
   `tier?: TierName`) on every `styleLadder`/`numbering.levels` entry.
@@ -72,9 +73,10 @@ The validation lives once, on the write schema
 every write path — REST (`src/api/numbering-profiles.ts`) and MCP CRUD
 (`src/mcp/numbering-profile-crud-handlers.ts`) — with no per-route logic. The
 read schema (`NumberingProfileReadSchema`, ADR-061) is unaffected: it still
-requires `tier` on every entry (a persisted row was already validated
-consistent at write time) and performs no derivation, since re-deriving on
-every read would mask a row written before this validation existed.
+requires `tier` on every entry — rows written under this ADR are validated
+consistent, while rows persisted before this validation existed may retain a
+divergent `tier` — and performs no derivation, since re-deriving on every read
+would mask exactly those legacy rows.
 
 A related implementation choice, surfaced while spiking the Zod v4
 `.check()`/`.transform()` chain this validation needed: the parsed
