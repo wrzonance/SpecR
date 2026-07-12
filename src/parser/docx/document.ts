@@ -47,7 +47,7 @@ function extractRunText(run: Record<string, unknown>): string {
   return '';
 }
 
-function extractText(para: Record<string, unknown>): string {
+export function extractText(para: Record<string, unknown>): string {
   const directRuns = toArray<Record<string, unknown>>(
     para['w:r'] as readonly Record<string, unknown>[] | undefined
   );
@@ -180,6 +180,18 @@ function resolveParagraphVanish(
   if (paragraphMarkVanish(pPr)) return true;
   if (styleId && styleMap.vanishStyleIds.has(styleId)) return true;
   return allTextRunsVanish(raw, styleMap.vanishCharStyleIds);
+}
+
+// Exported so other document.xml-scoped scanners (e.g. the table extractor, #293) can
+// resolve a raw paragraph node's hiddenness through the same 3-signal resolution
+// (paragraph-mark, paragraph-style, run/char-style) as ordinary body paragraphs,
+// instead of re-implementing vanish detection. Mirrors parseParagraph's own pPr/styleId
+// extraction verbatim — this is a pure delegation, not a new code path.
+export function isParagraphVanish(raw: Record<string, unknown>, styleMap: StyleMap): boolean {
+  const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
+  const styleVal = pPr ? getAttrVal(pPr['w:pStyle']) : '';
+  const styleId = styleVal || undefined;
+  return resolveParagraphVanish(raw, pPr, styleId, styleMap);
 }
 
 function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxParagraph {
