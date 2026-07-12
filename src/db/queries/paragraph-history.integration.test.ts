@@ -6,6 +6,7 @@ import {
   recordParagraphHistory,
   resolveActorUserId,
   resolveHistoryContext,
+  PARAGRAPH_HISTORY_OPS,
   SYSTEM_ACTOR_LABEL,
 } from './paragraph-history.js';
 
@@ -205,6 +206,42 @@ describe('recordParagraphHistory (integration)', () => {
         );
       })
     ).rejects.toThrow();
+  });
+
+  it('accepts every op in PARAGRAPH_HISTORY_OPS — keeps the migration CHECK constraint in lockstep', async () => {
+    const specId = specIds[0];
+    if (specId === undefined) throw new Error('missing fixture spec');
+    const paragraphId = await newParagraph(specId, 'op vocabulary text', 7);
+
+    // One version per op so ON CONFLICT (paragraph_id, version) can't mask a
+    // rejection. If PARAGRAPH_HISTORY_OPS and migration 046's
+    // paragraph_versions_op_check ever drift, one of these INSERTs throws and
+    // this test — not a silent production write — catches it.
+    await runInTransaction(async (client) => {
+      const userId = await resolveActorUserId(client, label('op-vocab'));
+      let version = 100;
+      for (const op of PARAGRAPH_HISTORY_OPS) {
+        version += 1;
+        await recordParagraphHistory(client, {
+          paragraphId,
+          specId,
+          version,
+          text: `text for ${op}`,
+          nodeType: 'pr1',
+          op,
+          contentVersion: 2,
+          userId,
+        });
+      }
+    });
+
+    const stored = await pool.query<{ op: string }>(
+      'SELECT op FROM paragraph_versions WHERE paragraph_id = $1',
+      [paragraphId]
+    );
+    const byName = (a: string, b: string): number => a.localeCompare(b);
+    const storedOps = [...new Set(stored.rows.map((r) => r.op))].sort(byName);
+    expect(storedOps).toEqual([...PARAGRAPH_HISTORY_OPS].sort(byName));
   });
 });
 
