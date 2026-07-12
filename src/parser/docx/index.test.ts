@@ -935,6 +935,26 @@ describe('parseDocx — table extraction wiring (#293)', () => {
     expect(tree.hiddenTables).toEqual([{ rows: [['secret']] }]);
   });
 
+  it('INV-7b: the suggestion string reflects a visibleCount greater than one — not stuck at 1', async () => {
+    const visibleTableA = docxTable(tableRow(tableCell(visibleTablePara('a'))));
+    const visibleTableB = docxTable(tableRow(tableCell(visibleTablePara('b'))));
+    const documentXml = STRUCTURED_DOC.replace(
+      '</w:body>',
+      `${visibleTableA}${visibleTableB}</w:body>`
+    );
+    const tree = await parseDocx(
+      await makeDocx({ documentXml, numberingXml: STRUCTURED_NUMBERING })
+    );
+
+    expect(tree.warnings).toEqual([
+      {
+        type: 'table-content-skipped',
+        suggestion: '2 visible table(s) detected but not yet modeled into the spec tree',
+      },
+    ]);
+    expect(tree.hiddenTables).toBeUndefined();
+  });
+
   it('INV-9: no tables present — hiddenTables key is absent, never an empty array', async () => {
     const tree = await parseDocx(await makeDocx({}));
 

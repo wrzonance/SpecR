@@ -108,7 +108,7 @@ function buildRetainedTable(rows: readonly TableRow[]): RetainedTable {
 function classifyTable(rows: readonly TableRow[]): TableClassification {
   const evidence = rows
     .flatMap((row) => row.flatMap((cell) => cell.paragraphs))
-    .filter((p) => p.text.length > 0);
+    .filter((p) => p.text.trim().length > 0);
   if (evidence.length > 0 && evidence.every((p) => p.isVanish)) {
     return { kind: 'hidden', table: buildRetainedTable(rows) };
   }
