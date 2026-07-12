@@ -82,8 +82,6 @@ import {
   CloneRevisionNomenclatureBodySchema,
   RequiredSectionsBodySchema,
   SubmittalRegisterBodySchema,
-  CreateNumberingProfileBodySchema,
-  PatchNumberingProfileBodySchema,
   SetSpecNumberingProfileBodySchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
@@ -327,20 +325,12 @@ router.delete(
   deleteAssociationHandler
 );
 router.get('/libraries/:id/numbering-profiles', listProfilesHandler);
-router.post(
-  '/libraries/:id/numbering-profiles',
-  validateBody(CreateNumberingProfileBodySchema),
-  createProfileHandler
-);
+router.post('/libraries/:id/numbering-profiles', createProfileHandler);
 // /numbering-profiles/snapshot MUST be registered before /numbering-profiles/:id
 // so Express matches the literal path first (#299).
 router.post('/numbering-profiles/snapshot', parseRateLimit, upload.single('file'), snapshotHandler);
 router.get('/numbering-profiles/:id', getProfileHandler);
-router.patch(
-  '/numbering-profiles/:id',
-  validateBody(PatchNumberingProfileBodySchema),
-  patchProfileHandler
-);
+router.patch('/numbering-profiles/:id', patchProfileHandler);
 router.delete('/numbering-profiles/:id', deleteProfileHandler);
 router.put(
   '/specs/:id/numbering-profile',
