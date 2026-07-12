@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
-import { insertSiblingRow, setVanishRow } from '../db/index.js';
-import type { InsertParagraphResult } from '../db/index.js';
+import { insertSiblingRow, setVanishRow, recordParagraphHistory } from '../db/index.js';
+import type { InsertParagraphResult, ParagraphHistoryContext } from '../db/index.js';
 import { MergeError } from './error.js';
 import type { DiffResult, ModifiedDiff, ParagraphDiff } from './types.js';
 
@@ -19,11 +19,25 @@ interface ParagraphRow {
 
 // One accepted uuid resolves to exactly one of these three apply strategies —
 // 'conflicts' shares the modified/'text' path since it is the same shape
-// (ModifiedDiff) and the same ours/theirs apply logic.
+// (ModifiedDiff) and the same ours/theirs apply logic. `diffKind` on the 'text'
+// variant records WHICH bucket (modified vs conflict) the entry came from, set
+// once here where the origin bucket is still known — applyTextChange has no
+// other way to recover it, and the write-history payload (#377, ADR-052 D1)
+// needs it to describe the merge.
 type ApplicableChange =
-  | { readonly kind: 'text'; readonly change: ModifiedDiff }
+  | {
+      readonly kind: 'text';
+      readonly change: ModifiedDiff;
+      readonly diffKind: 'modified' | 'conflict';
+    }
   | { readonly kind: 'added'; readonly change: ParagraphDiff }
   | { readonly kind: 'deleted' };
+
+/** The 'text' branch of {@link ApplicableChange} — applyTextChange's own param
+ *  type, so callers narrow once (`change.kind === 'text'`) and pass the whole
+ *  entry through rather than unwrapping `.change` and re-threading `diffKind`
+ *  as a second parameter. */
+type TextChange = Extract<ApplicableChange, { readonly kind: 'text' }>;
 
 // UUIDs are case-insensitive (z.uuid() accepts either case, PostgreSQL's uuid type
 // compares canonically), so accept-array and diff-bucket lookups are keyed on a
@@ -35,11 +49,11 @@ function applicableChanges(diff: DiffResult): ReadonlyMap<string, ApplicableChan
   return new Map<string, ApplicableChange>([
     ...diff.modified.map((c): [string, ApplicableChange] => [
       uuidKey(c.uuid),
-      { kind: 'text', change: c },
+      { kind: 'text', change: c, diffKind: 'modified' },
     ]),
     ...diff.conflicts.map((c): [string, ApplicableChange] => [
       uuidKey(c.uuid),
-      { kind: 'text', change: c },
+      { kind: 'text', change: c, diffKind: 'conflict' },
     ]),
     ...diff.added.map((c): [string, ApplicableChange] => [
       uuidKey(c.uuid),
@@ -78,38 +92,19 @@ async function lockParagraph(
   return result.rows[0] ?? null;
 }
 
-/** Snapshot one paragraph_versions row for a new base version, idempotent on
- *  (paragraph_id, version) so a retried apply never duplicates it. Both the
- *  text-change and the deleted-op path record the pre/post image the same way.
- *
- *  Minimal compatibility shim for migration 046 (issue #377, ADR-052 D1),
- *  which makes paragraph_versions.spec_id/op NOT NULL: op is hardcoded to
- *  'merge' because this function is, today, the only writer of
- *  paragraph_versions rows (the migration's own backfill default). This
- *  function is superseded by src/db/queries/paragraph-history.ts's
- *  recordParagraphHistory, which threads a real op/content_version/user_id —
- *  the full rewire is a separate, later task in the #377 series. */
-async function snapshotParagraphVersion(
-  client: PoolClient,
-  specId: string,
-  paragraphId: string,
-  version: number,
-  text: string,
-  nodeType: string
-): Promise<void> {
-  await client.query(
-    `INSERT INTO paragraph_versions (paragraph_id, spec_id, version, text, node_type, op)
-     VALUES ($1, $2, $3, $4, $5, 'merge')
-     ON CONFLICT (paragraph_id, version) DO NOTHING`,
-    [paragraphId, specId, version, text, nodeType]
-  );
-}
-
+/** Applies one modified/conflict-op text change. Records a paragraph_versions
+ *  snapshot (#377, ADR-052 D1) under op 'merge', with a payload naming which
+ *  diff bucket (`entry.diffKind`) it resolved — idempotent on
+ *  (paragraph_id, version) so a retried apply never duplicates the row.
+ *  A no-op (theirs already matches current text) records nothing, matching
+ *  applyDeletedChange/applyAddedChange's own no-op contracts below. */
 async function applyTextChange(
   specId: string,
-  change: ModifiedDiff,
-  client: PoolClient
+  entry: TextChange,
+  client: PoolClient,
+  ctx: ParagraphHistoryContext
 ): Promise<boolean> {
+  const { change, diffKind } = entry;
   const row = await lockParagraph(specId, change.uuid, client);
   if (!row) throw new InvalidAcceptedChangeError(`unknown accepted UUID: ${change.uuid}`);
   if (row.text === change.theirs) return false;
@@ -117,14 +112,17 @@ async function applyTextChange(
     throw new MergeError(`stale diff for paragraph ${change.uuid}`);
   }
   const nextVersion = row.baseVersion + 1;
-  await snapshotParagraphVersion(
-    client,
+  await recordParagraphHistory(client, {
+    paragraphId: change.uuid,
     specId,
-    change.uuid,
-    nextVersion,
-    change.theirs,
-    row.nodeType
-  );
+    version: nextVersion,
+    text: change.theirs,
+    nodeType: row.nodeType,
+    op: 'merge',
+    contentVersion: ctx.contentVersion,
+    userId: ctx.userId,
+    payload: { kind: 'merge', diffKind },
+  });
   await client.query(
     `UPDATE paragraphs
      SET text = $1, base_version = $2, updated_at = now()
@@ -168,12 +166,21 @@ function describeInsertFailure(result: InsertFailure, ctx: InsertFailureContext)
  *  from `entry` so the caller can chain it through the effective-anchor
  *  resolution (see applyAcceptedAdded) rather than always anchoring on
  *  `entry.afterUuid`. Every non-created/non-exists status is a client-visible
- *  rejection (structural/foreign anchor, id collision/mismatch, …) → 400. */
+ *  rejection (structural/foreign anchor, id collision/mismatch, …) → 400.
+ *  On `created`, records a paragraph_versions snapshot (#377, ADR-052 D1)
+ *  under op 'merge' — closing the gap #374 left open, where an added-op's
+ *  materialization recorded no write-history at all. `version` is always 1:
+ *  insertSiblingRow's INSERT never sets base_version explicitly, so the new
+ *  row carries paragraphs.base_version's column DEFAULT (1, migration 003) —
+ *  no extra read needed to know it. An `exists` (idempotent re-submit)
+ *  snapshots nothing, matching applyTextChange/applyDeletedChange's own
+ *  no-op contracts. */
 async function applyAddedChange(
   specId: string,
   anchorNodeId: string,
   entry: ParagraphDiff,
-  client: PoolClient
+  client: PoolClient,
+  ctx: ParagraphHistoryContext
 ): Promise<boolean> {
   const result = await insertSiblingRow(client, specId, {
     anchorNodeId,
@@ -181,7 +188,20 @@ async function applyAddedChange(
     explicitId: entry.uuid,
   });
   if (result.status === 'exists') return false;
-  if (result.status === 'created') return true;
+  if (result.status === 'created') {
+    await recordParagraphHistory(client, {
+      paragraphId: result.node.id,
+      specId,
+      version: 1,
+      text: result.node.text,
+      nodeType: result.node.type,
+      op: 'merge',
+      contentVersion: ctx.contentVersion,
+      userId: ctx.userId,
+      payload: { kind: 'merge', diffKind: 'added' },
+    });
+    return true;
+  }
   throw new InvalidAcceptedChangeError(
     describeInsertFailure(result, { anchorUuid: anchorNodeId, entryUuid: entry.uuid })
   );
@@ -251,7 +271,8 @@ async function applyAcceptedAdded(
   specId: string,
   acceptedEntries: readonly ParagraphDiff[],
   allAdded: readonly ParagraphDiff[],
-  client: PoolClient
+  client: PoolClient,
+  ctx: ParagraphHistoryContext
 ): Promise<number> {
   const groups = groupAddedByAnchor(allAdded);
   const remap = new Map<string, string>();
@@ -268,7 +289,7 @@ async function applyAcceptedAdded(
       remap,
       client
     );
-    const created = await applyAddedChange(specId, anchorNodeId, entry, client);
+    const created = await applyAddedChange(specId, anchorNodeId, entry, client, ctx);
     remap.set(entry.afterUuid, entry.uuid);
     if (created) applied += 1;
   }
@@ -277,11 +298,13 @@ async function applyAcceptedAdded(
 
 /** Applies one deleted-op by delegating to setVanishRow(..., true) — never a
  *  hard delete. Uses the pre-toggle image setVanishRow returns to snapshot
- *  the paragraph_versions row without a second FOR UPDATE round-trip. */
+ *  the paragraph_versions row (#377, ADR-052 D1) under op 'merge' without a
+ *  second FOR UPDATE round-trip. */
 async function applyDeletedChange(
   specId: string,
   uuid: string,
-  client: PoolClient
+  client: PoolClient,
+  ctx: ParagraphHistoryContext
 ): Promise<boolean> {
   const result = await setVanishRow(client, specId, uuid, true);
   if (result.status === 'not-removable') {
@@ -297,14 +320,17 @@ async function applyDeletedChange(
   if (!result.changed) return false;
 
   const nextVersion = result.previousBaseVersion + 1;
-  await snapshotParagraphVersion(
-    client,
+  await recordParagraphHistory(client, {
+    paragraphId: uuid,
     specId,
-    uuid,
-    nextVersion,
-    result.previousText,
-    result.previousNodeType
-  );
+    version: nextVersion,
+    text: result.previousText,
+    nodeType: result.previousNodeType,
+    op: 'merge',
+    contentVersion: ctx.contentVersion,
+    userId: ctx.userId,
+    payload: { kind: 'merge', diffKind: 'deleted' },
+  });
   return true;
 }
 
@@ -317,12 +343,19 @@ async function applyDeletedChange(
  * order must follow document order, not caller-supplied order. Any thrown
  * error propagates to the caller uncaught, so the whole apply is atomic: the
  * caller's transaction rolls back every write this call made.
+ *
+ * `ctx` (#377, ADR-052 D1) is resolved exactly once by the caller (see
+ * apply-merge.ts) and threaded to every paragraph_versions snapshot this call
+ * makes — so N changes from one outer write all stamp the same
+ * content_version generation and the same resolved actor, without each
+ * apply-strategy function re-resolving it itself.
  */
 export async function applyAccepted(
   specId: string,
   acceptedIds: readonly string[],
   diff: DiffResult,
-  client: PoolClient
+  client: PoolClient,
+  ctx: ParagraphHistoryContext
 ): Promise<ApplyAcceptedResult> {
   const accepted = uniqueAccepted(acceptedIds);
   const applicable = applicableChanges(diff);
@@ -339,11 +372,11 @@ export async function applyAccepted(
     }
     const wasApplied =
       change.kind === 'text'
-        ? await applyTextChange(specId, change.change, client)
-        : await applyDeletedChange(specId, uuid, client);
+        ? await applyTextChange(specId, change, client, ctx)
+        : await applyDeletedChange(specId, uuid, client, ctx);
     if (wasApplied) applied += 1;
   }
-  applied += await applyAcceptedAdded(specId, addedEntries, diff.added, client);
+  applied += await applyAcceptedAdded(specId, addedEntries, diff.added, client, ctx);
 
   return { applied, rejected: applicable.size - accepted.length };
 }
