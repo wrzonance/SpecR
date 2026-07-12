@@ -158,6 +158,7 @@ export {
   NumberingProfileSchema,
   NumberingProfileReadSchema,
   TierNameSchema,
+  tierForIlvl,
 } from './numbering-profile-schema.js';
 export type { NumberingProfile, TierName } from './numbering-profile-schema.js';
 export {

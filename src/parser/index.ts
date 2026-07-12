@@ -37,6 +37,7 @@ export { parsePdf, assertPdfSafe } from './pdf/index.js';
 export { extractRefsFromTree } from './refs/index.js';
 export { ParserError } from './error.js';
 export type { SectionInference } from '../lib/infer-section.js';
+export { tierForIlvl } from '../ast/index.js';
 export type { NumberingProfile, TierName } from '../ast/index.js';
 
 export interface ParseResult {

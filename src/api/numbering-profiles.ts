@@ -12,14 +12,12 @@ import {
   findLibraryById,
   NumberingProfileInUseError,
 } from '../db/index.js';
-import type {
-  CreateNumberingProfileBody,
-  PatchNumberingProfileBody,
-  SetSpecNumberingProfileBody,
-} from '../ast/index.js';
+import { CreateNumberingProfileBodySchema, PatchNumberingProfileBodySchema } from '../ast/index.js';
+import type { SetSpecNumberingProfileBody } from '../ast/index.js';
 import { assertDocxSafe, extractNumberingProfileFromDocx } from '../parser/index.js';
 import { logger } from '../lib/logger.js';
 import { getPgCode } from '../lib/pg-errors.js';
+import { formatZodIssues } from '../lib/zod-issues.js';
 
 const UUID_SCHEMA = z.uuid();
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -80,7 +78,12 @@ export async function listProfilesHandler(req: Request, res: Response): Promise<
 export async function createProfileHandler(req: Request, res: Response): Promise<void> {
   const libraryId = parseUuid(req, res, 'library');
   if (!libraryId) return;
-  const { name, rules } = req.body as CreateNumberingProfileBody;
+  const parsed = CreateNumberingProfileBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(422).json({ success: false, error: formatZodIssues(parsed.error) });
+    return;
+  }
+  const { name, rules } = parsed.data;
   try {
     const profile = await createNumberingProfile(libraryId, name, rules);
     res.status(201).json({ success: true, data: profile });
@@ -113,7 +116,12 @@ export async function getProfileHandler(req: Request, res: Response): Promise<vo
 export async function patchProfileHandler(req: Request, res: Response): Promise<void> {
   const id = parseUuid(req, res, 'numbering profile');
   if (!id) return;
-  const patch = req.body as PatchNumberingProfileBody;
+  const parsed = PatchNumberingProfileBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(422).json({ success: false, error: formatZodIssues(parsed.error) });
+    return;
+  }
+  const patch = parsed.data;
   try {
     if (await rejectMissingOrBuiltIn(id, res, 'modified')) return;
     const profile = await updateNumberingProfile(id, patch);

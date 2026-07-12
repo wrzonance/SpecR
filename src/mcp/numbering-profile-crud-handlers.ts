@@ -13,6 +13,7 @@ import { assertDocxSafe, extractNumberingProfileFromDocx } from '../parser/index
 import { decodeBase64Payload } from '../lib/decode-base64.js';
 import { getPgCode } from '../lib/pg-errors.js';
 import { logger } from '../lib/logger.js';
+import { formatZodIssues } from '../lib/zod-issues.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
 
 // Shapes exported so the tools advertise exactly what the handlers validate, reusing the
@@ -51,10 +52,6 @@ const SnapshotArgs = z.object(SnapshotNumberingProfileShape);
 const BUILT_IN_MODIFY_ERROR = 'the built-in CSI Default numbering profile cannot be modified';
 const BUILT_IN_DELETE_ERROR = 'the built-in CSI Default numbering profile cannot be deleted';
 
-function issues(err: z.ZodError): string {
-  return err.issues.map((i) => i.message).join('; ');
-}
-
 function internalError(err: unknown, tool: string): ToolResult {
   logger.error({ err }, `mcp tool ${tool} failed`);
   return toolError(`Internal error — ${tool} failed`);
@@ -80,7 +77,9 @@ export async function handleListLibraryNumberingProfiles(args: unknown): Promise
 export async function handleCreateLibraryNumberingProfile(args: unknown): Promise<ToolResult> {
   const parsed = CreateArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid create_library_numbering_profile input: ${issues(parsed.error)}`);
+    return toolError(
+      `invalid create_library_numbering_profile input: ${formatZodIssues(parsed.error)}`
+    );
   }
   const { libraryId, name, rules } = parsed.data;
   try {
@@ -108,7 +107,7 @@ export async function handleGetNumberingProfileById(args: unknown): Promise<Tool
 export async function handleUpdateNumberingProfile(args: unknown): Promise<ToolResult> {
   const parsed = UpdateArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid update_numbering_profile input: ${issues(parsed.error)}`);
+    return toolError(`invalid update_numbering_profile input: ${formatZodIssues(parsed.error)}`);
   }
   const { profileId, ...patch } = parsed.data;
   try {

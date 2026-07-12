@@ -4325,8 +4325,11 @@ paths:
       summary: Create a numbering profile for a library
       description: >
         Creates a new named numbering profile owned by the library. The `rules`
-        object carries the NumberingProfile shape (tiers, numbering, styleLadder).
-        Library must exist (missing → 404).
+        object carries the NumberingProfile shape (tiers, numbering, styleLadder,
+        articleIlvl). Library must exist (missing → 404). Each entry's `tier` is
+        optional — the server derives it from ilvl + articleIlvl and rejects
+        (422) a declared value that disagrees; articleIlvl is required once
+        numbering or styleLadder is non-empty (ADR-067).
       tags: [numbering-profiles]
       parameters:
         - name: id
@@ -4453,8 +4456,12 @@ paths:
       description: >
         Partial update: omit a field to leave it unchanged. At least one of
         `name` or `rules` should be present (an empty body is accepted but is
-        a no-op). The built-in CSI Default (`libraryId: null`) is protected and
-        cannot be modified (→ 409) — it is the fallback for every unassigned spec.
+        a no-op). When `rules` is supplied, each entry's `tier` is optional —
+        the server derives it from ilvl + articleIlvl and rejects (422) a
+        declared value that disagrees; articleIlvl is required once numbering
+        or styleLadder is non-empty (ADR-067). The built-in CSI Default
+        (`libraryId: null`) is protected and cannot be modified (→ 409) — it
+        is the fallback for every unassigned spec.
       tags: [numbering-profiles]
       parameters:
         - name: id
@@ -7646,11 +7653,22 @@ components:
     NumberingProfile:
       type: object
       description: >
-        Extracted numbering configuration from a DOCX file. Carries tiers
-        (CSI hierarchy), numbering (numId→levels map), styleLadder (style→tier
+        Extracted numbering configuration from a DOCX file, and the WRITE
+        contract for POST/PATCH /numbering-profiles. Carries tiers (CSI
+        hierarchy), numbering (numId→levels map), styleLadder (style→tier
         map), and articleIlvl (the ilvl at which the Article tier sits, always
         >= 1 — ilvl 0 is the PART tier). Open schema — unknown keys are
         preserved for forward-compatibility.
+
+
+        `tier` on each numbering[].levels[] and styleLadder[] entry is a
+        DERIVED annotation, not authoritative input (ADR-067): classification
+        is driven by ilvl + articleIlvl alone. Omit `tier` and the server
+        fills it from tierForIlvl(ilvl, articleIlvl); declare one that
+        disagrees with that derivation and the write is rejected (422,
+        entry-naming message). articleIlvl becomes required as soon as
+        numbering or styleLadder is non-empty, since the derivation is
+        undecidable without it.
       additionalProperties: true
       required: [tiers, numbering, styleLadder]
       properties:
@@ -7713,7 +7731,7 @@ components:
                 items:
                   type: object
                   additionalProperties: true
-                  required: [ilvl, tier]
+                  required: [ilvl]
                   properties:
                     ilvl:
                       type: integer
@@ -7721,6 +7739,10 @@ components:
                     tier:
                       type: string
                       enum: [part, article, paragraph, subparagraph]
+                      description: >
+                        Optional — derived from ilvl + articleIlvl when
+                        omitted (ADR-067); a declared value that disagrees
+                        with the derivation is rejected (422).
                     labelTemplate:
                       type: string
                     numFmt:
@@ -7731,7 +7753,7 @@ components:
           items:
             type: object
             additionalProperties: true
-            required: [styleId, numId, ilvl, tier]
+            required: [styleId, numId, ilvl]
             properties:
               styleId:
                 type: string
@@ -7743,12 +7765,19 @@ components:
               tier:
                 type: string
                 enum: [part, article, paragraph, subparagraph]
+                description: >
+                  Optional — derived from ilvl + articleIlvl when omitted
+                  (ADR-067); a declared value that disagrees with the
+                  derivation is rejected (422).
         articleIlvl:
           type: integer
           minimum: 1
           description: >
             Ilvl of the Article tier. Always >= 1 — ilvl 0 is reserved for the
-            PART tier, so the Article level can never be 0.
+            PART tier, so the Article level can never be 0. Required as soon
+            as numbering or styleLadder is non-empty — the server needs it to
+            derive (and validate) each entry's tier (ADR-067); a body that
+            supplies rules without it is rejected (422).
 
     NumberingProfileRead:
       type: object

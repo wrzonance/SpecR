@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NumberingProfileSchema, NumberingProfileReadSchema } from './index.js';
+import { NumberingProfileSchema, NumberingProfileReadSchema, tierForIlvl } from './index.js';
 
 describe('NumberingProfileSchema', () => {
   const valid = {
@@ -60,6 +60,90 @@ describe('NumberingProfileSchema', () => {
   it('accepts articleIlvl 1 (the minimum valid Article level)', () => {
     const parsed = NumberingProfileSchema.parse({ ...valid, articleIlvl: 1 });
     expect(parsed.articleIlvl).toBe(1);
+  });
+});
+
+// #319: tier is derived from (ilvl, articleIlvl), not authoritative client input —
+// see ADR-067. The server fills an omitted tier and rejects one that disagrees
+// with the derivation, naming the offending entry.
+describe('NumberingProfileSchema — tier derivation (#319)', () => {
+  const valid = {
+    tiers: { part: { numberStyle: 'integer', maxCount: 5 } },
+    numbering: [{ numId: 12, levels: [{ ilvl: 0, tier: 'part', labelTemplate: 'PART %1' }] }],
+    styleLadder: [{ styleId: 'PART', numId: 12, ilvl: 0, tier: 'part' }],
+    articleIlvl: 1,
+  };
+
+  it('rejects a styleLadder entry whose declared tier disagrees with the derivation', () => {
+    expect(() =>
+      NumberingProfileSchema.parse({
+        ...valid,
+        styleLadder: [{ styleId: 'ARTICLE', numId: 12, ilvl: 1, tier: 'part' }],
+      })
+    ).toThrow(/styleLadder\[styleId=ARTICLE\].*derives to 'article'/);
+  });
+
+  it('rejects a numbering.levels entry whose declared tier disagrees with the derivation', () => {
+    expect(() =>
+      NumberingProfileSchema.parse({
+        ...valid,
+        numbering: [{ numId: 12, levels: [{ ilvl: 1, tier: 'part' }] }],
+      })
+    ).toThrow(/numbering\[numId=12\].*derives to 'article'/);
+  });
+
+  it('rejects a non-empty numbering with articleIlvl omitted', () => {
+    const withoutArticleIlvl = {
+      tiers: valid.tiers,
+      numbering: valid.numbering,
+      styleLadder: valid.styleLadder,
+    };
+    expect(() => NumberingProfileSchema.parse(withoutArticleIlvl)).toThrow(
+      /articleIlvl is required/
+    );
+  });
+
+  it('rejects a non-empty styleLadder with articleIlvl omitted, even if numbering is empty', () => {
+    expect(() =>
+      NumberingProfileSchema.parse({
+        tiers: valid.tiers,
+        numbering: [],
+        styleLadder: valid.styleLadder,
+      })
+    ).toThrow(/articleIlvl is required/);
+  });
+
+  it('accepts an empty profile with articleIlvl omitted (nothing to derive)', () => {
+    const parsed = NumberingProfileSchema.parse({
+      tiers: valid.tiers,
+      numbering: [],
+      styleLadder: [],
+    });
+    expect(parsed.articleIlvl).toBeUndefined();
+    expect(parsed.numbering).toEqual([]);
+    expect(parsed.styleLadder).toEqual([]);
+  });
+
+  it('fills an omitted tier with the value derived from (ilvl, articleIlvl)', () => {
+    const parsed = NumberingProfileSchema.parse({
+      ...valid,
+      numbering: [{ numId: 12, levels: [{ ilvl: 2 }] }],
+      styleLadder: [{ styleId: 'PARA', numId: 12, ilvl: 2 }],
+    });
+    expect(parsed.numbering[0]?.levels[0]?.tier).toBe(tierForIlvl(2, 1));
+    expect(parsed.styleLadder[0]?.tier).toBe(tierForIlvl(2, 1));
+  });
+
+  it('accepts a fully-consistent profile with every tier declared', () => {
+    const parsed = NumberingProfileSchema.parse(valid);
+    expect(parsed.numbering[0]?.levels[0]?.tier).toBe('part');
+    expect(parsed.styleLadder[0]?.tier).toBe('part');
+  });
+
+  it('is idempotent: re-parsing the already-transformed output succeeds unchanged', () => {
+    const once = NumberingProfileSchema.parse(valid);
+    const twice = NumberingProfileSchema.parse(once);
+    expect(twice).toEqual(once);
   });
 });
 
@@ -128,5 +212,34 @@ describe('NumberingProfileReadSchema (read-tolerant — #323)', () => {
   it('still rejects a non-positive part maxCount (a tier size must be >= 1)', () => {
     const broken = { ...valid, tiers: { part: { numberStyle: 'integer', maxCount: 0 } } };
     expect(() => NumberingProfileReadSchema.parse(broken)).toThrow();
+  });
+
+  // The read schema deliberately does NOT run checkTierEntriesMatchDerived (#319):
+  // a persisted row was already validated as consistent at write time, so read never
+  // re-derives or re-checks tier — it trusts the stored value verbatim. Pin that the
+  // exact declared-vs-derived divergence the write schema rejects (see the
+  // 'tier derivation (#319)' describe block above) still reads back unchanged.
+  it('accepts a styleLadder entry whose declared tier disagrees with the derivation (read trusts the stored tier, #319)', () => {
+    const divergent = {
+      ...valid,
+      styleLadder: [{ styleId: 'ARTICLE', numId: 12, ilvl: 1, tier: 'part' }],
+    };
+    expect(() => NumberingProfileSchema.parse(divergent)).toThrow(
+      /styleLadder\[styleId=ARTICLE\].*derives to 'article'/
+    );
+    const parsed = NumberingProfileReadSchema.parse(divergent);
+    expect(parsed.styleLadder[0]?.tier).toBe('part');
+  });
+
+  it('accepts a numbering.levels entry whose declared tier disagrees with the derivation (read trusts the stored tier, #319)', () => {
+    const divergent = {
+      ...valid,
+      numbering: [{ numId: 12, levels: [{ ilvl: 1, tier: 'part' }] }],
+    };
+    expect(() => NumberingProfileSchema.parse(divergent)).toThrow(
+      /numbering\[numId=12\].*derives to 'article'/
+    );
+    const parsed = NumberingProfileReadSchema.parse(divergent);
+    expect(parsed.numbering[0]?.levels[0]?.tier).toBe('part');
   });
 });
