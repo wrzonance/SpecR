@@ -205,12 +205,14 @@ export {
   SnapshotValidationError,
   RevisionNomenclatureValidationError,
   RevisionComparisonError,
+  RevisionParentValidationError,
   type RevisionSummary,
   type RevisionSpecEntry,
   type RevisionWithTrees,
   type RevisionManualData,
   type RevisionAddendumManualData,
 } from './queries/revisions.js';
+export { isUnprocessableRevisionInputError } from './queries/revision-input-errors.js';
 export { listPackageRevisions } from './queries/revision-list.js';
 export {
   insertConvention,

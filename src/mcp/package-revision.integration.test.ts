@@ -87,10 +87,12 @@ interface RevisionSummary {
   revisionId: string;
   type: string;
   specCount: number;
+  parentRevisionId: string | null;
 }
 interface RevisionWithTrees {
   revisionId: string;
   specs: unknown[];
+  parentRevisionId: string | null;
 }
 
 describe('package revision MCP tools', () => {
@@ -152,6 +154,134 @@ describe('package revision MCP tools', () => {
     ).toBe(true);
   });
 
+  it('issue_package_revision rejects a malformed parentRevisionId (ADR-066 #389)', async () => {
+    const packageId = await packageWithMember('08 71 00');
+    const res = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+      parentRevisionId: 'not-a-uuid',
+    });
+    expect(isToolError(res)).toBe(true);
+  });
+
+  it('issue_package_revision accepts a well-formed parentRevisionId and echoes it back', async () => {
+    const packageId = await packageWithMember('08 80 00');
+    const root = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+    });
+    expect(isToolError(root)).toBe(false);
+    const rootId = parse<RevisionSummary>(root).revisionId;
+    const child = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 2 },
+      parentRevisionId: rootId,
+    });
+    expect(isToolError(child)).toBe(false);
+    expect(parse<RevisionSummary>(child).parentRevisionId).toBe(rootId);
+  });
+
+  it('issue_package_revision rejects a nonexistent parentRevisionId with its message (ADR-066 #389)', async () => {
+    const packageId = await packageWithMember('08 90 00');
+    const res = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+      parentRevisionId: MISSING,
+    });
+    expect(isToolError(res)).toBe(true);
+    expect(res.content[0]!.text).toContain('not found');
+  });
+
+  it('issue_package_revision rejects a parentRevisionId from a different package (ADR-066 #389)', async () => {
+    const packageId = await packageWithMember('09 30 00');
+    const otherPackageId = await packageWithMember('09 51 00');
+    const foreign = await handleIssuePackageRevision({
+      packageId: otherPackageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+    });
+    expect(isToolError(foreign)).toBe(false);
+    const foreignId = parse<RevisionSummary>(foreign).revisionId;
+    const res = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+      parentRevisionId: foreignId,
+    });
+    expect(isToolError(res)).toBe(true);
+    expect(res.content[0]!.text).toContain('different package');
+  });
+
+  it('issue_package_revision rejects a parentRevisionId that already has a parent (ADR-066 #389)', async () => {
+    const packageId = await packageWithMember('09 65 00');
+    const root = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+    });
+    expect(isToolError(root)).toBe(false);
+    const rootId = parse<RevisionSummary>(root).revisionId;
+    const child = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 2 },
+      parentRevisionId: rootId,
+    });
+    expect(isToolError(child)).toBe(false);
+    const childId = parse<RevisionSummary>(child).revisionId;
+    const grandchild = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 3 },
+      parentRevisionId: childId,
+    });
+    expect(isToolError(grandchild)).toBe(true);
+    expect(grandchild.content[0]!.text).toContain('nesting depth');
+  });
+
+  it('get_revision echoes parentRevisionId: null by default, present as a key (ADR-066 #389)', async () => {
+    const packageId = await packageWithMember('06 10 00');
+    const issued = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+    });
+    const revisionId = parse<RevisionSummary>(issued).revisionId;
+    const got = await handleGetRevision({ revisionId });
+    const summary = parse<RevisionWithTrees>(got);
+    expect(summary).toHaveProperty('parentRevisionId');
+    expect(summary.parentRevisionId).toBeNull();
+  });
+
+  it('get_revision and list_package_revisions echo a non-null parentRevisionId (ADR-066 #389)', async () => {
+    const packageId = await packageWithMember('06 20 00');
+    const root = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+    });
+    const rootId = parse<RevisionSummary>(root).revisionId;
+    const child = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 2 },
+      parentRevisionId: rootId,
+    });
+    const childId = parse<RevisionSummary>(child).revisionId;
+
+    const got = await handleGetRevision({ revisionId: childId });
+    expect(parse<RevisionWithTrees>(got).parentRevisionId).toBe(rootId);
+
+    const list = parse<RevisionSummary[]>(await handleListPackageRevisions({ packageId }));
+    const childSummary = list.find((r) => r.revisionId === childId);
+    expect(childSummary).toHaveProperty('parentRevisionId');
+    expect(childSummary?.parentRevisionId).toBe(rootId);
+  });
+
   it('get_revision rejects a bad UUID and an unknown id', async () => {
     expect(isToolError(await handleGetRevision({ revisionId: 'nope' }))).toBe(true);
     expect(isToolError(await handleGetRevision({ revisionId: MISSING }))).toBe(true);
@@ -170,6 +300,8 @@ describe('package revision MCP tools', () => {
     expect(list.length).toBe(1);
     expect(list[0]!.type).toBe('addendum');
     expect(list[0]!.specCount).toBe(1);
+    expect(list[0]).toHaveProperty('parentRevisionId');
+    expect(list[0]!.parentRevisionId).toBeNull();
   });
 
   it('list_package_revisions rejects an unknown package and a bad UUID', async () => {

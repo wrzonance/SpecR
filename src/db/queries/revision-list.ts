@@ -40,7 +40,7 @@ export async function listPackageRevisions(
     const profile = await getRevisionNomenclatureForProject(pkgRow.project_id, db);
     const res = await db.query<RevisionListRow>(
       `SELECT pr.id, pr.package_id, pr.label, pr.revision_type, pr.revision_date,
-              pr.sort_order, pr.attributes, pr.issued_at,
+              pr.sort_order, pr.attributes, pr.issued_at, pr.parent_revision_id,
               (SELECT COUNT(*)::int FROM package_revision_specs prs
                WHERE prs.revision_id = pr.id) AS spec_count
        FROM package_revisions pr

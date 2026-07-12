@@ -11,7 +11,9 @@ import { getRevisionNomenclatureForProject } from './revision-nomenclature.js';
 import type { RevisionNomenclatureProfile } from './revision-nomenclature.js';
 import { createRevisionIdentityDraft, getRevisionDisplayIdentity } from './revision-identity.js';
 import type { CreatePackageRevisionInput } from './revision-identity.js';
+import { assertValidParentRevision } from './revision-parent.js';
 export { RevisionNomenclatureValidationError } from './revision-identity.js';
+export { RevisionParentValidationError } from './revision-parent.js';
 
 /** Package revisions (ADR-015 D5, issue #96): immutable issuance snapshots.
  *  Issuing freezes every member section's full SpecTree as JSONB inside one
@@ -41,6 +43,7 @@ export interface RevisionSummary {
   readonly attributes: RevisionAttributes;
   readonly issuedAt: string;
   readonly specCount: number;
+  readonly parentRevisionId: string | null;
 }
 
 export interface RevisionSpecEntry {
@@ -61,6 +64,7 @@ export interface RevisionWithTrees {
   readonly attributes: RevisionAttributes;
   readonly issuedAt: string;
   readonly specs: readonly RevisionSpecEntry[];
+  readonly parentRevisionId: string | null;
 }
 
 export interface RevisionManualData {
@@ -89,6 +93,7 @@ export interface RevisionRow {
   readonly sort_order: number;
   readonly attributes: unknown;
   readonly issued_at: Date;
+  readonly parent_revision_id: string | null;
 }
 
 interface PackageRow {
@@ -246,6 +251,7 @@ export function mapSummary(
     attributes,
     issuedAt: row.issued_at.toISOString(),
     specCount,
+    parentRevisionId: row.parent_revision_id,
   };
 }
 
@@ -281,17 +287,26 @@ async function insertRevisionRow(
   packageId: string,
   input: string | CreatePackageRevisionInput,
   profile: RevisionNomenclatureProfile,
+  parentRevisionId: string | null,
   client: PoolClient
 ): Promise<RevisionRow> {
   const draft = createRevisionIdentityDraft(input, profile);
   const sortOrder = draft.sortOrder ?? (await nextSortOrder(packageId, client));
   const rev = await client.query<RevisionRow>(
     `INSERT INTO package_revisions
-      (package_id, label, revision_type, revision_date, sort_order, attributes)
-     VALUES ($1, $2, $3, $4::date, $5, $6::jsonb)
+      (package_id, label, revision_type, revision_date, sort_order, attributes, parent_revision_id)
+     VALUES ($1, $2, $3, $4::date, $5, $6::jsonb, $7)
      RETURNING id, package_id, label, revision_type, revision_date,
-               sort_order, attributes, issued_at`,
-    [packageId, draft.label, draft.type, draft.date, sortOrder, JSON.stringify(draft.attributes)]
+               sort_order, attributes, issued_at, parent_revision_id`,
+    [
+      packageId,
+      draft.label,
+      draft.type,
+      draft.date,
+      sortOrder,
+      JSON.stringify(draft.attributes),
+      parentRevisionId,
+    ]
   );
   const row = rev.rows[0];
   if (!row) throw new DatabaseError('createPackageRevision: no row returned after insert');
@@ -311,7 +326,9 @@ export async function createPackageRevision(
     const locked = await lockPackage(packageId, client);
     const profile = await getRevisionNomenclatureForProject(locked.project_id, client);
     if (!profile) throw new DatabaseError('createPackageRevision: no nomenclature profile');
-    const row = await insertRevisionRow(packageId, input, profile, client);
+    const parentRevisionId = typeof input === 'string' ? null : (input.parentRevisionId ?? null);
+    await assertValidParentRevision(packageId, parentRevisionId, client);
+    const row = await insertRevisionRow(packageId, input, profile, parentRevisionId, client);
     const entries = await snapshotMemberTrees(packageId, client);
     await insertSnapshotRows(row.id, entries, client);
     await markMembersIssued(
@@ -348,7 +365,7 @@ export async function getPackageRevision(
   try {
     const rev = await db.query<RevisionRow>(
       `SELECT id, package_id, label, revision_type, revision_date,
-              sort_order, attributes, issued_at
+              sort_order, attributes, issued_at, parent_revision_id
        FROM package_revisions WHERE id = $1`,
       [revisionId]
     );
