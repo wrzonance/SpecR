@@ -15,6 +15,7 @@ import {
 import { checkRegexPatterns } from '../../lib/regex-safety.js';
 import { classify } from '../../conventions/index.js';
 import { assertSpecWritable } from './edit-gate.js';
+import { bumpSpecContentVersion } from './content-version.js';
 import { SourceFactsSchema } from '../../ast/index.js';
 import type { PoolClient } from 'pg';
 import type { ConventionRules, Editability } from '../../ast/index.js';
@@ -290,10 +291,7 @@ async function insertNoteSibling(
   // Materializing a note mutates the tree — bump content_version so project-copy
   // clean/edited detection (which keys on it) sees the change (mirrors
   // updateParagraphText). The idempotent repeat path rolls back, so it never reaches here.
-  await client.query(
-    `UPDATE specs SET content_version = content_version + 1, updated_at = now() WHERE id = $1`,
-    [specId]
-  );
+  await bumpSpecContentVersion(client, specId);
   return row.id;
 }
 

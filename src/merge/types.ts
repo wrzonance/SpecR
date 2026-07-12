@@ -13,7 +13,12 @@ export interface ExtractResult {
   /** uuid → plain text (post virtual-accept of track changes) */
   readonly controlled: ReadonlyMap<string, string>;
   /** non-empty paragraphs outside any specr-uuid w:sdt, with document-order index */
-  readonly orphans: readonly { readonly text: string; readonly index: number }[];
+  readonly orphans: readonly {
+    readonly text: string;
+    readonly index: number;
+    /** nearest preceding controlled uuid in document order, undefined if none */
+    readonly afterUuid: string | undefined;
+  }[];
   readonly trackChanges: {
     readonly present: boolean;
     readonly records: readonly TrackChangeRecord[];
@@ -26,6 +31,10 @@ export interface ParagraphDiff {
   readonly text: string;
   /** document order in theirs */
   readonly index: number;
+  /** nearest preceding controlled uuid in document order; the key is optional so
+   *  the Zod merge-request parse shape (afterUuid an optional key) is directly
+   *  assignable to this internal shape — no reconciling mapper needed. */
+  readonly afterUuid?: string | undefined;
 }
 
 export interface ModifiedDiff {

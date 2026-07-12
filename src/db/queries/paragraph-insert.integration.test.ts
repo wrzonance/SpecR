@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { pool, insertParagraphAfter, StaleVersionError } from '../index.js';
+import type { PoolClient } from 'pg';
+import { pool, insertParagraphAfter, insertSiblingRow, StaleVersionError } from '../index.js';
 
 const SPEC_ID = 'c1000000-0000-0000-0000-000000000000';
 const OTHER_SPEC_ID = 'c1000000-0000-0000-0000-00000000000f';
@@ -23,6 +24,31 @@ async function positionOf(nodeId: string): Promise<number> {
     [nodeId]
   );
   return res.rows[0]?.position ?? -1;
+}
+
+async function countParagraphsWithId(id: string): Promise<number> {
+  const res = await pool.query<{ count: string }>('SELECT count(*) FROM paragraphs WHERE id = $1', [
+    id,
+  ]);
+  return Number(res.rows[0]?.count ?? '0');
+}
+
+/** Runs `fn` inside its own BEGIN/COMMIT — insertSiblingRow is a gate-free,
+ *  transaction-managed-by-caller DB core, so exercising it directly (rather
+ *  than through insertParagraphAfter) requires owning the transaction here. */
+async function runInTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 beforeAll(async () => {
@@ -204,5 +230,95 @@ describe('insertParagraphAfter', () => {
       expectedVersion: version,
     });
     expect(result.status).toBe('created');
+  });
+});
+
+// insertSiblingRow is the reusable, gate-free DB core (#374) behind
+// insertParagraphAfter and (in a later change) the merge engine's added-op
+// apply. These pin the invariants the extraction must hold: the explicitId
+// idempotency pre-check runs under the anchor lock strictly before any
+// sibling-position shift, and the core never gates or bumps content_version —
+// that stays exclusively the caller's job.
+describe('insertSiblingRow (DB core, #374)', () => {
+  it('short-circuits a retried explicitId to "exists" before any position shift or duplicate row — the sole idempotency mechanism', async () => {
+    const explicitId = 'c1000000-0000-0000-0000-0000000000bb';
+    const lastPosBefore = await positionOf(PR1_LAST_ID);
+
+    const first = await runInTransaction((client) =>
+      insertSiblingRow(client, SPEC_ID, {
+        anchorNodeId: PR1_FIRST_ID,
+        text: 'Retryable insert.',
+        explicitId,
+      })
+    );
+    expect(first.status).toBe('created');
+    if (first.status !== 'created') return;
+    expect(first.node.id).toBe(explicitId);
+    expect(await positionOf(PR1_LAST_ID)).toBe(lastPosBefore + 1);
+    expect(await countParagraphsWithId(explicitId)).toBe(1);
+
+    // A retry (same explicitId, e.g. a re-submitted merge accept) must observe
+    // the first attempt's row under the anchor lock and skip BOTH the shift
+    // and the insert entirely — not just avoid a duplicate row.
+    const second = await runInTransaction((client) =>
+      insertSiblingRow(client, SPEC_ID, {
+        anchorNodeId: PR1_FIRST_ID,
+        text: 'Retryable insert.',
+        explicitId,
+      })
+    );
+    expect(second).toEqual({ status: 'exists', id: explicitId });
+    expect(await positionOf(PR1_LAST_ID)).toBe(lastPosBefore + 1); // no second shift
+    expect(await countParagraphsWithId(explicitId)).toBe(1); // no duplicate row
+  });
+
+  it('never bumps content_version itself — that is exclusively insertParagraphAfter’s job', async () => {
+    const versionBefore = await contentVersion(SPEC_ID);
+    const result = await runInTransaction((client) =>
+      insertSiblingRow(client, SPEC_ID, {
+        anchorNodeId: PR1_MIDDLE_ID,
+        text: 'Core insert, no bump.',
+      })
+    );
+    expect(result.status).toBe('created');
+    expect(await contentVersion(SPEC_ID)).toBe(versionBefore);
+  });
+
+  it('never calls assertSpecWritable — succeeds directly against an archived (gate-rejected) spec', async () => {
+    const archivedSpecId = 'c1000000-0000-0000-0000-0000000000cc';
+    const archivedPartId = 'c1000000-0000-0000-0000-0000000000cd';
+    const archivedBodyId = 'c1000000-0000-0000-0000-0000000000ce';
+    await pool.query(
+      `INSERT INTO specs (id, section, title, source, library_id, lifecycle_state)
+       VALUES ($1, '99 99 03', 'Archived Insert Test', 'arcat',
+               (SELECT id FROM libraries WHERE name = 'Default Company Master'), 'archived')
+       ON CONFLICT (id) DO NOTHING`,
+      [archivedSpecId]
+    );
+    await pool.query(
+      `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
+       VALUES ($1, $2, NULL, 'part', 'GENERAL', 1) ON CONFLICT (id) DO NOTHING`,
+      [archivedPartId, archivedSpecId]
+    );
+    await pool.query(
+      `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
+       VALUES ($1, $2, $3, 'pr1', 'Body.', 1) ON CONFLICT (id) DO NOTHING`,
+      [archivedBodyId, archivedSpecId, archivedPartId]
+    );
+
+    try {
+      // If insertSiblingRow called assertSpecWritable, this would throw
+      // SpecWriteForbiddenError instead of returning 'created' — the archived
+      // lifecycle_state gates writes at that layer, not this one.
+      const result = await runInTransaction((client) =>
+        insertSiblingRow(client, archivedSpecId, {
+          anchorNodeId: archivedBodyId,
+          text: 'Gate is the caller’s job, not the core’s.',
+        })
+      );
+      expect(result.status).toBe('created');
+    } finally {
+      await pool.query('DELETE FROM specs WHERE id = $1', [archivedSpecId]);
+    }
   });
 });

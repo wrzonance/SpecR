@@ -12,12 +12,12 @@ function snap(uuid: string, text: string, baseVersion = 1): ParagraphSnapshot {
 
 function extract(
   controlled: readonly (readonly [string, string])[],
-  orphans: readonly { text: string; index: number }[] = [],
+  orphans: readonly { text: string; index: number; afterUuid?: string | undefined }[] = [],
   records: readonly TrackChangeRecord[] = []
 ): ExtractResult {
   return {
     controlled: new Map(controlled),
-    orphans,
+    orphans: orphans.map((o) => ({ text: o.text, index: o.index, afterUuid: o.afterUuid })),
     trackChanges: { present: records.length > 0, records },
   };
 }
@@ -80,6 +80,21 @@ describe('computeDiff', () => {
     expect(result.conflicts).toEqual([]);
   });
 
+  it('theirs-deletes a paragraph ours edited since base → classified as a plain delete', () => {
+    // KNOWN AMBIGUITY (#465): classifyBase checks "missing from theirs → deleted"
+    // BEFORE consulting ours, so an owner delete of a paragraph the spec writer
+    // edited in the DB since base (ours "writer edit" ≠ base "base text") is emitted
+    // as a plain delete, not the git-style delete/modify conflict ADR-005 line 29
+    // implies. Accepting it (since #374) vanishes the writer's edit — reversibly
+    // (setVanishRow + paragraph_versions snapshot), but without surfacing the
+    // divergence. Pinned here as current behavior; the fix (a delete/modify-conflict
+    // category + apply-time guard) is a /diff contract change tracked in #465.
+    const result = computeDiff([snap(U1, 'base text')], [snap(U1, 'writer edit')], extract([]));
+    expect(result.deleted).toEqual([U1]);
+    expect(result.conflicts).toEqual([]);
+    expect(result.modified).toEqual([]);
+  });
+
   it('paragraph absent from ours falls back to base text → theirs change is modified, not conflict', () => {
     const result = computeDiff([snap(U1, 'base text')], [], extract([[U1, 'owner edit']]));
     expect(result.modified).toEqual([
@@ -88,11 +103,36 @@ describe('computeDiff', () => {
     expect(result.conflicts).toEqual([]);
   });
 
-  it('orphan paragraph in theirs → added with synthesized uuid and document index', () => {
-    const result = computeDiff([], [], extract([], [{ text: 'new owner paragraph', index: 3 }]), {
-      uuidGen: () => 'fixed-0',
-    });
-    expect(result.added).toEqual([{ uuid: 'fixed-0', text: 'new owner paragraph', index: 3 }]);
+  it('orphan paragraph in theirs → added with synthesized uuid, document index, and afterUuid', () => {
+    const result = computeDiff(
+      [snap(U1, 'kept')],
+      [snap(U1, 'kept')],
+      extract([[U1, 'kept']], [{ text: 'new owner paragraph', index: 3, afterUuid: U1 }]),
+      { uuidGen: () => 'fixed-0' }
+    );
+    expect(result.added).toEqual([
+      { uuid: 'fixed-0', text: 'new owner paragraph', index: 3, afterUuid: U1 },
+    ]);
+  });
+
+  it('two orphans sharing one anchor uuid → both added entries carry the same afterUuid', () => {
+    let n = 0;
+    const result = computeDiff(
+      [snap(U1, 'kept')],
+      [snap(U1, 'kept')],
+      extract(
+        [[U1, 'kept']],
+        [
+          { text: 'first new', index: 1, afterUuid: U1 },
+          { text: 'second new', index: 2, afterUuid: U1 },
+        ]
+      ),
+      { uuidGen: () => `fixed-${n++}` }
+    );
+    expect(result.added).toEqual([
+      { uuid: 'fixed-0', text: 'first new', index: 1, afterUuid: U1 },
+      { uuid: 'fixed-1', text: 'second new', index: 2, afterUuid: U1 },
+    ]);
   });
 
   it('injected uuidGen makes added uuids deterministic across orphans', () => {
@@ -208,7 +248,9 @@ describe('computeDiff', () => {
     expect(result.modified).toEqual([
       { uuid: U1, base: 'base text', theirs: 'owner edit', ours: 'base text' },
     ]);
-    expect(result.added).toEqual([{ uuid: 'fixed-0', text: 'new paragraph', index: 5 }]);
+    expect(result.added).toEqual([
+      { uuid: 'fixed-0', text: 'new paragraph', index: 5, afterUuid: undefined },
+    ]);
     expect(result.conflicts).toEqual([]);
     expect(result.deleted).toEqual([]);
     expect(result.warnings).toEqual([]);

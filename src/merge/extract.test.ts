@@ -10,6 +10,7 @@ const ART_ID = '00000000-0000-0000-0000-000000000003';
 const PR1_ID = '00000000-0000-0000-0000-000000000004';
 const NOTE_ID = '00000000-0000-0000-0000-000000000005';
 const U1 = '11111111-1111-1111-1111-111111111111';
+const U2 = '22222222-2222-2222-2222-222222222222';
 
 const TREE: SpecTree = {
   id: '00000000-0000-0000-0000-000000000001',
@@ -67,7 +68,9 @@ describe('extractContentControls', () => {
   it('roundtrip: synthetic title paragraph is the only orphan; no track changes', async () => {
     const buffer = await generateDocx(TREE);
     const result = await extractContentControls(buffer);
-    expect(result.orphans).toEqual([{ text: 'SECTION 27 21 00 — Structured Cabling', index: 0 }]);
+    expect(result.orphans).toEqual([
+      { text: 'SECTION 27 21 00 — Structured Cabling', index: 0, afterUuid: undefined },
+    ]);
     expect(result.trackChanges.present).toBe(false);
     expect(result.trackChanges.records).toEqual([]);
   });
@@ -79,7 +82,26 @@ describe('extractContentControls', () => {
     const result = await extractContentControls(buffer);
     expect(result.controlled.size).toBe(1);
     expect(result.controlled.get(U1)).toBe('controlled text');
-    expect(result.orphans).toEqual([{ text: 'orphan text', index: 1 }]);
+    expect(result.orphans).toEqual([{ text: 'orphan text', index: 1, afterUuid: U1 }]);
+  });
+
+  it('orphan between two controlled paragraphs → afterUuid is the nearest preceding controlled uuid', async () => {
+    const body =
+      sdt(U1, para(run('first controlled'))) +
+      para(run('orphan between')) +
+      sdt(U2, para(run('second controlled')));
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.orphans).toEqual([{ text: 'orphan between', index: 1, afterUuid: U1 }]);
+  });
+
+  it('two orphans in a row after the same controlled paragraph share one afterUuid', async () => {
+    const body =
+      sdt(U1, para(run('first controlled'))) + para(run('orphan one')) + para(run('orphan two'));
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.orphans).toEqual([
+      { text: 'orphan one', index: 1, afterUuid: U1 },
+      { text: 'orphan two', index: 2, afterUuid: U1 },
+    ]);
   });
 
   it('w:sdt without a specr-uuid- tag → its paragraph is an orphan', async () => {
@@ -89,7 +111,7 @@ describe('extractContentControls', () => {
       '</w:sdtContent></w:sdt>';
     const result = await extractContentControls(await craftDocx(body));
     expect(result.controlled.size).toBe(0);
-    expect(result.orphans).toEqual([{ text: 'foreign control', index: 0 }]);
+    expect(result.orphans).toEqual([{ text: 'foreign control', index: 0, afterUuid: undefined }]);
   });
 
   it('w:ins is virtually accepted: text included, record carries uuid/author/date', async () => {
@@ -127,7 +149,7 @@ describe('extractContentControls', () => {
   it('whitespace-only paragraphs are skipped and do not consume an index', async () => {
     const body = para(run('   ')) + para(run('real text'));
     const result = await extractContentControls(await craftDocx(body));
-    expect(result.orphans).toEqual([{ text: 'real text', index: 0 }]);
+    expect(result.orphans).toEqual([{ text: 'real text', index: 0, afterUuid: undefined }]);
   });
 
   it('normalizes w:tab → tab, w:br → newline, strips w:noBreakHyphen', async () => {
@@ -192,20 +214,27 @@ describe('extractContentControls', () => {
     const result = await extractContentControls(await craftDocx(body));
     expect(result.controlled.get(U1)).toBe('first para\nsecond para');
     // tail is the third non-empty paragraph encountered (index 2 — two sdt paragraphs consumed 0 and 1)
-    expect(result.orphans).toEqual([{ text: 'tail', index: 2 }]);
+    expect(result.orphans).toEqual([{ text: 'tail', index: 2, afterUuid: U1 }]);
   });
 
-  // KNOWN AMBIGUITY: table-cell paragraphs are not generator output; they surface
-  // as individual orphans with document-order indexes (never silently dropped).
-  it('table cell paragraphs surface as orphans with document-order indexes', async () => {
+  // KNOWN AMBIGUITY: table-cell paragraphs are not generator output. They surface
+  // as orphans but are deliberately kept ANCHORLESS (afterUuid undefined) even when
+  // a controlled paragraph precedes the table (#374): a w:tbl cell has no CSI tier,
+  // so anchoring — and later flattening — it onto a body sibling would corrupt
+  // structure. Anchorless orphans flow into the merge's anchorless-addition
+  // rejection instead of silently applying. The non-table paragraph after the table
+  // anchors normally, proving the flag scopes to the table subtree only.
+  it('table-cell paragraphs stay anchorless even when a controlled paragraph precedes the table', async () => {
     const body =
+      sdt(U1, para(run('controlled before table'))) +
       `<w:tbl><w:tr><w:tc>${para(run('cell A'))}</w:tc><w:tc>${para(run('cell B'))}</w:tc></w:tr></w:tbl>` +
       para(run('after table'));
     const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('controlled before table');
     expect(result.orphans).toEqual([
-      { text: 'cell A', index: 0 },
-      { text: 'cell B', index: 1 },
-      { text: 'after table', index: 2 },
+      { text: 'cell A', index: 1, afterUuid: undefined },
+      { text: 'cell B', index: 2, afterUuid: undefined },
+      { text: 'after table', index: 3, afterUuid: U1 },
     ]);
   });
 });

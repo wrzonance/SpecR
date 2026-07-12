@@ -4,6 +4,7 @@ import { logger } from '../lib/logger.js';
 import { DatabaseError } from './errors.js';
 
 export { DatabaseError } from './errors.js';
+export { bumpSpecContentVersion } from './queries/content-version.js';
 
 export function createPool(): Pool {
   return new Pool({ connectionString: config.DATABASE_URL });
@@ -51,16 +52,19 @@ export {
   getParagraphWithAncestors,
   getParagraphSpecId,
   updateParagraphText,
-  setParagraphVanish,
 } from './queries/paragraphs.js';
 export type {
   ParagraphRow,
   ParagraphWithAncestors,
   UpdateParagraphResult,
-  SetVanishResult,
 } from './queries/paragraphs.js';
-export { insertParagraphAfter } from './queries/paragraph-insert.js';
+// insertSiblingRow / setVanishRow are the gate-free DB cores behind
+// insertParagraphAfter / setParagraphVanish AND the merge engine's added/deleted-op
+// apply (src/merge/conflict.ts, #374) — its first cross-module consumer.
+export { insertParagraphAfter, insertSiblingRow } from './queries/paragraph-insert.js';
 export type { InsertParagraphResult, InsertParagraphInput } from './queries/paragraph-insert.js';
+export { setParagraphVanish, setVanishRow } from './queries/paragraph-vanish.js';
+export type { SetVanishResult, SetVanishRowResult } from './queries/paragraph-vanish.js';
 export {
   insertRefs,
   getInboundReferences,
