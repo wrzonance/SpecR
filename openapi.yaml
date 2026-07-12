@@ -455,6 +455,13 @@ paths:
                   description: >
                     Optional optimistic-concurrency precondition — the spec
                     `contentVersion` the caller read. Stale → 409.
+                actorLabel:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Optional caller identity attributed to this write in
+                    paragraph history (#377); omitted falls back to a system
+                    sentinel.
       responses:
         '201':
           description: Created paragraph node
@@ -519,6 +526,13 @@ paths:
                   description: >
                     Optional optimistic-concurrency precondition — the spec
                     `contentVersion` the caller read. Stale → 409.
+                actorLabel:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Optional caller identity attributed to this write in
+                    paragraph history (#377); omitted falls back to a system
+                    sentinel.
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -641,6 +655,13 @@ paths:
                   type: boolean
                   description: >
                     true to remove (set vanish), false to restore (clear vanish).
+                actorLabel:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Optional caller identity attributed to this write in
+                    paragraph history (#377); omitted falls back to a system
+                    sentinel.
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -818,6 +839,22 @@ paths:
             type: integer
             minimum: 0
           description: Zero-based index into the anchor's source_facts.comments.
+      requestBody:
+        required: false
+        description: >
+          Optional (#377) — the route was bodyless pre-#377 and a truly absent
+          body still resolves as if `{}` were sent (byte-identical behavior).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actorLabel:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Optional caller identity attributed to this write in
+                    paragraph history; omitted falls back to a system sentinel.
       responses:
         '201':
           description: Note node created
@@ -6259,6 +6296,12 @@ components:
           description: >
             Optional optimistic-concurrency precondition (ADR-018) — the spec
             `contentVersion` the redline was diffed against. Stale → 409.
+        actorLabel:
+          type: string
+          minLength: 1
+          description: >
+            Optional caller identity attributed to this merge in paragraph
+            history (#377); omitted falls back to a system sentinel.
 
     LockState:
       type: object
