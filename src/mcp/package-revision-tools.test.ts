@@ -29,9 +29,14 @@ describe('registerPackageRevisionTools — parentRevisionId doc parity (ADR-066 
     registerPackageRevisionTools(registrar);
     const description = descriptions.get('issue_package_revision') ?? '';
     expect(description).toContain('parentRevisionId');
-    expect(description).toMatch(/same package/i);
-    expect(description).toMatch(/nesting|depth/i);
     expect(description).toMatch(/isError/);
+    // Pin the custody rule's actual direction, not just its keywords — a
+    // negated rewrite ("must NOT belong to the same package") or a flipped
+    // bound ("nesting depth must exceed 1") would still contain "same
+    // package" / "depth" and slip past a keyword-only check.
+    expect(description).toMatch(/must belong to the same package/i);
+    expect(description).not.toMatch(/must (?:not|never) belong to the same package/i);
+    expect(description).toMatch(/nesting depth cannot exceed 1/i);
   });
 
   it('get_revision documents that the response echoes parentRevisionId', () => {

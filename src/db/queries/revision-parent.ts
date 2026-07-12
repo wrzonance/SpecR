@@ -32,7 +32,11 @@ export function checkParentRevisionRules(
   if (candidate === null) {
     throw new RevisionParentValidationError(`parent revision ${parentRevisionId} not found`);
   }
-  if (candidate.packageId !== targetPackageId) {
+  // Case-fold: Postgres canonicalizes uuid columns to lowercase on read, so
+  // `candidate.packageId` (fetched from the DB) is always lowercase, while
+  // `targetPackageId` is the route-param string passed through as typed —
+  // an uppercase/mixed-case UUID in the URL must still compare equal.
+  if (candidate.packageId.toLowerCase() !== targetPackageId.toLowerCase()) {
     throw new RevisionParentValidationError(
       `parent revision ${parentRevisionId} belongs to a different package`
     );

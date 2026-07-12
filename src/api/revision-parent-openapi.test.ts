@@ -129,6 +129,14 @@ describe('openapi.yaml — package_revisions.parent_revision_id (ADR-066 #389)',
     const doc = await loadSpec();
     const op = operation(doc, '/packages/{id}/revisions', 'post');
     const description = op.responses?.['422']?.description ?? '';
-    expect(description).toMatch(/parent revision/i);
+    // Pin the custody rule's actual content and direction, not just that the
+    // words "parent revision" appear somewhere — a rewrite that garbles or
+    // inverts a clause (e.g. "belongs to the SAME package") would still
+    // match a bare /parent revision/i check.
+    expect(description).toMatch(/parentRevisionId fails a custody rule/i);
+    expect(description).toMatch(/parent revision does not exist/i);
+    expect(description).toMatch(/belongs to a different package/i);
+    expect(description).not.toMatch(/belongs to the same package/i);
+    expect(description).toMatch(/nesting depth cannot exceed 1/i);
   });
 });

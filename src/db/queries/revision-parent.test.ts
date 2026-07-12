@@ -32,6 +32,17 @@ describe('checkParentRevisionRules', () => {
     ).toThrow(RevisionParentValidationError);
   });
 
+  it('does not throw for a same-package candidate when packageId casing differs (Postgres canonicalizes uuid columns to lowercase, but the route-param packageId is passed through as typed)', () => {
+    const mixedCaseId = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
+    expect(() =>
+      checkParentRevisionRules(
+        mixedCaseId,
+        parentRevisionId,
+        candidate({ packageId: mixedCaseId.toLowerCase() })
+      )
+    ).not.toThrow();
+  });
+
   it('throws when the candidate already has a parent (nesting depth > 1)', () => {
     expect(() =>
       checkParentRevisionRules(
