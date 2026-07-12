@@ -191,6 +191,32 @@ describe('resolveHistoryContext', () => {
   });
 });
 
+describe('lazyHistoryContext', () => {
+  it('resolves once and memoizes — repeated calls return the same context, one actor upsert', async () => {
+    resolveOrCreateUserByLabel.mockResolvedValueOnce({ id: 'u-alice', label: 'alice' });
+    const client = fakeClient();
+    const { lazyHistoryContext } = await import('./paragraph-history.js');
+
+    const getCtx = lazyHistoryContext(client as never, 5, 'alice');
+    const [ctx1, ctx2] = await Promise.all([getCtx(), getCtx()]);
+
+    expect(ctx1).toBe(ctx2); // same object — resolved once, then memoized
+    expect(ctx1).toEqual({ contentVersion: 6, userId: 'u-alice' });
+    expect(resolveOrCreateUserByLabel).toHaveBeenCalledTimes(1);
+  });
+
+  it('never upserts the actor when the getter is never called — a write that no-ops resolves nothing', async () => {
+    const client = fakeClient();
+    const { lazyHistoryContext } = await import('./paragraph-history.js');
+
+    // Build the resolver but never invoke it — the deferral's whole point: a
+    // merge that applies zero changes must not upsert a users row for actorLabel.
+    lazyHistoryContext(client as never, 5, 'alice');
+
+    expect(resolveOrCreateUserByLabel).not.toHaveBeenCalled();
+  });
+});
+
 describe('PARAGRAPH_HISTORY_OPS', () => {
   it("mirrors migration 046's paragraph_versions_op_check CHECK constraint exactly", async () => {
     const { PARAGRAPH_HISTORY_OPS } = await import('./paragraph-history.js');
