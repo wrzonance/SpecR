@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { pool } from '../index.js';
 import { ConventionValidationError } from './conventions.js';
 import { SpecWriteForbiddenError } from './edit-gate.js';
+import { SYSTEM_ACTOR_LABEL } from './paragraph-history.js';
 import {
   setSpecEditabilityOverride,
   clearSpecEditabilityOverride,
@@ -341,5 +342,152 @@ describe('acceptCommentAsNote', () => {
     );
     expect(notes.rows[0]!.n).toBe(0);
     await pool.query(`DELETE FROM specs WHERE id = $1`, [gatedSpec]);
+  });
+});
+
+interface HistoryRow {
+  readonly version: number;
+  readonly text: string;
+  readonly node_type: string;
+  readonly op: string;
+  readonly spec_id: string;
+  readonly content_version: number;
+  readonly payload: unknown;
+}
+
+async function historyRowsFor(paragraphId: string): Promise<HistoryRow[]> {
+  const res = await pool.query<HistoryRow>(
+    `SELECT version, text, node_type, op, spec_id, content_version, payload
+     FROM paragraph_versions WHERE paragraph_id = $1 ORDER BY version`,
+    [paragraphId]
+  );
+  return res.rows;
+}
+
+// acceptCommentAsNote's write-history capture (#377, ADR-052 D1): a created
+// note snapshots the new note row under op 'accept-note' with a payload
+// naming the anchor/index it materialized from, and the idempotent already-
+// accepted retry path (no-op, provenance match) writes zero new rows — the
+// same "created write snapshots once, no-op writes nothing" contract
+// setParagraphVanish's own history describe block pins for remove/restore.
+describe('acceptCommentAsNote — version history capture (#377)', () => {
+  let specId: string;
+  let libraryId: string;
+
+  beforeAll(async () => {
+    const lib = await pool.query<{ id: string }>(
+      `SELECT id FROM libraries WHERE name = 'Default Company Master' LIMIT 1`
+    );
+    libraryId = lib.rows[0]!.id;
+    const spec = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ('00 00 10', 'recl-history-it', 'arcat', $1) RETURNING id`,
+      [libraryId]
+    );
+    specId = spec.rows[0]!.id;
+  });
+
+  afterAll(async () => {
+    await pool.query(`DELETE FROM specs WHERE id = $1`, [specId]);
+  });
+
+  it('version-history: accept-as-note snapshots the created note, the already-accepted retry writes nothing (#377)', async () => {
+    const before = await pool.query<{ content_version: number }>(
+      `SELECT content_version FROM specs WHERE id = $1`,
+      [specId]
+    );
+    const anchor = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'History anchor', 50, $2::jsonb) RETURNING id`,
+      [
+        specId,
+        JSON.stringify({ comments: [{ author: 'A', text: 'History note', anchor: [0, 4] }] }),
+      ]
+    );
+    const anchorId = anchor.rows[0]!.id;
+
+    const created = await acceptCommentAsNote(specId, anchorId, 0);
+    expect(created.status).toBe('created');
+    if (created.status !== 'created') throw new Error('expected created');
+
+    // Exactly one new paragraph_versions row, in the same transaction as the
+    // paragraphs mutation that created the note.
+    const afterCreate = await historyRowsFor(created.noteId);
+    expect(afterCreate).toHaveLength(1);
+    expect(afterCreate[0]).toMatchObject({
+      version: 1,
+      text: 'History note',
+      node_type: 'note',
+      op: 'accept-note',
+      spec_id: specId,
+      content_version: before.rows[0]!.content_version + 1,
+    });
+    expect(afterCreate[0]?.payload).toEqual({
+      kind: 'accept-note',
+      anchorNodeId: anchorId,
+      commentIndex: 0,
+    });
+
+    // The idempotent already-accepted retry is a no-op write — it must not
+    // mint a second paragraph_versions row for the note.
+    const retry = await acceptCommentAsNote(specId, anchorId, 0);
+    expect(retry.status).toBe('already-accepted');
+    const afterRetry = await historyRowsFor(created.noteId);
+    expect(afterRetry).toHaveLength(1); // unchanged — no second row
+
+    await pool.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);
+  });
+
+  it('stamps the resolved actorLabel on the snapshot as a real users row', async () => {
+    const actorLabel = 'ph-actor-reclassify-test';
+    const anchor = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Actor anchor', 51, $2::jsonb) RETURNING id`,
+      [specId, JSON.stringify({ comments: [{ author: 'A', text: 'Actor note', anchor: [0, 4] }] })]
+    );
+    const anchorId = anchor.rows[0]!.id;
+
+    const created = await acceptCommentAsNote(specId, anchorId, 0, actorLabel);
+    expect(created.status).toBe('created');
+    if (created.status !== 'created') throw new Error('expected created');
+
+    const joined = await pool.query<{ label: string }>(
+      `SELECT u.label FROM paragraph_versions v
+       JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1
+       ORDER BY v.version DESC LIMIT 1`,
+      [created.noteId]
+    );
+    expect(joined.rows[0]?.label).toBe(actorLabel);
+
+    await pool.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);
+    await pool.query('DELETE FROM users WHERE label = $1', [actorLabel]);
+  });
+
+  it('falls back to SYSTEM_ACTOR_LABEL when no actorLabel is supplied', async () => {
+    const anchor = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+       VALUES ($1, 'pr1', 'Fallback anchor', 52, $2::jsonb) RETURNING id`,
+      [
+        specId,
+        JSON.stringify({ comments: [{ author: 'A', text: 'Fallback note', anchor: [0, 4] }] }),
+      ]
+    );
+    const anchorId = anchor.rows[0]!.id;
+
+    const created = await acceptCommentAsNote(specId, anchorId, 0);
+    expect(created.status).toBe('created');
+    if (created.status !== 'created') throw new Error('expected created');
+
+    const joined = await pool.query<{ label: string }>(
+      `SELECT u.label FROM paragraph_versions v
+       JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1
+       ORDER BY v.version DESC LIMIT 1`,
+      [created.noteId]
+    );
+    expect(joined.rows[0]?.label).toBe(SYSTEM_ACTOR_LABEL);
+
+    await pool.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);
   });
 });
