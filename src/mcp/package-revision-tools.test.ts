@@ -8,7 +8,24 @@
 // that they echo it. A registrar fake records descriptions without touching
 // capabilities.ts tiers or the DB — registerPackageRevisionTools() itself
 // only calls ToolRegistrar.register().
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// The tool descriptions under test are literals inside registerPackageRevisionTools
+// (package-revision-tools.ts); the handlers module only supplies the handler fns +
+// input Shapes that get passed straight through to register(). Mock it so this stays
+// a pure no-DB unit test: importing the real handlers pulls in ../db/index.js →
+// src/lib/env.ts, whose import-time env validation calls process.exit(1) when
+// DATABASE_URL is unset, aborting the documented no-DB `pnpm test` suite. This
+// mirrors the vi.mock('../db/index.js') isolation the other MCP handler unit tests use.
+vi.mock('./package-revision-handlers.js', () => ({
+  handleIssuePackageRevision: vi.fn(),
+  handleGetRevision: vi.fn(),
+  handleListPackageRevisions: vi.fn(),
+  IssuePackageRevisionShape: {},
+  GetRevisionShape: {},
+  ListPackageRevisionsShape: {},
+}));
+
 import { registerPackageRevisionTools } from './package-revision-tools.js';
 import type { ToolRegistrar } from './tool-registry.js';
 
