@@ -78,11 +78,12 @@ function registerNumberingProfileCrudWriteTools(reg: ToolRegistrar): void {
     {
       description:
         'Partial update of a numbering profile — supply name and/or rules; omit a field to ' +
-        "leave it unchanged. When rules is supplied, each entry's `tier` is optional — the " +
-        'server derives it from ilvl + articleIlvl and rejects (422) a declared value that ' +
-        'disagrees; articleIlvl is required once numbering or styleLadder is non-empty ' +
-        '(ADR-067). The built-in CSI Default (libraryId: null) is protected and cannot be ' +
-        'modified. Returns the updated profile row.',
+        'leave it unchanged. At least one of name or rules must be present. When rules is ' +
+        "supplied, each entry's `tier` is optional — the server derives it from ilvl + " +
+        'articleIlvl and rejects (422) a declared value that disagrees; articleIlvl is ' +
+        'required once numbering or styleLadder is non-empty (ADR-067). The built-in CSI ' +
+        'Default (libraryId: null) is protected and cannot be modified. Returns the updated ' +
+        'profile row.',
       inputSchema: UpdateNumberingProfileShape,
     },
     handleUpdateNumberingProfile

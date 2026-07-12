@@ -148,6 +148,18 @@ describe('numbering-profile CRUD MCP tools', () => {
     ).toBe(true);
   });
 
+  it('update rejects a fully-empty patch — no name or rules (matches REST 422)', async () => {
+    const libraryId = await makeLibrary();
+    const created = parse<ProfileRow>(
+      await handleCreateLibraryNumberingProfile({
+        libraryId,
+        name: 'Empty patch test',
+        rules: RULES,
+      })
+    );
+    expect(isToolError(await handleUpdateNumberingProfile({ profileId: created.id }))).toBe(true);
+  });
+
   it('update rejects a divergent declared tier, naming the offending entry (#319)', async () => {
     const libraryId = await makeLibrary();
     const created = parse<ProfileRow>(
