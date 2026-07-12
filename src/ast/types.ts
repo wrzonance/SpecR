@@ -143,12 +143,22 @@ export type ParseWarningType =
   | 'pdf-ocr-low-confidence'
   | 'pdf-ocr-unusable'
   | 'pdf-font-encoding-remapped'
-  | 'pdf-font-encoding-unrecoverable';
+  | 'pdf-font-encoding-unrecoverable'
+  | 'table-content-skipped';
 
 export interface ParseWarning {
   readonly type: ParseWarningType;
   readonly lineHint?: string;
   readonly suggestion?: string;
+}
+
+/**
+ * A DOCX table classified as hidden (all evidence-bearing cell paragraphs
+ * vanish) and retained out-of-band for future change-management (ADR-038).
+ * Rows are preserved as plain-text grids — no per-cell structure inference.
+ */
+export interface RetainedTable {
+  readonly rows: readonly (readonly string[])[];
 }
 
 export interface SpecTree {
@@ -157,6 +167,11 @@ export interface SpecTree {
   readonly title: string;
   readonly parts: readonly SpecNode[];
   readonly warnings?: readonly ParseWarning[];
+  /**
+   * Hidden tables retained out-of-band for future change-mgmt (ADR-038).
+   * Absent === none.
+   */
+  readonly hiddenTables?: readonly RetainedTable[];
 }
 
 export type SecRef = z.infer<typeof SecRefSchema>;

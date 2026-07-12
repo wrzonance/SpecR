@@ -1,5 +1,54 @@
 import { describe, it, expect } from 'vitest';
-import { getAttrVal, getAttrNumVal, extractAttrStr, toArray } from './xml-utils.js';
+import {
+  createDocumentXmlParser,
+  getAttrVal,
+  getAttrNumVal,
+  extractAttrStr,
+  toArray,
+} from './xml-utils.js';
+
+// The factory is the single source of the document.xml parser config shared by
+// document.ts and tables.ts (#293). These pin the config guarantees the reused
+// text/vanish helpers depend on, so drift (or a bad refactor) fails here — not silently
+// in one scanner. See the #22/#120 rationale on createDocumentXmlParser.
+describe('createDocumentXmlParser', () => {
+  interface Run {
+    readonly 'w:t'?: unknown;
+  }
+  interface Para {
+    readonly 'w:r'?: readonly Run[];
+    readonly 'w:pPr'?: unknown;
+  }
+  const parseP = (xml: string): Para | undefined => {
+    const parsed = createDocumentXmlParser(['w:p', 'w:r']).parse(xml) as {
+      readonly 'w:p'?: readonly Para[];
+    };
+    return parsed['w:p']?.[0];
+  };
+  const firstRunText = (xml: string): unknown => parseP(xml)?.['w:r']?.[0]?.['w:t'];
+
+  it('keeps a bare-integer w:t run as a string, never coerced to a number (#120)', () => {
+    expect(firstRunText('<w:p><w:r><w:t>9</w:t></w:r></w:p>')).toBe('9');
+  });
+
+  it('preserves leading/trailing whitespace in w:t text (trimValues: false)', () => {
+    expect(firstRunText('<w:p><w:r><w:t> x </w:t></w:r></w:p>')).toBe(' x ');
+  });
+
+  it('decodes OOXML entities in text (processEntities: true)', () => {
+    expect(firstRunText('<w:p><w:r><w:t>a &amp; b</w:t></w:r></w:p>')).toBe('a & b');
+  });
+
+  it('forces the requested tags to arrays even when a single element is present', () => {
+    expect(Array.isArray(parseP('<w:p><w:r><w:t>only</w:t></w:r></w:p>')?.['w:r'])).toBe(true);
+  });
+
+  it('does not array-wrap a tag outside the requested set', () => {
+    expect(Array.isArray(parseP('<w:p><w:pPr/><w:r><w:t>x</w:t></w:r></w:p>')?.['w:pPr'])).toBe(
+      false
+    );
+  });
+});
 
 describe('getAttrVal', () => {
   it('returns string value from @_w:val', () => {

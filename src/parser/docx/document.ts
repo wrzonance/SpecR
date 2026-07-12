@@ -1,31 +1,20 @@
-import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
-import { extractAttrStr, getAttrVal, getAttrNumVal, toArray } from './xml-utils.js';
+import {
+  createDocumentXmlParser,
+  extractAttrStr,
+  getAttrVal,
+  getAttrNumVal,
+  toArray,
+} from './xml-utils.js';
 import { parseParagraphSources } from './source-facts.js';
 import type { SourceFacts } from '../../ast/types.js';
 import type { DocxComment } from './comments.js';
 import type { DocxParagraph, NumberingMap, StyleMap } from './types.js';
 import type { ParagraphSource } from './source-facts.js';
 
-// Entity audit (issue #22): fxp v5 does not resolve custom or recursive entity declarations
-// — undefined/recursive &refs; are returned verbatim, not expanded (no billion-laughs risk).
-// processEntities: true is required: OOXML text content uses &amp; &lt; &gt; for ampersands
-// and angle brackets; setting false would corrupt those characters in paragraph text.
-// trimValues: false preserves trailing/leading spaces in w:t text nodes — trimming would
-// corrupt concatenated paragraph text across adjacent runs.
-// parseTagValue: false keeps w:t text as strings (#120): fxp's default numeric coercion
-// turns a bare-integer run (<w:t>9</w:t>) into the number 9, which extractRunText cannot
-// read and silently drops — deleting digits from numbers Word split across runs, e.g.
-// "09 91 26" stored as ["09 ", "9", "1 26"] rendered as "09 1 26".
-const xmlParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-  textNodeName: '#text',
-  processEntities: true,
-  trimValues: false,
-  parseTagValue: false,
-  isArray: (name) => ['w:p', 'w:r', 'w:hyperlink'].includes(name),
-});
+// See createDocumentXmlParser (xml-utils) for the #22/#120 config rationale. The table
+// extractor shares this exact config so their reused text/vanish helpers stay in lockstep.
+const xmlParser = createDocumentXmlParser(['w:p', 'w:r', 'w:hyperlink']);
 
 interface ParagraphFields {
   readonly styleId: string | undefined;
@@ -180,6 +169,32 @@ function resolveParagraphVanish(
   if (paragraphMarkVanish(pPr)) return true;
   if (styleId && styleMap.vanishStyleIds.has(styleId)) return true;
   return allTextRunsVanish(raw, styleMap.vanishCharStyleIds);
+}
+
+// Exported so other document.xml-scoped scanners (e.g. the table extractor, #293) can
+// resolve a raw paragraph node's hiddenness through the same 3-signal resolution
+// (paragraph-mark, paragraph-style, run/char-style) as ordinary body paragraphs,
+// instead of re-implementing vanish detection. Mirrors parseParagraph's own pPr/styleId
+// extraction verbatim — this is a pure delegation, not a new code path.
+export function isParagraphVanish(raw: Record<string, unknown>, styleMap: StyleMap): boolean {
+  const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
+  const styleVal = pPr ? getAttrVal(pPr['w:pStyle']) : '';
+  const styleId = styleVal || undefined;
+  return resolveParagraphVanish(raw, pPr, styleId, styleMap);
+}
+
+// Exported alongside isParagraphVanish for document.xml-scoped scanners (the table
+// extractor, #293) that have no ordered-source text to fall back on. Collects runs at
+// any depth via collectRuns — the SAME traversal isParagraphVanish uses — so a cell
+// whose text sits inside a w:sdt content control (SpecR's own merge anchors) or a
+// w:ins/w:del tracked-change wrapper is both classified AND retained with its text,
+// never dropped. (extractText reads only direct + hyperlink runs, which suffices for
+// the body path's `parseParagraphSources ?? extractText` fallback but would silently
+// lose wrapped runs here, misclassifying a fully-hidden wrapped table as visible.)
+export function extractParagraphText(para: Record<string, unknown>): string {
+  const runs: Record<string, unknown>[] = [];
+  collectRuns(para, runs);
+  return runs.map(extractRunText).join('');
 }
 
 function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxParagraph {

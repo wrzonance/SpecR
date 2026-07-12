@@ -1,6 +1,35 @@
 // Shared OOXML attribute extraction helpers for fast-xml-parser output.
 // fast-xml-parser represents w:val attributes as { '@_w:val': string | number }.
 
+import { XMLParser } from 'fast-xml-parser';
+
+// The word/document.xml full-fidelity parser config, shared by every scanner that reads
+// document.xml runs/paragraphs (document.ts, tables.ts) so the run/text/vanish helpers
+// they reuse (extractParagraphText, isParagraphVanish) behave identically on every path —
+// only the isArray tag set varies per scanner. Two hand-copied configs could drift and
+// make a reused helper silently diverge on one path (Codex #293).
+//
+// Entity audit (issue #22): fxp v5 does not resolve custom or recursive entity
+// declarations — undefined/recursive &refs; are returned verbatim, not expanded (no
+// billion-laughs risk). processEntities: true is required: OOXML text uses &amp; &lt;
+// &gt; for ampersands and angle brackets; false would corrupt those characters in text.
+// trimValues: false preserves leading/trailing spaces in w:t nodes — trimming would
+// corrupt concatenated paragraph text across adjacent runs. parseTagValue: false keeps
+// w:t text as strings (#120): fxp's default numeric coercion turns a bare-integer run
+// (<w:t>9</w:t>) into the number 9, which extractRunText cannot read and silently drops —
+// deleting digits Word split across runs, e.g. "09 91 26" stored as ["09 ", "9", "1 26"].
+export function createDocumentXmlParser(isArrayTags: readonly string[]): XMLParser {
+  return new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    textNodeName: '#text',
+    processEntities: true,
+    trimValues: false,
+    parseTagValue: false,
+    isArray: (name) => isArrayTags.includes(name),
+  });
+}
+
 export function getAttrVal(obj: unknown): string {
   if (obj !== null && typeof obj === 'object' && '@_w:val' in obj) {
     const v = (obj as Record<string, unknown>)['@_w:val'];
