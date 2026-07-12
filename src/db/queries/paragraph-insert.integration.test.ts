@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { PoolClient } from 'pg';
 import { pool, insertParagraphAfter, insertSiblingRow, StaleVersionError } from '../index.js';
+import { SYSTEM_ACTOR_LABEL } from './paragraph-history.js';
 
 const SPEC_ID = 'c1000000-0000-0000-0000-000000000000';
 const OTHER_SPEC_ID = 'c1000000-0000-0000-0000-00000000000f';
@@ -320,5 +321,100 @@ describe('insertSiblingRow (DB core, #374)', () => {
     } finally {
       await pool.query('DELETE FROM specs WHERE id = $1', [archivedSpecId]);
     }
+  });
+});
+
+interface HistoryRow {
+  readonly version: number;
+  readonly text: string;
+  readonly node_type: string;
+  readonly op: string;
+  readonly spec_id: string;
+  readonly content_version: number;
+  readonly payload: { kind: string; parentId: string | null; position: number } | null;
+}
+
+async function historyRowsFor(paragraphId: string): Promise<HistoryRow[]> {
+  const res = await pool.query<HistoryRow>(
+    `SELECT version, text, node_type, op, spec_id, content_version, payload
+     FROM paragraph_versions WHERE paragraph_id = $1 ORDER BY version`,
+    [paragraphId]
+  );
+  return res.rows;
+}
+
+describe('insertParagraphAfter — version history capture (#377)', () => {
+  it('version-history: insert records a creation row (#377)', async () => {
+    const versionBefore = await contentVersion(SPEC_ID);
+
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: PR1_MIDDLE_ID,
+      text: 'History-tracked insert.',
+    });
+    expect(result.status).toBe('created');
+    if (result.status !== 'created') return;
+
+    // Exactly one new paragraph_versions row per write.
+    const rows = await historyRowsFor(result.node.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      version: 1,
+      text: 'History-tracked insert.',
+      node_type: 'pr1',
+      op: 'insert',
+      spec_id: SPEC_ID,
+      content_version: versionBefore + 1,
+    });
+    expect(rows[0]?.payload).toEqual({
+      kind: 'insert',
+      parentId: ART_ID,
+      position: result.position,
+    });
+
+    const joined = await pool.query<{ label: string }>(
+      `SELECT u.label FROM paragraph_versions v
+       JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1 AND v.version = 1`,
+      [result.node.id]
+    );
+    expect(joined.rows[0]?.label).toBe(SYSTEM_ACTOR_LABEL);
+  });
+
+  it('stamps the resolved actorLabel on the creation row as a real users row', async () => {
+    const actorLabel = 'ph-actor-paragraph-insert-test';
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: PR1_MIDDLE_ID,
+      text: 'History-tracked insert, named actor.',
+      actorLabel,
+    });
+    expect(result.status).toBe('created');
+    if (result.status !== 'created') return;
+
+    const joined = await pool.query<{ label: string }>(
+      `SELECT u.label FROM paragraph_versions v
+       JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1 AND v.version = 1`,
+      [result.node.id]
+    );
+    expect(joined.rows[0]?.label).toBe(actorLabel);
+
+    await pool.query('DELETE FROM users WHERE label = $1', [actorLabel]);
+  });
+
+  it('a no-op (rejected) insert writes zero paragraph_versions rows', async () => {
+    const before = await pool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM paragraph_versions'
+    );
+
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: PART_ID,
+      text: 'Should not become a part.',
+    });
+    expect(result.status).toBe('invalid-type');
+
+    const after = await pool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM paragraph_versions'
+    );
+    expect(after.rows[0]?.count).toBe(before.rows[0]?.count);
   });
 });
