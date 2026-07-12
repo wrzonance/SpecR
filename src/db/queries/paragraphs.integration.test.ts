@@ -337,9 +337,13 @@ describe('updateParagraphText — version history capture (#377)', () => {
        ORDER BY v.version DESC LIMIT 1`,
       [HIST_PAR_ID]
     );
-    expect(joined.rows[0]!.label).toBe(actorLabel);
-
-    await pool.query('DELETE FROM users WHERE label = $1', [actorLabel]);
+    try {
+      expect(joined.rows[0]!.label).toBe(actorLabel);
+    } finally {
+      // Run cleanup even if the assertion throws — a leaked users row (label is
+      // UNIQUE) would fail later runs that re-claim it.
+      await pool.query('DELETE FROM users WHERE label = $1', [actorLabel]);
+    }
   });
 
   it('falls back to SYSTEM_ACTOR_LABEL when no actorLabel is supplied', async () => {

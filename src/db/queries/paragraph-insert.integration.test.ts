@@ -378,14 +378,19 @@ describe('insertParagraphAfter — version history capture (#377)', () => {
        WHERE v.paragraph_id = $1 AND v.version = 1`,
       [result.node.id]
     );
-    expect(joined.rows[0]?.label).toBe(actorLabel);
-
-    await pool.query('DELETE FROM users WHERE label = $1', [actorLabel]);
+    try {
+      expect(joined.rows[0]?.label).toBe(actorLabel);
+    } finally {
+      // Run cleanup even if the assertion throws — a leaked users row (label is
+      // UNIQUE) would fail later runs that re-claim it.
+      await pool.query('DELETE FROM users WHERE label = $1', [actorLabel]);
+    }
   });
 
   it('a no-op (rejected) insert writes zero paragraph_versions rows', async () => {
     const before = await pool.query<{ count: string }>(
-      'SELECT count(*)::text AS count FROM paragraph_versions'
+      'SELECT count(*)::text AS count FROM paragraph_versions WHERE spec_id = $1',
+      [SPEC_ID]
     );
 
     const result = await insertParagraphAfter(SPEC_ID, {
@@ -395,7 +400,8 @@ describe('insertParagraphAfter — version history capture (#377)', () => {
     expect(result.status).toBe('invalid-type');
 
     const after = await pool.query<{ count: string }>(
-      'SELECT count(*)::text AS count FROM paragraph_versions'
+      'SELECT count(*)::text AS count FROM paragraph_versions WHERE spec_id = $1',
+      [SPEC_ID]
     );
     expect(after.rows[0]?.count).toBe(before.rows[0]?.count);
   });
