@@ -159,6 +159,31 @@ describe('POST /packages/:id/revisions', () => {
     expect(res.status).toBe(422);
   });
 
+  it('422 for a malformed parentRevisionId (ADR-066 #389 — schema boundary)', async () => {
+    const res = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 900 },
+      parentRevisionId: 'not-a-uuid',
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('accepts a well-formed parentRevisionId and echoes it back (ADR-066 #389)', async () => {
+    const root = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 901 },
+    });
+    expect(root.status).toBe(201);
+    const rootId = (await data(root))['revisionId'] as string;
+    const child = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 902 },
+      parentRevisionId: rootId,
+    });
+    expect(child.status).toBe(201);
+    expect((await data(child))['parentRevisionId']).toBe(rootId);
+  });
+
   it('issuance flips member specs lifecycle_state to issued (ADR-018 D3)', async () => {
     async function lifecycle(id: string): Promise<string> {
       const r = await pool.query<{ lifecycle_state: string }>(

@@ -87,6 +87,7 @@ interface RevisionSummary {
   revisionId: string;
   type: string;
   specCount: number;
+  parentRevisionId: string | null;
 }
 interface RevisionWithTrees {
   revisionId: string;
@@ -150,6 +151,36 @@ describe('package revision MCP tools', () => {
     expect(
       isToolError(await handleIssuePackageRevision({ packageId, type: 'addendum', typ0: 'oops' }))
     ).toBe(true);
+  });
+
+  it('issue_package_revision rejects a malformed parentRevisionId (ADR-066 #389)', async () => {
+    const packageId = await packageWithMember('08 71 00');
+    const res = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+      parentRevisionId: 'not-a-uuid',
+    });
+    expect(isToolError(res)).toBe(true);
+  });
+
+  it('issue_package_revision accepts a well-formed parentRevisionId and echoes it back', async () => {
+    const packageId = await packageWithMember('08 80 00');
+    const root = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+    });
+    expect(isToolError(root)).toBe(false);
+    const rootId = parse<RevisionSummary>(root).revisionId;
+    const child = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 2 },
+      parentRevisionId: rootId,
+    });
+    expect(isToolError(child)).toBe(false);
+    expect(parse<RevisionSummary>(child).parentRevisionId).toBe(rootId);
   });
 
   it('get_revision rejects a bad UUID and an unknown id', async () => {

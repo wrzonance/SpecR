@@ -90,6 +90,11 @@ export const StructuredCreateRevisionBodySchema = z
     date: RevisionDateSchema.exactOptional(),
     sortOrder: z.number().int().positive().exactOptional(),
     attributes: RevisionAttributesSchema.exactOptional(),
+    // ADR-066 (#389): the revision this one was issued FROM (git-tag-like
+    // custody). Cross-package / nesting-depth / existence rules are enforced
+    // by the query layer (assertValidParentRevision) — this only pins the
+    // shape at the API boundary.
+    parentRevisionId: z.uuid().exactOptional(),
   })
   .strict();
 
