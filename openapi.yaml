@@ -4455,8 +4455,8 @@ paths:
       summary: Update a numbering profile (name and/or rules)
       description: >
         Partial update: omit a field to leave it unchanged. At least one of
-        `name` or `rules` should be present (an empty body is accepted but is
-        a no-op). When `rules` is supplied, each entry's `tier` is optional —
+        `name` or `rules` is required — an empty body is rejected (422).
+        When `rules` is supplied, each entry's `tier` is optional —
         the server derives it from ilvl + articleIlvl and rejects (422) a
         declared value that disagrees; articleIlvl is required once numbering
         or styleLadder is non-empty (ADR-067). The built-in CSI Default

@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import {
-  AddSectionToProjectBodySchema,
-  PatchSpecBodySchema,
-  StylePropertiesSchema,
-} from './schemas.js';
+import { AddSectionToProjectBodySchema, PatchSpecBodySchema } from './schemas.js';
+import { StylePropertiesSchema } from './style-schemas.js';
 import { GenerateBodySchema } from './generate-schemas.js';
 
 describe('StylePropertiesSchema (ADR-021 open style payload)', () => {

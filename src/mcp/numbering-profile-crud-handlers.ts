@@ -38,7 +38,14 @@ export const UpdateNumberingProfileShape = {
   ...NumberingProfileIdShape,
   ...PatchNumberingProfileBodySchema.shape,
 };
-const UpdateArgs = z.object(UpdateNumberingProfileShape);
+// .shape only carries the field definitions, not PatchNumberingProfileBodySchema's
+// own non-empty-patch .check() (see template-handlers.ts UpdateTemplateArgs for the
+// same pattern) — re-assert the invariant here so the MCP tool matches the REST body.
+const UpdateArgs = z
+  .object(UpdateNumberingProfileShape)
+  .refine((v) => v.name !== undefined || v.rules !== undefined, {
+    message: 'at least one of name or rules is required',
+  });
 
 export const SnapshotNumberingProfileShape = {
   contentBase64: z
