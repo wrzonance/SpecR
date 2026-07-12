@@ -96,13 +96,14 @@ async function lockParagraph(
  *  snapshot (#377, ADR-052 D1) under op 'merge', with a payload naming which
  *  diff bucket (`entry.diffKind`) it resolved — idempotent on
  *  (paragraph_id, version) so a retried apply never duplicates the row.
- *  A no-op (theirs already matches current text) records nothing, matching
- *  applyDeletedChange/applyAddedChange's own no-op contracts below. */
+ *  A no-op (theirs already matches current text) records nothing and never
+ *  calls `resolveCtx`, matching applyDeletedChange/applyAddedChange's own
+ *  no-op contracts below. */
 async function applyTextChange(
   specId: string,
   entry: TextChange,
   client: PoolClient,
-  ctx: ParagraphHistoryContext
+  resolveCtx: () => Promise<ParagraphHistoryContext>
 ): Promise<boolean> {
   const { change, diffKind } = entry;
   const row = await lockParagraph(specId, change.uuid, client);
@@ -112,6 +113,7 @@ async function applyTextChange(
     throw new MergeError(`stale diff for paragraph ${change.uuid}`);
   }
   const nextVersion = row.baseVersion + 1;
+  const ctx = await resolveCtx();
   await recordParagraphHistory(client, {
     paragraphId: change.uuid,
     specId,
@@ -173,14 +175,14 @@ function describeInsertFailure(result: InsertFailure, ctx: InsertFailureContext)
  *  insertSiblingRow's INSERT never sets base_version explicitly, so the new
  *  row carries paragraphs.base_version's column DEFAULT (1, migration 003) —
  *  no extra read needed to know it. An `exists` (idempotent re-submit)
- *  snapshots nothing, matching applyTextChange/applyDeletedChange's own
- *  no-op contracts. */
+ *  snapshots nothing and never calls `resolveCtx`, matching
+ *  applyTextChange/applyDeletedChange's own no-op contracts. */
 async function applyAddedChange(
   specId: string,
   anchorNodeId: string,
   entry: ParagraphDiff,
   client: PoolClient,
-  ctx: ParagraphHistoryContext
+  resolveCtx: () => Promise<ParagraphHistoryContext>
 ): Promise<boolean> {
   const result = await insertSiblingRow(client, specId, {
     anchorNodeId,
@@ -189,6 +191,7 @@ async function applyAddedChange(
   });
   if (result.status === 'exists') return false;
   if (result.status === 'created') {
+    const ctx = await resolveCtx();
     await recordParagraphHistory(client, {
       paragraphId: result.node.id,
       specId,
@@ -272,7 +275,7 @@ async function applyAcceptedAdded(
   acceptedEntries: readonly ParagraphDiff[],
   allAdded: readonly ParagraphDiff[],
   client: PoolClient,
-  ctx: ParagraphHistoryContext
+  resolveCtx: () => Promise<ParagraphHistoryContext>
 ): Promise<number> {
   const groups = groupAddedByAnchor(allAdded);
   const remap = new Map<string, string>();
@@ -289,7 +292,7 @@ async function applyAcceptedAdded(
       remap,
       client
     );
-    const created = await applyAddedChange(specId, anchorNodeId, entry, client, ctx);
+    const created = await applyAddedChange(specId, anchorNodeId, entry, client, resolveCtx);
     remap.set(entry.afterUuid, entry.uuid);
     if (created) applied += 1;
   }
@@ -304,7 +307,7 @@ async function applyDeletedChange(
   specId: string,
   uuid: string,
   client: PoolClient,
-  ctx: ParagraphHistoryContext
+  resolveCtx: () => Promise<ParagraphHistoryContext>
 ): Promise<boolean> {
   const result = await setVanishRow(client, specId, uuid, true);
   if (result.status === 'not-removable') {
@@ -320,6 +323,7 @@ async function applyDeletedChange(
   if (!result.changed) return false;
 
   const nextVersion = result.previousBaseVersion + 1;
+  const ctx = await resolveCtx();
   await recordParagraphHistory(client, {
     paragraphId: uuid,
     specId,
@@ -344,18 +348,22 @@ async function applyDeletedChange(
  * error propagates to the caller uncaught, so the whole apply is atomic: the
  * caller's transaction rolls back every write this call made.
  *
- * `ctx` (#377, ADR-052 D1) is resolved exactly once by the caller (see
- * apply-merge.ts) and threaded to every paragraph_versions snapshot this call
- * makes — so N changes from one outer write all stamp the same
- * content_version generation and the same resolved actor, without each
- * apply-strategy function re-resolving it itself.
+ * `resolveCtx` (#377, ADR-052 D1) is a memoized {@link ParagraphHistoryContext}
+ * resolver built once by the caller (see apply-merge.ts's lazyHistoryContext)
+ * and threaded to every apply-strategy function, each of which calls it only
+ * once it has confirmed ITS OWN change is effective — never on a no-op. That
+ * keeps the actor-upsert (resolveOrCreateUserByLabel, inside
+ * resolveHistoryContext) off the path entirely for a merge that ends up
+ * writing nothing, while still sharing one content_version generation and one
+ * resolved actor across every snapshot N effective changes from one outer
+ * write DO make (the resolver caches its result after the first call).
  */
 export async function applyAccepted(
   specId: string,
   acceptedIds: readonly string[],
   diff: DiffResult,
   client: PoolClient,
-  ctx: ParagraphHistoryContext
+  resolveCtx: () => Promise<ParagraphHistoryContext>
 ): Promise<ApplyAcceptedResult> {
   const accepted = uniqueAccepted(acceptedIds);
   const applicable = applicableChanges(diff);
@@ -372,11 +380,11 @@ export async function applyAccepted(
     }
     const wasApplied =
       change.kind === 'text'
-        ? await applyTextChange(specId, change, client, ctx)
-        : await applyDeletedChange(specId, uuid, client, ctx);
+        ? await applyTextChange(specId, change, client, resolveCtx)
+        : await applyDeletedChange(specId, uuid, client, resolveCtx);
     if (wasApplied) applied += 1;
   }
-  applied += await applyAcceptedAdded(specId, addedEntries, diff.added, client, ctx);
+  applied += await applyAcceptedAdded(specId, addedEntries, diff.added, client, resolveCtx);
 
   return { applied, rejected: applicable.size - accepted.length };
 }

@@ -392,6 +392,7 @@ export type { UserSummary } from './queries/users.js';
 export {
   recordParagraphHistory,
   resolveHistoryContext,
+  lazyHistoryContext,
   SYSTEM_ACTOR_LABEL,
 } from './queries/paragraph-history.js';
 export type { ParagraphHistoryContext } from './queries/paragraph-history.js';

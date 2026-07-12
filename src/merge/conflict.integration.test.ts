@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { describe, it, expect, afterAll } from 'vitest';
-import { pool, resolveHistoryContext } from '../db/index.js';
+import { pool, lazyHistoryContext } from '../db/index.js';
 import type { ParagraphHistoryContext } from '../db/index.js';
 import { applyAccepted, InvalidAcceptedChangeError } from './conflict.js';
 import { applyMerge } from './apply-merge.js';
@@ -91,21 +91,21 @@ async function runInTransaction<T>(fn: (client: PoolClient) => Promise<T>): Prom
   }
 }
 
-/** Every applyAccepted call site in this file needs a ParagraphHistoryContext
- *  (#377, ADR-052 D1) — real callers (apply-merge.ts) resolve one exactly once
- *  per outer write, immediately after the gate succeeds. These tests bypass
- *  the gate entirely (they call applyAccepted directly, not applyMerge), so
- *  there is no real pre-bump content_version to resolve against; the exact
- *  number is irrelevant to what this file's applyAccepted-level tests assert
+/** Every applyAccepted call site in this file needs a lazy
+ *  ParagraphHistoryContext resolver (#377, ADR-052 D1) — real callers
+ *  (apply-merge.ts) build one exactly once per outer write, immediately after
+ *  the gate succeeds, via lazyHistoryContext. These tests bypass the gate
+ *  entirely (they call applyAccepted directly, not applyMerge), so there is
+ *  no real pre-bump content_version to resolve against; the exact number is
+ *  irrelevant to what this file's applyAccepted-level tests assert
  *  (op/uuid/rejection-count/idempotency), so 0 is used uniformly. Tests that
  *  DO care about the real specs.content_version lockstep go through
  *  applyMerge instead (see the 'write-history lockstep' describe block below). */
 async function runApplyAccepted<T>(
-  fn: (client: PoolClient, ctx: ParagraphHistoryContext) => Promise<T>
+  fn: (client: PoolClient, resolveCtx: () => Promise<ParagraphHistoryContext>) => Promise<T>
 ): Promise<T> {
   return runInTransaction(async (client) => {
-    const ctx = await resolveHistoryContext(client, 0, undefined);
-    return fn(client, ctx);
+    return fn(client, lazyHistoryContext(client, 0, undefined));
   });
 }
 
@@ -115,6 +115,14 @@ async function contentVersion(specId: string): Promise<number> {
     [specId]
   );
   return res.rows[0]?.content_version ?? -1;
+}
+
+/** True if `label` has ever been resolved through resolveOrCreateUserByLabel
+ *  (a row exists in `users`). Used to prove a no-effective-write merge never
+ *  triggers the actor upsert (#377 follow-up). */
+async function userExists(label: string): Promise<boolean> {
+  const res = await pool.query('SELECT 1 FROM users WHERE label = $1', [label]);
+  return res.rowCount !== null && res.rowCount > 0;
 }
 
 interface HistoryRow {
@@ -614,5 +622,55 @@ describe('applyMerge — write-history lockstep (#377)', () => {
     expect(second).toMatchObject({ kind: 'applied', applied: 0, rejected: 0 });
     expect(await contentVersion(specId)).toBe(before); // no-op re-submit → no bump
     expect(await historyRowsFor(pr1Id)).toHaveLength(1); // still exactly one row
+  });
+});
+
+// applyMerge must not resolve (and thereby upsert) an actor's users row until
+// it is known the merge makes an effective write — mirroring applyVanish/
+// runInsert/runAccept, which all defer resolveHistoryContext past their own
+// no-op guard. Resolving eagerly, right after the gate, would mint a users
+// row for actorLabel even when nothing in the accept array actually changes
+// anything (code review finding on #377, ADR-052 D1).
+describe('applyMerge — defers actor resolution until an effective write (#377 follow-up)', () => {
+  it('accept=[] resolves no actor and creates no users row', async () => {
+    const { specId } = await createFixture();
+    const actorLabel = `unused-actor-${randomUUID()}`;
+    const diff = diffWith({});
+
+    const outcome = await applyMerge(specId, [], diff, undefined, actorLabel);
+
+    expect(outcome).toMatchObject({ kind: 'applied', applied: 0, rejected: 0 });
+    expect(await userExists(actorLabel)).toBe(false);
+  });
+
+  it('a merge where every accepted change is a no-op creates no users row for a fresh actor', async () => {
+    const { specId, pr1SecondId } = await createFixture();
+    const actorLabel = `unused-actor-${randomUUID()}`;
+    const diff = diffWith({
+      modified: [
+        {
+          uuid: pr1SecondId,
+          base: PR1_SECOND_TEXT,
+          theirs: PR1_SECOND_TEXT,
+          ours: PR1_SECOND_TEXT,
+        },
+      ],
+    });
+
+    const outcome = await applyMerge(specId, [pr1SecondId], diff, undefined, actorLabel);
+
+    expect(outcome).toMatchObject({ kind: 'applied', applied: 0, rejected: 0 });
+    expect(await userExists(actorLabel)).toBe(false);
+  });
+
+  it('a merge with a real effective write still resolves and attributes the actor', async () => {
+    const { specId, pr1Id } = await createFixture();
+    const actorLabel = `real-actor-${randomUUID()}`;
+    const diff = diffWith({ deleted: [pr1Id] });
+
+    const outcome = await applyMerge(specId, [pr1Id], diff, undefined, actorLabel);
+
+    expect(outcome).toMatchObject({ kind: 'applied', applied: 1, rejected: 0 });
+    expect(await userExists(actorLabel)).toBe(true);
   });
 });

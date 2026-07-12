@@ -3,7 +3,7 @@ import {
   findSpecById,
   assertSpecWritable,
   bumpSpecContentVersion,
-  resolveHistoryContext,
+  lazyHistoryContext,
 } from '../db/index.js';
 import { applyAccepted, type ApplyAcceptedResult } from './conflict.js';
 import type { DiffResult } from './types.js';
@@ -22,10 +22,14 @@ export type ApplyMergeOutcome =
  *
  * `actorLabel` (#377, ADR-052 D1) attributes every paragraph_versions snapshot
  * this merge writes; falls back to the SYSTEM_ACTOR_LABEL sentinel
- * (paragraph-history.ts) when omitted. The history context is resolved once,
- * right after the gate succeeds — before it is known whether any individual
- * change will turn out to be a no-op — so every snapshot this call makes
- * shares one content_version generation and one resolved actor.
+ * (paragraph-history.ts) when omitted. The history context is resolved
+ * lazily (lazyHistoryContext) — only on the first change applyAccepted
+ * confirms is actually effective, mirroring applyVanish/runInsert/runAccept's
+ * own "resolve past the no-op guard" contract — so a merge that ends up
+ * writing nothing (empty accept array, or every accepted change already
+ * matches) never upserts a users row for actorLabel. Every snapshot this
+ * call DOES make still shares one content_version generation and one
+ * resolved actor, since the resolver memoizes after its first call.
  */
 export async function applyMerge(
   specId: string,
@@ -42,8 +46,8 @@ export async function applyMerge(
     // A merge mutates content, so it is governed exactly like a paragraph write.
     // The returned contentVersion is the pre-bump generation this write belongs to.
     const gate = await assertSpecWritable(client, specId, expectedVersion);
-    const historyContext = await resolveHistoryContext(client, gate.contentVersion, actorLabel);
-    const result = await applyAccepted(specId, accept, diff, client, historyContext);
+    const resolveHistory = lazyHistoryContext(client, gate.contentVersion, actorLabel);
+    const result = await applyAccepted(specId, accept, diff, client, resolveHistory);
     // Only advance the optimistic-concurrency token when content actually changed:
     // a no-op merge (applied === 0) must not bump content_version, or it would
     // invalidate every other client's precondition and trigger avoidable 409s.

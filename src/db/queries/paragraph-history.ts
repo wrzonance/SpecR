@@ -128,3 +128,23 @@ export async function resolveHistoryContext(
   const userId = await resolveActorUserId(client, actorLabel);
   return { contentVersion: preBumpContentVersion + 1, userId };
 }
+
+/** A {@link ParagraphHistoryContext} resolver deferred until first use, and
+ *  memoized so every call after the first returns the SAME resolved context —
+ *  the multi-write analogue of "call resolveHistoryContext once, right before
+ *  the first confirmed-effective write" that single-write paths (applyVanish,
+ *  runInsert, runAccept) already follow inline. A caller that applies N
+ *  changes in one transaction (applyAccepted) does not know in advance which,
+ *  if any, will turn out to be effective — resolving eagerly would upsert the
+ *  actor's `users` row even for a merge that writes nothing. */
+export function lazyHistoryContext(
+  client: PoolClient,
+  preBumpContentVersion: number,
+  actorLabel: string | undefined
+): () => Promise<ParagraphHistoryContext> {
+  let resolved: Promise<ParagraphHistoryContext> | undefined;
+  return () => {
+    resolved ??= resolveHistoryContext(client, preBumpContentVersion, actorLabel);
+    return resolved;
+  };
+}
