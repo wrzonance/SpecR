@@ -230,6 +230,16 @@ describe('POST /packages/:id/revisions', () => {
     expect(grandchild.status).toBe(422);
   });
 
+  it('legacy {label} body always yields parentRevisionId: null (ADR-066 #389)', async () => {
+    const res = await json('POST', `/packages/${pkgEmpty}/revisions`, {
+      label: `Legacy Null ${Date.now()}`,
+    });
+    expect(res.status).toBe(201);
+    const d = await data(res);
+    expect(d).toHaveProperty('parentRevisionId');
+    expect(d['parentRevisionId']).toBeNull();
+  });
+
   it('issuance flips member specs lifecycle_state to issued (ADR-018 D3)', async () => {
     async function lifecycle(id: string): Promise<string> {
       const r = await pool.query<{ lifecycle_state: string }>(
@@ -299,6 +309,29 @@ describe('GET /revisions/:id', () => {
     const res = await json('GET', `/revisions/${ZERO}`);
     expect(res.status).toBe(404);
   });
+
+  it('echoes parentRevisionId: null by default, present as a key (ADR-066 #389)', async () => {
+    const res = await json('GET', `/revisions/${revisionId}`);
+    const d = await data(res);
+    expect(d).toHaveProperty('parentRevisionId');
+    expect(d['parentRevisionId']).toBeNull();
+  });
+
+  it('echoes a non-null parentRevisionId for a revision issued with one (ADR-066 #389)', async () => {
+    const root = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 920 },
+    });
+    const rootId = (await data(root))['revisionId'] as string;
+    const child = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 921 },
+      parentRevisionId: rootId,
+    });
+    const childId = (await data(child))['revisionId'] as string;
+    const res = await json('GET', `/revisions/${childId}`);
+    expect((await data(res))['parentRevisionId']).toBe(rootId);
+  });
 });
 
 describe('GET /packages/:id/revisions', () => {
@@ -333,6 +366,15 @@ describe('GET /packages/:id/revisions', () => {
     // specCount included (2 members frozen), just re-ordered by the issuance clock.
     expect(list).toEqual(expected);
     expect(list.every((r) => r['specCount'] === 2)).toBe(true);
+  });
+
+  it('echoes parentRevisionId for every summary — always present, null default (ADR-066 #389)', async () => {
+    const res = await json('GET', `/packages/${timelinePkg}/revisions`);
+    const list = ((await res.json()) as { data: Array<Record<string, unknown>> }).data;
+    for (const rev of list) {
+      expect(rev).toHaveProperty('parentRevisionId');
+    }
+    expect(list.every((r) => r['parentRevisionId'] === null)).toBe(true);
   });
 
   it('returns an empty array for a package that has issued nothing yet', async () => {
