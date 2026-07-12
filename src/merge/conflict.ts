@@ -80,19 +80,28 @@ async function lockParagraph(
 
 /** Snapshot one paragraph_versions row for a new base version, idempotent on
  *  (paragraph_id, version) so a retried apply never duplicates it. Both the
- *  text-change and the deleted-op path record the pre/post image the same way. */
+ *  text-change and the deleted-op path record the pre/post image the same way.
+ *
+ *  Minimal compatibility shim for migration 046 (issue #377, ADR-052 D1),
+ *  which makes paragraph_versions.spec_id/op NOT NULL: op is hardcoded to
+ *  'merge' because this function is, today, the only writer of
+ *  paragraph_versions rows (the migration's own backfill default). This
+ *  function is superseded by src/db/queries/paragraph-history.ts's
+ *  recordParagraphHistory, which threads a real op/content_version/user_id —
+ *  the full rewire is a separate, later task in the #377 series. */
 async function snapshotParagraphVersion(
   client: PoolClient,
+  specId: string,
   paragraphId: string,
   version: number,
   text: string,
   nodeType: string
 ): Promise<void> {
   await client.query(
-    `INSERT INTO paragraph_versions (paragraph_id, version, text, node_type)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO paragraph_versions (paragraph_id, spec_id, version, text, node_type, op)
+     VALUES ($1, $2, $3, $4, $5, 'merge')
      ON CONFLICT (paragraph_id, version) DO NOTHING`,
-    [paragraphId, version, text, nodeType]
+    [paragraphId, specId, version, text, nodeType]
   );
 }
 
@@ -108,7 +117,14 @@ async function applyTextChange(
     throw new MergeError(`stale diff for paragraph ${change.uuid}`);
   }
   const nextVersion = row.baseVersion + 1;
-  await snapshotParagraphVersion(client, change.uuid, nextVersion, change.theirs, row.nodeType);
+  await snapshotParagraphVersion(
+    client,
+    specId,
+    change.uuid,
+    nextVersion,
+    change.theirs,
+    row.nodeType
+  );
   await client.query(
     `UPDATE paragraphs
      SET text = $1, base_version = $2, updated_at = now()
@@ -283,6 +299,7 @@ async function applyDeletedChange(
   const nextVersion = result.previousBaseVersion + 1;
   await snapshotParagraphVersion(
     client,
+    specId,
     uuid,
     nextVersion,
     result.previousText,
