@@ -219,6 +219,7 @@ export {
   SnapshotValidationError,
   RevisionNomenclatureValidationError,
   RevisionComparisonError,
+  RevisionParentValidationError,
 } from './queries/revisions.js';
 export { listPackageRevisions } from './queries/revision-list.js';
 export type {
