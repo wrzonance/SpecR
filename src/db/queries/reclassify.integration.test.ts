@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { pool } from '../index.js';
+import { historyRowsFor } from '../../test-utils/history-rows.js';
 import { ConventionValidationError } from './conventions.js';
 import { SpecWriteForbiddenError } from './edit-gate.js';
 import { SYSTEM_ACTOR_LABEL } from './paragraph-history.js';
@@ -345,25 +346,6 @@ describe('acceptCommentAsNote', () => {
   });
 });
 
-interface HistoryRow {
-  readonly version: number;
-  readonly text: string;
-  readonly node_type: string;
-  readonly op: string;
-  readonly spec_id: string;
-  readonly content_version: number;
-  readonly payload: unknown;
-}
-
-async function historyRowsFor(paragraphId: string): Promise<HistoryRow[]> {
-  const res = await pool.query<HistoryRow>(
-    `SELECT version, text, node_type, op, spec_id, content_version, payload
-     FROM paragraph_versions WHERE paragraph_id = $1 ORDER BY version`,
-    [paragraphId]
-  );
-  return res.rows;
-}
-
 // acceptCommentAsNote's write-history capture (#377, ADR-052 D1): a created
 // note snapshots the new note row under op 'accept-note' with a payload
 // naming the anchor/index it materialized from, and the idempotent already-
@@ -412,7 +394,7 @@ describe('acceptCommentAsNote — version history capture (#377)', () => {
 
     // Exactly one new paragraph_versions row, in the same transaction as the
     // paragraphs mutation that created the note.
-    const afterCreate = await historyRowsFor(created.noteId);
+    const afterCreate = await historyRowsFor(pool, created.noteId);
     expect(afterCreate).toHaveLength(1);
     expect(afterCreate[0]).toMatchObject({
       version: 1,
@@ -432,7 +414,7 @@ describe('acceptCommentAsNote — version history capture (#377)', () => {
     // mint a second paragraph_versions row for the note.
     const retry = await acceptCommentAsNote(specId, anchorId, 0);
     expect(retry.status).toBe('already-accepted');
-    const afterRetry = await historyRowsFor(created.noteId);
+    const afterRetry = await historyRowsFor(pool, created.noteId);
     expect(afterRetry).toHaveLength(1); // unchanged — no second row
 
     await pool.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);

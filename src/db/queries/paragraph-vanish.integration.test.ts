@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { PoolClient } from 'pg';
 import { pool, setParagraphVanish, setVanishRow } from '../index.js';
+import { historyRowsFor } from '../../test-utils/history-rows.js';
 import { SYSTEM_ACTOR_LABEL } from './paragraph-history.js';
 
 async function runInTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -279,25 +280,6 @@ describe('setVanishRow (DB core, #374)', () => {
   });
 });
 
-interface HistoryRow {
-  readonly version: number;
-  readonly text: string;
-  readonly node_type: string;
-  readonly op: string;
-  readonly spec_id: string;
-  readonly content_version: number;
-  readonly payload: unknown;
-}
-
-async function historyRowsFor(paragraphId: string): Promise<HistoryRow[]> {
-  const res = await pool.query<HistoryRow>(
-    `SELECT version, text, node_type, op, spec_id, content_version, payload
-     FROM paragraph_versions WHERE paragraph_id = $1 ORDER BY version`,
-    [paragraphId]
-  );
-  return res.rows;
-}
-
 // setParagraphVanish's write-history capture (#377, ADR-052 D1): vanish and
 // restore each snapshot the paragraph's PRE-toggle image (the text/node_type
 // it had before this write) under op 'remove'/'restore' respectively, and a
@@ -338,7 +320,7 @@ describe('setParagraphVanish — version history capture (#377)', () => {
     const removed = await setParagraphVanish(specId, nodeId, true);
     expect(removed.status).toBe('updated');
 
-    const afterRemove = await historyRowsFor(nodeId);
+    const afterRemove = await historyRowsFor(pool, nodeId);
     expect(afterRemove).toHaveLength(1);
     expect(afterRemove[0]).toMatchObject({
       text: 'History-tracked removable paragraph.',
@@ -355,7 +337,7 @@ describe('setParagraphVanish — version history capture (#377)', () => {
     const restored = await setParagraphVanish(specId, nodeId, false);
     expect(restored.status).toBe('updated');
 
-    const afterRestore = await historyRowsFor(nodeId);
+    const afterRestore = await historyRowsFor(pool, nodeId);
     expect(afterRestore).toHaveLength(2);
     expect(afterRestore[1]).toMatchObject({
       text: 'History-tracked removable paragraph.',
@@ -372,7 +354,7 @@ describe('setParagraphVanish — version history capture (#377)', () => {
     const noop = await setParagraphVanish(specId, nodeId, false);
     expect(noop.status).toBe('updated');
 
-    const afterNoop = await historyRowsFor(nodeId);
+    const afterNoop = await historyRowsFor(pool, nodeId);
     expect(afterNoop).toHaveLength(2); // unchanged — no third row
     expect(await contentVersion(specId)).toBe(versionBeforeNoop); // unchanged
   });

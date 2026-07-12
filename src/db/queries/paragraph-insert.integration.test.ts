@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { PoolClient } from 'pg';
 import { pool, insertParagraphAfter, insertSiblingRow, StaleVersionError } from '../index.js';
+import { historyRowsFor } from '../../test-utils/history-rows.js';
 import { SYSTEM_ACTOR_LABEL } from './paragraph-history.js';
 
 const SPEC_ID = 'c1000000-0000-0000-0000-000000000000';
@@ -324,25 +325,6 @@ describe('insertSiblingRow (DB core, #374)', () => {
   });
 });
 
-interface HistoryRow {
-  readonly version: number;
-  readonly text: string;
-  readonly node_type: string;
-  readonly op: string;
-  readonly spec_id: string;
-  readonly content_version: number;
-  readonly payload: { kind: string; parentId: string | null; position: number } | null;
-}
-
-async function historyRowsFor(paragraphId: string): Promise<HistoryRow[]> {
-  const res = await pool.query<HistoryRow>(
-    `SELECT version, text, node_type, op, spec_id, content_version, payload
-     FROM paragraph_versions WHERE paragraph_id = $1 ORDER BY version`,
-    [paragraphId]
-  );
-  return res.rows;
-}
-
 describe('insertParagraphAfter — version history capture (#377)', () => {
   it('version-history: insert records a creation row (#377)', async () => {
     const versionBefore = await contentVersion(SPEC_ID);
@@ -355,7 +337,7 @@ describe('insertParagraphAfter — version history capture (#377)', () => {
     if (result.status !== 'created') return;
 
     // Exactly one new paragraph_versions row per write.
-    const rows = await historyRowsFor(result.node.id);
+    const rows = await historyRowsFor(pool, result.node.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       version: 1,
