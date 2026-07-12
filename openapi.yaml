@@ -456,16 +456,7 @@ paths:
                     Optional optimistic-concurrency precondition — the spec
                     `contentVersion` the caller read. Stale → 409.
                 actorLabel:
-                  type: string
-                  minLength: 1
-                  maxLength: 200
-                  pattern: '[\s\S]*\S[\s\S]*'
-                  description: >
-                    Optional caller identity attributed to this write in
-                    paragraph history (#377); omitted falls back to a system
-                    sentinel. Resolves to a users.label and shares its contract:
-                    trimmed before resolution, whitespace-only rejected, and the
-                    1-200 length bounds apply to the trimmed value.
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '201':
           description: Created paragraph node
@@ -531,16 +522,7 @@ paths:
                     Optional optimistic-concurrency precondition — the spec
                     `contentVersion` the caller read. Stale → 409.
                 actorLabel:
-                  type: string
-                  minLength: 1
-                  maxLength: 200
-                  pattern: '[\s\S]*\S[\s\S]*'
-                  description: >
-                    Optional caller identity attributed to this write in
-                    paragraph history (#377); omitted falls back to a system
-                    sentinel. Resolves to a users.label and shares its contract:
-                    trimmed before resolution, whitespace-only rejected, and the
-                    1-200 length bounds apply to the trimmed value.
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -664,16 +646,7 @@ paths:
                   description: >
                     true to remove (set vanish), false to restore (clear vanish).
                 actorLabel:
-                  type: string
-                  minLength: 1
-                  maxLength: 200
-                  pattern: '[\s\S]*\S[\s\S]*'
-                  description: >
-                    Optional caller identity attributed to this write in
-                    paragraph history (#377); omitted falls back to a system
-                    sentinel. Resolves to a users.label and shares its contract:
-                    trimmed before resolution, whitespace-only rejected, and the
-                    1-200 length bounds apply to the trimmed value.
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '200':
           description: Updated paragraph node (with its subtree)
@@ -862,16 +835,7 @@ paths:
               type: object
               properties:
                 actorLabel:
-                  type: string
-                  minLength: 1
-                  maxLength: 200
-                  pattern: '[\s\S]*\S[\s\S]*'
-                  description: >
-                    Optional caller identity attributed to this write in
-                    paragraph history; omitted falls back to a system sentinel.
-                    Resolves to a users.label and shares its contract: trimmed
-                    before resolution, whitespace-only rejected, and the 1-200
-                    length bounds apply to the trimmed value.
+                  $ref: '#/components/schemas/ActorLabel'
       responses:
         '201':
           description: Note node created
@@ -4878,6 +4842,19 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
 
   schemas:
+    # ── Shared field schemas ───────────────────────────────────────────────────
+
+    ActorLabel:
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: '[\s\S]*\S[\s\S]*'
+      description: >
+        Optional caller identity attributed to a paragraph-history write (#377);
+        omitted falls back to a system sentinel. Resolves to a users.label and
+        shares its contract: trimmed before resolution, whitespace-only rejected,
+        and the 1-200 length bounds apply to the trimmed value.
+
     # ── Envelope shapes ────────────────────────────────────────────────────────
 
     SuccessResponse:
@@ -6314,16 +6291,7 @@ components:
             Optional optimistic-concurrency precondition (ADR-018) — the spec
             `contentVersion` the redline was diffed against. Stale → 409.
         actorLabel:
-          type: string
-          minLength: 1
-          maxLength: 200
-          pattern: '[\s\S]*\S[\s\S]*'
-          description: >
-            Optional caller identity attributed to this merge in paragraph
-            history (#377); omitted falls back to a system sentinel. Resolves to
-            a users.label and shares its contract: trimmed before resolution,
-            whitespace-only rejected, and the 1-200 length bounds apply to the
-            trimmed value.
+          $ref: '#/components/schemas/ActorLabel'
 
     LockState:
       type: object
