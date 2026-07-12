@@ -3,7 +3,7 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool } from '../db/index.js';
+import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
 
 let server: Server;
 let baseUrl: string;
@@ -134,5 +134,45 @@ describe('POST /specs/:id/paragraphs (integration)', () => {
     const body = (await res.json()) as { success: boolean; currentVersion?: number };
     expect(body.success).toBe(false);
     expect(body.currentVersion).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('POST /specs/:id/paragraphs — actorLabel attribution (#377)', () => {
+  async function historyActor(paragraphId: string): Promise<string | null> {
+    const row = await pool.query<{ label: string | null }>(
+      `SELECT u.label FROM paragraph_versions v
+       LEFT JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1 AND v.version = 1`,
+      [paragraphId]
+    );
+    return row.rows[0]?.label ?? null;
+  }
+
+  it('a supplied actorLabel attributes the insert history row; response shape is unchanged', async () => {
+    const res = await postInsert(specId, {
+      anchorNodeId: anchorId,
+      text: 'Inserted with attribution.',
+      actorLabel: 'insert.bot',
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { success: boolean; data: Record<string, unknown> };
+    expect(Object.keys(body.data).sort((a, b) => a.localeCompare(b))).toEqual([
+      'children',
+      'id',
+      'meta',
+      'text',
+      'type',
+    ]);
+    expect(await historyActor(body.data['id'] as string)).toBe('insert.bot');
+  });
+
+  it('omitting actorLabel attributes the insert history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const res = await postInsert(specId, {
+      anchorNodeId: anchorId,
+      text: 'Inserted without attribution.',
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { id: string } };
+    expect(await historyActor(body.data.id)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

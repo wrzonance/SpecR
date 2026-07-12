@@ -1,6 +1,10 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { PatchEditabilityBodySchema, ReclassifyBodySchema } from '../ast/index.js';
+import {
+  PatchEditabilityBodySchema,
+  ReclassifyBodySchema,
+  AcceptNoteBodySchema,
+} from '../ast/index.js';
 import type { ConventionRules } from '../ast/index.js';
 import {
   setSpecEditabilityOverride,
@@ -140,8 +144,21 @@ export async function acceptAsNoteHandler(req: Request, res: Response): Promise<
     res.status(400).json({ success: false, error: 'invalid comment index' });
     return;
   }
+  // The route was bodyless pre-#377 (the target comment is identified entirely by path
+  // params); a truly absent body still resolves to {}, matching that contract byte for
+  // byte — actorLabel (#377) is the only field this schema accepts.
+  const body = AcceptNoteBodySchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ success: false, error: 'invalid accept-as-note body' });
+    return;
+  }
   try {
-    const outcome = await acceptCommentAsNote(ids.specId, ids.nodeId, index.data);
+    const outcome = await acceptCommentAsNote(
+      ids.specId,
+      ids.nodeId,
+      index.data,
+      body.data.actorLabel
+    );
     sendAcceptOutcome(outcome, res);
   } catch (err) {
     // The note insert passes the composed edit gate (ADR-018): an archived or

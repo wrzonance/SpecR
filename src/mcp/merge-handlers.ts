@@ -37,9 +37,9 @@ export async function handleApplyMerge(args: unknown): Promise<ToolResult> {
       `invalid apply_merge input: ${parsed.error.issues.map((i) => i.message).join('; ')}`
     );
   }
-  const { specId, accept, diff, expectedVersion } = parsed.data;
+  const { specId, accept, diff, expectedVersion, actorLabel } = parsed.data;
   try {
-    const outcome = await applyMerge(specId, accept, diff, expectedVersion);
+    const outcome = await applyMerge(specId, accept, diff, expectedVersion, actorLabel);
     if (outcome.kind === 'not-found') return toolError(`spec not found: id=${specId}`);
     return ok({ applied: outcome.applied, rejected: outcome.rejected });
   } catch (err) {

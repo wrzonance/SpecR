@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import express from 'express';
 import type { Server } from 'http';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSpec, insertTree, pool } from '../db/index.js';
+import { createSpec, insertTree, pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
 import type { DiffResult } from '../merge/index.js';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
@@ -246,6 +246,44 @@ describe('POST /specs/:id/merge (integration)', () => {
     expect(second.status).toBe(200);
     expect(second.body.data).toEqual({ applied: 0, rejected: 0 });
     expect(state).toEqual({ text: REVISED_TEXT, baseVersion: 2, versionCount: 1 });
+  });
+});
+
+describe('POST /specs/:id/merge — actorLabel attribution (#377)', () => {
+  async function historyActor(paragraphId: string, version: number): Promise<string | null> {
+    const row = await pool.query<{ label: string | null }>(
+      `SELECT u.label FROM paragraph_versions v
+       LEFT JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1 AND v.version = $2`,
+      [paragraphId, version]
+    );
+    return row.rows[0]?.label ?? null;
+  }
+
+  it('a supplied actorLabel attributes the merge history row; response shape is unchanged', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    const { status, body } = await postMerge(specId, {
+      accept: [paragraphId],
+      diff: diffFor(paragraphId),
+      actorLabel: 'merge.bot',
+    });
+    expect(status).toBe(200);
+    // Response shape unaffected by actorLabel — still exactly { applied, rejected }.
+    expect(Object.keys(body.data!).sort((a, b) => a.localeCompare(b))).toEqual([
+      'applied',
+      'rejected',
+    ]);
+    expect(await historyActor(paragraphId, 2)).toBe('merge.bot');
+  });
+
+  it('omitting actorLabel attributes the merge history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    const { status } = await postMerge(specId, {
+      accept: [paragraphId],
+      diff: diffFor(paragraphId),
+    });
+    expect(status).toBe(200);
+    expect(await historyActor(paragraphId, 2)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });
 

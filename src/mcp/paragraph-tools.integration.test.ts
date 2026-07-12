@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { pool } from '../db/index.js';
+import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
 import {
   handleUpdateParagraph,
   handleRemoveParagraph,
@@ -50,6 +50,17 @@ async function insertParagraph(spec: string, nodeType: string, text: string): Pr
   const id = r.rows[0]?.id;
   if (!id) throw new Error('failed to insert test paragraph');
   return id;
+}
+
+// Resolve the actor label attributed to a paragraph's history row at a given version (#377).
+async function historyActor(paragraphId: string, version: number): Promise<string | null> {
+  const row = await pool.query<{ label: string | null }>(
+    `SELECT u.label FROM paragraph_versions v
+     LEFT JOIN users u ON u.id = v.user_id
+     WHERE v.paragraph_id = $1 AND v.version = $2`,
+    [paragraphId, version]
+  );
+  return row.rows[0]?.label ?? null;
 }
 
 beforeAll(async () => {
@@ -112,6 +123,27 @@ describe('update_paragraph MCP tool', () => {
   });
 });
 
+describe('update_paragraph MCP tool — actorLabel attribution (#377)', () => {
+  it('a supplied actorLabel attributes the history row', async () => {
+    const target = await insertParagraph(specId, 'pr1', 'Attribution target.');
+    const res = await handleUpdateParagraph({
+      specId,
+      nodeId: target,
+      text: 'Updated with attribution.',
+      actorLabel: 'mcp.bot',
+    });
+    expect(isToolError(res)).toBe(false);
+    expect(await historyActor(target, 2)).toBe('mcp.bot'); // base_version 1 → 2
+  });
+
+  it('omitting actorLabel attributes the history row to the SYSTEM_ACTOR_LABEL sentinel — byte-identical to the pre-#377 path', async () => {
+    const target = await insertParagraph(specId, 'pr1', 'Attribution target 2.');
+    const res = await handleUpdateParagraph({ specId, nodeId: target, text: 'Updated, no actor.' });
+    expect(isToolError(res)).toBe(false);
+    expect(await historyActor(target, 2)).toBe(SYSTEM_ACTOR_LABEL);
+  });
+});
+
 describe('insert_paragraph MCP tool', () => {
   it('inserts a sibling after the anchor and returns the created SpecNode', async () => {
     const res = await handleInsertParagraph({
@@ -154,6 +186,31 @@ describe('insert_paragraph MCP tool', () => {
   });
 });
 
+describe('insert_paragraph MCP tool — actorLabel attribution (#377)', () => {
+  it('a supplied actorLabel attributes the insert history row', async () => {
+    const res = await handleInsertParagraph({
+      specId,
+      anchorNodeId: bodyId,
+      text: 'Inserted with attribution.',
+      actorLabel: 'mcp.bot',
+    });
+    expect(isToolError(res)).toBe(false);
+    const node = parse<{ id: string }>(res);
+    expect(await historyActor(node.id, 1)).toBe('mcp.bot');
+  });
+
+  it('omitting actorLabel attributes the insert history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const res = await handleInsertParagraph({
+      specId,
+      anchorNodeId: bodyId,
+      text: 'Inserted, no actor.',
+    });
+    expect(isToolError(res)).toBe(false);
+    const node = parse<{ id: string }>(res);
+    expect(await historyActor(node.id, 1)).toBe(SYSTEM_ACTOR_LABEL);
+  });
+});
+
 describe('remove_paragraph MCP tool', () => {
   it('soft-removes then restores a body paragraph (reversible vanish)', async () => {
     const removed = await handleRemoveParagraph({ specId, nodeId: bodyId, removed: true });
@@ -171,6 +228,27 @@ describe('remove_paragraph MCP tool', () => {
   it('rejects removing a note node — not render-suppressible (422 in REST)', async () => {
     const res = await handleRemoveParagraph({ specId, nodeId: noteId, removed: true });
     expect(isToolError(res)).toBe(true);
+  });
+});
+
+describe('remove_paragraph MCP tool — actorLabel attribution (#377)', () => {
+  it('a supplied actorLabel attributes the remove history row', async () => {
+    const target = await insertParagraph(specId, 'pr1', 'Removable.');
+    const res = await handleRemoveParagraph({
+      specId,
+      nodeId: target,
+      removed: true,
+      actorLabel: 'mcp.bot',
+    });
+    expect(isToolError(res)).toBe(false);
+    expect(await historyActor(target, 2)).toBe('mcp.bot'); // previousBaseVersion 1 → 2
+  });
+
+  it('omitting actorLabel attributes the remove history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const target = await insertParagraph(specId, 'pr1', 'Removable 2.');
+    const res = await handleRemoveParagraph({ specId, nodeId: target, removed: true });
+    expect(isToolError(res)).toBe(false);
+    expect(await historyActor(target, 2)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });
 
@@ -280,5 +358,39 @@ describe('accept_comment_as_note MCP tool', () => {
     });
     expect(isToolError(res)).toBe(true); // bodyId has no comment at index 0…
     expect(res.content[0]!.text).toContain('no comment'); // …but ownership passed despite the case
+  });
+});
+
+describe('accept_comment_as_note MCP tool — actorLabel attribution (#377)', () => {
+  async function anchorWithComment(): Promise<string> {
+    const r = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version, source_facts)
+       VALUES ($1, NULL, 'pr1', 'Anchor.', 11, 1, $2::jsonb) RETURNING id`,
+      [specId, JSON.stringify({ comments: [{ author: 'A', text: 'x', anchor: [0, 1] }] })]
+    );
+    const id = r.rows[0]?.id;
+    if (!id) throw new Error('failed to insert comment anchor');
+    return id;
+  }
+
+  it('a supplied actorLabel attributes the note history row', async () => {
+    const anchor = await anchorWithComment();
+    const res = await handleAcceptCommentAsNote({
+      specId,
+      nodeId: anchor,
+      index: 0,
+      actorLabel: 'mcp.bot',
+    });
+    expect(isToolError(res)).toBe(false);
+    const noteId = parse<{ noteId: string }>(res).noteId;
+    expect(await historyActor(noteId, 1)).toBe('mcp.bot');
+  });
+
+  it('omitting actorLabel attributes the note history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const anchor = await anchorWithComment();
+    const res = await handleAcceptCommentAsNote({ specId, nodeId: anchor, index: 0 });
+    expect(isToolError(res)).toBe(false);
+    const noteId = parse<{ noteId: string }>(res).noteId;
+    expect(await historyActor(noteId, 1)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

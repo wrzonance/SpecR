@@ -93,7 +93,8 @@ export async function updateParagraphHandler(req: Request, res: Response): Promi
       specId.data,
       nodeId.data,
       body.data.text,
-      body.data.expectedVersion
+      body.data.expectedVersion,
+      body.data.actorLabel
     );
     switch (result.status) {
       case 'not-found':
@@ -147,7 +148,12 @@ export async function removeParagraphHandler(req: Request, res: Response): Promi
   }
 
   try {
-    const result = await setParagraphVanish(specId.data, nodeId.data, body.data.removed);
+    const result = await setParagraphVanish(
+      specId.data,
+      nodeId.data,
+      body.data.removed,
+      body.data.actorLabel
+    );
     switch (result.status) {
       case 'not-found':
         res.status(404).json({ success: false, error: 'paragraph not found' });

@@ -3,7 +3,7 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool } from '../db/index.js';
+import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
 
 let server: Server;
 let baseUrl: string;
@@ -202,6 +202,53 @@ describe('PATCH /specs/:id/paragraphs/:nodeId (integration)', () => {
       body: JSON.stringify({ text: 'valid text' }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('PATCH paragraph — actorLabel attribution (#377)', () => {
+  async function historyActor(paragraphId: string): Promise<string | null> {
+    const version = await pool.query<{ base_version: number }>(
+      'SELECT base_version FROM paragraphs WHERE id = $1',
+      [paragraphId]
+    );
+    const row = await pool.query<{ label: string | null }>(
+      `SELECT u.label FROM paragraph_versions v
+       LEFT JOIN users u ON u.id = v.user_id
+       WHERE v.paragraph_id = $1 AND v.version = $2`,
+      [paragraphId, version.rows[0]?.base_version]
+    );
+    return row.rows[0]?.label ?? null;
+  }
+
+  it('a supplied actorLabel attributes the history row; response shape is unchanged', async () => {
+    const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${nodeId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Provide attributed cabling.', actorLabel: 'qa.bot' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { success: boolean; data: Record<string, unknown> };
+    expect(body.success).toBe(true);
+    // Response is still a bare SpecNode — actorLabel is attribution-only, never echoed back.
+    expect(Object.keys(body.data).sort((a, b) => a.localeCompare(b))).toEqual([
+      'children',
+      'id',
+      'meta',
+      'text',
+      'type',
+    ]);
+
+    expect(await historyActor(nodeId)).toBe('qa.bot');
+  });
+
+  it('omitting actorLabel attributes the history row to the SYSTEM_ACTOR_LABEL sentinel — byte-identical to the pre-#377 path', async () => {
+    const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${nodeId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Provide unattributed cabling.' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await historyActor(nodeId)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });
 

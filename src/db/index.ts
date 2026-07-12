@@ -389,5 +389,9 @@ export type { UserSummary } from './queries/users.js';
 // Write-history capture core (#377, ADR-052 D1) — the merge engine's applyAccepted/
 // applyMerge (src/merge/) is the first cross-module consumer that threads a resolved
 // ParagraphHistoryContext through its own call graph rather than resolving it itself.
-export { recordParagraphHistory, resolveHistoryContext } from './queries/paragraph-history.js';
+export {
+  recordParagraphHistory,
+  resolveHistoryContext,
+  SYSTEM_ACTOR_LABEL,
+} from './queries/paragraph-history.js';
 export type { ParagraphHistoryContext } from './queries/paragraph-history.js';
