@@ -95,6 +95,27 @@ describe('numbering-profile CRUD MCP tools', () => {
     ).toBe(true);
   });
 
+  it('create rejects a divergent declared tier, naming the offending entry (#319)', async () => {
+    const libraryId = await makeLibrary();
+    const res = await handleCreateLibraryNumberingProfile({
+      libraryId,
+      name: 'Divergent',
+      rules: {
+        tiers: { part: { numberStyle: 'integer', maxCount: 5 } },
+        // ilvl=1 with articleIlvl=1 derives to 'article' — the declared
+        // 'subparagraph' is inconsistent, so the parse must reject it (#319).
+        numbering: [{ numId: 1, levels: [{ ilvl: 1, tier: 'subparagraph' }] }],
+        styleLadder: [],
+        articleIlvl: 1,
+      },
+    });
+    expect(isToolError(res)).toBe(true);
+    const message = res.content[0]!.text;
+    expect(message).toContain('numId=1');
+    expect(message).toContain("declares tier 'subparagraph'");
+    expect(message).toContain("derives to 'article'");
+  });
+
   it('get rejects a bad UUID and an unknown id', async () => {
     expect(isToolError(await handleGetNumberingProfileById({ profileId: 'nope' }))).toBe(true);
     expect(isToolError(await handleGetNumberingProfileById({ profileId: MISSING }))).toBe(true);
@@ -125,6 +146,29 @@ describe('numbering-profile CRUD MCP tools', () => {
     expect(
       isToolError(await handleUpdateNumberingProfile({ profileId: created.id, name: '  ' }))
     ).toBe(true);
+  });
+
+  it('update rejects a divergent declared tier, naming the offending entry (#319)', async () => {
+    const libraryId = await makeLibrary();
+    const created = parse<ProfileRow>(
+      await handleCreateLibraryNumberingProfile({ libraryId, name: 'Update Target', rules: RULES })
+    );
+    const res = await handleUpdateNumberingProfile({
+      profileId: created.id,
+      rules: {
+        tiers: { part: { numberStyle: 'integer', maxCount: 5 } },
+        numbering: [],
+        // ilvl=2 with articleIlvl=1 derives to 'paragraph' — the declared
+        // 'part' is inconsistent, so the parse must reject it (#319).
+        styleLadder: [{ styleId: 'PR1', numId: 1, ilvl: 2, tier: 'part' }],
+        articleIlvl: 1,
+      },
+    });
+    expect(isToolError(res)).toBe(true);
+    const message = res.content[0]!.text;
+    expect(message).toContain('styleId=PR1');
+    expect(message).toContain("declares tier 'part'");
+    expect(message).toContain("derives to 'paragraph'");
   });
 
   it('deletes an unreferenced profile', async () => {
