@@ -159,10 +159,20 @@ export const CreateNumberingProfileBodySchema = z.object({
 
 export type CreateNumberingProfileBody = z.infer<typeof CreateNumberingProfileBodySchema>;
 
-export const PatchNumberingProfileBodySchema = z.object({
-  name: z.string().trim().check(z.minLength(1)).exactOptional(),
-  rules: NumberingProfileSchema.exactOptional(),
-});
+export const PatchNumberingProfileBodySchema = z
+  .object({
+    name: z.string().trim().check(z.minLength(1)).exactOptional(),
+    rules: NumberingProfileSchema.exactOptional(),
+  })
+  .check((ctx) => {
+    if (ctx.value.name === undefined && ctx.value.rules === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        message: 'at least one of name or rules must be present',
+      });
+    }
+  });
 
 export type PatchNumberingProfileBody = z.infer<typeof PatchNumberingProfileBodySchema>;
 

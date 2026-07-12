@@ -80,6 +80,16 @@ describe('#317 numbering-profile body name — trim before length check', () => 
     const result = PatchNumberingProfileBodySchema.safeParse({ name: '  ' });
     expect(result.success).toBe(false);
   });
+
+  it('rejects a fully-empty patch body (matches PatchTemplateBodySchema)', () => {
+    const result = PatchNumberingProfileBodySchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts a patch with only rules present', () => {
+    const result = PatchNumberingProfileBodySchema.safeParse({ rules: RULES });
+    expect(result.success).toBe(true);
+  });
 });
 
 describe('SpecTreeSchema — valid inputs', () => {
