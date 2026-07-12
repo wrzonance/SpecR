@@ -8,7 +8,7 @@
 import { ParserError } from '../error.js';
 import { createDocumentXmlParser, toArray } from './xml-utils.js';
 import { extractParagraphText, isParagraphVanish } from './document.js';
-import type { RetainedTable } from '../../ast/types.js';
+import type { RetainedTable } from '../../ast/index.js';
 import type { StyleMap } from './types.js';
 
 // Shares document.ts's exact document.xml parser config (createDocumentXmlParser, see
