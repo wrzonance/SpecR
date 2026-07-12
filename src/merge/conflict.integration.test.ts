@@ -599,4 +599,20 @@ describe('applyMerge — write-history lockstep (#377)', () => {
     expect(await contentVersion(specId)).toBe(before); // no-op re-submit → no bump
     expect(await historyRowsFor(addedUuid)).toHaveLength(1); // still exactly one row
   });
+
+  it('a re-submitted deleted-op accept (already vanished) writes zero additional rows', async () => {
+    const { specId, pr1Id } = await createFixture();
+    const diff = diffWith({ deleted: [pr1Id] });
+
+    const first = await applyMerge(specId, [pr1Id], diff, undefined);
+    expect(first).toMatchObject({ kind: 'applied', applied: 1 });
+    expect(await historyRowsFor(pr1Id)).toHaveLength(1);
+
+    const before = await contentVersion(specId);
+    const second = await applyMerge(specId, [pr1Id], diff, undefined);
+
+    expect(second).toMatchObject({ kind: 'applied', applied: 0, rejected: 0 });
+    expect(await contentVersion(specId)).toBe(before); // no-op re-submit → no bump
+    expect(await historyRowsFor(pr1Id)).toHaveLength(1); // still exactly one row
+  });
 });
