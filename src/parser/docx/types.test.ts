@@ -66,6 +66,7 @@ describe('ClassifiedParagraph.suppressed — no ripple into AST-level shapes', (
       'pdf-ocr-unusable',
       'pdf-font-encoding-remapped',
       'pdf-font-encoding-unrecoverable',
+      'table-content-skipped',
     ]);
   });
 });

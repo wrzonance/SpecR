@@ -150,7 +150,8 @@ export type { MergeBody } from './merge-schemas.js';
 export { SubmittalRegisterBodySchema } from './submittal-register-schemas.js';
 export type { SubmittalRegisterBody } from './submittal-register-schemas.js';
 export type { ParagraphAssociation } from './types.js';
-export type { ParseWarning, ParseWarningType } from './types.js';
+export type { ParseWarning, ParseWarningType, RetainedTable } from './types.js';
+export { RetainedTableSchema } from './schemas.js';
 export { textEndsWithClosed } from './comment-closure.js';
 export {
   NumberingProfileSchema,

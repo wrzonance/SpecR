@@ -17,6 +17,9 @@ import {
   ReclassifyBodySchema,
   CreateNumberingProfileBodySchema,
   PatchNumberingProfileBodySchema,
+  ParseWarningTypeSchema,
+  ParseWarningSchema,
+  RetainedTableSchema,
 } from './schemas.js';
 
 const VALID_NODE_TYPES = [
@@ -163,6 +166,79 @@ describe('SpecTreeSchema — invalid inputs', () => {
         parts: [],
       })
     ).toThrow();
+  });
+});
+
+// #293 — hidden DOCX tables are retained out-of-band (ADR-038); visible tables
+// are surfaced as a 'table-content-skipped' warning, not silently dropped.
+describe('SpecTreeSchema — hiddenTables (#293)', () => {
+  const base = { id: VALID_UUID, section: VALID_SECTION, title: 'Cabling', parts: [] };
+
+  it('accepts a SpecTree with hiddenTables', () => {
+    const result = SpecTreeSchema.parse({
+      ...base,
+      hiddenTables: [{ rows: [['a', 'b']] }],
+    });
+    expect(result.hiddenTables).toEqual([{ rows: [['a', 'b']] }]);
+  });
+
+  it('omits hiddenTables when absent (no default [] injected)', () => {
+    const result = SpecTreeSchema.parse(base);
+    expect('hiddenTables' in result).toBe(false);
+  });
+
+  it('rejects a hiddenTables row cell that is not a string', () => {
+    expect(() =>
+      SpecTreeSchema.parse({
+        ...base,
+        hiddenTables: [{ rows: [[1, 'b']] }],
+      })
+    ).toThrow();
+  });
+});
+
+describe('ParseWarningTypeSchema — table-content-skipped (#293)', () => {
+  it('accepts table-content-skipped', () => {
+    expect(ParseWarningTypeSchema.parse('table-content-skipped')).toBe('table-content-skipped');
+  });
+
+  it('ParseWarningSchema accepts a table-content-skipped warning', () => {
+    const result = ParseWarningSchema.parse({
+      type: 'table-content-skipped',
+      suggestion: '1 visible table(s) detected but not yet modeled into the spec tree',
+    });
+    expect(result.type).toBe('table-content-skipped');
+  });
+});
+
+describe('RetainedTableSchema (#293)', () => {
+  it('accepts a table with string rows', () => {
+    const result = RetainedTableSchema.parse({
+      rows: [
+        ['Header 1', 'Header 2'],
+        ['a', 'b'],
+      ],
+    });
+    expect(result.rows).toEqual([
+      ['Header 1', 'Header 2'],
+      ['a', 'b'],
+    ]);
+  });
+
+  it('accepts a table with zero rows', () => {
+    expect(RetainedTableSchema.parse({ rows: [] }).rows).toEqual([]);
+  });
+
+  it('accepts a row with zero cells', () => {
+    expect(RetainedTableSchema.parse({ rows: [[]] }).rows).toEqual([[]]);
+  });
+
+  it('rejects a non-string cell', () => {
+    expect(() => RetainedTableSchema.parse({ rows: [[1, 2]] })).toThrow();
+  });
+
+  it('rejects a missing rows field', () => {
+    expect(() => RetainedTableSchema.parse({})).toThrow();
   });
 });
 

@@ -252,12 +252,19 @@ export const ParseWarningTypeSchema = z.enum([
   'pdf-ocr-unusable',
   'pdf-font-encoding-remapped',
   'pdf-font-encoding-unrecoverable',
+  'table-content-skipped',
 ]);
 
 export const ParseWarningSchema = z.object({
   type: ParseWarningTypeSchema,
   lineHint: z.string().exactOptional(),
   suggestion: z.string().exactOptional(),
+});
+
+// A DOCX table classified as hidden and retained out-of-band for future
+// change-management (ADR-038, #293). Plain-text grid — no per-cell structure.
+export const RetainedTableSchema = z.object({
+  rows: z.array(z.array(z.string())),
 });
 
 export const SpecTreeSchema = z.object({
@@ -268,6 +275,7 @@ export const SpecTreeSchema = z.object({
   title: z.string().check(z.minLength(1)),
   parts: z.array(SpecNodeSchema),
   warnings: z.array(ParseWarningSchema).exactOptional(),
+  hiddenTables: z.array(RetainedTableSchema).exactOptional(),
 });
 
 export const PatchSpecBodySchema = z.object({

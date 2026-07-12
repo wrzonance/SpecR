@@ -61,6 +61,11 @@ const WARNING_SUGGESTIONS: Readonly<Record<ParseWarningType, string>> = {
     'PDF text looked like font-encoding mojibake and was remapped before parsing.',
   'pdf-font-encoding-unrecoverable':
     'PDF text looked font-encoded or symbol-corrupted, but no deterministic remap improved it.',
+  // Emitted directly by the DOCX parser (docx/index.ts runPipeline via
+  // extractTables), not via makeWarning — the record stays exhaustive over
+  // ParseWarningType regardless of origin.
+  'table-content-skipped':
+    'One or more visible tables were detected but not yet modeled into the spec tree.',
 };
 
 const SECTION_EXTRACT_RE = new RegExp(
