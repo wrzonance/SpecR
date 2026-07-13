@@ -83,6 +83,7 @@ import {
   RequiredSectionsBodySchema,
   SubmittalRegisterBodySchema,
   SetSpecNumberingProfileBodySchema,
+  HeaderFooterCompositionSchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 import { generateHandler, generateManualHandler, generateRevisionHandler } from './generate.js';
@@ -147,6 +148,25 @@ import {
   clearSpecProfileHandler,
   snapshotHandler,
 } from './numbering-profiles.js';
+import {
+  getLibraryHeaderFooterHandler,
+  putLibraryHeaderFooterHandler,
+  deleteLibraryHeaderFooterHandler,
+  getProjectHeaderFooterHandler,
+  putProjectHeaderFooterHandler,
+  deleteProjectHeaderFooterHandler,
+  getPackageHeaderFooterHandler,
+  putPackageHeaderFooterHandler,
+  deletePackageHeaderFooterHandler,
+  getRevisionHeaderFooterHandler,
+  putRevisionHeaderFooterHandler,
+  deleteRevisionHeaderFooterHandler,
+} from './header-footer.js';
+import {
+  resolveProjectHeaderFooterHandler,
+  resolvePackageHeaderFooterHandler,
+  resolveRevisionHeaderFooterHandler,
+} from './header-footer-resolve.js';
 
 const parseRateLimit = rateLimit({
   windowMs: config.RATE_LIMIT_WINDOW_MS,
@@ -338,3 +358,37 @@ router.put(
   setSpecProfileHandler
 );
 router.delete('/specs/:id/numbering-profile', clearSpecProfileHandler);
+// Header/footer config (#476, ADR-040) — CRUD at 4 scopes plus a read-only
+// effective-resolution view. `/header-footer/resolved` is a longer path than
+// `/header-footer` so it never collides with the CRUD routes above it.
+router.get('/libraries/:id/header-footer', getLibraryHeaderFooterHandler);
+router.put(
+  '/libraries/:id/header-footer',
+  validateBody(HeaderFooterCompositionSchema),
+  putLibraryHeaderFooterHandler
+);
+router.delete('/libraries/:id/header-footer', deleteLibraryHeaderFooterHandler);
+router.get('/projects/:id/header-footer', getProjectHeaderFooterHandler);
+router.put(
+  '/projects/:id/header-footer',
+  validateBody(HeaderFooterCompositionSchema),
+  putProjectHeaderFooterHandler
+);
+router.delete('/projects/:id/header-footer', deleteProjectHeaderFooterHandler);
+router.get('/packages/:id/header-footer', getPackageHeaderFooterHandler);
+router.put(
+  '/packages/:id/header-footer',
+  validateBody(HeaderFooterCompositionSchema),
+  putPackageHeaderFooterHandler
+);
+router.delete('/packages/:id/header-footer', deletePackageHeaderFooterHandler);
+router.get('/revisions/:id/header-footer', getRevisionHeaderFooterHandler);
+router.put(
+  '/revisions/:id/header-footer',
+  validateBody(HeaderFooterCompositionSchema),
+  putRevisionHeaderFooterHandler
+);
+router.delete('/revisions/:id/header-footer', deleteRevisionHeaderFooterHandler);
+router.get('/projects/:id/header-footer/resolved', resolveProjectHeaderFooterHandler);
+router.get('/packages/:id/header-footer/resolved', resolvePackageHeaderFooterHandler);
+router.get('/revisions/:id/header-footer/resolved', resolveRevisionHeaderFooterHandler);

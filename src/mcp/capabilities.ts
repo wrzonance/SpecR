@@ -158,6 +158,22 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['list_library_standards', 'read'],
   ['list_project_standards', 'read'],
   ['record_standard_verification', 'write'],
+  // wave 7h — header/footer config CRUD + resolve (#476 / ADR-040)
+  ['get_library_header_footer', 'read'],
+  ['get_project_header_footer', 'read'],
+  ['get_package_header_footer', 'read'],
+  ['get_revision_header_footer', 'read'],
+  ['resolve_project_header_footer', 'read'],
+  ['resolve_package_header_footer', 'read'],
+  ['resolve_revision_header_footer', 'read'],
+  ['set_library_header_footer', 'write'],
+  ['set_project_header_footer', 'write'],
+  ['set_package_header_footer', 'write'],
+  ['set_revision_header_footer', 'write'],
+  ['clear_library_header_footer', 'write'], // clears override (reversible), not destructive
+  ['clear_project_header_footer', 'write'], // clears override (reversible), not destructive
+  ['clear_package_header_footer', 'write'], // clears override (reversible), not destructive
+  ['clear_revision_header_footer', 'write'], // clears override (reversible), not destructive
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row

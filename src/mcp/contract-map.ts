@@ -129,6 +129,22 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /libraries/{}/standards', 'list_library_standards'],
   ['get /projects/{}/standards', 'list_project_standards'],
   ['put /standards/{}/{}', 'record_standard_verification'],
+  // wave 7h — header/footer config CRUD + resolve (#476 / ADR-040)
+  ['get /libraries/{}/header-footer', 'get_library_header_footer'],
+  ['put /libraries/{}/header-footer', 'set_library_header_footer'],
+  ['delete /libraries/{}/header-footer', 'clear_library_header_footer'],
+  ['get /projects/{}/header-footer', 'get_project_header_footer'],
+  ['put /projects/{}/header-footer', 'set_project_header_footer'],
+  ['delete /projects/{}/header-footer', 'clear_project_header_footer'],
+  ['get /packages/{}/header-footer', 'get_package_header_footer'],
+  ['put /packages/{}/header-footer', 'set_package_header_footer'],
+  ['delete /packages/{}/header-footer', 'clear_package_header_footer'],
+  ['get /revisions/{}/header-footer', 'get_revision_header_footer'],
+  ['put /revisions/{}/header-footer', 'set_revision_header_footer'],
+  ['delete /revisions/{}/header-footer', 'clear_revision_header_footer'],
+  ['get /projects/{}/header-footer/resolved', 'resolve_project_header_footer'],
+  ['get /packages/{}/header-footer/resolved', 'resolve_package_header_footer'],
+  ['get /revisions/{}/header-footer/resolved', 'resolve_revision_header_footer'],
 ]);
 
 /**
@@ -269,4 +285,13 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   // citation graph (a parsed spec citing standards) beyond `pnpm seed`.
   'list_library_standards',
   'list_project_standards',
+  // header/footer config reads (#476 / ADR-040): mirror their mapped REST GETs 1:1, but
+  // need a seeded header_footer_configs row (a set_*_header_footer call) beyond `pnpm seed`.
+  'get_library_header_footer',
+  'get_project_header_footer',
+  'get_package_header_footer',
+  'get_revision_header_footer',
+  'resolve_project_header_footer',
+  'resolve_package_header_footer',
+  'resolve_revision_header_footer',
 ]);
