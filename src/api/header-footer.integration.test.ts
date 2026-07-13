@@ -236,7 +236,7 @@ describe.each(SCOPE_CASES)('PUT/GET $name/:id/header-footer — catchall fidelit
 // ─── Invariant: write-boundary errors map to 422 without leaking internals ─
 
 describe('write-boundary error mapping', () => {
-  it('422 — malformed HeaderFooterComposition body, no stack/internal leakage', async () => {
+  it('422 — malformed HeaderFooterComposition body, rejected by validateBody at the route', async () => {
     const id = await makeClientLibraryId();
     const res = await put(`/libraries/${id}/header-footer`, {
       header: { center: 'not-an-object' },
@@ -244,6 +244,15 @@ describe('write-boundary error mapping', () => {
     expect(res.status).toBe(422);
     const json = (await res.json()) as { success: false; error: string };
     expect(json.error).not.toMatch(/at Object\.|node_modules|\.ts:\d+/);
+    // Pins the route -> validateBody -> handler wiring specifically: status
+    // 422 alone doesn't, because upsertHeaderFooterConfig's own write-time
+    // schema check (src/db/queries/header-footer.ts) independently rejects
+    // the same malformed body with a DIFFERENT message
+    // ('header/footer config write failed validation'). Only validateBody's
+    // fixed message reaches the client, so asserting it fails red if the
+    // route's validateBody(HeaderFooterCompositionSchema) middleware is ever
+    // dropped — matching the convention pinned in specs.integration.test.ts.
+    expect(json.error).toBe('validation failed');
   });
 
   it('422 — client-scope PUT against a library that exists but is not tier=client', async () => {
