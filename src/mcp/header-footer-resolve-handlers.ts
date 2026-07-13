@@ -35,10 +35,6 @@ const ProjectArgs = z.object(ResolveProjectHeaderFooterShape);
 const PackageArgs = z.object(ResolvePackageHeaderFooterShape);
 const RevisionArgs = z.object(ResolveRevisionHeaderFooterShape);
 
-function issues(err: z.ZodError): string {
-  return err.issues.map((i) => i.message).join('; ');
-}
-
 function internalError(err: unknown, tool: string): ToolResult {
   logger.error({ err }, `mcp tool ${tool} failed`);
   return toolError(`Internal error — ${tool} failed`);
@@ -65,7 +61,7 @@ async function runResolveHeaderFooter(
 export async function handleResolveProjectHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = ProjectArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid resolve_project_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid resolve_project_header_footer input: projectId must be a UUID');
   }
   return runResolveHeaderFooter('project', parsed.data.projectId, 'resolve_project_header_footer');
 }
@@ -73,7 +69,7 @@ export async function handleResolveProjectHeaderFooter(args: unknown): Promise<T
 export async function handleResolvePackageHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = PackageArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid resolve_package_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid resolve_package_header_footer input: packageId must be a UUID');
   }
   return runResolveHeaderFooter('package', parsed.data.packageId, 'resolve_package_header_footer');
 }
@@ -81,7 +77,7 @@ export async function handleResolvePackageHeaderFooter(args: unknown): Promise<T
 export async function handleResolveRevisionHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = RevisionArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid resolve_revision_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid resolve_revision_header_footer input: revisionId must be a UUID');
   }
   return runResolveHeaderFooter(
     'revision',

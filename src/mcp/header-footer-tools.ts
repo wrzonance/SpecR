@@ -155,7 +155,7 @@ function registerHeaderFooterClearTools(reg: ToolRegistrar): void {
     'clear_library_header_footer',
     {
       description:
-        "Clear a client library's header/footer override (reversible), not destructive. " +
+        "Clear a client library's own header/footer configuration (reversible), not destructive. " +
         'Returns { libraryId, cleared: true }.',
       inputSchema: LibraryHeaderFooterShape,
     },

@@ -160,7 +160,7 @@ async function runClearHeaderFooter(
 export async function handleGetLibraryHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = LibraryArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid get_library_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid get_library_header_footer input: libraryId must be a UUID');
   }
   return runGetHeaderFooter('client', parsed.data.libraryId, 'get_library_header_footer');
 }
@@ -181,7 +181,7 @@ export async function handleSetLibraryHeaderFooter(args: unknown): Promise<ToolR
 export async function handleClearLibraryHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = LibraryArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid clear_library_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid clear_library_header_footer input: libraryId must be a UUID');
   }
   return runClearHeaderFooter('client', parsed.data.libraryId, 'clear_library_header_footer');
 }
@@ -191,7 +191,7 @@ export async function handleClearLibraryHeaderFooter(args: unknown): Promise<Too
 export async function handleGetProjectHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = ProjectArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid get_project_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid get_project_header_footer input: projectId must be a UUID');
   }
   return runGetHeaderFooter('project', parsed.data.projectId, 'get_project_header_footer');
 }
@@ -212,7 +212,7 @@ export async function handleSetProjectHeaderFooter(args: unknown): Promise<ToolR
 export async function handleClearProjectHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = ProjectArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid clear_project_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid clear_project_header_footer input: projectId must be a UUID');
   }
   return runClearHeaderFooter('project', parsed.data.projectId, 'clear_project_header_footer');
 }
@@ -222,7 +222,7 @@ export async function handleClearProjectHeaderFooter(args: unknown): Promise<Too
 export async function handleGetPackageHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = PackageArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid get_package_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid get_package_header_footer input: packageId must be a UUID');
   }
   return runGetHeaderFooter('package', parsed.data.packageId, 'get_package_header_footer');
 }
@@ -243,7 +243,7 @@ export async function handleSetPackageHeaderFooter(args: unknown): Promise<ToolR
 export async function handleClearPackageHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = PackageArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid clear_package_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid clear_package_header_footer input: packageId must be a UUID');
   }
   return runClearHeaderFooter('package', parsed.data.packageId, 'clear_package_header_footer');
 }
@@ -253,7 +253,7 @@ export async function handleClearPackageHeaderFooter(args: unknown): Promise<Too
 export async function handleGetRevisionHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = RevisionArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid get_revision_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid get_revision_header_footer input: revisionId must be a UUID');
   }
   return runGetHeaderFooter('revision', parsed.data.revisionId, 'get_revision_header_footer');
 }
@@ -274,7 +274,7 @@ export async function handleSetRevisionHeaderFooter(args: unknown): Promise<Tool
 export async function handleClearRevisionHeaderFooter(args: unknown): Promise<ToolResult> {
   const parsed = RevisionArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError(`invalid clear_revision_header_footer input: ${issues(parsed.error)}`);
+    return toolError('invalid clear_revision_header_footer input: revisionId must be a UUID');
   }
   return runClearHeaderFooter('revision', parsed.data.revisionId, 'clear_revision_header_footer');
 }
