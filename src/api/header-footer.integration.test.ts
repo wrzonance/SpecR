@@ -251,6 +251,32 @@ describe.each(SCOPE_CASES)('PUT $name/:id/header-footer', (scopeCase) => {
   });
 });
 
+// ─── Invariant: catchall round-trip fidelity (byte-for-byte, incl. extensions) ─
+//
+// HeaderFooterCompositionSchema.catchall(JsonValue) sits at the TOP level, so
+// any handler that reshapes the body (e.g. spreading `.shape` into a plain
+// z.object()) would silently drop an unrecognized key. The REST layer never
+// reshapes — validateBody parses the schema directly and the config is handed
+// to upsertHeaderFooterConfig unchanged — but this pins that byte-for-byte,
+// not just for the modeled fields.
+
+describe.each(SCOPE_CASES)('PUT/GET $name/:id/header-footer — catchall fidelity', (scopeCase) => {
+  it('round-trips an unrecognized top-level extension key byte-for-byte', async () => {
+    const id = await scopeCase.makeId();
+    const configWithExtension = { ...SAMPLE_CONFIG, xClientExtension: { note: 'keep me' } };
+
+    const putRes = await put(`${scopeCase.base}/${id}/header-footer`, configWithExtension);
+    expect(putRes.status).toBe(200);
+    const putJson = (await putRes.json()) as { data: { config: unknown } };
+    expect(putJson.data.config).toEqual(configWithExtension);
+
+    const getRes = await get(`${scopeCase.base}/${id}/header-footer`);
+    expect(getRes.status).toBe(200);
+    const getJson = (await getRes.json()) as { data: { config: unknown } };
+    expect(getJson.data.config).toEqual(configWithExtension);
+  });
+});
+
 // ─── Invariant: write-boundary errors map to 422 without leaking internals ─
 
 describe('write-boundary error mapping', () => {
