@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import { createLibrary } from './libraries.js';
 import { upsertHeaderFooterConfig } from './header-footer.js';
@@ -33,6 +34,34 @@ async function attachSpecToProject(projectId: string, specId: string): Promise<v
     projectId,
     specId,
   ]);
+}
+
+// Review finding: resolveClientName has two distinct undefined-producing
+// paths — a null clientLibraryId and a non-null clientLibraryId whose
+// library row no longer resolves. The schema makes the second path a
+// genuine time-of-check/time-of-use race rather than a reachable steady
+// state: contextForProject's client lookup is an INNER JOIN against
+// libraries, so it can only ever return a clientLibraryId that existed at
+// that exact query. This reproduces the race deterministically against real
+// Postgres: every read still goes through the real pool, but the wrapper
+// performs a genuine unlink+delete right before the one query
+// (findLibraryById's `FROM libraries WHERE id`) that must observe the
+// library as already gone.
+function raceLibraryDeletionOnLookup(libraryId: string): { query: Pool['query'] } {
+  // Every call site in header-footer-context.ts/header-footer.ts/libraries.ts
+  // uses only the `(text: string, values: unknown[])` form of `db.query` —
+  // never the QueryConfig/stream/callback overloads. Narrowing to that one
+  // shape (rather than reproducing all of `Pool['query']`'s overloads for a
+  // test double) needs one cast at the boundary, same as this suite's
+  // existing `FAKE_POOL = {} as Pool` precedent (src/api/generate-header-footer.test.ts).
+  const query = (async (text: string, values?: unknown[]): Promise<QueryResult<QueryResultRow>> => {
+    if (text.includes('FROM libraries WHERE id')) {
+      await pool.query('DELETE FROM project_sources WHERE library_id = $1', [libraryId]);
+      await pool.query('DELETE FROM libraries WHERE id = $1', [libraryId]);
+    }
+    return pool.query(text, values);
+  }) as Pool['query'];
+  return { query };
 }
 
 afterEach(async () => {
@@ -98,7 +127,7 @@ describe('resolveSpecHeaderFooterContext', () => {
     });
   });
 
-  it('I9: no client source on the project chain omits clientName rather than throwing', async () => {
+  it('no client source on the project chain (null clientLibraryId) omits clientName rather than throwing', async () => {
     const specId = await insertSpec('09 91 26.05');
     const projectId = await insertProject(`${TEST_PREFIX}p5`);
     await attachSpecToProject(projectId, specId);
@@ -111,6 +140,36 @@ describe('resolveSpecHeaderFooterContext', () => {
 
     expect(context?.fieldValues.clientName).toBeUndefined();
     expect(context?.fieldValues.projectName).toBe(`${TEST_PREFIX}p5`);
+  });
+
+  it('client library deleted between context resolution and name lookup (stale clientLibraryId) omits clientName rather than throwing', async () => {
+    const company = await createLibrary({ tier: 'company', name: `${TEST_PREFIX}company-race` });
+    const client = await createLibrary({
+      tier: 'client',
+      name: `${TEST_PREFIX}client-race`,
+      parentLibraryId: company.id,
+    });
+    const specId = await insertSpec('09 91 26.06');
+    const projectId = await insertProject(`${TEST_PREFIX}p6`);
+    await attachSpecToProject(projectId, specId);
+    await pool.query(
+      `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
+      [projectId, client.id]
+    );
+    await upsertHeaderFooterConfig(
+      { projectId },
+      { footer: { right: { content: [{ kind: 'pageNumber' }] } } }
+    );
+
+    const context = await resolveSpecHeaderFooterContext(
+      specId,
+      raceLibraryDeletionOnLookup(client.id)
+    );
+
+    expect(context?.fieldValues.clientName).toBeUndefined();
+    expect(context?.fieldValues.projectName).toBe(`${TEST_PREFIX}p6`);
+    const remaining = await pool.query('SELECT id FROM libraries WHERE id = $1', [client.id]);
+    expect(remaining.rows).toHaveLength(0);
   });
 
   it('I3: a genuine database failure propagates as DatabaseError, not swallowed', async () => {

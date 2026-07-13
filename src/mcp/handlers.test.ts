@@ -16,6 +16,7 @@ vi.mock('../db/index.js', () => ({
   getOutboundReferences: vi.fn(),
   listProjects: vi.fn(),
   getEffectiveNumberingProfile: vi.fn(),
+  resolveSpecHeaderFooterContext: vi.fn(),
 }));
 
 vi.mock('../lib/logger.js', () => ({
@@ -25,6 +26,7 @@ vi.mock('../lib/logger.js', () => ({
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 const FAKE_SPEC_ID = '10000000-0000-4000-8000-000000000001';
@@ -87,5 +89,63 @@ describe('handleGetReferences', () => {
     expect(vi.mocked(db.findProjectById)).not.toHaveBeenCalled();
     expect(vi.mocked(db.getInboundReferences)).not.toHaveBeenCalled();
     expect(vi.mocked(db.getOutboundReferences)).not.toHaveBeenCalled();
+  });
+});
+
+// #304 review finding: resolveHeaderFooterInput is generate_docx's inline
+// mirror of src/api/generate-header-footer.ts's buildHeaderFooterOptions
+// (deliberately duplicated across the api/↔mcp/ module boundary — see that
+// function's own comment). buildHeaderFooterOptions has a dedicated I2/I5/I9
+// unit suite (src/api/generate-header-footer.test.ts); this file's
+// server.integration.test.ts coverage re-fetches fresh rows from Postgres on
+// every call, so it can never observe a mutation of the resolved context —
+// these unit tests close that gap directly against the exported function.
+describe('resolveHeaderFooterInput', () => {
+  const COMPOSITION = { header: { left: { content: [] } } };
+
+  it('#304 I2: null context (orphan/ambiguous/unconfigured spec) resolves to undefined', async () => {
+    const db = await import('../db/index.js');
+    const { resolveHeaderFooterInput } = await import('./handlers.js');
+    vi.mocked(db.resolveSpecHeaderFooterContext).mockResolvedValueOnce(null);
+
+    const result = await resolveHeaderFooterInput(FAKE_SPEC_ID);
+
+    expect(result).toBeUndefined();
+    expect(vi.mocked(db.resolveSpecHeaderFooterContext)).toHaveBeenCalledWith(
+      FAKE_SPEC_ID,
+      db.pool
+    );
+  });
+
+  it('#304 I5: never mutates the object resolveSpecHeaderFooterContext returned', async () => {
+    const db = await import('../db/index.js');
+    const { resolveHeaderFooterInput } = await import('./handlers.js');
+    const fieldValues = Object.freeze({ projectName: 'Acme HQ' });
+    const context = Object.freeze({ composition: COMPOSITION, fieldValues });
+    vi.mocked(db.resolveSpecHeaderFooterContext).mockResolvedValueOnce(context);
+
+    await expect(resolveHeaderFooterInput(FAKE_SPEC_ID)).resolves.toBeDefined();
+
+    expect(context.fieldValues).toEqual({ projectName: 'Acme HQ' });
+    expect(context).toEqual({ composition: COMPOSITION, fieldValues: { projectName: 'Acme HQ' } });
+  });
+
+  it('#304 I9: stamps today, formatted YYYY-MM-DD, alongside the sourced fields', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-05T00:00:00Z'));
+    const db = await import('../db/index.js');
+    const { resolveHeaderFooterInput } = await import('./handlers.js');
+    vi.mocked(db.resolveSpecHeaderFooterContext).mockResolvedValueOnce({
+      composition: COMPOSITION,
+      fieldValues: { projectName: 'Acme HQ' },
+    });
+
+    const result = await resolveHeaderFooterInput(FAKE_SPEC_ID);
+
+    expect(result).toEqual({
+      composition: COMPOSITION,
+      current: { date: '2026-01-05', projectName: 'Acme HQ' },
+    });
+    vi.useRealTimers();
   });
 });

@@ -254,8 +254,13 @@ function todayIsoDate(): string {
  *  project (#304), or undefined when nothing applies — mirrors
  *  src/api/generate-header-footer.ts's `buildHeaderFooterOptions` inline
  *  rather than importing it (see `todayIsoDate`), so generate_docx renders
- *  in lockstep with POST /specs/:id/generate (ADR-044). */
-async function resolveHeaderFooterInput(
+ *  in lockstep with POST /specs/:id/generate (ADR-044). Exported (unlike
+ *  `todayIsoDate`) so a dedicated unit test can pin its no-mutation
+ *  invariant (I5) the same way `buildHeaderFooterOptions`'s own suite does
+ *  (src/api/generate-header-footer.test.ts) — `server.integration.test.ts`
+ *  re-fetches fresh rows from Postgres on every call, so a mutation here
+ *  would otherwise never surface as a failure. */
+export async function resolveHeaderFooterInput(
   specId: string
 ): Promise<HeaderFooterGenerationInput | undefined> {
   const context = await resolveSpecHeaderFooterContext(specId, pool);
