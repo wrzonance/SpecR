@@ -1,30 +1,18 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
-import {
-  deleteLibraryHeaderFooterHandler,
-  deletePackageHeaderFooterHandler,
-  deleteProjectHeaderFooterHandler,
-  deleteRevisionHeaderFooterHandler,
-  getLibraryHeaderFooterHandler,
-  getPackageHeaderFooterHandler,
-  getProjectHeaderFooterHandler,
-  getRevisionHeaderFooterHandler,
-  putLibraryHeaderFooterHandler,
-  putPackageHeaderFooterHandler,
-  putProjectHeaderFooterHandler,
-  putRevisionHeaderFooterHandler,
-} from './header-footer.js';
-import { validateBody } from './middleware/validate.js';
+import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { HeaderFooterCompositionSchema } from '../ast/index.js';
 import { pool, createLibrary } from '../db/index.js';
 
 // ─── Test setup ────────────────────────────────────────────────────────────
 //
-// Isolated app: registers only the header/footer routes this task owns
-// (mirrors the wiring router.ts will carry once it is wired in, but does not
-// depend on router.ts itself, since that wiring is a later task).
+// Boots the real production router (router.ts) rather than a hand-wired
+// stand-in — this exercises the actual route -> validateBody -> handler
+// wiring the app serves, including the header/footer PUT's malformed-body
+// and catchall-fidelity invariants (#476 review finding: those invariants
+// were previously pinned only against a locally re-wired Express app, never
+// against router.ts's own wiring).
 
 let server: Server;
 let baseUrl: string;
@@ -33,39 +21,7 @@ beforeAll(async () => {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json());
-
-  app.get('/libraries/:id/header-footer', getLibraryHeaderFooterHandler);
-  app.put(
-    '/libraries/:id/header-footer',
-    validateBody(HeaderFooterCompositionSchema),
-    putLibraryHeaderFooterHandler
-  );
-  app.delete('/libraries/:id/header-footer', deleteLibraryHeaderFooterHandler);
-
-  app.get('/projects/:id/header-footer', getProjectHeaderFooterHandler);
-  app.put(
-    '/projects/:id/header-footer',
-    validateBody(HeaderFooterCompositionSchema),
-    putProjectHeaderFooterHandler
-  );
-  app.delete('/projects/:id/header-footer', deleteProjectHeaderFooterHandler);
-
-  app.get('/packages/:id/header-footer', getPackageHeaderFooterHandler);
-  app.put(
-    '/packages/:id/header-footer',
-    validateBody(HeaderFooterCompositionSchema),
-    putPackageHeaderFooterHandler
-  );
-  app.delete('/packages/:id/header-footer', deletePackageHeaderFooterHandler);
-
-  app.get('/revisions/:id/header-footer', getRevisionHeaderFooterHandler);
-  app.put(
-    '/revisions/:id/header-footer',
-    validateBody(HeaderFooterCompositionSchema),
-    putRevisionHeaderFooterHandler
-  );
-  app.delete('/revisions/:id/header-footer', deleteRevisionHeaderFooterHandler);
-
+  app.use(router);
   app.use(errorHandler);
 
   await new Promise<void>((resolve) => {
