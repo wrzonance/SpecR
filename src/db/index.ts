@@ -304,6 +304,14 @@ export {
   type HeaderFooterResolutionContext,
   type ResolvedHeaderFooterConfig,
 } from './queries/header-footer.js';
+// Single-spec generation-context resolution (#304) — scopes a spec to its
+// sole owning project's effective header/footer config, or null when
+// orphaned/ambiguous/unconfigured (see the doc comment on the function).
+export { resolveSpecHeaderFooterContext } from './queries/header-footer-context.js';
+export type {
+  HeaderFooterFieldSource,
+  HeaderFooterGenerationContext,
+} from './queries/header-footer-context.js';
 export {
   listRequiredSections,
   setRequiredSections,
