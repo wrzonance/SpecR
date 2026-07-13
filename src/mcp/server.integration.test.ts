@@ -738,6 +738,20 @@ describe('tool: generate_docx — header/footer resolution (#304)', () => {
       if (!headerFile) throw new Error('word/header1.xml missing from generated DOCX');
       const headerXml = await headerFile.async('string');
       expect(headerXml).toContain('MCP HF Client-less Project');
+      // The right cell's only field is clientName, which resolves to nothing
+      // when the project has no client source (resolveValueField,
+      // header-footer-fields.ts) — so header-footer-regions.ts's
+      // needsRightTab/regionChildren must render neither a right tab stop
+      // nor any run for it. Asserted structurally (tab count, and the full
+      // set of rendered text runs) rather than by searching for absent
+      // text, since there is no concrete client-name value to assert the
+      // absence of.
+      const tabRuns = headerXml.match(/<w:r><w:tab\/><\/w:r>/g) ?? [];
+      expect(tabRuns).toHaveLength(1); // center tab only — no second (right) tab
+      const textRunContents = [...headerXml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map(
+        (m) => m[1] ?? ''
+      );
+      expect(textRunContents).toEqual(['MCP HF Client-less Project']);
     } finally {
       await pool.query('DELETE FROM header_footer_configs WHERE project_id = $1', [projectId]);
       await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
