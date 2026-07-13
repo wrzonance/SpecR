@@ -4706,6 +4706,455 @@ paths:
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /libraries/{id}/header-footer:
+    get:
+      operationId: getLibraryHeaderFooter
+      summary: Get a client library's header/footer config
+      description: >
+        Reads the client library's own header/footer config (ADR-040). This is
+        the top of the client -> project -> package -> revision precedence
+        chain read by the resolve endpoints below; it is never itself
+        inherited from anywhere.
+      tags: [header-footer]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Client library UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The library's header/footer config
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/HeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: putLibraryHeaderFooter
+      summary: Create or replace a client library's header/footer config
+      description: >
+        Upsert (ADR-040). The body is the full `HeaderFooterComposition` —
+        v1 (#208) `header`/`footer`/`style` fields, or v2 (#302)
+        `variants`/`pageNumbering`/`raw` — validated and stored verbatim,
+        including any unrecognized top-level extension keys.
+      tags: [header-footer]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Client library UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaderFooterComposition'
+      responses:
+        '200':
+          description: Config created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/HeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: Library not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteLibraryHeaderFooter
+      summary: Delete a client library's header/footer config
+      tags: [header-footer]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Client library UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Config deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [libraryId]
+                        properties:
+                          libraryId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: Library not found, or the library has no header/footer config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/header-footer:
+    get:
+      operationId: getProjectHeaderFooter
+      summary: Get a project's own header/footer config override
+      description: >
+        Reads only the project's own override row — not the effective
+        (inherited) config. Use `GET /projects/{id}/header-footer/resolved`
+        for the merged client -> project result (ADR-040).
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: The project's header/footer config override
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/HeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: putProjectHeaderFooter
+      summary: Create or replace a project's header/footer config override
+      description: >
+        Upsert (ADR-040). The body is the full `HeaderFooterComposition`; see
+        `PUT /libraries/{id}/header-footer` for the shape contract.
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaderFooterComposition'
+      responses:
+        '200':
+          description: Config created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/HeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteProjectHeaderFooter
+      summary: Delete a project's header/footer config override
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Override deleted; resolved reads fall back to the parent scope
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId]
+                        properties:
+                          projectId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /packages/{id}/header-footer:
+    get:
+      operationId: getPackageHeaderFooter
+      summary: Get a design package's own header/footer config override
+      description: >
+        Reads only the package's own override row. Use
+        `GET /packages/{id}/header-footer/resolved` for the merged
+        client -> project -> package result (ADR-040).
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/PackageId'
+      responses:
+        '200':
+          description: The package's header/footer config override
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/HeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: putPackageHeaderFooter
+      summary: Create or replace a design package's header/footer config override
+      description: >
+        Upsert (ADR-040). The body is the full `HeaderFooterComposition`; see
+        `PUT /libraries/{id}/header-footer` for the shape contract.
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/PackageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaderFooterComposition'
+      responses:
+        '200':
+          description: Config created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/HeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deletePackageHeaderFooter
+      summary: Delete a design package's header/footer config override
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/PackageId'
+      responses:
+        '200':
+          description: Override deleted; resolved reads fall back to the parent scope
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [packageId]
+                        properties:
+                          packageId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /revisions/{id}/header-footer:
+    get:
+      operationId: getRevisionHeaderFooter
+      summary: Get an issued revision's own header/footer config override
+      description: >
+        Reads only the revision's own override row. Use
+        `GET /revisions/{id}/header-footer/resolved` for the merged
+        client -> project -> package -> revision result (ADR-040).
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/RevisionId'
+      responses:
+        '200':
+          description: The revision's header/footer config override
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/HeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: putRevisionHeaderFooter
+      summary: Create or replace an issued revision's header/footer config override
+      description: >
+        Upsert (ADR-040). The body is the full `HeaderFooterComposition`; see
+        `PUT /libraries/{id}/header-footer` for the shape contract.
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/RevisionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeaderFooterComposition'
+      responses:
+        '200':
+          description: Config created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/HeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteRevisionHeaderFooter
+      summary: Delete an issued revision's header/footer config override
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/RevisionId'
+      responses:
+        '200':
+          description: Override deleted; resolved reads fall back to the parent scope
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [revisionId]
+                        properties:
+                          revisionId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/header-footer/resolved:
+    get:
+      operationId: resolveProjectHeaderFooter
+      summary: Read the effective (merged) header/footer config for a project
+      description: >
+        Merges every contributing config row anchored above and at this
+        project — client library, then the project itself — in that
+        precedence order (later layers win per-key, ADR-040). `layers` lists
+        every contributing row low-to-high precedence; the winning scope for
+        any given key is `layers[layers.length - 1].scope`, whichever layer
+        last touched it — no separate winning-scope field is synthesized.
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Resolved header/footer config
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ResolvedHeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /packages/{id}/header-footer/resolved:
+    get:
+      operationId: resolvePackageHeaderFooter
+      summary: Read the effective (merged) header/footer config for a design package
+      description: >
+        Merges every contributing config row anchored above and at this
+        package — client library, project, then the package itself — in
+        that precedence order (ADR-040). See
+        `GET /projects/{id}/header-footer/resolved` for the layers/provenance
+        contract.
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/PackageId'
+      responses:
+        '200':
+          description: Resolved header/footer config
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ResolvedHeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /revisions/{id}/header-footer/resolved:
+    get:
+      operationId: resolveRevisionHeaderFooter
+      summary: Read the effective (merged) header/footer config for an issued revision
+      description: >
+        Merges every contributing config row anchored above and at this
+        revision — client library, project, package, then the revision
+        itself — in that precedence order (ADR-040). See
+        `GET /projects/{id}/header-footer/resolved` for the layers/provenance
+        contract.
+      tags: [header-footer]
+      parameters:
+        - $ref: '#/components/parameters/RevisionId'
+      responses:
+        '200':
+          description: Resolved header/footer config
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ResolvedHeaderFooterConfig' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
 # ─── Components ───────────────────────────────────────────────────────────────
 
 components:
@@ -4747,6 +5196,22 @@ components:
       in: path
       required: true
       description: Library UUID
+      schema:
+        type: string
+        format: uuid
+    PackageId:
+      name: id
+      in: path
+      required: true
+      description: Design package UUID
+      schema:
+        type: string
+        format: uuid
+    RevisionId:
+      name: id
+      in: path
+      required: true
+      description: Package revision UUID
       schema:
         type: string
         format: uuid
@@ -8081,3 +8546,221 @@ components:
         sourceUrl: { type: [string, 'null'], format: uri, maxLength: 2000 }
         title: { type: [string, 'null'], minLength: 1, maxLength: 500 }
         notes: { type: [string, 'null'], maxLength: 5000 }
+
+    # ── Header/footer config (#476, ADR-040) ─────────────────────────────────────
+
+    HeaderFooterScope:
+      description: >
+        Which scope a header/footer config row is anchored to — exactly one
+        of a client library, a project, a design package, or an issued
+        revision.
+      oneOf:
+        - type: object
+          required: [kind, clientLibraryId]
+          properties:
+            kind: { type: string, enum: [client] }
+            clientLibraryId: { type: string, format: uuid }
+        - type: object
+          required: [kind, projectId]
+          properties:
+            kind: { type: string, enum: [project] }
+            projectId: { type: string, format: uuid }
+        - type: object
+          required: [kind, packageId]
+          properties:
+            kind: { type: string, enum: [package] }
+            packageId: { type: string, format: uuid }
+        - type: object
+          required: [kind, revisionId]
+          properties:
+            kind: { type: string, enum: [revision] }
+            revisionId: { type: string, format: uuid }
+      discriminator:
+        propertyName: kind
+
+    HeaderFooterComposition:
+      type: object
+      description: >
+        JSONB-backed header/footer composition (ADR-040). v1 (#208) top-level
+        `header`/`footer`/`style` describe a single page variant and are read
+        as the `default` variant unless an explicit `variants.default` is
+        also present, in which case `variants.default` wins. v2 (#302) adds
+        `variants.first`/`variants.even` (Word title-page and even/odd
+        headers), `pageNumbering`, and an open `raw` sidecar for
+        captured-but-unmodeled OOXML markup plus parser warnings (#306).
+        Every nested object is open (`additionalProperties: true`, ADR-021)
+        — unknown JSON-safe keys, including at the top level, are preserved
+        verbatim on write and round-tripped on read.
+      additionalProperties: true
+      properties:
+        header:
+          type: object
+          additionalProperties: true
+          description: A header region (left/center/right cells, region style, rule line).
+          properties:
+            left: &headerFooterCell
+              type: object
+              additionalProperties: true
+              properties:
+                content:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                    required: [kind]
+                    properties:
+                      kind:
+                        type: string
+                        enum:
+                          [
+                            date,
+                            sectionTitle,
+                            sectionNumber,
+                            pageNumber,
+                            packageName,
+                            revisionName,
+                            revisionLabel,
+                            projectName,
+                            projectNumber,
+                            clientName,
+                            clientNumber,
+                            literal,
+                          ]
+                      source: { type: string, enum: [issuance, current] }
+                      text: { type: string }
+                      label: { type: string }
+                      format: { type: string }
+                      prefix: { type: string }
+                      suffix: { type: string }
+                separator: { type: string }
+                style: &headerFooterVisualStyle
+                  type: object
+                  additionalProperties: true
+                  properties:
+                    fontFamily: { type: string }
+                    fontSizeHalfPt: { type: integer }
+                    bold: { type: boolean }
+                    italic: { type: boolean }
+                    caps: { type: boolean }
+                    color: { type: string }
+            center: *headerFooterCell
+            right: *headerFooterCell
+            style: *headerFooterVisualStyle
+            ruleLine: &headerFooterRuleLine
+              type: object
+              additionalProperties: true
+              properties:
+                enabled: { type: boolean }
+                widthTwips: { type: integer }
+                color: { type: string }
+                style: { type: string }
+        footer:
+          type: object
+          additionalProperties: true
+          description: A footer region — same shape as `header`.
+          properties:
+            left: *headerFooterCell
+            center: *headerFooterCell
+            right: *headerFooterCell
+            style: *headerFooterVisualStyle
+            ruleLine: *headerFooterRuleLine
+        style: *headerFooterVisualStyle
+        variants:
+          type: object
+          additionalProperties: true
+          description: >
+            Word-style page variants (ADR-040): `default` applies to every
+            page unless a more specific variant overrides it; `first`
+            overrides the title page (`w:titlePg`); `even` overrides even
+            pages (`w:evenAndOddHeaders`).
+          properties:
+            default: &headerFooterVariant
+              type: object
+              additionalProperties: true
+              properties:
+                header:
+                  type: object
+                  additionalProperties: true
+                  properties:
+                    left: *headerFooterCell
+                    center: *headerFooterCell
+                    right: *headerFooterCell
+                    style: *headerFooterVisualStyle
+                    ruleLine: *headerFooterRuleLine
+                footer:
+                  type: object
+                  additionalProperties: true
+                  properties:
+                    left: *headerFooterCell
+                    center: *headerFooterCell
+                    right: *headerFooterCell
+                    style: *headerFooterVisualStyle
+                    ruleLine: *headerFooterRuleLine
+                style: *headerFooterVisualStyle
+            first: *headerFooterVariant
+            even: *headerFooterVariant
+        pageNumbering:
+          type: object
+          additionalProperties: true
+          required: [mode]
+          description: >
+            Page-numbering policy: continuous across the package, or
+            restarting at each spec section. `startAt` seeds the first
+            rendered number (`w:pgNumType@start`).
+          properties:
+            mode: { type: string, enum: [continuous, restartPerSpec] }
+            startAt: { type: integer }
+        raw:
+          type: object
+          additionalProperties: true
+          description: >
+            Open sidecar for captured-but-unmodeled header/footer OOXML plus
+            parser warnings (#306) — never lost on round-trip.
+          properties:
+            warnings:
+              type: array
+              items: { type: string }
+
+    HeaderFooterConfig:
+      type: object
+      description: A stored header/footer config row for exactly one scope.
+      required: [id, scope, config, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        scope: { $ref: '#/components/schemas/HeaderFooterScope' }
+        config: { $ref: '#/components/schemas/HeaderFooterComposition' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    HeaderFooterResolutionContext:
+      type: object
+      description: >
+        The anchor chain resolved for a project/package/revision read —
+        which client library (if any) feeds the top of the precedence chain,
+        and how far down the package/revision chain the anchor reaches.
+        `packageId`/`revisionId` are present only when the anchor is at or
+        below that level.
+      required: [clientLibraryId, projectId]
+      properties:
+        clientLibraryId: { type: [string, 'null'], format: uuid }
+        projectId: { type: string, format: uuid }
+        packageId: { type: string, format: uuid }
+        revisionId: { type: string, format: uuid }
+
+    ResolvedHeaderFooterConfig:
+      type: object
+      description: >
+        The effective header/footer config for a project/package/revision
+        anchor, merged client -> project -> package -> revision in that
+        precedence order (later layers win per-key, ADR-040). `layers` lists
+        every contributing config row low-to-high precedence — the winning
+        scope for any given key is `layers[layers.length - 1].scope`,
+        whichever layer last touched it; no separate winning-scope field is
+        synthesized.
+      required: [context, layers, config]
+      properties:
+        context: { $ref: '#/components/schemas/HeaderFooterResolutionContext' }
+        layers:
+          type: array
+          items: { $ref: '#/components/schemas/HeaderFooterConfig' }
+        config: { $ref: '#/components/schemas/HeaderFooterComposition' }

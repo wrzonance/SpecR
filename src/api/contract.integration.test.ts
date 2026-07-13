@@ -124,6 +124,22 @@ const RESPONSE_ALLOWLIST = new Set([
   'get /numbering-profiles/{}',
   'patch /numbering-profiles/{}',
   'put /specs/{}/numbering-profile',
+  // header/footer config CRUD + resolve (#476, ADR-040)
+  'get /libraries/{}/header-footer',
+  'put /libraries/{}/header-footer',
+  'delete /libraries/{}/header-footer',
+  'get /projects/{}/header-footer',
+  'put /projects/{}/header-footer',
+  'delete /projects/{}/header-footer',
+  'get /packages/{}/header-footer',
+  'put /packages/{}/header-footer',
+  'delete /packages/{}/header-footer',
+  'get /revisions/{}/header-footer',
+  'put /revisions/{}/header-footer',
+  'delete /revisions/{}/header-footer',
+  'get /projects/{}/header-footer/resolved',
+  'get /packages/{}/header-footer/resolved',
+  'get /revisions/{}/header-footer/resolved',
 ]);
 
 let server: Server;
