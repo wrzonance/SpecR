@@ -1,5 +1,7 @@
-import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import type { Request, Response } from 'express';
+import type { HeaderFooterComposition } from '../ast/index.js';
+import { DatabaseError } from '../db/errors.js';
 
 vi.mock('../db/index.js', () => ({
   getSpecTree: vi.fn(),
@@ -7,6 +9,7 @@ vi.mock('../db/index.js', () => ({
   getTemplateByName: vi.fn(),
   findProjectById: vi.fn(),
   findSoleProjectSectionNumberFormat: vi.fn(),
+  resolveSpecHeaderFooterContext: vi.fn(),
   pool: {},
 }));
 vi.mock('../generator/index.js', () => ({
@@ -19,6 +22,10 @@ vi.mock('../lib/logger.js', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('safeFilename', () => {
@@ -63,13 +70,18 @@ describe('manualFilename', () => {
 const SPEC_ID = '0a4d4567-1b2c-4d3e-9f00-abcdefabcdef';
 
 async function setupSpecGenerate(): Promise<void> {
-  const { getSpecTree, getTemplateByName } = await import('../db/index.js');
+  const { getSpecTree, getTemplateByName, resolveSpecHeaderFooterContext } =
+    await import('../db/index.js');
   const { generateDocx } = await import('../generator/index.js');
   vi.mocked(getSpecTree).mockResolvedValueOnce({
     tree: { id: SPEC_ID, section: '09 91 00', title: 'Painting', parts: [] },
     references: [],
   });
   vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
+  // Default: no owning project / no configured header-footer — keeps the
+  // pre-#304 tests' `options` assertions byte-identical unless a test
+  // below overrides this mock to return a populated context.
+  vi.mocked(resolveSpecHeaderFooterContext).mockResolvedValueOnce(null);
   vi.mocked(generateDocx).mockResolvedValueOnce(Buffer.from('docx'));
 }
 
@@ -127,6 +139,108 @@ async function loadSpecMocks(): Promise<{
   const { findSoleProjectSectionNumberFormat } = await import('../db/index.js');
   return { generateDocx, findSoleProjectSectionNumberFormat };
 }
+
+const COMPOSITION = { header: { left: { content: [] } } } as unknown as HeaderFooterComposition;
+
+// #304 — REST wiring of buildHeaderFooterOptions into generateHandler.
+// I4: sole project with a configured header/footer -> generateDocx receives
+// options.headerFooter populated from the resolved context, date-stamped.
+// I6: orphan/multi-project/zero-layer -> headerFooter stays omitted, so the
+// pre-#304 `options` shape (existing describe('generateHandler') block
+// above) is unchanged byte-for-byte.
+// I7: a resolved context that omits clientName (stale/missing
+// clientLibraryId at the DB layer) never throws here — the field is simply
+// absent from options.headerFooter.current.
+// I9: a DatabaseError thrown while resolving header/footer context surfaces
+// through generateHandler's existing catch-all as a 500, not a new swallow.
+describe('generateHandler — header/footer resolution (#304)', () => {
+  it('I4: configured project -> generateDocx receives populated options.headerFooter', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T12:00:00Z'));
+    await setupSpecGenerate();
+    const { generateDocx } = await import('../generator/index.js');
+    const { resolveSpecHeaderFooterContext } = await import('../db/index.js');
+    vi.mocked(resolveSpecHeaderFooterContext)
+      .mockReset()
+      .mockResolvedValueOnce({
+        composition: COMPOSITION,
+        fieldValues: { projectName: 'Acme HQ', clientName: 'Acme Corp' },
+      });
+    const { generateHandler } = await import('./generate.js');
+
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, mockRes());
+
+    expect(resolveSpecHeaderFooterContext).toHaveBeenCalledWith(SPEC_ID, expect.anything());
+    expect(generateDocx).toHaveBeenCalledWith(
+      expect.objectContaining({ section: '09 91 00' }),
+      undefined,
+      expect.objectContaining({
+        headerFooter: {
+          composition: COMPOSITION,
+          current: { date: '2026-07-12', projectName: 'Acme HQ', clientName: 'Acme Corp' },
+        },
+      })
+    );
+  });
+
+  it('I6: no owning project/config -> options.headerFooter stays omitted', async () => {
+    const { generateDocx } = await loadSpecMocks();
+    const { generateHandler } = await import('./generate.js');
+
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, mockRes());
+
+    // options may be undefined outright (pre-#304 baseline) or an object
+    // without headerFooter — either is the correct I6 outcome.
+    const call = vi.mocked(generateDocx).mock.calls[0];
+    expect(call?.[2] ?? {}).not.toHaveProperty('headerFooter');
+  });
+
+  it('I7: resolved context without clientName -> current omits clientName, no throw', async () => {
+    await setupSpecGenerate();
+    const { generateDocx } = await import('../generator/index.js');
+    const { resolveSpecHeaderFooterContext } = await import('../db/index.js');
+    vi.mocked(resolveSpecHeaderFooterContext)
+      .mockReset()
+      .mockResolvedValueOnce({
+        composition: COMPOSITION,
+        fieldValues: { projectName: 'Acme HQ' },
+      });
+    const { generateHandler } = await import('./generate.js');
+    const res = mockRes();
+
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, res);
+
+    expect(res.status).not.toHaveBeenCalled();
+    const call = vi.mocked(generateDocx).mock.calls[0];
+    const headerFooter = (
+      call?.[2] as { headerFooter?: { current: Record<string, unknown> } } | undefined
+    )?.headerFooter;
+    expect(headerFooter?.current).toEqual(expect.objectContaining({ projectName: 'Acme HQ' }));
+    expect(headerFooter?.current ?? {}).not.toHaveProperty('clientName');
+  });
+
+  it('I9: DatabaseError while resolving context surfaces as the existing 500, not swallowed', async () => {
+    const { getSpecTree, getTemplateByName, resolveSpecHeaderFooterContext } =
+      await import('../db/index.js');
+    const { generateDocx } = await import('../generator/index.js');
+    vi.mocked(getSpecTree).mockResolvedValueOnce({
+      tree: { id: SPEC_ID, section: '09 91 00', title: 'Painting', parts: [] },
+      references: [],
+    });
+    vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
+    vi.mocked(resolveSpecHeaderFooterContext).mockRejectedValueOnce(
+      new DatabaseError('findSoleOwningProject: query failed')
+    );
+    const { generateHandler } = await import('./generate.js');
+    const res = mockRes();
+
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ success: false, error: 'generation failed' });
+    expect(generateDocx).not.toHaveBeenCalled();
+  });
+});
 
 function mockRes(): Response {
   return {

@@ -4,7 +4,12 @@ import type { Server } from 'http';
 import JSZip from 'jszip';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool, createTemplateWithRules, deleteTemplate } from '../db/index.js';
+import {
+  pool,
+  createTemplateWithRules,
+  deleteTemplate,
+  upsertHeaderFooterConfig,
+} from '../db/index.js';
 
 let server: Server;
 let baseUrl: string;
@@ -182,6 +187,66 @@ describe('POST /specs/:id/generate — project default fallback (#267)', () => {
   it('orphan spec (no project) → canonical', async () => {
     const xml = await specDocXml(testSpecId, {});
     expect(xml).toContain('SECTION 27 13 23');
+  });
+});
+
+function headerFooterPartNames(zip: JSZip): string[] {
+  return Object.keys(zip.files).filter((name) => /^word\/(header|footer)\d+\.xml$/.test(name));
+}
+
+describe('POST /specs/:id/generate — header/footer resolution (#304)', () => {
+  it("renders the sole owning project's configured header/footer, resolved to the project's name", async () => {
+    const projectId = await attachSpecToProject('HF Configured Project', testSpecId, 'canonical');
+    try {
+      await upsertHeaderFooterConfig(
+        { projectId },
+        { header: { center: { content: [{ kind: 'projectName' }] } } }
+      );
+      const res = await fetch(`${baseUrl}/specs/${testSpecId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(200);
+      const zip = await JSZip.loadAsync(Buffer.from(await res.arrayBuffer()));
+      expect(headerFooterPartNames(zip)).toContain('word/header1.xml');
+      const headerFile = zip.file('word/header1.xml');
+      if (!headerFile) throw new Error('word/header1.xml missing from generated DOCX');
+      const headerXml = await headerFile.async('string');
+      expect(headerXml).toContain('HF Configured Project');
+    } finally {
+      await pool.query('DELETE FROM header_footer_configs WHERE project_id = $1', [projectId]);
+      await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+    }
+  });
+
+  it('sole owning project with zero configured layers → output stays byte-identical to the config-less baseline', async () => {
+    const baseline = await specDocXml(testSpecId, {});
+    const projectId = await attachSpecToProject('HF Unconfigured Project', testSpecId, 'canonical');
+    try {
+      const withProject = await specDocXml(testSpecId, {});
+      expect(withProject).toBe(baseline);
+
+      const res = await fetch(`${baseUrl}/specs/${testSpecId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const zip = await JSZip.loadAsync(Buffer.from(await res.arrayBuffer()));
+      expect(headerFooterPartNames(zip)).toEqual([]);
+    } finally {
+      await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+    }
+  });
+
+  it('orphan spec (no project) → no header/footer parts emitted', async () => {
+    const res = await fetch(`${baseUrl}/specs/${testSpecId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const zip = await JSZip.loadAsync(Buffer.from(await res.arrayBuffer()));
+    expect(headerFooterPartNames(zip)).toEqual([]);
   });
 });
 

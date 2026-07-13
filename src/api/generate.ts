@@ -23,6 +23,7 @@ import type {
 import { generateDocx, generateManual } from '../generator/index.js';
 import type { ManualMeta, ManualSectionListing } from '../generator/index.js';
 import { logger } from '../lib/logger.js';
+import { buildHeaderFooterOptions } from './generate-header-footer.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const RevisionGenerateBodySchema = GenerateBodySchema.extend({
@@ -95,7 +96,13 @@ export async function generateHandler(req: Request, res: Response): Promise<void
       bodyResult.data.sectionNumberFormat ??
       (await findSoleProjectSectionNumberFormat(idResult.data, pool)) ??
       undefined;
-    const options = generateOptions(format);
+    // Same sole-owning-project scope resolves the header/footer to render
+    // (issue #304); omitted entirely when nothing applies, so an orphan or
+    // unconfigured spec's output stays byte-identical to the pre-#304
+    // baseline (buildHeaderFooterOptions's undefined gate).
+    const headerFooter = await buildHeaderFooterOptions(idResult.data, pool);
+    const baseOptions = generateOptions(format);
+    const options = headerFooter ? { ...baseOptions, headerFooter } : baseOptions;
     const buffer = await generateDocx(result.tree, resolution.rules, options);
     const filename = safeFilename(result.tree.section, result.tree.title);
     res.setHeader('Content-Type', DOCX_MIME);
