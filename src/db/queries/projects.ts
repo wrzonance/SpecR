@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import { assertClientExists, ClientNotFoundError } from './clients.js';
 import { getPgCode } from '../../lib/pg-errors.js';
 import type { LibraryTier } from './libraries.js';
-import { SECTION_NUMBER_FORMATS } from '../../lib/section-number.js';
+import { parseSectionNumberFormat } from '../../lib/section-number.js';
 import type { SectionNumberFormat } from '../../lib/section-number.js';
 
 interface Queryable {
@@ -245,12 +245,6 @@ function mapSources(rows: readonly ProjectSourceRow[]): readonly ProjectSource[]
   }));
 }
 
-function parseSectionNumberFormat(raw: string): SectionNumberFormat {
-  return (SECTION_NUMBER_FORMATS as readonly string[]).includes(raw)
-    ? (raw as SectionNumberFormat)
-    : 'canonical';
-}
-
 async function fetchProjectTocAndSources(
   project: ProjectRow,
   id: string,
@@ -307,39 +301,6 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
     return await fetchProjectTocAndSources(project, id, pool);
   } catch (err) {
     throw new DatabaseError(`findProjectById: toc query failed for ${id}`, { cause: err });
-  }
-}
-
-/**
- * Resolve the section-number format to fall back to for a stored spec when a
- * generate request omits it (issue #267). A spec reaches a project only via
- * `project_specs`, and may belong to zero, one, or several projects — so a
- * project default is only well-defined when the spec belongs to EXACTLY ONE
- * project. Zero projects (orphan spec) or two-plus (no unambiguous owner) both
- * return null, letting the caller fall through to the canonical default rather
- * than picking an arbitrary project's format.
- */
-export async function findSoleProjectSectionNumberFormat(
-  specId: string,
-  pool: Queryable
-): Promise<SectionNumberFormat | null> {
-  try {
-    // One row per active project the spec belongs to. We fetch the (at most a
-    // few) matches and decide sole-ownership in code — clearer than a HAVING
-    // over a window function, and the result set is tiny.
-    const { rows } = await pool.query<{ section_number_format: string }>(
-      `SELECT DISTINCT p.id, p.section_number_format
-       FROM projects p
-       JOIN project_specs ps ON ps.project_id = p.id
-       WHERE ps.spec_id = $1 AND p.deleted_at IS NULL`,
-      [specId]
-    );
-    const row = rows[0];
-    return rows.length === 1 && row ? parseSectionNumberFormat(row.section_number_format) : null;
-  } catch (err) {
-    throw new DatabaseError(`findSoleProjectSectionNumberFormat: query failed for spec ${specId}`, {
-      cause: err,
-    });
   }
 }
 

@@ -72,7 +72,6 @@ export type { InboundReference, OutboundReference } from './queries/refs.js';
 export {
   createProject,
   findProjectById,
-  findSoleProjectSectionNumberFormat,
   listProjects,
   setProjectSources,
   updateProject,
@@ -304,6 +303,20 @@ export {
   type HeaderFooterResolutionContext,
   type ResolvedHeaderFooterConfig,
 } from './queries/header-footer.js';
+// Single-spec generation-context resolution (#267/#304) — scopes a spec to its
+// sole owning project once, yielding both the section-number-format fallback
+// and the effective header/footer config from ONE ownership snapshot (or null
+// fields when orphaned/ambiguous/unconfigured). `resolveSpecHeaderFooterContext`
+// is the header/footer-only view for callers without a format fallback.
+export {
+  resolveSpecGenerationContext,
+  resolveSpecHeaderFooterContext,
+} from './queries/header-footer-context.js';
+export type {
+  HeaderFooterFieldSource,
+  HeaderFooterGenerationContext,
+  SpecGenerationContext,
+} from './queries/header-footer-context.js';
 export {
   listRequiredSections,
   setRequiredSections,

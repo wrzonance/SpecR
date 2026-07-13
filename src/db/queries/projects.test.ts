@@ -140,62 +140,11 @@ describe('findProjectById', () => {
   });
 });
 
-describe('findSoleProjectSectionNumberFormat', () => {
-  it('returns the format when the spec belongs to exactly one project', async () => {
-    const { pool } = await import('../index.js');
-    vi.mocked(pool.query).mockResolvedValueOnce({
-      rows: [{ section_number_format: 'dots' }],
-      rowCount: 1,
-    } as never);
-    const { findSoleProjectSectionNumberFormat } = await import('./projects.js');
-    const result = await findSoleProjectSectionNumberFormat('spec-1', pool);
-    expect(result).toBe('dots');
-  });
-
-  it('returns null when the spec belongs to no project', async () => {
-    const { pool } = await import('../index.js');
-    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
-    const { findSoleProjectSectionNumberFormat } = await import('./projects.js');
-    const result = await findSoleProjectSectionNumberFormat('spec-orphan', pool);
-    expect(result).toBeNull();
-  });
-
-  it('returns null when the spec belongs to multiple projects (ambiguous)', async () => {
-    // Two distinct project rows → no unambiguous owner; the caller falls
-    // through to the canonical default rather than picking arbitrarily.
-    const { pool } = await import('../index.js');
-    vi.mocked(pool.query).mockResolvedValueOnce({
-      rows: [
-        { id: 'proj-1', section_number_format: 'dots' },
-        { id: 'proj-2', section_number_format: 'compact' },
-      ],
-      rowCount: 2,
-    } as never);
-    const { findSoleProjectSectionNumberFormat } = await import('./projects.js');
-    const result = await findSoleProjectSectionNumberFormat('spec-shared', pool);
-    expect(result).toBeNull();
-  });
-
-  it('normalizes an out-of-range stored value to canonical', async () => {
-    const { pool } = await import('../index.js');
-    vi.mocked(pool.query).mockResolvedValueOnce({
-      rows: [{ section_number_format: 'garbage' }],
-      rowCount: 1,
-    } as never);
-    const { findSoleProjectSectionNumberFormat } = await import('./projects.js');
-    const result = await findSoleProjectSectionNumberFormat('spec-1', pool);
-    expect(result).toBe('canonical');
-  });
-
-  it('throws DatabaseError on query failure', async () => {
-    const { DatabaseError, pool } = await import('../index.js');
-    vi.mocked(pool.query).mockRejectedValueOnce(new Error('db down'));
-    const { findSoleProjectSectionNumberFormat } = await import('./projects.js');
-    await expect(findSoleProjectSectionNumberFormat('spec-1', pool)).rejects.toBeInstanceOf(
-      DatabaseError
-    );
-  });
-});
+// The spec's sole-owning-project section-number-format fallback moved into
+// resolveSpecGenerationContext (src/db/queries/header-footer-context.ts, #479),
+// which resolves ownership once for both numbering and header/footer; its
+// coverage lives in header-footer-context.integration.test.ts. The pure
+// string→format coercion is covered in src/lib/section-number.test.ts.
 
 describe('listProjects', () => {
   it('returns project ids and names', async () => {

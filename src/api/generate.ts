@@ -8,7 +8,7 @@ import {
   getTemplate,
   getTemplateByName,
   findProjectById,
-  findSoleProjectSectionNumberFormat,
+  resolveSpecGenerationContext,
   getPackageRevisionManualData,
   getPackageRevisionAddendumManualData,
   RevisionComparisonError,
@@ -23,6 +23,7 @@ import type {
 import { generateDocx, generateManual } from '../generator/index.js';
 import type { ManualMeta, ManualSectionListing } from '../generator/index.js';
 import { logger } from '../lib/logger.js';
+import { buildHeaderFooterOptions } from './generate-header-footer.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const RevisionGenerateBodySchema = GenerateBodySchema.extend({
@@ -89,13 +90,20 @@ export async function generateHandler(req: Request, res: Response): Promise<void
       res.status(404).json({ success: false, error: 'template not found' });
       return;
     }
-    // Request body wins; otherwise fall back to the format of the spec's sole
-    // owning project (issue #267). Null (orphan or multi-project) → canonical.
+    // One ownership snapshot feeds BOTH the section-number-format fallback
+    // (issue #267) and the header/footer context (issue #304), so a concurrent
+    // project_specs membership change can never pair one project's numbering
+    // with another's header/footer. Request body wins for the format; null
+    // (orphan or multi-project) → canonical. Header/footer is omitted entirely
+    // when nothing applies, keeping an orphan or unconfigured spec's output
+    // byte-identical to the pre-#304 baseline (buildHeaderFooterOptions's
+    // undefined gate).
+    const specContext = await resolveSpecGenerationContext(idResult.data, pool);
     const format =
-      bodyResult.data.sectionNumberFormat ??
-      (await findSoleProjectSectionNumberFormat(idResult.data, pool)) ??
-      undefined;
-    const options = generateOptions(format);
+      bodyResult.data.sectionNumberFormat ?? specContext.sectionNumberFormat ?? undefined;
+    const headerFooter = buildHeaderFooterOptions(specContext.headerFooter);
+    const baseOptions = generateOptions(format);
+    const options = headerFooter ? { ...baseOptions, headerFooter } : baseOptions;
     const buffer = await generateDocx(result.tree, resolution.rules, options);
     const filename = safeFilename(result.tree.section, result.tree.title);
     res.setHeader('Content-Type', DOCX_MIME);

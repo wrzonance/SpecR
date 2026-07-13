@@ -4,7 +4,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import express from 'express';
 import type { Server } from 'http';
 import { Document, Paragraph, TextRun, Packer } from 'docx';
-import { pool, createSpec, insertTree } from '../db/index.js';
+import JSZip from 'jszip';
+import { pool, createSpec, insertTree, upsertHeaderFooterConfig } from '../db/index.js';
 import { registerMcpRoutes } from './server.js';
 
 let server: Server;
@@ -597,6 +598,164 @@ describe('tool: parse_document', () => {
       .filter((r) => r.target_type === 'standard')
       .map((r) => r.standard_code);
     expect(standardRefs).toContain('ASTM C150');
+  });
+});
+
+// #304 — mirrors REST's POST /specs/:id/generate header/footer resolution
+// (src/api/generate.integration.test.ts) into the generate_docx MCP tool, so
+// the two entry points render identically for the same spec/project state
+// (ADR-044 lockstep).
+describe('tool: generate_docx — header/footer resolution (#304)', () => {
+  let hfSpecId: string;
+
+  beforeAll(async () => {
+    hfSpecId = await createSpec({
+      section: '09 91 26',
+      title: 'HF MCP Test Spec',
+      source: 'arcat',
+    });
+    await insertTree(
+      {
+        id: hfSpecId,
+        section: '09 91 26',
+        title: 'HF MCP Test Spec',
+        parts: [
+          {
+            id: '30000000-0000-4000-8000-0000000000f1',
+            type: 'part',
+            text: 'GENERAL',
+            children: [],
+            meta: {},
+          },
+        ],
+      },
+      hfSpecId,
+      pool
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [hfSpecId]);
+  });
+
+  async function attachHfProject(name: string): Promise<string> {
+    const res = await pool.query<{ id: string }>(
+      `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+      [name]
+    );
+    const id = res.rows[0]?.id;
+    if (!id) throw new Error(`failed to insert project ${name}`);
+    await pool.query(
+      `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`,
+      [id, hfSpecId]
+    );
+    return id;
+  }
+
+  interface GeneratedDocx {
+    readonly contentBase64: string;
+    readonly isError: boolean;
+  }
+
+  async function callGenerateDocx(specId: string): Promise<GeneratedDocx> {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'generate_docx',
+      arguments: { specId },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    if (result['isError'] === true) return { contentBase64: '', isError: true };
+    const content = result['content'] as { type: string; text: string }[];
+    const data = JSON.parse(content[0]!.text) as { contentBase64: string };
+    return { contentBase64: data.contentBase64, isError: false };
+  }
+
+  function headerFooterPartNames(zip: JSZip): string[] {
+    return Object.keys(zip.files).filter((name) => /^word\/(header|footer)\d+\.xml$/.test(name));
+  }
+
+  // word/document.xml only — docProps/core.xml carries a per-call generation
+  // timestamp, so comparing the raw base64 blob is flaky by construction
+  // (same non-determinism the REST precedent's specDocXml() sidesteps).
+  async function documentXml(contentBase64: string): Promise<string> {
+    const zip = await JSZip.loadAsync(Buffer.from(contentBase64, 'base64'));
+    const file = zip.file('word/document.xml');
+    if (!file) throw new Error('word/document.xml missing from generated DOCX');
+    return file.async('string');
+  }
+
+  it("I7: sole owning project's configured header/footer renders in the tool output (parity with REST)", async () => {
+    const projectId = await attachHfProject('MCP HF Configured Project');
+    try {
+      await upsertHeaderFooterConfig(
+        { projectId },
+        { header: { center: { content: [{ kind: 'projectName' }] } } }
+      );
+      const { contentBase64, isError } = await callGenerateDocx(hfSpecId);
+      expect(isError).toBe(false);
+      const zip = await JSZip.loadAsync(Buffer.from(contentBase64, 'base64'));
+      expect(headerFooterPartNames(zip)).toContain('word/header1.xml');
+      const headerFile = zip.file('word/header1.xml');
+      if (!headerFile) throw new Error('word/header1.xml missing from generated DOCX');
+      const headerXml = await headerFile.async('string');
+      expect(headerXml).toContain('MCP HF Configured Project');
+    } finally {
+      await pool.query('DELETE FROM header_footer_configs WHERE project_id = $1', [projectId]);
+      await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+    }
+  });
+
+  it('I8: no owning project or zero configured layers -> header/footer stays omitted, output unchanged', async () => {
+    const baseline = await callGenerateDocx(hfSpecId);
+    const baselineXml = await documentXml(baseline.contentBase64);
+    const projectId = await attachHfProject('MCP HF Unconfigured Project');
+    try {
+      const withProject = await callGenerateDocx(hfSpecId);
+      expect(await documentXml(withProject.contentBase64)).toBe(baselineXml);
+      const zip = await JSZip.loadAsync(Buffer.from(withProject.contentBase64, 'base64'));
+      expect(headerFooterPartNames(zip)).toEqual([]);
+    } finally {
+      await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+    }
+  });
+
+  it('I9: missing client source -> clientName omitted from the rendered header, tool still succeeds', async () => {
+    const projectId = await attachHfProject('MCP HF Client-less Project');
+    try {
+      await upsertHeaderFooterConfig(
+        { projectId },
+        {
+          header: {
+            center: { content: [{ kind: 'projectName' }] },
+            right: { content: [{ kind: 'clientName' }] },
+          },
+        }
+      );
+      const { contentBase64, isError } = await callGenerateDocx(hfSpecId);
+      expect(isError).toBe(false);
+      const zip = await JSZip.loadAsync(Buffer.from(contentBase64, 'base64'));
+      const headerFile = zip.file('word/header1.xml');
+      if (!headerFile) throw new Error('word/header1.xml missing from generated DOCX');
+      const headerXml = await headerFile.async('string');
+      expect(headerXml).toContain('MCP HF Client-less Project');
+      // The right cell's only field is clientName, which resolves to nothing
+      // when the project has no client source (resolveValueField,
+      // header-footer-fields.ts) — so header-footer-regions.ts's
+      // needsRightTab/regionChildren must render neither a right tab stop
+      // nor any run for it. Asserted structurally (tab count, and the full
+      // set of rendered text runs) rather than by searching for absent
+      // text, since there is no concrete client-name value to assert the
+      // absence of.
+      const tabRuns = headerXml.match(/<w:r><w:tab\/><\/w:r>/g) ?? [];
+      expect(tabRuns).toHaveLength(1); // center tab only — no second (right) tab
+      const textRunContents = [...headerXml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map(
+        (m) => m[1] ?? ''
+      );
+      expect(textRunContents).toEqual(['MCP HF Client-less Project']);
+    } finally {
+      await pool.query('DELETE FROM header_footer_configs WHERE project_id = $1', [projectId]);
+      await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+    }
   });
 });
 

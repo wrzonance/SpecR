@@ -1131,6 +1131,19 @@ paths:
     post:
       operationId: generateDocx
       summary: Generate a DOCX from a stored spec AST
+      description: >
+        Header/footer content is resolved automatically (#304): when the spec
+        belongs to exactly one project, and that project's client → project →
+        package → revision scope chain has at least one configured
+        `header_footer_configs` layer, the resolved composition and field
+        values (project name, client name, etc.) are rendered into the
+        generated DOCX, stamped with the current date. An orphan spec, a spec
+        owned by two or more projects, or a resolvable project with no
+        configured layers anywhere in its chain all fall back gracefully — the
+        DOCX renders with no header/footer, identical to the pre-#304 output.
+        This resolution has no request or response shape of its own; it is
+        driven entirely by existing project/package/revision and
+        `header_footer_configs` state.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'

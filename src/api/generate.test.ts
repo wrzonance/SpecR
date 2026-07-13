@@ -1,12 +1,14 @@
-import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import type { Request, Response } from 'express';
+import type { HeaderFooterComposition } from '../ast/index.js';
+import { DatabaseError } from '../db/errors.js';
 
 vi.mock('../db/index.js', () => ({
   getSpecTree: vi.fn(),
   getTemplate: vi.fn(),
   getTemplateByName: vi.fn(),
   findProjectById: vi.fn(),
-  findSoleProjectSectionNumberFormat: vi.fn(),
+  resolveSpecGenerationContext: vi.fn(),
   pool: {},
 }));
 vi.mock('../generator/index.js', () => ({
@@ -19,6 +21,10 @@ vi.mock('../lib/logger.js', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('safeFilename', () => {
@@ -63,26 +69,36 @@ describe('manualFilename', () => {
 const SPEC_ID = '0a4d4567-1b2c-4d3e-9f00-abcdefabcdef';
 
 async function setupSpecGenerate(): Promise<void> {
-  const { getSpecTree, getTemplateByName } = await import('../db/index.js');
+  const { getSpecTree, getTemplateByName, resolveSpecGenerationContext } =
+    await import('../db/index.js');
   const { generateDocx } = await import('../generator/index.js');
   vi.mocked(getSpecTree).mockResolvedValueOnce({
     tree: { id: SPEC_ID, section: '09 91 00', title: 'Painting', parts: [] },
     references: [],
   });
   vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
+  // Default: orphan/ambiguous spec — no format fallback, no configured
+  // header/footer — keeps the pre-#267/#304 `options` assertions byte-identical
+  // unless a test below overrides this mock to return a populated snapshot.
+  vi.mocked(resolveSpecGenerationContext).mockResolvedValueOnce({
+    sectionNumberFormat: null,
+    headerFooter: null,
+  });
   vi.mocked(generateDocx).mockResolvedValueOnce(Buffer.from('docx'));
 }
 
 describe('generateHandler', () => {
-  it('generate: request sectionNumberFormat wins; no project lookup is made', async () => {
-    const { generateDocx, findSoleProjectSectionNumberFormat } = await loadSpecMocks();
+  it('generate: request sectionNumberFormat wins over the resolved project snapshot', async () => {
+    const { generateDocx, resolveSpecGenerationContext } = await loadSpecMocks();
+    // A populated snapshot format still loses to an explicit body format.
+    vi.mocked(resolveSpecGenerationContext)
+      .mockReset()
+      .mockResolvedValueOnce({ sectionNumberFormat: 'compact', headerFooter: null });
     const { generateHandler } = await import('./generate.js');
     await generateHandler(
       { params: { id: SPEC_ID }, body: { sectionNumberFormat: 'dots' } } as unknown as Request,
       mockRes()
     );
-    // Body present → the `??` short-circuits, sparing the DB a useless query.
-    expect(findSoleProjectSectionNumberFormat).not.toHaveBeenCalled();
     expect(generateDocx).toHaveBeenCalledWith(
       expect.objectContaining({ section: '09 91 00' }),
       undefined,
@@ -91,11 +107,13 @@ describe('generateHandler', () => {
   });
 
   it("generate: falls back to the spec's sole project default when body omits the format", async () => {
-    const { generateDocx, findSoleProjectSectionNumberFormat } = await loadSpecMocks();
-    vi.mocked(findSoleProjectSectionNumberFormat).mockResolvedValueOnce('dots');
+    const { generateDocx, resolveSpecGenerationContext } = await loadSpecMocks();
+    vi.mocked(resolveSpecGenerationContext)
+      .mockReset()
+      .mockResolvedValueOnce({ sectionNumberFormat: 'dots', headerFooter: null });
     const { generateHandler } = await import('./generate.js');
     await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, mockRes());
-    expect(findSoleProjectSectionNumberFormat).toHaveBeenCalledWith(SPEC_ID, expect.anything());
+    expect(resolveSpecGenerationContext).toHaveBeenCalledWith(SPEC_ID, expect.anything());
     expect(generateDocx).toHaveBeenCalledWith(
       expect.objectContaining({ section: '09 91 00' }),
       undefined,
@@ -104,8 +122,8 @@ describe('generateHandler', () => {
   });
 
   it('generate: no project default and no body format → canonical (undefined options)', async () => {
-    const { generateDocx, findSoleProjectSectionNumberFormat } = await loadSpecMocks();
-    vi.mocked(findSoleProjectSectionNumberFormat).mockResolvedValueOnce(null);
+    // setupSpecGenerate's default snapshot is { null, null }.
+    const { generateDocx } = await loadSpecMocks();
     const { generateHandler } = await import('./generate.js');
     await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, mockRes());
     expect(generateDocx).toHaveBeenCalledWith(
@@ -114,19 +132,153 @@ describe('generateHandler', () => {
       undefined
     );
   });
+
+  // Regression (CodeRabbit, PR #479): the handler must resolve sole ownership
+  // EXACTLY ONCE and derive both the section-number-format fallback and the
+  // header/footer from that single snapshot — never two independent lookups a
+  // concurrent membership change could wedge between.
+  it('generate: resolves sole ownership once, feeding format and header/footer from one snapshot', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T12:00:00Z'));
+    const { generateDocx, resolveSpecGenerationContext } = await loadSpecMocks();
+    vi.mocked(resolveSpecGenerationContext)
+      .mockReset()
+      .mockResolvedValueOnce({
+        sectionNumberFormat: 'dots',
+        headerFooter: { composition: COMPOSITION, fieldValues: { projectName: 'Acme HQ' } },
+      });
+    const { generateHandler } = await import('./generate.js');
+
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, mockRes());
+
+    expect(resolveSpecGenerationContext).toHaveBeenCalledTimes(1);
+    expect(generateDocx).toHaveBeenCalledWith(
+      expect.objectContaining({ section: '09 91 00' }),
+      undefined,
+      {
+        sectionNumberFormat: 'dots',
+        headerFooter: {
+          composition: COMPOSITION,
+          current: { date: '2026-07-12', projectName: 'Acme HQ' },
+        },
+      }
+    );
+  });
 });
 
 async function loadSpecMocks(): Promise<{
   generateDocx: Awaited<typeof import('../generator/index.js')>['generateDocx'];
-  findSoleProjectSectionNumberFormat: Awaited<
+  resolveSpecGenerationContext: Awaited<
     typeof import('../db/index.js')
-  >['findSoleProjectSectionNumberFormat'];
+  >['resolveSpecGenerationContext'];
 }> {
   await setupSpecGenerate();
   const { generateDocx } = await import('../generator/index.js');
-  const { findSoleProjectSectionNumberFormat } = await import('../db/index.js');
-  return { generateDocx, findSoleProjectSectionNumberFormat };
+  const { resolveSpecGenerationContext } = await import('../db/index.js');
+  return { generateDocx, resolveSpecGenerationContext };
 }
+
+const COMPOSITION = { header: { left: { content: [] } } } as unknown as HeaderFooterComposition;
+
+// #304 — REST wiring of buildHeaderFooterOptions into generateHandler, now fed
+// by the single resolveSpecGenerationContext snapshot.
+// I4: sole project with a configured header/footer -> generateDocx receives
+// options.headerFooter populated from the resolved context, date-stamped.
+// I6: orphan/multi-project/zero-layer -> headerFooter stays omitted, so the
+// pre-#304 `options` shape (existing describe('generateHandler') block
+// above) is unchanged byte-for-byte.
+// I7: a resolved context that omits clientName (stale/missing
+// clientLibraryId at the DB layer) never throws here — the field is simply
+// absent from options.headerFooter.current.
+// I9: a DatabaseError thrown while resolving the generation context surfaces
+// through generateHandler's existing catch-all as a 500, not a new swallow.
+describe('generateHandler — header/footer resolution (#304)', () => {
+  it('I4: configured project -> generateDocx receives populated options.headerFooter', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T12:00:00Z'));
+    const { generateDocx, resolveSpecGenerationContext } = await loadSpecMocks();
+    vi.mocked(resolveSpecGenerationContext)
+      .mockReset()
+      .mockResolvedValueOnce({
+        sectionNumberFormat: null,
+        headerFooter: {
+          composition: COMPOSITION,
+          fieldValues: { projectName: 'Acme HQ', clientName: 'Acme Corp' },
+        },
+      });
+    const { generateHandler } = await import('./generate.js');
+
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, mockRes());
+
+    expect(resolveSpecGenerationContext).toHaveBeenCalledWith(SPEC_ID, expect.anything());
+    expect(generateDocx).toHaveBeenCalledWith(
+      expect.objectContaining({ section: '09 91 00' }),
+      undefined,
+      expect.objectContaining({
+        headerFooter: {
+          composition: COMPOSITION,
+          current: { date: '2026-07-12', projectName: 'Acme HQ', clientName: 'Acme Corp' },
+        },
+      })
+    );
+  });
+
+  it('I6: no owning project/config -> options.headerFooter stays omitted', async () => {
+    const { generateDocx } = await loadSpecMocks();
+    const { generateHandler } = await import('./generate.js');
+
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, mockRes());
+
+    // options may be undefined outright (pre-#304 baseline) or an object
+    // without headerFooter — either is the correct I6 outcome.
+    const call = vi.mocked(generateDocx).mock.calls[0];
+    expect(call?.[2] ?? {}).not.toHaveProperty('headerFooter');
+  });
+
+  it('I7: resolved context without clientName -> current omits clientName, no throw', async () => {
+    const { generateDocx, resolveSpecGenerationContext } = await loadSpecMocks();
+    vi.mocked(resolveSpecGenerationContext)
+      .mockReset()
+      .mockResolvedValueOnce({
+        sectionNumberFormat: null,
+        headerFooter: { composition: COMPOSITION, fieldValues: { projectName: 'Acme HQ' } },
+      });
+    const { generateHandler } = await import('./generate.js');
+    const res = mockRes();
+
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, res);
+
+    expect(res.status).not.toHaveBeenCalled();
+    const call = vi.mocked(generateDocx).mock.calls[0];
+    const headerFooter = (
+      call?.[2] as { headerFooter?: { current: Record<string, unknown> } } | undefined
+    )?.headerFooter;
+    expect(headerFooter?.current).toEqual(expect.objectContaining({ projectName: 'Acme HQ' }));
+    expect(headerFooter?.current ?? {}).not.toHaveProperty('clientName');
+  });
+
+  it('I9: DatabaseError while resolving context surfaces as the existing 500, not swallowed', async () => {
+    const { getSpecTree, getTemplateByName, resolveSpecGenerationContext } =
+      await import('../db/index.js');
+    const { generateDocx } = await import('../generator/index.js');
+    vi.mocked(getSpecTree).mockResolvedValueOnce({
+      tree: { id: SPEC_ID, section: '09 91 00', title: 'Painting', parts: [] },
+      references: [],
+    });
+    vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
+    vi.mocked(resolveSpecGenerationContext).mockRejectedValueOnce(
+      new DatabaseError('findSoleOwningProject: query failed')
+    );
+    const { generateHandler } = await import('./generate.js');
+    const res = mockRes();
+
+    await generateHandler({ params: { id: SPEC_ID }, body: {} } as unknown as Request, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ success: false, error: 'generation failed' });
+    expect(generateDocx).not.toHaveBeenCalled();
+  });
+});
 
 function mockRes(): Response {
   return {

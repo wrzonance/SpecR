@@ -14,11 +14,13 @@ import {
   getOutboundReferences,
   listProjects,
   listLibraries,
+  resolveSpecHeaderFooterContext,
   pool,
 } from '../db/index.js';
 import type { InboundReference, OutboundReference } from '../db/index.js';
 import { assertDocxSafe } from '../parser/index.js';
 import { generateDocx } from '../generator/index.js';
+import type { HeaderFooterGenerationInput, HeaderFooterFieldValues } from '../generator/index.js';
 import { computeSpecDiff, MergeError } from '../merge/index.js';
 import { logger } from '../lib/logger.js';
 import { decodeBase64Payload } from '../lib/decode-base64.js';
@@ -240,13 +242,45 @@ export async function handleGetSpecLineage({ specId }: { specId: string }): Prom
   }
 }
 
+/** Today's date, formatted `YYYY-MM-DD` (#304) — mirrored, not imported,
+ *  from src/api/generate-header-footer.ts's `todayIsoDate`: mcp/ never
+ *  imports from api/ (module-boundary rule), and this is only a 2-call-site
+ *  duplication, under DRY's 3+-repeat threshold. */
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Resolve the generator-ready header/footer input for a spec's sole owning
+ *  project (#304), or undefined when nothing applies — mirrors
+ *  src/api/generate-header-footer.ts's `buildHeaderFooterOptions` inline
+ *  rather than importing it (see `todayIsoDate`), so generate_docx renders
+ *  in lockstep with POST /specs/:id/generate (ADR-044). Exported (unlike
+ *  `todayIsoDate`) so a dedicated unit test can pin its no-mutation
+ *  invariant (I5) the same way `buildHeaderFooterOptions`'s own suite does
+ *  (src/api/generate-header-footer.test.ts) — `server.integration.test.ts`
+ *  re-fetches fresh rows from Postgres on every call, so a mutation here
+ *  would otherwise never surface as a failure. */
+export async function resolveHeaderFooterInput(
+  specId: string
+): Promise<HeaderFooterGenerationInput | undefined> {
+  const context = await resolveSpecHeaderFooterContext(specId, pool);
+  if (context === null) return undefined;
+  const current: HeaderFooterFieldValues = { date: todayIsoDate(), ...context.fieldValues };
+  return { composition: context.composition, current };
+}
+
 export async function handleGenerateDocx({ specId }: { specId: string }): Promise<ToolResult> {
   try {
     const result = await getSpecTree(specId);
     if (!result) {
       return toolError(`Spec not found: id=${specId}`);
     }
-    const buf = await generateDocx(result.tree);
+    const headerFooter = await resolveHeaderFooterInput(specId);
+    const buf = await generateDocx(
+      result.tree,
+      undefined,
+      headerFooter ? { headerFooter } : undefined
+    );
     return {
       content: [
         {

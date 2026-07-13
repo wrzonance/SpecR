@@ -104,3 +104,27 @@ This is an **accepted, documented migration caveat**, not a defect:
   the collision is documented instead. Pinned by a regression test in
   `src/ast/header-footer-schemas.test.ts`. If a real colliding legacy row ever
   surfaces, normalizing it is a data-migration concern for #304/#306.
+
+### Update (#304)
+
+Single-spec resolution and rendering shipped: `resolveSpecHeaderFooterContext`
+(`src/db/queries/header-footer-context.ts`) resolves a spec's sole owning
+project through `resolveHeaderFooterConfig` and assembles a generator-ready
+context, gated on at least one configured layer (`layers.length > 0`, never
+merely a non-null resolution). `buildHeaderFooterOptions`
+(`src/api/generate-header-footer.ts`) stamps the current date and wires the
+result into `POST /specs/{id}/generate`; the MCP `generate_docx` tool mirrors
+the same resolution for parity (ADR-044). An orphan spec, an ambiguously-owned
+spec, or a resolvable project with zero configured layers all fall back to the
+pre-#304 output unchanged.
+
+`generateManualHandler` (`POST /projects/{id}/generate`) and
+`generateRevisionHandler` (`POST /revisions/{id}/generate`) are an explicit
+scope cut, not a silent drop: they render a whole project manual or a frozen
+package revision, where "the spec's sole owning project" is not the right
+resolution key, so wiring them is deferred to a follow-up issue. No
+package/revision-level field values (package name, revision label) are
+populated on the `POST /specs/{id}/generate` path either: a bare spec id has
+no unambiguous package/revision without a verified schema path, so
+`HeaderFooterFieldSource` declares those fields for shape parity but they
+resolve `undefined` here.
