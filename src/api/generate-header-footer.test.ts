@@ -1,37 +1,20 @@
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import type { Pool } from 'pg';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import type { HeaderFooterComposition } from '../ast/index.js';
-
-vi.mock('../db/index.js', () => ({
-  resolveSpecHeaderFooterContext: vi.fn(),
-}));
-
-beforeEach(() => {
-  vi.clearAllMocks();
-});
+import type { HeaderFooterGenerationContext } from '../db/index.js';
+import { buildHeaderFooterOptions } from './generate-header-footer.js';
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-const SPEC_ID = '0a4d4567-1b2c-4d3e-9f00-abcdefabcdef';
-const FAKE_POOL = {} as Pool;
 const COMPOSITION = { header: { left: { content: [] } } } as unknown as HeaderFooterComposition;
 
-// I2: resolveSpecHeaderFooterContext returning null is the one gate that
-// keeps generateDocx's output byte-identical to the pre-#304 baseline —
-// buildHeaderFooterOptions must surface that as undefined, not an empty
-// options object.
+// I2: a null context is the one gate that keeps generateDocx's output
+// byte-identical to the pre-#304 baseline — buildHeaderFooterOptions must
+// surface that as undefined, not an empty options object.
 describe('buildHeaderFooterOptions — I2 no-context gate', () => {
-  it('generate-header-footer: null context (orphan/ambiguous/unconfigured spec) → undefined', async () => {
-    const { resolveSpecHeaderFooterContext } = await import('../db/index.js');
-    vi.mocked(resolveSpecHeaderFooterContext).mockResolvedValueOnce(null);
-    const { buildHeaderFooterOptions } = await import('./generate-header-footer.js');
-
-    const result = await buildHeaderFooterOptions(SPEC_ID, FAKE_POOL);
-
-    expect(result).toBeUndefined();
-    expect(resolveSpecHeaderFooterContext).toHaveBeenCalledWith(SPEC_ID, FAKE_POOL);
+  it('generate-header-footer: null context (orphan/ambiguous/unconfigured spec) → undefined', () => {
+    expect(buildHeaderFooterOptions(null)).toBeUndefined();
   });
 });
 
@@ -40,17 +23,14 @@ describe('buildHeaderFooterOptions — I2 no-context gate', () => {
 // packageName/revisionName/revisionLabel are never fabricated on this
 // project-only-scope path (#304 decisions).
 describe('buildHeaderFooterOptions — I4 field assembly', () => {
-  it('generate-header-footer: populated context → composition pass-through + current stamped with sourced fields and date', async () => {
+  it('generate-header-footer: populated context → composition pass-through + current stamped with sourced fields and date', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-12T23:45:00Z'));
-    const { resolveSpecHeaderFooterContext } = await import('../db/index.js');
-    vi.mocked(resolveSpecHeaderFooterContext).mockResolvedValueOnce({
+
+    const result = buildHeaderFooterOptions({
       composition: COMPOSITION,
       fieldValues: { projectName: 'Acme HQ', clientName: 'Acme Corp' },
     });
-    const { buildHeaderFooterOptions } = await import('./generate-header-footer.js');
-
-    const result = await buildHeaderFooterOptions(SPEC_ID, FAKE_POOL);
 
     expect(result).toEqual({
       composition: COMPOSITION,
@@ -67,19 +47,18 @@ describe('buildHeaderFooterOptions — I4 field assembly', () => {
   });
 });
 
-// I5: never mutate the object resolveSpecHeaderFooterContext returned
-// (code.md immutability rule) — freeze it so any attempted mutation throws
-// in this ESM module's strict-mode execution, and confirm it reads back
-// unchanged.
+// I5: never mutate the context object the caller passed in (code.md
+// immutability rule) — freeze it so any attempted mutation throws in this
+// ESM module's strict-mode execution, and confirm it reads back unchanged.
 describe('buildHeaderFooterOptions — I5 no input mutation', () => {
-  it('generate-header-footer: resolved context object is never mutated', async () => {
-    const { resolveSpecHeaderFooterContext } = await import('../db/index.js');
+  it('generate-header-footer: resolved context object is never mutated', () => {
     const fieldValues = Object.freeze({ projectName: 'Acme HQ' });
-    const context = Object.freeze({ composition: COMPOSITION, fieldValues });
-    vi.mocked(resolveSpecHeaderFooterContext).mockResolvedValueOnce(context);
-    const { buildHeaderFooterOptions } = await import('./generate-header-footer.js');
+    const context: HeaderFooterGenerationContext = Object.freeze({
+      composition: COMPOSITION,
+      fieldValues,
+    });
 
-    await expect(buildHeaderFooterOptions(SPEC_ID, FAKE_POOL)).resolves.toBeDefined();
+    expect(buildHeaderFooterOptions(context)).toBeDefined();
 
     expect(context.fieldValues).toEqual({ projectName: 'Acme HQ' });
     expect(context).toEqual({ composition: COMPOSITION, fieldValues: { projectName: 'Acme HQ' } });
@@ -90,17 +69,11 @@ describe('buildHeaderFooterOptions — I5 no input mutation', () => {
 // timestamp, not locale-dependent, and it tracks the clock rather than
 // being hardcoded.
 describe('buildHeaderFooterOptions — I9 date stamp format', () => {
-  it('generate-header-footer: stamped date is today, formatted YYYY-MM-DD, single digits zero-padded', async () => {
+  it('generate-header-footer: stamped date is today, formatted YYYY-MM-DD, single digits zero-padded', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-05T00:00:00Z'));
-    const { resolveSpecHeaderFooterContext } = await import('../db/index.js');
-    vi.mocked(resolveSpecHeaderFooterContext).mockResolvedValueOnce({
-      composition: COMPOSITION,
-      fieldValues: {},
-    });
-    const { buildHeaderFooterOptions } = await import('./generate-header-footer.js');
 
-    const result = await buildHeaderFooterOptions(SPEC_ID, FAKE_POOL);
+    const result = buildHeaderFooterOptions({ composition: COMPOSITION, fieldValues: {} });
 
     expect(result?.current.date).toBe('2026-01-05');
     expect(result?.current.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);

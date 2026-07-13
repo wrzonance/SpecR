@@ -6,6 +6,7 @@ import {
   sectionNumberCandidateFragment,
   normalizeSectionNumber,
   parseSectionNumberCandidate,
+  parseSectionNumberFormat,
   formatSectionNumber,
   formatSectionReferences,
   findSectionNumbers,
@@ -251,5 +252,16 @@ describe('SectionNumberSchema', () => {
   it('rejects malformed and sentinel values', () => {
     expect(SectionNumberSchema.safeParse('27210').success).toBe(false);
     expect(SectionNumberSchema.safeParse('unknown').success).toBe(false);
+  });
+});
+
+describe('parseSectionNumberFormat', () => {
+  it('passes through a recognized stored value', () => {
+    expect(parseSectionNumberFormat('dots')).toBe('dots');
+    expect(parseSectionNumberFormat('spaced-compact')).toBe('spaced-compact');
+  });
+  it('coerces an out-of-range or garbage stored value to canonical', () => {
+    expect(parseSectionNumberFormat('garbage')).toBe('canonical');
+    expect(parseSectionNumberFormat('')).toBe('canonical');
   });
 });

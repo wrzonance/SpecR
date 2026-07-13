@@ -3,7 +3,10 @@ import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import { createLibrary } from './libraries.js';
 import { upsertHeaderFooterConfig } from './header-footer.js';
-import { resolveSpecHeaderFooterContext } from './header-footer-context.js';
+import {
+  resolveSpecHeaderFooterContext,
+  resolveSpecGenerationContext,
+} from './header-footer-context.js';
 
 const TEST_PREFIX = 'hfctx-test-';
 
@@ -19,10 +22,10 @@ async function insertSpec(section: string): Promise<string> {
   return row.id;
 }
 
-async function insertProject(name: string): Promise<string> {
+async function insertProject(name: string, sectionNumberFormat = 'canonical'): Promise<string> {
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO projects (name, description) VALUES ($1, $2) RETURNING id`,
-    [name, 'header/footer context test']
+    `INSERT INTO projects (name, description, section_number_format) VALUES ($1, $2, $3) RETURNING id`,
+    [name, 'header/footer context test', sectionNumberFormat]
   );
   const row = result.rows[0];
   if (!row) throw new Error('insertProject: no project id returned');
@@ -176,5 +179,59 @@ describe('resolveSpecHeaderFooterContext', () => {
     await expect(resolveSpecHeaderFooterContext('not-a-valid-uuid')).rejects.toBeInstanceOf(
       DatabaseError
     );
+  });
+});
+
+describe('resolveSpecGenerationContext', () => {
+  it('orphan spec (no owning project) → both fields null', async () => {
+    const specId = await insertSpec('09 92 26.01');
+    await expect(resolveSpecGenerationContext(specId)).resolves.toEqual({
+      sectionNumberFormat: null,
+      headerFooter: null,
+    });
+  });
+
+  it('ambiguously owned spec (2+ projects) → both fields null', async () => {
+    const specId = await insertSpec('09 92 26.02');
+    const p1 = await insertProject(`${TEST_PREFIX}g1`, 'dots');
+    const p2 = await insertProject(`${TEST_PREFIX}g2`, 'compact');
+    await attachSpecToProject(p1, specId);
+    await attachSpecToProject(p2, specId);
+    await expect(resolveSpecGenerationContext(specId)).resolves.toEqual({
+      sectionNumberFormat: null,
+      headerFooter: null,
+    });
+  });
+
+  it('sole project with no configured layers → format still resolves, header/footer null', async () => {
+    const specId = await insertSpec('09 92 26.03');
+    const projectId = await insertProject(`${TEST_PREFIX}g3`, 'dots');
+    await attachSpecToProject(projectId, specId);
+    await expect(resolveSpecGenerationContext(specId)).resolves.toEqual({
+      sectionNumberFormat: 'dots',
+      headerFooter: null,
+    });
+  });
+
+  // Regression (CodeRabbit, PR #479): the section-number format AND the
+  // header/footer must both come from the SAME sole-owning-project snapshot —
+  // proven here by a single project owning the spec, whose format and
+  // projectName are read back together in one resolution.
+  it('sole project with a configured layer → format and header/footer come from one snapshot', async () => {
+    const specId = await insertSpec('09 92 26.04');
+    const projectId = await insertProject(`${TEST_PREFIX}g4`, 'compact');
+    await attachSpecToProject(projectId, specId);
+    await upsertHeaderFooterConfig(
+      { projectId },
+      { footer: { right: { content: [{ kind: 'pageNumber' }] } } }
+    );
+
+    const context = await resolveSpecGenerationContext(specId);
+
+    expect(context.sectionNumberFormat).toBe('compact');
+    expect(context.headerFooter?.fieldValues.projectName).toBe(`${TEST_PREFIX}g4`);
+    expect(context.headerFooter?.composition).toEqual({
+      footer: { right: { content: [{ kind: 'pageNumber' }] } },
+    });
   });
 });

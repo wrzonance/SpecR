@@ -15,6 +15,18 @@ export const SECTION_NUMBER_FORMATS = ['canonical', 'dots', 'compact', 'spaced-c
 export type SectionNumberFormat = (typeof SECTION_NUMBER_FORMATS)[number];
 export const SectionNumberFormatSchema = z.enum(SECTION_NUMBER_FORMATS);
 
+/**
+ * Coerce a raw stored section-number-format string to a known
+ * `SectionNumberFormat`, defaulting an unrecognized or out-of-range value to
+ * `'canonical'`. Used when reading a persisted project default back out of the
+ * DB, where the column is a plain string.
+ */
+export function parseSectionNumberFormat(raw: string): SectionNumberFormat {
+  return (SECTION_NUMBER_FORMATS as readonly string[]).includes(raw)
+    ? (raw as SectionNumberFormat)
+    : 'canonical';
+}
+
 export type SectionNumberParseContext = 'canonical' | 'strong';
 export type SectionNumberParseFailureReason = 'empty' | 'not-canonical' | 'invalid-format';
 
