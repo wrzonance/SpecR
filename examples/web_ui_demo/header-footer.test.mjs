@@ -7,7 +7,8 @@
 // appended to. Real DOM painting stays untested directly here, same split as
 // header-footer-editor.test.mjs/download.test.mjs elsewhere in this demo.
 //
-// Pins three invariants from the design's spike learnings:
+// Pins four invariants from the design's spike learnings plus one caught in
+// this task's manual verification pass:
 //   1. mountInspector(container, spec) only ever appends into `container` —
 //      never clears/replaces its pre-existing children (the container-
 //      clearing bug the spike found: `#editor-inspector` already holds
@@ -19,6 +20,13 @@
 //      library's tier is exactly 'client' — mirroring the server's
 //      requireClientLibrary gate so the UI never fires a call guaranteed to
 //      400/404.
+//   4. REGRESSION (envelope leak): ctx.get/ctx.put unwrap the API's full
+//      HeaderFooterConfig record (`{ id, scope, config, createdAt,
+//      updatedAt }`) to its bare `.config` before handing it to the editor —
+//      a manual pass against a real server found a saved field vanishing
+//      from both the post-Save repaint and a later reload because the
+//      un-unwrapped record has no top-level `.variants`/`.header`/`.footer`
+//      for selectVariant() to find.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { initHeaderFooter } from './js/header-footer.js';
@@ -299,4 +307,94 @@ test('refreshLibraryPanel: switching tier away from "client" stops firing the cl
   tier = 'company';
   await hf.refreshLibraryPanel();
   assert.equal(getCalls.length, 1, 'no new client API call once the tier is no longer client');
+});
+
+// --- Invariant 4: ctx.get/ctx.put unwrap the API's full record ------------
+
+const STORED_COMPOSITION = {
+  variants: { default: { header: { center: { content: [{ kind: 'literal', text: 'X' }] } } } },
+};
+
+function fakeRecord(config) {
+  return { id: 'cfg-1', scope: { kind: 'client' }, config, createdAt: 't0', updatedAt: 't0' };
+}
+
+test('clientEditorCtx.get: unwraps the API record to its bare composition, not the envelope', async () => {
+  let capturedEditorCtx = null;
+  const deps = baseDeps({
+    createEditor: (editorCtx) => {
+      capturedEditorCtx = editorCtx;
+      return { refresh: async () => {} };
+    },
+    getClientHeaderFooter: async () => fakeRecord(STORED_COMPOSITION),
+  });
+  const ctx = baseCtx({ getSelectedLibraryTier: () => 'client', getSelectedLibraryId: () => 'lib-1' });
+  const hf = initHeaderFooter(ctx, deps);
+
+  await hf.refreshLibraryPanel();
+
+  const result = await capturedEditorCtx.get();
+  assert.deepEqual(
+    result,
+    STORED_COMPOSITION,
+    'get() must resolve the bare composition (record.config), never the {id,scope,config,...} envelope'
+  );
+});
+
+test('clientEditorCtx.get: a not-yet-configured scope (record null) still resolves null, not {config: undefined}', async () => {
+  let capturedEditorCtx = null;
+  const deps = baseDeps({
+    createEditor: (editorCtx) => {
+      capturedEditorCtx = editorCtx;
+      return { refresh: async () => {} };
+    },
+    getClientHeaderFooter: async () => null,
+  });
+  const ctx = baseCtx({ getSelectedLibraryTier: () => 'client', getSelectedLibraryId: () => 'lib-1' });
+  const hf = initHeaderFooter(ctx, deps);
+
+  await hf.refreshLibraryPanel();
+
+  assert.equal(await capturedEditorCtx.get(), null);
+});
+
+test('clientEditorCtx.put: unwraps the saved record to its bare composition, not the envelope', async () => {
+  let capturedEditorCtx = null;
+  const deps = baseDeps({
+    createEditor: (editorCtx) => {
+      capturedEditorCtx = editorCtx;
+      return { refresh: async () => {} };
+    },
+    putClientHeaderFooter: async (_id, composition) => fakeRecord(composition),
+  });
+  const ctx = baseCtx({ getSelectedLibraryTier: () => 'client', getSelectedLibraryId: () => 'lib-1' });
+  const hf = initHeaderFooter(ctx, deps);
+
+  await hf.refreshLibraryPanel();
+
+  const result = await capturedEditorCtx.put(STORED_COMPOSITION);
+  assert.deepEqual(
+    result,
+    STORED_COMPOSITION,
+    'put() must resolve the server round-tripped composition, never the {id,scope,config,...} envelope'
+  );
+});
+
+test('projectEditorCtx.get/put: unwrap the API record to its bare composition, not the envelope', async () => {
+  let capturedEditorCtx = null;
+  const deps = baseDeps({
+    createEditor: (editorCtx) => {
+      capturedEditorCtx = editorCtx;
+      return { refresh: async () => {} };
+    },
+    getProjectHeaderFooter: async () => fakeRecord(STORED_COMPOSITION),
+    putProjectHeaderFooter: async (_id, composition) => fakeRecord(composition),
+  });
+  const ctx = baseCtx({ getActiveProjectId: () => 'proj-1' });
+  const hf = initHeaderFooter(ctx, deps);
+
+  await hf.refreshProjectPanel();
+
+  assert.deepEqual(await capturedEditorCtx.get(), STORED_COMPOSITION);
+  assert.deepEqual(await capturedEditorCtx.put(STORED_COMPOSITION), STORED_COMPOSITION);
 });

@@ -36,6 +36,20 @@
 // sibling Effective Resolution panel showing the pre-save layers/winning
 // scope until the user switched views. `projectEditorCtx`'s `onSaved` now
 // re-fetches and repaints that panel immediately, every time.
+//
+// VERIFICATION FIX (envelope leak — caught in the manual pass, not by any
+// unit test, because every mock ctx.get/ctx.put in this file's and
+// header-footer-editor.js's tests already returned a bare composition):
+// getClientHeaderFooter/putClientHeaderFooter/getProjectHeaderFooter/
+// putProjectHeaderFooter all resolve the FULL stored record
+// (`{ id, scope, config, createdAt, updatedAt }`) via api.js's generic
+// envelope proxy, not the bare HeaderFooterComposition the editor's ctx.get/
+// ctx.put contract documents. Passing the record straight through made
+// selectVariant() find no `.variants`/`.header`/`.footer` on it, so both the
+// post-Save repaint and any later reload of a persisted config rendered as
+// empty even though the server round-trip itself was correct. `clientEditorCtx`
+// and `projectEditorCtx` now unwrap `.config` (see `unwrapComposition` below)
+// before handing the value to the editor.
 import { API_FEATURES } from './features.js';
 import {
   getClientHeaderFooter,
@@ -74,6 +88,19 @@ function el(deps, tag, className, text) {
   node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+// getClientHeaderFooter/putClientHeaderFooter/getProjectHeaderFooter/
+// putProjectHeaderFooter resolve the FULL stored record (src/api/
+// header-footer.ts's HeaderFooterConfig: `{ id, scope, config, createdAt,
+// updatedAt }`) — api.js is a thin, generic envelope proxy and has no reason
+// to know the editor's shape. header-footer-editor.js's ctx.get/ctx.put
+// contract, though, is scoped to the bare HeaderFooterComposition it
+// round-trips (see that module's doc comment). Unwrap the record to its
+// `.config` here, once, rather than leaking the API envelope into the editor
+// — a GET with nothing configured yet stays `null`, never `undefined`.
+function unwrapComposition(record) {
+  return record?.config ?? null;
 }
 
 // A status-specific toast for a failed DOCX generation/download — distinct
@@ -139,8 +166,14 @@ export function initHeaderFooter(ctx, deps = defaultDeps) {
   function clientEditorCtx() {
     return {
       container: ctx.libraryContainer,
-      get: () => deps.getClientHeaderFooter(ctx.getSelectedLibraryId()),
-      put: (composition) => deps.putClientHeaderFooter(ctx.getSelectedLibraryId(), composition),
+      get: async () => {
+        const record = await deps.getClientHeaderFooter(ctx.getSelectedLibraryId());
+        return unwrapComposition(record);
+      },
+      put: async (composition) => {
+        const record = await deps.putClientHeaderFooter(ctx.getSelectedLibraryId(), composition);
+        return unwrapComposition(record);
+      },
       del: () => deps.deleteClientHeaderFooter(ctx.getSelectedLibraryId()),
       toast: ctx.toast,
       previewContext: previewContext(),
@@ -151,8 +184,14 @@ export function initHeaderFooter(ctx, deps = defaultDeps) {
   function projectEditorCtx() {
     return {
       container: ctx.projectEditorContainer,
-      get: () => deps.getProjectHeaderFooter(ctx.getActiveProjectId()),
-      put: (composition) => deps.putProjectHeaderFooter(ctx.getActiveProjectId(), composition),
+      get: async () => {
+        const record = await deps.getProjectHeaderFooter(ctx.getActiveProjectId());
+        return unwrapComposition(record);
+      },
+      put: async (composition) => {
+        const record = await deps.putProjectHeaderFooter(ctx.getActiveProjectId(), composition);
+        return unwrapComposition(record);
+      },
       del: () => deps.deleteProjectHeaderFooter(ctx.getActiveProjectId()),
       toast: ctx.toast,
       previewContext: previewContext(),
