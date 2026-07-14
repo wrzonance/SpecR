@@ -30,8 +30,19 @@ const KNOWN = { section: '09 91 26', title: 'EXTERIOR PAINTING' };
 
 const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
 
+// CTX.sectionNumber is deliberately DIFFERENT from KNOWN.section. The source
+// XML's second cell literally reads '09 91 26', which matchKnownSectionField
+// recognizes at *capture* time (matched against KNOWN.section) and collapses
+// into a typed `{ kind: 'sectionNumber' }` field — never a
+// `{ kind: 'literal', text: '09 91 26' }` passthrough. renderHeaderFooterComposition
+// then re-resolves that field kind at *generation* time from CTX.sectionNumber
+// (resolveSectionNumber, generator/header-footer-fields.ts). Keeping the two
+// values distinct is what makes the round-trip assertion below actually prove
+// typed field resolution: if captureRegion had instead captured the cell as a
+// literal passthrough, the packed XML would echo the ORIGINAL '09 91 26' —
+// not CTX's '23 05 00' — and the test would fail.
 const CTX: HeaderFooterFieldContext = {
-  sectionNumber: '09 91 26',
+  sectionNumber: '23 05 00',
   sectionTitle: 'EXTERIOR PAINTING',
   current: {},
 };
@@ -93,16 +104,24 @@ describe('captureRegion → renderHeaderFooterComposition → Packer → JSZip r
     const captured = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(captured.region?.table).toBeDefined();
     expect(captured.unmodeled).toEqual([]);
+    // Prove the recognition happened at the AST layer itself: the second
+    // cell's content must be the typed field marker, not a literal string
+    // that merely happens to equal the source text.
+    expect(captured.region?.table?.rows[0]?.cells[1]?.content).toEqual([{ kind: 'sectionNumber' }]);
 
     const headerXml = await packedHeaderXml(compositionWithHeader(captured.region));
 
     expect(headerXml).toContain('<w:tbl>');
     expect(headerXml).toContain('Drawing No.');
-    // the second cell was captured as a modeled `sectionNumber` field (not
-    // literal text) — the packed XML must carry the *resolved* value from
-    // CTX, proving the field survived the parser→generator handoff typed,
-    // not just as a passthrough string.
-    expect(headerXml).toContain('09 91 26');
+    // CTX.sectionNumber ('23 05 00') deliberately differs from the source
+    // XML's literal cell text ('09 91 26' = KNOWN.section, see CTX's own
+    // comment above). The packed XML must carry CTX's resolved value and NOT
+    // the original literal, proving the second cell survived the parser→
+    // generator handoff as a typed `sectionNumber` field that gets
+    // re-resolved at generation time — not a passthrough of the captured
+    // string (a passthrough would emit the original '09 91 26' instead).
+    expect(headerXml).toContain('23 05 00');
+    expect(headerXml).not.toContain('09 91 26');
   });
 
   it('carries captured w:tblGrid column widths through into a real packed <w:tblGrid>', async () => {
