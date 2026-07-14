@@ -131,3 +131,61 @@ export interface ClassifiedParagraph {
   // Absent/false === retained normally.
   readonly suppressed?: boolean;
 }
+
+// ─── header/footer capture (#306, ADR-068) ─────────────────────────────────
+
+// A single header/footer reference discovered in the document's trailing
+// body-level w:sectPr. Word emits up to 3 references per region
+// (default/first/even) via w:headerReference / w:footerReference, each
+// carrying an r:id resolved through word/_rels/document.xml.rels.
+export interface HeaderFooterReference {
+  readonly variant: 'default' | 'first' | 'even';
+  readonly region: 'header' | 'footer';
+  readonly rId: string;
+}
+
+// r:id -> target path (e.g. "header1.xml"), parsed from
+// word/_rels/document.xml.rels.
+export type RelationshipMap = ReadonlyMap<string, string>;
+
+export interface SectionHeaderFooterInfo {
+  readonly references: readonly HeaderFooterReference[];
+  readonly titlePg: boolean;
+  readonly pgNumStart?: number;
+  // true when the body contains any w:pPr/w:sectPr beyond the single
+  // trailing body-level w:sectPr this parser reads — a second section with
+  // its own header/footer references that this slice does not model
+  // (ADR-068: single-sectPr scope).
+  readonly hasAdditionalSectionBreaks: boolean;
+}
+
+export interface DocumentSettingsInfo {
+  readonly evenAndOddHeaders: boolean;
+}
+
+// A reference that resolved to a real relationship target, paired with that
+// target path. resolveReferenceTargets returns a list of these rather than a
+// Map keyed by target path so two references resolving to the same physical
+// part never collide.
+export interface ResolvedHeaderFooterReference {
+  readonly reference: HeaderFooterReference;
+  readonly target: string;
+}
+
+// Parser-local mirror of ast/header-footer-schemas.ts's
+// HeaderFooterUnmodeledEntrySchema. `detail` is `unknown` here — it has not
+// yet been passed through xml-utils.ts's compact() helper, which happens
+// once, at construction, in header-footer.ts — guaranteeing the final
+// ast-level HeaderFooterUnmodeledEntry is always JSON-safe.
+export interface HeaderFooterUnmodeledEntry {
+  readonly variant: 'default' | 'first' | 'even';
+  readonly region: 'header' | 'footer';
+  readonly kind:
+    | 'image'
+    | 'table'
+    | 'unrecognizedField'
+    | 'unresolvedReference'
+    | 'extraParagraph'
+    | 'inactiveVariant';
+  readonly detail: unknown;
+}

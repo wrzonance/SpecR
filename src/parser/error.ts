@@ -11,7 +11,8 @@ export type ParserErrorCode =
   | 'SEC_XML_INVALID'
   | 'PDF_TEXT_LAYER_UNEXTRACTABLE'
   | 'UNSUPPORTED_FORMAT'
-  | 'DOCX_TABLE_XML_INVALID';
+  | 'DOCX_TABLE_XML_INVALID'
+  | 'DOCX_HEADER_FOOTER_XML_INVALID';
 
 export interface ParserErrorOptions extends SpecrErrorOptions {
   readonly code?: ParserErrorCode;
