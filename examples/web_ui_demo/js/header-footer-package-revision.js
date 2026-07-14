@@ -236,6 +236,13 @@ export function initPackageRevisionHeaderFooter(ctx, deps = defaultDeps) {
   async function refreshPackagePanel() {
     const visible = API_FEATURES.headerFooter && Boolean(ctx.getSelectedPackageId());
     if (!visible) {
+      // Tear down the resolution guard BEFORE clearing so an in-flight
+      // refreshPackageResolutionPanel() fetch settling after this deselect is
+      // dropped by its isCurrent(token) check — otherwise it would repaint
+      // stale package data into the just-cleared container. bump() (not next())
+      // is the guard's documented teardown call: invalidate in-flight without
+      // issuing a new token, since nothing is selected anymore.
+      packageResolutionGuard.bump();
       ctx.packageEditorContainer.replaceChildren();
       ctx.packageResolutionContainer.replaceChildren();
       // Invalidate BEFORE dropping the reference — see header-footer.js's
@@ -254,6 +261,9 @@ export function initPackageRevisionHeaderFooter(ctx, deps = defaultDeps) {
     const revisionId = ctx.getSelectedRevisionId();
     const visible = API_FEATURES.headerFooter && Boolean(revisionId);
     if (!visible) {
+      // See refreshPackagePanel: tear down the guard first (bump()) so a late
+      // resolution response can't repaint the just-cleared revision container.
+      revisionResolutionGuard.bump();
       ctx.revisionEditorContainer.replaceChildren();
       ctx.revisionResolutionContainer.replaceChildren();
       ctx.revisionDownloadContainer.replaceChildren();

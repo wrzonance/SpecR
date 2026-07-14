@@ -203,6 +203,72 @@ test('REGRESSION: a slow package resolution response resolving AFTER a second sa
   );
 });
 
+test('REGRESSION: a package resolution response settling AFTER the scope is deselected must not repaint the cleared panel', async () => {
+  let resolvePending;
+  const deps = baseDeps({
+    getPackageHeaderFooterResolved: async () =>
+      new Promise((resolve) => {
+        resolvePending = () =>
+          resolve({ layers: [{ scope: { kind: 'package', packageId: 'pkg-1' }, config: {} }] });
+      }),
+  });
+  const packageResolutionContainer = fakeContainer();
+  let selectedPackageId = 'pkg-1';
+  const ctx = baseCtx({
+    getSelectedPackageId: () => selectedPackageId,
+    packageResolutionContainer,
+  });
+  const hf = initPackageRevisionHeaderFooter(ctx, deps);
+
+  const pending = hf.refreshPackagePanel(); // issues token, resolution fetch parked
+  selectedPackageId = null; // user clears the package UUID input
+  await hf.refreshPackagePanel(); // invisible branch: bump()s the guard, clears panel
+
+  assert.equal(packageResolutionContainer.children.length, 0);
+
+  resolvePending(); // stale response settles — must be dropped by isCurrent()
+  await pending;
+
+  assert.equal(
+    packageResolutionContainer.children.length,
+    0,
+    'a resolution response arriving after deselect must not repaint the cleared panel'
+  );
+});
+
+test('REGRESSION: a revision resolution response settling AFTER the scope is deselected must not repaint the cleared panel', async () => {
+  let resolvePending;
+  const deps = baseDeps({
+    getRevisionHeaderFooterResolved: async () =>
+      new Promise((resolve) => {
+        resolvePending = () =>
+          resolve({ layers: [{ scope: { kind: 'revision', revisionId: 'rev-1' }, config: {} }] });
+      }),
+  });
+  const revisionResolutionContainer = fakeContainer();
+  let selectedRevisionId = 'rev-1';
+  const ctx = baseCtx({
+    getSelectedRevisionId: () => selectedRevisionId,
+    revisionResolutionContainer,
+  });
+  const hf = initPackageRevisionHeaderFooter(ctx, deps);
+
+  const pending = hf.refreshRevisionPanel(); // issues token, resolution fetch parked
+  selectedRevisionId = null; // user clears the revision UUID input
+  await hf.refreshRevisionPanel(); // invisible branch: bump()s the guard, clears panel
+
+  assert.equal(revisionResolutionContainer.children.length, 0);
+
+  resolvePending(); // stale response settles — must be dropped by isCurrent()
+  await pending;
+
+  assert.equal(
+    revisionResolutionContainer.children.length,
+    0,
+    'a resolution response arriving after deselect must not repaint the cleared panel'
+  );
+});
+
 test('refreshPackagePanel/refreshRevisionPanel: no id selected — clears both panels for that scope and never calls its resolved API', async () => {
   const resolvedCalls = [];
   const deps = baseDeps({
