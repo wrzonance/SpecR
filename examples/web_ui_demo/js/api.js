@@ -390,11 +390,13 @@ export function clearSpecNumberingProfile(specId) {
   return sendJson('DELETE', `/specs/${enc(specId)}/numbering-profile`);
 }
 
-// ── Header/footer configs (#477, ADR-040) ─────────────────────────────────
-// v1 UI scope-cut: client library and project only. Package/revision rows are
-// struct-complete server-side but have no editor surface yet (see #477's
-// follow-up issue). GETs resolve `null` for "no config at this scope yet" —
-// not an error; PUT is always upsert (full composition, not a partial patch).
+// ── Header/footer configs (#477, ADR-040, #481) ────────────────────────────
+// Client library and project scopes (#477) plus package and revision scopes
+// (#481) are all covered below. GETs resolve `null` for "no config at this
+// scope yet" — not an error; PUT is always upsert (full composition, not a
+// partial patch). Each scope's `/resolved` GET returns the merged config
+// following ADR-040's precedence chain (client -> project -> package ->
+// revision) up to and including that scope.
 
 export function getClientHeaderFooter(libraryId) {
   return getJsonOrNull(`/libraries/${enc(libraryId)}/header-footer`);
@@ -427,14 +429,53 @@ export function getProjectHeaderFooterResolved(projectId) {
   return getJson(`/projects/${enc(projectId)}/header-footer/resolved`);
 }
 
-// Generates a DOCX from stored spec state (#304: header/footer content, if
-// any is configured anywhere in the owning project's scope chain, is resolved
-// and rendered automatically server-side — this call has no request body of
-// its own). Resolves with the response Blob on 2xx. Throws an Error carrying
-// `.status` on any other status; the error body is the usual ApiResponse
-// envelope, so a best-effort message is extracted where the body is JSON.
-export async function fetchSpecDocx(specId) {
-  const res = await fetch(`/specs/${enc(specId)}/generate`, { method: 'POST' });
+export function getPackageHeaderFooter(packageId) {
+  return getJsonOrNull(`/packages/${enc(packageId)}/header-footer`);
+}
+
+export function putPackageHeaderFooter(packageId, composition) {
+  return sendJson('PUT', `/packages/${enc(packageId)}/header-footer`, composition);
+}
+
+export function deletePackageHeaderFooter(packageId) {
+  return sendJson('DELETE', `/packages/${enc(packageId)}/header-footer`);
+}
+
+// The effective (merged) config for a package: client -> project -> package
+// precedence (ADR-040). Same `data.layers` shape as getProjectHeaderFooterResolved.
+export function getPackageHeaderFooterResolved(packageId) {
+  return getJson(`/packages/${enc(packageId)}/header-footer/resolved`);
+}
+
+export function getRevisionHeaderFooter(revisionId) {
+  return getJsonOrNull(`/revisions/${enc(revisionId)}/header-footer`);
+}
+
+export function putRevisionHeaderFooter(revisionId, composition) {
+  return sendJson('PUT', `/revisions/${enc(revisionId)}/header-footer`, composition);
+}
+
+export function deleteRevisionHeaderFooter(revisionId) {
+  return sendJson('DELETE', `/revisions/${enc(revisionId)}/header-footer`);
+}
+
+// The effective (merged) config for a revision: client -> project -> package
+// -> revision precedence (ADR-040). Same `data.layers` shape as
+// getProjectHeaderFooterResolved.
+export function getRevisionHeaderFooterResolved(revisionId) {
+  return getJson(`/revisions/${enc(revisionId)}/header-footer/resolved`);
+}
+
+// Shared blob-fetch-with-status-error implementation backing fetchSpecDocx,
+// fetchManualDocx, and fetchRevisionDocx (#481) — the three DOCX-generation
+// endpoints differ only in path and request body, never in how a failure is
+// reported. POSTs to `path` (an `init.method` override is supported but none
+// of the three callers below need one) and resolves with the response Blob on
+// 2xx. Throws an Error carrying `.status` on any other status; the error body
+// is the usual ApiResponse envelope, so a best-effort message is extracted
+// where the body is JSON.
+async function fetchDocx(path, init = {}) {
+  const res = await fetch(path, { method: 'POST', ...init });
   if (!res.ok) {
     let message = `generate failed: ${res.status}`;
     try {
@@ -448,6 +489,38 @@ export async function fetchSpecDocx(specId) {
     throw err;
   }
   return res.blob();
+}
+
+// Generates a DOCX from stored spec state (#304: header/footer content, if
+// any is configured anywhere in the owning project's scope chain, is resolved
+// and rendered automatically server-side — this call has no request body of
+// its own).
+export function fetchSpecDocx(specId) {
+  return fetchDocx(`/specs/${enc(specId)}/generate`);
+}
+
+// Generates a whole-manual DOCX for a project's current table of contents
+// (#481): header/footer content, if configured anywhere in the client ->
+// project scope chain, is resolved and rendered automatically server-side.
+// No request body.
+export function fetchManualDocx(projectId) {
+  return fetchDocx(`/projects/${enc(projectId)}/generate`);
+}
+
+// Generates a DOCX for one design-package revision (#481): the issued
+// revision by default, or an addendum against `body.baseRevisionId` when
+// given (mirrors generateRevisionHandler's renderIssuedRevision vs.
+// renderAddendumRevision server-side branch). Header/footer content, if
+// configured anywhere in the client -> project -> package -> revision scope
+// chain, is resolved and rendered automatically server-side. `body` is only
+// sent when it has keys, so a bare issued-revision request stays
+// no-request-body like fetchSpecDocx/fetchManualDocx.
+export function fetchRevisionDocx(revisionId, body = {}) {
+  const init =
+    Object.keys(body).length > 0
+      ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      : {};
+  return fetchDocx(`/revisions/${enc(revisionId)}/generate`, init);
 }
 
 // Polls a parse job until it completes or fails. Calls onProgress with the
