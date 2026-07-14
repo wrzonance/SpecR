@@ -332,7 +332,12 @@ describe('HeaderFooterCompositionSchema — total-size invariant matches the tra
     // top-level object, so a size invariant enforced once at the top still
     // has to catch overage contributed by ANY of them combined — not just a
     // single offending key.
-    const chunk = 'A'.repeat(100_000);
+    // Sized just past HEADER_FOOTER_JSON_BODY_LIMIT_BYTES (~7.25 MB): six 1 MB
+    // nested vendor tokens (6 MB) plus two 1 MB warning entries (2 MB) ≈ 8 MB,
+    // so the overage is genuinely distributed across nested catchalls rather
+    // than carried by one field — without allocating the ~60 MB an oversized
+    // warnings array would cost.
+    const chunk = 'A'.repeat(1_000_000);
     const input = {
       header: {
         left: { style: { vendorTokenA: chunk } },
@@ -344,7 +349,7 @@ describe('HeaderFooterCompositionSchema — total-size invariant matches the tra
         first: { style: { vendorTokenE: chunk } },
         even: { style: { vendorTokenF: chunk } },
       },
-      raw: { warnings: Array(600).fill(chunk) },
+      raw: { warnings: [chunk, chunk] },
     };
     expect(() => HeaderFooterCompositionSchema.parse(input)).toThrow();
   });

@@ -10,7 +10,7 @@
 //     parse-time invariant on `HeaderFooterCompositionSchema` (every level of
 //     which is `.catchall(JsonValue)`, so a structurally-valid composition
 //     can still carry unbounded extension data — see that schema's
-//     `superRefine` for the fix this constant makes possible).
+//     size-invariant `.check` for the fix this constant makes possible).
 // `ast/` may only import `lib/` and its own siblings (never `api/`, which
 // orchestrates every other module), so the constant has to live somewhere
 // both can reach — `lib/` is exactly that shared leaf.

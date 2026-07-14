@@ -62,7 +62,12 @@ export function createHeaderFooterBodyLimitMiddleware(): RequestHandler {
   const restJson = express.json();
   const headerFooterCompositionJson = express.json({ limit: HEADER_FOOTER_JSON_BODY_LIMIT_BYTES });
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (req.path.startsWith('/mcp')) {
+    // Case-insensitive to match how Express actually dispatches this request:
+    // case-sensitive routing is disabled (see HEADER_FOOTER_COMPOSITION_PATH's
+    // `i` flag above), so `/MCP` also routes to the MCP handler and must skip
+    // the default limit here too, deferring to the route-local limit in
+    // `src/mcp/server.ts` — a lowercase-only check would leak `/MCP` past it.
+    if (req.path.toLowerCase().startsWith('/mcp')) {
       next();
       return;
     }

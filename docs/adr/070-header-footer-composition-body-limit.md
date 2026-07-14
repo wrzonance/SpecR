@@ -128,7 +128,7 @@ single-image write. Unlike the multi-image gap below (an explicit,
 accepted-out-of-scope limitation), this one was an unintended gap between
 what the schema called valid and what the transport limit actually allowed.
 
-Fixed by adding one `.superRefine` to `HeaderFooterCompositionSchema`
+Fixed by adding one size-invariant `.check` to `HeaderFooterCompositionSchema`
 (`src/ast/header-footer-schemas.ts`) that rejects any parse whose serialized
 byte length exceeds `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES` — enforced once at
 the top level so it covers overage contributed by any nested catchall,
@@ -157,8 +157,11 @@ documented gap.
   a composition with several near-max images can still 413 despite each
   image field individually passing its Zod bound, because the derived
   limit is sized for one image plus envelope. Out of scope for this ADR.
-- No DB migration, no AST/schema shape change, no change to
-  `HeaderFooterCompositionSchema` or `router.ts` route registrations —
-  this is purely a transport-dispatch (`src/index.ts`) and
-  contract-documentation (`openapi.yaml`) change, plus the incidental
-  shared-error-handler correctness fix.
+- No DB migration, no AST/schema *shape* change (the composition's fields and
+  types are untouched), and no change to `router.ts` route registrations.
+  Beyond the transport-dispatch (`src/index.ts`) and contract-documentation
+  (`openapi.yaml`) changes, `HeaderFooterCompositionSchema` gains one
+  parse-time size *invariant* — the `.check` above rejects a structurally-valid
+  composition whose serialized bytes exceed `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES`,
+  keeping "Zod-valid" and "fits the transport limit" from diverging — plus the
+  incidental shared-error-handler correctness fix.

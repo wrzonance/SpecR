@@ -187,11 +187,12 @@ export const HeaderFooterCompositionSchema = z
   // per-field cap into every nested catchall) keeps "Zod-valid" and "fits
   // the transport limit" from ever diverging — the multi-image accepted
   // limitation ADR-070 documents remains the only gap.
-  .superRefine((composition, ctx) => {
-    const byteLength = serializedByteLength(composition);
+  .check((ctx) => {
+    const byteLength = serializedByteLength(ctx.value);
     if (byteLength <= HEADER_FOOTER_JSON_BODY_LIMIT_BYTES) return;
-    ctx.addIssue({
+    ctx.issues.push({
       code: 'custom',
+      input: ctx.value,
       message:
         `composition serializes to ~${byteLength} bytes, exceeding the ` +
         `${HEADER_FOOTER_JSON_BODY_LIMIT_BYTES}-byte transport limit ` +
