@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   HeaderFooterCompositionSchema,
+  HeaderFooterUnmodeledEntrySchema,
   PageNumberingModeSchema,
   defaultVariant,
 } from './header-footer-schemas.js';
@@ -164,5 +165,80 @@ describe('HeaderFooterCompositionSchema — reserved-key promotion (ADR-040 cave
     ).toThrow();
     expect(() => HeaderFooterCompositionSchema.parse({ raw: '<w:hdr/>' })).toThrow();
     expect(() => HeaderFooterCompositionSchema.parse({ variants: 'legacy-string' })).toThrow();
+  });
+});
+
+// #306 (ADR-068): every unsupported/unrecognized header/footer content item
+// must be captured into `raw.unmodeled` (JSON-safe) and reflected as one line
+// in `raw.warnings` — never silently dropped. This pins the schema boundary
+// that guarantee is built on: `raw.unmodeled` is additive and backward
+// compatible with every pre-#306 `HeaderFooterComposition` value.
+describe('HeaderFooterCompositionSchema — raw.unmodeled sidecar (#306, ADR-068)', () => {
+  it('captures an unmodeled entry for each of the six kinds, JSON-safe, alongside its warning', () => {
+    const kinds = [
+      'image',
+      'table',
+      'unrecognizedField',
+      'unresolvedReference',
+      'extraParagraph',
+      'inactiveVariant',
+    ] as const;
+    const input = {
+      raw: {
+        warnings: kinds.map((kind) => `unsupported ${kind} in header/footer`),
+        unmodeled: kinds.map((kind) => ({
+          variant: 'default' as const,
+          region: 'header' as const,
+          kind,
+          detail: { note: `${kind} fragment`, nested: { safe: true } },
+        })),
+      },
+    };
+    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
+  });
+
+  it('rejects an unmodeled entry with an unrecognized kind', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        raw: {
+          unmodeled: [{ variant: 'default', region: 'header', kind: 'notAKind', detail: {} }],
+        },
+      })
+    ).toThrow();
+  });
+
+  it('rejects an unmodeled entry missing a required field', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        raw: { unmodeled: [{ region: 'header', kind: 'image', detail: {} }] },
+      })
+    ).toThrow();
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        raw: { unmodeled: [{ variant: 'default', region: 'header', kind: 'image' }] },
+      })
+    ).toThrow();
+  });
+
+  it('exposes HeaderFooterUnmodeledEntrySchema standalone for parser-side construction', () => {
+    const entry = {
+      variant: 'first' as const,
+      region: 'footer' as const,
+      kind: 'inactiveVariant' as const,
+      detail: { reason: 'w:evenAndOddHeaders absent' },
+    };
+    expect(HeaderFooterUnmodeledEntrySchema.parse(entry)).toEqual(entry);
+  });
+
+  it('still validates a pre-#306 raw sidecar carrying only `warnings`, with no `unmodeled` key', () => {
+    const preExisting = {
+      raw: {
+        warnings: ['unsupported w:fldSimple in odd footer'],
+        capturedOoxml: { 'header2.xml': '<w:hdr/>' },
+      },
+    };
+    const parsed = HeaderFooterCompositionSchema.parse(preExisting);
+    expect(parsed).toEqual(preExisting);
+    expect(parsed.raw?.unmodeled).toBeUndefined();
   });
 });

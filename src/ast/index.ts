@@ -140,6 +140,7 @@ export {
   HeaderFooterCompositionSchema,
   HeaderFooterFieldKindSchema,
   HeaderFooterVariantSchema,
+  HeaderFooterUnmodeledEntrySchema,
   PageNumberingModeSchema,
   defaultVariant,
 } from './header-footer-schemas.js';
@@ -147,6 +148,7 @@ export type {
   HeaderFooterComposition,
   HeaderFooterFieldKind,
   HeaderFooterVariant,
+  HeaderFooterUnmodeledEntry,
   PageNumberingMode,
 } from './header-footer-schemas.js';
 export { RequiredSectionsBodySchema } from './required-sections-schemas.js';
