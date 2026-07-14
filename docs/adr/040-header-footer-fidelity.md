@@ -128,3 +128,59 @@ populated on the `POST /specs/{id}/generate` path either: a bare spec id has
 no unambiguous package/revision without a verified schema path, so
 `HeaderFooterFieldSource` declares those fields for shape parity but they
 resolve `undefined` here.
+
+### Update (#481)
+
+The follow-up deferred above shipped: both `generateManualHandler` and
+`generateRevisionHandler` now resolve **and render** header/footer content,
+closing the gap this ADR's #304 update explicitly left open.
+
+- **Resolution.** `resolveProjectManualHeaderFooterContext`
+  (`src/db/queries/header-footer-context.ts`) reuses the existing
+  `buildHeaderFooterFromProject` builder behind a widened `ProjectIdentity {
+  id, name }` parameter, so the whole-manual path shares its resolution logic
+  with the single-spec path (#304) rather than duplicating it.
+  `resolveRevisionHeaderFooterContext` resolves the client → project →
+  package → revision chain for `{ revisionId }` alone; field values (project
+  name, package name, revision name/label) are threaded in from the caller's
+  already-fetched `RevisionManualData` rather than re-queried, so there is no
+  TOCTOU window between "what was rendered" and "what the DB now says." In
+  addendum mode (`baseRevisionId` supplied), resolution is always keyed on the
+  **target** revision being rendered, never the comparison base. Both
+  resolvers preserve the existing contract: zero configured layers anywhere
+  in the chain resolves `null`/`undefined`, and the DOCX falls back to the
+  pre-#481, headerless output unchanged.
+- **Rendering.** `generateManual` (`src/generator/index.ts`) previously
+  accepted `options.headerFooter` but discarded it — no manual-scoped
+  composition ever reached a section's OOXML. It now renders the composition
+  into **every TOC section's own OOXML section** via the same
+  `renderOptionalHeaderFooter`/`sectionHeaderFooterOptions` helpers the
+  single-spec path already used, sourcing each section's `sectionNumber`/
+  `sectionTitle` only from its own `SpecTree` so per-section renders cannot
+  drift or collide with a sibling's. Two behaviors worth naming explicitly,
+  since both are correct but easy to assume otherwise:
+  - The front-matter/cover OOXML section (project name + description, Word
+    TOC field) stays deliberately headerless — confirmed by inspecting
+    generated OOXML for zero `headerReference`/`footerReference` on any
+    composition. `evenAndOddHeaderAndFooters` is document-scoped in
+    dolanmiu/docx, so it is computed once from the first TOC section's
+    render; this is not a shortcut but provably always correct, because every
+    `renderOptionalHeaderFooter` call in the section loop shares the exact
+    same `options.headerFooter.composition` object reference (only
+    `sectionNumber`/`sectionTitle` vary per section).
+  - A `variants.first` (`titlePage`/`w:titlePg`) composition applies
+    **per OOXML section**, not just to the whole manual's first page — because
+    every `SpecTree` opens its own section, each spec's own opening page gets
+    first-page header/footer treatment. This is the intended behavior (each
+    section behaves like its own mini-document for cover/first-page
+    purposes), not a bug.
+- **Revision-scope fallback wording.** `POST /revisions/{id}/generate`'s
+  addendum cover / front-matter revision identity is unchanged by this
+  update; only the *running* header/footer content is newly wired.
+
+No new struct or Zod schema was needed: `GenerateDocxOptions` and
+`ManualMeta` were already shaped to carry `headerFooter` end to end.
+`openapi.yaml`'s prose for both operations is corrected in the same PR (this
+file's `Update (#481)`); `src/mcp/contract-map.ts` needs no change — both
+routes remain `MCP_UNEXPOSED` with an unchanged request/response shape, so
+neither route's MCP-parity entry moves.

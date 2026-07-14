@@ -1988,9 +1988,16 @@ paths:
         anchor for round-trip. The manual opens with a cover page (project name +
         description, style-template applied) and a Word TOC field over the section
         headings — Word computes the TOC entries and pagination on open; SpecR emits
-        the field, not page numbers. This route renders the live draft from
-        `project_specs`; issued and addendum manuals render from frozen package
-        revisions via `POST /revisions/{id}/generate`.
+        the field, not page numbers; the cover page itself stays headerless (no
+        header/footer reference in its `sectPr`). This route renders the live draft
+        from `project_specs`; issued and addendum manuals render from frozen package
+        revisions via `POST /revisions/{id}/generate`. Header/footer content is
+        resolved and rendered per #481: the project's client → project → package →
+        revision `header_footer_configs` chain is resolved once and the result is
+        rendered into every TOC section's own OOXML section (never just the
+        manual's first page), so a `first`/title-page variant applies to each
+        section's own opening page. A project with zero configured layers falls
+        back to the pre-#481 output unchanged.
       tags: [projects]
       parameters:
         - $ref: '#/components/parameters/ProjectId'
@@ -3545,9 +3552,14 @@ paths:
         edits. When `baseRevisionId` is supplied, addendum mode compares the
         target and base revision snapshots by section-level AST equality and
         emits only sections whose frozen trees differ, under an addendum cover
-        listing the affected sections. Running DOCX headers/footers are reserved
-        for the header/footer foundation work; this endpoint renders revision
-        identity on the cover/front matter only.
+        listing the affected sections. Header/footer content is resolved and
+        rendered per #481: the client → project → package → revision
+        `header_footer_configs` chain is resolved for the target revision being
+        rendered (never `baseRevisionId`, even in addendum mode) and rendered
+        into every emitted section's own OOXML section. A revision with zero
+        configured layers anywhere in its chain falls back to the pre-#481
+        output — no header or footer, cover/front-matter revision identity
+        unchanged.
       tags: [packages]
       parameters:
         - name: id
