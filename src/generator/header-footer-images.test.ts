@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Document, Packer, Paragraph } from 'docx';
 import JSZip from 'jszip';
+import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
 import type { HeaderFooterField } from './header-footer-fields.js';
 import {
   imageFieldHasContent,
@@ -129,6 +130,29 @@ describe('renderImageRun — pure and total, never throws', () => {
   it('returns a real ImageRun for a fully valid image field', () => {
     expect(renderImageRun(VALID_IMAGE_FIELD)).toBeDefined();
   });
+
+  // Regression (#308): a realistically-sized, fully valid, schema-accepted
+  // image (well under MAX_IMAGE_BYTES) threw RangeError('Maximum call stack
+  // size exceeded') — decodeBase64Payload's base64 validity check used a
+  // regex whose grouped quantifier recurses once per 4-char group, blowing
+  // the JS stack on a multi-megabyte payload. A real firm/client logo is
+  // routinely in this size range.
+  it('does not throw for a realistically-sized valid image (regression: stack overflow)', () => {
+    // Real PNG signature followed by several MB of filler bytes — large
+    // enough to have crashed the old base64 validator, still well under
+    // MAX_IMAGE_BYTES (5 MB decoded).
+    const largePng = Buffer.concat([PNG_BYTES, Buffer.alloc(4 * 1024 * 1024, 0x00)]);
+    const field: HeaderFooterField = {
+      kind: 'image',
+      imageData: largePng.toString('base64'),
+      widthEmu: 914400,
+      heightEmu: 457200,
+    };
+    expect(() => renderImageRun(field)).not.toThrow();
+    expect(renderImageRun(field)).toBeDefined();
+    expect(() => imageFieldWarnings(field, 'header.left')).not.toThrow();
+    expect(imageFieldWarnings(field, 'header.left')).toEqual([]);
+  });
 });
 
 describe('renderImageRun — chosen type is always the sniffed type, never the declared imageMediaType', () => {
@@ -176,37 +200,36 @@ describe('renderImageRun — chosen type is always the sniffed type, never the d
 });
 
 describe('renderImageRun — EMU to pixel transformation is pure, deterministic, total, never negative/NaN', () => {
-  const emuCases: readonly [number, number][] = [
-    [9525, 9525], // exactly 1px x 1px
-    [1, 1], // rounds down toward 0, still a finite non-negative number
-    [914400, 457200], // 1in x 0.5in
-    [100000, 200000],
-    [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+  // [widthEmu, heightEmu, expectedCx, expectedCy] — expectedCx/expectedCy are
+  // the <wp:extent> values docx writes to word/document.xml after emuToPixels'
+  // round(emu / 9525) conversion and docx's own px*9525 re-encoding. Computed
+  // independently of the formula under test (not re-derived with the same
+  // `/ 9525` division here) so a broken/NaN/negative conversion is actually
+  // caught by a value mismatch — a prior version of this test only asserted
+  // "does not throw" / "is defined", which passes even for a silently wrong
+  // (but still non-throwing, still-defined) pixel value.
+  const emuCases: readonly [number, number, number, number][] = [
+    [9525, 9525, 9525, 9525], // exactly 1px x 1px, round-trips exactly
+    [1, 1, 0, 0], // rounds down to 0px — never negative, never NaN
+    [914400, 457200, 914400, 457200], // 1in x 0.5in: 96px x 48px, round-trips exactly
+    [100000, 200000, 95250, 200025], // rounds to 10px x 21px, does not round-trip exactly
+    // Number.MAX_SAFE_INTEGER / 9525 = 945637717033.4986... rounds to
+    // 945637717033px; re-encoded (px * 9525) is one ULP-scale value below the
+    // original EMU — still finite, still positive, never NaN.
+    [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, 9007199254739325, 9007199254739325],
   ];
 
   it.each(emuCases)(
-    'widthEmu=%d heightEmu=%d never yields NaN/negative output',
-    (widthEmu, heightEmu) => {
-      // renderImageRun is total for any positive widthEmu/heightEmu — the
-      // transformation math itself is what's under test here, exercised
-      // indirectly since the field carries the only place it happens.
-      expect(() => renderImageRun({ ...VALID_IMAGE_FIELD, widthEmu, heightEmu })).not.toThrow();
-      expect(renderImageRun({ ...VALID_IMAGE_FIELD, widthEmu, heightEmu })).toBeDefined();
+    'widthEmu=%d heightEmu=%d converts to the documented cx/cy, never NaN/negative',
+    async (widthEmu, heightEmu, expectedCx, expectedCy) => {
+      const run = renderImageRun({ ...VALID_IMAGE_FIELD, widthEmu, heightEmu });
+      expect(run).toBeDefined();
+      const zip = await renderToZip(run!);
+      const xml = await zip.file('word/document.xml')!.async('string');
+      expect(xml).toMatch(new RegExp(`cx="${expectedCx}"`));
+      expect(xml).toMatch(new RegExp(`cy="${expectedCy}"`));
     }
   );
-
-  it('produces the exact documented conversion (EMU / 9525, rounded) for a known value', async () => {
-    const run = renderImageRun({ ...VALID_IMAGE_FIELD, widthEmu: 914400, heightEmu: 457200 });
-    expect(run).toBeDefined();
-    // 914400 / 9525 = 96px exactly; 457200 / 9525 = 48px exactly. docx re-encodes
-    // those pixel counts back to EMU (px * 9525) when it builds <wp:extent>, so a
-    // round trip through an exact-multiple-of-9525 EMU value comes back unchanged.
-    const zip = await renderToZip(run!);
-    const file = zip.file('word/document.xml');
-    const xml = await file!.async('string');
-    expect(xml).toMatch(/cx="914400"/);
-    expect(xml).toMatch(/cy="457200"/);
-  });
 });
 
 describe('imageFieldWarnings', () => {
@@ -309,5 +332,34 @@ describe('imageFieldWarnings', () => {
     );
     // missing dimensions + declared/sniffed mismatch + unsupported key = 3 independent issues
     expect(warnings.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// Regression (#308): MAX_IMAGE_BASE64_LENGTH is a length-only pre-filter, so it
+// cannot distinguish a correctly-padded MAX_IMAGE_BYTES-byte encoding from an
+// unpadded (MAX_IMAGE_BYTES + 1)-byte one at the same string length — the AST
+// schema's `.refine()` accepts both (see header-footer-schemas.test.ts's "exactly
+// at the cap" test). This end-to-end case pins that the *generator* still never
+// silently renders the over-cap one: decodeBase64Payload's exact, padding-aware
+// check drops it with a warning, same as any other unreadable image.
+describe('renderImageRun/imageFieldWarnings — MAX_IMAGE_BASE64_LENGTH boundary is closed at decode time', () => {
+  // All-'A' is valid base64 alphabet with no '=' padding, so at exactly
+  // MAX_IMAGE_BASE64_LENGTH chars it decodes to MAX_IMAGE_BYTES + 1 bytes —
+  // schema-length-acceptable, but one byte over the real cap.
+  const oversizedAtSchemaBoundary: HeaderFooterField = {
+    kind: 'image',
+    imageData: 'A'.repeat(MAX_IMAGE_BASE64_LENGTH),
+    widthEmu: 914400,
+    heightEmu: 457200,
+  };
+
+  it('renderImageRun does not throw and does not render the over-cap image', () => {
+    expect(() => renderImageRun(oversizedAtSchemaBoundary)).not.toThrow();
+    expect(renderImageRun(oversizedAtSchemaBoundary)).toBeUndefined();
+  });
+
+  it('imageFieldWarnings reports the decode-time size rejection, never silently drops it', () => {
+    const warnings = imageFieldWarnings(oversizedAtSchemaBoundary, 'header.left');
+    expect(warnings.some((w) => w.includes('could not be decoded'))).toBe(true);
   });
 });

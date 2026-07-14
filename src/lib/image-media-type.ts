@@ -21,7 +21,23 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
  * schema's `.refine()` so an oversized `imageData` payload is rejected by Zod before
  * any buffer is materialized — the same encoded-length-first posture
  * `decodeBase64Payload` (`./decode-base64.js`) already uses for MCP file payloads.
- * Base64 inflates 3 raw bytes into 4 encoded chars, rounded up to a full 4-char group.
+ * Base64 inflates 3 raw bytes into 4 encoded chars, rounded up to a full 4-char group
+ * (`ceil`, not `floor`) so a *real*, correctly-padded encoding of exactly
+ * `MAX_IMAGE_BYTES` bytes is always accepted here — see the "exactly at the cap"
+ * schema test.
+ *
+ * Deliberately an approximate, length-only pre-filter, not an exact byte-count
+ * bound: the same string length is shared by a correctly-padded `MAX_IMAGE_BYTES`-byte
+ * encoding AND an unpadded (`MAX_IMAGE_BYTES` + 1)-byte one (padding is invisible to a
+ * length check), so a pathological unpadded `imageData` at exactly this length passes
+ * this schema-layer check but is then correctly rejected by the *exact*,
+ * padding-aware `decodeBase64Payload(imageData, MAX_IMAGE_BYTES)` check the generator
+ * runs at render time (`header-footer-images.ts`) — which is the authoritative cap.
+ * That two-tier gap is intentional (schema = cheap early reject, decode time = exact
+ * enforcement) and end-to-end safe: the oversized image is dropped with a warning,
+ * never silently rendered over-cap. Tightening this constant to close the gap would
+ * instead reject real, correctly-padded images at the advertised cap — a worse
+ * regression than the gap itself.
  */
 export const MAX_IMAGE_BASE64_LENGTH = Math.ceil(MAX_IMAGE_BYTES / 3) * 4;
 
