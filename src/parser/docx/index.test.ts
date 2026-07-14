@@ -1046,4 +1046,50 @@ describe('parseDocx — header/footer capture wiring (#306)', () => {
       false
     );
   });
+
+  // Issue #306 acceptance criteria 3/4: unsupported image/table content must
+  // be preserved (never silently dropped) and warned. header-footer-region.ts
+  // is already exhaustively unit-tested for this at its own boundary — this
+  // test pins that the full parseDocx pipeline actually wires it through end
+  // to end, since the prior 3 tests here only exercise literal text and the
+  // inactiveVariant toggle, never an actual unsupported content *type*.
+  it('unsupported image and table content in a header are preserved in raw.unmodeled and warned, never silently discarded', async () => {
+    const zip = new JSZip();
+    zip.file('word/styles.xml', MINIMAL_STYLES);
+    zip.file(
+      'word/document.xml',
+      docWithSectPr('<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>')
+    );
+    zip.file('word/_rels/document.xml.rels', HEADER_FOOTER_RELS_XML);
+    zip.file(
+      'word/header1.xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:drawing><wp:inline/></w:drawing></w:r></w:p>
+  <w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+</w:hdr>`
+    );
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const tree = await parseDocx(buffer);
+
+    // No text content was recognized, so there is nothing to promote into
+    // variants — the image/table content lives only in raw, never fabricated
+    // into an empty-but-present region.
+    expect(tree.headerFooter?.variants).toBeUndefined();
+    expect(tree.headerFooter?.raw?.unmodeled).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ variant: 'default', region: 'header', kind: 'image' }),
+        expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' }),
+      ])
+    );
+    // One raw.warnings line per unmodeled item — never fewer than the items
+    // preserved (AC4: nothing is discarded without a corresponding warning).
+    expect(tree.headerFooter?.raw?.warnings?.length).toBe(
+      tree.headerFooter?.raw?.unmodeled?.length
+    );
+    expect(tree.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'header-footer-content-skipped' })])
+    );
+  });
 });
