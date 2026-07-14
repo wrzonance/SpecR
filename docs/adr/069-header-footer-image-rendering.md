@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-#301 (the header/footer fidelity umbrella) shipped the v2 composition
+\#301 (the header/footer fidelity umbrella) shipped the v2 composition
 schema (ADR-040, #302), the capture pipeline (ADR-068, #306), and
 text/field rendering (#303) — all deliberately excluding image content to
 keep that first renderer slice small. #308 is the follow-up: render
