@@ -6,6 +6,7 @@ import {
   SpecNodeEditabilitySchema,
 } from './spec-tree-schemas.js';
 import { StyleNodeTypeSchema, StylePropertiesSchema } from './style-schemas.js';
+import type { HeaderFooterComposition } from './header-footer-schemas.js';
 
 export type NodeType = z.infer<typeof NodeTypeSchema>;
 
@@ -143,7 +144,8 @@ export type ParseWarningType =
   | 'pdf-ocr-unusable'
   | 'pdf-font-encoding-remapped'
   | 'pdf-font-encoding-unrecoverable'
-  | 'table-content-skipped';
+  | 'table-content-skipped'
+  | 'header-footer-content-skipped';
 
 export interface ParseWarning {
   readonly type: ParseWarningType;
@@ -171,6 +173,12 @@ export interface SpecTree {
    * Absent === none.
    */
   readonly hiddenTables?: readonly RetainedTable[];
+  /**
+   * Captured DOCX header/footer composition (#306, ADR-068). Parse-output
+   * only in this slice — no DB/REST/MCP persistence. Absent === no header
+   * or footer content was captured (or the source format has none, e.g. .SEC).
+   */
+  readonly headerFooter?: HeaderFooterComposition;
 }
 
 export type SecRef = z.infer<typeof SecRefSchema>;

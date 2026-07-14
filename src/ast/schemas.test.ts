@@ -22,6 +22,7 @@ import {
   ParseWarningSchema,
   RetainedTableSchema,
 } from './spec-tree-schemas.js';
+import { HeaderFooterCompositionSchema } from './header-footer-schemas.js';
 import {
   CreateNumberingProfileBodySchema,
   PatchNumberingProfileBodySchema,
@@ -234,6 +235,61 @@ describe('ParseWarningTypeSchema — table-content-skipped (#293)', () => {
       suggestion: '1 visible table(s) detected but not yet modeled into the spec tree',
     });
     expect(result.type).toBe('table-content-skipped');
+  });
+});
+
+// #306 — captured-but-unmodeled DOCX header/footer content is preserved
+// (raw.unmodeled) and surfaced as one aggregate warning, mirroring the
+// table-content-skipped (#293) precedent above.
+describe('ParseWarningTypeSchema — header-footer-content-skipped (#306)', () => {
+  it('accepts header-footer-content-skipped', () => {
+    expect(ParseWarningTypeSchema.parse('header-footer-content-skipped')).toBe(
+      'header-footer-content-skipped'
+    );
+  });
+
+  it('ParseWarningSchema accepts a header-footer-content-skipped warning', () => {
+    const result = ParseWarningSchema.parse({
+      type: 'header-footer-content-skipped',
+      suggestion: '1 header/footer item(s) detected but not yet modeled; see raw.unmodeled',
+    });
+    expect(result.type).toBe('header-footer-content-skipped');
+  });
+});
+
+// #306 — SpecTree.headerFooter is parse-output only (no DB/REST/MCP
+// persistence in this slice), mirroring the hiddenTables (#293) block above.
+describe('SpecTreeSchema — headerFooter (#306)', () => {
+  const base = { id: VALID_UUID, section: VALID_SECTION, title: 'Cabling', parts: [] };
+  const composition = HeaderFooterCompositionSchema.parse({
+    header: { center: { content: [{ kind: 'sectionTitle' }] } },
+    footer: { right: { content: [{ kind: 'pageNumber' }] } },
+  });
+
+  it('accepts a SpecTree with headerFooter', () => {
+    const result = SpecTreeSchema.parse({ ...base, headerFooter: composition });
+    expect(result.headerFooter).toEqual(composition);
+  });
+
+  it('omits headerFooter when absent (no default injected)', () => {
+    const result = SpecTreeSchema.parse(base);
+    expect('headerFooter' in result).toBe(false);
+  });
+
+  // Mirrors the hiddenTables exactOptional regression guard above: distinguishes
+  // "key absent" from "key present with value undefined" (exactOptionalPropertyTypes).
+  it('rejects an explicit headerFooter: undefined (exactOptional, not optional)', () => {
+    const result = SpecTreeSchema.safeParse({ ...base, headerFooter: undefined });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a headerFooter with a malformed field kind', () => {
+    expect(() =>
+      SpecTreeSchema.parse({
+        ...base,
+        headerFooter: { header: { center: { content: [{ kind: 'not-a-real-kind' }] } } },
+      })
+    ).toThrow();
   });
 });
 

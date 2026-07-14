@@ -4,6 +4,7 @@ import { SectionNumberSchema } from '../lib/section-number.js';
 import { textEndsWithClosed } from './comment-closure.js';
 import { SignalNumberSchema, SpecNodeInferenceSchema } from './inference-schemas.js';
 import { ActorLabelSchema } from './actor-schemas.js';
+import { HeaderFooterCompositionSchema } from './header-footer-schemas.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -254,6 +255,7 @@ export const ParseWarningTypeSchema = z.enum([
   'pdf-font-encoding-remapped',
   'pdf-font-encoding-unrecoverable',
   'table-content-skipped',
+  'header-footer-content-skipped',
 ]);
 
 export const ParseWarningSchema = z.object({
@@ -277,4 +279,7 @@ export const SpecTreeSchema = z.object({
   parts: z.array(SpecNodeSchema),
   warnings: z.array(ParseWarningSchema).exactOptional(),
   hiddenTables: z.array(RetainedTableSchema).exactOptional(),
+  // Captured DOCX header/footer composition (#306). Parse-output only in this
+  // slice — no DB/REST/MCP persistence; see ADR-068.
+  headerFooter: HeaderFooterCompositionSchema.exactOptional(),
 });
