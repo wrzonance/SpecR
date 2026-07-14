@@ -1,10 +1,10 @@
 import { Header, Footer } from 'docx';
-import type { Paragraph } from 'docx';
 import { defaultVariant } from '../ast/index.js';
 import type { HeaderFooterComposition, HeaderFooterVariant } from '../ast/index.js';
 import { cascadeStyle } from './header-footer-fields.js';
 import type { HeaderFooterFieldContext, HeaderFooterVisualStyle } from './header-footer-fields.js';
-import { buildRegionParagraph, regionImageWarnings } from './header-footer-regions.js';
+import { buildRegionChildren, regionImageWarnings } from './header-footer-regions.js';
+import { tableWarnings, type HeaderFooterTable } from './header-footer-tables.js';
 
 // `Partial<T>` alone does not strip `| undefined` from a value type under
 // `exactOptionalPropertyTypes` — it only adds `?`, so a `Partial<{ default:
@@ -36,13 +36,8 @@ function buildHeader(
   ctx: HeaderFooterFieldContext
 ): Header | undefined {
   const inheritedStyle = cascadeStyle(variant?.style, compositionStyle);
-  const paragraph: Paragraph | undefined = buildRegionParagraph(
-    variant?.header,
-    inheritedStyle,
-    ctx,
-    'bottom'
-  );
-  return paragraph === undefined ? undefined : new Header({ children: [paragraph] });
+  const children = buildRegionChildren(variant?.header, inheritedStyle, ctx, 'bottom');
+  return children.length === 0 ? undefined : new Header({ children });
 }
 
 function buildFooter(
@@ -51,13 +46,8 @@ function buildFooter(
   ctx: HeaderFooterFieldContext
 ): Footer | undefined {
   const inheritedStyle = cascadeStyle(variant?.style, compositionStyle);
-  const paragraph: Paragraph | undefined = buildRegionParagraph(
-    variant?.footer,
-    inheritedStyle,
-    ctx,
-    'top'
-  );
-  return paragraph === undefined ? undefined : new Footer({ children: [paragraph] });
+  const children = buildRegionChildren(variant?.footer, inheritedStyle, ctx, 'top');
+  return children.length === 0 ? undefined : new Footer({ children });
 }
 
 function buildHeaders(
@@ -131,6 +121,42 @@ function collectImageWarnings(
 }
 
 /**
+ * `variant?.[key]?.table` pre-resolved into a single call. Factored out so
+ * {@link collectTableWarnings}'s own body reads as flat function calls (zero
+ * optional-chain operators) rather than inlining this *doubly*-nested
+ * optional chain six times — the naive inline version measured ESLint
+ * `complexity: 11` against the enforced cap of 10, a trap
+ * {@link collectImageWarnings}'s single-nested `variant?.header` did not hit.
+ */
+function regionTable(
+  variant: HeaderFooterVariant | undefined,
+  key: 'header' | 'footer'
+): HeaderFooterTable | undefined {
+  return variant?.[key]?.table;
+}
+
+/**
+ * Every image-field warning inside a table cell (#309, ADR-071) across the
+ * default/first/even header AND footer regions' `table` slot, in the same
+ * fixed order as {@link collectImageWarnings}. `[]` when no table cell
+ * carries an image field.
+ */
+function collectTableWarnings(
+  defaultV: HeaderFooterVariant,
+  firstV: HeaderFooterVariant | undefined,
+  evenV: HeaderFooterVariant | undefined
+): readonly string[] {
+  return [
+    ...tableWarnings(regionTable(defaultV, 'header'), 'header'),
+    ...tableWarnings(regionTable(firstV, 'header'), 'header.first'),
+    ...tableWarnings(regionTable(evenV, 'header'), 'header.even'),
+    ...tableWarnings(regionTable(defaultV, 'footer'), 'footer'),
+    ...tableWarnings(regionTable(firstV, 'footer'), 'footer.first'),
+    ...tableWarnings(regionTable(evenV, 'footer'), 'footer.even'),
+  ];
+}
+
+/**
  * Render one {@link HeaderFooterComposition} into docx `Header`/`Footer`
  * instances plus the section-level metadata needed to wire them up
  * (`titlePage`, `evenAndOddHeaders`, `pageNumberStart`). Pure and total —
@@ -155,6 +181,7 @@ export function renderHeaderFooterComposition(
   const pageNumberStart = resolvePageNumberStart(composition.pageNumbering);
   const rawWarnings = composition.raw?.warnings ?? [];
   const imageWarnings = collectImageWarnings(defaultV, firstV, evenV);
+  const tableWarningsList = collectTableWarnings(defaultV, firstV, evenV);
 
   return {
     ...(headers !== undefined ? { headers } : {}),
@@ -162,6 +189,6 @@ export function renderHeaderFooterComposition(
     titlePage: firstV !== undefined,
     evenAndOddHeaders: evenV !== undefined,
     ...(pageNumberStart !== undefined ? { pageNumberStart } : {}),
-    warnings: [...rawWarnings, ...imageWarnings],
+    warnings: [...rawWarnings, ...imageWarnings, ...tableWarningsList],
   };
 }

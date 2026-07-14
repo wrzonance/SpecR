@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { renderHeaderFooterComposition } from './header-footer.js';
 import type { HeaderFooterRenderResult } from './header-footer.js';
 import type { HeaderFooterFieldContext, HeaderFooterCell } from './header-footer-fields.js';
+import type { HeaderFooterTable } from './header-footer-tables.js';
 import type { HeaderFooterComposition } from '../ast/index.js';
 
 const CTX: HeaderFooterFieldContext = {
@@ -29,6 +30,32 @@ function imageCell(): HeaderFooterCell {
 // render this and imageFieldWarnings reports it (missingDimensionsWarning).
 function brokenImageCell(): HeaderFooterCell {
   return { content: [{ kind: 'image', imageData: LOGO_PNG_BASE64 }] };
+}
+
+// A minimal one-row, two-cell table (#309) — mirrors header-footer-regions
+// .test.ts's own fixture; header-footer-tables.test.ts owns row/cell/border
+// coverage, so this file only exercises the composition-level wiring.
+function simpleTable(): HeaderFooterTable {
+  return { rows: [{ cells: [{ content: [{ kind: 'literal', text: 'QTY' }] }] }] };
+}
+
+// A table cell carrying an image field — table cells structurally cannot
+// render images (ADR-071 decision 4), so this always produces a warning via
+// tableWarnings, never a silently-dropped image.
+function tableWithImageCell(): HeaderFooterTable {
+  return {
+    rows: [
+      {
+        cells: [
+          {
+            content: [
+              { kind: 'image', imageData: LOGO_PNG_BASE64, widthEmu: 914400, heightEmu: 457200 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
 }
 
 // Renders headers/footers through a real Document + Packer round-trip so
@@ -553,5 +580,108 @@ describe('renderHeaderFooterComposition — image rendering + multi-variant dedu
       expect(mediaTargets.has(target)).toBe(true);
       expect(xmlByPart[partName]).toContain(`r:embed="${relId}"`);
     }
+  });
+});
+
+describe('renderHeaderFooterComposition — table content round-trips through a real docx Packer (#309)', () => {
+  it('renders header.table into a real word/header1.xml as a <w:tbl>, alongside the paragraph', async () => {
+    const composition: HeaderFooterComposition = {
+      header: { center: { content: [{ kind: 'sectionTitle' }] }, table: simpleTable() },
+    };
+    const result = renderHeaderFooterComposition(composition, CTX);
+    expect(result.warnings).toEqual([]);
+    const xml = await extractHeaderFooterXml(result.headers, result.footers);
+    const headerXml = xml['word/header1.xml'];
+    expect(headerXml).toContain('<w:tbl>');
+    expect(headerXml).toContain('QTY');
+    expect(headerXml).toContain(CTX.sectionTitle);
+  });
+
+  it('renders footer.table the same way as header.table', async () => {
+    const composition: HeaderFooterComposition = { footer: { table: simpleTable() } };
+    const result = renderHeaderFooterComposition(composition, CTX);
+    const xml = await extractHeaderFooterXml(result.headers, result.footers);
+    expect(xml['word/footer1.xml']).toContain('<w:tbl>');
+  });
+
+  it('renders a table for each of default/first/even when each variant carries its own table', async () => {
+    const composition: HeaderFooterComposition = {
+      variants: {
+        default: { header: { table: simpleTable() } },
+        first: { header: { table: simpleTable() } },
+        even: { header: { table: simpleTable() } },
+      },
+    };
+    const result = renderHeaderFooterComposition(composition, CTX);
+    const xml = await extractHeaderFooterXml(result.headers, result.footers);
+    expect(Object.keys(xml)).toHaveLength(3);
+    for (const headerXml of Object.values(xml)) {
+      expect(headerXml).toContain('<w:tbl>');
+    }
+  });
+
+  it('a table-only region (no left/center/right/ruleLine) still produces a non-empty Header', () => {
+    const composition: HeaderFooterComposition = { header: { table: simpleTable() } };
+    const result = renderHeaderFooterComposition(composition, CTX);
+    expect(result.headers?.default).toBeInstanceOf(Header);
+  });
+});
+
+describe('renderHeaderFooterComposition — unsupported table cell content always surfaces as a warning (#309)', () => {
+  // ADR-071 decision 4: table cells structurally cannot render images. An
+  // image field inside a table cell must never be silently dropped — it
+  // always produces a warning in the composition-level warnings array,
+  // mirroring the "warned, never silently dropped" posture #308 established
+  // for other unrenderable image cases.
+  it('is [] when a table carries no image-field cells', () => {
+    const composition: HeaderFooterComposition = { header: { table: simpleTable() } };
+    expect(renderHeaderFooterComposition(composition, CTX).warnings).toEqual([]);
+  });
+
+  it('surfaces a warning, prefixed with header.table, for an image field inside a header table cell', () => {
+    const composition: HeaderFooterComposition = { header: { table: tableWithImageCell() } };
+    const warnings = renderHeaderFooterComposition(composition, CTX).warnings;
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings.every((warning) => warning.startsWith('header.table'))).toBe(true);
+  });
+
+  it('surfaces a warning, prefixed with footer.table, for an image field inside a footer table cell', () => {
+    const composition: HeaderFooterComposition = { footer: { table: tableWithImageCell() } };
+    const warnings = renderHeaderFooterComposition(composition, CTX).warnings;
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings.every((warning) => warning.startsWith('footer.table'))).toBe(true);
+  });
+
+  it('collects table image warnings across default/first/even, each with its own variant prefix', () => {
+    const composition: HeaderFooterComposition = {
+      variants: {
+        default: { header: { table: tableWithImageCell() } },
+        first: { header: { table: tableWithImageCell() } },
+        even: { footer: { table: tableWithImageCell() } },
+      },
+    };
+    const warnings = renderHeaderFooterComposition(composition, CTX).warnings;
+    expect(warnings.some((warning) => warning.startsWith('header.table'))).toBe(true);
+    expect(warnings.some((warning) => warning.startsWith('header.first.table'))).toBe(true);
+    expect(warnings.some((warning) => warning.startsWith('footer.even.table'))).toBe(true);
+  });
+
+  it('appends table warnings after raw.warnings and image warnings, still never dropping the image field itself from XML consideration', () => {
+    const composition: HeaderFooterComposition = {
+      header: { left: brokenImageCell(), table: tableWithImageCell() },
+      raw: { warnings: ['unsupported watermark'] },
+    };
+    const warnings = renderHeaderFooterComposition(composition, CTX).warnings;
+    expect(warnings[0]).toBe('unsupported watermark');
+    expect(warnings.some((warning) => warning.startsWith('header.left'))).toBe(true);
+    expect(warnings.some((warning) => warning.startsWith('header.table'))).toBe(true);
+  });
+
+  it('an image inside a table cell renders no <w:drawing> for that cell (structurally excluded, not merely warned)', async () => {
+    const composition: HeaderFooterComposition = { header: { table: tableWithImageCell() } };
+    const result = renderHeaderFooterComposition(composition, CTX);
+    const xml = await extractHeaderFooterXml(result.headers, result.footers);
+    expect(xml['word/header1.xml']).toContain('<w:tbl>');
+    expect(xml['word/header1.xml']).not.toContain('<w:drawing>');
   });
 });

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { BorderStyle, Document, Header, Packer, Paragraph } from 'docx';
+import { BorderStyle, Document, Header, Packer, Paragraph, Table } from 'docx';
 import JSZip from 'jszip';
 import {
+  buildRegionChildren,
   buildRegionParagraph,
   regionImageWarnings,
   ruleLineBorder,
@@ -9,6 +10,7 @@ import {
   type HeaderFooterRuleLine,
 } from './header-footer-regions.js';
 import type { HeaderFooterCell, HeaderFooterFieldContext } from './header-footer-fields.js';
+import type { HeaderFooterTable } from './header-footer-tables.js';
 
 const CTX: HeaderFooterFieldContext = {
   sectionNumber: '09 91 26',
@@ -41,6 +43,22 @@ function brokenImageCell(): HeaderFooterCell {
   return { content: [{ kind: 'image', imageData: LOGO_PNG_BASE64 }] };
 }
 
+// A minimal one-row, two-cell table (#309) — enough to exercise
+// buildRegionChildren's table slot without duplicating header-footer
+// -tables.test.ts's own row/cell/border coverage.
+function simpleTable(): HeaderFooterTable {
+  return {
+    rows: [
+      {
+        cells: [
+          { content: [{ kind: 'literal', text: 'QTY' }] },
+          { content: [{ kind: 'literal', text: 'ITEM' }] },
+        ],
+      },
+    ],
+  };
+}
+
 async function renderParagraphsToXml(paragraphs: readonly Paragraph[]): Promise<string> {
   const doc = new Document({ sections: [{ children: [...paragraphs] }] });
   const zip = await JSZip.loadAsync(await Packer.toBuffer(doc));
@@ -58,6 +76,21 @@ async function renderHeaderToZip(paragraph: Paragraph): Promise<JSZip> {
     sections: [{ headers: { default: new Header({ children: [paragraph] }) }, children: [] }],
   });
   return JSZip.loadAsync(await Packer.toBuffer(doc));
+}
+
+// Same as renderHeaderToZip but for buildRegionChildren's full
+// `(Paragraph | Table)[]` output, so the round-trip test below exercises
+// the actual union docx's `IHeaderOptions.children` accepts.
+async function renderChildrenToHeaderXml(
+  children: readonly (Paragraph | Table)[]
+): Promise<string> {
+  const doc = new Document({
+    sections: [{ headers: { default: new Header({ children: [...children] }) }, children: [] }],
+  });
+  const zip = await JSZip.loadAsync(await Packer.toBuffer(doc));
+  const file = zip.file('word/header1.xml');
+  if (!file) throw new Error('word/header1.xml missing');
+  return file.async('string');
 }
 
 // Strips every properly-wrapped `<w:r>...<w:tab/>...</w:r>` span. Anything
@@ -377,6 +410,69 @@ describe('buildRegionParagraph — acceptance criterion 1: logo image renders in
     // stop, one to reach the right stop. Pins that mixing an image into the
     // left cell doesn't silently drop a tab stop.
     expect(countTabs(headerXml)).toBe(2);
+  });
+});
+
+describe('buildRegionChildren — backward compatibility with buildRegionParagraph', () => {
+  it('is [] for an undefined region (same presence gate as buildRegionParagraph)', () => {
+    expect(buildRegionChildren(undefined, undefined, CTX, 'bottom')).toEqual([]);
+  });
+
+  it('is [] for a region with no paragraph content and no table', () => {
+    const region: HeaderFooterRegion = { left: { content: [{ kind: 'literal' }] } };
+    expect(buildRegionChildren(region, undefined, CTX, 'bottom')).toEqual([]);
+  });
+
+  it('returns exactly one Paragraph, matching buildRegionParagraph output, when table is absent', () => {
+    const region: HeaderFooterRegion = { left: literalCell('LEFT'), right: literalCell('RIGHT') };
+    const children = buildRegionChildren(region, undefined, CTX, 'bottom');
+    expect(children).toHaveLength(1);
+    expect(children[0]).toBeInstanceOf(Paragraph);
+  });
+
+  it('still renders a bordered contentless paragraph for an enabled rule line with no table', () => {
+    const region: HeaderFooterRegion = { ruleLine: { enabled: true, widthTwips: 8 } };
+    const children = buildRegionChildren(region, undefined, CTX, 'bottom');
+    expect(children).toHaveLength(1);
+    expect(children[0]).toBeInstanceOf(Paragraph);
+  });
+});
+
+describe('buildRegionChildren — round-trip fidelity: table content survives the docx Packer', () => {
+  it('is [Table] (no paragraph) for a table-only region with no left/center/right/ruleLine', () => {
+    const region: HeaderFooterRegion = { table: simpleTable() };
+    const children = buildRegionChildren(region, undefined, CTX, 'bottom');
+    expect(children).toHaveLength(1);
+    expect(children[0]).toBeInstanceOf(Table);
+  });
+
+  it('is [Paragraph, Table], paragraph first, when a region carries both', () => {
+    const region: HeaderFooterRegion = { left: literalCell('LEFT'), table: simpleTable() };
+    const children = buildRegionChildren(region, undefined, CTX, 'bottom');
+    expect(children).toHaveLength(2);
+    expect(children[0]).toBeInstanceOf(Paragraph);
+    expect(children[1]).toBeInstanceOf(Table);
+  });
+
+  it('round-trips both the paragraph text and the table cell text through a real docx Packer, paragraph before table', async () => {
+    const region: HeaderFooterRegion = { left: literalCell('LEFT'), table: simpleTable() };
+    const children = buildRegionChildren(region, undefined, CTX, 'bottom');
+    const xml = await renderChildrenToHeaderXml(children);
+    expect(xml).toContain('LEFT');
+    expect(xml).toContain('<w:tbl>');
+    expect(xml).toContain('QTY');
+    expect(xml).toContain('ITEM');
+    // Order: the paragraph's own text must appear before the <w:tbl> open
+    // tag — pins buildRegionChildren's [paragraph?, table?] ordering, not
+    // just presence of both.
+    expect(xml.indexOf('LEFT')).toBeLessThan(xml.indexOf('<w:tbl>'));
+  });
+
+  it('cascades region.style into the table cells, same as it cascades into the paragraph', async () => {
+    const region: HeaderFooterRegion = { style: { bold: true }, table: simpleTable() };
+    const children = buildRegionChildren(region, undefined, CTX, 'bottom');
+    const xml = await renderChildrenToHeaderXml(children);
+    expect(xml).toMatch(/<w:tbl>[\s\S]*<w:b\/>[\s\S]*<\/w:tbl>/);
   });
 });
 
