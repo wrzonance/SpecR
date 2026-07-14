@@ -23,4 +23,5 @@ export const API_FEATURES = {
   numberingProfiles: true, // numbering-profile CRUD + DOCX snapshot + ingress (landed #299/#317/#320)
   compareReport: true, // POST /reports/compare — grounded comparison matrix        (landed ADR-047)
   compareAlignment: false, // compare alignment/include request options            (#384 — flip when landed)
+  headerFooter: true, // header/footer CRUD + resolve + DOCX download        (landed ADR-040/#477)
 };
