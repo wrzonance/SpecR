@@ -147,13 +147,17 @@ function unsupportedKeyWarnings(field: HeaderFooterField): readonly string[] {
 
 /**
  * Every warning `field` produces, each prefixed with `location` (e.g.
- * `"header.left"`). `[]` when `field.imageData` is absent — nothing was
- * attempted, so nothing to warn about — and also `[]` for a fully valid image
- * field with no dimension/decode/mismatch/unsupported-key issues. Pure, no
- * I/O, never throws.
+ * `"header.left"`). `[]` when `field.kind !== 'image'` — `HeaderFooterField`
+ * is not a discriminated union at the schema level, so a non-image kind can
+ * still carry a stray `imageData`/`widthEmu`-shaped payload; that must never
+ * be treated as an image field, matching `imageFieldHasContent`/
+ * `renderImageRun`'s kind gate. Also `[]` when `field.imageData` is absent —
+ * nothing was attempted, so nothing to warn about — and `[]` for a fully
+ * valid image field with no dimension/decode/mismatch/unsupported-key
+ * issues. Pure, no I/O, never throws.
  */
 export function imageFieldWarnings(field: HeaderFooterField, location: string): readonly string[] {
-  if (field.imageData === undefined) return [];
+  if (field.kind !== 'image' || field.imageData === undefined) return [];
   const warnings = [
     missingDimensionsWarning(field),
     unreadableDataWarning(field),

@@ -301,6 +301,12 @@ describe('buildRegionParagraph — acceptance criterion 1: logo image renders in
     const headerXml = await headerFile.async('string');
     expect(headerXml).toContain('<w:drawing>');
     expect(headerXml).toContain('RIGHT');
+    // Same tab semantics as the text-only "left + right populated, center
+    // empty" case above: a left cell (image or text, doesn't matter which)
+    // plus a right cell needs two tabs — one to clear the empty center
+    // stop, one to reach the right stop. Pins that mixing an image into the
+    // left cell doesn't silently drop a tab stop.
+    expect(countTabs(headerXml)).toBe(2);
   });
 });
 

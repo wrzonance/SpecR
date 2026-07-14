@@ -80,6 +80,30 @@ async function extractHeaderFooterXml(
   return Object.fromEntries(entries);
 }
 
+// The `.rels` part (e.g. `word/_rels/header1.xml.rels`) for every rendered
+// header/footer part, keyed by that part's own name — used to assert each
+// page-variant instance gets its own relationship entry (not a sibling's)
+// pointing at a shared media part, without asserting anything about `word/
+// document.xml.rels` or other unrelated relationship parts.
+async function extractHeaderFooterRels(
+  headers: HeaderFooterRenderResult['headers'],
+  footers: HeaderFooterRenderResult['footers']
+): Promise<Record<string, string>> {
+  const zip = await JSZip.loadAsync(await Packer.toBuffer(docWithHeadersFooters(headers, footers)));
+  const partNames = Object.keys(zip.files).filter((name) =>
+    /^word\/(header|footer)\d+\.xml$/.test(name)
+  );
+  const entries = await Promise.all(
+    partNames.map(async (partName) => {
+      const relsName = partName.replace(/^word\/(.+)$/, 'word/_rels/$1.rels');
+      const file = zip.file(relsName);
+      const xml = file === null ? '' : await file.async('string');
+      return [partName, xml] as const;
+    })
+  );
+  return Object.fromEntries(entries);
+}
+
 describe('renderHeaderFooterComposition — purity and totality', () => {
   it('never throws for an empty composition', () => {
     expect(() => renderHeaderFooterComposition({}, CTX)).not.toThrow();
@@ -494,5 +518,27 @@ describe('renderHeaderFooterComposition — image rendering + multi-variant dedu
       ([name, entry]) => name.startsWith('word/media/') && !entry.dir
     );
     expect(mediaNames).toHaveLength(1);
+    const mediaTarget = `media/${mediaNames[0]![0].replace('word/media/', '')}`;
+
+    // The other half of "collision-free": each header instance's OWN
+    // `_rels/headerN.xml.rels` carries exactly one image relationship
+    // pointing at the shared media part, and that header's own XML embeds
+    // exactly the relationship id its own rels file defines — never a
+    // sibling's part borrowing an id that isn't declared in its own rels
+    // file (which would render as a broken image in Word even though the
+    // media part itself is present and deduped).
+    const xmlByPart = await extractHeaderFooterXml(result.headers, result.footers);
+    const relsByPart = await extractHeaderFooterRels(result.headers, result.footers);
+    expect(Object.keys(relsByPart)).toHaveLength(3);
+    for (const [partName, relsXml] of Object.entries(relsByPart)) {
+      const relMatches = [...relsXml.matchAll(/<Relationship\b[^>]*\/>/g)];
+      expect(relMatches).toHaveLength(1);
+      expect(relsXml).toContain(`Target="${mediaTarget}"`);
+
+      const relIdMatch = /<Relationship\b[^>]*\bId="([^"]+)"/.exec(relsXml);
+      if (!relIdMatch) throw new Error(`${partName} rels: no relationship Id found`);
+      const [, relId] = relIdMatch;
+      expect(xmlByPart[partName]).toContain(`r:embed="${relId}"`);
+    }
   });
 });

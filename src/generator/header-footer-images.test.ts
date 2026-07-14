@@ -216,6 +216,16 @@ describe('imageFieldWarnings', () => {
     expect(imageFieldWarnings({ kind: 'pageNumber' }, 'header.left')).toEqual([]);
   });
 
+  it('returns [] for a non-image field, even one carrying stray imageData that would otherwise warn', () => {
+    // Mirrors imageFieldHasContent's "stray imageData" case: HeaderFooterField
+    // is not a discriminated union at the schema level, so a non-image kind can
+    // carry an imageData/widthEmu-shaped payload. It must never be treated as an
+    // image field just because imageData is present.
+    expect(
+      imageFieldWarnings({ kind: 'literal', text: 'x', imageData: MALFORMED_BASE64 }, 'header.left')
+    ).toEqual([]);
+  });
+
   it('returns [] for a fully valid image field (no dimension/decode/mismatch/unsupported-key issues)', () => {
     expect(imageFieldWarnings(VALID_IMAGE_FIELD, 'header.left')).toEqual([]);
   });
