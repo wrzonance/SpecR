@@ -16,13 +16,20 @@ import {
   extractAttrStr,
   toArray,
 } from './xml-utils.js';
+import { collectRuns } from './document.js';
+import { extractRunProps } from './resolver.js';
 import {
   collapseComplexFields,
   extractTextLikeValue,
   isCollapsedFieldRun,
   matchKnownSectionField,
+  toHeaderFooterVisualStyle,
 } from './header-footer-field-recognition.js';
-import type { CollapsedFieldRun, KnownSectionIdentity } from './header-footer-field-recognition.js';
+import type {
+  CollapsedFieldRun,
+  HeaderFooterVisualStyle,
+  KnownSectionIdentity,
+} from './header-footer-field-recognition.js';
 import type { HeaderFooterUnmodeledEntry } from './types.js';
 import type { HeaderFooterVariant } from '../../ast/index.js';
 
@@ -96,10 +103,16 @@ function paragraphsOf(root: Record<string, unknown>): readonly Record<string, un
   );
 }
 
+// Deep scan (document.ts's collectRuns, reused here #306 review): a header/footer
+// paragraph's runs can nest inside w:hyperlink, tracked-change wrappers (w:ins/w:del),
+// or a w:sdt content control — the exact same wrapper vocabulary the main body parser
+// already handles. A direct-children-only scan silently dropped any wrapped header/
+// footer text with no unmodeled entry and no warning; this makes wrapped content
+// visible to capture the same way it already is for ordinary body paragraphs.
 function runsOf(paragraph: Record<string, unknown>): readonly Record<string, unknown>[] {
-  return toArray<Record<string, unknown>>(
-    paragraph['w:r'] as readonly Record<string, unknown>[] | undefined
-  );
+  const runs: Record<string, unknown>[] = [];
+  collectRuns(paragraph, runs);
+  return runs;
 }
 
 function paragraphHasContent(runs: readonly Record<string, unknown>[]): boolean {
@@ -169,6 +182,25 @@ function resolveFieldMarker(marker: CollapsedFieldRun): FieldResolution {
   };
 }
 
+// The cell's run-level formatting (bold/italic/color/font/caps, #306 review):
+// taken from the first piece that carries a w:rPr, since HeaderFooterCellSchema
+// models one style per cell, not one per run — a cell whose runs mix styles only
+// has its first run's style captured, a documented simplification (mirrors
+// captureRuleLine/captureFromParagraphs's own "first paragraph wins" convention).
+// A collapsed complex-field marker never carries a w:rPr (collapseRunSequence
+// discards the wrapped runs' own properties), so field-run styling is out of
+// scope here.
+function firstRunStyle(
+  pieces: readonly Record<string, unknown>[]
+): HeaderFooterVisualStyle | undefined {
+  for (const piece of pieces) {
+    if (isCollapsedFieldRun(piece)) continue;
+    const style = toHeaderFooterVisualStyle(extractRunProps(asRecord(piece['w:rPr'])));
+    if (style !== undefined) return style;
+  }
+  return undefined;
+}
+
 // Builds one cell's content: consecutive plain-text runs are concatenated
 // and matched against the known section identity (ADR-068: literal equality
 // only); a recognized field marker flushes the buffer first, then
@@ -179,6 +211,7 @@ function buildCellContent(
 ): {
   readonly content: readonly HeaderFooterField[];
   readonly unmodeled: readonly PartialUnmodeled[];
+  readonly style: HeaderFooterVisualStyle | undefined;
 } {
   const content: HeaderFooterField[] = [];
   const unmodeled: PartialUnmodeled[] = [];
@@ -200,7 +233,7 @@ function buildCellContent(
     else unmodeled.push(resolved.entry);
   }
   flushBuffer();
-  return { content, unmodeled };
+  return { content, unmodeled, style: firstRunStyle(pieces) };
 }
 
 // ─── tab-boundary cell split (ADR-068: KNOWN AMBIGUITY at 3+ tabs) ─────────
@@ -241,11 +274,18 @@ function cellKeyForIndex(index: number): CellKey {
   return 'right';
 }
 
+// A cell already merged from an earlier segment (the 3+ tabs KNOWN AMBIGUITY
+// fold-into-right case) keeps its own already-resolved style — later segments'
+// content still merges in, but never displaces the style captured first.
 function mergeCell(
   existing: HeaderFooterCell | undefined,
-  extra: readonly HeaderFooterField[]
+  extra: readonly HeaderFooterField[],
+  style: HeaderFooterVisualStyle | undefined
 ): HeaderFooterCell {
-  return { content: [...(existing?.content ?? []), ...extra] };
+  return compact({
+    content: [...(existing?.content ?? []), ...extra],
+    style: existing?.style ?? style,
+  }) as HeaderFooterCell;
 }
 
 function assignSegmentsToCells(
@@ -262,7 +302,7 @@ function assignSegmentsToCells(
     unmodeled.push(...built.unmodeled);
     if (built.content.length === 0) return;
     const key = cellKeyForIndex(index);
-    cells[key] = mergeCell(cells[key], built.content);
+    cells[key] = mergeCell(cells[key], built.content, built.style);
   });
   if (segments.length > 3) {
     unmodeled.push({

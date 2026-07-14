@@ -125,7 +125,13 @@ function runIsVanish(
 // and the wrapper SpecR's own generator emits (w:sdt UUID anchors). Collect runs at
 // any depth so a fully-hidden wrapped paragraph is still detected (Codex #295). Skip
 // w:rPr/w:pPr — property elements carry the paragraph mark, not content runs.
-function collectRuns(value: unknown, acc: Record<string, unknown>[]): void {
+//
+// Exported for reuse by header-footer-region.ts's paragraph-content scan (#306
+// review): header/footer parts wrap runs in the exact same OOXML constructs, and a
+// direct-children-only scan there silently dropped any hyperlink/tracked-change
+// (w:ins/w:del)/content-control (w:sdt)-wrapped header or footer text, with no
+// raw.unmodeled entry and no warning.
+export function collectRuns(value: unknown, acc: Record<string, unknown>[]): void {
   if (Array.isArray(value)) {
     for (const item of value) collectRuns(item, acc);
     return;

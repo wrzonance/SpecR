@@ -66,12 +66,18 @@ function ruleLineEdge(region: RegionKind): 'top' | 'bottom' {
   return region === 'header' ? 'bottom' : 'top';
 }
 
-function findResolvedRef(
+// Every resolved reference matching (kind, region) — real Word output emits at
+// most one w:headerReference/w:footerReference per (variant, region) slot, but
+// a non-conforming document could carry two (e.g. a merge artifact). Returns
+// all matches, in document order, rather than just the first (#306 review): a
+// single HeaderFooterRegion slot can only capture one of them, but the others
+// must still be surfaced, never silently discarded.
+function findResolvedRefs(
   resolved: readonly ResolvedHeaderFooterReference[],
   kind: VariantKind,
   region: RegionKind
-): ResolvedHeaderFooterReference | undefined {
-  return resolved.find((r) => r.reference.variant === kind && r.reference.region === region);
+): readonly ResolvedHeaderFooterReference[] {
+  return resolved.filter((r) => r.reference.variant === kind && r.reference.region === region);
 }
 
 function partXmlFor(
@@ -126,6 +132,31 @@ function unresolvedToUnmodeled(ref: HeaderFooterReference): HeaderFooterUnmodele
   };
 }
 
+// A second (or later) reference resolving to the same (variant, region) slot as
+// one already captured (#306 review) — real Word never emits this, but a
+// non-conforming document could. HeaderFooterRegionSchema models exactly one
+// region per slot, so only the first resolved reference is ever captured; every
+// later one is preserved here under the same `unresolvedReference` kind
+// missingPartEntry already uses for "resolved, but no content captured for it".
+function duplicateReferenceEntry(
+  kind: VariantKind,
+  region: RegionKind,
+  resolvedRef: ResolvedHeaderFooterReference
+): HeaderFooterUnmodeledEntry {
+  return {
+    variant: kind,
+    region,
+    kind: 'unresolvedReference',
+    detail: compact({
+      target: resolvedRef.target,
+      rId: resolvedRef.reference.rId,
+      reason:
+        'duplicate header/footer reference for this variant/region — only the first ' +
+        'resolved target is captured',
+    }),
+  };
+}
+
 interface RegionBuildResult {
   readonly region: ReturnType<typeof captureRegion>['region'];
   readonly unmodeled: readonly HeaderFooterUnmodeledEntry[];
@@ -153,6 +184,25 @@ function buildVariant(
   return { region: captured.region, unmodeled: captured.unmodeled };
 }
 
+// One (variant, region) slot end-to-end: picks the first resolved reference to
+// actually capture (there is only ever room for one HeaderFooterRegion per
+// slot) and folds every additional resolved reference in as a duplicate
+// unmodeled entry, never dropping it (#306 review).
+function buildRegionSlot(
+  kind: VariantKind,
+  region: RegionKind,
+  resolved: readonly ResolvedHeaderFooterReference[],
+  active: boolean,
+  entries: HeaderFooterCaptureEntries,
+  known: KnownSectionIdentity
+): RegionBuildResult {
+  const [primaryRef, ...duplicateRefs] = findResolvedRefs(resolved, kind, region);
+  const partXml = primaryRef ? partXmlFor(region, primaryRef.target, entries) : undefined;
+  const built = buildVariant(kind, region, primaryRef, active, partXml, known);
+  const duplicateUnmodeled = duplicateRefs.map((ref) => duplicateReferenceEntry(kind, region, ref));
+  return { region: built.region, unmodeled: [...built.unmodeled, ...duplicateUnmodeled] };
+}
+
 interface KindBuildResult {
   readonly variant: Record<string, unknown> | undefined;
   readonly unmodeled: readonly HeaderFooterUnmodeledEntry[];
@@ -166,24 +216,8 @@ function buildVariantForKind(
   known: KnownSectionIdentity
 ): KindBuildResult {
   const active = isVariantActive(kind, activation);
-  const headerRef = findResolvedRef(resolved, kind, 'header');
-  const header = buildVariant(
-    kind,
-    'header',
-    headerRef,
-    active,
-    headerRef ? partXmlFor('header', headerRef.target, entries) : undefined,
-    known
-  );
-  const footerRef = findResolvedRef(resolved, kind, 'footer');
-  const footer = buildVariant(
-    kind,
-    'footer',
-    footerRef,
-    active,
-    footerRef ? partXmlFor('footer', footerRef.target, entries) : undefined,
-    known
-  );
+  const header = buildRegionSlot(kind, 'header', resolved, active, entries, known);
+  const footer = buildRegionSlot(kind, 'footer', resolved, active, entries, known);
   const built = compact({ header: header.region, footer: footer.region });
   return {
     variant: Object.keys(built).length > 0 ? built : undefined,

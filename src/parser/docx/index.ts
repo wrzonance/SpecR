@@ -18,7 +18,7 @@ import type { NumberingProfile } from '../../ast/index.js';
 import type { NumberingMap, StyleMap, ClassifiedParagraph, DocxParagraph } from './types.js';
 import { resolveStyleCascade } from './resolver.js';
 import { detectSource, detectArticleIlvl } from './source-detection.js';
-import { parseCoreMetadata } from './core-metadata.js';
+import { parseCoreMetadata, UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
 import type { CoreMetadata } from './core-metadata.js';
 import { captureHeaderFooter } from './header-footer.js';
 import { readHeaderFooterParts } from './header-footer-parts.js';
@@ -112,7 +112,7 @@ function runPipeline(
   // with method/confidence reporting — do not duplicate that here.
   const meta: CoreMetadata = entries.coreXml
     ? parseCoreMetadata(entries.coreXml)
-    : { section: 'unknown', title: 'unknown' };
+    : { section: UNKNOWN_SECTION_IDENTITY, title: UNKNOWN_SECTION_IDENTITY };
 
   onProgress?.('complete', 100);
   const tree = buildTree(classified, meta.section, meta.title, source);

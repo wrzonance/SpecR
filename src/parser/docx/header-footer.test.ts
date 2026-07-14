@@ -307,6 +307,31 @@ describe('captureHeaderFooter — never throws for document-content reasons', ()
     expect((caught as ParserError).code).toBe('DOCX_HEADER_FOOTER_XML_INVALID');
     expect((caught as ParserError).message).toMatch(/failed to parse/);
   });
+
+  // Pins the orchestrator boundary directly (#306 review): every other test in
+  // this describe block only exercises document.xml/rels/settings.xml malformed
+  // input, never a malformed header/footer PART itself — so buildVariant's own
+  // doc comment claim ("captureRegion's throw propagates unchanged") was
+  // untested where it actually matters, through captureHeaderFooter, not just
+  // through captureRegion directly (header-footer-region.test.ts already pins
+  // that half).
+  it('propagates ParserError DOCX_HEADER_FOOTER_XML_INVALID for a malformed header/footer PART XML, via buildVariant, unchanged', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
+      headerParts: new Map([['word/header1.xml', '<not valid xml']]),
+    });
+    let caught: unknown;
+    try {
+      captureHeaderFooter(entries, KNOWN);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ParserError);
+    expect((caught as ParserError).code).toBe('DOCX_HEADER_FOOTER_XML_INVALID');
+    expect((caught as ParserError).message).toMatch(/failed to parse word\/header part XML/);
+  });
 });
 
 // INVARIANT (ADR-068): buildComposition's final HeaderFooterCompositionSchema
@@ -371,6 +396,43 @@ describe('captureHeaderFooter — pgNumStart preservation (ADR-068)', () => {
     );
     expect(result.composition?.raw).toBeUndefined();
     expect(result.warnings).toEqual([]);
+  });
+});
+
+// Regression (#306 review): findResolvedRef used Array.find(), so when two
+// w:headerReference/w:footerReference elements of the SAME (variant, region)
+// both resolve to real relationship targets (a non-conforming document — real
+// Word never emits this), only the first was captured; the second resolved
+// reference's target part was never read and never appeared anywhere in
+// raw.unmodeled/raw.warnings. It is now preserved as a duplicate unmodeled
+// entry instead of silently vanishing.
+describe('captureHeaderFooter — duplicate resolved reference for the same (variant, region) slot (#306 review)', () => {
+  it('captures the first resolved default header and preserves the second as unmodeled, not silently dropped', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}${headerRef('rId2', 'default')}</w:sectPr>`;
+    const result = captureHeaderFooter(
+      baseEntries({
+        documentXml: makeDocXml(sectPr),
+        documentRelsXml: makeRelsXml(
+          relationship('rId1', 'header1.xml') + relationship('rId2', 'header2.xml')
+        ),
+        headerParts: new Map([
+          ['word/header1.xml', makeHdrXml('First')],
+          ['word/header2.xml', makeHdrXml('Second')],
+        ]),
+      }),
+      KNOWN
+    );
+    expect(result.composition?.variants?.default?.header?.left?.content).toEqual([
+      { kind: 'literal', text: 'First' },
+    ]);
+    const duplicateEntry = result.composition?.raw?.unmodeled?.find(
+      (e) => e.kind === 'unresolvedReference' && e.variant === 'default' && e.region === 'header'
+    );
+    expect(duplicateEntry).toBeDefined();
+    const duplicateDetail = JSON.stringify(duplicateEntry?.detail);
+    expect(duplicateDetail).toContain('word/header2.xml');
+    expect(duplicateDetail).toContain('rId2');
+    expect(result.warnings).toHaveLength(1);
   });
 });
 

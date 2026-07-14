@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, globSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { parse } from '../index.js';
-import { HeaderFooterCompositionSchema } from '../../ast/index.js';
 import type { SpecNode } from '../../ast/types.js';
 
 // Whole reference corpus is copyrighted and gitignored under
@@ -57,11 +56,12 @@ describe.skipIf(CORPUS.length === 0)('DOCX corpus — every real spec parses to 
 });
 
 // Task 19 (#306): header/footer capture must be a clean no-op across the whole
-// corpus — it never throws for document-content reasons, and any composition it
-// does produce is a valid HeaderFooterComposition. Unlike the 3-part sweep above,
-// there is no fixed expected shape here (most vendor DOCX headers/footers are
-// unmodeled-but-preserved, not the small recognized-field subset), so this only
-// pins the two things captureHeaderFooter's contract actually promises.
+// corpus — it never throws for document-content reasons, and the tree-level
+// warning wiring is consistent with what was actually captured. Unlike the
+// 3-part sweep above, there is no fixed expected shape here (most vendor DOCX
+// headers/footers are unmodeled-but-preserved, not the small recognized-field
+// subset), so this only pins the two things captureHeaderFooter's contract
+// actually promises.
 describe.skipIf(CORPUS.length === 0)(
   'DOCX corpus — header/footer capture is a clean, well-typed no-op',
   () => {
@@ -71,8 +71,23 @@ describe.skipIf(CORPUS.length === 0)(
 
       it(`${name}: captures a header/footer composition without a capture failure`, async () => {
         const { tree } = await parse(readFileSync(file), name);
+        // `tree.headerFooter` (when present) has already been validated once,
+        // inside captureHeaderFooter's own buildComposition, by the very schema
+        // parse that constructed it — re-asserting `.parse().not.toThrow()`
+        // here would be tautological (review finding #306): it can never fail,
+        // since a failure would already have rejected the `parse()` call above.
+        // Instead this pins the one guarantee the schema itself cannot check —
+        // a cross-field invariant between raw.warnings and the tree-level
+        // aggregate warning (header-footer.ts's buildTreeWarnings): exactly one
+        // 'header-footer-content-skipped' ParseWarning iff raw.warnings is
+        // non-empty, never silent and never phantom, across every real corpus
+        // document's header/footer content.
         if (tree.headerFooter === undefined) return;
-        expect(() => HeaderFooterCompositionSchema.parse(tree.headerFooter)).not.toThrow();
+        const aggregateWarnings = (tree.warnings ?? []).filter(
+          (w) => w.type === 'header-footer-content-skipped'
+        );
+        const rawWarningCount = tree.headerFooter.raw?.warnings?.length ?? 0;
+        expect(aggregateWarnings.length).toBe(rawWarningCount > 0 ? 1 : 0);
       });
     }
   }

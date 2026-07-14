@@ -45,6 +45,26 @@ function tableXml(): string {
   return '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';
 }
 
+function hyperlinkRun(text: string): string {
+  return `<w:hyperlink r:id="rId9">${textRun(text)}</w:hyperlink>`;
+}
+
+function insertedRun(text: string): string {
+  return `<w:ins w:id="1" w:author="Editor">${textRun(text)}</w:ins>`;
+}
+
+function deletedRun(text: string): string {
+  return `<w:del w:id="2" w:author="Editor"><w:r><w:delText>${text}</w:delText></w:r></w:del>`;
+}
+
+function sdtRun(text: string): string {
+  return `<w:sdt><w:sdtPr><w:id w:val="123"/></w:sdtPr><w:sdtContent>${textRun(text)}</w:sdtContent></w:sdt>`;
+}
+
+function styledTextRun(text: string, rPrXml: string): string {
+  return `<w:r><w:rPr>${rPrXml}</w:rPr><w:t>${text}</w:t></w:r>`;
+}
+
 describe('captureRegion — cell capture and tab-boundary splitting', () => {
   it('puts all content in left when the paragraph has no tab boundaries', () => {
     const xml = makeHdrXml(paragraph('', textRun('Draft Copy')));
@@ -129,6 +149,76 @@ describe('captureRegion — cell capture and tab-boundary splitting', () => {
     expect(result.unmodeled).toContainEqual(
       expect.objectContaining({ variant: 'default', region: 'header', kind: 'image' })
     );
+  });
+});
+
+// Regression (#306 review): runsOf/paragraphHasContent only scanned a paragraph's
+// direct w:r children, so header/footer content wrapped in w:hyperlink, tracked
+// changes (w:ins/w:del), or a w:sdt content control was invisible to capture — it
+// was silently dropped with no unmodeled entry and no warning. runsOf now deep-
+// scans via document.ts's collectRuns, the same traversal already used for
+// ordinary body paragraphs.
+describe('captureRegion — content nested inside wrapper elements is not silently dropped (#306 review)', () => {
+  it('captures text wrapped in w:hyperlink as ordinary cell content', () => {
+    const xml = makeHdrXml(paragraph('', hyperlinkRun('Linked Text')));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Linked Text' }]);
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('captures text wrapped in a tracked-change insertion (w:ins) as ordinary cell content', () => {
+    const xml = makeHdrXml(paragraph('', insertedRun('Inserted Text')));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Inserted Text' }]);
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('captures text wrapped in a w:sdt content control as ordinary cell content', () => {
+    const xml = makeHdrXml(paragraph('', sdtRun('SDT Text')));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'SDT Text' }]);
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('splits on a tab boundary even when the second segment is wrapped in w:hyperlink', () => {
+    const xml = makeHdrXml(
+      paragraph('', `${textRun('Left text')}${tabRun()}${hyperlinkRun('Linked center')}`)
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Left text' }]);
+    expect(result.region?.center?.content).toEqual([{ kind: 'literal', text: 'Linked center' }]);
+  });
+
+  it('a w:del tracked-deletion run (w:delText, not w:t) never surfaces as captured content', () => {
+    const xml = makeHdrXml(paragraph('', deletedRun('Removed Text')));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region).toBeUndefined();
+    expect(result.unmodeled).toEqual([]);
+  });
+});
+
+describe('captureRegion — cell style capture from run properties (#306 review)', () => {
+  it('maps a bold/italic/colored run onto HeaderFooterCell.style', () => {
+    const xml = makeHdrXml(
+      paragraph('', styledTextRun('Confidential', '<w:b/><w:i/><w:color w:val="FF0000"/>'))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.style).toEqual({ bold: true, italic: true, color: 'FF0000' });
+  });
+
+  it('leaves style undefined for a plain run with no rPr', () => {
+    const xml = makeHdrXml(paragraph('', textRun('Plain')));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.style).toBeUndefined();
+  });
+
+  it('captures only the FIRST styled run per cell — a documented simplification, not per-run styling', () => {
+    const xml = makeHdrXml(
+      paragraph('', `${styledTextRun('Bold ', '<w:b/>')}${styledTextRun('Italic', '<w:i/>')}`)
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Bold Italic' }]);
+    expect(result.region?.left?.style).toEqual({ bold: true });
   });
 });
 
