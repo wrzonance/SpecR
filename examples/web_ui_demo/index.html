@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="css/editor.css" />
     <link rel="stylesheet" href="css/constellation.css" />
     <link rel="stylesheet" href="css/markdown.css" />
+    <link rel="stylesheet" href="css/header-footer.css" />
   </head>
   <body>
     <div id="grid-overlay" aria-hidden="true"></div>
@@ -249,6 +250,21 @@
             </p>
             <div class="source-list" id="project-source-list"></div>
           </section>
+          <!-- Header/footer profile editor for this project's scope, plus the
+               Effective Resolution sub-panel (winning scope + layer chain
+               from client → project). Populated by header-footer.js's
+               refreshProjectPanel — see that module's ctx contract for the
+               mount-point roles below. Spans the full settings-shell width;
+               see css/header-footer.css's .hf-settings-panel. -->
+          <section class="settings-panel hf-settings-panel" id="project-header-footer-panel">
+            <div class="settings-panel-head">
+              <h3>HEADER / FOOTER</h3>
+            </div>
+            <div class="hf-settings-shell">
+              <div class="hf-panel-body" id="project-header-footer-editor"></div>
+              <div class="hf-resolution-panel" id="project-header-footer-resolution"></div>
+            </div>
+          </section>
         </div>
       </div>
     </section>
@@ -285,6 +301,23 @@
               </div>
             </div>
             <div class="library-tree" id="library-tree"></div>
+            <!-- Client-scope header/footer profile editor — visible only for
+                 tier === 'client' libraries (mirrors the API's
+                 requireClientLibrary gate). Starts hidden; a later app.js
+                 task toggles it via getSelectedLibraryTier() and repaints
+                 #library-header-footer through header-footer.js's
+                 refreshLibraryPanel. See that module's ctx contract for the
+                 mount-point role below. -->
+            <section class="hf-panel" id="library-header-footer-panel" hidden>
+              <div class="hf-panel-head">
+                <h3>HEADER / FOOTER</h3>
+                <p class="hf-panel-hint">
+                  client-scope profile — wins over nothing; a project can
+                  still override it
+                </p>
+              </div>
+              <div class="hf-panel-body" id="library-header-footer"></div>
+            </section>
           </section>
         </div>
       </div>
