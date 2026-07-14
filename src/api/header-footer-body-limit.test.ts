@@ -13,6 +13,7 @@ import {
   HEADER_FOOTER_BODY_ENVELOPE_BYTES,
   HEADER_FOOTER_JSON_BODY_LIMIT_BYTES,
   isHeaderFooterCompositionWrite,
+  isMcpPath,
 } from './header-footer-body-limit.js';
 
 describe('HEADER_FOOTER_JSON_BODY_LIMIT_BYTES (#490)', () => {
@@ -116,4 +117,23 @@ describe('isHeaderFooterCompositionWrite (#490)', () => {
       })
     ).toBe(false);
   });
+});
+
+describe('isMcpPath (#490 — the /mcp bypass predicate)', () => {
+  it.each(['/mcp', '/mcp/', '/mcp/messages', '/MCP', '/Mcp'])(
+    'true for %s (the MCP endpoint or a subpath, case-insensitive)',
+    (path) => {
+      expect(isMcpPath(path)).toBe(true);
+    }
+  );
+
+  // Regression (CodeRabbit): a bare startsWith('/mcp') also matched lookalike
+  // REST paths and silently widened their body-size budget. The segment
+  // boundary must keep every non-MCP route on the default limit.
+  it.each(['/mcp-anything', '/mcpx', '/mcp_config', '/libraries/x/header-footer', '/'])(
+    'false for %s (lookalike or unrelated route keeps the default limit)',
+    (path) => {
+      expect(isMcpPath(path)).toBe(false);
+    }
+  );
 });
