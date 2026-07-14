@@ -546,6 +546,15 @@ async function loadActiveProjectWorkspace() {
   await refreshCoordination();
   await refreshOpenComments();
   await refreshSubmittalRegister();
+  // Repaint the project-scope header/footer editor + Effective Resolution for
+  // the now-active project. showView('settings') only fires on VIEW entry, so
+  // switching projects from the Settings dropdown (project-select →
+  // switchProject) would otherwise leave the old project's editor/resolution on
+  // screen — and, because the editor's ctx reads activeProjectId live, a Save
+  // on that stale editor would PUT into the newly selected project. refresh()
+  // reloads the new project's config (dropping to a Save-less loading state
+  // meanwhile), closing that window. Self-guarding + fire-and-forget.
+  void headerFooterPanel?.refreshProjectPanel();
 }
 
 async function deleteActiveProject() {
