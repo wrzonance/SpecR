@@ -8,8 +8,8 @@ Accepted
 
 \#301 (the header/footer fidelity umbrella) has shipped the v2
 composition schema (ADR-040, #302), the capture pipeline (ADR-068,
-#306), text/field rendering (#303), and image/logo rendering (ADR-069,
-#308). #309 is the remaining renderer slice explicitly deferred by all
+\#306), text/field rendering (#303), and image/logo rendering (ADR-069,
+\#308). #309 is the remaining renderer slice explicitly deferred by all
 of those: many real specification footers are laid out as a simple
 table/grid ("Drawing No. | Sheet 1 of 3 | Approved by:" in three
 bordered columns), and flattening that to tab-separated text loses
@@ -98,9 +98,9 @@ const HeaderFooterTableSchema = z
 not a table; the schema rejects that fabricated shape rather than
 accepting it and pushing the problem downstream to the generator.
 
-### 3. Images are excluded from table cells structurally, not by a second field schema
+### 3. Images are excluded from table cells at render time, not by a second field schema
 
-#309's scope explicitly keeps "image/table intersections... out unless
+\#309's scope explicitly keeps "image/table intersections... out unless
 already handled by the image/logo slice" (#308). Rather than defining
 a second, image-less field schema for table-cell content — which would
 duplicate `HeaderFooterFieldSchema` and immediately drift from it —
