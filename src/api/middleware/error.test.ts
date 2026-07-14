@@ -38,4 +38,17 @@ describe('errorHandler middleware', () => {
     expect(status).toHaveBeenCalledWith(400);
     expect(json).toHaveBeenCalledWith({ success: false, error: err.message });
   });
+
+  it('returns 413 with a non-leaky message for body-parser payload-too-large errors', () => {
+    const { res, status, json } = makeRes();
+    const err = Object.assign(new Error('request entity too large'), {
+      status: 413,
+      type: 'entity.too.large',
+      limit: 102400,
+      length: 204800,
+    });
+    errorHandler(err, {} as Request, res, mockNext);
+    expect(status).toHaveBeenCalledWith(413);
+    expect(json).toHaveBeenCalledWith({ success: false, error: 'payload too large' });
+  });
 });
