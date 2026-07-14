@@ -160,7 +160,22 @@ beforeAll(async () => {
         left: { content: [{ kind: 'clientName' }] },
         right: { content: [{ kind: 'projectName' }] },
       },
-      footer: { right: { content: [{ kind: 'pageNumber' }] } },
+      footer: {
+        right: { content: [{ kind: 'pageNumber' }] },
+        // #309 (ADR-071): a footer.table alongside the existing right-cell
+        // paragraph, so this suite's REST/MCP parity coverage extends past
+        // #304's paragraph-only fields to the table capability #309 adds.
+        table: {
+          rows: [
+            {
+              cells: [
+                { content: [{ kind: 'literal', text: 'Rev.' }] },
+                { content: [{ kind: 'sectionNumber' }] },
+              ],
+            },
+          ],
+        },
+      },
     }
   );
 });
@@ -211,5 +226,13 @@ describe('REST/MCP header-footer parity (#304 I8)', () => {
     const restFooter = await docxPart(restBuf, 'word/footer1.xml');
     const mcpFooter = await docxPart(mcpBuf, 'word/footer1.xml');
     expect(mcpFooter).toBe(restFooter);
+
+    // #309 (ADR-071): the footer.table configured in beforeAll must reach
+    // both entry points identically — a real <w:tbl>, carrying both the
+    // literal cell and the resolved sectionNumber field cell, not just an
+    // empty/paragraph-only footer part.
+    expect(restFooter).toContain('<w:tbl>');
+    expect(restFooter).toContain('Rev.');
+    expect(restFooter).toContain('09 91 27');
   });
 });
