@@ -112,22 +112,17 @@ describe('onboarding job lifecycle (O-8)', () => {
   });
 });
 
+// These round-trip through the REAL onboarding job store (createOnboardingJob /
+// updateOnboardingJob / getOnboardingJob), not just the local baseReport()
+// fixture builder — updateOnboardingJob's `...update.result` spread is the
+// production pass-through under test here (it must not clone/serialize the
+// report), distinct from processOnboardingJob's `tree.headerFooter ?? null`
+// null-collapse, which is covered against real production code in
+// onboarding.test.ts's 'processOnboardingJob — report.headerFooter (#307)'.
 describe('OnboardingReport.headerFooter (#307)', () => {
-  it('is present and null when the source tree had no header/footer composition', () => {
-    const report = baseReport(null);
-    expect(report).toHaveProperty('headerFooter');
-    expect(report.headerFooter).toBeNull();
-  });
-
-  it('round-trips a header/footer composition unchanged (pure pass-through)', () => {
-    const composition: HeaderFooterComposition = {
-      pageNumbering: { mode: 'continuous' },
-    };
-    const report = baseReport(composition);
-    expect(report.headerFooter).toBe(composition);
-  });
-
-  it('every OnboardingReport literal supplies headerFooter as a required key', () => {
+  function storeReport(
+    headerFooter: OnboardingReport['headerFooter']
+  ): OnboardingReport | undefined {
     const jobId = createOnboardingJob();
     updateOnboardingJob(jobId, {
       status: 'complete',
@@ -139,10 +134,23 @@ describe('OnboardingReport.headerFooter (#307)', () => {
         title: 'T',
         libraryId: 'lib1',
         templateId: null,
-        report: baseReport(null),
+        report: baseReport(headerFooter),
       },
     });
-    const done = getOnboardingJob(jobId);
-    expect(done?.result?.report).toHaveProperty('headerFooter');
+    return getOnboardingJob(jobId)?.result?.report;
+  }
+
+  it('is present and null when the source tree had no header/footer composition', () => {
+    const report = storeReport(null);
+    expect(report).toHaveProperty('headerFooter');
+    expect(report?.headerFooter).toBeNull();
+  });
+
+  it('round-trips a header/footer composition through the job store unchanged (pure pass-through)', () => {
+    const composition: HeaderFooterComposition = {
+      pageNumbering: { mode: 'continuous' },
+    };
+    const report = storeReport(composition);
+    expect(report?.headerFooter).toBe(composition);
   });
 });
