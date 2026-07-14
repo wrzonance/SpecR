@@ -6318,7 +6318,8 @@ components:
 
     OnboardingReport:
       type: object
-      required: [styleDerivation, styleSourceNeeded, editability, hierarchy, parseWarnings]
+      required:
+        [styleDerivation, styleSourceNeeded, headerFooter, editability, hierarchy, parseWarnings]
       properties:
         styleDerivation:
           oneOf:
@@ -6328,6 +6329,15 @@ components:
         styleSourceNeeded:
           type: boolean
           description: True when no style template was derived (non-DOCX) — assign via O-12.
+        headerFooter:
+          oneOf:
+            - $ref: '#/components/schemas/HeaderFooterComposition'
+            - type: 'null'
+          description: >
+            Header/footer composition captured at parse time (ADR-040, #306);
+            null when the source had none. Review draft only — not persisted
+            here; save it (as-is or edited) via `PUT .../header-footer`
+            (#208/#480).
         editability:
           $ref: '#/components/schemas/EditabilitySummary'
         hierarchy:

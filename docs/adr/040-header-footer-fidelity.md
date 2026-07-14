@@ -129,6 +129,46 @@ no unambiguous package/revision without a verified schema path, so
 `HeaderFooterFieldSource` declares those fields for shape parity but they
 resolve `undefined` here.
 
+### Update (#307)
+
+Onboarding surfaces the header/footer captured during import as a **read-only,
+job-TTL-scoped review draft** — never a new persisted row. `OnboardingReport`
+(`src/lib/jobs.ts`) gains `headerFooter: HeaderFooterComposition | null`, a
+pure pass-through of `SpecTree.headerFooter` (`tree.headerFooter ?? null`),
+null-collapsed to match the existing `styleDerivation` sibling field's
+convention. `processOnboardingJob` (`src/api/onboarding.ts`) is the only
+producer; `GET /libraries/import/jobs/{jobId}` is the only place it is read.
+No migration, no new table/column, no new endpoint: `header_footer_configs`
+has no FK to `specs`, and the field disappears with the job record once its
+TTL elapses.
+
+Accept/tweak/assign reuses the #480 scope routes **verbatim** — the draft is
+not a new write path, it is read access to an existing one. A reviewer PUTs
+`report.headerFooter` (as-is or edited) to whichever of
+`PUT /libraries/{id}/header-footer`, `PUT /projects/{id}/header-footer`,
+`PUT /packages/{id}/header-footer`, or `PUT /revisions/{id}/header-footer`
+matches the intended scope (`src/api/header-footer.ts`); the #304 resolver and
+generator path then pick it up unchanged on the next render — this is the
+"re-render uses the edited profile" acceptance criterion, already wired.
+
+**Rejected: a dedicated accept/save endpoint.** A bespoke
+`POST /libraries/import/jobs/{jobId}/header-footer/accept`-style route would
+duplicate the validation, scope resolution, and persistence the four existing
+scope routes already provide, for no behavioral gain — the draft *is* a
+`HeaderFooterComposition`, and the scope routes are already full-overwrite
+upserts. Adding a second write path for the same shape would fork validation
+and drift from the #480 contract instead of composing with it.
+
+`openapi.yaml`'s `OnboardingReport` component mirrors `styleDerivation`'s
+`oneOf: [$ref HeaderFooterComposition, type: 'null']` + `required` pattern
+verbatim (not the `allOf` pattern used for `SpecTree.headerFooter` on a
+different schema) — pinned by a static contract test
+(`src/api/onboarding-header-footer-openapi.test.ts`). MCP is unaffected: both
+touched REST routes (`POST /libraries/{id}/import`,
+`GET /libraries/import/jobs/{jobId}`) are already `MCP_UNEXPOSED`
+(`src/mcp/contract-map.ts`), and a response-field addition does not change
+that classification.
+
 ### Update (#481)
 
 The follow-up deferred above shipped: both `generateManualHandler` and
