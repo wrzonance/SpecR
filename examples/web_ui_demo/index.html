@@ -265,6 +265,53 @@
               <div class="hf-resolution-panel" id="project-header-footer-resolution"></div>
             </div>
           </section>
+          <!-- Design-package-scope header/footer profile (ADR-040's client ->
+               project -> package -> revision precedence chain, #481). The v1
+               demo has no package picker, so the scope is reached through a
+               plain UUID text input; header-footer-package-revision.js's
+               initPackageRevisionHeaderFooter reads it via
+               getSelectedPackageId and repaints the editor + resolution
+               mounts below on every change. CRUD-only — no Download DOCX,
+               since no POST /packages/:id/generate route exists. -->
+          <section class="settings-panel hf-settings-panel" id="package-header-footer-panel">
+            <div class="settings-panel-head">
+              <h3>DESIGN PACKAGE HEADER / FOOTER</h3>
+            </div>
+            <div class="settings-form">
+              <label>
+                <span>PACKAGE ID</span>
+                <input id="package-id-input" type="text" autocomplete="off" placeholder="design package UUID" />
+              </label>
+            </div>
+            <div class="hf-settings-shell">
+              <div class="hf-panel-body" id="package-header-footer-editor"></div>
+              <div class="hf-resolution-panel" id="package-header-footer-resolution"></div>
+            </div>
+          </section>
+          <!-- Revision-scope header/footer profile (#481) — same plain-UUID
+               entry point as the package panel above, via
+               getSelectedRevisionId, plus a Download DOCX action (a revision
+               DOES have a generate route). #revision-header-footer-download
+               is a NEW mount point: unlike the project-scope manual-download
+               button, which reuses #editor-inspector (header-footer.js's
+               mountInspector wrapper — see that module's TASK 7 doc note),
+               the revision panel has no existing container to append into. -->
+          <section class="settings-panel hf-settings-panel" id="revision-header-footer-panel">
+            <div class="settings-panel-head">
+              <h3>REVISION HEADER / FOOTER</h3>
+            </div>
+            <div class="settings-form">
+              <label>
+                <span>REVISION ID</span>
+                <input id="revision-id-input" type="text" autocomplete="off" placeholder="revision UUID" />
+              </label>
+            </div>
+            <div class="hf-settings-shell">
+              <div class="hf-panel-body" id="revision-header-footer-editor"></div>
+              <div class="hf-resolution-panel" id="revision-header-footer-resolution"></div>
+            </div>
+            <div class="hf-revision-download" id="revision-header-footer-download"></div>
+          </section>
         </div>
       </div>
     </section>

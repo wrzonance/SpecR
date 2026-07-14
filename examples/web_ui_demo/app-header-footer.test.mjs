@@ -129,3 +129,112 @@ test('headerFooterPanel is constructed before editorPanel — mountInspector mus
   assert.ok(hfIndex > -1 && editorIndex > -1);
   assert.ok(hfIndex < editorIndex, 'initHeaderFooter must run before initEditor reads headerFooterPanel.mountInspector');
 });
+
+// ── Package/revision header-footer wiring (#481, task 8/9) ─────────────────
+//
+// header-footer-package-revision.js's own test suite pins the module's
+// internal behavior (guard independence, CRUD-only package panel, Download
+// DOCX). What is NOT covered anywhere else, and is the real regression risk
+// of THIS task, is app.js's wiring contract: the ctx object it hands to
+// initPackageRevisionHeaderFooter, and the UUID-input change listeners that
+// keep selectedPackageId/selectedRevisionId in sync and trigger a repaint.
+
+test('imports initPackageRevisionHeaderFooter from header-footer-package-revision.js', () => {
+  assert.match(
+    source,
+    /import\s*\{\s*initPackageRevisionHeaderFooter\s*\}\s*from\s*'\.\/header-footer-package-revision\.js';/
+  );
+});
+
+function callSite(marker) {
+  const start = source.indexOf(marker);
+  assert.ok(start > -1, `expected the ${marker} call site`);
+  const end = source.indexOf('});', start);
+  assert.ok(end > -1, `expected a terminating "});" for ${marker}`);
+  return source.slice(start, end);
+}
+
+test('initPackageRevisionHeaderFooter is wired with independent package/revision id getters', () => {
+  const call = callSite('packageRevisionHeaderFooterPanel = initPackageRevisionHeaderFooter({');
+  assert.match(call, /getSelectedPackageId:\s*\(\)\s*=>\s*selectedPackageId,/);
+  assert.match(call, /getSelectedRevisionId:\s*\(\)\s*=>\s*selectedRevisionId,/);
+});
+
+test('initPackageRevisionHeaderFooter is wired with all five documented mount points', () => {
+  const call = callSite('packageRevisionHeaderFooterPanel = initPackageRevisionHeaderFooter({');
+  assert.match(
+    call,
+    /packageEditorContainer:\s*document\.getElementById\('package-header-footer-editor'\),/
+  );
+  assert.match(
+    call,
+    /packageResolutionContainer:\s*document\.getElementById\('package-header-footer-resolution'\),/
+  );
+  assert.match(
+    call,
+    /revisionEditorContainer:\s*document\.getElementById\('revision-header-footer-editor'\),/
+  );
+  assert.match(
+    call,
+    /revisionResolutionContainer:\s*document\.getElementById\('revision-header-footer-resolution'\),/
+  );
+  assert.match(
+    call,
+    /revisionDownloadContainer:\s*document\.getElementById\('revision-header-footer-download'\),/
+  );
+});
+
+test('package-id-input change listener normalizes with normalizeUuidInput and refreshes only the package panel', () => {
+  const body = functionBody('initPackageRevisionIdInputs');
+  const packageBlock = body.slice(
+    body.indexOf("getElementById('package-id-input')"),
+    body.indexOf("getElementById('revision-id-input')")
+  );
+  assert.match(
+    packageBlock,
+    /selectedPackageId\s*=\s*normalizeUuidInput\(packageInput\.value\);/
+  );
+  assert.match(
+    packageBlock,
+    /void packageRevisionHeaderFooterPanel\?\.refreshPackagePanel\(\);/
+  );
+  assert.doesNotMatch(
+    packageBlock,
+    /refreshRevisionPanel/,
+    'the package-id-input listener must never trigger a revision-scope refresh'
+  );
+});
+
+test('revision-id-input change listener normalizes with normalizeUuidInput and refreshes only the revision panel', () => {
+  const body = functionBody('initPackageRevisionIdInputs');
+  const revisionBlock = body.slice(body.indexOf("getElementById('revision-id-input')"));
+  assert.match(
+    revisionBlock,
+    /selectedRevisionId\s*=\s*normalizeUuidInput\(revisionInput\.value\);/
+  );
+  assert.match(
+    revisionBlock,
+    /void packageRevisionHeaderFooterPanel\?\.refreshRevisionPanel\(\);/
+  );
+  assert.doesNotMatch(
+    revisionBlock,
+    /refreshPackagePanel/,
+    'the revision-id-input listener must never trigger a package-scope refresh'
+  );
+});
+
+test('normalizeUuidInput trims and coerces an empty string to null — never a bare \'\'', () => {
+  const body = functionBody('normalizeUuidInput');
+  assert.match(body, /const trimmed = value\.trim\(\);/);
+  assert.match(body, /return trimmed === '' \? null : trimmed;/);
+});
+
+test('initPackageRevisionIdInputs is called during boot, alongside the other init*() wiring calls', () => {
+  const body = functionBody('boot');
+  assert.match(body, /initPackageRevisionIdInputs\(\);/);
+});
+
+test('selectedPackageId/selectedRevisionId start as null (nothing entered on load)', () => {
+  assert.match(source, /let selectedPackageId = null;/);
+  assert.match(source, /let selectedRevisionId = null;/);
+});
