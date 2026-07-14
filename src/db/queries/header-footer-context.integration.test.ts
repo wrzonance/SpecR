@@ -2,11 +2,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import { createLibrary } from './libraries.js';
+import { createPackage } from './packages.js';
+import { createPackageRevision } from './revisions.js';
 import { upsertHeaderFooterConfig } from './header-footer.js';
 import {
   resolveSpecHeaderFooterContext,
   resolveSpecGenerationContext,
+  resolveProjectManualHeaderFooterContext,
+  resolveRevisionHeaderFooterContext,
 } from './header-footer-context.js';
+import type { RevisionHeaderFooterFieldSource } from './header-footer-context.js';
 
 const TEST_PREFIX = 'hfctx-test-';
 
@@ -233,5 +238,144 @@ describe('resolveSpecGenerationContext', () => {
     expect(context.headerFooter?.composition).toEqual({
       footer: { right: { content: [{ kind: 'pageNumber' }] } },
     });
+  });
+});
+
+async function insertRevisionScope(
+  projectSuffix: string
+): Promise<{ projectId: string; packageId: string; revisionId: string }> {
+  const projectId = await insertProject(`${TEST_PREFIX}${projectSuffix}`);
+  const pkg = await createPackage(projectId, `${TEST_PREFIX}${projectSuffix}-pkg`, pool);
+  const revision = await createPackageRevision(
+    pkg.packageId,
+    { label: `${TEST_PREFIX}${projectSuffix}-rev` },
+    pool
+  );
+  return { projectId, packageId: pkg.packageId, revisionId: revision.revisionId };
+}
+
+const FIELD_SOURCE: RevisionHeaderFooterFieldSource = {
+  projectName: 'Caller-Supplied Project',
+  packageName: 'Caller-Supplied Package',
+  revisionName: 'Caller-Supplied Revision',
+  revisionLabel: 'Caller-Supplied Label',
+};
+
+describe('resolveProjectManualHeaderFooterContext', () => {
+  it('I1: project with zero configured header/footer layers resolves to null, not an empty composition', async () => {
+    const projectId = await insertProject(`${TEST_PREFIX}pm1`);
+    await expect(
+      resolveProjectManualHeaderFooterContext(projectId, `${TEST_PREFIX}pm1`)
+    ).resolves.toBeNull();
+  });
+
+  it('resolves composition + projectName under a configured project layer', async () => {
+    const projectId = await insertProject(`${TEST_PREFIX}pm2`);
+    await upsertHeaderFooterConfig(
+      { projectId },
+      { footer: { right: { content: [{ kind: 'pageNumber' }] } } }
+    );
+
+    const context = await resolveProjectManualHeaderFooterContext(projectId, `${TEST_PREFIX}pm2`);
+
+    expect(context?.composition).toEqual({
+      footer: { right: { content: [{ kind: 'pageNumber' }] } },
+    });
+    expect(context?.fieldValues).toEqual({ projectName: `${TEST_PREFIX}pm2` });
+  });
+
+  it('I3: a genuine database failure propagates as DatabaseError, not swallowed', async () => {
+    await expect(
+      resolveProjectManualHeaderFooterContext('not-a-valid-uuid', 'irrelevant')
+    ).rejects.toBeInstanceOf(DatabaseError);
+  });
+});
+
+describe('resolveRevisionHeaderFooterContext', () => {
+  it('I1: revision with zero configured header/footer layers anywhere in its chain resolves to null', async () => {
+    const { revisionId } = await insertRevisionScope('rv1');
+    await expect(resolveRevisionHeaderFooterContext(revisionId, FIELD_SOURCE)).resolves.toBeNull();
+  });
+
+  it('a revision that does not exist resolves to null rather than throwing', async () => {
+    await expect(
+      resolveRevisionHeaderFooterContext('00000000-0000-0000-0000-000000000000', FIELD_SOURCE)
+    ).resolves.toBeNull();
+  });
+
+  // fieldSource values are threaded verbatim from the caller's own
+  // RevisionManualData snapshot, never re-derived from a second DB read —
+  // deliberately mismatched from the real project/package/revision names so
+  // an internal re-query would be caught by this assertion.
+  it('fieldSource values are threaded verbatim, never re-queried from the DB', async () => {
+    const { revisionId } = await insertRevisionScope('rv2');
+    await upsertHeaderFooterConfig(
+      { revisionId },
+      { header: { left: { content: [{ kind: 'revisionLabel' }] } } }
+    );
+
+    const context = await resolveRevisionHeaderFooterContext(revisionId, FIELD_SOURCE);
+
+    expect(context?.fieldValues).toEqual(FIELD_SOURCE);
+  });
+
+  it('resolves clientName from the client tier alongside the threaded fieldSource', async () => {
+    const company = await createLibrary({ tier: 'company', name: `${TEST_PREFIX}rv-company` });
+    const client = await createLibrary({
+      tier: 'client',
+      name: `${TEST_PREFIX}rv-client`,
+      parentLibraryId: company.id,
+    });
+    const { projectId, revisionId } = await insertRevisionScope('rv3');
+    await pool.query(
+      `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
+      [projectId, client.id]
+    );
+    await upsertHeaderFooterConfig(
+      { revisionId },
+      { header: { center: { content: [{ kind: 'clientName' }] } } }
+    );
+
+    const context = await resolveRevisionHeaderFooterContext(revisionId, FIELD_SOURCE);
+
+    expect(context?.fieldValues).toEqual({
+      ...FIELD_SOURCE,
+      clientName: `${TEST_PREFIX}rv-client`,
+    });
+  });
+
+  // Cascade precedence: resolveHeaderFooterConfig merges client < project <
+  // package < revision, so a revision-level layer wins over a project-level
+  // layer for the same key while an unconflicting project-level key survives.
+  it('cascade precedence: revision layer overrides project layer for the same key, project-only keys survive', async () => {
+    const { projectId, revisionId } = await insertRevisionScope('rv4');
+    await upsertHeaderFooterConfig(
+      { projectId },
+      {
+        header: {
+          left: { content: [{ kind: 'pageNumber' }] },
+          right: { content: [{ kind: 'projectName' }] },
+        },
+      }
+    );
+    await upsertHeaderFooterConfig(
+      { revisionId },
+      { header: { left: { content: [{ kind: 'literal', text: 'Revision Wins' }] } } }
+    );
+
+    const context = await resolveRevisionHeaderFooterContext(revisionId, FIELD_SOURCE);
+
+    expect(context?.composition).toEqual({
+      header: {
+        left: { content: [{ kind: 'literal', text: 'Revision Wins' }] },
+        right: { content: [{ kind: 'projectName' }] },
+      },
+    });
+  });
+
+  it('I3: a genuine database failure propagates as DatabaseError, not swallowed', async () => {
+    await expect(
+      resolveRevisionHeaderFooterContext('not-a-valid-uuid', FIELD_SOURCE)
+    ).rejects.toBeInstanceOf(DatabaseError);
   });
 });

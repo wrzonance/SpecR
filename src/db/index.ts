@@ -308,14 +308,22 @@ export {
 // and the effective header/footer config from ONE ownership snapshot (or null
 // fields when orphaned/ambiguous/unconfigured). `resolveSpecHeaderFooterContext`
 // is the header/footer-only view for callers without a format fallback.
+// `resolveProjectManualHeaderFooterContext`/`resolveRevisionHeaderFooterContext`
+// (#481) are the whole-manual counterparts: project- and revision-scoped
+// header/footer resolution for the /projects/{id}/generate and
+// /revisions/{id}/generate DOCX builds.
 export {
   resolveSpecGenerationContext,
   resolveSpecHeaderFooterContext,
+  resolveProjectManualHeaderFooterContext,
+  resolveRevisionHeaderFooterContext,
 } from './queries/header-footer-context.js';
 export type {
+  ProjectIdentity,
   HeaderFooterFieldSource,
   HeaderFooterGenerationContext,
   SpecGenerationContext,
+  RevisionHeaderFooterFieldSource,
 } from './queries/header-footer-context.js';
 export {
   listRequiredSections,
