@@ -499,12 +499,26 @@ export function initHeaderFooterEditor(ctx) {
   }
 
   async function onSave() {
+    // Claim the latest-operation token so a refresh() or invalidate() during the
+    // in-flight PUT fences this completion — without it, a save that resolves
+    // after this editor was discarded (scope switched away) or after a newer
+    // refresh() would repaint the shared container and toast for a scope it no
+    // longer owns. `pending` is the exact draft PUT (saveDraft reads its
+    // composition synchronously, so the payload is already snapshotted); its
+    // reference is kept only to detect an edit made WHILE the PUT was in flight.
+    const token = requestGuard.next();
+    const pending = draft;
     try {
-      draft = await saveDraft(ctx, draft);
+      const saved = await saveDraft(ctx, pending);
+      if (!requestGuard.isCurrent(token)) return; // superseded / instance discarded
       hasPersistedConfig = true;
       mode = 'editing';
+      // Keep an edit made during the PUT; only adopt the server's round-tripped
+      // draft when nothing changed under us.
+      if (draft === pending) draft = saved;
       ctx.toast?.('Header/footer configuration saved');
     } catch (err) {
+      if (!requestGuard.isCurrent(token)) return;
       ctx.toast?.(`Could not save header/footer configuration: ${err.message}`, 'err');
     }
     render();
@@ -518,13 +532,19 @@ export function initHeaderFooterEditor(ctx) {
       danger: true,
     });
     if (!ok) return;
+    // Same fence as onSave: a delete resolving after this editor is discarded
+    // or a newer refresh() started must not repaint/toast a container it no
+    // longer owns.
+    const token = requestGuard.next();
     let outcome;
     try {
       outcome = await deleteDraft(ctx);
     } catch (err) {
+      if (!requestGuard.isCurrent(token)) return;
       ctx.toast?.(`Could not delete header/footer configuration: ${err.message}`, 'err');
       return;
     }
+    if (!requestGuard.isCurrent(token)) return; // superseded / instance discarded
     // deleteDraft() already fired ctx.onSaved?.() — e.g. header-footer.js's
     // project-scope wiring refreshes the sibling Effective Resolution panel
     // from it — before this repaint, so the two never disagree.
