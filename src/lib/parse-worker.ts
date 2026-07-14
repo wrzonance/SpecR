@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { parse } from '../parser/index.js';
-import { ParseWarningSchema, RetainedTableSchema, SecRefSchema } from '../ast/index.js';
+import {
+  ParseWarningSchema,
+  RetainedTableSchema,
+  SecRefSchema,
+  HeaderFooterCompositionSchema,
+} from '../ast/index.js';
 import type { SpecTree, SecRef, NumberingProfile } from '../ast/index.js';
 import { SectionNumberSchema } from './section-number.js';
 import { config } from './env.js';
@@ -37,6 +42,10 @@ export const workerOutputSchema = z.object({
     // default 'strip unknown keys' behavior silently drops them at this
     // cross-thread boundary before they ever reach the API caller or DB.
     hiddenTables: z.array(RetainedTableSchema).optional(),
+    // #306: captured DOCX header/footer composition (ADR-068) — same
+    // cross-thread stripping risk as hiddenTables above; must be declared
+    // here or every captureHeaderFooter() result vanishes at this boundary.
+    headerFooter: HeaderFooterCompositionSchema.optional(),
   }),
   refs: z.array(SecRefSchema).default([]),
   capabilities: z.array(z.string()).optional(),
