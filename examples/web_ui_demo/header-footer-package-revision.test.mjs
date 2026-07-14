@@ -470,3 +470,38 @@ test('onSaved (package): re-fetches and repaints ONLY the package resolution pan
     'onSaved must re-fetch the package resolution — and never touch the revision one'
   );
 });
+
+test('onSaved (revision): re-fetches and repaints ONLY the revision resolution panel, never the package one', async () => {
+  const resolvedCalls = [];
+  let capturedRevisionCtx = null;
+  const deps = baseDeps({
+    // Only refreshRevisionPanel() runs in this test, so createEditor is only
+    // ever invoked once, for the revision scope.
+    createEditor: (editorCtx) => {
+      capturedRevisionCtx = editorCtx;
+      return { refresh: async () => {}, invalidate: () => {} };
+    },
+    getRevisionHeaderFooterResolved: async () => {
+      resolvedCalls.push('revision');
+      return { layers: [{ scope: { kind: 'revision', revisionId: 'rev-1' }, config: {} }] };
+    },
+    getPackageHeaderFooterResolved: async () => {
+      resolvedCalls.push('package');
+      return { layers: [] };
+    },
+  });
+  const ctx = baseCtx({ getSelectedRevisionId: () => 'rev-1' });
+  const hf = initPackageRevisionHeaderFooter(ctx, deps);
+
+  await hf.refreshRevisionPanel();
+  assert.deepEqual(resolvedCalls, ['revision']);
+  assert.equal(typeof capturedRevisionCtx.onSaved, 'function');
+
+  await capturedRevisionCtx.onSaved();
+
+  assert.deepEqual(
+    resolvedCalls,
+    ['revision', 'revision'],
+    'onSaved must re-fetch the revision resolution — and never touch the package one'
+  );
+});
