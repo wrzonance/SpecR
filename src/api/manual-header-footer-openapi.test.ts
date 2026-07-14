@@ -11,6 +11,17 @@
 // foundation work," which is now false. This file pins the corrected prose
 // directly against the dereferenced spec so a future doc edit that
 // re-introduces either gap fails here first, not in a spec-editor's hands.
+//
+// The manual endpoint's resolution chain is narrower than the revision
+// endpoint's: `resolveProjectManualHeaderFooterContext` calls
+// `buildHeaderFooterFromProject`, which resolves `resolveHeaderFooterConfig`
+// with only `{ projectId }` — `contextForProject`
+// (src/db/queries/header-footer.ts) hard-codes `package_id`/`revision_id` to
+// NULL, so `selectResolutionLayers`'s package/revision OR-clauses can never
+// match. This route can only ever consult the client → project layers (ADR-040
+// "Update (#481)"). The description must say so, not claim the full
+// client → project → package → revision chain the revision endpoint actually
+// resolves.
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { loadSpec, type OpenApiDoc } from '../test-utils/contract/validate-response.js';
@@ -30,6 +41,18 @@ describe('openapi.yaml — manual/revision header-footer rendering (#481)', () =
     expect(description).toMatch(/header\/footer/i);
     expect(description).toMatch(/resolved and rendered|rendered into every section/i);
     expect(description).not.toMatch(/reserved for the header\/footer foundation work/i);
+  });
+
+  it('/projects/{id}/generate accurately scopes its chain to client → project — never claims package/revision layers apply', async () => {
+    const doc = await loadSpec();
+    const description = descriptionOf(doc, '/projects/{id}/generate', 'post');
+    // resolveProjectManualHeaderFooterContext → buildHeaderFooterFromProject →
+    // resolveHeaderFooterConfig({ projectId }) → contextForProject hard-codes
+    // package_id/revision_id to NULL: this route is structurally incapable of
+    // consulting package- or revision-scoped header_footer_configs layers.
+    expect(description).toMatch(/client\s*(→|->)\s*project\b/i);
+    expect(description).not.toMatch(/client\s*(→|->)\s*project\s*(→|->)\s*package/i);
+    expect(description).not.toMatch(/package\s*(→|->)\s*revision/i);
   });
 
   it('/revisions/{id}/generate documents header/footer rendering as in scope, keyed on the target revision', async () => {

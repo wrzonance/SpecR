@@ -579,9 +579,22 @@ describe('generateManualHandler — header/footer resolution (#481)', () => {
       res
     );
 
+    // Assert generation and the response actually happened, not just that
+    // headerFooter was omitted — otherwise a regression that silently
+    // returns before calling generateManual (e.g. an early return added
+    // above the resolveProjectManualHeaderFooterContext call) would pass
+    // this test vacuously: `mock.calls[0]` would be `undefined`, `call?.[3]`
+    // would fall through to `{}`, and `not.toHaveProperty('headerFooter')`
+    // would still be satisfied.
     expect(res.status).not.toHaveBeenCalled();
+    expect(generateManual).toHaveBeenCalledTimes(1);
     const call = vi.mocked(generateManual).mock.calls[0];
     expect(call?.[3] ?? {}).not.toHaveProperty('headerFooter');
+    expect(res.send).toHaveBeenCalledWith(Buffer.from('manual'));
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      expect.stringContaining('.docx')
+    );
   });
 });
 
@@ -682,9 +695,19 @@ describe('generateRevisionHandler — header/footer resolution (#481)', () => {
       res
     );
 
+    // Same "actually ran" guard as generateManualHandler's unconfigured-chain
+    // test above: assert generation and the response happened, not merely
+    // that headerFooter was absent, so a silent early-return regression
+    // can't pass vacuously.
     expect(res.status).not.toHaveBeenCalled();
+    expect(generateManual).toHaveBeenCalledTimes(1);
     const call = vi.mocked(generateManual).mock.calls[0];
     expect(call?.[3] ?? {}).not.toHaveProperty('headerFooter');
+    expect(res.send).toHaveBeenCalledWith(Buffer.from('manual'));
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      expect.stringContaining('.docx')
+    );
   });
 
   // Regression: addendum-targets-revision-not-base. If this ever regressed to
@@ -692,6 +715,8 @@ describe('generateRevisionHandler — header/footer resolution (#481)', () => {
   // package/revision's header/footer (or the base's, mid-comparison) onto the
   // changed revision's own trees.
   it('addendum revision resolves header/footer keyed on its own revisionId, never body.baseRevisionId', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T12:00:00Z'));
     const {
       getPackageRevisionAddendumManualData,
       getTemplateByName,
@@ -711,6 +736,14 @@ describe('generateRevisionHandler — header/footer resolution (#481)', () => {
     };
     vi.mocked(getPackageRevisionAddendumManualData).mockResolvedValueOnce(addendumData);
     vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
+    // Distinct field values from the issued-revision test above, so a
+    // handler that accidentally reused the issued-revision fixture's
+    // composition/fields (rather than this addendum's own resolved context)
+    // would be caught by the options.headerFooter assertion below.
+    vi.mocked(resolveRevisionHeaderFooterContext).mockResolvedValueOnce({
+      composition: COMPOSITION,
+      fieldValues: REVISION_FIELD_SOURCE,
+    });
     vi.mocked(generateManual).mockResolvedValueOnce(Buffer.from('manual'));
     const { generateRevisionHandler } = await import('./generate.js');
 
@@ -727,15 +760,35 @@ describe('generateRevisionHandler — header/footer resolution (#481)', () => {
       BASE_REVISION_ID,
       expect.anything()
     );
+    // Exact field-source object, keyed on the addendum's OWN revision data
+    // (data.project.name/data.designPackage.name/data.revision.displayName/
+    // data.revision.label from buildRevisionManualData()'s defaults) — not
+    // `expect.anything()`, so a regression that supplies a wrong or partial
+    // packageName/revisionName/revisionLabel/projectName on the addendum
+    // branch specifically fails here.
     expect(resolveRevisionHeaderFooterContext).toHaveBeenCalledWith(
       REVISION_ID,
-      expect.anything(),
+      REVISION_FIELD_SOURCE,
       expect.anything()
     );
     expect(resolveRevisionHeaderFooterContext).not.toHaveBeenCalledWith(
       BASE_REVISION_ID,
       expect.anything(),
       expect.anything()
+    );
+    // generateManual's resulting options.headerFooter, not just the resolver
+    // call's arguments — pins that the resolved composition/fields actually
+    // reach the renderer on the addendum branch.
+    expect(generateManual).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({
+        headerFooter: {
+          composition: COMPOSITION,
+          current: { date: '2026-07-14', ...REVISION_FIELD_SOURCE },
+        },
+      })
     );
   });
 });

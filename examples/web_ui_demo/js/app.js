@@ -55,6 +55,7 @@ import { initPackageRevisionHeaderFooter } from './header-footer-package-revisio
 import { openConfirm, openChoice, openPicker } from './modal.js';
 import { mergeSourcesWithScope, moveSource, resolutionNotice } from './source-order.mjs';
 import { classifyRemovalConflict } from './spec-removal.mjs';
+import { normalizeUuidInput } from './uuid-input.mjs';
 
 const specs = new Map(); // specId -> { tree, references, warnings?, capabilities? }
 const ACTIVE_PROJECT_KEY = 'specr-active-project';
@@ -2528,12 +2529,8 @@ function initMapActions() {
 // The v1 demo has no package/revision picker UI, so these two scopes are
 // reached through plain UUID text inputs in Project Settings — normalized to
 // null for "nothing entered" (never a bare ''), mirroring header-footer.js's
-// getSelectedLibraryTier contract.
-
-function normalizeUuidInput(value) {
-  const trimmed = value.trim();
-  return trimmed === '' ? null : trimmed;
-}
+// getSelectedLibraryTier contract. normalizeUuidInput itself lives in
+// uuid-input.mjs (pure, no DOM) so it gets a real runtime test.
 
 function initPackageRevisionIdInputs() {
   const packageInput = document.getElementById('package-id-input');

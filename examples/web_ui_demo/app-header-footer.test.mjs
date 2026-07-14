@@ -30,6 +30,15 @@
 //      to route through headerFooterPanel (itself internally gated, see
 //      header-footer.test.mjs's own invariant 3), never a bare
 //      getClientHeaderFooter-style call app.js would have to gate itself.
+//
+// Where behavior is genuinely DOM-free — normalizeUuidInput — it lives in its
+// own pure module (js/uuid-input.mjs) with a real runtime test
+// (uuid-input.test.mjs) instead of a source-text regex here; this file only
+// pins that app.js still imports it. The remaining #481 tests below
+// (initPackageRevisionHeaderFooter's ctx getters, the id-input change
+// listeners) stay source-anchored because they close over app.js's own
+// module-scope DOM elements and state, which this repo's jsdom-free test
+// setup cannot exercise at runtime — see each test's own comment.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -154,6 +163,14 @@ function callSite(marker) {
   return source.slice(start, end);
 }
 
+// Source-text anchored, not runtime — same constraint as the whole file (see
+// header comment above): initPackageRevisionHeaderFooter's ctx getters close
+// over app.js's module-scope `selectedPackageId`/`selectedRevisionId`, which
+// only exist once app.js is loaded in a real `document`. A rename of either
+// variable would need this regex updated even with no behavior change; that
+// is the accepted trade-off, not an oversight (see how normalizeUuidInput was
+// pulled out to its own DOM-free module + real runtime test in
+// uuid-input.test.mjs specifically so it did NOT need this treatment).
 test('initPackageRevisionHeaderFooter is wired with independent package/revision id getters', () => {
   const call = callSite('packageRevisionHeaderFooterPanel = initPackageRevisionHeaderFooter({');
   assert.match(call, /getSelectedPackageId:\s*\(\)\s*=>\s*selectedPackageId,/);
@@ -184,6 +201,11 @@ test('initPackageRevisionHeaderFooter is wired with all five documented mount po
   );
 });
 
+// Source-text anchored (see comment on the getters test above): the change
+// listeners themselves are DOM event wiring, closing over module-scope
+// `selectedPackageId`/`packageRevisionHeaderFooterPanel` — only
+// normalizeUuidInput's own logic was extracted for a real runtime test
+// (uuid-input.test.mjs); the call-site wiring around it stays source-anchored.
 test('package-id-input change listener normalizes with normalizeUuidInput and refreshes only the package panel', () => {
   const body = functionBody('initPackageRevisionIdInputs');
   const packageBlock = body.slice(
@@ -223,10 +245,20 @@ test('revision-id-input change listener normalizes with normalizeUuidInput and r
   );
 });
 
-test('normalizeUuidInput trims and coerces an empty string to null — never a bare \'\'', () => {
-  const body = functionBody('normalizeUuidInput');
-  assert.match(body, /const trimmed = value\.trim\(\);/);
-  assert.match(body, /return trimmed === '' \? null : trimmed;/);
+// normalizeUuidInput's own behavior (trim, empty -> null) is pure and DOM-free,
+// so it is exercised with a real runtime test in uuid-input.test.mjs instead
+// of a source-text regex — this only pins that app.js still wires in THAT
+// module's export, not a local reimplementation drifting back in.
+test('imports normalizeUuidInput from uuid-input.mjs', () => {
+  assert.match(
+    source,
+    /import\s*\{\s*normalizeUuidInput\s*\}\s*from\s*'\.\/uuid-input\.mjs';/
+  );
+  assert.doesNotMatch(
+    source,
+    /function normalizeUuidInput\(/,
+    'normalizeUuidInput must not be reimplemented locally now that it lives in uuid-input.mjs'
+  );
 });
 
 test('initPackageRevisionIdInputs is called during boot, alongside the other init*() wiring calls', () => {
