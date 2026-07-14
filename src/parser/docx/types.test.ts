@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NodeTypeSchema, ParseWarningTypeSchema } from '../../ast/schemas.js';
+import { NodeTypeSchema, ParseWarningTypeSchema } from '../../ast/spec-tree-schemas.js';
 import { StyleNodeTypeSchema } from '../../ast/style-schemas.js';
 
 // Boundary invariants for #292's ClassifiedParagraph.suppressed field (Phase 2 of 4:

@@ -4,7 +4,7 @@ import {
   ArticleRoleSchema,
   SecRefSchema,
   SpecNodeEditabilitySchema,
-} from './schemas.js';
+} from './spec-tree-schemas.js';
 import { StyleNodeTypeSchema, StylePropertiesSchema } from './style-schemas.js';
 
 export type NodeType = z.infer<typeof NodeTypeSchema>;

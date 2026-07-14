@@ -1,15 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
-  NodeTypeSchema,
-  SpecNodeMetaSchema,
-  SpecTreeSchema,
   PatchSpecBodySchema,
-  SignalConflictSchema,
-  SourceFactsSchema,
   CreateProjectBodySchema,
   AddSectionToProjectBodySchema,
   CreatePackageBodySchema,
   SetPackageSpecsBodySchema,
+  UpdateParagraphBodySchema,
+} from './schemas.js';
+import {
+  NodeTypeSchema,
+  SpecNodeMetaSchema,
+  SpecTreeSchema,
+  SignalConflictSchema,
+  SourceFactsSchema,
   ConventionRulesSchema,
   EditabilitySchema,
   PatchEditabilityBodySchema,
@@ -18,8 +21,7 @@ import {
   ParseWarningTypeSchema,
   ParseWarningSchema,
   RetainedTableSchema,
-  UpdateParagraphBodySchema,
-} from './schemas.js';
+} from './spec-tree-schemas.js';
 import {
   CreateNumberingProfileBodySchema,
   PatchNumberingProfileBodySchema,
