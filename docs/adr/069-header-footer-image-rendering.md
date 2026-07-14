@@ -175,9 +175,10 @@ well under 10 for all five functions) via `npx eslint` after the split.
 The original task design did not identify `src/lib/decode-base64.ts` as
 a dependency — it predates this feature (added for MCP inline file
 payloads: `parse_document`, `import_template`). The spike found its
-contract — validate well-formed base64 via `BASE64_RE`, reject malformed
-padding, cap decoded size from the *encoded* length before allocating —
-is an exact fit for `imageData`'s decode step, and reusing it is a direct
+contract — validate canonical base64 via `isValidBase64Payload`, reject
+malformed padding, cap decoded size from the *encoded* length before
+allocating — is an exact fit for `imageData`'s decode step, and reusing it
+is a direct
 application of this repo's "reuse before reinventing" house rule.
 `renderImageRun` and `unreadableDataWarning` both call
 `decodeBase64Payload(field.imageData, MAX_IMAGE_BYTES)` rather than

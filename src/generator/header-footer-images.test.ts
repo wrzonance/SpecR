@@ -232,6 +232,31 @@ describe('renderImageRun — EMU to pixel transformation is pure, deterministic,
   );
 });
 
+describe('renderImageRun — altText carries full a11y metadata (name/title/descr) (#308)', () => {
+  it('writes the field altText into wp:docPr name, title, and descr', async () => {
+    const run = renderImageRun({ ...VALID_IMAGE_FIELD, altText: 'ACME logo' });
+    expect(run).toBeDefined();
+    const zip = await renderToZip(run!);
+    const xml = await zip.file('word/document.xml')!.async('string');
+    const docPr = /<wp:docPr[^>]*\/?>/.exec(xml)?.[0] ?? '';
+    expect(docPr).toContain('name="ACME logo"');
+    expect(docPr).toContain('title="ACME logo"');
+    expect(docPr).toContain('descr="ACME logo"');
+  });
+
+  it('leaves the a11y attributes empty when the field carries no altText', async () => {
+    // docx always writes name/title/descr; with no altText they stay empty
+    // strings rather than leaking a stray value.
+    const run = renderImageRun(VALID_IMAGE_FIELD);
+    expect(run).toBeDefined();
+    const zip = await renderToZip(run!);
+    const xml = await zip.file('word/document.xml')!.async('string');
+    const docPr = /<wp:docPr[^>]*\/?>/.exec(xml)?.[0] ?? '';
+    expect(docPr).toContain('title=""');
+    expect(docPr).toContain('descr=""');
+  });
+});
+
 describe('imageFieldWarnings', () => {
   it('returns [] when imageData is absent, regardless of field kind', () => {
     expect(imageFieldWarnings({ kind: 'image' }, 'header.left')).toEqual([]);

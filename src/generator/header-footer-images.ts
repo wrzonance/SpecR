@@ -90,7 +90,7 @@ export function renderImageRun(field: HeaderFooterField): ImageRun | undefined {
   const altText =
     field.altText === undefined
       ? {}
-      : { altText: { name: field.altText, description: field.altText } };
+      : { altText: { name: field.altText, title: field.altText, description: field.altText } };
   return new ImageRun({
     type: docxImageType(sniffed.mediaType),
     data: sniffed.buffer,

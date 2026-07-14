@@ -150,6 +150,27 @@ describe('buildRegionParagraph — presence invariant', () => {
     expect(paragraph).toBeInstanceOf(Paragraph);
   });
 
+  it('is undefined when the only content is an unrenderable image (no empty <w:p/>) (#308)', () => {
+    // A broken image has content per cellHasContent but renders zero runs;
+    // the gate is rendered children, so no empty paragraph is emitted (the
+    // broken image still surfaces via regionImageWarnings).
+    const region: HeaderFooterRegion = { center: brokenImageCell() };
+    expect(buildRegionParagraph(region, undefined, CTX, 'bottom')).toBeUndefined();
+  });
+
+  it('still renders a bordered contentless paragraph for a lone broken image under an enabled rule line', async () => {
+    const region: HeaderFooterRegion = {
+      center: brokenImageCell(),
+      ruleLine: { enabled: true, widthTwips: 8 },
+    };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    expect(paragraph).toBeInstanceOf(Paragraph);
+    if (paragraph === undefined) throw new Error('unreachable');
+    const xml = await renderParagraphsToXml([paragraph]);
+    expect(xml).toContain('<w:pBdr><w:bottom w:val="single" w:sz="3"/></w:pBdr>');
+    expect(xml).not.toContain('<w:t ');
+  });
+
   it('emits exactly one bordered, contentless paragraph when the rule line is enabled but every cell is empty', async () => {
     const region: HeaderFooterRegion = { ruleLine: { enabled: true, widthTwips: 8 } };
     const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');

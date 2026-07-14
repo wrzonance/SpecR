@@ -29,9 +29,9 @@ const FieldPropertiesSchema = z.object({
                   content: z.object({
                     items: z.object({
                       properties: z.object({
-                        imageData: z.object({ maxLength: z.number() }),
-                        widthEmu: z.object({ minimum: z.number() }),
-                        heightEmu: z.object({ minimum: z.number() }),
+                        imageData: z.object({ type: z.literal('string'), maxLength: z.number() }),
+                        widthEmu: z.object({ type: z.literal('integer'), minimum: z.number() }),
+                        heightEmu: z.object({ type: z.literal('integer'), minimum: z.number() }),
                       }),
                     }),
                   }),
@@ -57,11 +57,17 @@ describe('openapi.yaml — header/footer image field bounds mirror the Zod schem
     ).toBe(MAX_IMAGE_BASE64_LENGTH);
   });
 
-  it('widthEmu/heightEmu require positive integers', async () => {
+  it('imageData is a string and widthEmu/heightEmu are positive integers', async () => {
     const raw = await loadRawSpec();
     const field =
       FieldPropertiesSchema.parse(raw).components.schemas.HeaderFooterComposition.properties.header
         .properties.left.properties.content.items.properties;
+    // The schema parse above already fails if a type drifts (e.g. a dimension
+    // declared string); assert explicitly so the intent — string payload,
+    // integer dimensions — is visible, not just implied by the parse.
+    expect(field.imageData.type).toBe('string');
+    expect(field.widthEmu.type).toBe('integer');
+    expect(field.heightEmu.type).toBe('integer');
     expect(field.widthEmu.minimum).toBe(1);
     expect(field.heightEmu.minimum).toBe(1);
   });

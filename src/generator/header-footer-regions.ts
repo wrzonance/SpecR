@@ -3,7 +3,6 @@ import type { IBorderOptions, IBordersOptions, TabStopDefinition } from 'docx';
 import type { HeaderFooterVariant } from '../ast/index.js';
 import {
   cascadeStyle,
-  cellHasContent,
   renderCellRuns,
   type HeaderFooterCell,
   type HeaderFooterFieldContext,
@@ -127,17 +126,6 @@ function regionChildren(
   ];
 }
 
-function regionHasContent(
-  region: HeaderFooterRegion | undefined,
-  ctx: HeaderFooterFieldContext
-): boolean {
-  return (
-    cellHasContent(region?.left, ctx) ||
-    cellHasContent(region?.center, ctx) ||
-    cellHasContent(region?.right, ctx)
-  );
-}
-
 /** Every image-field warning `cell` produces, each prefixed with `location`. */
 function cellImageWarnings(
   cell: HeaderFooterCell | undefined,
@@ -182,8 +170,13 @@ function paragraphBorderOption(
  * full-width), with `region.ruleLine` (if enabled) rendered as a paragraph
  * border on `ruleLineEdge`.
  *
- * `undefined` when the region has no content and no enabled rule line. A
- * region with an enabled rule line but every cell empty still returns a
+ * `undefined` when the region renders no content and has no enabled rule
+ * line. The gate is the ACTUAL rendered children, not structural presence: a
+ * region whose only field is an unrenderable image (e.g. missing dimensions,
+ * #308) has content per `cellHasContent` but produces zero runs, and emitting
+ * a paragraph for it would serialize an empty `<w:p/>` (the broken image
+ * still surfaces via `regionImageWarnings`, independently of this paragraph).
+ * A region with an enabled rule line but every cell empty still returns a
  * single contentless paragraph, so the rule line still renders.
  */
 export function buildRegionParagraph(
@@ -193,11 +186,12 @@ export function buildRegionParagraph(
   ruleLineEdge: RuleLineEdge
 ): Paragraph | undefined {
   const border = ruleLineBorder(region?.ruleLine);
-  if (!regionHasContent(region, ctx) && border === undefined) return undefined;
-
   const style = cascadeStyle(region?.style, inheritedStyle);
+  const children = regionChildren(region, ctx, style);
+  if (children.length === 0 && border === undefined) return undefined;
+
   return new Paragraph({
-    children: regionChildren(region, ctx, style),
+    children,
     tabStops: [CENTER_TAB_STOP, RIGHT_TAB_STOP],
     ...paragraphBorderOption(border, ruleLineEdge),
   });
