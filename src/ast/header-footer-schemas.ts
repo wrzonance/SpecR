@@ -78,6 +78,35 @@ const HeaderFooterCellSchema = z
   })
   .catchall(JsonValue);
 
+// A table/grid layout for header/footer content (#309, ADR-071) — a new
+// sibling slot on HeaderFooterRegionSchema, not a replacement for the
+// left/center/right paragraph model (a region may carry both). Cell content
+// reuses the existing 13-kind HeaderFooterFieldSchema verbatim (the
+// "no images in table cells" rule is enforced at render time, not by a
+// second field schema); cell/table style reuses HeaderFooterVisualStyleSchema;
+// table borders reuse HeaderFooterRuleLineSchema verbatim, applied uniformly
+// to all six docx ITableBordersOptions edges by the generator.
+const HeaderFooterTableCellSchema = z
+  .object({
+    content: z.array(HeaderFooterFieldSchema).exactOptional(),
+    columnSpan: z.number().int().positive().exactOptional(),
+    separator: z.string().exactOptional(),
+    style: HeaderFooterVisualStyleSchema.exactOptional(),
+  })
+  .catchall(JsonValue);
+
+const HeaderFooterTableRowSchema = z
+  .object({ cells: z.array(HeaderFooterTableCellSchema) })
+  .catchall(JsonValue);
+
+const HeaderFooterTableSchema = z
+  .object({
+    rows: z.array(HeaderFooterTableRowSchema).min(1),
+    columnWidths: z.array(z.number().int().positive()).exactOptional(),
+    borders: HeaderFooterRuleLineSchema.exactOptional(),
+  })
+  .catchall(JsonValue);
+
 const HeaderFooterRegionSchema = z
   .object({
     left: HeaderFooterCellSchema.exactOptional(),
@@ -85,6 +114,7 @@ const HeaderFooterRegionSchema = z
     right: HeaderFooterCellSchema.exactOptional(),
     style: HeaderFooterVisualStyleSchema.exactOptional(),
     ruleLine: HeaderFooterRuleLineSchema.exactOptional(),
+    table: HeaderFooterTableSchema.exactOptional(),
   })
   .catchall(JsonValue);
 
