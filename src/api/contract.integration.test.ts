@@ -383,8 +383,26 @@ describe('response contract (covered endpoints)', () => {
 });
 
 describe('header/footer config CRUD + resolve endpoints (#476, ADR-040)', () => {
+  // `left` carries a `kind: 'image'` field (#308, ADR-069) so every PUT/GET/
+  // resolve round trip in this suite also proves the openapi.yaml
+  // `&headerFooterCell` anchor and the Zod `HeaderFooterFieldSchema` agree on
+  // the image fields — not just the pre-existing text-field kinds.
   const SAMPLE_CONFIG = {
-    header: { center: { content: [{ kind: 'projectName' }] } },
+    header: {
+      center: { content: [{ kind: 'projectName' }] },
+      left: {
+        content: [
+          {
+            kind: 'image',
+            imageData: 'AAAA',
+            imageMediaType: 'image/png',
+            widthEmu: 914400,
+            heightEmu: 914400,
+            altText: 'Company logo',
+          },
+        ],
+      },
+    },
     footer: { right: { content: [{ kind: 'pageNumber' }] } },
   };
 

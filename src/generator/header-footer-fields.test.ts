@@ -14,7 +14,22 @@ import {
   type HeaderFooterField,
   type HeaderFooterFieldContext,
   type HeaderFooterCell,
+  type HeaderFooterRunChild,
 } from './header-footer-fields.js';
+
+// Minimal real PNG magic-byte signature (header only, no pixel data — the
+// generator only ever needs the signature to sniff a type), matching
+// header-footer-images.test.ts's fixtures.
+const PNG_BASE64 = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02,
+]).toString('base64');
+
+const VALID_IMAGE_FIELD: HeaderFooterField = {
+  kind: 'image',
+  imageData: PNG_BASE64,
+  widthEmu: 914400,
+  heightEmu: 457200,
+};
 
 const CTX: HeaderFooterFieldContext = {
   sectionNumber: '09 91 26',
@@ -44,13 +59,14 @@ const EXPECTED_KINDS: readonly HeaderFooterFieldKind[] = [
   'clientName',
   'clientNumber',
   'literal',
+  'image',
 ];
 
 const OTHER_KINDS: readonly HeaderFooterFieldKind[] = EXPECTED_KINDS.filter(
   (kind) => kind !== 'sectionNumber' && kind !== 'sectionTitle'
 );
 
-async function renderRunsToXml(runs: readonly TextRun[]): Promise<string> {
+async function renderRunsToXml(runs: readonly HeaderFooterRunChild[]): Promise<string> {
   const doc = new Document({
     sections: [{ children: [new Paragraph({ children: [...runs] })] }],
   });
@@ -139,7 +155,7 @@ describe('renderFieldRun — literal/value field text never collides with a docx
 });
 
 describe('resolveFieldChildren field-kind coverage', () => {
-  it('the schema enum still has exactly the 12 kinds the resolver table covers', () => {
+  it('the schema enum still has exactly the 13 kinds the resolver table covers', () => {
     expect([...HeaderFooterFieldKindSchema.options].sort((a, b) => a.localeCompare(b))).toEqual(
       [...EXPECTED_KINDS].sort((a, b) => a.localeCompare(b))
     );
@@ -277,6 +293,48 @@ describe('cellHasContent — resolved-output emptiness, not just content-array l
   });
 });
 
+describe('cellHasContent — image field OR-composition (#308)', () => {
+  it('is true for an image-only cell carrying imageData', () => {
+    expect(cellHasContent({ content: [VALID_IMAGE_FIELD] }, CTX)).toBe(true);
+  });
+
+  it('is false for an image-only cell with no imageData', () => {
+    expect(cellHasContent({ content: [{ kind: 'image' }] }, CTX)).toBe(false);
+  });
+
+  it('is true for a cell mixing a resolving text field and an image field', () => {
+    const cell: HeaderFooterCell = {
+      content: [{ kind: 'literal', text: 'Logo:' }, VALID_IMAGE_FIELD],
+    };
+    expect(cellHasContent(cell, CTX)).toBe(true);
+  });
+
+  // Invariant (#308): cellHasContent becomes `resolveFieldChildren(...).length > 0
+  // || imageFieldHasContent(...)` — an OR composition, not a rewrite. For every
+  // non-image kind, imageFieldHasContent is always false, so the OR must reduce
+  // to exactly the pre-existing resolveFieldChildren-based truth value.
+  it('OR composition with the image branch never changes cellHasContent for the 12 pre-existing kinds', () => {
+    const nonImageKinds = EXPECTED_KINDS.filter((kind) => kind !== 'image');
+    for (const kind of nonImageKinds) {
+      const field: HeaderFooterField = { kind };
+      const expected = resolveFieldChildren(field, CTX).length > 0;
+      expect(cellHasContent({ content: [field] }, CTX)).toBe(expected);
+    }
+  });
+
+  // Invariant (#308): adding the 13th kind must never regress the other 12 —
+  // a cell mixing every pre-existing kind with an image field still reports
+  // content, and (more importantly) removing the image field from that same
+  // mix does not change the outcome for the pre-existing fields' own truth.
+  it('adding the image kind never regresses cellHasContent for the pre-existing kinds sharing its cell', () => {
+    const literalOnly: HeaderFooterCell = { content: [{ kind: 'literal', text: 'x' }] };
+    const literalPlusImage: HeaderFooterCell = {
+      content: [{ kind: 'literal', text: 'x' }, { kind: 'image' }], // imageData absent
+    };
+    expect(cellHasContent(literalOnly, CTX)).toBe(cellHasContent(literalPlusImage, CTX));
+  });
+});
+
 describe('headerFooterRunOptions', () => {
   it('returns {} for undefined style', () => {
     expect(headerFooterRunOptions(undefined)).toEqual({});
@@ -397,6 +455,51 @@ describe('renderCellRuns', () => {
     expect((xml.match(/<w:b\/>/g) ?? []).length).toBe(3);
     expect((xml.match(/<w:i\/>/g) ?? []).length).toBe(3);
     expect((xml.match(/w:ascii="Arial"/g) ?? []).length).toBe(3);
+  });
+});
+
+describe('renderCellRuns — image fields (#308)', () => {
+  it('renders an image-only cell to exactly one run and no separator', () => {
+    const cell: HeaderFooterCell = { content: [VALID_IMAGE_FIELD] };
+    const runs = renderCellRuns(cell, CTX, undefined);
+    expect(runs).toHaveLength(1);
+  });
+
+  it('interleaves the default separator between a literal and an image field', async () => {
+    const cell: HeaderFooterCell = {
+      content: [{ kind: 'literal', text: 'Logo:' }, VALID_IMAGE_FIELD],
+    };
+    const runs = renderCellRuns(cell, CTX, undefined);
+    expect(runs).toHaveLength(3); // literal, separator, image
+    const xml = await renderRunsToXml(runs);
+    expect(xml).toContain('Logo:');
+  });
+
+  it('interleaves exactly two separators when an image field sits between two literals', () => {
+    const cell: HeaderFooterCell = {
+      content: [{ kind: 'literal', text: 'A' }, VALID_IMAGE_FIELD, { kind: 'literal', text: 'B' }],
+    };
+    const runs = renderCellRuns(cell, CTX, undefined);
+    // literal A, separator, image, separator, literal B
+    expect(runs).toHaveLength(5);
+  });
+
+  it('skips an unrenderable image field (missing dimensions) with no separator on either side (#regression)', async () => {
+    const brokenImage: HeaderFooterField = { kind: 'image', imageData: PNG_BASE64 }; // no widthEmu/heightEmu
+    const cell: HeaderFooterCell = {
+      content: [{ kind: 'literal', text: 'A' }, brokenImage, { kind: 'literal', text: 'B' }],
+    };
+    const runs = renderCellRuns(cell, CTX, undefined);
+    expect(runs).toHaveLength(3); // literal A, separator, literal B — image contributes nothing
+    const xml = await renderRunsToXml(runs);
+    expect(textRunContents(xml)).toEqual(['A', ' ', 'B']);
+  });
+
+  it('the cascaded cell style never applies to the image run itself (ImageRun carries no run-style options)', () => {
+    const cell: HeaderFooterCell = { content: [VALID_IMAGE_FIELD], style: { bold: true } };
+    const runs = renderCellRuns(cell, CTX, undefined);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).not.toBeInstanceOf(TextRun);
   });
 });
 

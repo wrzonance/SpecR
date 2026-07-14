@@ -4,7 +4,7 @@ import { defaultVariant } from '../ast/index.js';
 import type { HeaderFooterComposition, HeaderFooterVariant } from '../ast/index.js';
 import { cascadeStyle } from './header-footer-fields.js';
 import type { HeaderFooterFieldContext, HeaderFooterVisualStyle } from './header-footer-fields.js';
-import { buildRegionParagraph } from './header-footer-regions.js';
+import { buildRegionParagraph, regionImageWarnings } from './header-footer-regions.js';
 
 // `Partial<T>` alone does not strip `| undefined` from a value type under
 // `exactOptionalPropertyTypes` — it only adds `?`, so a `Partial<{ default:
@@ -107,6 +107,30 @@ function resolvePageNumberStart(
 }
 
 /**
+ * Every image-field warning (#308, ADR-069) across the default/first/even
+ * header AND footer regions, in a fixed, deterministic order: header
+ * default, header first, header even, then footer default, first, even.
+ * Locations are `"header"`/`"footer"` for the default variant and
+ * `"header.first"`/`"footer.even"` etc. for named variants — each further
+ * suffixed with `.left`/`.center`/`.right` by {@link regionImageWarnings}.
+ * `[]` when no region carries an image field with a warning.
+ */
+function collectImageWarnings(
+  defaultV: HeaderFooterVariant,
+  firstV: HeaderFooterVariant | undefined,
+  evenV: HeaderFooterVariant | undefined
+): readonly string[] {
+  return [
+    ...regionImageWarnings(defaultV.header, 'header'),
+    ...regionImageWarnings(firstV?.header, 'header.first'),
+    ...regionImageWarnings(evenV?.header, 'header.even'),
+    ...regionImageWarnings(defaultV.footer, 'footer'),
+    ...regionImageWarnings(firstV?.footer, 'footer.first'),
+    ...regionImageWarnings(evenV?.footer, 'footer.even'),
+  ];
+}
+
+/**
  * Render one {@link HeaderFooterComposition} into docx `Header`/`Footer`
  * instances plus the section-level metadata needed to wire them up
  * (`titlePage`, `evenAndOddHeaders`, `pageNumberStart`). Pure and total —
@@ -129,6 +153,8 @@ export function renderHeaderFooterComposition(
   const headers = buildHeaders(compositionStyle, ctx, defaultV, firstV, evenV);
   const footers = buildFooters(compositionStyle, ctx, defaultV, firstV, evenV);
   const pageNumberStart = resolvePageNumberStart(composition.pageNumbering);
+  const rawWarnings = composition.raw?.warnings ?? [];
+  const imageWarnings = collectImageWarnings(defaultV, firstV, evenV);
 
   return {
     ...(headers !== undefined ? { headers } : {}),
@@ -136,6 +162,6 @@ export function renderHeaderFooterComposition(
     titlePage: firstV !== undefined,
     evenAndOddHeaders: evenV !== undefined,
     ...(pageNumberStart !== undefined ? { pageNumberStart } : {}),
-    warnings: composition.raw?.warnings !== undefined ? [...composition.raw.warnings] : [],
+    warnings: [...rawWarnings, ...imageWarnings],
   };
 }

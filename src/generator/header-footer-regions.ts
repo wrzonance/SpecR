@@ -3,11 +3,13 @@ import type { IBorderOptions, IBordersOptions, TabStopDefinition } from 'docx';
 import type { HeaderFooterVariant } from '../ast/index.js';
 import {
   cascadeStyle,
-  cellHasContent,
   renderCellRuns,
+  type HeaderFooterCell,
   type HeaderFooterFieldContext,
+  type HeaderFooterRunChild,
   type HeaderFooterVisualStyle,
 } from './header-footer-fields.js';
+import { imageFieldWarnings } from './header-footer-images.js';
 
 // Local indexed-access aliases (see header-footer-fields.ts for the same
 // pattern): the AST barrel (`src/ast/index.ts`) exports only
@@ -97,31 +99,57 @@ function tabRun(): TextRun {
 // the (empty) center stop, one to reach the right stop. Collapsing this to a
 // single tab would land right-cell content at the center stop instead of the
 // right margin — see header-footer-regions.test.ts for the pinned case.
+//
+// The tab flags key off the ALREADY-RENDERED run counts, not `cellHasContent`:
+// a cell whose only field fails to render (e.g. an undecodable image, #308)
+// counts as content structurally but produces zero runs, so basing a tab on
+// `cellHasContent` would emit a dangling `<w:tab/>` with nothing after it
+// (center text + a broken right image left a trailing right tab). Deriving
+// from run counts treats an empty-rendering cell as empty — no dangling tab —
+// and renders each cell exactly once instead of walking its fields twice.
 function regionChildren(
   region: HeaderFooterRegion | undefined,
   ctx: HeaderFooterFieldContext,
   style: HeaderFooterVisualStyle | undefined
-): readonly TextRun[] {
-  const needsCenterTab = cellHasContent(region?.center, ctx) || cellHasContent(region?.right, ctx);
-  const needsRightTab = cellHasContent(region?.right, ctx);
+): readonly HeaderFooterRunChild[] {
+  const leftRuns = renderCellRuns(region?.left, ctx, style);
+  const centerRuns = renderCellRuns(region?.center, ctx, style);
+  const rightRuns = renderCellRuns(region?.right, ctx, style);
+  const needsCenterTab = centerRuns.length > 0 || rightRuns.length > 0;
+  const needsRightTab = rightRuns.length > 0;
   return [
-    ...renderCellRuns(region?.left, ctx, style),
+    ...leftRuns,
     ...(needsCenterTab ? [tabRun()] : []),
-    ...renderCellRuns(region?.center, ctx, style),
+    ...centerRuns,
     ...(needsRightTab ? [tabRun()] : []),
-    ...renderCellRuns(region?.right, ctx, style),
+    ...rightRuns,
   ];
 }
 
-function regionHasContent(
+/** Every image-field warning `cell` produces, each prefixed with `location`. */
+function cellImageWarnings(
+  cell: HeaderFooterCell | undefined,
+  location: string
+): readonly string[] {
+  if (cell?.content === undefined) return [];
+  return cell.content.flatMap((field) => imageFieldWarnings(field, location));
+}
+
+/**
+ * Every image-field warning across `region`'s left/center/right cells (#308),
+ * each prefixed with `location.<cell>` (e.g. `"header.left"`). `[]` for an
+ * undefined region or a region whose image fields (if any) carry no
+ * warnings.
+ */
+export function regionImageWarnings(
   region: HeaderFooterRegion | undefined,
-  ctx: HeaderFooterFieldContext
-): boolean {
-  return (
-    cellHasContent(region?.left, ctx) ||
-    cellHasContent(region?.center, ctx) ||
-    cellHasContent(region?.right, ctx)
-  );
+  location: string
+): readonly string[] {
+  return [
+    ...cellImageWarnings(region?.left, `${location}.left`),
+    ...cellImageWarnings(region?.center, `${location}.center`),
+    ...cellImageWarnings(region?.right, `${location}.right`),
+  ];
 }
 
 // `Paragraph`'s `border` option is a full `IBordersOptions` map (top/bottom/
@@ -142,8 +170,13 @@ function paragraphBorderOption(
  * full-width), with `region.ruleLine` (if enabled) rendered as a paragraph
  * border on `ruleLineEdge`.
  *
- * `undefined` when the region has no content and no enabled rule line. A
- * region with an enabled rule line but every cell empty still returns a
+ * `undefined` when the region renders no content and has no enabled rule
+ * line. The gate is the ACTUAL rendered children, not structural presence: a
+ * region whose only field is an unrenderable image (e.g. missing dimensions,
+ * #308) has content per `cellHasContent` but produces zero runs, and emitting
+ * a paragraph for it would serialize an empty `<w:p/>` (the broken image
+ * still surfaces via `regionImageWarnings`, independently of this paragraph).
+ * A region with an enabled rule line but every cell empty still returns a
  * single contentless paragraph, so the rule line still renders.
  */
 export function buildRegionParagraph(
@@ -153,11 +186,12 @@ export function buildRegionParagraph(
   ruleLineEdge: RuleLineEdge
 ): Paragraph | undefined {
   const border = ruleLineBorder(region?.ruleLine);
-  if (!regionHasContent(region, ctx) && border === undefined) return undefined;
-
   const style = cascadeStyle(region?.style, inheritedStyle);
+  const children = regionChildren(region, ctx, style);
+  if (children.length === 0 && border === undefined) return undefined;
+
   return new Paragraph({
-    children: regionChildren(region, ctx, style),
+    children,
     tabStops: [CENTER_TAB_STOP, RIGHT_TAB_STOP],
     ...paragraphBorderOption(border, ruleLineEdge),
   });

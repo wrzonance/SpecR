@@ -8675,6 +8675,7 @@ components:
                             clientName,
                             clientNumber,
                             literal,
+                            image,
                           ]
                       source: { type: string, enum: [issuance, current] }
                       text: { type: string }
@@ -8682,6 +8683,25 @@ components:
                       format: { type: string }
                       prefix: { type: string }
                       suffix: { type: string }
+                      imageData:
+                        type: string
+                        maxLength: 6990508
+                        description: >
+                          Base64-encoded image bytes for a `kind: "image"`
+                          field (#308, ADR-069). The generator never trusts
+                          `imageMediaType` — it re-sniffs the actual bytes'
+                          magic-byte signature and renders using that result,
+                          so a stale/unsupported `imageMediaType` still
+                          round-trips here; it just will not render. The
+                          `maxLength` is the base64-string cap corresponding
+                          to the 5 MB decoded-byte limit
+                          (`MAX_IMAGE_BASE64_LENGTH`,
+                          `src/lib/image-media-type.ts`) enforced by the
+                          paired Zod schema (`src/ast/header-footer-schemas.ts`).
+                      imageMediaType: { type: string }
+                      widthEmu: { type: integer, minimum: 1 }
+                      heightEmu: { type: integer, minimum: 1 }
+                      altText: { type: string }
                 separator: { type: string }
                 style: &headerFooterVisualStyle
                   type: object

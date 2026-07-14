@@ -35,4 +35,25 @@ describe('decodeBase64Payload', () => {
     const fourBytes = Buffer.from([1, 2, 3, 4]).toString('base64');
     expect('error' in decodeBase64Payload(fourBytes, 3)).toBe(true);
   });
+
+  // Regression (#308): BASE64_RE's grouped, quantified subpattern
+  // (`(?:X{4})*`) forces V8's backtracking regex engine to recurse once per
+  // matched 4-char group. On a multi-megabyte payload — well within
+  // decodeBase64Payload's own default 10 MB cap, and well within the 5 MB
+  // header/footer image cap that Zod already accepted — that recursion blew
+  // the JS call stack (`RangeError: Maximum call stack size exceeded`)
+  // before validation ever completed, for fully valid input.
+  it('does not throw a stack overflow for a large, realistically-sized valid payload', () => {
+    const fourMegabytes = Buffer.alloc(4 * 1024 * 1024, 0x41).toString('base64');
+    expect(() => decodeBase64Payload(fourMegabytes)).not.toThrow();
+    const result = decodeBase64Payload(fourMegabytes);
+    expect('buffer' in result).toBe(true);
+  });
+
+  it('does not throw a stack overflow at the decoded-size cap boundary', () => {
+    const tenMegabytes = Buffer.alloc(10 * 1024 * 1024, 0x41).toString('base64');
+    expect(() => decodeBase64Payload(tenMegabytes)).not.toThrow();
+    const result = decodeBase64Payload(tenMegabytes);
+    expect('buffer' in result).toBe(true);
+  });
 });

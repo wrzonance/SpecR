@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { BorderStyle, Document, Packer, Paragraph } from 'docx';
+import { BorderStyle, Document, Header, Packer, Paragraph } from 'docx';
 import JSZip from 'jszip';
 import {
   buildRegionParagraph,
+  regionImageWarnings,
   ruleLineBorder,
   type HeaderFooterRegion,
   type HeaderFooterRuleLine,
@@ -19,12 +20,44 @@ function literalCell(text: string): HeaderFooterCell {
   return { content: [{ kind: 'literal', text }] };
 }
 
+// A minimal real PNG magic-byte signature (matches header-footer-images
+// .test.ts's fixture) — `renderImageRun` only needs a signature
+// `sniffImageMediaType` recognizes, not full pixel data (ADR-069: `docx`'s
+// `ImageRun` constructor performs no content validation).
+const LOGO_PNG_BASE64 = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02,
+]).toString('base64');
+
+function imageCell(): HeaderFooterCell {
+  return {
+    content: [{ kind: 'image', imageData: LOGO_PNG_BASE64, widthEmu: 914400, heightEmu: 457200 }],
+  };
+}
+
+function brokenImageCell(): HeaderFooterCell {
+  // imageData present but no widthEmu/heightEmu — a structurally-present
+  // image field renderImageRun will refuse to render (see header-footer
+  // -images.ts's missingDimensionsWarning).
+  return { content: [{ kind: 'image', imageData: LOGO_PNG_BASE64 }] };
+}
+
 async function renderParagraphsToXml(paragraphs: readonly Paragraph[]): Promise<string> {
   const doc = new Document({ sections: [{ children: [...paragraphs] }] });
   const zip = await JSZip.loadAsync(await Packer.toBuffer(doc));
   const file = zip.file('word/document.xml');
   if (!file) throw new Error('document.xml missing');
   return file.async('string');
+}
+
+// Renders `paragraph` inside a header part (not the document body), so the
+// acceptance-criterion-1 pin below inspects `word/header1.xml` + the
+// `word/media/` part it references — the actual production path a header
+// region's image content flows through.
+async function renderHeaderToZip(paragraph: Paragraph): Promise<JSZip> {
+  const doc = new Document({
+    sections: [{ headers: { default: new Header({ children: [paragraph] }) }, children: [] }],
+  });
+  return JSZip.loadAsync(await Packer.toBuffer(doc));
 }
 
 // Strips every properly-wrapped `<w:r>...<w:tab/>...</w:r>` span. Anything
@@ -117,6 +150,27 @@ describe('buildRegionParagraph — presence invariant', () => {
     expect(paragraph).toBeInstanceOf(Paragraph);
   });
 
+  it('is undefined when the only content is an unrenderable image (no empty <w:p/>) (#308)', () => {
+    // A broken image has content per cellHasContent but renders zero runs;
+    // the gate is rendered children, so no empty paragraph is emitted (the
+    // broken image still surfaces via regionImageWarnings).
+    const region: HeaderFooterRegion = { center: brokenImageCell() };
+    expect(buildRegionParagraph(region, undefined, CTX, 'bottom')).toBeUndefined();
+  });
+
+  it('still renders a bordered contentless paragraph for a lone broken image under an enabled rule line', async () => {
+    const region: HeaderFooterRegion = {
+      center: brokenImageCell(),
+      ruleLine: { enabled: true, widthTwips: 8 },
+    };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    expect(paragraph).toBeInstanceOf(Paragraph);
+    if (paragraph === undefined) throw new Error('unreachable');
+    const xml = await renderParagraphsToXml([paragraph]);
+    expect(xml).toContain('<w:pBdr><w:bottom w:val="single" w:sz="3"/></w:pBdr>');
+    expect(xml).not.toContain('<w:t ');
+  });
+
   it('emits exactly one bordered, contentless paragraph when the rule line is enabled but every cell is empty', async () => {
     const region: HeaderFooterRegion = { ruleLine: { enabled: true, widthTwips: 8 } };
     const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
@@ -200,6 +254,55 @@ describe('buildRegionParagraph — tab-stop count follows Word tab semantics, no
   });
 });
 
+describe('buildRegionParagraph — a cell whose image fails to render reserves no tab (#308)', () => {
+  // A structurally-present image field that renderImageRun refuses (missing
+  // dimensions here) produces zero runs. The tab flags key off rendered-run
+  // counts, so such a cell counts as empty — no `<w:tab/>` is emitted with
+  // nothing after it. Pre-fix these keyed off cellHasContent (true for any
+  // imageData), leaving a dangling trailing tab.
+  it('center text + right broken image -> one tab, no dangling right tab', async () => {
+    const region: HeaderFooterRegion = {
+      center: literalCell('CENTER'),
+      right: brokenImageCell(),
+    };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    if (paragraph === undefined) throw new Error('unreachable');
+    const xml = await renderParagraphsToXml([paragraph]);
+    expect(countTabs(xml)).toBe(1);
+  });
+
+  it('left text + center broken image, right empty -> zero tabs', async () => {
+    const region: HeaderFooterRegion = {
+      left: literalCell('LEFT'),
+      center: brokenImageCell(),
+    };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    if (paragraph === undefined) throw new Error('unreachable');
+    const xml = await renderParagraphsToXml([paragraph]);
+    expect(countTabs(xml)).toBe(0);
+  });
+
+  it('left + center text + right broken image -> one tab (no trailing right tab)', async () => {
+    const region: HeaderFooterRegion = {
+      left: literalCell('LEFT'),
+      center: literalCell('CENTER'),
+      right: brokenImageCell(),
+    };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    if (paragraph === undefined) throw new Error('unreachable');
+    const xml = await renderParagraphsToXml([paragraph]);
+    expect(countTabs(xml)).toBe(1);
+  });
+
+  it('left text + right valid image -> two tabs (a rendered image still reserves its tab)', async () => {
+    const region: HeaderFooterRegion = { left: literalCell('LEFT'), right: imageCell() };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    if (paragraph === undefined) throw new Error('unreachable');
+    const xml = await renderParagraphsToXml([paragraph]);
+    expect(countTabs(xml)).toBe(2);
+  });
+});
+
 describe('buildRegionParagraph — layout and style', () => {
   it('defines CENTER and RIGHT tab stops at the standard positions', async () => {
     const region: HeaderFooterRegion = {
@@ -233,5 +336,85 @@ describe('buildRegionParagraph — layout and style', () => {
     const xml = await renderParagraphsToXml([paragraph]);
     expect(xml).toMatch(/<w:b\/>/);
     expect(xml).toContain('w:ascii="Arial"');
+  });
+});
+
+describe('buildRegionParagraph — acceptance criterion 1: logo image renders into header output', () => {
+  it('renders an image field into a real word/header1.xml drawing + word/media part', async () => {
+    const region: HeaderFooterRegion = { left: imageCell() };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    expect(paragraph).toBeInstanceOf(Paragraph);
+    if (paragraph === undefined) throw new Error('unreachable');
+
+    const zip = await renderHeaderToZip(paragraph);
+    const headerFile = zip.file('word/header1.xml');
+    if (!headerFile) throw new Error('word/header1.xml missing');
+    const headerXml = await headerFile.async('string');
+    expect(headerXml).toContain('<w:drawing>');
+
+    // docx names media parts by content hash, not a literal "imageN" — assert
+    // on the part's location + extension rather than an exact filename.
+    const mediaNames = Object.entries(zip.files)
+      .filter(([name, entry]) => name.startsWith('word/media/') && !entry.dir)
+      .map(([name]) => name);
+    expect(mediaNames).toHaveLength(1);
+    expect(mediaNames[0]).toMatch(/\.png$/);
+  });
+
+  it('still lays out a mixed text + image cell correctly (image does not displace the tab layout)', async () => {
+    const region: HeaderFooterRegion = { left: imageCell(), right: literalCell('RIGHT') };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    if (paragraph === undefined) throw new Error('unreachable');
+    const zip = await renderHeaderToZip(paragraph);
+    const headerFile = zip.file('word/header1.xml');
+    if (!headerFile) throw new Error('word/header1.xml missing');
+    const headerXml = await headerFile.async('string');
+    expect(headerXml).toContain('<w:drawing>');
+    expect(headerXml).toContain('RIGHT');
+    // Same tab semantics as the text-only "left + right populated, center
+    // empty" case above: a left cell (image or text, doesn't matter which)
+    // plus a right cell needs two tabs — one to clear the empty center
+    // stop, one to reach the right stop. Pins that mixing an image into the
+    // left cell doesn't silently drop a tab stop.
+    expect(countTabs(headerXml)).toBe(2);
+  });
+});
+
+describe('regionImageWarnings', () => {
+  it('is [] for an undefined region', () => {
+    expect(regionImageWarnings(undefined, 'header')).toEqual([]);
+  });
+
+  it('is [] for a region with no image fields at all', () => {
+    const region: HeaderFooterRegion = {
+      left: literalCell('LEFT'),
+      center: literalCell('CENTER'),
+      right: literalCell('RIGHT'),
+    };
+    expect(regionImageWarnings(region, 'header')).toEqual([]);
+  });
+
+  it('is [] for a region whose only image field is fully valid', () => {
+    const region: HeaderFooterRegion = { left: imageCell() };
+    expect(regionImageWarnings(region, 'header')).toEqual([]);
+  });
+
+  it('surfaces a warning for a broken image field, prefixed with location.<cell>', () => {
+    const region: HeaderFooterRegion = { left: brokenImageCell() };
+    const warnings = regionImageWarnings(region, 'header');
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings.every((warning) => warning.startsWith('header.left'))).toBe(true);
+  });
+
+  it('collects warnings independently across left/center/right, each with its own cell suffix', () => {
+    const region: HeaderFooterRegion = {
+      left: brokenImageCell(),
+      center: literalCell('CENTER'),
+      right: brokenImageCell(),
+    };
+    const warnings = regionImageWarnings(region, 'footer');
+    expect(warnings.some((warning) => warning.startsWith('footer.left'))).toBe(true);
+    expect(warnings.some((warning) => warning.startsWith('footer.right'))).toBe(true);
+    expect(warnings.some((warning) => warning.startsWith('footer.center'))).toBe(false);
   });
 });
