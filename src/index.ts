@@ -7,14 +7,22 @@ import { router } from './api/router.js';
 import { errorHandler } from './api/middleware/error.js';
 import { registerMcpRoutes } from './mcp/server.js';
 import { registerDocsRoutes } from './api/docs.js';
+import {
+  HEADER_FOOTER_JSON_BODY_LIMIT_BYTES,
+  isHeaderFooterCompositionWrite,
+} from './api/header-footer-body-limit.js';
 
 const app = express();
 app.disable('x-powered-by');
 
-// REST routes use default JSON limit; /mcp applies its own larger limit route-locally
+// REST routes use the default JSON limit; /mcp applies its own larger limit
+// route-locally; the four header/footer composition PUT routes get a
+// route-scoped limit sized for one base64-encoded image (#490).
 const restJson = express.json();
+const headerFooterCompositionJson = express.json({ limit: HEADER_FOOTER_JSON_BODY_LIMIT_BYTES });
 app.use((req, res, next) => {
   if (req.path.startsWith('/mcp')) return next();
+  if (isHeaderFooterCompositionWrite(req)) return headerFooterCompositionJson(req, res, next);
   restJson(req, res, next);
 });
 app.use(router);
