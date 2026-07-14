@@ -1,5 +1,6 @@
 // src/mcp/contract.integration.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { Document, Header, Footer, Paragraph, TextRun, Packer } from 'docx';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createProject, createClient, resolveOrCreateUserByLabel, pool } from '../db/index.js';
 import {
@@ -15,7 +16,7 @@ import {
   INV5_SHAPE_EXEMPT,
   INV5_READ_PENDING,
 } from './contract-map.js';
-import { handleListLibraries, handleListProjects } from './handlers.js';
+import { handleListLibraries, handleListProjects, handleParseDocument } from './handlers.js';
 import { handleListTemplates } from './template-handlers.js';
 import { handleListConventions } from './convention-handlers.js';
 import { handleListRevisionNomenclatureProfiles } from './revision-nomenclature-handlers.js';
@@ -179,6 +180,44 @@ describe('MCP contract (REST <-> MCP parity)', () => {
     for (const op of MCP_UNEXPOSED.keys())
       expect(real.has(op), `${op} not in openapi.yaml`).toBe(true);
     for (const op of OP_TO_TOOL.keys()) expect(MCP_UNEXPOSED.has(op)).toBe(false);
+  });
+
+  // #306: SpecTree gained a headerFooter field, but it is parse-output only —
+  // never persisted, never returned by REST or MCP (see ADR-068). post /parse's
+  // response shape did not grow, so the pre-existing 'post /parse' -> 'parse_document'
+  // mapping needed zero new contract-map.ts entries. Pinned by driving the tool
+  // with a real header/footer DOCX, not just inspecting the static map, so a
+  // future change that starts returning headerFooter through this surface fails
+  // here rather than silently widening the contract.
+  it('#306: parse_document on a header/footer DOCX needs zero new contract-map entries', async () => {
+    expect(OP_TO_TOOL.get('post /parse')).toBe('parse_document');
+
+    const doc = new Document({
+      sections: [
+        {
+          headers: {
+            default: new Header({
+              children: [new Paragraph({ children: [new TextRun('Header text')] })],
+            }),
+          },
+          footers: {
+            default: new Footer({
+              children: [new Paragraph({ children: [new TextRun('Footer text')] })],
+            }),
+          },
+          children: [
+            new Paragraph({ children: [new TextRun('SECTION 99 99 96 - MCP HEADER FOOTER TEST')] }),
+          ],
+        },
+      ],
+    });
+    const contentBase64 = (await Packer.toBuffer(doc)).toString('base64');
+    const result = await handleParseDocument({
+      filename: 'mcp-header-footer-306.docx',
+      contentBase64,
+    });
+    const payload = parsePayload(result) as Record<string, unknown>;
+    expect(Object.keys(payload)).not.toContain('headerFooter');
   });
 
   it.each(INV5_DRIVEN)(
