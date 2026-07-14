@@ -56,7 +56,10 @@ function isFldCharType(run: Record<string, unknown>, type: string): boolean {
   return val === type;
 }
 
-function extractTextLikeValue(value: unknown): string {
+// Exported for reuse by header-footer-region.ts's cell-text extraction
+// (paragraph capture) — the same "string or { '#text': string }" shape
+// fast-xml-parser produces for w:t needs handling in both places.
+export function extractTextLikeValue(value: unknown): string {
   if (typeof value === 'string') return value;
   const rec = asRecord(value);
   const text = rec?.['#text'];
