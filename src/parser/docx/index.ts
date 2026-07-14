@@ -19,11 +19,10 @@ import type { NumberingProfile } from '../../ast/index.js';
 import type { NumberingMap, StyleMap, ClassifiedParagraph, DocxParagraph } from './types.js';
 import { resolveStyleCascade } from './resolver.js';
 import { parseSectionNumberCandidate } from '../../lib/section-number.js';
+import { detectSource, detectArticleIlvl } from './source-detection.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
 // reject if total uncompressed bytes > 50MB to prevent ZIP bomb exhaustion.
-
-type Source = 'arcat' | 'cpi' | 'unknown';
 
 const coreParser = new XMLParser({
   ignoreAttributes: false,
@@ -64,33 +63,6 @@ function parseCoreMetadata(xml: string): {
       },
     };
   }
-}
-
-// Detect spec source from style names.
-// Coarse provenance tag inferred from a document's style-vocabulary fingerprint.
-// ANNOTATION ONLY: surfaced as meta.source, computed after classification, and never
-// read back as an inference input — structure is derived from signals, not this tag.
-// The fingerprints below are two recurring authoring conventions seen in the corpus:
-//   • styles sharing a common heading prefix (…Part, …Article, …)
-//   • short-form PRT + ART styles carrying numPr in styles.xml (absent from the
-//     generic Word templates a flat <ol> export produces)
-function detectSource(styleMap: StyleMap): Source {
-  if ([...styleMap.styles.keys()].some((id) => id.startsWith('ARCAT'))) return 'arcat';
-  // short-form PRT + ART styles are not present in generic Word templates
-  if (styleMap.styles.has('ART') && styleMap.styles.has('PRT')) return 'cpi';
-  return 'unknown';
-}
-
-// The ilvl at which the article tier begins is not fixed — a document declares it
-// through its own article style's numPr. Commonly ilvl 1; documents that reserve the
-// low levels for a Schedule / Product-Data block start the article deeper (e.g. ilvl
-// 3). Read it from the document's own article style; if no known article-style name
-// is present, fall back to the numbering.xml scan.
-function detectArticleIlvl(styleMap: StyleMap, numberingMap: NumberingMap): number {
-  const artStyle = styleMap.resolvedNumPr.get('ART') ?? styleMap.resolvedNumPr.get('ARCATArticle');
-  if (artStyle) return artStyle.ilvl;
-  // Fall back to the numbering.xml scan (reserved-level lvlText heuristic).
-  return numberingMap.articleIlvl;
 }
 
 async function extractEntries(zip: JSZip): Promise<{
