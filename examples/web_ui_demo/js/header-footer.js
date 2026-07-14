@@ -78,6 +78,7 @@ import {
 import { initHeaderFooterEditor } from './header-footer-editor.js';
 import { winningScope, scopeLabel } from './header-footer-resolve.mjs';
 import { triggerBlobDownload } from './download.js';
+import { createRequestGuard } from './request-guard.mjs';
 
 const defaultDeps = {
   createEditor: initHeaderFooterEditor,
@@ -172,6 +173,13 @@ function paintResolutionPanel(container, resolved, deps) {
 export function initHeaderFooter(ctx, deps = defaultDeps) {
   let clientEditor = null;
   let projectEditor = null;
+  // Stale-response guard for the Effective Resolution panel: refreshProjectPanel,
+  // onSaved, and the project-switch hook can all fire overlapping resolution
+  // fetches, and an OLDER project's response resolving last would repaint the
+  // shared projectResolutionContainer with the wrong winning-scope chain. Only
+  // the latest-issued request paints — same primitive the editor uses for its
+  // own ctx.get() (see header-footer-editor.js's requestGuard).
+  const resolutionGuard = createRequestGuard();
 
   function previewContext() {
     return ctx.getPreviewContext ? ctx.getPreviewContext() : undefined;
@@ -217,6 +225,9 @@ export function initHeaderFooter(ctx, deps = defaultDeps) {
   }
 
   async function refreshResolutionPanel() {
+    // Issue the token BEFORE the early clear too, so a "no project" refresh that
+    // clears the panel still supersedes an in-flight fetch for a prior project.
+    const token = resolutionGuard.next();
     const projectId = ctx.getActiveProjectId();
     if (!API_FEATURES.headerFooter || !projectId) {
       ctx.projectResolutionContainer.replaceChildren();
@@ -224,8 +235,10 @@ export function initHeaderFooter(ctx, deps = defaultDeps) {
     }
     try {
       const resolved = await deps.getProjectHeaderFooterResolved(projectId);
+      if (!resolutionGuard.isCurrent(token)) return; // superseded by a newer refresh
       paintResolutionPanel(ctx.projectResolutionContainer, resolved, deps);
     } catch (err) {
+      if (!resolutionGuard.isCurrent(token)) return;
       ctx.toast?.(`Could not load effective header/footer resolution: ${err.message}`, 'err');
     }
   }
