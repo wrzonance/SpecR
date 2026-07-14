@@ -20,18 +20,26 @@ import { resolveStyleCascade } from './resolver.js';
 import { detectSource, detectArticleIlvl } from './source-detection.js';
 import { parseCoreMetadata } from './core-metadata.js';
 import type { CoreMetadata } from './core-metadata.js';
+import { captureHeaderFooter } from './header-footer.js';
+import { readHeaderFooterParts } from './header-footer-parts.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
 // reject if total uncompressed bytes > 50MB to prevent ZIP bomb exhaustion.
 
-async function extractEntries(zip: JSZip): Promise<{
-  numberingXml: string | null;
-  stylesXml: string | null;
-  documentXml: string | null;
-  commentsXml: string | null;
-  coreXml: string | null;
-  themeXml: string | null;
-}> {
+interface ExtractedEntries {
+  readonly numberingXml: string | null;
+  readonly stylesXml: string | null;
+  readonly documentXml: string | null;
+  readonly commentsXml: string | null;
+  readonly coreXml: string | null;
+  readonly themeXml: string | null;
+  readonly settingsXml: string | null;
+  readonly documentRelsXml: string | null;
+  readonly headerParts: ReadonlyMap<string, string>;
+  readonly footerParts: ReadonlyMap<string, string>;
+}
+
+async function extractEntries(zip: JSZip): Promise<ExtractedEntries> {
   const read = async (name: string): Promise<string | null> => {
     const file = zip.file(name);
     return file ? file.async('string') : null;
@@ -39,15 +47,41 @@ async function extractEntries(zip: JSZip): Promise<{
   // NOTE: Strict discovery of the theme part should follow the officeDocument→theme
   // relationship in word/_rels/document.xml.rels; reading theme1.xml by convention
   // is an adequate approximation for spec-import use-cases.
-  const [numberingXml, stylesXml, documentXml, commentsXml, coreXml, themeXml] = await Promise.all([
-    read('word/numbering.xml'),
-    read('word/styles.xml'),
-    read('word/document.xml'),
-    read('word/comments.xml'),
-    read('docProps/core.xml'),
-    read('word/theme/theme1.xml'),
+  const [textParts, headerFooterParts] = await Promise.all([
+    Promise.all([
+      read('word/numbering.xml'),
+      read('word/styles.xml'),
+      read('word/document.xml'),
+      read('word/comments.xml'),
+      read('docProps/core.xml'),
+      read('word/theme/theme1.xml'),
+      read('word/settings.xml'),
+      read('word/_rels/document.xml.rels'),
+    ]),
+    readHeaderFooterParts(zip), // #306: word/header*.xml, word/footer*.xml glob-read
   ]);
-  return { numberingXml, stylesXml, documentXml, commentsXml, coreXml, themeXml };
+  const [
+    numberingXml,
+    stylesXml,
+    documentXml,
+    commentsXml,
+    coreXml,
+    themeXml,
+    settingsXml,
+    documentRelsXml,
+  ] = textParts;
+  return {
+    numberingXml,
+    stylesXml,
+    documentXml,
+    commentsXml,
+    coreXml,
+    themeXml,
+    settingsXml,
+    documentRelsXml,
+    headerParts: headerFooterParts.headerParts,
+    footerParts: headerFooterParts.footerParts,
+  };
 }
 
 interface ValidEntries {
@@ -56,6 +90,10 @@ interface ValidEntries {
   readonly documentXml: string;
   readonly commentsXml: string | null;
   readonly coreXml: string | null;
+  readonly settingsXml: string | null;
+  readonly documentRelsXml: string | null;
+  readonly headerParts: ReadonlyMap<string, string>;
+  readonly footerParts: ReadonlyMap<string, string>;
 }
 
 function runPipeline(
@@ -93,14 +131,32 @@ function runPipeline(
         }
       : undefined;
 
+  // Header/footer capture (#306, ADR-068): `known` is meta.section/meta.title
+  // from parseCoreMetadata ONLY — never the content-inference fallback the
+  // parse() orchestrator applies later — so a field match is always a literal
+  // identity match, never a guess.
+  const hf = captureHeaderFooter(
+    {
+      documentXml: entries.documentXml,
+      settingsXml: entries.settingsXml,
+      documentRelsXml: entries.documentRelsXml,
+      headerParts: entries.headerParts,
+      footerParts: entries.footerParts,
+    },
+    { section: meta.section, title: meta.title }
+  );
+
   // Each source fires at most once per parse — appended, not deduped.
   const warnings = [
     ...structuralWarnings,
     ...(meta.warning ? [meta.warning] : []),
     ...(tableWarning ? [tableWarning] : []),
+    ...hf.warnings,
   ];
   const withWarnings = warnings.length > 0 ? { ...tree, warnings } : tree;
-  return hiddenTables.length > 0 ? { ...withWarnings, hiddenTables } : withWarnings;
+  const withHiddenTables =
+    hiddenTables.length > 0 ? { ...withWarnings, hiddenTables } : withWarnings;
+  return hf.composition ? { ...withHiddenTables, headerFooter: hf.composition } : withHiddenTables;
 }
 
 // ─── Internal classification helper ──────────────────────────────────────────
@@ -280,7 +336,17 @@ export async function parseDocx(
   }
 
   onProgress?.('extracting', 10);
-  const { numberingXml, stylesXml, documentXml, commentsXml, coreXml } = await extractEntries(zip);
+  const {
+    numberingXml,
+    stylesXml,
+    documentXml,
+    commentsXml,
+    coreXml,
+    settingsXml,
+    documentRelsXml,
+    headerParts,
+    footerParts,
+  } = await extractEntries(zip);
 
   if (!stylesXml) {
     throw new ParserError('DOCX missing word/styles.xml', { code: 'DOCX_MISSING_STYLES' });
@@ -290,7 +356,17 @@ export async function parseDocx(
   }
 
   return runPipeline(
-    { numberingXml, stylesXml, documentXml, commentsXml, coreXml },
+    {
+      numberingXml,
+      stylesXml,
+      documentXml,
+      commentsXml,
+      coreXml,
+      settingsXml,
+      documentRelsXml,
+      headerParts,
+      footerParts,
+    },
     onProgress,
     numberingProfile
   );

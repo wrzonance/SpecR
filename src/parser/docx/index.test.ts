@@ -962,3 +962,88 @@ describe('parseDocx — table extraction wiring (#293)', () => {
     expect((tree.warnings ?? []).some((w) => w.type === 'table-content-skipped')).toBe(false);
   });
 });
+
+// ─── header/footer capture wiring (#306, ADR-068) ───────────────────────────
+// captureHeaderFooter itself is exhaustively unit-tested at its own boundary
+// (header-footer.test.ts) — these tests pin only that index.ts actually wires
+// it in: entries (documentXml/settingsXml/documentRelsXml/headerParts/
+// footerParts) flow through from the zip, `known` comes from parseCoreMetadata
+// (never a guess), and hf.composition/hf.warnings land on the returned tree
+// the same way tableWarning/hiddenTables already do.
+
+const HEADER_FOOTER_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+</Relationships>`;
+
+function headerPartXml(text: string): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:hdr>`;
+}
+
+function docWithSectPr(sectPr: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Plain paragraph text.</w:t></w:r></w:p>
+    ${sectPr}
+  </w:body>
+</w:document>`;
+}
+
+describe('parseDocx — header/footer capture wiring (#306)', () => {
+  it('captures a resolved default header into tree.headerFooter, using meta.section (core.xml) as the known identity — not a guess', async () => {
+    const zip = new JSZip();
+    zip.file('word/styles.xml', MINIMAL_STYLES);
+    zip.file(
+      'word/document.xml',
+      docWithSectPr('<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>')
+    );
+    zip.file('docProps/core.xml', CORE_XML); // dc:subject "27 21 00" -> tree.section
+    zip.file('word/_rels/document.xml.rels', HEADER_FOOTER_RELS_XML);
+    zip.file('word/header1.xml', headerPartXml('27 21 00'));
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const tree = await parseDocx(buffer);
+
+    expect(tree.section).toBe('27 21 00');
+    expect(tree.headerFooter?.variants?.default?.header?.left?.content).toEqual([
+      { kind: 'sectionNumber' },
+    ]);
+    expect(tree.headerFooter?.raw).toBeUndefined();
+    expect((tree.warnings ?? []).some((w) => w.type === 'header-footer-content-skipped')).toBe(
+      false
+    );
+  });
+
+  it('an inactive first-header reference (no w:titlePg) is preserved under headerFooter.raw.unmodeled and surfaces exactly one aggregate warning on the tree', async () => {
+    const zip = new JSZip();
+    zip.file('word/styles.xml', MINIMAL_STYLES);
+    zip.file(
+      'word/document.xml',
+      docWithSectPr('<w:sectPr><w:headerReference w:type="first" r:id="rId1"/></w:sectPr>')
+    );
+    zip.file('word/_rels/document.xml.rels', HEADER_FOOTER_RELS_XML);
+    zip.file('word/header1.xml', headerPartXml('First Page'));
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const tree = await parseDocx(buffer);
+
+    expect(tree.headerFooter?.variants?.first).toBeUndefined();
+    expect(tree.headerFooter?.raw?.unmodeled).toEqual([
+      expect.objectContaining({ variant: 'first', region: 'header', kind: 'inactiveVariant' }),
+    ]);
+    expect(tree.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'header-footer-content-skipped' })])
+    );
+  });
+
+  it('no header/footer content anywhere — headerFooter key is absent, never an empty object', async () => {
+    const tree = await parseDocx(await makeDocx({}));
+
+    expect(Object.prototype.hasOwnProperty.call(tree, 'headerFooter')).toBe(false);
+    expect((tree.warnings ?? []).some((w) => w.type === 'header-footer-content-skipped')).toBe(
+      false
+    );
+  });
+});
