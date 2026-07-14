@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, globSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { parse } from '../index.js';
+import { HeaderFooterCompositionSchema } from '../../ast/index.js';
 import type { SpecNode } from '../../ast/types.js';
 
 // Whole reference corpus is copyrighted and gitignored under
@@ -54,6 +55,28 @@ describe.skipIf(CORPUS.length === 0)('DOCX corpus — every real spec parses to 
     });
   }
 });
+
+// Task 19 (#306): header/footer capture must be a clean no-op across the whole
+// corpus — it never throws for document-content reasons, and any composition it
+// does produce is a valid HeaderFooterComposition. Unlike the 3-part sweep above,
+// there is no fixed expected shape here (most vendor DOCX headers/footers are
+// unmodeled-but-preserved, not the small recognized-field subset), so this only
+// pins the two things captureHeaderFooter's contract actually promises.
+describe.skipIf(CORPUS.length === 0)(
+  'DOCX corpus — header/footer capture is a clean, well-typed no-op',
+  () => {
+    for (const file of CORPUS) {
+      const name = basename(file);
+      if (INVALID.has(name)) continue;
+
+      it(`${name}: captures a header/footer composition without a capture failure`, async () => {
+        const { tree } = await parse(readFileSync(file), name);
+        if (tree.headerFooter === undefined) return;
+        expect(() => HeaderFooterCompositionSchema.parse(tree.headerFooter)).not.toThrow();
+      });
+    }
+  }
+);
 
 // Regression (CPI_DATA_COMMUNICATIONS_WIRELESS_ACCESS_POINTS.docx): an unstyled doc that
 // types its whole outline as a decimal ladder. Its PART headings "2.0 PRODUCTS" /
