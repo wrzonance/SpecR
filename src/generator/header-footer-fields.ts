@@ -1,5 +1,7 @@
 import { PageNumber, TextRun } from 'docx';
+import type { ImageRun } from 'docx';
 import type { HeaderFooterFieldKind, HeaderFooterVariant } from '../ast/index.js';
+import { imageFieldHasContent, renderImageRun } from './header-footer-images.js';
 
 // Local indexed-access aliases: the AST barrel (`src/ast/index.ts`) exports
 // only the composition-level types (HeaderFooterComposition/Variant/
@@ -118,10 +120,9 @@ function resolveLiteral(field: HeaderFooterField): readonly FieldValue[] {
 //
 // `image` (#308, ADR-069) resolves to `[]` here — exhaustiveness only, never
 // invoked at runtime through the ordinary text-field path. Image content is
-// binary, not a `FieldValue`, so it is dispatched separately before it ever
-// reaches `resolveFieldChildren` (see the follow-up image-rendering work);
-// this stub only keeps `cellHasContent`/`renderCellRuns` correct (an
-// image-only cell is *not yet* treated as content) until that dispatch lands.
+// binary, not a `FieldValue`, so it is dispatched separately (see
+// `renderCellRuns`/`cellHasContent` below, which route `kind: 'image'`
+// fields through `header-footer-images.ts` instead of this table).
 const FIELD_RESOLVERS: Record<HeaderFooterFieldKind, FieldResolver> = {
   date: resolveValueField('date'),
   sectionTitle: resolveSectionTitle,
@@ -159,19 +160,34 @@ export function cellIsEmpty(cell: HeaderFooterCell | undefined): boolean {
 }
 
 /**
+ * True iff `field` would occupy space when `cell` renders: a text/value field
+ * that resolves to at least one `FieldValue`, OR (#308) an image field
+ * carrying `imageData`. The image branch is deliberately presence-based, not
+ * a render-success check — `renderImageRun` can still fail a structurally
+ * present image (missing dimensions, undecodable data), and that failure is
+ * surfaced as a warning (`imageFieldWarnings`), not by silently collapsing
+ * the cell's reserved layout space out from under it.
+ */
+function fieldHasContent(field: HeaderFooterField, ctx: HeaderFooterFieldContext): boolean {
+  return resolveFieldChildren(field, ctx).length > 0 || imageFieldHasContent(field);
+}
+
+/**
  * True iff `cell` resolves to at least one real field value for `ctx` — not
  * merely a non-empty `content` array. A field can be structurally present
  * yet resolve to nothing (`{ kind: 'literal' }` with no `text`, or a value
  * field whose key is absent from `ctx.current`/`ctx.issuance`), and regions
  * need to know whether a cell would actually render before deciding to emit
- * a paragraph or a tab stop for it.
+ * a paragraph or a tab stop for it. The image-field OR-branch (#308) never
+ * changes this for the 12 pre-existing kinds: `imageFieldHasContent` is
+ * `false` for every non-image `field.kind`.
  */
 export function cellHasContent(
   cell: HeaderFooterCell | undefined,
   ctx: HeaderFooterFieldContext
 ): boolean {
   if (cellIsEmpty(cell)) return false;
-  return (cell?.content ?? []).some((field) => resolveFieldChildren(field, ctx).length > 0);
+  return (cell?.content ?? []).some((field) => fieldHasContent(field, ctx));
 }
 
 /** docx TextRun run-property options mapped from a resolved visual style. */
@@ -240,18 +256,43 @@ export function renderFieldRun(
   );
 }
 
+/** A rendered cell/region child: text (`renderFieldRun`) or an image (#308, ADR-069). */
+export type HeaderFooterRunChild = TextRun | ImageRun;
+
+/**
+ * One field's rendered output, routed by kind: `kind: 'image'` goes through
+ * `renderImageRun` (`[]` when it cannot render — see that function's own
+ * guard clauses), every other kind goes through `renderFieldRun` unchanged.
+ * `style` is not applied to an image run — `HeaderFooterVisualStyle` is a
+ * text run-property set (font/size/bold/…) with no image-specific analogue.
+ */
+function renderFieldRunChild(
+  field: HeaderFooterField,
+  ctx: HeaderFooterFieldContext,
+  style: HeaderFooterVisualStyle | undefined
+): readonly HeaderFooterRunChild[] {
+  if (field.kind === 'image') {
+    const image = renderImageRun(field);
+    return image === undefined ? [] : [image];
+  }
+  return renderFieldRun(field, ctx, style);
+}
+
 /**
  * Render one cell's fields in order, interleaving `cell.separator` (default a
  * single space) between entries that actually resolve to output. A field
- * that resolves to nothing (e.g. `{ kind: 'literal' }` with no `text`, or a
- * value field whose key is absent from `ctx`) is skipped entirely and never
- * triggers a separator on either side — the separator count always tracks
- * resolved output, not `cell.content`'s structural length. `[]` for an
- * absent/empty cell.
+ * that resolves to nothing (e.g. `{ kind: 'literal' }` with no `text`, a
+ * value field whose key is absent from `ctx`, or an image field that fails
+ * to decode/sniff/dimension — see `renderImageRun`) is skipped entirely and
+ * never triggers a separator on either side — the separator count always
+ * tracks resolved output, not `cell.content`'s structural length. `[]` for
+ * an absent/empty cell.
  *
  * The separator run carries the same cascaded cell style as the field runs it
  * divides — so a bold/red/Arial cell's ` | ` divider (and even the default
- * space's font-derived width) stays visually consistent with its fields.
+ * space's font-derived width) stays visually consistent with its fields. An
+ * image field never carries that style itself (see `renderFieldRunChild`),
+ * but the separator around it still does.
  *
  * The default separator can visually double up with a literal field's own
  * trailing space (e.g. a literal "Page " immediately followed by a
@@ -263,15 +304,15 @@ export function renderCellRuns(
   cell: HeaderFooterCell | undefined,
   ctx: HeaderFooterFieldContext,
   inheritedStyle: HeaderFooterVisualStyle | undefined
-): readonly TextRun[] {
+): readonly HeaderFooterRunChild[] {
   if (cell === undefined || cell.content === undefined || cell.content.length === 0) return [];
   const style = cascadeStyle(cell.style, inheritedStyle);
   const separatorOptions = headerFooterRunOptions(style);
   const separator = cell.separator ?? ' ';
-  const runs: TextRun[] = [];
+  const runs: HeaderFooterRunChild[] = [];
   let hasRenderedField = false;
   for (const field of cell.content) {
-    const fieldRuns = renderFieldRun(field, ctx, style);
+    const fieldRuns = renderFieldRunChild(field, ctx, style);
     if (fieldRuns.length === 0) continue;
     if (hasRenderedField) runs.push(new TextRun({ text: separator, ...separatorOptions }));
     runs.push(...fieldRuns);

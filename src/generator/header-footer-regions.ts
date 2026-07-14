@@ -6,6 +6,7 @@ import {
   cellHasContent,
   renderCellRuns,
   type HeaderFooterFieldContext,
+  type HeaderFooterRunChild,
   type HeaderFooterVisualStyle,
 } from './header-footer-fields.js';
 
@@ -101,7 +102,7 @@ function regionChildren(
   region: HeaderFooterRegion | undefined,
   ctx: HeaderFooterFieldContext,
   style: HeaderFooterVisualStyle | undefined
-): readonly TextRun[] {
+): readonly HeaderFooterRunChild[] {
   const needsCenterTab = cellHasContent(region?.center, ctx) || cellHasContent(region?.right, ctx);
   const needsRightTab = cellHasContent(region?.right, ctx);
   return [
