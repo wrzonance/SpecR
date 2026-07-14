@@ -8,9 +8,10 @@
 // whole table; an unsupported field or an extra paragraph inside an
 // otherwise-simple cell drops only that item — both preserved as unmodeled,
 // never silently lost. Per-cell field recognition reuses
-// header-footer-region.ts's buildCellContent/paragraphsOf/runsOf/
-// paragraphHasContent/isDrawingRun/captureBorderEdge rather than
-// reimplementing them.
+// header-footer-region.ts's buildCellContent/runsOf/paragraphHasContent/
+// isDrawingRun/captureBorderEdge rather than reimplementing them; cell
+// paragraphs are gathered by this module's own deep collectCellParagraphs
+// (w:sdt/w:ins-wrapped cell paragraphs, not just direct w:p children).
 
 import { asRecord, compact, extractAttrStr, toArray } from './xml-utils.js';
 import { collapseComplexFields } from './header-footer-field-recognition.js';
@@ -19,7 +20,6 @@ import {
   buildCellContent,
   captureBorderEdge,
   isDrawingRun,
-  paragraphsOf,
   runsOf,
   paragraphHasContent,
 } from './header-footer-region.js';
@@ -121,6 +121,53 @@ function columnSpanOf(tc: Record<string, unknown>): number | undefined {
   return gridSpan ? parsePositiveInt(extractAttrStr(gridSpan, '@_w:val')) : undefined;
 }
 
+// A cell's content-bearing paragraph is not always a DIRECT w:p child of the
+// w:tc: content controls (w:sdt) and tracked-change wrappers (w:ins/w:del)
+// wrap paragraphs exactly as they wrap runs — the same reason region capture
+// deep-scans runs (header-footer-region.ts's runsOf/collectRuns) and this
+// module deep-scans for nested tables (containsNestedTable). A shallow
+// `tc['w:p']` read would capture a cell whose only paragraph is wrapped as
+// EMPTY, with no unmodeled entry and no warning — a silent drop this pipeline
+// forbids (ADR-068 criteria 3/4). This collects every w:p at any depth in
+// document order, skipping property containers (w:tcPr/w:pPr/w:rPr) and never
+// descending into a nested w:tbl (already disqualified upstream by
+// hasNestedTable — guarded here so the collector stays correct in isolation).
+// Keys collectCellParagraphs never recurses into: property containers
+// (w:tcPr/w:pPr/w:rPr) carry no paragraph content, and a nested w:tbl is
+// disqualified upstream — harvesting its paragraphs here would be wrong.
+// A Set (not a 4-way `||`) keeps the collector under the enforced
+// complexity cap of 10.
+const CELL_PARAGRAPH_SKIP_KEYS: ReadonlySet<string> = new Set([
+  'w:tcPr',
+  'w:pPr',
+  'w:rPr',
+  'w:tbl',
+]);
+
+function collectCellParagraphs(node: unknown, acc: Record<string, unknown>[]): void {
+  if (Array.isArray(node)) {
+    for (const item of node) collectCellParagraphs(item, acc);
+    return;
+  }
+  if (node === null || typeof node !== 'object') return;
+  for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+    if (CELL_PARAGRAPH_SKIP_KEYS.has(key)) continue;
+    if (key === 'w:p') {
+      acc.push(
+        ...toArray<Record<string, unknown>>(child as readonly Record<string, unknown>[] | undefined)
+      );
+      continue;
+    }
+    collectCellParagraphs(child, acc);
+  }
+}
+
+function paragraphsInCell(tc: Record<string, unknown>): readonly Record<string, unknown>[] {
+  const acc: Record<string, unknown>[] = [];
+  collectCellParagraphs(tc, acc);
+  return acc;
+}
+
 interface CellCaptureResult {
   readonly cell: HeaderFooterTableCell;
   readonly unmodeled: readonly PartialUnmodeled[];
@@ -130,7 +177,7 @@ function captureTableCell(
   tc: Record<string, unknown>,
   known: KnownSectionIdentity
 ): CellCaptureResult {
-  const contentBearing = paragraphsOf(tc).filter((p) => paragraphHasContent(runsOf(p)));
+  const contentBearing = paragraphsInCell(tc).filter((p) => paragraphHasContent(runsOf(p)));
   const extraUnmodeled: readonly PartialUnmodeled[] = contentBearing
     .slice(1)
     .map((p): PartialUnmodeled => ({ kind: 'extraParagraph', detail: compact(p) }));

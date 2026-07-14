@@ -110,10 +110,11 @@ describe('captureRegion — simple table capture (#309, ADR-071)', () => {
     expect(result.region?.table?.columnWidths).toEqual([1440, 2880]);
   });
 
-  // Documented simplification (mirrors "first run/paragraph wins" elsewhere
-  // in this capture pipeline): HeaderFooterTableSchema models a single
-  // uniform border for a table, so only the w:tblBorders w:top edge is
-  // captured as the table's representative border definition.
+  // KNOWN AMBIGUITY: HeaderFooterTableSchema models a single uniform border
+  // for a table (mirrors "first run/paragraph wins" elsewhere in this
+  // capture pipeline), so when per-edge w:tblBorders styles differ, only
+  // the w:top edge is captured as the table's representative border
+  // definition; other edges' distinct styling is discarded.
   it('captures the table borders from the w:tblBorders w:top edge as a single uniform rule line', () => {
     const xml = makeHdrXml(
       table(
@@ -136,6 +137,27 @@ describe('captureRegion — simple table capture (#309, ADR-071)', () => {
     expect(result.region?.table?.rows).toEqual([
       { cells: [{}, { content: [{ kind: 'literal', text: 'B' }] }] },
     ]);
+  });
+
+  // A cell's paragraph can be wrapped in a w:sdt content control (or a
+  // w:ins/w:del tracked-change wrapper) rather than sitting as a direct w:p
+  // child — region capture already deep-scans runs for exactly this, and this
+  // module deep-scans for wrapped NESTED tables. A shallow `tc['w:p']` read
+  // would capture such a cell as EMPTY with no unmodeled entry, a silent drop
+  // (ADR-068 criteria 3/4); collectCellParagraphs finds the wrapped paragraph.
+  it('captures a cell whose only paragraph is wrapped in a w:sdt content control, never as an empty cell', () => {
+    const wrappedCell = `<w:tc><w:sdt><w:sdtContent>${paragraph(textRun('Wrapped'))}</w:sdtContent></w:sdt></w:tc>`;
+    const xml = makeHdrXml(table(row(wrappedCell + cell(paragraph(textRun('Direct'))))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      {
+        cells: [
+          { content: [{ kind: 'literal', text: 'Wrapped' }] },
+          { content: [{ kind: 'literal', text: 'Direct' }] },
+        ],
+      },
+    ]);
+    expect(result.unmodeled).toEqual([]);
   });
 
   // Confirms columnWidths/borders are genuinely ABSENT keys (compact() drops
