@@ -60,9 +60,23 @@ function allCellsOf(tbl: Record<string, unknown>): readonly Record<string, unkno
 }
 
 // A w:tbl nested inside a w:tc — always a root-level sibling of w:p per
-// ADR-068, so any w:tbl found INSIDE a cell here is a genuine nested table.
+// ADR-068, so any w:tbl found INSIDE a cell here, at any depth, is a genuine
+// nested table. Deep scan (mirrors document.ts's collectRuns traversal)
+// rather than a direct `'w:tbl' in tc` check: a nested w:tbl wrapped in a
+// w:sdt content control (or any other future wrapper) sits several levels
+// below tc, not as a direct property — a shallow check would miss it, drop
+// the table with no unmodeled trace, and report the surrounding table as
+// cleanly captured.
+function containsNestedTable(node: unknown): boolean {
+  if (Array.isArray(node)) return node.some(containsNestedTable);
+  if (node === null || typeof node !== 'object') return false;
+  return Object.entries(node as Record<string, unknown>).some(
+    ([key, child]) => key === 'w:tbl' || containsNestedTable(child)
+  );
+}
+
 function hasNestedTable(tbl: Record<string, unknown>): boolean {
-  return allCellsOf(tbl).some((tc) => 'w:tbl' in tc);
+  return allCellsOf(tbl).some((tc) => containsNestedTable(tc));
 }
 
 // Vertical cell merge (w:vMerge) has no representation in

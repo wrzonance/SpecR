@@ -137,6 +137,18 @@ describe('captureRegion — simple table capture (#309, ADR-071)', () => {
       { cells: [{}, { content: [{ kind: 'literal', text: 'B' }] }] },
     ]);
   });
+
+  // Confirms columnWidths/borders are genuinely ABSENT keys (compact() drops
+  // undefined entries entirely), not merely undefined-valued — toStrictEqual
+  // (unlike toEqual) distinguishes a missing key from a key set to undefined,
+  // so this catches any regression that starts fabricating either hint.
+  it('captures a table with no columnWidths or borders key present when the source has no w:tblGrid or w:tblBorders', () => {
+    const xml = makeHdrXml(table(row(cell(paragraph(textRun('A'))))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table).toStrictEqual({
+      rows: [{ cells: [{ content: [{ kind: 'literal', text: 'A' }] }] }],
+    });
+  });
 });
 
 describe('captureRegion — per-item drops inside an otherwise-capturable table (ADR-071 decision 4)', () => {
@@ -192,6 +204,17 @@ describe('captureRegion — structural table disqualification (ADR-071 decision 
 
   it('never fabricates a table from a w:tbl with zero rows — disqualified whole, like any other malformed table', () => {
     const xml = makeHdrXml(table(''));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table).toBeUndefined();
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+  });
+
+  it('disqualifies the whole table when a cell contains a nested w:tbl wrapped in a w:sdt content control, preserving it whole as unmodeled — never silently dropped as an empty cell', () => {
+    const nestedTbl = table(row(cell(paragraph(textRun('nested')))));
+    const sdtWrappedNestedTbl = `<w:sdt><w:sdtContent>${nestedTbl}</w:sdtContent></w:sdt>`;
+    const xml = makeHdrXml(table(row(cell(sdtWrappedNestedTbl))));
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(result.region?.table).toBeUndefined();
     expect(result.unmodeled).toContainEqual(
