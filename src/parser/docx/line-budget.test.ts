@@ -61,6 +61,7 @@ describe('src/parser/docx/ line budget (#306)', () => {
   it.each([
     ['./index.ts', './index.ts'],
     ['./source-detection.ts', './source-detection.ts'],
+    ['./core-metadata.ts', './core-metadata.ts'],
   ])('%s stays at or under the 400-line hard cap', (_name, relativePath) => {
     expect(lineCount(relativePath)).toBeLessThanOrEqual(MAX_LINES);
   });

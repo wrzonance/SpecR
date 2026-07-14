@@ -1,5 +1,4 @@
 import JSZip from 'jszip';
-import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { buildNumberingMap, emptyNumberingMap, withArticleIlvl } from './numbering.js';
 import { buildStyleMap } from './styles.js';
@@ -18,52 +17,12 @@ import type { ParseWarning, SpecTree, StyleProperties } from '../../ast/types.js
 import type { NumberingProfile } from '../../ast/index.js';
 import type { NumberingMap, StyleMap, ClassifiedParagraph, DocxParagraph } from './types.js';
 import { resolveStyleCascade } from './resolver.js';
-import { parseSectionNumberCandidate } from '../../lib/section-number.js';
 import { detectSource, detectArticleIlvl } from './source-detection.js';
+import { parseCoreMetadata } from './core-metadata.js';
+import type { CoreMetadata } from './core-metadata.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
 // reject if total uncompressed bytes > 50MB to prevent ZIP bomb exhaustion.
-
-const coreParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-  textNodeName: '#text',
-});
-
-function parseCoreMetadata(xml: string): {
-  section: string;
-  title: string;
-  warning?: ParseWarning;
-} {
-  try {
-    const parsed = coreParser.parse(xml) as Record<string, unknown>;
-    const props = parsed['cp:coreProperties'] as Record<string, unknown> | undefined;
-    const subject = props?.['dc:subject'];
-    const titleVal = props?.['dc:title'];
-    // dc:subject is free-text in Word — normalize so non-conforming values degrade
-    // to 'unknown' and the orchestrator's content inference takes over (instead of
-    // leaking prose downstream where the worker section-gate would kill the job).
-    const parsedSection =
-      typeof subject === 'string' ? parseSectionNumberCandidate(subject, 'strong') : null;
-    const section = parsedSection?.ok === true ? parsedSection.canonical : 'unknown';
-    return {
-      section,
-      title: typeof titleVal === 'string' && titleVal.trim() ? titleVal.trim() : 'unknown',
-    };
-  } catch {
-    // Corrupt/unparseable core.xml previously degraded silently to 'unknown'.
-    // Surface it as a tree warning so it flows to logs/API/MCP responses instead.
-    return {
-      section: 'unknown',
-      title: 'unknown',
-      warning: {
-        type: 'core-metadata-unreadable',
-        suggestion:
-          'docProps/core.xml could not be parsed; section/title fell back to content inference.',
-      },
-    };
-  }
-}
 
 async function extractEntries(zip: JSZip): Promise<{
   numberingXml: string | null;
@@ -113,7 +72,7 @@ function runPipeline(
   // Section/title from core.xml only; when absent, the parse() orchestrator's
   // inferSectionMeta (lib/infer-section.ts) recovers them from tree content
   // with method/confidence reporting — do not duplicate that here.
-  const meta: { section: string; title: string; warning?: ParseWarning } = entries.coreXml
+  const meta: CoreMetadata = entries.coreXml
     ? parseCoreMetadata(entries.coreXml)
     : { section: 'unknown', title: 'unknown' };
 
