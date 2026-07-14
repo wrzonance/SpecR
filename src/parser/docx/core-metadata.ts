@@ -14,6 +14,14 @@ export interface CoreMetadata {
   readonly warning?: ParseWarning;
 }
 
+// Fallback value for `section`/`title` whenever docProps/core.xml is absent,
+// unreadable, or lacks a conforming dc:subject/dc:title — never a real
+// section number or title. Exported so a caller holding a CoreMetadata-derived
+// identity (header-footer-field-recognition.ts's matchKnownSectionField, #306
+// ADR-068) can positively exclude this sentinel instead of risking a
+// coincidental literal-text match against it.
+export const UNKNOWN_SECTION_IDENTITY = 'unknown';
+
 // docProps/core.xml → section/title metadata. Moved verbatim out of index.ts
 // (#306 line-budget prerequisite, one of two extractions carving out headroom
 // for the header/footer capture feature) — zero behavior change.
@@ -28,17 +36,20 @@ export function parseCoreMetadata(xml: string): CoreMetadata {
     // leaking prose downstream where the worker section-gate would kill the job).
     const parsedSection =
       typeof subject === 'string' ? parseSectionNumberCandidate(subject, 'strong') : null;
-    const section = parsedSection?.ok === true ? parsedSection.canonical : 'unknown';
+    const section = parsedSection?.ok === true ? parsedSection.canonical : UNKNOWN_SECTION_IDENTITY;
     return {
       section,
-      title: typeof titleVal === 'string' && titleVal.trim() ? titleVal.trim() : 'unknown',
+      title:
+        typeof titleVal === 'string' && titleVal.trim()
+          ? titleVal.trim()
+          : UNKNOWN_SECTION_IDENTITY,
     };
   } catch {
     // Corrupt/unparseable core.xml previously degraded silently to 'unknown'.
     // Surface it as a tree warning so it flows to logs/API/MCP responses instead.
     return {
-      section: 'unknown',
-      title: 'unknown',
+      section: UNKNOWN_SECTION_IDENTITY,
+      title: UNKNOWN_SECTION_IDENTITY,
       warning: {
         type: 'core-metadata-unreadable',
         suggestion:

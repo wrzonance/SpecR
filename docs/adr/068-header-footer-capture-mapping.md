@@ -120,14 +120,22 @@ paragraph's capture.
 
 ### Page-numbering policy is read from `w:pgNumType`, restart-per-part is not inferred
 
-`pageNumbering.startAt` is read directly from the trailing `w:sectPr`'s
-`w:pgNumType/@w:start` attribute when present. This capture does not
-attempt to infer `pageNumbering.mode` (`continuous` vs `restartPerSpec`)
-from a single document's section properties — that policy is inherently
-a cross-document, package-level decision (ADR-040 already scopes it that
-way), not recoverable from one spec section's OOXML. Only `startAt` is
-populated when this document declares an explicit restart point; `mode`
-is left for the caller/resolver (#304) to set.
+The trailing `w:sectPr`'s `w:pgNumType/@w:start` attribute, when present, is
+read into `sectionInfo.pgNumStart`. This capture does not attempt to infer
+`pageNumbering.mode` (`continuous` vs `restartPerSpec`) from a single
+document's section properties — that policy is inherently a cross-document,
+package-level decision (ADR-040 already scopes it that way), not recoverable
+from one spec section's OOXML.
+
+**Correction (post-implementation review, #306):** `PageNumberingSchema.mode`
+(ADR-040) is a *required* field whenever `pageNumbering` is present at all —
+there is no schema-valid way to write `pageNumbering: { startAt }` without
+also supplying `mode`, and fabricating a `mode` here would be exactly the
+guessed cross-document policy this section already rules out. `pgNumStart` is
+therefore preserved verbatim under `raw.pgNumStart` (the sidecar's open
+catchall) with a matching `raw.warnings` line, not promoted to
+`composition.pageNumbering.startAt`. `mode` and the promotion decision both
+remain for the caller/resolver (#304) to set.
 
 ### Field recognition is core.xml-literal, never content-inferred
 

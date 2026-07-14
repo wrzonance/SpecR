@@ -7,7 +7,13 @@
 
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
-import { asRecord, createDocumentXmlParser, extractAttrStr, toArray } from './xml-utils.js';
+import {
+  asRecord,
+  createDocumentXmlParser,
+  extractAttrStr,
+  getAttrVal,
+  toArray,
+} from './xml-utils.js';
 import type {
   DocumentSettingsInfo,
   HeaderFooterReference,
@@ -15,6 +21,19 @@ import type {
   ResolvedHeaderFooterReference,
   SectionHeaderFooterInfo,
 } from './types.js';
+
+// OOXML CT_OnOff toggle (ECMA-376 §17.17.4), used below by both w:titlePg
+// (trailing w:sectPr) and w:evenAndOddHeaders (settings.xml): an absent
+// element is off; a present element with no @w:val, or @w:val outside
+// {0,false,off}, is on; an explicit @w:val in {0,false,off} is off. Mirrors
+// this codebase's established CT_OnOff convention (resolver.ts's toggle(),
+// comments.ts's isStrikeOn()) — presence alone is not enough, since a
+// document can carry an explicit off-toggle (<w:titlePg w:val="0"/>).
+function isOnOffActive(el: unknown): boolean {
+  if (el === undefined) return false;
+  const val = getAttrVal(el);
+  return val !== '0' && val !== 'false' && val !== 'off';
+}
 
 // ─── word/_rels/document.xml.rels ──────────────────────────────────────────
 
@@ -166,7 +185,7 @@ export function parseSectionHeaderFooterInfo(documentXml: string): SectionHeader
   const pgNumStart = extractPgNumStart(sectPr);
   return {
     references: readSectPrReferences(sectPr),
-    titlePg: 'w:titlePg' in sectPr,
+    titlePg: isOnOffActive(sectPr['w:titlePg']),
     ...(pgNumStart !== undefined ? { pgNumStart } : {}),
     hasAdditionalSectionBreaks,
   };
@@ -196,7 +215,7 @@ export function parseDocumentSettings(settingsXml: string | null): DocumentSetti
   if (settingsXml === null || settingsXml.trim() === '') return { evenAndOddHeaders: false };
   const parsed = parseSettingsXml(settingsXml);
   const root = asRecord(parsed['w:settings']);
-  return { evenAndOddHeaders: root !== undefined && 'w:evenAndOddHeaders' in root };
+  return { evenAndOddHeaders: root !== undefined && isOnOffActive(root['w:evenAndOddHeaders']) };
 }
 
 // ─── reference resolution ───────────────────────────────────────────────────

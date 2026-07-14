@@ -4,6 +4,7 @@
 // capture itself (paragraph -> region) lives in header-footer-region.ts.
 
 import { asRecord, compact } from './xml-utils.js';
+import { UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
 import type { RunProperties, HeaderFooterVariant } from '../../ast/index.js';
 
 // Local mirror of generator/header-footer-fields.ts's HeaderFooterVisualStyle
@@ -172,13 +173,21 @@ export interface KnownSectionIdentity {
  * identity (ADR-068: core.xml-literal, never content-inferred). Exact
  * equality only — a substring/partial match is never fabricated into a
  * field reference, since that would misattribute unrelated text.
+ *
+ * `known.section`/`known.title` independently fall back to
+ * UNKNOWN_SECTION_IDENTITY ('unknown') when docProps/core.xml is
+ * absent/unreadable or lacks a conforming dc:subject/dc:title
+ * (core-metadata.ts). That sentinel is never matched against, even when the
+ * header/footer text literally reads "unknown" — otherwise a document with
+ * missing metadata would have ordinary text spuriously recognized as a
+ * section field reference instead of falling back to a literal field.
  */
 export function matchKnownSectionField(
   text: string,
   known: KnownSectionIdentity
 ): 'sectionNumber' | 'sectionTitle' | undefined {
-  if (text === known.section) return 'sectionNumber';
-  if (text === known.title) return 'sectionTitle';
+  if (known.section !== UNKNOWN_SECTION_IDENTITY && text === known.section) return 'sectionNumber';
+  if (known.title !== UNKNOWN_SECTION_IDENTITY && text === known.title) return 'sectionTitle';
   return undefined;
 }
 

@@ -52,6 +52,39 @@ describe('matchKnownSectionField', () => {
   it('is case-sensitive — no normalization that could fabricate a match', () => {
     expect(matchKnownSectionField('staining and transparent finishing', KNOWN)).toBeUndefined();
   });
+
+  // Regression (#306 review): index.ts defaults meta.section/meta.title to the
+  // literal string 'unknown' whenever docProps/core.xml is absent/unreadable
+  // (core-metadata.ts's UNKNOWN_SECTION_IDENTITY) and passes that straight
+  // through as `known`. Literal header/footer text that happens to read
+  // "unknown" must fall back to a literal field, never be fabricated into a
+  // sectionNumber/sectionTitle reference just because it matches the sentinel.
+  it('never matches the sectionNumber sentinel when known.section is the "unknown" fallback', () => {
+    expect(
+      matchKnownSectionField('unknown', { section: 'unknown', title: 'unknown' })
+    ).toBeUndefined();
+  });
+
+  it('never matches the sectionTitle sentinel when known.title is the "unknown" fallback', () => {
+    expect(
+      matchKnownSectionField('unknown', { section: '09 91 26', title: 'unknown' })
+    ).toBeUndefined();
+  });
+
+  it('still matches a real section number when only title fell back to "unknown"', () => {
+    expect(matchKnownSectionField('09 91 26', { section: '09 91 26', title: 'unknown' })).toBe(
+      'sectionNumber'
+    );
+  });
+
+  it('still matches a real title when only section fell back to "unknown"', () => {
+    expect(
+      matchKnownSectionField('STAINING AND TRANSPARENT FINISHING', {
+        section: 'unknown',
+        title: 'STAINING AND TRANSPARENT FINISHING',
+      })
+    ).toBe('sectionTitle');
+  });
 });
 
 // ─── recognizeFieldCode ──────────────────────────────────────────────────────

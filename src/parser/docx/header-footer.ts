@@ -195,12 +195,29 @@ function unmodeledWarningLine(entry: HeaderFooterUnmodeledEntry): string {
   return `${entry.region} ${entry.variant} header/footer: ${entry.kind} content not modeled`;
 }
 
+// A page-number restart declared by the trailing w:sectPr (w:pgNumType/@w:start)
+// cannot be promoted to composition.pageNumbering.startAt: PageNumberingSchema
+// requires `mode` (continuous | restartPerSpec), and mode is a cross-document,
+// package-level policy decision this single-document capture cannot infer
+// (ADR-068) — fabricating one would misattribute a guess to the source
+// document. The value is preserved verbatim, never silently dropped.
+function pgNumStartWarningLine(pgNumStart: number): string {
+  return (
+    `document declares a page-number restart (w:pgNumType/@w:start=${pgNumStart}) — ` +
+    'preserved as raw.pgNumStart; not applied to pageNumbering.startAt because ' +
+    'pageNumbering.mode is a cross-document policy decision this capture cannot ' +
+    'infer (ADR-068)'
+  );
+}
+
 // Granular, one string per unmodeled item plus (ADR-068) one for a body that
 // carries additional w:pPr/w:sectPr section breaks this capture's
-// single-sectPr scope does not model its own header/footer set for.
+// single-sectPr scope does not model its own header/footer set for, plus one
+// for a preserved-but-unpromoted pgNumStart (see pgNumStartWarningLine above).
 function buildRawWarnings(
   unmodeled: readonly HeaderFooterUnmodeledEntry[],
-  hasAdditionalSectionBreaks: boolean
+  hasAdditionalSectionBreaks: boolean,
+  pgNumStart: number | undefined
 ): readonly string[] {
   const sectionBreakWarning = hasAdditionalSectionBreaks
     ? [
@@ -208,7 +225,8 @@ function buildRawWarnings(
           'references, not modeled by this capture (ADR-068: single-sectPr scope)',
       ]
     : [];
-  return [...unmodeled.map(unmodeledWarningLine), ...sectionBreakWarning];
+  const pgNumStartWarning = pgNumStart !== undefined ? [pgNumStartWarningLine(pgNumStart)] : [];
+  return [...unmodeled.map(unmodeledWarningLine), ...sectionBreakWarning, ...pgNumStartWarning];
 }
 
 // Exactly one aggregate ParseWarning at the tree level iff rawWarnings is
@@ -230,15 +248,23 @@ function buildTreeWarnings(rawWarnings: readonly string[]): readonly ParseWarnin
 // so this parse is expected to always succeed on any real document input —
 // if it ever throws, that is an uncaught internal defect in the capture
 // code, never remapped to DOCX_HEADER_FOOTER_XML_INVALID (reserved strictly
-// for malformed source XML).
-function buildComposition(
+// for malformed source XML); this call is deliberately NOT wrapped in a
+// try/catch, so that ZodError propagates raw (pinned directly by
+// header-footer.test.ts's buildComposition invariant test, #306).
+//
+// Exported (not just for internal reuse) so that invariant test can construct
+// a candidate no real capture path can produce — `variants`' looseness is
+// exactly what makes that possible without an `as unknown as` cast.
+export function buildComposition(
   variants: Record<string, unknown>,
   unmodeled: readonly HeaderFooterUnmodeledEntry[],
-  rawWarnings: readonly string[]
+  rawWarnings: readonly string[],
+  pgNumStart: number | undefined
 ): HeaderFooterComposition | undefined {
   const raw = compact({
     warnings: rawWarnings.length > 0 ? rawWarnings : undefined,
     unmodeled: unmodeled.length > 0 ? unmodeled : undefined,
+    pgNumStart,
   });
   const candidate: Record<string, unknown> = compact({
     variants: Object.keys(variants).length > 0 ? variants : undefined,
@@ -288,9 +314,13 @@ export function captureHeaderFooter(
     ...unresolved.map(unresolvedToUnmodeled),
   ];
 
-  const rawWarnings = buildRawWarnings(unmodeled, sectionInfo.hasAdditionalSectionBreaks);
+  const rawWarnings = buildRawWarnings(
+    unmodeled,
+    sectionInfo.hasAdditionalSectionBreaks,
+    sectionInfo.pgNumStart
+  );
   return {
-    composition: buildComposition(variants, unmodeled, rawWarnings),
+    composition: buildComposition(variants, unmodeled, rawWarnings, sectionInfo.pgNumStart),
     warnings: buildTreeWarnings(rawWarnings),
   };
 }

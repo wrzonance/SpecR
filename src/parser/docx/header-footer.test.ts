@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { captureHeaderFooter } from './header-footer.js';
+import { z } from 'zod';
+import { ParserError } from '../error.js';
+import { captureHeaderFooter, buildComposition } from './header-footer.js';
 import type { HeaderFooterCaptureEntries } from './header-footer.js';
 
 const KNOWN = { section: '09 91 26', title: 'STAINING AND TRANSPARENT FINISHING' };
@@ -295,9 +297,80 @@ describe('captureHeaderFooter — never throws for document-content reasons', ()
   });
 
   it('propagates ParserError DOCX_HEADER_FOOTER_XML_INVALID for genuinely malformed settings.xml (not remapped, not swallowed)', () => {
-    expect(() =>
-      captureHeaderFooter(baseEntries({ settingsXml: '<not valid xml' }), KNOWN)
-    ).toThrow(/failed to parse/);
+    let caught: unknown;
+    try {
+      captureHeaderFooter(baseEntries({ settingsXml: '<not valid xml' }), KNOWN);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ParserError);
+    expect((caught as ParserError).code).toBe('DOCX_HEADER_FOOTER_XML_INVALID');
+    expect((caught as ParserError).message).toMatch(/failed to parse/);
+  });
+});
+
+// INVARIANT (ADR-068): buildComposition's final HeaderFooterCompositionSchema
+// .parse() call is never wrapped in a try/catch that remaps failure to
+// DOCX_HEADER_FOOTER_XML_INVALID — that code is reserved strictly for
+// malformed SOURCE XML, never an internal shape defect in the capture code
+// itself. Real document content can never produce a candidate that fails this
+// validation (every `raw.unmodeled` detail is already compact()-ed JSON-safe
+// data, per ADR-068), so this failure path is unreachable through
+// captureHeaderFooter's normal input space; buildComposition is exported
+// solely to pin this boundary contract directly, the same way this module's
+// sibling file (header-footer-field-recognition.ts) exports its own small
+// internal helpers for direct testing. `variants` is intentionally typed as a
+// loosely-typed `Record<string, unknown>` intermediate (see buildComposition's
+// own doc comment) — passing it a shape real capture code could never build
+// is exactly what that looseness is for.
+describe('buildComposition — internal-defect propagation invariant (ADR-068)', () => {
+  it('propagates a raw ZodError, never a ParserError, when the candidate fails HeaderFooterCompositionSchema.parse()', () => {
+    let caught: unknown;
+    try {
+      buildComposition({ default: 'not-an-object' }, [], [], undefined);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(z.ZodError);
+    expect(caught).not.toBeInstanceOf(ParserError);
+  });
+});
+
+// Regression (#306 review): sectionInfo.pgNumStart (w:pgNumType/@w:start) was
+// extracted by parseSectionHeaderFooterInfo but never reached the returned
+// composition or its raw sidecar — silently discarded. pageNumbering.mode is
+// a required field on PageNumberingSchema and a cross-document policy
+// decision this single-document capture cannot infer (ADR-068), so the value
+// is preserved under raw.pgNumStart (the sidecar's open catchall) plus a
+// raw.warnings line, rather than fabricating a mode to populate
+// composition.pageNumbering directly.
+describe('captureHeaderFooter — pgNumStart preservation (ADR-068)', () => {
+  it('preserves w:pgNumType/@w:start under raw.pgNumStart with a raw.warnings line', () => {
+    const sectPr = '<w:sectPr><w:pgNumType w:start="3"/></w:sectPr>';
+    const result = captureHeaderFooter(baseEntries({ documentXml: makeDocXml(sectPr) }), KNOWN);
+    expect(result.composition?.raw?.pgNumStart).toBe(3);
+    expect(result.composition?.raw?.warnings).toEqual([expect.stringContaining('pgNumType')]);
+    expect(result.warnings).toHaveLength(1);
+  });
+
+  it('never fabricates composition.pageNumbering — mode is a cross-document decision this capture cannot infer', () => {
+    const sectPr = '<w:sectPr><w:pgNumType w:start="3"/></w:sectPr>';
+    const result = captureHeaderFooter(baseEntries({ documentXml: makeDocXml(sectPr) }), KNOWN);
+    expect(result.composition?.pageNumbering).toBeUndefined();
+  });
+
+  it('does not add raw.pgNumStart or a warning when w:pgNumType is absent', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
+    const result = captureHeaderFooter(
+      baseEntries({
+        documentXml: makeDocXml(sectPr),
+        documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
+        headerParts: new Map([['word/header1.xml', makeHdrXml('Default')]]),
+      }),
+      KNOWN
+    );
+    expect(result.composition?.raw).toBeUndefined();
+    expect(result.warnings).toEqual([]);
   });
 });
 

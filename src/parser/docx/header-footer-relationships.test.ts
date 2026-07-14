@@ -99,6 +99,29 @@ describe('parseSectionHeaderFooterInfo', () => {
     expect(without.titlePg).toBe(false);
   });
 
+  // Regression (#306 review): CT_OnOff (ECMA-376 §17.17.4) is a toggle, not a
+  // presence flag — a document can carry an EXPLICIT off value
+  // (<w:titlePg w:val="0"/>), which must read as false, matching the
+  // established @w:val convention (resolver.ts's toggle(), comments.ts's
+  // isStrikeOn()) rather than the mere-presence check this codebase uses
+  // everywhere else for CT_OnOff elements.
+  it.each(['0', 'false', 'off'])(
+    'sets titlePg false when w:titlePg carries an explicit off toggle (@w:val=%s)',
+    (val) => {
+      const info = parseSectionHeaderFooterInfo(
+        makeDocXml(`<w:sectPr><w:titlePg w:val="${val}"/></w:sectPr>`)
+      );
+      expect(info.titlePg).toBe(false);
+    }
+  );
+
+  it('sets titlePg true when w:titlePg carries an explicit on toggle (@w:val="1")', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:titlePg w:val="1"/></w:sectPr>')
+    );
+    expect(info.titlePg).toBe(true);
+  });
+
   it('reads pgNumStart from w:pgNumType/@w:start when present', () => {
     const info = parseSectionHeaderFooterInfo(
       makeDocXml('<w:sectPr><w:pgNumType w:start="3"/></w:sectPr>')
@@ -158,6 +181,24 @@ describe('parseDocumentSettings', () => {
 
   it('reads evenAndOddHeaders false when absent from a present settings.xml', () => {
     expect(parseDocumentSettings(makeSettingsXml('')).evenAndOddHeaders).toBe(false);
+  });
+
+  // Regression (#306 review): same CT_OnOff toggle convention as w:titlePg
+  // above — an explicit off value must read as false, not be treated as
+  // active merely because the element is present.
+  it.each(['0', 'false', 'off'])(
+    'reads evenAndOddHeaders false when it carries an explicit off toggle (@w:val=%s)',
+    (val) => {
+      const settings = parseDocumentSettings(
+        makeSettingsXml(`<w:evenAndOddHeaders w:val="${val}"/>`)
+      );
+      expect(settings.evenAndOddHeaders).toBe(false);
+    }
+  );
+
+  it('reads evenAndOddHeaders true when it carries an explicit on toggle (@w:val="1")', () => {
+    const settings = parseDocumentSettings(makeSettingsXml('<w:evenAndOddHeaders w:val="1"/>'));
+    expect(settings.evenAndOddHeaders).toBe(true);
   });
 
   it('returns evenAndOddHeaders false for a null (absent) settings.xml', () => {
