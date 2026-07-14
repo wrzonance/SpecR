@@ -3,7 +3,7 @@ import { Document, Packer, Header, Footer } from 'docx';
 import JSZip from 'jszip';
 import { renderHeaderFooterComposition } from './header-footer.js';
 import type { HeaderFooterRenderResult } from './header-footer.js';
-import type { HeaderFooterFieldContext } from './header-footer-fields.js';
+import type { HeaderFooterFieldContext, HeaderFooterCell } from './header-footer-fields.js';
 import type { HeaderFooterComposition } from '../ast/index.js';
 
 const CTX: HeaderFooterFieldContext = {
@@ -11,6 +11,25 @@ const CTX: HeaderFooterFieldContext = {
   sectionTitle: 'EXTERIOR PAINTING',
   current: { projectName: 'Riverside HQ' },
 };
+
+// A minimal real PNG magic-byte signature (matches header-footer-images.test
+// .ts's and header-footer-regions.test.ts's fixture) — `renderImageRun` only
+// needs a signature `sniffImageMediaType` recognizes, not full pixel data.
+const LOGO_PNG_BASE64 = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02,
+]).toString('base64');
+
+function imageCell(): HeaderFooterCell {
+  return {
+    content: [{ kind: 'image', imageData: LOGO_PNG_BASE64, widthEmu: 914400, heightEmu: 457200 }],
+  };
+}
+
+// imageData present but no widthEmu/heightEmu — renderImageRun refuses to
+// render this and imageFieldWarnings reports it (missingDimensionsWarning).
+function brokenImageCell(): HeaderFooterCell {
+  return { content: [{ kind: 'image', imageData: LOGO_PNG_BASE64 }] };
+}
 
 // Renders headers/footers through a real Document + Packer round-trip so
 // assertions inspect actual generated OOXML parts, mirroring the
@@ -374,5 +393,106 @@ describe('renderHeaderFooterComposition — sectionNumber/sectionTitle sourced o
     const xml = await file.async('string');
     expect(xml).toContain(CTX.sectionNumber);
     expect(xml).toContain(CTX.sectionTitle);
+  });
+});
+
+describe('renderHeaderFooterComposition — image warnings wire into the top-level warnings array (#308)', () => {
+  it('is unchanged from the old raw-only pass-through when no image fields are present', () => {
+    const warnings = ['unsupported watermark'];
+    const composition: HeaderFooterComposition = {
+      header: { center: { content: [{ kind: 'sectionTitle' }] } },
+      raw: { warnings },
+    };
+    expect(renderHeaderFooterComposition(composition, CTX).warnings).toEqual(warnings);
+  });
+
+  it('appends image warnings after raw.warnings, in header default/first/even then footer default/first/even order', () => {
+    const composition: HeaderFooterComposition = {
+      header: { left: brokenImageCell() },
+      footer: { left: brokenImageCell() },
+      variants: {
+        first: { header: { left: brokenImageCell() } },
+        even: { footer: { left: brokenImageCell() } },
+      },
+      raw: { warnings: ['unsupported watermark'] },
+    };
+    const warnings = renderHeaderFooterComposition(composition, CTX).warnings;
+    const prefixes = warnings.map((warning) => warning.split(': ')[0]);
+    expect(prefixes).toEqual([
+      'unsupported watermark',
+      'header.left',
+      'header.first.left',
+      'footer.left',
+      'footer.even.left',
+    ]);
+  });
+
+  it('is [] when no image fields carry warnings, even across default/first/even variants', () => {
+    const composition: HeaderFooterComposition = {
+      variants: {
+        default: { header: { left: imageCell() } },
+        first: { header: { left: imageCell() } },
+        even: { footer: { left: imageCell() } },
+      },
+    };
+    expect(renderHeaderFooterComposition(composition, CTX).warnings).toEqual([]);
+  });
+});
+
+describe('renderHeaderFooterComposition — image rendering + multi-variant dedup (#308)', () => {
+  it('renders a header image into a real docx round-trip with no warnings', async () => {
+    const composition: HeaderFooterComposition = { header: { left: imageCell() } };
+    const result = renderHeaderFooterComposition(composition, CTX);
+    expect(result.warnings).toEqual([]);
+
+    const doc = new Document({
+      sections: [
+        { ...(result.headers !== undefined ? { headers: result.headers } : {}), children: [] },
+      ],
+    });
+    const zip = await JSZip.loadAsync(await Packer.toBuffer(doc));
+    const headerFile = zip.file('word/header1.xml');
+    if (!headerFile) throw new Error('word/header1.xml missing');
+    const xml = await headerFile.async('string');
+    expect(xml).toContain('<w:drawing>');
+
+    const mediaNames = Object.entries(zip.files).filter(
+      ([name, entry]) => name.startsWith('word/media/') && !entry.dir
+    );
+    expect(mediaNames).toHaveLength(1);
+  });
+
+  it('dedups one image shared across default/first/even variants into a single media part, collision-free', async () => {
+    const composition: HeaderFooterComposition = {
+      variants: {
+        default: { header: { left: imageCell() } },
+        first: { header: { left: imageCell() } },
+        even: { header: { left: imageCell() } },
+      },
+    };
+    const result = renderHeaderFooterComposition(composition, CTX);
+    expect(result.warnings).toEqual([]);
+
+    const doc = new Document({
+      sections: [
+        { ...(result.headers !== undefined ? { headers: result.headers } : {}), children: [] },
+      ],
+    });
+    const zip = await JSZip.loadAsync(await Packer.toBuffer(doc));
+    const headerParts = Object.keys(zip.files).filter((name) =>
+      /^word\/header\d+\.xml$/.test(name)
+    );
+    expect(headerParts).toHaveLength(3);
+    for (const name of headerParts) {
+      const file = zip.file(name);
+      if (!file) throw new Error(`${name} missing`);
+      const xml = await file.async('string');
+      expect(xml).toContain('<w:drawing>');
+    }
+
+    const mediaNames = Object.entries(zip.files).filter(
+      ([name, entry]) => name.startsWith('word/media/') && !entry.dir
+    );
+    expect(mediaNames).toHaveLength(1);
   });
 });
