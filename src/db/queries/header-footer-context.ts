@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { pool } from '../index.js';
 import { DatabaseError } from '../errors.js';
-import { resolveHeaderFooterConfig } from './header-footer.js';
+import { resolveHeaderFooterConfig, type ResolveHeaderFooterConfigInput } from './header-footer.js';
 import { findLibraryById } from './libraries.js';
 import { parseSectionNumberFormat } from '../../lib/section-number.js';
 import type { SectionNumberFormat } from '../../lib/section-number.js';
@@ -119,11 +119,30 @@ async function resolveClientName(
 }
 
 /**
+ * The shared prelude to every scoped header/footer context: resolve the
+ * cascade for `target`, gate on at least one configured layer, and resolve
+ * the client display name. Returns null when zero layers are configured
+ * anywhere in the chain — `resolveHeaderFooterConfig` always returns a
+ * non-null `{ config: {} }` even with zero rows, so `layers.length` is the
+ * only real "configured" signal. Single-sourcing this gate keeps the
+ * null-fallthrough (byte-identical pre-#304/#481 output) from drifting
+ * between the project- and revision-scoped callers as more scopes are added.
+ */
+async function resolveConfigWithClientName(
+  target: ResolveHeaderFooterConfigInput,
+  db: Queryable
+): Promise<{ composition: HeaderFooterComposition; clientName: string | undefined } | null> {
+  const resolved = await resolveHeaderFooterConfig(target, db);
+  if (!resolved || resolved.layers.length === 0) return null;
+
+  const clientName = await resolveClientName(resolved.context.clientLibraryId, db);
+  return { composition: resolved.config, clientName };
+}
+
+/**
  * Build the header/footer generation context for a project, or null when
  * that project has zero configured header/footer layers anywhere in its
- * client→project chain (`resolveHeaderFooterConfig` always returns a
- * non-null `{ config: {} }` even with zero rows — `layers.length` is the
- * only real "configured" signal).
+ * client→project chain.
  *
  * Never invents package/revision-level context on its own: `project` carries
  * only id/name, so `HeaderFooterFieldSource.packageName`/`revisionName`/
@@ -135,16 +154,15 @@ async function buildHeaderFooterFromProject(
   project: ProjectIdentity,
   db: Queryable
 ): Promise<HeaderFooterGenerationContext | null> {
-  const resolved = await resolveHeaderFooterConfig({ projectId: project.id }, db);
-  if (!resolved || resolved.layers.length === 0) return null;
+  const resolved = await resolveConfigWithClientName({ projectId: project.id }, db);
+  if (!resolved) return null;
 
-  const clientName = await resolveClientName(resolved.context.clientLibraryId, db);
   const fieldValues: HeaderFooterFieldSource = {
     projectName: project.name,
-    ...(clientName !== undefined ? { clientName } : {}),
+    ...(resolved.clientName !== undefined ? { clientName: resolved.clientName } : {}),
   };
 
-  return { composition: resolved.config, fieldValues };
+  return { composition: resolved.composition, fieldValues };
 }
 
 /**
@@ -234,17 +252,16 @@ export async function resolveRevisionHeaderFooterContext(
   fieldSource: RevisionHeaderFooterFieldSource,
   db: Queryable = pool
 ): Promise<HeaderFooterGenerationContext | null> {
-  const resolved = await resolveHeaderFooterConfig({ revisionId }, db);
-  if (!resolved || resolved.layers.length === 0) return null;
+  const resolved = await resolveConfigWithClientName({ revisionId }, db);
+  if (!resolved) return null;
 
-  const clientName = await resolveClientName(resolved.context.clientLibraryId, db);
   const fieldValues: HeaderFooterFieldSource = {
     projectName: fieldSource.projectName,
     packageName: fieldSource.packageName,
     revisionName: fieldSource.revisionName,
     revisionLabel: fieldSource.revisionLabel,
-    ...(clientName !== undefined ? { clientName } : {}),
+    ...(resolved.clientName !== undefined ? { clientName: resolved.clientName } : {}),
   };
 
-  return { composition: resolved.config, fieldValues };
+  return { composition: resolved.composition, fieldValues };
 }
