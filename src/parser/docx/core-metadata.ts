@@ -1,4 +1,11 @@
 import { XMLParser } from 'fast-xml-parser';
+// XMLValidator is flagged deprecated (relocated to the separate
+// `fast-xml-validator` package in fast-xml-parser 5.x) but still ships and works
+// in the pinned version. We keep using it rather than take on a whole new
+// dependency — added attack surface — for a single core.xml validity check.
+// Revisit if it is removed upstream.
+// eslint-disable-next-line sonarjs/deprecation -- intentional: see note above
+import { XMLValidator } from 'fast-xml-parser';
 import type { ParseWarning } from '../../ast/types.js';
 import { parseSectionNumberCandidate } from '../../lib/section-number.js';
 
@@ -22,10 +29,36 @@ export interface CoreMetadata {
 // coincidental literal-text match against it.
 export const UNKNOWN_SECTION_IDENTITY = 'unknown';
 
+// Shared fallback for docProps/core.xml that cannot be trusted — whether it
+// fails XML validation (malformed markup that fast-xml-parser's lenient parse
+// would accept without throwing) or throws outright. Surfaced as a tree warning
+// so the degrade to content inference is visible in logs/API/MCP responses
+// instead of silently emitting an 'unknown' (or worse, a value scraped from a
+// corrupt file).
+function unreadableCoreMetadata(): CoreMetadata {
+  return {
+    section: UNKNOWN_SECTION_IDENTITY,
+    title: UNKNOWN_SECTION_IDENTITY,
+    warning: {
+      type: 'core-metadata-unreadable',
+      suggestion:
+        'docProps/core.xml could not be parsed; section/title fell back to content inference.',
+    },
+  };
+}
+
 // docProps/core.xml → section/title metadata. Moved verbatim out of index.ts
 // (#306 line-budget prerequisite, one of two extractions carving out headroom
 // for the header/footer capture feature) — zero behavior change.
 export function parseCoreMetadata(xml: string): CoreMetadata {
+  // fast-xml-parser decouples validation from parsing for performance, so
+  // parse() accepts malformed markup (unclosed/mismatched tags) without
+  // throwing and could scrape a value from a corrupt file. Validate first and
+  // route invalid XML through the same unreadable path as an outright throw.
+  // eslint-disable-next-line sonarjs/deprecation -- see XMLValidator import note
+  if (XMLValidator.validate(xml) !== true) {
+    return unreadableCoreMetadata();
+  }
   try {
     const parsed = coreParser.parse(xml) as Record<string, unknown>;
     const props = parsed['cp:coreProperties'] as Record<string, unknown> | undefined;
@@ -45,16 +78,6 @@ export function parseCoreMetadata(xml: string): CoreMetadata {
           : UNKNOWN_SECTION_IDENTITY,
     };
   } catch {
-    // Corrupt/unparseable core.xml previously degraded silently to 'unknown'.
-    // Surface it as a tree warning so it flows to logs/API/MCP responses instead.
-    return {
-      section: UNKNOWN_SECTION_IDENTITY,
-      title: UNKNOWN_SECTION_IDENTITY,
-      warning: {
-        type: 'core-metadata-unreadable',
-        suggestion:
-          'docProps/core.xml could not be parsed; section/title fell back to content inference.',
-      },
-    };
+    return unreadableCoreMetadata();
   }
 }

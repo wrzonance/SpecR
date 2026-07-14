@@ -298,6 +298,20 @@ describe('parseDocx — error handling', () => {
     expect(tree.section).toBe('unknown');
     expect(tree.title).toBe('unknown');
   });
+
+  it('core.xml malformed-but-parseable (unclosed root) surfaces the warning, never a section scraped from a corrupt file', async () => {
+    // fast-xml-parser's parse() is lenient: it accepts an unclosed root tag
+    // WITHOUT throwing and would even extract dc:subject from the truncated
+    // markup, silently degrading with no warning. XMLValidator.validate rejects
+    // it, so it must route through the same unreadable path as an outright throw.
+    const truncatedCore = `<?xml version="1.0"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:subject>27 21 00</dc:subject>`;
+    const buffer = await makeDocx({ coreXml: truncatedCore });
+    const tree = await parseDocx(buffer);
+    expect(tree.warnings?.some((w) => w.type === 'core-metadata-unreadable')).toBe(true);
+    expect(tree.section).toBe('unknown');
+    expect(tree.title).toBe('unknown');
+  });
 });
 
 describe('parseDocx — source facts: comments (#128)', () => {
@@ -983,7 +997,7 @@ function headerPartXml(text: string): string {
 
 function docWithSectPr(sectPr: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <w:body>
     <w:p><w:r><w:t>Plain paragraph text.</w:t></w:r></w:p>
     ${sectPr}
@@ -1064,7 +1078,7 @@ describe('parseDocx — header/footer capture wiring (#306)', () => {
     zip.file(
       'word/header1.xml',
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
   <w:p><w:r><w:drawing><wp:inline/></w:drawing></w:r></w:p>
   <w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
 </w:hdr>`

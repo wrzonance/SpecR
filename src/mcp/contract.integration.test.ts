@@ -216,8 +216,7 @@ describe('MCP contract (REST <-> MCP parity)', () => {
       filename: 'mcp-header-footer-306.docx',
       contentBase64,
     });
-    const payload = parsePayload(result) as Record<string, unknown>;
-    expect(Object.keys(payload)).not.toContain('headerFooter');
+    expect(parsePayload(result)).not.toHaveProperty('headerFooter');
   });
 
   it.each(INV5_DRIVEN)(

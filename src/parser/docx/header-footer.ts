@@ -9,8 +9,7 @@
 // (mirrors the pre-existing table-content-skipped pattern in index.ts).
 
 import { HeaderFooterCompositionSchema } from '../../ast/index.js';
-import type { HeaderFooterComposition } from '../../ast/index.js';
-import type { ParseWarning } from '../../ast/types.js';
+import type { HeaderFooterComposition, ParseWarning } from '../../ast/index.js';
 import { compact } from './xml-utils.js';
 import {
   parseDocumentRelationships,

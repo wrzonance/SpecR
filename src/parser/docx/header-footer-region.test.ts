@@ -123,6 +123,23 @@ describe('captureRegion — cell capture and tab-boundary splitting', () => {
     );
   });
 
+  it('a bare trailing tab (empty 4th segment) fills left/center/right without a spurious overflow warning', () => {
+    // 3 tabs after 3 content runs yields a 4th, EMPTY segment — nothing is
+    // actually folded past `right`, so the "extra content folded into right"
+    // warning (gated on segment content, not count) must NOT fire.
+    const xml = makeHdrXml(
+      paragraph(
+        '',
+        `${textRun('A')}${tabRun()}${textRun('B')}${tabRun()}${textRun('C')}${tabRun()}`
+      )
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'A' }]);
+    expect(result.region?.center?.content).toEqual([{ kind: 'literal', text: 'B' }]);
+    expect(result.region?.right?.content).toEqual([{ kind: 'literal', text: 'C' }]);
+    expect(result.unmodeled).toEqual([]);
+  });
+
   it('captures a recognized field code (PAGE) as a modeled field, not literal text', () => {
     const xml = makeHdrXml(paragraph('', `${textRun('Page ')}${fieldRuns(' PAGE ', '3')}`));
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);

@@ -297,14 +297,19 @@ function assignSegmentsToCells(
 } {
   const cells: Partial<Record<CellKey, HeaderFooterCell>> = {};
   const unmodeled: PartialUnmodeled[] = [];
+  // Only genuine overflow warrants the warning: a bare trailing tab yields a 4th
+  // (empty) segment with nothing folded into `right`, so gate on content past
+  // index 2 — not on segment count alone.
+  let overflowHasContent = false;
   segments.forEach((segment, index) => {
     const built = buildCellContent(segment, known);
     unmodeled.push(...built.unmodeled);
     if (built.content.length === 0) return;
+    if (index >= 3) overflowHasContent = true;
     const key = cellKeyForIndex(index);
     cells[key] = mergeCell(cells[key], built.content, built.style);
   });
-  if (segments.length > 3) {
+  if (overflowHasContent) {
     unmodeled.push({
       kind: 'unrecognizedField',
       detail: compact({
