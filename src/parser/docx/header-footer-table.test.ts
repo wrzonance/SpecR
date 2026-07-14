@@ -1,0 +1,229 @@
+import { describe, it, expect } from 'vitest';
+import { captureRegion } from './header-footer-region.js';
+
+// Exercises captureTablesForRegion's own capture rules (#309, ADR-071)
+// through captureRegion — the module's public boundary (CLAUDE.md: "test at
+// module API boundaries, not internals"), the same way
+// header-footer-region.test.ts already tests captureRegion's paragraph-cell
+// rules. header-footer-region.test.ts's own table describe block covers only
+// the region-level structural invariant (root-level detection, merging
+// alongside a captured paragraph); this file covers the table's internal
+// shape.
+
+const KNOWN = { section: '09 91 26', title: 'STAINING AND TRANSPARENT FINISHING' };
+
+const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+
+function makeHdrXml(bodyXml: string): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr ${NS}>${bodyXml}</w:hdr>`;
+}
+
+function paragraph(runsXml: string): string {
+  return `<w:p>${runsXml}</w:p>`;
+}
+
+function textRun(text: string): string {
+  return `<w:r><w:t>${text}</w:t></w:r>`;
+}
+
+function drawingRun(): string {
+  return '<w:r><w:drawing><wp:inline/></w:drawing></w:r>';
+}
+
+function styledTextRun(text: string, rPrXml: string): string {
+  return `<w:r><w:rPr>${rPrXml}</w:rPr><w:t>${text}</w:t></w:r>`;
+}
+
+function cell(pXml: string, tcPrXml = ''): string {
+  const tcPr = tcPrXml === '' ? '' : `<w:tcPr>${tcPrXml}</w:tcPr>`;
+  return `<w:tc>${tcPr}${pXml}</w:tc>`;
+}
+
+function row(cellsXml: string): string {
+  return `<w:tr>${cellsXml}</w:tr>`;
+}
+
+function table(rowsXml: string, tblPrXml = '', tblGridXml = ''): string {
+  return `<w:tbl>${tblPrXml}${tblGridXml}${rowsXml}</w:tbl>`;
+}
+
+function gridCol(widthTwips: number): string {
+  return `<w:gridCol w:w="${widthTwips}"/>`;
+}
+
+function gridSpan(n: number): string {
+  return `<w:gridSpan w:val="${n}"/>`;
+}
+
+describe('captureRegion — simple table capture (#309, ADR-071)', () => {
+  it('captures a multi-row, multi-cell table into region.table with literal content per cell', () => {
+    const xml = makeHdrXml(
+      table(
+        row(cell(paragraph(textRun('Drawing No.'))) + cell(paragraph(textRun('Sheet 1 of 3')))) +
+          row(cell(paragraph(textRun('Approved by:'))) + cell(paragraph(textRun(''))))
+      )
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      {
+        cells: [
+          { content: [{ kind: 'literal', text: 'Drawing No.' }] },
+          { content: [{ kind: 'literal', text: 'Sheet 1 of 3' }] },
+        ],
+      },
+      { cells: [{ content: [{ kind: 'literal', text: 'Approved by:' }] }, {}] },
+    ]);
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('maps a cell whose text matches the known section identity onto a modeled field, not literal text', () => {
+    const xml = makeHdrXml(table(row(cell(paragraph(textRun('09 91 26'))))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      { cells: [{ content: [{ kind: 'sectionNumber' }] }] },
+    ]);
+  });
+
+  it('captures a bold/colored run onto a cell style, mirroring cell-style capture for left/center/right', () => {
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(styledTextRun('Approved', '<w:b/><w:color w:val="FF0000"/>')))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows[0]?.cells[0]?.style).toEqual({ bold: true, color: 'FF0000' });
+  });
+
+  it('captures columnSpan from w:gridSpan on a cell', () => {
+    const xml = makeHdrXml(table(row(cell(paragraph(textRun('Wide cell')), gridSpan(2)))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows[0]?.cells[0]?.columnSpan).toBe(2);
+  });
+
+  it('captures columnWidths from w:tblGrid/w:gridCol, in document order', () => {
+    const xml = makeHdrXml(
+      table(
+        row(cell(paragraph(textRun('A'))) + cell(paragraph(textRun('B')))),
+        '',
+        `<w:tblGrid>${gridCol(1440)}${gridCol(2880)}</w:tblGrid>`
+      )
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.columnWidths).toEqual([1440, 2880]);
+  });
+
+  // Documented simplification (mirrors "first run/paragraph wins" elsewhere
+  // in this capture pipeline): HeaderFooterTableSchema models a single
+  // uniform border for a table, so only the w:tblBorders w:top edge is
+  // captured as the table's representative border definition.
+  it('captures the table borders from the w:tblBorders w:top edge as a single uniform rule line', () => {
+    const xml = makeHdrXml(
+      table(
+        row(cell(paragraph(textRun('A')))),
+        '<w:tblPr><w:tblBorders><w:top w:val="single" w:sz="4" w:color="000000"/><w:bottom w:val="double" w:sz="8"/></w:tblBorders></w:tblPr>'
+      )
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.borders).toEqual({
+      enabled: true,
+      style: 'single',
+      widthTwips: 10,
+      color: '000000',
+    });
+  });
+
+  it('leaves an empty cell (no content-bearing paragraph) present in row.cells with no content, preserving column position', () => {
+    const xml = makeHdrXml(table(row(cell(paragraph('')) + cell(paragraph(textRun('B'))))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      { cells: [{}, { content: [{ kind: 'literal', text: 'B' }] }] },
+    ]);
+  });
+});
+
+describe('captureRegion — per-item drops inside an otherwise-capturable table (ADR-071 decision 4)', () => {
+  it('drops an image run from cell content as unmodeled, never as cell content — the surrounding table is still captured', () => {
+    const xml = makeHdrXml(table(row(cell(paragraph(`${textRun('Logo: ')}${drawingRun()}`)))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      { cells: [{ content: [{ kind: 'literal', text: 'Logo: ' }] }] },
+    ]);
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'image' })
+    );
+  });
+
+  it('captures only the first content-bearing paragraph in a cell; a second is unmodeled extraParagraph, never merged', () => {
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(textRun('First')) + paragraph(textRun('Second')))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      { cells: [{ content: [{ kind: 'literal', text: 'First' }] }] },
+    ]);
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'extraParagraph' })
+    );
+  });
+});
+
+describe('captureRegion — structural table disqualification (ADR-071 decision 4)', () => {
+  it('disqualifies the whole table when a cell contains a nested w:tbl, preserving it whole as unmodeled', () => {
+    const nestedTbl = table(row(cell(paragraph(textRun('nested')))));
+    const xml = makeHdrXml(table(row(cell(nestedTbl))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table).toBeUndefined();
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+  });
+
+  it('disqualifies the whole table when a cell carries a vertical merge (w:vMerge), preserving it whole as unmodeled', () => {
+    const xml = makeHdrXml(
+      table(
+        row(cell(paragraph(textRun('A')), '<w:vMerge w:val="restart"/>')) +
+          row(cell(paragraph(textRun('')), '<w:vMerge/>'))
+      )
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table).toBeUndefined();
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+  });
+
+  it('never fabricates a table from a w:tbl with zero rows — disqualified whole, like any other malformed table', () => {
+    const xml = makeHdrXml(table(''));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table).toBeUndefined();
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+  });
+});
+
+describe('captureRegion — "first table wins" (ADR-071 decision 5, mirrors ADR-068)', () => {
+  it('drops a second, otherwise-valid table whole as unmodeled — never inspected for salvageable content', () => {
+    const firstTable = table(row(cell(paragraph(textRun('First')))));
+    const secondTable = table(row(cell(paragraph(textRun('Second')))));
+    const xml = makeHdrXml(`${firstTable}${secondTable}`);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      { cells: [{ content: [{ kind: 'literal', text: 'First' }] }] },
+    ]);
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({
+      variant: 'default',
+      region: 'header',
+      kind: 'table',
+    });
+  });
+
+  it('disqualifies only the FIRST table when it is structurally unsupported; a later, otherwise-valid table is still not captured', () => {
+    const nestedTbl = table(row(cell(paragraph(textRun('nested')))));
+    const badFirstTable = table(row(cell(nestedTbl)));
+    const validSecondTable = table(row(cell(paragraph(textRun('Second')))));
+    const xml = makeHdrXml(`${badFirstTable}${validSecondTable}`);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table).toBeUndefined();
+    expect(result.unmodeled.filter((u) => u.kind === 'table')).toHaveLength(2);
+  });
+});

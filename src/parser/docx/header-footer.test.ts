@@ -291,8 +291,15 @@ describe('captureHeaderFooter — never throws for document-content reasons', ()
     });
     expect(() => captureHeaderFooter(entries, KNOWN)).not.toThrow();
     const result = captureHeaderFooter(entries, KNOWN);
+    // The simple 1-cell table is now captured into the region (#309,
+    // ADR-071) rather than preserved as unmodeled; only the unrecognized
+    // STYLEREF field remains unmodeled.
+    expect(result.composition?.variants?.default?.header?.table).toEqual({
+      rows: [{ cells: [{ content: [{ kind: 'literal', text: 'cell' }] }] }],
+    });
     const kinds = result.composition?.raw?.unmodeled?.map((e) => e.kind) ?? [];
-    expect(kinds).toContain('table');
+    expect(kinds).not.toContain('table');
+    expect(kinds).toContain('unrecognizedField');
     expect(result.warnings).toHaveLength(1);
   });
 

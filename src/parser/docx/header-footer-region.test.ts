@@ -278,26 +278,40 @@ describe('captureRegion — INVARIANT: at most one captured region per part', ()
   });
 });
 
-describe('captureRegion — INVARIANT: w:tbl is detected at the part root, not inside a paragraph', () => {
-  it('detects a w:tbl as a root-level sibling of w:p and preserves it as unmodeled', () => {
+// Deep table-shape capture (rows/cells/columnSpan/columnWidths/borders,
+// nested/vMerge disqualification, first-table-wins, per-cell image/
+// extraParagraph drops) is covered in header-footer-table.test.ts, which
+// exercises captureTablesForRegion's own rules through this same public
+// captureRegion boundary. This block covers only the region-level structural
+// invariant: a root-level w:tbl is detected as a sibling of w:p (never
+// inside a paragraph, ADR-068), merges into the SAME region as any captured
+// paragraph cells (ADR-071), and "first table wins" the same way "first
+// paragraph wins" (ADR-068).
+describe('captureRegion — INVARIANT: w:tbl is a root-level sibling of w:p, captured into region.table', () => {
+  it('captures a root-level w:tbl into region.table alongside a captured paragraph, in the same region', () => {
     const xml = makeHdrXml(`${paragraph('', textRun('Header text'))}${tableXml()}`);
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Header text' }]);
-    expect(result.unmodeled).toContainEqual(
-      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
-    );
+    expect(result.region?.table).toEqual({
+      rows: [{ cells: [{ content: [{ kind: 'literal', text: 'cell' }] }] }],
+    });
+    expect(result.unmodeled).toEqual([]);
   });
 
-  it('never reports a table when no w:tbl exists anywhere in the part', () => {
+  it('leaves region.table undefined and reports no table unmodeled entry when no w:tbl exists', () => {
     const xml = makeHdrXml(paragraph('', textRun('No table here')));
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table).toBeUndefined();
     expect(result.unmodeled.some((u) => u.kind === 'table')).toBe(false);
   });
 
-  it('detects multiple root-level w:tbl elements, one unmodeled entry per table', () => {
+  it('keeps only the first of multiple root-level w:tbl elements as region.table; the rest are unmodeled (ADR-071 "first table wins")', () => {
     const xml = makeHdrXml(`${paragraph('', textRun('Text'))}${tableXml()}${tableXml()}`);
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
-    expect(result.unmodeled.filter((u) => u.kind === 'table')).toHaveLength(2);
+    expect(result.region?.table).toEqual({
+      rows: [{ cells: [{ content: [{ kind: 'literal', text: 'cell' }] }] }],
+    });
+    expect(result.unmodeled.filter((u) => u.kind === 'table')).toHaveLength(1);
   });
 });
 
