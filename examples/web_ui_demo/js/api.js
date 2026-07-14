@@ -36,6 +36,29 @@ async function sendJson(method, path, payload) {
   return body.data;
 }
 
+// GET request whose 200 response may legitimately not exist yet — resolves
+// `null` on 404 (never throws: "not configured at this scope" is a valid
+// state, e.g. a client library or project with no header/footer config row —
+// see src/api/header-footer.ts's getHeaderFooterConfig). Any other non-2xx
+// status, or a 2xx envelope that isn't `{ success: true, data }`, throws an
+// Error carrying `.status` so callers can still branch (mirrors sendJson).
+async function getJsonOrNull(path) {
+  const res = await fetch(path);
+  if (res.status === 404) return null;
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+  if (!res.ok || !body || body.success !== true) {
+    const err = new Error((body && body.error) || `request failed: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return body.data;
+}
+
 const enc = encodeURIComponent;
 
 export function checkHealth() {
@@ -365,6 +388,66 @@ export function setSpecNumberingProfile(specId, profileId) {
 
 export function clearSpecNumberingProfile(specId) {
   return sendJson('DELETE', `/specs/${enc(specId)}/numbering-profile`);
+}
+
+// ── Header/footer configs (#477, ADR-040) ─────────────────────────────────
+// v1 UI scope-cut: client library and project only. Package/revision rows are
+// struct-complete server-side but have no editor surface yet (see #477's
+// follow-up issue). GETs resolve `null` for "no config at this scope yet" —
+// not an error; PUT is always upsert (full composition, not a partial patch).
+
+export function getClientHeaderFooter(libraryId) {
+  return getJsonOrNull(`/libraries/${enc(libraryId)}/header-footer`);
+}
+
+export function putClientHeaderFooter(libraryId, composition) {
+  return sendJson('PUT', `/libraries/${enc(libraryId)}/header-footer`, composition);
+}
+
+export function deleteClientHeaderFooter(libraryId) {
+  return sendJson('DELETE', `/libraries/${enc(libraryId)}/header-footer`);
+}
+
+export function getProjectHeaderFooter(projectId) {
+  return getJsonOrNull(`/projects/${enc(projectId)}/header-footer`);
+}
+
+export function putProjectHeaderFooter(projectId, composition) {
+  return sendJson('PUT', `/projects/${enc(projectId)}/header-footer`, composition);
+}
+
+export function deleteProjectHeaderFooter(projectId) {
+  return sendJson('DELETE', `/projects/${enc(projectId)}/header-footer`);
+}
+
+// The effective (merged) config for a project: client -> project precedence
+// (ADR-040). `data.layers` lists every contributing row low-to-high
+// precedence; the winning scope for any key is `layers.at(-1).scope`.
+export function getProjectHeaderFooterResolved(projectId) {
+  return getJson(`/projects/${enc(projectId)}/header-footer/resolved`);
+}
+
+// Generates a DOCX from stored spec state (#304: header/footer content, if
+// any is configured anywhere in the owning project's scope chain, is resolved
+// and rendered automatically server-side — this call has no request body of
+// its own). Resolves with the response Blob on 2xx. Throws an Error carrying
+// `.status` on any other status; the error body is the usual ApiResponse
+// envelope, so a best-effort message is extracted where the body is JSON.
+export async function fetchSpecDocx(specId) {
+  const res = await fetch(`/specs/${enc(specId)}/generate`, { method: 'POST' });
+  if (!res.ok) {
+    let message = `generate failed: ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body && body.error) message = body.error;
+    } catch {
+      // Non-JSON (or empty) error body — keep the generic status message.
+    }
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
+  }
+  return res.blob();
 }
 
 // Polls a parse job until it completes or fails. Calls onProgress with the
