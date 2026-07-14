@@ -1,5 +1,4 @@
 import JSZip from 'jszip';
-import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { buildNumberingMap, emptyNumberingMap, withArticleIlvl } from './numbering.js';
 import { buildStyleMap } from './styles.js';
@@ -18,89 +17,29 @@ import type { ParseWarning, SpecTree, StyleProperties } from '../../ast/types.js
 import type { NumberingProfile } from '../../ast/index.js';
 import type { NumberingMap, StyleMap, ClassifiedParagraph, DocxParagraph } from './types.js';
 import { resolveStyleCascade } from './resolver.js';
-import { parseSectionNumberCandidate } from '../../lib/section-number.js';
+import { detectSource, detectArticleIlvl } from './source-detection.js';
+import { parseCoreMetadata, UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
+import type { CoreMetadata } from './core-metadata.js';
+import { captureHeaderFooter } from './header-footer.js';
+import { readHeaderFooterParts } from './header-footer-parts.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
 // reject if total uncompressed bytes > 50MB to prevent ZIP bomb exhaustion.
 
-type Source = 'arcat' | 'cpi' | 'unknown';
-
-const coreParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-  textNodeName: '#text',
-});
-
-function parseCoreMetadata(xml: string): {
-  section: string;
-  title: string;
-  warning?: ParseWarning;
-} {
-  try {
-    const parsed = coreParser.parse(xml) as Record<string, unknown>;
-    const props = parsed['cp:coreProperties'] as Record<string, unknown> | undefined;
-    const subject = props?.['dc:subject'];
-    const titleVal = props?.['dc:title'];
-    // dc:subject is free-text in Word — normalize so non-conforming values degrade
-    // to 'unknown' and the orchestrator's content inference takes over (instead of
-    // leaking prose downstream where the worker section-gate would kill the job).
-    const parsedSection =
-      typeof subject === 'string' ? parseSectionNumberCandidate(subject, 'strong') : null;
-    const section = parsedSection?.ok === true ? parsedSection.canonical : 'unknown';
-    return {
-      section,
-      title: typeof titleVal === 'string' && titleVal.trim() ? titleVal.trim() : 'unknown',
-    };
-  } catch {
-    // Corrupt/unparseable core.xml previously degraded silently to 'unknown'.
-    // Surface it as a tree warning so it flows to logs/API/MCP responses instead.
-    return {
-      section: 'unknown',
-      title: 'unknown',
-      warning: {
-        type: 'core-metadata-unreadable',
-        suggestion:
-          'docProps/core.xml could not be parsed; section/title fell back to content inference.',
-      },
-    };
-  }
+interface ExtractedEntries {
+  readonly numberingXml: string | null;
+  readonly stylesXml: string | null;
+  readonly documentXml: string | null;
+  readonly commentsXml: string | null;
+  readonly coreXml: string | null;
+  readonly themeXml: string | null;
+  readonly settingsXml: string | null;
+  readonly documentRelsXml: string | null;
+  readonly headerParts: ReadonlyMap<string, string>;
+  readonly footerParts: ReadonlyMap<string, string>;
 }
 
-// Detect spec source from style names.
-// Coarse provenance tag inferred from a document's style-vocabulary fingerprint.
-// ANNOTATION ONLY: surfaced as meta.source, computed after classification, and never
-// read back as an inference input — structure is derived from signals, not this tag.
-// The fingerprints below are two recurring authoring conventions seen in the corpus:
-//   • styles sharing a common heading prefix (…Part, …Article, …)
-//   • short-form PRT + ART styles carrying numPr in styles.xml (absent from the
-//     generic Word templates a flat <ol> export produces)
-function detectSource(styleMap: StyleMap): Source {
-  if ([...styleMap.styles.keys()].some((id) => id.startsWith('ARCAT'))) return 'arcat';
-  // short-form PRT + ART styles are not present in generic Word templates
-  if (styleMap.styles.has('ART') && styleMap.styles.has('PRT')) return 'cpi';
-  return 'unknown';
-}
-
-// The ilvl at which the article tier begins is not fixed — a document declares it
-// through its own article style's numPr. Commonly ilvl 1; documents that reserve the
-// low levels for a Schedule / Product-Data block start the article deeper (e.g. ilvl
-// 3). Read it from the document's own article style; if no known article-style name
-// is present, fall back to the numbering.xml scan.
-function detectArticleIlvl(styleMap: StyleMap, numberingMap: NumberingMap): number {
-  const artStyle = styleMap.resolvedNumPr.get('ART') ?? styleMap.resolvedNumPr.get('ARCATArticle');
-  if (artStyle) return artStyle.ilvl;
-  // Fall back to the numbering.xml scan (reserved-level lvlText heuristic).
-  return numberingMap.articleIlvl;
-}
-
-async function extractEntries(zip: JSZip): Promise<{
-  numberingXml: string | null;
-  stylesXml: string | null;
-  documentXml: string | null;
-  commentsXml: string | null;
-  coreXml: string | null;
-  themeXml: string | null;
-}> {
+async function extractEntries(zip: JSZip): Promise<ExtractedEntries> {
   const read = async (name: string): Promise<string | null> => {
     const file = zip.file(name);
     return file ? file.async('string') : null;
@@ -108,15 +47,41 @@ async function extractEntries(zip: JSZip): Promise<{
   // NOTE: Strict discovery of the theme part should follow the officeDocument→theme
   // relationship in word/_rels/document.xml.rels; reading theme1.xml by convention
   // is an adequate approximation for spec-import use-cases.
-  const [numberingXml, stylesXml, documentXml, commentsXml, coreXml, themeXml] = await Promise.all([
-    read('word/numbering.xml'),
-    read('word/styles.xml'),
-    read('word/document.xml'),
-    read('word/comments.xml'),
-    read('docProps/core.xml'),
-    read('word/theme/theme1.xml'),
+  const [textParts, headerFooterParts] = await Promise.all([
+    Promise.all([
+      read('word/numbering.xml'),
+      read('word/styles.xml'),
+      read('word/document.xml'),
+      read('word/comments.xml'),
+      read('docProps/core.xml'),
+      read('word/theme/theme1.xml'),
+      read('word/settings.xml'),
+      read('word/_rels/document.xml.rels'),
+    ]),
+    readHeaderFooterParts(zip), // #306: word/header*.xml, word/footer*.xml glob-read
   ]);
-  return { numberingXml, stylesXml, documentXml, commentsXml, coreXml, themeXml };
+  const [
+    numberingXml,
+    stylesXml,
+    documentXml,
+    commentsXml,
+    coreXml,
+    themeXml,
+    settingsXml,
+    documentRelsXml,
+  ] = textParts;
+  return {
+    numberingXml,
+    stylesXml,
+    documentXml,
+    commentsXml,
+    coreXml,
+    themeXml,
+    settingsXml,
+    documentRelsXml,
+    headerParts: headerFooterParts.headerParts,
+    footerParts: headerFooterParts.footerParts,
+  };
 }
 
 interface ValidEntries {
@@ -125,6 +90,10 @@ interface ValidEntries {
   readonly documentXml: string;
   readonly commentsXml: string | null;
   readonly coreXml: string | null;
+  readonly settingsXml: string | null;
+  readonly documentRelsXml: string | null;
+  readonly headerParts: ReadonlyMap<string, string>;
+  readonly footerParts: ReadonlyMap<string, string>;
 }
 
 function runPipeline(
@@ -141,9 +110,9 @@ function runPipeline(
   // Section/title from core.xml only; when absent, the parse() orchestrator's
   // inferSectionMeta (lib/infer-section.ts) recovers them from tree content
   // with method/confidence reporting — do not duplicate that here.
-  const meta: { section: string; title: string; warning?: ParseWarning } = entries.coreXml
+  const meta: CoreMetadata = entries.coreXml
     ? parseCoreMetadata(entries.coreXml)
-    : { section: 'unknown', title: 'unknown' };
+    : { section: UNKNOWN_SECTION_IDENTITY, title: UNKNOWN_SECTION_IDENTITY };
 
   onProgress?.('complete', 100);
   const tree = buildTree(classified, meta.section, meta.title, source);
@@ -162,14 +131,32 @@ function runPipeline(
         }
       : undefined;
 
+  // Header/footer capture (#306, ADR-068): `known` is meta.section/meta.title
+  // from parseCoreMetadata ONLY — never the content-inference fallback the
+  // parse() orchestrator applies later — so a field match is always a literal
+  // identity match, never a guess.
+  const hf = captureHeaderFooter(
+    {
+      documentXml: entries.documentXml,
+      settingsXml: entries.settingsXml,
+      documentRelsXml: entries.documentRelsXml,
+      headerParts: entries.headerParts,
+      footerParts: entries.footerParts,
+    },
+    { section: meta.section, title: meta.title }
+  );
+
   // Each source fires at most once per parse — appended, not deduped.
   const warnings = [
     ...structuralWarnings,
     ...(meta.warning ? [meta.warning] : []),
     ...(tableWarning ? [tableWarning] : []),
+    ...hf.warnings,
   ];
   const withWarnings = warnings.length > 0 ? { ...tree, warnings } : tree;
-  return hiddenTables.length > 0 ? { ...withWarnings, hiddenTables } : withWarnings;
+  const withHiddenTables =
+    hiddenTables.length > 0 ? { ...withWarnings, hiddenTables } : withWarnings;
+  return hf.composition ? { ...withHiddenTables, headerFooter: hf.composition } : withHiddenTables;
 }
 
 // ─── Internal classification helper ──────────────────────────────────────────
@@ -349,7 +336,17 @@ export async function parseDocx(
   }
 
   onProgress?.('extracting', 10);
-  const { numberingXml, stylesXml, documentXml, commentsXml, coreXml } = await extractEntries(zip);
+  const {
+    numberingXml,
+    stylesXml,
+    documentXml,
+    commentsXml,
+    coreXml,
+    settingsXml,
+    documentRelsXml,
+    headerParts,
+    footerParts,
+  } = await extractEntries(zip);
 
   if (!stylesXml) {
     throw new ParserError('DOCX missing word/styles.xml', { code: 'DOCX_MISSING_STYLES' });
@@ -359,7 +356,17 @@ export async function parseDocx(
   }
 
   return runPipeline(
-    { numberingXml, stylesXml, documentXml, commentsXml, coreXml },
+    {
+      numberingXml,
+      stylesXml,
+      documentXml,
+      commentsXml,
+      coreXml,
+      settingsXml,
+      documentRelsXml,
+      headerParts,
+      footerParts,
+    },
     onProgress,
     numberingProfile
   );

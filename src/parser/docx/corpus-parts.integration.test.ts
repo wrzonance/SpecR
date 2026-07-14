@@ -55,6 +55,44 @@ describe.skipIf(CORPUS.length === 0)('DOCX corpus — every real spec parses to 
   }
 });
 
+// Task 19 (#306): header/footer capture must be a clean no-op across the whole
+// corpus — it never throws for document-content reasons, and the tree-level
+// warning wiring is consistent with what was actually captured. Unlike the
+// 3-part sweep above, there is no fixed expected shape here (most vendor DOCX
+// headers/footers are unmodeled-but-preserved, not the small recognized-field
+// subset), so this only pins the two things captureHeaderFooter's contract
+// actually promises.
+describe.skipIf(CORPUS.length === 0)(
+  'DOCX corpus — header/footer capture is a clean, well-typed no-op',
+  () => {
+    for (const file of CORPUS) {
+      const name = basename(file);
+      if (INVALID.has(name)) continue;
+
+      it(`${name}: captures a header/footer composition without a capture failure`, async () => {
+        const { tree } = await parse(readFileSync(file), name);
+        // `tree.headerFooter` (when present) has already been validated once,
+        // inside captureHeaderFooter's own buildComposition, by the very schema
+        // parse that constructed it — re-asserting `.parse().not.toThrow()`
+        // here would be tautological (review finding #306): it can never fail,
+        // since a failure would already have rejected the `parse()` call above.
+        // Instead this pins the one guarantee the schema itself cannot check —
+        // a cross-field invariant between raw.warnings and the tree-level
+        // aggregate warning (header-footer.ts's buildTreeWarnings): exactly one
+        // 'header-footer-content-skipped' ParseWarning iff raw.warnings is
+        // non-empty, never silent and never phantom, across every real corpus
+        // document's header/footer content.
+        if (tree.headerFooter === undefined) return;
+        const aggregateWarnings = (tree.warnings ?? []).filter(
+          (w) => w.type === 'header-footer-content-skipped'
+        );
+        const rawWarningCount = tree.headerFooter.raw?.warnings?.length ?? 0;
+        expect(aggregateWarnings.length).toBe(rawWarningCount > 0 ? 1 : 0);
+      });
+    }
+  }
+);
+
 // Regression (CPI_DATA_COMMUNICATIONS_WIRELESS_ACCESS_POINTS.docx): an unstyled doc that
 // types its whole outline as a decimal ladder. Its PART headings "2.0 PRODUCTS" /
 // "3.0 EXECUTION" were read as articles (^\d+\.\d+) and nested under PART 1 GENERAL,

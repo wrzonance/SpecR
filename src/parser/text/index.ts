@@ -66,6 +66,11 @@ const WARNING_SUGGESTIONS: Readonly<Record<ParseWarningType, string>> = {
   // ParseWarningType regardless of origin.
   'table-content-skipped':
     'One or more visible tables were detected but not yet modeled into the spec tree.',
+  // Emitted directly by the DOCX parser (docx/header-footer.ts captureHeaderFooter),
+  // not via makeWarning — the record stays exhaustive over ParseWarningType
+  // regardless of origin. See raw.unmodeled (#306, ADR-068) for the preserved content.
+  'header-footer-content-skipped':
+    'One or more header/footer items were detected but not yet modeled; see raw.unmodeled.',
 };
 
 const SECTION_EXTRACT_RE = new RegExp(

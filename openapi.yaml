@@ -6228,6 +6228,7 @@ components:
             - pdf-font-encoding-remapped
             - pdf-font-encoding-unrecoverable
             - table-content-skipped
+            - header-footer-content-skipped
         lineHint:
           type: string
           description: 'Source location hint (e.g. "line 12: <text>")'
@@ -6675,6 +6676,15 @@ components:
             Hidden DOCX tables (all evidence-bearing cell paragraphs vanish)
             retained out-of-band for future change-management (ADR-038).
             Absent when the source has no hidden tables.
+        headerFooter:
+          description: >
+            Captured DOCX header/footer composition (ADR-040, #306), parsed
+            straight from the source document. Parse-output only — not
+            persisted; separate from the header/footer config CRUD surface
+            (`GET/PUT/DELETE .../header-footer`, #476). Absent when the
+            source has no headers or footers.
+          allOf:
+            - $ref: '#/components/schemas/HeaderFooterComposition'
 
     StyleSource:
       type: object

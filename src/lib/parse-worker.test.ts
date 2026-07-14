@@ -86,6 +86,48 @@ describe('workerOutputSchema', () => {
       expect(result.data.tree.hiddenTables).toEqual([{ rows: [['secret A', 'secret B']] }]);
     }
   });
+
+  // #306 regression (mirrors #293): the worker's structured-clone boundary
+  // must round-trip tree.headerFooter, not silently strip it. Zod objects
+  // drop unknown keys by default, so if workerOutputSchema's tree sub-schema
+  // doesn't declare headerFooter, every captured DOCX header/footer
+  // composition from captureHeaderFooter() vanishes here — the only path
+  // real uploads (parse, onboarding) actually exercise.
+  it('preserves tree.headerFooter across the worker boundary instead of stripping it', async () => {
+    const { workerOutputSchema } = await import('./parse-worker.js');
+    const headerFooter = {
+      variants: {
+        default: {
+          header: { center: { content: [{ kind: 'sectionTitle' as const }] } },
+        },
+      },
+      raw: {
+        warnings: ['footer image on default variant was not captured (kind=image)'],
+        unmodeled: [
+          {
+            variant: 'default' as const,
+            region: 'footer' as const,
+            kind: 'image' as const,
+            detail: { rId: 'rId7' },
+          },
+        ],
+      },
+    };
+    const result = workerOutputSchema.safeParse({
+      tree: {
+        id: 's1',
+        section: '09 91 26',
+        title: 'Painting',
+        parts: [],
+        headerFooter,
+      },
+      refs: [],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.tree.headerFooter).toEqual(headerFooter);
+    }
+  });
 });
 
 describe('parseWorker', () => {

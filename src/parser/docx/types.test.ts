@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NodeTypeSchema, ParseWarningTypeSchema } from '../../ast/schemas.js';
+import { NodeTypeSchema, ParseWarningTypeSchema } from '../../ast/spec-tree-schemas.js';
 import { StyleNodeTypeSchema } from '../../ast/style-schemas.js';
 
 // Boundary invariants for #292's ClassifiedParagraph.suppressed field (Phase 2 of 4:
@@ -8,6 +8,11 @@ import { StyleNodeTypeSchema } from '../../ast/style-schemas.js';
 // (a retained node hidden via meta.vanish) and isNote (a retained node rendered as
 // [NOTE]). This file pins that the field is purely additive: it does not ripple into
 // NodeType, StyleNodeType, or ParseWarningType.
+//
+// The ParseWarningType snapshot below intentionally includes 'header-footer-content-
+// skipped' (#306, ADR-068) — an unrelated, later addition to the same enum. Keep this
+// list in sync with ParseWarningTypeSchema's actual members; a mismatch here means this
+// test (not production code) is stale.
 //
 // The runtime construction/orthogonality invariants (a rule row IS suppressed; a
 // suppressed row need not also set isVanish/isNote; a suppressed row's
@@ -68,6 +73,7 @@ describe('ClassifiedParagraph.suppressed — no ripple into AST-level shapes', (
       'pdf-font-encoding-remapped',
       'pdf-font-encoding-unrecoverable',
       'table-content-skipped',
+      'header-footer-content-skipped',
     ]);
   });
 });

@@ -32,6 +32,9 @@ export {
   SpecTreeSchema,
   SecRefSchema,
   ParseWarningSchema,
+  ArticleRoleSchema,
+} from './spec-tree-schemas.js';
+export {
   PatchSpecBodySchema,
   UpdateParagraphBodySchema,
   CreateProjectBodySchema,
@@ -42,7 +45,6 @@ export {
   SetPackageSpecsBodySchema,
   AcquireLockBodySchema,
   ReleaseLockBodySchema,
-  ArticleRoleSchema,
 } from './schemas.js';
 export { deriveArticleRole, tagArticleRoles, ARTICLE_ROLE_RULES } from './article-role.js';
 export { AstError } from './error.js';
@@ -96,10 +98,10 @@ export {
   ConventionRulesSchema,
   ClassificationEvidenceSchema,
   SpecNodeEditabilitySchema,
-} from './schemas.js';
-export type { Editability, ConventionRules, ClassificationEvidence } from './schemas.js';
-export { PutConventionBodySchema, CloneConventionBodySchema } from './schemas.js';
-export type { PutConventionBody, CloneConventionBody } from './schemas.js';
+} from './spec-tree-schemas.js';
+export type { Editability, ConventionRules, ClassificationEvidence } from './spec-tree-schemas.js';
+export { PutConventionBodySchema, CloneConventionBodySchema } from './spec-tree-schemas.js';
+export type { PutConventionBody, CloneConventionBody } from './spec-tree-schemas.js';
 export {
   DivisionSchema,
   DisciplineRuleInputSchema,
@@ -110,8 +112,12 @@ export {
   PatchEditabilityBodySchema,
   PatchRemovalBodySchema,
   ReclassifyBodySchema,
-} from './schemas.js';
-export type { PatchEditabilityBody, PatchRemovalBody, ReclassifyBody } from './schemas.js';
+} from './spec-tree-schemas.js';
+export type {
+  PatchEditabilityBody,
+  PatchRemovalBody,
+  ReclassifyBody,
+} from './spec-tree-schemas.js';
 export { ActorLabelSchema, AcceptNoteBodySchema } from './actor-schemas.js';
 export type { AcceptNoteBody } from './actor-schemas.js';
 export { InsertParagraphBodySchema, InsertableNodeTypeSchema } from './paragraph-schemas.js';
@@ -134,6 +140,7 @@ export {
   HeaderFooterCompositionSchema,
   HeaderFooterFieldKindSchema,
   HeaderFooterVariantSchema,
+  HeaderFooterUnmodeledEntrySchema,
   PageNumberingModeSchema,
   defaultVariant,
 } from './header-footer-schemas.js';
@@ -141,6 +148,7 @@ export type {
   HeaderFooterComposition,
   HeaderFooterFieldKind,
   HeaderFooterVariant,
+  HeaderFooterUnmodeledEntry,
   PageNumberingMode,
 } from './header-footer-schemas.js';
 export { RequiredSectionsBodySchema } from './required-sections-schemas.js';
@@ -153,7 +161,7 @@ export { SubmittalRegisterBodySchema } from './submittal-register-schemas.js';
 export type { SubmittalRegisterBody } from './submittal-register-schemas.js';
 export type { ParagraphAssociation } from './types.js';
 export type { ParseWarning, ParseWarningType, RetainedTable } from './types.js';
-export { RetainedTableSchema } from './schemas.js';
+export { RetainedTableSchema } from './spec-tree-schemas.js';
 export { textEndsWithClosed } from './comment-closure.js';
 export {
   NumberingProfileSchema,

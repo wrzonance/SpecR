@@ -101,11 +101,36 @@ const PageNumberingSchema = z
   })
   .catchall(JsonValue);
 
+// A single captured-but-unmodeled header/footer content item (#306, ADR-068):
+// content the capture recognized but could not map into a typed field —
+// preserved here (JSON-safe, already parsed — never re-serialized OOXML) so
+// acceptance criterion 3 ("preserved") is met, alongside a matching
+// `raw.warnings` entry for criterion 4 ("warned, never silently dropped).
+// `inactiveVariant` is distinct from `unresolvedReference`: the former's
+// reference DID resolve to a real relationship target, but the section's own
+// page-variant toggle (`w:titlePg`/`w:evenAndOddHeaders`) is off, so Word
+// itself would not render it — promoting it into `variants.first`/`.even`
+// would fabricate behavior the source document doesn't exhibit.
+export const HeaderFooterUnmodeledEntrySchema = z.object({
+  variant: z.enum(['default', 'first', 'even']),
+  region: z.enum(['header', 'footer']),
+  kind: z.enum([
+    'image',
+    'table',
+    'unrecognizedField',
+    'unresolvedReference',
+    'extraParagraph',
+    'inactiveVariant',
+  ]),
+  detail: JsonValue,
+});
+
 // Open sidecar for captured but unmodeled header/footer OOXML plus parser
 // warnings (#306). Fully open so round-tripping never loses unsupported markup.
 const HeaderFooterRawSidecarSchema = z
   .object({
     warnings: z.array(z.string()).exactOptional(),
+    unmodeled: z.array(HeaderFooterUnmodeledEntrySchema).exactOptional(),
   })
   .catchall(JsonValue);
 
@@ -123,6 +148,7 @@ export const HeaderFooterCompositionSchema = z
 export type HeaderFooterFieldKind = z.infer<typeof HeaderFooterFieldKindSchema>;
 export type HeaderFooterVariant = z.infer<typeof HeaderFooterVariantSchema>;
 export type PageNumberingMode = z.infer<typeof PageNumberingModeSchema>;
+export type HeaderFooterUnmodeledEntry = z.infer<typeof HeaderFooterUnmodeledEntrySchema>;
 export type HeaderFooterComposition = z.infer<typeof HeaderFooterCompositionSchema>;
 
 /**

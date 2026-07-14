@@ -298,6 +298,20 @@ describe('parseDocx — error handling', () => {
     expect(tree.section).toBe('unknown');
     expect(tree.title).toBe('unknown');
   });
+
+  it('core.xml malformed-but-parseable (unclosed root) surfaces the warning, never a section scraped from a corrupt file', async () => {
+    // fast-xml-parser's parse() is lenient: it accepts an unclosed root tag
+    // WITHOUT throwing and would even extract dc:subject from the truncated
+    // markup, silently degrading with no warning. XMLValidator.validate rejects
+    // it, so it must route through the same unreadable path as an outright throw.
+    const truncatedCore = `<?xml version="1.0"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:subject>27 21 00</dc:subject>`;
+    const buffer = await makeDocx({ coreXml: truncatedCore });
+    const tree = await parseDocx(buffer);
+    expect(tree.warnings?.some((w) => w.type === 'core-metadata-unreadable')).toBe(true);
+    expect(tree.section).toBe('unknown');
+    expect(tree.title).toBe('unknown');
+  });
 });
 
 describe('parseDocx — source facts: comments (#128)', () => {
@@ -960,5 +974,136 @@ describe('parseDocx — table extraction wiring (#293)', () => {
 
     expect(Object.prototype.hasOwnProperty.call(tree, 'hiddenTables')).toBe(false);
     expect((tree.warnings ?? []).some((w) => w.type === 'table-content-skipped')).toBe(false);
+  });
+});
+
+// ─── header/footer capture wiring (#306, ADR-068) ───────────────────────────
+// captureHeaderFooter itself is exhaustively unit-tested at its own boundary
+// (header-footer.test.ts) — these tests pin only that index.ts actually wires
+// it in: entries (documentXml/settingsXml/documentRelsXml/headerParts/
+// footerParts) flow through from the zip, `known` comes from parseCoreMetadata
+// (never a guess), and hf.composition/hf.warnings land on the returned tree
+// the same way tableWarning/hiddenTables already do.
+
+const HEADER_FOOTER_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+</Relationships>`;
+
+function headerPartXml(text: string): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:hdr>`;
+}
+
+function docWithSectPr(sectPr: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p><w:r><w:t>Plain paragraph text.</w:t></w:r></w:p>
+    ${sectPr}
+  </w:body>
+</w:document>`;
+}
+
+describe('parseDocx — header/footer capture wiring (#306)', () => {
+  it('captures a resolved default header into tree.headerFooter, using meta.section (core.xml) as the known identity — not a guess', async () => {
+    const zip = new JSZip();
+    zip.file('word/styles.xml', MINIMAL_STYLES);
+    zip.file(
+      'word/document.xml',
+      docWithSectPr('<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>')
+    );
+    zip.file('docProps/core.xml', CORE_XML); // dc:subject "27 21 00" -> tree.section
+    zip.file('word/_rels/document.xml.rels', HEADER_FOOTER_RELS_XML);
+    zip.file('word/header1.xml', headerPartXml('27 21 00'));
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const tree = await parseDocx(buffer);
+
+    expect(tree.section).toBe('27 21 00');
+    expect(tree.headerFooter?.variants?.default?.header?.left?.content).toEqual([
+      { kind: 'sectionNumber' },
+    ]);
+    expect(tree.headerFooter?.raw).toBeUndefined();
+    expect((tree.warnings ?? []).some((w) => w.type === 'header-footer-content-skipped')).toBe(
+      false
+    );
+  });
+
+  it('an inactive first-header reference (no w:titlePg) is preserved under headerFooter.raw.unmodeled and surfaces exactly one aggregate warning on the tree', async () => {
+    const zip = new JSZip();
+    zip.file('word/styles.xml', MINIMAL_STYLES);
+    zip.file(
+      'word/document.xml',
+      docWithSectPr('<w:sectPr><w:headerReference w:type="first" r:id="rId1"/></w:sectPr>')
+    );
+    zip.file('word/_rels/document.xml.rels', HEADER_FOOTER_RELS_XML);
+    zip.file('word/header1.xml', headerPartXml('First Page'));
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const tree = await parseDocx(buffer);
+
+    expect(tree.headerFooter?.variants?.first).toBeUndefined();
+    expect(tree.headerFooter?.raw?.unmodeled).toEqual([
+      expect.objectContaining({ variant: 'first', region: 'header', kind: 'inactiveVariant' }),
+    ]);
+    expect(tree.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'header-footer-content-skipped' })])
+    );
+  });
+
+  it('no header/footer content anywhere — headerFooter key is absent, never an empty object', async () => {
+    const tree = await parseDocx(await makeDocx({}));
+
+    expect(Object.prototype.hasOwnProperty.call(tree, 'headerFooter')).toBe(false);
+    expect((tree.warnings ?? []).some((w) => w.type === 'header-footer-content-skipped')).toBe(
+      false
+    );
+  });
+
+  // Issue #306 acceptance criteria 3/4: unsupported image/table content must
+  // be preserved (never silently dropped) and warned. header-footer-region.ts
+  // is already exhaustively unit-tested for this at its own boundary — this
+  // test pins that the full parseDocx pipeline actually wires it through end
+  // to end, since the prior 3 tests here only exercise literal text and the
+  // inactiveVariant toggle, never an actual unsupported content *type*.
+  it('unsupported image and table content in a header are preserved in raw.unmodeled and warned, never silently discarded', async () => {
+    const zip = new JSZip();
+    zip.file('word/styles.xml', MINIMAL_STYLES);
+    zip.file(
+      'word/document.xml',
+      docWithSectPr('<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>')
+    );
+    zip.file('word/_rels/document.xml.rels', HEADER_FOOTER_RELS_XML);
+    zip.file(
+      'word/header1.xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+  <w:p><w:r><w:drawing><wp:inline/></w:drawing></w:r></w:p>
+  <w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+</w:hdr>`
+    );
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const tree = await parseDocx(buffer);
+
+    // No text content was recognized, so there is nothing to promote into
+    // variants — the image/table content lives only in raw, never fabricated
+    // into an empty-but-present region.
+    expect(tree.headerFooter?.variants).toBeUndefined();
+    expect(tree.headerFooter?.raw?.unmodeled).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ variant: 'default', region: 'header', kind: 'image' }),
+        expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' }),
+      ])
+    );
+    // One raw.warnings line per unmodeled item — never fewer than the items
+    // preserved (AC4: nothing is discarded without a corresponding warning).
+    expect(tree.headerFooter?.raw?.warnings?.length).toBe(
+      tree.headerFooter?.raw?.unmodeled?.length
+    );
+    expect(tree.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'header-footer-content-skipped' })])
+    );
   });
 });
