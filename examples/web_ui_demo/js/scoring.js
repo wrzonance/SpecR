@@ -17,6 +17,7 @@ import {
   selectScoringRows,
   buildPositionMap,
 } from './scoring-filter.mjs';
+import { createRequestGuard } from './request-guard.mjs';
 
 const SIGNAL_LABELS = {
   1: 'numbering.xml',
@@ -59,22 +60,6 @@ export function resolveLocateTarget(sheet, nodeId) {
   const head = sheet.querySelector('.sheet-head');
   if (head) return { node: head, tier: 'head' };
   return { node: null, tier: 'none' };
-}
-
-// Monotonic stale-response guard for loadSelected: `next()` issues a token for
-// a new in-flight request; `bump()` invalidates whatever is in flight WITHOUT
-// issuing a new token — used when a refresh leaves no selection at all, so an
-// older fetch can't repopulate a pane that now has nothing selected;
-// `isCurrent()` reports whether a token is still the newest issued.
-export function createRequestGuard() {
-  let current = 0;
-  return {
-    next: () => (current += 1),
-    bump: () => {
-      current += 1;
-    },
-    isCurrent: (token) => token === current,
-  };
 }
 
 function prefersReducedMotion() {

@@ -24,7 +24,9 @@ import {
   saveDraft,
   loadDraft,
   deleteDraft,
+  resolveRefreshOutcome,
 } from './js/header-footer-editor.js';
+import { createRequestGuard } from './js/request-guard.mjs';
 
 test('createDraft: seeds an empty composition and dirty:false for null/undefined', () => {
   assert.deepEqual(createDraft(null), { composition: {}, dirty: false });
@@ -290,4 +292,88 @@ test('deleteDraft: a non-404 failure re-throws and never fires ctx.onSaved()', a
 
   await assert.rejects(() => deleteDraft(ctx), /server error/);
   assert.equal(onSavedCalls, 0, 'onSaved must never fire when the delete genuinely failed');
+});
+
+// ── resolveRefreshOutcome — pure re-entrancy guard for refresh() ──────────
+//
+// Regression: initHeaderFooterEditor's refresh() had no guard against
+// overlapping calls on the SAME memoized instance (e.g. header-footer.js's
+// refreshLibraryPanel/refreshProjectPanel re-invoking .refresh() on a rapid
+// selection change, while a slower earlier ctx.get() is still in flight). If
+// the OLDER request's response happens to arrive AFTER the newer one's, it
+// would silently overwrite the editor's draft/mode with stale data for the
+// wrong scope — and a later Save would PUT that stale draft to whatever
+// scope is CURRENTLY selected, not the one it was actually loaded for. This
+// mirrors scoring.js's loadSelected guard (see request-guard.mjs), applied
+// here as a pure function so the guard decision itself is testable without
+// the real DOM initHeaderFooterEditor's refresh()/render() require.
+
+test('resolveRefreshOutcome: a stale token (superseded by a newer refresh()) is never applied', () => {
+  const guard = createRequestGuard();
+  const staleToken = guard.next(); // the older, slower refresh() call
+  guard.next(); // a newer refresh() call started before the older one resolved
+  const composition = { variants: { default: { header: {} } } };
+
+  const result = resolveRefreshOutcome(guard, staleToken, {
+    status: 'loaded',
+    draft: createDraft(composition),
+  });
+
+  assert.deepEqual(
+    result,
+    { applied: false },
+    'the older call must never apply its outcome once a newer refresh() has started'
+  );
+});
+
+test('resolveRefreshOutcome: the current (latest) token applies a "loaded" outcome', () => {
+  const guard = createRequestGuard();
+  const token = guard.next();
+  const draft = createDraft({ variants: { default: { header: {} } } });
+
+  const result = resolveRefreshOutcome(guard, token, { status: 'loaded', draft });
+
+  assert.deepEqual(result, {
+    applied: true,
+    mode: 'editing',
+    draft,
+    hasPersistedConfig: true,
+  });
+});
+
+test('resolveRefreshOutcome: the current token applies an "empty" outcome as a fresh, non-dirty draft', () => {
+  const guard = createRequestGuard();
+  const token = guard.next();
+
+  const result = resolveRefreshOutcome(guard, token, { status: 'empty' });
+
+  assert.deepEqual(result, {
+    applied: true,
+    mode: 'empty',
+    draft: { composition: {}, dirty: false },
+    hasPersistedConfig: false,
+  });
+});
+
+test('resolveRefreshOutcome: the current token applies an "error" outcome without touching draft/hasPersistedConfig', () => {
+  const guard = createRequestGuard();
+  const token = guard.next();
+
+  const result = resolveRefreshOutcome(guard, token, { status: 'error', message: 'network error' });
+
+  assert.deepEqual(result, { applied: true, mode: 'error', errorMessage: 'network error' });
+});
+
+test('resolveRefreshOutcome: bump() (editor torn down mid-flight) invalidates the in-flight token too', () => {
+  // Mirrors header-footer.js invalidating a memoized editor's in-flight
+  // refresh() when the panel becomes invisible (tier change / no project
+  // selected) — the stale response must not repaint a container that no
+  // longer belongs to this editor.
+  const guard = createRequestGuard();
+  const token = guard.next();
+  guard.bump();
+
+  const result = resolveRefreshOutcome(guard, token, { status: 'empty' });
+
+  assert.deepEqual(result, { applied: false });
 });

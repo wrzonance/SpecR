@@ -35,9 +35,14 @@
 //     loadDraft below) instead of resolving null (defaults to a generic
 //     message). This state offers Retry only — never Create/Save.
 //
-// Returns `{ refresh }` — the caller invokes refresh() after mount and again
-// whenever the selected library/project changes; ctx.get()/put()/del() are
-// expected to read whatever is "currently selected" at call time.
+// Returns `{ refresh, invalidate }` — the caller invokes refresh() after
+// mount and again whenever the selected library/project changes;
+// ctx.get()/put()/del() are expected to read whatever is "currently
+// selected" at call time. refresh() guards itself against overlapping
+// in-flight calls on the SAME instance (see resolveRefreshOutcome below);
+// invalidate() lets the caller tell an about-to-be-discarded instance that
+// any still-in-flight refresh() must no-op instead of repainting a
+// container it no longer owns (see header-footer.js's teardown paths).
 //
 // STATE: holds exactly one local `HeaderFooterEditorDraft` — `{ composition,
 // dirty }` — mutated ONLY via the pure helpers below (editField/addField/
@@ -65,6 +70,7 @@ import {
 import { buildPreviewModel } from './header-footer-preview.mjs';
 import { renderPreview, renderVariantTabs } from './header-footer-preview-view.js';
 import { openConfirm } from './modal.js';
+import { createRequestGuard } from './request-guard.mjs';
 
 // ── Draft controller — pure/ctx-only, no DOM. Exported for boundary tests. ──
 
@@ -196,6 +202,31 @@ export async function deleteDraft(ctx) {
   }
   ctx.onSaved?.();
   return { draft: createDraft({}), alreadyRemoved };
+}
+
+/**
+ * Decides what a loadDraft() outcome means for the editor's next state, OR
+ * that it means nothing at all because `token` is no longer current — a
+ * NEWER refresh() call already started (see initHeaderFooterEditor's own
+ * requestGuard), or the editor was invalidated entirely (torn down by
+ * header-footer.js because its scope stopped being visible) while this
+ * ctx.get() was still in flight. `{ applied: false }` is the ONLY correct
+ * response to either case: the caller must not touch draft/mode/
+ * hasPersistedConfig, and must not repaint — doing so would let a slower,
+ * older response overwrite what a newer refresh() (or the current visible
+ * scope) already settled on. Kept pure/DOM-free, mirroring loadDraft/
+ * saveDraft/deleteDraft above, so the guard decision itself is directly
+ * testable without the real DOM refresh()/render() require.
+ */
+export function resolveRefreshOutcome(requestGuard, token, outcome) {
+  if (!requestGuard.isCurrent(token)) return { applied: false };
+  if (outcome.status === 'loaded') {
+    return { applied: true, mode: 'editing', draft: outcome.draft, hasPersistedConfig: true };
+  }
+  if (outcome.status === 'empty') {
+    return { applied: true, mode: 'empty', draft: createDraft({}), hasPersistedConfig: false };
+  }
+  return { applied: true, mode: 'error', errorMessage: outcome.message };
 }
 
 // ── DOM rendering — no jsdom in this repo, so nothing below is unit tested
@@ -394,7 +425,8 @@ function renderEditorBody(container, state, dispatch) {
 
 /**
  * Mounts the header/footer editor into `ctx.container`. See the module doc
- * comment for the full `ctx` contract. Returns `{ refresh }`.
+ * comment for the full `ctx` contract. Returns `{ refresh, invalidate }` —
+ * see refresh()/invalidate() below for the re-entrancy guard both close over.
  */
 export function initHeaderFooterEditor(ctx) {
   const { container } = ctx;
@@ -402,6 +434,10 @@ export function initHeaderFooterEditor(ctx) {
   let hasPersistedConfig = false;
   let mode = 'loading'; // 'loading' | 'empty' | 'editing' | 'error'
   let activeVariant = 'default';
+  // Guards refresh() against overlapping in-flight ctx.get() calls on THIS
+  // memoized instance (header-footer.js reuses one editor across selection
+  // changes) — see resolveRefreshOutcome's doc comment above.
+  const requestGuard = createRequestGuard();
 
   function applyEdit(newDraft) {
     draft = newDraft;
@@ -503,19 +539,22 @@ export function initHeaderFooterEditor(ctx) {
     render();
   }
 
+  // Overlapping calls: header-footer.js reuses this ONE memoized instance
+  // across every selection change while the panel stays visible, so a rapid
+  // switch (client library A -> B, or project A -> B) can issue a second
+  // refresh() before the first's ctx.get() resolves. Without the
+  // requestGuard, whichever response arrives LAST would win regardless of
+  // which was issued last — silently applying an older scope's data over a
+  // newer one, which a subsequent Save would then PUT to the CURRENTLY
+  // selected (different) scope. See resolveRefreshOutcome's doc comment.
   async function refresh() {
+    const token = requestGuard.next();
     mode = 'loading';
     render();
     const outcome = await loadDraft(ctx);
-    if (outcome.status === 'loaded') {
-      draft = outcome.draft;
-      hasPersistedConfig = true;
-      mode = 'editing';
-    } else if (outcome.status === 'empty') {
-      draft = createDraft({});
-      hasPersistedConfig = false;
-      mode = 'empty';
-    } else {
+    const resolved = resolveRefreshOutcome(requestGuard, token, outcome);
+    if (!resolved.applied) return; // superseded — never touch state or repaint
+    if (resolved.mode === 'error') {
       // A REAL load failure (network error, 5xx, malformed envelope) — never
       // collapsed into 'empty', which would let "Create configuration" ->
       // Save fire a destructive full-composition ctx.put() over whatever is
@@ -523,10 +562,25 @@ export function initHeaderFooterEditor(ctx) {
       // left as whatever it last was — 'error' mode never renders Save/
       // Create/Delete, so it can't drive an overwrite either way.
       mode = 'error';
-      ctx.toast?.(`Could not load header/footer configuration: ${outcome.message}`, 'err');
+      ctx.toast?.(`Could not load header/footer configuration: ${resolved.errorMessage}`, 'err');
+    } else {
+      draft = resolved.draft;
+      hasPersistedConfig = resolved.hasPersistedConfig;
+      mode = resolved.mode;
     }
     render();
   }
 
-  return { refresh };
+  // Invalidates any refresh() currently in flight WITHOUT starting a new
+  // one — called by header-footer.js right before it discards this editor
+  // instance (the panel's scope stopped being visible: tier switched away
+  // from 'client', or the active project was deselected). Without this, a
+  // slow ctx.get() from the torn-down editor could still resolve later and
+  // repaint `container` with stale content for a scope that is no longer
+  // selected, even though a brand-new editor may already own that container.
+  function invalidate() {
+    requestGuard.bump();
+  }
+
+  return { refresh, invalidate };
 }

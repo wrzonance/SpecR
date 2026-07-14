@@ -440,6 +440,102 @@ test('clientEditorCtx.getPreviewContext: re-invokes the outer ctx.getPreviewCont
   );
 });
 
+// --- Invariant 6: a memoized editor's in-flight refresh() is invalidated
+// before it is discarded — mirrors scoring.js's createRequestGuard.bump()
+// pattern (see js/request-guard.mjs). refreshLibraryPanel/refreshProjectPanel
+// reuse ONE memoized editor across every selection change while its scope
+// stays visible; when the scope stops being visible (tier switches away from
+// 'client', or the active project is deselected) mid-refresh, the still-
+// in-flight ctx.get() must never be allowed to repaint `container` after
+// ownership of that container has moved on — invalidate() is what stops it
+// (see header-footer-editor.js's own resolveRefreshOutcome/invalidate). ---
+
+test('refreshLibraryPanel: invalidates the memoized client editor before discarding it when tier flips away from "client"', async () => {
+  const calls = [];
+  let resolveFirstRefresh;
+  const deps = baseDeps({
+    createEditor: () => ({
+      refresh: () => {
+        calls.push('refresh');
+        return new Promise((resolve) => {
+          resolveFirstRefresh = resolve;
+        });
+      },
+      invalidate: () => calls.push('invalidate'),
+    }),
+  });
+  let tier = 'client';
+  const ctx = baseCtx({ getSelectedLibraryTier: () => tier, getSelectedLibraryId: () => 'lib-1' });
+  const hf = initHeaderFooter(ctx, deps);
+
+  const firstRefresh = hf.refreshLibraryPanel(); // creates the editor; refresh() never resolves yet
+  tier = 'company'; // scope stops being visible while the above is still in flight
+  await hf.refreshLibraryPanel();
+
+  assert.deepEqual(
+    calls,
+    ['refresh', 'invalidate'],
+    'the editor must be invalidated, not just dropped, before its reference is cleared'
+  );
+
+  resolveFirstRefresh(); // let the stale refresh() settle so the test itself doesn't hang
+  await firstRefresh;
+});
+
+test('refreshLibraryPanel: a fresh editor after teardown is a NEW instance, never the invalidated one', async () => {
+  const createdEditors = [];
+  const deps = baseDeps({
+    createEditor: () => {
+      const editor = { refresh: async () => {}, invalidate: () => {} };
+      createdEditors.push(editor);
+      return editor;
+    },
+  });
+  let tier = 'client';
+  const ctx = baseCtx({ getSelectedLibraryTier: () => tier, getSelectedLibraryId: () => 'lib-1' });
+  const hf = initHeaderFooter(ctx, deps);
+
+  await hf.refreshLibraryPanel(); // creates editor #1
+  tier = 'company';
+  await hf.refreshLibraryPanel(); // tears editor #1 down
+  tier = 'client';
+  await hf.refreshLibraryPanel(); // must create a NEW editor, not resurrect #1
+
+  assert.equal(createdEditors.length, 2, 'switching back to tier "client" builds a fresh editor');
+});
+
+test('refreshProjectPanel: invalidates the memoized project editor before discarding it when the project is deselected', async () => {
+  const calls = [];
+  let resolveFirstRefresh;
+  const deps = baseDeps({
+    createEditor: () => ({
+      refresh: () => {
+        calls.push('refresh');
+        return new Promise((resolve) => {
+          resolveFirstRefresh = resolve;
+        });
+      },
+      invalidate: () => calls.push('invalidate'),
+    }),
+  });
+  let projectId = 'proj-1';
+  const ctx = baseCtx({ getActiveProjectId: () => projectId });
+  const hf = initHeaderFooter(ctx, deps);
+
+  const firstRefresh = hf.refreshProjectPanel(); // creates the editor; refresh() never resolves yet
+  projectId = null; // scope stops being visible while the above is still in flight
+  await hf.refreshProjectPanel();
+
+  assert.deepEqual(
+    calls,
+    ['refresh', 'invalidate'],
+    'the editor must be invalidated, not just dropped, before its reference is cleared'
+  );
+
+  resolveFirstRefresh();
+  await firstRefresh;
+});
+
 test('projectEditorCtx.getPreviewContext: re-invokes the outer ctx.getPreviewContext on every call, even once the editor is memoized', async () => {
   let capturedEditorCtx = null;
   let currentPreview = { projectName: 'Terminal A' };

@@ -95,7 +95,24 @@ test('renderLibraryDetail() (the client-library-selection change handler) refres
 
 test('renderLibraryDetail() gates the panel wrapper on tier === "client", mirroring the server-side requireClientLibrary gate', () => {
   const body = functionBody('renderLibraryDetail');
-  assert.match(body, /API_FEATURES\.headerFooter && library\?\.tier === 'client'/);
+  // Anchored to the FULL `hfPanel.hidden = !( ... );` assignment — not just
+  // the bare condition substring. A regex that only matched
+  // `API_FEATURES.headerFooter && library?.tier === 'client'` would still
+  // match a mutant that dropped the leading `!(`/closing `)`
+  // (`hfPanel.hidden = (API_FEATURES.headerFooter && library?.tier ===
+  // 'client');`), which INVERTS the panel's visibility — it would render
+  // (empty) for reference/company libraries and stay hidden for client
+  // libraries, the exact tier this feature targets — while the unanchored
+  // regex kept passing, because the negation sits outside the matched
+  // substring. No other test in the suite exercises this dynamic
+  // hidden-toggle: header-footer-markup.test.mjs only checks index.html's
+  // static initial `hidden` attribute, and header-footer.test.mjs's
+  // tier-gating tests cover the separate API-call gate inside
+  // refreshLibraryPanel, not this visual wrapper toggle.
+  assert.match(
+    body,
+    /hfPanel\.hidden = !\(API_FEATURES\.headerFooter && library\?\.tier === 'client'\);/
+  );
 });
 
 test('initEditor is wired with mountHeaderFooterInspector from the header/footer panel', () => {

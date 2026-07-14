@@ -239,6 +239,12 @@ export function initHeaderFooter(ctx, deps = defaultDeps) {
     const visible = API_FEATURES.headerFooter && ctx.getSelectedLibraryTier() === 'client';
     if (!visible) {
       ctx.libraryContainer.replaceChildren();
+      // Invalidate BEFORE dropping the reference: a slow refresh() started
+      // while this scope was still visible may still be in flight. Without
+      // this, its response could resolve later and repaint `container` with
+      // stale content for a scope that's no longer selected — see
+      // header-footer-editor.js's invalidate()/resolveRefreshOutcome.
+      clientEditor?.invalidate?.();
       clientEditor = null;
       return;
     }
@@ -253,6 +259,8 @@ export function initHeaderFooter(ctx, deps = defaultDeps) {
     if (!visible) {
       ctx.projectEditorContainer.replaceChildren();
       ctx.projectResolutionContainer.replaceChildren();
+      // See refreshLibraryPanel's matching comment above.
+      projectEditor?.invalidate?.();
       projectEditor = null;
       return;
     }
