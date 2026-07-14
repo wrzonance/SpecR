@@ -171,7 +171,7 @@ afterAll(async () => {
 });
 
 describe('onboarding headerFooter draft — generator round trip (#307 AC2/AC3)', () => {
-  it('preserves a typed sectionNumber field through import (no new persistence), and resolution picks it up on the next generate', async () => {
+  it('preserves a typed sectionNumber field through import (no new persistence), and a reviewer edit to the saved draft resolves on the next generate', async () => {
     // Precondition: nothing scoped to this project yet.
     const before = await pool.query<{ count: string }>(
       `SELECT COUNT(*) AS count FROM header_footer_configs WHERE project_id = $1`,
@@ -208,10 +208,17 @@ describe('onboarding headerFooter draft — generator round trip (#307 AC2/AC3)'
     );
     expect(afterImport.rows[0]?.count).toBe('0');
 
-    // AC #2: PUT the reviewed draft (unedited) to the spec's owning project
-    // scope via the existing #480 route, then confirm the next /generate
-    // call resolves it — closing review -> save -> re-render with zero new
-    // production code.
+    // AC #2: a reviewer edits the captured draft, then PUTs it to the spec's
+    // owning project scope via the existing #480 route — closing
+    // review -> save -> re-render with zero new production code. Editing the
+    // draft to a DIFFERENT field-kind (sectionTitle, not the captured
+    // sectionNumber) is what proves the generator resolves the reviewer's
+    // saved edit: sectionTitle renders the section's TITLE, a value the
+    // imported sectionNumber field could never produce, so a footer carrying
+    // TITLE can only have come from the PUT draft.
+    const editedHeaderFooter: HeaderFooterComposition = {
+      variants: { default: { footer: { right: { content: [{ kind: 'sectionTitle' }] } } } },
+    };
     await pool.query(
       `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`,
       [projectId, specId]
@@ -219,7 +226,7 @@ describe('onboarding headerFooter draft — generator round trip (#307 AC2/AC3)'
     const putRes = await fetch(`${baseUrl}/projects/${projectId}/header-footer`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(result.report.headerFooter),
+      body: JSON.stringify(editedHeaderFooter),
     });
     expect(putRes.status).toBe(200);
 
@@ -231,6 +238,6 @@ describe('onboarding headerFooter draft — generator round trip (#307 AC2/AC3)'
     expect(generateRes.status).toBe(200);
     const generatedBuffer = Buffer.from(await generateRes.arrayBuffer());
     const footerXml = await docxPart(generatedBuffer, 'word/footer1.xml');
-    expect(footerXml).toContain(SECTION);
+    expect(footerXml).toContain(TITLE);
   }, 40_000);
 });
