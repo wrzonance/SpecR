@@ -59,15 +59,29 @@ describe('openapi.yaml — header/footer PUT 413 contract mirrors the body limit
     }
   );
 
-  it('components.responses.PayloadTooLarge description embeds the live byte limit (drift guard)', async () => {
+  it('components.responses.PayloadTooLarge description embeds the EXACT live byte limit (drift guard)', async () => {
+    // A bare `.toContain(String(N))` substring check is unsound as a
+    // byte-accuracy guard: it would still pass if the prose embedded a
+    // DIFFERENT number that merely happens to contain N's digits as a
+    // contiguous substring (e.g. N=7252652 "contained in" a typo'd
+    // 17252652, or N re-embedded with a stray trailing digit) — none of
+    // which is the number this response actually documents. Extract the
+    // number from its known prose position and compare it EXACTLY instead.
     const raw = RawSpecSchema.parse(await loadRawSpec());
     const payloadTooLarge = PayloadTooLargeResponseSchema.parse(
       raw.components.responses.PayloadTooLarge
     );
+    const match = /\blimit of (\d+) bytes\b/.exec(payloadTooLarge.description);
+    if (!match) {
+      throw new Error(
+        'openapi.yaml PayloadTooLarge description no longer matches "limit of <N> bytes" — update this test\'s extraction pattern alongside any prose rewrite'
+      );
+    }
+    const [, embeddedBytes] = match;
     expect(
-      payloadTooLarge.description,
+      Number(embeddedBytes),
       'openapi.yaml PayloadTooLarge description drifted from HEADER_FOOTER_JSON_BODY_LIMIT_BYTES — update openapi.yaml when the derived limit changes'
-    ).toContain(String(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES));
+    ).toBe(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES);
   });
 
   it('sibling GET/DELETE header-footer ops do not document a 413', async () => {

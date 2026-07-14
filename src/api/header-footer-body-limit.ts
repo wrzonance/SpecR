@@ -14,27 +14,18 @@
 // surface those routes are otherwise protected from by the small default.
 import express from 'express';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
-import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
+import {
+  HEADER_FOOTER_BODY_ENVELOPE_BYTES,
+  HEADER_FOOTER_JSON_BODY_LIMIT_BYTES,
+} from '../lib/header-footer-body-limit.js';
 
 /**
- * Headroom above one max-sized image for the surrounding JSON structure — the
- * composition envelope, other header/footer cells, and their non-image text
- * runs. Deliberately generous: a composition with several near-max-sized
- * images can still exceed this derived limit despite each field individually
- * passing the AST schema's own per-field bound — an accepted limitation, not
- * a bug, since the byte budget here covers exactly the one-image case the
- * issue describes.
+ * Re-exported (not redefined) from `src/lib/header-footer-body-limit.ts` —
+ * that module is the single derivation site, shared with the AST schema's
+ * own size invariant (`src/ast/header-footer-schemas.ts`). Kept as named
+ * exports here so existing importers of this file are unaffected.
  */
-export const HEADER_FOOTER_BODY_ENVELOPE_BYTES = 262_144; // 256 KiB
-
-/**
- * Route-scoped JSON body-size limit for header/footer composition writes,
- * derived from (never hardcoded independently of) `MAX_IMAGE_BASE64_LENGTH`
- * so it can never silently fall out of sync with the image cap it exists to
- * accommodate.
- */
-export const HEADER_FOOTER_JSON_BODY_LIMIT_BYTES =
-  MAX_IMAGE_BASE64_LENGTH + HEADER_FOOTER_BODY_ENVELOPE_BYTES;
+export { HEADER_FOOTER_BODY_ENVELOPE_BYTES, HEADER_FOOTER_JSON_BODY_LIMIT_BYTES };
 
 // Express 5 defaults both `case sensitive routing` and `strict routing` to
 // disabled, so `router.put('/libraries/:id/header-footer', ...)` matches a

@@ -114,6 +114,32 @@ separate, pre-existing, and entirely unaffected code path (it was never
 routed through `express.json()`); this ADR only closes the gap for the
 JSON PUT endpoints.
 
+## Follow-up: schema-level size invariant closes the .catchall gap (code review, #490)
+
+A code-review pass on this ADR's implementation found that every level of
+`HeaderFooterCompositionSchema` (top-level object plus every nested
+Region/Cell/Field/Variant/RawSidecar schema) is `.catchall(JsonValue)`
+(ADR-021's open-extension contract), with no size bound on the extension
+values themselves. That meant a composition Zod would call *valid* — one
+image, everything else nominal — could still carry unbounded data in an open
+extension key and exceed `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES`, contradicting
+this ADR's premise that the derived limit accommodates every schema-valid
+single-image write. Unlike the multi-image gap below (an explicit,
+accepted-out-of-scope limitation), this one was an unintended gap between
+what the schema called valid and what the transport limit actually allowed.
+
+Fixed by adding one `.superRefine` to `HeaderFooterCompositionSchema`
+(`src/ast/header-footer-schemas.ts`) that rejects any parse whose serialized
+byte length exceeds `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES` — enforced once at
+the top level so it covers overage contributed by any nested catchall,
+without duplicating a per-field cap into every one of them. Because `ast/`
+may not import from `api/` (module-boundaries.md), the shared constant moved
+to `src/lib/header-footer-body-limit.ts`; `src/api/header-footer-body-limit.ts`
+now re-exports it rather than deriving its own copy, so the transport
+dispatch and the schema's own invariant can never drift apart. The multi-image
+accepted limitation described below is unaffected and remains the only
+documented gap.
+
 ## Consequences
 
 - A composition write carrying one image at up to `MAX_IMAGE_BASE64_LENGTH`

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
+import { HEADER_FOOTER_JSON_BODY_LIMIT_BYTES } from '../lib/header-footer-body-limit.js';
 
 // JSONB-backed header/footer composition follows ADR-021: known keys are typed,
 // unknown JSON-safe keys are preserved for client/project-specific extensions.
@@ -153,6 +154,19 @@ const HeaderFooterRawSidecarSchema = z
   })
   .catchall(JsonValue);
 
+/**
+ * Approximate serialized byte size of a parsed composition — the same
+ * encoded-length-first, pre-materialization posture `MAX_IMAGE_BASE64_LENGTH`
+ * and `decodeBase64Payload` already use elsewhere in this schema: cheap and
+ * close enough to guard an invariant, not a byte-exact wire measurement (key
+ * order/number formatting can differ from what the client actually sent).
+ * Pure and total — `JSON.stringify` never throws on a Zod-parsed, JSON-safe
+ * value (every leaf is `z.json()` or a JSON-primitive-typed field).
+ */
+function serializedByteLength(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
 export const HeaderFooterCompositionSchema = z
   .object({
     // v1 (#208) fields — preserved; read as the `default` variant (ADR-040).
@@ -162,7 +176,30 @@ export const HeaderFooterCompositionSchema = z
     pageNumbering: PageNumberingSchema.exactOptional(),
     raw: HeaderFooterRawSidecarSchema.exactOptional(),
   })
-  .catchall(JsonValue);
+  .catchall(JsonValue)
+  // Code-review finding (#490 follow-up): every level above is
+  // `.catchall(JsonValue)` (ADR-021 open extensions) with no size bound of
+  // its own, so a structurally-valid composition could still carry unbounded
+  // open-extension data and exceed `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES` —
+  // the transport limit `src/api/header-footer-body-limit.ts` derives for
+  // exactly the one-image case this schema advertises (ADR-070). Enforcing
+  // the SAME budget here, once, at the top level (rather than duplicating a
+  // per-field cap into every nested catchall) keeps "Zod-valid" and "fits
+  // the transport limit" from ever diverging — the multi-image accepted
+  // limitation ADR-070 documents remains the only gap.
+  .superRefine((composition, ctx) => {
+    const byteLength = serializedByteLength(composition);
+    if (byteLength <= HEADER_FOOTER_JSON_BODY_LIMIT_BYTES) return;
+    ctx.addIssue({
+      code: 'custom',
+      message:
+        `composition serializes to ~${byteLength} bytes, exceeding the ` +
+        `${HEADER_FOOTER_JSON_BODY_LIMIT_BYTES}-byte transport limit ` +
+        '(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES) — open .catchall extension ' +
+        'keys (ADR-021) share the same byte budget as imageData, not an ' +
+        'unbounded one',
+    });
+  });
 
 export type HeaderFooterFieldKind = z.infer<typeof HeaderFooterFieldKindSchema>;
 export type HeaderFooterVariant = z.infer<typeof HeaderFooterVariantSchema>;

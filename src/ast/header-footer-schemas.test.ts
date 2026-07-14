@@ -6,6 +6,7 @@ import {
   defaultVariant,
 } from './header-footer-schemas.js';
 import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
+import { HEADER_FOOTER_JSON_BODY_LIMIT_BYTES } from '../lib/header-footer-body-limit.js';
 
 // #302 (parent #301): extend the v1 composition (#208) with Word-style page
 // variants, a page-numbering policy, and an open `raw` sidecar — without
@@ -298,5 +299,62 @@ describe('HeaderFooterCompositionSchema — image fields (#308, ADR-069)', () =>
         header: { left: { content: [{ kind: 'imagex' }] } },
       })
     ).toThrow();
+  });
+});
+
+// Code-review finding (#490 follow-up): every level of this schema is
+// `.catchall(JsonValue)` (ADR-021 open extensions), which has no size bound
+// of its own. Without a total-size invariant, a request that Zod would call
+// "valid" could still carry unbounded open-extension data and exceed
+// `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES` (src/api/header-footer-body-limit.ts,
+// derived from `MAX_IMAGE_BASE64_LENGTH` + envelope) — the transport limit
+// ADR-070 sized for exactly one image plus a modest envelope. That mismatch
+// means a "Zod-valid" composition is not actually guaranteed to fit the
+// transport budget the schema's own docs claim it does. Pins the fix: Zod
+// itself now enforces the same budget, so "Zod-valid" and "fits the
+// transport limit" can never diverge.
+describe('HeaderFooterCompositionSchema — total-size invariant matches the transport limit (#490)', () => {
+  it('rejects a structurally-valid composition whose open .catchall extension data alone exceeds HEADER_FOOTER_JSON_BODY_LIMIT_BYTES', () => {
+    // No image anywhere — every typed field is absent. Only an open extension
+    // key (ADR-021) carries size, and it alone is already past the transport
+    // budget. Pre-fix, HeaderFooterCompositionSchema.parse() accepted this
+    // (catchall(JsonValue) has no size bound); the resulting payload would
+    // still 413 at body-parser, defeating the "Zod-valid write always fits"
+    // invariant HEADER_FOOTER_JSON_BODY_LIMIT_BYTES exists to guarantee.
+    const oversizedExtension = 'A'.repeat(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES);
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({ vendorExtension: oversizedExtension })
+    ).toThrow();
+  });
+
+  it('rejects when the overage is spread across many nested .catchall levels rather than one field', () => {
+    // Region/cell/field/variant catchalls are all nested inside the same
+    // top-level object, so a size invariant enforced once at the top still
+    // has to catch overage contributed by ANY of them combined — not just a
+    // single offending key.
+    const chunk = 'A'.repeat(100_000);
+    const input = {
+      header: {
+        left: { style: { vendorTokenA: chunk } },
+        center: { style: { vendorTokenB: chunk } },
+        right: { style: { vendorTokenC: chunk } },
+      },
+      variants: {
+        default: { style: { vendorTokenD: chunk } },
+        first: { style: { vendorTokenE: chunk } },
+        even: { style: { vendorTokenF: chunk } },
+      },
+      raw: { warnings: Array(600).fill(chunk) },
+    };
+    expect(() => HeaderFooterCompositionSchema.parse(input)).toThrow();
+  });
+
+  it('still accepts a genuine one-image composition (the case the transport limit is sized for) plus a small extension', () => {
+    const imageData = 'A'.repeat(MAX_IMAGE_BASE64_LENGTH);
+    const input = {
+      header: { left: { content: [{ kind: 'image', imageData }] } },
+      vendorExtension: { note: 'firm-logo-v2' },
+    };
+    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
   });
 });
