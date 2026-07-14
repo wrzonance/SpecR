@@ -67,9 +67,15 @@ describe('openapi.yaml — manual/revision header-footer rendering (#481)', () =
     expect(description).toMatch(/target revision/i);
   });
 
-  it('front-matter/cover section stays deliberately headerless (documented, not silently implied)', async () => {
+  it('front-matter/cover section stays deliberately headerless — documented for BOTH manual and revision, not silently implied', async () => {
     const doc = await loadSpec();
-    const description = descriptionOf(doc, '/projects/{id}/generate', 'post');
-    expect(description).toMatch(/cover page.*(no header|headerless)|headerless.*cover/is);
+    const manual = descriptionOf(doc, '/projects/{id}/generate', 'post');
+    expect(manual).toMatch(/cover page.*(no header|headerless)|headerless.*cover/is);
+    // #481: the revision endpoint emits an addendum/front-matter cover that is
+    // headerless too, even though every emitted spec section receives the
+    // resolved header/footer — the description must say so, not leave "every
+    // emitted section" to imply the cover is header-stamped.
+    const revision = descriptionOf(doc, '/revisions/{id}/generate', 'post');
+    expect(revision).toMatch(/(cover|front-matter).*headerless|headerless.*(cover|front-matter)/is);
   });
 });

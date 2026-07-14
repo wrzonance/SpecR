@@ -3558,10 +3558,13 @@ paths:
         rendered per #481: the client → project → package → revision
         `header_footer_configs` chain is resolved for the target revision being
         rendered (never `baseRevisionId`, even in addendum mode) and rendered
-        into every emitted section's own OOXML section. A revision with zero
-        configured layers anywhere in its chain falls back to the pre-#481
-        output — no header or footer, cover/front-matter revision identity
-        unchanged.
+        into every emitted spec section's own OOXML section. The addendum /
+        front-matter cover section itself stays headerless (no header/footer
+        reference in its `sectPr`), exactly as the project manual's cover does —
+        only the emitted spec sections receive the resolved header/footer. A
+        revision with zero configured layers anywhere in its chain falls back to
+        the pre-#481 output — no header or footer, cover/front-matter revision
+        identity unchanged.
       tags: [packages]
       parameters:
         - name: id
