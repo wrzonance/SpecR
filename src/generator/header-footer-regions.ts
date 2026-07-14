@@ -5,10 +5,12 @@ import {
   cascadeStyle,
   cellHasContent,
   renderCellRuns,
+  type HeaderFooterCell,
   type HeaderFooterFieldContext,
   type HeaderFooterRunChild,
   type HeaderFooterVisualStyle,
 } from './header-footer-fields.js';
+import { imageFieldWarnings } from './header-footer-images.js';
 
 // Local indexed-access aliases (see header-footer-fields.ts for the same
 // pattern): the AST barrel (`src/ast/index.ts`) exports only
@@ -123,6 +125,32 @@ function regionHasContent(
     cellHasContent(region?.center, ctx) ||
     cellHasContent(region?.right, ctx)
   );
+}
+
+/** Every image-field warning `cell` produces, each prefixed with `location`. */
+function cellImageWarnings(
+  cell: HeaderFooterCell | undefined,
+  location: string
+): readonly string[] {
+  if (cell?.content === undefined) return [];
+  return cell.content.flatMap((field) => imageFieldWarnings(field, location));
+}
+
+/**
+ * Every image-field warning across `region`'s left/center/right cells (#308),
+ * each prefixed with `location.<cell>` (e.g. `"header.left"`). `[]` for an
+ * undefined region or a region whose image fields (if any) carry no
+ * warnings.
+ */
+export function regionImageWarnings(
+  region: HeaderFooterRegion | undefined,
+  location: string
+): readonly string[] {
+  return [
+    ...cellImageWarnings(region?.left, `${location}.left`),
+    ...cellImageWarnings(region?.center, `${location}.center`),
+    ...cellImageWarnings(region?.right, `${location}.right`),
+  ];
 }
 
 // `Paragraph`'s `border` option is a full `IBordersOptions` map (top/bottom/
