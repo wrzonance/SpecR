@@ -517,27 +517,40 @@ describe('renderHeaderFooterComposition — image rendering + multi-variant dedu
     const mediaNames = Object.entries(zip.files).filter(
       ([name, entry]) => name.startsWith('word/media/') && !entry.dir
     );
-    expect(mediaNames).toHaveLength(1);
-    const mediaTarget = `media/${mediaNames[0]![0].replace('word/media/', '')}`;
+    // Implementation ASSUMPTION, not the invariant under test: docx's Packer
+    // dedups byte-identical image data, so the three identical logos are
+    // expected to collapse into a single `word/media` part. That dedup is
+    // docx's behavior (not a documented-stable contract SpecR owns) — pinned
+    // here only so a future docx change that stops deduping is noticed, never
+    // as the property this test exists to guard.
+    expect(
+      mediaNames,
+      'implementation assumption: docx dedups identical image bytes into one media part'
+    ).toHaveLength(1);
+    const mediaTargets = new Set(
+      mediaNames.map(([name]) => `media/${name.replace('word/media/', '')}`)
+    );
 
-    // The other half of "collision-free": each header instance's OWN
-    // `_rels/headerN.xml.rels` carries exactly one image relationship
-    // pointing at the shared media part, and that header's own XML embeds
-    // exactly the relationship id its own rels file defines — never a
-    // sibling's part borrowing an id that isn't declared in its own rels
-    // file (which would render as a broken image in Word even though the
-    // media part itself is present and deduped).
+    // The invariant SpecR OWNS and this test exists to guard ("collision-free"
+    // wiring): each header instance's OWN `_rels/headerN.xml.rels` declares
+    // exactly one image relationship whose Target resolves to a real media
+    // part, and that header's own XML embeds exactly the relationship id its
+    // own rels file declares — never a sibling's id (which would render as a
+    // broken image in Word even though the media part itself is present). This
+    // holds whether or not the media bytes are shared across parts.
     const xmlByPart = await extractHeaderFooterXml(result.headers, result.footers);
     const relsByPart = await extractHeaderFooterRels(result.headers, result.footers);
     expect(Object.keys(relsByPart)).toHaveLength(3);
     for (const [partName, relsXml] of Object.entries(relsByPart)) {
       const relMatches = [...relsXml.matchAll(/<Relationship\b[^>]*\/>/g)];
       expect(relMatches).toHaveLength(1);
-      expect(relsXml).toContain(`Target="${mediaTarget}"`);
 
-      const relIdMatch = /<Relationship\b[^>]*\bId="([^"]+)"/.exec(relsXml);
-      if (!relIdMatch) throw new Error(`${partName} rels: no relationship Id found`);
-      const [, relId] = relIdMatch;
+      const relId = /<Relationship\b[^>]*\bId="([^"]+)"/.exec(relsXml)?.[1];
+      const target = /<Relationship\b[^>]*\bTarget="([^"]+)"/.exec(relsXml)?.[1];
+      if (relId === undefined || target === undefined) {
+        throw new Error(`${partName} rels: missing relationship Id/Target`);
+      }
+      expect(mediaTargets.has(target)).toBe(true);
       expect(xmlByPart[partName]).toContain(`r:embed="${relId}"`);
     }
   });
