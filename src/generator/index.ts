@@ -234,12 +234,31 @@ export async function generateDocx(
  * titles (ADR-017 D1). Word computes the TOC entries + pagination on open; SpecR
  * emits the field + headings (structure), never page numbers.
  *
- * `options.headerFooter` (#303) is deliberately NOT wired here — the issue's
- * acceptance criteria describe header/footer rendering for standalone
- * generated specs (`generateDocx`), and a manual's own front-matter cover
- * page + per-section OOXML-section split need a header/footer story of their
- * own (running headers across sections, cover-page suppression) that's out
- * of scope for this PR.
+ * `options.headerFooter` (#481) renders the same composition into every spec
+ * section — never the front-matter section, which is deliberately headerless
+ * (confirmed empty of `headerReference`/`footerReference` for any composition,
+ * cover pages carry no running header). Each spec's own `sectionNumber` /
+ * `sectionTitle` still comes only from its own `SpecTree` (see
+ * `renderOptionalHeaderFooter` below), so per-section renders can't drift or
+ * collide with a sibling's.
+ *
+ * `evenAndOddHeaderAndFooters` is document-scoped in dolanmiu/docx, so it is
+ * computed once from the first section's render and applied at the `Document`
+ * level. This is not a shortcut — it is provably always correct: every
+ * `renderOptionalHeaderFooter` call in the loop below shares the exact same
+ * `options.headerFooter.composition` object reference (only `sectionNumber`/
+ * `sectionTitle` vary per tree), so `composition.variants?.even !== undefined`
+ * — the sole input to `evenAndOddHeaders` — is identical for every section.
+ * There is no design-reachable state where per-section computation could
+ * yield a different answer.
+ *
+ * `variants.first` (`titlePage`/`w:titlePg`) is likewise per-section: because
+ * every `SpecTree` opens its own OOXML section, EVERY spec's own opening page
+ * gets first-page header/footer treatment when the composition defines a
+ * `first` variant — not just the whole manual's first page. This is intended
+ * (each spec section behaves like its own mini-document for cover/first-page
+ * purposes) but is easy to assume otherwise, so it is called out here
+ * explicitly.
  */
 export async function generateManual(
   trees: readonly SpecTree[],
@@ -256,17 +275,19 @@ export async function generateManual(
     const frontMatter = buildFrontMatter(meta, styleRules);
     const sections = trees.map((tree, i) => {
       const reference = `${SPEC_NUM_REF}-${i}`;
+      const render = renderOptionalHeaderFooter(tree, format, options);
       return {
         reference,
+        ...sectionHeaderFooterOptions(render),
         children: buildSectionChildren(tree, sectionContext(format, reference, rules)),
       };
     });
+    const firstRender =
+      trees[0] !== undefined ? renderOptionalHeaderFooter(trees[0], format, options) : undefined;
     const doc = new Document({
+      ...documentLevelOptions(firstRender),
       numbering: { config: sections.map((s) => buildSpecNumberingConfig(rules, s.reference)) },
-      sections: [
-        { properties: {}, children: frontMatter },
-        ...sections.map((s) => ({ properties: {}, children: s.children })),
-      ],
+      sections: [{ properties: {}, children: frontMatter }, ...sections],
     });
     return await Packer.toBuffer(doc);
   } catch (err) {
