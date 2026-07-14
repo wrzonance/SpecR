@@ -18,9 +18,12 @@
 //   projectResolutionContainer: HTMLElement — dedicated mount for the
 //     Effective Resolution sub-panel (winning scope + layer chain).
 //   toast?: (message, kind?) => void
-//   getPreviewContext?: () => PreviewFieldContext — passed straight through
-//     to the editor's own preview (date/projectName/clientName only — see
-//     header-footer-preview.mjs's PREVIEWABLE_IDENTITY_KEYS).
+//   getPreviewContext?: () => PreviewFieldContext — re-invoked fresh on every
+//     mounted editor render (never cached here — see the STALE-PREVIEW FIX
+//     note below) and threaded through, via the SAME name, as the inner
+//     header-footer-editor.js ctx's own `getPreviewContext` (date/
+//     projectName/clientName only — see header-footer-preview.mjs's
+//     PREVIEWABLE_IDENTITY_KEYS).
 //
 // Returns `{ refreshLibraryPanel, refreshProjectPanel, mountInspector }`.
 //
@@ -50,6 +53,17 @@
 // empty even though the server round-trip itself was correct. `clientEditorCtx`
 // and `projectEditorCtx` now unwrap `.config` (see `unwrapComposition` below)
 // before handing the value to the editor.
+//
+// STALE-PREVIEW FIX: clientEditor/projectEditor are memoized (created once,
+// then only .refresh()'d — see refreshLibraryPanel/refreshProjectPanel), but
+// header-footer-editor.js's render() reads its preview identity fresh on
+// every render. Passing an already-invoked `previewContext: previewContext()`
+// value in the ctx object would freeze that identity at whichever call first
+// created the editor — e.g. switching between two client libraries while
+// staying tier === 'client' would never reach the mounted editor's preview.
+// `getPreviewContext` instead hands the editor the `previewContext` FUNCTION
+// itself, which reads `ctx.getPreviewContext()` (the outer ctx passed to
+// initHeaderFooter) fresh on every call, however many editor refreshes later.
 import { API_FEATURES } from './features.js';
 import {
   getClientHeaderFooter,
@@ -176,7 +190,7 @@ export function initHeaderFooter(ctx, deps = defaultDeps) {
       },
       del: () => deps.deleteClientHeaderFooter(ctx.getSelectedLibraryId()),
       toast: ctx.toast,
-      previewContext: previewContext(),
+      getPreviewContext: previewContext,
       emptyStateLabel: 'No header/footer configuration for this client library yet.',
     };
   }
@@ -194,7 +208,7 @@ export function initHeaderFooter(ctx, deps = defaultDeps) {
       },
       del: () => deps.deleteProjectHeaderFooter(ctx.getActiveProjectId()),
       toast: ctx.toast,
-      previewContext: previewContext(),
+      getPreviewContext: previewContext,
       // Fires AFTER ctx.put resolves (saveDraft's contract) and BEFORE the
       // editor's own repaint — see the module doc's stale-panel spike fix.
       onSaved: () => refreshResolutionPanel(),

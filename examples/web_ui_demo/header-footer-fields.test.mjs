@@ -199,10 +199,16 @@ test('withCellField replaces one field by index, never mutating the input cell',
   );
 });
 
-test('addCellField appends a field without mutating the input cell', () => {
-  const cell = deepFreeze({ content: [{ kind: 'sectionTitle' }] });
+test('addCellField appends a field without mutating the input cell, and round-trips unrelated catchall keys', () => {
+  const cell = deepFreeze({
+    content: [{ kind: 'sectionTitle' }],
+    separator: ' | ',
+    style: { bold: true },
+  });
   const next = addCellField(cell, emptyField('pageNumber'));
   assert.deepEqual(next.content, [{ kind: 'sectionTitle' }, { kind: 'pageNumber' }]);
+  assert.deepEqual(next.separator, ' | ', 'untouched cell-level catchall key survives');
+  assert.deepEqual(next.style, { bold: true }, 'untouched cell-level catchall key survives');
   assert.deepEqual(cell.content, [{ kind: 'sectionTitle' }], 'input cell must be unchanged');
 });
 
@@ -211,11 +217,15 @@ test('addCellField tolerates an undefined/empty cell (Add on a never-populated r
   assert.deepEqual(next.content, [{ kind: 'date' }]);
 });
 
-test('removeCellField drops one field by index, never mutating the input cell', () => {
+test('removeCellField drops one field by index, never mutating the input cell, and round-trips unrelated catchall keys', () => {
   const cell = deepFreeze({
     content: [{ kind: 'sectionTitle' }, { kind: 'pageNumber' }, { kind: 'literal', text: 'x' }],
+    separator: ' | ',
+    style: { bold: true },
   });
   const next = removeCellField(cell, 1);
   assert.deepEqual(next.content, [{ kind: 'sectionTitle' }, { kind: 'literal', text: 'x' }]);
+  assert.deepEqual(next.separator, ' | ', 'untouched cell-level catchall key survives');
+  assert.deepEqual(next.style, { bold: true }, 'untouched cell-level catchall key survives');
   assert.equal(cell.content.length, 3, 'input cell must be unchanged');
 });

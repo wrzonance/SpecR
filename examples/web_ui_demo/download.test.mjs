@@ -81,6 +81,11 @@ test('triggerBlobDownload: failure after click (link.click throws) still revokes
 
   assert.ok(calls.includes('click'), 'click was attempted before the throw');
   assert.ok(
+    calls.includes('removeChild'),
+    'the throwaway anchor must still be detached from the DOM even though click() threw — ' +
+      'otherwise it stays permanently attached to document.body'
+  );
+  assert.ok(
     !calls.some((c) => Array.isArray(c) && c[0] === 'revokeObjectURL'),
     'not revoked synchronously'
   );
@@ -95,13 +100,17 @@ test('triggerBlobDownload: failure after click (link.click throws) still revokes
   assert.deepEqual(revokes, [['revokeObjectURL', 'blob:fake-url']]);
 });
 
-test('triggerBlobDownload: failure before click (appendChild throws) still revokes exactly once, and click never fires', () => {
+test('triggerBlobDownload: failure before click (appendChild throws) still revokes exactly once, click never fires, and removeChild is never called on an element that was never attached', () => {
   const { deps, calls, flush } = fakeDeps({ appendThrows: true });
   const blob = { size: 4 };
 
   assert.throws(() => triggerBlobDownload(blob, 'report.docx', deps), /appendChild failed/);
 
   assert.ok(!calls.includes('click'), 'click was never dispatched');
+  assert.ok(
+    !calls.includes('removeChild'),
+    'removeChild must never be called on an element appendChild never actually attached'
+  );
   assert.ok(
     !calls.some((c) => Array.isArray(c) && c[0] === 'revokeObjectURL'),
     'not revoked synchronously'

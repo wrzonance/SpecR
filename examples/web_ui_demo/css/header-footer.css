@@ -150,6 +150,39 @@
   cursor: pointer;
 }
 
+/* ── editor: error state (a real ctx.get() failure — Retry only, deliberately
+   NEVER a "Create configuration" affordance, which would let a transient
+   load failure be "fixed" via a destructive full-composition ctx.put()
+   overwrite; see header-footer-editor.js's loadDraft doc comment) ──────── */
+
+.hf-error {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.6rem 0;
+}
+
+.hf-error-text {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--err);
+}
+
+.hf-error-retry {
+  justify-self: start;
+  border: 1px solid var(--err);
+  background: transparent;
+  color: var(--err);
+  font: 0.7rem var(--mono);
+  letter-spacing: 0.1em;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+}
+
+.hf-error-retry:hover {
+  background: var(--err);
+  color: #ffffff;
+}
+
 /* ── variant tabs (default / first page / even pages) ────────────────── */
 
 .hf-variant-tabs-host {

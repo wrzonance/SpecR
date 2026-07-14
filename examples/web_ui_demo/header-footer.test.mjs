@@ -398,3 +398,72 @@ test('projectEditorCtx.get/put: unwrap the API record to its bare composition, n
   assert.deepEqual(await capturedEditorCtx.get(), STORED_COMPOSITION);
   assert.deepEqual(await capturedEditorCtx.put(STORED_COMPOSITION), STORED_COMPOSITION);
 });
+
+// --- Invariant 5: getPreviewContext is threaded through as a LIVE function,
+// never a snapshot taken once at editor-creation time. clientEditor/
+// projectEditor are memoized (created once, then only .refresh()'d), so a
+// static `previewContext: previewContext()` value handed to the editor's ctx
+// at creation would freeze whatever ctx.getPreviewContext() returned at that
+// moment for the editor's entire lifetime — e.g. switching between two
+// client libraries while staying tier === 'client' would never reach the
+// mounted editor's preview on a later refresh. ---------------------------
+
+test('clientEditorCtx.getPreviewContext: re-invokes the outer ctx.getPreviewContext on every call, even once the editor is memoized', async () => {
+  let capturedEditorCtx = null;
+  let currentPreview = { clientName: 'Acme' };
+  const deps = baseDeps({
+    createEditor: (editorCtx) => {
+      capturedEditorCtx = editorCtx;
+      return { refresh: async () => {} };
+    },
+  });
+  const ctx = baseCtx({
+    getSelectedLibraryTier: () => 'client',
+    getSelectedLibraryId: () => 'lib-1',
+    getPreviewContext: () => currentPreview,
+  });
+  const hf = initHeaderFooter(ctx, deps);
+
+  await hf.refreshLibraryPanel(); // creates and memoizes the editor
+  assert.deepEqual(capturedEditorCtx.getPreviewContext(), { clientName: 'Acme' });
+
+  // Switch libraries while staying tier === 'client': a real refresh, but
+  // the memoized editor instance — and the ctx object captured above — is
+  // never recreated.
+  currentPreview = { clientName: 'Beta' };
+  await hf.refreshLibraryPanel();
+
+  assert.deepEqual(
+    capturedEditorCtx.getPreviewContext(),
+    { clientName: 'Beta' },
+    'the SAME ctx object handed to the memoized editor must still read the latest preview identity'
+  );
+});
+
+test('projectEditorCtx.getPreviewContext: re-invokes the outer ctx.getPreviewContext on every call, even once the editor is memoized', async () => {
+  let capturedEditorCtx = null;
+  let currentPreview = { projectName: 'Terminal A' };
+  const deps = baseDeps({
+    createEditor: (editorCtx) => {
+      capturedEditorCtx = editorCtx;
+      return { refresh: async () => {} };
+    },
+  });
+  const ctx = baseCtx({
+    getActiveProjectId: () => 'proj-1',
+    getPreviewContext: () => currentPreview,
+  });
+  const hf = initHeaderFooter(ctx, deps);
+
+  await hf.refreshProjectPanel();
+  assert.deepEqual(capturedEditorCtx.getPreviewContext(), { projectName: 'Terminal A' });
+
+  currentPreview = { projectName: 'Terminal B' };
+  await hf.refreshProjectPanel();
+
+  assert.deepEqual(
+    capturedEditorCtx.getPreviewContext(),
+    { projectName: 'Terminal B' },
+    'the SAME ctx object handed to the memoized editor must still read the latest preview identity'
+  );
+});

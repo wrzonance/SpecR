@@ -19,16 +19,25 @@ const browserDeps = {
 // macrotask guarantees it never runs before the click has been dispatched,
 // on both the success and failure path (the `finally` always schedules it
 // exactly once).
+//
+// `link.click()` throwing must not skip detaching the anchor — `removeChild`
+// used to sit inline after `click()` in the try block, so a throwing click
+// left the throwaway element permanently attached to document.body. It now
+// runs from `finally`, guarded by `attached` so it's never called on a link
+// `appendChild` itself failed to attach (that would throw its own
+// NotFoundError against a real DOM).
 export function triggerBlobDownload(blob, filename, deps = browserDeps) {
   const url = deps.createObjectURL(blob);
+  const link = deps.createAnchor();
+  link.href = url;
+  link.download = filename;
+  let attached = false;
   try {
-    const link = deps.createAnchor();
-    link.href = url;
-    link.download = filename;
     deps.appendChild(link);
+    attached = true;
     link.click();
-    deps.removeChild(link);
   } finally {
+    if (attached) deps.removeChild(link);
     deps.scheduleRevoke(() => deps.revokeObjectURL(url));
   }
 }

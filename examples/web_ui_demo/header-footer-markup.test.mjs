@@ -60,10 +60,20 @@ test('Settings view: project-scope panel exists with distinct editor + resolutio
 
 test('Settings view: header/footer panel sits inside #view-settings, alongside the other settings panels', () => {
   const settingsStart = html.indexOf('id="view-settings"');
-  const settingsEnd = html.indexOf('</section>', html.indexOf('project-source-list', settingsStart));
+  // The NEXT `.app-view` section's opening tag — i.e. view-library's — is
+  // the real closing boundary of #view-settings for this file's purposes.
+  // A bare `</section>` search from inside the settings shell would instead
+  // land on one of the NESTED settings-panel sections (SOURCE LIBRARIES,
+  // or the header/footer panel's own closing tag) and prove nothing about
+  // whether the panel is actually still inside #view-settings.
+  const settingsEnd = html.indexOf('class="app-view"', settingsStart + 1);
   const panelStart = html.indexOf('id="project-header-footer-panel"', settingsStart);
-  assert.ok(settingsStart > -1 && panelStart > -1);
+  assert.ok(settingsStart > -1 && settingsEnd > -1 && panelStart > -1);
   assert.ok(panelStart > settingsStart, 'panel must be inside the settings view');
+  assert.ok(
+    panelStart < settingsEnd,
+    'panel must close before the next .app-view section begins (view-library)'
+  );
 });
 
 test('no new <script> tag is added — ESM wiring stays owned by app.js', () => {

@@ -57,8 +57,18 @@ test('imports initHeaderFooter from header-footer.js', () => {
 });
 
 test('getSelectedLibraryTier is normalized with an explicit `?? null` — never bare selectedLibrary()?.tier', () => {
+  // Scoped to the initHeaderFooter({ ... }) call site — mirrors the
+  // "initEditor is wired..." check below — rather than a bare source-wide
+  // regex.match, which would equally match an unrelated occurrence of this
+  // exact text elsewhere in this 2600+ line file, and would NOT fail if the
+  // expression were extracted out of this call site into a differently-named
+  // helper that still normalizes to null correctly.
+  const initHeaderFooterStart = source.indexOf('headerFooterPanel = initHeaderFooter({');
+  assert.ok(initHeaderFooterStart > -1, 'expected the initHeaderFooter(...) call site');
+  const callEnd = source.indexOf('});', initHeaderFooterStart);
+  const call = source.slice(initHeaderFooterStart, callEnd);
   assert.match(
-    source,
+    call,
     /getSelectedLibraryTier:\s*\(\)\s*=>\s*selectedLibrary\(\)\?\.tier\s*\?\?\s*null/,
     'header-footer.js documents this ctx field as ALREADY normalized to null — selectedLibrary()?.tier alone can be undefined'
   );

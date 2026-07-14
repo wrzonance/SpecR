@@ -22,6 +22,8 @@ import {
   removeField,
   editPageNumbering,
   saveDraft,
+  loadDraft,
+  deleteDraft,
 } from './js/header-footer-editor.js';
 
 test('createDraft: seeds an empty composition and dirty:false for null/undefined', () => {
@@ -151,16 +153,33 @@ test('saveDraft: ctx.put is invoked exactly once no matter how many local edits 
 });
 
 test('saveDraft: never invokes ctx.put when no save is requested (edits alone are not enough)', () => {
+  // A real ctx.put SPY stays in scope through every local edit below, so
+  // this actually proves the claim its title makes — editField/addField/
+  // removeField/editPageNumbering take no ctx parameter at all, so there is
+  // no path from a local edit to a network call, but asserting the spy's
+  // call count (rather than merely re-checking the draft shape, which the
+  // 'addField / removeField' and 'editPageNumbering' tests above already
+  // pin) is what makes this test capable of failing for the reason it claims.
+  const putCalls = [];
+  const ctx = {
+    put: async (composition) => {
+      putCalls.push(composition);
+      return composition;
+    },
+    onSaved: () => {},
+  };
+
   let draft = createDraft({});
   draft = addField(draft, 'default', 'header', 'left', { kind: 'literal', text: 'x' });
   draft = addField(draft, 'default', 'footer', 'right', { kind: 'date' });
   draft = editPageNumbering(draft, { mode: 'continuous' });
-  // No ctx was ever constructed or called — if addField/editPageNumbering
-  // touched a network layer they would throw here (no ctx in scope). Reaching
-  // this assertion without a saveDraft() call is itself the proof; assert the
-  // draft is still just local state.
+
+  assert.equal(
+    putCalls.length,
+    0,
+    'ctx.put must not fire from local edits alone — only saveDraft() invokes it'
+  );
   assert.equal(draft.dirty, true);
-  assert.equal(draft.composition.variants.default.header.left.content.length, 1);
 });
 
 test('saveDraft: onSaved fires after ctx.put resolves and before saveDraft itself resolves', async () => {
@@ -189,4 +208,86 @@ test('saveDraft: falls back to the drafted composition when ctx.put resolves not
 
   assert.deepEqual(saved.composition, draft.composition);
   assert.equal(saved.dirty, false);
+});
+
+// ── loadDraft — ctx-only, pins the refresh() error-vs-empty split ─────────
+//
+// ctx.get()'s documented contract distinguishes "genuinely not configured
+// yet" (resolves null) from a real failure (REJECTS — network error, 5xx, a
+// malformed envelope; see api.js's getJsonOrNull). A rejection must never be
+// folded into the same outcome as a genuine null: 'empty' is what unlocks
+// the "Create configuration" -> Save UI, and Save always fires a full-
+// composition ctx.put() — collapsing a transient GET failure into 'empty'
+// would let that Save silently overwrite whatever is actually stored.
+
+test('loadDraft: ctx.get() resolving null lands in "empty" — the genuinely-not-configured state', async () => {
+  const outcome = await loadDraft({ get: async () => null });
+  assert.deepEqual(outcome, { status: 'empty' });
+});
+
+test('loadDraft: ctx.get() resolving a composition lands in "loaded" with a fresh, non-dirty draft', async () => {
+  const composition = { variants: { default: { header: {} } } };
+  const outcome = await loadDraft({ get: async () => composition });
+  assert.equal(outcome.status, 'loaded');
+  assert.deepEqual(outcome.draft, { composition, dirty: false });
+});
+
+test('loadDraft: ctx.get() REJECTING (transient failure) lands in "error", never "empty"', async () => {
+  const outcome = await loadDraft({
+    get: async () => {
+      throw new Error('network error');
+    },
+  });
+  assert.equal(outcome.status, 'error');
+  assert.equal(outcome.message, 'network error');
+});
+
+// ── deleteDraft — ctx-only, pins onSaved firing on every successful delete ─
+
+test('deleteDraft: a successful ctx.del() fires ctx.onSaved() before resolving', async () => {
+  const order = [];
+  const ctx = {
+    del: async () => {
+      order.push('del');
+    },
+    onSaved: () => order.push('onSaved'),
+  };
+
+  const outcome = await deleteDraft(ctx);
+
+  assert.deepEqual(order, ['del', 'onSaved']);
+  assert.equal(outcome.alreadyRemoved, false);
+  assert.deepEqual(outcome.draft, { composition: {}, dirty: false });
+});
+
+test('deleteDraft: a 404 (already removed server-side) is treated as success and still fires ctx.onSaved()', async () => {
+  const order = [];
+  const notFound = Object.assign(new Error('not found'), { status: 404 });
+  const ctx = {
+    del: async () => {
+      throw notFound;
+    },
+    onSaved: () => order.push('onSaved'),
+  };
+
+  const outcome = await deleteDraft(ctx);
+
+  assert.deepEqual(order, ['onSaved']);
+  assert.equal(outcome.alreadyRemoved, true);
+});
+
+test('deleteDraft: a non-404 failure re-throws and never fires ctx.onSaved()', async () => {
+  let onSavedCalls = 0;
+  const serverError = Object.assign(new Error('server error'), { status: 500 });
+  const ctx = {
+    del: async () => {
+      throw serverError;
+    },
+    onSaved: () => {
+      onSavedCalls += 1;
+    },
+  };
+
+  await assert.rejects(() => deleteDraft(ctx), /server error/);
+  assert.equal(onSavedCalls, 0, 'onSaved must never fire when the delete genuinely failed');
 });
