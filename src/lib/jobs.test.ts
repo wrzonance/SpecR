@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { HeaderFooterComposition } from '../ast/index.js';
 import {
   createJob,
   updateJob,
@@ -6,7 +7,25 @@ import {
   createOnboardingJob,
   updateOnboardingJob,
   getOnboardingJob,
+  type OnboardingReport,
 } from './jobs.js';
+
+function baseReport(headerFooter: OnboardingReport['headerFooter']): OnboardingReport {
+  return {
+    styleDerivation: null,
+    styleSourceNeeded: true,
+    headerFooter,
+    editability: {
+      counts: { locked: 0, editable: 0, choice: 0, note: 0 },
+      lowConfidence: [],
+    },
+    hierarchy: {
+      counts: { scored: 0, unscored: 0, belowThreshold: 0 },
+      lowConfidence: [],
+    },
+    parseWarnings: [],
+  };
+}
 
 describe('jobs', () => {
   it('createJob returns a UUID string', () => {
@@ -75,19 +94,7 @@ describe('onboarding job lifecycle (O-8)', () => {
         title: 'Painting',
         libraryId: 'lib1',
         templateId: null,
-        report: {
-          styleDerivation: null,
-          styleSourceNeeded: true,
-          editability: {
-            counts: { locked: 0, editable: 0, choice: 0, note: 0 },
-            lowConfidence: [],
-          },
-          hierarchy: {
-            counts: { scored: 0, unscored: 0, belowThreshold: 0 },
-            lowConfidence: [],
-          },
-          parseWarnings: [],
-        },
+        report: baseReport(null),
       },
     });
     const done = getOnboardingJob(jobId);
@@ -102,5 +109,40 @@ describe('onboarding job lifecycle (O-8)', () => {
   it('onboarding store is separate from the parse-job store', () => {
     const parseId = createJob();
     expect(getOnboardingJob(parseId)).toBeUndefined();
+  });
+});
+
+describe('OnboardingReport.headerFooter (#307)', () => {
+  it('is present and null when the source tree had no header/footer composition', () => {
+    const report = baseReport(null);
+    expect(report).toHaveProperty('headerFooter');
+    expect(report.headerFooter).toBeNull();
+  });
+
+  it('round-trips a header/footer composition unchanged (pure pass-through)', () => {
+    const composition: HeaderFooterComposition = {
+      pageNumbering: { mode: 'continuous' },
+    };
+    const report = baseReport(composition);
+    expect(report.headerFooter).toBe(composition);
+  });
+
+  it('every OnboardingReport literal supplies headerFooter as a required key', () => {
+    const jobId = createOnboardingJob();
+    updateOnboardingJob(jobId, {
+      status: 'complete',
+      stage: 'complete',
+      pct: 100,
+      result: {
+        specId: 's2',
+        section: '01 10 00',
+        title: 'T',
+        libraryId: 'lib1',
+        templateId: null,
+        report: baseReport(null),
+      },
+    });
+    const done = getOnboardingJob(jobId);
+    expect(done?.result?.report).toHaveProperty('headerFooter');
   });
 });
