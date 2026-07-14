@@ -25,6 +25,23 @@ function idAttr(id) {
   return match[0];
 }
 
+// Index of the balanced `</section>` that closes the <section> whose opening
+// tag starts at `openIdx`. Walks nested <section>…</section> pairs so a child
+// section's own close can't be mistaken for the parent's — the whole point of
+// the `.library-detail` containment assertion below (the header/footer panel is
+// itself a nested <section>, so a naive first-`</section>`-after-panel search
+// finds the PANEL's close and proves nothing about the parent boundary).
+function sectionCloseAfter(openIdx) {
+  const tag = /<section\b|<\/section>/g;
+  tag.lastIndex = openIdx;
+  let depth = 0;
+  for (let m = tag.exec(html); m; m = tag.exec(html)) {
+    depth += m[0] === '</section>' ? -1 : 1;
+    if (depth === 0) return m.index;
+  }
+  return -1;
+}
+
 test('header/footer stylesheet is linked in <head>, alongside the existing sheets', () => {
   const headMatch = html.match(/<head>[\s\S]*?<\/head>/);
   assert.ok(headMatch, 'expected a <head> section');
@@ -42,10 +59,13 @@ test('Library view: client-scope panel exists, hidden by default (tier-gated by 
 });
 
 test('Library view: header/footer panel sits inside .library-detail, after .library-tree', () => {
-  const detailStart = html.indexOf('class="library-detail"');
+  const detailStart = html.indexOf('<section class="library-detail"');
   const treeStart = html.indexOf('id="library-tree"', detailStart);
   const panelStart = html.indexOf('id="library-header-footer-panel"', detailStart);
-  const detailEnd = html.indexOf('</section>', panelStart);
+  // The BALANCED close of .library-detail — not the first `</section>` after the
+  // panel, which is the panel's own close and would pass even if the panel were
+  // moved out of .library-detail.
+  const detailEnd = sectionCloseAfter(detailStart);
   assert.ok(detailStart > -1 && treeStart > -1 && panelStart > -1 && detailEnd > -1);
   assert.ok(treeStart < panelStart, 'header/footer panel must come after the library tree');
   assert.ok(panelStart < detailEnd, 'header/footer panel must be inside .library-detail');
