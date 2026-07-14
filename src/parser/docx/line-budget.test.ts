@@ -64,6 +64,8 @@ describe('src/parser/docx/ line budget (#306)', () => {
     ['./core-metadata.ts', './core-metadata.ts'],
     ['./header-footer-relationships.ts', './header-footer-relationships.ts'],
     ['./header-footer-field-recognition.ts', './header-footer-field-recognition.ts'],
+    ['./header-footer-region.ts', './header-footer-region.ts'],
+    ['./header-footer-parts.ts', './header-footer-parts.ts'],
   ])('%s stays at or under the 400-line hard cap', (_name, relativePath) => {
     expect(lineCount(relativePath)).toBeLessThanOrEqual(MAX_LINES);
   });
