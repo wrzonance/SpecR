@@ -115,6 +115,13 @@ function resolveLiteral(field: HeaderFooterField): readonly FieldValue[] {
 // text/separator/page-number/rule-line fidelity, not per-field formatting;
 // `field.prefix`/`field.suffix` are deferred the same way (no #303
 // acceptance criterion requires them — see the coverage test).
+//
+// `image` (#308, ADR-069) resolves to `[]` here — exhaustiveness only, never
+// invoked at runtime through the ordinary text-field path. Image content is
+// binary, not a `FieldValue`, so it is dispatched separately before it ever
+// reaches `resolveFieldChildren` (see the follow-up image-rendering work);
+// this stub only keeps `cellHasContent`/`renderCellRuns` correct (an
+// image-only cell is *not yet* treated as content) until that dispatch lands.
 const FIELD_RESOLVERS: Record<HeaderFooterFieldKind, FieldResolver> = {
   date: resolveValueField('date'),
   sectionTitle: resolveSectionTitle,
@@ -128,6 +135,7 @@ const FIELD_RESOLVERS: Record<HeaderFooterFieldKind, FieldResolver> = {
   clientName: resolveValueField('clientName'),
   clientNumber: resolveValueField('clientNumber'),
   literal: resolveLiteral,
+  image: () => [],
 };
 
 /**

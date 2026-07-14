@@ -44,6 +44,7 @@ const EXPECTED_KINDS: readonly HeaderFooterFieldKind[] = [
   'clientName',
   'clientNumber',
   'literal',
+  'image',
 ];
 
 const OTHER_KINDS: readonly HeaderFooterFieldKind[] = EXPECTED_KINDS.filter(
@@ -139,7 +140,7 @@ describe('renderFieldRun — literal/value field text never collides with a docx
 });
 
 describe('resolveFieldChildren field-kind coverage', () => {
-  it('the schema enum still has exactly the 12 kinds the resolver table covers', () => {
+  it('the schema enum still has exactly the 13 kinds the resolver table covers', () => {
     expect([...HeaderFooterFieldKindSchema.options].sort((a, b) => a.localeCompare(b))).toEqual(
       [...EXPECTED_KINDS].sort((a, b) => a.localeCompare(b))
     );

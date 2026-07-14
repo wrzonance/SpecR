@@ -8648,6 +8648,7 @@ components:
                             clientName,
                             clientNumber,
                             literal,
+                            image,
                           ]
                       source: { type: string, enum: [issuance, current] }
                       text: { type: string }
@@ -8655,6 +8656,19 @@ components:
                       format: { type: string }
                       prefix: { type: string }
                       suffix: { type: string }
+                      imageData:
+                        type: string
+                        description: >
+                          Base64-encoded image bytes for a `kind: "image"`
+                          field (#308, ADR-069). The generator never trusts
+                          `imageMediaType` — it re-sniffs the actual bytes'
+                          magic-byte signature and renders using that result,
+                          so a stale/unsupported `imageMediaType` still
+                          round-trips here; it just will not render.
+                      imageMediaType: { type: string }
+                      widthEmu: { type: integer }
+                      heightEmu: { type: integer }
+                      altText: { type: string }
                 separator: { type: string }
                 style: &headerFooterVisualStyle
                   type: object

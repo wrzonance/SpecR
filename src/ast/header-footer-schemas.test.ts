@@ -5,6 +5,7 @@ import {
   PageNumberingModeSchema,
   defaultVariant,
 } from './header-footer-schemas.js';
+import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
 
 // #302 (parent #301): extend the v1 composition (#208) with Word-style page
 // variants, a page-numbering policy, and an open `raw` sidecar — without
@@ -240,5 +241,62 @@ describe('HeaderFooterCompositionSchema — raw.unmodeled sidecar (#306, ADR-068
     const parsed = HeaderFooterCompositionSchema.parse(preExisting);
     expect(parsed).toEqual(preExisting);
     expect(parsed.raw?.unmodeled).toBeUndefined();
+  });
+});
+
+// #308 (ADR-069): `kind: 'image'` header/footer fields. The schema boundary never
+// trusts a caller-declared `imageMediaType` — the generator re-sniffs the actual
+// bytes (src/lib/image-media-type.ts) and picks the docx `ImageRun` type off the
+// sniff result, never the declared value — so ANY string here (including an
+// unsupported one) is structurally valid and round-trips; the ONLY thing that
+// rejects an image field is the `imageData` base64-length cap.
+describe('HeaderFooterCompositionSchema — image fields (#308, ADR-069)', () => {
+  it('accepts an image field with an open/unsupported imageMediaType and an unrelated catchall key, and round-trips both', () => {
+    const input = {
+      header: {
+        center: {
+          content: [
+            {
+              kind: 'image',
+              imageData: 'AAAA',
+              imageMediaType: 'image/svg+xml', // unsupported by docx's ImageRun — still valid here
+              widthEmu: 914400,
+              heightEmu: 914400,
+              altText: 'Company logo',
+              rotationDegrees: 90, // open .catchall extension key (ADR-021)
+            },
+          ],
+        },
+      },
+    };
+    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
+  });
+
+  it('accepts an image field with only imageData set — missing dimensions/altText validate (they just do not render)', () => {
+    const input = { header: { left: { content: [{ kind: 'image', imageData: 'AAAA' }] } } };
+    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
+  });
+
+  it('accepts imageData exactly at the MAX_IMAGE_BASE64_LENGTH cap', () => {
+    const imageData = 'A'.repeat(MAX_IMAGE_BASE64_LENGTH);
+    const input = { header: { left: { content: [{ kind: 'image', imageData }] } } };
+    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
+  });
+
+  it('rejects imageData one character past the MAX_IMAGE_BASE64_LENGTH cap', () => {
+    const imageData = 'A'.repeat(MAX_IMAGE_BASE64_LENGTH + 1);
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        header: { left: { content: [{ kind: 'image', imageData }] } },
+      })
+    ).toThrow();
+  });
+
+  it('still rejects an unrecognized field kind now that "image" is a valid kind (catchall must not swallow typed-field errors)', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        header: { left: { content: [{ kind: 'imagex' }] } },
+      })
+    ).toThrow();
   });
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
 
 // JSONB-backed header/footer composition follows ADR-021: known keys are typed,
 // unknown JSON-safe keys are preserved for client/project-specific extensions.
@@ -17,6 +18,7 @@ export const HeaderFooterFieldKindSchema = z.enum([
   'clientName',
   'clientNumber',
   'literal',
+  'image',
 ]);
 
 const HeaderFooterFieldSchema = z
@@ -28,6 +30,23 @@ const HeaderFooterFieldSchema = z
     format: z.string().exactOptional(),
     prefix: z.string().exactOptional(),
     suffix: z.string().exactOptional(),
+    // `kind: 'image'` fields (#308, ADR-069). `imageData` is base64; the size cap
+    // is enforced here (encoded-length-first, matching decodeBase64Payload's
+    // posture) so an oversized payload is rejected before any buffer is
+    // materialized. `imageMediaType` is deliberately OPEN (mirrors
+    // `ruleLine.style`) — the generator never trusts it and re-sniffs the actual
+    // bytes (src/lib/image-media-type.ts); an unsupported/stale value here still
+    // round-trips, it just won't render.
+    imageData: z
+      .string()
+      .refine((value) => value.length <= MAX_IMAGE_BASE64_LENGTH, {
+        message: `imageData exceeds the ${MAX_IMAGE_BASE64_LENGTH}-char base64 size cap`,
+      })
+      .exactOptional(),
+    imageMediaType: z.string().exactOptional(),
+    widthEmu: z.number().int().positive().exactOptional(),
+    heightEmu: z.number().int().positive().exactOptional(),
+    altText: z.string().exactOptional(),
   })
   .catchall(JsonValue);
 
