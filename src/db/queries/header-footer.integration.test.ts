@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { pool } from '../index.js';
+import { HEADER_FOOTER_JSON_BODY_LIMIT_BYTES } from '../../lib/header-footer-body-limit.js';
 import { createLibrary } from './libraries.js';
 import {
   deleteHeaderFooterConfig,
@@ -214,6 +215,31 @@ describe('header_footer_configs query surface', () => {
         right: { content: [{ kind: 'pageNumber', format: 'PAGE {page}' }] },
       },
     });
+  });
+
+  it('resolves layers whose MERGED size exceeds the write transport limit without erroring (#490 follow-up — structural read, not a write)', async () => {
+    // Two independently-valid layers, each within the per-write transport
+    // budget, whose deep-merge exceeds HEADER_FOOTER_JSON_BODY_LIMIT_BYTES.
+    // Pre-fix the resolution re-parse (mergeConfigs → parseConfig) enforced the
+    // WRITE budget on the merged READ and threw HeaderFooterValidationError, so
+    // resolveHeaderFooterConfigCore 500'd on data that was legitimately stored.
+    // The invariant now lives on the write schema only; the structural
+    // resolution read must tolerate the merged overage.
+    const fixture = await makeScopeFixture();
+    const nearHalfBudget = 'A'.repeat(Math.floor(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES * 0.6));
+    await upsertHeaderFooterConfig(
+      { clientLibraryId: fixture.clientLibraryId },
+      { header: { left: { content: [{ kind: 'clientName' }] } }, clientLogo: nearHalfBudget }
+    );
+    await upsertHeaderFooterConfig(
+      { projectId: fixture.projectId },
+      { footer: { left: { content: [{ kind: 'projectNumber' }] } }, projectLogo: nearHalfBudget }
+    );
+
+    const resolved = await resolveHeaderFooterConfig({ projectId: fixture.projectId });
+
+    expect(resolved?.config['clientLogo']).toBe(nearHalfBudget);
+    expect(resolved?.config['projectLogo']).toBe(nearHalfBudget);
   });
 
   it('rejects invalid composition fields and non-client library scopes at the write boundary', async () => {

@@ -167,6 +167,18 @@ function serializedByteLength(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), 'utf8');
 }
 
+// Structural composition schema — the canonical AST shape (ADR-021 open
+// extensions at every level). Deliberately carries NO transport-size bound: it
+// is the schema every READ/parse path re-parses through — DB resolution merges
+// (`src/db/queries/header-footer.ts`) and DOCX capture
+// (`src/parser/docx/header-footer.ts`) — where a value can legitimately exceed
+// the per-write transport budget. A merged multi-layer resolution combines
+// several independently-valid layers (each written within the budget), and a
+// captured DOCX header carries whatever image the document holds; neither is a
+// single transport request, so neither may inherit
+// `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES`. Enforcing it here would turn a valid
+// read into a 500 (#490 follow-up review). The size invariant lives ONLY on
+// `HeaderFooterCompositionWriteSchema` below.
 export const HeaderFooterCompositionSchema = z
   .object({
     // v1 (#208) fields — preserved; read as the `default` variant (ADR-040).
@@ -176,31 +188,33 @@ export const HeaderFooterCompositionSchema = z
     pageNumbering: PageNumberingSchema.exactOptional(),
     raw: HeaderFooterRawSidecarSchema.exactOptional(),
   })
-  .catchall(JsonValue)
-  // Code-review finding (#490 follow-up): every level above is
-  // `.catchall(JsonValue)` (ADR-021 open extensions) with no size bound of
-  // its own, so a structurally-valid composition could still carry unbounded
-  // open-extension data and exceed `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES` —
-  // the transport limit `src/api/header-footer-body-limit.ts` derives for
-  // exactly the one-image case this schema advertises (ADR-070). Enforcing
-  // the SAME budget here, once, at the top level (rather than duplicating a
-  // per-field cap into every nested catchall) keeps "Zod-valid" and "fits
-  // the transport limit" from ever diverging — the multi-image accepted
-  // limitation ADR-070 documents remains the only gap.
-  .check((ctx) => {
-    const byteLength = serializedByteLength(ctx.value);
-    if (byteLength <= HEADER_FOOTER_JSON_BODY_LIMIT_BYTES) return;
-    ctx.issues.push({
-      code: 'custom',
-      input: ctx.value,
-      message:
-        `composition serializes to ~${byteLength} bytes, exceeding the ` +
-        `${HEADER_FOOTER_JSON_BODY_LIMIT_BYTES}-byte transport limit ` +
-        '(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES) — open .catchall extension ' +
-        'keys (ADR-021) share the same byte budget as imageData, not an ' +
-        'unbounded one',
-    });
+  .catchall(JsonValue);
+
+// Write-path schema: the structural schema PLUS the transport-size invariant.
+// Applied ONLY where a composition arrives as a single request body that must
+// fit `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES` — the four `PUT .../header-footer`
+// routes (`validateBody`, `src/api/router.ts`) and the MCP `set_*_header_footer`
+// write tools (`src/mcp/header-footer-handlers.ts`). Every level above is
+// `.catchall(JsonValue)` (ADR-021) with no per-field size bound, so a
+// structurally-valid composition could still carry unbounded open-extension
+// data; this one top-level check keeps a Zod-valid WRITE always within the
+// budget the route-local `express.json({limit})` / `/mcp` transport limits also
+// enforce — without imposing that budget on reads/resolution. (#490 follow-up;
+// ADR-070.)
+export const HeaderFooterCompositionWriteSchema = HeaderFooterCompositionSchema.check((ctx) => {
+  const byteLength = serializedByteLength(ctx.value);
+  if (byteLength <= HEADER_FOOTER_JSON_BODY_LIMIT_BYTES) return;
+  ctx.issues.push({
+    code: 'custom',
+    input: ctx.value,
+    message:
+      `composition serializes to ~${byteLength} bytes, exceeding the ` +
+      `${HEADER_FOOTER_JSON_BODY_LIMIT_BYTES}-byte transport limit ` +
+      '(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES) — open .catchall extension ' +
+      'keys (ADR-021) share the same byte budget as imageData, not an ' +
+      'unbounded one',
   });
+});
 
 export type HeaderFooterFieldKind = z.infer<typeof HeaderFooterFieldKindSchema>;
 export type HeaderFooterVariant = z.infer<typeof HeaderFooterVariantSchema>;

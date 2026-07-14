@@ -7,10 +7,13 @@
 //   - `src/api/header-footer-body-limit.ts` sizes the route-scoped
 //     `express.json({ limit })` instance for the four composition PUT routes.
 //   - `src/ast/header-footer-schemas.ts` enforces the SAME limit as a
-//     parse-time invariant on `HeaderFooterCompositionSchema` (every level of
-//     which is `.catchall(JsonValue)`, so a structurally-valid composition
-//     can still carry unbounded extension data — see that schema's
-//     size-invariant `.check` for the fix this constant makes possible).
+//     parse-time invariant on the WRITE schema
+//     (`HeaderFooterCompositionWriteSchema`) — every level of the composition
+//     is `.catchall(JsonValue)`, so a structurally-valid write could still
+//     carry unbounded extension data. The invariant is scoped to writes only;
+//     the structural `HeaderFooterCompositionSchema` (reads/resolution/DOCX
+//     capture) deliberately omits it so a merged multi-layer read never
+//     inherits the per-write transport budget.
 // `ast/` may only import `lib/` and its own siblings (never `api/`, which
 // orchestrates every other module), so the constant has to live somewhere
 // both can reach — `lib/` is exactly that shared leaf.

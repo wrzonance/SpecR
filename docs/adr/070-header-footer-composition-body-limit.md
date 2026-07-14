@@ -128,17 +128,34 @@ single-image write. Unlike the multi-image gap below (an explicit,
 accepted-out-of-scope limitation), this one was an unintended gap between
 what the schema called valid and what the transport limit actually allowed.
 
-Fixed by adding one size-invariant `.check` to `HeaderFooterCompositionSchema`
-(`src/ast/header-footer-schemas.ts`) that rejects any parse whose serialized
-byte length exceeds `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES` — enforced once at
-the top level so it covers overage contributed by any nested catchall,
-without duplicating a per-field cap into every one of them. Because `ast/`
-may not import from `api/` (module-boundaries.md), the shared constant moved
-to `src/lib/header-footer-body-limit.ts`; `src/api/header-footer-body-limit.ts`
-now re-exports it rather than deriving its own copy, so the transport
-dispatch and the schema's own invariant can never drift apart. The multi-image
-accepted limitation described below is unaffected and remains the only
-documented gap.
+Fixed by adding one size-invariant `.check` — on a **write-only** schema,
+`HeaderFooterCompositionWriteSchema` (`src/ast/header-footer-schemas.ts`) —
+that rejects any parse whose serialized byte length exceeds
+`HEADER_FOOTER_JSON_BODY_LIMIT_BYTES`, enforced once at the top level so it
+covers overage contributed by any nested catchall without duplicating a
+per-field cap into every one of them. The four `PUT .../header-footer` routes
+(`validateBody`) and the MCP `set_*_header_footer` tools validate against this
+write schema; the bare structural `HeaderFooterCompositionSchema` — the shape
+every read/parse path uses — omits it. Because `ast/` may not import from
+`api/` (module-boundaries.md), the shared constant moved to
+`src/lib/header-footer-body-limit.ts`; `src/api/header-footer-body-limit.ts`
+now re-exports it rather than deriving its own copy, so the transport dispatch
+and the schema's own invariant can never drift apart.
+
+A second review pass caught why the invariant must be write-scoped: the shared
+`HeaderFooterCompositionSchema` is also re-parsed on read paths.
+`resolveHeaderFooterConfig` deep-merges the client → project → package →
+revision layers and re-parses the merged result (`src/db/queries/header-footer.ts`),
+and DOCX capture re-parses whatever a document holds
+(`src/parser/docx/header-footer.ts`). A merged resolution combines several
+independently-valid layers — each stored within the budget — and can
+legitimately exceed `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES`. Had the invariant
+lived on the shared schema, that valid read would throw
+`HeaderFooterValidationError` and the resolve endpoint would 500 on data that
+was legally stored. Scoping it to writes keeps "Zod-valid write always fits
+transport" while letting reads/resolution carry a merged config of any size.
+The multi-image accepted limitation described below is a WRITE-side gap only and
+remains the only documented one.
 
 ## Consequences
 
@@ -157,11 +174,14 @@ documented gap.
   a composition with several near-max images can still 413 despite each
   image field individually passing its Zod bound, because the derived
   limit is sized for one image plus envelope. Out of scope for this ADR.
-- No DB migration, no AST/schema *shape* change (the composition's fields and
-  types are untouched), and no change to `router.ts` route registrations.
+- No DB migration and no AST/schema *shape* change (the composition's fields
+  and types are untouched), and no change to `router.ts` route registrations.
   Beyond the transport-dispatch (`src/index.ts`) and contract-documentation
-  (`openapi.yaml`) changes, `HeaderFooterCompositionSchema` gains one
-  parse-time size *invariant* — the `.check` above rejects a structurally-valid
-  composition whose serialized bytes exceed `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES`,
-  keeping "Zod-valid" and "fits the transport limit" from diverging — plus the
-  incidental shared-error-handler correctness fix.
+  (`openapi.yaml`) changes, a new **write-only** schema
+  `HeaderFooterCompositionWriteSchema` carries one parse-time size *invariant*
+  (structural schema + a `.check`) that rejects a write whose serialized bytes
+  exceed `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES`, keeping "Zod-valid write" and
+  "fits the transport limit" from diverging. The shared
+  `HeaderFooterCompositionSchema` used by reads/resolution/DOCX capture stays
+  structural (no size bound), so a merged multi-layer resolution never inherits
+  the per-write budget. Plus the incidental shared-error-handler correctness fix.

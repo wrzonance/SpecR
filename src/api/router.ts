@@ -83,7 +83,7 @@ import {
   RequiredSectionsBodySchema,
   SubmittalRegisterBodySchema,
   SetSpecNumberingProfileBodySchema,
-  HeaderFooterCompositionSchema,
+  HeaderFooterCompositionWriteSchema,
 } from '../ast/index.js';
 import { parseHandler, parseJobHandler, upload } from './parse.js';
 import { generateHandler, generateManualHandler, generateRevisionHandler } from './generate.js';
@@ -364,28 +364,28 @@ router.delete('/specs/:id/numbering-profile', clearSpecProfileHandler);
 router.get('/libraries/:id/header-footer', getLibraryHeaderFooterHandler);
 router.put(
   '/libraries/:id/header-footer',
-  validateBody(HeaderFooterCompositionSchema),
+  validateBody(HeaderFooterCompositionWriteSchema),
   putLibraryHeaderFooterHandler
 );
 router.delete('/libraries/:id/header-footer', deleteLibraryHeaderFooterHandler);
 router.get('/projects/:id/header-footer', getProjectHeaderFooterHandler);
 router.put(
   '/projects/:id/header-footer',
-  validateBody(HeaderFooterCompositionSchema),
+  validateBody(HeaderFooterCompositionWriteSchema),
   putProjectHeaderFooterHandler
 );
 router.delete('/projects/:id/header-footer', deleteProjectHeaderFooterHandler);
 router.get('/packages/:id/header-footer', getPackageHeaderFooterHandler);
 router.put(
   '/packages/:id/header-footer',
-  validateBody(HeaderFooterCompositionSchema),
+  validateBody(HeaderFooterCompositionWriteSchema),
   putPackageHeaderFooterHandler
 );
 router.delete('/packages/:id/header-footer', deletePackageHeaderFooterHandler);
 router.get('/revisions/:id/header-footer', getRevisionHeaderFooterHandler);
 router.put(
   '/revisions/:id/header-footer',
-  validateBody(HeaderFooterCompositionSchema),
+  validateBody(HeaderFooterCompositionWriteSchema),
   putRevisionHeaderFooterHandler
 );
 router.delete('/revisions/:id/header-footer', deleteRevisionHeaderFooterHandler);

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   HeaderFooterCompositionSchema,
+  HeaderFooterCompositionWriteSchema,
   HeaderFooterUnmodeledEntrySchema,
   PageNumberingModeSchema,
   defaultVariant,
@@ -302,29 +303,44 @@ describe('HeaderFooterCompositionSchema — image fields (#308, ADR-069)', () =>
   });
 });
 
-// Code-review finding (#490 follow-up): every level of this schema is
+// Code-review finding (#490 follow-up): every level of the composition is
 // `.catchall(JsonValue)` (ADR-021 open extensions), which has no size bound
 // of its own. Without a total-size invariant, a request that Zod would call
 // "valid" could still carry unbounded open-extension data and exceed
 // `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES` (src/api/header-footer-body-limit.ts,
 // derived from `MAX_IMAGE_BASE64_LENGTH` + envelope) — the transport limit
-// ADR-070 sized for exactly one image plus a modest envelope. That mismatch
-// means a "Zod-valid" composition is not actually guaranteed to fit the
-// transport budget the schema's own docs claim it does. Pins the fix: Zod
-// itself now enforces the same budget, so "Zod-valid" and "fits the
-// transport limit" can never diverge.
-describe('HeaderFooterCompositionSchema — total-size invariant matches the transport limit (#490)', () => {
+// ADR-070 sized for exactly one image plus a modest envelope. The invariant is
+// enforced on the WRITE schema only: a WRITE is a single transport request, so
+// "Zod-valid write" and "fits the transport limit" must never diverge. The
+// structural schema (reads/resolution/DOCX capture) deliberately omits it — a
+// second review pass found that enforcing it there turned a merged multi-layer
+// resolution read into a 500 (see the "structural schema tolerates oversize"
+// case below).
+describe('HeaderFooterCompositionWriteSchema — total-size invariant matches the transport limit (#490)', () => {
   it('rejects a structurally-valid composition whose open .catchall extension data alone exceeds HEADER_FOOTER_JSON_BODY_LIMIT_BYTES', () => {
     // No image anywhere — every typed field is absent. Only an open extension
     // key (ADR-021) carries size, and it alone is already past the transport
-    // budget. Pre-fix, HeaderFooterCompositionSchema.parse() accepted this
-    // (catchall(JsonValue) has no size bound); the resulting payload would
-    // still 413 at body-parser, defeating the "Zod-valid write always fits"
-    // invariant HEADER_FOOTER_JSON_BODY_LIMIT_BYTES exists to guarantee.
+    // budget. Pre-fix, the write schema accepted this (catchall(JsonValue) has
+    // no size bound); the resulting payload would still 413 at body-parser,
+    // defeating the "Zod-valid write always fits" invariant
+    // HEADER_FOOTER_JSON_BODY_LIMIT_BYTES exists to guarantee.
     const oversizedExtension = 'A'.repeat(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES);
     expect(() =>
-      HeaderFooterCompositionSchema.parse({ vendorExtension: oversizedExtension })
+      HeaderFooterCompositionWriteSchema.parse({ vendorExtension: oversizedExtension })
     ).toThrow();
+  });
+
+  // Regression (#490 follow-up, 2nd review): the transport-size invariant must
+  // NOT live on the shared structural schema. Reads/resolution re-parse through
+  // HeaderFooterCompositionSchema — a merged multi-layer resolution combines
+  // several independently-valid layers (each written within the budget) and can
+  // legitimately exceed HEADER_FOOTER_JSON_BODY_LIMIT_BYTES. Enforcing the write
+  // budget there rejected the merged read and surfaced as a 500
+  // (src/api/header-footer-resolve.ts). The structural schema must tolerate it.
+  it('structural HeaderFooterCompositionSchema accepts an oversized composition (a merged resolution read never inherits the write transport budget)', () => {
+    const oversizedExtension = 'A'.repeat(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES + 1);
+    const parsed = HeaderFooterCompositionSchema.parse({ vendorExtension: oversizedExtension });
+    expect(parsed).toEqual({ vendorExtension: oversizedExtension });
   });
 
   it('rejects when the overage is spread across many nested .catchall levels rather than one field', () => {
@@ -351,7 +367,7 @@ describe('HeaderFooterCompositionSchema — total-size invariant matches the tra
       },
       raw: { warnings: [chunk, chunk] },
     };
-    expect(() => HeaderFooterCompositionSchema.parse(input)).toThrow();
+    expect(() => HeaderFooterCompositionWriteSchema.parse(input)).toThrow();
   });
 
   it('still accepts a genuine one-image composition (the case the transport limit is sized for) plus a small extension', () => {
@@ -360,6 +376,6 @@ describe('HeaderFooterCompositionSchema — total-size invariant matches the tra
       header: { left: { content: [{ kind: 'image', imageData }] } },
       vendorExtension: { note: 'firm-logo-v2' },
     };
-    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
+    expect(HeaderFooterCompositionWriteSchema.parse(input)).toEqual(input);
   });
 });

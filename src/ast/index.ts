@@ -138,6 +138,7 @@ export type {
 export type { GenerateBody } from './generate-schemas.js';
 export {
   HeaderFooterCompositionSchema,
+  HeaderFooterCompositionWriteSchema,
   HeaderFooterFieldKindSchema,
   HeaderFooterVariantSchema,
   HeaderFooterUnmodeledEntrySchema,
