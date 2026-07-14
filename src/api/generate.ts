@@ -9,6 +9,8 @@ import {
   getTemplateByName,
   findProjectById,
   resolveSpecGenerationContext,
+  resolveProjectManualHeaderFooterContext,
+  resolveRevisionHeaderFooterContext,
   getPackageRevisionManualData,
   getPackageRevisionAddendumManualData,
   RevisionComparisonError,
@@ -21,7 +23,7 @@ import type {
   RevisionSpecEntry,
 } from '../db/index.js';
 import { generateDocx, generateManual } from '../generator/index.js';
-import type { ManualMeta, ManualSectionListing } from '../generator/index.js';
+import type { GenerateDocxOptions, ManualMeta, ManualSectionListing } from '../generator/index.js';
 import { logger } from '../lib/logger.js';
 import { buildHeaderFooterOptions } from './generate-header-footer.js';
 
@@ -169,6 +171,35 @@ interface RevisionDocx {
   readonly filename: string;
 }
 
+/**
+ * Resolve and layer the revision-scoped header/footer (#481) onto an already-
+ * computed base options object. Keyed on `data.revision.revisionId` — the
+ * revision actually being rendered — never `body.baseRevisionId`: an addendum
+ * renders the CHANGED revision's own trees, so its header/footer must resolve
+ * from that same revision's chain, not its comparison base. Field values are
+ * threaded straight from the caller's already-fetched `RevisionManualData`
+ * snapshot (no second DB read, no TOCTOU). Omits `headerFooter` entirely when
+ * the resolved context is null (zero configured layers), keeping `options`
+ * byte-identical to the pre-#481 baseline for an unconfigured chain.
+ */
+async function withRevisionHeaderFooter(
+  data: RevisionManualData,
+  baseOptions: ReturnType<typeof generateOptions>
+): Promise<GenerateDocxOptions | undefined> {
+  const context = await resolveRevisionHeaderFooterContext(
+    data.revision.revisionId,
+    {
+      projectName: data.project.name,
+      packageName: data.designPackage.name,
+      revisionName: data.revision.displayName,
+      revisionLabel: data.revision.label,
+    },
+    pool
+  );
+  const headerFooter = buildHeaderFooterOptions(context);
+  return headerFooter ? { ...baseOptions, headerFooter } : baseOptions;
+}
+
 async function renderIssuedRevision(
   revisionId: string,
   body: RevisionGenerateBody,
@@ -177,7 +208,8 @@ async function renderIssuedRevision(
   const data = await getPackageRevisionManualData(revisionId, pool);
   if (data === null) return null;
   const trees = data.revision.specs.map((entry) => entry.tree);
-  const options = generateOptions(body.sectionNumberFormat);
+  const baseOptions = generateOptions(body.sectionNumberFormat);
+  const options = await withRevisionHeaderFooter(data, baseOptions);
   const buffer = await generateManual(trees, revisionManualMeta(data), rules, options);
   return {
     buffer,
@@ -195,7 +227,8 @@ async function renderAddendumRevision(
   if (data === null) return null;
   if (data.changedSpecs.length === 0) return 'empty-addendum';
   const trees = data.changedSpecs.map((entry) => entry.tree);
-  const options = generateOptions(body.sectionNumberFormat);
+  const baseOptions = generateOptions(body.sectionNumberFormat);
+  const options = await withRevisionHeaderFooter(data, baseOptions);
   const buffer = await generateManual(trees, addendumManualMeta(data), rules, options);
   return {
     buffer,
@@ -233,7 +266,18 @@ export async function generateManualHandler(req: Request, res: Response): Promis
     // Request body wins; otherwise fall back to the project's stored default
     // (issue #267). findProjectById already carries section_number_format.
     const format = bodyResult.data.sectionNumberFormat ?? project.sectionNumberFormat;
-    const options = generateOptions(format);
+    const baseOptions = generateOptions(format);
+    // #481: whole-manual counterpart to generateHandler's #304 wiring — the
+    // project is already resolved above (findProjectById), so there is no
+    // second ownership lookup to race; headerFooter stays omitted entirely
+    // when the project's client→project chain has zero configured layers.
+    const headerFooterContext = await resolveProjectManualHeaderFooterContext(
+      project.projectId,
+      project.name,
+      pool
+    );
+    const headerFooter = buildHeaderFooterOptions(headerFooterContext);
+    const options = headerFooter ? { ...baseOptions, headerFooter } : baseOptions;
     const meta = { name: project.name, description: project.description };
     const buffer = await generateManual(trees, meta, resolution.rules, options);
     res.setHeader('Content-Type', DOCX_MIME);

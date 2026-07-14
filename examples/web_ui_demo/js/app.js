@@ -51,9 +51,11 @@ import { initScoring } from './scoring.js';
 import { initEditor } from './editor.js';
 import { initConstellation } from './constellation.js';
 import { initHeaderFooter } from './header-footer.js';
+import { initPackageRevisionHeaderFooter } from './header-footer-package-revision.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
 import { mergeSourcesWithScope, moveSource, resolutionNotice } from './source-order.mjs';
 import { classifyRemovalConflict } from './spec-removal.mjs';
+import { normalizeUuidInput } from './uuid-input.mjs';
 
 const specs = new Map(); // specId -> { tree, references, warnings?, capabilities? }
 const ACTIVE_PROJECT_KEY = 'specr-active-project';
@@ -71,6 +73,9 @@ let comparePanel = null; // deterministic side-by-side comparison controller (in
 let editorPanel = null; // full-page document editor controller (initEditor, #369)
 let constellationPanel = null; // division solar-system map controller (initConstellation, #369)
 let headerFooterPanel = null; // header/footer profile editor + resolution controller (initHeaderFooter, #477)
+let packageRevisionHeaderFooterPanel = null; // package/revision header-footer controller (initPackageRevisionHeaderFooter, #481)
+let selectedPackageId = null; // demo package-scope UUID input, normalized to null when empty (#481)
+let selectedRevisionId = null; // demo revision-scope UUID input, normalized to null when empty (#481)
 let tocSections = [];
 const tocCollapsedDivisions = new Set();
 let libraries = [];
@@ -2519,6 +2524,27 @@ function initMapActions() {
   });
 }
 
+// ── Package/revision header/footer scope inputs (#481) ──────────────────────
+//
+// The v1 demo has no package/revision picker UI, so these two scopes are
+// reached through plain UUID text inputs in Project Settings — normalized to
+// null for "nothing entered" (never a bare ''), mirroring header-footer.js's
+// getSelectedLibraryTier contract. normalizeUuidInput itself lives in
+// uuid-input.mjs (pure, no DOM) so it gets a real runtime test.
+
+function initPackageRevisionIdInputs() {
+  const packageInput = document.getElementById('package-id-input');
+  packageInput?.addEventListener('change', () => {
+    selectedPackageId = normalizeUuidInput(packageInput.value);
+    void packageRevisionHeaderFooterPanel?.refreshPackagePanel();
+  });
+  const revisionInput = document.getElementById('revision-id-input');
+  revisionInput?.addEventListener('change', () => {
+    selectedRevisionId = normalizeUuidInput(revisionInput.value);
+    void packageRevisionHeaderFooterPanel?.refreshRevisionPanel();
+  });
+}
+
 async function boot() {
   document.getElementById('tb-date').textContent = new Date().toISOString().slice(0, 10);
   initNavigation();
@@ -2526,6 +2552,7 @@ async function boot() {
   initTocBuilder();
   initLibraryManager();
   initMapActions();
+  initPackageRevisionIdInputs();
   audit = initAudit({
     findingsPane: document.getElementById('audit-findings'),
     specPane: document.getElementById('audit-spec-pane'),
@@ -2589,6 +2616,16 @@ async function boot() {
     libraryContainer: document.getElementById('library-header-footer'),
     projectEditorContainer: document.getElementById('project-header-footer-editor'),
     projectResolutionContainer: document.getElementById('project-header-footer-resolution'),
+    toast,
+  });
+  packageRevisionHeaderFooterPanel = initPackageRevisionHeaderFooter({
+    getSelectedPackageId: () => selectedPackageId,
+    getSelectedRevisionId: () => selectedRevisionId,
+    packageEditorContainer: document.getElementById('package-header-footer-editor'),
+    packageResolutionContainer: document.getElementById('package-header-footer-resolution'),
+    revisionEditorContainer: document.getElementById('revision-header-footer-editor'),
+    revisionResolutionContainer: document.getElementById('revision-header-footer-resolution'),
+    revisionDownloadContainer: document.getElementById('revision-header-footer-download'),
     toast,
   });
   editorPanel = initEditor({

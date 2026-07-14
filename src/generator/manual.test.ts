@@ -4,6 +4,7 @@ import { generateManual } from './index.js';
 import { GeneratorError } from './error.js';
 import type { ManualMeta } from './front-matter.js';
 import type { SpecTree } from '../ast/types.js';
+import type { HeaderFooterComposition } from '../ast/index.js';
 
 const META: ManualMeta = { name: 'Acme Tower', description: 'New HQ tower' };
 
@@ -148,5 +149,197 @@ describe('generateManual', () => {
 
   it('throws GeneratorError when no sections are supplied', async () => {
     await expect(generateManual([], META)).rejects.toBeInstanceOf(GeneratorError);
+  });
+});
+
+const HEADER_FOOTER_COMPOSITION: HeaderFooterComposition = {
+  header: {
+    center: {
+      content: [
+        { kind: 'sectionNumber' },
+        { kind: 'literal', text: ' — ' },
+        { kind: 'sectionTitle' },
+      ],
+    },
+  },
+  footer: {
+    right: { content: [{ kind: 'pageNumber' }] },
+  },
+};
+
+const EVEN_COMPOSITION: HeaderFooterComposition = {
+  ...HEADER_FOOTER_COMPOSITION,
+  variants: {
+    even: { header: { center: { content: [{ kind: 'literal', text: 'EVEN PAGE HEADER' }] } } },
+  },
+};
+
+const FIRST_PAGE_COMPOSITION: HeaderFooterComposition = {
+  ...HEADER_FOOTER_COMPOSITION,
+  variants: {
+    first: { header: { center: { content: [{ kind: 'literal', text: 'FIRST PAGE HEADER' }] } } },
+  },
+};
+
+async function headerFooterPartNames(buffer: Buffer): Promise<{
+  headers: readonly string[];
+  footers: readonly string[];
+}> {
+  const zip = await JSZip.loadAsync(buffer);
+  const names = Object.keys(zip.files);
+  return {
+    headers: names
+      .filter((name) => /^word\/header\d+\.xml$/.test(name))
+      .sort((a, b) => a.localeCompare(b)),
+    footers: names
+      .filter((name) => /^word\/footer\d+\.xml$/.test(name))
+      .sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+async function readZipPart(buffer: Buffer, partName: string): Promise<string> {
+  const zip = await JSZip.loadAsync(buffer);
+  const file = zip.file(partName);
+  if (!file) throw new Error(`${partName} missing from generated DOCX`);
+  return file.async('string');
+}
+
+// `docProps/core.xml` carries a wall-clock `dcterms:created`/`dcterms:modified`
+// timestamp docx stamps on every `Packer.toBuffer` call — pre-existing,
+// unrelated to #481, and the one part that legitimately differs between two
+// otherwise-identical generations. Excluding it turns "byte-identical output"
+// into a check of actual document content rather than wall-clock noise.
+async function contentPartsExcludingTimestamp(buffer: Buffer): Promise<Record<string, string>> {
+  const zip = await JSZip.loadAsync(buffer);
+  const entries = await Promise.all(
+    Object.keys(zip.files)
+      .filter((name) => name !== 'docProps/core.xml' && !zip.files[name]?.dir)
+      .sort((a, b) => a.localeCompare(b))
+      .map(async (name) => {
+        const file = zip.file(name);
+        if (!file) throw new Error(`${name} missing from generated DOCX`);
+        return [name, await file.async('string')] as const;
+      })
+  );
+  return Object.fromEntries(entries);
+}
+
+// #481: generateManual previously discarded options.headerFooter entirely
+// (ADR-017/303 scoped header/footer rendering to standalone generateDocx
+// only). These tests pin the manual-scoped wiring's invariants at the
+// boundary — never the per-section OOXML internals.
+describe('generateManual — #481 header/footer wiring', () => {
+  it('omitting options.headerFooter reproduces byte-identical output to calling without options at all (pre-#481 baseline)', async () => {
+    const withoutOptions = await generateManual([SECTION_A, SECTION_B], META);
+    // A defined `options` object that still omits `headerFooter` must take the
+    // exact same code path as `options` being absent entirely — proves the
+    // gate is on `headerFooter`, not on `options` itself.
+    const withOptionsMinusHeaderFooter = await generateManual(
+      [SECTION_A, SECTION_B],
+      META,
+      undefined,
+      { sectionNumberFormat: 'canonical' }
+    );
+    expect(await contentPartsExcludingTimestamp(withOptionsMinusHeaderFooter)).toEqual(
+      await contentPartsExcludingTimestamp(withoutOptions)
+    );
+  });
+
+  it('front-matter section never carries a header/footer reference, regardless of options.headerFooter', async () => {
+    const xml = await getDocXml(
+      await generateManual([SECTION_A, SECTION_B], META, undefined, {
+        headerFooter: { composition: HEADER_FOOTER_COMPOSITION, current: {} },
+      })
+    );
+    const firstSectionTitleIndex = xml.indexOf('SECTION 03 30 00');
+    expect(firstSectionTitleIndex).toBeGreaterThan(-1);
+    const frontMatterXml = xml.slice(0, firstSectionTitleIndex);
+    expect(frontMatterXml).not.toContain('w:headerReference');
+    expect(frontMatterXml).not.toContain('w:footerReference');
+  });
+
+  it('each spec section renders its own header/footer parts sourced from its own SpecTree (zero collisions)', async () => {
+    const buffer = await generateManual([SECTION_A, SECTION_B], META, undefined, {
+      headerFooter: { composition: HEADER_FOOTER_COMPOSITION, current: {} },
+    });
+    const { headers, footers } = await headerFooterPartNames(buffer);
+    expect(headers.length).toBe(2);
+    expect(footers.length).toBe(2);
+
+    const headerContents = await Promise.all(headers.map((name) => readZipPart(buffer, name)));
+    const carriesA = headerContents.filter(
+      (xml) => xml.includes('03 30 00') && xml.includes('Cast-in-Place Concrete')
+    );
+    const carriesB = headerContents.filter(
+      (xml) => xml.includes('09 91 00') && xml.includes('Painting')
+    );
+    // Exactly one header carries each section's own sectionNumber/title —
+    // never both in one file, never swapped between sections.
+    expect(carriesA.length).toBe(1);
+    expect(carriesB.length).toBe(1);
+    expect(carriesA[0]).not.toContain('Painting');
+    expect(carriesB[0]).not.toContain('Cast-in-Place Concrete');
+  });
+
+  it('header/footer relationship IDs are unique across sections (no collisions)', async () => {
+    const buffer = await generateManual([SECTION_A, SECTION_B], META, undefined, {
+      headerFooter: { composition: HEADER_FOOTER_COMPOSITION, current: {} },
+    });
+    const relsXml = await readZipPart(buffer, 'word/_rels/document.xml.rels');
+    const relIds = [
+      ...relsXml.matchAll(/Id="(rId\d+)"[^>]*Target="(?:header|footer)\d+\.xml"/g),
+    ].map((m) => m[1]);
+    // 2 sections × (1 header + 1 footer) = 4 distinct relationship IDs.
+    expect(relIds.length).toBe(4);
+    expect(new Set(relIds).size).toBe(relIds.length);
+  });
+
+  it('single-tree manual (N=1) still renders its own section header/footer', async () => {
+    const buffer = await generateManual([SECTION_A], META, undefined, {
+      headerFooter: { composition: HEADER_FOOTER_COMPOSITION, current: {} },
+    });
+    const { headers, footers } = await headerFooterPartNames(buffer);
+    expect(headers.length).toBe(1);
+    expect(footers.length).toBe(1);
+    const headerXml = await readZipPart(buffer, headers[0] as string);
+    expect(headerXml).toContain('03 30 00');
+    expect(headerXml).toContain('Cast-in-Place Concrete');
+  });
+
+  it('document-level evenAndOddHeaders reflects the shared composition (proof: composition is the same object reference for every section, so first-section computation is always correct)', async () => {
+    const withEven = await generateManual([SECTION_A, SECTION_B], META, undefined, {
+      headerFooter: { composition: EVEN_COMPOSITION, current: {} },
+    });
+    const settingsWithEven = await readZipPart(withEven, 'word/settings.xml');
+    expect(settingsWithEven).toMatch(/<w:evenAndOddHeaders\/>/);
+
+    const withoutEven = await generateManual([SECTION_A, SECTION_B], META, undefined, {
+      headerFooter: { composition: HEADER_FOOTER_COMPOSITION, current: {} },
+    });
+    const settingsWithoutEven = await readZipPart(withoutEven, 'word/settings.xml');
+    expect(settingsWithoutEven).not.toMatch(/<w:evenAndOddHeaders\/>/);
+  });
+
+  it("variants.first (titlePage) applies per-OOXML-section — every section opening page gets first-page treatment, not just the manual's first page", async () => {
+    const xml = await getDocXml(
+      await generateManual([SECTION_A, SECTION_B], META, undefined, {
+        headerFooter: { composition: FIRST_PAGE_COMPOSITION, current: {} },
+      })
+    );
+    const titlePgCount = [...xml.matchAll(/<w:titlePg/g)].length;
+    // Both section A's and section B's own sectPr set titlePage — the manual
+    // is not treated as one continuous flow with a single first page.
+    expect(titlePgCount).toBe(2);
+  });
+
+  it('front matter never gets titlePage treatment, even when options.headerFooter sets variants.first', async () => {
+    const xml = await getDocXml(
+      await generateManual([SECTION_A, SECTION_B], META, undefined, {
+        headerFooter: { composition: FIRST_PAGE_COMPOSITION, current: {} },
+      })
+    );
+    const firstSectionTitleIndex = xml.indexOf('SECTION 03 30 00');
+    const frontMatterXml = xml.slice(0, firstSectionTitleIndex);
+    expect(frontMatterXml).not.toContain('<w:titlePg');
   });
 });

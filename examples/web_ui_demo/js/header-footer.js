@@ -64,6 +64,17 @@
 // `getPreviewContext` instead hands the editor the `previewContext` FUNCTION
 // itself, which reads `ctx.getPreviewContext()` (the outer ctx passed to
 // initHeaderFooter) fresh on every call, however many editor refreshes later.
+//
+// TASK 7 (#481, manual Download DOCX): mountInspector's wrapper also mounts
+// a "Download Manual DOCX" button for the active project, next to the
+// spec-level one. `#editor-inspector` is deliberately reused instead of
+// adding a project-scope download container: `ctx.projectEditorContainer`
+// gets `replaceChildren()`'d by header-footer-editor.js's render() on EVERY
+// internal re-render (field edit, variant switch, save), not just the
+// initial refresh(), so a button mounted there would vanish the moment the
+// user touched the project-scope form. `ctx.getActiveProjectId()` is
+// already part of this module's ctx contract — no new ctx field, no new
+// index.html mount point.
 import { API_FEATURES } from './features.js';
 import {
   getClientHeaderFooter,
@@ -74,6 +85,7 @@ import {
   deleteProjectHeaderFooter,
   getProjectHeaderFooterResolved,
   fetchSpecDocx,
+  fetchManualDocx,
 } from './api.js';
 import { initHeaderFooterEditor } from './header-footer-editor.js';
 import { winningScope, scopeLabel } from './header-footer-resolve.mjs';
@@ -90,6 +102,7 @@ const defaultDeps = {
   deleteProjectHeaderFooter,
   getProjectHeaderFooterResolved,
   fetchSpecDocx,
+  fetchManualDocx,
   triggerBlobDownload,
   createElement: (tag) => document.createElement(tag),
 };
@@ -142,12 +155,55 @@ async function downloadSpecDocx(spec, ctx, deps) {
   }
 }
 
+// Same per-status-code shape as downloadFailureMessage above, scoped to the
+// whole-project manual (#481) instead of one spec — there is no per-spec
+// section number to name, so the copy stays generic to "this project"/
+// "manual.docx" rather than embedding an identifier the user never typed.
+function downloadManualFailureMessage(err) {
+  if (err?.status === 404) return 'This project was not found — it may have been removed';
+  if (err?.status === 400) return `Could not generate manual.docx: ${err.message}`;
+  if (err?.status === 500) return 'Server error generating manual.docx — try again shortly';
+  return `Could not download manual.docx: ${err?.message ?? 'unknown error'}`;
+}
+
+async function downloadManualDocx(projectId, ctx, deps) {
+  try {
+    const blob = await deps.fetchManualDocx(projectId);
+    deps.triggerBlobDownload(blob, 'manual.docx');
+    ctx.toast?.('Downloaded manual.docx');
+  } catch (err) {
+    ctx.toast?.(downloadManualFailureMessage(err), 'err');
+  }
+}
+
 function paintInspectorPanel(wrapper, spec, ctx, deps) {
   wrapper.appendChild(el(deps, 'div', 'hf-inspector-head', 'HEADER / FOOTER'));
   const download = el(deps, 'button', 'hf-inspector-download', 'Download DOCX');
   download.type = 'button';
   download.title = 'Generate this section as a DOCX with its configured header/footer';
   download.addEventListener('click', () => void downloadSpecDocx(spec, ctx, deps));
+  wrapper.appendChild(download);
+  paintManualDownloadButton(wrapper, ctx, deps);
+}
+
+// Manual (whole-project) download (#481) — appended into the SAME append-
+// only wrapper as the spec-level button above. This deliberately reuses
+// #editor-inspector rather than ctx.projectEditorContainer: header-footer-
+// editor.js's render() calls container.replaceChildren() on EVERY internal
+// re-render (field edit, variant switch, save — not just the initial
+// refresh()), so a button appended there would vanish mid-edit.
+// #editor-inspector is populated once per spec-select and this module never
+// clears it (see the module doc's SPIKE FIX note) — the only stable mount
+// point available without a new index.html container. Reuses the existing
+// ctx.getActiveProjectId(); silently omits the button when no project is
+// active rather than painting a dead control.
+function paintManualDownloadButton(wrapper, ctx, deps) {
+  const projectId = ctx.getActiveProjectId();
+  if (!projectId) return;
+  const download = el(deps, 'button', 'hf-inspector-download-manual', 'Download Manual DOCX');
+  download.type = 'button';
+  download.title = 'Generate the whole project manual as a DOCX with its configured header/footer';
+  download.addEventListener('click', () => void downloadManualDocx(projectId, ctx, deps));
   wrapper.appendChild(download);
 }
 

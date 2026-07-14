@@ -91,6 +91,7 @@ function baseDeps(overrides = {}) {
     deleteProjectHeaderFooter: noop,
     getProjectHeaderFooterResolved: async () => ({ layers: [] }),
     fetchSpecDocx: noop,
+    fetchManualDocx: noop,
     triggerBlobDownload: () => {},
     createElement: fakeElement,
     ...overrides,
@@ -141,6 +142,85 @@ test('mountInspector: called twice appends a second wrapper without ever clearin
     3,
     'pre-existing content plus two wrappers, nothing removed'
   );
+});
+
+// --- Invariant 7: mountInspector also mounts a Download Manual DOCX action
+// (#481) for the ACTIVE PROJECT, appended into the SAME append-only wrapper
+// as the spec-level Download DOCX button. This deliberately reuses
+// #editor-inspector rather than ctx.projectEditorContainer: header-footer-
+// editor.js's render() calls container.replaceChildren() on EVERY internal
+// re-render (field edit, variant switch, save — not just the initial
+// refresh()), so a button appended there would vanish the moment the user
+// touched the project-scope form. #editor-inspector, by contrast, is
+// populated once per spec-select and this module never clears it (see the
+// SPIKE FIX note above) — the only stable mount point available without a
+// new index.html container. No new ctx field: ctx.getActiveProjectId was
+// already part of the contract. -------------------------------------------
+
+test('mountInspector: mounts a Download Manual DOCX button for the active project that downloads and toasts on success', async () => {
+  const downloads = [];
+  const toasts = [];
+  const deps = baseDeps({
+    fetchManualDocx: async (projectId) => {
+      assert.equal(projectId, 'proj-1');
+      return { blobFor: projectId };
+    },
+    triggerBlobDownload: (blob, filename) => downloads.push({ blob, filename }),
+  });
+  const ctx = baseCtx({
+    getActiveProjectId: () => 'proj-1',
+    toast: (message, kind) => toasts.push({ message, kind }),
+  });
+  const hf = initHeaderFooter(ctx, deps);
+  const container = fakeContainer();
+
+  const wrapper = hf.mountInspector(container, { id: 'spec-1', section: '09 91 26' });
+  const button = wrapper.children.find((c) => c.className === 'hf-inspector-download-manual');
+  assert.ok(button, 'a Download Manual DOCX button is mounted');
+
+  await button.listeners.click();
+
+  assert.deepEqual(downloads, [{ blob: { blobFor: 'proj-1' }, filename: 'manual.docx' }]);
+  assert.deepEqual(toasts, [{ message: 'Downloaded manual.docx', kind: undefined }]);
+});
+
+test('mountInspector: Download Manual DOCX button toasts a status-specific error and never throws on failure', async () => {
+  const toasts = [];
+  const deps = baseDeps({
+    fetchManualDocx: async () => {
+      const err = new Error('not found');
+      err.status = 404;
+      throw err;
+    },
+  });
+  const ctx = baseCtx({
+    getActiveProjectId: () => 'proj-1',
+    toast: (message, kind) => toasts.push({ message, kind }),
+  });
+  const hf = initHeaderFooter(ctx, deps);
+  const container = fakeContainer();
+
+  const wrapper = hf.mountInspector(container, { id: 'spec-1', section: '09 91 26' });
+  const button = wrapper.children.find((c) => c.className === 'hf-inspector-download-manual');
+
+  await button.listeners.click();
+
+  assert.equal(toasts.length, 1);
+  assert.equal(toasts[0].kind, 'err');
+  assert.match(toasts[0].message, /not found/);
+});
+
+test('mountInspector: no active project — no Download Manual DOCX button is painted, spec download still works', () => {
+  const ctx = baseCtx({ getActiveProjectId: () => null });
+  const hf = initHeaderFooter(ctx, baseDeps());
+  const container = fakeContainer();
+
+  const wrapper = hf.mountInspector(container, { id: 'spec-1', section: '09 91 26' });
+
+  const manualButton = wrapper.children.find((c) => c.className === 'hf-inspector-download-manual');
+  assert.equal(manualButton, undefined, 'no manual download button without an active project');
+  const specButton = wrapper.children.find((c) => c.className === 'hf-inspector-download');
+  assert.ok(specButton, 'the spec-level Download DOCX button is unaffected');
 });
 
 // --- Invariant 2: Save repaints the sibling resolution panel immediately --
@@ -328,7 +408,10 @@ test('clientEditorCtx.get: unwraps the API record to its bare composition, not t
     },
     getClientHeaderFooter: async () => fakeRecord(STORED_COMPOSITION),
   });
-  const ctx = baseCtx({ getSelectedLibraryTier: () => 'client', getSelectedLibraryId: () => 'lib-1' });
+  const ctx = baseCtx({
+    getSelectedLibraryTier: () => 'client',
+    getSelectedLibraryId: () => 'lib-1',
+  });
   const hf = initHeaderFooter(ctx, deps);
 
   await hf.refreshLibraryPanel();
@@ -350,7 +433,10 @@ test('clientEditorCtx.get: a not-yet-configured scope (record null) still resolv
     },
     getClientHeaderFooter: async () => null,
   });
-  const ctx = baseCtx({ getSelectedLibraryTier: () => 'client', getSelectedLibraryId: () => 'lib-1' });
+  const ctx = baseCtx({
+    getSelectedLibraryTier: () => 'client',
+    getSelectedLibraryId: () => 'lib-1',
+  });
   const hf = initHeaderFooter(ctx, deps);
 
   await hf.refreshLibraryPanel();
@@ -367,7 +453,10 @@ test('clientEditorCtx.put: unwraps the saved record to its bare composition, not
     },
     putClientHeaderFooter: async (_id, composition) => fakeRecord(composition),
   });
-  const ctx = baseCtx({ getSelectedLibraryTier: () => 'client', getSelectedLibraryId: () => 'lib-1' });
+  const ctx = baseCtx({
+    getSelectedLibraryTier: () => 'client',
+    getSelectedLibraryId: () => 'lib-1',
+  });
   const hf = initHeaderFooter(ctx, deps);
 
   await hf.refreshLibraryPanel();

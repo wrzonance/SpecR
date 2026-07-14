@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { pool } from '../index.js';
 import { DatabaseError } from '../errors.js';
-import { resolveHeaderFooterConfig } from './header-footer.js';
+import { resolveHeaderFooterConfig, type ResolveHeaderFooterConfigInput } from './header-footer.js';
 import { findLibraryById } from './libraries.js';
 import { parseSectionNumberFormat } from '../../lib/section-number.js';
 import type { SectionNumberFormat } from '../../lib/section-number.js';
@@ -18,14 +18,27 @@ interface SoleOwningProjectRow {
 }
 
 /**
- * Header/footer identity-field facts sourced from the DB for a spec's
- * resolved generation context. No `date` here — date is generation-time,
- * not a DB fact; each consumer (src/api/generate-header-footer.ts,
- * src/mcp/handlers.ts) stamps it separately. `packageName`/`revisionName`/
- * `revisionLabel` are declared for shape parity with the generator's
- * `HeaderFooterFieldValues` but always resolve `undefined` on this
- * project-only-scope path — a bare `specId` has no verified, unambiguous
- * package/revision (#304).
+ * The minimal project identity `buildHeaderFooterFromProject` needs: an id to
+ * resolve the header/footer cascade from, and a name to stamp into
+ * `fieldValues.projectName`. Deliberately narrower than any one caller's full
+ * project row (`SoleOwningProjectRow`'s sole-ownership resolution,
+ * `ProjectWithToc`'s manual-generation lookup) so both structurally satisfy
+ * it without either caller re-shaping its own row for this call.
+ */
+export interface ProjectIdentity {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * Header/footer identity-field facts sourced from the DB for a resolved
+ * generation context. No `date` here — date is generation-time, not a DB
+ * fact; each consumer (src/api/generate-header-footer.ts, src/mcp/handlers.ts)
+ * stamps it separately. `packageName`/`revisionName`/`revisionLabel` are
+ * populated on the revision-scoped manual path
+ * (`resolveRevisionHeaderFooterContext`) but always resolve `undefined` on
+ * the single-spec path (`resolveSpecHeaderFooterContext`) — a bare `specId`
+ * has no verified, unambiguous package/revision (#304).
  */
 export interface HeaderFooterFieldSource {
   readonly packageName?: string;
@@ -106,31 +119,50 @@ async function resolveClientName(
 }
 
 /**
- * Build the header/footer generation context for an already-resolved sole
- * owning project, or null when that project has zero configured header/footer
- * layers anywhere in its client→project chain (`resolveHeaderFooterConfig`
- * always returns a non-null `{ config: {} }` even with zero rows —
- * `layers.length` is the only real "configured" signal).
- *
- * Never invents package/revision-level context: no verified schema gives a
- * bare `specId` an unambiguous package/revision, so
- * `HeaderFooterFieldSource.packageName`/`revisionName`/`revisionLabel` stay
- * permanently undefined on this path.
+ * The shared prelude to every scoped header/footer context: resolve the
+ * cascade for `target`, gate on at least one configured layer, and resolve
+ * the client display name. Returns null when zero layers are configured
+ * anywhere in the chain — `resolveHeaderFooterConfig` always returns a
+ * non-null `{ config: {} }` even with zero rows, so `layers.length` is the
+ * only real "configured" signal. Single-sourcing this gate keeps the
+ * null-fallthrough (byte-identical pre-#304/#481 output) from drifting
+ * between the project- and revision-scoped callers as more scopes are added.
  */
-async function buildHeaderFooterFromProject(
-  project: SoleOwningProjectRow,
+async function resolveConfigWithClientName(
+  target: ResolveHeaderFooterConfigInput,
   db: Queryable
-): Promise<HeaderFooterGenerationContext | null> {
-  const resolved = await resolveHeaderFooterConfig({ projectId: project.id }, db);
+): Promise<{ composition: HeaderFooterComposition; clientName: string | undefined } | null> {
+  const resolved = await resolveHeaderFooterConfig(target, db);
   if (!resolved || resolved.layers.length === 0) return null;
 
   const clientName = await resolveClientName(resolved.context.clientLibraryId, db);
+  return { composition: resolved.config, clientName };
+}
+
+/**
+ * Build the header/footer generation context for a project, or null when
+ * that project has zero configured header/footer layers anywhere in its
+ * client→project chain.
+ *
+ * Never invents package/revision-level context on its own: `project` carries
+ * only id/name, so `HeaderFooterFieldSource.packageName`/`revisionName`/
+ * `revisionLabel` stay undefined here — callers that DO have a verified
+ * package/revision (`resolveRevisionHeaderFooterContext`) fill those in
+ * separately rather than through this project-scoped builder.
+ */
+async function buildHeaderFooterFromProject(
+  project: ProjectIdentity,
+  db: Queryable
+): Promise<HeaderFooterGenerationContext | null> {
+  const resolved = await resolveConfigWithClientName({ projectId: project.id }, db);
+  if (!resolved) return null;
+
   const fieldValues: HeaderFooterFieldSource = {
     projectName: project.name,
-    ...(clientName !== undefined ? { clientName } : {}),
+    ...(resolved.clientName !== undefined ? { clientName: resolved.clientName } : {}),
   };
 
-  return { composition: resolved.config, fieldValues };
+  return { composition: resolved.composition, fieldValues };
 }
 
 /**
@@ -172,4 +204,64 @@ export async function resolveSpecHeaderFooterContext(
   db: Queryable = pool
 ): Promise<HeaderFooterGenerationContext | null> {
   return (await resolveSpecGenerationContext(specId, db)).headerFooter;
+}
+
+/**
+ * Resolve the header/footer generation context for a whole-manual (project)
+ * DOCX build (#481) — the project-scoped counterpart to
+ * `resolveSpecHeaderFooterContext`. Callers here already hold a verified
+ * project (e.g. `findProjectById`), so unlike the single-spec path there is
+ * no sole-ownership lookup to perform first: `projectId`/`projectName` are
+ * taken as given and passed straight through to the shared builder. Null
+ * when the project's client→project chain has zero configured layers.
+ */
+export async function resolveProjectManualHeaderFooterContext(
+  projectId: string,
+  projectName: string,
+  db: Queryable = pool
+): Promise<HeaderFooterGenerationContext | null> {
+  return buildHeaderFooterFromProject({ id: projectId, name: projectName }, db);
+}
+
+/**
+ * Identity-field facts for a revision-scoped manual build, threaded in by the
+ * caller from its own already-fetched `RevisionManualData` snapshot (never
+ * re-queried here) — one ownership snapshot per generation call, same
+ * no-TOCTOU discipline as `resolveSpecGenerationContext`'s sole-owner read.
+ */
+export interface RevisionHeaderFooterFieldSource {
+  readonly projectName: string;
+  readonly packageName: string;
+  readonly revisionName: string;
+  readonly revisionLabel: string;
+}
+
+/**
+ * Resolve the header/footer generation context for a package-revision manual
+ * DOCX build (#481), cascading client→project→package→revision via the same
+ * `resolveHeaderFooterConfig` used by the CRUD/resolved-view endpoints. Null
+ * when zero layers are configured anywhere in that revision's chain.
+ *
+ * `fieldSource` values are stamped into `fieldValues` verbatim — they come
+ * from the caller's own `RevisionManualData` fetch, not a second DB read, so
+ * a concurrent rename between that fetch and this resolve can never produce
+ * a mixed-snapshot header/footer.
+ */
+export async function resolveRevisionHeaderFooterContext(
+  revisionId: string,
+  fieldSource: RevisionHeaderFooterFieldSource,
+  db: Queryable = pool
+): Promise<HeaderFooterGenerationContext | null> {
+  const resolved = await resolveConfigWithClientName({ revisionId }, db);
+  if (!resolved) return null;
+
+  const fieldValues: HeaderFooterFieldSource = {
+    projectName: fieldSource.projectName,
+    packageName: fieldSource.packageName,
+    revisionName: fieldSource.revisionName,
+    revisionLabel: fieldSource.revisionLabel,
+    ...(resolved.clientName !== undefined ? { clientName: resolved.clientName } : {}),
+  };
+
+  return { composition: resolved.composition, fieldValues };
 }
