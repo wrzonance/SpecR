@@ -1,0 +1,506 @@
+/* Header/footer profile editor, preview, and resolution surfaces (#477).
+   Reuses app.css's tokens (--line, --line-dim, --amber, --sheet, --mono,
+   --ok, --err, …) — only sizing/layout for the .hf-* classes painted by
+   header-footer-editor.js, header-footer-preview-view.js, and header-footer.js
+   live here. All three mount points (Library client-scope, Settings
+   project-scope, the read-only #editor-inspector summary) share this one
+   stylesheet rather than three near-duplicates. */
+
+/* ── panel shells (static markup in index.html) ──────────────────────── */
+
+.hf-panel {
+  border: 1px solid var(--line-dim);
+  background: #ffffff;
+  margin-top: 0.8rem;
+  padding: 0.8rem;
+}
+
+.hf-panel-head {
+  border-bottom: 1px dashed var(--line-dim);
+  padding-bottom: 0.55rem;
+  margin-bottom: 0.7rem;
+}
+
+.hf-panel-head h3 {
+  margin: 0;
+  font: 0.72rem var(--mono);
+  letter-spacing: 0.14em;
+  color: var(--amber);
+}
+
+.hf-panel-hint {
+  margin: 0.3rem 0 0;
+  font: 0.7rem var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* The Settings-view panel spans settings-shell's full two-column width and
+   lays its editor + resolution mounts out side by side. */
+.hf-settings-panel {
+  grid-column: 1 / -1;
+}
+
+.hf-settings-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+  gap: 1rem;
+  align-items: start;
+}
+
+.hf-resolution-panel {
+  border: 1px solid var(--line-dim);
+  background: var(--sheet-dim);
+  padding: 0.7rem;
+  min-height: 3rem;
+}
+
+/* ── read-only inspector summary (#editor-inspector, append-only mount) ── */
+
+.hf-inspector {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line-dim);
+  display: grid;
+  gap: 8px;
+}
+
+.hf-inspector-head {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  color: var(--amber);
+}
+
+.hf-inspector-download {
+  width: 100%;
+  border: 1px solid var(--line-dim);
+  background: transparent;
+  color: var(--line);
+  font: 0.68rem var(--mono);
+  letter-spacing: 0.08em;
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+}
+
+.hf-inspector-download:hover {
+  border-color: var(--amber);
+  background: var(--amber);
+  color: var(--ink-950);
+}
+
+/* ── effective resolution (winning scope + layer chain) ─────────────────── */
+
+.hf-resolution {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.hf-resolution-winner {
+  font: 0.68rem var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--ink-on-vellum);
+}
+
+.hf-resolution-chain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.hf-resolution-layer {
+  border: 1px solid var(--vellum-edge);
+  background: var(--vellum-dim);
+  color: var(--ink-on-vellum-dim);
+  font: 0.62rem var(--mono);
+  letter-spacing: 0.08em;
+  padding: 0.2rem 0.45rem;
+}
+
+/* the last chain entry is the winning scope — call it out */
+.hf-resolution-layer:last-child {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+/* ── editor: loading / empty states ──────────────────────────────────── */
+
+.hf-editor-loading,
+.hf-empty-text {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.hf-empty {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.6rem 0;
+}
+
+.hf-empty-create {
+  justify-self: start;
+  border: 1px solid var(--amber);
+  background: var(--amber);
+  color: var(--ink-950);
+  font: 0.7rem var(--mono);
+  letter-spacing: 0.1em;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+}
+
+/* ── editor: error state (a real ctx.get() failure — Retry only, deliberately
+   NEVER a "Create configuration" affordance, which would let a transient
+   load failure be "fixed" via a destructive full-composition ctx.put()
+   overwrite; see header-footer-editor.js's loadDraft doc comment) ──────── */
+
+.hf-error {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.6rem 0;
+}
+
+.hf-error-text {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--err);
+}
+
+.hf-error-retry {
+  justify-self: start;
+  border: 1px solid var(--err);
+  background: transparent;
+  color: var(--err);
+  font: 0.7rem var(--mono);
+  letter-spacing: 0.1em;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+}
+
+.hf-error-retry:hover {
+  background: var(--err);
+  color: #ffffff;
+}
+
+/* ── variant tabs (default / first page / even pages) ────────────────── */
+
+.hf-variant-tabs-host {
+  margin-bottom: 0.7rem;
+}
+
+.hf-variant-tabs {
+  display: flex;
+  gap: 0.3rem;
+  border-bottom: 1px solid var(--line-dim);
+}
+
+.hf-variant-tab {
+  border: 1px solid var(--line-dim);
+  border-bottom: none;
+  background: var(--sheet-dim);
+  color: var(--muted);
+  font: 0.66rem var(--mono);
+  letter-spacing: 0.08em;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+
+.hf-variant-tab.is-active {
+  background: #ffffff;
+  color: var(--vellum);
+  border-color: var(--line-dim);
+  position: relative;
+  top: 1px;
+}
+
+/* ── region / cell / field editors (header + footer, left/center/right) ── */
+
+.hf-region-editor {
+  margin-bottom: 0.9rem;
+}
+
+.hf-region-title {
+  margin: 0 0 0.5rem;
+  font: 0.68rem var(--mono);
+  letter-spacing: 0.12em;
+  color: var(--line);
+  text-transform: uppercase;
+}
+
+.hf-cell-editor {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border: 1px solid var(--line-dim);
+  margin-bottom: 0.4rem;
+}
+
+.hf-cell-label {
+  font: 0.6rem var(--mono);
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.hf-field-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.hf-field-kind {
+  flex: none;
+  border: 1px solid var(--line-dim);
+  background: #ffffff;
+  color: var(--vellum);
+  font: 0.72rem var(--mono);
+  padding: 0.3rem 0.4rem;
+}
+
+.hf-field-text {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line-dim);
+  background: #ffffff;
+  color: var(--vellum);
+  font: 0.75rem var(--mono);
+  padding: 0.32rem 0.5rem;
+}
+
+.hf-field-text:focus {
+  border-color: var(--amber);
+  outline: none;
+}
+
+.hf-field-remove {
+  flex: none;
+  border: 1px solid var(--vellum-edge);
+  background: transparent;
+  color: var(--err);
+  font: 0.62rem var(--mono);
+  letter-spacing: 0.06em;
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+}
+
+.hf-cell-add {
+  justify-self: start;
+  border: 1px dashed var(--line-dim);
+  background: transparent;
+  color: var(--line);
+  font: 0.66rem var(--mono);
+  letter-spacing: 0.06em;
+  padding: 0.32rem 0.6rem;
+  cursor: pointer;
+}
+
+.hf-cell-add:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+/* ── page numbering policy ────────────────────────────────────────────── */
+
+.hf-pagenum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.6rem 0;
+  border-top: 1px dashed var(--line-dim);
+  margin-top: 0.4rem;
+}
+
+.hf-pagenum-label {
+  font: 0.62rem var(--mono);
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.hf-pagenum-mode {
+  border: 1px solid var(--line-dim);
+  background: #ffffff;
+  color: var(--vellum);
+  font: 0.72rem var(--mono);
+  padding: 0.3rem 0.4rem;
+}
+
+.hf-pagenum-startat {
+  width: 4rem;
+  border: 1px solid var(--line-dim);
+  background: #ffffff;
+  color: var(--vellum);
+  font: 0.72rem var(--mono);
+  padding: 0.3rem 0.4rem;
+}
+
+/* ── save / delete actions ───────────────────────────────────────────── */
+
+.hf-editor-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding-top: 0.7rem;
+  border-top: 1px dashed var(--line-dim);
+  margin-top: 0.6rem;
+}
+
+.hf-save,
+.hf-delete {
+  font: 0.7rem var(--mono);
+  letter-spacing: 0.08em;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  border: 1px solid;
+}
+
+.hf-save.is-primary {
+  background: var(--amber);
+  color: var(--ink-950);
+  border-color: var(--amber);
+}
+
+.hf-save.is-primary:disabled {
+  background: var(--vellum-dim);
+  color: var(--muted);
+  border-color: var(--line-dim);
+  cursor: not-allowed;
+}
+
+.hf-delete.is-danger {
+  background: transparent;
+  color: var(--err);
+  border-color: var(--err);
+}
+
+.hf-delete.is-danger:hover {
+  background: var(--err);
+  color: #ffffff;
+}
+
+/* ── preview (HTML approximation of the page's header/footer regions) ──── */
+
+.hf-preview-host {
+  margin: 0.8rem 0;
+}
+
+.hf-preview {
+  border: 1px solid var(--line-dim);
+  background: var(--sheet-dim);
+  padding: 0.7rem 0.9rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.hf-preview-region-label {
+  font: 0.58rem var(--mono);
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+.hf-preview-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.5rem;
+  font: 0.78rem var(--serif);
+}
+
+.hf-preview-cell {
+  display: block;
+  word-break: break-word;
+}
+
+.hf-preview-cell-left {
+  text-align: left;
+}
+
+.hf-preview-cell-center {
+  text-align: center;
+}
+
+.hf-preview-cell-right {
+  text-align: right;
+}
+
+.hf-field {
+  margin-right: 0.15rem;
+}
+
+.hf-field-empty {
+  color: var(--muted);
+}
+
+.hf-field-resolved {
+  color: var(--vellum);
+}
+
+/* generation-only fields (spec number/title, page number, …) fabricate no
+   text of their own — they resolve at DOCX-generation time from live spec
+   metadata, so the preview marks them visually distinct from literal text. */
+.hf-field-generation-only {
+  color: var(--line);
+  font-style: italic;
+}
+
+.hf-field-unavailable {
+  color: var(--err);
+  font-style: italic;
+}
+
+.hf-preview-rule {
+  border-top: 1px solid var(--vellum-edge);
+  margin-top: 0.3rem;
+}
+
+.hf-preview-page-band {
+  text-align: center;
+  font: 0.66rem var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 0.3rem 0;
+  border-top: 1px dashed var(--vellum-edge);
+  border-bottom: 1px dashed var(--vellum-edge);
+}
+
+/* ── unsupported-OOXML warnings (read-only, raw-sidecar passthrough) ───── */
+
+.hf-preview-warnings {
+  border: 1px solid #d9a93f;
+  background: rgba(217, 169, 63, 0.08);
+  padding: 0.5rem 0.7rem;
+  margin-top: 0.4rem;
+}
+
+.hf-preview-warnings-head {
+  margin: 0 0 0.35rem;
+  font: 0.66rem var(--mono);
+  letter-spacing: 0.04em;
+  color: #8a5b00;
+}
+
+.hf-preview-warnings-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.72rem;
+  color: var(--ink-on-vellum-dim);
+  display: grid;
+  gap: 0.2rem;
+}
+
+/* ── narrow viewports: stack editor + resolution, tighten field rows ──── */
+
+@media (max-width: 900px) {
+  .hf-settings-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .hf-preview-row {
+    grid-template-columns: 1fr;
+    text-align: left;
+  }
+
+  .hf-preview-cell-center,
+  .hf-preview-cell-right {
+    text-align: left;
+  }
+}

@@ -50,6 +50,7 @@ import { initAudit } from './audit.js';
 import { initScoring } from './scoring.js';
 import { initEditor } from './editor.js';
 import { initConstellation } from './constellation.js';
+import { initHeaderFooter } from './header-footer.js';
 import { openConfirm, openChoice, openPicker } from './modal.js';
 import { mergeSourcesWithScope, moveSource, resolutionNotice } from './source-order.mjs';
 import { classifyRemovalConflict } from './spec-removal.mjs';
@@ -69,6 +70,7 @@ let composePanel = null; // agent-driven grounded reporting controller (initComp
 let comparePanel = null; // deterministic side-by-side comparison controller (initCompare, #385)
 let editorPanel = null; // full-page document editor controller (initEditor, #369)
 let constellationPanel = null; // division solar-system map controller (initConstellation, #369)
+let headerFooterPanel = null; // header/footer profile editor + resolution controller (initHeaderFooter, #477)
 let tocSections = [];
 const tocCollapsedDivisions = new Set();
 let libraries = [];
@@ -169,6 +171,11 @@ function showView(view) {
   if (view === 'scoring') scoringPanel?.refresh();
   if (view === 'editor') editorPanel?.refresh();
   if (view === 'constellation') constellationPanel?.refresh();
+  // library's own selection-change handler (renderLibraryDetail) already
+  // refreshes the client-scope panel on every selection; this covers
+  // entering the view without a selection change (e.g. a straight tab click).
+  if (view === 'library') void headerFooterPanel?.refreshLibraryPanel();
+  if (view === 'settings') void headerFooterPanel?.refreshProjectPanel();
   updateAddFabVisibility();
 }
 
@@ -539,6 +546,15 @@ async function loadActiveProjectWorkspace() {
   await refreshCoordination();
   await refreshOpenComments();
   await refreshSubmittalRegister();
+  // Repaint the project-scope header/footer editor + Effective Resolution for
+  // the now-active project. showView('settings') only fires on VIEW entry, so
+  // switching projects from the Settings dropdown (project-select →
+  // switchProject) would otherwise leave the old project's editor/resolution on
+  // screen — and, because the editor's ctx reads activeProjectId live, a Save
+  // on that stale editor would PUT into the newly selected project. refresh()
+  // reloads the new project's config (dropping to a Save-less loading state
+  // meanwhile), closing that window. Self-guarding + fire-and-forget.
+  void headerFooterPanel?.refreshProjectPanel();
 }
 
 async function deleteActiveProject() {
@@ -1425,6 +1441,14 @@ function renderLibraryDetail() {
   if (rename) rename.hidden = library?.tier !== 'client';
   if (add) add.disabled = !library;
   renderLibraryTree();
+  // Client-scope header/footer panel — visible only for tier === 'client',
+  // mirroring the server's requireClientLibrary gate (header-footer.js's own
+  // refreshLibraryPanel enforces the same condition before firing any API
+  // call; this only toggles the surrounding panel's visibility, which is
+  // outside that module's ctx contract).
+  const hfPanel = document.getElementById('library-header-footer-panel');
+  if (hfPanel) hfPanel.hidden = !(API_FEATURES.headerFooter && library?.tier === 'client');
+  void headerFooterPanel?.refreshLibraryPanel();
 }
 
 function renderLibraryTree() {
@@ -2558,6 +2582,15 @@ async function boot() {
     onCite: onComposeCite,
     onHandoff: onCompareHandoff,
   });
+  headerFooterPanel = initHeaderFooter({
+    getSelectedLibraryTier: () => selectedLibrary()?.tier ?? null,
+    getSelectedLibraryId: () => selectedLibraryId,
+    getActiveProjectId: () => activeProjectId,
+    libraryContainer: document.getElementById('library-header-footer'),
+    projectEditorContainer: document.getElementById('project-header-footer-editor'),
+    projectResolutionContainer: document.getElementById('project-header-footer-resolution'),
+    toast,
+  });
   editorPanel = initEditor({
     getSpecs: () => specs,
     displaySection,
@@ -2598,6 +2631,7 @@ async function boot() {
     ...(API_FEATURES.paragraphCreate ? { persistDraft: persistDraftParagraph } : {}),
     isActive: () => currentView === 'editor',
     toast,
+    mountHeaderFooterInspector: headerFooterPanel.mountInspector,
   });
   constellationPanel = initConstellation({
     getSpecs: () => specs,

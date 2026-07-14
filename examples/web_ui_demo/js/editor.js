@@ -16,6 +16,19 @@ function el(tag, className, text) {
   return node;
 }
 
+// renderInspector's call site for ctx.mountHeaderFooterInspector (#477) —
+// exported so it is unit-testable without the rest of initEditor's DOM tree,
+// same split as header-footer.js/header-footer-editor.js elsewhere in this
+// demo (pure/testable wiring vs. untested DOM paint). A no-op unless there is
+// a selected section to summarize AND the optional callback was wired in;
+// otherwise delegates entirely to ctx.mountHeaderFooterInspector, which is
+// itself contracted (header-footer.js's module doc) to only ever append into
+// `inspector`, never clear it.
+export function appendHeaderFooterSummary(inspector, spec, ctx) {
+  if (!spec || !ctx.mountHeaderFooterInspector) return;
+  ctx.mountHeaderFooterInspector(inspector, spec.tree);
+}
+
 // ctx contract (wired in app.js):
 //   getSpecs()            -> Map<specId, { tree, references }>
 //   displaySection(s)     -> section formatted per project setting
@@ -26,6 +39,15 @@ function el(tag, className, text) {
 //   removeSection(section)-> async; removes every loaded copy from the project
 //   isActive()            -> true when the editor view is visible
 //   toast(msg, kind)
+//   mountHeaderFooterInspector?(container, spec) -> void — optional (#477).
+//                            Appends header-footer.js's read-only summary
+//                            (download DOCX action) as the LAST step of
+//                            renderInspector, once CITES/CITED BY/EDITABILITY
+//                            are already painted — see appendHeaderFooterSummary
+//                            below. Per header-footer.js's own module doc, this
+//                            callback only ever APPENDS into `container`
+//                            (`#editor-inspector`); it must never be cleared by
+//                            it.
 export function initEditor(ctx) {
   const rail = document.getElementById('editor-rail');
   const main = document.getElementById('editor-main');
@@ -598,6 +620,8 @@ export function initEditor(ctx) {
       }
       inspector.appendChild(chips);
     }
+
+    appendHeaderFooterSummary(inspector, spec, ctx);
   }
 
   // ── controller ────────────────────────────────────────────────────────────
