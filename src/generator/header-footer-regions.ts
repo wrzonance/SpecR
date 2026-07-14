@@ -100,19 +100,30 @@ function tabRun(): TextRun {
 // the (empty) center stop, one to reach the right stop. Collapsing this to a
 // single tab would land right-cell content at the center stop instead of the
 // right margin — see header-footer-regions.test.ts for the pinned case.
+//
+// The tab flags key off the ALREADY-RENDERED run counts, not `cellHasContent`:
+// a cell whose only field fails to render (e.g. an undecodable image, #308)
+// counts as content structurally but produces zero runs, so basing a tab on
+// `cellHasContent` would emit a dangling `<w:tab/>` with nothing after it
+// (center text + a broken right image left a trailing right tab). Deriving
+// from run counts treats an empty-rendering cell as empty — no dangling tab —
+// and renders each cell exactly once instead of walking its fields twice.
 function regionChildren(
   region: HeaderFooterRegion | undefined,
   ctx: HeaderFooterFieldContext,
   style: HeaderFooterVisualStyle | undefined
 ): readonly HeaderFooterRunChild[] {
-  const needsCenterTab = cellHasContent(region?.center, ctx) || cellHasContent(region?.right, ctx);
-  const needsRightTab = cellHasContent(region?.right, ctx);
+  const leftRuns = renderCellRuns(region?.left, ctx, style);
+  const centerRuns = renderCellRuns(region?.center, ctx, style);
+  const rightRuns = renderCellRuns(region?.right, ctx, style);
+  const needsCenterTab = centerRuns.length > 0 || rightRuns.length > 0;
+  const needsRightTab = rightRuns.length > 0;
   return [
-    ...renderCellRuns(region?.left, ctx, style),
+    ...leftRuns,
     ...(needsCenterTab ? [tabRun()] : []),
-    ...renderCellRuns(region?.center, ctx, style),
+    ...centerRuns,
     ...(needsRightTab ? [tabRun()] : []),
-    ...renderCellRuns(region?.right, ctx, style),
+    ...rightRuns,
   ];
 }
 

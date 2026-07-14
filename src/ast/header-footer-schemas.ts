@@ -39,8 +39,8 @@ const HeaderFooterFieldSchema = z
     // round-trips, it just won't render.
     imageData: z
       .string()
-      .refine((value) => value.length <= MAX_IMAGE_BASE64_LENGTH, {
-        message: `imageData exceeds the ${MAX_IMAGE_BASE64_LENGTH}-char base64 size cap`,
+      .max(MAX_IMAGE_BASE64_LENGTH, {
+        error: `imageData exceeds the ${MAX_IMAGE_BASE64_LENGTH}-char base64 size cap`,
       })
       .exactOptional(),
     imageMediaType: z.string().exactOptional(),

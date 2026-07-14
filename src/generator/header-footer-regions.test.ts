@@ -233,6 +233,55 @@ describe('buildRegionParagraph — tab-stop count follows Word tab semantics, no
   });
 });
 
+describe('buildRegionParagraph — a cell whose image fails to render reserves no tab (#308)', () => {
+  // A structurally-present image field that renderImageRun refuses (missing
+  // dimensions here) produces zero runs. The tab flags key off rendered-run
+  // counts, so such a cell counts as empty — no `<w:tab/>` is emitted with
+  // nothing after it. Pre-fix these keyed off cellHasContent (true for any
+  // imageData), leaving a dangling trailing tab.
+  it('center text + right broken image -> one tab, no dangling right tab', async () => {
+    const region: HeaderFooterRegion = {
+      center: literalCell('CENTER'),
+      right: brokenImageCell(),
+    };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    if (paragraph === undefined) throw new Error('unreachable');
+    const xml = await renderParagraphsToXml([paragraph]);
+    expect(countTabs(xml)).toBe(1);
+  });
+
+  it('left text + center broken image, right empty -> zero tabs', async () => {
+    const region: HeaderFooterRegion = {
+      left: literalCell('LEFT'),
+      center: brokenImageCell(),
+    };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    if (paragraph === undefined) throw new Error('unreachable');
+    const xml = await renderParagraphsToXml([paragraph]);
+    expect(countTabs(xml)).toBe(0);
+  });
+
+  it('left + center text + right broken image -> one tab (no trailing right tab)', async () => {
+    const region: HeaderFooterRegion = {
+      left: literalCell('LEFT'),
+      center: literalCell('CENTER'),
+      right: brokenImageCell(),
+    };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    if (paragraph === undefined) throw new Error('unreachable');
+    const xml = await renderParagraphsToXml([paragraph]);
+    expect(countTabs(xml)).toBe(1);
+  });
+
+  it('left text + right valid image -> two tabs (a rendered image still reserves its tab)', async () => {
+    const region: HeaderFooterRegion = { left: literalCell('LEFT'), right: imageCell() };
+    const paragraph = buildRegionParagraph(region, undefined, CTX, 'bottom');
+    if (paragraph === undefined) throw new Error('unreachable');
+    const xml = await renderParagraphsToXml([paragraph]);
+    expect(countTabs(xml)).toBe(2);
+  });
+});
+
 describe('buildRegionParagraph — layout and style', () => {
   it('defines CENTER and RIGHT tab stops at the standard positions', async () => {
     const region: HeaderFooterRegion = {
