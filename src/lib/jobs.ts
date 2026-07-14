@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { DerivationReport } from '../parser/index.js';
-import type { ParseWarning, Editability } from '../ast/index.js';
+import type { ParseWarning, Editability, HeaderFooterComposition } from '../ast/index.js';
 import type { HierarchySummary } from './hierarchy-summary.js';
 
 export type ParseStage =
@@ -106,6 +106,8 @@ export interface OnboardingReport {
   readonly styleDerivation: DerivationReport | null;
   /** True when no style template was derived (non-DOCX) — assign via O-12 later. */
   readonly styleSourceNeeded: boolean;
+  /** Header/footer composition captured at parse time (#306); null when the source had none. Review draft only — not persisted here; save via PUT .../header-footer (#208/#480). */
+  readonly headerFooter: HeaderFooterComposition | null;
   readonly editability: EditabilitySummary;
   /** Hierarchy-inference confidence summary (ADR-055). */
   readonly hierarchy: HierarchySummary;

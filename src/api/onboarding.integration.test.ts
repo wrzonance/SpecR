@@ -59,6 +59,7 @@ interface OnboardingJobData {
     report: {
       styleDerivation: unknown;
       styleSourceNeeded: boolean;
+      headerFooter: unknown;
       editability: { counts: Record<string, number>; lowConfidence: unknown[] };
       hierarchy: {
         counts: { scored: number; unscored: number; belowThreshold: number };
@@ -113,6 +114,10 @@ describe('POST /libraries/:id/import (O-8)', () => {
     expect(r.report.styleSourceNeeded).toBe(false);
     expect(r.report.editability).toBeDefined();
     expect(Array.isArray(r.report.parseWarnings)).toBe(true);
+    // #307: fixture has no header/footer parts — draft is always present as a
+    // key on the report (null-collapse of SpecTree.headerFooter), never absent.
+    expect('headerFooter' in r.report).toBe(true);
+    expect(r.report.headerFooter).toBeNull();
     // ADR-055 hierarchy section: every structural DOCX paragraph is scored
     expect(r.report.hierarchy.counts.scored).toBeGreaterThan(0);
     expect(r.report.hierarchy.counts.unscored).toBe(0);

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { HeaderFooterComposition } from '../ast/index.js';
 import {
   createJob,
   updateJob,
@@ -6,7 +7,25 @@ import {
   createOnboardingJob,
   updateOnboardingJob,
   getOnboardingJob,
+  type OnboardingReport,
 } from './jobs.js';
+
+function baseReport(headerFooter: OnboardingReport['headerFooter']): OnboardingReport {
+  return {
+    styleDerivation: null,
+    styleSourceNeeded: true,
+    headerFooter,
+    editability: {
+      counts: { locked: 0, editable: 0, choice: 0, note: 0 },
+      lowConfidence: [],
+    },
+    hierarchy: {
+      counts: { scored: 0, unscored: 0, belowThreshold: 0 },
+      lowConfidence: [],
+    },
+    parseWarnings: [],
+  };
+}
 
 describe('jobs', () => {
   it('createJob returns a UUID string', () => {
@@ -75,19 +94,7 @@ describe('onboarding job lifecycle (O-8)', () => {
         title: 'Painting',
         libraryId: 'lib1',
         templateId: null,
-        report: {
-          styleDerivation: null,
-          styleSourceNeeded: true,
-          editability: {
-            counts: { locked: 0, editable: 0, choice: 0, note: 0 },
-            lowConfidence: [],
-          },
-          hierarchy: {
-            counts: { scored: 0, unscored: 0, belowThreshold: 0 },
-            lowConfidence: [],
-          },
-          parseWarnings: [],
-        },
+        report: baseReport(null),
       },
     });
     const done = getOnboardingJob(jobId);
@@ -102,5 +109,48 @@ describe('onboarding job lifecycle (O-8)', () => {
   it('onboarding store is separate from the parse-job store', () => {
     const parseId = createJob();
     expect(getOnboardingJob(parseId)).toBeUndefined();
+  });
+});
+
+// These round-trip through the REAL onboarding job store (createOnboardingJob /
+// updateOnboardingJob / getOnboardingJob), not just the local baseReport()
+// fixture builder — updateOnboardingJob's `...update.result` spread is the
+// production pass-through under test here (it must not clone/serialize the
+// report), distinct from processOnboardingJob's `tree.headerFooter ?? null`
+// null-collapse, which is covered against real production code in
+// onboarding.test.ts's 'processOnboardingJob — report.headerFooter (#307)'.
+describe('OnboardingReport.headerFooter (#307)', () => {
+  function storeReport(
+    headerFooter: OnboardingReport['headerFooter']
+  ): OnboardingReport | undefined {
+    const jobId = createOnboardingJob();
+    updateOnboardingJob(jobId, {
+      status: 'complete',
+      stage: 'complete',
+      pct: 100,
+      result: {
+        specId: 's2',
+        section: '01 10 00',
+        title: 'T',
+        libraryId: 'lib1',
+        templateId: null,
+        report: baseReport(headerFooter),
+      },
+    });
+    return getOnboardingJob(jobId)?.result?.report;
+  }
+
+  it('is present and null when the source tree had no header/footer composition', () => {
+    const report = storeReport(null);
+    expect(report).toHaveProperty('headerFooter');
+    expect(report?.headerFooter).toBeNull();
+  });
+
+  it('round-trips a header/footer composition through the job store unchanged (pure pass-through)', () => {
+    const composition: HeaderFooterComposition = {
+      pageNumbering: { mode: 'continuous' },
+    };
+    const report = storeReport(composition);
+    expect(report?.headerFooter).toBe(composition);
   });
 });

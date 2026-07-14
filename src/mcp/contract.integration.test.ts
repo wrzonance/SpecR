@@ -219,6 +219,20 @@ describe('MCP contract (REST <-> MCP parity)', () => {
     expect(parsePayload(result)).not.toHaveProperty('headerFooter');
   });
 
+  // #307: OnboardingReport (surfaced via GET /libraries/import/jobs/{jobId})
+  // gained a headerFooter review-draft field, but the change touches only the
+  // job-result payload shape — not the tool/route boundary. Pin that both the
+  // async-import POST and its job-polling GET stay MCP_UNEXPOSED (agents
+  // ingest documents synchronously via load_files, see contract-map.ts), so a
+  // future change doesn't silently promote an async job-polling primitive
+  // into an agent-facing tool just because its payload grew a field.
+  it('#307: onboarding headerFooter draft needs zero new contract-map entries', () => {
+    expect(MCP_UNEXPOSED.has('post /libraries/{}/import')).toBe(true);
+    expect(MCP_UNEXPOSED.has('get /libraries/import/jobs/{}')).toBe(true);
+    expect(OP_TO_TOOL.has('post /libraries/{}/import')).toBe(false);
+    expect(OP_TO_TOOL.has('get /libraries/import/jobs/{}')).toBe(false);
+  });
+
   it.each(INV5_DRIVEN)(
     'INV-5: $tool output validates against its mapped op response schema',
     async ({ tool, method, path, status, invoke }) => {

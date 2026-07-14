@@ -256,6 +256,7 @@ async function processOnboardingJob(
     const report: OnboardingReport = {
       styleDerivation: style.report,
       styleSourceNeeded: style.templateId === null,
+      headerFooter: tree.headerFooter ?? null,
       editability: summaries.editability,
       hierarchy: summaries.hierarchy,
       parseWarnings: tree.warnings ?? [],
