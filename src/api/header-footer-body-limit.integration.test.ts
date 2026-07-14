@@ -1,14 +1,16 @@
 // src/api/header-footer-body-limit.integration.test.ts
 //
-// #490 — regression, end-to-end. Pins the dispatch middleware itself
-// (src/index.ts) through a REAL HTTP request/response cycle rather than the
-// unit-level predicate (header-footer-body-limit.test.ts already covers
-// `isHeaderFooterCompositionWrite` in isolation). src/index.ts can't be
-// imported directly — importing it opens a listener as a side effect — so
-// this test app reconstructs its exact 3-branch dispatch verbatim from the
-// same exported constant and predicate it wires, so a regression in ordering
-// (e.g. checking the predicate after body-parsing already ran, or dropping
-// the `/mcp` early-return) fails here.
+// #490 — regression, end-to-end. Pins the dispatch middleware itself through
+// a REAL HTTP request/response cycle rather than the unit-level predicate
+// (header-footer-body-limit.test.ts already covers `isHeaderFooterCompositionWrite`
+// in isolation). `src/index.ts` can't be imported directly — importing it
+// opens a listener as a side effect — so this test app wires
+// `createHeaderFooterBodyLimitMiddleware()`, the SAME exported factory
+// `src/index.ts` calls, rather than hand-copying its dispatch logic. A
+// regression to the real ordering (e.g. checking the predicate after
+// body-parsing already ran, or dropping the `/mcp` early-return) lives in
+// that one shared function, so it fails here exactly because both production
+// and this test call it.
 //
 // Neither existing header/footer-adjacent integration test exercises this:
 // header-footer.integration.test.ts and router-header-footer.integration.test.ts
@@ -22,9 +24,10 @@ import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool, createLibrary } from '../db/index.js';
 import { assertResponse } from '../test-utils/contract/validate-response.js';
+import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
 import {
+  createHeaderFooterBodyLimitMiddleware,
   HEADER_FOOTER_JSON_BODY_LIMIT_BYTES,
-  isHeaderFooterCompositionWrite,
 } from './header-footer-body-limit.js';
 
 let server: Server;
@@ -33,17 +36,9 @@ let baseUrl: string;
 beforeAll(async () => {
   const app = express();
   app.disable('x-powered-by');
-  // Mirrors src/index.ts's real 3-branch dispatch — the invariant under test
-  // is THIS wiring, not a stand-in that merely calls the same functions.
-  const restJson = express.json();
-  const headerFooterCompositionJson = express.json({
-    limit: HEADER_FOOTER_JSON_BODY_LIMIT_BYTES,
-  });
-  app.use((req, res, next) => {
-    if (req.path.startsWith('/mcp')) return next();
-    if (isHeaderFooterCompositionWrite(req)) return headerFooterCompositionJson(req, res, next);
-    restJson(req, res, next);
-  });
+  // The exact production dispatch middleware — the invariant under test is
+  // THIS wiring, not a stand-in that merely calls the same functions.
+  app.use(createHeaderFooterBodyLimitMiddleware());
   app.use(router);
   app.use(errorHandler);
   await new Promise<void>((resolve) => {
@@ -84,6 +79,28 @@ function compositionWithLiteralTextLength(length: number): unknown {
   };
 }
 
+// The real-world scenario the route-scoped limit exists to fix: an
+// `imageData` field at its own per-field cap (`MAX_IMAGE_BASE64_LENGTH`,
+// `src/ast/header-footer-schemas.ts`), which is already comfortably over the
+// REST-wide 100kb default. Zod's schema validates only *length*, not base64
+// alphabet, so a repeated 'A' run exercises the same code path a real
+// base64-encoded logo would.
+function compositionWithMaxSizeImage(): unknown {
+  return {
+    header: {
+      center: {
+        content: [
+          {
+            kind: 'image',
+            imageData: 'A'.repeat(MAX_IMAGE_BASE64_LENGTH),
+            imageMediaType: 'image/png',
+          },
+        ],
+      },
+    },
+  };
+}
+
 async function put(path: string, body: unknown): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
     method: 'PUT',
@@ -105,6 +122,22 @@ describe('header/footer PUT body-size dispatch, end-to-end (#490)', () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as { success: boolean };
     expect(json.success).toBe(true);
+  });
+
+  it('INV7: a max-size base64 imageData field — the case the route-scoped limit exists for — parses, validates, and persists', async () => {
+    const lib = await createLibrary({
+      tier: 'client',
+      name: `${TEST_PREFIX}image-${uniqueSuffix()}`,
+    });
+    const res = await put(`/libraries/${lib.id}/header-footer`, compositionWithMaxSizeImage());
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      success: boolean;
+      data: { config: { header?: { center?: { content?: Array<{ imageData?: string }> } } } };
+    };
+    expect(json.success).toBe(true);
+    const persistedContent = json.data.config.header?.center?.content;
+    expect(persistedContent?.[0]?.imageData).toHaveLength(MAX_IMAGE_BASE64_LENGTH);
   });
 
   it('INV7: a composition body over the route-scoped limit is rejected pre-Zod with the documented 413', async () => {

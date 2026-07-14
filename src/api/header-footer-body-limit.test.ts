@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
 import {
+  HEADER_FOOTER_BODY_ENVELOPE_BYTES,
   HEADER_FOOTER_JSON_BODY_LIMIT_BYTES,
   isHeaderFooterCompositionWrite,
 } from './header-footer-body-limit.js';
@@ -21,6 +22,17 @@ describe('HEADER_FOOTER_JSON_BODY_LIMIT_BYTES (#490)', () => {
     // room on top of one max-sized image, so the limit can never merely equal
     // MAX_IMAGE_BASE64_LENGTH.
     expect(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES).toBeGreaterThan(MAX_IMAGE_BASE64_LENGTH);
+  });
+
+  it('equals MAX_IMAGE_BASE64_LENGTH + HEADER_FOOTER_BODY_ENVELOPE_BYTES exactly', () => {
+    // INV2: pins the algebraic *derivation* itself, not just an inequality —
+    // a regression that swaps the sum for a bare hardcoded literal equal to
+    // today's value would still satisfy INV1 above, but fails this the
+    // moment either input constant moves and the hardcoded value doesn't
+    // move with it.
+    expect(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES).toBe(
+      MAX_IMAGE_BASE64_LENGTH + HEADER_FOOTER_BODY_ENVELOPE_BYTES
+    );
   });
 });
 
@@ -66,6 +78,41 @@ describe('isHeaderFooterCompositionWrite (#490)', () => {
       isHeaderFooterCompositionWrite({
         method: 'PUT',
         path: '/libraries/11111111-1111-1111-1111-111111111111/keynotes',
+      })
+    ).toBe(false);
+  });
+
+  // Express 5 (`app.set('case sensitive routing')` / `'strict routing'`
+  // both default to disabled) routes case-insensitively and treats a
+  // trailing slash as optional, so `req.path` reaching this predicate can
+  // legitimately differ in case or trailing slash from the route pattern
+  // while Express still dispatches it to the composition handler. The
+  // predicate must classify every one of those the same as the canonical
+  // form, or a real composition write silently falls through to the small
+  // default body-parser limit instead of the derived one.
+  it('true for a mixed-case path (Express 5 default: case-insensitive routing)', () => {
+    expect(
+      isHeaderFooterCompositionWrite({
+        method: 'PUT',
+        path: '/Libraries/11111111-1111-1111-1111-111111111111/Header-Footer',
+      })
+    ).toBe(true);
+  });
+
+  it('true for a path with a trailing slash (Express 5 default: non-strict routing)', () => {
+    expect(
+      isHeaderFooterCompositionWrite({
+        method: 'PUT',
+        path: '/libraries/11111111-1111-1111-1111-111111111111/header-footer/',
+      })
+    ).toBe(true);
+  });
+
+  it('still false for a resolved-view path even with mixed case', () => {
+    expect(
+      isHeaderFooterCompositionWrite({
+        method: 'PUT',
+        path: '/Projects/11111111-1111-1111-1111-111111111111/Header-Footer/Resolved',
       })
     ).toBe(false);
   });

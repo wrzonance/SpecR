@@ -12,7 +12,8 @@
 // Scoped to PUT only: GET and DELETE never carry a request body, so widening
 // their limit has no benefit and would needlessly widen the request-body DoS
 // surface those routes are otherwise protected from by the small default.
-import type { Request } from 'express';
+import express from 'express';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
 
 /**
@@ -35,8 +36,14 @@ export const HEADER_FOOTER_BODY_ENVELOPE_BYTES = 262_144; // 256 KiB
 export const HEADER_FOOTER_JSON_BODY_LIMIT_BYTES =
   MAX_IMAGE_BASE64_LENGTH + HEADER_FOOTER_BODY_ENVELOPE_BYTES;
 
+// Express 5 defaults both `case sensitive routing` and `strict routing` to
+// disabled, so `router.put('/libraries/:id/header-footer', ...)` matches a
+// request path regardless of case and with or without a trailing slash —
+// `req.path` reaching this predicate can carry either. The `i` flag and the
+// trailing `\/?` mirror that exactly so this predicate never disagrees with
+// how Express actually dispatched the request.
 const HEADER_FOOTER_COMPOSITION_PATH =
-  /^\/(?:libraries|projects|packages|revisions)\/[^/]+\/header-footer$/;
+  /^\/(?:libraries|projects|packages|revisions)\/[^/]+\/header-footer\/?$/i;
 
 /**
  * True only for the four `PUT .../header-footer` composition-write routes —
@@ -48,4 +55,30 @@ const HEADER_FOOTER_COMPOSITION_PATH =
  */
 export function isHeaderFooterCompositionWrite(req: Pick<Request, 'method' | 'path'>): boolean {
   return req.method === 'PUT' && HEADER_FOOTER_COMPOSITION_PATH.test(req.path);
+}
+
+/**
+ * Builds the REST body-size dispatch middleware `src/index.ts` wires
+ * directly in front of `router` — exported (rather than left as an inline
+ * closure in `src/index.ts`) so both production and integration tests use
+ * the exact same wiring instead of the test hand-copying it (#490). `/mcp`
+ * is skipped entirely (it applies its own route-local limit in
+ * `src/mcp/server.ts`); every header/footer composition PUT gets the
+ * derived, image-sized limit; every other REST route keeps
+ * `express.json()`'s untouched default.
+ */
+export function createHeaderFooterBodyLimitMiddleware(): RequestHandler {
+  const restJson = express.json();
+  const headerFooterCompositionJson = express.json({ limit: HEADER_FOOTER_JSON_BODY_LIMIT_BYTES });
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (req.path.startsWith('/mcp')) {
+      next();
+      return;
+    }
+    if (isHeaderFooterCompositionWrite(req)) {
+      headerFooterCompositionJson(req, res, next);
+      return;
+    }
+    restJson(req, res, next);
+  };
 }
