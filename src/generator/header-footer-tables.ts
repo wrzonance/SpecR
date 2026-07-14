@@ -13,8 +13,8 @@
 // (`tableWarnings`), matching the "warned, never silently dropped" posture
 // `header-footer-images.ts` uses for other unrenderable image cases.
 
-import { Paragraph, Table, TableCell, TableRow, TextRun } from 'docx';
-import type { ITableBordersOptions } from 'docx';
+import { BorderStyle, Paragraph, Table, TableCell, TableRow, TextRun } from 'docx';
+import type { IBorderOptions, ITableBordersOptions } from 'docx';
 import {
   cascadeStyle,
   headerFooterRunOptions,
@@ -98,21 +98,30 @@ function buildTableRow(
   });
 }
 
+// docx's `Table` constructor injects a DEFAULT single-line border on all six
+// edges whenever the `borders` option is OMITTED (verified against real
+// `Packer` output). A captured borderless header/footer table (the common
+// case — most layout grids draw no lines) carries `borders: undefined`, so
+// omitting the option would round-trip it into a *bordered* table — a silent
+// fidelity break. To prevent that, borders are ALWAYS emitted explicitly:
+// this all-`NONE` set suppresses docx's default when there is no enabled rule
+// line to draw.
+const NO_TABLE_BORDER: IBorderOptions = { style: BorderStyle.NONE, size: 0, color: 'auto' };
+
 /**
  * `table.borders` (a single `HeaderFooterRuleLine`, ADR-071 decision 2)
  * applied UNIFORMLY to all six `ITableBordersOptions` edges via the same
  * `ruleLineBorder` helper `header-footer-regions.ts` uses for paragraph
  * rule lines — verified against real docx `Packer` output: a real
  * `<w:tblBorders>` with all six children (`top`/`bottom`/`left`/`right`/
- * `insideH`/`insideV`) serializes correctly. `undefined` when `borders` is
- * absent or not explicitly `enabled: true` (mirrors `ruleLineBorder`'s own
- * gate).
+ * `insideH`/`insideV`) serializes correctly. Falls back to
+ * {@link NO_TABLE_BORDER} (an explicit no-border set) when `borders` is
+ * absent or not explicitly `enabled: true` — NOT `undefined`, because an
+ * omitted `borders` option makes docx draw its default single-line grid
+ * (see the note on `NO_TABLE_BORDER`).
  */
-function tableBordersOption(
-  borders: HeaderFooterTable['borders']
-): ITableBordersOptions | undefined {
-  const border = ruleLineBorder(borders);
-  if (border === undefined) return undefined;
+function tableBordersOption(borders: HeaderFooterTable['borders']): ITableBordersOptions {
+  const border = ruleLineBorder(borders) ?? NO_TABLE_BORDER;
   return {
     top: border,
     bottom: border,
@@ -138,11 +147,10 @@ export function buildTable(
   ctx: HeaderFooterFieldContext
 ): Table | undefined {
   if (table === undefined) return undefined;
-  const borders = tableBordersOption(table.borders);
   return new Table({
     rows: table.rows.map((row) => buildTableRow(row, ctx, inheritedStyle)),
     ...(table.columnWidths !== undefined ? { columnWidths: table.columnWidths } : {}),
-    ...(borders !== undefined ? { borders } : {}),
+    borders: tableBordersOption(table.borders),
   });
 }
 

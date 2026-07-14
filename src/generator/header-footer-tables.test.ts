@@ -168,26 +168,32 @@ describe('buildTable — round-trip fidelity', () => {
 });
 
 describe('buildTable — borders (ADR-071 decision 2: one rule line, all six edges)', () => {
-  // docx's `Table` always synthesizes its OWN default `w:tblBorders` (single/
-  // auto/sz=4 on every edge) when the `borders` option is omitted entirely —
-  // this is docx's own unconditional behavior (verified against real Packer
-  // output), not something `buildTable` renders. The real invariant under
-  // test is that `buildTable` never passes a `borders` option here: the
-  // emitted block is exactly docx's untouched default, never the
-  // 336699/double styling the "applies one enabled rule line" case below
-  // pins when a rule line IS declared and enabled.
-  it('passes no borders option through when table.borders is absent', async () => {
+  // A captured borderless table (borders absent, or a rule line not explicitly
+  // `enabled: true`) MUST render no visible borders. docx's own `Table` injects
+  // a default single/auto/sz=4 grid on every edge when the `borders` option is
+  // OMITTED (verified against real Packer output), which would silently turn a
+  // borderless source table into a bordered one — a round-trip fidelity break.
+  // buildTable therefore ALWAYS emits an explicit `w:tblBorders`: all six edges
+  // set to `w:val="none"` here to suppress docx's default. The 336699/double
+  // styling below is what an explicitly enabled rule line pins.
+  const NONE_EDGES = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'];
+
+  it('renders all six edges as w:val="none" when table.borders is absent (suppresses docx default)', async () => {
     const table = textTable([[literalCell('A')]]);
     const built = buildTable(table, undefined, CTX);
     const xml = await renderTableToHeaderXml(built!);
     const bordersMatch = /<w:tblBorders>([\s\S]*?)<\/w:tblBorders>/.exec(xml);
     expect(bordersMatch).not.toBeNull();
-    expect(bordersMatch![1]).not.toContain('336699');
-    expect(bordersMatch![1]).toMatch(/w:val="single"/);
-    expect(bordersMatch![1]).toMatch(/w:color="auto"/);
+    const bordersXml = bordersMatch![1]!;
+    expect(bordersXml).not.toMatch(/w:val="single"/);
+    for (const edge of NONE_EDGES) {
+      const edgeMatch = new RegExp(`<w:${edge}[^/]*/>`).exec(bordersXml);
+      expect(edgeMatch, `expected a <w:${edge}/> border edge`).not.toBeNull();
+      expect(edgeMatch![0]).toContain('w:val="none"');
+    }
   });
 
-  it('passes no borders option through when table.borders.enabled is not exactly true', async () => {
+  it('renders all six edges as w:val="none" when table.borders.enabled is not exactly true', async () => {
     const table: HeaderFooterTable = {
       rows: [{ cells: [literalCell('A')] }],
       borders: { enabled: false, widthTwips: 8, color: '336699' },
@@ -196,8 +202,14 @@ describe('buildTable — borders (ADR-071 decision 2: one rule line, all six edg
     const xml = await renderTableToHeaderXml(built!);
     const bordersMatch = /<w:tblBorders>([\s\S]*?)<\/w:tblBorders>/.exec(xml);
     expect(bordersMatch).not.toBeNull();
-    expect(bordersMatch![1]).not.toContain('336699');
-    expect(bordersMatch![1]).toMatch(/w:color="auto"/);
+    const bordersXml = bordersMatch![1]!;
+    expect(bordersXml).not.toContain('336699');
+    expect(bordersXml).not.toMatch(/w:val="single"/);
+    for (const edge of NONE_EDGES) {
+      const edgeMatch = new RegExp(`<w:${edge}[^/]*/>`).exec(bordersXml);
+      expect(edgeMatch, `expected a <w:${edge}/> border edge`).not.toBeNull();
+      expect(edgeMatch![0]).toContain('w:val="none"');
+    }
   });
 
   it('applies one enabled rule line uniformly to all six ITableBordersOptions edges', async () => {
