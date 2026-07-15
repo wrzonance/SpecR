@@ -303,6 +303,110 @@ describe('HeaderFooterCompositionSchema — image fields (#308, ADR-069)', () =>
   });
 });
 
+// #309 (ADR-071): a table/grid layout for header/footer content, as a new
+// sibling slot on HeaderFooterRegionSchema alongside left/center/right — not
+// a replacement for the paragraph model. Cell content reuses the existing
+// 13-kind HeaderFooterFieldSchema, cell/table style reuses
+// HeaderFooterVisualStyleSchema, and table borders reuse
+// HeaderFooterRuleLineSchema verbatim (ADR-021 "known keys typed, unknown
+// keys open" posture kept uniform, no parallel schema family for tables).
+describe('HeaderFooterCompositionSchema — table content (#309, ADR-071)', () => {
+  it('accepts a region.table with rows/cells, mixed field content, and round-trips open extension keys at every level (ADR-021 openness)', () => {
+    const input = {
+      footer: {
+        table: {
+          rows: [
+            {
+              cells: [
+                {
+                  content: [{ kind: 'literal', text: 'Drawing No.' }],
+                  columnSpan: 2,
+                  style: { bold: true },
+                },
+                { content: [{ kind: 'pageNumber' }], separator: ' of ' },
+              ],
+              rowVendorKey: 'vendor-a',
+            },
+          ],
+          columnWidths: [4500, 2500],
+          borders: { enabled: true, widthTwips: 8, color: '000000' },
+          tableVendorKey: { nested: true },
+        },
+      },
+    };
+    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
+  });
+
+  it('rejects a table with zero rows (a table with no rows is a fabricated shape, not a valid one)', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({ footer: { table: { rows: [] } } })
+    ).toThrow();
+  });
+
+  it('rejects a table row whose cells is not an array', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        footer: { table: { rows: [{ cells: 'not-an-array' }] } },
+      })
+    ).toThrow();
+  });
+
+  it('rejects an invalid field kind nested inside table cell content (catchall must not swallow typed-field errors)', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        footer: { table: { rows: [{ cells: [{ content: [{ kind: 'bogus' }] }] }] } },
+      })
+    ).toThrow();
+  });
+
+  it('enforces the imageData base64-length cap on an image field nested inside a table cell', () => {
+    const imageData = 'A'.repeat(MAX_IMAGE_BASE64_LENGTH + 1);
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        footer: { table: { rows: [{ cells: [{ content: [{ kind: 'image', imageData }] }] }] } },
+      })
+    ).toThrow();
+  });
+
+  it('rejects a non-positive columnSpan and a non-positive columnWidths entry', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        footer: { table: { rows: [{ cells: [{ columnSpan: 0 }] }] } },
+      })
+    ).toThrow();
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        footer: { table: { rows: [{ cells: [{}] }], columnWidths: [0] } },
+      })
+    ).toThrow();
+  });
+
+  it('rejects a non-integer borders.widthTwips (borders reuses HeaderFooterRuleLineSchema verbatim)', () => {
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        footer: { table: { rows: [{ cells: [{}] }], borders: { widthTwips: 1.5 } } },
+      })
+    ).toThrow();
+  });
+
+  it('a region can carry both a paragraph (left/center/right) and a table together, in that order', () => {
+    const input = {
+      footer: {
+        left: { content: [{ kind: 'literal', text: 'Approved by:' }] },
+        table: {
+          rows: [{ cells: [{ content: [{ kind: 'literal', text: 'Sheet 1 of 3' }] }] }],
+        },
+      },
+    };
+    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
+  });
+
+  it('still validates a pre-#309 region with no table key (additive-optional, backward compatible)', () => {
+    const preExisting = { header: { center: { content: [{ kind: 'sectionTitle' }] } } };
+    expect(HeaderFooterCompositionSchema.parse(preExisting)).toEqual(preExisting);
+  });
+});
+
 // Code-review finding (#490 follow-up): every level of the composition is
 // `.catchall(JsonValue)` (ADR-021 open extensions), which has no size bound
 // of its own. Without a total-size invariant, a request that Zod would call
@@ -377,5 +481,28 @@ describe('HeaderFooterCompositionWriteSchema — total-size invariant matches th
       vendorExtension: { note: 'firm-logo-v2' },
     };
     expect(HeaderFooterCompositionWriteSchema.parse(input)).toEqual(input);
+  });
+
+  // Merge integration (#309 table shapes × #490 write-size invariant): the write
+  // schema is the shared structural schema PLUS `.check`, so it must accept the
+  // new region.table shapes untouched AND still enforce the transport budget
+  // against open-extension data nested inside a table cell — the budget is a
+  // top-level check, so table-cell catchall size counts toward it.
+  it('accepts a table-bearing composition within budget and trips the size check on oversized table-cell extension data', () => {
+    const within = {
+      footer: {
+        table: { rows: [{ cells: [{ content: [{ kind: 'literal', text: 'Sheet 1 of 3' }] }] }] },
+      },
+    };
+    expect(HeaderFooterCompositionWriteSchema.parse(within)).toEqual(within);
+
+    const oversized = {
+      footer: {
+        table: {
+          rows: [{ cells: [{ vendorBlob: 'A'.repeat(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES) }] }],
+        },
+      },
+    };
+    expect(() => HeaderFooterCompositionWriteSchema.parse(oversized)).toThrow();
   });
 });

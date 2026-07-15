@@ -1066,7 +1066,11 @@ describe('parseDocx — header/footer capture wiring (#306)', () => {
   // is already exhaustively unit-tested for this at its own boundary — this
   // test pins that the full parseDocx pipeline actually wires it through end
   // to end, since the prior 3 tests here only exercise literal text and the
-  // inactiveVariant toggle, never an actual unsupported content *type*.
+  // inactiveVariant toggle, never an actual unsupported content *type*. The
+  // table is nested (a w:tbl inside a w:tc), a structurally-disqualifying
+  // shape (#309, ADR-071 decision 4) — a plain, simple table is now captured
+  // into region.table rather than preserved as unmodeled, so this fixture
+  // must stay genuinely unsupported to keep exercising this path.
   it('unsupported image and table content in a header are preserved in raw.unmodeled and warned, never silently discarded', async () => {
     const zip = new JSZip();
     zip.file('word/styles.xml', MINIMAL_STYLES);
@@ -1080,7 +1084,7 @@ describe('parseDocx — header/footer capture wiring (#306)', () => {
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
   <w:p><w:r><w:drawing><wp:inline/></w:drawing></w:r></w:p>
-  <w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+  <w:tbl><w:tr><w:tc><w:tbl><w:tr><w:tc><w:p><w:r><w:t>nested cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:tc></w:tr></w:tbl>
 </w:hdr>`
     );
     const buffer = await zip.generateAsync({ type: 'nodebuffer' });

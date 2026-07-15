@@ -1,4 +1,4 @@
-import { BorderStyle, Paragraph, Tab, TabStopPosition, TabStopType, TextRun } from 'docx';
+import { BorderStyle, Paragraph, Table, Tab, TabStopPosition, TabStopType, TextRun } from 'docx';
 import type { IBorderOptions, IBordersOptions, TabStopDefinition } from 'docx';
 import type { HeaderFooterVariant } from '../ast/index.js';
 import {
@@ -10,6 +10,7 @@ import {
   type HeaderFooterVisualStyle,
 } from './header-footer-fields.js';
 import { imageFieldWarnings } from './header-footer-images.js';
+import { buildTable } from './header-footer-tables.js';
 
 // Local indexed-access aliases (see header-footer-fields.ts for the same
 // pattern): the AST barrel (`src/ast/index.ts`) exports only
@@ -195,4 +196,33 @@ export function buildRegionParagraph(
     tabStops: [CENTER_TAB_STOP, RIGHT_TAB_STOP],
     ...paragraphBorderOption(border, ruleLineEdge),
   });
+}
+
+/**
+ * `[paragraph?, table?]` for one region, in that fixed order (#309):
+ * everything {@link buildRegionParagraph} already renders for `region`'s
+ * left/center/right cells and rule line, followed by `region.table` (via
+ * `header-footer-tables.ts`'s `buildTable`) when present. `[]` when the
+ * region renders neither. Verified against real docx `Packer` output:
+ * `Header`/`Footer`'s `children` option accepts a mixed
+ * `(Paragraph | Table)[]`, and a paragraph followed by a table serializes in
+ * that order.
+ *
+ * `region.style` is cascaded into the table exactly once, here —
+ * `buildTable` itself passes the style it's given straight through to every
+ * row/cell rather than re-cascading (see `header-footer-tables.ts`'s
+ * `buildTable` doc comment), so this is the only cascade step for the table
+ * branch, mirroring the cascade `buildRegionParagraph` already performs
+ * internally for the paragraph branch.
+ */
+export function buildRegionChildren(
+  region: HeaderFooterRegion | undefined,
+  inheritedStyle: HeaderFooterVisualStyle | undefined,
+  ctx: HeaderFooterFieldContext,
+  ruleLineEdge: RuleLineEdge
+): readonly (Paragraph | Table)[] {
+  const paragraph = buildRegionParagraph(region, inheritedStyle, ctx, ruleLineEdge);
+  const style = cascadeStyle(region?.style, inheritedStyle);
+  const table = buildTable(region?.table, style, ctx);
+  return [...(paragraph !== undefined ? [paragraph] : []), ...(table !== undefined ? [table] : [])];
 }

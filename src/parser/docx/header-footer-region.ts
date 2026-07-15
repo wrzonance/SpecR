@@ -2,11 +2,14 @@
 // reads a single word/header*.xml or word/footer*.xml part and captures its
 // first content-bearing paragraph into a HeaderFooterRegion ({left, center,
 // right} cells split on tab boundaries, plus a rule-line border passthrough).
-// Table detection, tab-boundary overflow, and any second content-bearing
-// paragraph are preserved as unmodeled entries rather than silently dropped
-// (acceptance criteria 3/4). Field-code/text recognition itself lives in
-// header-footer-field-recognition.ts; relationship/section-property
-// discovery lives in header-footer-relationships.ts.
+// Tab-boundary overflow and any second content-bearing paragraph are
+// preserved as unmodeled entries rather than silently dropped (acceptance
+// criteria 3/4). A root-level w:tbl (#309, ADR-071) is captured into the
+// region's `table` slot by header-footer-table.ts, whose captureTablesForRegion
+// this module calls and merges into the same region. Field-code/text
+// recognition itself lives in header-footer-field-recognition.ts;
+// relationship/section-property discovery lives in
+// header-footer-relationships.ts.
 
 import { ParserError } from '../error.js';
 import {
@@ -30,6 +33,7 @@ import type {
   HeaderFooterVisualStyle,
   KnownSectionIdentity,
 } from './header-footer-field-recognition.js';
+import { captureTablesForRegion } from './header-footer-table.js';
 import type { HeaderFooterUnmodeledEntry } from './types.js';
 import type { HeaderFooterVariant } from '../../ast/index.js';
 
@@ -50,8 +54,10 @@ export interface RegionCaptureResult {
 
 // Internal helpers build unmodeled entries before variant/region are known
 // at their call depth — stamped on once, at the top of captureRegion, rather
-// than threaded through every helper.
-type PartialUnmodeled = Omit<HeaderFooterUnmodeledEntry, 'variant' | 'region'>;
+// than threaded through every helper. Exported (shared, not redeclared) so
+// header-footer-table.ts's own per-cell/per-table unmodeled entries use the
+// exact same shape.
+export type PartialUnmodeled = Omit<HeaderFooterUnmodeledEntry, 'variant' | 'region'>;
 
 function stamp(
   variant: HeaderFooterUnmodeledEntry['variant'],
@@ -61,9 +67,11 @@ function stamp(
 }
 
 // Own instance, scoped to header/footer part vocabulary (w:hdr/w:ftr root,
-// w:p/w:r/w:tbl as the only repeatable wrapper tags this scan needs) —
-// shares createDocumentXmlParser's #22/#120-safe base config (xml-utils).
-const partParser = createDocumentXmlParser(['w:p', 'w:r', 'w:tbl']);
+// w:p/w:r/w:tbl/w:tr/w:tc/w:gridCol as the only repeatable wrapper tags this
+// scan needs — the table-structure tags support header-footer-table.ts's
+// row/cell/column-width capture) — shares createDocumentXmlParser's
+// #22/#120-safe base config (xml-utils).
+const partParser = createDocumentXmlParser(['w:p', 'w:r', 'w:tbl', 'w:tr', 'w:tc', 'w:gridCol']);
 
 function partRootKey(region: HeaderFooterUnmodeledEntry['region']): 'w:hdr' | 'w:ftr' {
   return region === 'header' ? 'w:hdr' : 'w:ftr';
@@ -83,21 +91,15 @@ function parsePartXml(
   }
 }
 
-// ─── table detection (root-level scan, ADR-068) ─────────────────────────────
-
-// OOXML tables (w:tbl) cannot nest inside a paragraph (w:p) — a header/footer
-// part's w:tbl is always a root-level sibling of w:p, never a descendant.
-// Scanning the part root's direct children (never inside a paragraph's run
-// sequence) is a structural fact, not a heuristic (ADR-068).
-function findTables(root: Record<string, unknown>): readonly Record<string, unknown>[] {
-  return toArray<Record<string, unknown>>(
-    root['w:tbl'] as readonly Record<string, unknown>[] | undefined
-  );
-}
-
 // ─── paragraph selection ────────────────────────────────────────────────────
+//
+// Root-level w:tbl detection (ADR-068: a w:tbl cannot nest inside a w:p, so
+// it is always a root-level sibling — a structural fact, not a heuristic)
+// now lives in header-footer-table.ts's captureTablesForRegion, which reuses
+// paragraphsOf/runsOf/paragraphHasContent/isDrawingRun/buildCellContent below
+// for its own per-cell content capture.
 
-function paragraphsOf(root: Record<string, unknown>): readonly Record<string, unknown>[] {
+export function paragraphsOf(root: Record<string, unknown>): readonly Record<string, unknown>[] {
   return toArray<Record<string, unknown>>(
     root['w:p'] as readonly Record<string, unknown>[] | undefined
   );
@@ -109,19 +111,19 @@ function paragraphsOf(root: Record<string, unknown>): readonly Record<string, un
 // already handles. A direct-children-only scan silently dropped any wrapped header/
 // footer text with no unmodeled entry and no warning; this makes wrapped content
 // visible to capture the same way it already is for ordinary body paragraphs.
-function runsOf(paragraph: Record<string, unknown>): readonly Record<string, unknown>[] {
+export function runsOf(paragraph: Record<string, unknown>): readonly Record<string, unknown>[] {
   const runs: Record<string, unknown>[] = [];
   collectRuns(paragraph, runs);
   return runs;
 }
 
-function paragraphHasContent(runs: readonly Record<string, unknown>[]): boolean {
+export function paragraphHasContent(runs: readonly Record<string, unknown>[]): boolean {
   return runs.some(
     (r) => 'w:t' in r || 'w:fldChar' in r || 'w:instrText' in r || 'w:drawing' in r || 'w:pict' in r
   );
 }
 
-// ─── rule line (paragraph border passthrough, ADR-068) ─────────────────────
+// ─── rule line / border passthrough (ADR-068, generalized for tables #309) ─
 
 // Inverse of generator/header-footer-regions.ts's ruleLineBorderSize: w:sz is
 // eighths of a point (ECMA-376 §17.3.1.24); widthTwips = w:sz / 0.4 (i.e.
@@ -135,19 +137,19 @@ function ruleLineWidthTwips(szStr: string): number | undefined {
 }
 
 /**
- * Read the first content-bearing paragraph's border on `edge` ('bottom' for
- * a header's rule line beneath its text, 'top' for a footer's rule line
- * above it) as a verbatim style passthrough (ADR-068): w:val -> style, w:sz
- * -> widthTwips, w:color -> color. `w:val="nil"`/`"none"` explicitly
- * suppresses the border — treated as no rule line at all, not `enabled:
- * false`.
+ * Read a single border edge (a `w:*Bdr`-shaped container's `edgeKey` child,
+ * e.g. `w:pBdr`'s `w:bottom`, or `w:tblBorders`'s `w:top`) as a verbatim
+ * style passthrough (ADR-068/ADR-071): w:val -> style, w:sz -> widthTwips,
+ * w:color -> color. `w:val="nil"`/`"none"` explicitly suppresses the border
+ * — treated as no rule line at all, not `enabled: false`. Generalized out of
+ * the original paragraph-only captureRuleLine (#309) so header-footer-table.ts
+ * can reuse the exact same edge-reading logic for a table's `w:tblBorders`.
  */
-function captureRuleLine(
-  pPr: Record<string, unknown> | undefined,
-  edge: 'top' | 'bottom'
+export function captureBorderEdge(
+  borderContainer: Record<string, unknown> | undefined,
+  edgeKey: string
 ): HeaderFooterRuleLine | undefined {
-  const pBdr = asRecord(pPr?.['w:pBdr']);
-  const border = asRecord(pBdr?.[`w:${edge}`]);
+  const border = asRecord(borderContainer?.[edgeKey]);
   if (!border) return undefined;
   const val = extractAttrStr(border, '@_w:val');
   if (val === '' || val === 'nil' || val === 'none') return undefined;
@@ -159,6 +161,19 @@ function captureRuleLine(
     widthTwips: szStr === '' ? undefined : ruleLineWidthTwips(szStr),
     color: color === '' ? undefined : color,
   }) as HeaderFooterRuleLine;
+}
+
+/**
+ * Read the first content-bearing paragraph's border on `edge` ('bottom' for
+ * a header's rule line beneath its text, 'top' for a footer's rule line
+ * above it). Thin wrapper over captureBorderEdge, scoped to a paragraph's
+ * own w:pBdr container.
+ */
+function captureRuleLine(
+  pPr: Record<string, unknown> | undefined,
+  edge: 'top' | 'bottom'
+): HeaderFooterRuleLine | undefined {
+  return captureBorderEdge(asRecord(pPr?.['w:pBdr']), `w:${edge}`);
 }
 
 // ─── field-marker resolution ────────────────────────────────────────────────
@@ -204,8 +219,10 @@ function firstRunStyle(
 // Builds one cell's content: consecutive plain-text runs are concatenated
 // and matched against the known section identity (ADR-068: literal equality
 // only); a recognized field marker flushes the buffer first, then
-// contributes its own field or unmodeled entry.
-function buildCellContent(
+// contributes its own field or unmodeled entry. Exported so
+// header-footer-table.ts's per-table-cell capture (#309) reuses the exact
+// same literal/field recognition instead of a second implementation.
+export function buildCellContent(
   pieces: readonly Record<string, unknown>[],
   known: KnownSectionIdentity
 ): {
@@ -238,7 +255,9 @@ function buildCellContent(
 
 // ─── tab-boundary cell split (ADR-068: KNOWN AMBIGUITY at 3+ tabs) ─────────
 
-function isDrawingRun(run: Record<string, unknown>): boolean {
+// Exported so header-footer-table.ts's table-cell capture (#309) drops an
+// image run out of cell content the same way region capture already does.
+export function isDrawingRun(run: Record<string, unknown>): boolean {
   return 'w:drawing' in run || 'w:pict' in run;
 }
 
@@ -378,11 +397,14 @@ function captureFromParagraphs(
 /**
  * Capture one header/footer part (`partXml`, the already-read text of a
  * single word/header*.xml or word/footer*.xml) into at most one
- * HeaderFooterRegion, plus every unsupported/unrecognized content item as a
- * stamped, JSON-safe unmodeled entry (ADR-068). `edge` selects which
- * paragraph border represents this region's rule line ('bottom' for a
- * header, 'top' for a footer). Never throws for document-content reasons —
- * only malformed-but-present part XML throws (DOCX_HEADER_FOOTER_XML_INVALID).
+ * HeaderFooterRegion — its first content-bearing paragraph (left/center/right
+ * cells) AND its first qualifying root-level table (#309, ADR-071
+ * captureTablesForRegion), both merged into the same region when present —
+ * plus every unsupported/unrecognized content item as a stamped, JSON-safe
+ * unmodeled entry (ADR-068). `edge` selects which paragraph border
+ * represents this region's rule line ('bottom' for a header, 'top' for a
+ * footer). Never throws for document-content reasons — only
+ * malformed-but-present part XML throws (DOCX_HEADER_FOOTER_XML_INVALID).
  */
 export function captureRegion(
   partXml: string,
@@ -396,12 +418,17 @@ export function captureRegion(
   if (!root) return { region: undefined, unmodeled: [] };
 
   const toStamped = stamp(variant, region);
-  const tableUnmodeled = findTables(root).map((tbl) =>
-    toStamped({ kind: 'table', detail: compact(tbl) })
-  );
   const fromParagraphs = captureFromParagraphs(paragraphsOf(root), edge, known);
+  const tableResult = captureTablesForRegion(root, known);
+  const mergedRegion = compact({
+    ...fromParagraphs.region,
+    table: tableResult.table,
+  }) as HeaderFooterRegion;
   return {
-    region: fromParagraphs.region,
-    unmodeled: [...tableUnmodeled, ...fromParagraphs.unmodeled.map(toStamped)],
+    region: Object.keys(mergedRegion).length > 0 ? mergedRegion : undefined,
+    unmodeled: [
+      ...tableResult.unmodeled.map(toStamped),
+      ...fromParagraphs.unmodeled.map(toStamped),
+    ],
   };
 }
