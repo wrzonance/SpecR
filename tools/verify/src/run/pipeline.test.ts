@@ -4,14 +4,20 @@
 // (2) No raw Error or unhandled rejection ever escapes this module's async
 //     boundary, even when a stage fails or when recording that failure
 //     itself throws.
+// (3) runGenerate's templateId param is `string | undefined` (#305 task
+//     3/7) — exported alongside failRun so the sibling header/footer
+//     fixture pipeline can drive its own generate stage. The invariant that
+//     matters at this module's boundary: when templateId is undefined, the
+//     request body handed to apiClient.generateDocx never carries a
+//     `templateId` key at all (not a `templateId: undefined` key).
 
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createPipeline } from './pipeline.js';
+import { createPipeline, runGenerate } from './pipeline.js';
 import { createRunStore, type RunStore } from './run-store.js';
-import type { ApiClient } from '../api-client/client.js';
+import type { ApiClient, GenerateDocxOptions } from '../api-client/client.js';
 
 function stubApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   const defaults: ApiClient = {
@@ -32,6 +38,16 @@ function stubApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
         report: { nodeTypes: [], skippedNodeTypes: [], vanishSkipped: 0 },
       }),
     generateDocx: () => Promise.resolve(Buffer.from('generated docx bytes')),
+    // Header/footer fixture-provisioning methods (#305 task 2/7) — not
+    // exercised by this suite's own tests (that's header-footer-pipeline
+    // .test.ts, task 8/7's job); stubbed only so this hand-built ApiClient
+    // mock keeps satisfying the interface as it grows.
+    createClientLibrary: () => Promise.reject(new Error('createClientLibrary not stubbed')),
+    importLibraryMaster: () => Promise.reject(new Error('importLibraryMaster not stubbed')),
+    waitForLibraryImportJob: () => Promise.reject(new Error('waitForLibraryImportJob not stubbed')),
+    createProject: () => Promise.reject(new Error('createProject not stubbed')),
+    addSectionToProject: () => Promise.reject(new Error('addSectionToProject not stubbed')),
+    putProjectHeaderFooter: () => Promise.reject(new Error('putProjectHeaderFooter not stubbed')),
   };
   return { ...defaults, ...overrides };
 }
@@ -185,5 +201,23 @@ describe('pipeline (orchestration + no-escape boundary)', () => {
     } finally {
       process.removeListener('unhandledRejection', onUnhandledRejection);
     }
+  });
+
+  it('runGenerate never sends a templateId key when called with templateId=undefined', async () => {
+    const capturedOptions: GenerateDocxOptions[] = [];
+    const apiClient = stubApiClient({
+      generateDocx: (_specId, options = {}) => {
+        capturedOptions.push(options);
+        return Promise.resolve(Buffer.from('generated docx bytes'));
+      },
+    });
+    const record = runStore.createRun({ runId: 'templateless-run', referenceFilename: 'r.docx' });
+
+    await runGenerate({ apiClient, runStore }, record.runId, 'spec-1', undefined, undefined);
+
+    expect(capturedOptions).toHaveLength(1);
+    const sentOptions = capturedOptions[0];
+    if (sentOptions === undefined) throw new Error('generateDocx was never called');
+    expect('templateId' in sentOptions).toBe(false);
   });
 });

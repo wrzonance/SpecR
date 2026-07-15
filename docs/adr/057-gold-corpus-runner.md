@@ -38,6 +38,13 @@ The fingerprint reuses `fixtureRecord` (parts/note-leak) and `buildHierarchyRepo
 (confidence bands) rather than duplicating either, so it cannot drift from the renderers
 or the WS2 report.
 
+**Update 2026-07-15:** the purpose-built visual-confirmation instrument for blessing is now the
+round-trip harness at `tools/verify` (#150/#305) — reference vs round-trip vs region-scoped pixel
+diff, headers/footers included. The linkage remains workflow-level only; the harness and the gold
+runner stay deliberately uncoupled in code (the harness needs a browser + the REST API + a database,
+while `gold:verify` stays fast, headless, and structural). The "visually confirmed a parse in the
+web UI" step above is served by that harness; `gold:bless` is still run separately by hand.
+
 ## Consequences
 
 - Inference regressions on real specs are caught locally by an explicit veto, not left

@@ -1,8 +1,9 @@
 // Express app wiring for the visual round-trip verification harness (#150,
 // task 6/8): mounts the run lifecycle + screenshot-ingestion routes
-// (routes/runs.ts), the guarded artifact file server (routes/files.ts), and
-// static UMD bundles for docx-preview + jszip — the harness's own browser
-// page loads these via <script> tags, served directly out of this
+// (routes/runs.ts), the guarded artifact file server (routes/files.ts), the
+// header/footer fixture route (routes/header-footer-fixtures.ts, #305 task
+// 6/7), and static UMD bundles for docx-preview + jszip — the harness's own
+// browser page loads these via <script> tags, served directly out of this
 // package's own node_modules (paths confirmed reachable by the WT-150
 // spike) rather than bundled, since this is a local dev tool, not a shipped
 // artifact (issue #150 design decision 5).
@@ -16,12 +17,19 @@ import multer from 'multer';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import { createRunsRouter } from './routes/runs.js';
 import { createFilesRouter } from './routes/files.js';
+import { createHeaderFooterFixturesRouter } from './routes/header-footer-fixtures.js';
 import type { Pipeline } from '../run/pipeline.js';
 import type { RunStore } from '../run/run-store.js';
+import type { HeaderFooterFixturePipeline } from '../run/header-footer-pipeline.js';
 
 export interface AppDeps {
   readonly pipeline: Pipeline;
   readonly runStore: RunStore;
+  // The header/footer fixture capstone (#305) shares this app's RunStore
+  // but drives its own fire-and-forget pipeline (see
+  // run/header-footer-pipeline.ts's docstring) — its runs are still polled
+  // via the existing GET /api/runs/:runId.
+  readonly headerFooterFixturePipeline: HeaderFooterFixturePipeline;
 }
 
 // A full-page PNG screenshot arrives base64-encoded in a screenshot POST's
@@ -96,6 +104,10 @@ export function createApp(deps: AppDeps): Express {
 
   app.use('/api/runs', createRunsRouter(deps.pipeline, deps.runStore));
   app.use('/api/runs', createFilesRouter(deps.runStore));
+  app.use(
+    '/api/header-footer-fixtures',
+    createHeaderFooterFixturesRouter(deps.headerFooterFixturePipeline)
+  );
 
   mountVendorBundles(app);
   app.use(express.static(path.join(PACKAGE_ROOT, 'public')));

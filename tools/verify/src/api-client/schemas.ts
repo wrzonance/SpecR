@@ -17,7 +17,7 @@ import * as z from 'zod';
 
 // ─── Envelope shapes (openapi.yaml SuccessResponse / ErrorResponse) ───────────
 
-export function successResponseSchema<Data extends z.ZodTypeAny>(
+export function successResponseSchema<Data extends z.ZodType>(
   data: Data
 ): z.ZodObject<{ success: z.ZodLiteral<true>; data: Data }> {
   return z.object({ success: z.literal(true), data });
@@ -176,3 +176,226 @@ export const TemplateImportResponseSchema = successResponseSchema(TemplateImport
 export const SectionNumberFormatSchema = z.enum(['canonical', 'dots', 'compact', 'spaced-compact']);
 
 export type SectionNumberFormat = z.infer<typeof SectionNumberFormatSchema>;
+
+// ─── Header/footer fixture harness (#305) ─────────────────────────────────────
+// library-client.ts and project-client.ts (task 2/7) drive the library-import
+// and project-provisioning calls that parse against these. Kept here rather
+// than in client.ts's schema imports so this file stays the single
+// hand-mirrored copy of the openapi.yaml response shapes the harness
+// actually calls, per this file's own opening docstring.
+//
+// Every schema below was cross-checked against openapi.yaml's exact
+// `required` lists AND the real handler/db-query source (src/api/projects.ts,
+// src/db/queries/projects.ts, src/db/queries/derive.ts,
+// src/db/queries/header-footer.ts) while implementing task 2/7 — the
+// versions task 1/7 committed (`ProjectSummarySchema` keyed on `id` instead
+// of `projectId`; `HeaderFooterConfigSchema` with a flat `projectId` instead
+// of a `scope` union; `AddSectionToProjectResultSchema` requiring a
+// `projectSpecId` field that doesn't exist on the wire; `OnboardingStageSchema`
+// enumerating a status vocabulary the real API never sends) would each throw
+// VerifyApiError on every real 2xx response. Fixed here rather than filed as
+// a follow-up: they block this task's own methods from ever succeeding
+// against the live API, which is the harness's entire reason to exist (see
+// client.ts's opening comment).
+
+export const LibrarySchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+});
+
+export type Library = z.infer<typeof LibrarySchema>;
+
+const ProjectSourceSchema = z.object({
+  libraryId: z.uuid(),
+  name: z.string(),
+  tier: z.enum(['company', 'client']),
+  priority: z.number().int().min(1),
+});
+
+// Matches openapi.yaml's ProjectSummary component exactly (required:
+// [projectId, name, description, clientId, clientName, sources]) — POST
+// /projects's 201 response, confirmed against
+// src/db/queries/projects.ts's createProject.
+export const ProjectSummarySchema = z.object({
+  projectId: z.uuid(),
+  name: z.string(),
+  description: z.string().nullable(),
+  clientId: z.uuid().nullable(),
+  clientName: z.string().nullable(),
+  sources: z.array(ProjectSourceSchema),
+});
+
+export type ProjectSummary = z.infer<typeof ProjectSummarySchema>;
+
+// Library-import jobs use a different terminal-status vocabulary than parse
+// jobs (ParseStageSchema above) — deliberately its own enum, not reused,
+// per the spike's struct #5 correction: an onboarding job never reports
+// ParseStageSchema's fine-grained parse sub-stages ('extracting',
+// 'numbering', ...). Values confirmed against openapi.yaml's own
+// OnboardingStage component, not guessed.
+export const OnboardingStageSchema = z.enum([
+  'queued',
+  'running',
+  'parsing',
+  'persisting',
+  'deriving-style',
+  'classifying',
+  'complete',
+  'failed',
+]);
+
+export type OnboardingStage = z.infer<typeof OnboardingStageSchema>;
+
+// EditabilityValue mirrors openapi.yaml's own enum (locked/editable/choice/
+// note) — matches this repo's editability glossary term exactly.
+const EditabilityValueSchema = z.enum(['locked', 'editable', 'choice', 'note']);
+
+const EditabilitySummarySchema = z.object({
+  counts: z.object({
+    locked: z.number().int(),
+    editable: z.number().int(),
+    choice: z.number().int(),
+    note: z.number().int(),
+  }),
+  lowConfidence: z.array(
+    z.object({
+      nodeId: z.uuid(),
+      value: EditabilityValueSchema,
+      confidence: z.number().min(0).max(1),
+    })
+  ),
+});
+
+const HierarchySummarySchema = z.object({
+  counts: z.object({
+    scored: z.number().int(),
+    unscored: z.number().int(),
+    belowThreshold: z.number().int(),
+  }),
+  unscoredReason: z.string().exactOptional(),
+  lowConfidence: z.array(
+    z.object({
+      nodeId: z.uuid(),
+      nodeType: z.enum(['part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5', 'pr6', 'pr7']),
+      ilvl: z.number().int().min(0).max(8),
+      confidence: z.number().min(0).max(1),
+      evidence: z.array(z.string()),
+    })
+  ),
+});
+
+// The parse-time-captured header/footer composition draft (ADR-040, #306) —
+// this harness never reads or round-trips it (it PUTs its own composition
+// via project-client.ts's putProjectHeaderFooter and never acts on what the
+// parser guessed), so it stays a loose passthrough shape, same posture as
+// decision 10's HeaderFooterConfigSchema.config catchall.
+const HeaderFooterDraftSchema = z.looseObject({});
+
+// SPIKE-BUILD FIX (found live during task 7/7's smoke test): the real
+// GET /libraries/import/jobs/{jobId} 200 nests DerivationReportSchema's
+// {nodeTypes, skippedNodeTypes, vanishSkipped} shape under
+// `report.styleDerivation` (nullable — null for non-DOCX masters), NOT at
+// `report` directly — openapi.yaml's OnboardingReport component (required:
+// [styleDerivation, styleSourceNeeded, headerFooter, editability, hierarchy,
+// parseWarnings]) confirmed against a real completed job's response. A run
+// against every one of #305's 5 scenarios failed at stage 'upload' with a
+// ZodError on `report.nodeTypes` (`expected array, received undefined`)
+// before this fix — a bug in this hand-mirrored schema, not repo-root src/
+// drift (openapi.yaml and the real handler already agree on this shape).
+export const OnboardingReportSchema = z.object({
+  styleDerivation: DerivationReportSchema.nullable(),
+  styleSourceNeeded: z.boolean(),
+  headerFooter: HeaderFooterDraftSchema.nullable(),
+  editability: EditabilitySummarySchema,
+  hierarchy: HierarchySummarySchema,
+  parseWarnings: z.array(ParseWarningSchema),
+});
+
+export const OnboardingJobResultSchema = z.object({
+  specId: z.uuid(),
+  section: z.string(),
+  title: z.string(),
+  libraryId: z.uuid(),
+  templateId: z.uuid().nullable(),
+  report: OnboardingReportSchema,
+});
+
+export type OnboardingJobResult = z.infer<typeof OnboardingJobResultSchema>;
+
+export const OnboardingJobSchema = z.object({
+  jobId: z.uuid(),
+  status: OnboardingStageSchema,
+  progress: z.object({
+    stage: OnboardingStageSchema,
+    pct: z.number().min(0).max(100),
+  }),
+  result: OnboardingJobResultSchema.exactOptional(),
+  error: z.string().exactOptional(),
+  expiresAt: z.number().int(),
+});
+
+export type OnboardingJob = z.infer<typeof OnboardingJobSchema>;
+
+// One of exactly four scope kinds (openapi.yaml's HeaderFooterScope oneOf) —
+// a header/footer config row is anchored to a client library, a project, a
+// design package, or an issued revision. This harness only ever PUTs at
+// project scope, but GET/PUT both return whichever scope the row actually
+// has, so all four are modeled rather than narrowed to 'project' alone.
+const HeaderFooterScopeSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('client'), clientLibraryId: z.uuid() }),
+  z.object({ kind: z.literal('project'), projectId: z.uuid() }),
+  z.object({ kind: z.literal('package'), packageId: z.uuid() }),
+  z.object({ kind: z.literal('revision'), revisionId: z.uuid() }),
+]);
+
+// additionalProperties: true on `config` in openapi.yaml, same posture as
+// StylePropertiesSchema above — this harness only round-trips what it
+// itself PUT via putProjectHeaderFooter, never interprets an
+// externally-authored config.
+export const HeaderFooterConfigSchema = z.object({
+  id: z.uuid(),
+  scope: HeaderFooterScopeSchema,
+  config: z.object({}).catchall(z.json()),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type HeaderFooterConfig = z.infer<typeof HeaderFooterConfigSchema>;
+
+const ProjectSpecSourceSchema = z.object({
+  libraryId: z.uuid(),
+  name: z.string(),
+});
+
+// Matches openapi.yaml's POST /projects/{id}/specs 201 response (required:
+// [specId, section, position, source]) — confirmed against
+// src/db/queries/derive.ts's addSectionToProject, which returns exactly
+// this shape (`specId` is the project-owned clone's id, never a separate
+// `projectSpecId` field).
+export const AddSectionToProjectResultSchema = z.object({
+  specId: z.uuid(),
+  section: z.string(),
+  position: z.number().int(),
+  source: ProjectSpecSourceSchema,
+  shadowed: z.array(ProjectSpecSourceSchema).exactOptional(),
+});
+
+export type AddSectionToProjectResult = z.infer<typeof AddSectionToProjectResultSchema>;
+
+// ─── Wrapped response envelopes for the six task-2/7 methods ─────────────────
+
+export const CreateClientLibraryResponseSchema = successResponseSchema(LibrarySchema);
+
+export const ImportLibraryMasterResponseSchema = successResponseSchema(
+  z.object({ jobId: z.uuid() })
+);
+
+export const OnboardingJobResponseSchema = successResponseSchema(OnboardingJobSchema);
+
+export const CreateProjectResponseSchema = successResponseSchema(ProjectSummarySchema);
+
+export const AddSectionToProjectResponseSchema = successResponseSchema(
+  AddSectionToProjectResultSchema
+);
+
+export const PutHeaderFooterResponseSchema = successResponseSchema(HeaderFooterConfigSchema);

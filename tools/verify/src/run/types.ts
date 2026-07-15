@@ -54,6 +54,30 @@ export interface RunArtifacts {
   readonly referenceScreenshotPath?: string;
   /** work/<runId>/roundtrip-screenshot.png — same as referenceScreenshotPath, for the round-tripped pane (stage: screenshot). */
   readonly roundtripScreenshotPath?: string;
+  /**
+   * The client library id created by the header/footer fixture pipeline's
+   * own provisioning path (stage: upload, #305) — library-client.ts's
+   * createClientLibrary. Absent for the main upload->parse->import->generate
+   * run, which has no library of its own.
+   */
+  readonly libraryId?: string;
+  /**
+   * The project id provisioned from libraryId (stage: import, #305) —
+   * project-client.ts's createProject, sourced from libraryId above.
+   */
+  readonly projectId?: string;
+  /**
+   * The project-owned spec id returned by addSectionToProject (stage:
+   * import, #305) — project-client.ts's AddSectionToProjectResult.specId,
+   * the id the fixture pipeline's own generate stage renders from.
+   */
+  readonly projectSpecId?: string;
+  /**
+   * The header/footer config id returned by putProjectHeaderFooter (stage:
+   * import, #305) — project-client.ts's HeaderFooterConfig.id, confirming
+   * the composition this run's generate stage was rendered against.
+   */
+  readonly headerFooterConfigId?: string;
 }
 
 /**

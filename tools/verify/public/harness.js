@@ -323,10 +323,20 @@
   // ─── run lifecycle: start + poll GET /api/runs/:runId ──────────────────
 
   const POLL_INTERVAL_MS = 1000;
-  const TERMINAL_STAGE = 'generate';
+  // A run is terminal on failure, or when it completes at the LAST stage it
+  // will reach. The upload pipeline stops at 'generate'; the header/footer
+  // restartPerSpec fixture appends a 'report'-stage page-numbering
+  // postcondition after generate, so 'report/complete' is terminal too (and
+  // 'generate/complete' is never observed for that run — it re-opens to
+  // 'report/running' synchronously). 'report' is RUN_STAGES' final stage, so
+  // a complete there is always terminal.
+  const TERMINAL_STAGES = ['generate', 'report'];
 
   function isTerminal(record) {
-    return record.status === 'failed' || (record.stage === TERMINAL_STAGE && record.status === 'complete');
+    return (
+      record.status === 'failed' ||
+      (record.status === 'complete' && TERMINAL_STAGES.indexOf(record.stage) !== -1)
+    );
   }
 
   function renderRunStatus(record) {
@@ -347,12 +357,28 @@
       .then((body) => (body ? body.data : null));
   }
 
+  // The stopper for the currently-active poll loop, if any. Starting a new
+  // run (from the upload form OR scenario-picker.js, both of which call
+  // pollRun) supersedes the previous loop so two pollers never write to
+  // #run-status and the panes at once — a stale run can't overwrite a newer
+  // one's result. __resetPaneState only clears the panes; it does not stop
+  // an in-flight loop, which is why the guard lives here.
+  let activeStop = null;
   function pollRun(runId) {
+    if (activeStop) activeStop();
     let stopped = false;
+    activeStop = function () {
+      stopped = true;
+    };
     function tick() {
       if (stopped) return;
       pollOnce(runId)
         .then((record) => {
+          // Re-check after the in-flight fetch resolves: a newer run may have
+          // superseded this loop while the request was outstanding. Without
+          // this, one more stale render/setTimeout would slip through before
+          // the next tick's guard catches it.
+          if (stopped) return;
           if (record) {
             renderRunStatus(record);
             renderProperties(record.artifacts.derivationReport);
@@ -373,6 +399,10 @@
           setTimeout(tick, POLL_INTERVAL_MS);
         })
         .catch((err) => {
+          // Same supersession re-check as the fulfilled path: a loop
+          // superseded while its fetch was in flight must not write the
+          // status line or reschedule when that fetch rejects.
+          if (stopped) return;
           // A transient fetch/JSON/non-2xx error must not kill the poll loop
           // or leak an unhandled rejection — surface a diagnostic to the
           // status line (so a persistent failure is visible, not a silently
@@ -418,4 +448,12 @@
   }
 
   document.getElementById('run-form').addEventListener('submit', handleSubmit);
+
+  // Exposed so scenario-picker.js (#305 task 7/7) can drive a header/footer
+  // fixture run through the exact same poll loop / pane-loading / diff-
+  // loading logic this form uses, rather than duplicating any of it — both
+  // POST /api/runs and POST /api/header-footer-fixtures write into the same
+  // RunStore, so one poller already covers both entry points.
+  window.__pollRun = pollRun;
+  window.__resetPaneState = resetPaneState;
 })();

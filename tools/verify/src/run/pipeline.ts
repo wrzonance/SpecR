@@ -15,6 +15,13 @@
 // converted through toRunError() before being written to the RunRecord. No
 // raw Error or unhandled rejection ever escapes this module's async
 // boundary (see errors.ts).
+//
+// runGenerate and failRun are exported (#305 task 3/7) so the sibling
+// header/footer fixture pipeline (header-footer-pipeline.ts) can drive its
+// own generate stage and the same no-escape failure-recording pattern
+// without duplicating either — its RunRecord has no templateId of its own,
+// which is exactly why runGenerate's templateId param widened to
+// `string | undefined`.
 
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
@@ -101,16 +108,26 @@ async function runImport(
   return template.id;
 }
 
-async function runGenerate(
+// templateId is `string | undefined` (not just `string`) so callers outside
+// the main upload->parse->import->generate run — e.g. the #305 header/footer
+// fixture pipeline, which has no template of its own and relies on the
+// server's documented UFGS-Default fallback — can drive a generate stage
+// without one. The spread guard below is load-bearing, not stylistic:
+// GenerateDocxOptions.templateId is `string | undefined` under this repo's
+// `exactOptionalPropertyTypes`, so explicitly assigning `templateId:
+// undefined` is a type error, and would additionally put a literal
+// `templateId` key (with an undefined value) on the object — this keeps the
+// key itself absent whenever there is no templateId.
+export async function runGenerate(
   deps: PipelineDeps,
   runId: string,
   specId: string,
-  templateId: string,
+  templateId: string | undefined,
   options: StartRunOptions | undefined
 ): Promise<void> {
   deps.runStore.updateRun(runId, { stage: 'generate', status: 'running' });
   const buffer = await deps.apiClient.generateDocx(specId, {
-    templateId,
+    ...(templateId !== undefined ? { templateId } : {}),
     ...(options?.sectionNumberFormat !== undefined
       ? { sectionNumberFormat: options.sectionNumberFormat }
       : {}),
@@ -128,7 +145,7 @@ async function runGenerate(
 // I/O is the root cause), there is nowhere further to report to — swallow
 // it here rather than let it become an unhandled rejection escaping this
 // fire-and-forget pipeline (see module docstring).
-function failRun(deps: PipelineDeps, runId: string, stage: RunStage, err: unknown): void {
+export function failRun(deps: PipelineDeps, runId: string, stage: RunStage, err: unknown): void {
   const error = toRunError(stage, err);
   try {
     deps.runStore.updateRun(runId, { status: 'failed', stage: error.stage, error });
