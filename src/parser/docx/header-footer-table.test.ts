@@ -354,4 +354,39 @@ describe('captureRegion — table-cell w:fldSimple field recognition (#485, tabl
     ]);
     expect(result.unmodeled).toEqual([]);
   });
+
+  // #485 review (CRITICAL — table-cell path): the two-run-only test above
+  // (w:r THEN w:fldSimple, nothing after) never exercises fast-xml-parser's
+  // grouped-mode sibling-merge bug, because there is no SECOND w:r after the
+  // field for the parser to merge out of place. A field genuinely
+  // INTERLEAVED between two literal runs at the same parent is what
+  // header-footer-region.test.ts's own "INVARIANT: preserves true document
+  // order" test (paragraph path) exercises — this is that same shape, one
+  // level deeper inside a table cell, proving captureTableCell's own
+  // runsOf(first) call restores true order too, not just the paragraph
+  // path's runsOf(first, order) call.
+  it('preserves true document order for a w:fldSimple field interleaved BETWEEN two literal runs inside a table cell (#485 review, CRITICAL)', () => {
+    const xml = makeHdrXml(
+      table(
+        row(
+          cell(paragraph(`${textRun('Page ')}${simpleFieldRun(' PAGE ', '3')}${textRun(' of 10')}`))
+        )
+      )
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      {
+        cells: [
+          {
+            content: [
+              { kind: 'literal', text: 'Page ' },
+              { kind: 'pageNumber' },
+              { kind: 'literal', text: ' of 10' },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(result.unmodeled).toEqual([]);
+  });
 });

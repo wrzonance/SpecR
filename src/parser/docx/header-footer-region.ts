@@ -575,11 +575,14 @@ function captureFromParagraphs(
   const first = contentBearing[0];
 
   const { ruleLine, unmodeled: ruleLineUnmodeled } = resolveRuleLine(paragraphs, first, edge);
-  // Order-corrected (#485 review): this is the ONE call site whose output
-  // becomes user-visible cell content, so it is the one that must survive an
-  // interleaved w:fldSimple/w:r sequence in true document order — every
-  // other runsOf call in this module (above, and inside resolveRuleLine) only
-  // tests run SET membership/count, which is order-independent.
+  // Order-corrected (#485 review): this call site's output becomes
+  // user-visible cell content, so it must survive an interleaved
+  // w:fldSimple/w:r sequence in true document order — the OTHER order-
+  // corrected call site is header-footer-table.ts's captureTableCell, which
+  // takes the same `order` side-table for its own user-visible cell content.
+  // Every other runsOf call in this module (above, and inside
+  // resolveRuleLine) only tests run SET membership/count, which is
+  // order-independent.
   const { cells, unmodeled: cellUnmodeled } = first
     ? splitParagraphIntoCells(runsOf(first, order), known, mediaByRId)
     : { cells: {}, unmodeled: [] };
@@ -611,11 +614,14 @@ function captureFromParagraphs(
  *
  * A run-ordinal side-table (header-footer-run-order.ts's computeRunOrder,
  * #485 review) is built once per part, from this SAME partXml, and threaded
- * into captureFromParagraphs so its one order-sensitive runsOf call restores
- * true document order across an interleaved w:fldSimple/w:r sequence that
- * the grouped-mode parse above cannot preserve on its own. Table-cell capture
- * (captureTablesForRegion) never receives it — out of scope, matching the
- * mediaByRId exclusion above.
+ * into BOTH captureFromParagraphs' order-sensitive runsOf call AND
+ * captureTablesForRegion (header-footer-table.ts, #485 review) so every
+ * order-sensitive runsOf call in this part — paragraph cell or table cell —
+ * restores true document order across an interleaved w:fldSimple/w:r
+ * sequence that the grouped-mode parse above cannot preserve on its own.
+ * Unlike mediaByRId (table-cell images stay out of scope, ADR-071 decision
+ * 4), RunOrder is not an exclusion — table-cell fields need the same
+ * correction paragraph-cell fields do.
  */
 export function captureRegion(
   partXml: string,
@@ -632,7 +638,7 @@ export function captureRegion(
   const order = computeRunOrder(partXml, partRootKey(region), root, region);
   const toStamped = stamp(variant, region);
   const fromParagraphs = captureFromParagraphs(paragraphsOf(root), edge, known, order, mediaByRId);
-  const tableResult = captureTablesForRegion(root, known);
+  const tableResult = captureTablesForRegion(root, known, order);
   const mergedRegion = compact({
     ...fromParagraphs.region,
     table: tableResult.table,
