@@ -3,7 +3,8 @@
 // literal matching, and rPr -> HeaderFooterVisualStyle mapping. Content
 // capture itself (paragraph -> region) lives in header-footer-region.ts.
 
-import { asRecord, compact } from './xml-utils.js';
+import { asRecord, compact, extractAttrStr } from './xml-utils.js';
+import { collectRuns } from './document.js';
 import { UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
 import type { RunProperties, HeaderFooterVariant } from '../../ast/index.js';
 
@@ -128,15 +129,36 @@ function collapseRunSequence(
   };
 }
 
+// Collapses a single w:fldSimple element (Word's single-tag field shorthand —
+// used interchangeably with the begin/separate/end w:fldChar sequence for the
+// same field codes, #485) into the same CollapsedFieldRun marker shape as
+// collapseRunSequence produces, so downstream capture never needs to know
+// which OOXML representation a field was authored in. Pure and tolerant: a
+// missing @_w:instr reads as '' (-> 'unrecognized'), and no inner runs reads
+// as cachedText: ''. collectRuns (document.ts, imported read-only per
+// CLAUDE.md's module-boundary rule) gathers w:t text from every w:r at any
+// depth in the subtree, so a field wrapped in e.g. w:sdt is still read.
+function collapseSimpleField(fldSimple: Record<string, unknown>): Record<string, unknown> {
+  const rawInstr = extractAttrStr(fldSimple, '@_w:instr');
+  const runs: Record<string, unknown>[] = [];
+  collectRuns(fldSimple, runs);
+  const cachedText = runs.map((r) => extractTextLikeValue(r['w:t'])).join('');
+  const marker: CollapsedFieldRun = { code: recognizeFieldCode(rawInstr), rawInstr, cachedText };
+  return { [COLLAPSED_FIELD_KEY]: marker };
+}
+
 /**
  * Collapse each OOXML complex-field run sequence (w:fldChar begin ->
- * w:instrText* -> w:fldChar separate -> cached runs -> w:fldChar end) in a
+ * w:instrText* -> w:fldChar separate -> cached runs -> w:fldChar end) AND
+ * every w:fldSimple element (Word's single-tag field shorthand, #485) in a
  * paragraph's run list into a single synthetic marker run, so downstream
  * capture (header-footer-region.ts) can treat a field as one unit rather than
- * reassembling it. Runs outside a field sequence pass through unchanged. A
- * truncated field (missing separate/end) degrades gracefully — it consumes to
- * the end of the run list rather than throwing, since this is a valid-XML,
- * merely-unusual document shape, not a parse error.
+ * reassembling it — one recognition path regardless of which OOXML
+ * representation the field was authored in. Runs outside a field sequence
+ * pass through unchanged. A truncated w:fldChar field (missing separate/end)
+ * degrades gracefully — it consumes to the end of the run list rather than
+ * throwing, since this is a valid-XML, merely-unusual document shape, not a
+ * parse error.
  */
 export function collapseComplexFields(
   runs: readonly Record<string, unknown>[]
@@ -146,6 +168,12 @@ export function collapseComplexFields(
   while (i < runs.length) {
     const run = runs[i];
     if (run === undefined) {
+      i++;
+      continue;
+    }
+    const fldSimple = asRecord(run['w:fldSimple']);
+    if (fldSimple) {
+      out.push(collapseSimpleField(fldSimple));
       i++;
       continue;
     }

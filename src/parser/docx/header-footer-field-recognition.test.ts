@@ -199,6 +199,109 @@ describe('collapseComplexFields', () => {
   });
 });
 
+// ─── collapseComplexFields: w:fldSimple (#485) ───────────────────────────────
+//
+// INVARIANT (ADR-068 acceptance criterion 4, cross-representation
+// equivalence): a `w:fldSimple` element — Word's single-tag field shorthand,
+// used interchangeably with the begin/separate/end `w:fldChar` sequence for
+// the SAME field codes — must collapse into a structurally identical
+// CollapsedFieldRun marker. Nothing about a field's origin representation
+// may leak downstream, and nothing may be silently left un-warned by falling
+// through as an unrecognized raw run.
+function fldSimpleRun(
+  instr: string,
+  innerRuns: readonly Record<string, unknown>[] = []
+): Record<string, unknown> {
+  return {
+    'w:fldSimple': {
+      '@_w:instr': instr,
+      'w:r': innerRuns,
+    },
+  };
+}
+
+describe('collapseComplexFields: w:fldSimple', () => {
+  it('collapses a w:fldSimple PAGE field into the same marker shape as a w:fldChar sequence', () => {
+    const runs = [fldSimpleRun(' PAGE ', [plainRun('3')])];
+    const collapsed = collapseComplexFields(runs);
+    expect(collapsed).toHaveLength(1);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('page');
+    expect(marker.__collapsedField.rawInstr).toBe(' PAGE ');
+    expect(marker.__collapsedField.cachedText).toBe('3');
+  });
+
+  it('recognizes a w:fldSimple DATE field and accumulates cached text across multiple inner runs', () => {
+    const runs = [fldSimpleRun(' DATE \\@ "M/d/yyyy" ', [plainRun('7/13/'), plainRun('2026')])];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('date');
+    expect(marker.__collapsedField.cachedText).toBe('7/13/2026');
+  });
+
+  it('collapses an unrecognized field code (e.g. STYLEREF) rather than leaving it as a raw, un-warnable run', () => {
+    const runs = [fldSimpleRun(' STYLEREF "Heading 1" ', [plainRun('Some Style Text')])];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('unrecognized');
+    expect(marker.__collapsedField.cachedText).toBe('Some Style Text');
+  });
+
+  it('tolerates a missing @_w:instr attribute (empty rawInstr -> unrecognized)', () => {
+    const runs = [{ 'w:fldSimple': { 'w:r': [plainRun('x')] } }];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.rawInstr).toBe('');
+    expect(marker.__collapsedField.code).toBe('unrecognized');
+  });
+
+  it('tolerates a w:fldSimple with no inner runs (empty cachedText, never thrown)', () => {
+    const runs = [{ 'w:fldSimple': { '@_w:instr': ' PAGE ' } }];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.cachedText).toBe('');
+  });
+
+  it('leaves surrounding plain runs untouched, collapsing only the w:fldSimple in the middle', () => {
+    const runs = [plainRun('Page '), fldSimpleRun(' PAGE ', [plainRun('3')]), plainRun(' of N')];
+    const collapsed = collapseComplexFields(runs);
+    expect(collapsed).toHaveLength(3);
+    expect(collapsed[0]).toEqual(plainRun('Page '));
+    expect(isCollapsedFieldRun(collapsed[1] as Record<string, unknown>)).toBe(true);
+    expect(collapsed[2]).toEqual(plainRun(' of N'));
+  });
+
+  it('reads cached text from runs nested inside a wrapper (e.g. w:sdt) within the w:fldSimple, via collectRuns traversal', () => {
+    const nested = {
+      'w:fldSimple': {
+        '@_w:instr': ' PAGE ',
+        'w:sdt': { 'w:sdtContent': { 'w:r': [plainRun('5')] } },
+      },
+    };
+    const collapsed = collapseComplexFields([nested]);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.cachedText).toBe('5');
+  });
+});
+
 // ─── toHeaderFooterVisualStyle ───────────────────────────────────────────────
 
 describe('toHeaderFooterVisualStyle', () => {
