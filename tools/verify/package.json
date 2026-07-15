@@ -14,6 +14,9 @@
     "format": "prettier --write src/",
     "test": "vitest run"
   },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
   "devDependencies": {
     "@eslint/js": "latest",
     "@types/node": "^22.0.0",
