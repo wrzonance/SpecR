@@ -214,6 +214,48 @@ with or without `raw`, with or without `warnings` — continues to parse
 unchanged; `unmodeled` is additive-optional, matching the backward-compat
 posture ADR-040 already established for this file.
 
+### Addendum (2026-07-15, #484): standalone border-only paragraphs are no longer silently dropped
+
+`captureFromParagraphs` filtered to `contentBearing = paragraphs.filter((p) =>
+paragraphHasContent(runsOf(p)))` and read the rule line only from
+`contentBearing[0]`'s own `w:pBdr`. A header/footer horizontal rule
+authored as its own otherwise-empty paragraph — `w:pPr/w:pBdr` with no
+runs at all — is never content-bearing (`paragraphHasContent` only
+recognizes `w:t`/`w:fldChar`/`w:instrText`/`w:drawing`/`w:pict`), so it was
+filtered out before `captureRuleLine` ever ran on it: no `region.ruleLine`,
+no `raw.unmodeled` entry, no warning. This violated acceptance criterion 4
+above for two concrete shapes: a part whose only content is a standalone
+rule line, and a leading standalone rule-line paragraph above a text
+paragraph.
+
+**Decision:** a new `resolveRuleLine` helper scans every paragraph in the
+part (not just the first content-bearing one) for a qualifying border,
+position-agnostically — leading, trailing, or the sole paragraph are all
+treated identically, since OOXML gives no structural reason to special-case
+position. When the content-bearing paragraph carries no border of its own,
+the first such standalone paragraph is **promoted** into `region.ruleLine`;
+any further standalone match **demotes** to an `unmodeled { kind:
+'extraParagraph' }` entry, reusing the existing kind rather than adding a
+new one (a single-issue fix keeps its schema footprint at zero).
+
+**KNOWN AMBIGUITY:** when a part has *both* a standalone rule-line
+paragraph and a content-bearing paragraph that also carries its own
+border, OOXML gives no canonical tiebreak for which one is "the" rule
+line. The content-bearing paragraph's own border wins outright — matching
+the pre-existing "first content-bearing paragraph wins" convention this
+ADR already established above — and the standalone paragraph demotes to
+`unmodeled` rather than being merged or silently dropped. This is
+`// KNOWN AMBIGUITY`-pinned per `CLAUDE.md`'s OOXML ambiguity rule in
+`header-footer-region.test.ts`.
+
+A genuinely empty, borderless, content-less paragraph is unaffected and
+remains silently unreported — that paragraph carries no signal at all, so
+there is nothing to preserve; this is unchanged pre-#484 behavior, called
+out here so it is not mistaken for a remaining gap. No schema change:
+`resolveRuleLine`'s return shape is local to `header-footer-region.ts` and
+`captureFromParagraphs`'s existing `{ region, unmodeled }` return type is
+unchanged.
+
 ## Consequences
 
 - Acceptance criteria 3 and 4 are met by construction: every unmodeled

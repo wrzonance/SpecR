@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ParserError } from '../error.js';
-import { captureRegion } from './header-footer-region.js';
+import { captureRegion, paragraphsOf } from './header-footer-region.js';
+import { asRecord, compact, createDocumentXmlParser } from './xml-utils.js';
 
 const KNOWN = { section: '09 91 26', title: 'STAINING AND TRANSPARENT FINISHING' };
 
@@ -8,6 +9,28 @@ const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/mai
 
 function makeHdrXml(bodyXml: string): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr ${NS}>${bodyXml}</w:hdr>`;
+}
+
+// Mirrors header-footer-region.ts's own partParser config exactly (same
+// isArray tag set) so tests can independently re-parse a header part and
+// assert on the SAME raw paragraph records captureRegion itself works from —
+// used to pin the "detail === compact(paragraph)" losslessness invariant
+// (#484 review) without reaching into the module's internal parser. Same
+// idiom as header-footer-images.test.ts's own partParser.
+const testPartParser = createDocumentXmlParser([
+  'w:p',
+  'w:r',
+  'w:tbl',
+  'w:tr',
+  'w:tc',
+  'w:gridCol',
+]);
+
+function parseHeaderParagraphs(xml: string): readonly Record<string, unknown>[] {
+  const parsed = testPartParser.parse(xml) as Record<string, unknown>;
+  const root = asRecord(parsed['w:hdr']);
+  if (!root) throw new Error('test fixture parse failure: no w:hdr root');
+  return paragraphsOf(root);
 }
 
 function makeFtrXml(bodyXml: string): string {
@@ -383,6 +406,174 @@ describe('captureRegion — rule line (paragraph border passthrough)', () => {
     const xml = makeHdrXml(paragraph('', textRun('Header')));
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(result.region?.ruleLine).toBeUndefined();
+  });
+});
+
+// Standalone border-only paragraph promotion/demotion (#484, ADR-068
+// addendum): a rule line authored as its own otherwise-empty paragraph
+// (w:pPr/w:pBdr, no runs) is not content-bearing, so it used to be filtered
+// out of captureFromParagraphs entirely with no region contribution and no
+// unmodeled entry — a silent drop in violation of ADR-068 acceptance
+// criterion 4. resolveRuleLine now scans every paragraph (not just the
+// first content-bearing one) for a qualifying border and promotes the
+// first standalone match into region.ruleLine when the content-bearing
+// paragraph itself carries none; any further standalone match demotes to
+// an `extraParagraph` unmodeled entry, position-agnostically.
+describe('captureRegion — standalone rule-line paragraph promotion/demotion (#484, ADR-068 addendum)', () => {
+  it('promotes a standalone border-only paragraph to region.ruleLine when the part has no content-bearing paragraph at all', () => {
+    const xml = makeHdrXml(paragraph('<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>', ''));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region).toEqual({ ruleLine: { enabled: true, style: 'single', widthTwips: 10 } });
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('promotes a leading standalone rule-line paragraph above a borderless text paragraph, not discarding it', () => {
+    const xml = makeHdrXml(
+      `${paragraph('<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>', '')}${paragraph('', textRun('Header text'))}`
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Header text' }]);
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('promotes a trailing standalone rule-line paragraph below a borderless text paragraph (position-agnostic)', () => {
+    const xml = makeFtrXml(
+      `${paragraph('', textRun('Footer text'))}${paragraph('<w:pBdr><w:top w:val="single" w:sz="4"/></w:pBdr>', '')}`
+    );
+    const result = captureRegion(xml, 'top', 'default', 'footer', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Footer text' }]);
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('promotes the first standalone rule-line paragraph and demotes a second one to an extraParagraph unmodeled entry', () => {
+    // Deliberately DIFFERENT border values per paragraph (single/4 vs
+    // double/8, #484 review): identical candidates can't prove document-order-
+    // first promotion — a promote-the-last or promote-arbitrary bug would
+    // still pass an identical-values test. The assertions below pin the
+    // promoted ruleLine to the FIRST paragraph's own border, never the second.
+    const firstRule = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+    const secondRule = '<w:pBdr><w:bottom w:val="double" w:sz="8"/></w:pBdr>';
+    const xml = makeHdrXml(`${paragraph(firstRule, '')}${paragraph(secondRule, '')}`);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({
+      variant: 'default',
+      region: 'header',
+      kind: 'extraParagraph',
+    });
+    // Losslessness half of the invariant (#484 review): the demoted entry's
+    // `detail` is the raw SECOND paragraph record, verbatim (compact(paragraph)),
+    // not a summary and not the promoted first paragraph.
+    const demotedParagraph = parseHeaderParagraphs(xml)[1];
+    expect(demotedParagraph).toBeDefined();
+    expect(result.unmodeled[0]?.detail).toEqual(
+      compact(demotedParagraph as Record<string, unknown>)
+    );
+  });
+
+  // KNOWN AMBIGUITY (ADR-068 addendum, #484, CLAUDE.md OOXML ambiguity
+  // rule): when a part has BOTH a standalone rule-line paragraph AND a
+  // content-bearing paragraph that also carries its own border, OOXML
+  // gives no canonical tiebreak for which one is "the" rule line. The
+  // content-bearing paragraph's own border wins outright — matching the
+  // pre-existing "first content-bearing paragraph wins" convention — and
+  // the standalone paragraph demotes to an unmodeled entry instead of
+  // being merged or silently dropped.
+  it('KNOWN AMBIGUITY: a content-bearing paragraph’s own border wins outright over a standalone candidate', () => {
+    const standaloneRule = '<w:pBdr><w:bottom w:val="double" w:sz="8"/></w:pBdr>';
+    const contentRule = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+    const xml = makeHdrXml(
+      `${paragraph(standaloneRule, '')}${paragraph(contentRule, textRun('Header text'))}`
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({ kind: 'extraParagraph' });
+  });
+
+  // KNOWN AMBIGUITY (ADR-068 addendum, #484 review): the same precedence as
+  // above, but with the standalone candidate positioned AFTER the
+  // content-bearing paragraph instead of before it — the reverse document
+  // order from the test above. The content-bearing paragraph's border still
+  // wins outright either way, proving the precedence "never silently varies
+  // by position" (resolveRuleLine's own doc comment) rather than only
+  // happening to hold for one relative ordering.
+  it('KNOWN AMBIGUITY: a content-bearing paragraph’s own border wins outright over a standalone candidate positioned AFTER it', () => {
+    const contentRule = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+    const standaloneRule = '<w:pBdr><w:bottom w:val="double" w:sz="8"/></w:pBdr>';
+    const xml = makeHdrXml(
+      `${paragraph(contentRule, textRun('Header text'))}${paragraph(standaloneRule, '')}`
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Header text' }]);
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({ kind: 'extraParagraph' });
+  });
+
+  // #484 review — a bordered paragraph that is non-content-bearing yet still
+  // carries a run (a lone w:br) is NOT run-free, so it must never be promoted
+  // into region.ruleLine: a promoted paragraph's runs are never captured, so
+  // promoting this one would silently drop its w:br. It demotes to an
+  // extraParagraph instead, preserving the whole paragraph verbatim (border
+  // AND run) — ADR-068 criterion 4, nothing silently discarded.
+  it('does not promote a bordered non-content paragraph that still has a run (w:br); preserves it verbatim as an extraParagraph', () => {
+    const xml = makeHdrXml(
+      paragraph('<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>', '<w:r><w:br/></w:r>')
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    // Border NOT promoted — the region has no rule line at all, rather than a
+    // rule line shorn of its dropped run.
+    expect(result.region).toBeUndefined();
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({
+      variant: 'default',
+      region: 'header',
+      kind: 'extraParagraph',
+    });
+    // Losslessness half of the invariant: the demoted entry's `detail` is the
+    // raw paragraph verbatim (compact(paragraph)) — border and w:br both
+    // survive in unmodeled, neither silently dropped.
+    const demoted = parseHeaderParagraphs(xml)[0];
+    expect(demoted).toBeDefined();
+    expect(result.unmodeled[0]?.detail).toEqual(compact(demoted as Record<string, unknown>));
+  });
+
+  // #484 review — the skip-to-next-eligible half of promotion: a run-carrying
+  // bordered candidate in document-order-first position must be SKIPPED (not
+  // promoted), and the LATER run-free candidate promoted instead. Deliberately
+  // different border values (single/4 with a w:br vs double/8 run-free) so the
+  // promoted ruleLine can only be the second paragraph's border — proving
+  // promotion actually advanced past the disqualified first candidate rather
+  // than merely finding nothing to promote.
+  it('skips a run-carrying bordered candidate and promotes the later run-free one; the skipped candidate demotes verbatim', () => {
+    const runCarrying = paragraph(
+      '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>',
+      '<w:r><w:br/></w:r>'
+    );
+    const runFree = paragraph('<w:pBdr><w:bottom w:val="double" w:sz="8"/></w:pBdr>', '');
+    const xml = makeHdrXml(`${runCarrying}${runFree}`);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    // Promoted rule line is the SECOND (run-free) paragraph's border —
+    // widthTwips = round(8 / 0.4) = 20 — never the first's single/4.
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'double', widthTwips: 20 });
+    // The skipped first candidate is preserved verbatim (border AND w:br), not
+    // dropped for being passed over.
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({ kind: 'extraParagraph' });
+    const skipped = parseHeaderParagraphs(xml)[0];
+    expect(skipped).toBeDefined();
+    expect(result.unmodeled[0]?.detail).toEqual(compact(skipped as Record<string, unknown>));
+  });
+
+  it('regression guard: a part with no paragraphs at all still returns region undefined and unmodeled empty', () => {
+    const xml = makeHdrXml('');
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region).toBeUndefined();
+    expect(result.unmodeled).toEqual([]);
   });
 });
 

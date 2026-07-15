@@ -165,16 +165,71 @@ export function captureBorderEdge(
 }
 
 /**
- * Read the first content-bearing paragraph's border on `edge` ('bottom' for
- * a header's rule line beneath its text, 'top' for a footer's rule line
- * above it). Thin wrapper over captureBorderEdge, scoped to a paragraph's
- * own w:pBdr container.
+ * Read a single paragraph's border on `edge` ('bottom' for a header's rule
+ * line beneath its text, 'top' for a footer's rule line above it). Thin
+ * wrapper over captureBorderEdge, scoped to a paragraph's own w:pBdr
+ * container. Used both for a part's first content-bearing paragraph and,
+ * via resolveRuleLine (#484), for any standalone border-only paragraph.
  */
 function captureRuleLine(
   pPr: Record<string, unknown> | undefined,
   edge: 'top' | 'bottom'
 ): HeaderFooterRuleLine | undefined {
   return captureBorderEdge(asRecord(pPr?.['w:pBdr']), `w:${edge}`);
+}
+
+/**
+ * Resolve a region's rule line, honoring a standalone border-only paragraph
+ * that carries no runs at all (#484, ADR-068 addendum) — otherwise silently
+ * dropped, since `paragraphHasContent` never sees it and it never reaches
+ * `first`. `candidates` is every non-content-bearing paragraph across the
+ * WHOLE part (position-agnostic: leading, trailing, or the only paragraph)
+ * that itself carries a qualifying border on `edge`, in document order.
+ *
+ * - If the content-bearing paragraph (`first`) has its own border, that
+ *   border wins outright — KNOWN AMBIGUITY, OOXML gives no canonical
+ *   tiebreak — and every candidate demotes to an `extraParagraph`
+ *   unmodeled entry.
+ * - Otherwise the first candidate that is genuinely run-free (border ONLY,
+ *   no runs at all) promotes into `ruleLine`; every other candidate —
+ *   including a bordered paragraph that still carries a non-content run
+ *   such as a lone `w:br` — demotes to `extraParagraph`, so promotion never
+ *   silently drops that run (ADR-068 criterion 4, #484 review).
+ * - No candidates and no border on `first` → unchanged empty behavior.
+ */
+function resolveRuleLine(
+  paragraphs: readonly Record<string, unknown>[],
+  first: Record<string, unknown> | undefined,
+  edge: 'top' | 'bottom'
+): {
+  readonly ruleLine: HeaderFooterRuleLine | undefined;
+  readonly unmodeled: readonly PartialUnmodeled[];
+} {
+  const firstRuleLine = first ? captureRuleLine(asRecord(first['w:pPr']), edge) : undefined;
+  const candidates = paragraphs
+    .filter((p) => !paragraphHasContent(runsOf(p)))
+    .map((p) => ({ paragraph: p, border: captureRuleLine(asRecord(p['w:pPr']), edge) }))
+    .filter(
+      (c): c is { paragraph: Record<string, unknown>; border: HeaderFooterRuleLine } =>
+        c.border !== undefined
+    );
+
+  const toDemoted = (c: { paragraph: Record<string, unknown> }): PartialUnmodeled => ({
+    kind: 'extraParagraph',
+    detail: compact(c.paragraph),
+  });
+
+  // Only a truly run-free paragraph (border ONLY, no runs at all) is eligible
+  // for promotion — matching #484's "no runs at all" contract — so a promoted
+  // paragraph never carries a run that capture would then discard. A bordered
+  // non-content paragraph that still has runs stays a candidate purely so it
+  // is preserved verbatim by demotion, never promoted and never dropped.
+  const promoteIdx =
+    firstRuleLine !== undefined
+      ? -1
+      : candidates.findIndex((c) => runsOf(c.paragraph).length === 0);
+  const ruleLine = promoteIdx >= 0 ? candidates[promoteIdx]?.border : firstRuleLine;
+  return { ruleLine, unmodeled: candidates.filter((_, i) => i !== promoteIdx).map(toDemoted) };
 }
 
 // ─── field-marker resolution ────────────────────────────────────────────────
@@ -396,7 +451,11 @@ function buildRegionFromCells(
 // region — HeaderFooterRegionSchema models one {left, center, right} row per
 // part. Any later content-bearing paragraph is preserved as an
 // `extraParagraph` unmodeled entry, never merged into or overwriting the
-// first paragraph's capture (ADR-068).
+// first paragraph's capture (ADR-068). A part with NO content-bearing
+// paragraph at all can still contribute a region: resolveRuleLine (#484,
+// ADR-068 addendum) promotes a standalone border-only paragraph into
+// `ruleLine` regardless of whether a content-bearing paragraph exists,
+// so this no longer early-returns on `!first`.
 function captureFromParagraphs(
   paragraphs: readonly Record<string, unknown>[],
   edge: 'top' | 'bottom',
@@ -411,17 +470,15 @@ function captureFromParagraphs(
     .slice(1)
     .map((p): PartialUnmodeled => ({ kind: 'extraParagraph', detail: compact(p) }));
   const first = contentBearing[0];
-  if (!first) return { region: undefined, unmodeled: extraUnmodeled };
 
-  const ruleLine = captureRuleLine(asRecord(first['w:pPr']), edge);
-  const { cells, unmodeled: cellUnmodeled } = splitParagraphIntoCells(
-    runsOf(first),
-    known,
-    mediaByRId
-  );
+  const { ruleLine, unmodeled: ruleLineUnmodeled } = resolveRuleLine(paragraphs, first, edge);
+  const { cells, unmodeled: cellUnmodeled } = first
+    ? splitParagraphIntoCells(runsOf(first), known, mediaByRId)
+    : { cells: {}, unmodeled: [] };
+
   return {
     region: buildRegionFromCells(cells, ruleLine),
-    unmodeled: [...cellUnmodeled, ...extraUnmodeled],
+    unmodeled: [...cellUnmodeled, ...ruleLineUnmodeled, ...extraUnmodeled],
   };
 }
 
