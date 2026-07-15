@@ -62,3 +62,7 @@ public/
 
 # Fixture A/B snapshots (copyright-derived parse renders; never committed)
 .fixture-snapshots/
+
+# tools/verify's local working directory (screenshots, rendered artifacts) —
+# local dev tool, out of CI; see issue #150 design decision 5.
+tools/verify/work/

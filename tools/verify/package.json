@@ -1,0 +1,28 @@
+{
+  "name": "specr-verify-harness",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Visual round-trip verification harness (#150): docx-preview + pixel diff, agent-driven. Isolated pnpm package — see pnpm-workspace.yaml.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.17.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src/ && tsc --noEmit && prettier --check src/",
+    "format": "prettier --write src/",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-sonarjs": "^4.0.3",
+    "prettier": "^3.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^4.1.5"
+  }
+}

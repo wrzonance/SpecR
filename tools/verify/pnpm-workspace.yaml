@@ -1,0 +1,18 @@
+# tools/verify is an ISOLATED pnpm workspace root, deliberately separate from
+# the repo root's pnpm-workspace.yaml. `packages: []` is what makes this the
+# case: pnpm resolves the nearest pnpm-workspace.yaml walking up from the cwd,
+# and stops there. Without this file, `pnpm --dir tools/verify install`
+# silently resolves against the REPO ROOT importer instead — confirmed by the
+# WT-150 spike (finding 0): zero node_modules created under tools/verify,
+# "Already up to date" printed, no error. This file must exist before the
+# first `pnpm --dir tools/verify install` or that install silently no-ops.
+#
+# tools/verify gets its own pnpm-lock.yaml and node_modules, entirely
+# independent of the root's — see workspace-isolation.test.ts for the pinned
+# invariant.
+packages: []
+
+# Mirrors the root pnpm-workspace.yaml's allowBuilds: esbuild's postinstall
+# (native binary build) is required by vitest/tsx, same as at the repo root.
+allowBuilds:
+  esbuild: true
