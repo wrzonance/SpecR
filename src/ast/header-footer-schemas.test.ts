@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   HeaderFooterCompositionSchema,
+  HeaderFooterCompositionWriteSchema,
   HeaderFooterUnmodeledEntrySchema,
   PageNumberingModeSchema,
   defaultVariant,
 } from './header-footer-schemas.js';
 import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
+import { HEADER_FOOTER_JSON_BODY_LIMIT_BYTES } from '../lib/header-footer-body-limit.js';
 
 // #302 (parent #301): extend the v1 composition (#208) with Word-style page
 // variants, a page-numbering policy, and an open `raw` sidecar — without
@@ -402,5 +404,105 @@ describe('HeaderFooterCompositionSchema — table content (#309, ADR-071)', () =
   it('still validates a pre-#309 region with no table key (additive-optional, backward compatible)', () => {
     const preExisting = { header: { center: { content: [{ kind: 'sectionTitle' }] } } };
     expect(HeaderFooterCompositionSchema.parse(preExisting)).toEqual(preExisting);
+  });
+});
+
+// Code-review finding (#490 follow-up): every level of the composition is
+// `.catchall(JsonValue)` (ADR-021 open extensions), which has no size bound
+// of its own. Without a total-size invariant, a request that Zod would call
+// "valid" could still carry unbounded open-extension data and exceed
+// `HEADER_FOOTER_JSON_BODY_LIMIT_BYTES` (src/api/header-footer-body-limit.ts,
+// derived from `MAX_IMAGE_BASE64_LENGTH` + envelope) — the transport limit
+// ADR-070 sized for exactly one image plus a modest envelope. The invariant is
+// enforced on the WRITE schema only: a WRITE is a single transport request, so
+// "Zod-valid write" and "fits the transport limit" must never diverge. The
+// structural schema (reads/resolution/DOCX capture) deliberately omits it — a
+// second review pass found that enforcing it there turned a merged multi-layer
+// resolution read into a 500 (see the "structural schema tolerates oversize"
+// case below).
+describe('HeaderFooterCompositionWriteSchema — total-size invariant matches the transport limit (#490)', () => {
+  it('rejects a structurally-valid composition whose open .catchall extension data alone exceeds HEADER_FOOTER_JSON_BODY_LIMIT_BYTES', () => {
+    // No image anywhere — every typed field is absent. Only an open extension
+    // key (ADR-021) carries size, and it alone is already past the transport
+    // budget. Pre-fix, the write schema accepted this (catchall(JsonValue) has
+    // no size bound); the resulting payload would still 413 at body-parser,
+    // defeating the "Zod-valid write always fits" invariant
+    // HEADER_FOOTER_JSON_BODY_LIMIT_BYTES exists to guarantee.
+    const oversizedExtension = 'A'.repeat(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES);
+    expect(() =>
+      HeaderFooterCompositionWriteSchema.parse({ vendorExtension: oversizedExtension })
+    ).toThrow();
+  });
+
+  // Regression (#490 follow-up, 2nd review): the transport-size invariant must
+  // NOT live on the shared structural schema. Reads/resolution re-parse through
+  // HeaderFooterCompositionSchema — a merged multi-layer resolution combines
+  // several independently-valid layers (each written within the budget) and can
+  // legitimately exceed HEADER_FOOTER_JSON_BODY_LIMIT_BYTES. Enforcing the write
+  // budget there rejected the merged read and surfaced as a 500
+  // (src/api/header-footer-resolve.ts). The structural schema must tolerate it.
+  it('structural HeaderFooterCompositionSchema accepts an oversized composition (a merged resolution read never inherits the write transport budget)', () => {
+    const oversizedExtension = 'A'.repeat(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES + 1);
+    const parsed = HeaderFooterCompositionSchema.parse({ vendorExtension: oversizedExtension });
+    expect(parsed).toEqual({ vendorExtension: oversizedExtension });
+  });
+
+  it('rejects when the overage is spread across many nested .catchall levels rather than one field', () => {
+    // Region/cell/field/variant catchalls are all nested inside the same
+    // top-level object, so a size invariant enforced once at the top still
+    // has to catch overage contributed by ANY of them combined — not just a
+    // single offending key.
+    // Sized just past HEADER_FOOTER_JSON_BODY_LIMIT_BYTES (~7.25 MB): six 1 MB
+    // nested vendor tokens (6 MB) plus two 1 MB warning entries (2 MB) ≈ 8 MB,
+    // so the overage is genuinely distributed across nested catchalls rather
+    // than carried by one field — without allocating the ~60 MB an oversized
+    // warnings array would cost.
+    const chunk = 'A'.repeat(1_000_000);
+    const input = {
+      header: {
+        left: { style: { vendorTokenA: chunk } },
+        center: { style: { vendorTokenB: chunk } },
+        right: { style: { vendorTokenC: chunk } },
+      },
+      variants: {
+        default: { style: { vendorTokenD: chunk } },
+        first: { style: { vendorTokenE: chunk } },
+        even: { style: { vendorTokenF: chunk } },
+      },
+      raw: { warnings: [chunk, chunk] },
+    };
+    expect(() => HeaderFooterCompositionWriteSchema.parse(input)).toThrow();
+  });
+
+  it('still accepts a genuine one-image composition (the case the transport limit is sized for) plus a small extension', () => {
+    const imageData = 'A'.repeat(MAX_IMAGE_BASE64_LENGTH);
+    const input = {
+      header: { left: { content: [{ kind: 'image', imageData }] } },
+      vendorExtension: { note: 'firm-logo-v2' },
+    };
+    expect(HeaderFooterCompositionWriteSchema.parse(input)).toEqual(input);
+  });
+
+  // Merge integration (#309 table shapes × #490 write-size invariant): the write
+  // schema is the shared structural schema PLUS `.check`, so it must accept the
+  // new region.table shapes untouched AND still enforce the transport budget
+  // against open-extension data nested inside a table cell — the budget is a
+  // top-level check, so table-cell catchall size counts toward it.
+  it('accepts a table-bearing composition within budget and trips the size check on oversized table-cell extension data', () => {
+    const within = {
+      footer: {
+        table: { rows: [{ cells: [{ content: [{ kind: 'literal', text: 'Sheet 1 of 3' }] }] }] },
+      },
+    };
+    expect(HeaderFooterCompositionWriteSchema.parse(within)).toEqual(within);
+
+    const oversized = {
+      footer: {
+        table: {
+          rows: [{ cells: [{ vendorBlob: 'A'.repeat(HEADER_FOOTER_JSON_BODY_LIMIT_BYTES) }] }],
+        },
+      },
+    };
+    expect(() => HeaderFooterCompositionWriteSchema.parse(oversized)).toThrow();
   });
 });

@@ -4810,6 +4810,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '500': { $ref: '#/components/responses/InternalServerError' }
     delete:
@@ -4903,6 +4904,7 @@ paths:
                       data: { $ref: '#/components/schemas/HeaderFooterConfig' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '500': { $ref: '#/components/responses/InternalServerError' }
     delete:
@@ -4986,6 +4988,7 @@ paths:
                       data: { $ref: '#/components/schemas/HeaderFooterConfig' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '500': { $ref: '#/components/responses/InternalServerError' }
     delete:
@@ -5069,6 +5072,7 @@ paths:
                       data: { $ref: '#/components/schemas/HeaderFooterConfig' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '500': { $ref: '#/components/responses/InternalServerError' }
     delete:
@@ -5326,6 +5330,20 @@ components:
                   currentVersion:
                     type: integer
                     description: Present on a stale-version conflict — the spec's current contentVersion.
+    PayloadTooLarge:
+      description: >
+        Request body too large. The default REST body limit is 100KB; the
+        four header/footer composition PUT routes
+        (`/libraries|projects|packages|revisions/{id}/header-footer`) are
+        dispatched to a larger, route-scoped limit of 7252652 bytes, sized to
+        fit one image field at its own maxLength
+        (`HEADER_FOOTER_JSON_BODY_LIMIT_BYTES`, derived from
+        `MAX_IMAGE_BASE64_LENGTH`) plus headroom for the surrounding
+        composition JSON — `{success: false, error: "payload too large"}`
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     UnprocessableEntity:
       description: Unprocessable — file parsed but semantically unusable
       content:
