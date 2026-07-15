@@ -430,11 +430,10 @@ scenario-picker UI:
 6. [Issue #497](https://github.com/wrzonance/SpecR/issues/497) filed for the confirmed `src/`
    round-trip gap (manual page breaks); decision 11's two schema bugs were `tools/verify`'s own and
    fixed inline, not filed.
-7. `pnpm --dir tools/verify lint` and `pnpm --dir tools/verify test` green; `src/openapi-noop.test.ts`
-   (new at the time; removed in #500 — its git-state invariant only held on a branch that never
-   touches `src/` and failed every later src-touching branch) and `src/file-line-budget.test.ts`
-   pinned this PR's two boundary invariants
-   (`git diff origin/main...HEAD -- src/ openapi.yaml` empty; no `tools/verify/src` file over 400 lines);
-   `src/import-boundary.test.ts` and `src/workspace-isolation.test.ts` re-run clean; root `pnpm lint`/
-   `pnpm test` unaffected (`git diff origin/main...HEAD -- src/ openapi.yaml` confirmed empty for the whole
-   branch).
+7. `pnpm --dir tools/verify lint` and `pnpm --dir tools/verify test` were green at build time.
+   `src/file-line-budget.test.ts` pins the 400-line cap on `tools/verify/src` files;
+   `src/import-boundary.test.ts` and `src/workspace-isolation.test.ts` re-ran clean; root
+   `pnpm lint`/`pnpm test` were unaffected. (The build branch also carried a git-state test,
+   `src/openapi-noop.test.ts`, verifying it never touched repo-root `src/` or `openapi.yaml` —
+   an invariant that is branch-scoped by nature, so the test was removed in #500; see
+   [openapi.yaml no-op](#openapiyaml-no-op) for the standing guarantee.)
