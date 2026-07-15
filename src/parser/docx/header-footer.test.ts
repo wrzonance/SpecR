@@ -564,3 +564,153 @@ describe("captureHeaderFooter — oversize embedded image never reaches buildCom
     ]);
   });
 });
+
+// INVARIANT (#487, ADR-068): captureHeaderFooter never throws due to embedded
+// image content, for ANY of the four ways image resolution can fail — a
+// malformed drawing descriptor, an unresolvable relationship (no matching
+// media byte for the run's rId), oversize bytes (pinned above, its own
+// describe block, since that's the one failure mode with a genuine ordering
+// hazard against buildComposition's un-guarded schema.parse()), or unsniffable
+// bytes (#306 regression guard). Every case degrades to the same raw sidecar +
+// single capture warning, never a thrown error and never a silent drop, run
+// through the full orchestrator path (entries.mediaByPart -> buildRegionSlot
+// -> buildVariant -> captureRegion -> buildCellContent/resolveDrawingImage ->
+// buildComposition) rather than resolveDrawingImage in isolation (already
+// unit-pinned by header-footer-images.test.ts).
+describe('captureHeaderFooter — malformed/unresolvable/unsniffable embedded image data never throws (#487, ADR-068)', () => {
+  it('degrades a malformed drawing (no wp:extent, no descriptor) to a raw sidecar + capture warning, never a thrown error', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
+    const malformedDrawingRun =
+      '<w:r><w:drawing><wp:inline><wp:docPr id="1"/></wp:inline></w:drawing></w:r>';
+    const hdrXml = makeHdrXmlWithBody(
+      `<w:p><w:r><w:t>Logo:</w:t></w:r>${malformedDrawingRun}</w:p>`
+    );
+    const mediaByPart: HeaderFooterMediaByPart = new Map([
+      ['word/header1.xml', new Map([['rIdImg1', pngBytes()]])],
+    ]);
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
+      headerParts: new Map([['word/header1.xml', hdrXml]]),
+      mediaByPart,
+    });
+
+    expect(() => captureHeaderFooter(entries, KNOWN)).not.toThrow();
+
+    const result = captureHeaderFooter(entries, KNOWN);
+    expect(result.composition?.variants?.default?.header?.left?.content).toEqual([
+      { kind: 'literal', text: 'Logo:' },
+    ]);
+    const unmodeledKinds = result.composition?.raw?.unmodeled?.map((e) => e.kind) ?? [];
+    expect(unmodeledKinds).toContain('image');
+    expect(result.warnings).toHaveLength(1);
+  });
+
+  it("degrades an unresolvable relationship (rId absent from this part's media map) to a raw sidecar + capture warning, never a thrown error", () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
+    const hdrXml = makeHdrXmlWithBody(
+      `<w:p><w:r><w:t>Logo:</w:t></w:r>${imageDrawingRun('rIdImg1')}</w:p>`
+    );
+    // The part's media map exists but has no entry for rIdImg1 — the
+    // relationship's target was never resolved (e.g. dropped during the
+    // async extraction phase), not the same case as no map at all.
+    const mediaByPart: HeaderFooterMediaByPart = new Map([
+      ['word/header1.xml', new Map([['rIdOther', pngBytes()]])],
+    ]);
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
+      headerParts: new Map([['word/header1.xml', hdrXml]]),
+      mediaByPart,
+    });
+
+    expect(() => captureHeaderFooter(entries, KNOWN)).not.toThrow();
+
+    const result = captureHeaderFooter(entries, KNOWN);
+    expect(result.composition?.variants?.default?.header?.left?.content).toEqual([
+      { kind: 'literal', text: 'Logo:' },
+    ]);
+    const unmodeledKinds = result.composition?.raw?.unmodeled?.map((e) => e.kind) ?? [];
+    expect(unmodeledKinds).toContain('image');
+    expect(result.warnings).toHaveLength(1);
+  });
+
+  it('degrades unsniffable bytes (no known magic-byte signature) to a raw sidecar + capture warning, never a thrown error (#306 regression guard)', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
+    const hdrXml = makeHdrXmlWithBody(
+      `<w:p><w:r><w:t>Logo:</w:t></w:r>${imageDrawingRun('rIdImg1')}</w:p>`
+    );
+    const garbageBytes = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
+    const mediaByPart: HeaderFooterMediaByPart = new Map([
+      ['word/header1.xml', new Map([['rIdImg1', garbageBytes]])],
+    ]);
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
+      headerParts: new Map([['word/header1.xml', hdrXml]]),
+      mediaByPart,
+    });
+
+    expect(() => captureHeaderFooter(entries, KNOWN)).not.toThrow();
+
+    const result = captureHeaderFooter(entries, KNOWN);
+    expect(result.composition?.variants?.default?.header?.left?.content).toEqual([
+      { kind: 'literal', text: 'Logo:' },
+    ]);
+    const unmodeledKinds = result.composition?.raw?.unmodeled?.map((e) => e.kind) ?? [];
+    expect(unmodeledKinds).toContain('image');
+    expect(result.warnings).toHaveLength(1);
+  });
+});
+
+// INVARIANT (#487, ADR-071 decision 4): a table cell's drawing run is filtered
+// out by header-footer-table.ts's own pre-filter BEFORE buildCellContent ever
+// sees it, and captureTablesForRegion is deliberately never given a
+// mediaByRId slice (header-footer-region.ts's captureRegion doc comment) — so
+// buildCellContent's new drawing branch is structurally unreachable from a
+// table cell's capture path. This holds even when the referenced image WOULD
+// resolve to a valid modeled field outside a table cell (proving the
+// pre-filter, not merely an incidentally-unresolvable rId) — the same
+// well-formed, resolvable drawing run and mediaByPart entry used by the
+// paragraph-level image tests above, placed inside a table cell instead.
+// Extracted from the test body below purely to keep the assertion's own
+// complexity within eslint's cap — flattens every cell's content across a
+// captured table's rows and keeps only `image`-kind fields.
+function imageFieldsInTableCells(
+  rows: readonly { readonly cells: readonly { readonly content?: readonly { kind: string }[] }[] }[]
+): readonly { kind: string }[] {
+  return rows
+    .flatMap((row) => row.cells)
+    .flatMap((cell) => cell.content ?? [])
+    .filter((field) => field.kind === 'image');
+}
+
+describe('captureHeaderFooter — table-cell image never resolves to a modeled field (#487, ADR-071 decision 4)', () => {
+  it('drops a well-formed, resolvable image inside a table cell as unmodeled, never as a modeled image field', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
+    const tableXml =
+      '<w:tbl><w:tr><w:tc><w:p>' +
+      '<w:r><w:t>Logo: </w:t></w:r>' +
+      imageDrawingRun('rIdImg1') +
+      '</w:p></w:tc></w:tr></w:tbl>';
+    const hdrXml = makeHdrXmlWithBody(tableXml);
+    const mediaByPart: HeaderFooterMediaByPart = new Map([
+      ['word/header1.xml', new Map([['rIdImg1', pngBytes()]])],
+    ]);
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
+      headerParts: new Map([['word/header1.xml', hdrXml]]),
+      mediaByPart,
+    });
+
+    expect(() => captureHeaderFooter(entries, KNOWN)).not.toThrow();
+
+    const composition = captureHeaderFooter(entries, KNOWN).composition;
+    const rows = composition?.variants?.default?.header?.table?.rows;
+    expect(rows).toEqual([{ cells: [{ content: [{ kind: 'literal', text: 'Logo: ' }] }] }]);
+    expect(composition?.raw?.unmodeled?.some((entry) => entry.kind === 'image')).toBe(true);
+    // No cell in any row ever carries a modeled `image` field.
+    expect(imageFieldsInTableCells(rows ?? [])).toEqual([]);
+  });
+});
