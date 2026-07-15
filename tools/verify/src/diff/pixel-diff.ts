@@ -107,6 +107,17 @@ export function createPixelDiffer(): PixelDiffer {
  * `footerGeom` are null when that region doesn't exist on the page (e.g. no
  * running header/footer defined) — see RegionDiffSet's docstring for the
  * invariant this implies.
+ *
+ * COORDINATE CONTRACT (load-bearing for the future capture-wiring task):
+ * a SINGLE `pageGeom`/`headerGeom`/`footerGeom` locates the same logical
+ * region in BOTH `referenceScreenshotPath` and `roundtripScreenshotPath`, so
+ * the two screenshots must share one coordinate system. In the shipped 3-pane
+ * layout the reference and round-trip panes sit in different grid columns, so
+ * their raw viewport-relative window.__measure() rects have DIFFERENT `x` —
+ * feeding either pane's viewport geometry here as-is would crop the wrong
+ * area out of the other screenshot. The capturing agent must therefore supply
+ * pane-local captures + pane-local geometry (or otherwise normalize both
+ * screenshots to a shared origin) before calling diffRegions().
  */
 export interface RegionDiffInput {
   readonly referenceScreenshotPath: string;

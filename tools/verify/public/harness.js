@@ -346,21 +346,33 @@
     let stopped = false;
     function tick() {
       if (stopped) return;
-      pollOnce(runId).then((record) => {
-        if (record) {
-          renderRunStatus(record);
-          renderProperties(record.artifacts.derivationReport);
-          renderDerivationReport(record.artifacts.derivationReport);
-          tryAutoLoadPane(runId, 'reference');
-          tryAutoLoadPane(runId, 'roundtrip');
-          if (isTerminal(record)) {
-            stopped = true;
-            window.__loadDiffPane(runId);
-            return;
+      pollOnce(runId)
+        .then((record) => {
+          if (record) {
+            renderRunStatus(record);
+            renderProperties(record.artifacts.derivationReport);
+            renderDerivationReport(record.artifacts.derivationReport);
+            tryAutoLoadPane(runId, 'reference');
+            tryAutoLoadPane(runId, 'roundtrip');
+            if (isTerminal(record)) {
+              stopped = true;
+              window.__loadDiffPane(runId).catch(() => {
+                // Best-effort diff load — the region-diff pipeline may not
+                // have produced crops yet; the diff pane keeps its default
+                // empty state on failure rather than leaking an unhandled
+                // rejection.
+              });
+              return;
+            }
           }
-        }
-        setTimeout(tick, POLL_INTERVAL_MS);
-      });
+          setTimeout(tick, POLL_INTERVAL_MS);
+        })
+        .catch(() => {
+          // A transient fetch/JSON error must not kill the poll loop or leak
+          // an unhandled rejection — keep polling until a terminal state is
+          // seen (the server may just be momentarily unreachable).
+          setTimeout(tick, POLL_INTERVAL_MS);
+        });
     }
     tick();
   }
