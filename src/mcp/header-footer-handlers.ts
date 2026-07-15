@@ -8,7 +8,7 @@ import {
   upsertHeaderFooterConfig,
 } from '../db/index.js';
 import type { HeaderFooterScopeInput } from '../db/index.js';
-import { HeaderFooterCompositionSchema } from '../ast/index.js';
+import { HeaderFooterCompositionWriteSchema } from '../ast/index.js';
 import type { HeaderFooterComposition } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
@@ -44,27 +44,30 @@ export const RevisionHeaderFooterShape = {
 };
 
 // CORRECTED (spike finding #1): nest the whole body as one opaque `config`
-// field rather than spreading `HeaderFooterCompositionSchema.shape` into the
-// args shape. That schema's catchall sits at the TOP level (unlike nested-
+// field rather than spreading `HeaderFooterCompositionWriteSchema.shape` into
+// the args shape. That schema's catchall sits at the TOP level (unlike nested-
 // field precedents elsewhere in this codebase), so flattening it into a
 // plain z.object args shape would silently strip unrecognized top-level
 // extension keys — verified live: HeaderFooterCompositionSchema.safeParse
 // round-trips an extension key; z.object({...spread}).safeParse drops it.
+// The WRITE schema (structural + transport-size invariant) is used here because
+// an MCP set_*_header_footer call is a single transport request that must fit
+// HEADER_FOOTER_JSON_BODY_LIMIT_BYTES, mirroring the PUT routes' validateBody.
 export const SetLibraryHeaderFooterShape = {
   ...LibraryHeaderFooterShape,
-  config: HeaderFooterCompositionSchema,
+  config: HeaderFooterCompositionWriteSchema,
 };
 export const SetProjectHeaderFooterShape = {
   ...ProjectHeaderFooterShape,
-  config: HeaderFooterCompositionSchema,
+  config: HeaderFooterCompositionWriteSchema,
 };
 export const SetPackageHeaderFooterShape = {
   ...PackageHeaderFooterShape,
-  config: HeaderFooterCompositionSchema,
+  config: HeaderFooterCompositionWriteSchema,
 };
 export const SetRevisionHeaderFooterShape = {
   ...RevisionHeaderFooterShape,
-  config: HeaderFooterCompositionSchema,
+  config: HeaderFooterCompositionWriteSchema,
 };
 
 const LibraryArgs = z.object(LibraryHeaderFooterShape);
