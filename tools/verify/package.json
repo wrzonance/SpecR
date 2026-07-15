@@ -15,11 +15,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "latest",
     "@types/node": "^22.0.0",
+    "@types/pngjs": "^6.0.5",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-sonarjs": "^4.0.3",
