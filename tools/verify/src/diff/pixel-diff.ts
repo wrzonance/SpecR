@@ -141,44 +141,197 @@ export interface RegionDiffSet {
   readonly footer: PixelDiffResult | null;
 }
 
-async function diffRegion(
+/** A geometry pair with one Geom per side — the resolved shape a crop-and-diff always operates on (never a raw nullable pair). */
+interface DualGeom {
+  readonly reference: Geom;
+  readonly roundtrip: Geom;
+}
+
+// Crop `referencePath`/`roundtripPath` at their own (possibly distinct)
+// resolved geometries and diff the crops. The one shared primitive behind
+// diffPageRegion/diffRegionPair/diffRegions/diffPaneRegions — every path
+// that ends up producing a PixelDiffResult funnels through here so the
+// crop-file-naming convention (`{regionName}-{side}.png`) stays in one
+// place.
+async function diffCroppedPair(
   differ: PixelDiffer,
-  input: RegionDiffInput,
-  geom: Geom,
+  referencePath: string,
+  roundtripPath: string,
+  workDir: string,
+  geoms: DualGeom,
   regionName: string
 ): Promise<PixelDiffResult> {
-  const referenceCrop = path.join(input.workDir, `${regionName}-reference.png`);
-  const roundtripCrop = path.join(input.workDir, `${regionName}-roundtrip.png`);
-  const diffOut = path.join(input.workDir, `${regionName}-diff.png`);
+  const referenceCrop = path.join(workDir, `${regionName}-reference.png`);
+  const roundtripCrop = path.join(workDir, `${regionName}-roundtrip.png`);
+  const diffOut = path.join(workDir, `${regionName}-diff.png`);
 
   await Promise.all([
-    cropRegion(input.referenceScreenshotPath, geom, referenceCrop),
-    cropRegion(input.roundtripScreenshotPath, geom, roundtripCrop),
+    cropRegion(referencePath, geoms.reference, referenceCrop),
+    cropRegion(roundtripPath, geoms.roundtrip, roundtripCrop),
   ]);
   return differ.diff(referenceCrop, roundtripCrop, diffOut);
 }
 
-async function diffOptionalRegion(
+/**
+ * Resolve a region's two per-side geometries into the single DualGeom every
+ * crop-and-diff operates on:
+ *  - both absent -> null (region doesn't exist on either side — skip it,
+ *    same as today's diffOptionalRegion behavior).
+ *  - both present -> passed through UNMERGED, one geometry per side (the
+ *    normal case: reference and roundtrip panes sit at different screen
+ *    coordinates, see PaneDiffInput's docstring).
+ *  - exactly one present -> the absent side is cropped at the PRESENT
+ *    side's own geometry, not skipped. This makes a missing region diff
+ *    loudly against whatever pixels the other render actually has there,
+ *    rather than silently reporting "no diff to show" — see
+ *    diffPaneRegions' docstring for why that matters for this harness's
+ *    default-vs-missing-header/footer fixtures.
+ */
+export function resolveDualGeom(reference: Geom | null, roundtrip: Geom | null): DualGeom | null {
+  if (reference !== null && roundtrip !== null) return { reference, roundtrip };
+  if (reference !== null) return { reference, roundtrip: reference };
+  if (roundtrip !== null) return { reference: roundtrip, roundtrip };
+  return null;
+}
+
+/**
+ * Crop and diff the page region. Always non-null — page geometry is
+ * required on both sides, unlike header/footer — kept as its own helper
+ * (rather than routed through diffRegionPair's nullable-typed path) so
+ * satisfying RegionDiffSet.page's non-null type never needs a runtime throw
+ * that could only ever be dead code (WT-305 spike finding 6).
+ */
+async function diffPageRegion(
   differ: PixelDiffer,
-  input: RegionDiffInput,
-  geom: Geom | null,
+  referencePath: string,
+  roundtripPath: string,
+  workDir: string,
+  geoms: DualGeom
+): Promise<PixelDiffResult> {
+  return diffCroppedPair(differ, referencePath, roundtripPath, workDir, geoms, 'page');
+}
+
+/**
+ * Crop and diff an optional (header/footer) region. Null iff BOTH sides'
+ * input Geom were null — see resolveDualGeom's docstring for the
+ * one-side-present fallback.
+ */
+async function diffRegionPair(
+  differ: PixelDiffer,
+  referencePath: string,
+  roundtripPath: string,
+  workDir: string,
+  geoms: { reference: Geom | null; roundtrip: Geom | null },
   regionName: string
 ): Promise<PixelDiffResult | null> {
-  return geom === null ? null : diffRegion(differ, input, geom, regionName);
+  const resolved = resolveDualGeom(geoms.reference, geoms.roundtrip);
+  return resolved === null
+    ? null
+    : diffCroppedPair(differ, referencePath, roundtripPath, workDir, resolved, regionName);
 }
 
 /**
  * Crop and diff a run's page/header/footer regions. See RegionDiffSet's
  * docstring for the null-iff-absent invariant on header/footer.
+ *
+ * Implemented as a thin wrapper over diffPageRegion/diffRegionPair, giving
+ * BOTH sides the SAME geometry (this input carries only one geometry per
+ * region, not a per-side pair) — behaviorally identical to the pre-#305
+ * implementation: resolveDualGeom(g, g) always passes `g` through for both
+ * sides, and resolveDualGeom(null, null) always skips, exactly like the old
+ * diffOptionalRegion.
  */
 export async function diffRegions(
   differ: PixelDiffer,
   input: RegionDiffInput
 ): Promise<RegionDiffSet> {
+  const { referenceScreenshotPath: refPath, roundtripScreenshotPath: rtPath, workDir } = input;
   const [page, header, footer] = await Promise.all([
-    diffRegion(differ, input, input.pageGeom, 'page'),
-    diffOptionalRegion(differ, input, input.headerGeom, 'header'),
-    diffOptionalRegion(differ, input, input.footerGeom, 'footer'),
+    diffPageRegion(differ, refPath, rtPath, workDir, {
+      reference: input.pageGeom,
+      roundtrip: input.pageGeom,
+    }),
+    diffRegionPair(
+      differ,
+      refPath,
+      rtPath,
+      workDir,
+      { reference: input.headerGeom, roundtrip: input.headerGeom },
+      'header'
+    ),
+    diffRegionPair(
+      differ,
+      refPath,
+      rtPath,
+      workDir,
+      { reference: input.footerGeom, roundtrip: input.footerGeom },
+      'footer'
+    ),
+  ]);
+  return { page, header, footer };
+}
+
+/**
+ * One side's (reference or roundtrip) page/header/footer geometry, all
+ * relative to that side's OWN `screenshotPath` — see PaneDiffInput's
+ * docstring for why reference and roundtrip need independent geometries
+ * rather than the single shared set RegionDiffInput carries.
+ */
+export interface PaneRegions {
+  readonly screenshotPath: string;
+  readonly pageGeom: Geom;
+  readonly headerGeom: Geom | null;
+  readonly footerGeom: Geom | null;
+}
+
+/**
+ * Input to diffPaneRegions: unlike RegionDiffInput (one geometry set shared
+ * by both screenshots, historically true because a single measurement pass
+ * covered same-origin screenshots), the shipped 3-pane layout's reference
+ * and round-trip panes sit in DIFFERENT grid columns — see diffRegions'
+ * RegionDiffInput docstring on that coordinate contract. A pane-local
+ * capture pairs each screenshot with its OWN geometry so the two panes
+ * never need to share one coordinate system.
+ */
+export interface PaneDiffInput {
+  readonly reference: PaneRegions;
+  readonly roundtrip: PaneRegions;
+  /** Directory region crops and diff images are written into. */
+  readonly workDir: string;
+}
+
+/**
+ * Crop and diff a run's page/header/footer regions from two INDEPENDENTLY
+ * positioned pane screenshots — the dual-geometry counterpart to
+ * diffRegions. See RegionDiffSet's docstring for the null-iff-absent
+ * invariant on header/footer (here: null iff BOTH sides' Geom were null).
+ */
+export async function diffPaneRegions(
+  differ: PixelDiffer,
+  input: PaneDiffInput
+): Promise<RegionDiffSet> {
+  const { reference, roundtrip, workDir } = input;
+  const [page, header, footer] = await Promise.all([
+    diffPageRegion(differ, reference.screenshotPath, roundtrip.screenshotPath, workDir, {
+      reference: reference.pageGeom,
+      roundtrip: roundtrip.pageGeom,
+    }),
+    diffRegionPair(
+      differ,
+      reference.screenshotPath,
+      roundtrip.screenshotPath,
+      workDir,
+      { reference: reference.headerGeom, roundtrip: roundtrip.headerGeom },
+      'header'
+    ),
+    diffRegionPair(
+      differ,
+      reference.screenshotPath,
+      roundtrip.screenshotPath,
+      workDir,
+      { reference: reference.footerGeom, roundtrip: roundtrip.footerGeom },
+      'footer'
+    ),
   ]);
   return { page, header, footer };
 }
