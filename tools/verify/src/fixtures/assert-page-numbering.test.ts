@@ -35,6 +35,24 @@ function documentXmlWithTwoSections(firstSectPrBody: string, trailingSectPrBody:
   );
 }
 
+// A single-section document whose current body-level sectPr wraps a
+// w:sectPrChange holding the section's PREVIOUS properties in a nested
+// sectPr. Exercises the "ignore tracked-change history" contract — the
+// historical nested sectPr must not be read as the final section.
+function documentXmlWithTrackedChange(
+  currentSectPrBody: string,
+  historicalSectPrBody: string
+): string {
+  return (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+    '<w:body><w:p><w:r><w:t>body</w:t></w:r></w:p>' +
+    `<w:sectPr>${currentSectPrBody}` +
+    `<w:sectPrChange w:id="1" w:author="reviewer"><w:sectPr>${historicalSectPrBody}</w:sectPr></w:sectPrChange>` +
+    '</w:sectPr></w:body></w:document>'
+  );
+}
+
 async function docxBufferWithDocumentXml(documentXml: string | null): Promise<Buffer> {
   const zip = new JSZip();
   if (documentXml !== null) zip.file('word/document.xml', documentXml);
@@ -83,6 +101,18 @@ describe('assertPageNumberingRestart', () => {
     );
 
     await expect(assertPageNumberingRestart(buffer, 1)).resolves.toBeUndefined();
+  });
+
+  it('ignores a historical sectPr inside w:sectPrChange (tracked changes)', async () => {
+    // The current body section has no restart; only the tracked-change
+    // history does. Reading the historical value would wrongly pass.
+    const buffer = await docxBufferWithDocumentXml(
+      documentXmlWithTrackedChange('<w:pgSz w:w="11906"/>', '<w:pgNumType w:start="1"/>')
+    );
+
+    await expect(assertPageNumberingRestart(buffer, 1)).rejects.toThrow(
+      /expected .*w:start="1".*found not found/
+    );
   });
 
   it('throws VerifyRenderError (stage report) when word/document.xml is missing entirely', async () => {

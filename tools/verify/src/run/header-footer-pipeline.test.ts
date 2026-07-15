@@ -312,13 +312,13 @@ describe('header-footer fixture pipeline (orchestration + no-escape boundary)', 
 
     const runId = pipeline.startRun({ scenarioId: 'restartPerSpec' });
 
+    // The restartPerSpec postcondition re-opens the run as a non-terminal
+    // 'report' stage, verifies the generated DOCX's page numbering, then
+    // records report/complete — the run's true terminal success state.
     await waitFor(() => {
       const run = runStore.getRun(runId);
-      return run?.stage === 'generate' && run.status === 'complete';
+      return run?.stage === 'report' && run.status === 'complete';
     });
-    // Let the post-generate page-numbering assertion settle — on success it
-    // leaves stage/status untouched, so confirm it did not flip to failed.
-    await new Promise((resolve) => setTimeout(resolve, 20));
 
     const run = runStore.getRun(runId);
     if (run === undefined) throw new Error('run missing after pipeline completed');

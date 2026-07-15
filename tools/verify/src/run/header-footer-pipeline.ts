@@ -246,6 +246,14 @@ async function assertGeneratedPageNumbering(
 ): Promise<void> {
   const { pageNumbering } = scenario.composition;
   if (pageNumbering?.mode !== 'restartPerSpec' || pageNumbering.startAt === undefined) return;
+  // Re-open the run as a NON-terminal 'report' stage before reading and
+  // asserting. runFixtureGenerate already recorded generate/complete, which
+  // pollers treat as terminal (harness.js's isTerminal) — without moving off
+  // it first, a poller could report success in the window before this
+  // postcondition runs, then have the run flip to report/failed underneath
+  // it. The transition happens synchronously after runFixtureGenerate's
+  // await resolves, so no poll can observe the intervening generate/complete.
+  deps.runStore.updateRun(runId, { stage: 'report', status: 'running' });
   const generatedPath = deps.runStore.getRun(runId)?.artifacts.generatedPath;
   if (generatedPath === undefined) {
     throw new VerifyRenderError(
@@ -255,6 +263,7 @@ async function assertGeneratedPageNumbering(
     );
   }
   await assertPageNumberingRestart(await readFile(generatedPath), pageNumbering.startAt);
+  deps.runStore.updateRun(runId, { stage: 'report', status: 'complete' });
 }
 
 async function executeFixtureRun(

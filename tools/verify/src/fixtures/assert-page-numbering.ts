@@ -25,13 +25,22 @@ async function readDocumentXml(docxBuffer: Buffer): Promise<string> {
       stage: 'report',
     });
   }
-  return entry.async('string');
+  try {
+    return await entry.async('string');
+  } catch (err) {
+    // async() can reject after loadAsync succeeded (corrupt/truncated
+    // entry) — keep that on the harness's typed report-stage boundary
+    // rather than leaking a raw JSZip error.
+    throw new VerifyRenderError('failed to read word/document.xml from the generated DOCX', {
+      stage: 'report',
+      cause: err,
+    });
+  }
 }
 
-// Index of the FINAL w:sectPr open tag (`<w:sectPr>` or `<w:sectPr ...>`),
-// or -1 if none. The `[\s>]` guard excludes `<w:sectPrChange>` (a revision
-// child that lives INSIDE a sectPr), so this lands on the real trailing
-// section-properties element even in a tracked-changes document.
+// Index of the FINAL w:sectPr open tag (`<w:sectPr>` or `<w:sectPr ...>`) in
+// the given XML, or -1 if none. The `[\s>]` guard means it never matches the
+// `<w:sectPrChange>` element name.
 function lastSectPrIndex(documentXml: string): number {
   const opens = /<w:sectPr[\s>]/g;
   let index = -1;
@@ -42,13 +51,17 @@ function lastSectPrIndex(documentXml: string): number {
 }
 
 function extractPgNumStart(documentXml: string): string | null {
+  // Strip tracked-change history first: a <w:sectPrChange> records a
+  // section's PREVIOUS properties in a nested <w:sectPr>. Left in place it
+  // would be picked as the "final" section and validate an obsolete w:start.
+  const current = documentXml.replace(/<w:sectPrChange\b[\s\S]*?<\/w:sectPrChange>/g, '');
   // Scope the search to the FINAL w:sectPr (the body-level section
   // properties). A multi-section DOCX carries a w:sectPr per section, and
   // only the trailing one governs the asserted spec's page numbering — an
   // unscoped scan would return an earlier section's w:pgNumType and pass
   // even when the trailing section dropped the restart.
-  const lastSectPr = lastSectPrIndex(documentXml);
-  const scope = lastSectPr === -1 ? documentXml : documentXml.slice(lastSectPr);
+  const lastSectPr = lastSectPrIndex(current);
+  const scope = lastSectPr === -1 ? current : current.slice(lastSectPr);
   const match = /<w:pgNumType\b[^>]*\bw:start="(\d+)"[^>]*>/.exec(scope);
   return match?.[1] ?? null;
 }

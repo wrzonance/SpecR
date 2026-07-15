@@ -1,6 +1,6 @@
 // Pins the README's "openapi.yaml no-op" claim (#305 task 7/7): this whole
 // tools/verify build adds zero endpoints to the main SpecR REST API, so
-// `git diff origin/main -- src/ openapi.yaml` must stay empty for the
+// `git diff origin/main...HEAD -- src/ openapi.yaml` must stay empty for the
 // entire branch — no commit under this feature ever touches the repo
 // root's own src/ tree or its hand-authored API contract.
 //

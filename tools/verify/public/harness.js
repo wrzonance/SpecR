@@ -323,10 +323,20 @@
   // ─── run lifecycle: start + poll GET /api/runs/:runId ──────────────────
 
   const POLL_INTERVAL_MS = 1000;
-  const TERMINAL_STAGE = 'generate';
+  // A run is terminal on failure, or when it completes at the LAST stage it
+  // will reach. The upload pipeline stops at 'generate'; the header/footer
+  // restartPerSpec fixture appends a 'report'-stage page-numbering
+  // postcondition after generate, so 'report/complete' is terminal too (and
+  // 'generate/complete' is never observed for that run — it re-opens to
+  // 'report/running' synchronously). 'report' is RUN_STAGES' final stage, so
+  // a complete there is always terminal.
+  const TERMINAL_STAGES = ['generate', 'report'];
 
   function isTerminal(record) {
-    return record.status === 'failed' || (record.stage === TERMINAL_STAGE && record.status === 'complete');
+    return (
+      record.status === 'failed' ||
+      (record.status === 'complete' && TERMINAL_STAGES.indexOf(record.stage) !== -1)
+    );
   }
 
   function renderRunStatus(record) {
@@ -364,6 +374,11 @@
       if (stopped) return;
       pollOnce(runId)
         .then((record) => {
+          // Re-check after the in-flight fetch resolves: a newer run may have
+          // superseded this loop while the request was outstanding. Without
+          // this, one more stale render/setTimeout would slip through before
+          // the next tick's guard catches it.
+          if (stopped) return;
           if (record) {
             renderRunStatus(record);
             renderProperties(record.artifacts.derivationReport);
