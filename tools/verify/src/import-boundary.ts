@@ -6,7 +6,7 @@
 // types. This module is what import-boundary.test.ts pins that invariant
 // with; it is not itself part of the harness's runtime request path.
 import { readdirSync, statSync } from 'node:fs';
-import { dirname, extname, join, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 
 export interface ImportViolation {
   readonly file: string;
@@ -16,9 +16,14 @@ export interface ImportViolation {
 
 // Matches this package's own style exactly (single-quoted, ESM, prettier-
 // formatted) — a scoped detector for this invariant, not a general JS/TS
-// parser. Covers static imports/re-exports, dynamic import(), and require().
+// parser. Covers `from '...'` imports/re-exports, bare side-effect imports
+// (`import './foo.js';`), dynamic import(), and require(). Double-quoted
+// specifiers are intentionally out of scope: prettier normalizes every string
+// to single quotes and CI fails `prettier --check`, so a double-quoted import
+// can never reach committed source to evade this detector.
 const RELATIVE_IMPORT_PATTERNS = [
   /\bfrom\s+'(\.[^']+)'/g,
+  /\bimport\s+'(\.[^']+)'/g,
   /\bimport\(\s*'(\.[^']+)'\s*\)/g,
   /\brequire\(\s*'(\.[^']+)'\s*\)/g,
 ];
@@ -48,9 +53,21 @@ export function findOutOfBoundsSpecifiers(
   const fileDir = dirname(filePath);
   return extractRelativeSpecifiers(source).flatMap((specifier) => {
     const resolvedPath = resolve(fileDir, specifier);
-    const isInBounds = resolvedPath === packageRoot || resolvedPath.startsWith(packageRoot + '/');
-    return isInBounds ? [] : [{ file: filePath, specifier, resolvedPath }];
+    return isWithinRoot(packageRoot, resolvedPath)
+      ? []
+      : [{ file: filePath, specifier, resolvedPath }];
   });
+}
+
+// Platform-aware containment: resolve() returns native separators, so a raw
+// `startsWith(packageRoot + '/')` misclassifies in-package paths on Windows
+// (backslashes never match the hardcoded '/'). Mirror routes/files.ts's
+// isWithin() — path.relative() reports "escapes upward" as a leading '..' and
+// "different root" as an absolute path, both separator-agnostic. packageRoot
+// itself yields '' (in bounds).
+function isWithinRoot(packageRoot: string, resolvedPath: string): boolean {
+  const rel = relative(packageRoot, resolvedPath);
+  return !rel.startsWith('..') && !isAbsolute(rel);
 }
 
 const SCAN_EXTENSIONS = new Set(['.ts', '.js']);

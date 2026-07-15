@@ -53,8 +53,15 @@ async function main(): Promise<void> {
   const pipeline = createPipeline({ apiClient, runStore });
   const app = createApp({ pipeline, runStore });
 
-  app.listen(env.port, () => {
-    console.log(`verify harness listening on http://localhost:${String(env.port)}`);
+  // listen() emits an 'error' event (e.g. EADDRINUSE) rather than throwing or
+  // rejecting the callback — without this it bypasses main().catch() and
+  // crashes with a raw stack trace instead of the "failed to start" path.
+  await new Promise<void>((resolve, reject) => {
+    const server = app.listen(env.port, () => {
+      console.log(`verify harness listening on http://localhost:${String(env.port)}`);
+      resolve();
+    });
+    server.on('error', reject);
   });
 }
 

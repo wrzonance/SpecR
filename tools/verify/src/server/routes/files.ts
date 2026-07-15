@@ -26,6 +26,7 @@ import path from 'node:path';
 import { Router, type Request, type Response } from 'express';
 import * as z from 'zod';
 import { sanitizeRunFilename } from '../../filename.js';
+import { stringParam } from '../params.js';
 import type { RunStore } from '../../run/run-store.js';
 
 export const RUN_FILE_NAMES = [
@@ -80,15 +81,6 @@ export function resolveRunFilePath(
   const runDir = runStore.runDir(cleanRunId);
   const resolved = path.join(runDir, filenameResult.data);
   return isWithin(runDir, resolved) ? resolved : null;
-}
-
-// Express 5's ParamsDictionary types a captured segment as `string | string[]`
-// (to accommodate repeating params elsewhere in the app) — this route never
-// declares a repeating param, so a string[] here can only mean a malformed
-// request; treat it the same as "absent" rather than passing an array where
-// a filename/runId string is expected.
-function stringParam(value: string | string[] | undefined): string | undefined {
-  return typeof value === 'string' ? value : undefined;
 }
 
 function serveRunFile(runStore: RunStore) {

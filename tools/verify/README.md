@@ -58,7 +58,7 @@ SpecR API and from `openapi.yaml`, which needs no changes for this tool (see
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/runs` | Start a run: multipart `file` (the reference `.docx`) plus optional `section`/`title` fields. Returns `{ runId }` (202) immediately; the pipeline (upload → parse → import → generate) runs in the background. |
+| `POST` | `/api/runs` | Start a run: multipart `file` (the reference `.docx`) plus optional `section`/`title`/`sectionNumberFormat` fields. Returns `{ runId }` (202) immediately; the pipeline (upload → parse → import → generate) runs in the background. |
 | `GET` | `/api/runs/:runId` | Poll a run's current `RunRecord` — `stage`, `status`, `artifacts`, and `error` if failed. |
 | `POST` | `/api/runs/:runId/screenshot` | Ingest an externally-captured screenshot: JSON body `{ pane: 'reference'\|'roundtrip', imageBase64 }`. **This is the primary, and only, capture-ingestion path** — see [finding 2](#2-capture-source-external-playwright-screenshot-only). |
 | `GET` | `/api/runs/:runId/files/:filename` | Serve one of a run's artifacts. `:filename` is a closed enum (`src/server/routes/files.ts`'s `RUN_FILE_NAMES`) — `reference.docx`, `generated.docx`, both screenshots, and the nine region crop/diff PNGs (`page-`/`header-`/`footer-` × `reference`/`roundtrip`/`diff`). |
@@ -128,7 +128,7 @@ Issue #150 explicitly scopes this as a `tools/`-only build with no ADR. This sec
 decision record — spike findings (WT-150, pre-build) and build findings (discovered while
 implementing/verifying tasks 1–8) both numbered together in the order they were confirmed.
 
-#### 1. `pnpm-workspace.yaml` must exist before the first install
+### 1. `pnpm-workspace.yaml` must exist before the first install
 Without `tools/verify/pnpm-workspace.yaml` (`packages: []`), `pnpm --dir tools/verify install`
 silently resolves against the **repo root** importer instead: zero `node_modules` created under
 `tools/verify`, "Already up to date" printed, no error. pnpm resolves the *nearest*
@@ -136,7 +136,7 @@ silently resolves against the **repo root** importer instead: zero `node_modules
 `tools/verify` its own workspace root. The single most impactful spike finding; every other file in
 this package depends on install actually working.
 
-#### 2. Capture source: external Playwright screenshot only
+### 2. Capture source: external Playwright screenshot only
 An in-page `canvas`/`foreignObject` rasterization of the rendered panes (`window.__captureScreenshot`)
 was prototyped and confirmed non-viable: it renders blank/gray in Chromium, because docx-preview's
 injected stylesheet does not survive a cloned-subtree `foreignObject` rasterization. It was not
@@ -144,7 +144,7 @@ shipped, not even as a documented stub. The only capture path is external: a dri
 (Playwright) screenshots the rendered page and `POST`s it to `/api/runs/:runId/screenshot` as base64
 PNG — see [Driving a run](#driving-a-run-the-agent-workflow).
 
-#### 3. Region geometry is viewport-relative, not document-relative
+### 3. Region geometry is viewport-relative, not document-relative
 `window.__measure()`/`window.__regionGeom()` use `getBoundingClientRect()`, so `x`/`y` are relative to
 the *viewport*, not the document. At an unpinned or too-narrow viewport, `x` can go negative (this
 page's centered layout) or a region can extend past what the screenshot actually captured.
@@ -153,7 +153,7 @@ than ever silently clipping or writing a garbage crop — confirmed **load-beari
 paranoia (see finding 7, which is exactly this backstop catching a real, previously-undiscovered
 misconfiguration).
 
-#### 4. Two real API-client defects, fixed before they could ship
+### 4. Two real API-client defects, fixed before they could ship
 - Every multipart DOCX upload must set an explicit `Content-Type` on its `Blob` part
   (`api-client/client.ts`'s `DOCX_MIME` constant) — a type-less `Blob` omits `Content-Type` on the
   multipart part, and `src/api/parse.ts`'s `uploadMimeError()` genuinely 400s a request that arrives
@@ -165,12 +165,12 @@ misconfiguration).
   `"rejected": [{ "value": 140, "count": 3 }]` entries, rendered correctly in the harness's sidebar
   as "rejected: 140 x3").
 
-#### 5. `pixelmatch`'s ESM-only default export
+### 5. `pixelmatch`'s ESM-only default export
 `import pixelmatch from 'pixelmatch'` (v6+, ESM default-only) — never `require()`/CJS-interop-wrap
 it; a future "fix" toward CJS interop would silently break under this package's NodeNext module
 resolution. Pinned with an inline comment in `diff/pixel-diff.ts`, not just here.
 
-#### 6. Pad-not-fail pixel diffing, validated against a real dimension mismatch
+### 6. Pad-not-fail pixel diffing, validated against a real dimension mismatch
 `createPixelDiffer().diff()` never throws on a canvas-dimension mismatch between the two images —
 both are padded onto a shared `max(width) x max(height)` canvas first (zero-filled margin, via
 `pngjs`'s `Buffer.alloc`-backed `PNG` constructor), so `diffRatio` is always defined and in `[0, 1]`.
@@ -182,7 +182,7 @@ bug — the generator should presumably match the reference's page size (or the 
 default to A4 unconditionally. **Flagged as a follow-up issue, not worked around inside
 `tools/verify`.**
 
-#### 7. Viewport width must fit *both* panes, not just be "pinned" (task 8)
+### 7. Viewport width must fit *both* panes, not just be "pinned" (task 8)
 The WT-150 spike's original `VERIFY_VIEWPORT_WIDTH` default (900px) was carried through the design as
 "pin the viewport before screenshotting," but the spike's own throwaway page (`.spike-150/spike-web`)
 was a single full-width container — it never validated that number against the **shipped** harness
@@ -202,7 +202,7 @@ reopens this gap fails a test, not just a real capture. This is exactly what fin
 backstop exists for — it would have caught this as a `VerifyRenderError` the first time a driving
 agent tried to crop at the old default, rather than producing a silently wrong crop.
 
-#### 8. `diffRegions()`'s shared-geometry assumption doesn't fit a side-by-side layout
+### 8. `diffRegions()`'s shared-geometry assumption doesn't fit a side-by-side layout
 `diff/pixel-diff.ts`'s `diffRegions()` crops **both** the reference and round-trip screenshots using
 the *same* `Geom` rect (`RegionDiffInput.pageGeom`, one value applied to both `cropRegion()` calls).
 That is correct when both screenshots already share one coordinate frame (e.g. each pane captured in

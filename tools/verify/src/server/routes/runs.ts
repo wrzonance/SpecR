@@ -21,6 +21,7 @@ import multer from 'multer';
 import { Router, type Request, type Response } from 'express';
 import * as z from 'zod';
 import { SectionNumberFormatSchema } from '../../api-client/schemas.js';
+import { stringParam } from '../params.js';
 import type { Pipeline } from '../../run/pipeline.js';
 import type { RunStore } from '../../run/run-store.js';
 
@@ -61,14 +62,6 @@ function screenshotFilename(pane: 'reference' | 'roundtrip'): string {
 function decodePng(imageBase64: string): Buffer | null {
   const buffer = Buffer.from(imageBase64, 'base64');
   return buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE) ? buffer : null;
-}
-
-// Express 5's ParamsDictionary types a captured segment as `string | string[]`
-// (to accommodate repeating params elsewhere in the app) — neither route
-// below declares a repeating param, so a string[] here can only mean a
-// malformed request; treat it the same as "absent".
-function stringParam(value: string | string[] | undefined): string | undefined {
-  return typeof value === 'string' ? value : undefined;
 }
 
 function startRunHandler(pipeline: Pipeline) {
