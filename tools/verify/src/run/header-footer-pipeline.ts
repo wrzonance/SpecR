@@ -22,18 +22,32 @@
 // per-method stage), project + header/footer provisioning report as
 // 'import' (mirrors project-client.ts's), and the final render reports as
 // 'generate' via the shared runGenerate.
+//
+// Each provisioning stage additionally asserts the IDENTITY of what the
+// backend returned, not just its Zod-validated shape: the parsed
+// section/title round-trip (assertScenarioIdentityRoundTripped), the
+// provisioned section + source library (assertSectionProvisioned), and the
+// header/footer config's project scope (assertHeaderFooterScoped). After
+// generate, the restartPerSpec scenario runs one 'report'-stage
+// postcondition (assertGeneratedPageNumbering) against the GENERATED DOCX's
+// OOXML, because its page-numbering restart is invisible in docx-preview.
 
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { VerifyApiError, type RunStage } from '../errors.js';
+import { VerifyApiError, VerifyRenderError, type RunStage } from '../errors.js';
 import { failRun, runGenerate, type PipelineDeps } from './pipeline.js';
+import { assertPageNumberingRestart } from '../fixtures/assert-page-numbering.js';
 import {
   buildScenarioReferenceDocx,
   findScenario,
   type HeaderFooterScenario,
   type HeaderFooterScenarioId,
 } from '../fixtures/header-footer-scenarios.js';
-import type { OnboardingJobResult } from '../api-client/schemas.js';
+import type {
+  AddSectionToProjectResult,
+  HeaderFooterConfig,
+  OnboardingJobResult,
+} from '../api-client/schemas.js';
 import type { RunRecord } from './types.js';
 
 /** Reuses pipeline.ts's PipelineDeps verbatim — same apiClient/runStore shape. */
@@ -121,6 +135,26 @@ interface ProjectProvisionResult {
   readonly projectSpecId: string;
 }
 
+// The provisioned section must be the scenario's own, sourced from the
+// library this run just created. The api-client Zod-validates the response
+// SHAPE (schemas.ts) but not its identity, so a backend that added a
+// different section — or resolved the section from some other source
+// library — would pass silently and the whole run would end up verifying
+// the wrong spec. Mirrors assertScenarioIdentityRoundTripped's guard at the
+// parse boundary.
+function assertSectionProvisioned(
+  scenario: HeaderFooterScenario,
+  libraryId: string,
+  added: AddSectionToProjectResult
+): void {
+  if (added.section === scenario.section && added.source.libraryId === libraryId) return;
+  throw new VerifyApiError(
+    `header/footer scenario '${scenario.id}' provisioned section '${added.section}' from library ` +
+      `'${added.source.libraryId}', expected section '${scenario.section}' from library '${libraryId}'`,
+    { stage: 'import' }
+  );
+}
+
 // Create a project sourced from the just-imported library and add the
 // scenario's own section to it. Reports as stage 'import', matching
 // project-client.ts's own per-method stage.
@@ -135,6 +169,7 @@ async function runProjectProvision(
     libraryId,
   ]);
   const added = await deps.apiClient.addSectionToProject(projectId, scenario.section);
+  assertSectionProvisioned(scenario, libraryId, added);
 
   deps.runStore.updateRun(runId, {
     stage: 'import',
@@ -142,6 +177,25 @@ async function runProjectProvision(
     artifacts: { projectId, projectSpecId: added.specId },
   });
   return { projectId, projectSpecId: added.specId };
+}
+
+// The returned config must be anchored to the project this run just PUT it
+// on. The api-client models all four HeaderFooterScope kinds (schemas.ts)
+// and validates only the shape, so a backend that persisted the config at
+// the wrong scope — or the wrong project — would round-trip a valid but
+// wrong row; this pins it to { kind: 'project', projectId }.
+function assertHeaderFooterScoped(
+  scenario: HeaderFooterScenario,
+  projectId: string,
+  config: HeaderFooterConfig
+): void {
+  const { scope } = config;
+  if (scope.kind === 'project' && scope.projectId === projectId) return;
+  const found = scope.kind === 'project' ? `project '${scope.projectId}'` : `scope '${scope.kind}'`;
+  throw new VerifyApiError(
+    `header/footer scenario '${scenario.id}' config anchored to ${found}, expected project '${projectId}'`,
+    { stage: 'import' }
+  );
 }
 
 // PUT the scenario's own header/footer composition onto the provisioned
@@ -156,6 +210,7 @@ async function runHeaderFooterConfig(
 ): Promise<void> {
   deps.runStore.updateRun(runId, { stage: 'import', status: 'running' });
   const config = await deps.apiClient.putProjectHeaderFooter(projectId, scenario.composition);
+  assertHeaderFooterScoped(scenario, projectId, config);
 
   deps.runStore.updateRun(runId, {
     stage: 'import',
@@ -173,6 +228,33 @@ function runFixtureGenerate(
   projectSpecId: string
 ): Promise<void> {
   return runGenerate(deps, runId, projectSpecId, undefined, undefined);
+}
+
+// #305's restartPerSpec scenario forces a page-numbering restart a human
+// reviewer CANNOT see — PAGE fields render empty in docx-preview on both
+// panes (documented KNOWN LIMITATION) — so the restart is verified at the
+// OOXML level against the GENERATED DOCX, not by pixels. Without this
+// postcondition a generator regression that dropped the trailing sectPr's
+// w:pgNumType w:start would leave the run 'generate: complete' and look
+// fine on screen, so the restartPerSpec scenario would verify nothing. Only
+// the restartPerSpec mode carries a restart to assert; every other mode
+// no-ops. Reads the generatedPath runGenerate recorded on the RunRecord.
+async function assertGeneratedPageNumbering(
+  deps: HeaderFooterPipelineDeps,
+  runId: string,
+  scenario: HeaderFooterScenario
+): Promise<void> {
+  const { pageNumbering } = scenario.composition;
+  if (pageNumbering?.mode !== 'restartPerSpec' || pageNumbering.startAt === undefined) return;
+  const generatedPath = deps.runStore.getRun(runId)?.artifacts.generatedPath;
+  if (generatedPath === undefined) {
+    throw new VerifyRenderError(
+      `header/footer scenario '${scenario.id}' finished generate without a generated DOCX ` +
+        `to verify page numbering against`,
+      { stage: 'report' }
+    );
+  }
+  await assertPageNumberingRestart(await readFile(generatedPath), pageNumbering.startAt);
 }
 
 async function executeFixtureRun(
@@ -193,6 +275,8 @@ async function executeFixtureRun(
     await runHeaderFooterConfig(deps, record.runId, scenario, projectId);
     stage = 'generate';
     await runFixtureGenerate(deps, record.runId, projectSpecId);
+    stage = 'report';
+    await assertGeneratedPageNumbering(deps, record.runId, scenario);
   } catch (err) {
     failRun(deps, record.runId, stage, err);
   }

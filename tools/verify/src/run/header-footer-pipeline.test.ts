@@ -16,7 +16,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createHeaderFooterFixturePipeline } from './header-footer-pipeline.js';
 import { createRunStore, type RunStore } from './run-store.js';
-import { HEADER_FOOTER_SCENARIOS } from '../fixtures/header-footer-scenarios.js';
+import {
+  buildScenarioReferenceDocx,
+  findScenario,
+  HEADER_FOOTER_SCENARIOS,
+} from '../fixtures/header-footer-scenarios.js';
 import type { ApiClient } from '../api-client/client.js';
 import type {
   AddSectionToProjectResult,
@@ -32,6 +36,12 @@ import type {
 // buildOnboardingResult.
 const DEFAULT_SCENARIO_SECTION = '07 92 00';
 const DEFAULT_SCENARIO_TITLE = 'Joint Sealants';
+
+// The 'restartPerSpec' scenario's own section/title — the only catalog entry
+// whose composition carries pageNumbering.mode === 'restartPerSpec', so it is
+// the one that exercises the post-generate OOXML page-numbering assertion.
+const RESTART_SCENARIO_SECTION = '26 05 00';
+const RESTART_SCENARIO_TITLE = 'Common Work Results for Electrical';
 
 function buildOnboardingResult(overrides: Partial<OnboardingJobResult> = {}): OnboardingJobResult {
   return {
@@ -88,6 +98,30 @@ function stubApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
     putProjectHeaderFooter: () => Promise.resolve(headerFooterConfig),
   };
   return { ...defaults, ...overrides };
+}
+
+// api-client stub tuned so a 'restartPerSpec' run clears every identity gate
+// (parse round-trip, provisioned section, project scope) and reaches the
+// post-generate page-numbering assertion, with generateDocx returning the
+// DOCX under test.
+function restartPerSpecClient(generateDocx: () => Promise<Buffer>): ApiClient {
+  return stubApiClient({
+    waitForLibraryImportJob: () =>
+      Promise.resolve(
+        buildOnboardingResult({
+          section: RESTART_SCENARIO_SECTION,
+          title: RESTART_SCENARIO_TITLE,
+        })
+      ),
+    addSectionToProject: () =>
+      Promise.resolve({
+        specId: 'project-spec-1',
+        section: RESTART_SCENARIO_SECTION,
+        position: 1,
+        source: { libraryId: 'library-1', name: 'fixture library' },
+      }),
+    generateDocx,
+  });
 }
 
 function brokenRunStore(base: RunStore): RunStore {
@@ -261,6 +295,120 @@ describe('header-footer fixture pipeline (orchestration + no-escape boundary)', 
     } finally {
       process.removeListener('unhandledRejection', onUnhandledRejection);
     }
+  });
+
+  it('completes a restartPerSpec run whose generated DOCX declares the page-numbering restart', async () => {
+    const generatedDocx = await buildScenarioReferenceDocx(findScenario('restartPerSpec'));
+    const apiClient = restartPerSpecClient(() => Promise.resolve(generatedDocx));
+    const pipeline = createHeaderFooterFixturePipeline({ apiClient, runStore });
+
+    const runId = pipeline.startRun({ scenarioId: 'restartPerSpec' });
+
+    await waitFor(() => {
+      const run = runStore.getRun(runId);
+      return run?.stage === 'generate' && run.status === 'complete';
+    });
+    // Let the post-generate page-numbering assertion settle — on success it
+    // leaves stage/status untouched, so confirm it did not flip to failed.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const run = runStore.getRun(runId);
+    if (run === undefined) throw new Error('run missing after pipeline completed');
+    expect(run.status).toBe('complete');
+    expect(run.error).toBeUndefined();
+    expect(run.artifacts.generatedPath).toBeDefined();
+  });
+
+  it('fails a restartPerSpec run at the report stage when the generated DOCX omits the restart', async () => {
+    // The 'default' scenario declares no pageNumbering, so its reference DOCX
+    // carries no w:pgNumType w:start — standing in for a generator regression
+    // that dropped the restart element while still emitting a valid DOCX.
+    const docxWithoutRestart = await buildScenarioReferenceDocx(findScenario('default'));
+    const apiClient = restartPerSpecClient(() => Promise.resolve(docxWithoutRestart));
+    const pipeline = createHeaderFooterFixturePipeline({ apiClient, runStore });
+
+    const runId = pipeline.startRun({ scenarioId: 'restartPerSpec' });
+
+    await waitFor(() => runStore.getRun(runId)?.status === 'failed');
+
+    const run = runStore.getRun(runId);
+    if (run === undefined) throw new Error('run missing after failure');
+    expect(run.error?.stage).toBe('report');
+    expect(run.error?.message).toContain('w:pgNumType');
+    // Generation itself succeeded; only the OOXML postcondition failed.
+    expect(run.artifacts.generatedPath).toBeDefined();
+  });
+
+  it('fails the import stage when the provisioned section is not the scenario section', async () => {
+    const apiClient = stubApiClient({
+      addSectionToProject: () =>
+        Promise.resolve({
+          specId: 'project-spec-1',
+          section: '99 99 99',
+          position: 1,
+          source: { libraryId: 'library-1', name: 'fixture library' },
+        }),
+    });
+    const pipeline = createHeaderFooterFixturePipeline({ apiClient, runStore });
+
+    const runId = pipeline.startRun({ scenarioId: 'default' });
+
+    await waitFor(() => runStore.getRun(runId)?.status === 'failed');
+
+    const run = runStore.getRun(runId);
+    if (run === undefined) throw new Error('run missing after failure');
+    expect(run.error?.stage).toBe('import');
+    expect(run.error?.message).toContain('99 99 99');
+    expect(run.error?.message).toContain(DEFAULT_SCENARIO_SECTION);
+    // Never reaches header/footer config once the section identity fails.
+    expect(run.artifacts.headerFooterConfigId).toBeUndefined();
+  });
+
+  it('fails the import stage when the provisioned section is sourced from a different library', async () => {
+    const apiClient = stubApiClient({
+      addSectionToProject: () =>
+        Promise.resolve({
+          specId: 'project-spec-1',
+          section: DEFAULT_SCENARIO_SECTION,
+          position: 1,
+          source: { libraryId: 'some-other-library', name: 'unexpected library' },
+        }),
+    });
+    const pipeline = createHeaderFooterFixturePipeline({ apiClient, runStore });
+
+    const runId = pipeline.startRun({ scenarioId: 'default' });
+
+    await waitFor(() => runStore.getRun(runId)?.status === 'failed');
+
+    const run = runStore.getRun(runId);
+    if (run === undefined) throw new Error('run missing after failure');
+    expect(run.error?.stage).toBe('import');
+    expect(run.error?.message).toContain('some-other-library');
+    expect(run.artifacts.headerFooterConfigId).toBeUndefined();
+  });
+
+  it('fails the import stage when the header/footer config is anchored to a different project', async () => {
+    const apiClient = stubApiClient({
+      putProjectHeaderFooter: () =>
+        Promise.resolve({
+          id: 'hf-config-1',
+          scope: { kind: 'project', projectId: 'someone-elses-project' },
+          config: {},
+          createdAt: '2026-07-15T00:00:00.000Z',
+          updatedAt: '2026-07-15T00:00:00.000Z',
+        }),
+    });
+    const pipeline = createHeaderFooterFixturePipeline({ apiClient, runStore });
+
+    const runId = pipeline.startRun({ scenarioId: 'default' });
+
+    await waitFor(() => runStore.getRun(runId)?.status === 'failed');
+
+    const run = runStore.getRun(runId);
+    if (run === undefined) throw new Error('run missing after failure');
+    expect(run.error?.stage).toBe('import');
+    expect(run.error?.message).toContain('someone-elses-project');
+    expect(run.error?.message).toContain('project-1');
   });
 
   it('never lets a failure escape even when recording the failure itself throws', async () => {
