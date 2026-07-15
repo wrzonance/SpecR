@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { ParserError } from '../error.js';
-import { captureRegion, paragraphsOf } from './header-footer-region.js';
+import {
+  captureRegion,
+  paragraphHasContent,
+  paragraphsOf,
+  runsOf,
+} from './header-footer-region.js';
 import { asRecord, compact, createDocumentXmlParser } from './xml-utils.js';
+import { collectRuns } from './document.js';
 
 const KNOWN = { section: '09 91 26', title: 'STAINING AND TRANSPARENT FINISHING' };
 
@@ -62,6 +68,13 @@ function fieldRuns(instr: string, cachedText: string): string {
     `<w:r><w:t>${cachedText}</w:t></w:r>` +
     '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
   );
+}
+
+// Word's single-tag field shorthand (#485) — @_w:instr carries the field
+// code, and the cached display text sits in a nested w:r, parallel to
+// fieldRuns' w:fldChar begin/separate/end sequence above.
+function simpleFieldRun(instr: string, cachedText: string): string {
+  return `<w:fldSimple w:instr="${instr}"><w:r><w:t>${cachedText}</w:t></w:r></w:fldSimple>`;
 }
 
 function tableXml(): string {
@@ -262,6 +275,59 @@ describe('captureRegion — content nested inside wrapper elements is not silent
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(result.region).toBeUndefined();
     expect(result.unmodeled).toEqual([]);
+  });
+});
+
+// #485 traversal layer: runsOf's local collectRunsAndFields must terminate at
+// a w:fldSimple element as a whole (re-wrapped as { 'w:fldSimple': element }),
+// the same way it already terminates at w:r — rather than recursing into it
+// and silently flattening its cached-text w:r into an ordinary literal run,
+// which is what document.ts's shared collectRuns still does (and must keep
+// doing, unmodified, for the ordinary body-paragraph path).
+describe('runsOf / paragraphHasContent — w:fldSimple terminal handling (#485 traversal layer)', () => {
+  it('paragraphHasContent recognizes a bare w:fldSimple-wrapped run as content-bearing', () => {
+    expect(paragraphHasContent([{ 'w:fldSimple': { '@_w:instr': ' PAGE ' } }])).toBe(true);
+  });
+
+  it('paragraphHasContent stays false for a run with none of the recognized content keys', () => {
+    expect(paragraphHasContent([{ 'w:rPr': {} }])).toBe(false);
+  });
+
+  it('collects a w:fldSimple as exactly one terminal run — no double-counting of its inner cached-text run', () => {
+    const xml = makeHdrXml(paragraph('', simpleFieldRun(' PAGE ', '3')));
+    const [paragraphNode] = parseHeaderParagraphs(xml);
+    if (paragraphNode === undefined) throw new Error('test fixture parse failure: no paragraph');
+    const runs = runsOf(paragraphNode);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toHaveProperty('w:fldSimple');
+  });
+
+  it('finds a w:fldSimple nested inside a w:sdt content control (deep-unwrap parity with w:r)', () => {
+    const wrapped = `<w:sdt><w:sdtPr><w:id w:val="1"/></w:sdtPr><w:sdtContent>${simpleFieldRun(' PAGE ', '3')}</w:sdtContent></w:sdt>`;
+    const xml = makeHdrXml(paragraph('', wrapped));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'pageNumber' }]);
+  });
+
+  it('recognizes a PAGE field authored as w:fldSimple as content-bearing and captures it as a modeled field (parity with w:fldChar)', () => {
+    const xml = makeHdrXml(paragraph('', `${textRun('Page ')}${simpleFieldRun(' PAGE ', '3')}`));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([
+      { kind: 'literal', text: 'Page ' },
+      { kind: 'pageNumber' },
+    ]);
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it("document.ts's shared collectRuns is unmodified — it still flattens w:fldSimple into its inner w:r, unlike header-footer-region.ts's own local traversal", () => {
+    const xml = makeHdrXml(paragraph('', simpleFieldRun(' PAGE ', '3')));
+    const [paragraphNode] = parseHeaderParagraphs(xml);
+    if (paragraphNode === undefined) throw new Error('test fixture parse failure: no paragraph');
+    const sharedRuns: Record<string, unknown>[] = [];
+    collectRuns(paragraphNode, sharedRuns);
+    expect(sharedRuns).toHaveLength(1);
+    expect(sharedRuns[0]).not.toHaveProperty('w:fldSimple');
+    expect(sharedRuns[0]).toHaveProperty('w:t');
   });
 });
 
