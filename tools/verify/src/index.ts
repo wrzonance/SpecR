@@ -2,7 +2,10 @@
 // task 6/8): loads env, confirms the real SpecR REST API is actually
 // reachable before this harness accepts any traffic (design decision 3 —
 // every run this harness drives depends on that API), wires
-// api-client/run-store/pipeline/app together, and starts listening.
+// api-client/run-store/pipeline/app together, and starts listening. The
+// header/footer fixture pipeline (#305 task 6/7) shares the same apiClient
+// and runStore as the main pipeline — see header-footer-pipeline.ts's own
+// docstring for why it drives a different provisioning path.
 //
 // probeApiReachable is exported and covered by index.test.ts; main() itself
 // is guarded behind the ESM main-module check at the bottom of this file so
@@ -16,6 +19,7 @@ import { toRunError, VerifyApiError } from './errors.js';
 import { createApiClient } from './api-client/client.js';
 import { createRunStore } from './run/run-store.js';
 import { createPipeline } from './run/pipeline.js';
+import { createHeaderFooterFixturePipeline } from './run/header-footer-pipeline.js';
 import { createApp } from './server/app.js';
 
 const REACHABILITY_TIMEOUT_MS = 5000;
@@ -51,7 +55,8 @@ async function main(): Promise<void> {
   const apiClient = createApiClient({ baseUrl: env.specrApiBaseUrl });
   const runStore = createRunStore();
   const pipeline = createPipeline({ apiClient, runStore });
-  const app = createApp({ pipeline, runStore });
+  const headerFooterFixturePipeline = createHeaderFooterFixturePipeline({ apiClient, runStore });
+  const app = createApp({ pipeline, runStore, headerFooterFixturePipeline });
 
   // listen() emits an 'error' event (e.g. EADDRINUSE) rather than throwing or
   // rejecting the callback — without this it bypasses main().catch() and

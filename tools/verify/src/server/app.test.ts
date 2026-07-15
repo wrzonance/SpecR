@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApiClient } from '../api-client/client.js';
 import { createRunStore, type RunStore } from '../run/run-store.js';
 import { createPipeline } from '../run/pipeline.js';
+import { createHeaderFooterFixturePipeline } from '../run/header-footer-pipeline.js';
 import { createApp } from './app.js';
 
 describe('createApp (wiring smoke tests)', () => {
@@ -28,7 +29,8 @@ describe('createApp (wiring smoke tests)', () => {
     runStore = createRunStore(workRoot);
     const apiClient = createApiClient({ baseUrl: 'http://localhost:3000' });
     const pipeline = createPipeline({ apiClient, runStore });
-    app = createApp({ pipeline, runStore });
+    const headerFooterFixturePipeline = createHeaderFooterFixturePipeline({ apiClient, runStore });
+    app = createApp({ pipeline, runStore, headerFooterFixturePipeline });
 
     server = app.listen(0);
     await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -54,6 +56,19 @@ describe('createApp (wiring smoke tests)', () => {
 
     const response = await fetch(`${baseUrl}/api/runs/run-1/files/not-a-real-file.png`);
     expect(response.status).toBe(404);
+  });
+
+  it('mounts the header/footer fixtures router under /api/header-footer-fixtures (#305)', async () => {
+    const response = await fetch(`${baseUrl}/api/header-footer-fixtures`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scenarioId: 'default' }),
+    });
+    const body = (await response.json()) as { success: boolean; data: { runId: string } };
+
+    expect(response.status).toBe(202);
+    expect(body.success).toBe(true);
+    expect(typeof body.data.runId).toBe('string');
   });
 
   it('serves the docx-preview UMD bundle from its own node_modules', async () => {
