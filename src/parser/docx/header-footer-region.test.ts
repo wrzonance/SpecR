@@ -542,6 +542,33 @@ describe('captureRegion — standalone rule-line paragraph promotion/demotion (#
     expect(result.unmodeled[0]?.detail).toEqual(compact(demoted as Record<string, unknown>));
   });
 
+  // #484 review — the skip-to-next-eligible half of promotion: a run-carrying
+  // bordered candidate in document-order-first position must be SKIPPED (not
+  // promoted), and the LATER run-free candidate promoted instead. Deliberately
+  // different border values (single/4 with a w:br vs double/8 run-free) so the
+  // promoted ruleLine can only be the second paragraph's border — proving
+  // promotion actually advanced past the disqualified first candidate rather
+  // than merely finding nothing to promote.
+  it('skips a run-carrying bordered candidate and promotes the later run-free one; the skipped candidate demotes verbatim', () => {
+    const runCarrying = paragraph(
+      '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>',
+      '<w:r><w:br/></w:r>'
+    );
+    const runFree = paragraph('<w:pBdr><w:bottom w:val="double" w:sz="8"/></w:pBdr>', '');
+    const xml = makeHdrXml(`${runCarrying}${runFree}`);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    // Promoted rule line is the SECOND (run-free) paragraph's border —
+    // widthTwips = round(8 / 0.4) = 20 — never the first's single/4.
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'double', widthTwips: 20 });
+    // The skipped first candidate is preserved verbatim (border AND w:br), not
+    // dropped for being passed over.
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({ kind: 'extraParagraph' });
+    const skipped = parseHeaderParagraphs(xml)[0];
+    expect(skipped).toBeDefined();
+    expect(result.unmodeled[0]?.detail).toEqual(compact(skipped as Record<string, unknown>));
+  });
+
   it('regression guard: a part with no paragraphs at all still returns region undefined and unmodeled empty', () => {
     const xml = makeHdrXml('');
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
