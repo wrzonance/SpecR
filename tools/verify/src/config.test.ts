@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { loadVerifyEnv } from './config.js';
 import { VerifyValidationError, toRunError } from './errors.js';
+import {
+  extractPaneColumnCount,
+  extractSidebarWidthPx,
+  readHarnessIndexHtml,
+} from './layout-constants.js';
 
 const validEnv = {
   SPECR_API_BASE_URL: 'http://localhost:3000',
@@ -90,17 +95,25 @@ describe('loadVerifyEnv', () => {
   // docstring): confirmed via Playwright that below ~2768px, docx-preview's
   // centered Letter-width (816 CSS px) page overflows the reference pane's
   // column of public/index.html's 3-column grid (sidebar fixed at 320px),
-  // driving pageGeom.x negative even at a "pinned" viewport. This test
-  // re-derives that same margin from the real layout constants so a future
-  // change to any of them (default width, sidebar width, or page width) that
-  // reopens the gap fails loudly here, not silently in a real capture.
+  // driving pageGeom.x negative even at a "pinned" viewport. The sidebar
+  // width and pane-column count below are read from the REAL, shipped
+  // public/index.html (layout-constants.ts), not duplicated as literals that
+  // could silently drift from it — so a future change to any of them
+  // (default width, sidebar width, or page width) that reopens the gap fails
+  // loudly here, not silently in a real capture.
   it('default viewportWidth leaves a positive margin for the widest common page in the 3-pane grid', () => {
-    const SIDEBAR_WIDTH_PX = 320;
-    const PANE_COLUMN_COUNT = 3;
-    const LETTER_PAGE_WIDTH_PX = 816; // 8.5in @ 96 CSS px/in — the wider of Letter/A4
+    // LETTER_PAGE_WIDTH_PX is a physical-unit fact (8.5in @ 96 CSS px/in, the
+    // wider of Letter/A4 at that resolution) — it names a page size
+    // docx-preview centers, not a public/index.html CSS rule, so there is
+    // nothing to read it from; it stays a literal here by design.
+    const LETTER_PAGE_WIDTH_PX = 816;
+
+    const indexHtml = readHarnessIndexHtml();
+    const sidebarWidthPx = extractSidebarWidthPx(indexHtml);
+    const paneColumnCount = extractPaneColumnCount(indexHtml);
 
     const { viewportWidth } = loadVerifyEnv({ SPECR_API_BASE_URL: 'http://localhost:3000' });
-    const paneColumnWidth = (viewportWidth - SIDEBAR_WIDTH_PX) / PANE_COLUMN_COUNT;
+    const paneColumnWidth = (viewportWidth - sidebarWidthPx) / paneColumnCount;
     const margin = (paneColumnWidth - LETTER_PAGE_WIDTH_PX) / 2;
 
     expect(margin).toBeGreaterThan(0);
