@@ -22,6 +22,8 @@ import { parseCoreMetadata, UNKNOWN_SECTION_IDENTITY } from './core-metadata.js'
 import type { CoreMetadata } from './core-metadata.js';
 import { captureHeaderFooter } from './header-footer.js';
 import { readHeaderFooterParts } from './header-footer-parts.js';
+import { readHeaderFooterMedia } from './header-footer-media-parts.js';
+import type { HeaderFooterMediaByPart } from './header-footer-media-parts.js';
 
 // SECURITY (issue #19): add uncompressed size check after JSZip.loadAsync —
 // reject if total uncompressed bytes > 50MB to prevent ZIP bomb exhaustion.
@@ -37,6 +39,7 @@ interface ExtractedEntries {
   readonly documentRelsXml: string | null;
   readonly headerParts: ReadonlyMap<string, string>;
   readonly footerParts: ReadonlyMap<string, string>;
+  readonly mediaByPart: HeaderFooterMediaByPart;
 }
 
 async function extractEntries(zip: JSZip): Promise<ExtractedEntries> {
@@ -47,7 +50,7 @@ async function extractEntries(zip: JSZip): Promise<ExtractedEntries> {
   // NOTE: Strict discovery of the theme part should follow the officeDocument→theme
   // relationship in word/_rels/document.xml.rels; reading theme1.xml by convention
   // is an adequate approximation for spec-import use-cases.
-  const [textParts, headerFooterParts] = await Promise.all([
+  const [textParts, headerFooterParts, mediaByPart] = await Promise.all([
     Promise.all([
       read('word/numbering.xml'),
       read('word/styles.xml'),
@@ -59,6 +62,7 @@ async function extractEntries(zip: JSZip): Promise<ExtractedEntries> {
       read('word/_rels/document.xml.rels'),
     ]),
     readHeaderFooterParts(zip), // #306: word/header*.xml, word/footer*.xml glob-read
+    readHeaderFooterMedia(zip), // #487: eagerly-resolved header/footer image media bytes
   ]);
   const [
     numberingXml,
@@ -81,6 +85,7 @@ async function extractEntries(zip: JSZip): Promise<ExtractedEntries> {
     documentRelsXml,
     headerParts: headerFooterParts.headerParts,
     footerParts: headerFooterParts.footerParts,
+    mediaByPart,
   };
 }
 
@@ -94,6 +99,7 @@ interface ValidEntries {
   readonly documentRelsXml: string | null;
   readonly headerParts: ReadonlyMap<string, string>;
   readonly footerParts: ReadonlyMap<string, string>;
+  readonly mediaByPart: HeaderFooterMediaByPart;
 }
 
 function runPipeline(
@@ -142,11 +148,7 @@ function runPipeline(
       documentRelsXml: entries.documentRelsXml,
       headerParts: entries.headerParts,
       footerParts: entries.footerParts,
-      // Placeholder (#487): extractEntries doesn't yet eagerly resolve
-      // header/footer image media (header-footer-media-parts.ts) into
-      // ValidEntries, so header/footer images don't round-trip through this
-      // pipeline yet — a follow-up task wires the real map through here.
-      mediaByPart: new Map(),
+      mediaByPart: entries.mediaByPart,
     },
     { section: meta.section, title: meta.title }
   );
@@ -351,6 +353,7 @@ export async function parseDocx(
     documentRelsXml,
     headerParts,
     footerParts,
+    mediaByPart,
   } = await extractEntries(zip);
 
   if (!stylesXml) {
@@ -371,6 +374,7 @@ export async function parseDocx(
       documentRelsXml,
       headerParts,
       footerParts,
+      mediaByPart,
     },
     onProgress,
     numberingProfile
