@@ -12,6 +12,7 @@ describe('loadVerifyEnv', () => {
     expect(loadVerifyEnv(validEnv)).toEqual({
       specrApiBaseUrl: 'http://localhost:3000',
       viewportWidth: 900,
+      port: 4300,
     });
   });
 
@@ -21,12 +22,34 @@ describe('loadVerifyEnv', () => {
     expect(loadVerifyEnv(env).viewportWidth).toBe(900);
   });
 
+  it('defaults port to 4300 when VERIFY_PORT is unset', () => {
+    const env = { SPECR_API_BASE_URL: 'http://localhost:3000' };
+
+    expect(loadVerifyEnv(env).port).toBe(4300);
+  });
+
+  it('loads a custom VERIFY_PORT', () => {
+    expect(loadVerifyEnv({ ...validEnv, VERIFY_PORT: '5000' }).port).toBe(5000);
+  });
+
+  it('throws VerifyValidationError when VERIFY_PORT is not numeric', () => {
+    expect(() => loadVerifyEnv({ ...validEnv, VERIFY_PORT: 'not-a-number' })).toThrow(
+      VerifyValidationError
+    );
+  });
+
+  it('throws VerifyValidationError when VERIFY_PORT is zero or negative', () => {
+    expect(() => loadVerifyEnv({ ...validEnv, VERIFY_PORT: '0' })).toThrow(VerifyValidationError);
+    expect(() => loadVerifyEnv({ ...validEnv, VERIFY_PORT: '-1' })).toThrow(VerifyValidationError);
+  });
+
   it('ignores unrelated keys already present on process.env (PATH, HOME, ...)', () => {
     const env = { ...validEnv, PATH: '/usr/bin', HOME: '/home/whoever', RANDOM_UNRELATED: 'x' };
 
     expect(loadVerifyEnv(env)).toEqual({
       specrApiBaseUrl: 'http://localhost:3000',
       viewportWidth: 900,
+      port: 4300,
     });
   });
 

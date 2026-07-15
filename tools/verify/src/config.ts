@@ -19,11 +19,16 @@ const envSchema = z.object({
   // screenshot; cropRegion()'s bounds-check throws VerifyRenderError as a
   // backstop, not the primary guard. See .env.example.
   VERIFY_VIEWPORT_WIDTH: z.coerce.number().int().positive().default(900),
+  // Port this harness's own Express server listens on (server/app.ts,
+  // index.ts). Distinct from the main SpecR API's default PORT (3000, see
+  // src/lib/env.ts) so both can run side by side on one machine.
+  VERIFY_PORT: z.coerce.number().int().positive().default(4300),
 });
 
 export interface VerifyEnv {
   readonly specrApiBaseUrl: string;
   readonly viewportWidth: number;
+  readonly port: number;
 }
 
 /**
@@ -44,5 +49,6 @@ export function loadVerifyEnv(env: NodeJS.ProcessEnv = process.env): VerifyEnv {
   return {
     specrApiBaseUrl: result.data.SPECR_API_BASE_URL,
     viewportWidth: result.data.VERIFY_VIEWPORT_WIDTH,
+    port: result.data.VERIFY_PORT,
   };
 }

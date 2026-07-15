@@ -29,6 +29,12 @@ export default defineConfig(
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'sonarjs/cognitive-complexity': ['error', 10],
+      // routes/runs.ts's multer upload limit (10 MB) deliberately mirrors
+      // src/api/parse.ts's own compressed-upload limit exactly, which is
+      // itself over this rule's 8 MB default fileUploadSizeLimit — raise
+      // the threshold to match rather than shrink a limit that's already
+      // sized to the real API it re-uploads to.
+      'sonarjs/content-length': ['error', { fileUploadSizeLimit: 10 * 1024 * 1024 }],
     },
   },
   // Test suites grow linearly with the number of cases — the 50-line function
@@ -38,6 +44,16 @@ export default defineConfig(
     rules: {
       'max-lines-per-function': 'off',
       'max-lines': 'off',
+    },
+  },
+  // The boot entrypoint prints human-readable startup/failure diagnostics to
+  // the terminal — this harness has no pino logger of its own (isolated
+  // package, see errors.ts's docstring), so console is the intended output
+  // mechanism here. Mirrors the root config's scripts/**/*.ts carve-out.
+  {
+    files: ['src/index.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
   eslintConfigPrettier,

@@ -44,6 +44,16 @@ export interface RunArtifacts {
   readonly derivationReport?: DerivationReport;
   /** work/<runId>/generated.docx — the round-tripped output (stage: generate). */
   readonly generatedPath?: string;
+  /**
+   * work/<runId>/reference-screenshot.png — the reference pane's externally
+   * captured (Playwright) full-page screenshot (stage: screenshot). This is
+   * the PRIMARY capture-ingestion path per issue #150's resolved
+   * capture-source decision — see server/routes/runs.ts's
+   * submitScreenshotHandler.
+   */
+  readonly referenceScreenshotPath?: string;
+  /** work/<runId>/roundtrip-screenshot.png — same as referenceScreenshotPath, for the round-tripped pane (stage: screenshot). */
+  readonly roundtripScreenshotPath?: string;
 }
 
 /**
