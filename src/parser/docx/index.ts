@@ -142,6 +142,11 @@ function runPipeline(
       documentRelsXml: entries.documentRelsXml,
       headerParts: entries.headerParts,
       footerParts: entries.footerParts,
+      // Placeholder (#487): extractEntries doesn't yet eagerly resolve
+      // header/footer image media (header-footer-media-parts.ts) into
+      // ValidEntries, so header/footer images don't round-trip through this
+      // pipeline yet — a follow-up task wires the real map through here.
+      mediaByPart: new Map(),
     },
     { section: meta.section, title: meta.title }
   );

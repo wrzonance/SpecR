@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { ParserError } from '../error.js';
+import { MAX_IMAGE_BYTES } from '../../lib/image-media-type.js';
 import { captureHeaderFooter, buildComposition } from './header-footer.js';
 import type { HeaderFooterCaptureEntries } from './header-footer.js';
+import type { HeaderFooterMediaByPart } from './header-footer-media-parts.js';
 
 const KNOWN = { section: '09 91 26', title: 'STAINING AND TRANSPARENT FINISHING' };
 
@@ -44,6 +46,12 @@ function makeHdrXml(text: string): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr ${NS}><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:hdr>`;
 }
 
+// Arbitrary-body variant of makeHdrXml, for fixtures (e.g. the #487 drawing
+// tests below) that need more than a single plain-text paragraph.
+function makeHdrXmlWithBody(bodyXml: string): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr ${NS}>${bodyXml}</w:hdr>`;
+}
+
 function makeFtrXml(text: string): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ${NS}><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:ftr>`;
 }
@@ -57,8 +65,32 @@ function baseEntries(
     documentRelsXml: null,
     headerParts: new Map(),
     footerParts: new Map(),
+    mediaByPart: new Map(),
     ...overrides,
   };
+}
+
+// ─── image-resolving drawing run fixture (#487) — mirrors
+// header-footer-region.test.ts's own imageDrawingRun fixture, as raw XML
+// text (captureHeaderFooter's entries carry part XML as strings).
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function pngBytes(totalLength = 16): Uint8Array {
+  const bytes = new Uint8Array(totalLength);
+  bytes.set(PNG_SIGNATURE);
+  return bytes;
+}
+
+function imageDrawingRun(rId: string, cx = '914400', cy = '609600'): string {
+  return (
+    '<w:r><w:drawing><wp:inline>' +
+    `<wp:extent cx="${cx}" cy="${cy}"/>` +
+    '<wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData><pic:pic><pic:blipFill>' +
+    `<a:blip r:embed="${rId}"/>` +
+    '</pic:blipFill></pic:pic></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r>'
+  );
 }
 
 describe('captureHeaderFooter — no header/footer content', () => {
@@ -464,5 +496,71 @@ describe('captureHeaderFooter — two references resolving to the same physical 
         even: { header: { left: { content: sharedContent } } },
       },
     });
+  });
+});
+
+// INVARIANT (#487, ADR-068): an oversize embedded image never reaches
+// buildComposition's un-guarded HeaderFooterCompositionSchema.parse() call
+// (header-footer.ts has no try/catch around it — see that function's own doc
+// comment). resolveDrawingImage's MAX_IMAGE_BYTES cap runs on raw bytes
+// BEFORE any field is built, so an oversize image degrades to the same
+// `{ kind: 'image' }` unmodeled fallback #306 already emits for an
+// unresolvable drawing, never a modeled `image` field with an oversized
+// `imageData` string — and, critically, never a thrown ZodError surfacing
+// through captureHeaderFooter's public contract (which never throws for
+// document-content reasons). This exercises the full orchestrator path —
+// entries.mediaByPart -> buildRegionSlot -> buildVariant -> captureRegion ->
+// buildCellContent/resolveDrawingImage -> buildComposition — not just
+// resolveDrawingImage in isolation (already pinned by
+// header-footer-images.test.ts).
+describe("captureHeaderFooter — oversize embedded image never reaches buildComposition's un-guarded schema.parse() (#487)", () => {
+  it('degrades an oversize embedded image to a raw sidecar + capture warning, never a thrown error', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
+    const hdrXml = makeHdrXmlWithBody(
+      `<w:p><w:r><w:t>Logo:</w:t></w:r>${imageDrawingRun('rIdImg1')}</w:p>`
+    );
+    const mediaByPart: HeaderFooterMediaByPart = new Map([
+      ['word/header1.xml', new Map([['rIdImg1', pngBytes(MAX_IMAGE_BYTES + 1)]])],
+    ]);
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
+      headerParts: new Map([['word/header1.xml', hdrXml]]),
+      mediaByPart,
+    });
+
+    expect(() => captureHeaderFooter(entries, KNOWN)).not.toThrow();
+
+    const result = captureHeaderFooter(entries, KNOWN);
+    // The oversize image never reaches the region's content — only the
+    // preceding literal text is captured as a modeled field.
+    expect(result.composition?.variants?.default?.header?.left?.content).toEqual([
+      { kind: 'literal', text: 'Logo:' },
+    ]);
+    // The oversize image is preserved as an unmodeled sidecar entry, not
+    // silently dropped and not promoted to a modeled `image` field.
+    const unmodeledKinds = result.composition?.raw?.unmodeled?.map((e) => e.kind) ?? [];
+    expect(unmodeledKinds).toContain('image');
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatchObject({ type: 'header-footer-content-skipped' });
+  });
+
+  it('accepts an image at exactly the MAX_IMAGE_BYTES cap into a modeled image field (boundary, not off-by-one)', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
+    const hdrXml = makeHdrXmlWithBody(`<w:p>${imageDrawingRun('rIdImg1')}</w:p>`);
+    const mediaByPart: HeaderFooterMediaByPart = new Map([
+      ['word/header1.xml', new Map([['rIdImg1', pngBytes(MAX_IMAGE_BYTES)]])],
+    ]);
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
+      headerParts: new Map([['word/header1.xml', hdrXml]]),
+      mediaByPart,
+    });
+
+    const result = captureHeaderFooter(entries, KNOWN);
+    expect(result.composition?.variants?.default?.header?.left?.content).toEqual([
+      expect.objectContaining({ kind: 'image', imageMediaType: 'image/png' }),
+    ]);
   });
 });
