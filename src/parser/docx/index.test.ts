@@ -1111,3 +1111,102 @@ describe('parseDocx — header/footer capture wiring (#306)', () => {
     );
   });
 });
+
+// ─── header/footer image media wiring, end-to-end (#487) ───────────────────
+// header-footer-media-parts.ts (readHeaderFooterMedia) and
+// header-footer-images.ts (resolveDrawingImage) are each exhaustively
+// unit-tested at their own boundaries. This test pins only that index.ts's
+// extractEntries/parseDocx actually thread the real mediaByPart map through
+// runPipeline -> captureHeaderFooter end to end — a real embedded image in a
+// real header part resolves to a modeled `image` field, never the
+// placeholder-empty-map behavior this task replaces (which forced every
+// image into raw.unmodeled regardless of a real, resolvable relationship).
+
+// Real leading PNG signature bytes (sniffImageMediaType reads only the
+// prefix) — see src/lib/image-media-type.ts.
+const PNG_MAGIC_BYTES = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+]);
+
+const HEADER_PART_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>`;
+
+// A real w:drawing -> wp:inline -> wp:extent/wp:docPr/a:graphic chain
+// (mirrors header-footer-images.test.ts's own fixture shape) referencing the
+// image relationship declared in HEADER_PART_RELS_XML above.
+function headerPartWithImageXml(): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:p><w:r><w:drawing>
+    <wp:inline>
+      <wp:extent cx="914400" cy="457200"/>
+      <wp:docPr id="1" descr="Firm logo"/>
+      <a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId2"/></pic:blipFill></pic:pic></a:graphicData></a:graphic>
+    </wp:inline>
+  </w:drawing></w:r></w:p>
+</w:hdr>`;
+}
+
+describe('parseDocx — header/footer image media wiring (#487)', () => {
+  it('resolves a real embedded PNG in a header into a modeled image field, using the eagerly-resolved mediaByPart map', async () => {
+    const zip = new JSZip();
+    zip.file('word/styles.xml', MINIMAL_STYLES);
+    zip.file(
+      'word/document.xml',
+      docWithSectPr('<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>')
+    );
+    zip.file('word/_rels/document.xml.rels', HEADER_FOOTER_RELS_XML);
+    zip.file('word/header1.xml', headerPartWithImageXml());
+    zip.file('word/_rels/header1.xml.rels', HEADER_PART_RELS_XML);
+    zip.file('word/media/image1.png', PNG_MAGIC_BYTES);
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const tree = await parseDocx(buffer);
+
+    const content = tree.headerFooter?.variants?.default?.header?.left?.content;
+    expect(content).toEqual([
+      expect.objectContaining({
+        kind: 'image',
+        imageMediaType: 'image/png',
+        widthEmu: 914400,
+        heightEmu: 457200,
+        altText: 'Firm logo',
+      }),
+    ]);
+    expect(tree.headerFooter?.raw).toBeUndefined();
+  });
+
+  // Under the placeholder-empty-map behavior this task replaces, EVERY
+  // drawing degraded to unmodeled at the rId-lookup-miss step — the sniff
+  // check below was unreachable end to end. With the real map wired through,
+  // a resolvable relationship whose bytes don't sniff to a supported type
+  // (#306 regression guard) must still degrade to raw sidecar + warning,
+  // never throw (ADR-068) — this exercises that previously-unreachable path.
+  it('a resolvable relationship whose media bytes are unsniffable degrades to raw.unmodeled + warning, never throws', async () => {
+    const zip = new JSZip();
+    zip.file('word/styles.xml', MINIMAL_STYLES);
+    zip.file(
+      'word/document.xml',
+      docWithSectPr('<w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr>')
+    );
+    zip.file('word/_rels/document.xml.rels', HEADER_FOOTER_RELS_XML);
+    zip.file('word/header1.xml', headerPartWithImageXml());
+    zip.file('word/_rels/header1.xml.rels', HEADER_PART_RELS_XML);
+    zip.file('word/media/image1.png', new Uint8Array([0x00, 0x01, 0x02, 0x03])); // no valid signature
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const tree = await parseDocx(buffer);
+
+    expect(tree.headerFooter?.variants).toBeUndefined();
+    expect(tree.headerFooter?.raw?.unmodeled).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ variant: 'default', region: 'header', kind: 'image' }),
+      ])
+    );
+    expect(tree.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'header-footer-content-skipped' })])
+    );
+  });
+});

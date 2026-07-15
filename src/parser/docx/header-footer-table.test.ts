@@ -26,8 +26,30 @@ function textRun(text: string): string {
   return `<w:r><w:t>${text}</w:t></w:r>`;
 }
 
-function drawingRun(): string {
-  return '<w:r><w:drawing><wp:inline/></w:drawing></w:r>';
+// A resolvable drawing-run fixture (#487, ADR-071 decision 4) — mirrors
+// header-footer-region.test.ts's own pngBytes/imageDrawingRun fixtures so the
+// "drops an image run from cell content" test below can supply a genuinely
+// resolvable rId + mediaByRId, the only way to prove the table-cell
+// pre-filter runs BEFORE buildCellContent's image-resolving branch rather
+// than merely lacking anything to resolve.
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function pngBytes(totalLength = 16): Uint8Array {
+  const bytes = new Uint8Array(totalLength);
+  bytes.set(PNG_SIGNATURE);
+  return bytes;
+}
+
+function imageDrawingRun(rId: string, cx = '914400', cy = '609600'): string {
+  return (
+    '<w:r><w:drawing><wp:inline>' +
+    `<wp:extent cx="${cx}" cy="${cy}"/>` +
+    '<wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData><pic:pic><pic:blipFill>' +
+    `<a:blip r:embed="${rId}"/>` +
+    '</pic:blipFill></pic:pic></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r>'
+  );
 }
 
 function styledTextRun(text: string, rPrXml: string): string {
@@ -174,12 +196,18 @@ describe('captureRegion — simple table capture (#309, ADR-071)', () => {
 });
 
 describe('captureRegion — per-item drops inside an otherwise-capturable table (ADR-071 decision 4)', () => {
-  it('drops an image run from cell content as unmodeled, never as cell content — the surrounding table is still captured', () => {
-    const xml = makeHdrXml(table(row(cell(paragraph(`${textRun('Logo: ')}${drawingRun()}`)))));
-    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+  it('drops an image run from cell content as unmodeled, never as cell content — the surrounding table is still captured, even when mediaByRId would resolve it', () => {
+    const rId = 'rId7';
+    const mediaByRId = new Map([[rId, pngBytes()]]);
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(`${textRun('Logo: ')}${imageDrawingRun(rId)}`))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, mediaByRId);
     expect(result.region?.table?.rows).toEqual([
       { cells: [{ content: [{ kind: 'literal', text: 'Logo: ' }] }] },
     ]);
+    const cellContent = result.region?.table?.rows[0]?.cells[0]?.content ?? [];
+    expect(cellContent.some((field) => field.kind === 'image')).toBe(false);
     expect(result.unmodeled).toContainEqual(
       expect.objectContaining({ variant: 'default', region: 'header', kind: 'image' })
     );

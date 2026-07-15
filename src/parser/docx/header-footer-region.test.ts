@@ -65,6 +65,34 @@ function styledTextRun(text: string, rPrXml: string): string {
   return `<w:r><w:rPr>${rPrXml}</w:rPr><w:t>${text}</w:t></w:r>`;
 }
 
+// ─── image-resolving drawing run fixtures (#487) — a well-formed w:drawing
+// whose rId/EMU size/blip chain mirror header-footer-images.test.ts's own
+// wellFormedDrawing fixture, but as raw XML text (captureRegion's own input
+// shape) rather than a pre-parsed record.
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function pngBytes(totalLength = 16): Uint8Array {
+  const bytes = new Uint8Array(totalLength);
+  bytes.set(PNG_SIGNATURE);
+  return bytes;
+}
+
+function imageDrawingRun(rId: string, cx = '914400', cy = '609600', docPrAttrs = ''): string {
+  return (
+    '<w:r><w:drawing><wp:inline>' +
+    `<wp:extent cx="${cx}" cy="${cy}"/>` +
+    `<wp:docPr id="1" ${docPrAttrs}/>` +
+    '<a:graphic><a:graphicData><pic:pic><pic:blipFill>' +
+    `<a:blip r:embed="${rId}"/>` +
+    '</pic:blipFill></pic:pic></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r>'
+  );
+}
+
+function tableXmlWithImageCell(rId: string): string {
+  return `<w:tbl><w:tr><w:tc><w:p>${imageDrawingRun(rId)}</w:p></w:tc></w:tr></w:tbl>`;
+}
+
 describe('captureRegion — cell capture and tab-boundary splitting', () => {
   it('puts all content in left when the paragraph has no tab boundaries', () => {
     const xml = makeHdrXml(paragraph('', textRun('Draft Copy')));
@@ -355,6 +383,87 @@ describe('captureRegion — rule line (paragraph border passthrough)', () => {
     const xml = makeHdrXml(paragraph('', textRun('Header')));
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(result.region?.ruleLine).toBeUndefined();
+  });
+});
+
+// Image resolution wiring (#487, Task 4): captureRegion's new optional 6th
+// param (mediaByRId) threads through captureFromParagraphs ->
+// splitParagraphIntoCells -> assignSegmentsToCells -> buildCellContent, which
+// gains a drawing branch (isDrawingRun -> resolveDrawingImage) alongside its
+// existing collapsed-field/text branches. Deep resolution behavior itself
+// (descriptor parsing, byte lookup, sniff, size cap) is pinned in
+// header-footer-images.test.ts; this file pins only the two invariants that
+// live at THIS boundary — table-cell exclusion and run-order preservation.
+describe('captureRegion — image resolution wiring (#487)', () => {
+  it('INVARIANT: a table-cell drawing run never produces a kind:"image" field, even when mediaByRId would resolve it', () => {
+    const rId = 'rId5';
+    const bytes = pngBytes();
+    const mediaByRId = new Map([[rId, bytes]]);
+    const xml = makeHdrXml(tableXmlWithImageCell(rId));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, mediaByRId);
+
+    const cellContent = result.region?.table?.rows[0]?.cells[0]?.content ?? [];
+    expect(cellContent.some((field) => field.kind === 'image')).toBe(false);
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'image' })
+    );
+  });
+
+  it('resolves a paragraph-level drawing run to a modeled image field when mediaByRId supplies matching bytes', () => {
+    const rId = 'rId9';
+    const bytes = pngBytes();
+    const mediaByRId = new Map([[rId, bytes]]);
+    const xml = makeHdrXml(paragraph('', imageDrawingRun(rId)));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, mediaByRId);
+
+    expect(result.region?.left?.content).toEqual([
+      {
+        kind: 'image',
+        imageData: Buffer.from(bytes).toString('base64'),
+        imageMediaType: 'image/png',
+        widthEmu: 914400,
+        heightEmu: 609600,
+      },
+    ]);
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('falls back to the pre-existing unmodeled image entry when no mediaByRId is supplied (backward compatible)', () => {
+    const rId = 'rId9';
+    const xml = makeHdrXml(paragraph('', imageDrawingRun(rId)));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+
+    expect(result.region).toBeUndefined();
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'image' })
+    );
+  });
+
+  it('INVARIANT: preserves original run order across text/image/field pieces within a cell — image placement is never reordered', () => {
+    const rId = 'rId3';
+    const bytes = pngBytes();
+    const mediaByRId = new Map([[rId, bytes]]);
+    const xml = makeHdrXml(
+      paragraph(
+        '',
+        `${textRun('Before ')}${imageDrawingRun(rId)}${textRun(' After ')}${fieldRuns(' PAGE ', '3')}`
+      )
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, mediaByRId);
+
+    expect(result.region?.left?.content).toEqual([
+      { kind: 'literal', text: 'Before ' },
+      {
+        kind: 'image',
+        imageData: Buffer.from(bytes).toString('base64'),
+        imageMediaType: 'image/png',
+        widthEmu: 914400,
+        heightEmu: 609600,
+      },
+      { kind: 'literal', text: ' After ' },
+      { kind: 'pageNumber' },
+    ]);
+    expect(result.unmodeled).toEqual([]);
   });
 });
 

@@ -19,6 +19,7 @@ import {
 } from './header-footer-relationships.js';
 import { captureRegion } from './header-footer-region.js';
 import type { KnownSectionIdentity } from './header-footer-field-recognition.js';
+import type { HeaderFooterMediaByPart } from './header-footer-media-parts.js';
 // The PARSER-LOCAL HeaderFooterUnmodeledEntry (types.ts), not the ast-level
 // one (detail: JsonValue) — captureRegion already returns this shape, and
 // every detail value it builds is already compact()-ed (header-footer-region.ts),
@@ -37,6 +38,11 @@ export interface HeaderFooterCaptureEntries {
   readonly documentRelsXml: string | null;
   readonly headerParts: ReadonlyMap<string, string>;
   readonly footerParts: ReadonlyMap<string, string>;
+  // Eagerly-resolved image-relationship media bytes for every header/footer
+  // part (#487, header-footer-media-parts.ts), keyed by the same owning-part
+  // path partXmlFor already uses (e.g. "word/header1.xml"). A part absent
+  // here means "no image relationships for this part" — never an error.
+  readonly mediaByPart: HeaderFooterMediaByPart;
 }
 
 export interface HeaderFooterCaptureResult {
@@ -165,13 +171,16 @@ interface RegionBuildResult {
 // default/first/even) from buildVariantForKind. Never throws for
 // document-content reasons: only captureRegion's malformed-part-XML path
 // throws (DOCX_HEADER_FOOTER_XML_INVALID), and that propagates unchanged.
+// `mediaByRId` (#487, optional) is this part's own rId -> media-bytes slice
+// of entries.mediaByPart, forwarded into captureRegion unchanged.
 function buildVariant(
   kind: VariantKind,
   region: RegionKind,
   resolvedRef: ResolvedHeaderFooterReference | undefined,
   active: boolean,
   partXml: string | undefined,
-  known: KnownSectionIdentity
+  known: KnownSectionIdentity,
+  mediaByRId: ReadonlyMap<string, Uint8Array> | undefined
 ): RegionBuildResult {
   if (!resolvedRef) return { region: undefined, unmodeled: [] };
   if (!active)
@@ -179,14 +188,17 @@ function buildVariant(
   if (partXml === undefined) {
     return { region: undefined, unmodeled: [missingPartEntry(kind, region, resolvedRef)] };
   }
-  const captured = captureRegion(partXml, ruleLineEdge(region), kind, region, known);
+  const captured = captureRegion(partXml, ruleLineEdge(region), kind, region, known, mediaByRId);
   return { region: captured.region, unmodeled: captured.unmodeled };
 }
 
 // One (variant, region) slot end-to-end: picks the first resolved reference to
 // actually capture (there is only ever room for one HeaderFooterRegion per
 // slot) and folds every additional resolved reference in as a duplicate
-// unmodeled entry, never dropping it (#306 review).
+// unmodeled entry, never dropping it (#306 review). Resolves the primary
+// ref's media slice off the SAME target key partXmlFor already uses (#487) —
+// a target with no entry in entries.mediaByPart yields `undefined`, meaning
+// "no image relationships for this part", not an error.
 function buildRegionSlot(
   kind: VariantKind,
   region: RegionKind,
@@ -197,7 +209,8 @@ function buildRegionSlot(
 ): RegionBuildResult {
   const [primaryRef, ...duplicateRefs] = findResolvedRefs(resolved, kind, region);
   const partXml = primaryRef ? partXmlFor(region, primaryRef.target, entries) : undefined;
-  const built = buildVariant(kind, region, primaryRef, active, partXml, known);
+  const mediaByRId = primaryRef ? entries.mediaByPart.get(primaryRef.target) : undefined;
+  const built = buildVariant(kind, region, primaryRef, active, partXml, known, mediaByRId);
   const duplicateUnmodeled = duplicateRefs.map((ref) => duplicateReferenceEntry(kind, region, ref));
   return { region: built.region, unmodeled: [...built.unmodeled, ...duplicateUnmodeled] };
 }

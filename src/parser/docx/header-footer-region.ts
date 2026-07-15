@@ -34,6 +34,7 @@ import type {
   KnownSectionIdentity,
 } from './header-footer-field-recognition.js';
 import { captureTablesForRegion } from './header-footer-table.js';
+import { resolveDrawingImage } from './header-footer-images.js';
 import type { HeaderFooterUnmodeledEntry } from './types.js';
 import type { HeaderFooterVariant } from '../../ast/index.js';
 
@@ -197,6 +198,19 @@ function resolveFieldMarker(marker: CollapsedFieldRun): FieldResolution {
   };
 }
 
+// FieldResolution and header-footer-images.ts's DrawingResolution are the
+// same two-arm shape by design (mirrors each other, see that file's own
+// comment) — this single push-site handles either, keeping buildCellContent's
+// 3-way branch under the enforced cognitive-complexity cap of 10 (#487).
+function applyResolution(
+  resolved: FieldResolution,
+  content: HeaderFooterField[],
+  unmodeled: PartialUnmodeled[]
+): void {
+  if (resolved.kind === 'field') content.push(resolved.field);
+  else unmodeled.push(resolved.entry);
+}
+
 // The cell's run-level formatting (bold/italic/color/font/caps, #306 review):
 // taken from the first piece that carries a w:rPr, since HeaderFooterCellSchema
 // models one style per cell, not one per run — a cell whose runs mix styles only
@@ -218,13 +232,19 @@ function firstRunStyle(
 
 // Builds one cell's content: consecutive plain-text runs are concatenated
 // and matched against the known section identity (ADR-068: literal equality
-// only); a recognized field marker flushes the buffer first, then
-// contributes its own field or unmodeled entry. Exported so
+// only); a recognized field marker or a resolvable drawing run each flush
+// the buffer first, then contribute their own field or unmodeled entry, in
+// original run order (#487). `mediaByRId` is OPTIONAL — its own caller
+// (header-footer-table.ts's captureTableCell) never passes it and pre-filters
+// drawing runs before this function ever sees them (ADR-071 decision 4:
+// table-cell images stay out of scope), so this function's drawing branch is
+// reachable only from paragraph/cell-tab-split capture. Exported so
 // header-footer-table.ts's per-table-cell capture (#309) reuses the exact
 // same literal/field recognition instead of a second implementation.
 export function buildCellContent(
   pieces: readonly Record<string, unknown>[],
-  known: KnownSectionIdentity
+  known: KnownSectionIdentity,
+  mediaByRId?: ReadonlyMap<string, Uint8Array>
 ): {
   readonly content: readonly HeaderFooterField[];
   readonly unmodeled: readonly PartialUnmodeled[];
@@ -240,14 +260,17 @@ export function buildCellContent(
     buffer = '';
   };
   for (const piece of pieces) {
+    if (isDrawingRun(piece)) {
+      flushBuffer();
+      applyResolution(resolveDrawingImage(piece, mediaByRId), content, unmodeled);
+      continue;
+    }
     if (!isCollapsedFieldRun(piece)) {
       buffer += extractTextLikeValue(piece['w:t']);
       continue;
     }
     flushBuffer();
-    const resolved = resolveFieldMarker(piece.__collapsedField);
-    if (resolved.kind === 'field') content.push(resolved.field);
-    else unmodeled.push(resolved.entry);
+    applyResolution(resolveFieldMarker(piece.__collapsedField), content, unmodeled);
   }
   flushBuffer();
   return { content, unmodeled, style: firstRunStyle(pieces) };
@@ -309,7 +332,8 @@ function mergeCell(
 
 function assignSegmentsToCells(
   segments: readonly (readonly Record<string, unknown>[])[],
-  known: KnownSectionIdentity
+  known: KnownSectionIdentity,
+  mediaByRId?: ReadonlyMap<string, Uint8Array>
 ): {
   readonly cells: Partial<Record<CellKey, HeaderFooterCell>>;
   readonly unmodeled: readonly PartialUnmodeled[];
@@ -321,7 +345,7 @@ function assignSegmentsToCells(
   // index 2 — not on segment count alone.
   let overflowHasContent = false;
   segments.forEach((segment, index) => {
-    const built = buildCellContent(segment, known);
+    const built = buildCellContent(segment, known, mediaByRId);
     unmodeled.push(...built.unmodeled);
     if (built.content.length === 0) return;
     if (index >= 3) overflowHasContent = true;
@@ -340,20 +364,22 @@ function assignSegmentsToCells(
   return { cells, unmodeled };
 }
 
+// Drawing runs flow through splitOnTabs unfiltered (#487) — a w:tab never
+// appears inside a w:drawing (ECMA-376 CT_Drawing has no tab-marker child),
+// so a drawing run is never mistaken for a tab boundary; it simply rides
+// along in whichever segment it falls into and is resolved (or preserved as
+// unmodeled) by buildCellContent's own drawing branch.
 function splitParagraphIntoCells(
   runs: readonly Record<string, unknown>[],
-  known: KnownSectionIdentity
+  known: KnownSectionIdentity,
+  mediaByRId?: ReadonlyMap<string, Uint8Array>
 ): {
   readonly cells: Partial<Record<CellKey, HeaderFooterCell>>;
   readonly unmodeled: readonly PartialUnmodeled[];
 } {
   const collapsed = collapseComplexFields(runs);
-  const imageUnmodeled: readonly PartialUnmodeled[] = collapsed
-    .filter(isDrawingRun)
-    .map((run): PartialUnmodeled => ({ kind: 'image', detail: compact(run) }));
-  const segments = splitOnTabs(collapsed.filter((r) => !isDrawingRun(r)));
-  const assigned = assignSegmentsToCells(segments, known);
-  return { cells: assigned.cells, unmodeled: [...imageUnmodeled, ...assigned.unmodeled] };
+  const segments = splitOnTabs(collapsed);
+  return assignSegmentsToCells(segments, known, mediaByRId);
 }
 
 // ─── single-region assembly (at most one per part, ADR-068) ────────────────
@@ -374,7 +400,8 @@ function buildRegionFromCells(
 function captureFromParagraphs(
   paragraphs: readonly Record<string, unknown>[],
   edge: 'top' | 'bottom',
-  known: KnownSectionIdentity
+  known: KnownSectionIdentity,
+  mediaByRId?: ReadonlyMap<string, Uint8Array>
 ): {
   readonly region: HeaderFooterRegion | undefined;
   readonly unmodeled: readonly PartialUnmodeled[];
@@ -387,7 +414,11 @@ function captureFromParagraphs(
   if (!first) return { region: undefined, unmodeled: extraUnmodeled };
 
   const ruleLine = captureRuleLine(asRecord(first['w:pPr']), edge);
-  const { cells, unmodeled: cellUnmodeled } = splitParagraphIntoCells(runsOf(first), known);
+  const { cells, unmodeled: cellUnmodeled } = splitParagraphIntoCells(
+    runsOf(first),
+    known,
+    mediaByRId
+  );
   return {
     region: buildRegionFromCells(cells, ruleLine),
     unmodeled: [...cellUnmodeled, ...extraUnmodeled],
@@ -405,20 +436,28 @@ function captureFromParagraphs(
  * represents this region's rule line ('bottom' for a header, 'top' for a
  * footer). Never throws for document-content reasons — only
  * malformed-but-present part XML throws (DOCX_HEADER_FOOTER_XML_INVALID).
+ *
+ * `mediaByRId` (#487, OPTIONAL) is this part's own rId -> media-bytes slice
+ * of header-footer-media-parts.ts's eagerly-resolved map — threaded into
+ * paragraph/cell capture only. `captureTablesForRegion` is deliberately NEVER
+ * given it: table-cell images stay out of scope (ADR-071 decision 4), so a
+ * table cell's own drawing pre-filter (header-footer-table.ts) still always
+ * produces an unmodeled entry, never a modeled `image` field.
  */
 export function captureRegion(
   partXml: string,
   edge: 'top' | 'bottom',
   variant: HeaderFooterUnmodeledEntry['variant'],
   region: HeaderFooterUnmodeledEntry['region'],
-  known: KnownSectionIdentity
+  known: KnownSectionIdentity,
+  mediaByRId?: ReadonlyMap<string, Uint8Array>
 ): RegionCaptureResult {
   const parsed = parsePartXml(partXml, region);
   const root = asRecord(parsed[partRootKey(region)]);
   if (!root) return { region: undefined, unmodeled: [] };
 
   const toStamped = stamp(variant, region);
-  const fromParagraphs = captureFromParagraphs(paragraphsOf(root), edge, known);
+  const fromParagraphs = captureFromParagraphs(paragraphsOf(root), edge, known, mediaByRId);
   const tableResult = captureTablesForRegion(root, known);
   const mergedRegion = compact({
     ...fromParagraphs.region,
