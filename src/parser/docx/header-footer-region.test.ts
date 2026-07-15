@@ -319,6 +319,15 @@ describe('runsOf / paragraphHasContent — w:fldSimple terminal handling (#485 t
     expect(result.unmodeled).toEqual([]);
   });
 
+  it('preserves an unrecognized field code (e.g. STYLEREF) authored as w:fldSimple as unmodeled, never guessed into a known field (parity with the w:fldChar path tested above)', () => {
+    const xml = makeHdrXml(paragraph('', simpleFieldRun(' STYLEREF Heading1 ', 'Some Style Text')));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region).toBeUndefined();
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'unrecognizedField' })
+    );
+  });
+
   it("document.ts's shared collectRuns is unmodified — it still flattens w:fldSimple into its inner w:r, unlike header-footer-region.ts's own local traversal", () => {
     const xml = makeHdrXml(paragraph('', simpleFieldRun(' PAGE ', '3')));
     const [paragraphNode] = parseHeaderParagraphs(xml);
@@ -634,6 +643,51 @@ describe('captureRegion — standalone rule-line paragraph promotion/demotion (#
     expect(skipped).toBeDefined();
     expect(result.unmodeled[0]?.detail).toEqual(compact(skipped as Record<string, unknown>));
   });
+
+  // #485 review — protects resolveRuleLine's candidate filter from the new
+  // w:fldSimple terminal: a "run-free" (no ordinary w:r) paragraph that
+  // carries BOTH a border AND a field is content-bearing (paragraphHasContent
+  // now recognizes w:fldSimple, same as it already recognized w:fldChar) —
+  // so it must be excluded from resolveRuleLine's run-free-candidate list
+  // entirely, not merely disqualified from promotion the way a run-carrying
+  // w:br candidate is (the case above). As the SECOND content-bearing
+  // paragraph in the part, it demotes whole via the pre-existing
+  // extraParagraph path (INVARIANT block above) — its border is never
+  // separately considered or promoted, exactly the outcome a w:fldChar-
+  // authored equivalent already produces today (w:fldChar was already in
+  // paragraphHasContent's disjunction pre-#485). Run for both OOXML
+  // representations to pin cross-representation equivalence, not just
+  // demonstrate it once for w:fldSimple.
+  it.each([
+    ['w:fldChar', fieldRuns(' STYLEREF Heading1 ', 'Some Style Text')],
+    ['w:fldSimple', simpleFieldRun(' STYLEREF Heading1 ', 'Some Style Text')],
+  ])(
+    'a run-free paragraph with a border AND a field (%s) demotes whole as a second content-bearing paragraph — its border is never separately promoted (protects resolveRuleLine)',
+    (_label, fieldXml) => {
+      const border = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+      const xml = makeHdrXml(
+        `${paragraph('', textRun('Header text'))}${paragraph(border, fieldXml)}`
+      );
+      const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+
+      expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Header text' }]);
+      expect(result.region?.ruleLine).toBeUndefined();
+      expect(result.unmodeled).toHaveLength(1);
+      expect(result.unmodeled[0]).toMatchObject({
+        variant: 'default',
+        region: 'header',
+        kind: 'extraParagraph',
+      });
+      // Losslessness half of the invariant: the demoted entry's `detail` is
+      // the raw SECOND paragraph verbatim (compact(paragraph)) — border and
+      // field both survive in unmodeled, neither silently dropped.
+      const secondParagraph = parseHeaderParagraphs(xml)[1];
+      expect(secondParagraph).toBeDefined();
+      expect(result.unmodeled[0]?.detail).toEqual(
+        compact(secondParagraph as Record<string, unknown>)
+      );
+    }
+  );
 
   it('regression guard: a part with no paragraphs at all still returns region undefined and unmodeled empty', () => {
     const xml = makeHdrXml('');
