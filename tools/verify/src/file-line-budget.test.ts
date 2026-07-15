@@ -28,6 +28,38 @@ describe('countNonBlankLines', () => {
   it('counts a single line with no trailing newline', () => {
     expect(countNonBlankLines('only line')).toBe(1);
   });
+
+  // Regression: ESLint's max-lines rule (eslint.config.js) is configured with
+  // both skipBlankLines AND skipComments: true. A counter that only skips
+  // blank lines is not equivalent — a file padded with comment-only lines
+  // would be flagged here as over budget while `pnpm lint` stays green (or
+  // vice versa, a comment-heavy file could pass here but fail lint). See
+  // finding on file-line-budget.ts:18.
+  it('does not count a line that is only a single-line comment', () => {
+    expect(countNonBlankLines('const a = 1;\n// standalone comment\nconst b = 2;')).toBe(2);
+  });
+
+  it('does not count lines that are only a multi-line block comment', () => {
+    const source = ['const a = 1;', '/*', ' * block comment', ' */', 'const b = 2;'].join('\n');
+    expect(countNonBlankLines(source)).toBe(2);
+  });
+
+  it('still counts a line with code and a trailing line comment', () => {
+    expect(countNonBlankLines('const a = 1; // trailing comment')).toBe(1);
+  });
+
+  it('still counts a line whose only content is a code+comment mix on the open/close of a block comment', () => {
+    const source = ['const a = 1; /*', 'comment body', '*/ const b = 2;'].join('\n');
+    expect(countNonBlankLines(source)).toBe(2);
+  });
+
+  it('does not mistake "//" inside a string literal for a line comment', () => {
+    expect(countNonBlankLines("const url = 'http://localhost:3000';")).toBe(1);
+  });
+
+  it('does not mistake "/*" inside a string literal for a block comment', () => {
+    expect(countNonBlankLines("const s = 'a /* not a comment */ b';\nconst t = 2;")).toBe(2);
+  });
 });
 
 describe('tools/verify source tree stays within the 400-line file cap', () => {
