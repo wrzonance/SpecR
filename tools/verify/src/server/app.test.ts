@@ -125,4 +125,60 @@ describe('createApp (wiring smoke tests)', () => {
     // that it is NOT rejected upstream as "payload too large".
     expect(response.status).toBe(422);
   });
+
+  describe('errorHandler (HTTP transport boundary)', () => {
+    it('passes through a client error status (malformed JSON) instead of flattening it to 500', async () => {
+      // express.json() throws a body-parser SyntaxError carrying its own
+      // `.status = 400` before any route handler runs — this pins that the
+      // real client-error status survives, mirroring
+      // src/api/middleware/error.ts's `err.status ?? 500` passthrough.
+      const response = await fetch(`${baseUrl}/api/runs/does-not-exist`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{ this is not valid JSON',
+      });
+      const body = (await response.json()) as { success: boolean; error: string };
+
+      expect(response.status).toBe(400);
+      expect(body).toEqual({ success: false, error: 'internal server error' });
+    });
+
+    it('answers 400 for a multer file-size-limit rejection, passing through its message only', async () => {
+      runStore.createRun({ runId: 'run-3', referenceFilename: 'reference.docx' });
+      const overLimitFile = Buffer.alloc(10 * 1024 * 1024 + 1);
+      const form = new FormData();
+      form.append('file', new Blob([overLimitFile]), 'reference.docx');
+
+      const response = await fetch(`${baseUrl}/api/runs`, { method: 'POST', body: form });
+      const body = (await response.json()) as { success: boolean; error: string };
+
+      expect(response.status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.error.length).toBeGreaterThan(0);
+      expect(body.error).not.toContain('.ts:');
+      expect(body.error).not.toContain('at ');
+    });
+
+    it('answers a generic 500 without leaking internals when a handler-level fs write throws', async () => {
+      // Deletes the run's own work directory out from under it, so
+      // routes/runs.ts's writeFileSync (writeScreenshot) throws a raw,
+      // unwrapped ENOENT synchronously inside submitScreenshotHandler — the
+      // exact "disk I/O fails mid-handler" scenario this middleware exists
+      // to contain.
+      runStore.createRun({ runId: 'run-4', referenceFilename: 'reference.docx' });
+      rmSync(runStore.runDir('run-4'), { recursive: true, force: true });
+      const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+
+      const response = await fetch(`${baseUrl}/api/runs/run-4/screenshot`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pane: 'reference', imageBase64: pngBytes.toString('base64') }),
+      });
+      const body = (await response.json()) as { success: boolean; error: string };
+
+      expect(response.status).toBe(500);
+      expect(body).toEqual({ success: false, error: 'internal server error' });
+      expect(JSON.stringify(body)).not.toContain('ENOENT');
+    });
+  });
 });

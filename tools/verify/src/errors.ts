@@ -5,12 +5,22 @@
 // the harness has zero runtime dependency on the main API package.
 //
 // Every pipeline stage (config/upload/parse/import/generate/render/measure/
-// screenshot/diff/report) and every HTTP handler in this harness funnels its
-// catch block through toRunError() before the failure crosses a
-// serialization boundary (HTTP response body, RunRecord persisted to disk),
-// so a failure always carries { stage, message, cause } — never a bare
-// string, and never a raw Error with a stack trace that could leak
+// screenshot/diff/report) funnels its catch block through toRunError()
+// before the failure crosses a serialization boundary — run/pipeline.ts's
+// failRun() persists the result on the RunRecord (polled via GET
+// /api/runs/:runId), and index.ts's boot-time catch prints it — so a
+// pipeline-stage failure always carries { stage, message, cause } — never a
+// bare string, and never a raw Error with a stack trace that could leak
 // internals across that boundary.
+//
+// The raw HTTP transport boundary (server/app.ts's Express error-handling
+// middleware) is a SEPARATE, lighter-weight boundary and deliberately does
+// NOT go through toRunError(): a malformed request body or an unwrapped fs
+// exception escaping a handler isn't a pipeline stage, so there is no
+// RunStage to attach. That middleware instead mirrors
+// src/api/middleware/error.ts's own shape directly (MulterError -> 400 with
+// its message, otherwise `err.status ?? 500` with a fixed, non-leaking
+// message) — see app.test.ts's "errorHandler" suite for the pinned contract.
 
 export const RUN_STAGES = [
   'config',

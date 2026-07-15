@@ -9,9 +9,11 @@ import {
 } from './errors.js';
 
 // Pins the core invariant of the WT-150 error hierarchy: every pipeline
-// stage failure and every HTTP handler failure converts to a serializable
-// RunError carrying exactly { stage, message, cause? } — never a bare
-// string, and never a raw stack trace leaking across the boundary.
+// stage failure converts to a serializable RunError carrying exactly
+// { stage, message, cause? } — never a bare string, and never a raw stack
+// trace leaking across the boundary. (The raw HTTP transport boundary in
+// server/app.ts is a separate, RunError-free contract — see its own
+// app.test.ts "errorHandler" suite.)
 describe('toRunError (serializable failure boundary)', () => {
   it('carries the origin VerifyError stage, message, and no cause when none was given', () => {
     const error = new VerifyRenderError('screenshot capture returned a blank canvas', {

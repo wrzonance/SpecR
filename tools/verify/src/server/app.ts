@@ -59,18 +59,34 @@ function notFoundHandler(_req: Request, res: Response): void {
   res.status(404).json({ success: false, error: 'not found' });
 }
 
+// A thrown value with a numeric `.status` (body-parser's malformed-JSON and
+// entity-too-large errors both set this, via http-errors' createError) names
+// its own real HTTP status — mirrors src/api/middleware/error.ts's
+// `(err as { status?: number }).status ?? 500` passthrough, so a client
+// error (bad JSON, oversized body) is answered as the client error it is,
+// never flattened to a 500.
+function hasNumericStatus(err: unknown): err is { status: number } {
+  return (
+    typeof err === 'object' && err !== null && 'status' in err && typeof err.status === 'number'
+  );
+}
+
 // Express recognizes error-handling middleware by arity (four params), so
 // _req/_next stay in the signature even though this handler never reads
 // them — mirrors src/api/middleware/error.ts's errorHandler. Never forwards
 // err.message/stack to the response body: this harness has no logger of its
 // own (isolated package), so the only visibility into an unexpected failure
-// is the response status this middleware controls.
+// is the response status this middleware controls. This is a distinct,
+// lighter-weight boundary from run/pipeline.ts's toRunError() — it has no
+// RunStage to attach (an HTTP transport failure like malformed JSON isn't a
+// pipeline stage), so it never carries a RunError shape (see errors.ts).
 function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction): void {
   if (err instanceof multer.MulterError) {
     res.status(400).json({ success: false, error: err.message });
     return;
   }
-  res.status(500).json({ success: false, error: 'internal server error' });
+  const status = hasNumericStatus(err) ? err.status : 500;
+  res.status(status).json({ success: false, error: 'internal server error' });
 }
 
 export function createApp(deps: AppDeps): Express {
