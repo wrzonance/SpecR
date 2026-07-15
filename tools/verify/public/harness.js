@@ -399,6 +399,10 @@
           setTimeout(tick, POLL_INTERVAL_MS);
         })
         .catch((err) => {
+          // Same supersession re-check as the fulfilled path: a loop
+          // superseded while its fetch was in flight must not write the
+          // status line or reschedule when that fetch rejects.
+          if (stopped) return;
           // A transient fetch/JSON/non-2xx error must not kill the poll loop
           // or leak an unhandled rejection — surface a diagnostic to the
           // status line (so a persistent failure is visible, not a silently
