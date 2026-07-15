@@ -11,8 +11,11 @@
 // never fetched `main` (e.g. `actions/checkout`'s default fetch-depth: 1)
 // skips rather than failing for an environment reason unrelated to the
 // invariant itself. Every normal dev worktree and any checkout that has run
-// `git fetch origin main` (this repo's own loc-check CI job does, via
-// fetch-depth: 0) resolves it and the assertion runs for real.
+// `git fetch origin main` resolves it and the assertion runs for real —
+// including this repo's own CI: .github/workflows/ci.yml's `verify-harness`
+// job runs `pnpm test` inside tools/verify (this package's own isolated
+// pnpm workspace, invisible to the root `test` job) with fetch-depth: 0, so
+// this check is enforced on every push and pull request, not just locally.
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';

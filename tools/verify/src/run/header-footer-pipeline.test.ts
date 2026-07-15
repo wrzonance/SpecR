@@ -24,11 +24,20 @@ import type {
   OnboardingJobResult,
 } from '../api-client/schemas.js';
 
-function stubApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
-  const onboardingResult: OnboardingJobResult = {
+// The 'default' scenario's own section/title (HEADER_FOOTER_SCENARIOS) —
+// stubApiClient's default waitForLibraryImportJob result matches these
+// exactly, so a full run through startRun({ scenarioId: 'default' }) never
+// trips the pipeline's own real-parser-identity assertion. Tests that need
+// a MISMATCH pass an onboardingResult override built from this via
+// buildOnboardingResult.
+const DEFAULT_SCENARIO_SECTION = '07 92 00';
+const DEFAULT_SCENARIO_TITLE = 'Joint Sealants';
+
+function buildOnboardingResult(overrides: Partial<OnboardingJobResult> = {}): OnboardingJobResult {
+  return {
     specId: 'spec-1',
-    section: '07 92 00',
-    title: 'Joint Sealants',
+    section: DEFAULT_SCENARIO_SECTION,
+    title: DEFAULT_SCENARIO_TITLE,
     libraryId: 'library-1',
     templateId: null,
     report: {
@@ -45,7 +54,12 @@ function stubApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
       },
       parseWarnings: [],
     },
+    ...overrides,
   };
+}
+
+function stubApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
+  const onboardingResult = buildOnboardingResult();
   const addSectionResult: AddSectionToProjectResult = {
     specId: 'project-spec-1',
     section: '07 92 00',
@@ -165,6 +179,44 @@ describe('header-footer fixture pipeline (orchestration + no-escape boundary)', 
     const run = runStore.getRun(runId);
     if (run === undefined) throw new Error('run missing after failure');
     expect(run.error).toEqual({ stage: 'upload', message: 'ECONNREFUSED' });
+  });
+
+  it('fails the upload stage when the real parser resolves a different title than the scenario expects', async () => {
+    const apiClient = stubApiClient({
+      waitForLibraryImportJob: () =>
+        Promise.resolve(buildOnboardingResult({ title: 'A Completely Different Title' })),
+    });
+    const pipeline = createHeaderFooterFixturePipeline({ apiClient, runStore });
+
+    const runId = pipeline.startRun({ scenarioId: 'default' });
+
+    await waitFor(() => runStore.getRun(runId)?.status === 'failed');
+
+    const run = runStore.getRun(runId);
+    if (run === undefined) throw new Error('run missing after failure');
+    expect(run.error?.stage).toBe('upload');
+    expect(run.error?.message).toContain('A Completely Different Title');
+    expect(run.error?.message).toContain(DEFAULT_SCENARIO_TITLE);
+    // Never reaches project provisioning once the identity check fails.
+    expect(run.artifacts.projectId).toBeUndefined();
+  });
+
+  it('fails the upload stage when the real parser resolves a different section than the scenario expects', async () => {
+    const apiClient = stubApiClient({
+      waitForLibraryImportJob: () =>
+        Promise.resolve(buildOnboardingResult({ section: '99 99 99' })),
+    });
+    const pipeline = createHeaderFooterFixturePipeline({ apiClient, runStore });
+
+    const runId = pipeline.startRun({ scenarioId: 'default' });
+
+    await waitFor(() => runStore.getRun(runId)?.status === 'failed');
+
+    const run = runStore.getRun(runId);
+    if (run === undefined) throw new Error('run missing after failure');
+    expect(run.error?.stage).toBe('upload');
+    expect(run.error?.message).toContain('99 99 99');
+    expect(run.error?.message).toContain(DEFAULT_SCENARIO_SECTION);
   });
 
   it('records an import-stage failure when project provisioning fails', async () => {

@@ -25,7 +25,7 @@
 
 import { writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import type { RunStage } from '../errors.js';
+import { VerifyApiError, type RunStage } from '../errors.js';
 import { failRun, runGenerate, type PipelineDeps } from './pipeline.js';
 import {
   buildScenarioReferenceDocx,
@@ -33,6 +33,7 @@ import {
   type HeaderFooterScenario,
   type HeaderFooterScenarioId,
 } from '../fixtures/header-footer-scenarios.js';
+import type { OnboardingJobResult } from '../api-client/schemas.js';
 import type { RunRecord } from './types.js';
 
 /** Reuses pipeline.ts's PipelineDeps verbatim — same apiClient/runStore shape. */
@@ -57,6 +58,31 @@ function fixtureName(scenario: HeaderFooterScenario, runId: string): string {
   return `verify-${scenario.id}-${runId}`;
 }
 
+// Enforces this module's own stated invariant — every scenario's built
+// reference DOCX round-trips through the REAL parser to its own
+// section/title exactly. OnboardingJobResult.section/.title are the
+// backend's own resolved values (src/parser/docx/core-metadata.ts's
+// parseCoreMetadata, reading the docProps/core.xml this pipeline's
+// reference DOCX carries — see header-footer-scenarios.ts's spike-fix
+// docstring), never read back from the scenario catalog. Without this
+// check the pipeline would silently accept whatever the real parser
+// produced: RunRecord.section/.title are seeded from the scenario catalog
+// itself at startRun() (see createHeaderFooterFixturePipeline below) and
+// never overwritten from the parsed result, so a title/section-resolution
+// regression in the real parser would otherwise go undetected end to end.
+function assertScenarioIdentityRoundTripped(
+  scenario: HeaderFooterScenario,
+  result: OnboardingJobResult
+): void {
+  if (result.section === scenario.section && result.title === scenario.title) return;
+  throw new VerifyApiError(
+    `header/footer scenario '${scenario.id}' round-tripped through the real parser as ` +
+      `section '${result.section}' / title '${result.title}', expected ` +
+      `'${scenario.section}' / '${scenario.title}'`,
+    { stage: 'upload' }
+  );
+}
+
 // Build the scenario's ground-truth reference DOCX, persist it alongside
 // this run's other artifacts (mirrors pipeline.ts's runUpload writing
 // input.referenceBuffer to the same deterministic referencePath), then
@@ -79,7 +105,8 @@ async function runLibraryProvision(
     referenceBuffer,
     referenceFilename
   );
-  await deps.apiClient.waitForLibraryImportJob(jobId);
+  const onboardingResult = await deps.apiClient.waitForLibraryImportJob(jobId);
+  assertScenarioIdentityRoundTripped(scenario, onboardingResult);
 
   deps.runStore.updateRun(record.runId, {
     stage: 'upload',
