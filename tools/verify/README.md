@@ -152,10 +152,14 @@ independent of the repo root's. Two invariants are pinned by tests, not just thi
 
 ## openapi.yaml no-op
 
-This build adds zero endpoints to the SpecR REST API — every route in [HTTP API](#http-api) above
+This tool adds zero endpoints to the SpecR REST API — every route in [HTTP API](#http-api) above
 is this package's own separate Express server (`VERIFY_PORT`, default 4300), never mounted on the
-main API. `git diff origin/main...HEAD -- src/ openapi.yaml` is empty for this entire branch; the
-contract gate (`src/api/contract.integration.test.ts`) has nothing new to check.
+main API, so the contract gate (`src/api/contract.integration.test.ts`) has nothing new to check.
+The standing guarantee is the compile-time import boundary (`src/import-boundary.test.ts`):
+`tools/verify` never imports repo-root `src/**`. (The original build branch also pinned this with a
+git-state test asserting `git diff origin/main...HEAD -- src/ openapi.yaml` stayed empty — that
+invariant only holds on a branch that never touches `src/`, so the test failed every later
+src-touching branch and was removed in #500.)
 
 ## Gold-corpus workflow linkage (ADR-057)
 
@@ -427,7 +431,9 @@ scenario-picker UI:
    round-trip gap (manual page breaks); decision 11's two schema bugs were `tools/verify`'s own and
    fixed inline, not filed.
 7. `pnpm --dir tools/verify lint` and `pnpm --dir tools/verify test` green; `src/openapi-noop.test.ts`
-   (new) and `src/file-line-budget.test.ts` both pin this PR's two boundary invariants
+   (new at the time; removed in #500 — its git-state invariant only held on a branch that never
+   touches `src/` and failed every later src-touching branch) and `src/file-line-budget.test.ts`
+   pinned this PR's two boundary invariants
    (`git diff origin/main...HEAD -- src/ openapi.yaml` empty; no `tools/verify/src` file over 400 lines);
    `src/import-boundary.test.ts` and `src/workspace-isolation.test.ts` re-run clean; root `pnpm lint`/
    `pnpm test` unaffected (`git diff origin/main...HEAD -- src/ openapi.yaml` confirmed empty for the whole
