@@ -187,6 +187,14 @@ function captureTableCell(
     return { cell: compact({ columnSpan }) as HeaderFooterTableCell, unmodeled: extraUnmodeled };
   }
 
+  // Table-cell images stay OUT OF SCOPE (#487, ADR-071 decision 4, source-
+  // confirmed against src/generator/header-footer-tables.ts: buildTable never
+  // renders image content inside a cell). This pre-filter runs BEFORE
+  // buildCellContent, so buildCellContent's own drawing branch (#487,
+  // header-footer-region.ts) is never reached from this call site — a
+  // table-cell drawing run always becomes an unmodeled `image` entry here,
+  // never a modeled `image` field. buildCellContent is deliberately called
+  // WITHOUT a mediaByRId argument for the same reason.
   const collapsed = collapseComplexFields(runsOf(first));
   const imageUnmodeled: readonly PartialUnmodeled[] = collapsed
     .filter(isDrawingRun)
