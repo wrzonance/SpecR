@@ -190,8 +190,11 @@ function captureRuleLine(
  *   border wins outright — KNOWN AMBIGUITY, OOXML gives no canonical
  *   tiebreak — and every candidate demotes to an `extraParagraph`
  *   unmodeled entry.
- * - Otherwise the first candidate promotes into `ruleLine`; any further
- *   candidate demotes to `extraParagraph`.
+ * - Otherwise the first candidate that is genuinely run-free (border ONLY,
+ *   no runs at all) promotes into `ruleLine`; every other candidate —
+ *   including a bordered paragraph that still carries a non-content run
+ *   such as a lone `w:br` — demotes to `extraParagraph`, so promotion never
+ *   silently drops that run (ADR-068 criterion 4, #484 review).
  * - No candidates and no border on `first` → unchanged empty behavior.
  */
 function resolveRuleLine(
@@ -216,11 +219,17 @@ function resolveRuleLine(
     detail: compact(c.paragraph),
   });
 
-  if (firstRuleLine !== undefined) {
-    return { ruleLine: firstRuleLine, unmodeled: candidates.map(toDemoted) };
-  }
-  const [promoted, ...rest] = candidates;
-  return { ruleLine: promoted?.border, unmodeled: rest.map(toDemoted) };
+  // Only a truly run-free paragraph (border ONLY, no runs at all) is eligible
+  // for promotion — matching #484's "no runs at all" contract — so a promoted
+  // paragraph never carries a run that capture would then discard. A bordered
+  // non-content paragraph that still has runs stays a candidate purely so it
+  // is preserved verbatim by demotion, never promoted and never dropped.
+  const promoteIdx =
+    firstRuleLine !== undefined
+      ? -1
+      : candidates.findIndex((c) => runsOf(c.paragraph).length === 0);
+  const ruleLine = promoteIdx >= 0 ? candidates[promoteIdx]?.border : firstRuleLine;
+  return { ruleLine, unmodeled: candidates.filter((_, i) => i !== promoteIdx).map(toDemoted) };
 }
 
 // ─── field-marker resolution ────────────────────────────────────────────────

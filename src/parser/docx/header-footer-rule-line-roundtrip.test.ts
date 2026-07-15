@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Document, Packer } from 'docx';
-import type { Header } from 'docx';
+import type { Header, Footer } from 'docx';
 import JSZip from 'jszip';
 import { captureRegion } from './header-footer-region.js';
 import type { HeaderFooterRegion } from './header-footer-region.js';
@@ -43,6 +43,10 @@ function makeHdrXml(bodyXml: string): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr ${NS}>${bodyXml}</w:hdr>`;
 }
 
+function makeFtrXml(bodyXml: string): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ${NS}>${bodyXml}</w:ftr>`;
+}
+
 function paragraph(pPrXml: string, runsXml: string): string {
   const pPr = pPrXml === '' ? '' : `<w:pPr>${pPrXml}</w:pPr>`;
   return `<w:p>${pPr}${runsXml}</w:p>`;
@@ -69,6 +73,22 @@ async function packedHeaderXml(composition: HeaderFooterComposition): Promise<st
   return file.async('string');
 }
 
+// Footer twin of docWithHeader/packedHeaderXml — a footer's rule line lives on
+// the 'top' edge (above the footer text), the inverse of a header's 'bottom'.
+function docWithFooter(footers: Partial<Record<'default', Footer>> | undefined): Document {
+  return new Document({
+    sections: [{ ...(footers !== undefined ? { footers } : {}), children: [] }],
+  });
+}
+
+async function packedFooterXml(composition: HeaderFooterComposition): Promise<string> {
+  const result = renderHeaderFooterComposition(composition, CTX);
+  const zip = await JSZip.loadAsync(await Packer.toBuffer(docWithFooter(result.footers)));
+  const file = zip.file('word/footer1.xml');
+  if (!file) throw new Error('word/footer1.xml missing from packed DOCX');
+  return file.async('string');
+}
+
 // compact() + `as HeaderFooterComposition` mirrors the exact idiom
 // header-footer-region.ts's own captureRegion tail uses to fold a
 // possibly-undefined `table`/`ruleLine` into a region under
@@ -76,6 +96,10 @@ async function packedHeaderXml(composition: HeaderFooterComposition): Promise<st
 // key.
 function compositionWithHeader(region: HeaderFooterRegion | undefined): HeaderFooterComposition {
   return compact({ header: region }) as HeaderFooterComposition;
+}
+
+function compositionWithFooter(region: HeaderFooterRegion | undefined): HeaderFooterComposition {
+  return compact({ footer: region }) as HeaderFooterComposition;
 }
 
 describe('captureRegion → renderHeaderFooterComposition → Packer → JSZip round-trip (#484)', () => {
@@ -140,5 +164,29 @@ describe('captureRegion → renderHeaderFooterComposition → Packer → JSZip r
 
     expect(headerXml).not.toContain('<w:pBdr>');
     expect(headerXml).toContain('Header text');
+  });
+
+  // Footer twin of the first header case (#484 review): the fix targets both
+  // parts, so pin the footer path end-to-end too. A footer's rule line is a
+  // 'top' border above its text, so a standalone border-only paragraph carries
+  // w:top — captured off raw OOXML, rendered through the generator's footers
+  // path, packed, and reopened to prove a real <w:pBdr> lands in
+  // word/footer1.xml, none of it leaking as footer text.
+  it('a standalone border-only footer rule-line paragraph (w:top), no content-bearing paragraph in the part, packs a real <w:pBdr> in word/footer1.xml', async () => {
+    const xml = makeFtrXml(paragraph('<w:pBdr><w:top w:val="single" w:sz="4"/></w:pBdr>', ''));
+    const captured = captureRegion(xml, 'top', 'default', 'footer', KNOWN);
+    // widthTwips = round(4 / 0.4) = 10 — same conversion as the header cases.
+    expect(captured.region).toEqual({
+      ruleLine: { enabled: true, style: 'single', widthTwips: 10 },
+    });
+    expect(captured.unmodeled).toEqual([]);
+
+    const footerXml = await packedFooterXml(compositionWithFooter(captured.region));
+
+    // Generator recomputes w:sz from widthTwips (round(10 * 0.4) = 4): the
+    // packed border is the inverse of the parser's own conversion, proving the
+    // footer path round-trips as consistently as the header path.
+    expect(footerXml).toContain('<w:pBdr><w:top w:val="single" w:sz="4"/></w:pBdr>');
+    expect(footerXml).not.toContain('<w:t ');
   });
 });

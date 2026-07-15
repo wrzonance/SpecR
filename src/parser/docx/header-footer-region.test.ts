@@ -514,6 +514,34 @@ describe('captureRegion — standalone rule-line paragraph promotion/demotion (#
     expect(result.unmodeled[0]).toMatchObject({ kind: 'extraParagraph' });
   });
 
+  // #484 review — a bordered paragraph that is non-content-bearing yet still
+  // carries a run (a lone w:br) is NOT run-free, so it must never be promoted
+  // into region.ruleLine: a promoted paragraph's runs are never captured, so
+  // promoting this one would silently drop its w:br. It demotes to an
+  // extraParagraph instead, preserving the whole paragraph verbatim (border
+  // AND run) — ADR-068 criterion 4, nothing silently discarded.
+  it('does not promote a bordered non-content paragraph that still has a run (w:br); preserves it verbatim as an extraParagraph', () => {
+    const xml = makeHdrXml(
+      paragraph('<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>', '<w:r><w:br/></w:r>')
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    // Border NOT promoted — the region has no rule line at all, rather than a
+    // rule line shorn of its dropped run.
+    expect(result.region).toBeUndefined();
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({
+      variant: 'default',
+      region: 'header',
+      kind: 'extraParagraph',
+    });
+    // Losslessness half of the invariant: the demoted entry's `detail` is the
+    // raw paragraph verbatim (compact(paragraph)) — border and w:br both
+    // survive in unmodeled, neither silently dropped.
+    const demoted = parseHeaderParagraphs(xml)[0];
+    expect(demoted).toBeDefined();
+    expect(result.unmodeled[0]?.detail).toEqual(compact(demoted as Record<string, unknown>));
+  });
+
   it('regression guard: a part with no paragraphs at all still returns region undefined and unmodeled empty', () => {
     const xml = makeHdrXml('');
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
