@@ -17,7 +17,7 @@ import * as z from 'zod';
 
 // ─── Envelope shapes (openapi.yaml SuccessResponse / ErrorResponse) ───────────
 
-export function successResponseSchema<Data extends z.ZodTypeAny>(
+export function successResponseSchema<Data extends z.ZodType>(
   data: Data
 ): z.ZodObject<{ success: z.ZodLiteral<true>; data: Data }> {
   return z.object({ success: z.literal(true), data });
@@ -341,7 +341,7 @@ export type OnboardingJob = z.infer<typeof OnboardingJobSchema>;
 // design package, or an issued revision. This harness only ever PUTs at
 // project scope, but GET/PUT both return whichever scope the row actually
 // has, so all four are modeled rather than narrowed to 'project' alone.
-const HeaderFooterScopeSchema = z.union([
+const HeaderFooterScopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('client'), clientLibraryId: z.uuid() }),
   z.object({ kind: z.literal('project'), projectId: z.uuid() }),
   z.object({ kind: z.literal('package'), packageId: z.uuid() }),

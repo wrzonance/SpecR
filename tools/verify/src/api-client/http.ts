@@ -82,7 +82,7 @@ export async function assertOk(response: Response, path: string, stage: RunStage
 // Every JSON response this client hands to a caller passes through here —
 // the single point where "unexpected shape" (VerifyApiError's own stated
 // domain, per errors.ts) is enforced for the SpecR REST API's responses.
-export async function parseJson<Schema extends z.ZodTypeAny>(
+export async function parseJson<Schema extends z.ZodType>(
   response: Response,
   schema: Schema,
   path: string,
