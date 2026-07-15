@@ -27,6 +27,7 @@ import {
   Document,
   Footer,
   Header,
+  PageBreak,
   Packer,
   Paragraph,
   TextRun,
@@ -34,6 +35,7 @@ import {
 } from 'docx';
 import { VerifyRenderError } from '../errors.js';
 import type {
+  HeaderFooterCellInput,
   HeaderFooterCompositionInput,
   HeaderFooterFieldInput,
   HeaderFooterVariantInput,
@@ -57,6 +59,14 @@ function literalField(text: string): HeaderFooterFieldInput {
 const SECTION_NUMBER_FIELD: HeaderFooterFieldInput = { kind: 'sectionNumber' };
 const SECTION_TITLE_FIELD: HeaderFooterFieldInput = { kind: 'sectionTitle' };
 
+// Wrap a single field as the one-item `content` array the real API's
+// HeaderFooterCellSchema requires at a region position (`header.center` /
+// `footer.center`) — see project-client.ts's HeaderFooterCellInput docstring
+// for why a bare field object silently renders nothing.
+function cell(field: HeaderFooterFieldInput): HeaderFooterCellInput {
+  return { content: [field] };
+}
+
 export const HEADER_FOOTER_SCENARIOS: readonly HeaderFooterScenario[] = [
   {
     id: 'default',
@@ -67,8 +77,8 @@ export const HEADER_FOOTER_SCENARIOS: readonly HeaderFooterScenario[] = [
     composition: {
       variants: {
         default: {
-          header: { center: literalField('PROJECT MASTER') },
-          footer: { center: SECTION_NUMBER_FIELD },
+          header: { center: cell(literalField('PROJECT MASTER')) },
+          footer: { center: cell(SECTION_NUMBER_FIELD) },
         },
       },
     },
@@ -81,8 +91,8 @@ export const HEADER_FOOTER_SCENARIOS: readonly HeaderFooterScenario[] = [
     pageCount: 2,
     composition: {
       variants: {
-        default: { header: { center: literalField('CONTINUATION') } },
-        first: { header: { center: literalField('COVER PAGE') } },
+        default: { header: { center: cell(literalField('CONTINUATION')) } },
+        first: { header: { center: cell(literalField('COVER PAGE')) } },
       },
     },
   },
@@ -94,8 +104,8 @@ export const HEADER_FOOTER_SCENARIOS: readonly HeaderFooterScenario[] = [
     pageCount: 2,
     composition: {
       variants: {
-        default: { header: { center: literalField('ODD PAGE') } },
-        even: { header: { center: literalField('EVEN PAGE') } },
+        default: { header: { center: cell(literalField('ODD PAGE')) } },
+        even: { header: { center: cell(literalField('EVEN PAGE')) } },
       },
     },
   },
@@ -108,8 +118,8 @@ export const HEADER_FOOTER_SCENARIOS: readonly HeaderFooterScenario[] = [
     composition: {
       variants: {
         default: {
-          header: { center: SECTION_NUMBER_FIELD },
-          footer: { center: SECTION_TITLE_FIELD },
+          header: { center: cell(SECTION_NUMBER_FIELD) },
+          footer: { center: cell(SECTION_TITLE_FIELD) },
         },
       },
     },
@@ -123,7 +133,7 @@ export const HEADER_FOOTER_SCENARIOS: readonly HeaderFooterScenario[] = [
     pageCount: 1,
     composition: {
       variants: {
-        default: { header: { center: literalField('RESTART DEMO') } },
+        default: { header: { center: cell(literalField('RESTART DEMO')) } },
       },
       pageNumbering: { mode: 'restartPerSpec', startAt: 1 },
     },
@@ -141,11 +151,7 @@ export function findScenario(id: HeaderFooterScenarioId): HeaderFooterScenario {
   return scenario;
 }
 
-function resolveFieldText(
-  field: HeaderFooterFieldInput | undefined,
-  scenario: HeaderFooterScenario
-): string {
-  if (field === undefined) return '';
+function resolveFieldText(field: HeaderFooterFieldInput, scenario: HeaderFooterScenario): string {
   switch (field.kind) {
     case 'literal':
       return field.text ?? '';
@@ -154,6 +160,17 @@ function resolveFieldText(
     case 'sectionTitle':
       return scenario.title;
   }
+}
+
+// Every fixture scenario's cell carries exactly one content field — this
+// harness never exercises the real API's multi-field-per-cell case, so the
+// first entry is the whole story here.
+function resolveCellText(
+  cell: HeaderFooterCellInput | undefined,
+  scenario: HeaderFooterScenario
+): string {
+  const field = cell?.content[0];
+  return field === undefined ? '' : resolveFieldText(field, scenario);
 }
 
 function centeredParagraph(text: string): Paragraph {
@@ -166,7 +183,7 @@ function buildHeader(
 ): Header | undefined {
   if (variant?.header?.center === undefined) return undefined;
   return new Header({
-    children: [centeredParagraph(resolveFieldText(variant.header.center, scenario))],
+    children: [centeredParagraph(resolveCellText(variant.header.center, scenario))],
   });
 }
 
@@ -176,7 +193,7 @@ function buildFooter(
 ): Footer | undefined {
   if (variant?.footer?.center === undefined) return undefined;
   return new Footer({
-    children: [centeredParagraph(resolveFieldText(variant.footer.center, scenario))],
+    children: [centeredParagraph(resolveCellText(variant.footer.center, scenario))],
   });
 }
 
@@ -226,13 +243,25 @@ function buildSectionProperties(scenario: HeaderFooterScenario): ISectionPropert
   };
 }
 
+// A run-level PageBreak (`<w:br w:type="page"/>`), not the pPr-level
+// `pageBreakBefore: true` paragraph property: docx-preview 0.4.0's own
+// pagination (`splitBySection`, vendored under node_modules) only detects
+// `pageBreakBefore` when it comes from a NAMED STYLE's paragraphProps
+// (`findStyle(elem.styleName)?.paragraphProps?.pageBreakBefore`), never a
+// paragraph's own direct pPr override — the shape `docx`'s
+// `pageBreakBefore: true` constructor option actually emits. Confirmed live
+// during task 7/7's Playwright smoke test: with the pPr-level property, the
+// reference pane rendered as a single page despite the paragraph carrying a
+// valid `w:pageBreakBefore`. A run-level break is the one page-break
+// mechanism `isPageBreakElement` DOES honor regardless of style.
 function buildBodyChildren(pageCount: 1 | 2): readonly Paragraph[] {
+  if (pageCount === 1) {
+    return [new Paragraph({ children: [new TextRun('Reference fixture body text, page 1.')] })];
+  }
   const firstPage = new Paragraph({
-    children: [new TextRun('Reference fixture body text, page 1.')],
+    children: [new TextRun('Reference fixture body text, page 1.'), new PageBreak()],
   });
-  if (pageCount === 1) return [firstPage];
   const secondPage = new Paragraph({
-    pageBreakBefore: true,
     children: [new TextRun('Reference fixture body text, page 2.')],
   });
   return [firstPage, secondPage];

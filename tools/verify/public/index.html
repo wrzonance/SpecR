@@ -50,6 +50,8 @@
     flex-wrap: wrap;
   }
   #run-status { font-family: monospace; opacity: 0.85; }
+  #scenario-picker { display: flex; align-items: center; gap: 0.4rem; }
+  #scenario-picker label { font-size: 0.85rem; opacity: 0.85; }
   #layout {
     flex: 1;
     display: grid;
@@ -116,6 +118,11 @@
     <input type="text" id="title-input" placeholder="title (optional)">
     <button type="submit" id="start-run-button">Start run</button>
   </form>
+  <div id="scenario-picker" data-testid="scenario-picker">
+    <label for="scenario-select">Header/footer fixture</label>
+    <select id="scenario-select" data-testid="scenario-select"></select>
+    <button type="button" id="start-scenario-button">Start scenario run</button>
+  </div>
   <div id="run-status" data-testid="run-status">no run started</div>
 </header>
 
@@ -155,5 +162,6 @@
 </main>
 
 <script src="/harness.js"></script>
+<script src="/scenario-picker.js"></script>
 </body>
 </html>

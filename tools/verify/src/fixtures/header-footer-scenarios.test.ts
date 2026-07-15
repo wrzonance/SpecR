@@ -96,7 +96,11 @@ describe('buildScenarioReferenceDocx', () => {
 
     const documentXml = await readEntry(zip, 'word/document.xml');
     expect(documentXml).toContain('<w:titlePg/>');
-    expect(documentXml).toContain('<w:pageBreakBefore/>');
+    // A run-level page break (`<w:br w:type="page"/>`), not the pPr-level
+    // `pageBreakBefore` property — docx-preview 0.4.0 only honors the
+    // latter when it comes from a named style, never a paragraph's own
+    // direct override (see buildBodyChildren's docstring).
+    expect(documentXml).toContain('<w:br w:type="page"/>');
     const defaultHeaderXml = await readEntry(zip, 'word/header1.xml');
     expect(defaultHeaderXml).toContain('CONTINUATION');
     const firstHeaderXml = await readEntry(zip, 'word/header2.xml');

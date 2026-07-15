@@ -246,9 +246,78 @@ export const OnboardingStageSchema = z.enum([
 
 export type OnboardingStage = z.infer<typeof OnboardingStageSchema>;
 
+// EditabilityValue mirrors openapi.yaml's own enum (locked/editable/choice/
+// note) — matches this repo's editability glossary term exactly.
+const EditabilityValueSchema = z.enum(['locked', 'editable', 'choice', 'note']);
+
+const EditabilitySummarySchema = z.object({
+  counts: z.object({
+    locked: z.number().int(),
+    editable: z.number().int(),
+    choice: z.number().int(),
+    note: z.number().int(),
+  }),
+  lowConfidence: z.array(
+    z.object({
+      nodeId: z.uuid(),
+      value: EditabilityValueSchema,
+      confidence: z.number().min(0).max(1),
+    })
+  ),
+});
+
+const HierarchySummarySchema = z.object({
+  counts: z.object({
+    scored: z.number().int(),
+    unscored: z.number().int(),
+    belowThreshold: z.number().int(),
+  }),
+  unscoredReason: z.string().exactOptional(),
+  lowConfidence: z.array(
+    z.object({
+      nodeId: z.uuid(),
+      nodeType: z.enum(['part', 'article', 'pr1', 'pr2', 'pr3', 'pr4', 'pr5', 'pr6', 'pr7']),
+      ilvl: z.number().int().min(0).max(8),
+      confidence: z.number().min(0).max(1),
+      evidence: z.array(z.string()),
+    })
+  ),
+});
+
+// The parse-time-captured header/footer composition draft (ADR-040, #306) —
+// this harness never reads or round-trips it (it PUTs its own composition
+// via project-client.ts's putProjectHeaderFooter and never acts on what the
+// parser guessed), so it stays a loose passthrough shape, same posture as
+// decision 10's HeaderFooterConfigSchema.config catchall.
+const HeaderFooterDraftSchema = z.looseObject({});
+
+// SPIKE-BUILD FIX (found live during task 7/7's smoke test): the real
+// GET /libraries/import/jobs/{jobId} 200 nests DerivationReportSchema's
+// {nodeTypes, skippedNodeTypes, vanishSkipped} shape under
+// `report.styleDerivation` (nullable — null for non-DOCX masters), NOT at
+// `report` directly — openapi.yaml's OnboardingReport component (required:
+// [styleDerivation, styleSourceNeeded, headerFooter, editability, hierarchy,
+// parseWarnings]) confirmed against a real completed job's response. A run
+// against every one of #305's 5 scenarios failed at stage 'upload' with a
+// ZodError on `report.nodeTypes` (`expected array, received undefined`)
+// before this fix — a bug in this hand-mirrored schema, not repo-root src/
+// drift (openapi.yaml and the real handler already agree on this shape).
+export const OnboardingReportSchema = z.object({
+  styleDerivation: DerivationReportSchema.nullable(),
+  styleSourceNeeded: z.boolean(),
+  headerFooter: HeaderFooterDraftSchema.nullable(),
+  editability: EditabilitySummarySchema,
+  hierarchy: HierarchySummarySchema,
+  parseWarnings: z.array(ParseWarningSchema),
+});
+
 export const OnboardingJobResultSchema = z.object({
+  specId: z.uuid(),
+  section: z.string(),
+  title: z.string(),
+  libraryId: z.uuid(),
   templateId: z.uuid().nullable(),
-  report: DerivationReportSchema,
+  report: OnboardingReportSchema,
 });
 
 export type OnboardingJobResult = z.infer<typeof OnboardingJobResultSchema>;

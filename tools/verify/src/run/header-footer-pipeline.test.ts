@@ -26,8 +26,25 @@ import type {
 
 function stubApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   const onboardingResult: OnboardingJobResult = {
+    specId: 'spec-1',
+    section: '07 92 00',
+    title: 'Joint Sealants',
+    libraryId: 'library-1',
     templateId: null,
-    report: { nodeTypes: [], skippedNodeTypes: [], vanishSkipped: 0 },
+    report: {
+      styleDerivation: { nodeTypes: [], skippedNodeTypes: [], vanishSkipped: 0 },
+      styleSourceNeeded: true,
+      headerFooter: null,
+      editability: {
+        counts: { locked: 0, editable: 0, choice: 0, note: 0 },
+        lowConfidence: [],
+      },
+      hierarchy: {
+        counts: { scored: 0, unscored: 0, belowThreshold: 0 },
+        lowConfidence: [],
+      },
+      parseWarnings: [],
+    },
   };
   const addSectionResult: AddSectionToProjectResult = {
     specId: 'project-spec-1',

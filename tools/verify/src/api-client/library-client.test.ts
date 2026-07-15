@@ -28,8 +28,19 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 const validOnboardingResult = {
+  specId: '44444444-4444-4444-8444-444444444444',
+  section: '07 92 00',
+  title: 'Joint Sealants',
+  libraryId: LIBRARY_ID,
   templateId: '33333333-3333-4333-8333-333333333333',
-  report: { nodeTypes: [], skippedNodeTypes: [], vanishSkipped: 0 },
+  report: {
+    styleDerivation: { nodeTypes: [], skippedNodeTypes: [], vanishSkipped: 0 },
+    styleSourceNeeded: false,
+    headerFooter: null,
+    editability: { counts: { locked: 0, editable: 0, choice: 0, note: 0 }, lowConfidence: [] },
+    hierarchy: { counts: { scored: 0, unscored: 0, belowThreshold: 0 }, lowConfidence: [] },
+    parseWarnings: [],
+  },
 };
 
 describe('createClientLibrary', () => {

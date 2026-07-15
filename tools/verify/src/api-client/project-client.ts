@@ -22,14 +22,33 @@ import {
 // scenarios.ts (#305 task 3/7), because this is the wire-body type
 // putProjectHeaderFooter actually sends — the fixtures module imports this
 // type rather than redeclaring an incompatible one.
+//
+// BUILD FIX (found live during task 7/7's smoke test): a header/footer
+// REGION position (e.g. `header.center`) is a CELL wrapping a `content`
+// ARRAY of fields (src/ast/header-footer-schemas.ts's HeaderFooterCellSchema),
+// never a bare field object. An earlier draft put the field directly at
+// `header.center` — the real API's `.catchall(JsonValue)` on that schema
+// happily accepted it as an object with unknown extra keys and an absent
+// `content`, so PUT/GET both round-tripped it without error, but the
+// generator's `buildRegionChildren` reads `cell.content` and found nothing:
+// every one of #305's 5 scenarios generated with zero headers/footers in the
+// output OOXML before this fix (jszip-confirmed against a real
+// POST /specs/{id}/generate — no headerReference/footerReference at all),
+// even though the composition round-tripped "successfully" end to end. Not
+// repo-root src/ drift: openapi.yaml and the real handler already agree on
+// the Cell shape; this was tools/verify's own wire-shape modeling bug.
 export interface HeaderFooterFieldInput {
   readonly kind: 'literal' | 'sectionNumber' | 'sectionTitle';
   readonly text?: string;
 }
 
+export interface HeaderFooterCellInput {
+  readonly content: readonly HeaderFooterFieldInput[];
+}
+
 export interface HeaderFooterVariantInput {
-  readonly header?: { readonly center?: HeaderFooterFieldInput };
-  readonly footer?: { readonly center?: HeaderFooterFieldInput };
+  readonly header?: { readonly center?: HeaderFooterCellInput };
+  readonly footer?: { readonly center?: HeaderFooterCellInput };
 }
 
 export interface HeaderFooterCompositionInput {

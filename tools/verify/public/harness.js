@@ -418,4 +418,12 @@
   }
 
   document.getElementById('run-form').addEventListener('submit', handleSubmit);
+
+  // Exposed so scenario-picker.js (#305 task 7/7) can drive a header/footer
+  // fixture run through the exact same poll loop / pane-loading / diff-
+  // loading logic this form uses, rather than duplicating any of it — both
+  // POST /api/runs and POST /api/header-footer-fixtures write into the same
+  // RunStore, so one poller already covers both entry points.
+  window.__pollRun = pollRun;
+  window.__resetPaneState = resetPaneState;
 })();

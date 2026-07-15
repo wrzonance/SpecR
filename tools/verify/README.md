@@ -62,6 +62,7 @@ SpecR API and from `openapi.yaml`, which needs no changes for this tool (see
 | `GET` | `/api/runs/:runId` | Poll a run's current `RunRecord` — `stage`, `status`, `artifacts`, and `error` if failed. |
 | `POST` | `/api/runs/:runId/screenshot` | Ingest an externally-captured screenshot: JSON body `{ pane: 'reference'\|'roundtrip', imageBase64 }`. **This is the primary, and only, capture-ingestion path** — see [finding 2](#2-capture-source-external-playwright-screenshot-only). |
 | `GET` | `/api/runs/:runId/files/:filename` | Serve one of a run's artifacts. `:filename` is a closed enum (`src/server/routes/files.ts`'s `RUN_FILE_NAMES`) — `reference.docx`, `generated.docx`, both screenshots, and the nine region crop/diff PNGs (`page-`/`header-`/`footer-` × `reference`/`roundtrip`/`diff`). |
+| `POST` | `/api/header-footer-fixtures` | Start a header/footer fixture run (#305): JSON body `{ scenarioId }`, one of the 5 catalog ids in [Header/footer fixture scenarios](#header-footer-fixture-scenarios-305) below. Returns `{ runId }` (202) immediately; polls through the same `GET /api/runs/:runId` as the main upload form — both routes share one `RunStore`. No multipart upload: the reference `.docx` is built server-side from the catalog, not supplied by the caller. |
 
 ## Driving a run (the agent workflow)
 
@@ -98,6 +99,40 @@ ran, end to end, against a real API + Postgres):
 Steps 4–6 are deliberately **not** wired into an HTTP route (see finding 2's scope note): the driving
 agent computes them, using this package's own `render/regions.ts` (`cropRegion`) and
 `diff/pixel-diff.ts` (`createPixelDiffer`, `diffRegions`) as a library, not through the server.
+
+## Header/footer fixture scenarios (#305)
+
+A second, self-contained entry point alongside the main upload-driven run: `POST
+/api/header-footer-fixtures` builds its OWN reference `.docx` server-side from a small, closed
+catalog (`src/fixtures/header-footer-scenarios.ts`'s `HEADER_FOOTER_SCENARIOS`), so exercising a
+header/footer composition end to end needs no hand-prepared fixture file. Real CSI section/title
+identities, never placeholders — the point is to drive the real API's own
+library → project → header/footer-config → generate provisioning path (decision 5 below), not to
+stub it.
+
+| Scenario id | What it exercises |
+|---|---|
+| `default` | One default header/footer variant applied to every page. |
+| `first` | A distinct first-page header (`w:titlePg`), different from the default variant. |
+| `even` | A distinct even-page header (`w:evenAndOddHeaders`), different from the default (odd-page) variant. |
+| `fields` | Header/footer fields resolved from the section's own identity (`sectionNumber`/`sectionTitle`), not literal text. |
+| `restartPerSpec` | Page numbering restarts at 1 for this spec (`w:pgNumType w:start="1"`) instead of continuing the project's sequence — asserted by `src/fixtures/assert-page-numbering.ts`'s `assertPageNumberingRestart`. |
+
+Drive all 5 through the real API (no mocks — same discipline as the main pipeline):
+
+```bash
+for s in default first even fields restartPerSpec; do
+  curl -s -X POST http://localhost:4300/api/header-footer-fixtures \
+    -H 'Content-Type: application/json' -d "{\"scenarioId\":\"$s\"}"
+done
+# poll GET /api/runs/:runId for each returned runId until stage=generate, status=complete
+```
+
+...or use the page's own **scenario picker** (`public/scenario-picker.js`, decision 9 below): pick a
+scenario from the toolbar's dropdown and click "Start scenario run" — it reuses the exact same poll
+loop and pane-loading logic as the main upload form (`harness.js` exposes `window.__pollRun` /
+`window.__resetPaneState` for this purpose), so both entry points render into the same
+reference/round-trip/diff panes.
 
 ## Isolation from the root workspace
 
@@ -221,6 +256,106 @@ the viewport-relative measurement) and crop each side with its own rect, rather 
 `diffRegions()`'s single shared rect fits a side-by-side layout. `diffRegions()` itself is unchanged —
 it is correct for its stated contract; this is operational guidance for callers, not a code defect.
 
+### 9. A real HTTP route, not test/script-only — with a cuttable UI
+`POST /api/header-footer-fixtures` is a real Express route (`server/routes/header-footer-fixtures.ts`),
+not a test-only helper, matching issue #305's acceptance criterion framing (driving a scenario through
+the harness's own UI, the same way the main upload form does). The scenario-picker UI
+(`public/scenario-picker.js`) was scoped as **cuttable first** under LOC pressure — the route + fixture
+pipeline stay independently useful via `curl`/Playwright alone even without it — but it shipped: it is
+~50 lines and reuses `harness.js`'s existing poll loop verbatim (two new `window.__pollRun` /
+`window.__resetPaneState` exports), so the marginal cost was small enough not to cut.
+
+### 10. `HeaderFooterConfig.config` stays a loose Zod catchall
+Same posture as `PropertyDecision`/`DerivationReport` elsewhere in `schemas.ts`: this harness only ever
+round-trips a header/footer composition **it itself PUT** (via `putProjectHeaderFooter`) — it never
+has to interpret an externally-authored config it didn't write. A loose `.catchall`-style shape is
+sufficient and avoids hand-mirroring `openapi.yaml`'s full recursive `HeaderFooterComposition` schema
+(fields, tables, rule lines, image data, ADR-021's open extensions) a second time in this package.
+
+### 11. Two real build-time defects in this harness's OWN schemas — found live, fixed inline
+Both surfaced only once every one of #305's 5 scenarios was actually driven through the real API (task
+7/7's smoke test) — not caught by the earlier tasks' unit tests, which mocked the wire shapes rather
+than asserting them against a live response. Confirmed both are bugs in **this package's own**
+hand-mirrored types, not `src/` drift (`openapi.yaml` and the real handlers already agree with each
+other on both shapes):
+
+- `OnboardingJobResultSchema.report` was typed as `DerivationReportSchema` directly. The real
+  `GET /libraries/import/jobs/{jobId}` 200 nests that `{nodeTypes, skippedNodeTypes, vanishSkipped}`
+  shape under `report.styleDerivation` (nullable) inside a larger `OnboardingReport` object
+  (`{styleDerivation, styleSourceNeeded, headerFooter, editability, hierarchy, parseWarnings}`,
+  `openapi.yaml`'s own `required` list). Every one of the 5 scenarios failed at stage `'upload'` with a
+  Zod error on `report.nodeTypes` (`expected array, received undefined`) before this fix.
+- `HeaderFooterVariantInput`'s `header.center` / `footer.center` carried a bare field object
+  (`{kind, text}`) directly. The real API models a region position as a **Cell** wrapping a `content`
+  array (`src/ast/header-footer-schemas.ts`'s `HeaderFooterCellSchema`) — `{content: [{kind, text}]}`.
+  Because that schema is `.catchall(JsonValue)` (ADR-021's open-extension posture), the bare field
+  object still validated as a Cell with an absent `content` and two unknown extra keys — `PUT`/`GET`
+  both "succeeded" and echoed it back unchanged, but the generator's `buildRegionChildren` reads
+  `cell.content` and found nothing: **every one of the 5 scenarios generated with zero
+  headers/footers in the output OOXML** (jszip-confirmed: no `headerReference`/`footerReference` at
+  all) despite the PUT/GET round-trip reporting success. This is the sharper of the two — a
+  request that validates and a response that echoes it back can still be silently wrong three layers
+  downstream, when every layer in between is `.catchall`-open by design (ADR-021) and none of them
+  assert what the *generator* actually consumes.
+
+### 12. `docx-preview` 0.4.0 ignores a paragraph's own direct `pageBreakBefore`
+The `'first'`/`'even'` scenario fixtures need a real page 2 to show their page-variant header on.
+`buildScenarioReferenceDocx` originally set `docx`'s `pageBreakBefore: true` paragraph option — this
+writes a valid `<w:pPr><w:pageBreakBefore/></w:pPr>` (confirmed via jszip), but the vendored
+`docx-preview` build's own pagination (`splitBySection`, `node_modules/docx-preview/dist/docx-preview.js`)
+only reads `pageBreakBefore` from a **named style**'s resolved properties
+(`findStyle(elem.styleName)?.paragraphProps?.pageBreakBefore`) — never a paragraph's own direct `pPr`
+override, which `docx`'s constructor option produces. Confirmed live: the reference pane rendered as a
+single page despite a structurally valid `w:pageBreakBefore` being present in the XML. Fixed by
+switching to a run-level break (`docx`'s `PageBreak`, emitting `<w:br w:type="page"/>`) — the one
+page-break mechanism `docx-preview`'s `isPageBreakElement` DOES honor regardless of style
+(`elem.break == "page"`), confirmed by re-driving the `'even'` scenario through Playwright: the
+reference pane now reaches page 2 with a non-null `headerGeom` (see the smoke-test section below for
+why the round-tripped pane still doesn't).
+
+### 13. Scenario `id`s are the SOLE source of the route's request schema
+`server/routes/header-footer-fixtures.ts`'s `StartHeaderFooterFixtureBodySchema` builds its `z.enum`
+from `HEADER_FOOTER_SCENARIOS.map((s) => s.id)` at module load, rather than hand-listing the 5 ids a
+second time — a scenario added to or removed from the catalog never needs a matching edit in the route
+to stay in sync. Same "derive from the one source of truth" posture as decision 4's `RUN_FILE_NAMES`
+enum in the sibling `files.ts` route.
+
+## Known limitations
+
+### PAGE-field pixel-invisibility
+A header/footer field of kind `'pageNumber'` (`HeaderFooterFieldKindSchema`, `src/ast/`) makes the real
+generator emit a genuine Word field (`docx`'s `PageNumber.CURRENT` sentinel →
+`src/generator/header-footer-fields.ts`'s `resolvePageNumber`, a real `w:fldSimple`/`PAGE` field code) —
+not static text. Word computes and displays that field's value only when the document is opened or
+its fields are updated; the vendored `docx-preview` 0.4.0 build has **no render case at all** for
+`DomType.SimpleField` in its `renderElement()` switch (confirmed by reading
+`node_modules/docx-preview/dist/docx-preview.js` directly — every other `DomType` has a case, this one
+falls through to nothing). A `pageNumber` field therefore renders as **visually empty** in every pane
+this harness produces — present in the OOXML, present in `docx-preview`'s parsed DOM, invisible in the
+screenshot. None of #305's 5 catalog scenarios use `pageNumber` (all use `literal`/`sectionNumber`/
+`sectionTitle`, which resolve to real static text), so this doesn't block today's smoke test, but a
+future scenario exercising `pageNumber` would pixel-diff as a false "match" (both sides blank) or a
+false "mismatch" against a non-blank expectation — never a meaningful comparison. Not a `tools/verify`
+bug and not `src/` drift: it's a genuine gap in the vendored preview library between "the OOXML is
+correct" and "a static screenshot can show it."
+
+### Round-tripped output never reaches page 2 for a manual page break
+Filed as [issue #497](https://github.com/wrzonance/SpecR/issues/497) — not fixed here, per this
+task's "file a separate issue for `src/` drift, don't fix inline" convention. `src/parser/`, `src/ast/`,
+and `src/generator/` have no `pageBreak` concept anywhere: a reference DOCX's run-level page break
+(decision 12's fix) round-trips through `parse → import → generate` as if it were never there —
+confirmed via jszip (the generated `document.xml` has no `w:br w:type="page"` anywhere) and via
+Playwright (`window.__measure('roundtrip').pageCount` stays `1` while the reference pane correctly
+shows `2`). Practical consequence for this harness: the `'first'`/`'even'` scenarios' page-variant
+header can be visually verified on the **reference** pane's page 2, but the **round-tripped** pane
+never has a page 2 to compare it against — `diffPaneRegions`'s single-side-present fallback (decision 7
+in the original #150 build) would crop the round-tripped screenshot at the reference's page-2 header
+coordinates, which fall outside that screenshot's actual (1-page-tall) bounds; `render/regions.ts`'s
+`cropRegion()` bounds-check throws `VerifyRenderError` rather than producing a garbage crop — the
+correct, safe failure mode, but not a diff. **Don't trust `diffPaneRegions` for a `'first'`/`'even'`
+scenario's page-2+ header/footer region until #497 is resolved** — page 1 (the `default` variant, on
+both scenarios) diffs correctly today.
+
 ## Manual smoke test (task 8)
 
 Run against a real, disposable Postgres + SpecR API (never mocked), driven end to end with
@@ -242,3 +377,44 @@ Playwright:
 6. `pnpm --dir tools/verify lint` and `pnpm --dir tools/verify test` green (168 tests, 14 files);
    root `pnpm lint`/`pnpm test` green and unaffected (`git diff origin/main` touches only
    `tools/verify/**` and `.gitignore`); `openapi.yaml` confirmed a no-op (above).
+
+## Header/footer fixture smoke test (#305 task 7/7)
+
+Run against the same kind of real, disposable Postgres + SpecR API as the #150 smoke test above —
+never mocked — plus a real `jszip` inspection of every generated `.docx` and a Playwright drive of the
+scenario-picker UI:
+
+1. Real SpecR API booted against an isolated, migrated + seeded Postgres (`DATABASE_URL` passed
+   inline); `pnpm --dir tools/verify dev` equivalent (`tsx src/index.ts` with `SPECR_API_BASE_URL`
+   pointed at it).
+2. All 5 catalog scenarios started via `POST /api/header-footer-fixtures` and polled to
+   `stage: "generate", status: "complete"` — first pass surfaced decision 11's two schema bugs (every
+   run failed at stage `'upload'`); fixed inline, re-run, all 5 completed.
+3. Every scenario's `generated.docx` unzipped and its `word/document.xml` / `header*.xml` /
+   `footer*.xml` inspected directly (not just "did it 200") — confirmed each scenario's exact expected
+   text landed in the right header/footer part (`'PROJECT MASTER'`/`'07 92 00'` for `default`,
+   `'CONTINUATION'`/`'COVER PAGE'` + `w:titlePg` for `first`, `'ODD PAGE'`/`'EVEN PAGE'` +
+   `evenAndOddHeaders` for `even`, the literal section number/title for `fields`, and
+   `w:pgNumType w:start="1"` for `restartPerSpec`) — this is what surfaced decision 11's second schema
+   bug (all 5 generated with zero headers/footers before the `HeaderFooterCellInput` fix, despite every
+   API call along the way reporting success).
+4. `src/fixtures/assert-page-numbering.ts`'s `assertPageNumberingRestart` re-run directly against the
+   real `restartPerSpec` output: passes at the expected `startAt`, throws (naming the actual value
+   found) against a wrong one, and throws (`'not found'`) against the `default` scenario's continuous
+   numbering — all three confirmed against real generated bytes, not synthetic fixtures.
+5. `'even'` scenario driven through the actual browser page via Playwright: resized to the 3200px
+   viewport, selected `even` in the scenario picker, clicked "Start scenario run," waited for
+   `stage=generate status=complete`, then called `window.__measure()` on both panes. Reference pane:
+   `pageCount: 2`, page 2's `headerGeom` non-null (`EVEN PAGE` visible). Round-trip pane: `pageCount: 1`
+   — confirms [Known limitations](#known-limitations)'s page-break-drop finding empirically, not just
+   by reading `src/`; `diffPaneRegions` is NOT trusted for this scenario's page-2 header per that
+   section.
+6. [Issue #497](https://github.com/wrzonance/SpecR/issues/497) filed for the confirmed `src/`
+   round-trip gap (manual page breaks); decision 11's two schema bugs were `tools/verify`'s own and
+   fixed inline, not filed.
+7. `pnpm --dir tools/verify lint` and `pnpm --dir tools/verify test` green; `src/openapi-noop.test.ts`
+   (new) and `src/file-line-budget.test.ts` both pin this PR's two boundary invariants
+   (`git diff origin/main -- src/ openapi.yaml` empty; no `tools/verify/src` file over 400 lines);
+   `src/import-boundary.test.ts` and `src/workspace-isolation.test.ts` re-run clean; root `pnpm lint`/
+   `pnpm test` unaffected (`git diff origin/main -- src/ openapi.yaml` confirmed empty for the whole
+   branch).
