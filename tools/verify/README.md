@@ -154,8 +154,22 @@ independent of the repo root's. Two invariants are pinned by tests, not just thi
 
 This build adds zero endpoints to the SpecR REST API — every route in [HTTP API](#http-api) above
 is this package's own separate Express server (`VERIFY_PORT`, default 4300), never mounted on the
-main API. `git diff origin/main -- src/ openapi.yaml` is empty for this entire branch; the contract
-gate (`src/api/contract.integration.test.ts`) has nothing new to check.
+main API. `git diff origin/main...HEAD -- src/ openapi.yaml` is empty for this entire branch; the
+contract gate (`src/api/contract.integration.test.ts`) has nothing new to check.
+
+## Gold-corpus workflow linkage (ADR-057)
+
+This harness is the purpose-built **visual-confirmation instrument that precedes
+`pnpm gold:bless`**. The blessing workflow is: run a file through the harness, **visually confirm**
+the round-trip — region-scoped, headers and footers included (reference vs round-trip vs pixel
+diff) — **then** bless its coarse structural fingerprint with `pnpm gold:bless`. From that point on,
+`pnpm gold:verify` (ADR-057's private, local-only regression gate) guards that file as blessed truth.
+
+The linkage is **workflow-level only** — there is deliberately **no code coupling in either
+direction** (#150 design decision 6). Rationale: the gold gate must stay fast, headless, and
+CI-adjacent (structural fingerprints, no browser), while this harness needs a browser, the live
+REST API, and a database. So the web harness and the CLI gold runner **never import from or invoke
+each other** — a human runs the harness to confirm, then runs `gold:bless` separately.
 
 ## Design decisions
 
@@ -414,7 +428,7 @@ scenario-picker UI:
    fixed inline, not filed.
 7. `pnpm --dir tools/verify lint` and `pnpm --dir tools/verify test` green; `src/openapi-noop.test.ts`
    (new) and `src/file-line-budget.test.ts` both pin this PR's two boundary invariants
-   (`git diff origin/main -- src/ openapi.yaml` empty; no `tools/verify/src` file over 400 lines);
+   (`git diff origin/main...HEAD -- src/ openapi.yaml` empty; no `tools/verify/src` file over 400 lines);
    `src/import-boundary.test.ts` and `src/workspace-isolation.test.ts` re-run clean; root `pnpm lint`/
-   `pnpm test` unaffected (`git diff origin/main -- src/ openapi.yaml` confirmed empty for the whole
+   `pnpm test` unaffected (`git diff origin/main...HEAD -- src/ openapi.yaml` confirmed empty for the whole
    branch).
