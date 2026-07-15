@@ -6,6 +6,7 @@
 import { asRecord, compact, extractAttrStr } from './xml-utils.js';
 import { collectRuns } from './document.js';
 import { UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
+import type { RunOrder } from './header-footer-run-order.js';
 import type { RunProperties, HeaderFooterVariant } from '../../ast/index.js';
 
 // Local mirror of generator/header-footer-fields.ts's HeaderFooterVisualStyle
@@ -165,10 +166,26 @@ function containsNestedField(node: unknown): boolean {
 // unmodeled entry. Such a construct is forced to 'unrecognized' so the whole
 // thing is preserved verbatim as unmodeled downstream, never recognized-and-
 // dropped (ADR-068: never silently drop a field).
-function collapseSimpleField(fldSimple: Record<string, unknown>): Record<string, unknown> {
+function collapseSimpleField(
+  fldSimple: Record<string, unknown>,
+  order?: RunOrder
+): Record<string, unknown> {
   const rawInstr = extractAttrStr(fldSimple, '@_w:instr');
   const runs: Record<string, unknown>[] = [];
   collectRuns(fldSimple, runs);
+  // collectRuns gathers cached runs in fast-xml-parser's grouped (tag-keyed)
+  // order, which reorders an interleaved direct/wrapper-nested cached sequence
+  // (e.g. w:r, w:hyperlink>w:r, w:r -> the two direct runs group ahead of the
+  // wrapped one). `order` is the per-part run-order side-table, which now also
+  // ordinal-izes these nested cached runs (header-footer-run-order.ts), so
+  // sorting restores true document order. The sort is a no-op on the common
+  // path (a single cached run, or all-direct runs already in order).
+  if (order) {
+    runs.sort(
+      (a, b) =>
+        (order.get(a) ?? Number.MAX_SAFE_INTEGER) - (order.get(b) ?? Number.MAX_SAFE_INTEGER)
+    );
+  }
   const cachedText = runs.map((r) => extractTextLikeValue(r['w:t'])).join('');
   const code = containsNestedField(fldSimple) ? 'unrecognized' : recognizeFieldCode(rawInstr);
   const marker: CollapsedFieldRun = { code, rawInstr, cachedText };
@@ -187,9 +204,15 @@ function collapseSimpleField(fldSimple: Record<string, unknown>): Record<string,
  * degrades gracefully — it consumes to the end of the run list rather than
  * throwing, since this is a valid-XML, merely-unusual document shape, not a
  * parse error.
+ *
+ * `order` (OPTIONAL) is the part's run-order side-table (header-footer-run-
+ * order.ts), threaded through to collapseSimpleField so a w:fldSimple's cached
+ * runs are joined in true document order (#485 review). Callers that only test
+ * run structure (never assemble user-visible cached text) may omit it.
  */
 export function collapseComplexFields(
-  runs: readonly Record<string, unknown>[]
+  runs: readonly Record<string, unknown>[],
+  order?: RunOrder
 ): readonly Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   let i = 0;
@@ -205,7 +228,7 @@ export function collapseComplexFields(
     // primitive value to {} so an empty/malformed field still collapses to an
     // 'unrecognized' marker (ADR-068: never silently drop), #485 robustness review.
     if ('w:fldSimple' in run) {
-      out.push(collapseSimpleField(asRecord(run['w:fldSimple']) ?? {}));
+      out.push(collapseSimpleField(asRecord(run['w:fldSimple']) ?? {}, order));
       i++;
       continue;
     }

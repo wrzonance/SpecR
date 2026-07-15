@@ -92,10 +92,18 @@ function walkOrder(
     seen.set(tag, index + 1);
     const groupedChild = pairedGroupedChild(groupedNode, tag, index);
     if (!groupedChild) continue;
-    if (tag === 'w:r' || tag === 'w:fldSimple') {
+    if (tag === 'w:r') {
       order.set(groupedChild, cursor.next++);
       continue;
     }
+    // A w:fldSimple is a terminal at the PARAGRAPH level (region.ts wraps it
+    // whole), so it takes an ordinal — but its CACHED runs need ordinals too,
+    // so collapseSimpleField (field-recognition.ts) can restore their true
+    // document order across an interleaved direct/wrapper-nested cached
+    // sequence (#485 review). Recording then recursing gives the field its own
+    // ordinal and every nested run a later one; the next paragraph-level piece
+    // still sorts after the whole field, so paragraph ordering is unchanged.
+    if (tag === 'w:fldSimple') order.set(groupedChild, cursor.next++);
     walkOrder(groupedChild, childrenOf(sibling, tag), order, cursor);
   }
 }

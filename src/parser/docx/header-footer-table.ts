@@ -210,7 +210,7 @@ function captureTableCell(
   // exact same order correction for a w:fldSimple field interleaved between
   // two w:r runs, not just the run-SET membership checks the rest of this
   // module's runsOf calls (paragraphsInCell filtering) rely on.
-  const collapsed = collapseComplexFields(runsOf(first, order));
+  const collapsed = collapseComplexFields(runsOf(first, order), order);
   const imageUnmodeled: readonly PartialUnmodeled[] = collapsed
     .filter(isDrawingRun)
     .map((run): PartialUnmodeled => ({ kind: 'image', detail: compact(run) }));

@@ -336,6 +336,27 @@ describe('runsOf / paragraphHasContent — w:fldSimple terminal handling (#485 t
     expect(result.region?.left?.content).toEqual([{ kind: 'pageNumber' }]);
   });
 
+  // #485 review (Major — data integrity): the SAME grouped-parse reordering
+  // that afflicts paragraph-level runs also afflicts a w:fldSimple's own cached
+  // content. A field whose cached display interleaves a direct w:r, a
+  // w:hyperlink-wrapped w:r, then another direct w:r groups the two direct runs
+  // apart from the wrapped one, so a grouped-order gather yields 'ACB'. The
+  // per-part run-order side-table now descends into the w:fldSimple, so
+  // collapseSimpleField restores true document order 'ABC' in cachedText.
+  // (cachedText is surfaced on an UNRECOGNIZED field, so STYLEREF is used.)
+  it('preserves document order of a w:fldSimple cached run interleaving direct and wrapper-nested runs', () => {
+    const fld =
+      '<w:fldSimple w:instr=" STYLEREF ">' +
+      '<w:r><w:t>A</w:t></w:r>' +
+      '<w:hyperlink r:id="rId9"><w:r><w:t>B</w:t></w:r></w:hyperlink>' +
+      '<w:r><w:t>C</w:t></w:r>' +
+      '</w:fldSimple>';
+    const xml = makeHdrXml(paragraph('', fld));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    const entry = result.unmodeled.find((u) => u.kind === 'unrecognizedField');
+    expect(entry?.detail).toEqual({ rawInstr: ' STYLEREF ', cachedText: 'ABC' });
+  });
+
   // #485 review (CRITICAL finding — cross-representation equivalence): fast-
   // xml-parser's grouped (non-preserveOrder) parse mode collapses every
   // same-tag sibling into one array keyed by first appearance — when a

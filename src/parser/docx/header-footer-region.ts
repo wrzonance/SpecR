@@ -529,12 +529,16 @@ function assignSegmentsToCells(
 function splitParagraphIntoCells(
   runs: readonly Record<string, unknown>[],
   known: KnownSectionIdentity,
+  order: RunOrder,
   mediaByRId?: ReadonlyMap<string, Uint8Array>
 ): {
   readonly cells: Partial<Record<CellKey, HeaderFooterCell>>;
   readonly unmodeled: readonly PartialUnmodeled[];
 } {
-  const collapsed = collapseComplexFields(runs);
+  // `order` also reaches collapseComplexFields (not just the runsOf call that
+  // produced `runs`) so a w:fldSimple's own cached runs are joined in true
+  // document order, not fast-xml-parser's grouped order (#485 review).
+  const collapsed = collapseComplexFields(runs, order);
   const segments = splitOnTabs(collapsed);
   return assignSegmentsToCells(segments, known, mediaByRId);
 }
@@ -584,7 +588,7 @@ function captureFromParagraphs(
   // resolveRuleLine) only tests run SET membership/count, which is
   // order-independent.
   const { cells, unmodeled: cellUnmodeled } = first
-    ? splitParagraphIntoCells(runsOf(first, order), known, mediaByRId)
+    ? splitParagraphIntoCells(runsOf(first, order), known, order, mediaByRId)
     : { cells: {}, unmodeled: [] };
 
   return {
