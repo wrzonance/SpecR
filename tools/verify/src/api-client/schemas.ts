@@ -176,3 +176,83 @@ export const TemplateImportResponseSchema = successResponseSchema(TemplateImport
 export const SectionNumberFormatSchema = z.enum(['canonical', 'dots', 'compact', 'spaced-compact']);
 
 export type SectionNumberFormat = z.infer<typeof SectionNumberFormatSchema>;
+
+// ─── Header/footer fixture harness (#305) ─────────────────────────────────────
+// Not consumed anywhere yet — library-client.ts and project-client.ts (task
+// 2/7) drive the library-import and project-provisioning calls that parse
+// against these. Kept here rather than in client.ts's schema imports so
+// this file stays the single hand-mirrored copy of the openapi.yaml
+// response shapes the harness actually calls, per this file's own opening
+// docstring.
+
+export const LibrarySchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+});
+
+export type Library = z.infer<typeof LibrarySchema>;
+
+export const ProjectSummarySchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+});
+
+export type ProjectSummary = z.infer<typeof ProjectSummarySchema>;
+
+// Library-import jobs use a different terminal-status vocabulary than parse
+// jobs (ParseStageSchema above) — deliberately its own enum, not reused,
+// per the spike's struct #5 correction: an onboarding job never reports
+// ParseStageSchema's fine-grained parse sub-stages ('extracting',
+// 'numbering', ...).
+export const OnboardingStageSchema = z.enum([
+  'queued',
+  'uploading',
+  'parsing',
+  'deriving',
+  'validating',
+  'persisting',
+  'complete',
+  'failed',
+]);
+
+export type OnboardingStage = z.infer<typeof OnboardingStageSchema>;
+
+export const OnboardingJobResultSchema = z.object({
+  templateId: z.uuid().nullable(),
+  report: DerivationReportSchema,
+});
+
+export type OnboardingJobResult = z.infer<typeof OnboardingJobResultSchema>;
+
+export const OnboardingJobSchema = z.object({
+  jobId: z.uuid(),
+  status: OnboardingStageSchema,
+  progress: z.object({
+    stage: OnboardingStageSchema,
+    pct: z.number().min(0).max(100),
+  }),
+  result: OnboardingJobResultSchema.exactOptional(),
+  error: z.string().exactOptional(),
+  expiresAt: z.number().int(),
+});
+
+export type OnboardingJob = z.infer<typeof OnboardingJobSchema>;
+
+// additionalProperties: true in openapi.yaml, same posture as
+// StylePropertiesSchema above — this harness only round-trips what it
+// itself PUT via putProjectHeaderFooter, never interprets an
+// externally-authored config.
+export const HeaderFooterConfigSchema = z.object({
+  id: z.uuid(),
+  projectId: z.uuid(),
+  config: z.object({}).catchall(z.json()),
+});
+
+export type HeaderFooterConfig = z.infer<typeof HeaderFooterConfigSchema>;
+
+export const AddSectionToProjectResultSchema = z.object({
+  projectSpecId: z.uuid(),
+  specId: z.uuid(),
+});
+
+export type AddSectionToProjectResult = z.infer<typeof AddSectionToProjectResultSchema>;
