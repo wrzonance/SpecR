@@ -68,6 +68,38 @@ describe('createApp (wiring smoke tests)', () => {
     expect(await response.text()).toContain('JSZip');
   });
 
+  it('serves the harness page at GET / with the pane/sidebar/report automation hooks (task 7/8)', async () => {
+    const response = await fetch(`${baseUrl}/`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
+
+    const body = await response.text();
+    expect(body).toContain('data-testid="pane-reference"');
+    expect(body).toContain('data-testid="pane-roundtrip"');
+    expect(body).toContain('data-testid="pane-diff"');
+    expect(body).toContain('data-testid="properties-sidebar"');
+    expect(body).toContain('data-testid="derivation-report"');
+    expect(body).toContain('/harness.js');
+  });
+
+  it('serves harness.js exposing the render/measure hooks with no in-page screenshot capture', async () => {
+    const response = await fetch(`${baseUrl}/harness.js`);
+    expect(response.status).toBe(200);
+
+    const body = await response.text();
+    expect(body).toContain('window.__loadPane');
+    expect(body).toContain('window.__measure');
+    expect(body).toContain('window.__regionGeom');
+    // Confirmed non-viable by the WT-150 spike (blank/gray canvas output in
+    // Chromium) — never shipped as a working default (design decision 2).
+    // The real capture path is external Playwright -> POST
+    // /api/runs/:runId/screenshot, exercised by routes/runs.ts already.
+    expect(body).not.toContain('window.__captureScreenshot');
+    // Decision 7 (flow-mode rendering) is a locked render option on both
+    // panes now, not a query-string toggle like the spike's ignoreLRPB param.
+    expect(body).toContain('ignoreLastRenderedPageBreak: true');
+  });
+
   it('answers a generic JSON 404 for any unmatched route, never an HTML error page', async () => {
     const response = await fetch(`${baseUrl}/nonexistent-route`);
 

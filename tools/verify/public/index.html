@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpecR verify harness (#150)</title>
+<!--
+  Visual round-trip verification harness (#150, task 7/8): three panes
+  (reference render | round-trip render | region-diff overlay) plus a
+  per-NodeType properties sidebar and the WT-3 derivation-report panel, so
+  drift is attributable to capture, consensus, or generation without leaving
+  this page (issue #150 design decision 9).
+
+  OPERATIONAL PRECONDITION (design decision 3 / WT-150 spike finding 2):
+  window.__measure()'s geometry is getBoundingClientRect()-based and
+  therefore VIEWPORT-RELATIVE, not document-relative. Before the driving
+  agent (Playwright) takes any screenshot, it MUST resize the viewport to
+  >= window.__harnessConfig.viewportWidth (900px default — mirrors
+  config.ts's VerifyEnv.viewportWidth) and scroll to the top of the page.
+  render/regions.ts's cropRegion() bounds-check is a backstop for this, not
+  the primary guard.
+
+  Vendor bundles (docx-preview, jszip) are served directly out of this
+  package's own node_modules by server/app.ts — see that file's
+  mountVendorBundles() docstring for why this isn't a shipped/bundled asset.
+-->
+<script src="/vendor/jszip.js"></script>
+<script src="/vendor/docx-preview.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --border: #8888;
+    --bg-pane: #7a7a7a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.4 system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  #run-status { font-family: monospace; opacity: 0.85; }
+  #layout {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    min-height: 0;
+  }
+  #panes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    min-width: 0;
+    overflow: hidden;
+  }
+  .pane {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    min-width: 0;
+  }
+  .pane h2 {
+    margin: 0;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border);
+  }
+  .pane-content {
+    flex: 1;
+    overflow: auto;
+    background: var(--bg-pane);
+  }
+  .pane-empty {
+    margin: 1rem;
+    opacity: 0.8;
+    font-style: italic;
+  }
+  .diff-image { display: block; max-width: 100%; margin: 0 0.5rem 0.75rem; }
+  #sidebar {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-left: 1px solid var(--border);
+  }
+  #sidebar section {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+  #sidebar h2 { margin: 0 0 0.4rem; font-size: 0.85rem; text-transform: uppercase; }
+  .node-type-group { margin-bottom: 0.75rem; }
+  .node-type-group h3 { margin: 0 0 0.2rem; font-size: 0.8rem; }
+  .property-row, .decision-row { font-family: monospace; font-size: 0.78rem; margin: 0.1rem 0; }
+  .decision-row .conflict { color: #d9822b; }
+  .rejected-row { margin-left: 1rem; opacity: 0.75; font-size: 0.75rem; }
+</style>
+</head>
+<body>
+<header id="toolbar">
+  <form id="run-form" data-testid="run-form">
+    <input type="file" id="file-input" accept=".docx" required>
+    <input type="text" id="section-input" placeholder="section (optional)">
+    <input type="text" id="title-input" placeholder="title (optional)">
+    <button type="submit" id="start-run-button">Start run</button>
+  </form>
+  <div id="run-status" data-testid="run-status">no run started</div>
+</header>
+
+<main id="layout">
+  <section id="panes">
+    <div class="pane" id="pane-reference" data-testid="pane-reference">
+      <h2>Reference</h2>
+      <div class="pane-content" id="pane-reference-content"></div>
+    </div>
+    <div class="pane" id="pane-roundtrip" data-testid="pane-roundtrip">
+      <h2>Round-trip</h2>
+      <div class="pane-content" id="pane-roundtrip-content"></div>
+    </div>
+    <div class="pane" id="pane-diff" data-testid="pane-diff">
+      <h2>Diff</h2>
+      <div class="pane-content" id="pane-diff-content">
+        <p class="pane-empty">Region diffs appear here once the driving agent
+        has captured both panes' screenshots and diffed them.</p>
+      </div>
+    </div>
+  </section>
+
+  <aside id="sidebar">
+    <section id="properties-sidebar" data-testid="properties-sidebar">
+      <h2>Properties</h2>
+      <div id="properties-body">
+        <p class="pane-empty">Start a run to see derived per-NodeType properties.</p>
+      </div>
+    </section>
+    <section id="derivation-report" data-testid="derivation-report">
+      <h2>Derivation report</h2>
+      <div id="derivation-body">
+        <p class="pane-empty">Start a run to see the WT-3 derivation audit.</p>
+      </div>
+    </section>
+  </aside>
+</main>
+
+<script src="/harness.js"></script>
+</body>
+</html>

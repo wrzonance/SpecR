@@ -57,8 +57,11 @@ tmp/
 .worktrees
 .superpowers/
 
-# Vendored CDN assets (produced by pnpm vendor:scalar; never committed)
-public/
+# Vendored CDN assets (produced by pnpm vendor:scalar; never committed).
+# Anchored to the repo root (leading slash) — an unanchored `public/` also
+# matched tools/verify/public/, which is committed source (#150 task 7/8),
+# not a vendored/generated asset.
+/public/
 
 # Fixture A/B snapshots (copyright-derived parse renders; never committed)
 .fixture-snapshots/
