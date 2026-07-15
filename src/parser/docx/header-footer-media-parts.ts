@@ -8,6 +8,7 @@
 // never awaits I/O for images.
 
 import type JSZip from 'jszip';
+import { ParserError } from '../error.js';
 import { parseImageRelationships } from './header-footer-relationships.js';
 
 /**
@@ -49,15 +50,26 @@ async function readMediaBytes(zip: JSZip, target: string): Promise<Uint8Array | 
 // Resolves one header/footer part's declared image relationships to bytes.
 // Per-entry fault isolation via Promise.allSettled (never a bare Promise.all)
 // — one rId's rejected/missing fetch never prevents a sibling rId in the same
-// part from being captured. A malformed .rels XML SYNTAX is a different
-// failure mode and is NOT isolated here: parseImageRelationships's throw
-// propagates, matching its own documented contract.
+// part from being captured. Structural failures of the .rels part itself are a
+// different failure mode and are NOT isolated here: a corrupt/undecompressable
+// .rels entry (relsFile.async) and a malformed .rels XML SYNTAX
+// (parseImageRelationships) both surface as a typed ParserError — matching
+// parseImageRelationships's own documented contract and this codebase's
+// module-boundary rule (no raw JSZip error escapes this parser surface).
 async function readPartMedia(
   zip: JSZip,
   relsFile: JSZip.JSZipObject
 ): Promise<readonly [string, ReadonlyMap<string, Uint8Array>]> {
   const partPath = ownerPartPath(relsFile.name);
-  const relsXml = await relsFile.async('string');
+  let relsXml: string;
+  try {
+    relsXml = await relsFile.async('string');
+  } catch (err) {
+    throw new ParserError(`failed to read header/footer relationships part ${relsFile.name}`, {
+      code: 'DOCX_HEADER_FOOTER_XML_INVALID',
+      cause: err,
+    });
+  }
   const imageRels = parseImageRelationships(relsXml, partPath);
 
   const settled = await Promise.allSettled(

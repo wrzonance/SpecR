@@ -186,6 +186,13 @@ describe('parseDrawingDescriptor — structural walk, before any byte resolution
     expect(parseDrawingDescriptor(run)).toBeUndefined();
   });
 
+  it('returns undefined for a partially numeric EMU with suffix garbage (parseInt would accept "914400px")', () => {
+    const trailingUnits = wellFormedDrawing('rId1', '914400px', '609600', '');
+    const exponent = wellFormedDrawing('rId1', '1e5', '609600', '');
+    expect(parseDrawingDescriptor(trailingUnits)).toBeUndefined();
+    expect(parseDrawingDescriptor(exponent)).toBeUndefined();
+  });
+
   it('never falls back to a:xfrm/a:ext sizing when wp:extent is absent', () => {
     const run = inlineDrawing(
       '<a:xfrm><a:ext cx="500000" cy="500000"/></a:xfrm>' +

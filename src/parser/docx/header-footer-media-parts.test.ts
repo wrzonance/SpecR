@@ -143,6 +143,19 @@ describe('readHeaderFooterMedia', () => {
     await expect(readHeaderFooterMedia(zip)).rejects.toBeInstanceOf(ParserError);
   });
 
+  it('wraps a corrupt/undecompressable .rels entry read in a typed ParserError, never a raw JSZip error', async () => {
+    const zip = makeZip({
+      'word/header1.xml': '<w:hdr/>',
+      'word/_rels/header1.xml.rels': relsXml(imageRel('rId1', 'media/image1.png')),
+      'word/media/image1.png': new Uint8Array([1]),
+    });
+    // A rejected read of the .rels part itself (not a media byte fetch, which
+    // Promise.allSettled already isolates) must not leak a raw JSZip error past
+    // this parser boundary — it is the .rels-file read, so it surfaces typed.
+    breakFetch(zip, 'word/_rels/header1.xml.rels');
+    await expect(readHeaderFooterMedia(zip)).rejects.toBeInstanceOf(ParserError);
+  });
+
   it('does not match .rels files outside word/_rels/ or names that merely contain "header"/"footer"', async () => {
     const zip = makeZip({
       'customXml/_rels/header1.xml.rels': relsXml(imageRel('rId1', 'media/image1.png')),

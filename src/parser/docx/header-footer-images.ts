@@ -47,14 +47,25 @@ function drawingContainer(drawing: Record<string, unknown>): Record<string, unkn
 // are independently namespaced in XML. So this reads '@_cx'/'@_cy', not
 // '@_wp:cx'/'@_wp:cy'. Missing/non-positive/unparseable cx or cy means "no
 // decidable size" — the whole descriptor is dropped, not just the size.
+// A valid EMU coordinate is a bare positive integer (ECMA-376
+// ST_PositiveCoordinate). parseInt would silently accept suffix garbage
+// ("914400px" -> 914400), modeling a malformed extent as a real size, so
+// require a complete unsigned-integer match before converting; anything else
+// (partial number, sign, exponent, whitespace, empty) is "no decidable size".
+function positiveEmu(raw: string): number | undefined {
+  if (!/^\d+$/.test(raw)) return undefined;
+  const value = parseInt(raw, 10);
+  return value > 0 ? value : undefined;
+}
+
 function extentEmu(
   container: Record<string, unknown>
 ): { readonly widthEmu: number; readonly heightEmu: number } | undefined {
   const extent = asRecord(container['wp:extent']);
   if (!extent) return undefined;
-  const cx = parseInt(extractAttrStr(extent, '@_cx'), 10);
-  const cy = parseInt(extractAttrStr(extent, '@_cy'), 10);
-  if (isNaN(cx) || isNaN(cy) || cx <= 0 || cy <= 0) return undefined;
+  const cx = positiveEmu(extractAttrStr(extent, '@_cx'));
+  const cy = positiveEmu(extractAttrStr(extent, '@_cy'));
+  if (cx === undefined || cy === undefined) return undefined;
   return { widthEmu: cx, heightEmu: cy };
 }
 
@@ -122,12 +133,16 @@ export function parseDrawingDescriptor(
   if (!rId) return undefined;
   const extent = extentEmu(container);
   if (!extent) return undefined;
-  return compact({
+  const altText = altTextOf(container);
+  // Conditional spread over `compact(...) as DrawingDescriptor`: altText is the
+  // only optional field, so omitting it when absent keeps the exact-optional
+  // shape without a type assertion (project rule: no cross-boundary asserts).
+  return {
     rId,
     widthEmu: extent.widthEmu,
     heightEmu: extent.heightEmu,
-    altText: altTextOf(container),
-  }) as DrawingDescriptor;
+    ...(altText !== undefined ? { altText } : {}),
+  };
 }
 
 /** Mirrors header-footer-region.ts's own (unexported) FieldResolution shape. */
@@ -170,13 +185,18 @@ export function resolveDrawingImage(
   const imageMediaType = sniffImageMediaType(bytes);
   if (!imageMediaType) return unmodeledDrawing(run);
   if (bytes.byteLength > MAX_IMAGE_BYTES) return unmodeledDrawing(run);
-  const field = compact({
+  const { altText } = descriptor;
+  // Conditional spread over `compact(...) as HeaderFooterField`: altText is the
+  // only optional field here (imageMediaType/widthEmu/heightEmu are all defined
+  // by this point), so the explicit annotation + spread keeps the exact-optional
+  // image variant without an assertion (project rule: no cross-boundary asserts).
+  const field: HeaderFooterField = {
     kind: 'image',
     imageData: Buffer.from(bytes).toString('base64'),
     imageMediaType,
     widthEmu: descriptor.widthEmu,
     heightEmu: descriptor.heightEmu,
-    altText: descriptor.altText,
-  }) as HeaderFooterField;
+    ...(altText !== undefined ? { altText } : {}),
+  };
   return { kind: 'field', field };
 }
