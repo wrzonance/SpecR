@@ -18,7 +18,17 @@ const envSchema = z.object({
   // (Playwright) MUST resize to this width and scroll to top before any
   // screenshot; cropRegion()'s bounds-check throws VerifyRenderError as a
   // backstop, not the primary guard. See .env.example.
-  VERIFY_VIEWPORT_WIDTH: z.coerce.number().int().positive().default(900),
+  //
+  // 3200 (not the WT-150 spike's original single-pane 900 guess) — the
+  // shipped harness page (public/index.html) lays out reference/round-trip/
+  // diff as 3 equal-width grid columns beside a 320px sidebar, and
+  // docx-preview centers each rendered page (Letter=816px, A4=794px CSS px)
+  // within its own pane. Below ~2768px viewport width the reference pane's
+  // column is narrower than the page it must contain, so docx-preview
+  // overflows it symmetrically and pageGeom.x goes negative even at a
+  // "pinned" viewport — confirmed via Playwright during this build's task 8
+  // manual smoke test. 3200 keeps ~70px of margin either side.
+  VERIFY_VIEWPORT_WIDTH: z.coerce.number().int().positive().default(3200),
   // Port this harness's own Express server listens on (server/app.ts,
   // index.ts). Distinct from the main SpecR API's default PORT (3000, see
   // src/lib/env.ts) so both can run side by side on one machine.

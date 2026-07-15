@@ -13,7 +13,7 @@
 // paranoia: cropRegion throws VerifyRenderError rather than ever producing
 // a silently clipped or garbage crop that a later pixel-diff stage could
 // mistake for a legitimate comparison. The primary guard is operational —
-// the driving agent must pin the capture viewport (>=900px wide, scroll=0,
+// the driving agent must pin the capture viewport (>=3200px wide, scroll=0,
 // see config.ts's VerifyEnv.viewportWidth and the README) before any
 // screenshot is taken.
 

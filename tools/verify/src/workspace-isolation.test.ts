@@ -55,4 +55,31 @@ describe('workspace isolation (tools/verify vs repo root)', () => {
     expect(afterLockfile).toBe(beforeLockfile);
     expect(afterTopLevel).toEqual(beforeTopLevel);
   }, 30_000);
+
+  // The reverse direction: the root workspace's own package manager must
+  // never even discover tools/verify as a member, let alone install/build
+  // against it. `pnpm list -r` is read-only (no install/mutation) and
+  // reports pnpm's actual resolved workspace membership — the same
+  // resolution `pnpm install`/`build`/`lint`/`test` use at each root.
+  it('root workspace membership excludes tools/verify, and vice versa', () => {
+    // Same trusted, environment-provided build tool as the install call
+    // above — read-only here (`list`, not `install`), still not reachable
+    // from user/request input.
+    // eslint-disable-next-line sonarjs/no-os-command-from-path
+    const rootMembersRaw = execFileSync('pnpm', ['list', '-r', '--depth', '-1', '--json'], {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).toString('utf-8');
+    const rootMembers = JSON.parse(rootMembersRaw) as { path: string }[];
+    expect(rootMembers.some((member) => member.path === toolsVerifyRoot)).toBe(false);
+
+    const verifyListArgs = ['--dir', toolsVerifyRoot, 'list', '-r', '--depth', '-1', '--json'];
+    // eslint-disable-next-line sonarjs/no-os-command-from-path
+    const verifyMembersRaw = execFileSync('pnpm', verifyListArgs, {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).toString('utf-8');
+    const verifyMembers = JSON.parse(verifyMembersRaw) as { path: string }[];
+    expect(verifyMembers.some((member) => member.path === repoRoot)).toBe(false);
+  });
 });

@@ -36,11 +36,16 @@
 (function () {
   'use strict';
 
-  // Hardcoded, mirrors config.ts's VerifyEnv.viewportWidth default (900) —
+  // Hardcoded, mirrors config.ts's VerifyEnv.viewportWidth default (3200) —
   // this task's scope is the frontend page only, so there is no backend
   // config endpoint to fetch this from yet. The driving agent reads this
   // constant instead of a hardcoded number duplicated in its own script.
-  window.__harnessConfig = Object.freeze({ viewportWidth: 900 });
+  // 3200, not 900: this page's 3-column pane grid (see index.html) needs a
+  // viewport wide enough that BOTH the reference and round-trip panes fit
+  // their full rendered page width (Letter/A4, up to 816px) without
+  // docx-preview's centering pushing pageGeom.x negative — see config.ts's
+  // VerifyEnv.viewportWidth docstring for the measured threshold.
+  window.__harnessConfig = Object.freeze({ viewportWidth: 3200 });
 
   const RENDER_OPTIONS = {
     breakPages: true,

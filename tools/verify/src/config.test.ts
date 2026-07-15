@@ -4,22 +4,22 @@ import { VerifyValidationError, toRunError } from './errors.js';
 
 const validEnv = {
   SPECR_API_BASE_URL: 'http://localhost:3000',
-  VERIFY_VIEWPORT_WIDTH: '900',
+  VERIFY_VIEWPORT_WIDTH: '3200',
 };
 
 describe('loadVerifyEnv', () => {
   it('loads a valid env into camelCase VerifyEnv fields', () => {
     expect(loadVerifyEnv(validEnv)).toEqual({
       specrApiBaseUrl: 'http://localhost:3000',
-      viewportWidth: 900,
+      viewportWidth: 3200,
       port: 4300,
     });
   });
 
-  it('defaults viewportWidth to 900 when VERIFY_VIEWPORT_WIDTH is unset', () => {
+  it('defaults viewportWidth to 3200 when VERIFY_VIEWPORT_WIDTH is unset', () => {
     const env = { SPECR_API_BASE_URL: 'http://localhost:3000' };
 
-    expect(loadVerifyEnv(env).viewportWidth).toBe(900);
+    expect(loadVerifyEnv(env).viewportWidth).toBe(3200);
   });
 
   it('defaults port to 4300 when VERIFY_PORT is unset', () => {
@@ -48,7 +48,7 @@ describe('loadVerifyEnv', () => {
 
     expect(loadVerifyEnv(env)).toEqual({
       specrApiBaseUrl: 'http://localhost:3000',
-      viewportWidth: 900,
+      viewportWidth: 3200,
       port: 4300,
     });
   });
@@ -81,9 +81,29 @@ describe('loadVerifyEnv', () => {
     expect(() => loadVerifyEnv({ ...validEnv, VERIFY_VIEWPORT_WIDTH: '0' })).toThrow(
       VerifyValidationError
     );
-    expect(() => loadVerifyEnv({ ...validEnv, VERIFY_VIEWPORT_WIDTH: '-900' })).toThrow(
+    expect(() => loadVerifyEnv({ ...validEnv, VERIFY_VIEWPORT_WIDTH: '-3200' })).toThrow(
       VerifyValidationError
     );
+  });
+
+  // Pins the task-8 manual-smoke-test finding (config.ts's VerifyEnv.viewportWidth
+  // docstring): confirmed via Playwright that below ~2768px, docx-preview's
+  // centered Letter-width (816 CSS px) page overflows the reference pane's
+  // column of public/index.html's 3-column grid (sidebar fixed at 320px),
+  // driving pageGeom.x negative even at a "pinned" viewport. This test
+  // re-derives that same margin from the real layout constants so a future
+  // change to any of them (default width, sidebar width, or page width) that
+  // reopens the gap fails loudly here, not silently in a real capture.
+  it('default viewportWidth leaves a positive margin for the widest common page in the 3-pane grid', () => {
+    const SIDEBAR_WIDTH_PX = 320;
+    const PANE_COLUMN_COUNT = 3;
+    const LETTER_PAGE_WIDTH_PX = 816; // 8.5in @ 96 CSS px/in — the wider of Letter/A4
+
+    const { viewportWidth } = loadVerifyEnv({ SPECR_API_BASE_URL: 'http://localhost:3000' });
+    const paneColumnWidth = (viewportWidth - SIDEBAR_WIDTH_PX) / PANE_COLUMN_COUNT;
+    const margin = (paneColumnWidth - LETTER_PAGE_WIDTH_PX) / 2;
+
+    expect(margin).toBeGreaterThan(0);
   });
 
   it('a config failure converts into a serializable RunError carrying stage, message, and cause', () => {

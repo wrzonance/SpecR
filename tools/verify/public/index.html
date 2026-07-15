@@ -15,10 +15,11 @@
   window.__measure()'s geometry is getBoundingClientRect()-based and
   therefore VIEWPORT-RELATIVE, not document-relative. Before the driving
   agent (Playwright) takes any screenshot, it MUST resize the viewport to
-  >= window.__harnessConfig.viewportWidth (900px default — mirrors
-  config.ts's VerifyEnv.viewportWidth) and scroll to the top of the page.
-  render/regions.ts's cropRegion() bounds-check is a backstop for this, not
-  the primary guard.
+  >= window.__harnessConfig.viewportWidth (3200px default — mirrors
+  config.ts's VerifyEnv.viewportWidth; see that file's docstring for why
+  this 3-pane grid needs a wider viewport than a single-pane layout would)
+  and scroll to the top of the page. render/regions.ts's cropRegion()
+  bounds-check is a backstop for this, not the primary guard.
 
   Vendor bundles (docx-preview, jszip) are served directly out of this
   package's own node_modules by server/app.ts — see that file's
