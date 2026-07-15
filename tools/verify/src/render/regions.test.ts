@@ -78,6 +78,10 @@ describe('cropRegion', () => {
     ['rect extends past the bottom edge', { x: 0, y: 15, width: 10, height: 10 }],
     ['zero width', { x: 0, y: 0, width: 0, height: 10 }],
     ['zero height', { x: 0, y: 0, width: 10, height: 0 }],
+    // NaN would pass every range check below (NaN comparisons are all false)
+    // and reach pngjs as garbage — reject it at the boundary instead.
+    ['NaN x (unrounded/absent geometry)', { x: NaN, y: 0, width: 10, height: 10 }],
+    ['fractional width', { x: 0, y: 0, width: 10.5, height: 10 }],
   ])(
     'throws VerifyRenderError rather than clipping or producing a garbage crop (%s)',
     async (_label, rect) => {

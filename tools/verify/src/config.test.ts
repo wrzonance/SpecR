@@ -76,6 +76,15 @@ describe('loadVerifyEnv', () => {
     expect(() => loadVerifyEnv(env)).toThrow(VerifyValidationError);
   });
 
+  // A path prefix on the base URL is silently dropped by the client's
+  // new URL('/parse', baseUrl) — so `http://host/api/v2` would route to
+  // `http://host/parse`. Fail fast at config load instead of misrouting.
+  it('throws VerifyValidationError when SPECR_API_BASE_URL carries a path prefix', () => {
+    expect(() =>
+      loadVerifyEnv({ ...validEnv, SPECR_API_BASE_URL: 'http://localhost:3000/api/v2' })
+    ).toThrow(VerifyValidationError);
+  });
+
   it('throws VerifyValidationError when VERIFY_VIEWPORT_WIDTH is not numeric', () => {
     const env = { ...validEnv, VERIFY_VIEWPORT_WIDTH: 'not-a-number' };
 

@@ -29,6 +29,21 @@ export interface Geom {
   readonly height: number;
 }
 
+// pngjs's PNG constructor and bitblt() expect integer pixel coordinates and
+// dimensions. A non-integer or NaN rect would silently sail past the range
+// checks below (every `NaN < 0` / `NaN > w` comparison is false) and reach
+// pngjs as garbage — window.__measure() Math.round()s its
+// getBoundingClientRect() values precisely so this can't happen, but this is a
+// public boundary, so reject it here rather than trust the caller.
+function hasNonIntegerCoords(rect: Geom): boolean {
+  return (
+    !Number.isInteger(rect.x) ||
+    !Number.isInteger(rect.y) ||
+    !Number.isInteger(rect.width) ||
+    !Number.isInteger(rect.height)
+  );
+}
+
 function isOutOfBounds(rect: Geom, sourceWidth: number, sourceHeight: number): boolean {
   return (
     rect.x < 0 ||
@@ -41,6 +56,13 @@ function isOutOfBounds(rect: Geom, sourceWidth: number, sourceHeight: number): b
 }
 
 function assertWithinBounds(rect: Geom, sourcePath: string, source: PNG): void {
+  if (hasNonIntegerCoords(rect)) {
+    throw new VerifyRenderError(
+      `crop region ${JSON.stringify(rect)} has non-integer or non-finite coordinates — ` +
+        `geometry must be Math.round()ed integer pixels`,
+      { stage: 'render' }
+    );
+  }
   if (!isOutOfBounds(rect, source.width, source.height)) return;
   throw new VerifyRenderError(
     `crop region ${JSON.stringify(rect)} falls outside ${sourcePath}'s bounds ` +

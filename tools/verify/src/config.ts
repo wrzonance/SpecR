@@ -10,7 +10,23 @@ const envSchema = z.object({
   // POST /templates/import, POST /specs/{id}/generate, ...). Same-renderer
   // comparison depends on going through the real API, never an in-process
   // shortcut — see issue #150 design decision 3.
-  SPECR_API_BASE_URL: z.url(),
+  //
+  // Must be an ORIGIN with no path/query/hash: the client builds request URLs
+  // with `new URL('/parse', baseUrl)`, and an absolute path discards any path
+  // prefix on the base (so `https://host/api/v2` would silently route to
+  // `https://host/parse`). Reject that shape here rather than misroute quietly.
+  SPECR_API_BASE_URL: z.url().refine((value) => {
+    // Zod v4 still runs this refine when z.url() already failed, so guard the
+    // parse and defer to z.url()'s own "invalid URL" error rather than throwing
+    // a raw TypeError out of safeParse.
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      return true;
+    }
+    return url.pathname === '/' && url.search === '' && url.hash === '';
+  }, 'SPECR_API_BASE_URL must be an origin with no path, query, or fragment (e.g. http://localhost:3000)'),
   // Required capture viewport width (px) for the harness's own page.
   // docx-preview geometry (window.__measure()) is getBoundingClientRect()-
   // based and therefore VIEWPORT-RELATIVE, not document-relative — at
