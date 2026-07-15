@@ -178,12 +178,25 @@ export const SectionNumberFormatSchema = z.enum(['canonical', 'dots', 'compact',
 export type SectionNumberFormat = z.infer<typeof SectionNumberFormatSchema>;
 
 // ─── Header/footer fixture harness (#305) ─────────────────────────────────────
-// Not consumed anywhere yet — library-client.ts and project-client.ts (task
-// 2/7) drive the library-import and project-provisioning calls that parse
-// against these. Kept here rather than in client.ts's schema imports so
-// this file stays the single hand-mirrored copy of the openapi.yaml
-// response shapes the harness actually calls, per this file's own opening
-// docstring.
+// library-client.ts and project-client.ts (task 2/7) drive the library-import
+// and project-provisioning calls that parse against these. Kept here rather
+// than in client.ts's schema imports so this file stays the single
+// hand-mirrored copy of the openapi.yaml response shapes the harness
+// actually calls, per this file's own opening docstring.
+//
+// Every schema below was cross-checked against openapi.yaml's exact
+// `required` lists AND the real handler/db-query source (src/api/projects.ts,
+// src/db/queries/projects.ts, src/db/queries/derive.ts,
+// src/db/queries/header-footer.ts) while implementing task 2/7 — the
+// versions task 1/7 committed (`ProjectSummarySchema` keyed on `id` instead
+// of `projectId`; `HeaderFooterConfigSchema` with a flat `projectId` instead
+// of a `scope` union; `AddSectionToProjectResultSchema` requiring a
+// `projectSpecId` field that doesn't exist on the wire; `OnboardingStageSchema`
+// enumerating a status vocabulary the real API never sends) would each throw
+// VerifyApiError on every real 2xx response. Fixed here rather than filed as
+// a follow-up: they block this task's own methods from ever succeeding
+// against the live API, which is the harness's entire reason to exist (see
+// client.ts's opening comment).
 
 export const LibrarySchema = z.object({
   id: z.uuid(),
@@ -192,9 +205,24 @@ export const LibrarySchema = z.object({
 
 export type Library = z.infer<typeof LibrarySchema>;
 
-export const ProjectSummarySchema = z.object({
-  id: z.uuid(),
+const ProjectSourceSchema = z.object({
+  libraryId: z.uuid(),
   name: z.string(),
+  tier: z.enum(['company', 'client']),
+  priority: z.number().int().min(1),
+});
+
+// Matches openapi.yaml's ProjectSummary component exactly (required:
+// [projectId, name, description, clientId, clientName, sources]) — POST
+// /projects's 201 response, confirmed against
+// src/db/queries/projects.ts's createProject.
+export const ProjectSummarySchema = z.object({
+  projectId: z.uuid(),
+  name: z.string(),
+  description: z.string().nullable(),
+  clientId: z.uuid().nullable(),
+  clientName: z.string().nullable(),
+  sources: z.array(ProjectSourceSchema),
 });
 
 export type ProjectSummary = z.infer<typeof ProjectSummarySchema>;
@@ -203,14 +231,15 @@ export type ProjectSummary = z.infer<typeof ProjectSummarySchema>;
 // jobs (ParseStageSchema above) — deliberately its own enum, not reused,
 // per the spike's struct #5 correction: an onboarding job never reports
 // ParseStageSchema's fine-grained parse sub-stages ('extracting',
-// 'numbering', ...).
+// 'numbering', ...). Values confirmed against openapi.yaml's own
+// OnboardingStage component, not guessed.
 export const OnboardingStageSchema = z.enum([
   'queued',
-  'uploading',
+  'running',
   'parsing',
-  'deriving',
-  'validating',
   'persisting',
+  'deriving-style',
+  'classifying',
   'complete',
   'failed',
 ]);
@@ -238,21 +267,66 @@ export const OnboardingJobSchema = z.object({
 
 export type OnboardingJob = z.infer<typeof OnboardingJobSchema>;
 
-// additionalProperties: true in openapi.yaml, same posture as
+// One of exactly four scope kinds (openapi.yaml's HeaderFooterScope oneOf) —
+// a header/footer config row is anchored to a client library, a project, a
+// design package, or an issued revision. This harness only ever PUTs at
+// project scope, but GET/PUT both return whichever scope the row actually
+// has, so all four are modeled rather than narrowed to 'project' alone.
+const HeaderFooterScopeSchema = z.union([
+  z.object({ kind: z.literal('client'), clientLibraryId: z.uuid() }),
+  z.object({ kind: z.literal('project'), projectId: z.uuid() }),
+  z.object({ kind: z.literal('package'), packageId: z.uuid() }),
+  z.object({ kind: z.literal('revision'), revisionId: z.uuid() }),
+]);
+
+// additionalProperties: true on `config` in openapi.yaml, same posture as
 // StylePropertiesSchema above — this harness only round-trips what it
 // itself PUT via putProjectHeaderFooter, never interprets an
 // externally-authored config.
 export const HeaderFooterConfigSchema = z.object({
   id: z.uuid(),
-  projectId: z.uuid(),
+  scope: HeaderFooterScopeSchema,
   config: z.object({}).catchall(z.json()),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 
 export type HeaderFooterConfig = z.infer<typeof HeaderFooterConfigSchema>;
 
+const ProjectSpecSourceSchema = z.object({
+  libraryId: z.uuid(),
+  name: z.string(),
+});
+
+// Matches openapi.yaml's POST /projects/{id}/specs 201 response (required:
+// [specId, section, position, source]) — confirmed against
+// src/db/queries/derive.ts's addSectionToProject, which returns exactly
+// this shape (`specId` is the project-owned clone's id, never a separate
+// `projectSpecId` field).
 export const AddSectionToProjectResultSchema = z.object({
-  projectSpecId: z.uuid(),
   specId: z.uuid(),
+  section: z.string(),
+  position: z.number().int(),
+  source: ProjectSpecSourceSchema,
+  shadowed: z.array(ProjectSpecSourceSchema).exactOptional(),
 });
 
 export type AddSectionToProjectResult = z.infer<typeof AddSectionToProjectResultSchema>;
+
+// ─── Wrapped response envelopes for the six task-2/7 methods ─────────────────
+
+export const CreateClientLibraryResponseSchema = successResponseSchema(LibrarySchema);
+
+export const ImportLibraryMasterResponseSchema = successResponseSchema(
+  z.object({ jobId: z.uuid() })
+);
+
+export const OnboardingJobResponseSchema = successResponseSchema(OnboardingJobSchema);
+
+export const CreateProjectResponseSchema = successResponseSchema(ProjectSummarySchema);
+
+export const AddSectionToProjectResponseSchema = successResponseSchema(
+  AddSectionToProjectResultSchema
+);
+
+export const PutHeaderFooterResponseSchema = successResponseSchema(HeaderFooterConfigSchema);

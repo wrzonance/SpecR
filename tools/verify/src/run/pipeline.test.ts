@@ -32,6 +32,16 @@ function stubApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
         report: { nodeTypes: [], skippedNodeTypes: [], vanishSkipped: 0 },
       }),
     generateDocx: () => Promise.resolve(Buffer.from('generated docx bytes')),
+    // Header/footer fixture-provisioning methods (#305 task 2/7) — not
+    // exercised by this suite's own tests (that's header-footer-pipeline
+    // .test.ts, task 8/7's job); stubbed only so this hand-built ApiClient
+    // mock keeps satisfying the interface as it grows.
+    createClientLibrary: () => Promise.reject(new Error('createClientLibrary not stubbed')),
+    importLibraryMaster: () => Promise.reject(new Error('importLibraryMaster not stubbed')),
+    waitForLibraryImportJob: () => Promise.reject(new Error('waitForLibraryImportJob not stubbed')),
+    createProject: () => Promise.reject(new Error('createProject not stubbed')),
+    addSectionToProject: () => Promise.reject(new Error('addSectionToProject not stubbed')),
+    putProjectHeaderFooter: () => Promise.reject(new Error('putProjectHeaderFooter not stubbed')),
   };
   return { ...defaults, ...overrides };
 }

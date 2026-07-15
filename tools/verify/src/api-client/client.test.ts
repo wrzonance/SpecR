@@ -311,3 +311,34 @@ describe('generateDocx validates the binary response before returning it', () =>
     await expect(client.generateDocx('spec-id')).rejects.toThrow(/not a valid docx/);
   });
 });
+
+// The six header/footer fixture-provisioning methods (#305 task 2/7) are
+// unit-tested against their real request/response contract in
+// library-client.test.ts and project-client.test.ts — these two checks only
+// pin that createApiClient() actually wires them onto the returned client,
+// delegating to the same shared RequestContext as every other method.
+describe('createApiClient wires the header/footer fixture-provisioning methods (#305 task 2/7)', () => {
+  it('exposes all six methods on the returned client', () => {
+    const client = createApiClient({ baseUrl: BASE_URL, fetchImpl: vi.fn() });
+
+    expect(typeof client.createClientLibrary).toBe('function');
+    expect(typeof client.importLibraryMaster).toBe('function');
+    expect(typeof client.waitForLibraryImportJob).toBe('function');
+    expect(typeof client.createProject).toBe('function');
+    expect(typeof client.addSectionToProject).toBe('function');
+    expect(typeof client.putProjectHeaderFooter).toBe('function');
+  });
+
+  it('createClientLibrary delegates to POST /libraries/clients against the configured baseUrl', async () => {
+    const libraryId = '77777777-7777-4777-8777-777777777777';
+    const fetchImpl = vi.fn((url: RequestInfo | URL) => {
+      expect(url).toBe(`${BASE_URL}/libraries/clients`);
+      return Promise.resolve(
+        jsonResponse(201, { success: true, data: { id: libraryId, name: 'Acme' } })
+      );
+    });
+    const client = createApiClient({ baseUrl: BASE_URL, fetchImpl });
+
+    await expect(client.createClientLibrary('Acme')).resolves.toEqual({ id: libraryId });
+  });
+});
