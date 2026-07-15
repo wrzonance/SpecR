@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ParserError } from '../error.js';
 import {
   parseDocumentRelationships,
+  parseImageRelationships,
   parseSectionHeaderFooterInfo,
   parseDocumentSettings,
   resolveReferenceTargets,
@@ -75,6 +76,48 @@ describe('parseDocumentRelationships', () => {
     expect(caught).toBeInstanceOf(ParserError);
     expect((caught as ParserError).code).toBe('DOCX_HEADER_FOOTER_XML_INVALID');
     expect((caught as ParserError).cause).toBeDefined();
+  });
+});
+
+describe('parseImageRelationships', () => {
+  it('parses Id/Target pairs for a header/footer part, normalizing the Target the same way as parseDocumentRelationships', () => {
+    const xml = makeRelsXml(relationship('rId1', 'image', 'media/image1.png'));
+    const map = parseImageRelationships(xml, 'word/header1.xml');
+    expect(map.get('rId1')).toBe('word/media/image1.png');
+  });
+
+  it('filters out relationships whose Type is not the image relationship URI', () => {
+    const xml = makeRelsXml(
+      relationship('rId1', 'image', 'media/image1.png') +
+        relationship('rId2', 'hyperlink', 'https://example.com/') +
+        relationship('rId3', 'footnotes', 'footnotes.xml')
+    );
+    const map = parseImageRelationships(xml, 'word/header1.xml');
+    expect(map.size).toBe(1);
+    expect(map.get('rId1')).toBe('word/media/image1.png');
+    expect(map.get('rId2')).toBeUndefined();
+    expect(map.get('rId3')).toBeUndefined();
+  });
+
+  it('returns an empty map for a null (absent) relationships file', () => {
+    expect(parseImageRelationships(null, 'word/header1.xml').size).toBe(0);
+  });
+
+  it('returns an empty map for an empty-string relationships file', () => {
+    expect(parseImageRelationships('  ', 'word/header1.xml').size).toBe(0);
+  });
+
+  it('throws ParserError DOCX_HEADER_FOOTER_XML_INVALID with cause and the given partLabel for malformed XML', () => {
+    let caught: unknown;
+    try {
+      parseImageRelationships('<not valid xml', 'word/header3.xml');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ParserError);
+    expect((caught as ParserError).code).toBe('DOCX_HEADER_FOOTER_XML_INVALID');
+    expect((caught as ParserError).cause).toBeDefined();
+    expect((caught as ParserError).message).toContain('word/header3.xml');
   });
 });
 

@@ -56,27 +56,65 @@ function normalizeRelationshipTarget(rawTarget: string): string {
   return rawTarget.startsWith('/') ? rawTarget.slice(1) : `word/${rawTarget}`;
 }
 
-function parseRelsXml(relsXml: string): Record<string, unknown> {
+function parseRelsXml(relsXml: string, partLabel: string): Record<string, unknown> {
   try {
     return relsParser.parse(relsXml) as Record<string, unknown>;
   } catch (err) {
-    throw new ParserError('failed to parse word/_rels/document.xml.rels', {
+    throw new ParserError(`failed to parse relationships for ${partLabel}`, {
       code: 'DOCX_HEADER_FOOTER_XML_INVALID',
       cause: err,
     });
   }
 }
 
+function readRelationshipEntries(
+  relsXml: string,
+  partLabel: string
+): readonly Record<string, unknown>[] {
+  const parsed = parseRelsXml(relsXml, partLabel);
+  const root = asRecord(parsed['Relationships']);
+  return toArray<Record<string, unknown>>(
+    root?.['Relationship'] as readonly Record<string, unknown>[] | undefined
+  );
+}
+
 /** Absent (`null`) or blank rels XML yields an empty map, not a throw. */
 export function parseDocumentRelationships(relsXml: string | null): RelationshipMap {
   if (relsXml === null || relsXml.trim() === '') return new Map();
-  const parsed = parseRelsXml(relsXml);
-  const root = asRecord(parsed['Relationships']);
-  const rawRelationships = toArray<Record<string, unknown>>(
-    root?.['Relationship'] as readonly Record<string, unknown>[] | undefined
-  );
+  const rawRelationships = readRelationshipEntries(relsXml, 'word/_rels/document.xml.rels');
   const map = new Map<string, string>();
   for (const rel of rawRelationships) {
+    const id = extractAttrStr(rel, '@_Id');
+    const target = extractAttrStr(rel, '@_Target');
+    if (id && target) map.set(id, normalizeRelationshipTarget(target));
+  }
+  return map;
+}
+
+// ECMA-376 Part 1, §15.2.13 (Annex A): the fixed relationship Type URI that
+// identifies an image relationship, shared by every OPC part's .rels file —
+// not header/footer-specific, just narrower than the unfiltered
+// parseDocumentRelationships contract above.
+const IMAGE_RELATIONSHIP_TYPE =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
+
+/**
+ * Parse a header/footer PART's own `.rels` file (e.g.
+ * `word/_rels/header1.xml.rels`), filtered to image relationships only.
+ * `partLabel` names the owning part in any thrown ParserError message, e.g.
+ * `"word/header1.xml"`. Absent (`null`) or blank rels XML yields an empty
+ * map, not a throw — mirrors parseDocumentRelationships.
+ */
+export function parseImageRelationships(
+  relsXml: string | null,
+  partLabel: string
+): RelationshipMap {
+  if (relsXml === null || relsXml.trim() === '') return new Map();
+  const rawRelationships = readRelationshipEntries(relsXml, partLabel);
+  const map = new Map<string, string>();
+  for (const rel of rawRelationships) {
+    const type = extractAttrStr(rel, '@_Type');
+    if (type !== IMAGE_RELATIONSHIP_TYPE) continue;
     const id = extractAttrStr(rel, '@_Id');
     const target = extractAttrStr(rel, '@_Target');
     if (id && target) map.set(id, normalizeRelationshipTarget(target));
