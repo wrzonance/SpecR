@@ -154,7 +154,7 @@ export function findScenario(id: HeaderFooterScenarioId): HeaderFooterScenario {
 function resolveFieldText(field: HeaderFooterFieldInput, scenario: HeaderFooterScenario): string {
   switch (field.kind) {
     case 'literal':
-      return field.text ?? '';
+      return field.text;
     case 'sectionNumber':
       return scenario.section;
     case 'sectionTitle':

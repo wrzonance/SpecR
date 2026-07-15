@@ -28,8 +28,28 @@ async function readDocumentXml(docxBuffer: Buffer): Promise<string> {
   return entry.async('string');
 }
 
+// Index of the FINAL w:sectPr open tag (`<w:sectPr>` or `<w:sectPr ...>`),
+// or -1 if none. The `[\s>]` guard excludes `<w:sectPrChange>` (a revision
+// child that lives INSIDE a sectPr), so this lands on the real trailing
+// section-properties element even in a tracked-changes document.
+function lastSectPrIndex(documentXml: string): number {
+  const opens = /<w:sectPr[\s>]/g;
+  let index = -1;
+  for (let match = opens.exec(documentXml); match !== null; match = opens.exec(documentXml)) {
+    index = match.index;
+  }
+  return index;
+}
+
 function extractPgNumStart(documentXml: string): string | null {
-  const match = /<w:pgNumType\b[^>]*\bw:start="(\d+)"[^>]*>/.exec(documentXml);
+  // Scope the search to the FINAL w:sectPr (the body-level section
+  // properties). A multi-section DOCX carries a w:sectPr per section, and
+  // only the trailing one governs the asserted spec's page numbering — an
+  // unscoped scan would return an earlier section's w:pgNumType and pass
+  // even when the trailing section dropped the restart.
+  const lastSectPr = lastSectPrIndex(documentXml);
+  const scope = lastSectPr === -1 ? documentXml : documentXml.slice(lastSectPr);
+  const match = /<w:pgNumType\b[^>]*\bw:start="(\d+)"[^>]*>/.exec(scope);
   return match?.[1] ?? null;
 }
 

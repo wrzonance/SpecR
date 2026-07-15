@@ -347,8 +347,19 @@
       .then((body) => (body ? body.data : null));
   }
 
+  // The stopper for the currently-active poll loop, if any. Starting a new
+  // run (from the upload form OR scenario-picker.js, both of which call
+  // pollRun) supersedes the previous loop so two pollers never write to
+  // #run-status and the panes at once — a stale run can't overwrite a newer
+  // one's result. __resetPaneState only clears the panes; it does not stop
+  // an in-flight loop, which is why the guard lives here.
+  let activeStop = null;
   function pollRun(runId) {
+    if (activeStop) activeStop();
     let stopped = false;
+    activeStop = function () {
+      stopped = true;
+    };
     function tick() {
       if (stopped) return;
       pollOnce(runId)

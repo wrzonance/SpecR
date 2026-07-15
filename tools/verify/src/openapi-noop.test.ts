@@ -36,9 +36,13 @@ describe('openapi.yaml no-op: this branch never touches repo-root src/ or openap
   const repoRoot = resolve(import.meta.dirname, '..', '..', '..');
   const baseRefAvailable = resolveGitRef(repoRoot, 'origin/main');
 
-  it.skipIf(!baseRefAvailable)('git diff origin/main -- src/ openapi.yaml is empty', () => {
+  it.skipIf(!baseRefAvailable)('git diff origin/main...HEAD -- src/ openapi.yaml is empty', () => {
+    // Three-dot: diff from the MERGE BASE of origin/main and HEAD, isolating
+    // what THIS branch changed. A two-dot `git diff origin/main` would also
+    // surface src/ changes made on main AFTER this branch diverged, failing
+    // the invariant for an unrelated reason as the origin/main tip moves.
     // eslint-disable-next-line sonarjs/no-os-command-from-path
-    const diff = execFileSync('git', ['diff', 'origin/main', '--', 'src/', 'openapi.yaml'], {
+    const diff = execFileSync('git', ['diff', 'origin/main...HEAD', '--', 'src/', 'openapi.yaml'], {
       cwd: repoRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     }).toString('utf-8');

@@ -37,10 +37,14 @@ import {
 // even though the composition round-tripped "successfully" end to end. Not
 // repo-root src/ drift: openapi.yaml and the real handler already agree on
 // the Cell shape; this was tools/verify's own wire-shape modeling bug.
-export interface HeaderFooterFieldInput {
-  readonly kind: 'literal' | 'sectionNumber' | 'sectionTitle';
-  readonly text?: string;
-}
+// Discriminated union rather than a flat interface with optional `text`: a
+// 'literal' field is meaningless without its text, so requiring it here
+// makes `{ kind: 'literal' }` a compile error instead of silently rendering
+// an empty header/footer downstream (see resolveFieldText). The resolved
+// field kinds ('sectionNumber' | 'sectionTitle') carry no text of their own.
+export type HeaderFooterFieldInput =
+  | { readonly kind: 'literal'; readonly text: string }
+  | { readonly kind: 'sectionNumber' | 'sectionTitle' };
 
 export interface HeaderFooterCellInput {
   readonly content: readonly HeaderFooterFieldInput[];

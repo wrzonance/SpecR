@@ -33,7 +33,9 @@ const validProjectSummary = {
 
 describe('createProject', () => {
   it('returns the created projectId on a well-formed 201', async () => {
-    const fetchImpl = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      expect(url).toBe(`${BASE_URL}/projects`);
+      expect(init?.method).toBe('POST');
       expect(JSON.parse(init?.body as string)).toEqual({
         name: 'Campus Renovation',
         sourceLibraryIds: [LIBRARY_ID],
@@ -78,7 +80,9 @@ describe('addSectionToProject', () => {
   };
 
   it('returns the cloned spec on a well-formed 201', async () => {
-    const fetchImpl = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      expect(url).toBe(`${BASE_URL}/projects/${PROJECT_ID}/specs`);
+      expect(init?.method).toBe('POST');
       expect(JSON.parse(init?.body as string)).toEqual({ section: '09 91 26' });
       return Promise.resolve(jsonResponse(201, { success: true, data: validResult }));
     });
@@ -120,7 +124,8 @@ describe('putProjectHeaderFooter', () => {
 
   it('PUTs the composition body and returns the stored config', async () => {
     const composition = { pageNumbering: { mode: 'restartPerSpec' as const, startAt: 1 } };
-    const fetchImpl = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      expect(url).toBe(`${BASE_URL}/projects/${PROJECT_ID}/header-footer`);
       expect(init?.method).toBe('PUT');
       expect(JSON.parse(init?.body as string)).toEqual(composition);
       return Promise.resolve(jsonResponse(200, { success: true, data: validConfig }));

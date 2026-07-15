@@ -156,7 +156,7 @@ describe('header-footer fixture pipeline (orchestration + no-escape boundary)', 
 
   it.each(HEADER_FOOTER_SCENARIOS.map((scenario) => scenario.id))(
     'startRun never throws synchronously for catalog scenario %s',
-    (scenarioId) => {
+    async (scenarioId) => {
       const pipeline = createHeaderFooterFixturePipeline({
         apiClient: stubApiClient(),
         runStore,
@@ -170,6 +170,14 @@ describe('header-footer fixture pipeline (orchestration + no-escape boundary)', 
       expect(record?.section).toBe(
         HEADER_FOOTER_SCENARIOS.find((s) => s.id === scenarioId)?.section
       );
+
+      // startRun's synchronous contract is asserted above; now let the
+      // fire-and-forget run reach a terminal state before afterEach removes
+      // workRoot, so a background artifact write can never race cleanup.
+      await waitFor(() => {
+        const status = runStore.getRun(runId)?.status;
+        return status === 'complete' || status === 'failed';
+      });
     }
   );
 

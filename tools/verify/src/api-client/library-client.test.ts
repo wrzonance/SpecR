@@ -45,11 +45,13 @@ const validOnboardingResult = {
 
 describe('createClientLibrary', () => {
   it('returns the created library id on a well-formed 201', async () => {
-    const fetchImpl = vi.fn(() =>
-      Promise.resolve(
+    const fetchImpl = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      expect(url).toBe(`${BASE_URL}/libraries/clients`);
+      expect(init?.method).toBe('POST');
+      return Promise.resolve(
         jsonResponse(201, { success: true, data: { id: LIBRARY_ID, name: 'Acme Client' } })
-      )
-    );
+      );
+    });
 
     const result = await createClientLibrary(ctxWith(fetchImpl), 'Acme Client');
 
@@ -140,7 +142,9 @@ describe('waitForLibraryImportJob polls its own OnboardingStage terminal states'
   it('polls through running states and returns the result once complete', async () => {
     const sequence = [runningJob, runningJob, completeJob];
     let call = 0;
-    const fetchImpl = vi.fn(() => {
+    const fetchImpl = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      expect(url).toBe(`${BASE_URL}/libraries/import/jobs/${JOB_ID}`);
+      expect(init?.method).toBe('GET');
       const job = sequence[call] ?? completeJob;
       call += 1;
       return Promise.resolve(jsonResponse(200, { success: true, data: job }));
