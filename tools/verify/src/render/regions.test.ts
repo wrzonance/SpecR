@@ -100,6 +100,14 @@ describe('cropRegion', () => {
     expect(() => readFileSync(destPath)).toThrow();
   });
 
+  it('wraps a missing/unreadable source file in VerifyRenderError rather than a raw fs error', async () => {
+    const missing = path.join(workDir, 'does-not-exist.png');
+
+    await expect(
+      cropRegion(missing, { x: 0, y: 0, width: 4, height: 4 }, destPath)
+    ).rejects.toThrow(VerifyRenderError);
+  });
+
   it('a rejected crop carries stage "render" and names the offending source path', async () => {
     writePngFixture(sourcePath, solidPng(20, 20, [0, 0, 0, 255]));
 

@@ -57,7 +57,11 @@ async function main(): Promise<void> {
   // rejecting the callback — without this it bypasses main().catch() and
   // crashes with a raw stack trace instead of the "failed to start" path.
   await new Promise<void>((resolve, reject) => {
-    const server = app.listen(env.port, () => {
+    // Bind loopback only: this harness has no auth, accepts DOCX uploads, and
+    // serves run files — omitting the host binds 0.0.0.0/:: and exposes it to
+    // the whole network despite the "localhost" startup log. It is a local dev
+    // tool, so keep it reachable only from this machine.
+    const server = app.listen(env.port, '127.0.0.1', () => {
       console.log(`verify harness listening on http://localhost:${String(env.port)}`);
       resolve();
     });

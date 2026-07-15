@@ -17,7 +17,7 @@
 // boundary (see errors.ts).
 
 import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { toRunError, type RunStage } from '../errors.js';
 import type { ApiClient, UploadForParseOptions } from '../api-client/client.js';
@@ -57,7 +57,7 @@ async function runUpload(
   input: StartRunInput
 ): Promise<string> {
   deps.runStore.updateRun(record.runId, { stage: 'upload', status: 'running' });
-  writeFileSync(record.artifacts.referencePath, input.referenceBuffer);
+  await writeFile(record.artifacts.referencePath, input.referenceBuffer);
   const jobId = await deps.apiClient.uploadForParse(
     input.referenceBuffer,
     input.referenceFilename,
@@ -116,7 +116,7 @@ async function runGenerate(
       : {}),
   });
   const generatedPath = path.join(deps.runStore.runDir(runId), 'generated.docx');
-  writeFileSync(generatedPath, buffer);
+  await writeFile(generatedPath, buffer);
   deps.runStore.updateRun(runId, {
     stage: 'generate',
     status: 'complete',

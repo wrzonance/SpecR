@@ -338,7 +338,12 @@
 
   function pollOnce(runId) {
     return fetch('/api/runs/' + encodeURIComponent(runId))
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) => {
+        // Throw on a non-2xx so a persistent 5xx/404 surfaces via tick()'s
+        // .catch (below) instead of resolving to null and looping silently.
+        if (!response.ok) throw new Error('poll failed (HTTP ' + String(response.status) + ')');
+        return response.json();
+      })
       .then((body) => (body ? body.data : null));
   }
 
@@ -367,10 +372,13 @@
           }
           setTimeout(tick, POLL_INTERVAL_MS);
         })
-        .catch(() => {
-          // A transient fetch/JSON error must not kill the poll loop or leak
-          // an unhandled rejection — keep polling until a terminal state is
-          // seen (the server may just be momentarily unreachable).
+        .catch((err) => {
+          // A transient fetch/JSON/non-2xx error must not kill the poll loop
+          // or leak an unhandled rejection — surface a diagnostic to the
+          // status line (so a persistent failure is visible, not a silently
+          // frozen UI) and keep polling until a terminal state is seen.
+          document.getElementById('run-status').textContent =
+            'poll error (retrying): ' + String((err && err.message) || err);
           setTimeout(tick, POLL_INTERVAL_MS);
         });
     }

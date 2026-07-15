@@ -71,6 +71,21 @@ function assertWithinBounds(rect: Geom, sourcePath: string, source: PNG): void {
   );
 }
 
+// Read + decode the source PNG, wrapping a read/parse failure (missing file,
+// truncated/corrupt PNG) in VerifyRenderError so every failure this module
+// surfaces carries the 'render' stage — a raw fs/pngjs error would break that
+// contract (see errors.ts).
+async function readSourcePng(sourcePath: string): Promise<PNG> {
+  try {
+    return PNG.sync.read(await readFile(sourcePath));
+  } catch (err) {
+    throw new VerifyRenderError(`failed to read source PNG at ${sourcePath}`, {
+      stage: 'render',
+      cause: err,
+    });
+  }
+}
+
 /**
  * Crop `rect` out of the PNG at `sourcePath` and write the result to
  * `destPath`. Always bounds-checks `rect` against the source image's actual
@@ -78,7 +93,7 @@ function assertWithinBounds(rect: Geom, sourcePath: string, source: PNG): void {
  * or writing a garbage crop — see this module's docstring.
  */
 export async function cropRegion(sourcePath: string, rect: Geom, destPath: string): Promise<void> {
-  const source = PNG.sync.read(await readFile(sourcePath));
+  const source = await readSourcePng(sourcePath);
   assertWithinBounds(rect, sourcePath, source);
 
   const cropped = new PNG({ width: rect.width, height: rect.height });

@@ -1,7 +1,13 @@
 // In-memory RunRecord store with manifest.json persistence under
 // work/<runId>/ (#150, task 4/8). Mirrors src/lib/jobs.ts's synchronous
 // create/update/get shape; unlike jobs.ts, every mutation also snapshots the
-// record to disk so a run's last-known state survives a harness restart.
+// record to disk as an on-disk audit artifact — human-inspectable and served
+// back through the files route (GET .../files/manifest.json).
+//
+// The store is deliberately session-scoped: the Map is the source of truth and
+// is NOT rehydrated from disk on startup, so getRun() only knows runs created
+// in the current process. Runs are driven end-to-end within one session; the
+// manifest is a snapshot for inspection, not a restart-recovery store.
 //
 // Every mutation is a read-modify-write into a brand-new RunRecord —
 // createRun and updateRun never mutate an existing record or its nested

@@ -201,6 +201,63 @@ describe('every HTTP response is validated before being handed back', () => {
   });
 });
 
+describe('waitForParseJob polls until a terminal state', () => {
+  const runningJob = {
+    jobId: validParseJob.jobId,
+    status: 'running',
+    progress: { stage: 'running', pct: 50 },
+    expiresAt: 1_700_000_000_000,
+  };
+  const failedJob = {
+    jobId: validParseJob.jobId,
+    status: 'failed',
+    progress: { stage: 'failed', pct: 0 },
+    error: 'parse blew up',
+    expiresAt: 1_700_000_000_000,
+  };
+
+  it('polls through running states and returns the result once the job completes', async () => {
+    const sequence = [runningJob, runningJob, validParseJob];
+    let call = 0;
+    const fetchImpl = vi.fn(() => {
+      const job = sequence[call] ?? validParseJob;
+      call += 1;
+      return Promise.resolve(jsonResponse(200, { success: true, data: job }));
+    });
+    const client = createApiClient({ baseUrl: BASE_URL, fetchImpl });
+
+    const result = await client.waitForParseJob(validParseJob.jobId, {
+      pollIntervalMs: 1,
+      timeoutMs: 1000,
+    });
+
+    expect(result).toEqual(validParseJob.result);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws VerifyApiError carrying the API error when the job fails', async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(jsonResponse(200, { success: true, data: failedJob }))
+    );
+    const client = createApiClient({ baseUrl: BASE_URL, fetchImpl });
+
+    await expect(
+      client.waitForParseJob(validParseJob.jobId, { pollIntervalMs: 1, timeoutMs: 1000 })
+    ).rejects.toThrow(/failed: parse blew up/);
+  });
+
+  it('throws VerifyApiError when the job never completes before the deadline', async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(jsonResponse(200, { success: true, data: runningJob }))
+    );
+    const client = createApiClient({ baseUrl: BASE_URL, fetchImpl });
+
+    await expect(
+      client.waitForParseJob(validParseJob.jobId, { pollIntervalMs: 1, timeoutMs: 5 })
+    ).rejects.toThrow(/did not complete within/);
+  });
+});
+
 describe('generateDocx validates the binary response before returning it', () => {
   it('returns the docx buffer when Content-Type and zip magic both check out', async () => {
     const bytes = docxBuffer();
