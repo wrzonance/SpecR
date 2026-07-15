@@ -60,9 +60,13 @@ function isFldCharType(run: Record<string, unknown>, type: string): boolean {
 
 // Exported for reuse by header-footer-region.ts's cell-text extraction
 // (paragraph capture) — the same "string or { '#text': string }" shape
-// fast-xml-parser produces for w:t needs handling in both places.
+// fast-xml-parser produces for w:t (and w:instrText) needs handling in both
+// places. A run (or w:instrText) with MORE THAN ONE text child parses as an
+// ARRAY of those pieces (#485 review); flatten and concatenate them so no
+// cached/instruction text is dropped (ADR-068: never silently drop content).
 export function extractTextLikeValue(value: unknown): string {
   if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(extractTextLikeValue).join('');
   const rec = asRecord(value);
   const text = rec?.['#text'];
   return typeof text === 'string' ? text : '';

@@ -346,6 +346,22 @@ describe('collapseComplexFields: w:fldSimple', () => {
     expect(marker.__collapsedField.rawInstr).toBe(' PAGE ');
   });
 
+  // Regression (#485 CodeRabbit review): a single w:r with multiple w:t children
+  // makes r['w:t'] an ARRAY; extractTextLikeValue returned '' for arrays, so the
+  // field's cached display text was silently dropped. The text-like extractor now
+  // flattens arrays, concatenating every w:t piece (ADR-068: never drop content).
+  it('concatenates cached text from a run carrying multiple w:t children (array-valued w:t)', () => {
+    const runs = [
+      { 'w:fldSimple': { '@_w:instr': ' STYLEREF ', 'w:r': { 'w:t': ['Div 09 ', '91 26'] } } },
+    ];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.cachedText).toBe('Div 09 91 26');
+  });
+
   // A nested complex w:fldChar field inside a w:fldSimple is caught by the same
   // guard — its instrText/cached runs would otherwise be flattened away.
   it('downgrades a w:fldSimple containing a nested w:fldChar complex field to unrecognized', () => {
