@@ -18,6 +18,19 @@ describe('workspace isolation (tools/verify vs repo root)', () => {
   const toolsVerifyRoot = resolve(import.meta.dirname, '..');
   const repoRoot = resolve(toolsVerifyRoot, '..', '..');
 
+  // Snapshot the root node_modules top-level as a comparable value. Returns
+  // null when the directory is absent — the isolated `verify-harness` CI job
+  // installs deps in tools/verify ONLY and never runs a root install, so the
+  // repo-root node_modules legitimately does not exist there. Treating absent
+  // as null (rather than scandir-ing it, which throws ENOENT) keeps the
+  // invariant environment-agnostic AND strengthens it: if a tools/verify
+  // install wrongly resolved against the root importer, it would CREATE a
+  // root node_modules, flipping null → a listing and failing the assertion.
+  const snapshotRootNodeModules = (rootNodeModules: string): string[] | null =>
+    existsSync(rootNodeModules)
+      ? readdirSync(rootNodeModules).sort((a, b) => a.localeCompare(b))
+      : null;
+
   it('declares an isolated workspace root via packages: []', () => {
     const workspaceYamlPath = resolve(toolsVerifyRoot, 'pnpm-workspace.yaml');
     expect(existsSync(workspaceYamlPath)).toBe(true);
@@ -33,10 +46,9 @@ describe('workspace isolation (tools/verify vs repo root)', () => {
 
   it('re-running install against tools/verify never mutates the root lockfile or node_modules', () => {
     const rootLockfilePath = resolve(repoRoot, 'pnpm-lock.yaml');
+    const rootNodeModules = resolve(repoRoot, 'node_modules');
     const beforeLockfile = readFileSync(rootLockfilePath, 'utf-8');
-    const beforeTopLevel = readdirSync(resolve(repoRoot, 'node_modules')).sort((a, b) =>
-      a.localeCompare(b)
-    );
+    const beforeTopLevel = snapshotRootNodeModules(rootNodeModules);
 
     // 'pnpm' here is the trusted, environment-provided build tool this
     // whole dev/CI pipeline already runs under (same as `pnpm test`
@@ -48,9 +60,7 @@ describe('workspace isolation (tools/verify vs repo root)', () => {
     });
 
     const afterLockfile = readFileSync(rootLockfilePath, 'utf-8');
-    const afterTopLevel = readdirSync(resolve(repoRoot, 'node_modules')).sort((a, b) =>
-      a.localeCompare(b)
-    );
+    const afterTopLevel = snapshotRootNodeModules(rootNodeModules);
 
     expect(afterLockfile).toBe(beforeLockfile);
     expect(afterTopLevel).toEqual(beforeTopLevel);
