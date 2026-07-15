@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ParserError } from '../error.js';
-import { captureRegion } from './header-footer-region.js';
+import { captureRegion, paragraphsOf } from './header-footer-region.js';
+import { asRecord, compact, createDocumentXmlParser } from './xml-utils.js';
 
 const KNOWN = { section: '09 91 26', title: 'STAINING AND TRANSPARENT FINISHING' };
 
@@ -8,6 +9,28 @@ const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/mai
 
 function makeHdrXml(bodyXml: string): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr ${NS}>${bodyXml}</w:hdr>`;
+}
+
+// Mirrors header-footer-region.ts's own partParser config exactly (same
+// isArray tag set) so tests can independently re-parse a header part and
+// assert on the SAME raw paragraph records captureRegion itself works from —
+// used to pin the "detail === compact(paragraph)" losslessness invariant
+// (#484 review) without reaching into the module's internal parser. Same
+// idiom as header-footer-images.test.ts's own partParser.
+const testPartParser = createDocumentXmlParser([
+  'w:p',
+  'w:r',
+  'w:tbl',
+  'w:tr',
+  'w:tc',
+  'w:gridCol',
+]);
+
+function parseHeaderParagraphs(xml: string): readonly Record<string, unknown>[] {
+  const parsed = testPartParser.parse(xml) as Record<string, unknown>;
+  const root = asRecord(parsed['w:hdr']);
+  if (!root) throw new Error('test fixture parse failure: no w:hdr root');
+  return paragraphsOf(root);
 }
 
 function makeFtrXml(bodyXml: string): string {
@@ -425,8 +448,14 @@ describe('captureRegion — standalone rule-line paragraph promotion/demotion (#
   });
 
   it('promotes the first standalone rule-line paragraph and demotes a second one to an extraParagraph unmodeled entry', () => {
-    const rule = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
-    const xml = makeHdrXml(`${paragraph(rule, '')}${paragraph(rule, '')}`);
+    // Deliberately DIFFERENT border values per paragraph (single/4 vs
+    // double/8, #484 review): identical candidates can't prove document-order-
+    // first promotion — a promote-the-last or promote-arbitrary bug would
+    // still pass an identical-values test. The assertions below pin the
+    // promoted ruleLine to the FIRST paragraph's own border, never the second.
+    const firstRule = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+    const secondRule = '<w:pBdr><w:bottom w:val="double" w:sz="8"/></w:pBdr>';
+    const xml = makeHdrXml(`${paragraph(firstRule, '')}${paragraph(secondRule, '')}`);
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
     expect(result.unmodeled).toHaveLength(1);
@@ -435,6 +464,14 @@ describe('captureRegion — standalone rule-line paragraph promotion/demotion (#
       region: 'header',
       kind: 'extraParagraph',
     });
+    // Losslessness half of the invariant (#484 review): the demoted entry's
+    // `detail` is the raw SECOND paragraph record, verbatim (compact(paragraph)),
+    // not a summary and not the promoted first paragraph.
+    const demotedParagraph = parseHeaderParagraphs(xml)[1];
+    expect(demotedParagraph).toBeDefined();
+    expect(result.unmodeled[0]?.detail).toEqual(
+      compact(demotedParagraph as Record<string, unknown>)
+    );
   });
 
   // KNOWN AMBIGUITY (ADR-068 addendum, #484, CLAUDE.md OOXML ambiguity
@@ -452,6 +489,26 @@ describe('captureRegion — standalone rule-line paragraph promotion/demotion (#
       `${paragraph(standaloneRule, '')}${paragraph(contentRule, textRun('Header text'))}`
     );
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({ kind: 'extraParagraph' });
+  });
+
+  // KNOWN AMBIGUITY (ADR-068 addendum, #484 review): the same precedence as
+  // above, but with the standalone candidate positioned AFTER the
+  // content-bearing paragraph instead of before it — the reverse document
+  // order from the test above. The content-bearing paragraph's border still
+  // wins outright either way, proving the precedence "never silently varies
+  // by position" (resolveRuleLine's own doc comment) rather than only
+  // happening to hold for one relative ordering.
+  it('KNOWN AMBIGUITY: a content-bearing paragraph’s own border wins outright over a standalone candidate positioned AFTER it', () => {
+    const contentRule = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+    const standaloneRule = '<w:pBdr><w:bottom w:val="double" w:sz="8"/></w:pBdr>';
+    const xml = makeHdrXml(
+      `${paragraph(contentRule, textRun('Header text'))}${paragraph(standaloneRule, '')}`
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Header text' }]);
     expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
     expect(result.unmodeled).toHaveLength(1);
     expect(result.unmodeled[0]).toMatchObject({ kind: 'extraParagraph' });

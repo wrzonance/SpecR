@@ -101,8 +101,14 @@ describe('captureRegion → renderHeaderFooterComposition → Packer → JSZip r
   });
 
   it('the promoted first standalone rule-line paragraph renders once; the demoted second never duplicates a border or leaks as text', async () => {
-    const rule = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
-    const xml = makeHdrXml(`${paragraph(rule, '')}${paragraph(rule, '')}`);
+    // Deliberately DIFFERENT border values per paragraph (single/4 vs
+    // double/8, #484 review): identical candidates can't prove that the
+    // packed XML reflects the FIRST paragraph specifically — a bug that
+    // promoted the last (or picked arbitrarily) would still pack the same
+    // single border an identical-values fixture produces either way.
+    const firstRule = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+    const secondRule = '<w:pBdr><w:bottom w:val="double" w:sz="8"/></w:pBdr>';
+    const xml = makeHdrXml(`${paragraph(firstRule, '')}${paragraph(secondRule, '')}`);
     const captured = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(captured.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
     expect(captured.unmodeled).toHaveLength(1);
@@ -110,14 +116,18 @@ describe('captureRegion → renderHeaderFooterComposition → Packer → JSZip r
 
     const headerXml = await packedHeaderXml(compositionWithHeader(captured.region));
 
-    // Exactly one <w:pBdr> reaches the packed part: the demoted candidate's
-    // `unmodeled` entry is data captureFromParagraphs returns alongside
-    // `region`, but renderHeaderFooterComposition is only ever given
-    // `region` (compositionWithHeader never threads `unmodeled` through) —
-    // so a demotion bug that instead merged/duplicated candidates would
-    // show up here as more than one border in the packed XML.
+    // Exactly one <w:pBdr> reaches the packed part, and it is the FIRST
+    // paragraph's border (single/w:sz=4), never the demoted second's
+    // (double/w:sz=8): the demoted candidate's `unmodeled` entry is data
+    // captureFromParagraphs returns alongside `region`, but
+    // renderHeaderFooterComposition is only ever given `region`
+    // (compositionWithHeader never threads `unmodeled` through) — so a
+    // demotion bug that instead promoted/merged the wrong candidate would
+    // show up here as a "double" border, or more than one border, in the
+    // packed XML.
     expect(headerXml.match(/<w:pBdr>/g)).toHaveLength(1);
     expect(headerXml).toContain('<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>');
+    expect(headerXml).not.toContain('double');
     expect(headerXml).not.toContain('<w:t ');
   });
 
