@@ -300,6 +300,70 @@ describe('collapseComplexFields: w:fldSimple', () => {
     }
     expect(marker.__collapsedField.cachedText).toBe('5');
   });
+
+  // Regression (#485 robustness review): fast-xml-parser renders a childless,
+  // attribute-less <w:fldSimple/> (or <w:fldSimple></w:fldSimple>) as the
+  // PRIMITIVE '' — not a record — so an asRecord() value guard skips it and the
+  // raw run falls through un-collapsed, dropping the field with no unmodeled
+  // entry and no warning. The presence of the KEY, not a record value, marks a
+  // field: an empty/malformed field must still surface as unrecognized (ADR-068:
+  // never silently drop).
+  it('collapses a childless, attribute-less w:fldSimple (parser primitive "") into an unrecognized field rather than silently dropping it', () => {
+    const runs = [{ 'w:fldSimple': '' }];
+    const collapsed = collapseComplexFields(runs);
+    expect(collapsed).toHaveLength(1);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('unrecognized');
+    expect(marker.__collapsedField.rawInstr).toBe('');
+    expect(marker.__collapsedField.cachedText).toBe('');
+  });
+
+  // Regression (#485 robustness review): a w:fldSimple whose own subtree holds
+  // ANOTHER field (a nested w:fldSimple here) is schema-valid but a shape Word
+  // never emits. collapseSimpleField's flat collectRuns gather would recognize
+  // the OUTER code (' PAGE ' -> page) and absorb the inner field's cached runs
+  // into the outer's cachedText, dropping the inner field's identity with no
+  // unmodeled entry. Rather than recognize-and-drop, the whole construct is
+  // preserved verbatim as one unrecognized (unmodeled) field (ADR-068).
+  it('downgrades a w:fldSimple containing a nested field to unrecognized, so the nested field is never silently dropped', () => {
+    const runs = [
+      {
+        'w:fldSimple': {
+          '@_w:instr': ' PAGE ',
+          'w:fldSimple': { '@_w:instr': ' NUMPAGES ', 'w:r': [plainRun('7')] },
+        },
+      },
+    ];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('unrecognized');
+    expect(marker.__collapsedField.rawInstr).toBe(' PAGE ');
+  });
+
+  // A nested complex w:fldChar field inside a w:fldSimple is caught by the same
+  // guard — its instrText/cached runs would otherwise be flattened away.
+  it('downgrades a w:fldSimple containing a nested w:fldChar complex field to unrecognized', () => {
+    const runs = [
+      {
+        'w:fldSimple': {
+          '@_w:instr': ' PAGE ',
+          'w:r': [{ 'w:fldChar': { '@_w:fldCharType': 'begin' } }],
+        },
+      },
+    ];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('unrecognized');
+  });
 });
 
 // ─── toHeaderFooterVisualStyle ───────────────────────────────────────────────

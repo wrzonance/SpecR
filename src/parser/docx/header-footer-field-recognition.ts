@@ -129,6 +129,22 @@ function collapseRunSequence(
   };
 }
 
+// True when a w:fldSimple's own subtree contains a FURTHER field construct — a
+// nested w:fldSimple or a complex w:fldChar field. collectRuns (below) gathers
+// w:t text at any depth, so an inner field's cached runs would be flattened into
+// the outer's cachedText and the inner field's identity silently lost; detecting
+// the nested construct lets collapseSimpleField preserve the whole thing as
+// unmodeled instead (#485 robustness review). Scans for the tag KEYS only — the
+// value shape is irrelevant. Word never emits a nested w:fldSimple; this guards
+// hand-authored / non-Word OOXML.
+function containsNestedField(node: unknown): boolean {
+  if (Array.isArray(node)) return node.some(containsNestedField);
+  const rec = asRecord(node);
+  if (!rec) return false;
+  if ('w:fldSimple' in rec || 'w:fldChar' in rec) return true;
+  return Object.values(rec).some(containsNestedField);
+}
+
 // Collapses a single w:fldSimple element (Word's single-tag field shorthand —
 // used interchangeably with the begin/separate/end w:fldChar sequence for the
 // same field codes, #485) into the same CollapsedFieldRun marker shape as
@@ -138,12 +154,20 @@ function collapseRunSequence(
 // as cachedText: ''. collectRuns (document.ts, imported read-only per
 // CLAUDE.md's module-boundary rule) gathers w:t text from every w:r at any
 // depth in the subtree, so a field wrapped in e.g. w:sdt is still read.
+//
+// A field whose subtree holds ANOTHER field (containsNestedField) can't be
+// cleanly decomposed by that flat gather — recognizing the outer code would
+// absorb the inner field's cached text and drop the inner field with no
+// unmodeled entry. Such a construct is forced to 'unrecognized' so the whole
+// thing is preserved verbatim as unmodeled downstream, never recognized-and-
+// dropped (ADR-068: never silently drop a field).
 function collapseSimpleField(fldSimple: Record<string, unknown>): Record<string, unknown> {
   const rawInstr = extractAttrStr(fldSimple, '@_w:instr');
   const runs: Record<string, unknown>[] = [];
   collectRuns(fldSimple, runs);
   const cachedText = runs.map((r) => extractTextLikeValue(r['w:t'])).join('');
-  const marker: CollapsedFieldRun = { code: recognizeFieldCode(rawInstr), rawInstr, cachedText };
+  const code = containsNestedField(fldSimple) ? 'unrecognized' : recognizeFieldCode(rawInstr);
+  const marker: CollapsedFieldRun = { code, rawInstr, cachedText };
   return { [COLLAPSED_FIELD_KEY]: marker };
 }
 
@@ -171,9 +195,13 @@ export function collapseComplexFields(
       i++;
       continue;
     }
-    const fldSimple = asRecord(run['w:fldSimple']);
-    if (fldSimple) {
-      out.push(collapseSimpleField(fldSimple));
+    // The PRESENCE of the key marks a field — not a record value. fast-xml-parser
+    // renders a childless, attribute-less <w:fldSimple/> as the primitive ''; an
+    // asRecord() value guard would skip it and drop the field un-warned. Default a
+    // primitive value to {} so an empty/malformed field still collapses to an
+    // 'unrecognized' marker (ADR-068: never silently drop), #485 robustness review.
+    if ('w:fldSimple' in run) {
+      out.push(collapseSimpleField(asRecord(run['w:fldSimple']) ?? {}));
       i++;
       continue;
     }
