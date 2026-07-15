@@ -386,6 +386,85 @@ describe('captureRegion — rule line (paragraph border passthrough)', () => {
   });
 });
 
+// Standalone border-only paragraph promotion/demotion (#484, ADR-068
+// addendum): a rule line authored as its own otherwise-empty paragraph
+// (w:pPr/w:pBdr, no runs) is not content-bearing, so it used to be filtered
+// out of captureFromParagraphs entirely with no region contribution and no
+// unmodeled entry — a silent drop in violation of ADR-068 acceptance
+// criterion 4. resolveRuleLine now scans every paragraph (not just the
+// first content-bearing one) for a qualifying border and promotes the
+// first standalone match into region.ruleLine when the content-bearing
+// paragraph itself carries none; any further standalone match demotes to
+// an `extraParagraph` unmodeled entry, position-agnostically.
+describe('captureRegion — standalone rule-line paragraph promotion/demotion (#484, ADR-068 addendum)', () => {
+  it('promotes a standalone border-only paragraph to region.ruleLine when the part has no content-bearing paragraph at all', () => {
+    const xml = makeHdrXml(paragraph('<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>', ''));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region).toEqual({ ruleLine: { enabled: true, style: 'single', widthTwips: 10 } });
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('promotes a leading standalone rule-line paragraph above a borderless text paragraph, not discarding it', () => {
+    const xml = makeHdrXml(
+      `${paragraph('<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>', '')}${paragraph('', textRun('Header text'))}`
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Header text' }]);
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('promotes a trailing standalone rule-line paragraph below a borderless text paragraph (position-agnostic)', () => {
+    const xml = makeFtrXml(
+      `${paragraph('', textRun('Footer text'))}${paragraph('<w:pBdr><w:top w:val="single" w:sz="4"/></w:pBdr>', '')}`
+    );
+    const result = captureRegion(xml, 'top', 'default', 'footer', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Footer text' }]);
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('promotes the first standalone rule-line paragraph and demotes a second one to an extraParagraph unmodeled entry', () => {
+    const rule = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+    const xml = makeHdrXml(`${paragraph(rule, '')}${paragraph(rule, '')}`);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({
+      variant: 'default',
+      region: 'header',
+      kind: 'extraParagraph',
+    });
+  });
+
+  // KNOWN AMBIGUITY (ADR-068 addendum, #484, CLAUDE.md OOXML ambiguity
+  // rule): when a part has BOTH a standalone rule-line paragraph AND a
+  // content-bearing paragraph that also carries its own border, OOXML
+  // gives no canonical tiebreak for which one is "the" rule line. The
+  // content-bearing paragraph's own border wins outright — matching the
+  // pre-existing "first content-bearing paragraph wins" convention — and
+  // the standalone paragraph demotes to an unmodeled entry instead of
+  // being merged or silently dropped.
+  it('KNOWN AMBIGUITY: a content-bearing paragraph’s own border wins outright over a standalone candidate', () => {
+    const standaloneRule = '<w:pBdr><w:bottom w:val="double" w:sz="8"/></w:pBdr>';
+    const contentRule = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+    const xml = makeHdrXml(
+      `${paragraph(standaloneRule, '')}${paragraph(contentRule, textRun('Header text'))}`
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+    expect(result.unmodeled).toHaveLength(1);
+    expect(result.unmodeled[0]).toMatchObject({ kind: 'extraParagraph' });
+  });
+
+  it('regression guard: a part with no paragraphs at all still returns region undefined and unmodeled empty', () => {
+    const xml = makeHdrXml('');
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region).toBeUndefined();
+    expect(result.unmodeled).toEqual([]);
+  });
+});
+
 // Image resolution wiring (#487, Task 4): captureRegion's new optional 6th
 // param (mediaByRId) threads through captureFromParagraphs ->
 // splitParagraphIntoCells -> assignSegmentsToCells -> buildCellContent, which
