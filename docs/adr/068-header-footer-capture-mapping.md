@@ -324,10 +324,17 @@ key their `detail` on `target`/`rId` alone and never set a `part` field;
 a `relsUnreadable` degrade's `detail` always carries `part` (plus
 `reason`, and `rId` only at the paragraph-level path — the table-cell
 path never parses a drawing descriptor, so it has no `rId` to carry).
-This `part`-field presence is what `isRelsUnreadableDetail`
-(`header-footer-media-warnings.ts`) matches on to separate a
-`relsUnreadable` entry from the three pre-existing producers, verified
-against all three explicitly rather than assumed disjoint.
+A `relsUnreadable` entry is separated from the three pre-existing
+producers by `isRelsUnreadableEntry` (`header-footer-media-warnings.ts`),
+which matches the full triple — `kind: 'unresolvedReference'`, a string
+`detail.part`, AND `detail.reason` equal to the exact
+`RELS_UNREADABLE_REASON` constant — not `part`-presence alone. Matching
+all three guards (rather than assuming a bare `part` field is disjoint
+from the pre-existing producers) keeps a future or crafted entry that
+merely happens to carry `detail.part` under a different `kind`/`reason`
+from being pulled out of the generic warnings and silently losing its own
+warning (#503 review). All three pre-existing producers are still
+verified explicitly disjoint.
 
 **Table-cell drawings are counted too (ADR-071 decision 4 stands).** The
 issue's own prior art names `collectCellParagraphs` explicitly, so a
