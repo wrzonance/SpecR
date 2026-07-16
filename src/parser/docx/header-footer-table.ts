@@ -12,6 +12,11 @@
 // isDrawingRun/captureBorderEdge rather than reimplementing them; cell
 // paragraphs are gathered by this module's own deep collectCellParagraphs
 // (w:sdt/w:ins-wrapped cell paragraphs, not just direct w:p children).
+// captureTablesForRegion also takes captureRegion's per-part RunOrder
+// side-table (header-footer-run-order.ts, #485 review) and threads it all
+// the way to each cell's own runsOf call, so a w:fldSimple field interleaved
+// between two w:r runs inside a table cell keeps true document order exactly
+// like the paragraph path does — the table-cell path is not order-exempt.
 
 import { asRecord, compact, extractAttrStr, toArray } from './xml-utils.js';
 import { collapseComplexFields } from './header-footer-field-recognition.js';
@@ -24,6 +29,7 @@ import {
   paragraphHasContent,
 } from './header-footer-region.js';
 import type { HeaderFooterRegion, PartialUnmodeled } from './header-footer-region.js';
+import type { RunOrder } from './header-footer-run-order.js';
 
 // Local indexed-access aliases (mirrors header-footer-region.ts's own
 // pattern): derived structurally off HeaderFooterRegion's new `table` slot
@@ -175,7 +181,8 @@ interface CellCaptureResult {
 
 function captureTableCell(
   tc: Record<string, unknown>,
-  known: KnownSectionIdentity
+  known: KnownSectionIdentity,
+  order: RunOrder
 ): CellCaptureResult {
   const contentBearing = paragraphsInCell(tc).filter((p) => paragraphHasContent(runsOf(p)));
   const extraUnmodeled: readonly PartialUnmodeled[] = contentBearing
@@ -195,7 +202,15 @@ function captureTableCell(
   // table-cell drawing run always becomes an unmodeled `image` entry here,
   // never a modeled `image` field. buildCellContent is deliberately called
   // WITHOUT a mediaByRId argument for the same reason.
-  const collapsed = collapseComplexFields(runsOf(first));
+  //
+  // `order` (#485 review, CRITICAL) is threaded from captureRegion's SAME
+  // per-part RunOrder side-table the paragraph path uses (captureFromParagraphs'
+  // own runsOf(first, order) call in header-footer-region.ts) — this cell's
+  // content is exactly as user-visible as a paragraph cell's, so it needs the
+  // exact same order correction for a w:fldSimple field interleaved between
+  // two w:r runs, not just the run-SET membership checks the rest of this
+  // module's runsOf calls (paragraphsInCell filtering) rely on.
+  const collapsed = collapseComplexFields(runsOf(first, order), order);
   const imageUnmodeled: readonly PartialUnmodeled[] = collapsed
     .filter(isDrawingRun)
     .map((run): PartialUnmodeled => ({ kind: 'image', detail: compact(run) }));
@@ -218,9 +233,10 @@ interface RowCaptureResult {
 
 function captureTableRow(
   tr: Record<string, unknown>,
-  known: KnownSectionIdentity
+  known: KnownSectionIdentity,
+  order: RunOrder
 ): RowCaptureResult {
-  const built = recordsOf(tr, 'w:tc').map((tc) => captureTableCell(tc, known));
+  const built = recordsOf(tr, 'w:tc').map((tc) => captureTableCell(tc, known, order));
   return { row: { cells: built.map((b) => b.cell) }, unmodeled: built.flatMap((b) => b.unmodeled) };
 }
 
@@ -228,13 +244,14 @@ function captureTableRow(
 
 function captureTable(
   tbl: Record<string, unknown>,
-  known: KnownSectionIdentity
+  known: KnownSectionIdentity,
+  order: RunOrder
 ): TableCaptureResult {
   const rows = recordsOf(tbl, 'w:tr');
   if (rows.length === 0 || hasNestedTable(tbl) || hasUnsupportedMerge(tbl)) {
     return { table: undefined, unmodeled: [{ kind: 'table', detail: compact(tbl) }] };
   }
-  const built = rows.map((tr) => captureTableRow(tr, known));
+  const built = rows.map((tr) => captureTableRow(tr, known, order));
   const table = compact({
     rows: built.map((b) => b.row),
     columnWidths: columnWidthsOf(tbl),
@@ -251,16 +268,29 @@ function captureTable(
  * follows the captured one, and regardless of its own structural validity —
  * is preserved whole as an unmodeled `{ kind: 'table' }` entry, never merged
  * into or overwriting the captured table.
+ *
+ * `order` (#485 review, CRITICAL) is header-footer-run-order.ts's per-part
+ * RunOrder side-table — the SAME one captureRegion computes once from this
+ * SAME partXml/root and threads into its own paragraph-cell capture
+ * (header-footer-region.ts's captureFromParagraphs). Table-cell content is
+ * captured via this same module's runsOf/collectRunsAndFields traversal, so
+ * it is equally vulnerable to fast-xml-parser's grouped-mode sibling-merge
+ * reordering when a w:fldSimple field sits between two w:r runs inside one
+ * cell — this side-table restores true document order there too, mirroring
+ * (not diverging from) the paragraph path. Unlike mediaByRId (table-cell
+ * images stay out of scope, #487, ADR-071 decision 4), RunOrder is NOT an
+ * out-of-scope exclusion — every table-cell field capture needs it.
  */
 export function captureTablesForRegion(
   root: Record<string, unknown>,
-  known: KnownSectionIdentity
+  known: KnownSectionIdentity,
+  order: RunOrder
 ): TableCaptureResult {
   const tables = recordsOf(root, 'w:tbl');
   const first = tables[0];
   if (!first) return { table: undefined, unmodeled: [] };
 
-  const captured = captureTable(first, known);
+  const captured = captureTable(first, known, order);
   const extraUnmodeled: readonly PartialUnmodeled[] = tables
     .slice(1)
     .map((tbl): PartialUnmodeled => ({ kind: 'table', detail: compact(tbl) }));

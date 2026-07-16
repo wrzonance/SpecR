@@ -77,6 +77,15 @@ function gridSpan(n: number): string {
   return `<w:gridSpan w:val="${n}"/>`;
 }
 
+// Word's single-tag field shorthand (#485) — parallels
+// header-footer-region.test.ts's own simpleFieldRun helper; kept local to
+// this file rather than imported, per this suite's existing convention of
+// each header-footer test file owning its own XML-fragment builders (see
+// textRun/paragraph/cell above, all duplicated rather than shared).
+function simpleFieldRun(instr: string, cachedText: string): string {
+  return `<w:fldSimple w:instr="${instr}"><w:r><w:t>${cachedText}</w:t></w:r></w:fldSimple>`;
+}
+
 describe('captureRegion — simple table capture (#309, ADR-071)', () => {
   it('captures a multi-row, multi-cell table into region.table with literal content per cell', () => {
     const xml = makeHdrXml(
@@ -298,5 +307,86 @@ describe('captureRegion — "first table wins" (ADR-071 decision 5, mirrors ADR-
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(result.region?.table).toBeUndefined();
     expect(result.unmodeled.filter((u) => u.kind === 'table')).toHaveLength(2);
+  });
+});
+
+// #485 — captureTableCell's existing `collapseComplexFields(runsOf(first))`
+// call (zero production changes in THIS file) gains w:fldSimple support for
+// free once header-footer-region.ts's runsOf/paragraphHasContent learn the
+// w:fldSimple terminal: proves the traversal-layer fix wired in
+// header-footer-region.ts propagates through to the table-cell path, the
+// same way it already does for the region/paragraph path (see
+// header-footer-region.test.ts's own w:fldSimple describe block).
+describe('captureRegion — table-cell w:fldSimple field recognition (#485, table-cell parity)', () => {
+  it('recognizes a PAGE field authored as w:fldSimple inside a table cell as a modeled field, matching the w:fldChar-authored equivalent', () => {
+    const xml = makeHdrXml(table(row(cell(paragraph(simpleFieldRun(' PAGE ', '3'))))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      { cells: [{ content: [{ kind: 'pageNumber' }] }] },
+    ]);
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('preserves an unrecognized field code (e.g. STYLEREF) authored as w:fldSimple inside a table cell as unmodeled unrecognizedField, never guessed into a known field — the surrounding table is still captured', () => {
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(simpleFieldRun(' STYLEREF Heading1 ', 'Some Style Text')))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([{ cells: [{}] }]);
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'unrecognizedField' })
+    );
+  });
+
+  it('recognizes a w:fldSimple field alongside literal text in the same cell, preserving run order (parity with paragraph-level buildCellContent)', () => {
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(`${textRun('Page ')}${simpleFieldRun(' PAGE ', '3')}`))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      {
+        cells: [
+          {
+            content: [{ kind: 'literal', text: 'Page ' }, { kind: 'pageNumber' }],
+          },
+        ],
+      },
+    ]);
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  // #485 review (CRITICAL — table-cell path): the two-run-only test above
+  // (w:r THEN w:fldSimple, nothing after) never exercises fast-xml-parser's
+  // grouped-mode sibling-merge bug, because there is no SECOND w:r after the
+  // field for the parser to merge out of place. A field genuinely
+  // INTERLEAVED between two literal runs at the same parent is what
+  // header-footer-region.test.ts's own "INVARIANT: preserves true document
+  // order" test (paragraph path) exercises — this is that same shape, one
+  // level deeper inside a table cell, proving captureTableCell's own
+  // runsOf(first) call restores true order too, not just the paragraph
+  // path's runsOf(first, order) call.
+  it('preserves true document order for a w:fldSimple field interleaved BETWEEN two literal runs inside a table cell (#485 review, CRITICAL)', () => {
+    const xml = makeHdrXml(
+      table(
+        row(
+          cell(paragraph(`${textRun('Page ')}${simpleFieldRun(' PAGE ', '3')}${textRun(' of 10')}`))
+        )
+      )
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.table?.rows).toEqual([
+      {
+        cells: [
+          {
+            content: [
+              { kind: 'literal', text: 'Page ' },
+              { kind: 'pageNumber' },
+              { kind: 'literal', text: ' of 10' },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(result.unmodeled).toEqual([]);
   });
 });

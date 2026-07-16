@@ -9,7 +9,9 @@
 // this module calls and merges into the same region. Field-code/text
 // recognition itself lives in header-footer-field-recognition.ts;
 // relationship/section-property discovery lives in
-// header-footer-relationships.ts.
+// header-footer-relationships.ts; recovering true document order across an
+// interleaved w:fldSimple/w:r sequence (#485 review) lives in
+// header-footer-run-order.ts.
 
 import { ParserError } from '../error.js';
 import {
@@ -19,7 +21,6 @@ import {
   extractAttrStr,
   toArray,
 } from './xml-utils.js';
-import { collectRuns } from './document.js';
 import { extractRunProps } from './resolver.js';
 import {
   collapseComplexFields,
@@ -35,6 +36,8 @@ import type {
 } from './header-footer-field-recognition.js';
 import { captureTablesForRegion } from './header-footer-table.js';
 import { resolveDrawingImage } from './header-footer-images.js';
+import { computeRunOrder } from './header-footer-run-order.js';
+import type { RunOrder } from './header-footer-run-order.js';
 import type { HeaderFooterUnmodeledEntry } from './types.js';
 import type { HeaderFooterVariant } from '../../ast/index.js';
 
@@ -106,21 +109,120 @@ export function paragraphsOf(root: Record<string, unknown>): readonly Record<str
   );
 }
 
-// Deep scan (document.ts's collectRuns, reused here #306 review): a header/footer
-// paragraph's runs can nest inside w:hyperlink, tracked-change wrappers (w:ins/w:del),
-// or a w:sdt content control — the exact same wrapper vocabulary the main body parser
-// already handles. A direct-children-only scan silently dropped any wrapped header/
-// footer text with no unmodeled entry and no warning; this makes wrapped content
-// visible to capture the same way it already is for ordinary body paragraphs.
-export function runsOf(paragraph: Record<string, unknown>): readonly Record<string, unknown>[] {
+// Terminal-run push for collectRunsAndFields's two dispatch keys (#485): a
+// w:r pushes each sibling as-is (matches document.ts's collectRuns exactly),
+// while a w:fldSimple re-wraps each sibling under its own tag key so
+// header-footer-field-recognition.ts's collapseComplexFields still sees a
+// recognizable OOXML-shaped `{ 'w:fldSimple': element }` marker — never a
+// bare-unwrapped element and never a pre-collapsed one (decision 3). Shared
+// by both terminal branches so collectRunsAndFields's own dispatch stays a
+// single merged guard rather than two parallel guard-continues (spike
+// learning #2 — three branches measured complexity 11/cognitive 14 against
+// the enforced cap of 10).
+function pushTerminalRun(
+  key: 'w:r' | 'w:fldSimple',
+  child: unknown,
+  acc: Record<string, unknown>[]
+): void {
+  const siblings = toArray<Record<string, unknown>>(
+    child as readonly Record<string, unknown>[] | undefined
+  );
+  if (key === 'w:r') {
+    acc.push(...siblings);
+    return;
+  }
+  acc.push(...siblings.map((element) => ({ 'w:fldSimple': element })));
+}
+
+// Local near-duplicate of document.ts's collectRuns (deliberate — see module
+// comment / ADR-068 decision 2), scoped to this module's own terminal
+// vocabulary: a header/footer paragraph's runs can nest inside w:hyperlink,
+// tracked-change wrappers (w:ins/w:del), or a w:sdt content control, same as
+// the main body parser already handles (#306 review); a w:fldSimple element
+// (#485) is now ALSO a terminal — its whole subtree is captured as one
+// wrapped run rather than recursed into, so a field authored with Word's
+// single-tag shorthand survives to collapseComplexFields instead of being
+// silently flattened into an ordinary literal run. Two-branch shape (skip
+// check, then a single merged w:r|w:fldSimple terminal check) is what clears
+// the enforced complexity/cognitive-complexity cap of 10 — mirrors the
+// existing collectCellParagraphs precedent in header-footer-table.ts.
+//
+// CAVEAT this function alone cannot fix (#485 review, CRITICAL): when a
+// w:fldSimple sits BETWEEN two w:r terminals at the SAME parent, fast-xml-
+// parser's grouped-mode object model merges the second w:r into the first's
+// array — this traversal's own Object.entries order then reflects first-tag-
+// appearance, not true document order. runsOf (below) corrects that using an
+// optional RunOrder side-table from header-footer-run-order.ts; this
+// function's OWN push order is intentionally left as-is (it is still correct
+// whenever w:r/w:fldSimple never interleave at one parent, and every direct
+// caller either passes a RunOrder or is order-independent — see runsOf).
+function collectRunsAndFields(value: unknown, acc: Record<string, unknown>[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectRunsAndFields(item, acc);
+    return;
+  }
+  if (value === null || typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'w:rPr' || key === 'w:pPr') continue;
+    if (key === 'w:r' || key === 'w:fldSimple') {
+      pushTerminalRun(key, child, acc);
+      continue;
+    }
+    collectRunsAndFields(child, acc);
+  }
+}
+
+// header-footer-run-order.ts's side-table is keyed on the RAW w:fldSimple
+// element (the same object header-footer-run-order.ts's walkOrder pairs from
+// the grouped parse), but pushTerminalRun above re-wraps that same element
+// under a fresh `{ 'w:fldSimple': element }` object for every piece it
+// pushes — a NEW object, never reference-equal to the raw element the order
+// side-table was keyed on. Unwrap back to that raw element before the
+// lookup, exactly undoing pushTerminalRun's own wrapping; a plain w:r piece
+// is never wrapped, so it always looks itself up directly. (OOXML's CT_R
+// schema never allows a w:fldSimple child of w:r, so this check is
+// unambiguous — never a false match against genuine run content.)
+function runOrderKey(piece: Record<string, unknown>): Record<string, unknown> {
+  const wrapped = piece['w:fldSimple'];
+  return wrapped !== null && typeof wrapped === 'object'
+    ? (wrapped as Record<string, unknown>)
+    : piece;
+}
+
+function byRunOrder(
+  order: RunOrder
+): (a: Record<string, unknown>, b: Record<string, unknown>) => number {
+  return (a, b) =>
+    (order.get(runOrderKey(a)) ?? Number.MAX_SAFE_INTEGER) -
+    (order.get(runOrderKey(b)) ?? Number.MAX_SAFE_INTEGER);
+}
+
+// `order` is OPTIONAL: callers that only need the run SET (paragraphHasContent
+// membership checks, resolveRuleLine's run-free/run-count checks) are order-
+// independent and pass nothing, preserving this function's existing direct-
+// object-fixture test coverage unchanged. Callers that assemble user-visible
+// content (captureFromParagraphs' cell-content call) pass captureRegion's
+// per-part RunOrder (#485 review) to restore true document order across an
+// interleaved w:fldSimple/w:r sequence that collectRunsAndFields's own
+// traversal alone cannot preserve.
+export function runsOf(
+  paragraph: Record<string, unknown>,
+  order?: RunOrder
+): readonly Record<string, unknown>[] {
   const runs: Record<string, unknown>[] = [];
-  collectRuns(paragraph, runs);
-  return runs;
+  collectRunsAndFields(paragraph, runs);
+  return order ? [...runs].sort(byRunOrder(order)) : runs;
 }
 
 export function paragraphHasContent(runs: readonly Record<string, unknown>[]): boolean {
   return runs.some(
-    (r) => 'w:t' in r || 'w:fldChar' in r || 'w:instrText' in r || 'w:drawing' in r || 'w:pict' in r
+    (r) =>
+      'w:t' in r ||
+      'w:fldChar' in r ||
+      'w:instrText' in r ||
+      'w:drawing' in r ||
+      'w:pict' in r ||
+      'w:fldSimple' in r
   );
 }
 
@@ -427,12 +529,16 @@ function assignSegmentsToCells(
 function splitParagraphIntoCells(
   runs: readonly Record<string, unknown>[],
   known: KnownSectionIdentity,
+  order: RunOrder,
   mediaByRId?: ReadonlyMap<string, Uint8Array>
 ): {
   readonly cells: Partial<Record<CellKey, HeaderFooterCell>>;
   readonly unmodeled: readonly PartialUnmodeled[];
 } {
-  const collapsed = collapseComplexFields(runs);
+  // `order` also reaches collapseComplexFields (not just the runsOf call that
+  // produced `runs`) so a w:fldSimple's own cached runs are joined in true
+  // document order, not fast-xml-parser's grouped order (#485 review).
+  const collapsed = collapseComplexFields(runs, order);
   const segments = splitOnTabs(collapsed);
   return assignSegmentsToCells(segments, known, mediaByRId);
 }
@@ -460,6 +566,7 @@ function captureFromParagraphs(
   paragraphs: readonly Record<string, unknown>[],
   edge: 'top' | 'bottom',
   known: KnownSectionIdentity,
+  order: RunOrder,
   mediaByRId?: ReadonlyMap<string, Uint8Array>
 ): {
   readonly region: HeaderFooterRegion | undefined;
@@ -472,8 +579,16 @@ function captureFromParagraphs(
   const first = contentBearing[0];
 
   const { ruleLine, unmodeled: ruleLineUnmodeled } = resolveRuleLine(paragraphs, first, edge);
+  // Order-corrected (#485 review): this call site's output becomes
+  // user-visible cell content, so it must survive an interleaved
+  // w:fldSimple/w:r sequence in true document order — the OTHER order-
+  // corrected call site is header-footer-table.ts's captureTableCell, which
+  // takes the same `order` side-table for its own user-visible cell content.
+  // Every other runsOf call in this module (above, and inside
+  // resolveRuleLine) only tests run SET membership/count, which is
+  // order-independent.
   const { cells, unmodeled: cellUnmodeled } = first
-    ? splitParagraphIntoCells(runsOf(first), known, mediaByRId)
+    ? splitParagraphIntoCells(runsOf(first, order), known, order, mediaByRId)
     : { cells: {}, unmodeled: [] };
 
   return {
@@ -500,6 +615,17 @@ function captureFromParagraphs(
  * given it: table-cell images stay out of scope (ADR-071 decision 4), so a
  * table cell's own drawing pre-filter (header-footer-table.ts) still always
  * produces an unmodeled entry, never a modeled `image` field.
+ *
+ * A run-ordinal side-table (header-footer-run-order.ts's computeRunOrder,
+ * #485 review) is built once per part, from this SAME partXml, and threaded
+ * into BOTH captureFromParagraphs' order-sensitive runsOf call AND
+ * captureTablesForRegion (header-footer-table.ts, #485 review) so every
+ * order-sensitive runsOf call in this part — paragraph cell or table cell —
+ * restores true document order across an interleaved w:fldSimple/w:r
+ * sequence that the grouped-mode parse above cannot preserve on its own.
+ * Unlike mediaByRId (table-cell images stay out of scope, ADR-071 decision
+ * 4), RunOrder is not an exclusion — table-cell fields need the same
+ * correction paragraph-cell fields do.
  */
 export function captureRegion(
   partXml: string,
@@ -513,9 +639,10 @@ export function captureRegion(
   const root = asRecord(parsed[partRootKey(region)]);
   if (!root) return { region: undefined, unmodeled: [] };
 
+  const order = computeRunOrder(partXml, partRootKey(region), root, region);
   const toStamped = stamp(variant, region);
-  const fromParagraphs = captureFromParagraphs(paragraphsOf(root), edge, known, mediaByRId);
-  const tableResult = captureTablesForRegion(root, known);
+  const fromParagraphs = captureFromParagraphs(paragraphsOf(root), edge, known, order, mediaByRId);
+  const tableResult = captureTablesForRegion(root, known, order);
   const mergedRegion = compact({
     ...fromParagraphs.region,
     table: tableResult.table,

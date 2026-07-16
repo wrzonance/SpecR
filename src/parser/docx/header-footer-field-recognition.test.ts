@@ -199,6 +199,189 @@ describe('collapseComplexFields', () => {
   });
 });
 
+// ─── collapseComplexFields: w:fldSimple (#485) ───────────────────────────────
+//
+// INVARIANT (ADR-068 acceptance criterion 4, cross-representation
+// equivalence): a `w:fldSimple` element — Word's single-tag field shorthand,
+// used interchangeably with the begin/separate/end `w:fldChar` sequence for
+// the SAME field codes — must collapse into a structurally identical
+// CollapsedFieldRun marker. Nothing about a field's origin representation
+// may leak downstream, and nothing may be silently left un-warned by falling
+// through as an unrecognized raw run.
+function fldSimpleRun(
+  instr: string,
+  innerRuns: readonly Record<string, unknown>[] = []
+): Record<string, unknown> {
+  return {
+    'w:fldSimple': {
+      '@_w:instr': instr,
+      'w:r': innerRuns,
+    },
+  };
+}
+
+describe('collapseComplexFields: w:fldSimple', () => {
+  it('collapses a w:fldSimple PAGE field into the same marker shape as a w:fldChar sequence', () => {
+    const runs = [fldSimpleRun(' PAGE ', [plainRun('3')])];
+    const collapsed = collapseComplexFields(runs);
+    expect(collapsed).toHaveLength(1);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('page');
+    expect(marker.__collapsedField.rawInstr).toBe(' PAGE ');
+    expect(marker.__collapsedField.cachedText).toBe('3');
+  });
+
+  it('recognizes a w:fldSimple DATE field and accumulates cached text across multiple inner runs', () => {
+    const runs = [fldSimpleRun(' DATE \\@ "M/d/yyyy" ', [plainRun('7/13/'), plainRun('2026')])];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('date');
+    expect(marker.__collapsedField.cachedText).toBe('7/13/2026');
+  });
+
+  it('collapses an unrecognized field code (e.g. STYLEREF) rather than leaving it as a raw, un-warnable run', () => {
+    const runs = [fldSimpleRun(' STYLEREF "Heading 1" ', [plainRun('Some Style Text')])];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('unrecognized');
+    expect(marker.__collapsedField.cachedText).toBe('Some Style Text');
+  });
+
+  it('tolerates a missing @_w:instr attribute (empty rawInstr -> unrecognized)', () => {
+    const runs = [{ 'w:fldSimple': { 'w:r': [plainRun('x')] } }];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.rawInstr).toBe('');
+    expect(marker.__collapsedField.code).toBe('unrecognized');
+  });
+
+  it('tolerates a w:fldSimple with no inner runs (empty cachedText, never thrown)', () => {
+    const runs = [{ 'w:fldSimple': { '@_w:instr': ' PAGE ' } }];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.cachedText).toBe('');
+  });
+
+  it('leaves surrounding plain runs untouched, collapsing only the w:fldSimple in the middle', () => {
+    const runs = [plainRun('Page '), fldSimpleRun(' PAGE ', [plainRun('3')]), plainRun(' of N')];
+    const collapsed = collapseComplexFields(runs);
+    expect(collapsed).toHaveLength(3);
+    expect(collapsed[0]).toEqual(plainRun('Page '));
+    expect(isCollapsedFieldRun(collapsed[1] as Record<string, unknown>)).toBe(true);
+    expect(collapsed[2]).toEqual(plainRun(' of N'));
+  });
+
+  it('reads cached text from runs nested inside a wrapper (e.g. w:sdt) within the w:fldSimple, via collectRuns traversal', () => {
+    const nested = {
+      'w:fldSimple': {
+        '@_w:instr': ' PAGE ',
+        'w:sdt': { 'w:sdtContent': { 'w:r': [plainRun('5')] } },
+      },
+    };
+    const collapsed = collapseComplexFields([nested]);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.cachedText).toBe('5');
+  });
+
+  // Regression (#485 robustness review): fast-xml-parser renders a childless,
+  // attribute-less <w:fldSimple/> (or <w:fldSimple></w:fldSimple>) as the
+  // PRIMITIVE '' — not a record — so an asRecord() value guard skips it and the
+  // raw run falls through un-collapsed, dropping the field with no unmodeled
+  // entry and no warning. The presence of the KEY, not a record value, marks a
+  // field: an empty/malformed field must still surface as unrecognized (ADR-068:
+  // never silently drop).
+  it('collapses a childless, attribute-less w:fldSimple (parser primitive "") into an unrecognized field rather than silently dropping it', () => {
+    const runs = [{ 'w:fldSimple': '' }];
+    const collapsed = collapseComplexFields(runs);
+    expect(collapsed).toHaveLength(1);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('unrecognized');
+    expect(marker.__collapsedField.rawInstr).toBe('');
+    expect(marker.__collapsedField.cachedText).toBe('');
+  });
+
+  // Regression (#485 robustness review): a w:fldSimple whose own subtree holds
+  // ANOTHER field (a nested w:fldSimple here) is schema-valid but a shape Word
+  // never emits. collapseSimpleField's flat collectRuns gather would recognize
+  // the OUTER code (' PAGE ' -> page) and absorb the inner field's cached runs
+  // into the outer's cachedText, dropping the inner field's identity with no
+  // unmodeled entry. Rather than recognize-and-drop, the whole construct is
+  // preserved verbatim as one unrecognized (unmodeled) field (ADR-068).
+  it('downgrades a w:fldSimple containing a nested field to unrecognized, so the nested field is never silently dropped', () => {
+    const runs = [
+      {
+        'w:fldSimple': {
+          '@_w:instr': ' PAGE ',
+          'w:fldSimple': { '@_w:instr': ' NUMPAGES ', 'w:r': [plainRun('7')] },
+        },
+      },
+    ];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('unrecognized');
+    expect(marker.__collapsedField.rawInstr).toBe(' PAGE ');
+  });
+
+  // Regression (#485 CodeRabbit review): a single w:r with multiple w:t children
+  // makes r['w:t'] an ARRAY; extractTextLikeValue returned '' for arrays, so the
+  // field's cached display text was silently dropped. The text-like extractor now
+  // flattens arrays, concatenating every w:t piece (ADR-068: never drop content).
+  it('concatenates cached text from a run carrying multiple w:t children (array-valued w:t)', () => {
+    const runs = [
+      { 'w:fldSimple': { '@_w:instr': ' STYLEREF ', 'w:r': { 'w:t': ['Div 09 ', '91 26'] } } },
+    ];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.cachedText).toBe('Div 09 91 26');
+  });
+
+  // A nested complex w:fldChar field inside a w:fldSimple is caught by the same
+  // guard — its instrText/cached runs would otherwise be flattened away.
+  it('downgrades a w:fldSimple containing a nested w:fldChar complex field to unrecognized', () => {
+    const runs = [
+      {
+        'w:fldSimple': {
+          '@_w:instr': ' PAGE ',
+          'w:r': [{ 'w:fldChar': { '@_w:fldCharType': 'begin' } }],
+        },
+      },
+    ];
+    const collapsed = collapseComplexFields(runs);
+    const marker = collapsed[0];
+    if (marker === undefined || !isCollapsedFieldRun(marker)) {
+      throw new Error('expected a collapsed field run');
+    }
+    expect(marker.__collapsedField.code).toBe('unrecognized');
+  });
+});
+
 // ─── toHeaderFooterVisualStyle ───────────────────────────────────────────────
 
 describe('toHeaderFooterVisualStyle', () => {

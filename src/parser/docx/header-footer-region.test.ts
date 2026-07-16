@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { ParserError } from '../error.js';
-import { captureRegion, paragraphsOf } from './header-footer-region.js';
+import {
+  captureRegion,
+  paragraphHasContent,
+  paragraphsOf,
+  runsOf,
+} from './header-footer-region.js';
 import { asRecord, compact, createDocumentXmlParser } from './xml-utils.js';
+import { collectRuns } from './document.js';
 
 const KNOWN = { section: '09 91 26', title: 'STAINING AND TRANSPARENT FINISHING' };
 
@@ -62,6 +68,13 @@ function fieldRuns(instr: string, cachedText: string): string {
     `<w:r><w:t>${cachedText}</w:t></w:r>` +
     '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
   );
+}
+
+// Word's single-tag field shorthand (#485) — @_w:instr carries the field
+// code, and the cached display text sits in a nested w:r, parallel to
+// fieldRuns' w:fldChar begin/separate/end sequence above.
+function simpleFieldRun(instr: string, cachedText: string): string {
+  return `<w:fldSimple w:instr="${instr}"><w:r><w:t>${cachedText}</w:t></w:r></w:fldSimple>`;
 }
 
 function tableXml(): string {
@@ -262,6 +275,143 @@ describe('captureRegion — content nested inside wrapper elements is not silent
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(result.region).toBeUndefined();
     expect(result.unmodeled).toEqual([]);
+  });
+});
+
+// #485 traversal layer: runsOf's local collectRunsAndFields must terminate at
+// a w:fldSimple element as a whole (re-wrapped as { 'w:fldSimple': element }),
+// the same way it already terminates at w:r — rather than recursing into it
+// and silently flattening its cached-text w:r into an ordinary literal run,
+// which is what document.ts's shared collectRuns still does (and must keep
+// doing, unmodified, for the ordinary body-paragraph path).
+describe('runsOf / paragraphHasContent — w:fldSimple terminal handling (#485 traversal layer)', () => {
+  it('paragraphHasContent recognizes a bare w:fldSimple-wrapped run as content-bearing', () => {
+    expect(paragraphHasContent([{ 'w:fldSimple': { '@_w:instr': ' PAGE ' } }])).toBe(true);
+  });
+
+  it('paragraphHasContent stays false for a run with none of the recognized content keys', () => {
+    expect(paragraphHasContent([{ 'w:rPr': {} }])).toBe(false);
+  });
+
+  it('collects a w:fldSimple as exactly one terminal run — no double-counting of its inner cached-text run', () => {
+    const xml = makeHdrXml(paragraph('', simpleFieldRun(' PAGE ', '3')));
+    const [paragraphNode] = parseHeaderParagraphs(xml);
+    if (paragraphNode === undefined) throw new Error('test fixture parse failure: no paragraph');
+    const runs = runsOf(paragraphNode);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toHaveProperty('w:fldSimple');
+  });
+
+  it('finds a w:fldSimple nested inside a w:sdt content control (deep-unwrap parity with w:r)', () => {
+    const wrapped = `<w:sdt><w:sdtPr><w:id w:val="1"/></w:sdtPr><w:sdtContent>${simpleFieldRun(' PAGE ', '3')}</w:sdtContent></w:sdt>`;
+    const xml = makeHdrXml(paragraph('', wrapped));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'pageNumber' }]);
+  });
+
+  // #485 review (finding: traversal completeness / deep-unwrap parity): the
+  // w:sdt case above is only ONE of this module's own terminal wrappers
+  // (header-footer-region.ts's module comment names w:hyperlink and
+  // tracked-change w:ins/w:del alongside w:sdt) — each must independently
+  // prove a nested w:fldSimple is still found, not merely assumed by
+  // analogy to w:sdt or to w:r's own pre-existing coverage.
+  it('finds a w:fldSimple nested inside a w:hyperlink (deep-unwrap parity with w:r)', () => {
+    const wrapped = `<w:hyperlink r:id="rId9">${simpleFieldRun(' PAGE ', '3')}</w:hyperlink>`;
+    const xml = makeHdrXml(paragraph('', wrapped));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'pageNumber' }]);
+  });
+
+  it('finds a w:fldSimple nested inside a tracked-change insertion (w:ins) (deep-unwrap parity with w:r)', () => {
+    const wrapped = `<w:ins w:id="1" w:author="Editor">${simpleFieldRun(' PAGE ', '3')}</w:ins>`;
+    const xml = makeHdrXml(paragraph('', wrapped));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'pageNumber' }]);
+  });
+
+  it('finds a w:fldSimple nested inside a tracked-change deletion (w:del) (deep-unwrap parity with w:r)', () => {
+    const wrapped = `<w:del w:id="2" w:author="Editor">${simpleFieldRun(' PAGE ', '3')}</w:del>`;
+    const xml = makeHdrXml(paragraph('', wrapped));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([{ kind: 'pageNumber' }]);
+  });
+
+  // #485 review (Major — data integrity): the SAME grouped-parse reordering
+  // that afflicts paragraph-level runs also afflicts a w:fldSimple's own cached
+  // content. A field whose cached display interleaves a direct w:r, a
+  // w:hyperlink-wrapped w:r, then another direct w:r groups the two direct runs
+  // apart from the wrapped one, so a grouped-order gather yields 'ACB'. The
+  // per-part run-order side-table now descends into the w:fldSimple, so
+  // collapseSimpleField restores true document order 'ABC' in cachedText.
+  // (cachedText is surfaced on an UNRECOGNIZED field, so STYLEREF is used.)
+  it('preserves document order of a w:fldSimple cached run interleaving direct and wrapper-nested runs', () => {
+    const fld =
+      '<w:fldSimple w:instr=" STYLEREF ">' +
+      '<w:r><w:t>A</w:t></w:r>' +
+      '<w:hyperlink r:id="rId9"><w:r><w:t>B</w:t></w:r></w:hyperlink>' +
+      '<w:r><w:t>C</w:t></w:r>' +
+      '</w:fldSimple>';
+    const xml = makeHdrXml(paragraph('', fld));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    const entry = result.unmodeled.find((u) => u.kind === 'unrecognizedField');
+    expect(entry?.detail).toEqual({ rawInstr: ' STYLEREF ', cachedText: 'ABC' });
+  });
+
+  // #485 review (CRITICAL finding — cross-representation equivalence): fast-
+  // xml-parser's grouped (non-preserveOrder) parse mode collapses every
+  // same-tag sibling into one array keyed by first appearance — when a
+  // w:fldSimple sits BETWEEN two plain w:r runs, the second w:r gets merged
+  // into the FIRST w:r's array instead of staying interleaved after the
+  // field, silently reordering captured content. The identical field/text
+  // layout authored as w:fldChar never hits this: every piece (begin/
+  // instrText/separate/cached/end) is itself wrapped in w:r, so it all stays
+  // under ONE 'w:r' key and true order survives. Run for both
+  // representations so a regression in either direction is caught.
+  it.each([
+    ['w:fldChar', fieldRuns(' PAGE ', '3')],
+    ['w:fldSimple', simpleFieldRun(' PAGE ', '3')],
+  ])(
+    'INVARIANT: preserves true document order when a %s field is interleaved between two plain w:r runs',
+    (_label, fieldXml) => {
+      const xml = makeHdrXml(paragraph('', `${textRun('Page ')}${fieldXml}${textRun(' of 10')}`));
+      const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+      expect(result.region?.left?.content).toEqual([
+        { kind: 'literal', text: 'Page ' },
+        { kind: 'pageNumber' },
+        { kind: 'literal', text: ' of 10' },
+      ]);
+      expect(result.unmodeled).toEqual([]);
+    }
+  );
+
+  it('recognizes a PAGE field authored as w:fldSimple as content-bearing and captures it as a modeled field (parity with w:fldChar)', () => {
+    const xml = makeHdrXml(paragraph('', `${textRun('Page ')}${simpleFieldRun(' PAGE ', '3')}`));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region?.left?.content).toEqual([
+      { kind: 'literal', text: 'Page ' },
+      { kind: 'pageNumber' },
+    ]);
+    expect(result.unmodeled).toEqual([]);
+  });
+
+  it('preserves an unrecognized field code (e.g. STYLEREF) authored as w:fldSimple as unmodeled, never guessed into a known field (parity with the w:fldChar path tested above)', () => {
+    const xml = makeHdrXml(paragraph('', simpleFieldRun(' STYLEREF Heading1 ', 'Some Style Text')));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+    expect(result.region).toBeUndefined();
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'unrecognizedField' })
+    );
+  });
+
+  it("document.ts's shared collectRuns is unmodified — it still flattens w:fldSimple into its inner w:r, unlike header-footer-region.ts's own local traversal", () => {
+    const xml = makeHdrXml(paragraph('', simpleFieldRun(' PAGE ', '3')));
+    const [paragraphNode] = parseHeaderParagraphs(xml);
+    if (paragraphNode === undefined) throw new Error('test fixture parse failure: no paragraph');
+    const sharedRuns: Record<string, unknown>[] = [];
+    collectRuns(paragraphNode, sharedRuns);
+    expect(sharedRuns).toHaveLength(1);
+    expect(sharedRuns[0]).not.toHaveProperty('w:fldSimple');
+    expect(sharedRuns[0]).toHaveProperty('w:t');
   });
 });
 
@@ -568,6 +718,75 @@ describe('captureRegion — standalone rule-line paragraph promotion/demotion (#
     expect(skipped).toBeDefined();
     expect(result.unmodeled[0]?.detail).toEqual(compact(skipped as Record<string, unknown>));
   });
+
+  // #485 review — a SECOND content-bearing paragraph (border AND field) still
+  // demotes whole via the pre-existing extraParagraph path (INVARIANT block
+  // above), exactly like any other second content-bearing paragraph. NOTE:
+  // this scenario alone does NOT discriminate "excluded from
+  // resolveRuleLine's candidate list because content-bearing" from a
+  // regressed "included as a candidate but disqualified from promotion
+  // because runsOf still finds its field as one run" — both paths produce
+  // the identical extraParagraph/detail output here. The single-paragraph
+  // test below (real protection for resolveRuleLine's candidate filter) is
+  // what actually distinguishes them; this test documents the
+  // multiple-content-bearing-paragraph invariant on its own terms.
+  it.each([
+    ['w:fldChar', fieldRuns(' STYLEREF Heading1 ', 'Some Style Text')],
+    ['w:fldSimple', simpleFieldRun(' STYLEREF Heading1 ', 'Some Style Text')],
+  ])(
+    'a run-free paragraph with a border AND a field (%s) demotes whole as a second content-bearing paragraph — its border is never separately promoted',
+    (_label, fieldXml) => {
+      const border = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+      const xml = makeHdrXml(
+        `${paragraph('', textRun('Header text'))}${paragraph(border, fieldXml)}`
+      );
+      const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+
+      expect(result.region?.left?.content).toEqual([{ kind: 'literal', text: 'Header text' }]);
+      expect(result.region?.ruleLine).toBeUndefined();
+      expect(result.unmodeled).toHaveLength(1);
+      expect(result.unmodeled[0]).toMatchObject({
+        variant: 'default',
+        region: 'header',
+        kind: 'extraParagraph',
+      });
+      // Losslessness half of the invariant: the demoted entry's `detail` is
+      // the raw SECOND paragraph verbatim (compact(paragraph)) — border and
+      // field both survive in unmodeled, neither silently dropped.
+      const secondParagraph = parseHeaderParagraphs(xml)[1];
+      expect(secondParagraph).toBeDefined();
+      expect(result.unmodeled[0]?.detail).toEqual(
+        compact(secondParagraph as Record<string, unknown>)
+      );
+    }
+  );
+
+  // #485 review — the actual, discriminating protection for resolveRuleLine's
+  // candidate filter: a SOLE bordered paragraph whose only content is a
+  // field. If paragraphHasContent ever regressed to stop recognizing this
+  // field, the paragraph would drop out of `contentBearing` entirely (no
+  // `first`, so no cell content) AND separately fail resolveRuleLine's
+  // run-free promotion check (its field still counts as one run via runsOf,
+  // so `runsOf(...).length === 0` is false) — losing BOTH the modeled
+  // content and the ruleLine, with the whole paragraph demoted as an
+  // unpromoted extraParagraph instead. Only a SINGLE paragraph (not a
+  // second, already-demoted one) makes those two outcomes observably
+  // different through captureRegion's own output.
+  it.each([
+    ['w:fldChar', fieldRuns(' PAGE ', '3')],
+    ['w:fldSimple', simpleFieldRun(' PAGE ', '3')],
+  ])(
+    'a bordered paragraph whose only content is a field (%s) is captured as content AND ruleLine — never excluded as a run-free candidate (protects resolveRuleLine)',
+    (_label, fieldXml) => {
+      const border = '<w:pBdr><w:bottom w:val="single" w:sz="4"/></w:pBdr>';
+      const xml = makeHdrXml(paragraph(border, fieldXml));
+      const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+
+      expect(result.unmodeled).toEqual([]);
+      expect(result.region?.ruleLine).toEqual({ enabled: true, style: 'single', widthTwips: 10 });
+      expect(result.region?.left?.content).toEqual([{ kind: 'pageNumber' }]);
+    }
+  );
 
   it('regression guard: a part with no paragraphs at all still returns region undefined and unmodeled empty', () => {
     const xml = makeHdrXml('');
