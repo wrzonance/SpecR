@@ -309,6 +309,78 @@ describe('captureRegion — per-item drops inside an otherwise-capturable table 
       expect.objectContaining({ variant: 'default', region: 'header', kind: 'extraParagraph' })
     );
   });
+
+  // #505 (#502 follow-up): a drawing living inside an EXTRA (2nd+)
+  // content-bearing paragraph of a table cell is still preserved verbatim by
+  // its raw extraParagraph entry (never lost) but is ALSO itemized here as
+  // its own unresolvedReference when the part's own .rels file is unreadable
+  // — matching the cell's FIRST-paragraph drawing handling (captureTableCell's
+  // own imageUnmodeledEntry call) and the paragraph-path discard scanner
+  // (header-footer-region.test.ts's equivalent #505 pin).
+  it('#505: a drawing in an EXTRA cell paragraph of a relsUnreadable part is ALSO itemized as unresolvedReference, alongside the raw extraParagraph entry', () => {
+    const extraRId = 'rId10';
+    const partMedia = relsUnreadableMedia('word/header1.xml');
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(textRun('First')) + paragraph(imageDrawingRun(extraRId)))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.region?.table?.rows).toEqual([
+      { cells: [{ content: [{ kind: 'literal', text: 'First' }] }] },
+    ]);
+    expect(result.unmodeled).toContainEqual({
+      variant: 'default',
+      region: 'header',
+      kind: 'unresolvedReference',
+      detail: { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+    // ... AND the second paragraph is STILL preserved raw — the discard-path
+    // itemization adds a companion entry, it never removes the original.
+    const extra = result.unmodeled.filter((e) => e.kind === 'extraParagraph');
+    expect(extra).toHaveLength(1);
+    expect(JSON.stringify(extra[0]?.detail ?? null)).toContain(extraRId);
+  });
+
+  // INV-3 (table-cell path has no descriptor gate, ADR-068 addendum): unlike
+  // the paragraph path's INV-2 asymmetry, a malformed drawing (valid r:embed,
+  // missing wp:extent) in an EXTRA cell paragraph STILL degrades to
+  // unresolvedReference against a relsUnreadable part — mirroring this same
+  // file's own INV-3 pin for the FIRST cell paragraph (above) rather than the
+  // paragraph-path discard scanner's descriptor gate.
+  it('INV-3 (discard path): a malformed drawing (missing wp:extent) in an EXTRA cell paragraph still degrades to unresolvedReference in a relsUnreadable part — no descriptor gate here either', () => {
+    const extraRId = 'rId11';
+    const partMedia = relsUnreadableMedia('word/header1.xml');
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(textRun('First')) + paragraph(malformedDrawingRun(extraRId)))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.unmodeled).toContainEqual({
+      variant: 'default',
+      region: 'header',
+      kind: 'unresolvedReference',
+      detail: { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+  });
+
+  // Corpus-safety (#505): the discard-path scanner only activates against a
+  // relsUnreadable part — a healthy `resolved` partMedia leaves the discard
+  // path exactly as it behaved before this issue: the extra paragraph's
+  // drawing is preserved raw only, never itemized, so an ordinary corpus
+  // document with an intact .rels index sees no new unmodeled entries.
+  it('corpus-safety (#505): a drawing in an EXTRA cell paragraph of a HEALTHY (resolved) part is never itemized as unresolvedReference', () => {
+    const extraRId = 'rId10';
+    const partMedia = resolvedMedia([[extraRId, pngBytes()]]);
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(textRun('First')) + paragraph(imageDrawingRun(extraRId)))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.unmodeled.some((e) => e.kind === 'unresolvedReference')).toBe(false);
+    const extra = result.unmodeled.filter((e) => e.kind === 'extraParagraph');
+    expect(extra).toHaveLength(1);
+    expect(JSON.stringify(extra[0]?.detail ?? null)).toContain(extraRId);
+  });
 });
 
 describe('captureRegion — structural table disqualification (ADR-071 decision 4)', () => {
