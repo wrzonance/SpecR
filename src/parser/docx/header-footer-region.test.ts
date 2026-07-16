@@ -890,19 +890,16 @@ describe('captureRegion — image resolution wiring (#487)', () => {
     expect(result.unmodeled.some((e) => e.kind === 'image')).toBe(false);
   });
 
-  // SCOPE BOUNDARY (#502 follow-up, tracked by #505): #502 itemizes an
-  // unresolvable drawing as its own `unresolvedReference` only at the sites the
-  // base capture architecture (ADR-068/ADR-071) already visits drawing runs —
-  // the FIRST content-bearing paragraph and the first table's cells. A drawing
-  // in an EXTRA (2nd+) content-bearing paragraph of a relsUnreadable part is
-  // still preserved verbatim inside its raw `extraParagraph` entry (content is
-  // NOT lost) but is NOT emitted as its own `unresolvedReference`, so the
-  // aggregate part-level warning currently UNDERCOUNTS it. Pinned per
-  // CLAUDE.md's "never silently pick a behavior" rule; #505 will itemize the
-  // discard-path drawings (respecting the INV-2 descriptor-gate asymmetry) and
-  // update this expectation. The realistic single-image header case (drawing in
-  // the first paragraph, test above) is unaffected.
-  it('SCOPE BOUNDARY (#502 follow-up, #505): a drawing in an EXTRA paragraph of a relsUnreadable part stays raw extraParagraph, not a second unresolvedReference (documented undercount)', () => {
+  // #505 (#502 follow-up — was the SCOPE BOUNDARY documented-undercount pin):
+  // a descriptor-bearing drawing in an EXTRA (2nd+) content-bearing paragraph
+  // of a relsUnreadable part is now itemized as its own `unresolvedReference`
+  // — in ADDITION to (never instead of) being preserved verbatim inside its
+  // raw `extraParagraph` entry. Two image drawings now yield two
+  // unresolvedReference entries, so the aggregate part-level warning counts
+  // both. The realistic single-image header case (drawing in the first
+  // paragraph, test above) is unaffected — this only extends coverage to the
+  // discard path.
+  it('#505: a descriptor-bearing drawing in an EXTRA paragraph of a relsUnreadable part is ALSO itemized as its own unresolvedReference, alongside the raw extraParagraph entry', () => {
     const firstRId = 'rId9';
     const extraRId = 'rId10';
     const xml = makeHdrXml(
@@ -917,7 +914,54 @@ describe('captureRegion — image resolution wiring (#487)', () => {
       relsUnreadableMedia('word/header1.xml')
     );
 
-    // The FIRST paragraph's drawing IS itemized (base-architecture site) ...
+    // Both the FIRST paragraph's drawing (base-architecture site) AND the
+    // SECOND paragraph's (discard-path, #505) are itemized ...
+    const unresolved = result.unmodeled.filter((e) => e.kind === 'unresolvedReference');
+    expect(unresolved).toEqual(
+      expect.arrayContaining([
+        {
+          variant: 'default',
+          region: 'header',
+          kind: 'unresolvedReference',
+          detail: { rId: firstRId, part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+        },
+        {
+          variant: 'default',
+          region: 'header',
+          kind: 'unresolvedReference',
+          detail: { rId: extraRId, part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+        },
+      ])
+    );
+    expect(unresolved).toHaveLength(2);
+    // ... AND the second paragraph is STILL preserved raw — the discard-path
+    // itemization adds a companion entry, it never removes the original.
+    const extra = result.unmodeled.filter((e) => e.kind === 'extraParagraph');
+    expect(extra).toHaveLength(1);
+    expect(JSON.stringify(extra[0]?.detail ?? null)).toContain(extraRId);
+  });
+
+  // INV-2 asymmetry preserved in the discard path (#505): a drawing with no
+  // parseable descriptor (no r:embed / no wp:extent) in an EXTRA paragraph is
+  // NOT itemized as unresolvedReference, even against a relsUnreadable part —
+  // mirroring header-footer-images.test.ts's own INV-2 pin for the FIRST
+  // paragraph's drawing (resolveDrawingImage). The paragraph is still
+  // preserved verbatim inside its raw extraParagraph entry either way.
+  it('INV-2 (discard path, #505): a descriptor-less drawing in an EXTRA paragraph stays raw extraParagraph only, never unresolvedReference, even against a relsUnreadable part', () => {
+    const firstRId = 'rId9';
+    const xml = makeHdrXml(
+      `${paragraph('', imageDrawingRun(firstRId))}${paragraph('', drawingRun())}`
+    );
+    const result = captureRegion(
+      xml,
+      'bottom',
+      'default',
+      'header',
+      KNOWN,
+      relsUnreadableMedia('word/header1.xml')
+    );
+
+    // Only the FIRST paragraph's (descriptor-bearing) drawing is itemized.
     const unresolved = result.unmodeled.filter((e) => e.kind === 'unresolvedReference');
     expect(unresolved).toEqual([
       {
@@ -927,12 +971,29 @@ describe('captureRegion — image resolution wiring (#487)', () => {
         detail: { rId: firstRId, part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
       },
     ]);
-    // ... the SECOND paragraph's drawing is only preserved raw — never a second
-    // unresolvedReference, and never counted: two image drawings, one warning.
+    // The descriptor-less drawing's paragraph is still preserved raw, never dropped.
+    expect(result.unmodeled.filter((e) => e.kind === 'extraParagraph')).toHaveLength(1);
+  });
+
+  // Corpus-safety (#505): the discard-path scanner only activates against a
+  // relsUnreadable part — a healthy `resolved` partMedia (and the "no
+  // partMedia supplied at all" case) leaves the discard path's behavior
+  // exactly as it was before this issue: the extra paragraph's drawing is
+  // preserved raw only, never itemized, so an ordinary corpus document with
+  // an intact .rels index sees no new unmodeled entries from this change.
+  it('corpus-safety (#505): a descriptor-bearing drawing in an EXTRA paragraph of a HEALTHY (resolved) part is never itemized as unresolvedReference', () => {
+    const firstRId = 'rId9';
+    const extraRId = 'rId10';
+    const xml = makeHdrXml(
+      `${paragraph('', imageDrawingRun(firstRId))}${paragraph('', imageDrawingRun(extraRId))}`
+    );
+    const partMedia = resolvedMedia([[firstRId, pngBytes()]]);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.unmodeled.some((e) => e.kind === 'unresolvedReference')).toBe(false);
     const extra = result.unmodeled.filter((e) => e.kind === 'extraParagraph');
     expect(extra).toHaveLength(1);
     expect(JSON.stringify(extra[0]?.detail ?? null)).toContain(extraRId);
-    expect(unresolved.some((e) => JSON.stringify(e.detail).includes(extraRId))).toBe(false);
   });
 
   it('INVARIANT: preserves original run order across text/image/field pieces within a cell — image placement is never reordered', () => {

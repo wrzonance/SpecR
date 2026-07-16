@@ -36,6 +36,7 @@ import type {
 } from './header-footer-field-recognition.js';
 import { captureTablesForRegion } from './header-footer-table.js';
 import { resolveDrawingImage } from './header-footer-images.js';
+import { itemizeParagraphDiscardDrawings } from './header-footer-discard-drawings.js';
 import { computeRunOrder } from './header-footer-run-order.js';
 import type { RunOrder } from './header-footer-run-order.js';
 import type { HeaderFooterUnmodeledEntry } from './types.js';
@@ -574,9 +575,18 @@ function captureFromParagraphs(
   readonly unmodeled: readonly PartialUnmodeled[];
 } {
   const contentBearing = paragraphs.filter((p) => paragraphHasContent(runsOf(p)));
-  const extraUnmodeled: readonly PartialUnmodeled[] = contentBearing
-    .slice(1)
-    .map((p): PartialUnmodeled => ({ kind: 'extraParagraph', detail: compact(p) }));
+  const extraParagraphs = contentBearing.slice(1);
+  const extraUnmodeled: readonly PartialUnmodeled[] = extraParagraphs.map(
+    (p): PartialUnmodeled => ({ kind: 'extraParagraph', detail: compact(p) })
+  );
+  // #505: a drawing living inside one of these extra paragraphs is still
+  // preserved verbatim by extraUnmodeled above (never lost) but is ALSO
+  // itemized here as its own unresolvedReference when the part's own .rels
+  // file is unreadable (descriptor-gated, INV-2) — so the part-level
+  // aggregate warning (header-footer-media-warnings.ts) counts it, matching
+  // how the FIRST paragraph's own drawing is already itemized below
+  // (splitParagraphIntoCells -> resolveDrawingImage).
+  const discardedDrawingUnmodeled = itemizeParagraphDiscardDrawings(extraParagraphs, partMedia);
   const first = contentBearing[0];
 
   const { ruleLine, unmodeled: ruleLineUnmodeled } = resolveRuleLine(paragraphs, first, edge);
@@ -594,7 +604,12 @@ function captureFromParagraphs(
 
   return {
     region: buildRegionFromCells(cells, ruleLine),
-    unmodeled: [...cellUnmodeled, ...ruleLineUnmodeled, ...extraUnmodeled],
+    unmodeled: [
+      ...cellUnmodeled,
+      ...ruleLineUnmodeled,
+      ...extraUnmodeled,
+      ...discardedDrawingUnmodeled,
+    ],
   };
 }
 
