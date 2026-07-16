@@ -262,12 +262,20 @@
   }
 
   window.__loadPane = function loadPane(runId, pane) {
-    const container = document.getElementById(PANE_CONTENT_IDS[pane]);
+    // createScaleTarget rebuilds the outer/target pair fresh on every call
+    // (clearChildren on the pane-content div first) — this is what keeps a
+    // reload from accumulating a second .pane-scale-outer/.pane-scale-target
+    // pair alongside a stale one from a previous load.
+    const target = createScaleTarget(pane);
     paneState[pane] = { status: 'loading', error: null };
     return fetchPaneBlob(runId, pane)
-      .then((blob) => docx.renderAsync(blob, container, null, RENDER_OPTIONS))
+      .then((blob) => docx.renderAsync(blob, target, null, RENDER_OPTIONS))
       .then(() => {
         paneState[pane] = { status: 'done', error: null };
+        // The freshly rendered pane has a new natural size — rescale both
+        // panes now so a mismatched pair doesn't sit unscaled/mis-scaled
+        // until the next resize event or explicit __setDisplayMode call.
+        rescaleAllPanes();
       })
       .catch((err) => {
         paneState[pane] = { status: 'error', error: String((err && err.message) || err) };

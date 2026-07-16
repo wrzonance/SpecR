@@ -268,13 +268,23 @@ describe('createApp (wiring smoke tests)', () => {
     }
 
     async function loadHarnessSandbox(
-      search: string
+      search: string,
+      // Extra sandbox globals (e.g. `fetch`/`docx` stubs for task 4/9's
+      // __loadPane tests) — harness.js references both as bare identifiers,
+      // never window.fetch/window.docx, so they must live directly on the
+      // vm context object, not on the windowStub.
+      sandboxGlobals: Record<string, unknown> = {}
     ): Promise<{ window: FakeWindowStub; document: FakeDocumentStub }> {
       const response = await fetch(`${baseUrl}/harness.js`);
       const source = await response.text();
       const windowStub = createFakeWindow(search);
       const documentStub = createDefaultHarnessDocument();
-      const sandbox = { window: windowStub, document: documentStub, URLSearchParams };
+      const sandbox = {
+        window: windowStub,
+        document: documentStub,
+        URLSearchParams,
+        ...sandboxGlobals,
+      };
       vm.createContext(sandbox);
       // sonarjs flags vm.runInContext as dynamic code execution — safe here:
       // `source` is this package's OWN just-served harness.js (fetched from
@@ -284,6 +294,38 @@ describe('createApp (wiring smoke tests)', () => {
       // eslint-disable-next-line sonarjs/code-eval
       vm.runInContext(source, sandbox);
       return { window: windowStub, document: documentStub };
+    }
+
+    // Shared by both the task 3/9 (scale-wrapper DOM management) and task
+    // 4/9 (__loadPane wiring) sub-describes below — hoisted here rather than
+    // duplicated per-describe.
+    const PANE_CONTENT_IDS = {
+      reference: 'pane-reference-content',
+      roundtrip: 'pane-roundtrip-content',
+    } as const;
+
+    function configurePaneContent(
+      document: FakeDocumentStub,
+      paneContentId: string,
+      clientWidth: number
+    ): FakeElement {
+      const container = document.getElementById(paneContentId);
+      if (!container) throw new Error(`test setup: ${paneContentId} not registered`);
+      container.clientWidth = clientWidth;
+      return container;
+    }
+
+    function attachScalePair(
+      container: FakeElement,
+      targetRect: Rect
+    ): { outer: FakeElement; target: FakeElement } {
+      const outer = createFakeElement();
+      outer.className = 'pane-scale-outer';
+      const target = createFakeElement(targetRect);
+      target.className = 'pane-scale-target';
+      outer.appendChild(target);
+      container.appendChild(outer);
+      return { outer, target };
     }
 
     it('defaults to fit mode with no query string', async () => {
@@ -346,34 +388,9 @@ describe('createApp (wiring smoke tests)', () => {
       // .pane-scale-target pair. These tests pin the DOM-management and
       // scaling-math invariants that pair depends on; real pixel geometry
       // is the orchestrator's Playwright job, not this vitest suite's.
-      const PANE_CONTENT_IDS = {
-        reference: 'pane-reference-content',
-        roundtrip: 'pane-roundtrip-content',
-      } as const;
-
-      function configurePaneContent(
-        document: FakeDocumentStub,
-        paneContentId: string,
-        clientWidth: number
-      ): FakeElement {
-        const container = document.getElementById(paneContentId);
-        if (!container) throw new Error(`test setup: ${paneContentId} not registered`);
-        container.clientWidth = clientWidth;
-        return container;
-      }
-
-      function attachScalePair(
-        container: FakeElement,
-        targetRect: Rect
-      ): { outer: FakeElement; target: FakeElement } {
-        const outer = createFakeElement();
-        outer.className = 'pane-scale-outer';
-        const target = createFakeElement(targetRect);
-        target.className = 'pane-scale-target';
-        outer.appendChild(target);
-        container.appendChild(outer);
-        return { outer, target };
-      }
+      // PANE_CONTENT_IDS/configurePaneContent/attachScalePair are hoisted to
+      // this describe's parent scope (shared with the task 4/9 sub-describe
+      // below).
 
       it('capture mode resets both scale elements to a blank state regardless of prior state (geometry invariance)', async () => {
         const { window: harnessWindow, document } = await loadHarnessSandbox('');
@@ -555,6 +572,106 @@ describe('createApp (wiring smoke tests)', () => {
         const matchedNote = matched.document.getElementById('fit-scale-note');
         if (!matchedNote) throw new Error('test setup: fit-scale-note not registered');
         expect(matchedNote.textContent).toBe('');
+      });
+    });
+
+    describe('window.__loadPane wiring (#506 task 4/9)', () => {
+      // __loadPane now renders into createScaleTarget(pane)'s inner element
+      // (not the pane-content div itself) and calls rescaleAllPanes() on its
+      // existing success path — these tests drive that end-to-end through
+      // the real public loadPane entry point, with fetch/docx.renderAsync
+      // stubbed as sandbox globals (neither exists in this vm context
+      // otherwise; harness.js references both as bare identifiers).
+
+      function stubFetchOk(): (url: string) => Promise<{ ok: true; blob: () => Promise<object> }> {
+        return () => Promise.resolve({ ok: true, blob: () => Promise.resolve({}) });
+      }
+
+      function createRenderAsyncSpy(): {
+        docx: { renderAsync: (...args: unknown[]) => Promise<void> };
+        targets: unknown[];
+      } {
+        const targets: unknown[] = [];
+        return {
+          docx: {
+            renderAsync: (_blob: unknown, target: unknown): Promise<void> => {
+              targets.push(target);
+              return Promise.resolve();
+            },
+          },
+          targets,
+        };
+      }
+
+      it('renders each load into a fresh outer/target pair without accumulating wrappers (no wrapper accumulation)', async () => {
+        const { docx, targets } = createRenderAsyncSpy();
+        const { window: harnessWindow, document } = await loadHarnessSandbox('', {
+          fetch: stubFetchOk(),
+          docx,
+        });
+        const container = document.getElementById(PANE_CONTENT_IDS.reference);
+        if (!container) throw new Error('test setup: pane-reference-content not registered');
+        const loadPane = harnessWindow.__loadPane;
+        assertIsFunction(loadPane, '__loadPane');
+
+        await loadPane('run-1', 'reference');
+        await loadPane('run-1', 'reference');
+
+        // Exactly one outer/target pair survives two loads, mirroring
+        // createScaleTarget's own no-accumulation invariant (task 3/9) —
+        // this pins that __loadPane actually routes through it now, rather
+        // than rendering straight into the pane-content div as before.
+        expect(container.children).toHaveLength(1);
+        expect(container.children[0]?.className).toBe('pane-scale-outer');
+        expect(container.children[0]?.children).toHaveLength(1);
+        expect(container.children[0]?.children[0]?.className).toBe('pane-scale-target');
+        expect(targets).toHaveLength(2);
+        expect(targets[1]).not.toBe(targets[0]);
+      });
+
+      it('calls rescaleAllPanes() on the success path, recomputing the OTHER (unloaded) pane cleanly instead of leaving or compounding its stale transform (reset-first ordering)', async () => {
+        const { docx } = createRenderAsyncSpy();
+        const { window: harnessWindow, document } = await loadHarnessSandbox('', {
+          fetch: stubFetchOk(),
+          docx,
+        });
+        const roundtripContainer = configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 800);
+        const { outer: staleOuter, target: staleTarget } = attachScalePair(roundtripContainer, {
+          x: 0,
+          y: 0,
+          width: 1600,
+          height: 2000,
+        });
+        // Leftover state from a stale prior fit-mode computation on the
+        // OTHER pane (wrong values, deliberately not the correct 0.5 factor
+        // this rect/clientWidth pair recomputes to below) — proves the
+        // assertions afterward observe a real recompute, not a pane that
+        // already happened to hold the right answer.
+        staleOuter.style.width = '999px';
+        staleOuter.style.height = '111px';
+        staleTarget.style.width = 'max-content';
+        staleTarget.style.transform = 'scale(3.75)';
+        staleTarget.style.transformOrigin = 'top left';
+        configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+
+        const loadPane = harnessWindow.__loadPane;
+        assertIsFunction(loadPane, '__loadPane');
+        await loadPane('run-1', 'reference');
+
+        // rescaleAllPanes() always visits BOTH panes, so loading 'reference'
+        // must also recompute the untouched 'roundtrip' pane — landing on
+        // exactly the fresh scale(0.5)/800px/1000px this rect+clientWidth
+        // pair produces, not the stale scale(3.75)/999px it started with,
+        // and not some compounded product of the two (reset-first, never
+        // additive — the same invariant task 3/9 pins for __setDisplayMode,
+        // now confirmed to hold when driven through __loadPane's success
+        // path). If loadPane's success path never called rescaleAllPanes(),
+        // the stale values would still be here untouched.
+        expect(staleTarget.style.transform).toBe('scale(0.5)');
+        expect(staleTarget.style.width).toBe('max-content');
+        expect(staleTarget.style.transformOrigin).toBe('top left');
+        expect(staleOuter.style.width).toBe('800px');
+        expect(staleOuter.style.height).toBe('1000px');
       });
     });
   });
