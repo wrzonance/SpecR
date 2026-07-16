@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import JSZip from 'jszip';
-import { ParserError } from '../error.js';
 import { readHeaderFooterMedia } from './header-footer-media-parts.js';
+import type { HeaderFooterMediaByPart } from './header-footer-media-parts.js';
 
 const IMAGE_REL_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
 const HYPERLINK_REL_TYPE =
@@ -38,6 +38,19 @@ function breakFetch(zip: JSZip, path: string): void {
   vi.spyOn(file, 'async').mockRejectedValue(new Error('simulated decompression failure'));
 }
 
+// Unwraps a 'resolved' part's inner media map, or undefined for any other
+// outcome (absent part, or a 'relsUnreadable' part) -- keeps the assertions
+// below reading like the pre-#502 flat-map shape while still exercising the
+// real tagged-union return type.
+function resolvedMedia(
+  mediaByPart: HeaderFooterMediaByPart,
+  partPath: string
+): ReadonlyMap<string, Uint8Array> | undefined {
+  const partMedia = mediaByPart.get(partPath);
+  if (partMedia === undefined || partMedia.status !== 'resolved') return undefined;
+  return partMedia.media;
+}
+
 describe('readHeaderFooterMedia', () => {
   it('resolves media bytes for a header part, keyed by owning part path then rId', async () => {
     const zip = makeZip({
@@ -46,8 +59,9 @@ describe('readHeaderFooterMedia', () => {
       'word/media/image1.png': new Uint8Array([1, 2, 3]),
     });
     const mediaByPart = await readHeaderFooterMedia(zip);
-    const headerMedia = mediaByPart.get('word/header1.xml');
-    expect(headerMedia?.get('rId1')).toEqual(new Uint8Array([1, 2, 3]));
+    expect(resolvedMedia(mediaByPart, 'word/header1.xml')?.get('rId1')).toEqual(
+      new Uint8Array([1, 2, 3])
+    );
   });
 
   it('resolves media bytes for a footer part the same way', async () => {
@@ -57,7 +71,9 @@ describe('readHeaderFooterMedia', () => {
       'word/media/image2.png': new Uint8Array([9, 8, 7]),
     });
     const mediaByPart = await readHeaderFooterMedia(zip);
-    expect(mediaByPart.get('word/footer1.xml')?.get('rId1')).toEqual(new Uint8Array([9, 8, 7]));
+    expect(resolvedMedia(mediaByPart, 'word/footer1.xml')?.get('rId1')).toEqual(
+      new Uint8Array([9, 8, 7])
+    );
   });
 
   it('yields an empty map, not a throw, for a document with no header/footer .rels files', async () => {
@@ -83,7 +99,7 @@ describe('readHeaderFooterMedia', () => {
       'word/media/present.png': new Uint8Array([5]),
     });
     const mediaByPart = await readHeaderFooterMedia(zip);
-    const headerMedia = mediaByPart.get('word/header1.xml');
+    const headerMedia = resolvedMedia(mediaByPart, 'word/header1.xml');
     expect(headerMedia?.get('rId1')).toBeUndefined();
     expect(headerMedia?.get('rId2')).toEqual(new Uint8Array([5]));
   });
@@ -100,7 +116,7 @@ describe('readHeaderFooterMedia', () => {
     breakFetch(zip, 'word/media/corrupt.png');
 
     const mediaByPart = await readHeaderFooterMedia(zip);
-    const headerMedia = mediaByPart.get('word/header1.xml');
+    const headerMedia = resolvedMedia(mediaByPart, 'word/header1.xml');
     expect(headerMedia?.get('rId1')).toBeUndefined();
     expect(headerMedia?.get('rId2')).toEqual(new Uint8Array([42]));
   });
@@ -117,8 +133,10 @@ describe('readHeaderFooterMedia', () => {
     breakFetch(zip, 'word/media/corrupt.png');
 
     const mediaByPart = await readHeaderFooterMedia(zip);
-    expect(mediaByPart.get('word/header1.xml')?.get('rId1')).toBeUndefined();
-    expect(mediaByPart.get('word/header2.xml')?.get('rId1')).toEqual(new Uint8Array([42]));
+    expect(resolvedMedia(mediaByPart, 'word/header1.xml')?.get('rId1')).toBeUndefined();
+    expect(resolvedMedia(mediaByPart, 'word/header2.xml')?.get('rId1')).toEqual(
+      new Uint8Array([42])
+    );
   });
 
   it('filters out non-image relationships, matching parseImageRelationships', async () => {
@@ -130,30 +148,63 @@ describe('readHeaderFooterMedia', () => {
       'word/media/image1.png': new Uint8Array([1]),
     });
     const mediaByPart = await readHeaderFooterMedia(zip);
-    const headerMedia = mediaByPart.get('word/header1.xml');
+    const headerMedia = resolvedMedia(mediaByPart, 'word/header1.xml');
     expect(headerMedia?.size).toBe(1);
     expect(headerMedia?.get('rId2')).toEqual(new Uint8Array([1]));
   });
 
-  it('propagates a ParserError for a header/footer part whose .rels XML is malformed', async () => {
+  // INV-1 (#502): a header/footer part whose .rels XML is malformed degrades
+  // that PART to `relsUnreadable` instead of failing the whole DOCX parse.
+  it('degrades to relsUnreadable for a header/footer part whose .rels XML is malformed, never throwing', async () => {
     const zip = makeZip({
       'word/header1.xml': '<w:hdr/>',
       'word/_rels/header1.xml.rels': '<not valid xml',
     });
-    await expect(readHeaderFooterMedia(zip)).rejects.toBeInstanceOf(ParserError);
+    const mediaByPart = await readHeaderFooterMedia(zip);
+    expect(mediaByPart.get('word/header1.xml')).toEqual({
+      status: 'relsUnreadable',
+      partPath: 'word/header1.xml',
+    });
   });
 
-  it('wraps a corrupt/undecompressable .rels entry read in a typed ParserError, never a raw JSZip error', async () => {
+  // INV-1 (#502): a corrupt/undecompressable .rels entry read also degrades
+  // to relsUnreadable, never a raw JSZip error and never a throw.
+  it('degrades to relsUnreadable for a corrupt/undecompressable .rels entry read, never throwing', async () => {
     const zip = makeZip({
       'word/header1.xml': '<w:hdr/>',
       'word/_rels/header1.xml.rels': relsXml(imageRel('rId1', 'media/image1.png')),
       'word/media/image1.png': new Uint8Array([1]),
     });
-    // A rejected read of the .rels part itself (not a media byte fetch, which
-    // Promise.allSettled already isolates) must not leak a raw JSZip error past
-    // this parser boundary — it is the .rels-file read, so it surfaces typed.
+    // A rejected read of the .rels part itself (not a media byte fetch,
+    // which Promise.allSettled already isolates) degrades the whole part.
     breakFetch(zip, 'word/_rels/header1.xml.rels');
-    await expect(readHeaderFooterMedia(zip)).rejects.toBeInstanceOf(ParserError);
+    const mediaByPart = await readHeaderFooterMedia(zip);
+    expect(mediaByPart.get('word/header1.xml')).toEqual({
+      status: 'relsUnreadable',
+      partPath: 'word/header1.xml',
+    });
+  });
+
+  // INV-9 (#502): a relsUnreadable part never contaminates a sibling part --
+  // the sibling header/footer region still resolves its media normally.
+  it('isolates a relsUnreadable part from a sibling part -- the sibling header/footer region still resolves normally', async () => {
+    const zip = makeZip({
+      'word/header1.xml': '<w:hdr/>',
+      'word/_rels/header1.xml.rels': '<not valid xml',
+      'word/header2.xml': '<w:hdr/>',
+      'word/_rels/header2.xml.rels': relsXml(imageRel('rId1', 'media/good.png')),
+      'word/media/good.png': new Uint8Array([42]),
+    });
+
+    const mediaByPart = await readHeaderFooterMedia(zip);
+
+    expect(mediaByPart.get('word/header1.xml')).toEqual({
+      status: 'relsUnreadable',
+      partPath: 'word/header1.xml',
+    });
+    expect(resolvedMedia(mediaByPart, 'word/header2.xml')?.get('rId1')).toEqual(
+      new Uint8Array([42])
+    );
   });
 
   it('does not match .rels files outside word/_rels/ or names that merely contain "header"/"footer"', async () => {
