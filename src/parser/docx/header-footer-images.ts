@@ -15,6 +15,8 @@ import { asRecord, compact, extractAttrStr } from './xml-utils.js';
 import { sniffImageMediaType, MAX_IMAGE_BYTES } from '../../lib/image-media-type.js';
 import type { PartialUnmodeled } from './header-footer-region.js';
 import type { HeaderFooterVariant } from '../../ast/index.js';
+import { RELS_UNREADABLE_REASON } from './header-footer-media-parts.js';
+import type { HeaderFooterPartMedia } from './header-footer-media-parts.js';
 
 // Local alias, structurally identical to header-footer-region.ts's own
 // (unexported) HeaderFooterField derivation — re-derived here rather than
@@ -157,30 +159,54 @@ function unmodeledDrawing(run: Record<string, unknown>): DrawingResolution {
   return { kind: 'unmodeled', entry: { kind: 'image', detail: compact(run) } };
 }
 
+// #502: a `relsUnreadable` part means the part's own .rels file could not be
+// read/parsed at all — every reference into it is unresolvable by
+// construction, not merely a miss. Distinguished from a plain lookup miss
+// (`unmodeledDrawing`, kind:'image') by carrying `rId`/`part`/`reason`, so
+// header-footer-media-warnings.ts can attribute one capture-warning per
+// damaged part instead of one generic "image content not modeled" per run.
+function relsUnreadableEntry(rId: string, partPath: string): DrawingResolution {
+  return {
+    kind: 'unmodeled',
+    entry: {
+      kind: 'unresolvedReference',
+      detail: compact({ rId, part: partPath, reason: RELS_UNREADABLE_REASON }),
+    },
+  };
+}
+
 /**
  * Resolve a `w:drawing` run to a modeled `image` field or an unmodeled
  * fallback entry (ADR-068: never fail capture). Pure, sync, never throws —
- * `mediaByRId` is a plain lookup, already resolved by the async extraction
+ * `partMedia` is a plain lookup, already resolved by the async extraction
  * phase (header-footer-media-parts.ts); no I/O happens here.
  *
  * Resolution order, first failure wins:
- *  1. no descriptor (see parseDrawingDescriptor) -> unmodeled
- *  2. `mediaByRId`/rId lookup miss -> unmodeled
- *  3. bytes don't sniff to a supported type (#306 regression guard) -> unmodeled
- *  4. raw byte length exceeds MAX_IMAGE_BYTES, checked BEFORE base64 encoding
+ *  1. no descriptor (see parseDrawingDescriptor) -> unmodeled (rels-index
+ *     health is irrelevant to a non-pointer drawing)
+ *  2. `partMedia.status === 'relsUnreadable'` (#502) -> unresolvedReference,
+ *     carrying rId/part/reason — the part's own .rels file is damaged, so
+ *     every reference into it is unresolvable by construction
+ *  3. `partMedia.status === 'resolved'` but its `media`/rId lookup misses ->
+ *     unmodeled
+ *  4. bytes don't sniff to a supported type (#306 regression guard) -> unmodeled
+ *  5. raw byte length exceeds MAX_IMAGE_BYTES, checked BEFORE base64 encoding
  *     and BEFORE HeaderFooterCompositionSchema.parse() ever sees the field
  *     (buildComposition) -> unmodeled
- *  5. success -> `image` field, imageMediaType always the SNIFFED type
+ *  6. success -> `image` field, imageMediaType always the SNIFFED type
  *     (never a caller/part-declared type), imageData a base64 encoding of
  *     the accepted bytes.
  */
 export function resolveDrawingImage(
   run: Record<string, unknown>,
-  mediaByRId: ReadonlyMap<string, Uint8Array> | undefined
+  partMedia: HeaderFooterPartMedia | undefined
 ): DrawingResolution {
   const descriptor = parseDrawingDescriptor(run);
   if (!descriptor) return unmodeledDrawing(run);
-  const bytes = mediaByRId?.get(descriptor.rId);
+  if (partMedia?.status === 'relsUnreadable') {
+    return relsUnreadableEntry(descriptor.rId, partMedia.partPath);
+  }
+  const bytes = partMedia?.status === 'resolved' ? partMedia.media.get(descriptor.rId) : undefined;
   if (!bytes) return unmodeledDrawing(run);
   const imageMediaType = sniffImageMediaType(bytes);
   if (!imageMediaType) return unmodeledDrawing(run);

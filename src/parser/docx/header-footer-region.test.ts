@@ -8,6 +8,8 @@ import {
 } from './header-footer-region.js';
 import { asRecord, compact, createDocumentXmlParser } from './xml-utils.js';
 import { collectRuns } from './document.js';
+import { RELS_UNREADABLE_REASON } from './header-footer-media-parts.js';
+import type { HeaderFooterPartMedia } from './header-footer-media-parts.js';
 
 const KNOWN = { section: '09 91 26', title: 'STAINING AND TRANSPARENT FINISHING' };
 
@@ -127,6 +129,18 @@ function imageDrawingRun(rId: string, cx = '914400', cy = '609600', docPrAttrs =
 
 function tableXmlWithImageCell(rId: string): string {
   return `<w:tbl><w:tr><w:tc><w:p>${imageDrawingRun(rId)}</w:p></w:tc></w:tr></w:tbl>`;
+}
+
+// Wraps a plain rId -> bytes fixture into the `resolved` HeaderFooterPartMedia
+// shape captureRegion now expects (#502).
+function resolvedMedia(entries: readonly (readonly [string, Uint8Array])[]): HeaderFooterPartMedia {
+  return { status: 'resolved', media: new Map(entries) };
+}
+
+// The #502 counterpart: the part's own .rels file could not be read/parsed
+// at all, so every reference into it is unresolvable by construction.
+function relsUnreadableMedia(partPath = 'word/header1.xml'): HeaderFooterPartMedia {
+  return { status: 'relsUnreadable', partPath };
 }
 
 describe('captureRegion — cell capture and tab-boundary splitting', () => {
@@ -797,7 +811,7 @@ describe('captureRegion — standalone rule-line paragraph promotion/demotion (#
 });
 
 // Image resolution wiring (#487, Task 4): captureRegion's new optional 6th
-// param (mediaByRId) threads through captureFromParagraphs ->
+// param (partMedia) threads through captureFromParagraphs ->
 // splitParagraphIntoCells -> assignSegmentsToCells -> buildCellContent, which
 // gains a drawing branch (isDrawingRun -> resolveDrawingImage) alongside its
 // existing collapsed-field/text branches. Deep resolution behavior itself
@@ -805,12 +819,12 @@ describe('captureRegion — standalone rule-line paragraph promotion/demotion (#
 // header-footer-images.test.ts; this file pins only the two invariants that
 // live at THIS boundary — table-cell exclusion and run-order preservation.
 describe('captureRegion — image resolution wiring (#487)', () => {
-  it('INVARIANT: a table-cell drawing run never produces a kind:"image" field, even when mediaByRId would resolve it', () => {
+  it('INVARIANT: a table-cell drawing run never produces a kind:"image" field, even when partMedia would resolve it', () => {
     const rId = 'rId5';
     const bytes = pngBytes();
-    const mediaByRId = new Map([[rId, bytes]]);
+    const partMedia = resolvedMedia([[rId, bytes]]);
     const xml = makeHdrXml(tableXmlWithImageCell(rId));
-    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, mediaByRId);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
 
     const cellContent = result.region?.table?.rows[0]?.cells[0]?.content ?? [];
     expect(cellContent.some((field) => field.kind === 'image')).toBe(false);
@@ -819,12 +833,12 @@ describe('captureRegion — image resolution wiring (#487)', () => {
     );
   });
 
-  it('resolves a paragraph-level drawing run to a modeled image field when mediaByRId supplies matching bytes', () => {
+  it('resolves a paragraph-level drawing run to a modeled image field when partMedia supplies matching bytes', () => {
     const rId = 'rId9';
     const bytes = pngBytes();
-    const mediaByRId = new Map([[rId, bytes]]);
+    const partMedia = resolvedMedia([[rId, bytes]]);
     const xml = makeHdrXml(paragraph('', imageDrawingRun(rId)));
-    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, mediaByRId);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
 
     expect(result.region?.left?.content).toEqual([
       {
@@ -838,7 +852,7 @@ describe('captureRegion — image resolution wiring (#487)', () => {
     expect(result.unmodeled).toEqual([]);
   });
 
-  it('falls back to the pre-existing unmodeled image entry when no mediaByRId is supplied (backward compatible)', () => {
+  it('falls back to the pre-existing unmodeled image entry when no partMedia is supplied (backward compatible)', () => {
     const rId = 'rId9';
     const xml = makeHdrXml(paragraph('', imageDrawingRun(rId)));
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
@@ -849,17 +863,44 @@ describe('captureRegion — image resolution wiring (#487)', () => {
     );
   });
 
+  // #502: a relsUnreadable partMedia degrades a paragraph-level drawing to
+  // unresolvedReference (rId + part + reason), not the generic kind:'image'
+  // fallback the "no partMedia supplied" case above still uses — proving the
+  // two failure modes (no media at all vs. a damaged part's own .rels) are
+  // distinguishable at this same boundary.
+  it('resolves a paragraph-level drawing run in a relsUnreadable part to unresolvedReference, never kind:"image"', () => {
+    const rId = 'rId9';
+    const xml = makeHdrXml(paragraph('', imageDrawingRun(rId)));
+    const result = captureRegion(
+      xml,
+      'bottom',
+      'default',
+      'header',
+      KNOWN,
+      relsUnreadableMedia('word/header1.xml')
+    );
+
+    expect(result.region).toBeUndefined();
+    expect(result.unmodeled).toContainEqual({
+      variant: 'default',
+      region: 'header',
+      kind: 'unresolvedReference',
+      detail: { rId, part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+    expect(result.unmodeled.some((e) => e.kind === 'image')).toBe(false);
+  });
+
   it('INVARIANT: preserves original run order across text/image/field pieces within a cell — image placement is never reordered', () => {
     const rId = 'rId3';
     const bytes = pngBytes();
-    const mediaByRId = new Map([[rId, bytes]]);
+    const partMedia = resolvedMedia([[rId, bytes]]);
     const xml = makeHdrXml(
       paragraph(
         '',
         `${textRun('Before ')}${imageDrawingRun(rId)}${textRun(' After ')}${fieldRuns(' PAGE ', '3')}`
       )
     );
-    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, mediaByRId);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
 
     expect(result.region?.left?.content).toEqual([
       { kind: 'literal', text: 'Before ' },

@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { asRecord, createDocumentXmlParser } from './xml-utils.js';
 import { MAX_IMAGE_BYTES } from '../../lib/image-media-type.js';
 import { parseDrawingDescriptor, resolveDrawingImage } from './header-footer-images.js';
+import { RELS_UNREADABLE_REASON } from './header-footer-media-parts.js';
+import type { HeaderFooterPartMedia } from './header-footer-media-parts.js';
 
 // Real fast-xml-parser output, not hand-mocked records (spike-confirmed
 // posture, see the "unprefixed vs prefixed attribute" comments in
@@ -99,6 +101,19 @@ function pngBytes(totalLength = 16): Uint8Array {
 
 function jpegBytes(totalLength = 16): Uint8Array {
   return bytesOf(JPEG_SIGNATURE, totalLength);
+}
+
+// Wraps a plain rId -> bytes fixture into the `resolved` HeaderFooterPartMedia
+// shape resolveDrawingImage now expects (#502) — mirrors how
+// header-footer-media-parts.ts's readPartMedia builds a real one.
+function resolvedMedia(entries: readonly (readonly [string, Uint8Array])[]): HeaderFooterPartMedia {
+  return { status: 'resolved', media: new Map(entries) };
+}
+
+// The #502 counterpart: the part's own .rels file could not be read/parsed
+// at all, so every reference into it is unresolvable by construction.
+function relsUnreadableMedia(partPath = 'word/header1.xml'): HeaderFooterPartMedia {
+  return { status: 'relsUnreadable', partPath };
 }
 
 describe('parseDrawingDescriptor — structural walk, before any byte resolution', () => {
@@ -213,21 +228,24 @@ describe('parseDrawingDescriptor — structural walk, before any byte resolution
 describe('resolveDrawingImage — byte resolution, sniff, size cap (ADR-068: never fail capture)', () => {
   it('invariant: imageMediaType on a captured field is always the SNIFFED type, never inferred from anywhere else', () => {
     const run = wellFormedDrawing('rId1', '100000', '100000', '');
-    const pngResult = resolveDrawingImage(run, new Map([['rId1', pngBytes()]]));
-    const jpegResult = resolveDrawingImage(run, new Map([['rId1', jpegBytes()]]));
+    const pngResult = resolveDrawingImage(run, resolvedMedia([['rId1', pngBytes()]]));
+    const jpegResult = resolveDrawingImage(run, resolvedMedia([['rId1', jpegBytes()]]));
     expect(pngResult.kind === 'field' && pngResult.field.imageMediaType).toBe('image/png');
     expect(jpegResult.kind === 'field' && jpegResult.field.imageMediaType).toBe('image/jpeg');
   });
 
   it('invariant: unsniffable bytes never produce a field, even with a fully valid descriptor (#306 regression guard)', () => {
     const run = wellFormedDrawing('rId1', '100000', '100000', '');
-    const result = resolveDrawingImage(run, new Map([['rId1', new Uint8Array(GARBAGE_BYTES)]]));
+    const result = resolveDrawingImage(
+      run,
+      resolvedMedia([['rId1', new Uint8Array(GARBAGE_BYTES)]])
+    );
     expect(result.kind).toBe('unmodeled');
   });
 
   it('invariant: widthEmu/heightEmu on a captured field are the verbatim wp:extent cx/cy ints — no unit conversion', () => {
     const run = wellFormedDrawing('rId1', '914400', '1828800', '');
-    const result = resolveDrawingImage(run, new Map([['rId1', pngBytes()]]));
+    const result = resolveDrawingImage(run, resolvedMedia([['rId1', pngBytes()]]));
     expect(result.kind === 'field' && result.field.widthEmu).toBe(914400);
     expect(result.kind === 'field' && result.field.heightEmu).toBe(1828800);
   });
@@ -235,30 +253,32 @@ describe('resolveDrawingImage — byte resolution, sniff, size cap (ADR-068: nev
   it('invariant: the MAX_IMAGE_BYTES cap runs on raw decoded bytes, before base64 encoding and before any field is built', () => {
     const run = wellFormedDrawing('rId1', '100000', '100000', '');
     const oversize = pngBytes(MAX_IMAGE_BYTES + 1);
-    const result = resolveDrawingImage(run, new Map([['rId1', oversize]]));
+    const result = resolveDrawingImage(run, resolvedMedia([['rId1', oversize]]));
     expect(result.kind).toBe('unmodeled');
   });
 
   it('accepts bytes exactly at the MAX_IMAGE_BYTES cap (boundary, not off-by-one)', () => {
     const run = wellFormedDrawing('rId1', '100000', '100000', '');
     const atCap = pngBytes(MAX_IMAGE_BYTES);
-    const result = resolveDrawingImage(run, new Map([['rId1', atCap]]));
+    const result = resolveDrawingImage(run, resolvedMedia([['rId1', atCap]]));
     expect(result.kind).toBe('field');
   });
 
   it('falls back to unmodeled when parseDrawingDescriptor finds no descriptor', () => {
     const run = parseRun(`<w:r ${NS}><w:t>plain text</w:t></w:r>`);
-    const result = resolveDrawingImage(run, new Map([['rId1', pngBytes()]]));
+    const result = resolveDrawingImage(run, resolvedMedia([['rId1', pngBytes()]]));
     expect(result.kind).toBe('unmodeled');
     expect(result.kind === 'unmodeled' && result.entry.kind).toBe('image');
   });
 
-  it('falls back to unmodeled when mediaByRId has no entry for the descriptor rId', () => {
+  it('falls back to unmodeled when partMedia has no entry for the descriptor rId', () => {
     const run = wellFormedDrawing('rId1', '100000', '100000', '');
-    expect(resolveDrawingImage(run, new Map([['rId-other', pngBytes()]])).kind).toBe('unmodeled');
+    expect(resolveDrawingImage(run, resolvedMedia([['rId-other', pngBytes()]])).kind).toBe(
+      'unmodeled'
+    );
   });
 
-  it('falls back to unmodeled when mediaByRId itself is undefined (no image relationships for the part)', () => {
+  it('falls back to unmodeled when partMedia itself is undefined (no image relationships for the part)', () => {
     const run = wellFormedDrawing('rId1', '100000', '100000', '');
     expect(resolveDrawingImage(run, undefined).kind).toBe('unmodeled');
   });
@@ -266,7 +286,7 @@ describe('resolveDrawingImage — byte resolution, sniff, size cap (ADR-068: nev
   it('builds a byte-identical base64 round trip of the accepted bytes on success', () => {
     const run = wellFormedDrawing('rId1', '100000', '100000', 'descr="Logo"');
     const bytes = pngBytes(32);
-    const result = resolveDrawingImage(run, new Map([['rId1', bytes]]));
+    const result = resolveDrawingImage(run, resolvedMedia([['rId1', bytes]]));
     expect(result.kind).toBe('field');
     const field = result.kind === 'field' ? result.field : undefined;
     expect(field?.imageData).toBe(Buffer.from(bytes).toString('base64'));
@@ -279,5 +299,36 @@ describe('resolveDrawingImage — byte resolution, sniff, size cap (ADR-068: nev
       heightEmu: 100000,
       altText: 'Logo',
     });
+  });
+});
+
+// #502: a `relsUnreadable` partMedia means the owning part's own .rels file
+// could not be read/parsed at all — every reference into it is unresolvable
+// by construction, not merely a lookup miss. Distinguished from the generic
+// `kind: 'image'` fallback by carrying rId/part/reason so
+// header-footer-media-warnings.ts can attribute one capture-warning per
+// damaged part.
+describe('resolveDrawingImage — relsUnreadable partMedia (#502)', () => {
+  it('resolves to an unresolvedReference entry carrying rId, part, and the shared reason string', () => {
+    const run = wellFormedDrawing('rId1', '100000', '100000', '');
+    const result = resolveDrawingImage(run, relsUnreadableMedia('word/header1.xml'));
+    expect(result.kind).toBe('unmodeled');
+    expect(result.kind === 'unmodeled' && result.entry).toEqual({
+      kind: 'unresolvedReference',
+      detail: { rId: 'rId1', part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+  });
+
+  it('REGRESSION: a descriptor-less drawing still falls back to the pre-existing kind:"image" unmodeled entry, never unresolvedReference, even against a relsUnreadable part', () => {
+    const run = parseRun(`<w:r ${NS}><w:t>plain text</w:t></w:r>`);
+    const result = resolveDrawingImage(run, relsUnreadableMedia('word/header1.xml'));
+    expect(result.kind).toBe('unmodeled');
+    expect(result.kind === 'unmodeled' && result.entry.kind).toBe('image');
+  });
+
+  it("REGRESSION: a healthy (resolved) part's own successful resolution is unaffected by an unrelated relsUnreadable part existing elsewhere", () => {
+    const run = wellFormedDrawing('rId1', '100000', '100000', '');
+    const result = resolveDrawingImage(run, resolvedMedia([['rId1', pngBytes()]]));
+    expect(result.kind).toBe('field');
   });
 });

@@ -40,6 +40,7 @@ import { computeRunOrder } from './header-footer-run-order.js';
 import type { RunOrder } from './header-footer-run-order.js';
 import type { HeaderFooterUnmodeledEntry } from './types.js';
 import type { HeaderFooterVariant } from '../../ast/index.js';
+import type { HeaderFooterPartMedia } from './header-footer-media-parts.js';
 
 // Local indexed-access aliases (mirrors the generator's own pattern —
 // header-footer-fields.ts/header-footer-regions.ts): the AST barrel exports
@@ -391,7 +392,7 @@ function firstRunStyle(
 // and matched against the known section identity (ADR-068: literal equality
 // only); a recognized field marker or a resolvable drawing run each flush
 // the buffer first, then contribute their own field or unmodeled entry, in
-// original run order (#487). `mediaByRId` is OPTIONAL — its own caller
+// original run order (#487). `partMedia` is OPTIONAL — its own caller
 // (header-footer-table.ts's captureTableCell) never passes it and pre-filters
 // drawing runs before this function ever sees them (ADR-071 decision 4:
 // table-cell images stay out of scope), so this function's drawing branch is
@@ -401,7 +402,7 @@ function firstRunStyle(
 export function buildCellContent(
   pieces: readonly Record<string, unknown>[],
   known: KnownSectionIdentity,
-  mediaByRId?: ReadonlyMap<string, Uint8Array>
+  partMedia?: HeaderFooterPartMedia
 ): {
   readonly content: readonly HeaderFooterField[];
   readonly unmodeled: readonly PartialUnmodeled[];
@@ -419,7 +420,7 @@ export function buildCellContent(
   for (const piece of pieces) {
     if (isDrawingRun(piece)) {
       flushBuffer();
-      applyResolution(resolveDrawingImage(piece, mediaByRId), content, unmodeled);
+      applyResolution(resolveDrawingImage(piece, partMedia), content, unmodeled);
       continue;
     }
     if (!isCollapsedFieldRun(piece)) {
@@ -490,7 +491,7 @@ function mergeCell(
 function assignSegmentsToCells(
   segments: readonly (readonly Record<string, unknown>[])[],
   known: KnownSectionIdentity,
-  mediaByRId?: ReadonlyMap<string, Uint8Array>
+  partMedia?: HeaderFooterPartMedia
 ): {
   readonly cells: Partial<Record<CellKey, HeaderFooterCell>>;
   readonly unmodeled: readonly PartialUnmodeled[];
@@ -502,7 +503,7 @@ function assignSegmentsToCells(
   // index 2 — not on segment count alone.
   let overflowHasContent = false;
   segments.forEach((segment, index) => {
-    const built = buildCellContent(segment, known, mediaByRId);
+    const built = buildCellContent(segment, known, partMedia);
     unmodeled.push(...built.unmodeled);
     if (built.content.length === 0) return;
     if (index >= 3) overflowHasContent = true;
@@ -530,7 +531,7 @@ function splitParagraphIntoCells(
   runs: readonly Record<string, unknown>[],
   known: KnownSectionIdentity,
   order: RunOrder,
-  mediaByRId?: ReadonlyMap<string, Uint8Array>
+  partMedia?: HeaderFooterPartMedia
 ): {
   readonly cells: Partial<Record<CellKey, HeaderFooterCell>>;
   readonly unmodeled: readonly PartialUnmodeled[];
@@ -540,7 +541,7 @@ function splitParagraphIntoCells(
   // document order, not fast-xml-parser's grouped order (#485 review).
   const collapsed = collapseComplexFields(runs, order);
   const segments = splitOnTabs(collapsed);
-  return assignSegmentsToCells(segments, known, mediaByRId);
+  return assignSegmentsToCells(segments, known, partMedia);
 }
 
 // ─── single-region assembly (at most one per part, ADR-068) ────────────────
@@ -567,7 +568,7 @@ function captureFromParagraphs(
   edge: 'top' | 'bottom',
   known: KnownSectionIdentity,
   order: RunOrder,
-  mediaByRId?: ReadonlyMap<string, Uint8Array>
+  partMedia?: HeaderFooterPartMedia
 ): {
   readonly region: HeaderFooterRegion | undefined;
   readonly unmodeled: readonly PartialUnmodeled[];
@@ -588,7 +589,7 @@ function captureFromParagraphs(
   // resolveRuleLine) only tests run SET membership/count, which is
   // order-independent.
   const { cells, unmodeled: cellUnmodeled } = first
-    ? splitParagraphIntoCells(runsOf(first, order), known, order, mediaByRId)
+    ? splitParagraphIntoCells(runsOf(first, order), known, order, partMedia)
     : { cells: {}, unmodeled: [] };
 
   return {
@@ -609,12 +610,17 @@ function captureFromParagraphs(
  * footer). Never throws for document-content reasons — only
  * malformed-but-present part XML throws (DOCX_HEADER_FOOTER_XML_INVALID).
  *
- * `mediaByRId` (#487, OPTIONAL) is this part's own rId -> media-bytes slice
- * of header-footer-media-parts.ts's eagerly-resolved map — threaded into
- * paragraph/cell capture only. `captureTablesForRegion` is deliberately NEVER
- * given it: table-cell images stay out of scope (ADR-071 decision 4), so a
- * table cell's own drawing pre-filter (header-footer-table.ts) still always
- * produces an unmodeled entry, never a modeled `image` field.
+ * `partMedia` (#487/#502, OPTIONAL) is this part's own HeaderFooterPartMedia
+ * slice of header-footer-media-parts.ts's eagerly-resolved map — either a
+ * `resolved` rId -> media-bytes lookup or (#502) a `relsUnreadable` marker
+ * when the part's own .rels file could not be read/parsed. Threaded into
+ * BOTH paragraph/cell capture (captureFromParagraphs) AND
+ * captureTablesForRegion (#502 — previously never given it): a `resolved`
+ * partMedia is still never used to look up table-cell image bytes (ADR-071
+ * decision 4, table-cell images stay out of scope), but a `relsUnreadable`
+ * partMedia lets a table cell's own drawing pre-filter (header-footer-table.ts)
+ * attribute its unmodeled entry to the damaged part instead of the generic
+ * `image` kind.
  *
  * A run-ordinal side-table (header-footer-run-order.ts's computeRunOrder,
  * #485 review) is built once per part, from this SAME partXml, and threaded
@@ -623,9 +629,6 @@ function captureFromParagraphs(
  * order-sensitive runsOf call in this part — paragraph cell or table cell —
  * restores true document order across an interleaved w:fldSimple/w:r
  * sequence that the grouped-mode parse above cannot preserve on its own.
- * Unlike mediaByRId (table-cell images stay out of scope, ADR-071 decision
- * 4), RunOrder is not an exclusion — table-cell fields need the same
- * correction paragraph-cell fields do.
  */
 export function captureRegion(
   partXml: string,
@@ -633,7 +636,7 @@ export function captureRegion(
   variant: HeaderFooterUnmodeledEntry['variant'],
   region: HeaderFooterUnmodeledEntry['region'],
   known: KnownSectionIdentity,
-  mediaByRId?: ReadonlyMap<string, Uint8Array>
+  partMedia?: HeaderFooterPartMedia
 ): RegionCaptureResult {
   const parsed = parsePartXml(partXml, region);
   const root = asRecord(parsed[partRootKey(region)]);
@@ -641,8 +644,8 @@ export function captureRegion(
 
   const order = computeRunOrder(partXml, partRootKey(region), root, region);
   const toStamped = stamp(variant, region);
-  const fromParagraphs = captureFromParagraphs(paragraphsOf(root), edge, known, order, mediaByRId);
-  const tableResult = captureTablesForRegion(root, known, order);
+  const fromParagraphs = captureFromParagraphs(paragraphsOf(root), edge, known, order, partMedia);
+  const tableResult = captureTablesForRegion(root, known, order, partMedia);
   const mergedRegion = compact({
     ...fromParagraphs.region,
     table: tableResult.table,

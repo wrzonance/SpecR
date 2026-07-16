@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import { captureRegion } from './header-footer-region.js';
 import type { HeaderFooterRegion } from './header-footer-region.js';
 import { compact } from './xml-utils.js';
+import type { HeaderFooterPartMedia } from './header-footer-media-parts.js';
 import { renderHeaderFooterComposition } from '../../generator/index.js';
 import type { HeaderFooterFieldContext } from '../../generator/index.js';
 import type { HeaderFooterComposition } from '../../ast/index.js';
@@ -139,9 +140,12 @@ describe('captureRegion -> renderHeaderFooterComposition -> Packer -> JSZip draw
   it('carries a captured drawing image, byte-identical media + lossless EMU/px sizing, into a real packed DOCX', async () => {
     const originalBytes = fakePngBytes(64);
     const xml = makeHdrXml(paragraph(imageDrawingRun('rId9')));
-    const mediaByRId = new Map([['rId9', originalBytes]]);
+    const partMedia: HeaderFooterPartMedia = {
+      status: 'resolved',
+      media: new Map([['rId9', originalBytes]]),
+    };
 
-    const captured = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, mediaByRId);
+    const captured = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
     expect(captured.unmodeled).toEqual([]);
     expect(captured.region?.left?.content).toEqual([
       {

@@ -19,7 +19,10 @@ import {
 } from './header-footer-relationships.js';
 import { captureRegion } from './header-footer-region.js';
 import type { KnownSectionIdentity } from './header-footer-field-recognition.js';
-import type { HeaderFooterMediaByPart } from './header-footer-media-parts.js';
+import type {
+  HeaderFooterMediaByPart,
+  HeaderFooterPartMedia,
+} from './header-footer-media-parts.js';
 // The PARSER-LOCAL HeaderFooterUnmodeledEntry (types.ts), not the ast-level
 // one (detail: JsonValue) — captureRegion already returns this shape, and
 // every detail value it builds is already compact()-ed (header-footer-region.ts),
@@ -171,8 +174,8 @@ interface RegionBuildResult {
 // default/first/even) from buildVariantForKind. Never throws for
 // document-content reasons: only captureRegion's malformed-part-XML path
 // throws (DOCX_HEADER_FOOTER_XML_INVALID), and that propagates unchanged.
-// `mediaByRId` (#487, optional) is this part's own rId -> media-bytes slice
-// of entries.mediaByPart, forwarded into captureRegion unchanged.
+// `partMedia` (#487/#502, optional) is this part's own HeaderFooterPartMedia
+// slice of entries.mediaByPart, forwarded into captureRegion unchanged.
 function buildVariant(
   kind: VariantKind,
   region: RegionKind,
@@ -180,7 +183,7 @@ function buildVariant(
   active: boolean,
   partXml: string | undefined,
   known: KnownSectionIdentity,
-  mediaByRId: ReadonlyMap<string, Uint8Array> | undefined
+  partMedia: HeaderFooterPartMedia | undefined
 ): RegionBuildResult {
   if (!resolvedRef) return { region: undefined, unmodeled: [] };
   if (!active)
@@ -188,7 +191,7 @@ function buildVariant(
   if (partXml === undefined) {
     return { region: undefined, unmodeled: [missingPartEntry(kind, region, resolvedRef)] };
   }
-  const captured = captureRegion(partXml, ruleLineEdge(region), kind, region, known, mediaByRId);
+  const captured = captureRegion(partXml, ruleLineEdge(region), kind, region, known, partMedia);
   return { region: captured.region, unmodeled: captured.unmodeled };
 }
 
@@ -209,8 +212,8 @@ function buildRegionSlot(
 ): RegionBuildResult {
   const [primaryRef, ...duplicateRefs] = findResolvedRefs(resolved, kind, region);
   const partXml = primaryRef ? partXmlFor(region, primaryRef.target, entries) : undefined;
-  const mediaByRId = primaryRef ? entries.mediaByPart.get(primaryRef.target) : undefined;
-  const built = buildVariant(kind, region, primaryRef, active, partXml, known, mediaByRId);
+  const partMedia = primaryRef ? entries.mediaByPart.get(primaryRef.target) : undefined;
+  const built = buildVariant(kind, region, primaryRef, active, partXml, known, partMedia);
   const duplicateUnmodeled = duplicateRefs.map((ref) => duplicateReferenceEntry(kind, region, ref));
   return { region: built.region, unmodeled: [...built.unmodeled, ...duplicateUnmodeled] };
 }

@@ -93,6 +93,20 @@ function imageDrawingRun(rId: string, cx = '914400', cy = '609600'): string {
   );
 }
 
+// Wraps per-part rId -> bytes fixtures into the `resolved` HeaderFooterPartMedia
+// shape entries.mediaByPart now expects (#502) — mirrors how
+// header-footer-media-parts.ts's readPartMedia builds a real one.
+function resolvedMediaByPart(
+  parts: Readonly<Record<string, readonly (readonly [string, Uint8Array])[]>>
+): HeaderFooterMediaByPart {
+  return new Map(
+    Object.entries(parts).map(([partPath, entries]) => [
+      partPath,
+      { status: 'resolved' as const, media: new Map(entries) },
+    ])
+  );
+}
+
 describe('captureHeaderFooter — no header/footer content', () => {
   it('returns undefined composition and no warnings for a document with no sectPr at all', () => {
     const result = captureHeaderFooter(baseEntries(), KNOWN);
@@ -519,9 +533,9 @@ describe("captureHeaderFooter — oversize embedded image never reaches buildCom
     const hdrXml = makeHdrXmlWithBody(
       `<w:p><w:r><w:t>Logo:</w:t></w:r>${imageDrawingRun('rIdImg1')}</w:p>`
     );
-    const mediaByPart: HeaderFooterMediaByPart = new Map([
-      ['word/header1.xml', new Map([['rIdImg1', pngBytes(MAX_IMAGE_BYTES + 1)]])],
-    ]);
+    const mediaByPart = resolvedMediaByPart({
+      'word/header1.xml': [['rIdImg1', pngBytes(MAX_IMAGE_BYTES + 1)]],
+    });
     const entries = baseEntries({
       documentXml: makeDocXml(sectPr),
       documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
@@ -548,9 +562,9 @@ describe("captureHeaderFooter — oversize embedded image never reaches buildCom
   it('accepts an image at exactly the MAX_IMAGE_BYTES cap into a modeled image field (boundary, not off-by-one)', () => {
     const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
     const hdrXml = makeHdrXmlWithBody(`<w:p>${imageDrawingRun('rIdImg1')}</w:p>`);
-    const mediaByPart: HeaderFooterMediaByPart = new Map([
-      ['word/header1.xml', new Map([['rIdImg1', pngBytes(MAX_IMAGE_BYTES)]])],
-    ]);
+    const mediaByPart = resolvedMediaByPart({
+      'word/header1.xml': [['rIdImg1', pngBytes(MAX_IMAGE_BYTES)]],
+    });
     const entries = baseEntries({
       documentXml: makeDocXml(sectPr),
       documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
@@ -585,9 +599,7 @@ describe('captureHeaderFooter — malformed/unresolvable/unsniffable embedded im
     const hdrXml = makeHdrXmlWithBody(
       `<w:p><w:r><w:t>Logo:</w:t></w:r>${malformedDrawingRun}</w:p>`
     );
-    const mediaByPart: HeaderFooterMediaByPart = new Map([
-      ['word/header1.xml', new Map([['rIdImg1', pngBytes()]])],
-    ]);
+    const mediaByPart = resolvedMediaByPart({ 'word/header1.xml': [['rIdImg1', pngBytes()]] });
     const entries = baseEntries({
       documentXml: makeDocXml(sectPr),
       documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
@@ -614,9 +626,7 @@ describe('captureHeaderFooter — malformed/unresolvable/unsniffable embedded im
     // The part's media map exists but has no entry for rIdImg1 — the
     // relationship's target was never resolved (e.g. dropped during the
     // async extraction phase), not the same case as no map at all.
-    const mediaByPart: HeaderFooterMediaByPart = new Map([
-      ['word/header1.xml', new Map([['rIdOther', pngBytes()]])],
-    ]);
+    const mediaByPart = resolvedMediaByPart({ 'word/header1.xml': [['rIdOther', pngBytes()]] });
     const entries = baseEntries({
       documentXml: makeDocXml(sectPr),
       documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
@@ -641,9 +651,7 @@ describe('captureHeaderFooter — malformed/unresolvable/unsniffable embedded im
       `<w:p><w:r><w:t>Logo:</w:t></w:r>${imageDrawingRun('rIdImg1')}</w:p>`
     );
     const garbageBytes = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
-    const mediaByPart: HeaderFooterMediaByPart = new Map([
-      ['word/header1.xml', new Map([['rIdImg1', garbageBytes]])],
-    ]);
+    const mediaByPart = resolvedMediaByPart({ 'word/header1.xml': [['rIdImg1', garbageBytes]] });
     const entries = baseEntries({
       documentXml: makeDocXml(sectPr),
       documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
@@ -694,9 +702,7 @@ describe('captureHeaderFooter — table-cell image never resolves to a modeled f
       imageDrawingRun('rIdImg1') +
       '</w:p></w:tc></w:tr></w:tbl>';
     const hdrXml = makeHdrXmlWithBody(tableXml);
-    const mediaByPart: HeaderFooterMediaByPart = new Map([
-      ['word/header1.xml', new Map([['rIdImg1', pngBytes()]])],
-    ]);
+    const mediaByPart = resolvedMediaByPart({ 'word/header1.xml': [['rIdImg1', pngBytes()]] });
     const entries = baseEntries({
       documentXml: makeDocXml(sectPr),
       documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
