@@ -339,8 +339,18 @@ export function captureTablesForRegion(
   if (!first) return { table: undefined, unmodeled: [] };
 
   const captured = captureTable(first, known, order, partMedia);
-  const extraUnmodeled: readonly PartialUnmodeled[] = tables
-    .slice(1)
-    .map((tbl): PartialUnmodeled => ({ kind: 'table', detail: compact(tbl) }));
-  return { table: captured.table, unmodeled: [...captured.unmodeled, ...extraUnmodeled] };
+  const extraTables = tables.slice(1);
+  const extraUnmodeled: readonly PartialUnmodeled[] = extraTables.map(
+    (tbl): PartialUnmodeled => ({ kind: 'table', detail: compact(tbl) })
+  );
+  // #505: each EXTRA root-level table is still preserved verbatim above
+  // (never lost) — but any drawing living anywhere inside one (at any depth)
+  // is ALSO itemized as its own unresolvedReference when the part's own
+  // .rels file is unreadable, UNGATED (INV-3), matching this same module's
+  // own per-cell and disqualified-whole-table drawing handling above.
+  const discardedDrawingUnmodeled = itemizeTableDiscardDrawings(extraTables, partMedia);
+  return {
+    table: captured.table,
+    unmodeled: [...captured.unmodeled, ...extraUnmodeled, ...discardedDrawingUnmodeled],
+  };
 }
