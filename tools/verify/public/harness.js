@@ -32,9 +32,56 @@
 // (docx-preview centers the page in a narrower viewport). render/regions.ts's
 // cropRegion() bounds-check is a backstop for a missed precondition, not the
 // primary guard.
+//
+// DISPLAY MODES (#506): the page renders panes in one of two modes, chosen
+// once at load from the `mode` query param (resolveDisplayMode) and mutable
+// afterward only through window.__setDisplayMode('fit' | 'capture'). The
+// mode is a single, GLOBAL switch for the whole page, not a per-pane
+// setting — switching modes re-scales BOTH panes together, by design (#506
+// spike finding 2), so none of resolveDisplayMode/__setDisplayMode/
+// __getDisplayMode take a `pane` argument. fit (default) scales panes down
+// via a NESTED .pane-scale-outer/.pane-scale-target wrapper pair
+// (index.html's CSS): a single element can't simultaneously be
+// docx-preview's render target, the CSS transform target, AND the sizing
+// box its overflow:auto ancestor measures scrollWidth/scrollHeight against
+// — transform:scale() alone never shrinks that ancestor's scroll size (#506
+// spike finding 1). capture (?mode=capture) renders panes at natural,
+// untransformed size — the ONLY mode window.__measure()/window.__regionGeom()
+// trust geometry against; both force-switch into it via ensureCaptureMode()
+// before every read.
 
 (function () {
   'use strict';
+
+  // ─── display mode: fit vs capture (#506) ───────────────────────────────
+  // See this file's header comment for the full fit/capture contract. This
+  // block owns ONLY mode storage + strict boundary validation — the
+  // scale-target DOM helpers (getScaleOuter/getScaleTarget/rescaleAllPanes)
+  // that __setDisplayMode drives once a mode changes are wired in by a
+  // later task in the #506 program, not this one.
+
+  function resolveDisplayMode(search) {
+    // Never throws: any query string this can't parse, or any `mode` value
+    // other than exactly 'capture', falls back to the default ('fit')
+    // rather than surfacing a load-time error over a cosmetic default.
+    return new URLSearchParams(search).get('mode') === 'capture' ? 'capture' : 'fit';
+  }
+
+  let displayMode = resolveDisplayMode(window.location.search);
+
+  window.__setDisplayMode = function setDisplayMode(mode) {
+    if (mode !== 'fit' && mode !== 'capture') {
+      throw new Error("displayMode must be 'fit' or 'capture', got: " + JSON.stringify(mode));
+    }
+    displayMode = mode;
+    // #506 task 3/9 adds the rescaleAllPanes() call here once the
+    // scale-target DOM helpers it depends on exist — out of this task's
+    // scope (display-mode primitives only).
+  };
+
+  window.__getDisplayMode = function getDisplayMode() {
+    return displayMode;
+  };
 
   // Hardcoded, mirrors config.ts's VerifyEnv.viewportWidth default (3200) —
   // this task's scope is the frontend page only, so there is no backend

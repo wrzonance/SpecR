@@ -9,6 +9,7 @@ import { type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import type { Express } from 'express';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApiClient } from '../api-client/client.js';
@@ -121,6 +122,94 @@ describe('createApp (wiring smoke tests)', () => {
     // Decision 7 (flow-mode rendering) is a locked render option on both
     // panes now, not a query-string toggle like the spike's ignoreLRPB param.
     expect(body).toContain('ignoreLastRenderedPageBreak: true');
+  });
+
+  describe('harness.js display mode (#506)', () => {
+    // Runs the REAL served harness.js in an isolated vm context so these
+    // pin genuine runtime behavior, not just substring checks against the
+    // source text. Only enough of window/document is stubbed to satisfy
+    // harness.js's own top-level side effect (wiring the upload form's
+    // submit listener) — nothing under test here touches the DOM.
+    function assertIsFunction(
+      value: unknown,
+      name: string
+    ): asserts value is (...args: unknown[]) => unknown {
+      if (typeof value !== 'function') {
+        throw new Error(`harness.js sandbox: window.${name} is not a function`);
+      }
+    }
+
+    async function loadHarnessSandbox(search: string): Promise<Record<string, unknown>> {
+      const response = await fetch(`${baseUrl}/harness.js`);
+      const source = await response.text();
+      const formStub = { addEventListener: () => {} };
+      const sandbox = {
+        window: { location: { search } } as Record<string, unknown>,
+        document: { getElementById: () => formStub },
+        URLSearchParams,
+      };
+      vm.createContext(sandbox);
+      // sonarjs flags vm.runInContext as dynamic code execution — safe here:
+      // `source` is this package's OWN just-served harness.js (fetched from
+      // the app instance this test spun up), not attacker-controlled input,
+      // and it runs inside a purpose-built sandbox with no filesystem/network
+      // access exposed to it.
+      // eslint-disable-next-line sonarjs/code-eval
+      vm.runInContext(source, sandbox);
+      return sandbox.window;
+    }
+
+    it('defaults to fit mode with no query string', async () => {
+      const harnessWindow = await loadHarnessSandbox('');
+      const getDisplayMode = harnessWindow.__getDisplayMode;
+      assertIsFunction(getDisplayMode, '__getDisplayMode');
+
+      expect(getDisplayMode()).toBe('fit');
+    });
+
+    it('resolves capture mode only for an exact ?mode=capture query param, never throwing on garbage', async () => {
+      const capture = (await loadHarnessSandbox('?mode=capture')).__getDisplayMode;
+      const bogus = (await loadHarnessSandbox('?mode=bogus')).__getDisplayMode;
+      const wrongCase = (await loadHarnessSandbox('?mode=CAPTURE')).__getDisplayMode;
+      assertIsFunction(capture, '__getDisplayMode');
+      assertIsFunction(bogus, '__getDisplayMode');
+      assertIsFunction(wrongCase, '__getDisplayMode');
+
+      expect(capture()).toBe('capture');
+      expect(bogus()).toBe('fit');
+      expect(wrongCase()).toBe('fit');
+    });
+
+    it('__setDisplayMode is a single global switch, not a per-pane setter', async () => {
+      const harnessWindow = await loadHarnessSandbox('');
+      const setDisplayMode = harnessWindow.__setDisplayMode;
+      const getDisplayMode = harnessWindow.__getDisplayMode;
+      assertIsFunction(setDisplayMode, '__setDisplayMode');
+      assertIsFunction(getDisplayMode, '__getDisplayMode');
+
+      // Arity pins the boundary shape: mode only, no `pane` argument — the
+      // #506 design commits both panes to move together (spike finding 2).
+      expect(setDisplayMode).toHaveLength(1);
+      expect(getDisplayMode).toHaveLength(0);
+
+      setDisplayMode('capture');
+      expect(getDisplayMode()).toBe('capture');
+      setDisplayMode('fit');
+      expect(getDisplayMode()).toBe('fit');
+    });
+
+    it('__setDisplayMode throws on anything but exactly "fit"/"capture", leaving state untouched', async () => {
+      const harnessWindow = await loadHarnessSandbox('');
+      const setDisplayMode = harnessWindow.__setDisplayMode;
+      const getDisplayMode = harnessWindow.__getDisplayMode;
+      assertIsFunction(setDisplayMode, '__setDisplayMode');
+      assertIsFunction(getDisplayMode, '__getDisplayMode');
+
+      expect(() => setDisplayMode('bogus')).toThrow(/fit.*capture/);
+      expect(() => setDisplayMode('')).toThrow();
+      expect(() => setDisplayMode(undefined)).toThrow();
+      expect(getDisplayMode()).toBe('fit');
+    });
   });
 
   it('answers a generic JSON 404 for any unmatched route, never an HTML error page', async () => {
