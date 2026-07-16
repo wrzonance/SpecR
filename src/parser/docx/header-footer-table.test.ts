@@ -67,6 +67,22 @@ function imageDrawingRun(rId: string, cx = '914400', cy = '609600'): string {
   );
 }
 
+// INV-3 fixture: a w:drawing with a resolvable r:embed but NO wp:extent —
+// the same "malformed drawing" shape header-footer-images.test.ts's own
+// INV-2 fixture uses to prove the paragraph-level path keeps kind:'image'
+// unconditionally for it. Used here to prove the table-cell path, which has
+// no descriptor-validity gate of its own, treats it differently.
+function malformedDrawingRun(rId: string): string {
+  return (
+    '<w:r><w:drawing><wp:inline>' +
+    '<wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData><pic:pic><pic:blipFill>' +
+    `<a:blip r:embed="${rId}"/>` +
+    '</pic:blipFill></pic:pic></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r>'
+  );
+}
+
 function styledTextRun(text: string, rPrXml: string): string {
   return `<w:r><w:rPr>${rPrXml}</w:rPr><w:t>${text}</w:t></w:r>`;
 }
@@ -251,6 +267,27 @@ describe('captureRegion — per-item drops inside an otherwise-capturable table 
     expect(result.region?.table?.rows).toEqual([
       { cells: [{ content: [{ kind: 'literal', text: 'Logo: ' }] }] },
     ]);
+    expect(result.unmodeled).toContainEqual({
+      variant: 'default',
+      region: 'header',
+      kind: 'unresolvedReference',
+      detail: { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+    expect(result.unmodeled.some((e) => e.kind === 'image')).toBe(false);
+  });
+
+  // INV-3 (#502, ADR-068 addendum): the table-cell path has no equivalent
+  // to resolveDrawingImage's descriptor-validity gate — isDrawingRun only
+  // checks for w:drawing's presence (header-footer-region.ts). A drawing run
+  // that would itself fail parseDrawingDescriptor (missing wp:extent — see
+  // header-footer-images.test.ts's INV-2, the SAME fixture shape) still
+  // degrades to unresolvedReference here, a documented asymmetry versus the
+  // paragraph-level path, not an oversight.
+  it('INV-3: a malformed drawing run (valid r:embed, missing wp:extent — INV-2 keeps this kind:"image" at the paragraph level) still degrades to unresolvedReference in a relsUnreadable part — the table-cell path has no descriptor gate', () => {
+    const rId = 'rId9';
+    const partMedia = relsUnreadableMedia('word/header1.xml');
+    const xml = makeHdrXml(table(row(cell(paragraph(malformedDrawingRun(rId))))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
     expect(result.unmodeled).toContainEqual({
       variant: 'default',
       region: 'header',

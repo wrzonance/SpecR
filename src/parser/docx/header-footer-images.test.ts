@@ -326,6 +326,22 @@ describe('resolveDrawingImage — relsUnreadable partMedia (#502)', () => {
     expect(result.kind === 'unmodeled' && result.entry.kind).toBe('image');
   });
 
+  // INV-2 (#502, ADR-068 addendum): the REGRESSION test above proves "no
+  // w:drawing at all" keeps kind:'image'. This proves the stronger claim —
+  // resolveDrawingImage's arm ordering checks parseDrawingDescriptor
+  // VALIDITY first, not merely w:drawing's presence/absence — using a run
+  // that DOES carry a w:drawing with a resolvable r:embed, just missing
+  // wp:extent (so parseDrawingDescriptor still finds no descriptor). Even
+  // this "closer to real" malformed drawing keeps kind:'image'
+  // unconditionally against a relsUnreadable part.
+  it('INV-2: a malformed drawing (valid r:embed, missing wp:extent) still falls back to kind:"image" unconditionally against a relsUnreadable part', () => {
+    const run = inlineDrawing(docPrXml('') + picChainXml(blipXml('embed', 'rId1')));
+    expect(parseDrawingDescriptor(run)).toBeUndefined();
+    const result = resolveDrawingImage(run, relsUnreadableMedia('word/header1.xml'));
+    expect(result.kind).toBe('unmodeled');
+    expect(result.kind === 'unmodeled' && result.entry.kind).toBe('image');
+  });
+
   it("REGRESSION: a healthy (resolved) part's own successful resolution is unaffected by an unrelated relsUnreadable part existing elsewhere", () => {
     const run = wellFormedDrawing('rId1', '100000', '100000', '');
     const result = resolveDrawingImage(run, resolvedMedia([['rId1', pngBytes()]]));

@@ -942,4 +942,37 @@ describe('captureHeaderFooter — corrupt header/footer .rels degrades to per-pa
     ]);
     expect(result.warnings).toHaveLength(1);
   });
+
+  // INV-10 (#502, ADR-068 addendum): #502's degrade-not-throw behavior is
+  // strictly scoped to a part's OWN corrupt .rels — it does not soften
+  // header/footer PART-XML-ITSELF strictness elsewhere in the SAME
+  // document. Every other test in this describe block exercises a
+  // relsUnreadable part in isolation; this one combines it with a
+  // genuinely malformed sibling part to prove the two failure modes
+  // coexist without one masking the other (readHeaderFooterMedia's async
+  // extraction phase vs. captureRegion's synchronous part-XML parse are
+  // structurally independent code paths, not a single generalized
+  // try/catch).
+  it('INV-10: a relsUnreadable header part degrades normally while a genuinely malformed footer PART XML in the SAME document still throws, unaffected by the header degrade', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}${footerRef('rId2', 'default')}</w:sectPr>`;
+    const hdrXml = makeHdrXmlWithBody(`<w:p>${imageDrawingRun('rIdHdrImg')}</w:p>`);
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(
+        relationship('rId1', 'header1.xml') + relationship('rId2', 'footer1.xml')
+      ),
+      headerParts: new Map([['word/header1.xml', hdrXml]]),
+      footerParts: new Map([['word/footer1.xml', '<not valid xml']]),
+      mediaByPart: relsUnreadableMediaByPart(['word/header1.xml']),
+    });
+
+    let caught: unknown;
+    try {
+      captureHeaderFooter(entries, KNOWN);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ParserError);
+    expect((caught as ParserError).code).toBe('DOCX_HEADER_FOOTER_XML_INVALID');
+  });
 });
