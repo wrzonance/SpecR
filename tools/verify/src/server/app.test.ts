@@ -132,6 +132,34 @@ describe('createApp (wiring smoke tests)', () => {
     expect(body).toContain('ignoreLastRenderedPageBreak: true');
   });
 
+  it('serves pane-scale.js exposing the display-mode hooks harness.js was split from (#506)', async () => {
+    // harness.js had grown past this package's own 400-line file cap
+    // (CLAUDE.md's project override) — the display-mode/scale-wrapper
+    // concern (getScaleOuter/getScaleTarget/createScaleTarget/
+    // rescaleAllPanes) was extracted into its own served file, same as
+    // scenario-picker.js was split out earlier. index.html must load this
+    // BEFORE harness.js's own <script> tag.
+    const response = await fetch(`${baseUrl}/pane-scale.js`);
+    expect(response.status).toBe(200);
+
+    const body = await response.text();
+    expect(body).toContain('window.__setDisplayMode');
+    expect(body).toContain('window.__getDisplayMode');
+    expect(body).toContain('window.__createScaleTarget');
+    expect(body).toContain('window.__rescaleAllPanes');
+  });
+
+  it('loads pane-scale.js before harness.js in index.html, matching the cross-file dependency direction', async () => {
+    const response = await fetch(`${baseUrl}/`);
+    const body = await response.text();
+
+    const paneScaleIndex = body.indexOf('/pane-scale.js');
+    const harnessIndex = body.indexOf('/harness.js');
+    expect(paneScaleIndex).toBeGreaterThan(-1);
+    expect(harnessIndex).toBeGreaterThan(-1);
+    expect(paneScaleIndex).toBeLessThan(harnessIndex);
+  });
+
   describe('harness.js display mode (#506)', () => {
     // Runs the REAL served harness.js in an isolated vm context so these
     // pin genuine runtime behavior, not just substring checks against the
@@ -349,6 +377,18 @@ describe('createApp (wiring smoke tests)', () => {
       });
     }
 
+    // sonarjs flags vm.runInContext as dynamic code execution — safe here:
+    // `source` is always this package's OWN just-served static file (fetched
+    // from the app instance this test spun up), not attacker-controlled
+    // input, and it runs inside a purpose-built sandbox with no
+    // filesystem/network access exposed to it.
+    async function evalServedScript(path: string, sandbox: object): Promise<void> {
+      const response = await fetch(`${baseUrl}${path}`);
+      const source = await response.text();
+      // eslint-disable-next-line sonarjs/code-eval
+      vm.runInContext(source, sandbox);
+    }
+
     async function loadHarnessSandbox(
       search: string,
       // Extra sandbox globals (e.g. `fetch`/`docx` stubs for task 4/9's
@@ -357,8 +397,6 @@ describe('createApp (wiring smoke tests)', () => {
       // vm context object, not on the windowStub.
       sandboxGlobals: Record<string, unknown> = {}
     ): Promise<{ window: FakeWindowStub; document: FakeDocumentStub }> {
-      const response = await fetch(`${baseUrl}/harness.js`);
-      const source = await response.text();
       const windowStub = createFakeWindow(search);
       const documentStub = createDefaultHarnessDocument();
       const sandbox = {
@@ -368,13 +406,13 @@ describe('createApp (wiring smoke tests)', () => {
         ...sandboxGlobals,
       };
       vm.createContext(sandbox);
-      // sonarjs flags vm.runInContext as dynamic code execution — safe here:
-      // `source` is this package's OWN just-served harness.js (fetched from
-      // the app instance this test spun up), not attacker-controlled input,
-      // and it runs inside a purpose-built sandbox with no filesystem/network
-      // access exposed to it.
-      // eslint-disable-next-line sonarjs/code-eval
-      vm.runInContext(source, sandbox);
+      // Mirrors index.html's own <script> tag order (#506): pane-scale.js
+      // defines window.__setDisplayMode/__createScaleTarget/__rescaleAllPanes
+      // — harness.js's own top-level eval and several of its functions
+      // (ensureCaptureMode, __loadPane) reference those, so it must run
+      // second, against this same sandbox, exactly as it does in the browser.
+      await evalServedScript('/pane-scale.js', sandbox);
+      await evalServedScript('/harness.js', sandbox);
       return { window: windowStub, document: documentStub };
     }
 
@@ -688,6 +726,45 @@ describe('createApp (wiring smoke tests)', () => {
         expect(matchedNote.textContent).toBe('');
       });
 
+      // SCALE_MISMATCH_EPSILON (0.01) is documented as "loose enough to
+      // absorb sub-pixel rounding... tight enough to still flag a genuine
+      // mismatch" — the test above only exercises a gross mismatch (0.5 vs
+      // 1.0) and an exact match (0.5 vs 0.5), neither of which would catch
+      // a regression to the wrong threshold value or comparison operator
+      // (e.g. `>=` instead of `>`, or 0.1 instead of 0.01). These two pin
+      // the actual boundary the epsilon draws.
+      it('does not flag a scale-factor difference just UNDER the mismatch epsilon (#506 boundary)', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const refContainer = configurePaneContent(document, PANE_CONTENT_IDS.reference, 10000);
+        attachScalePair(refContainer, { x: 0, y: 0, width: 20000, height: 1000 }); // factor 0.5000
+        const rtContainer = configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 10198);
+        attachScalePair(rtContainer, { x: 0, y: 0, width: 20000, height: 1000 }); // factor 0.5099 — diff 0.0099
+
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+        setDisplayMode('fit');
+
+        const note = document.getElementById('fit-scale-note');
+        if (!note) throw new Error('test setup: fit-scale-note not registered');
+        expect(note.textContent).toBe('');
+      });
+
+      it('flags a scale-factor difference just OVER the mismatch epsilon (#506 boundary)', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const refContainer = configurePaneContent(document, PANE_CONTENT_IDS.reference, 10000);
+        attachScalePair(refContainer, { x: 0, y: 0, width: 20000, height: 1000 }); // factor 0.5000
+        const rtContainer = configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 10202);
+        attachScalePair(rtContainer, { x: 0, y: 0, width: 20000, height: 1000 }); // factor 0.5101 — diff 0.0101
+
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+        setDisplayMode('fit');
+
+        const note = document.getElementById('fit-scale-note');
+        if (!note) throw new Error('test setup: fit-scale-note not registered');
+        expect(note.textContent).not.toBe('');
+      });
+
       it('surfaces a scale-factor mismatch only via #fit-scale-note, never via console output (#506)', async () => {
         // README's "Display mode: fit vs capture" section states this
         // explicitly: "a DOM node, never console.*, because the driving
@@ -822,6 +899,73 @@ describe('createApp (wiring smoke tests)', () => {
         expect(staleTarget.style.transformOrigin).toBe('top left');
         expect(staleOuter.style.width).toBe('800px');
         expect(staleOuter.style.height).toBe('1000px');
+      });
+
+      it('a stale (superseded) call must not overwrite paneState set by a newer call for the SAME pane (race guard, review finding)', async () => {
+        // Two concurrent __loadPane calls for the same pane, neither
+        // awaited before the next starts, is a legitimate direct
+        // page.evaluate() pattern (this file's own header comment, README
+        // step 3). window.__createScaleTarget always detaches whatever the
+        // earlier call rendered into, but nothing used to stop that earlier
+        // call's own .then()/.catch() from still overwriting paneState once
+        // its fetch/render eventually settled — even reporting a false
+        // 'done' over a genuine 'error' the newer call already surfaced.
+        const { docx } = createRenderAsyncSpy();
+        // Definite-assignment assertion (test-only, CLAUDE.md permits `!`
+        // here): the executor below always runs synchronously inside `new
+        // Promise`, assigning this before the constructor returns.
+        let resolveSlowFetch!: (value: { ok: true; blob: () => Promise<object> }) => void;
+        const slowFetch = new Promise<{ ok: true; blob: () => Promise<object> }>((resolve) => {
+          resolveSlowFetch = resolve;
+        });
+        let fetchCallCount = 0;
+        const fetchStub = (): Promise<{
+          ok: boolean;
+          status?: number;
+          blob?: () => Promise<object>;
+        }> => {
+          fetchCallCount += 1;
+          // Call A (first): stays pending until the test resolves it below,
+          // deliberately well after call B has already settled.
+          if (fetchCallCount === 1) return slowFetch;
+          // Call B (second, supersedes call A): fails fast with a real
+          // (non-404, so tryAutoLoadPane's retry-on-404 path is irrelevant
+          // here) render error.
+          return Promise.resolve({ ok: false, status: 500 });
+        };
+
+        const { window: harnessWindow } = await loadHarnessSandbox('', {
+          fetch: fetchStub,
+          docx,
+        });
+        const loadPane = harnessWindow.__loadPane;
+        const measure = harnessWindow.__measure;
+        assertIsFunction(loadPane, '__loadPane');
+        assertIsFunction(measure, '__measure');
+
+        const callA = loadPane('run-1', 'reference') as Promise<void>;
+        const callB = loadPane('run-1', 'reference') as Promise<void>;
+
+        await callB.catch(() => {
+          // Expected — call B's stubbed fetch resolves ok:false.
+        });
+        await flushAsync();
+        const afterCallB = measure('reference') as { status: string; error: string | null };
+        expect(afterCallB.status).toBe('error');
+        expect(afterCallB.error).not.toBeNull();
+
+        // Call A's render now succeeds — well after call B already failed.
+        // Call A's own promise still resolves (the render genuinely
+        // happened, just into a now-detached node), but the shared
+        // paneState must stay exactly as call B (the newer, live call) left
+        // it.
+        resolveSlowFetch({ ok: true, blob: () => Promise.resolve({}) });
+        await expect(callA).resolves.toBeUndefined();
+        await flushAsync();
+
+        const afterCallA = measure('reference') as { status: string; error: string | null };
+        expect(afterCallA.status).toBe('error');
+        expect(afterCallA.error).not.toBeNull();
       });
     });
 

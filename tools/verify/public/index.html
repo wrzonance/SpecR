@@ -100,10 +100,10 @@
   }
   /* #506: nested scale wrapper — the OUTER div is the sized layout box the
      .pane-content ancestor's overflow calc sees (explicit width/height set
-     by harness.js in fit mode); the INNER .pane-scale-target is docx-preview's
+     by pane-scale.js in fit mode); the INNER .pane-scale-target is docx-preview's
      actual render target and the transform target (width:max-content +
      transform:scale in fit mode). A single element can't play both roles —
-     see index.html's DISPLAY MODES doc-comment and harness.js. */
+     see index.html's DISPLAY MODES doc-comment and pane-scale.js. */
   .pane-scale-outer { display: block; overflow: hidden; }
   .pane-scale-target { display: block; }
   .pane-empty {
@@ -185,6 +185,7 @@
   </aside>
 </main>
 
+<script src="/pane-scale.js"></script>
 <script src="/harness.js"></script>
 <script src="/scenario-picker.js"></script>
 </body>

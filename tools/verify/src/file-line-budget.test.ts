@@ -62,18 +62,34 @@ describe('countNonBlankLines', () => {
   });
 });
 
+function findOversizedFiles(dir: string): Array<{ file: string; lineCount: number }> {
+  return listPackageSourceFiles(dir)
+    .filter((file) => !file.endsWith('.test.ts'))
+    .map((file) => ({ file, lineCount: countNonBlankLines(readFileSync(file, 'utf-8')) }))
+    .filter(({ lineCount }) => lineCount > MAX_SOURCE_FILE_LINES);
+}
+
 describe('tools/verify source tree stays within the 400-line file cap', () => {
   it(`no non-test .ts/.js file under src/ exceeds ${String(MAX_SOURCE_FILE_LINES)} non-blank lines`, () => {
     const packageRoot = resolve(import.meta.dirname, '..');
-    const files = listPackageSourceFiles(resolve(packageRoot, 'src')).filter(
-      (file) => !file.endsWith('.test.ts')
-    );
-    expect(files.length).toBeGreaterThan(0);
+    const srcDir = resolve(packageRoot, 'src');
+    expect(listPackageSourceFiles(srcDir).length).toBeGreaterThan(0);
 
-    const oversized = files
-      .map((file) => ({ file, lineCount: countNonBlankLines(readFileSync(file, 'utf-8')) }))
-      .filter(({ lineCount }) => lineCount > MAX_SOURCE_FILE_LINES);
+    expect(findOversizedFiles(srcDir)).toEqual([]);
+  });
 
-    expect(oversized).toEqual([]);
+  // pnpm lint only runs ESLint's own max-lines rule against src/ ('eslint
+  // src/', package.json), so public/'s plain browser scripts (no bundler, no
+  // module system — see harness.js's own header comment) have no CI-enforced
+  // cap of their own. A #506 review finding caught exactly this gap:
+  // harness.js grew to 413 non-blank lines (over budget) with nothing red in
+  // CI. Reusing this same detector against public/ closes that gap rather
+  // than leaving the 400-line convention as prose-only for that directory.
+  it(`no non-test .js file under public/ exceeds ${String(MAX_SOURCE_FILE_LINES)} non-blank lines`, () => {
+    const packageRoot = resolve(import.meta.dirname, '..');
+    const publicDir = resolve(packageRoot, 'public');
+    expect(listPackageSourceFiles(publicDir).length).toBeGreaterThan(0);
+
+    expect(findOversizedFiles(publicDir)).toEqual([]);
   });
 });

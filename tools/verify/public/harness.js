@@ -34,56 +34,33 @@
 // primary guard.
 //
 // DISPLAY MODES (#506): the page renders panes in one of two modes, chosen
-// once at load from the `mode` query param (resolveDisplayMode) and mutable
-// afterward only through window.__setDisplayMode('fit' | 'capture'). The
-// mode is a single, GLOBAL switch for the whole page, not a per-pane
-// setting — switching modes re-scales BOTH panes together, by design (#506
-// spike finding 2), so none of resolveDisplayMode/__setDisplayMode/
-// __getDisplayMode take a `pane` argument. fit (default) scales panes down
-// via a NESTED .pane-scale-outer/.pane-scale-target wrapper pair
-// (index.html's CSS): a single element can't simultaneously be
-// docx-preview's render target, the CSS transform target, AND the sizing
-// box its overflow:auto ancestor measures scrollWidth/scrollHeight against
-// — transform:scale() alone never shrinks that ancestor's scroll size (#506
-// spike finding 1). capture (?mode=capture) renders panes at natural,
-// untransformed size — the ONLY mode window.__measure()/window.__regionGeom()
-// trust geometry against; both force-switch into it via ensureCaptureMode()
-// before every read.
+// once at load from the `mode` query param and mutable afterward only
+// through window.__setDisplayMode('fit' | 'capture'). The mode is a single,
+// GLOBAL switch for the whole page, not a per-pane setting — switching
+// modes re-scales BOTH panes together, by design (#506 spike finding 2).
+// fit (default) scales panes down via a NESTED .pane-scale-outer/
+// .pane-scale-target wrapper pair (index.html's CSS): a single element
+// can't simultaneously be docx-preview's render target, the CSS transform
+// target, AND the sizing box its overflow:auto ancestor measures
+// scrollWidth/scrollHeight against — transform:scale() alone never shrinks
+// that ancestor's scroll size (#506 spike finding 1). capture
+// (?mode=capture) renders panes at natural, untransformed size — the ONLY
+// mode window.__measure()/window.__regionGeom() trust geometry against;
+// both force-switch into it via ensureCaptureMode() before every read.
+//
+// All of the above — mode storage/validation, and the scale-wrapper DOM
+// management/math that applies it (getScaleOuter/getScaleTarget/
+// createScaleTarget/rescaleAllPanes) — lives in the sibling file
+// pane-scale.js, not here: harness.js had grown past this package's own
+// 400-line file cap (CLAUDE.md's project override), so that self-contained
+// concern was extracted, the same way scenario-picker.js was split out of
+// this file earlier. index.html loads pane-scale.js's <script> tag BEFORE
+// this one so window.__setDisplayMode/__createScaleTarget/__rescaleAllPanes
+// already exist by the time this file's own deferred callbacks (form
+// submit, poll tick, __loadPane) first reference them.
 
 (function () {
   'use strict';
-
-  // ─── display mode: fit vs capture (#506) ───────────────────────────────
-  // See this file's header comment for the full fit/capture contract. This
-  // block owns ONLY mode storage + strict boundary validation — the
-  // scale-target DOM helpers (getScaleOuter/getScaleTarget/rescaleAllPanes)
-  // that __setDisplayMode drives once a mode changes are wired in by a
-  // later task in the #506 program, not this one.
-
-  function resolveDisplayMode(search) {
-    // Never throws: any query string this can't parse, or any `mode` value
-    // other than exactly 'capture', falls back to the default ('fit')
-    // rather than surfacing a load-time error over a cosmetic default.
-    return new URLSearchParams(search).get('mode') === 'capture' ? 'capture' : 'fit';
-  }
-
-  let displayMode = resolveDisplayMode(window.location.search);
-
-  window.__setDisplayMode = function setDisplayMode(mode) {
-    if (mode !== 'fit' && mode !== 'capture') {
-      throw new Error("displayMode must be 'fit' or 'capture', got: " + JSON.stringify(mode));
-    }
-    displayMode = mode;
-    // Idempotent even when re-set to the current mode: rescaleAllPanes()
-    // always resets-then-recomputes (see applyDisplayModeToPane below), so
-    // calling this again after e.g. a viewport resize is a legitimate way
-    // to force a clean recompute, not a wasted no-op call.
-    rescaleAllPanes();
-  };
-
-  window.__getDisplayMode = function getDisplayMode() {
-    return displayMode;
-  };
 
   // Hardcoded, mirrors config.ts's VerifyEnv.viewportWidth default (3200) —
   // this task's scope is the frontend page only, so there is no backend
@@ -136,119 +113,10 @@
     node.textContent = '';
   }
 
-  // ─── scale-wrapper DOM management + fit-mode scaling math (#506 task 3/9)
-  // ───────────────────────────────────────────────────────────────────────
-  // A single element can't simultaneously be docx-preview's render target,
-  // the CSS transform target, AND the sizing box the pane-content ancestor's
-  // overflow:auto measures scrollWidth/scrollHeight against (see this file's
-  // DISPLAY MODES header comment — #506 spike finding 1). So every pane
-  // gets a NESTED pair: .pane-scale-outer (the sized layout box) wrapping
-  // .pane-scale-target (docx-preview's actual render target, and the
-  // transform target).
-
-  function getScaleOuter(pane) {
-    return document.getElementById(PANE_CONTENT_IDS[pane]).querySelector('.pane-scale-outer');
-  }
-
-  function getScaleTarget(pane) {
-    const outer = getScaleOuter(pane);
-    return outer ? outer.querySelector('.pane-scale-target') : null;
-  }
-
-  function createScaleTarget(pane) {
-    const container = document.getElementById(PANE_CONTENT_IDS[pane]);
-    clearChildren(container);
-    const outer = el('div', { className: 'pane-scale-outer' });
-    const target = el('div', { className: 'pane-scale-target' });
-    outer.appendChild(target);
-    container.appendChild(outer);
-    return target;
-  }
-
-  function resetScalePair(outer, target) {
-    outer.style.width = '';
-    outer.style.height = '';
-    target.style.width = '';
-    target.style.transform = '';
-    target.style.transformOrigin = '';
-  }
-
-  function isPositiveFinite(value) {
-    return Number.isFinite(value) && value > 0;
-  }
-
-  function applyDisplayModeToPane(pane) {
-    const outer = getScaleOuter(pane);
-    const target = getScaleTarget(pane);
-    if (!outer || !target) return undefined;
-
-    // Always reset first — one code path for fit→capture, capture→fit, and
-    // a fresh reload, so no stale transform/dimension ever survives a mode
-    // switch or a recompute (this is what makes capture-mode geometry
-    // byte-identical to a pane that was never transformed).
-    resetScalePair(outer, target);
-    if (displayMode === 'capture') return undefined;
-
-    // width:max-content neutralizes docx-preview's own centering CSS so the
-    // natural (untransformed) page size can be measured off `target` —
-    // without this, a narrower ancestor would already be squeezing the page
-    // before its size is ever read.
-    target.style.width = 'max-content';
-    const naturalRect = target.getBoundingClientRect();
-    if (!isPositiveFinite(naturalRect.width) || !isPositiveFinite(naturalRect.height)) {
-      resetScalePair(outer, target);
-      return undefined;
-    }
-
-    const paneContentEl = document.getElementById(PANE_CONTENT_IDS[pane]);
-    const rawFactor = paneContentEl.clientWidth / naturalRect.width;
-    if (!isPositiveFinite(rawFactor)) {
-      resetScalePair(outer, target);
-      return undefined;
-    }
-    // Clamped to at most 1 — fit mode's documented contract (this file's
-    // header comment, index.html, README) is that it SCALES PANES DOWN, never
-    // up. A pane column wider than the page's natural width (e.g. the tool's
-    // own recommended workflow: pinning the documented 3200px capture
-    // viewport while still in default fit mode yields a pane column wider
-    // than a Letter/A4 page) would otherwise produce factor > 1 and upscale.
-    const factor = Math.min(rawFactor, 1);
-
-    target.style.transform = 'scale(' + factor + ')';
-    target.style.transformOrigin = 'top left';
-    // The outer wrapper is the box the pane-content ancestor's overflow:auto
-    // measures scrollWidth/scrollHeight against — sizing it to exactly the
-    // scaled natural dimensions (not the untransformed natural size) is what
-    // eliminates the stray scroll space a lone transformed element leaves
-    // behind (#506 spike finding 1).
-    outer.style.width = naturalRect.width * factor + 'px';
-    outer.style.height = naturalRect.height * factor + 'px';
-    return factor;
-  }
-
-  // Loose enough to absorb sub-pixel rounding between two independently
-  // rendered panes at the same nominal page width, tight enough to still
-  // flag a genuine mismatch (e.g. one pane failing to load at all).
-  const SCALE_MISMATCH_EPSILON = 0.01;
-
-  function rescaleAllPanes() {
-    const referenceFactor = applyDisplayModeToPane('reference');
-    const roundtripFactor = applyDisplayModeToPane('roundtrip');
-    const mismatched =
-      referenceFactor !== undefined &&
-      roundtripFactor !== undefined &&
-      Math.abs(referenceFactor - roundtripFactor) > SCALE_MISMATCH_EPSILON;
-    document.getElementById('fit-scale-note').textContent = mismatched
-      ? 'fit-scale mismatch: reference=' +
-        referenceFactor.toFixed(3) +
-        ' roundtrip=' +
-        roundtripFactor.toFixed(3)
-      : '';
-  }
-
-  window.addEventListener('resize', rescaleAllPanes);
-
   // ─── pane loading (window.__loadPane) ──────────────────────────────────
+  // Scale-wrapper DOM management (window.__createScaleTarget) and fit-mode
+  // rescaling (window.__rescaleAllPanes) live in the sibling pane-scale.js
+  // — see this file's header comment.
 
   function fetchPaneBlob(runId, pane) {
     const url = `/api/runs/${encodeURIComponent(runId)}/files/${PANE_FILENAMES[pane]}`;
@@ -260,24 +128,50 @@
     });
   }
 
+  // Bumped on every __loadPane call for a given pane — lets a call's own
+  // .then()/.catch() tell whether it is still the LATEST in-flight load for
+  // that pane once its fetch/render finally settles. Without this, two
+  // concurrent __loadPane calls for the SAME pane (a legitimate direct
+  // page.evaluate() pattern — see this file's header comment and README
+  // step 3) can race: window.__createScaleTarget always detaches whatever
+  // the PREVIOUS call rendered into, but nothing stopped that previous
+  // call's own completion handler from still overwriting paneState with its
+  // own (now-superseded) outcome once its fetch/render eventually settled —
+  // even reporting a false 'done' over a genuine 'error' the newer call
+  // already surfaced, silently masking a real render failure.
+  const paneLoadGeneration = { reference: 0, roundtrip: 0 };
+
   window.__loadPane = function loadPane(runId, pane) {
-    // createScaleTarget rebuilds the outer/target pair fresh on every call
-    // (clearChildren on the pane-content div first) — this is what keeps a
+    // window.__createScaleTarget rebuilds the outer/target pair fresh on
+    // every call (clears the pane-content div first) — this is what keeps a
     // reload from accumulating a second .pane-scale-outer/.pane-scale-target
     // pair alongside a stale one from a previous load.
-    const target = createScaleTarget(pane);
+    const target = window.__createScaleTarget(pane);
     paneState[pane] = { status: 'loading', error: null };
+    const generation = ++paneLoadGeneration[pane];
     return fetchPaneBlob(runId, pane)
       .then((blob) => docx.renderAsync(blob, target, null, RENDER_OPTIONS))
       .then(() => {
+        // A newer __loadPane call for this pane has already started (and
+        // already rebuilt the DOM target and paneState) — this call is
+        // stale. Its own promise still resolves normally to its own
+        // caller (the render genuinely succeeded, just into a now-detached
+        // node), but it must not clobber the current, live paneState.
+        if (paneLoadGeneration[pane] !== generation) return;
         paneState[pane] = { status: 'done', error: null };
         // The freshly rendered pane has a new natural size — rescale both
         // panes now so a mismatched pair doesn't sit unscaled/mis-scaled
         // until the next resize event or explicit __setDisplayMode call.
-        rescaleAllPanes();
+        window.__rescaleAllPanes();
       })
       .catch((err) => {
-        paneState[pane] = { status: 'error', error: String((err && err.message) || err) };
+        // Same staleness guard as the success path — a superseded call's
+        // failure must not overwrite a newer call's (possibly successful)
+        // paneState. The rejection itself still propagates to this call's
+        // own caller either way.
+        if (paneLoadGeneration[pane] === generation) {
+          paneState[pane] = { status: 'error', error: String((err && err.message) || err) };
+        }
         throw err;
       });
   };
@@ -321,7 +215,7 @@
   // idempotence pin), but skipping the redundant call here avoids an
   // unnecessary rescaleAllPanes() recompute on every single measurement.
   function ensureCaptureMode() {
-    if (displayMode !== 'capture') {
+    if (window.__getDisplayMode() !== 'capture') {
       window.__setDisplayMode('capture');
     }
   }
