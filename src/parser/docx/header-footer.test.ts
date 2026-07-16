@@ -391,7 +391,14 @@ describe('captureHeaderFooter — never throws for document-content reasons', ()
   // untested where it actually matters, through captureHeaderFooter, not just
   // through captureRegion directly (header-footer-region.test.ts already pins
   // that half).
-  it('propagates ParserError DOCX_HEADER_FOOTER_XML_INVALID for a malformed header/footer PART XML, via buildVariant, unchanged', () => {
+  //
+  // INV-6 (#502, ADR-068 addendum): the issue's acceptance criterion 3
+  // ("corrupt header1.xml, the part XML itself, still fails the parse") —
+  // pre-existing (#306) strictness the #502 spike re-ran unmodified and
+  // confirmed still holds; formalized with this label as the closing
+  // regression pin for #502's own INV-N set, distinct from INV-1's degrade
+  // of the part's `.rels` sidecar, never the part's own body XML.
+  it('INV-6: propagates ParserError DOCX_HEADER_FOOTER_XML_INVALID for a malformed header/footer PART XML, via buildVariant, unchanged', () => {
     const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
     const entries = baseEntries({
       documentXml: makeDocXml(sectPr),
@@ -409,17 +416,19 @@ describe('captureHeaderFooter — never throws for document-content reasons', ()
     expect((caught as ParserError).message).toMatch(/failed to parse word\/header part XML/);
   });
 
-  // Regression pin (#502 task 4): parseDocumentRelationships' own strictness
-  // for malformed document.xml.rels (already pinned directly at
+  // INV-4 (#502, ADR-068 addendum): regression pin for the issue's acceptance
+  // criterion 2 ("corrupt document.xml.rels still fails the parse").
+  // parseDocumentRelationships' own strictness for malformed
+  // document.xml.rels (already pinned directly at
   // header-footer-relationships.test.ts's module boundary) was never
   // exercised through captureHeaderFooter itself — the orchestrator boundary
   // every other malformed-XML test in this block pins directly (settings.xml
-  // above, the header/footer PART XML above). #502 only ever degrades a
-  // header/footer PART's OWN .rels file (word/_rels/header*.xml.rels,
+  // above, the header/footer PART XML above, INV-6). #502 only ever degrades
+  // a header/footer PART's OWN .rels file (word/_rels/header*.xml.rels,
   // resolved eagerly by header-footer-media-parts.ts, never reaching this
   // module) — it must never soften document.xml.rels malformation, which
   // remains a hard parse failure.
-  it('propagates ParserError DOCX_HEADER_FOOTER_XML_INVALID for malformed document.xml.rels, via captureHeaderFooter, unchanged (#502)', () => {
+  it('INV-4: propagates ParserError DOCX_HEADER_FOOTER_XML_INVALID for malformed document.xml.rels, via captureHeaderFooter, unchanged (#502)', () => {
     const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
     const entries = baseEntries({
       documentXml: makeDocXml(sectPr),

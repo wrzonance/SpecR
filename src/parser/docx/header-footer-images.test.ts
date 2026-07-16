@@ -347,4 +347,20 @@ describe('resolveDrawingImage — relsUnreadable partMedia (#502)', () => {
     const result = resolveDrawingImage(run, resolvedMedia([['rId1', pngBytes()]]));
     expect(result.kind).toBe('field');
   });
+
+  // INV-7 (#502): resolveDrawingImage's arm 3 (`status === 'resolved'` but the
+  // descriptor's rId isn't in that part's media map -- an ordinary lookup
+  // miss, unrelated to #502) must keep falling back to the pre-existing
+  // kind:'image' unmodeled shape, never widen into arm 2's kind:
+  // 'unresolvedReference'. A `resolved` part and a `relsUnreadable` part both
+  // produce `{ kind: 'unmodeled' }` at the outer discriminant, so asserting
+  // only `result.kind === 'unmodeled'` (as the older sibling test above does)
+  // would not catch arm 3 accidentally collapsing into arm 2 -- this test
+  // asserts the inner `entry.kind` too, which does.
+  it('INV-7: a resolved part with an ordinary rId lookup miss still falls back to kind:"image", never unresolvedReference', () => {
+    const run = wellFormedDrawing('rId1', '100000', '100000', '');
+    const result = resolveDrawingImage(run, resolvedMedia([['rId-other', pngBytes()]]));
+    expect(result.kind).toBe('unmodeled');
+    expect(result.kind === 'unmodeled' && result.entry.kind).toBe('image');
+  });
 });

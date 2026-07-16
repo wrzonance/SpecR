@@ -389,6 +389,23 @@ by looking at a stack trace anyway (the fix is republishing a valid DOCX,
 not debugging SpecR), but it is a real, named tension with this repo's
 default error-handling posture, not a case quietly exempted from it.
 
+**The full #502 invariant set (INV-1 through INV-10) is now labeled at its
+test boundaries**, closing out the numbering this addendum cites throughout:
+INV-1 (`header-footer-media-parts.test.ts`, degrade-not-throw), INV-2/INV-3
+(the paragraph-vs-table-cell descriptor-gate asymmetry above), INV-4
+(`header-footer.test.ts`, document.xml.rels stays strict — acceptance
+criterion 2), INV-5 (`header-footer-media-warnings.test.ts`, same-part
+dedup across variant slots), INV-6 (`header-footer.test.ts`, a header/footer
+part's own body XML stays strict — acceptance criterion 3), INV-7
+(`header-footer-images.test.ts`, a `resolved` part's ordinary rId miss
+never widens into `relsUnreadable`'s `unresolvedReference`), INV-8
+(zero qualifying drawings emits no warning), INV-9 (a `relsUnreadable`
+part never contaminates a sibling part), and INV-10 (degrade and throw
+coexist in the same document without one masking the other). Each was
+verified RED (temporarily broken against the real implementation, confirmed
+to fail for the right reason, then reverted) before confirming GREEN against
+the unmodified, shipped code — task 6/6 of #502's full verification sweep.
+
 ## Consequences
 
 - Acceptance criteria 3 and 4 are met by construction: every unmodeled
