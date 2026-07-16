@@ -159,24 +159,26 @@ function unmodeledDrawing(run: Record<string, unknown>): DrawingResolution {
   return { kind: 'unmodeled', entry: { kind: 'image', detail: compact(run) } };
 }
 
-// #502: a `relsUnreadable` part means the part's own .rels file could not be
-// read/parsed at all — every reference into it is unresolvable by
-// construction, not merely a miss. Distinguished from a plain lookup miss
-// (`unmodeledDrawing`, kind:'image') by carrying `rId`/`part`/`reason`, so
-// header-footer-media-warnings.ts can attribute one capture-warning per
-// damaged part instead of one generic "image content not modeled" per run.
-//
-// Exported (#505) so header-footer-discard-drawings.ts's paragraph-path
-// discard scanner (itemizeParagraphDiscardDrawings) reuses the exact same
-// entry shape for a drawing living OUTSIDE this module's own
-// resolveDrawingImage call site — an extra (2nd+) content-bearing paragraph,
-// preserved whole elsewhere as its own `extraParagraph` entry but ALSO
-// itemized as its own `unresolvedReference` when the part is damaged. Return
-// type narrows to bare `PartialUnmodeled` (this function no longer needs the
-// `kind: 'unmodeled'` outer wrapper itself — its one in-module call site,
-// resolveDrawingImage below, wraps it) rather than the local `DrawingResolution`
-// union, since the discard scanner's own return type is `PartialUnmodeled[]`,
-// not `DrawingResolution[]`.
+/**
+ * #502: a `relsUnreadable` part means the part's own .rels file could not be
+ * read/parsed at all — every reference into it is unresolvable by
+ * construction, not merely a miss. Distinguished from a plain lookup miss
+ * (`unmodeledDrawing`, kind:'image') by carrying `rId`/`part`/`reason`, so
+ * header-footer-media-warnings.ts can attribute one capture-warning per
+ * damaged part instead of one generic "image content not modeled" per run.
+ *
+ * Exported (#505) so header-footer-discard-drawings.ts's paragraph-path
+ * discard scanner (itemizeParagraphDiscardDrawings) reuses the exact same
+ * entry shape for a drawing living OUTSIDE this module's own
+ * resolveDrawingImage call site — an extra (2nd+) content-bearing paragraph,
+ * preserved whole elsewhere as its own `extraParagraph` entry but ALSO
+ * itemized as its own `unresolvedReference` when the part is damaged. Return
+ * type narrows to bare `PartialUnmodeled` (this function no longer needs the
+ * `kind: 'unmodeled'` outer wrapper itself — its one in-module call site,
+ * resolveDrawingImage below, wraps it) rather than the local `DrawingResolution`
+ * union, since the discard scanner's own return type is `PartialUnmodeled[]`,
+ * not `DrawingResolution[]`.
+ */
 export function relsUnreadableEntry(rId: string, partPath: string): PartialUnmodeled {
   return {
     kind: 'unresolvedReference',
