@@ -95,6 +95,14 @@ describe('createApp (wiring smoke tests)', () => {
     expect(body).toContain('data-testid="properties-sidebar"');
     expect(body).toContain('data-testid="derivation-report"');
     expect(body).toContain('/harness.js');
+    // #506: an inline data: favicon <link> is sufficient on its own to
+    // suppress Chromium's implicit /favicon.ico probe — no new route or
+    // static asset needed (WT-506 spike finding 5).
+    expect(body).toContain('rel="icon"');
+    // #506: scale-factor disagreement between the reference/round-trip
+    // panes must be surfaced only through this DOM node, never through
+    // console output — the driving agent reads DOM state, not console logs.
+    expect(body).toContain('data-testid="fit-scale-note"');
   });
 
   it('serves harness.js exposing the render/measure hooks with no in-page screenshot capture', async () => {
