@@ -7,24 +7,40 @@
 // sibling file because header-footer.ts is already at ESLint's max-lines
 // cap (400, CLAUDE.md) — this stays well under budget.
 
+import { RELS_UNREADABLE_REASON } from './header-footer-media-parts.js';
 import type { HeaderFooterUnmodeledEntry } from './types.js';
 
+// The exact shape header-footer-images.ts's relsUnreadableEntry (carries rId)
+// and header-footer-table.ts's imageUnmodeledEntry (no rId — the table-cell
+// path never parses a drawing descriptor) both produce for a #502
+// relsUnreadable part.
+type RelsUnreadableEntry = HeaderFooterUnmodeledEntry & {
+  readonly kind: 'unresolvedReference';
+  readonly detail: { readonly part: string; readonly reason: string };
+};
+
 /**
- * Narrows an unmodeled entry's `detail` to #502's relsUnreadable shape --
- * `{ part: string, reason: string, rId?: string }` -- as produced by
- * header-footer-images.ts's relsUnreadableEntry (carries rId) and
- * header-footer-table.ts's imageUnmodeledEntry (no rId — the table-cell path
- * never parses a drawing descriptor). Every OTHER unmodeled-entry producer in
- * this module family (header-footer.ts's missingPartEntry/
- * unresolvedToUnmodeled/duplicateReferenceEntry) keys its detail on `target`
- * or `rId` alone, never `part`, so checking for a string `part` field is
- * sufficient to distinguish the two families without also inspecting
- * `reason` or the entry's `kind` (pinned: header-footer-media-warnings.test.ts's
- * non-interference tests against all three pre-existing shapes).
+ * Classifies a WHOLE unmodeled entry (not just its `detail`) as a #502
+ * relsUnreadable entry: `kind === 'unresolvedReference'` AND a string `part`
+ * AND `reason === RELS_UNREADABLE_REASON`. Matching on the full triple —
+ * rather than a bare string `part` field — keeps a future or crafted entry
+ * that merely happens to carry `detail.part` (a different kind, or an
+ * unrelated reason) from being pulled out of the generic warnings and
+ * mislabeled as an unresolvable image, which would silently lose its real
+ * warning. Every pre-existing unresolvedReference producer in this module
+ * family (header-footer.ts's missingPartEntry/unresolvedToUnmodeled/
+ * duplicateReferenceEntry) keys its detail on `target`/`rId`, never `part`
+ * with this reason, so it is correctly excluded (pinned:
+ * header-footer-media-warnings.test.ts's non-interference + negative tests).
  */
-export function isRelsUnreadableDetail(detail: unknown): detail is { readonly part: string } {
+export function isRelsUnreadableEntry(
+  entry: HeaderFooterUnmodeledEntry
+): entry is RelsUnreadableEntry {
+  if (entry.kind !== 'unresolvedReference') return false;
+  const detail = entry.detail;
   if (typeof detail !== 'object' || detail === null) return false;
-  return typeof (detail as Record<string, unknown>).part === 'string';
+  const record = detail as Record<string, unknown>;
+  return typeof record.part === 'string' && record.reason === RELS_UNREADABLE_REASON;
 }
 
 /**
@@ -44,7 +60,7 @@ export function buildRelsUnreadableWarnings(
 ): readonly string[] {
   const countsByPart = new Map<string, number>();
   for (const entry of unmodeled) {
-    if (!isRelsUnreadableDetail(entry.detail)) continue;
+    if (!isRelsUnreadableEntry(entry)) continue;
     countsByPart.set(entry.detail.part, (countsByPart.get(entry.detail.part) ?? 0) + 1);
   }
   return [...countsByPart.entries()].map(

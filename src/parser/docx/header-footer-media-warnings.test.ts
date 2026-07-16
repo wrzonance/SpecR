@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  isRelsUnreadableDetail,
+  isRelsUnreadableEntry,
   buildRelsUnreadableWarnings,
 } from './header-footer-media-warnings.js';
 import { RELS_UNREADABLE_REASON } from './header-footer-media-parts.js';
@@ -59,49 +59,80 @@ function duplicateReferenceEntry(target: string, rId: string): HeaderFooterUnmod
   };
 }
 
-describe('isRelsUnreadableDetail', () => {
-  it('matches a #502 relsUnreadable detail carrying rId (header-footer-images.ts shape)', () => {
-    expect(
-      isRelsUnreadableDetail({
-        rId: 'rId1',
-        part: 'word/header1.xml',
-        reason: RELS_UNREADABLE_REASON,
-      })
-    ).toBe(true);
+// Wraps a raw detail in a full unmodeled entry so the whole-entry guard can be
+// exercised for detail shapes that are not produced by a real #502 helper
+// (kind/detail combinations a crafted or future producer could emit).
+function entryWith(
+  kind: HeaderFooterUnmodeledEntry['kind'],
+  detail: unknown
+): HeaderFooterUnmodeledEntry {
+  return { variant: 'default', region: 'header', kind, detail };
+}
+
+describe('isRelsUnreadableEntry', () => {
+  it('matches a #502 relsUnreadable entry carrying rId (header-footer-images.ts shape)', () => {
+    expect(isRelsUnreadableEntry(relsUnreadableEntry('word/header1.xml', 'rId1'))).toBe(true);
   });
 
-  it('matches a #502 relsUnreadable detail with no rId (header-footer-table.ts shape)', () => {
-    expect(
-      isRelsUnreadableDetail({ part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON })
-    ).toBe(true);
+  it('matches a #502 relsUnreadable entry with no rId (header-footer-table.ts shape)', () => {
+    expect(isRelsUnreadableEntry(relsUnreadableEntry('word/header1.xml'))).toBe(true);
   });
 
   // Non-interference (task 3 requirement): the three PRE-EXISTING
   // unresolvedReference producers in header-footer.ts key on `target`, never
   // `part` — none should ever be mistaken for a #502 relsUnreadable entry.
-  it("REGRESSION: does not match missingPartEntry's detail shape (keys on target, not part)", () => {
-    expect(isRelsUnreadableDetail(missingPartEntry('header9.xml', 'rId1').detail)).toBe(false);
+  it('REGRESSION: does not match missingPartEntry (keys on target, not part)', () => {
+    expect(isRelsUnreadableEntry(missingPartEntry('header9.xml', 'rId1'))).toBe(false);
   });
 
-  it("REGRESSION: does not match unresolvedToUnmodeled's detail shape (rId only)", () => {
-    expect(isRelsUnreadableDetail(unresolvedToUnmodeledEntry('rId1').detail)).toBe(false);
+  it('REGRESSION: does not match unresolvedToUnmodeled (rId only)', () => {
+    expect(isRelsUnreadableEntry(unresolvedToUnmodeledEntry('rId1'))).toBe(false);
   });
 
-  it("REGRESSION: does not match duplicateReferenceEntry's detail shape (keys on target, not part)", () => {
-    expect(isRelsUnreadableDetail(duplicateReferenceEntry('header1.xml', 'rId2').detail)).toBe(
+  it('REGRESSION: does not match duplicateReferenceEntry (keys on target, not part)', () => {
+    expect(isRelsUnreadableEntry(duplicateReferenceEntry('header1.xml', 'rId2'))).toBe(false);
+  });
+
+  // NEGATIVE (CodeRabbit/Codex #503 review): classify the WHOLE entry, not
+  // just a bare string `part`. An entry that merely happens to carry
+  // `detail.part` but is NOT a #502 unresolvedReference must keep its own
+  // generic warning — never be pulled out and mislabeled as an unresolvable
+  // image reference. Guards the kind AND the reason, independently.
+  it('NEGATIVE: rejects a string `part` on a non-unresolvedReference kind (wrong kind)', () => {
+    expect(
+      isRelsUnreadableEntry(
+        entryWith('image', { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON })
+      )
+    ).toBe(false);
+    expect(isRelsUnreadableEntry(entryWith('extraParagraph', { part: 'word/header1.xml' }))).toBe(
       false
     );
   });
 
+  it('NEGATIVE: rejects an unresolvedReference whose reason is not RELS_UNREADABLE_REASON (wrong reason)', () => {
+    expect(
+      isRelsUnreadableEntry(entryWith('unresolvedReference', { part: 'word/header1.xml' }))
+    ).toBe(false);
+    expect(
+      isRelsUnreadableEntry(
+        entryWith('unresolvedReference', { part: 'word/header1.xml', reason: 'some other reason' })
+      )
+    ).toBe(false);
+  });
+
   it('rejects non-object and null detail values without throwing', () => {
-    expect(isRelsUnreadableDetail(undefined)).toBe(false);
-    expect(isRelsUnreadableDetail(null)).toBe(false);
-    expect(isRelsUnreadableDetail('word/header1.xml')).toBe(false);
-    expect(isRelsUnreadableDetail(42)).toBe(false);
+    expect(isRelsUnreadableEntry(entryWith('unresolvedReference', undefined))).toBe(false);
+    expect(isRelsUnreadableEntry(entryWith('unresolvedReference', null))).toBe(false);
+    expect(isRelsUnreadableEntry(entryWith('unresolvedReference', 'word/header1.xml'))).toBe(false);
+    expect(isRelsUnreadableEntry(entryWith('unresolvedReference', 42))).toBe(false);
   });
 
   it('rejects an object whose part field is not a string', () => {
-    expect(isRelsUnreadableDetail({ part: 123 })).toBe(false);
+    expect(
+      isRelsUnreadableEntry(
+        entryWith('unresolvedReference', { part: 123, reason: RELS_UNREADABLE_REASON })
+      )
+    ).toBe(false);
   });
 });
 

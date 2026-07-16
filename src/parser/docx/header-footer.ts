@@ -24,7 +24,7 @@ import type {
   HeaderFooterPartMedia,
 } from './header-footer-media-parts.js';
 import {
-  isRelsUnreadableDetail,
+  isRelsUnreadableEntry,
   buildRelsUnreadableWarnings,
 } from './header-footer-media-warnings.js';
 // The PARSER-LOCAL HeaderFooterUnmodeledEntry (types.ts), not the ast-level
@@ -267,7 +267,7 @@ function pgNumStartWarningLine(pgNumStart: number): string {
 // carries additional w:pPr/w:sectPr section breaks this capture's
 // single-sectPr scope does not model its own header/footer set for, plus one
 // for a preserved-but-unpromoted pgNumStart (see pgNumStartWarningLine
-// above). #502: entries matching isRelsUnreadableDetail are excluded from
+// above). #502: entries matching isRelsUnreadableEntry are excluded from
 // the generic per-entry mapping — they still count toward `unmodeled` (and
 // stay in raw.unmodeled untouched) — and instead collapse into
 // buildRelsUnreadableWarnings' single aggregate line per damaged part, so a
@@ -285,7 +285,7 @@ function buildRawWarnings(
       ]
     : [];
   const pgNumStartWarning = pgNumStart !== undefined ? [pgNumStartWarningLine(pgNumStart)] : [];
-  const genericUnmodeled = unmodeled.filter((entry) => !isRelsUnreadableDetail(entry.detail));
+  const genericUnmodeled = unmodeled.filter((entry) => !isRelsUnreadableEntry(entry));
   return [
     ...genericUnmodeled.map(unmodeledWarningLine),
     ...buildRelsUnreadableWarnings(unmodeled),
