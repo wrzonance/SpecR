@@ -17,6 +17,14 @@
 // the way to each cell's own runsOf call, so a w:fldSimple field interleaved
 // between two w:r runs inside a table cell keeps true document order exactly
 // like the paragraph path does — the table-cell path is not order-exempt.
+// A drawing living inside any of this module's own discard paths — an extra
+// (2nd+) cell paragraph, a whole disqualified table, or an extra (2nd+)
+// root-level table — is additionally itemized as its own
+// `unresolvedReference` when the part's own .rels file is unreadable (#505,
+// #502 follow-up); imageUnmodeledEntry and the itemizeTableDiscardDrawings
+// scanner both now live in header-footer-discard-drawings.ts (relocated
+// from this file) alongside the paragraph-path counterpart used by
+// header-footer-region.ts.
 
 import { asRecord, compact, extractAttrStr, toArray } from './xml-utils.js';
 import { collapseComplexFields } from './header-footer-field-recognition.js';
@@ -30,7 +38,10 @@ import {
 } from './header-footer-region.js';
 import type { HeaderFooterRegion, PartialUnmodeled } from './header-footer-region.js';
 import type { RunOrder } from './header-footer-run-order.js';
-import { RELS_UNREADABLE_REASON } from './header-footer-media-parts.js';
+import {
+  imageUnmodeledEntry,
+  itemizeTableDiscardDrawings,
+} from './header-footer-discard-drawings.js';
 import type { HeaderFooterPartMedia } from './header-footer-media-parts.js';
 
 // Local indexed-access aliases (mirrors header-footer-region.ts's own
@@ -181,27 +192,6 @@ interface CellCaptureResult {
   readonly unmodeled: readonly PartialUnmodeled[];
 }
 
-// A table-cell drawing run normally becomes an unmodeled `image` entry
-// verbatim (ADR-071 decision 4: table-cell images are out of scope,
-// regardless of rels-index health). #502: when the owning part's own .rels
-// file is itself unreadable, every drawing in this cell is unresolvable by
-// construction — that gets its own `unresolvedReference` entry (part +
-// reason, no `rId`: this layer never parses a drawing descriptor to find
-// one) so header-footer-media-warnings.ts can attribute one capture-warning
-// per damaged part instead of a generic "image content not modeled" line.
-function imageUnmodeledEntry(
-  run: Record<string, unknown>,
-  partMedia: HeaderFooterPartMedia | undefined
-): PartialUnmodeled {
-  if (partMedia?.status === 'relsUnreadable') {
-    return {
-      kind: 'unresolvedReference',
-      detail: compact({ part: partMedia.partPath, reason: RELS_UNREADABLE_REASON }),
-    };
-  }
-  return { kind: 'image', detail: compact(run) };
-}
-
 function captureTableCell(
   tc: Record<string, unknown>,
   known: KnownSectionIdentity,
@@ -209,13 +199,25 @@ function captureTableCell(
   partMedia?: HeaderFooterPartMedia
 ): CellCaptureResult {
   const contentBearing = paragraphsInCell(tc).filter((p) => paragraphHasContent(runsOf(p)));
-  const extraUnmodeled: readonly PartialUnmodeled[] = contentBearing
-    .slice(1)
-    .map((p): PartialUnmodeled => ({ kind: 'extraParagraph', detail: compact(p) }));
+  const extraParagraphs = contentBearing.slice(1);
+  const extraUnmodeled: readonly PartialUnmodeled[] = extraParagraphs.map(
+    (p): PartialUnmodeled => ({ kind: 'extraParagraph', detail: compact(p) })
+  );
+  // #505: a drawing living inside one of these extra (2nd+) cell paragraphs
+  // is still preserved verbatim by extraUnmodeled above (never lost) but is
+  // ALSO itemized here as its own unresolvedReference when the part's own
+  // .rels file is unreadable — UNGATED (INV-3), matching this cell's own
+  // FIRST-paragraph drawing handling below (imageUnmodeledEntry), which
+  // never gates on descriptor validity either (ADR-071 decision 4:
+  // table-cell images are out of scope regardless).
+  const discardedDrawingUnmodeled = itemizeTableDiscardDrawings(extraParagraphs, partMedia);
   const columnSpan = columnSpanOf(tc);
   const first = contentBearing[0];
   if (!first) {
-    return { cell: compact({ columnSpan }) as HeaderFooterTableCell, unmodeled: extraUnmodeled };
+    return {
+      cell: compact({ columnSpan }) as HeaderFooterTableCell,
+      unmodeled: [...extraUnmodeled, ...discardedDrawingUnmodeled],
+    };
   }
 
   // Table-cell images stay OUT OF SCOPE (#487, ADR-071 decision 4, source-
@@ -248,7 +250,15 @@ function captureTableCell(
     columnSpan,
     style: built.style,
   }) as HeaderFooterTableCell;
-  return { cell, unmodeled: [...imageUnmodeled, ...built.unmodeled, ...extraUnmodeled] };
+  return {
+    cell,
+    unmodeled: [
+      ...imageUnmodeled,
+      ...built.unmodeled,
+      ...extraUnmodeled,
+      ...discardedDrawingUnmodeled,
+    ],
+  };
 }
 
 interface RowCaptureResult {
@@ -276,7 +286,17 @@ function captureTable(
 ): TableCaptureResult {
   const rows = recordsOf(tbl, 'w:tr');
   if (rows.length === 0 || hasNestedTable(tbl) || hasUnsupportedMerge(tbl)) {
-    return { table: undefined, unmodeled: [{ kind: 'table', detail: compact(tbl) }] };
+    // #505: the whole disqualified table is still preserved verbatim below
+    // (never lost) — but any drawing living anywhere inside it (at any
+    // depth, including inside a disqualifying nested w:tbl) is ALSO
+    // itemized as its own unresolvedReference when the part's own .rels
+    // file is unreadable, UNGATED (INV-3), matching this same table's own
+    // per-cell drawing handling when it IS structurally capturable.
+    const discardedDrawingUnmodeled = itemizeTableDiscardDrawings([tbl], partMedia);
+    return {
+      table: undefined,
+      unmodeled: [{ kind: 'table', detail: compact(tbl) }, ...discardedDrawingUnmodeled],
+    };
   }
   const built = rows.map((tr) => captureTableRow(tr, known, order, partMedia));
   const table = compact({
@@ -327,8 +347,18 @@ export function captureTablesForRegion(
   if (!first) return { table: undefined, unmodeled: [] };
 
   const captured = captureTable(first, known, order, partMedia);
-  const extraUnmodeled: readonly PartialUnmodeled[] = tables
-    .slice(1)
-    .map((tbl): PartialUnmodeled => ({ kind: 'table', detail: compact(tbl) }));
-  return { table: captured.table, unmodeled: [...captured.unmodeled, ...extraUnmodeled] };
+  const extraTables = tables.slice(1);
+  const extraUnmodeled: readonly PartialUnmodeled[] = extraTables.map(
+    (tbl): PartialUnmodeled => ({ kind: 'table', detail: compact(tbl) })
+  );
+  // #505: each EXTRA root-level table is still preserved verbatim above
+  // (never lost) — but any drawing living anywhere inside one (at any depth)
+  // is ALSO itemized as its own unresolvedReference when the part's own
+  // .rels file is unreadable, UNGATED (INV-3), matching this same module's
+  // own per-cell and disqualified-whole-table drawing handling above.
+  const discardedDrawingUnmodeled = itemizeTableDiscardDrawings(extraTables, partMedia);
+  return {
+    table: captured.table,
+    unmodeled: [...captured.unmodeled, ...extraUnmodeled, ...discardedDrawingUnmodeled],
+  };
 }

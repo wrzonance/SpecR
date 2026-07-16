@@ -309,6 +309,78 @@ describe('captureRegion — per-item drops inside an otherwise-capturable table 
       expect.objectContaining({ variant: 'default', region: 'header', kind: 'extraParagraph' })
     );
   });
+
+  // #505 (#502 follow-up): a drawing living inside an EXTRA (2nd+)
+  // content-bearing paragraph of a table cell is still preserved verbatim by
+  // its raw extraParagraph entry (never lost) but is ALSO itemized here as
+  // its own unresolvedReference when the part's own .rels file is unreadable
+  // — matching the cell's FIRST-paragraph drawing handling (captureTableCell's
+  // own imageUnmodeledEntry call) and the paragraph-path discard scanner
+  // (header-footer-region.test.ts's equivalent #505 pin).
+  it('#505: a drawing in an EXTRA cell paragraph of a relsUnreadable part is ALSO itemized as unresolvedReference, alongside the raw extraParagraph entry', () => {
+    const extraRId = 'rId10';
+    const partMedia = relsUnreadableMedia('word/header1.xml');
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(textRun('First')) + paragraph(imageDrawingRun(extraRId)))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.region?.table?.rows).toEqual([
+      { cells: [{ content: [{ kind: 'literal', text: 'First' }] }] },
+    ]);
+    expect(result.unmodeled).toContainEqual({
+      variant: 'default',
+      region: 'header',
+      kind: 'unresolvedReference',
+      detail: { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+    // ... AND the second paragraph is STILL preserved raw — the discard-path
+    // itemization adds a companion entry, it never removes the original.
+    const extra = result.unmodeled.filter((e) => e.kind === 'extraParagraph');
+    expect(extra).toHaveLength(1);
+    expect(JSON.stringify(extra[0]?.detail ?? null)).toContain(extraRId);
+  });
+
+  // INV-3 (table-cell path has no descriptor gate, ADR-068 addendum): unlike
+  // the paragraph path's INV-2 asymmetry, a malformed drawing (valid r:embed,
+  // missing wp:extent) in an EXTRA cell paragraph STILL degrades to
+  // unresolvedReference against a relsUnreadable part — mirroring this same
+  // file's own INV-3 pin for the FIRST cell paragraph (above) rather than the
+  // paragraph-path discard scanner's descriptor gate.
+  it('INV-3 (discard path): a malformed drawing (missing wp:extent) in an EXTRA cell paragraph still degrades to unresolvedReference in a relsUnreadable part — no descriptor gate here either', () => {
+    const extraRId = 'rId11';
+    const partMedia = relsUnreadableMedia('word/header1.xml');
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(textRun('First')) + paragraph(malformedDrawingRun(extraRId)))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.unmodeled).toContainEqual({
+      variant: 'default',
+      region: 'header',
+      kind: 'unresolvedReference',
+      detail: { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+  });
+
+  // Corpus-safety (#505): the discard-path scanner only activates against a
+  // relsUnreadable part — a healthy `resolved` partMedia leaves the discard
+  // path exactly as it behaved before this issue: the extra paragraph's
+  // drawing is preserved raw only, never itemized, so an ordinary corpus
+  // document with an intact .rels index sees no new unmodeled entries.
+  it('corpus-safety (#505): a drawing in an EXTRA cell paragraph of a HEALTHY (resolved) part is never itemized as unresolvedReference', () => {
+    const extraRId = 'rId10';
+    const partMedia = resolvedMedia([[extraRId, pngBytes()]]);
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(textRun('First')) + paragraph(imageDrawingRun(extraRId)))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.unmodeled.some((e) => e.kind === 'unresolvedReference')).toBe(false);
+    const extra = result.unmodeled.filter((e) => e.kind === 'extraParagraph');
+    expect(extra).toHaveLength(1);
+    expect(JSON.stringify(extra[0]?.detail ?? null)).toContain(extraRId);
+  });
 });
 
 describe('captureRegion — structural table disqualification (ADR-071 decision 4)', () => {
@@ -351,6 +423,175 @@ describe('captureRegion — structural table disqualification (ADR-071 decision 
     const xml = makeHdrXml(table(row(cell(sdtWrappedNestedTbl))));
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
     expect(result.region?.table).toBeUndefined();
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+  });
+});
+
+// #505 (#502 follow-up): a whole table disqualified by ADR-071 decision 4
+// (0 rows / nested w:tbl / unsupported vMerge) is still preserved verbatim
+// as its own raw `{ kind: 'table' }` unmodeled entry (never lost) — but any
+// drawing run living anywhere inside that disqualified table was not, until
+// now, itemized as its own `unresolvedReference` when the owning part's own
+// .rels file is itself unreadable, so the part-level aggregate warning
+// undercounted it. Mirrors this file's own #505 pin for captureTableCell's
+// EXTRA-paragraph discard path (above) and header-footer-region.test.ts's
+// equivalent pin for the paragraph-region discard path.
+describe('captureRegion — #505 discard-path itemization: structurally disqualified whole table', () => {
+  it('#505: a drawing nested two levels deep inside a disqualifying nested sub-table is itemized as unresolvedReference in a relsUnreadable part, alongside the raw table entry (INV-10 deep-scan)', () => {
+    const rId = 'rId12';
+    const partMedia = relsUnreadableMedia('word/header1.xml');
+    // Two levels deep: outer table -> outer cell -> nested table -> nested
+    // cell -> paragraph -> drawing run. Disqualifies the OUTER table
+    // (hasNestedTable) while the drawing itself lives inside the nested
+    // sub-table, not the outer table's own direct paragraph content.
+    const nestedTbl = table(row(cell(paragraph(imageDrawingRun(rId)))));
+    const xml = makeHdrXml(table(row(cell(nestedTbl))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.region?.table).toBeUndefined();
+    // The whole disqualified table is still preserved raw, unchanged — not
+    // merely present BY KIND but genuinely carrying the original content
+    // (the nested drawing's own rId), proving this is preservation, not a
+    // kind-tagged replacement/stub.
+    const tableEntry = result.unmodeled.find((e) => e.kind === 'table');
+    expect(tableEntry).toMatchObject({ variant: 'default', region: 'header', kind: 'table' });
+    expect(JSON.stringify(tableEntry?.detail ?? null)).toContain(rId);
+    // ... AND the deeply-nested drawing is ALSO itemized as its own
+    // unresolvedReference (UNGATED — no descriptor check, ADR-071 decision 4;
+    // no rId in the detail — imageUnmodeledEntry never parses a descriptor).
+    expect(result.unmodeled).toContainEqual({
+      variant: 'default',
+      region: 'header',
+      kind: 'unresolvedReference',
+      detail: { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+  });
+
+  // Corpus-safety (#505): the discard-path scanner only activates against a
+  // relsUnreadable part — a healthy `resolved` partMedia leaves the discard
+  // path exactly as it behaved before this issue: the disqualified table's
+  // drawing is preserved raw only (inside the whole-table entry), never
+  // itemized, so an ordinary corpus document with an intact .rels index sees
+  // no new unmodeled entries from this change.
+  it('corpus-safety (#505): a drawing inside a disqualified table of a HEALTHY (resolved) part is never itemized as unresolvedReference', () => {
+    const rId = 'rId13';
+    const partMedia = resolvedMedia([[rId, pngBytes()]]);
+    const nestedTbl = table(row(cell(paragraph(imageDrawingRun(rId)))));
+    const xml = makeHdrXml(table(row(cell(nestedTbl))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.region?.table).toBeUndefined();
+    expect(result.unmodeled.some((e) => e.kind === 'unresolvedReference')).toBe(false);
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+  });
+
+  // Corpus-safety (#505): no partMedia supplied at all (undefined) — the
+  // discard-path scanner's optional-chaining guard (`partMedia?.status`)
+  // must short-circuit to `[]` rather than throw, matching every other call
+  // site's "no partMedia" behavior.
+  it('corpus-safety (#505): a drawing inside a disqualified table with NO partMedia supplied is never itemized, and capture never throws', () => {
+    const rId = 'rId14';
+    const nestedTbl = table(row(cell(paragraph(imageDrawingRun(rId)))));
+    const xml = makeHdrXml(table(row(cell(nestedTbl))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+
+    expect(result.region?.table).toBeUndefined();
+    expect(result.unmodeled.some((e) => e.kind === 'unresolvedReference')).toBe(false);
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+  });
+});
+
+// #505 (#502 follow-up): an EXTRA (2nd+) root-level table is preserved
+// verbatim as its own raw `{ kind: 'table' }` unmodeled entry (never lost,
+// ADR-071 decision 5) — but any drawing run living anywhere inside that
+// extra table was not, until now, itemized as its own `unresolvedReference`
+// when the owning part's own .rels file is itself unreadable, so the
+// part-level aggregate warning undercounted it. Mirrors this file's own
+// #505 pins above for captureTableCell's EXTRA-paragraph path and the
+// structurally-disqualified whole-table path, and
+// header-footer-region.test.ts's equivalent pin for the paragraph-region
+// discard path — this is the fourth and final #505 discard site.
+describe('captureRegion — #505 discard-path itemization: extra (2nd+) root-level table', () => {
+  it('#505: a drawing inside an EXTRA (2nd+) root-level table is itemized as unresolvedReference in a relsUnreadable part, alongside the raw table entry — even a descriptor-malformed drawing (INV-3, ungated)', () => {
+    const goodRId = 'rId15';
+    const malformedRId = 'rId16';
+    const partMedia = relsUnreadableMedia('word/header1.xml');
+    const firstTable = table(row(cell(paragraph(textRun('First')))));
+    const secondTable = table(
+      row(
+        cell(paragraph(`${textRun('Logo: ')}${imageDrawingRun(goodRId)}`)) +
+          cell(paragraph(malformedDrawingRun(malformedRId)))
+      )
+    );
+    const xml = makeHdrXml(`${firstTable}${secondTable}`);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.region?.table?.rows).toEqual([
+      { cells: [{ content: [{ kind: 'literal', text: 'First' }] }] },
+    ]);
+    // The whole extra table is still preserved raw, unchanged — not merely
+    // present BY KIND but genuinely carrying the original content (both
+    // drawings' own rIds), proving this is preservation, not a kind-tagged
+    // replacement/stub.
+    const tableEntry = result.unmodeled.find((e) => e.kind === 'table');
+    expect(tableEntry).toMatchObject({ variant: 'default', region: 'header', kind: 'table' });
+    const tableEntryJson = JSON.stringify(tableEntry?.detail ?? null);
+    expect(tableEntryJson).toContain(goodRId);
+    expect(tableEntryJson).toContain(malformedRId);
+    // ... AND BOTH drawings inside it (well-formed and descriptor-malformed
+    // alike — UNGATED, INV-3) are ALSO itemized as their own
+    // unresolvedReference entries; no rId in the detail (imageUnmodeledEntry
+    // never parses a drawing descriptor to find one).
+    const unresolved = result.unmodeled.filter((e) => e.kind === 'unresolvedReference');
+    expect(unresolved).toHaveLength(2);
+    for (const entry of unresolved) {
+      expect(entry).toEqual({
+        variant: 'default',
+        region: 'header',
+        kind: 'unresolvedReference',
+        detail: { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+      });
+    }
+  });
+
+  // Corpus-safety (#505): the discard-path scanner only activates against a
+  // relsUnreadable part — a healthy `resolved` partMedia leaves the discard
+  // path exactly as it behaved before this issue: the extra table's drawing
+  // is preserved raw only (inside the whole-table entry), never itemized, so
+  // an ordinary corpus document with an intact .rels index sees no new
+  // unmodeled entries from this change.
+  it('corpus-safety (#505): a drawing inside an EXTRA root-level table of a HEALTHY (resolved) part is never itemized as unresolvedReference', () => {
+    const rId = 'rId17';
+    const partMedia = resolvedMedia([[rId, pngBytes()]]);
+    const firstTable = table(row(cell(paragraph(textRun('First')))));
+    const secondTable = table(row(cell(paragraph(imageDrawingRun(rId)))));
+    const xml = makeHdrXml(`${firstTable}${secondTable}`);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.unmodeled.some((e) => e.kind === 'unresolvedReference')).toBe(false);
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+  });
+
+  // Corpus-safety (#505): no partMedia supplied at all (undefined) — the
+  // discard-path scanner's optional-chaining guard (`partMedia?.status`)
+  // must short-circuit to `[]` rather than throw, matching every other call
+  // site's "no partMedia" behavior.
+  it('corpus-safety (#505): a drawing inside an EXTRA root-level table with NO partMedia supplied is never itemized, and capture never throws', () => {
+    const rId = 'rId18';
+    const firstTable = table(row(cell(paragraph(textRun('First')))));
+    const secondTable = table(row(cell(paragraph(imageDrawingRun(rId)))));
+    const xml = makeHdrXml(`${firstTable}${secondTable}`);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+
+    expect(result.unmodeled.some((e) => e.kind === 'unresolvedReference')).toBe(false);
     expect(result.unmodeled).toContainEqual(
       expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
     );
