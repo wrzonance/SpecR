@@ -25,3 +25,4 @@ overrides:
   dompurify@<3.4.11: '>=3.4.11' # GHSA-vxr8-fq34-vvx9, GHSA-cmwh-pvxp-8882 (≤3.4.10)
   js-yaml@4.1.1: '>=4.2.0' # GHSA-h67p-54hq-rp68 (eslint's 4.x consumer)
   vite: ^8.0.16 # GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3
+  undici@<6.27.0: '>=6.27.0' # GHSA-35p6-xmwp-9g52, GHSA-g8m3-5g58-fq7m, GHSA-p88m-4jfj-68fv, GHSA-vxpw-j846-p89q (dev, via @redocly/cli)
