@@ -11,7 +11,13 @@
 // relationship/section-property discovery lives in
 // header-footer-relationships.ts; recovering true document order across an
 // interleaved w:fldSimple/w:r sequence (#485 review) lives in
-// header-footer-run-order.ts.
+// header-footer-run-order.ts. A drawing living inside an extra (2nd+)
+// content-bearing paragraph — preserved whole here as an `extraParagraph`
+// unmodeled entry rather than visited per-run — is additionally itemized as
+// its own `unresolvedReference` when the part's own .rels file is unreadable
+// (#505, #502 follow-up); that scanner (itemizeParagraphDiscardDrawings)
+// lives in header-footer-discard-drawings.ts alongside its table-path
+// counterpart (header-footer-table.ts).
 
 import { ParserError } from '../error.js';
 import {

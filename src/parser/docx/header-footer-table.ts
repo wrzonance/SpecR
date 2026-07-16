@@ -17,6 +17,14 @@
 // the way to each cell's own runsOf call, so a w:fldSimple field interleaved
 // between two w:r runs inside a table cell keeps true document order exactly
 // like the paragraph path does — the table-cell path is not order-exempt.
+// A drawing living inside any of this module's own discard paths — an extra
+// (2nd+) cell paragraph, a whole disqualified table, or an extra (2nd+)
+// root-level table — is additionally itemized as its own
+// `unresolvedReference` when the part's own .rels file is unreadable (#505,
+// #502 follow-up); imageUnmodeledEntry and the itemizeTableDiscardDrawings
+// scanner both now live in header-footer-discard-drawings.ts (relocated
+// from this file) alongside the paragraph-path counterpart used by
+// header-footer-region.ts.
 
 import { asRecord, compact, extractAttrStr, toArray } from './xml-utils.js';
 import { collapseComplexFields } from './header-footer-field-recognition.js';
