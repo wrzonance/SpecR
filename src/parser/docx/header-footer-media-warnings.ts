@@ -7,6 +7,7 @@
 // sibling file because header-footer.ts is already at ESLint's max-lines
 // cap (400, CLAUDE.md) — this stays well under budget.
 
+import { asRecord } from './xml-utils.js';
 import { RELS_UNREADABLE_REASON } from './header-footer-media-parts.js';
 import type { HeaderFooterUnmodeledEntry } from './types.js';
 
@@ -37,9 +38,8 @@ export function isRelsUnreadableEntry(
   entry: HeaderFooterUnmodeledEntry
 ): entry is RelsUnreadableEntry {
   if (entry.kind !== 'unresolvedReference') return false;
-  const detail = entry.detail;
-  if (typeof detail !== 'object' || detail === null) return false;
-  const record = detail as Record<string, unknown>;
+  const record = asRecord(entry.detail);
+  if (!record) return false;
   return typeof record.part === 'string' && record.reason === RELS_UNREADABLE_REASON;
 }
 
