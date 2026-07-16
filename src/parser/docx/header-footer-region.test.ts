@@ -890,6 +890,51 @@ describe('captureRegion — image resolution wiring (#487)', () => {
     expect(result.unmodeled.some((e) => e.kind === 'image')).toBe(false);
   });
 
+  // SCOPE BOUNDARY (#502 follow-up, tracked by #505): #502 itemizes an
+  // unresolvable drawing as its own `unresolvedReference` only at the sites the
+  // base capture architecture (ADR-068/ADR-071) already visits drawing runs —
+  // the FIRST content-bearing paragraph and the first table's cells. A drawing
+  // in an EXTRA (2nd+) content-bearing paragraph of a relsUnreadable part is
+  // still preserved verbatim inside its raw `extraParagraph` entry (content is
+  // NOT lost) but is NOT emitted as its own `unresolvedReference`, so the
+  // aggregate part-level warning currently UNDERCOUNTS it. Pinned per
+  // CLAUDE.md's "never silently pick a behavior" rule; #505 will itemize the
+  // discard-path drawings (respecting the INV-2 descriptor-gate asymmetry) and
+  // update this expectation. The realistic single-image header case (drawing in
+  // the first paragraph, test above) is unaffected.
+  it('SCOPE BOUNDARY (#502 follow-up, #505): a drawing in an EXTRA paragraph of a relsUnreadable part stays raw extraParagraph, not a second unresolvedReference (documented undercount)', () => {
+    const firstRId = 'rId9';
+    const extraRId = 'rId10';
+    const xml = makeHdrXml(
+      `${paragraph('', imageDrawingRun(firstRId))}${paragraph('', imageDrawingRun(extraRId))}`
+    );
+    const result = captureRegion(
+      xml,
+      'bottom',
+      'default',
+      'header',
+      KNOWN,
+      relsUnreadableMedia('word/header1.xml')
+    );
+
+    // The FIRST paragraph's drawing IS itemized (base-architecture site) ...
+    const unresolved = result.unmodeled.filter((e) => e.kind === 'unresolvedReference');
+    expect(unresolved).toEqual([
+      {
+        variant: 'default',
+        region: 'header',
+        kind: 'unresolvedReference',
+        detail: { rId: firstRId, part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+      },
+    ]);
+    // ... the SECOND paragraph's drawing is only preserved raw — never a second
+    // unresolvedReference, and never counted: two image drawings, one warning.
+    const extra = result.unmodeled.filter((e) => e.kind === 'extraParagraph');
+    expect(extra).toHaveLength(1);
+    expect(JSON.stringify(extra[0]?.detail ?? null)).toContain(extraRId);
+    expect(unresolved.some((e) => JSON.stringify(e.detail).includes(extraRId))).toBe(false);
+  });
+
   it('INVARIANT: preserves original run order across text/image/field pieces within a cell — image placement is never reordered', () => {
     const rId = 'rId3';
     const bytes = pngBytes();
