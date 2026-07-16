@@ -451,10 +451,13 @@ describe('captureRegion — #505 discard-path itemization: structurally disquali
     const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
 
     expect(result.region?.table).toBeUndefined();
-    // The whole disqualified table is still preserved raw, unchanged.
-    expect(result.unmodeled).toContainEqual(
-      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
-    );
+    // The whole disqualified table is still preserved raw, unchanged — not
+    // merely present BY KIND but genuinely carrying the original content
+    // (the nested drawing's own rId), proving this is preservation, not a
+    // kind-tagged replacement/stub.
+    const tableEntry = result.unmodeled.find((e) => e.kind === 'table');
+    expect(tableEntry).toMatchObject({ variant: 'default', region: 'header', kind: 'table' });
+    expect(JSON.stringify(tableEntry?.detail ?? null)).toContain(rId);
     // ... AND the deeply-nested drawing is ALSO itemized as its own
     // unresolvedReference (UNGATED — no descriptor check, ADR-071 decision 4;
     // no rId in the detail — imageUnmodeledEntry never parses a descriptor).
@@ -532,10 +535,15 @@ describe('captureRegion — #505 discard-path itemization: extra (2nd+) root-lev
     expect(result.region?.table?.rows).toEqual([
       { cells: [{ content: [{ kind: 'literal', text: 'First' }] }] },
     ]);
-    // The whole extra table is still preserved raw, unchanged.
-    expect(result.unmodeled).toContainEqual(
-      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
-    );
+    // The whole extra table is still preserved raw, unchanged — not merely
+    // present BY KIND but genuinely carrying the original content (both
+    // drawings' own rIds), proving this is preservation, not a kind-tagged
+    // replacement/stub.
+    const tableEntry = result.unmodeled.find((e) => e.kind === 'table');
+    expect(tableEntry).toMatchObject({ variant: 'default', region: 'header', kind: 'table' });
+    const tableEntryJson = JSON.stringify(tableEntry?.detail ?? null);
+    expect(tableEntryJson).toContain(goodRId);
+    expect(tableEntryJson).toContain(malformedRId);
     // ... AND BOTH drawings inside it (well-formed and descriptor-malformed
     // alike — UNGATED, INV-3) are ALSO itemized as their own
     // unresolvedReference entries; no rId in the detail (imageUnmodeledEntry
