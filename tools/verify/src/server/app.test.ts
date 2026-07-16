@@ -409,7 +409,7 @@ describe('createApp (wiring smoke tests)', () => {
       // Mirrors index.html's own <script> tag order (#506): pane-scale.js
       // defines window.__setDisplayMode/__createScaleTarget/__rescaleAllPanes
       // — harness.js's own top-level eval and several of its functions
-      // (ensureCaptureMode, __loadPane) reference those, so it must run
+      // (withCaptureMode, __loadPane) reference those, so it must run
       // second, against this same sandbox, exactly as it does in the browser.
       await evalServedScript('/pane-scale.js', sandbox);
       await evalServedScript('/harness.js', sandbox);
@@ -972,27 +972,32 @@ describe('createApp (wiring smoke tests)', () => {
     describe('window.__measure capture-mode guarantee (#506 task 5/9)', () => {
       // window.__measure()/window.__regionGeom() only trust geometry read in
       // capture mode (untransformed, natural size) — see this file's DISPLAY
-      // MODES header comment. These tests pin that __measure() force-applies
-      // capture mode itself before reading geometry, rather than trusting the
-      // caller to have switched modes first.
+      // MODES header comment. These tests pin that __measure() applies capture
+      // mode itself for the read (rather than trusting the caller to have
+      // switched first) AND restores the caller's prior mode before returning,
+      // so a measurement never permanently degrades the human-facing display.
 
-      it('force-switches an active fit-mode transform to capture (GLOBALLY, both panes) before reading geometry', async () => {
+      it('reads capture-mode (natural) geometry then restores the prior fit-mode display for BOTH panes (transparent switch-and-restore, #506)', async () => {
         const { window: harnessWindow, document } = await loadHarnessSandbox('');
         const referenceContainer = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
-        const { outer: referenceOuter, target: referenceTarget } = attachScalePair(
-          referenceContainer,
-          { x: 0, y: 0, width: 1600, height: 2000 }
-        );
+        const { target: referenceTarget } = attachScalePair(referenceContainer, {
+          x: 0,
+          y: 0,
+          width: 1600,
+          height: 2000,
+        });
         const [page] = attachRenderedPages(referenceTarget, [
           { x: 12, y: 34, width: 816, height: 1056 },
         ]);
         if (!page) throw new Error('test setup: reference page not attached');
 
         const roundtripContainer = configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 800);
-        const { outer: roundtripOuter, target: roundtripTarget } = attachScalePair(
-          roundtripContainer,
-          { x: 0, y: 0, width: 1600, height: 2000 }
-        );
+        const { target: roundtripTarget } = attachScalePair(roundtripContainer, {
+          x: 0,
+          y: 0,
+          width: 1600,
+          height: 2000,
+        });
 
         const setDisplayMode = harnessWindow.__setDisplayMode;
         const getDisplayMode = harnessWindow.__getDisplayMode;
@@ -1001,9 +1006,24 @@ describe('createApp (wiring smoke tests)', () => {
         setDisplayMode('fit');
         // Sanity: both panes are genuinely dirty (fit-mode transform applied)
         // before __measure runs, so the assertions below observe a real
-        // force-switch, not a pane that already happened to be untransformed.
+        // switch-and-restore, not a pane that already happened to be blank.
         expect(referenceTarget.style.transform).toBe('scale(0.5)');
         expect(roundtripTarget.style.transform).toBe('scale(0.5)');
+
+        // Records the GLOBAL display state at the exact instant __measure reads
+        // page geometry — proving the read lands in capture mode (both panes
+        // reset to untransformed natural size), not the fit mode the caller
+        // left the page in. A one-shot spy over the measured page's rect read.
+        const readOriginalRect = page.getBoundingClientRect.bind(page);
+        let modeDuringRead: unknown;
+        let referenceTransformDuringRead: string | undefined;
+        let roundtripTransformDuringRead: string | undefined;
+        page.getBoundingClientRect = (): Rect => {
+          modeDuringRead = getDisplayMode();
+          referenceTransformDuringRead = referenceTarget.style.transform;
+          roundtripTransformDuringRead = roundtripTarget.style.transform;
+          return readOriginalRect();
+        };
 
         const measure = harnessWindow.__measure;
         assertIsFunction(measure, '__measure');
@@ -1013,22 +1033,23 @@ describe('createApp (wiring smoke tests)', () => {
           pages: Array<{ pageGeom: Rect | null; headerGeom: Rect | null; footerGeom: Rect | null }>;
         };
 
-        // The measured pane's scale pair is reset to the same blank state
-        // __setDisplayMode('capture') itself produces (task 3/9's own pin).
-        expect(referenceTarget.style.transform).toBe('');
-        expect(referenceTarget.style.width).toBe('');
-        expect(referenceTarget.style.transformOrigin).toBe('');
-        expect(referenceOuter.style.width).toBe('');
-        expect(referenceOuter.style.height).toBe('');
-        // The OTHER (unmeasured) pane resets too — ensureCaptureMode routes
-        // through the real, global __setDisplayMode('capture'), never a
-        // local per-pane shortcut (#506 spike finding 2, decision 2).
-        expect(roundtripTarget.style.transform).toBe('');
-        expect(roundtripOuter.style.width).toBe('');
-        expect(getDisplayMode()).toBe('capture');
+        // DURING the read: capture mode, both panes untransformed (natural
+        // geometry, GLOBALLY — withCaptureMode routes through the real global
+        // __setDisplayMode('capture'), never a per-pane shortcut).
+        expect(modeDuringRead).toBe('capture');
+        expect(referenceTransformDuringRead).toBe('');
+        expect(roundtripTransformDuringRead).toBe('');
 
-        // geomOf/measurePage's own field shape and rounding are untouched —
-        // the regression pin this task's design calls out explicitly.
+        // AFTER the read: the prior fit-mode display is restored synchronously
+        // — a caller reading the mode right after __measure sees 'fit', and
+        // both panes are re-scaled. A measurement must never permanently
+        // degrade the human-facing display (#506 orchestrator finding).
+        expect(getDisplayMode()).toBe('fit');
+        expect(referenceTarget.style.transform).toBe('scale(0.5)');
+        expect(roundtripTarget.style.transform).toBe('scale(0.5)');
+
+        // The returned geometry is still the natural, capture-mode size —
+        // geomOf/measurePage's own field shape and rounding are untouched.
         expect(result.pageCount).toBe(1);
         expect(result.pages).toHaveLength(1);
         expect(result.pages[0]?.pageGeom).toEqual({ x: 12, y: 34, width: 816, height: 1056 });
@@ -1036,12 +1057,38 @@ describe('createApp (wiring smoke tests)', () => {
         expect(result.pages[0]?.footerGeom).toBeNull();
       });
 
-      it('is idempotent when already in capture mode — repeat calls read byte-identical geometry with no side effect', async () => {
+      it('__regionGeom restores the prior mode too, delegating its capture-mode read through __measure', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+        const { target } = attachScalePair(container, { x: 0, y: 0, width: 1600, height: 2000 });
+        attachRenderedPages(target, [{ x: 12, y: 34, width: 816, height: 1056 }]);
+        // The roundtrip pane must exist too — a global capture switch rescales
+        // BOTH, so applyDisplayModeToPane('roundtrip') must find a pair to reset.
+        const roundtripContainer = configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 800);
+        attachScalePair(roundtripContainer, { x: 0, y: 0, width: 1600, height: 2000 });
+
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        const getDisplayMode = harnessWindow.__getDisplayMode;
+        const regionGeom = harnessWindow.__regionGeom;
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+        assertIsFunction(getDisplayMode, '__getDisplayMode');
+        assertIsFunction(regionGeom, '__regionGeom');
+        setDisplayMode('fit');
+        expect(target.style.transform).toBe('scale(0.5)');
+
+        const geom = regionGeom('reference', 'page', 0);
+
+        expect(geom).toEqual({ x: 12, y: 34, width: 816, height: 1056 });
+        expect(getDisplayMode()).toBe('fit');
+        expect(target.style.transform).toBe('scale(0.5)');
+      });
+
+      it('is a pure no-op when already in capture mode — repeat calls read byte-identical geometry with no redundant mode switch', async () => {
         const { window: harnessWindow, document } = await loadHarnessSandbox('?mode=capture');
         const getDisplayMode = harnessWindow.__getDisplayMode;
-        const setDisplayMode = harnessWindow.__setDisplayMode;
+        const realSetDisplayMode = harnessWindow.__setDisplayMode;
         assertIsFunction(getDisplayMode, '__getDisplayMode');
-        assertIsFunction(setDisplayMode, '__setDisplayMode');
+        assertIsFunction(realSetDisplayMode, '__setDisplayMode');
         expect(getDisplayMode()).toBe('capture');
 
         const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
@@ -1052,14 +1099,25 @@ describe('createApp (wiring smoke tests)', () => {
         // rescaleAllPanes at least once, so the assertions below observe a
         // stable '' that never toggles — not an untouched `undefined` that
         // would trivially satisfy an unguarded assertion either way.
-        setDisplayMode('capture');
+        realSetDisplayMode('capture');
         expect(target.style.transform).toBe('');
+
+        // Counts every __setDisplayMode call __measure drives: when already in
+        // capture mode the switch-and-restore must skip BOTH ends, so a
+        // measurement never forces a redundant rescaleAllPanes recompute (the
+        // efficiency contract withCaptureMode's own comment promised).
+        let switchCalls = 0;
+        harnessWindow.__setDisplayMode = (mode: unknown): void => {
+          switchCalls += 1;
+          realSetDisplayMode(mode);
+        };
 
         const measure = harnessWindow.__measure;
         assertIsFunction(measure, '__measure');
         const first = measure('reference');
         const second = measure('reference');
 
+        expect(switchCalls).toBe(0);
         expect(second).toEqual(first);
         expect(target.style.transform).toBe('');
         expect(getDisplayMode()).toBe('capture');

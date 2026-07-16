@@ -46,7 +46,9 @@
 // that ancestor's scroll size (#506 spike finding 1). capture
 // (?mode=capture) renders panes at natural, untransformed size — the ONLY
 // mode window.__measure()/window.__regionGeom() trust geometry against;
-// both force-switch into it via ensureCaptureMode() before every read.
+// both switch into it via withCaptureMode() for the read and restore the
+// caller's prior mode before returning, so a measurement never leaves the
+// human-facing display stuck in capture mode (#506 orchestrator finding).
 //
 // All of the above — mode storage/validation, and the scale-wrapper DOM
 // management/math that applies it (getScaleOuter/getScaleTarget/
@@ -206,17 +208,32 @@
   // capture mode (untransformed, natural size) — see this file's DISPLAY
   // MODES header comment (#506 spike finding 1: a fit-mode scale transform
   // leaves getBoundingClientRect() reporting the SCALED, not natural, size).
-  // Force-switching here — rather than requiring the driving agent to call
-  // __setDisplayMode('capture') itself before every read — closes off an
-  // entire class of "forgot to switch modes before measuring" bugs. Global
-  // (both panes), not per-pane: __setDisplayMode has no per-pane variant by
-  // design (#506 spike finding 2). A no-op when already in capture mode —
-  // __setDisplayMode is itself always safe to call again (task 2/9's own
-  // idempotence pin), but skipping the redundant call here avoids an
-  // unnecessary rescaleAllPanes() recompute on every single measurement.
-  function ensureCaptureMode() {
-    if (window.__getDisplayMode() !== 'capture') {
+  // Switch-and-restore, run around `read`: snapshot the current mode, switch
+  // to capture only if needed, take the measurement, then restore the prior
+  // mode before returning — synchronously, so a caller that left the page in
+  // 'fit' still reads 'fit' (and sees both panes still scaled) the instant
+  // __measure returns. This closes off an entire class of "forgot to switch
+  // modes before measuring" bugs WITHOUT the transparent switch permanently
+  // degrading the human-facing display: a measurement must never leave the
+  // page stuck in capture mode (#506 orchestrator finding). Global (both
+  // panes), not per-pane, at BOTH ends: __setDisplayMode has no per-pane
+  // variant by design (#506 spike finding 2). A pure no-op when already in
+  // capture mode — skipping the switch AND the restore avoids an unnecessary
+  // rescaleAllPanes() recompute on every single measurement (__setDisplayMode
+  // is itself always safe to call again — task 2/9's own idempotence pin —
+  // but the redundant recompute is wasted work). `read` runs synchronously so
+  // its geometry is captured in capture mode before the finally restores.
+  function withCaptureMode(read) {
+    const priorMode = window.__getDisplayMode();
+    if (priorMode !== 'capture') {
       window.__setDisplayMode('capture');
+    }
+    try {
+      return read();
+    } finally {
+      if (priorMode !== 'capture') {
+        window.__setDisplayMode(priorMode);
+      }
     }
   }
 
@@ -241,17 +258,18 @@
   }
 
   window.__measure = function measure(pane) {
-    ensureCaptureMode();
-    const container = document.getElementById(PANE_CONTENT_IDS[pane]);
-    const sections = Array.prototype.slice.call(
-      container.querySelectorAll('.docx-wrapper > section.docx')
-    );
-    return {
-      status: paneState[pane].status,
-      error: paneState[pane].error,
-      pageCount: sections.length,
-      pages: sections.map(measurePage),
-    };
+    return withCaptureMode(function () {
+      const container = document.getElementById(PANE_CONTENT_IDS[pane]);
+      const sections = Array.prototype.slice.call(
+        container.querySelectorAll('.docx-wrapper > section.docx')
+      );
+      return {
+        status: paneState[pane].status,
+        error: paneState[pane].error,
+        pageCount: sections.length,
+        pages: sections.map(measurePage),
+      };
+    });
   };
 
   window.__regionGeom = function regionGeom(pane, region, pageIndex) {

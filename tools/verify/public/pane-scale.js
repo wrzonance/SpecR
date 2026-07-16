@@ -33,8 +33,10 @@
 // — transform:scale() alone never shrinks that ancestor's scroll size (#506
 // spike finding 1). capture (?mode=capture) renders panes at natural,
 // untransformed size — the ONLY mode harness.js's window.__measure()/
-// window.__regionGeom() trust geometry against; both force-switch into it
-// via harness.js's own ensureCaptureMode() before every read.
+// window.__regionGeom() trust geometry against; both switch into it via
+// harness.js's own withCaptureMode() for the read, then restore the caller's
+// prior mode before returning (a measurement never leaves the display stuck
+// in capture mode — #506 orchestrator finding).
 
 (function () {
   'use strict';

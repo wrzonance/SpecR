@@ -27,10 +27,11 @@
     visible without horizontal scrolling — for humans eyeballing a run.
   - capture (?mode=capture, or window.__setDisplayMode('capture')): panes
     render at natural size with no transform — this is the ONLY mode whose
-    geometry window.__measure()/window.__regionGeom() may be trusted against,
-    and window.__measure() force-switches into it via ensureCaptureMode()
-    before every read. Switching modes is a GLOBAL, both-panes effect by
-    design (#506 spike finding 2) — there is no per-pane fit/capture split.
+    geometry window.__measure()/window.__regionGeom() may be trusted against;
+    each switches into it for the read via withCaptureMode() and restores the
+    caller's prior mode before returning, so a measurement never leaves the
+    page latched in capture (#506). Switching modes is a GLOBAL, both-panes
+    effect by design (#506 spike finding 2) — no per-pane fit/capture split.
 
   Vendor bundles (docx-preview, jszip) are served directly out of this
   package's own node_modules by server/app.ts — see that file's
