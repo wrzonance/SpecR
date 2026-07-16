@@ -13,16 +13,16 @@ allowBuilds:
 # (no hono middleware is imported; qs.stringify is never called; the dev tools
 # never ship in dist/ or run in prod), but we pin the patched versions for
 # defense-in-depth and a clean `pnpm audit`. See issues #198 (runtime), #200,
-# and #203.
-# Residuals (dev-only, not reachable):
-#   - depcheck's js-yaml@3.x (Dependabot #11) — no 3.x backport for the 4.2.0 fix
-#     and latest depcheck still pins ^3.14.1; dismissed as tolerable_risk
-#     (depcheck runs only in release.yml on the repo's own trusted config).
+# #203, and #495. No residuals remain: the long-standing depcheck js-yaml@3.x
+# gap (formerly dismissed tolerable_risk — no 3.x backport existed) closed when
+# js-yaml 3.15.0 shipped the GHSA-h67p-54hq-rp68 fix for the 3.x line
+# (2026-06-26); it is pinned below alongside eslint's 4.x consumer.
 overrides:
   hono@<4.12.25: '>=4.12.25' # runtime, via @modelcontextprotocol/sdk → @hono/node-server
   qs@<6.15.2: '>=6.15.2' # runtime, via express → body-parser (CVE-2026-8723)
   esbuild@<0.28.1: '>=0.28.1' # GHSA-gv7w-rqvm-qjhr (high), -g7r4-m6w7-qqqr
   dompurify@<3.4.11: '>=3.4.11' # GHSA-vxr8-fq34-vvx9, GHSA-cmwh-pvxp-8882 (≤3.4.10)
   js-yaml@4.1.1: '>=4.2.0' # GHSA-h67p-54hq-rp68 (eslint's 4.x consumer)
+  js-yaml@<3.15.0: '>=3.15.0 <4' # GHSA-h67p-54hq-rp68 3.x backport (dev, via depcheck ^3.14.1; <4 keeps the safeLoad-era API depcheck calls)
   vite: ^8.0.16 # GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3
-  undici@<6.27.0: '>=6.27.0' # GHSA-35p6-xmwp-9g52, GHSA-g8m3-5g58-fq7m, GHSA-p88m-4jfj-68fv, GHSA-vxpw-j846-p89q (dev, via @redocly/cli)
+  undici@<6.27.0: '>=6.27.0 <7' # GHSA-35p6-xmwp-9g52, GHSA-g8m3-5g58-fq7m, GHSA-p88m-4jfj-68fv, GHSA-vxpw-j846-p89q (dev, via @redocly/cli's exact undici@6.24.0 pin; <7 stays on its major)
