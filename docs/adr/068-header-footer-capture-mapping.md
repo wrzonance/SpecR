@@ -23,7 +23,7 @@ The task: read `word/header*.xml`, `word/footer*.xml`,
 v2 composition; and preserve everything else in `raw` with a warning —
 never silently drop it. A pre-implementation spike surfaced several
 corrections to the original task design, recorded below alongside the
-decisions themselves so a future reader sees *why*, not just *what*.
+decisions themselves so a future reader sees _why_, not just _what_.
 
 ### Two prerequisite extractions
 
@@ -128,7 +128,7 @@ package-level decision (ADR-040 already scopes it that way), not recoverable
 from one spec section's OOXML.
 
 **Correction (post-implementation review, #306):** `PageNumberingSchema.mode`
-(ADR-040) is a *required* field whenever `pageNumbering` is present at all —
+(ADR-040) is a _required_ field whenever `pageNumbering` is present at all —
 there is no schema-valid way to write `pageNumbering: { startAt }` without
 also supplying `mode`, and fabricating a `mode` here would be exactly the
 guessed cross-document policy this section already rules out. `pgNumStart` is
@@ -179,8 +179,8 @@ The original task design instructed that ADR-040's schema file be left
 untouched — `raw`'s existing `warnings?: string[]` was assumed to be
 enough to satisfy acceptance criterion 3 ("preserved in raw sidecar and
 warned"). Implementation proved that assumption wrong: `warnings` is a
-list of *message strings*, with nowhere to put the actual preserved
-*content* (the unsupported paragraph, image reference, or table
+list of _message strings_, with nowhere to put the actual preserved
+_content_ (the unsupported paragraph, image reference, or table
 fragment itself). Storing that content as an untyped `unknown` also
 does not type-check against `z.json()`'s inferred type without an
 `as unknown as` cast, which this repo's TypeScript strictness forbids.
@@ -238,7 +238,7 @@ any further standalone match **demotes** to an `unmodeled { kind:
 'extraParagraph' }` entry, reusing the existing kind rather than adding a
 new one (a single-issue fix keeps its schema footprint at zero).
 
-**KNOWN AMBIGUITY:** when a part has *both* a standalone rule-line
+**KNOWN AMBIGUITY:** when a part has _both_ a standalone rule-line
 paragraph and a content-bearing paragraph that also carries its own
 border, OOXML gives no canonical tiebreak for which one is "the" rule
 line. The content-bearing paragraph's own border wins outright — matching
@@ -256,12 +256,169 @@ out here so it is not mistaken for a remaining gap. No schema change:
 `captureFromParagraphs`'s existing `{ region, unmodeled }` return type is
 unchanged.
 
+### Addendum (2026-07-16, #502): a header/footer part's own corrupt `.rels` degrades per-part, never fails the whole capture
+
+Prior to #502, a single damaged `word/_rels/header*.xml.rels` or
+`word/_rels/footer*.xml.rels` — malformed XML, or a `.rels` entry JSZip
+itself could not decompress — aborted `readHeaderFooterMedia` with a thrown
+`ParserError`, failing the entire DOCX parse over one damaged part's image
+relationships. This reverses that failure mode to a per-part degrade,
+mirroring every other unsupported-content case this ADR already documents
+(images, tables, extra paragraphs, inactive variants): preserved as an
+`unresolvedReference` and warned about, never silently dropped, never
+fatal. **This policy reversal was confirmed with the user issuing #502 and
+is not open for re-litigation in a future PR** — a future contributor
+proposing to restore the hard-fail behavior needs a new issue and a new
+ADR entry, not a quiet revert here.
+
+**`readHeaderFooterMedia`'s new contract:** a part absent from
+`HeaderFooterMediaByPart` still means what it always meant — "no `.rels`
+file exists for this part at all," not an error. A part _present_ in the
+map now means its `.rels` file existed and was attempted: either
+`{ status: 'resolved', media }` (the pre-#502 behavior, unchanged) or
+`{ status: 'relsUnreadable', partPath }` — the `.rels` file's own XML was
+malformed, or JSZip could not read/decompress the entry. `readPartMedia`'s
+single `try`/`catch` spans both failure points and never rejects.
+
+**`document.xml.rels` and part-XML-itself strictness are unchanged — and
+that distinction is deliberate, not an oversight.** #502 only ever
+degrades a header/footer part's own `.rels` file (an image-relationship
+index one layer removed from the part's rendered content). It does
+**not** touch:
+
+- `word/document.xml.rels` (top-level relationships resolving
+  `w:headerReference`/`w:footerReference` `r:id`s to part targets) —
+  `parseDocumentRelationships` still throws `DOCX_HEADER_FOOTER_XML_INVALID`
+  unchanged, now pinned through `captureHeaderFooter`'s own orchestrator
+  boundary, not just at its own module boundary.
+- The header/footer part's own body XML (`word/header*.xml`,
+  `word/footer*.xml`) — a malformed part still throws unchanged, via
+  `buildVariant`/`captureRegion`, exactly as before #502.
+
+A document can combine both: a header whose own `.rels` is corrupt (which
+now degrades) sitting alongside a footer whose _own body XML_ is malformed
+(which still throws) — the two failure modes coexist without one masking
+the other, because they are structurally independent code paths
+(`readHeaderFooterMedia`'s async extraction phase vs.
+`captureRegion`/`parseDocumentRelationships`'s synchronous parse), not a
+single generalized try/catch (INV-10, pinned end-to-end through
+`captureHeaderFooter`). `DOCX_HEADER_FOOTER_XML_INVALID`'s scope is
+therefore _narrower_ after #502 than before: it no longer covers "a
+header/footer part's own `.rels` is unreadable" (that case now degrades),
+but still covers every other genuinely-malformed-source-XML case this ADR
+already reserves it for (settings.xml, document.xml.rels, and each
+header/footer part's own body XML).
+
+**`unresolvedReference` is reused, not a new kind.** A `relsUnreadable`
+degrade is captured under the SAME `unmodeled.kind: 'unresolvedReference'`
+the schema (this ADR, above) already defines for "a reference that cannot
+be resolved" — an `r:id` with no relationship at all is one flavor;
+"every `r:id` in this part is unresolvable because its own relationship
+index is unreadable" is another. Both share the same remediation category
+(the reader cannot recover the referenced image without going back to the
+source document) and the same schema shape (`detail: JsonValue`), so a
+sixth `unmodeled` kind would have added schema surface with no behavioral
+payoff. The three pre-existing `unresolvedReference` producers
+(`missingPartEntry`, `unresolvedToUnmodeled`, `duplicateReferenceEntry`)
+key their `detail` on `target`/`rId` alone and never set a `part` field;
+a `relsUnreadable` degrade's `detail` always carries `part` (plus
+`reason`, and `rId` only at the paragraph-level path — the table-cell
+path never parses a drawing descriptor, so it has no `rId` to carry).
+A `relsUnreadable` entry is separated from the three pre-existing
+producers by `isRelsUnreadableEntry` (`header-footer-media-warnings.ts`),
+which matches the full triple — `kind: 'unresolvedReference'`, a string
+`detail.part`, AND `detail.reason` equal to the exact
+`RELS_UNREADABLE_REASON` constant — not `part`-presence alone. Matching
+all three guards (rather than assuming a bare `part` field is disjoint
+from the pre-existing producers) keeps a future or crafted entry that
+merely happens to carry `detail.part` under a different `kind`/`reason`
+from being pulled out of the generic warnings and silently losing its own
+warning (#503 review). All three pre-existing producers are still
+verified explicitly disjoint.
+
+**Table-cell drawings are counted too (ADR-071 decision 4 stands).** The
+issue's own prior art names `collectCellParagraphs` explicitly, so a
+table-cell drawing in a damaged part degrades to `unresolvedReference`
+and is counted into that part's aggregate warning, exactly like a
+paragraph-level drawing. ADR-071 decision 4 — table-cell images never
+become modeled content, regardless of rels-index health — is unchanged:
+`captureTableCell`'s `buildCellContent` call is still made _without_
+`partMedia`, so a table-cell image can degrade to `unresolvedReference`
+but can never be promoted to a modeled `image` field. One asymmetry is
+worth naming explicitly (INV-2/INV-3): the paragraph-level path
+(`resolveDrawingImage`) checks `parseDrawingDescriptor` validity _before_
+checking rels health, so a structurally malformed drawing (missing
+`wp:extent`, say) keeps the generic `kind: 'image'` fallback
+unconditionally, even against a `relsUnreadable` part (INV-2). The
+table-cell path has no equivalent descriptor gate — `isDrawingRun` is a
+coarse `'w:drawing' in run` check, matching today's pre-existing coarser
+pre-filter — so _any_ drawing-bearing run in a `relsUnreadable` table
+cell becomes `unresolvedReference`, even one that would itself have
+failed descriptor parsing at the paragraph level (INV-3). This is a
+documented asymmetry, not an oversight: the table-cell layer never had a
+descriptor gate before #502 either, and #502 does not add one.
+
+**One aggregate warning line per damaged part, not one per drawing.**
+`buildRelsUnreadableWarnings` groups matching `unmodeled` entries by
+`detail.part` into `Map<string, number>` and emits exactly one line per
+unique part — `"${part}'s relationships index is unreadable; ${count}
+image reference(s) could not be resolved"` — only when that part's count
+is greater than zero. The same physical part referenced by two different
+variant slots (e.g. `default` and `first` both resolving to
+`header2.xml`) dedupes naturally through this grouping, matching this
+ADR's own "two references, same physical part" pattern above. A damaged
+part with zero qualifying drawings — its `.rels` is corrupt but the part
+happens to contain no images at all — emits no warning; there is nothing
+to attribute a warning to. `buildRawWarnings` excludes every
+`relsUnreadable`-matched entry from the generic per-entry
+`unmodeledWarningLine` mapping and appends `buildRelsUnreadableWarnings`'
+aggregate lines instead — the excluded entries remain in `raw.unmodeled`
+untouched; only the _warning line_, not the preserved content, is
+deduplicated.
+
+**The caught error is discarded outright — a deliberate, narrow deviation
+from this repo's "chain cause across boundaries" convention
+(`CLAUDE.md`).** `readPartMedia`'s `catch` block returns
+`{ status: 'relsUnreadable', partPath }` without constructing a
+`ParserError`, without a `cause` chain, and without a logger call. This
+was a spike finding, not the original design: constructing a
+`ParserError` purely to immediately discard it (never thrown, since
+throwing would defeat the whole point of degrading instead of failing)
+trips this repo's own dead-code lint rules, and no file under `src/parser/`
+imports the pino logger today — adding one here would be new,
+unprecedented territory for a single warning line. The per-part warning
+string (`RELS_UNREADABLE_REASON`, surfaced through
+`buildRelsUnreadableWarnings`) is the _only_ context that survives past
+the catch — the original XML parse error or JSZip decompression failure
+is not recoverable from `raw.warnings` after the fact. This is accepted
+as the right tradeoff for a source-document defect the reader cannot fix
+by looking at a stack trace anyway (the fix is republishing a valid DOCX,
+not debugging SpecR), but it is a real, named tension with this repo's
+default error-handling posture, not a case quietly exempted from it.
+
+**The full #502 invariant set (INV-1 through INV-10) is now labeled at its
+test boundaries**, closing out the numbering this addendum cites throughout:
+INV-1 (`header-footer-media-parts.test.ts`, degrade-not-throw), INV-2/INV-3
+(the paragraph-vs-table-cell descriptor-gate asymmetry above), INV-4
+(`header-footer.test.ts`, document.xml.rels stays strict — acceptance
+criterion 2), INV-5 (`header-footer-media-warnings.test.ts`, same-part
+dedup across variant slots), INV-6 (`header-footer.test.ts`, a header/footer
+part's own body XML stays strict — acceptance criterion 3), INV-7
+(`header-footer-images.test.ts`, a `resolved` part's ordinary rId miss
+never widens into `relsUnreadable`'s `unresolvedReference`), INV-8
+(zero qualifying drawings emits no warning), INV-9 (a `relsUnreadable`
+part never contaminates a sibling part), and INV-10 (degrade and throw
+coexist in the same document without one masking the other). Each was
+verified RED (temporarily broken against the real implementation, confirmed
+to fail for the right reason, then reverted) before confirming GREEN against
+the unmodified, shipped code — task 6/6 of #502's full verification sweep.
+
 ## Consequences
 
 - Acceptance criteria 3 and 4 are met by construction: every unmodeled
   item is both preserved (`raw.unmodeled`, JSON-safe) and warned about
   (`raw.warnings`, one aggregate `ParseWarning { type:
-  'header-footer-content-skipped' }` at the tree level iff `raw.warnings`
+'header-footer-content-skipped' }` at the tree level iff `raw.warnings`
   is non-empty) — never silently dropped, never warned without the
   content actually being retained.
 - `resolveReferenceTargets`'s array-of-pairs shape and the

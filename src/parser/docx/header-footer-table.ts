@@ -30,6 +30,8 @@ import {
 } from './header-footer-region.js';
 import type { HeaderFooterRegion, PartialUnmodeled } from './header-footer-region.js';
 import type { RunOrder } from './header-footer-run-order.js';
+import { RELS_UNREADABLE_REASON } from './header-footer-media-parts.js';
+import type { HeaderFooterPartMedia } from './header-footer-media-parts.js';
 
 // Local indexed-access aliases (mirrors header-footer-region.ts's own
 // pattern): derived structurally off HeaderFooterRegion's new `table` slot
@@ -179,10 +181,32 @@ interface CellCaptureResult {
   readonly unmodeled: readonly PartialUnmodeled[];
 }
 
+// A table-cell drawing run normally becomes an unmodeled `image` entry
+// verbatim (ADR-071 decision 4: table-cell images are out of scope,
+// regardless of rels-index health). #502: when the owning part's own .rels
+// file is itself unreadable, every drawing in this cell is unresolvable by
+// construction — that gets its own `unresolvedReference` entry (part +
+// reason, no `rId`: this layer never parses a drawing descriptor to find
+// one) so header-footer-media-warnings.ts can attribute one capture-warning
+// per damaged part instead of a generic "image content not modeled" line.
+function imageUnmodeledEntry(
+  run: Record<string, unknown>,
+  partMedia: HeaderFooterPartMedia | undefined
+): PartialUnmodeled {
+  if (partMedia?.status === 'relsUnreadable') {
+    return {
+      kind: 'unresolvedReference',
+      detail: compact({ part: partMedia.partPath, reason: RELS_UNREADABLE_REASON }),
+    };
+  }
+  return { kind: 'image', detail: compact(run) };
+}
+
 function captureTableCell(
   tc: Record<string, unknown>,
   known: KnownSectionIdentity,
-  order: RunOrder
+  order: RunOrder,
+  partMedia?: HeaderFooterPartMedia
 ): CellCaptureResult {
   const contentBearing = paragraphsInCell(tc).filter((p) => paragraphHasContent(runsOf(p)));
   const extraUnmodeled: readonly PartialUnmodeled[] = contentBearing
@@ -199,9 +223,10 @@ function captureTableCell(
   // renders image content inside a cell). This pre-filter runs BEFORE
   // buildCellContent, so buildCellContent's own drawing branch (#487,
   // header-footer-region.ts) is never reached from this call site — a
-  // table-cell drawing run always becomes an unmodeled `image` entry here,
-  // never a modeled `image` field. buildCellContent is deliberately called
-  // WITHOUT a mediaByRId argument for the same reason.
+  // table-cell drawing run always becomes an unmodeled entry here (image, or
+  // #502's unresolvedReference for a damaged part), never a modeled `image`
+  // field. buildCellContent is deliberately called WITHOUT a partMedia
+  // argument for the same reason.
   //
   // `order` (#485 review, CRITICAL) is threaded from captureRegion's SAME
   // per-part RunOrder side-table the paragraph path uses (captureFromParagraphs'
@@ -213,7 +238,7 @@ function captureTableCell(
   const collapsed = collapseComplexFields(runsOf(first, order), order);
   const imageUnmodeled: readonly PartialUnmodeled[] = collapsed
     .filter(isDrawingRun)
-    .map((run): PartialUnmodeled => ({ kind: 'image', detail: compact(run) }));
+    .map((run) => imageUnmodeledEntry(run, partMedia));
   const built = buildCellContent(
     collapsed.filter((r) => !isDrawingRun(r)),
     known
@@ -234,9 +259,10 @@ interface RowCaptureResult {
 function captureTableRow(
   tr: Record<string, unknown>,
   known: KnownSectionIdentity,
-  order: RunOrder
+  order: RunOrder,
+  partMedia?: HeaderFooterPartMedia
 ): RowCaptureResult {
-  const built = recordsOf(tr, 'w:tc').map((tc) => captureTableCell(tc, known, order));
+  const built = recordsOf(tr, 'w:tc').map((tc) => captureTableCell(tc, known, order, partMedia));
   return { row: { cells: built.map((b) => b.cell) }, unmodeled: built.flatMap((b) => b.unmodeled) };
 }
 
@@ -245,13 +271,14 @@ function captureTableRow(
 function captureTable(
   tbl: Record<string, unknown>,
   known: KnownSectionIdentity,
-  order: RunOrder
+  order: RunOrder,
+  partMedia?: HeaderFooterPartMedia
 ): TableCaptureResult {
   const rows = recordsOf(tbl, 'w:tr');
   if (rows.length === 0 || hasNestedTable(tbl) || hasUnsupportedMerge(tbl)) {
     return { table: undefined, unmodeled: [{ kind: 'table', detail: compact(tbl) }] };
   }
-  const built = rows.map((tr) => captureTableRow(tr, known, order));
+  const built = rows.map((tr) => captureTableRow(tr, known, order, partMedia));
   const table = compact({
     rows: built.map((b) => b.row),
     columnWidths: columnWidthsOf(tbl),
@@ -277,20 +304,29 @@ function captureTable(
  * it is equally vulnerable to fast-xml-parser's grouped-mode sibling-merge
  * reordering when a w:fldSimple field sits between two w:r runs inside one
  * cell — this side-table restores true document order there too, mirroring
- * (not diverging from) the paragraph path. Unlike mediaByRId (table-cell
- * images stay out of scope, #487, ADR-071 decision 4), RunOrder is NOT an
- * out-of-scope exclusion — every table-cell field capture needs it.
+ * (not diverging from) the paragraph path. RunOrder is not an out-of-scope
+ * exclusion the way `partMedia` is — every table-cell field capture needs it.
+ *
+ * `partMedia` (#502, OPTIONAL) is the SAME per-part HeaderFooterPartMedia
+ * captureRegion resolves for its own paragraph-cell capture — passed here
+ * ONLY so a `relsUnreadable` part can be attributed by `partPath` in each
+ * qualifying cell's unmodeled entry (imageUnmodeledEntry, captureTableCell).
+ * Table-cell images stay out of scope regardless (ADR-071 decision 4): a
+ * `resolved` partMedia is never used to look up cell-image bytes here,
+ * mirroring buildCellContent's own table-cell call site, which is never
+ * given `partMedia` at all.
  */
 export function captureTablesForRegion(
   root: Record<string, unknown>,
   known: KnownSectionIdentity,
-  order: RunOrder
+  order: RunOrder,
+  partMedia?: HeaderFooterPartMedia
 ): TableCaptureResult {
   const tables = recordsOf(root, 'w:tbl');
   const first = tables[0];
   if (!first) return { table: undefined, unmodeled: [] };
 
-  const captured = captureTable(first, known, order);
+  const captured = captureTable(first, known, order, partMedia);
   const extraUnmodeled: readonly PartialUnmodeled[] = tables
     .slice(1)
     .map((tbl): PartialUnmodeled => ({ kind: 'table', detail: compact(tbl) }));

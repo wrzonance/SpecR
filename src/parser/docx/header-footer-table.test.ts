@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { captureRegion } from './header-footer-region.js';
+import { RELS_UNREADABLE_REASON } from './header-footer-media-parts.js';
+import type { HeaderFooterPartMedia } from './header-footer-media-parts.js';
 
 // Exercises captureTablesForRegion's own capture rules (#309, ADR-071)
 // through captureRegion — the module's public boundary (CLAUDE.md: "test at
@@ -29,7 +31,7 @@ function textRun(text: string): string {
 // A resolvable drawing-run fixture (#487, ADR-071 decision 4) — mirrors
 // header-footer-region.test.ts's own pngBytes/imageDrawingRun fixtures so the
 // "drops an image run from cell content" test below can supply a genuinely
-// resolvable rId + mediaByRId, the only way to prove the table-cell
+// resolvable rId + partMedia, the only way to prove the table-cell
 // pre-filter runs BEFORE buildCellContent's image-resolving branch rather
 // than merely lacking anything to resolve.
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -40,10 +42,39 @@ function pngBytes(totalLength = 16): Uint8Array {
   return bytes;
 }
 
+// Wraps a plain rId -> bytes fixture into the `resolved` HeaderFooterPartMedia
+// shape captureRegion/captureTablesForRegion now expect (#502).
+function resolvedMedia(entries: readonly (readonly [string, Uint8Array])[]): HeaderFooterPartMedia {
+  return { status: 'resolved', media: new Map(entries) };
+}
+
+// The #502 counterpart: the part's own .rels file could not be read/parsed
+// at all, so every table-cell drawing reference into it is unresolvable by
+// construction.
+function relsUnreadableMedia(partPath = 'word/header1.xml'): HeaderFooterPartMedia {
+  return { status: 'relsUnreadable', partPath };
+}
+
 function imageDrawingRun(rId: string, cx = '914400', cy = '609600'): string {
   return (
     '<w:r><w:drawing><wp:inline>' +
     `<wp:extent cx="${cx}" cy="${cy}"/>` +
+    '<wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData><pic:pic><pic:blipFill>' +
+    `<a:blip r:embed="${rId}"/>` +
+    '</pic:blipFill></pic:pic></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r>'
+  );
+}
+
+// INV-3 fixture: a w:drawing with a resolvable r:embed but NO wp:extent —
+// the same "malformed drawing" shape header-footer-images.test.ts's own
+// INV-2 fixture uses to prove the paragraph-level path keeps kind:'image'
+// unconditionally for it. Used here to prove the table-cell path, which has
+// no descriptor-validity gate of its own, treats it differently.
+function malformedDrawingRun(rId: string): string {
+  return (
+    '<w:r><w:drawing><wp:inline>' +
     '<wp:docPr id="1"/>' +
     '<a:graphic><a:graphicData><pic:pic><pic:blipFill>' +
     `<a:blip r:embed="${rId}"/>` +
@@ -205,13 +236,13 @@ describe('captureRegion — simple table capture (#309, ADR-071)', () => {
 });
 
 describe('captureRegion — per-item drops inside an otherwise-capturable table (ADR-071 decision 4)', () => {
-  it('drops an image run from cell content as unmodeled, never as cell content — the surrounding table is still captured, even when mediaByRId would resolve it', () => {
+  it('drops an image run from cell content as unmodeled, never as cell content — the surrounding table is still captured, even when partMedia would resolve it', () => {
     const rId = 'rId7';
-    const mediaByRId = new Map([[rId, pngBytes()]]);
+    const partMedia = resolvedMedia([[rId, pngBytes()]]);
     const xml = makeHdrXml(
       table(row(cell(paragraph(`${textRun('Logo: ')}${imageDrawingRun(rId)}`))))
     );
-    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, mediaByRId);
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
     expect(result.region?.table?.rows).toEqual([
       { cells: [{ content: [{ kind: 'literal', text: 'Logo: ' }] }] },
     ]);
@@ -220,6 +251,50 @@ describe('captureRegion — per-item drops inside an otherwise-capturable table 
     expect(result.unmodeled).toContainEqual(
       expect.objectContaining({ variant: 'default', region: 'header', kind: 'image' })
     );
+  });
+
+  // #502: when the owning part's own .rels file is unreadable, a table-cell
+  // drawing degrades to unresolvedReference (part + reason, no rId — this
+  // layer never parses a drawing descriptor to find one), not the generic
+  // kind:'image' fallback the miss/undefined cases above still use.
+  it('drops an image run in a relsUnreadable part as unresolvedReference (part + reason, no rId), never kind:"image"', () => {
+    const rId = 'rId7';
+    const partMedia = relsUnreadableMedia('word/header1.xml');
+    const xml = makeHdrXml(
+      table(row(cell(paragraph(`${textRun('Logo: ')}${imageDrawingRun(rId)}`))))
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+    expect(result.region?.table?.rows).toEqual([
+      { cells: [{ content: [{ kind: 'literal', text: 'Logo: ' }] }] },
+    ]);
+    expect(result.unmodeled).toContainEqual({
+      variant: 'default',
+      region: 'header',
+      kind: 'unresolvedReference',
+      detail: { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+    expect(result.unmodeled.some((e) => e.kind === 'image')).toBe(false);
+  });
+
+  // INV-3 (#502, ADR-068 addendum): the table-cell path has no equivalent
+  // to resolveDrawingImage's descriptor-validity gate — isDrawingRun only
+  // checks for w:drawing's presence (header-footer-region.ts). A drawing run
+  // that would itself fail parseDrawingDescriptor (missing wp:extent — see
+  // header-footer-images.test.ts's INV-2, the SAME fixture shape) still
+  // degrades to unresolvedReference here, a documented asymmetry versus the
+  // paragraph-level path, not an oversight.
+  it('INV-3: a malformed drawing run (valid r:embed, missing wp:extent — INV-2 keeps this kind:"image" at the paragraph level) still degrades to unresolvedReference in a relsUnreadable part — the table-cell path has no descriptor gate', () => {
+    const rId = 'rId9';
+    const partMedia = relsUnreadableMedia('word/header1.xml');
+    const xml = makeHdrXml(table(row(cell(paragraph(malformedDrawingRun(rId))))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+    expect(result.unmodeled).toContainEqual({
+      variant: 'default',
+      region: 'header',
+      kind: 'unresolvedReference',
+      detail: { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+    expect(result.unmodeled.some((e) => e.kind === 'image')).toBe(false);
   });
 
   it('captures only the first content-bearing paragraph in a cell; a second is unmodeled extraParagraph, never merged', () => {
