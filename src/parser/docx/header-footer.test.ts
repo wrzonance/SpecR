@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { ParserError } from '../error.js';
 import { MAX_IMAGE_BYTES } from '../../lib/image-media-type.js';
 import { captureHeaderFooter, buildComposition } from './header-footer.js';
-import type { HeaderFooterCaptureEntries } from './header-footer.js';
+import type { HeaderFooterCaptureEntries, HeaderFooterCaptureResult } from './header-footer.js';
+import { RELS_UNREADABLE_REASON } from './header-footer-media-parts.js';
 import type { HeaderFooterMediaByPart } from './header-footer-media-parts.js';
 
 const KNOWN = { section: '09 91 26', title: 'STAINING AND TRANSPARENT FINISHING' };
@@ -104,6 +105,28 @@ function resolvedMediaByPart(
       partPath,
       { status: 'resolved' as const, media: new Map(entries) },
     ])
+  );
+}
+
+// #502 counterpart to resolvedMediaByPart above: wraps a set of part paths
+// into the `relsUnreadable` HeaderFooterPartMedia shape — the part's own
+// .rels file could not be read/parsed at all, so every reference into it is
+// unresolvable by construction. Used by the end-to-end capture-warning
+// acceptance tests below.
+function relsUnreadableMediaByPart(partPaths: readonly string[]): HeaderFooterMediaByPart {
+  return new Map(
+    partPaths.map((partPath) => [partPath, { status: 'relsUnreadable' as const, partPath }])
+  );
+}
+
+// Wraps a drawing run in a w:sdt content control (mirrors header-footer-
+// region.test.ts's own sdtRun helper, applied to imageDrawingRun instead of
+// plain text) — proves the paragraph-level drawing-resolution path is
+// reached through an SDT wrapper too, not just a bare w:r.
+function sdtWrappedImage(rId: string): string {
+  return (
+    '<w:sdt><w:sdtPr><w:id w:val="123"/></w:sdtPr><w:sdtContent>' +
+    `${imageDrawingRun(rId)}</w:sdtContent></w:sdt>`
   );
 }
 
@@ -384,6 +407,32 @@ describe('captureHeaderFooter — never throws for document-content reasons', ()
     expect(caught).toBeInstanceOf(ParserError);
     expect((caught as ParserError).code).toBe('DOCX_HEADER_FOOTER_XML_INVALID');
     expect((caught as ParserError).message).toMatch(/failed to parse word\/header part XML/);
+  });
+
+  // Regression pin (#502 task 4): parseDocumentRelationships' own strictness
+  // for malformed document.xml.rels (already pinned directly at
+  // header-footer-relationships.test.ts's module boundary) was never
+  // exercised through captureHeaderFooter itself — the orchestrator boundary
+  // every other malformed-XML test in this block pins directly (settings.xml
+  // above, the header/footer PART XML above). #502 only ever degrades a
+  // header/footer PART's OWN .rels file (word/_rels/header*.xml.rels,
+  // resolved eagerly by header-footer-media-parts.ts, never reaching this
+  // module) — it must never soften document.xml.rels malformation, which
+  // remains a hard parse failure.
+  it('propagates ParserError DOCX_HEADER_FOOTER_XML_INVALID for malformed document.xml.rels, via captureHeaderFooter, unchanged (#502)', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: '<not valid xml',
+    });
+    let caught: unknown;
+    try {
+      captureHeaderFooter(entries, KNOWN);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ParserError);
+    expect((caught as ParserError).code).toBe('DOCX_HEADER_FOOTER_XML_INVALID');
   });
 });
 
@@ -718,5 +767,179 @@ describe('captureHeaderFooter — table-cell image never resolves to a modeled f
     expect(composition?.raw?.unmodeled?.some((entry) => entry.kind === 'image')).toBe(true);
     // No cell in any row ever carries a modeled `image` field.
     expect(imageFieldsInTableCells(rows ?? [])).toEqual([]);
+  });
+});
+
+// Small result accessors, extracted purely to keep each `it()` body's own
+// cyclomatic complexity under eslint's enforced cap of 10 — a single test
+// asserting on several optional-chained result fields (composition ->
+// variants -> a specific variant -> header/footer -> a cell) accumulates
+// enough branches on its own to trip the cap; each accessor here carries
+// only its own slice of that chain (mirrors imageFieldsInTableCells' own
+// extraction above, and header-footer-region.ts's "spike learning #2" doc
+// comment about complexity-driven extraction).
+function defaultHeaderOf(result: HeaderFooterCaptureResult) {
+  return result.composition?.variants?.default?.header;
+}
+
+function firstHeaderOf(result: HeaderFooterCaptureResult) {
+  return result.composition?.variants?.first?.header;
+}
+
+function rawWarningsOf(result: HeaderFooterCaptureResult): readonly string[] | undefined {
+  return result.composition?.raw?.warnings;
+}
+
+function rawUnmodeledKindsOf(result: HeaderFooterCaptureResult): readonly string[] {
+  return (result.composition?.raw?.unmodeled ?? []).map((entry) => entry.kind);
+}
+
+function rawUnresolvedReferenceDetailsOf(result: HeaderFooterCaptureResult): readonly unknown[] {
+  return (result.composition?.raw?.unmodeled ?? [])
+    .filter((entry) => entry.kind === 'unresolvedReference')
+    .map((entry) => entry.detail);
+}
+
+// End-to-end acceptance for #502 (issue: a header/footer part whose OWN
+// .rels file is corrupt/unreadable must never fail the whole DOCX parse, and
+// every image reference into it must collapse to exactly ONE part-level
+// capture warning, not one generic "image content not modeled" line per
+// drawing). Runs the full orchestrator path — entries.mediaByPart ->
+// buildRegionSlot -> buildVariant -> captureRegion ->
+// captureFromParagraphs/captureTablesForRegion -> buildRawWarnings ->
+// buildComposition — combining what header-footer-images.test.ts,
+// header-footer-table.test.ts, header-footer-region.test.ts, and
+// header-footer-media-warnings.test.ts each already pin in isolation at
+// their own module boundary.
+describe('captureHeaderFooter — corrupt header/footer .rels degrades to per-part capture warnings, never throws (#502)', () => {
+  it('captures text/fields/tables normally and counts BOTH an SDT-wrapped paragraph drawing and a table-cell drawing into one aggregate warning', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}</w:sectPr>`;
+    // First content-bearing paragraph: literal text (left) + a recognized
+    // PAGE field (center) + an SDT-wrapped drawing (right — never becomes
+    // cell content; only its unmodeled trace survives).
+    const paragraphXml =
+      '<w:p>' +
+      '<w:r><w:t>Confidential</w:t></w:r>' +
+      '<w:r><w:tab/></w:r>' +
+      '<w:fldSimple w:instr=" PAGE "><w:r><w:t>3</w:t></w:r></w:fldSimple>' +
+      '<w:r><w:tab/></w:r>' +
+      sdtWrappedImage('rIdSdtImg') +
+      '</w:p>';
+    // A root-level table whose only cell mixes literal text with a second,
+    // independent drawing run — table-cell images are always out of scope
+    // for content (ADR-071 decision 4), but #502 still needs this one
+    // counted toward the SAME damaged part's aggregate warning.
+    const tableXml =
+      '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Logo: </w:t></w:r>' +
+      imageDrawingRun('rIdTableImg') +
+      '</w:p></w:tc></w:tr></w:tbl>';
+    const hdrXml = makeHdrXmlWithBody(paragraphXml + tableXml);
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
+      headerParts: new Map([['word/header1.xml', hdrXml]]),
+      mediaByPart: relsUnreadableMediaByPart(['word/header1.xml']),
+    });
+
+    expect(() => captureHeaderFooter(entries, KNOWN)).not.toThrow();
+
+    const result = captureHeaderFooter(entries, KNOWN);
+    const header = defaultHeaderOf(result);
+    // Text and the recognized PAGE field are captured normally — a damaged
+    // .rels file only degrades image resolution, nothing else.
+    expect(header).toMatchObject({
+      left: { content: [{ kind: 'literal', text: 'Confidential' }] },
+      center: { content: [{ kind: 'pageNumber' }] },
+      table: { rows: [{ cells: [{ content: [{ kind: 'literal', text: 'Logo: ' }] }] }] },
+    });
+    // The SDT-wrapped drawing never becomes cell content — only its
+    // unmodeled trace, asserted below, survives.
+    expect(header?.right).toBeUndefined();
+
+    // Both drawings — the SDT-wrapped paragraph one AND the table-cell one —
+    // degrade to unresolvedReference (never the generic `image` unmodeled
+    // fallback), and both are attributed to the SAME damaged part.
+    const unresolvedDetails = rawUnresolvedReferenceDetailsOf(result);
+    expect(unresolvedDetails).toHaveLength(2);
+    expect(unresolvedDetails).toContainEqual({
+      rId: 'rIdSdtImg',
+      part: 'word/header1.xml',
+      reason: RELS_UNREADABLE_REASON,
+    });
+    expect(unresolvedDetails).toContainEqual({
+      part: 'word/header1.xml',
+      reason: RELS_UNREADABLE_REASON,
+    });
+    // Neither drawing ever falls back to the generic `image` unmodeled kind
+    // — both are attributed to the damaged part instead.
+    expect(rawUnmodeledKindsOf(result)).not.toContain('image');
+
+    // Exactly ONE aggregate capture-warning line for the damaged part, exact
+    // wording, counting BOTH drawings — never one generic line per drawing.
+    expect(rawWarningsOf(result)).toEqual([
+      "word/header1.xml's relationships index is unreadable; 2 image reference(s) could not be resolved",
+    ]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatchObject({ type: 'header-footer-content-skipped' });
+  });
+
+  it('emits two separate aggregate warnings, never merged, when two different parts are both damaged', () => {
+    const sectPr = `<w:sectPr>${headerRef('rId1', 'default')}${footerRef('rId2', 'default')}</w:sectPr>`;
+    const hdrXml = makeHdrXmlWithBody(`<w:p>${imageDrawingRun('rIdHdrImg')}</w:p>`);
+    const ftrXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ${NS}><w:p>${imageDrawingRun('rIdFtrImg')}</w:p></w:ftr>`;
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(
+        relationship('rId1', 'header1.xml') + relationship('rId2', 'footer1.xml')
+      ),
+      headerParts: new Map([['word/header1.xml', hdrXml]]),
+      footerParts: new Map([['word/footer1.xml', ftrXml]]),
+      mediaByPart: relsUnreadableMediaByPart(['word/header1.xml', 'word/footer1.xml']),
+    });
+
+    expect(() => captureHeaderFooter(entries, KNOWN)).not.toThrow();
+
+    const result = captureHeaderFooter(entries, KNOWN);
+    // Two distinct damaged parts each get their OWN line — the aggregation
+    // groups by part path, never collapsing two different parts into one.
+    expect(rawWarningsOf(result)).toEqual([
+      "word/header1.xml's relationships index is unreadable; 1 image reference(s) could not be resolved",
+      "word/footer1.xml's relationships index is unreadable; 1 image reference(s) could not be resolved",
+    ]);
+    expect(result.warnings).toHaveLength(1);
+  });
+
+  it('dedupes the same damaged physical part referenced by two different variant slots into one warning with a summed count', () => {
+    // default and first both resolve to the SAME physical header2.xml part
+    // (mirrors the pre-existing "two references resolving to the same
+    // physical part" test above), and that shared part's .rels is damaged.
+    const sectPr = `<w:sectPr><w:titlePg/>${headerRef('rId1', 'default')}${headerRef('rId5', 'first')}</w:sectPr>`;
+    const hdrXml = makeHdrXmlWithBody(
+      `<w:p><w:r><w:t>Shared</w:t></w:r>${imageDrawingRun('rIdSharedImg')}</w:p>`
+    );
+    const entries = baseEntries({
+      documentXml: makeDocXml(sectPr),
+      documentRelsXml: makeRelsXml(
+        relationship('rId1', 'header2.xml') + relationship('rId5', 'header2.xml')
+      ),
+      headerParts: new Map([['word/header2.xml', hdrXml]]),
+      mediaByPart: relsUnreadableMediaByPart(['word/header2.xml']),
+    });
+
+    expect(() => captureHeaderFooter(entries, KNOWN)).not.toThrow();
+
+    const result = captureHeaderFooter(entries, KNOWN);
+    // Both variants still capture their shared text content — the damaged
+    // .rels file only degrades the image, exactly like the single-variant
+    // scenario above.
+    const sharedText = [{ kind: 'literal', text: 'Shared' }];
+    expect(defaultHeaderOf(result)?.left?.content).toEqual(sharedText);
+    expect(firstHeaderOf(result)?.left?.content).toEqual(sharedText);
+    // ONE aggregate line, its count summed across both variant slots that
+    // reference the same physical part — never two lines, never doubled.
+    expect(rawWarningsOf(result)).toEqual([
+      "word/header2.xml's relationships index is unreadable; 2 image reference(s) could not be resolved",
+    ]);
+    expect(result.warnings).toHaveLength(1);
   });
 });
