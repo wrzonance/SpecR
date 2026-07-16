@@ -967,6 +967,123 @@ describe('createApp (wiring smoke tests)', () => {
         expect(afterCallA.status).toBe('error');
         expect(afterCallA.error).not.toBeNull();
       });
+
+      it('resetPaneState invalidates an in-flight load from the superseded run, so its late success cannot clobber the fresh idle state (#508 generation guard)', async () => {
+        const { docx } = createRenderAsyncSpy();
+        // Definite-assignment (test-only, CLAUDE.md permits `!` here): the
+        // executor runs synchronously inside `new Promise`.
+        let resolveSlowFetch!: (value: { ok: true; blob: () => Promise<object> }) => void;
+        const slowFetch = new Promise<{ ok: true; blob: () => Promise<object> }>((resolve) => {
+          resolveSlowFetch = resolve;
+        });
+        const { window: harnessWindow } = await loadHarnessSandbox('', {
+          fetch: () => slowFetch,
+          docx,
+        });
+        const loadPane = harnessWindow.__loadPane;
+        const resetPaneState = harnessWindow.__resetPaneState;
+        const measure = harnessWindow.__measure;
+        assertIsFunction(loadPane, '__loadPane');
+        assertIsFunction(resetPaneState, '__resetPaneState');
+        assertIsFunction(measure, '__measure');
+
+        // Run A's load is still in flight (fetch pending)...
+        const staleLoad = loadPane('run-A', 'reference') as Promise<void>;
+        expect((measure('reference') as { status: string }).status).toBe('loading');
+
+        // ...when run B supersedes it: resetPaneState resets the pane to 'idle'
+        // AND must invalidate run A's in-flight load by advancing the generation.
+        resetPaneState();
+        expect((measure('reference') as { status: string }).status).toBe('idle');
+
+        // Run A's render now completes, well after the reset. Its own promise
+        // still resolves (the render happened, into a now-detached node), but
+        // its 'done' write must be skipped so run B's fresh 'idle' survives —
+        // otherwise tryAutoLoadPane's own `status !== 'idle'` guard would see a
+        // stale 'done' and never load run B's reference pane, leaving it
+        // permanently blank.
+        resolveSlowFetch({ ok: true, blob: () => Promise.resolve({}) });
+        await expect(staleLoad).resolves.toBeUndefined();
+        await flushAsync();
+
+        expect((measure('reference') as { status: string }).status).toBe('idle');
+      });
+
+      it("a superseded auto-load's late notReady (404) must not reset a newer load's state back to idle (#508 generation guard)", async () => {
+        const { docx } = createRenderAsyncSpy();
+        let refPaneFetchCount = 0;
+        let resolveStaleRef!: (value: { ok: false; status: number }) => void;
+        const staleRef = new Promise<{ ok: false; status: number }>((resolve) => {
+          resolveStaleRef = resolve;
+        });
+        const terminalRecord = {
+          runId: 'run-A',
+          stage: 'generate',
+          status: 'complete',
+          error: null,
+          artifacts: { derivationReport: null },
+        };
+        const fetchStub = (
+          url: string
+        ): Promise<{
+          ok: boolean;
+          status?: number;
+          json?: () => Promise<unknown>;
+          blob?: () => Promise<object>;
+        }> => {
+          if (url === '/api/runs/run-A') {
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve({ success: true, data: terminalRecord }),
+            });
+          }
+          if (url.includes('reference.docx')) {
+            refPaneFetchCount += 1;
+            // First reference fetch = run A's auto-load; stays pending until the
+            // test resolves it to a 404, long after run B has superseded it.
+            // Second = run B's direct reload, which succeeds immediately.
+            return refPaneFetchCount === 1
+              ? staleRef
+              : Promise.resolve({ ok: true, blob: () => Promise.resolve({}) });
+          }
+          // Roundtrip pane file + diff crops: not-ready 404s, harmless here.
+          return Promise.resolve({ ok: false, status: 404 });
+        };
+
+        const { window: harnessWindow } = await loadHarnessSandbox('', {
+          fetch: fetchStub,
+          docx,
+        });
+        const pollRun = harnessWindow.__pollRun;
+        const loadPane = harnessWindow.__loadPane;
+        const resetPaneState = harnessWindow.__resetPaneState;
+        const measure = harnessWindow.__measure;
+        assertIsFunction(pollRun, '__pollRun');
+        assertIsFunction(loadPane, '__loadPane');
+        assertIsFunction(resetPaneState, '__resetPaneState');
+        assertIsFunction(measure, '__measure');
+
+        // Run A's terminal poll tick auto-loads the reference pane; its fetch
+        // stays pending (staleRef), so that load sits in flight.
+        pollRun('run-A');
+        await flushAsync();
+        expect((measure('reference') as { status: string }).status).toBe('loading');
+
+        // Run B supersedes (resetPaneState advances the generation), then loads
+        // and renders the reference pane to 'done'.
+        resetPaneState();
+        await (loadPane('run-A', 'reference') as Promise<void>);
+        await flushAsync();
+        expect((measure('reference') as { status: string }).status).toBe('done');
+
+        // Run A's auto-load finally 404s, long after run B already reached
+        // 'done'. tryAutoLoadPane's notReady reset is generation-guarded, so it
+        // must NOT reset run B's 'done' back to 'idle' (which would drop the
+        // real result and spawn a redundant reload).
+        resolveStaleRef({ ok: false, status: 404 });
+        await flushAsync();
+        expect((measure('reference') as { status: string }).status).toBe('done');
+      });
     });
 
     describe('window.__measure capture-mode guarantee (#506 task 5/9)', () => {

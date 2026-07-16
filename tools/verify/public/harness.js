@@ -180,17 +180,39 @@
 
   function tryAutoLoadPane(runId, pane) {
     if (paneState[pane].status !== 'idle') return;
-    window.__loadPane(runId, pane).catch((err) => {
+    // __loadPane bumps paneLoadGeneration[pane] synchronously (before it
+    // returns the promise), so reading it right after the call captures THIS
+    // load's generation.
+    const loadPromise = window.__loadPane(runId, pane);
+    const generation = paneLoadGeneration[pane];
+    loadPromise.catch((err) => {
       // A 404 just means the pipeline hasn't produced this file yet — reset
       // to 'idle' so the next poll tick retries. Any other failure is a real
-      // render error and stays surfaced via paneState[pane].error.
-      if (err && err.notReady) paneState[pane] = { status: 'idle', error: null };
+      // render error and stays surfaced via paneState[pane].error. The
+      // generation guard stops a STALE load's 404 — one a newer __loadPane or
+      // a resetPaneState has already superseded — from resetting that newer
+      // load's 'done'/'error'/'loading' back to 'idle' (which would drop a
+      // real result or spawn a redundant reload). The guard inside __loadPane
+      // covers its own 'done'/'error' writes; this covers the notReady reset,
+      // which lives out here in the caller and would otherwise bypass it.
+      if (err && err.notReady && paneLoadGeneration[pane] === generation) {
+        paneState[pane] = { status: 'idle', error: null };
+      }
     });
   }
 
   function resetPaneState() {
     paneState.reference = { status: 'idle', error: null };
     paneState.roundtrip = { status: 'idle', error: null };
+    // Invalidate any in-flight load from the just-superseded run: bumping the
+    // generation makes each pending __loadPane's own guards (and
+    // tryAutoLoadPane's notReady reset) see a mismatch, so a load that settles
+    // AFTER this reset can't clobber the new run's fresh 'idle' with a stale
+    // 'done'/'error' — which would otherwise leave the new run's pane
+    // permanently blank (its status stuck non-'idle', so tryAutoLoadPane never
+    // reloads it).
+    paneLoadGeneration.reference += 1;
+    paneLoadGeneration.roundtrip += 1;
     clearChildren(document.getElementById(PANE_CONTENT_IDS.reference));
     clearChildren(document.getElementById(PANE_CONTENT_IDS.roundtrip));
     // A stale mismatch note from a prior run must not linger over a new
