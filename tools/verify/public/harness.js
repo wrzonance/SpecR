@@ -165,14 +165,6 @@
     return target;
   }
 
-  // Test-only hook (#506 task 3/9): createScaleTarget has no caller yet —
-  // window.__loadPane starts using it in a later #506 task — so
-  // app.test.ts's vm-sandboxed suite needs a way to pin its own
-  // DOM-management invariant (repeat calls replace, never accumulate, the
-  // outer/target pair) directly. NOT part of the driving-agent API this
-  // file's header comment documents — do not call this from Playwright.
-  window.__harnessTestHooks = { createScaleTarget: createScaleTarget };
-
   function resetScalePair(outer, target) {
     outer.style.width = '';
     outer.style.height = '';
@@ -209,11 +201,18 @@
     }
 
     const paneContentEl = document.getElementById(PANE_CONTENT_IDS[pane]);
-    const factor = paneContentEl.clientWidth / naturalRect.width;
-    if (!isPositiveFinite(factor)) {
+    const rawFactor = paneContentEl.clientWidth / naturalRect.width;
+    if (!isPositiveFinite(rawFactor)) {
       resetScalePair(outer, target);
       return undefined;
     }
+    // Clamped to at most 1 — fit mode's documented contract (this file's
+    // header comment, index.html, README) is that it SCALES PANES DOWN, never
+    // up. A pane column wider than the page's natural width (e.g. the tool's
+    // own recommended workflow: pinning the documented 3200px capture
+    // viewport while still in default fit mode yields a pane column wider
+    // than a Letter/A4 page) would otherwise produce factor > 1 and upscale.
+    const factor = Math.min(rawFactor, 1);
 
     target.style.transform = 'scale(' + factor + ')';
     target.style.transformOrigin = 'top left';

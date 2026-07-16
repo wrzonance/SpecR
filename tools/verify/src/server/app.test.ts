@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import type { Express } from 'express';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiClient } from '../api-client/client.js';
 import { createRunStore, type RunStore } from '../run/run-store.js';
 import { createPipeline } from '../run/pipeline.js';
@@ -98,8 +98,16 @@ describe('createApp (wiring smoke tests)', () => {
     expect(body).toContain('/harness.js');
     // #506: an inline data: favicon <link> is sufficient on its own to
     // suppress Chromium's implicit /favicon.ico probe — no new route or
-    // static asset needed (WT-506 spike finding 5).
-    expect(body).toContain('rel="icon"');
+    // static asset needed (WT-506 spike finding 5). Pin the actual
+    // invariant (a SELF-CONTAINED data: URI, not merely the presence of a
+    // rel="icon" attribute anywhere in the page) — a bare substring check
+    // would pass even if this regressed to a relative/external href that
+    // required a server route or file. Lazy-captures up to the first `">`
+    // rather than the first bare `>`, because the SVG data URI itself
+    // contains unescaped `>` characters (its own tag closes) — a naive
+    // `[^>]*` boundary would truncate mid-URI and never reach it.
+    const iconHref = /rel="icon"\s+href="([\s\S]*?)">/.exec(body)?.[1];
+    expect(iconHref).toMatch(/^data:/);
     // #506: scale-factor disagreement between the reference/round-trip
     // panes must be surfaced only through this DOM node, never through
     // console output — the driving agent reads DOM state, not console logs.
@@ -551,6 +559,37 @@ describe('createApp (wiring smoke tests)', () => {
         expect(outer.style.height).toBe('1000px');
       });
 
+      it('clamps the fit-mode scale factor to at most 1, never upscaling a page narrower than its pane column (#506)', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        // clientWidth (1600) wider than the page's natural width (800) is
+        // exactly the scenario the tool's own recommended workflow reaches:
+        // pinning the documented 3200px capture viewport while still in
+        // default fit mode (README step 2) yields a pane column noticeably
+        // wider than a Letter/A4 page. A raw (unclamped) ratio would upscale
+        // — contradicting index.html's/README's documented "scales panes
+        // down" contract.
+        const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 1600);
+        const { outer, target } = attachScalePair(container, {
+          x: 0,
+          y: 0,
+          width: 800,
+          height: 1000,
+        });
+        configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 1600);
+
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+        setDisplayMode('fit');
+
+        expect(target.style.transform).toBe('scale(1)');
+        // The outer wrapper is sized off the CLAMPED factor too — an
+        // unclamped 2x factor would size it 1600x2000, defeating the point
+        // of the clamp (the outer box exists to bound the pane to its
+        // column, see the no-overflow test above).
+        expect(outer.style.width).toBe('800px');
+        expect(outer.style.height).toBe('1000px');
+      });
+
       it('always resets before recomputing, so a later fit pass never compounds onto a stale transform (reset-first ordering)', async () => {
         const { window: harnessWindow, document } = await loadHarnessSandbox('');
         const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
@@ -583,30 +622,13 @@ describe('createApp (wiring smoke tests)', () => {
         expect(outer.style.height).toBe('500px');
       });
 
-      it('createScaleTarget replaces, never accumulates, the outer/target pair on repeat calls (no wrapper accumulation)', async () => {
-        const { window: harnessWindow, document } = await loadHarnessSandbox('');
-        const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
-
-        // createScaleTarget has no caller yet — window.__loadPane starts
-        // using it in a later #506 task — so this test-only hook (documented
-        // in harness.js as NOT part of the driving-agent API) is the only
-        // way to pin its own DOM-management invariant ahead of that wiring.
-        const testHooksValue = harnessWindow.__harnessTestHooks;
-        if (typeof testHooksValue !== 'object' || testHooksValue === null) {
-          throw new Error('harness.js sandbox: window.__harnessTestHooks missing');
-        }
-        const createScaleTarget = (testHooksValue as Record<string, unknown>).createScaleTarget;
-        assertIsFunction(createScaleTarget, '__harnessTestHooks.createScaleTarget');
-
-        const firstTarget = createScaleTarget('reference');
-        const secondTarget = createScaleTarget('reference');
-
-        expect(container.children).toHaveLength(1);
-        expect(container.children[0]?.className).toBe('pane-scale-outer');
-        expect(container.children[0]?.children).toHaveLength(1);
-        expect(container.children[0]?.children[0]?.className).toBe('pane-scale-target');
-        expect(secondTarget).not.toBe(firstTarget);
-      });
+      // createScaleTarget's own "replaces, never accumulates the outer/target
+      // pair on repeat calls" invariant is pinned below, through the real
+      // public window.__loadPane entry point (see "renders each load into a
+      // fresh outer/target pair without accumulating wrappers" in the
+      // window.__loadPane wiring describe below) — createScaleTarget has a
+      // real caller now (__loadPane), so there is no need for a second copy
+      // of this test reaching through an internal-only escape hatch.
 
       it('wires rescaleAllPanes to a window resize listener', async () => {
         const { window: harnessWindow, document } = await loadHarnessSandbox('');
@@ -665,6 +687,40 @@ describe('createApp (wiring smoke tests)', () => {
         if (!matchedNote) throw new Error('test setup: fit-scale-note not registered');
         expect(matchedNote.textContent).toBe('');
       });
+
+      it('surfaces a scale-factor mismatch only via #fit-scale-note, never via console output (#506)', async () => {
+        // README's "Display mode: fit vs capture" section states this
+        // explicitly: "a DOM node, never console.*, because the driving
+        // agent reads DOM state, not console logs." Supplying a spy console
+        // as a sandbox global (harness.js has none of its own — a bare
+        // `console` reference would otherwise throw ReferenceError in this
+        // vm context) makes that invariant observable instead of merely
+        // implicit in the sandbox's missing global.
+        const consoleLog = vi.fn();
+        const consoleWarn = vi.fn();
+        const consoleError = vi.fn();
+        const { window: harnessWindow, document } = await loadHarnessSandbox('', {
+          console: { log: consoleLog, warn: consoleWarn, error: consoleError },
+        });
+        const refContainer = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+        attachScalePair(refContainer, { x: 0, y: 0, width: 1600, height: 2000 }); // factor 0.5
+        const rtContainer = configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 800);
+        attachScalePair(rtContainer, { x: 0, y: 0, width: 800, height: 1000 }); // factor 1.0
+
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+        setDisplayMode('fit');
+
+        const note = document.getElementById('fit-scale-note');
+        if (!note) throw new Error('test setup: fit-scale-note not registered');
+        // Confirms this scenario genuinely exercises the mismatch path the
+        // invariant covers — not a vacuously-true no-op where console just
+        // happened not to be called because nothing happened at all.
+        expect(note.textContent).not.toBe('');
+        expect(consoleLog).not.toHaveBeenCalled();
+        expect(consoleWarn).not.toHaveBeenCalled();
+        expect(consoleError).not.toHaveBeenCalled();
+      });
     });
 
     describe('window.__loadPane wiring (#506 task 4/9)', () => {
@@ -709,10 +765,12 @@ describe('createApp (wiring smoke tests)', () => {
         await loadPane('run-1', 'reference');
         await loadPane('run-1', 'reference');
 
-        // Exactly one outer/target pair survives two loads, mirroring
-        // createScaleTarget's own no-accumulation invariant (task 3/9) —
-        // this pins that __loadPane actually routes through it now, rather
-        // than rendering straight into the pane-content div as before.
+        // Exactly one outer/target pair survives two loads — this is
+        // createScaleTarget's own no-accumulation invariant, pinned here
+        // through the real public window.__loadPane boundary rather than an
+        // internal-only test hook, confirming __loadPane actually routes
+        // through it, rather than rendering straight into the pane-content
+        // div as before.
         expect(container.children).toHaveLength(1);
         expect(container.children[0]?.className).toBe('pane-scale-outer');
         expect(container.children[0]?.children).toHaveLength(1);
