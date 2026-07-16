@@ -74,9 +74,11 @@
       throw new Error("displayMode must be 'fit' or 'capture', got: " + JSON.stringify(mode));
     }
     displayMode = mode;
-    // #506 task 3/9 adds the rescaleAllPanes() call here once the
-    // scale-target DOM helpers it depends on exist — out of this task's
-    // scope (display-mode primitives only).
+    // Idempotent even when re-set to the current mode: rescaleAllPanes()
+    // always resets-then-recomputes (see applyDisplayModeToPane below), so
+    // calling this again after e.g. a viewport resize is a legitimate way
+    // to force a clean recompute, not a wasted no-op call.
+    rescaleAllPanes();
   };
 
   window.__getDisplayMode = function getDisplayMode() {
@@ -133,6 +135,119 @@
   function clearChildren(node) {
     node.textContent = '';
   }
+
+  // ─── scale-wrapper DOM management + fit-mode scaling math (#506 task 3/9)
+  // ───────────────────────────────────────────────────────────────────────
+  // A single element can't simultaneously be docx-preview's render target,
+  // the CSS transform target, AND the sizing box the pane-content ancestor's
+  // overflow:auto measures scrollWidth/scrollHeight against (see this file's
+  // DISPLAY MODES header comment — #506 spike finding 1). So every pane
+  // gets a NESTED pair: .pane-scale-outer (the sized layout box) wrapping
+  // .pane-scale-target (docx-preview's actual render target, and the
+  // transform target).
+
+  function getScaleOuter(pane) {
+    return document.getElementById(PANE_CONTENT_IDS[pane]).querySelector('.pane-scale-outer');
+  }
+
+  function getScaleTarget(pane) {
+    const outer = getScaleOuter(pane);
+    return outer ? outer.querySelector('.pane-scale-target') : null;
+  }
+
+  function createScaleTarget(pane) {
+    const container = document.getElementById(PANE_CONTENT_IDS[pane]);
+    clearChildren(container);
+    const outer = el('div', { className: 'pane-scale-outer' });
+    const target = el('div', { className: 'pane-scale-target' });
+    outer.appendChild(target);
+    container.appendChild(outer);
+    return target;
+  }
+
+  // Test-only hook (#506 task 3/9): createScaleTarget has no caller yet —
+  // window.__loadPane starts using it in a later #506 task — so
+  // app.test.ts's vm-sandboxed suite needs a way to pin its own
+  // DOM-management invariant (repeat calls replace, never accumulate, the
+  // outer/target pair) directly. NOT part of the driving-agent API this
+  // file's header comment documents — do not call this from Playwright.
+  window.__harnessTestHooks = { createScaleTarget: createScaleTarget };
+
+  function resetScalePair(outer, target) {
+    outer.style.width = '';
+    outer.style.height = '';
+    target.style.width = '';
+    target.style.transform = '';
+    target.style.transformOrigin = '';
+  }
+
+  function isPositiveFinite(value) {
+    return Number.isFinite(value) && value > 0;
+  }
+
+  function applyDisplayModeToPane(pane) {
+    const outer = getScaleOuter(pane);
+    const target = getScaleTarget(pane);
+    if (!outer || !target) return undefined;
+
+    // Always reset first — one code path for fit→capture, capture→fit, and
+    // a fresh reload, so no stale transform/dimension ever survives a mode
+    // switch or a recompute (this is what makes capture-mode geometry
+    // byte-identical to a pane that was never transformed).
+    resetScalePair(outer, target);
+    if (displayMode === 'capture') return undefined;
+
+    // width:max-content neutralizes docx-preview's own centering CSS so the
+    // natural (untransformed) page size can be measured off `target` —
+    // without this, a narrower ancestor would already be squeezing the page
+    // before its size is ever read.
+    target.style.width = 'max-content';
+    const naturalRect = target.getBoundingClientRect();
+    if (!isPositiveFinite(naturalRect.width) || !isPositiveFinite(naturalRect.height)) {
+      resetScalePair(outer, target);
+      return undefined;
+    }
+
+    const paneContentEl = document.getElementById(PANE_CONTENT_IDS[pane]);
+    const factor = paneContentEl.clientWidth / naturalRect.width;
+    if (!isPositiveFinite(factor)) {
+      resetScalePair(outer, target);
+      return undefined;
+    }
+
+    target.style.transform = 'scale(' + factor + ')';
+    target.style.transformOrigin = 'top left';
+    // The outer wrapper is the box the pane-content ancestor's overflow:auto
+    // measures scrollWidth/scrollHeight against — sizing it to exactly the
+    // scaled natural dimensions (not the untransformed natural size) is what
+    // eliminates the stray scroll space a lone transformed element leaves
+    // behind (#506 spike finding 1).
+    outer.style.width = naturalRect.width * factor + 'px';
+    outer.style.height = naturalRect.height * factor + 'px';
+    return factor;
+  }
+
+  // Loose enough to absorb sub-pixel rounding between two independently
+  // rendered panes at the same nominal page width, tight enough to still
+  // flag a genuine mismatch (e.g. one pane failing to load at all).
+  const SCALE_MISMATCH_EPSILON = 0.01;
+
+  function rescaleAllPanes() {
+    const referenceFactor = applyDisplayModeToPane('reference');
+    const roundtripFactor = applyDisplayModeToPane('roundtrip');
+    const mismatched =
+      referenceFactor !== undefined &&
+      roundtripFactor !== undefined &&
+      Math.abs(referenceFactor - roundtripFactor) > SCALE_MISMATCH_EPSILON;
+    document.getElementById('fit-scale-note').textContent = mismatched
+      ? 'fit-scale mismatch: reference=' +
+        referenceFactor.toFixed(3) +
+        ' roundtrip=' +
+        roundtripFactor.toFixed(3)
+      : '';
+  }
+
+  window.addEventListener('resize', rescaleAllPanes);
 
   // ─── pane loading (window.__loadPane) ──────────────────────────────────
 

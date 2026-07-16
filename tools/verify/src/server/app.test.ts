@@ -127,9 +127,137 @@ describe('createApp (wiring smoke tests)', () => {
   describe('harness.js display mode (#506)', () => {
     // Runs the REAL served harness.js in an isolated vm context so these
     // pin genuine runtime behavior, not just substring checks against the
-    // source text. Only enough of window/document is stubbed to satisfy
-    // harness.js's own top-level side effect (wiring the upload form's
-    // submit listener) — nothing under test here touches the DOM.
+    // source text. The document/window stubs below are real enough to
+    // survive rescaleAllPanes()'s DOM reads/writes (task 3/9 wires it into
+    // __setDisplayMode and a resize listener) without modeling actual CSS
+    // layout — geometry is supplied as test fixtures, not computed.
+    interface Rect {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }
+
+    interface FakeElement {
+      tagName: string;
+      className: string;
+      style: Record<string, string>;
+      clientWidth: number;
+      textContent: string;
+      readonly children: FakeElement[];
+      appendChild(child: FakeElement): FakeElement;
+      querySelector(selector: string): FakeElement | null;
+      getBoundingClientRect(): Rect;
+      addEventListener(): void;
+    }
+
+    interface FakeDocumentStub {
+      getElementById(id: string): FakeElement | null;
+      createElement(tagName: string): FakeElement;
+      registerId(id: string, element: FakeElement): FakeElement;
+    }
+
+    interface FakeWindowStub {
+      location: { search: string };
+      addEventListener(type: string, handler: () => void): void;
+      dispatchEvent(type: string): void;
+      [key: string]: unknown;
+    }
+
+    function findByClassName(nodes: FakeElement[], className: string): FakeElement | null {
+      for (const node of nodes) {
+        if (node.className === className) return node;
+        const found = findByClassName(node.children, className);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    function createFakeElement(rect: Rect = { x: 0, y: 0, width: 0, height: 0 }): FakeElement {
+      let text = '';
+      let kids: FakeElement[] = [];
+      return {
+        tagName: 'div',
+        className: '',
+        style: {},
+        clientWidth: 0,
+        get textContent(): string {
+          return text;
+        },
+        // Mirrors real DOM semantics: assigning textContent replaces ALL
+        // children — this is what makes createScaleTarget's clearChildren
+        // call actually clear a previous render's wrapper, not just add to it.
+        set textContent(value: string) {
+          text = value;
+          kids = [];
+        },
+        get children(): FakeElement[] {
+          return kids;
+        },
+        appendChild(child: FakeElement): FakeElement {
+          kids = [...kids, child];
+          return child;
+        },
+        querySelector(selector: string): FakeElement | null {
+          if (!selector.startsWith('.')) {
+            throw new Error(`FakeElement.querySelector: unsupported selector "${selector}"`);
+          }
+          return findByClassName(kids, selector.slice(1));
+        },
+        getBoundingClientRect(): Rect {
+          return { ...rect };
+        },
+        addEventListener(): void {
+          // no-op — sufficient for harness.js's top-level run-form wiring.
+        },
+      };
+    }
+
+    function createFakeDocument(): FakeDocumentStub {
+      const idMap = new Map<string, FakeElement>();
+      return {
+        getElementById(id: string): FakeElement | null {
+          return idMap.get(id) ?? null;
+        },
+        createElement(tagName: string): FakeElement {
+          const node = createFakeElement();
+          node.tagName = tagName;
+          return node;
+        },
+        registerId(id: string, element: FakeElement): FakeElement {
+          idMap.set(id, element);
+          return element;
+        },
+      };
+    }
+
+    function createFakeWindow(search: string): FakeWindowStub {
+      const listeners = new Map<string, Array<() => void>>();
+      return {
+        location: { search },
+        addEventListener(type: string, handler: () => void): void {
+          listeners.set(type, [...(listeners.get(type) ?? []), handler]);
+        },
+        dispatchEvent(type: string): void {
+          (listeners.get(type) ?? []).forEach((handler) => {
+            handler();
+          });
+        },
+      };
+    }
+
+    // The four ids harness.js's top-level eval and display-mode code paths
+    // touch — 'run-form' for the submit-listener wiring every load runs,
+    // the two pane-content divs, and the fit-scale diagnostic node.
+    function createDefaultHarnessDocument(): FakeDocumentStub {
+      const document = createFakeDocument();
+      document.registerId('run-form', createFakeElement());
+      document.registerId('pane-reference-content', createFakeElement());
+      document.registerId('pane-roundtrip-content', createFakeElement());
+      document.registerId('fit-scale-note', createFakeElement());
+      return document;
+    }
+
     function assertIsFunction(
       value: unknown,
       name: string
@@ -139,15 +267,14 @@ describe('createApp (wiring smoke tests)', () => {
       }
     }
 
-    async function loadHarnessSandbox(search: string): Promise<Record<string, unknown>> {
+    async function loadHarnessSandbox(
+      search: string
+    ): Promise<{ window: FakeWindowStub; document: FakeDocumentStub }> {
       const response = await fetch(`${baseUrl}/harness.js`);
       const source = await response.text();
-      const formStub = { addEventListener: () => {} };
-      const sandbox = {
-        window: { location: { search } } as Record<string, unknown>,
-        document: { getElementById: () => formStub },
-        URLSearchParams,
-      };
+      const windowStub = createFakeWindow(search);
+      const documentStub = createDefaultHarnessDocument();
+      const sandbox = { window: windowStub, document: documentStub, URLSearchParams };
       vm.createContext(sandbox);
       // sonarjs flags vm.runInContext as dynamic code execution — safe here:
       // `source` is this package's OWN just-served harness.js (fetched from
@@ -156,11 +283,11 @@ describe('createApp (wiring smoke tests)', () => {
       // access exposed to it.
       // eslint-disable-next-line sonarjs/code-eval
       vm.runInContext(source, sandbox);
-      return sandbox.window;
+      return { window: windowStub, document: documentStub };
     }
 
     it('defaults to fit mode with no query string', async () => {
-      const harnessWindow = await loadHarnessSandbox('');
+      const { window: harnessWindow } = await loadHarnessSandbox('');
       const getDisplayMode = harnessWindow.__getDisplayMode;
       assertIsFunction(getDisplayMode, '__getDisplayMode');
 
@@ -168,9 +295,9 @@ describe('createApp (wiring smoke tests)', () => {
     });
 
     it('resolves capture mode only for an exact ?mode=capture query param, never throwing on garbage', async () => {
-      const capture = (await loadHarnessSandbox('?mode=capture')).__getDisplayMode;
-      const bogus = (await loadHarnessSandbox('?mode=bogus')).__getDisplayMode;
-      const wrongCase = (await loadHarnessSandbox('?mode=CAPTURE')).__getDisplayMode;
+      const capture = (await loadHarnessSandbox('?mode=capture')).window.__getDisplayMode;
+      const bogus = (await loadHarnessSandbox('?mode=bogus')).window.__getDisplayMode;
+      const wrongCase = (await loadHarnessSandbox('?mode=CAPTURE')).window.__getDisplayMode;
       assertIsFunction(capture, '__getDisplayMode');
       assertIsFunction(bogus, '__getDisplayMode');
       assertIsFunction(wrongCase, '__getDisplayMode');
@@ -181,7 +308,7 @@ describe('createApp (wiring smoke tests)', () => {
     });
 
     it('__setDisplayMode is a single global switch, not a per-pane setter', async () => {
-      const harnessWindow = await loadHarnessSandbox('');
+      const { window: harnessWindow } = await loadHarnessSandbox('');
       const setDisplayMode = harnessWindow.__setDisplayMode;
       const getDisplayMode = harnessWindow.__getDisplayMode;
       assertIsFunction(setDisplayMode, '__setDisplayMode');
@@ -199,7 +326,7 @@ describe('createApp (wiring smoke tests)', () => {
     });
 
     it('__setDisplayMode throws on anything but exactly "fit"/"capture", leaving state untouched', async () => {
-      const harnessWindow = await loadHarnessSandbox('');
+      const { window: harnessWindow } = await loadHarnessSandbox('');
       const setDisplayMode = harnessWindow.__setDisplayMode;
       const getDisplayMode = harnessWindow.__getDisplayMode;
       assertIsFunction(setDisplayMode, '__setDisplayMode');
@@ -209,6 +336,226 @@ describe('createApp (wiring smoke tests)', () => {
       expect(() => setDisplayMode('')).toThrow();
       expect(() => setDisplayMode(undefined)).toThrow();
       expect(getDisplayMode()).toBe('fit');
+    });
+
+    describe('scale-wrapper DOM management and fit-mode scaling math (#506 task 3/9)', () => {
+      // A single element can't simultaneously be docx-preview's render
+      // target, the CSS transform target, AND the sizing box the
+      // pane-content ancestor's overflow:auto measures against (#506 spike
+      // finding 1) — so every pane gets a NESTED .pane-scale-outer >
+      // .pane-scale-target pair. These tests pin the DOM-management and
+      // scaling-math invariants that pair depends on; real pixel geometry
+      // is the orchestrator's Playwright job, not this vitest suite's.
+      const PANE_CONTENT_IDS = {
+        reference: 'pane-reference-content',
+        roundtrip: 'pane-roundtrip-content',
+      } as const;
+
+      function configurePaneContent(
+        document: FakeDocumentStub,
+        paneContentId: string,
+        clientWidth: number
+      ): FakeElement {
+        const container = document.getElementById(paneContentId);
+        if (!container) throw new Error(`test setup: ${paneContentId} not registered`);
+        container.clientWidth = clientWidth;
+        return container;
+      }
+
+      function attachScalePair(
+        container: FakeElement,
+        targetRect: Rect
+      ): { outer: FakeElement; target: FakeElement } {
+        const outer = createFakeElement();
+        outer.className = 'pane-scale-outer';
+        const target = createFakeElement(targetRect);
+        target.className = 'pane-scale-target';
+        outer.appendChild(target);
+        container.appendChild(outer);
+        return { outer, target };
+      }
+
+      it('capture mode resets both scale elements to a blank state regardless of prior state (geometry invariance)', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const referenceContainer = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+        const { outer: dirtyOuter, target: dirtyTarget } = attachScalePair(referenceContainer, {
+          x: 0,
+          y: 0,
+          width: 1600,
+          height: 2000,
+        });
+        // Leftover state from a previous fit-mode computation — capture
+        // mode must reset this away, not merely skip applying a new one.
+        dirtyOuter.style.width = '999px';
+        dirtyOuter.style.height = '111px';
+        dirtyTarget.style.width = 'max-content';
+        dirtyTarget.style.transform = 'scale(3.75)';
+        dirtyTarget.style.transformOrigin = 'top left';
+
+        const roundtripContainer = configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 800);
+        const { outer: cleanOuter, target: cleanTarget } = attachScalePair(roundtripContainer, {
+          x: 0,
+          y: 0,
+          width: 1600,
+          height: 2000,
+        });
+
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+        setDisplayMode('capture');
+
+        for (const outer of [dirtyOuter, cleanOuter]) {
+          expect(outer.style.width).toBe('');
+          expect(outer.style.height).toBe('');
+        }
+        for (const target of [dirtyTarget, cleanTarget]) {
+          expect(target.style.width).toBe('');
+          expect(target.style.transform).toBe('');
+          expect(target.style.transformOrigin).toBe('');
+        }
+      });
+
+      it('fit mode sizes the outer wrapper to exactly the scaled natural size, eliminating stray scroll space (no-overflow)', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+        const { outer, target } = attachScalePair(container, {
+          x: 0,
+          y: 0,
+          width: 1600,
+          height: 2000,
+        });
+        configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 800);
+
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+        setDisplayMode('fit');
+
+        expect(target.style.width).toBe('max-content');
+        expect(target.style.transform).toBe('scale(0.5)');
+        expect(target.style.transformOrigin).toBe('top left');
+        // The outer wrapper is the box the pane-content ancestor's
+        // overflow:auto measures against — sizing it to exactly the scaled
+        // natural dimensions (not the untransformed natural size) is what
+        // eliminates the stray scroll space the #506 spike found with a
+        // single transformed element.
+        expect(outer.style.width).toBe('800px');
+        expect(outer.style.height).toBe('1000px');
+      });
+
+      it('always resets before recomputing, so a later fit pass never compounds onto a stale transform (reset-first ordering)', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+        const { outer, target } = attachScalePair(container, {
+          x: 0,
+          y: 0,
+          width: 1600,
+          height: 2000,
+        });
+        configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 800);
+
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+
+        setDisplayMode('fit');
+        expect(target.style.transform).toBe('scale(0.5)');
+
+        // A viewport resize narrows the pane-content ancestor; re-applying
+        // fit mode is idempotent (still re-scales even when the mode itself
+        // doesn't change — see __setDisplayMode's own contract).
+        container.clientWidth = 400;
+        setDisplayMode('fit');
+
+        // A compounded (not reset-first) implementation would layer
+        // scale(0.25) on top of the still-present scale(0.5), or leave the
+        // stale 800px outer width behind. This must read as an independent,
+        // correct recomputation from the current clientWidth alone.
+        expect(target.style.transform).toBe('scale(0.25)');
+        expect(outer.style.width).toBe('400px');
+        expect(outer.style.height).toBe('500px');
+      });
+
+      it('createScaleTarget replaces, never accumulates, the outer/target pair on repeat calls (no wrapper accumulation)', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+
+        // createScaleTarget has no caller yet — window.__loadPane starts
+        // using it in a later #506 task — so this test-only hook (documented
+        // in harness.js as NOT part of the driving-agent API) is the only
+        // way to pin its own DOM-management invariant ahead of that wiring.
+        const testHooksValue = harnessWindow.__harnessTestHooks;
+        if (typeof testHooksValue !== 'object' || testHooksValue === null) {
+          throw new Error('harness.js sandbox: window.__harnessTestHooks missing');
+        }
+        const createScaleTarget = (testHooksValue as Record<string, unknown>).createScaleTarget;
+        assertIsFunction(createScaleTarget, '__harnessTestHooks.createScaleTarget');
+
+        const firstTarget = createScaleTarget('reference');
+        const secondTarget = createScaleTarget('reference');
+
+        expect(container.children).toHaveLength(1);
+        expect(container.children[0]?.className).toBe('pane-scale-outer');
+        expect(container.children[0]?.children).toHaveLength(1);
+        expect(container.children[0]?.children[0]?.className).toBe('pane-scale-target');
+        expect(secondTarget).not.toBe(firstTarget);
+      });
+
+      it('wires rescaleAllPanes to a window resize listener', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+        const { target } = attachScalePair(container, { x: 0, y: 0, width: 1600, height: 2000 });
+        configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 800);
+
+        // Fit is the default mode, but nothing applies it to the DOM until
+        // something drives rescaleAllPanes — confirm the pane starts inert
+        // (never touched, not merely reset to '').
+        expect(target.style.transform).toBeUndefined();
+
+        harnessWindow.dispatchEvent('resize');
+
+        expect(target.style.transform).toBe('scale(0.5)');
+      });
+
+      it('flags a scale-factor mismatch between panes via #fit-scale-note, and stays clear when factors match', async () => {
+        const mismatched = await loadHarnessSandbox('');
+        const refContainer = configurePaneContent(
+          mismatched.document,
+          PANE_CONTENT_IDS.reference,
+          800
+        );
+        attachScalePair(refContainer, { x: 0, y: 0, width: 1600, height: 2000 }); // factor 0.5
+        const rtContainer = configurePaneContent(
+          mismatched.document,
+          PANE_CONTENT_IDS.roundtrip,
+          800
+        );
+        attachScalePair(rtContainer, { x: 0, y: 0, width: 800, height: 1000 }); // factor 1.0
+        const setMismatched = mismatched.window.__setDisplayMode;
+        assertIsFunction(setMismatched, '__setDisplayMode');
+        setMismatched('fit');
+        const mismatchedNote = mismatched.document.getElementById('fit-scale-note');
+        if (!mismatchedNote) throw new Error('test setup: fit-scale-note not registered');
+        expect(mismatchedNote.textContent).not.toBe('');
+
+        const matched = await loadHarnessSandbox('');
+        const refContainer2 = configurePaneContent(
+          matched.document,
+          PANE_CONTENT_IDS.reference,
+          800
+        );
+        attachScalePair(refContainer2, { x: 0, y: 0, width: 1600, height: 2000 }); // factor 0.5
+        const rtContainer2 = configurePaneContent(
+          matched.document,
+          PANE_CONTENT_IDS.roundtrip,
+          800
+        );
+        attachScalePair(rtContainer2, { x: 0, y: 0, width: 1600, height: 2000 }); // factor 0.5
+        const setMatched = matched.window.__setDisplayMode;
+        assertIsFunction(setMatched, '__setDisplayMode');
+        setMatched('fit');
+        const matchedNote = matched.document.getElementById('fit-scale-note');
+        if (!matchedNote) throw new Error('test setup: fit-scale-note not registered');
+        expect(matchedNote.textContent).toBe('');
+      });
     });
   });
 
