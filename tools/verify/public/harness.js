@@ -32,6 +32,34 @@
 // (docx-preview centers the page in a narrower viewport). render/regions.ts's
 // cropRegion() bounds-check is a backstop for a missed precondition, not the
 // primary guard.
+//
+// DISPLAY MODES (#506): the page renders panes in one of two modes, chosen
+// once at load from the `mode` query param and mutable afterward only
+// through window.__setDisplayMode('fit' | 'capture'). The mode is a single,
+// GLOBAL switch for the whole page, not a per-pane setting — switching
+// modes re-scales BOTH panes together, by design (#506 spike finding 2).
+// fit (default) scales panes down via a NESTED .pane-scale-outer/
+// .pane-scale-target wrapper pair (index.html's CSS): a single element
+// can't simultaneously be docx-preview's render target, the CSS transform
+// target, AND the sizing box its overflow:auto ancestor measures
+// scrollWidth/scrollHeight against — transform:scale() alone never shrinks
+// that ancestor's scroll size (#506 spike finding 1). capture
+// (?mode=capture) renders panes at natural, untransformed size — the ONLY
+// mode window.__measure()/window.__regionGeom() trust geometry against;
+// both switch into it via withCaptureMode() for the read and restore the
+// caller's prior mode before returning, so a measurement never leaves the
+// human-facing display stuck in capture mode (#506 orchestrator finding).
+//
+// All of the above — mode storage/validation, and the scale-wrapper DOM
+// management/math that applies it (getScaleOuter/getScaleTarget/
+// createScaleTarget/rescaleAllPanes) — lives in the sibling file
+// pane-scale.js, not here: harness.js had grown past this package's own
+// 400-line file cap (CLAUDE.md's project override), so that self-contained
+// concern was extracted, the same way scenario-picker.js was split out of
+// this file earlier. index.html loads pane-scale.js's <script> tag BEFORE
+// this one so window.__setDisplayMode/__createScaleTarget/__rescaleAllPanes
+// already exist by the time this file's own deferred callbacks (form
+// submit, poll tick, __loadPane) first reference them.
 
 (function () {
   'use strict';
@@ -88,6 +116,9 @@
   }
 
   // ─── pane loading (window.__loadPane) ──────────────────────────────────
+  // Scale-wrapper DOM management (window.__createScaleTarget) and fit-mode
+  // rescaling (window.__rescaleAllPanes) live in the sibling pane-scale.js
+  // — see this file's header comment.
 
   function fetchPaneBlob(runId, pane) {
     const url = `/api/runs/${encodeURIComponent(runId)}/files/${PANE_FILENAMES[pane]}`;
@@ -99,35 +130,94 @@
     });
   }
 
+  // Bumped on every __loadPane call for a given pane — lets a call's own
+  // .then()/.catch() tell whether it is still the LATEST in-flight load for
+  // that pane once its fetch/render finally settles. Without this, two
+  // concurrent __loadPane calls for the SAME pane (a legitimate direct
+  // page.evaluate() pattern — see this file's header comment and README
+  // step 3) can race: window.__createScaleTarget always detaches whatever
+  // the PREVIOUS call rendered into, but nothing stopped that previous
+  // call's own completion handler from still overwriting paneState with its
+  // own (now-superseded) outcome once its fetch/render eventually settled —
+  // even reporting a false 'done' over a genuine 'error' the newer call
+  // already surfaced, silently masking a real render failure.
+  const paneLoadGeneration = { reference: 0, roundtrip: 0 };
+
   window.__loadPane = function loadPane(runId, pane) {
-    const container = document.getElementById(PANE_CONTENT_IDS[pane]);
+    // window.__createScaleTarget rebuilds the outer/target pair fresh on
+    // every call (clears the pane-content div first) — this is what keeps a
+    // reload from accumulating a second .pane-scale-outer/.pane-scale-target
+    // pair alongside a stale one from a previous load.
+    const target = window.__createScaleTarget(pane);
     paneState[pane] = { status: 'loading', error: null };
+    const generation = ++paneLoadGeneration[pane];
     return fetchPaneBlob(runId, pane)
-      .then((blob) => docx.renderAsync(blob, container, null, RENDER_OPTIONS))
+      .then((blob) => docx.renderAsync(blob, target, null, RENDER_OPTIONS))
       .then(() => {
+        // A newer __loadPane call for this pane has already started (and
+        // already rebuilt the DOM target and paneState) — this call is
+        // stale. Its own promise still resolves normally to its own
+        // caller (the render genuinely succeeded, just into a now-detached
+        // node), but it must not clobber the current, live paneState.
+        if (paneLoadGeneration[pane] !== generation) return;
         paneState[pane] = { status: 'done', error: null };
+        // The freshly rendered pane has a new natural size — rescale both
+        // panes now so a mismatched pair doesn't sit unscaled/mis-scaled
+        // until the next resize event or explicit __setDisplayMode call.
+        window.__rescaleAllPanes();
       })
       .catch((err) => {
-        paneState[pane] = { status: 'error', error: String((err && err.message) || err) };
+        // Same staleness guard as the success path — a superseded call's
+        // failure must not overwrite a newer call's (possibly successful)
+        // paneState. The rejection itself still propagates to this call's
+        // own caller either way.
+        if (paneLoadGeneration[pane] === generation) {
+          paneState[pane] = { status: 'error', error: String((err && err.message) || err) };
+        }
         throw err;
       });
   };
 
   function tryAutoLoadPane(runId, pane) {
     if (paneState[pane].status !== 'idle') return;
-    window.__loadPane(runId, pane).catch((err) => {
+    // __loadPane bumps paneLoadGeneration[pane] synchronously (before it
+    // returns the promise), so reading it right after the call captures THIS
+    // load's generation.
+    const loadPromise = window.__loadPane(runId, pane);
+    const generation = paneLoadGeneration[pane];
+    loadPromise.catch((err) => {
       // A 404 just means the pipeline hasn't produced this file yet — reset
       // to 'idle' so the next poll tick retries. Any other failure is a real
-      // render error and stays surfaced via paneState[pane].error.
-      if (err && err.notReady) paneState[pane] = { status: 'idle', error: null };
+      // render error and stays surfaced via paneState[pane].error. The
+      // generation guard stops a STALE load's 404 — one a newer __loadPane or
+      // a resetPaneState has already superseded — from resetting that newer
+      // load's 'done'/'error'/'loading' back to 'idle' (which would drop a
+      // real result or spawn a redundant reload). The guard inside __loadPane
+      // covers its own 'done'/'error' writes; this covers the notReady reset,
+      // which lives out here in the caller and would otherwise bypass it.
+      if (err && err.notReady && paneLoadGeneration[pane] === generation) {
+        paneState[pane] = { status: 'idle', error: null };
+      }
     });
   }
 
   function resetPaneState() {
     paneState.reference = { status: 'idle', error: null };
     paneState.roundtrip = { status: 'idle', error: null };
+    // Invalidate any in-flight load from the just-superseded run: bumping the
+    // generation makes each pending __loadPane's own guards (and
+    // tryAutoLoadPane's notReady reset) see a mismatch, so a load that settles
+    // AFTER this reset can't clobber the new run's fresh 'idle' with a stale
+    // 'done'/'error' — which would otherwise leave the new run's pane
+    // permanently blank (its status stuck non-'idle', so tryAutoLoadPane never
+    // reloads it).
+    paneLoadGeneration.reference += 1;
+    paneLoadGeneration.roundtrip += 1;
     clearChildren(document.getElementById(PANE_CONTENT_IDS.reference));
     clearChildren(document.getElementById(PANE_CONTENT_IDS.roundtrip));
+    // A stale mismatch note from a prior run must not linger over a new
+    // one's panes before they've even had a chance to be measured again.
+    document.getElementById('fit-scale-note').textContent = '';
   }
 
   // ─── geometry (window.__measure / window.__regionGeom) ────────────────
@@ -135,6 +225,39 @@
   // render/regions.ts's Geom and diff/pixel-diff.ts's RegionDiffInput
   // exactly, so a driving agent can feed this output straight into that
   // pipeline without reshaping it.
+
+  // window.__measure()/window.__regionGeom() only trust geometry read in
+  // capture mode (untransformed, natural size) — see this file's DISPLAY
+  // MODES header comment (#506 spike finding 1: a fit-mode scale transform
+  // leaves getBoundingClientRect() reporting the SCALED, not natural, size).
+  // Switch-and-restore, run around `read`: snapshot the current mode, switch
+  // to capture only if needed, take the measurement, then restore the prior
+  // mode before returning — synchronously, so a caller that left the page in
+  // 'fit' still reads 'fit' (and sees both panes still scaled) the instant
+  // __measure returns. This closes off an entire class of "forgot to switch
+  // modes before measuring" bugs WITHOUT the transparent switch permanently
+  // degrading the human-facing display: a measurement must never leave the
+  // page stuck in capture mode (#506 orchestrator finding). Global (both
+  // panes), not per-pane, at BOTH ends: __setDisplayMode has no per-pane
+  // variant by design (#506 spike finding 2). A pure no-op when already in
+  // capture mode — skipping the switch AND the restore avoids an unnecessary
+  // rescaleAllPanes() recompute on every single measurement (__setDisplayMode
+  // is itself always safe to call again — task 2/9's own idempotence pin —
+  // but the redundant recompute is wasted work). `read` runs synchronously so
+  // its geometry is captured in capture mode before the finally restores.
+  function withCaptureMode(read) {
+    const priorMode = window.__getDisplayMode();
+    if (priorMode !== 'capture') {
+      window.__setDisplayMode('capture');
+    }
+    try {
+      return read();
+    } finally {
+      if (priorMode !== 'capture') {
+        window.__setDisplayMode(priorMode);
+      }
+    }
+  }
 
   function geomOf(element) {
     const rect = element.getBoundingClientRect();
@@ -157,16 +280,18 @@
   }
 
   window.__measure = function measure(pane) {
-    const container = document.getElementById(PANE_CONTENT_IDS[pane]);
-    const sections = Array.prototype.slice.call(
-      container.querySelectorAll('.docx-wrapper > section.docx')
-    );
-    return {
-      status: paneState[pane].status,
-      error: paneState[pane].error,
-      pageCount: sections.length,
-      pages: sections.map(measurePage),
-    };
+    return withCaptureMode(function () {
+      const container = document.getElementById(PANE_CONTENT_IDS[pane]);
+      const sections = Array.prototype.slice.call(
+        container.querySelectorAll('.docx-wrapper > section.docx')
+      );
+      return {
+        status: paneState[pane].status,
+        error: paneState[pane].error,
+        pageCount: sections.length,
+        pages: sections.map(measurePage),
+      };
+    });
   };
 
   window.__regionGeom = function regionGeom(pane, region, pageIndex) {
@@ -228,6 +353,17 @@
   // DerivationReport — the sidebar shows WHAT was applied, the report panel
   // shows WHY, per issue #150 design decision 9) ──────────────────────────
 
+  // A fixture scenario run (#305's scenario-picker.js) has no derivation
+  // report to show — it never goes through the AST-derivation pipeline an
+  // uploaded file does — so its empty state reads differently from a
+  // genuinely-not-ready-yet upload run. RunKind is a plain caller-supplied
+  // value, never validated against an enum here: anything other than
+  // exactly 'scenario' falls back to the upload message rather than
+  // throwing, so an unexpected value can never crash rendering (#506).
+  function emptyStateMessage(runKind) {
+    return runKind === 'scenario' ? 'n/a for fixture scenario runs' : 'No derivation report yet.';
+  }
+
   function renderPropertiesGroup(nodeType) {
     const group = el('div', { className: 'node-type-group' });
     group.appendChild(
@@ -252,11 +388,11 @@
     return group;
   }
 
-  function renderProperties(report) {
+  function renderProperties(report, runKind) {
     const body = document.getElementById('properties-body');
     clearChildren(body);
     if (!report) {
-      body.appendChild(el('p', { className: 'pane-empty', text: 'No derivation report yet.' }));
+      body.appendChild(el('p', { className: 'pane-empty', text: emptyStateMessage(runKind) }));
       return;
     }
     report.nodeTypes.forEach(function (nodeType) {
@@ -289,11 +425,11 @@
     return wrapper;
   }
 
-  function renderDerivationReport(report) {
+  function renderDerivationReport(report, runKind) {
     const body = document.getElementById('derivation-body');
     clearChildren(body);
     if (!report) {
-      body.appendChild(el('p', { className: 'pane-empty', text: 'No derivation report yet.' }));
+      body.appendChild(el('p', { className: 'pane-empty', text: emptyStateMessage(runKind) }));
       return;
     }
     body.appendChild(
@@ -364,7 +500,11 @@
   // one's result. __resetPaneState only clears the panes; it does not stop
   // an in-flight loop, which is why the guard lives here.
   let activeStop = null;
-  function pollRun(runId) {
+  function pollRun(runId, runKind = 'upload') {
+    // A plain per-call argument, never persisted module state — each call
+    // to pollRun (upload form vs. scenario-picker.js) supplies its own
+    // runKind, closure-captured by THIS call's tick(), so an earlier run's
+    // runKind can never leak into a later, unrelated one.
     if (activeStop) activeStop();
     let stopped = false;
     activeStop = function () {
@@ -381,8 +521,8 @@
           if (stopped) return;
           if (record) {
             renderRunStatus(record);
-            renderProperties(record.artifacts.derivationReport);
-            renderDerivationReport(record.artifacts.derivationReport);
+            renderProperties(record.artifacts.derivationReport, runKind);
+            renderDerivationReport(record.artifacts.derivationReport, runKind);
             tryAutoLoadPane(runId, 'reference');
             tryAutoLoadPane(runId, 'roundtrip');
             if (isTerminal(record)) {
@@ -453,7 +593,10 @@
   // fixture run through the exact same poll loop / pane-loading / diff-
   // loading logic this form uses, rather than duplicating any of it — both
   // POST /api/runs and POST /api/header-footer-fixtures write into the same
-  // RunStore, so one poller already covers both entry points.
+  // RunStore, so one poller already covers both entry points. runKind
+  // ('upload', the default, or 'scenario') only changes the empty-state
+  // message shown while no derivation report exists yet (#506) — it is not
+  // persisted anywhere.
   window.__pollRun = pollRun;
   window.__resetPaneState = resetPaneState;
 })();

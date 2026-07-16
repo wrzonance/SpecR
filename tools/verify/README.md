@@ -64,6 +64,52 @@ SpecR API and from `openapi.yaml`, which needs no changes for this tool (see
 | `GET` | `/api/runs/:runId/files/:filename` | Serve one of a run's artifacts. `:filename` is a closed enum (`src/server/routes/files.ts`'s `RUN_FILE_NAMES`) — `reference.docx`, `generated.docx`, both screenshots, and the nine region crop/diff PNGs (`page-`/`header-`/`footer-` × `reference`/`roundtrip`/`diff`). |
 | `POST` | `/api/header-footer-fixtures` | Start a header/footer fixture run (#305): JSON body `{ scenarioId }`, one of the 5 catalog ids in [Header/footer fixture scenarios](#headerfooter-fixture-scenarios-305) below. Returns `{ runId }` (202) immediately; polls through the same `GET /api/runs/:runId` as the main upload form — both routes share one `RunStore`. No multipart upload: the reference `.docx` is built server-side from the catalog, not supplied by the caller. |
 
+## Display mode: fit vs capture (#506)
+
+The harness page renders both panes in one of two modes — a single, **global** switch for the
+whole page, not a per-pane setting (switching re-scales BOTH panes together, by design — see
+[decision 15](#15-measurement-is-a-transient-page-global-capture-switch-that-restores-the-prior-mode-506)
+below):
+
+| Mode | How to select | What it does | Who it's for |
+|---|---|---|---|
+| `fit` (default) | no query param, or `window.__setDisplayMode('fit')` | Scales each pane's rendered page down to fit its column, via a nested `.pane-scale-outer` / `.pane-scale-target` wrapper pair (CSS `transform: scale()` on the inner element, an explicitly-sized box on the outer — see [decision 14](#14-nested-pane-scale-outerpane-scale-target-wrapper--a-single-scaled-element-cant-do-all-three-jobs-506)) so the full page width is visible without horizontal scrolling. | A human eyeballing a run in a normal-width browser window. |
+| `capture` | `?mode=capture`, or `window.__setDisplayMode('capture')` | Renders panes at natural, untransformed size — no scale. A page wider than its pane column overflows into `.pane-content`'s `overflow:auto` (scrollable), never clipped, so a screenshot never silently loses the page's right edge. | The **only** mode whose geometry is trustworthy for screenshotting/cropping/diffing. |
+
+`window.__setDisplayMode(mode)` throws a plain `Error` for anything other than exactly `'fit'` or
+`'capture'` — strict boundary validation, no silent coercion of a typo'd or missing value.
+`window.__getDisplayMode()` is a pure read. `#fit-scale-note` (toolbar, next to `#run-status`)
+surfaces a fit-mode scale-factor disagreement when **both** panes render at measurably different
+page sizes (e.g. Letter vs A4): empty when both panes' factors agree within a small epsilon for
+sub-pixel rounding, otherwise it reports both factors — a DOM node, never `console.*`, because the
+driving agent reads DOM state, not console logs. It reports only when both factors are defined; a
+pane that failed to render produces no factor, so the note is cleared rather than flagged (a load
+failure surfaces through that pane's own state, not this scale-mismatch note).
+
+**`window.__measure()` / `window.__regionGeom()` read geometry in capture mode, then restore the
+caller's prior mode before they return** (`withCaptureMode()`): each snapshots the current mode,
+switches the page into `capture` only if it wasn't already there, reads, and switches back —
+synchronously, so a caller that left the page in `fit` still reads `fit` (and still sees both panes
+scaled) the instant the call returns. This closes off an entire class of "forgot to switch modes
+before measuring" bug **without** the older defect where a single measurement left the whole page
+latched in `capture` and visibly overflowing until someone manually switched back (#506, orchestrator
+acceptance finding). The switch is page-global (**both** panes — mode has no per-pane variant) at
+both ends, but it is transient: a measurement is now effectively read-only with respect to persistent
+display state. A driving agent that wants a `capture`-mode *screenshot* must therefore set `capture`
+mode itself and keep it set across the screenshot — see
+[Driving a run](#driving-a-run-the-agent-workflow) below.
+
+**Known residual risk — header/footer scale consistency not fixture-verified.** Capture-mode
+geometry-identity (decision 16 below) was confirmed against `pageGeom` on a single-page and a
+12-page fixture. No fixture reachable from inside this worktree without driving the full upload
+pipeline against a live API has header/footer content, so `headerGeom`/`footerGeom` under fit
+mode's scale transform specifically was not empirically exercised during the #506 build — only
+architecturally reasoned (the same transform applies uniformly to a section's header/footer
+children as it does to its body). Left as an explicit residual risk for the orchestrator's post-PR
+Playwright pass against a real upload run with header/footer content, per the issue's own guidance
+to defer geometry acceptance to the driving agent — see
+[decision 17](#17-headerfooter-scale-consistency-under-fit-mode-a-documented-residual-risk-not-silently-dropped-506).
+
 ## Driving a run (the agent workflow)
 
 The harness page (`public/index.html` + `public/harness.js`) renders both panes and displays
@@ -78,15 +124,30 @@ ran, end to end, against a real API + Postgres):
 2. **Pin the viewport before anything else.** Resize the browser to
    `>= VERIFY_VIEWPORT_WIDTH` (3200px default) and scroll to the top. `window.__harnessConfig.viewportWidth`
    on the page mirrors the server's configured value, so a driving script never has to hardcode it
-   twice. This is not optional cosmetic advice — see finding 7.
+   twice. This is not optional cosmetic advice — see finding 7. The page loads in `fit` mode by
+   default (see [Display mode](#display-mode-fit-vs-capture-506) above); that's fine to leave active
+   while poking around — no manual switch to `capture` is needed here, step 4 below does it
+   automatically.
 3. **Load both panes** (the page's own poll loop does this automatically once `reference.docx`/
    `generated.docx` exist — `window.__loadPane('reference' | 'roundtrip')` if driving it manually).
-4. **Measure geometry** via `window.__measure(pane)` / `window.__regionGeom(pane, region, pageIndex)`.
-   These are `getBoundingClientRect()`-based and therefore **viewport-relative, not
-   document-relative** — see finding 3.
-5. **Capture and ingest a screenshot per pane.** Take a screenshot of that pane's content element
-   (or the full page) and `POST` it as base64 PNG to `/api/runs/:runId/screenshot` with
-   `{ pane, imageBase64 }`.
+4. **Enter capture mode, then measure geometry.** For a screenshot pass, first call
+   `window.__setDisplayMode('capture')` so the page holds natural, untransformed size across both the
+   measurement AND the screenshot below. Then measure via `window.__measure(pane)` /
+   `window.__regionGeom(pane, region, pageIndex)`. These are `getBoundingClientRect()`-based and
+   therefore **viewport-relative, not document-relative** — see finding 3. Each reads geometry in
+   `capture` mode for the *whole page* (both panes, not just the one being measured — mode has no
+   per-pane variant) and then restores whatever mode it found on entry (#506); calling one while
+   already in `capture` mode is a pure no-op that leaves `capture` in place.
+5. **Capture and ingest a screenshot per pane, while still in capture mode.** With `capture` mode
+   still set from step 4, take a screenshot of that pane's content element (or the full page) and
+   `POST` it as base64 PNG to `/api/runs/:runId/screenshot` with `{ pane, imageBase64 }`. **The mode
+   must be `capture` here**: that is what guarantees the screenshot captures the same natural-size,
+   untransformed layout the geometry from step 4 describes. Since #506, `__measure()`/`__regionGeom()`
+   *restore* whatever mode they found rather than latching `capture`, so you cannot rely on a prior
+   measurement to have parked the page in `capture` — set it explicitly (step 4) and leave it set
+   until the screenshot is taken. Screenshotting in `fit` mode (the page default) instead captures
+   scaled pixels that don't correspond to the geometry step 6 will crop against. When done,
+   `window.__setDisplayMode('fit')` returns the page to the human-friendly view.
 6. **Crop and diff each region using each pane's OWN geometry**, then feed the crops to
    `createPixelDiffer().diff()` — see finding 8 for why this must be per-pane geometry, not a single
    shared rect, when reference and round-trip pages render at different pane positions and different
@@ -255,6 +316,15 @@ reopens this gap fails a test, not just a real capture. This is exactly what fin
 backstop exists for — it would have caught this as a `VerifyRenderError` the first time a driving
 agent tried to crop at the old default, rather than producing a silently wrong crop.
 
+**(#506 amendment)** This requirement is about **`capture` mode** specifically — the harness's only
+mode until #506 introduced a second, `fit`, mode as the page's new default for human eyeballing (see
+[Display mode: fit vs capture](#display-mode-fit-vs-capture-506)). The 3200px arithmetic above is
+unchanged by that: `window.__measure()`/`window.__regionGeom()` always read geometry in `capture`
+mode (switching into it for the read, then restoring the caller's prior mode — [decision 15](#15-measurement-is-a-transient-page-global-capture-switch-that-restores-the-prior-mode-506)),
+so a driving agent's viewport still needs to satisfy this constraint against `capture` mode's
+natural, untransformed page size — `fit` mode's scaled-down rendering has no bearing on it and was
+never the mode this finding measured against.
+
 ### 8. `diffRegions()`'s shared-geometry assumption doesn't fit a side-by-side layout
 `diff/pixel-diff.ts`'s `diffRegions()` crops **both** the reference and round-trip screenshots using
 the *same* `Geom` rect (`RegionDiffInput.pageGeom`, one value applied to both `cropRegion()` calls).
@@ -337,6 +407,67 @@ from `HEADER_FOOTER_SCENARIOS.map((s) => s.id)` at module load, rather than hand
 second time — a scenario added to or removed from the catalog never needs a matching edit in the route
 to stay in sync. Same "derive from the one source of truth" posture as decision 4's `RUN_FILE_NAMES`
 enum in the sibling `files.ts` route.
+
+### 14. Nested `.pane-scale-outer`/`.pane-scale-target` wrapper — a single scaled element can't do all three jobs (#506)
+A single element can't simultaneously be docx-preview's render target, the CSS `transform: scale()`
+target, AND the sizing box its `overflow: auto` ancestor (`.pane-content`) measures
+`scrollWidth`/`scrollHeight` against: `transform: scale()` never shrinks the transformed element's
+own `scrollWidth`/`scrollHeight` as reported to an ancestor — it stays pinned to the pre-scale
+natural size, leaving real stray scroll space, not a cosmetic quirk. The naive fix — giving that
+same transformed element an explicit scaled `width`/`height` — is actively wrong: it forces
+docx-preview's own `align-items: center` centering CSS to center the natural-width page inside an
+artificially-narrowed box, reproducing the original clipping bug byte-for-byte (confirmed via
+screenshot during the #506 spike). The shipped fix nests two elements instead: `.pane-scale-outer`
+is explicitly sized (`width`/`height` = natural size × scale factor) as the layout box the
+ancestor's overflow calculation sees; `.pane-scale-target`, nested inside it, gets
+`width: max-content` (neutralizing docx-preview's centering) plus the actual `transform: scale()`.
+Spike-verified to produce `scrollWidth === clientWidth` / `scrollHeight === clientHeight` (zero
+stray scroll) AND `pageGeom.x >= paneLeft` (no clipping) simultaneously at a 1400px pane width.
+
+### 15. Measurement is a transient page-global capture switch that restores the prior mode (#506)
+`window.__measure()`/`window.__regionGeom()` read geometry in capture mode and then restore whatever
+mode the caller was in, via `harness.js`'s `withCaptureMode(read)`: snapshot the current mode, switch
+to `capture` only if needed, run the synchronous read, and — in a `finally` — switch back. The switch
+is page-global at **both** ends (both panes, never just the one being measured, because
+`__setDisplayMode` has no per-pane variant by design — see
+[Display mode: fit vs capture](#display-mode-fit-vs-capture-506)), but it is **transient**: the
+instant either call returns, a caller that was in `fit` reads `fit` again and both panes are still
+scaled. An earlier build force-switched into `capture` and left it latched, so any measurement — even
+from a human just poking at geometry — permanently degraded the display into an overflowing,
+unscaled state until someone manually switched back; the #506 orchestrator acceptance pass flagged
+that as a defect, and switch-**and-restore** is the fix. Practical consequences: hand-testing
+`fit`-mode geometry no longer requires reading `getBoundingClientRect()` directly to dodge a latched
+side effect — `__measure()`/`__regionGeom()` leave the display exactly as they found it. A driving
+agent that wants a `capture`-mode *screenshot*, conversely, can no longer lean on a prior measurement
+having parked the page in `capture`; it must set `capture` itself and keep it set across the
+screenshot (see [Driving a run](#driving-a-run-the-agent-workflow), steps 4–5). When already in
+`capture` mode the whole thing is a pure no-op (no redundant `rescaleAllPanes()` recompute), pinned
+by `src/server/app.test.ts`'s vm-sandboxed suite alongside the switch-and-restore behavior itself.
+
+### 16. Capture-mode geometry-identity is empirically confirmed, not just architecturally argued (#506)
+The #506 spike round-tripped a real rendered pane through fit → measure → fit → measure and diffed
+the resulting JSON (identical), and separately compared a wrapper-free direct render against a
+nested-then-reset render (identical `y`/`width`/`height`). This upgrades finding
+[3](#3-region-geometry-is-viewport-relative-not-document-relative)'s regression pin from "reasoned
+from the CSS spec" to "confirmed against real Chromium". The *pixel-level* geometry-identity of a
+real CSS `transform` round-trip stays a Chromium-empirical fact, not encodable as a vitest test (the
+node-environment runner has no CSS layout — its `getBoundingClientRect` is a supplied fixture, so a
+`scale()` transform doesn't actually change a measured rect there). What the vm-sandboxed
+`describe('harness.js display mode (#506)', ...)` suite in `src/server/app.test.ts` *does* pin is the
+mode-orchestration contract around that read: the DOM-management and boundary-validation behaviors,
+and (since the orchestrator finding) that `__measure()`/`__regionGeom()` switch into `capture` for
+the read and restore the caller's prior mode for both panes — [decision 15](#15-measurement-is-a-transient-page-global-capture-switch-that-restores-the-prior-mode-506).
+
+### 17. Header/footer scale consistency under fit mode: a documented residual risk, not silently dropped (#506)
+Everything in decision 16 was confirmed against `pageGeom` on a single-page and a 12-page fixture.
+The only fixture reachable from inside this worktree without driving the full upload pipeline
+against a live API has no header/footer content, so `headerGeom`/`footerGeom` under `fit` mode's
+scale transform specifically was not empirically exercised during the #506 build — only
+architecturally reasoned (the same transform applies uniformly to a section's header/footer children
+as it does to its body). Left as an explicit residual risk for the orchestrator's post-PR Playwright
+pass against a real upload run with header/footer content, per the issue's own guidance to defer
+geometry acceptance to the driving agent — see
+[Display mode: fit vs capture](#display-mode-fit-vs-capture-506).
 
 ## Known limitations
 

@@ -21,10 +21,25 @@
   and scroll to the top of the page. render/regions.ts's cropRegion()
   bounds-check is a backstop for this, not the primary guard.
 
+  DISPLAY MODES (#506): this page renders panes in one of two modes.
+  - fit (default): both panes are scaled down (CSS transform, see
+    .pane-scale-outer/.pane-scale-target below) so the full page width is
+    visible without horizontal scrolling — for humans eyeballing a run.
+  - capture (?mode=capture, or window.__setDisplayMode('capture')): panes
+    render at natural size with no transform — this is the ONLY mode whose
+    geometry window.__measure()/window.__regionGeom() may be trusted against;
+    each switches into it for the read via withCaptureMode() and restores the
+    caller's prior mode before returning, so a measurement never leaves the
+    page latched in capture (#506). Switching modes is a GLOBAL, both-panes
+    effect by design (#506 spike finding 2) — no per-pane fit/capture split.
+
   Vendor bundles (docx-preview, jszip) are served directly out of this
   package's own node_modules by server/app.ts — see that file's
   mountVendorBundles() docstring for why this isn't a shipped/bundled asset.
 -->
+<!-- #506: an inline data: URI favicon is enough on its own to suppress
+     Chromium's implicit GET /favicon.ico probe — no new route/asset needed. -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%23555'/><text x='8' y='12' font-size='10' text-anchor='middle' fill='%23fff' font-family='sans-serif'>S</text></svg>">
 <script src="/vendor/jszip.js"></script>
 <script src="/vendor/docx-preview.js"></script>
 <style>
@@ -50,6 +65,7 @@
     flex-wrap: wrap;
   }
   #run-status { font-family: monospace; opacity: 0.85; }
+  #fit-scale-note { font-family: monospace; opacity: 0.85; color: #d9822b; }
   #scenario-picker { display: flex; align-items: center; gap: 0.4rem; }
   #scenario-picker label { font-size: 0.85rem; opacity: 0.85; }
   #layout {
@@ -83,6 +99,14 @@
     overflow: auto;
     background: var(--bg-pane);
   }
+  /* #506: nested scale wrapper — the OUTER div is the sized layout box the
+     .pane-content ancestor's overflow calc sees (explicit width/height set
+     by pane-scale.js in fit mode); the INNER .pane-scale-target is docx-preview's
+     actual render target and the transform target (width:max-content +
+     transform:scale in fit mode). A single element can't play both roles —
+     see index.html's DISPLAY MODES doc-comment and pane-scale.js. */
+  .pane-scale-outer { display: block; overflow: hidden; }
+  .pane-scale-target { display: block; }
   .pane-empty {
     margin: 1rem;
     opacity: 0.8;
@@ -124,6 +148,7 @@
     <button type="button" id="start-scenario-button">Start scenario run</button>
   </div>
   <div id="run-status" data-testid="run-status">no run started</div>
+  <div id="fit-scale-note" data-testid="fit-scale-note"></div>
 </header>
 
 <main id="layout">
@@ -161,6 +186,7 @@
   </aside>
 </main>
 
+<script src="/pane-scale.js"></script>
 <script src="/harness.js"></script>
 <script src="/scenario-picker.js"></script>
 </body>
