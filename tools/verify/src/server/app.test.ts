@@ -147,6 +147,7 @@ describe('createApp (wiring smoke tests)', () => {
       readonly children: FakeElement[];
       appendChild(child: FakeElement): FakeElement;
       querySelector(selector: string): FakeElement | null;
+      querySelectorAll(selector: string): FakeElement[];
       getBoundingClientRect(): Rect;
       addEventListener(): void;
     }
@@ -171,6 +172,30 @@ describe('createApp (wiring smoke tests)', () => {
         if (found) return found;
       }
       return null;
+    }
+
+    // measurePage (untouched by #506 — see harness.js) issues bare tag
+    // selectors ('header'/'footer'), so querySelector needs this alongside
+    // its existing class-selector support.
+    function findByTagName(nodes: FakeElement[], tagName: string): FakeElement | null {
+      for (const node of nodes) {
+        if (node.tagName === tagName) return node;
+        const found = findByTagName(node.children, tagName);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    // Purpose-built for the ONE compound selector window.__measure actually
+    // issues ('.docx-wrapper > section.docx') — mirrors querySelector's own
+    // narrow, unsupported-selector-throws philosophy rather than growing a
+    // general CSS engine this fake doesn't need.
+    function findDocxPages(nodes: FakeElement[]): FakeElement[] {
+      const wrapper = findByClassName(nodes, 'docx-wrapper');
+      if (!wrapper) return [];
+      return wrapper.children.filter(
+        (child) => child.tagName === 'section' && child.className === 'docx'
+      );
     }
 
     function createFakeElement(rect: Rect = { x: 0, y: 0, width: 0, height: 0 }): FakeElement {
@@ -199,10 +224,19 @@ describe('createApp (wiring smoke tests)', () => {
           return child;
         },
         querySelector(selector: string): FakeElement | null {
-          if (!selector.startsWith('.')) {
-            throw new Error(`FakeElement.querySelector: unsupported selector "${selector}"`);
+          if (selector.startsWith('.')) {
+            return findByClassName(kids, selector.slice(1));
           }
-          return findByClassName(kids, selector.slice(1));
+          if (/^[a-z]+$/.test(selector)) {
+            return findByTagName(kids, selector);
+          }
+          throw new Error(`FakeElement.querySelector: unsupported selector "${selector}"`);
+        },
+        querySelectorAll(selector: string): FakeElement[] {
+          if (selector !== '.docx-wrapper > section.docx') {
+            throw new Error(`FakeElement.querySelectorAll: unsupported selector "${selector}"`);
+          }
+          return findDocxPages(kids);
         },
         getBoundingClientRect(): Rect {
           return { ...rect };
@@ -326,6 +360,24 @@ describe('createApp (wiring smoke tests)', () => {
       outer.appendChild(target);
       container.appendChild(outer);
       return { outer, target };
+    }
+
+    // Shared by the task 5/9 (__measure capture-mode guarantee) sub-describe
+    // below — builds the '.docx-wrapper > section.docx' shape docx-preview
+    // actually leaves behind inside a render target (docx.renderAsync's
+    // `inWrapper: true` option), one section per page rect.
+    function attachRenderedPages(target: FakeElement, pageRects: Rect[]): FakeElement[] {
+      const wrapper = createFakeElement();
+      wrapper.className = 'docx-wrapper';
+      const sections = pageRects.map((rect) => {
+        const section = createFakeElement(rect);
+        section.tagName = 'section';
+        section.className = 'docx';
+        wrapper.appendChild(section);
+        return section;
+      });
+      target.appendChild(wrapper);
+      return sections;
     }
 
     it('defaults to fit mode with no query string', async () => {
@@ -672,6 +724,103 @@ describe('createApp (wiring smoke tests)', () => {
         expect(staleTarget.style.transformOrigin).toBe('top left');
         expect(staleOuter.style.width).toBe('800px');
         expect(staleOuter.style.height).toBe('1000px');
+      });
+    });
+
+    describe('window.__measure capture-mode guarantee (#506 task 5/9)', () => {
+      // window.__measure()/window.__regionGeom() only trust geometry read in
+      // capture mode (untransformed, natural size) — see this file's DISPLAY
+      // MODES header comment. These tests pin that __measure() force-applies
+      // capture mode itself before reading geometry, rather than trusting the
+      // caller to have switched modes first.
+
+      it('force-switches an active fit-mode transform to capture (GLOBALLY, both panes) before reading geometry', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const referenceContainer = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+        const { outer: referenceOuter, target: referenceTarget } = attachScalePair(
+          referenceContainer,
+          { x: 0, y: 0, width: 1600, height: 2000 }
+        );
+        const [page] = attachRenderedPages(referenceTarget, [
+          { x: 12, y: 34, width: 816, height: 1056 },
+        ]);
+        if (!page) throw new Error('test setup: reference page not attached');
+
+        const roundtripContainer = configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 800);
+        const { outer: roundtripOuter, target: roundtripTarget } = attachScalePair(
+          roundtripContainer,
+          { x: 0, y: 0, width: 1600, height: 2000 }
+        );
+
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        const getDisplayMode = harnessWindow.__getDisplayMode;
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+        assertIsFunction(getDisplayMode, '__getDisplayMode');
+        setDisplayMode('fit');
+        // Sanity: both panes are genuinely dirty (fit-mode transform applied)
+        // before __measure runs, so the assertions below observe a real
+        // force-switch, not a pane that already happened to be untransformed.
+        expect(referenceTarget.style.transform).toBe('scale(0.5)');
+        expect(roundtripTarget.style.transform).toBe('scale(0.5)');
+
+        const measure = harnessWindow.__measure;
+        assertIsFunction(measure, '__measure');
+        const result = measure('reference') as {
+          status: string;
+          pageCount: number;
+          pages: Array<{ pageGeom: Rect | null; headerGeom: Rect | null; footerGeom: Rect | null }>;
+        };
+
+        // The measured pane's scale pair is reset to the same blank state
+        // __setDisplayMode('capture') itself produces (task 3/9's own pin).
+        expect(referenceTarget.style.transform).toBe('');
+        expect(referenceTarget.style.width).toBe('');
+        expect(referenceTarget.style.transformOrigin).toBe('');
+        expect(referenceOuter.style.width).toBe('');
+        expect(referenceOuter.style.height).toBe('');
+        // The OTHER (unmeasured) pane resets too — ensureCaptureMode routes
+        // through the real, global __setDisplayMode('capture'), never a
+        // local per-pane shortcut (#506 spike finding 2, decision 2).
+        expect(roundtripTarget.style.transform).toBe('');
+        expect(roundtripOuter.style.width).toBe('');
+        expect(getDisplayMode()).toBe('capture');
+
+        // geomOf/measurePage's own field shape and rounding are untouched —
+        // the regression pin this task's design calls out explicitly.
+        expect(result.pageCount).toBe(1);
+        expect(result.pages).toHaveLength(1);
+        expect(result.pages[0]?.pageGeom).toEqual({ x: 12, y: 34, width: 816, height: 1056 });
+        expect(result.pages[0]?.headerGeom).toBeNull();
+        expect(result.pages[0]?.footerGeom).toBeNull();
+      });
+
+      it('is idempotent when already in capture mode — repeat calls read byte-identical geometry with no side effect', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('?mode=capture');
+        const getDisplayMode = harnessWindow.__getDisplayMode;
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        assertIsFunction(getDisplayMode, '__getDisplayMode');
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+        expect(getDisplayMode()).toBe('capture');
+
+        const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+        const { target } = attachScalePair(container, { x: 0, y: 0, width: 800, height: 1000 });
+        attachRenderedPages(target, [{ x: 10, y: 20, width: 800, height: 1000 }]);
+        // Establishes the realistic already-reset baseline a real page reaches
+        // once anything (e.g. __loadPane's success path) has driven
+        // rescaleAllPanes at least once, so the assertions below observe a
+        // stable '' that never toggles — not an untouched `undefined` that
+        // would trivially satisfy an unguarded assertion either way.
+        setDisplayMode('capture');
+        expect(target.style.transform).toBe('');
+
+        const measure = harnessWindow.__measure;
+        assertIsFunction(measure, '__measure');
+        const first = measure('reference');
+        const second = measure('reference');
+
+        expect(second).toEqual(first);
+        expect(target.style.transform).toBe('');
+        expect(getDisplayMode()).toBe('capture');
       });
     });
   });

@@ -306,6 +306,24 @@
   // exactly, so a driving agent can feed this output straight into that
   // pipeline without reshaping it.
 
+  // window.__measure()/window.__regionGeom() only trust geometry read in
+  // capture mode (untransformed, natural size) — see this file's DISPLAY
+  // MODES header comment (#506 spike finding 1: a fit-mode scale transform
+  // leaves getBoundingClientRect() reporting the SCALED, not natural, size).
+  // Force-switching here — rather than requiring the driving agent to call
+  // __setDisplayMode('capture') itself before every read — closes off an
+  // entire class of "forgot to switch modes before measuring" bugs. Global
+  // (both panes), not per-pane: __setDisplayMode has no per-pane variant by
+  // design (#506 spike finding 2). A no-op when already in capture mode —
+  // __setDisplayMode is itself always safe to call again (task 2/9's own
+  // idempotence pin), but skipping the redundant call here avoids an
+  // unnecessary rescaleAllPanes() recompute on every single measurement.
+  function ensureCaptureMode() {
+    if (displayMode !== 'capture') {
+      window.__setDisplayMode('capture');
+    }
+  }
+
   function geomOf(element) {
     const rect = element.getBoundingClientRect();
     return {
@@ -327,6 +345,7 @@
   }
 
   window.__measure = function measure(pane) {
+    ensureCaptureMode();
     const container = document.getElementById(PANE_CONTENT_IDS[pane]);
     const sections = Array.prototype.slice.call(
       container.querySelectorAll('.docx-wrapper > section.docx')
