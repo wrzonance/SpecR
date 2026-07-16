@@ -996,6 +996,27 @@ describe('captureRegion — image resolution wiring (#487)', () => {
     expect(JSON.stringify(extra[0]?.detail ?? null)).toContain(extraRId);
   });
 
+  // Corpus-safety (#505), the "no partMedia supplied at all" half of the
+  // comment above — the resolved-media case is pinned separately; this pins
+  // the OTHER short-circuit arm (itemizeParagraphDiscardDrawings's
+  // `partMedia?.status !== 'relsUnreadable'` guard, `undefined?.status`
+  // included) for the paragraph-path discard site itself, not just the
+  // FIRST-paragraph resolveDrawingImage site already covered by the
+  // "falls back ... when no partMedia is supplied" test above.
+  it('corpus-safety (#505): a descriptor-bearing drawing in an EXTRA paragraph is never itemized as unresolvedReference when partMedia is undefined (not supplied at all)', () => {
+    const firstRId = 'rId9';
+    const extraRId = 'rId10';
+    const xml = makeHdrXml(
+      `${paragraph('', imageDrawingRun(firstRId))}${paragraph('', imageDrawingRun(extraRId))}`
+    );
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+
+    expect(result.unmodeled.some((e) => e.kind === 'unresolvedReference')).toBe(false);
+    const extra = result.unmodeled.filter((e) => e.kind === 'extraParagraph');
+    expect(extra).toHaveLength(1);
+    expect(JSON.stringify(extra[0]?.detail ?? null)).toContain(extraRId);
+  });
+
   it('INVARIANT: preserves original run order across text/image/field pieces within a cell — image placement is never reordered', () => {
     const rId = 'rId3';
     const bytes = pngBytes();
