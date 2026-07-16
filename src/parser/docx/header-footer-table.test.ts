@@ -429,6 +429,81 @@ describe('captureRegion — structural table disqualification (ADR-071 decision 
   });
 });
 
+// #505 (#502 follow-up): a whole table disqualified by ADR-071 decision 4
+// (0 rows / nested w:tbl / unsupported vMerge) is still preserved verbatim
+// as its own raw `{ kind: 'table' }` unmodeled entry (never lost) — but any
+// drawing run living anywhere inside that disqualified table was not, until
+// now, itemized as its own `unresolvedReference` when the owning part's own
+// .rels file is itself unreadable, so the part-level aggregate warning
+// undercounted it. Mirrors this file's own #505 pin for captureTableCell's
+// EXTRA-paragraph discard path (above) and header-footer-region.test.ts's
+// equivalent pin for the paragraph-region discard path.
+describe('captureRegion — #505 discard-path itemization: structurally disqualified whole table', () => {
+  it('#505: a drawing nested two levels deep inside a disqualifying nested sub-table is itemized as unresolvedReference in a relsUnreadable part, alongside the raw table entry (INV-10 deep-scan)', () => {
+    const rId = 'rId12';
+    const partMedia = relsUnreadableMedia('word/header1.xml');
+    // Two levels deep: outer table -> outer cell -> nested table -> nested
+    // cell -> paragraph -> drawing run. Disqualifies the OUTER table
+    // (hasNestedTable) while the drawing itself lives inside the nested
+    // sub-table, not the outer table's own direct paragraph content.
+    const nestedTbl = table(row(cell(paragraph(imageDrawingRun(rId)))));
+    const xml = makeHdrXml(table(row(cell(nestedTbl))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.region?.table).toBeUndefined();
+    // The whole disqualified table is still preserved raw, unchanged.
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+    // ... AND the deeply-nested drawing is ALSO itemized as its own
+    // unresolvedReference (UNGATED — no descriptor check, ADR-071 decision 4;
+    // no rId in the detail — imageUnmodeledEntry never parses a descriptor).
+    expect(result.unmodeled).toContainEqual({
+      variant: 'default',
+      region: 'header',
+      kind: 'unresolvedReference',
+      detail: { part: 'word/header1.xml', reason: RELS_UNREADABLE_REASON },
+    });
+  });
+
+  // Corpus-safety (#505): the discard-path scanner only activates against a
+  // relsUnreadable part — a healthy `resolved` partMedia leaves the discard
+  // path exactly as it behaved before this issue: the disqualified table's
+  // drawing is preserved raw only (inside the whole-table entry), never
+  // itemized, so an ordinary corpus document with an intact .rels index sees
+  // no new unmodeled entries from this change.
+  it('corpus-safety (#505): a drawing inside a disqualified table of a HEALTHY (resolved) part is never itemized as unresolvedReference', () => {
+    const rId = 'rId13';
+    const partMedia = resolvedMedia([[rId, pngBytes()]]);
+    const nestedTbl = table(row(cell(paragraph(imageDrawingRun(rId)))));
+    const xml = makeHdrXml(table(row(cell(nestedTbl))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN, partMedia);
+
+    expect(result.region?.table).toBeUndefined();
+    expect(result.unmodeled.some((e) => e.kind === 'unresolvedReference')).toBe(false);
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+  });
+
+  // Corpus-safety (#505): no partMedia supplied at all (undefined) — the
+  // discard-path scanner's optional-chaining guard (`partMedia?.status`)
+  // must short-circuit to `[]` rather than throw, matching every other call
+  // site's "no partMedia" behavior.
+  it('corpus-safety (#505): a drawing inside a disqualified table with NO partMedia supplied is never itemized, and capture never throws', () => {
+    const rId = 'rId14';
+    const nestedTbl = table(row(cell(paragraph(imageDrawingRun(rId)))));
+    const xml = makeHdrXml(table(row(cell(nestedTbl))));
+    const result = captureRegion(xml, 'bottom', 'default', 'header', KNOWN);
+
+    expect(result.region?.table).toBeUndefined();
+    expect(result.unmodeled.some((e) => e.kind === 'unresolvedReference')).toBe(false);
+    expect(result.unmodeled).toContainEqual(
+      expect.objectContaining({ variant: 'default', region: 'header', kind: 'table' })
+    );
+  });
+});
+
 describe('captureRegion — "first table wins" (ADR-071 decision 5, mirrors ADR-068)', () => {
   it('drops a second, otherwise-valid table whole as unmodeled — never inspected for salvageable content', () => {
     const firstTable = table(row(cell(paragraph(textRun('First')))));

@@ -278,7 +278,17 @@ function captureTable(
 ): TableCaptureResult {
   const rows = recordsOf(tbl, 'w:tr');
   if (rows.length === 0 || hasNestedTable(tbl) || hasUnsupportedMerge(tbl)) {
-    return { table: undefined, unmodeled: [{ kind: 'table', detail: compact(tbl) }] };
+    // #505: the whole disqualified table is still preserved verbatim below
+    // (never lost) — but any drawing living anywhere inside it (at any
+    // depth, including inside a disqualifying nested w:tbl) is ALSO
+    // itemized as its own unresolvedReference when the part's own .rels
+    // file is unreadable, UNGATED (INV-3), matching this same table's own
+    // per-cell drawing handling when it IS structurally capturable.
+    const discardedDrawingUnmodeled = itemizeTableDiscardDrawings([tbl], partMedia);
+    return {
+      table: undefined,
+      unmodeled: [{ kind: 'table', detail: compact(tbl) }, ...discardedDrawingUnmodeled],
+    };
   }
   const built = rows.map((tr) => captureTableRow(tr, known, order, partMedia));
   const table = compact({
