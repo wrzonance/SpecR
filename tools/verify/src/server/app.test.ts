@@ -143,13 +143,15 @@ describe('createApp (wiring smoke tests)', () => {
       className: string;
       style: Record<string, string>;
       clientWidth: number;
+      value: string;
       textContent: string;
       readonly children: FakeElement[];
       appendChild(child: FakeElement): FakeElement;
       querySelector(selector: string): FakeElement | null;
       querySelectorAll(selector: string): FakeElement[];
       getBoundingClientRect(): Rect;
-      addEventListener(): void;
+      addEventListener(type: string, handler: () => void): void;
+      dispatchEvent(type: string): void;
     }
 
     interface FakeDocumentStub {
@@ -198,14 +200,38 @@ describe('createApp (wiring smoke tests)', () => {
       );
     }
 
+    // Shared by both FakeElement (click/submit listeners — #506 task 6/9's
+    // scenario-picker.js test needs a real dispatchable 'click') and
+    // FakeWindowStub (the 'resize' listener task 3/9 already exercised) —
+    // identical add/dispatch semantics, so this is the one place either
+    // fake's listener bookkeeping lives.
+    function createListenerRegistry(): {
+      add: (type: string, handler: () => void) => void;
+      dispatch: (type: string) => void;
+    } {
+      const listeners = new Map<string, Array<() => void>>();
+      return {
+        add(type, handler) {
+          listeners.set(type, [...(listeners.get(type) ?? []), handler]);
+        },
+        dispatch(type) {
+          (listeners.get(type) ?? []).forEach((handler) => {
+            handler();
+          });
+        },
+      };
+    }
+
     function createFakeElement(rect: Rect = { x: 0, y: 0, width: 0, height: 0 }): FakeElement {
       let text = '';
       let kids: FakeElement[] = [];
+      const registry = createListenerRegistry();
       return {
         tagName: 'div',
         className: '',
         style: {},
         clientWidth: 0,
+        value: '',
         get textContent(): string {
           return text;
         },
@@ -241,9 +267,8 @@ describe('createApp (wiring smoke tests)', () => {
         getBoundingClientRect(): Rect {
           return { ...rect };
         },
-        addEventListener(): void {
-          // no-op — sufficient for harness.js's top-level run-form wiring.
-        },
+        addEventListener: registry.add,
+        dispatchEvent: registry.dispatch,
       };
     }
 
@@ -266,29 +291,29 @@ describe('createApp (wiring smoke tests)', () => {
     }
 
     function createFakeWindow(search: string): FakeWindowStub {
-      const listeners = new Map<string, Array<() => void>>();
+      const registry = createListenerRegistry();
       return {
         location: { search },
-        addEventListener(type: string, handler: () => void): void {
-          listeners.set(type, [...(listeners.get(type) ?? []), handler]);
-        },
-        dispatchEvent(type: string): void {
-          (listeners.get(type) ?? []).forEach((handler) => {
-            handler();
-          });
-        },
+        addEventListener: registry.add,
+        dispatchEvent: registry.dispatch,
       };
     }
 
-    // The four ids harness.js's top-level eval and display-mode code paths
-    // touch — 'run-form' for the submit-listener wiring every load runs,
-    // the two pane-content divs, and the fit-scale diagnostic node.
+    // The ids harness.js's top-level eval and display-mode code paths touch
+    // — 'run-form' for the submit-listener wiring every load runs, the two
+    // pane-content divs, the fit-scale diagnostic node, and (#506 task 6/9)
+    // the run-status/properties-body/derivation-body/pane-diff-content ids
+    // window.__pollRun's tick() writes into on every poll.
     function createDefaultHarnessDocument(): FakeDocumentStub {
       const document = createFakeDocument();
       document.registerId('run-form', createFakeElement());
       document.registerId('pane-reference-content', createFakeElement());
       document.registerId('pane-roundtrip-content', createFakeElement());
       document.registerId('fit-scale-note', createFakeElement());
+      document.registerId('run-status', createFakeElement());
+      document.registerId('properties-body', createFakeElement());
+      document.registerId('derivation-body', createFakeElement());
+      document.registerId('pane-diff-content', createFakeElement());
       return document;
     }
 
@@ -299,6 +324,21 @@ describe('createApp (wiring smoke tests)', () => {
       if (typeof value !== 'function') {
         throw new Error(`harness.js sandbox: window.${name} is not a function`);
       }
+    }
+
+    // window.__pollRun's tick() chains several fetch().then().then() hops
+    // (pollOnce's own two, plus tick()'s own .then callback, plus whatever
+    // tryAutoLoadPane/loadDiffPane fire off inside it) before it finishes
+    // writing to the DOM for one poll — this drains the FULL microtask
+    // queue (including microtasks a microtask schedules) so a test can
+    // await exactly once rather than guessing a fixed number of
+    // `Promise.resolve()` hops. Safe without a sandboxed `setTimeout`: these
+    // tests only ever poll a TERMINAL record, so tick()'s reschedule branch
+    // (the only place it calls the real setTimeout) is never reached.
+    async function flushAsync(): Promise<void> {
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
     }
 
     async function loadHarnessSandbox(
@@ -821,6 +861,216 @@ describe('createApp (wiring smoke tests)', () => {
         expect(second).toEqual(first);
         expect(target.style.transform).toBe('');
         expect(getDisplayMode()).toBe('capture');
+      });
+    });
+
+    describe('window.__pollRun runKind threading + empty-state message (#506 task 6/9)', () => {
+      // RunKind is a plain, caller-supplied 2nd argument — never persisted
+      // module state, and never allowed to crash rendering just because a
+      // caller passed something other than exactly 'upload'/'scenario'.
+      // These drive the REAL __pollRun -> tick() -> renderProperties /
+      // renderDerivationReport path end to end (fetch stubbed, nothing else
+      // white-boxed) rather than asserting against an unexposed
+      // emptyStateMessage helper directly.
+
+      function terminalRecordWithNoReport(runId: string): unknown {
+        return {
+          runId,
+          stage: 'generate',
+          status: 'complete',
+          error: null,
+          artifacts: { derivationReport: null },
+        };
+      }
+
+      function jsonResponse(body: unknown): { ok: true; json: () => Promise<unknown> } {
+        return { ok: true, json: () => Promise.resolve(body) };
+      }
+
+      // Every fetch a poll tick fires besides the poll itself (pane files,
+      // diff crops) is treated as "not ready yet" — __loadPane/loadDiffPane
+      // already handle a non-ok response without crashing (pinned by the
+      // task 4/9 suite above), so a blanket 404 keeps this suite focused on
+      // the renderProperties/renderDerivationReport empty-state text alone.
+      function createPollFetchStub(
+        recordsByUrl: Record<string, unknown>
+      ): (url: string) => Promise<{ ok: boolean; status?: number; json?: () => Promise<unknown> }> {
+        return (url: string) => {
+          const record = recordsByUrl[url];
+          if (record !== undefined) {
+            return Promise.resolve(jsonResponse({ success: true, data: record }));
+          }
+          return Promise.resolve({ ok: false, status: 404 });
+        };
+      }
+
+      function textOf(document: FakeDocumentStub, id: string): string {
+        const element = document.getElementById(id);
+        if (!element) throw new Error(`test setup: ${id} not registered`);
+        return element.textContent;
+      }
+
+      // renderProperties/renderDerivationReport's empty-report branch
+      // APPENDS a <p class="pane-empty"> child carrying the message — it
+      // never assigns body.textContent directly — so (mirroring FakeElement's
+      // real-DOM-like split between an element's own textContent setter and
+      // its children) the message lives on that child, not on the container
+      // this fixture's getElementById(id) itself returns.
+      function emptyStateTextOf(document: FakeDocumentStub, id: string): string {
+        const container = document.getElementById(id);
+        if (!container) throw new Error(`test setup: ${id} not registered`);
+        const message = container.children[0];
+        if (!message) throw new Error(`test setup: ${id} has no rendered child`);
+        return message.textContent;
+      }
+
+      it('defaults an omitted runKind to the "upload" empty-state message', async () => {
+        const record = terminalRecordWithNoReport('run-upload-1');
+        const { window: harnessWindow, document } = await loadHarnessSandbox('', {
+          fetch: createPollFetchStub({ '/api/runs/run-upload-1': record }),
+        });
+        const pollRun = harnessWindow.__pollRun;
+        assertIsFunction(pollRun, '__pollRun');
+
+        pollRun('run-upload-1');
+        await flushAsync();
+
+        expect(emptyStateTextOf(document, 'properties-body')).toContain(
+          'No derivation report yet.'
+        );
+        expect(emptyStateTextOf(document, 'derivation-body')).toContain(
+          'No derivation report yet.'
+        );
+      });
+
+      it('renders the scenario-specific empty-state message for a caller-supplied runKind="scenario"', async () => {
+        const record = terminalRecordWithNoReport('run-scenario-1');
+        const { window: harnessWindow, document } = await loadHarnessSandbox('', {
+          fetch: createPollFetchStub({ '/api/runs/run-scenario-1': record }),
+        });
+        const pollRun = harnessWindow.__pollRun;
+        assertIsFunction(pollRun, '__pollRun');
+
+        pollRun('run-scenario-1', 'scenario');
+        await flushAsync();
+
+        expect(emptyStateTextOf(document, 'properties-body')).toContain(
+          'n/a for fixture scenario runs'
+        );
+        expect(emptyStateTextOf(document, 'derivation-body')).toContain(
+          'n/a for fixture scenario runs'
+        );
+      });
+
+      it('never crashes rendering on an unexpected runKind value, falling back to the default empty-state message', async () => {
+        const record = terminalRecordWithNoReport('run-bogus-1');
+        const { window: harnessWindow, document } = await loadHarnessSandbox('', {
+          fetch: createPollFetchStub({ '/api/runs/run-bogus-1': record }),
+        });
+        const pollRun = harnessWindow.__pollRun;
+        assertIsFunction(pollRun, '__pollRun');
+
+        expect(() => pollRun('run-bogus-1', 'not-a-real-run-kind')).not.toThrow();
+        await flushAsync();
+
+        // A full, uninterrupted run-status write is the confirmation that
+        // nothing threw mid-tick — a crash partway through tick() would
+        // leave properties-body/derivation-body cleared but never refilled.
+        expect(textOf(document, 'run-status')).toContain('run-bogus-1');
+        expect(emptyStateTextOf(document, 'properties-body')).toContain(
+          'No derivation report yet.'
+        );
+        expect(emptyStateTextOf(document, 'derivation-body')).toContain(
+          'No derivation report yet.'
+        );
+      });
+
+      it('is not persisted across calls — runKind is a per-call argument, not module state left over from a prior run', async () => {
+        const scenarioRecord = terminalRecordWithNoReport('run-a');
+        const uploadRecord = terminalRecordWithNoReport('run-b');
+        const { window: harnessWindow, document } = await loadHarnessSandbox('', {
+          fetch: createPollFetchStub({
+            '/api/runs/run-a': scenarioRecord,
+            '/api/runs/run-b': uploadRecord,
+          }),
+        });
+        const pollRun = harnessWindow.__pollRun;
+        assertIsFunction(pollRun, '__pollRun');
+
+        pollRun('run-a', 'scenario');
+        await flushAsync();
+        expect(emptyStateTextOf(document, 'properties-body')).toContain(
+          'n/a for fixture scenario runs'
+        );
+
+        // A second, unrelated run started with NO runKind argument must
+        // fall back to the 'upload' default, not carry over 'scenario' from
+        // the previous call.
+        pollRun('run-b');
+        await flushAsync();
+        expect(emptyStateTextOf(document, 'properties-body')).toContain(
+          'No derivation report yet.'
+        );
+      });
+    });
+
+    describe('resetPaneState clears the fit-scale note (#506 task 6/9)', () => {
+      it('clears any existing #fit-scale-note text alongside the pane state it already resets', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const note = document.getElementById('fit-scale-note');
+        if (!note) throw new Error('test setup: fit-scale-note not registered');
+        note.textContent = 'fit-scale mismatch: reference=0.500 roundtrip=1.000';
+
+        const resetPaneState = harnessWindow.__resetPaneState;
+        assertIsFunction(resetPaneState, '__resetPaneState');
+        resetPaneState();
+
+        expect(note.textContent).toBe('');
+      });
+    });
+
+    describe('scenario-picker.js runKind wiring (#506 task 6/9)', () => {
+      // scenario-picker.js is a separate served file, not harness.js — this
+      // runs the REAL served scenario-picker.js in its own sandbox, reusing
+      // the same fake DOM/listener building blocks, with window.__pollRun
+      // stubbed as a spy so the test observes exactly what argument list
+      // handleStartScenario calls the shared entry point with.
+
+      it('starts a fixture scenario run tagged runKind="scenario" through the shared __pollRun entry point', async () => {
+        const response = await fetch(`${baseUrl}/scenario-picker.js`);
+        const source = await response.text();
+
+        const pollRunCalls: unknown[][] = [];
+        const documentStub = createFakeDocument();
+        const select = createFakeElement();
+        select.value = 'default';
+        documentStub.registerId('scenario-select', select);
+        const button = createFakeElement();
+        documentStub.registerId('start-scenario-button', button);
+        documentStub.registerId('run-status', createFakeElement());
+
+        const windowStub = createFakeWindow('');
+        windowStub.__resetPaneState = (): void => {};
+        windowStub.__pollRun = (...args: unknown[]): void => {
+          pollRunCalls.push(args);
+        };
+
+        const sandbox = {
+          window: windowStub,
+          document: documentStub,
+          fetch: (): Promise<{ json: () => Promise<unknown> }> =>
+            Promise.resolve({
+              json: () => Promise.resolve({ success: true, data: { runId: 'scenario-run-1' } }),
+            }),
+        };
+        vm.createContext(sandbox);
+        // eslint-disable-next-line sonarjs/code-eval
+        vm.runInContext(source, sandbox);
+
+        button.dispatchEvent('click');
+        await flushAsync();
+
+        expect(pollRunCalls).toEqual([['scenario-run-1', 'scenario']]);
       });
     });
   });

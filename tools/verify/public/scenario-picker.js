@@ -39,7 +39,11 @@
       })
       .then(function (body) {
         if (!body.success) throw new Error(body.error || 'failed to start scenario run');
-        window.__pollRun(body.data.runId);
+        // 'scenario' (not the 'upload' default) — a fixture scenario run has
+        // no derivation report, so the sidebar/report panels show a
+        // scenario-specific empty-state message instead of harness.js's
+        // "not ready yet" one (#506).
+        window.__pollRun(body.data.runId, 'scenario');
       })
       .catch(function (err) {
         document.getElementById('run-status').textContent =

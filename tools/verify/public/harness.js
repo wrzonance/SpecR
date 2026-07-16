@@ -298,6 +298,9 @@
     paneState.roundtrip = { status: 'idle', error: null };
     clearChildren(document.getElementById(PANE_CONTENT_IDS.reference));
     clearChildren(document.getElementById(PANE_CONTENT_IDS.roundtrip));
+    // A stale mismatch note from a prior run must not linger over a new
+    // one's panes before they've even had a chance to be measured again.
+    document.getElementById('fit-scale-note').textContent = '';
   }
 
   // ─── geometry (window.__measure / window.__regionGeom) ────────────────
@@ -417,6 +420,17 @@
   // DerivationReport — the sidebar shows WHAT was applied, the report panel
   // shows WHY, per issue #150 design decision 9) ──────────────────────────
 
+  // A fixture scenario run (#305's scenario-picker.js) has no derivation
+  // report to show — it never goes through the AST-derivation pipeline an
+  // uploaded file does — so its empty state reads differently from a
+  // genuinely-not-ready-yet upload run. RunKind is a plain caller-supplied
+  // value, never validated against an enum here: anything other than
+  // exactly 'scenario' falls back to the upload message rather than
+  // throwing, so an unexpected value can never crash rendering (#506).
+  function emptyStateMessage(runKind) {
+    return runKind === 'scenario' ? 'n/a for fixture scenario runs' : 'No derivation report yet.';
+  }
+
   function renderPropertiesGroup(nodeType) {
     const group = el('div', { className: 'node-type-group' });
     group.appendChild(
@@ -441,11 +455,11 @@
     return group;
   }
 
-  function renderProperties(report) {
+  function renderProperties(report, runKind) {
     const body = document.getElementById('properties-body');
     clearChildren(body);
     if (!report) {
-      body.appendChild(el('p', { className: 'pane-empty', text: 'No derivation report yet.' }));
+      body.appendChild(el('p', { className: 'pane-empty', text: emptyStateMessage(runKind) }));
       return;
     }
     report.nodeTypes.forEach(function (nodeType) {
@@ -478,11 +492,11 @@
     return wrapper;
   }
 
-  function renderDerivationReport(report) {
+  function renderDerivationReport(report, runKind) {
     const body = document.getElementById('derivation-body');
     clearChildren(body);
     if (!report) {
-      body.appendChild(el('p', { className: 'pane-empty', text: 'No derivation report yet.' }));
+      body.appendChild(el('p', { className: 'pane-empty', text: emptyStateMessage(runKind) }));
       return;
     }
     body.appendChild(
@@ -553,7 +567,11 @@
   // one's result. __resetPaneState only clears the panes; it does not stop
   // an in-flight loop, which is why the guard lives here.
   let activeStop = null;
-  function pollRun(runId) {
+  function pollRun(runId, runKind = 'upload') {
+    // A plain per-call argument, never persisted module state — each call
+    // to pollRun (upload form vs. scenario-picker.js) supplies its own
+    // runKind, closure-captured by THIS call's tick(), so an earlier run's
+    // runKind can never leak into a later, unrelated one.
     if (activeStop) activeStop();
     let stopped = false;
     activeStop = function () {
@@ -570,8 +588,8 @@
           if (stopped) return;
           if (record) {
             renderRunStatus(record);
-            renderProperties(record.artifacts.derivationReport);
-            renderDerivationReport(record.artifacts.derivationReport);
+            renderProperties(record.artifacts.derivationReport, runKind);
+            renderDerivationReport(record.artifacts.derivationReport, runKind);
             tryAutoLoadPane(runId, 'reference');
             tryAutoLoadPane(runId, 'roundtrip');
             if (isTerminal(record)) {
@@ -642,7 +660,10 @@
   // fixture run through the exact same poll loop / pane-loading / diff-
   // loading logic this form uses, rather than duplicating any of it — both
   // POST /api/runs and POST /api/header-footer-fixtures write into the same
-  // RunStore, so one poller already covers both entry points.
+  // RunStore, so one poller already covers both entry points. runKind
+  // ('upload', the default, or 'scenario') only changes the empty-state
+  // message shown while no derivation report exists yet (#506) — it is not
+  // persisted anywhere.
   window.__pollRun = pollRun;
   window.__resetPaneState = resetPaneState;
 })();
