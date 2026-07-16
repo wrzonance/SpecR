@@ -570,6 +570,33 @@ describe('createApp (wiring smoke tests)', () => {
         }
       });
 
+      it('capture mode lets the outer wrapper overflow (scroll, not clip) while fit mode keeps it hidden (#508 Codex finding)', async () => {
+        const { window: harnessWindow, document } = await loadHarnessSandbox('');
+        const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);
+        const { outer } = attachScalePair(container, { x: 0, y: 0, width: 1600, height: 2000 });
+        configurePaneContent(document, PANE_CONTENT_IDS.roundtrip, 800);
+
+        const setDisplayMode = harnessWindow.__setDisplayMode;
+        assertIsFunction(setDisplayMode, '__setDisplayMode');
+
+        // Fit mode: no inline overflow, so index.html's
+        // `.pane-scale-outer { overflow: hidden }` governs — the sized outer is
+        // the exact scaled box, no stray scroll.
+        setDisplayMode('fit');
+        expect(outer.style.overflow).toBe('');
+
+        // Capture mode: overflow:visible so a page wider than its pane column
+        // reaches .pane-content's overflow:auto and scrolls instead of being
+        // clipped (which would drop the page's right edge from a screenshot at
+        // a too-narrow viewport). The measured geometry is unaffected either way.
+        setDisplayMode('capture');
+        expect(outer.style.overflow).toBe('visible');
+
+        // Back to fit: the inline override is cleared again (falls back to CSS).
+        setDisplayMode('fit');
+        expect(outer.style.overflow).toBe('');
+      });
+
       it('fit mode sizes the outer wrapper to exactly the scaled natural size, eliminating stray scroll space (no-overflow)', async () => {
         const { window: harnessWindow, document } = await loadHarnessSandbox('');
         const container = configurePaneContent(document, PANE_CONTENT_IDS.reference, 800);

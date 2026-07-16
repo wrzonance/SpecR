@@ -74,7 +74,7 @@ below):
 | Mode | How to select | What it does | Who it's for |
 |---|---|---|---|
 | `fit` (default) | no query param, or `window.__setDisplayMode('fit')` | Scales each pane's rendered page down to fit its column, via a nested `.pane-scale-outer` / `.pane-scale-target` wrapper pair (CSS `transform: scale()` on the inner element, an explicitly-sized box on the outer — see [decision 14](#14-nested-pane-scale-outerpane-scale-target-wrapper--a-single-scaled-element-cant-do-all-three-jobs-506)) so the full page width is visible without horizontal scrolling. | A human eyeballing a run in a normal-width browser window. |
-| `capture` | `?mode=capture`, or `window.__setDisplayMode('capture')` | Renders panes at natural, untransformed size — no scale, no scroll compensation. | The **only** mode whose geometry is trustworthy for screenshotting/cropping/diffing. |
+| `capture` | `?mode=capture`, or `window.__setDisplayMode('capture')` | Renders panes at natural, untransformed size — no scale. A page wider than its pane column overflows into `.pane-content`'s `overflow:auto` (scrollable), never clipped, so a screenshot never silently loses the page's right edge. | The **only** mode whose geometry is trustworthy for screenshotting/cropping/diffing. |
 
 `window.__setDisplayMode(mode)` throws a plain `Error` for anything other than exactly `'fit'` or
 `'capture'` — strict boundary validation, no silent coercion of a typo'd or missing value.

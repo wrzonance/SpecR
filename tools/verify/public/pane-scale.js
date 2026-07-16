@@ -120,6 +120,10 @@
   function resetScalePair(outer, target) {
     outer.style.width = '';
     outer.style.height = '';
+    // Clear the inline overflow so it falls back to index.html's
+    // `.pane-scale-outer { overflow: hidden }` (fit mode's default); the
+    // capture branch below re-sets it to 'visible'.
+    outer.style.overflow = '';
     target.style.width = '';
     target.style.transform = '';
     target.style.transformOrigin = '';
@@ -139,7 +143,19 @@
     // switch or a recompute (this is what makes capture-mode geometry
     // byte-identical to a pane that was never transformed).
     resetScalePair(outer, target);
-    if (displayMode === 'capture') return undefined;
+    if (displayMode === 'capture') {
+      // Capture mode renders at natural, untransformed size. A page wider than
+      // its pane column must overflow into .pane-content's own overflow:auto
+      // (scrollable) rather than be clipped by .pane-scale-outer's fit-mode
+      // overflow:hidden — otherwise a too-narrow capture viewport silently
+      // loses the page's right edge from the screenshot. The measured
+      // getBoundingClientRect geometry is identical either way; this only
+      // restores visual access to (and a correct screenshot of) the full
+      // natural page when the capture-viewport precondition (README finding 7)
+      // isn't met.
+      outer.style.overflow = 'visible';
+      return undefined;
+    }
 
     // width:max-content neutralizes docx-preview's own centering CSS so the
     // natural (untransformed) page size can be measured off `target` —
