@@ -261,11 +261,15 @@ describe('createApp (wiring smoke tests)', () => {
     function createFakeElement(rect: Rect = { x: 0, y: 0, width: 0, height: 0 }): FakeElement {
       let text = '';
       let kids: FakeElement[] = [];
+      // Referenced by closure (not `this`) in getBoundingClientRect below, so a
+      // spy that .bind()s or reassigns getBoundingClientRect still reads the
+      // live style — same object the returned `style` property exposes.
+      const style: Record<string, string> = {};
       const registry = createListenerRegistry();
       return {
         tagName: 'div',
         className: '',
-        style: {},
+        style,
         clientWidth: 0,
         value: '',
         get textContent(): string {
@@ -301,7 +305,17 @@ describe('createApp (wiring smoke tests)', () => {
           return findDocxPages(kids);
         },
         getBoundingClientRect(): Rect {
-          return { ...rect };
+          // Model the element's OWN `transform: scale(N)` so a rect read while
+          // a stale fit-mode transform is still applied reports SCALED geometry
+          // — this is what lets the reset-first tests actually catch a
+          // "measured before the reset cleared the transform" regression rather
+          // than always seeing natural size. transformOrigin is top-left in
+          // this harness, so x/y are unaffected and only width/height scale.
+          // Ancestor transforms aren't composed: the tests that rely on this
+          // measure the transformed element itself (the .pane-scale-target).
+          const match = /^scale\(([\d.]+)\)$/.exec(style.transform ?? '');
+          const scale = match && match[1] !== undefined ? Number(match[1]) : 1;
+          return { ...rect, width: rect.width * scale, height: rect.height * scale };
         },
         addEventListener: registry.add,
         dispatchEvent: registry.dispatch,

@@ -79,10 +79,12 @@ below):
 `window.__setDisplayMode(mode)` throws a plain `Error` for anything other than exactly `'fit'` or
 `'capture'` — strict boundary validation, no silent coercion of a typo'd or missing value.
 `window.__getDisplayMode()` is a pure read. `#fit-scale-note` (toolbar, next to `#run-status`)
-surfaces a fit-mode scale-factor disagreement between the two panes (e.g. one failed to load, or
-rendered a different page size): empty when both panes' factors agree within a small epsilon for
+surfaces a fit-mode scale-factor disagreement when **both** panes render at measurably different
+page sizes (e.g. Letter vs A4): empty when both panes' factors agree within a small epsilon for
 sub-pixel rounding, otherwise it reports both factors — a DOM node, never `console.*`, because the
-driving agent reads DOM state, not console logs.
+driving agent reads DOM state, not console logs. It reports only when both factors are defined; a
+pane that failed to render produces no factor, so the note is cleared rather than flagged (a load
+failure surfaces through that pane's own state, not this scale-mismatch note).
 
 **`window.__measure()` / `window.__regionGeom()` read geometry in capture mode, then restore the
 caller's prior mode before they return** (`withCaptureMode()`): each snapshots the current mode,
