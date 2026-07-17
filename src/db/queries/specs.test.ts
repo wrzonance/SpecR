@@ -138,6 +138,7 @@ describe('buildNodeTree editability derivation', () => {
     signal_provenance: null,
     classification: null,
     editability_override: null,
+    object_data: null,
   } as const;
 
   it('editability: corrupt override fails loud even when classification is null', async () => {
@@ -166,6 +167,7 @@ function row(
     signal_provenance: null,
     classification: null,
     editability_override: null,
+    object_data: null,
     ...p,
   };
 }

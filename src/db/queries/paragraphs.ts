@@ -5,6 +5,7 @@ import { recordParagraphHistory, resolveHistoryContext } from './paragraph-histo
 import type { Pool, PoolClient } from 'pg';
 import { NodeTypeSchema, parseSourceFacts, deriveArticleRole } from '../../ast/index.js';
 import type {
+  ObjectMeta,
   ParagraphAssociation,
   SignalConflict,
   SignalProvenance,
@@ -16,6 +17,7 @@ import type {
 import { listAssociationsForParagraph } from './associations.js';
 import { parseNodeType } from './node-type.js';
 import { deriveInference } from './inference-meta.js';
+import { parseObjectMeta } from './object-meta.js';
 
 export interface Queryable {
   query: Pool['query'];
@@ -33,6 +35,8 @@ interface FlatRow {
   readonly conflicts: readonly SignalConflict[];
   readonly sourceFacts: SourceFacts;
   readonly signalProvenance: SignalProvenance | null;
+  /** Captured DOCX body object (#300, ADR-072). Non-null only on `type: 'object'` rows. */
+  readonly objectData: ObjectMeta | null;
 }
 
 function hasSourceFacts(sourceFacts: SourceFacts): boolean {
@@ -59,6 +63,7 @@ function flattenDfs(
       signalProvenance: node.meta.inference
         ? { signalUsed: node.meta.inference.signalUsed, agreed: node.meta.inference.agreed }
         : null,
+      objectData: node.meta.object ?? null,
     });
     flattenDfs(node.children, specId, node.id, rows);
   });
@@ -78,8 +83,8 @@ export async function insertTree(tree: SpecTree, specId: string, pool: Queryable
       await pool.query(
         `INSERT INTO paragraphs
            (id, spec_id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-            signal_provenance)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)`,
+            signal_provenance, object_data)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb)`,
         [
           row.id,
           row.specId,
@@ -91,6 +96,7 @@ export async function insertTree(tree: SpecTree, specId: string, pool: Queryable
           JSON.stringify(row.conflicts),
           JSON.stringify(row.sourceFacts),
           row.signalProvenance ? JSON.stringify(row.signalProvenance) : null,
+          row.objectData ? JSON.stringify(row.objectData) : null,
         ]
       );
     } catch (err) {
@@ -113,6 +119,8 @@ export interface ParagraphRow {
   readonly inference?: SpecNodeInference;
   /** External content associations (#109). Present only when non-empty. */
   readonly associations?: readonly ParagraphAssociation[];
+  /** Captured DOCX body object (#300, ADR-072). Present only on `nodeType === 'object'`. */
+  readonly object?: ObjectMeta;
 }
 
 export interface ParagraphWithAncestors {
@@ -128,6 +136,7 @@ interface ChainRow {
   readonly conflicts: readonly SignalConflict[];
   readonly sourceFacts: SourceFacts;
   readonly signalProvenance: unknown;
+  readonly objectData: unknown;
   readonly depth: number;
 }
 
@@ -136,11 +145,14 @@ function toParagraphRow(r: ChainRow): ParagraphRow {
   // `closed` flag before they reach the API response (#262).
   const sourceFacts = parseSourceFacts(r.sourceFacts);
   // ParagraphRow.nodeType is a plain string and paragraphs.node_type carries no
-  // CHECK, so a non-enum row must pass through unscored (inference omitted) —
+  // CHECK, so a non-enum row must pass through unscored (inference/object omitted) —
   // never fail the whole ancestor read over a value this surface never typed.
   const nodeType = NodeTypeSchema.safeParse(r.nodeType);
   const inference = nodeType.success
     ? deriveInference(r.signalProvenance, r.conflicts, nodeType.data)
+    : undefined;
+  const objectMeta = nodeType.success
+    ? parseObjectMeta(nodeType.data, r.objectData, 'getParagraphWithAncestors')
     : undefined;
   return {
     id: r.id,
@@ -150,6 +162,7 @@ function toParagraphRow(r: ChainRow): ParagraphRow {
     ...(r.conflicts.length > 0 ? { conflicts: r.conflicts } : {}),
     ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
     ...(inference ? { inference } : {}),
+    ...(objectMeta ? { object: objectMeta } : {}),
   };
 }
 
@@ -174,16 +187,17 @@ export async function getParagraphWithAncestors(
     const result = await pool.query<ChainRow>(
       `WITH RECURSIVE chain AS (
          SELECT id, node_type, text, vanish, conflicts, source_facts, signal_provenance,
-                parent_id, 0 AS depth
+                object_data, parent_id, 0 AS depth
          FROM paragraphs WHERE id = $1
          UNION ALL
          SELECT p.id, p.node_type, p.text, p.vanish, p.conflicts, p.source_facts,
-                p.signal_provenance, p.parent_id, c.depth + 1
+                p.signal_provenance, p.object_data, p.parent_id, c.depth + 1
          FROM paragraphs p JOIN chain c ON p.id = c.parent_id
          WHERE c.depth + 1 < 10
        )
        SELECT id, node_type AS "nodeType", text, vanish, conflicts,
-              source_facts AS "sourceFacts", signal_provenance AS "signalProvenance", depth
+              source_facts AS "sourceFacts", signal_provenance AS "signalProvenance",
+              object_data AS "objectData", depth
        FROM chain ORDER BY depth DESC`,
       [id]
     );
@@ -212,6 +226,7 @@ interface SubtreeRow {
   readonly conflicts: readonly SignalConflict[];
   readonly sourceFacts: SourceFacts;
   readonly signalProvenance: unknown;
+  readonly objectData: unknown;
 }
 
 /** Assemble subtree rows (a node plus all its descendants) into one SpecNode
@@ -232,6 +247,7 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
     const articleRole = row.nodeType === 'article' ? deriveArticleRole(row.text) : undefined;
     const nodeType = parseNodeType(row.nodeType, 'buildSubtree');
     const inference = deriveInference(row.signalProvenance, row.conflicts, nodeType);
+    const objectMeta = parseObjectMeta(nodeType, row.objectData, 'buildSubtree');
     return {
       id: row.id,
       type: nodeType,
@@ -245,6 +261,7 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
         ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
         ...(articleRole !== undefined ? { articleRole } : {}),
         ...(inference ? { inference } : {}),
+        ...(objectMeta ? { object: objectMeta } : {}),
       },
     };
   };
@@ -269,17 +286,17 @@ export async function fetchSubtreeNode(
   const result = await db.query<SubtreeRow>(
     `WITH RECURSIVE subtree AS (
        SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              signal_provenance
+              signal_provenance, object_data
        FROM paragraphs WHERE id = $1 AND spec_id = $2
        UNION ALL
        SELECT p.id, p.parent_id, p.node_type, p.text, p.position, p.vanish,
-              p.conflicts, p.source_facts, p.signal_provenance
+              p.conflicts, p.source_facts, p.signal_provenance, p.object_data
        FROM paragraphs p JOIN subtree s ON p.parent_id = s.id
        WHERE p.spec_id = $2
      )
      SELECT id, parent_id AS "parentId", node_type AS "nodeType", text, position,
             vanish, conflicts, source_facts AS "sourceFacts",
-            signal_provenance AS "signalProvenance"
+            signal_provenance AS "signalProvenance", object_data AS "objectData"
      FROM subtree`,
     [nodeId, specId]
   );

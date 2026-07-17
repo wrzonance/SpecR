@@ -19,6 +19,7 @@ import { ClassificationSchema, OverrideSchema } from './editability.js';
 import { listAssociationsForSpec } from './associations.js';
 import { deriveInference } from './inference-meta.js';
 import { parseNodeType } from './node-type.js';
+import { parseObjectMeta } from './object-meta.js';
 
 interface SpecRow {
   readonly id: string;
@@ -119,6 +120,7 @@ export interface ParagraphTreeRow {
   readonly signal_provenance: unknown;
   readonly classification: unknown;
   readonly editability_override: unknown;
+  readonly object_data: unknown;
 }
 
 function hasSourceFacts(sourceFacts: SourceFacts): boolean {
@@ -173,6 +175,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
     const nodeType = parseNodeType(row.node_type, 'buildNodeTree');
     const articleRole = nodeType === 'article' ? deriveArticleRole(row.text) : undefined;
     const inference = deriveInference(row.signal_provenance, row.conflicts, nodeType);
+    const objectMeta = parseObjectMeta(nodeType, row.object_data, 'buildNodeTree');
     return {
       id: row.id,
       type: nodeType,
@@ -185,6 +188,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
         ...(inference ? { inference } : {}),
         ...(editability ? { editability } : {}),
         ...(articleRole !== undefined ? { articleRole } : {}),
+        ...(objectMeta ? { object: objectMeta } : {}),
       },
     };
   }
@@ -221,7 +225,7 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
 
     const paraResult = await pool.query<ParagraphTreeRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              signal_provenance, classification, editability_override
+              signal_provenance, classification, editability_override, object_data
        FROM paragraphs WHERE spec_id = $1`,
       [id]
     );
