@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { extractTables } from './tables.js';
+import { extractTables, classifyTopLevelTables } from './tables.js';
+import type { ClassifiedTopLevelTable } from './tables.js';
 import { buildStyleMap } from './styles.js';
 import { ParserError } from '../error.js';
+import type { StyleMap } from './types.js';
 
 const EMPTY_STYLES = buildStyleMap(
   `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>`
@@ -222,4 +224,113 @@ describe('extractTables — errors', () => {
     expect((caught as ParserError).code).toBe('DOCX_TABLE_XML_INVALID');
     expect((caught as ParserError).cause).toBeDefined();
   });
+});
+
+// extractTables' reduction over classifyTopLevelTables — mirrors the composition
+// extractTables itself performs, so the regression tests below can assert
+// extractTables(xml, styleMap) is byte-identical to deriving it from the promoted
+// classifyTopLevelTables export, not just independently correct.
+function deriveExtractionResult(classifications: readonly ClassifiedTopLevelTable[]) {
+  return {
+    hiddenTables: classifications.flatMap((c) => (c.kind === 'hidden' ? [c.table] : [])),
+    visibleCount: classifications.filter((c) => c.kind === 'visible').length,
+  };
+}
+
+describe('classifyTopLevelTables — promoted extraction (zero-behavior-change)', () => {
+  it('returns one classification per top-level table, hidden with its retained table', () => {
+    const xml = makeDocXml(table(row(cell(vanishPara('secret A')) + cell(vanishPara('secret B')))));
+    const result = classifyTopLevelTables(xml, EMPTY_STYLES);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      kind: 'hidden',
+      table: { rows: [['secret A', 'secret B']] },
+    });
+  });
+
+  it('returns a visible classification (no table payload) when no cell paragraph is vanish', () => {
+    const xml = makeDocXml(table(row(cell(visiblePara('a')) + cell(visiblePara('b')))));
+    const result = classifyTopLevelTables(xml, EMPTY_STYLES);
+    expect(result).toEqual([{ kind: 'visible' }]);
+  });
+
+  it('classifies multiple top-level tables independently, in document order', () => {
+    const hidden = table(row(cell(vanishPara('secret'))));
+    const visible = table(row(cell(visiblePara('shown'))));
+    const xml = makeDocXml(hidden + visible);
+    const result = classifyTopLevelTables(xml, EMPTY_STYLES);
+    expect(result).toEqual([
+      { kind: 'hidden', table: { rows: [['secret']] } },
+      { kind: 'visible' },
+    ]);
+  });
+
+  it('returns an empty array when word/document.xml has no w:tbl', () => {
+    const xml = makeDocXml(visiblePara('no tables here'));
+    expect(classifyTopLevelTables(xml, EMPTY_STYLES)).toEqual([]);
+  });
+
+  it('throws ParserError DOCX_TABLE_XML_INVALID with cause for malformed XML (same error as extractTables)', () => {
+    let caught: unknown;
+    try {
+      classifyTopLevelTables('<not valid xml', EMPTY_STYLES);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ParserError);
+    expect((caught as ParserError).code).toBe('DOCX_TABLE_XML_INVALID');
+    expect((caught as ParserError).cause).toBeDefined();
+  });
+});
+
+describe('extractTables — composes byte-identically over classifyTopLevelTables', () => {
+  const fixtures: Record<string, { xml: string; styleMap?: StyleMap }> = {
+    'single hidden table': {
+      xml: makeDocXml(table(row(cell(vanishPara('secret A')) + cell(vanishPara('secret B'))))),
+    },
+    'single visible table': {
+      xml: makeDocXml(table(row(cell(visiblePara('a')) + cell(visiblePara('b'))))),
+    },
+    'mixed cells within one row (visible)': {
+      xml: makeDocXml(table(row(cell(vanishPara('hidden')) + cell(visiblePara('shown'))))),
+    },
+    'vanish and visible evidence split across rows (visible)': {
+      xml: makeDocXml(
+        table(row(cell(vanishPara('hidden row'))) + row(cell(visiblePara('shown row'))))
+      ),
+    },
+    'empty table — no evidence (visible)': {
+      xml: makeDocXml(table(row(cell('<w:p/>') + cell('<w:p/>')))),
+    },
+    'no tables in the document': {
+      xml: makeDocXml(visiblePara('no tables here')),
+    },
+    'three independent visible tables': {
+      xml: makeDocXml(
+        table(row(cell(visiblePara('a')))) +
+          table(row(cell(visiblePara('b')))) +
+          table(row(cell(visiblePara('c'))))
+      ),
+    },
+    'a row with zero w:tc preserved as an empty array': {
+      xml: makeDocXml(table(row('') + row(cell(vanishPara('only row with content'))))),
+    },
+    'nested table inside a cell (KNOWN AMBIGUITY, not discovered)': {
+      xml: makeDocXml(
+        table(
+          row(cell(visiblePara('outer visible') + table(row(cell(vanishPara('nested secret'))))))
+        )
+      ),
+    },
+  };
+
+  it.each(Object.entries(fixtures))(
+    'extractTables(%s) equals deriveExtractionResult(classifyTopLevelTables(...))',
+    (_name, { xml, styleMap }) => {
+      const styles = styleMap ?? EMPTY_STYLES;
+      const direct = extractTables(xml, styles);
+      const derived = deriveExtractionResult(classifyTopLevelTables(xml, styles));
+      expect(direct).toEqual(derived);
+    }
+  );
 });
