@@ -176,4 +176,31 @@ describe('buildObjectBlocks', () => {
       expect((err as GeneratorError).cause).toBeInstanceOf(GeneratorError);
     }
   });
+
+  it('object-block: multi-key blob node throws rather than silently dropping a sibling branch', () => {
+    // A node with two element keys (`{ 'w:p': [], 'w:tbl': [] }`) is malformed
+    // preserveOrder data — every well-formed node carries exactly one element
+    // tag. Picking the first key would silently drop the second branch into a
+    // corrupt re-emitted document, so it must throw instead.
+    const multiKey = { 'w:p': [], 'w:tbl': [] } as ObjectBlobNode;
+    const blob: readonly ObjectBlobNode[] = [{ 'w:tbl': [multiKey] }];
+    expect(() => buildObjectBlocks(OBJECT_NODE_ID, blob)).toThrow(GeneratorError);
+    expect(() => buildObjectBlocks(OBJECT_NODE_ID, blob)).toThrow(
+      new RegExp(`failed to re-emit body object ${OBJECT_NODE_ID}`)
+    );
+  });
+
+  it('object-block: multi-key blob node surfaces the "exactly one element tag" cause', () => {
+    const multiKey = { 'w:p': [], 'w:tbl': [] } as ObjectBlobNode;
+    const blob: readonly ObjectBlobNode[] = [{ 'w:tbl': [multiKey] }];
+    try {
+      buildObjectBlocks(OBJECT_NODE_ID, blob);
+      expect.unreachable('expected buildObjectBlocks to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(GeneratorError);
+      const cause = (err as GeneratorError).cause;
+      expect(cause).toBeInstanceOf(GeneratorError);
+      expect((cause as GeneratorError).message).toMatch(/exactly one element tag/);
+    }
+  });
 });

@@ -28,14 +28,18 @@ import { parse } from '../index.js';
 import { generateDocx } from '../../generator/index.js';
 import type { SpecNode, SpecTree } from '../../ast/types.js';
 
-// Namespaces docx@9.7.1 itself declares on its generated <w:document> root
-// (verified against the installed dependency) — the hand-authored source
-// fixtures below need the same set so a real mc:AlternateContent/w:pict text
-// box parses exactly like a real Word-authored document would.
+// Root namespaces a real Word <w:document> declares — the wordprocessing +
+// wordprocessingDrawing/Shape, VML, and markup-compatibility set docx@9.7.1
+// also declares on its generated root (verified against the installed
+// dependency). DrawingML core (`xmlns:a`) is DELIBERATELY absent here: Word
+// (and docx itself) declare it INLINE on the <a:graphic> element, never on
+// the document root — so the DrawingML text-box fixture below carries its own
+// inline xmlns:a exactly as Word emits it. This is what keeps the re-emitted
+// blob namespace-valid on the round trip: the captured subtree carries the
+// binding for every prefix it uses (see the namespace-validity test below).
 const NS = [
   'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"',
   'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"',
-  'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"',
   'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"',
   'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"',
   'xmlns:v="urn:schemas-microsoft-com:vml"',
@@ -87,7 +91,10 @@ function floatingAlternateContentTextBoxParagraph(
     '<w:p><w:r><mc:AlternateContent>' +
     '<mc:Choice Requires="wps">' +
     '<w:drawing><wp:anchor><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
-    '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+    // xmlns:a declared INLINE on <a:graphic> exactly as Word/docx emit it —
+    // NOT on the source root — so the captured blob carries its own binding.
+    '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+    '<a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
     '<wps:wsp><wps:txbx><w:txbxContent>' +
     para(choiceText) +
     '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>' +
@@ -128,6 +135,18 @@ async function regenerateAndReparse(tree: SpecTree): Promise<SpecTree> {
   const buffer = await generateDocx(tree);
   const result = await parse(buffer, 'roundtrip.docx');
   return result.tree;
+}
+
+// The generator's raw output XML — used to assert the re-emitted blob is
+// namespace-well-formed, which the parse -> re-parse cycle above can't see
+// (fast-xml-parser treats a prefix as an opaque tag string and never rejects
+// an unbound one).
+async function generatedDocumentXml(tree: SpecTree): Promise<string> {
+  const buffer = await generateDocx(tree);
+  const zip = await JSZip.loadAsync(buffer);
+  const doc = zip.file('word/document.xml');
+  if (!doc) throw new Error('generated docx has no word/document.xml');
+  return doc.async('string');
 }
 
 // Bundles the three ObjectMeta assertions each test below repeats into one
@@ -279,9 +298,37 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
     expectObjectMeta(after[1], { kind: 'table' });
     expect(objectTextsOf(after[1] as SpecNode)).toEqual(['Table two text']);
   });
+
+  // The generator re-emits the captured DrawingML blob verbatim, including its
+  // <a:graphic> subtree. docx's own generated <w:document> root declares
+  // wp/wps/v/mc but NOT xmlns:a, so a re-emitted <a:graphic> would carry an
+  // UNBOUND `a:` prefix — a namespace-invalid document Word rejects — UNLESS
+  // the captured subtree brought its own binding. Word (and docx) declare
+  // xmlns:a inline on <a:graphic>, so capture preserves it and the round trip
+  // stays valid; the parse -> re-parse assertions above never catch this
+  // because fast-xml-parser tolerates an unbound prefix. This pins it directly.
+  //
+  // LIMITATION (WS3): a non-Word source that declares a DrawingML namespace
+  // ONLY on its <w:document> root (never inline) would lose that binding on
+  // capture — WS2 does not hoist root-scoped namespace declarations into the
+  // captured subtree. Deferred to WS3's full re-emission-fidelity work.
+  it('re-emits a DrawingML text box with its a: namespace bound — never an unbound prefix (#517)', async () => {
+    const source = await makeDocx(
+      para('Intro paragraph.') +
+        floatingAlternateContentTextBoxParagraph('Choice text kept', 'Stale VML fallback text')
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const docXml = await generatedDocumentXml(tree);
+
+    // The re-emitted blob really does carry the a:graphic subtree...
+    expect(docXml).toContain('<a:graphic');
+    // ...and the a: prefix is bound in scope (inline on the graphic, as Word
+    // emits) — never left dangling by docx's a-less generated document root.
+    expect(docXml).toMatch(/<a:graphic[^>]*xmlns:a=/);
+  });
 });
 
-// KNOWN AMBIGUITY (WS3): only the captured object's KIND/generation/floating
+// KNOWN AMBIGUITY: (WS3) only the captured object's KIND/generation/floating
 // and its interior TEXT are round-trip invariants. The outer `object` node's
 // own uuid, and every interior objectText leaf's uuid, are freshly minted on
 // each capture (parser/docx/object-anchor.ts) — SpecR narrows "round trip"

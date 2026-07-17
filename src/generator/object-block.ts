@@ -38,8 +38,15 @@ export class ImportedObjectBlock extends FileChild {
 // established per-module-helper pattern — see parser/docx/body-objects.ts
 // and body-order.ts's own private tagOf/childrenOf) ─────────────────────────
 
+// Exactly one non-`:@` key is the preserveOrder invariant for a well-formed
+// node (`{ 'w:p': [...], ':@': {...} }` or `{ '#text': '...' }`); a node with
+// two element keys (`{ 'w:p': [], 'w:tbl': [] }`) or a mixed `#text`+element
+// pair is malformed capture data. Returning `undefined` for it — rather than
+// silently picking the first key — lets `buildImportedXmlComponent` reject it
+// instead of dropping the sibling branch into a corrupt re-emitted document.
 function tagOf(node: ObjectBlobNode): string | undefined {
-  return Object.keys(node).find((key) => key !== ':@');
+  const tags = Object.keys(node).filter((key) => key !== ':@');
+  return tags.length === 1 ? tags[0] : undefined;
 }
 
 // Hand-written type guard, not a bare `Array.isArray` check: TS narrows
@@ -88,14 +95,18 @@ function pushChild(component: ImportedXmlComponent, child: ObjectBlobNode): void
 }
 
 // Recursively rebuilds one ObjectBlobNode subtree into docx's own
-// ImportedXmlComponent tree. A node with no element tag (an `ObjectBlobNode`
-// that is neither a `#text` leaf nor a single-key element wrapper) is
-// malformed capture data — it is never silently dropped, only surfaced as a
-// GeneratorError for buildObjectBlocks to wrap with its objectNodeId.
+// ImportedXmlComponent tree. A node without exactly one element tag (an
+// `ObjectBlobNode` that is neither a `#text` leaf nor a single-key element
+// wrapper — e.g. a malformed multi-key `{ 'w:p': [], 'w:tbl': [] }`) is
+// malformed capture data — it is never silently dropped or truncated to its
+// first branch, only surfaced as a GeneratorError for buildObjectBlocks to
+// wrap with its objectNodeId.
 function buildImportedXmlComponent(node: ObjectBlobNode): ImportedXmlComponent {
   const tag = tagOf(node);
   if (!tag) {
-    throw new GeneratorError(`blob node has no element tag: ${JSON.stringify(node)}`);
+    throw new GeneratorError(
+      `blob node must have exactly one element tag: ${JSON.stringify(node)}`
+    );
   }
   const attrs = node[':@'];
   const component = new ImportedXmlComponent(

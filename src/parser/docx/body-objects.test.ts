@@ -425,6 +425,10 @@ describe('extractBodyObjects — #517 mc:AlternateContent normalization in table
 });
 
 describe('extractBodyObjects — KNOWN AMBIGUITY: nested table/text box inside a captured object (ADR-072 addendum 20)', () => {
+  // KNOWN AMBIGUITY: a nested table/text box inside a captured object is
+  // flattened into the OUTER object's interiorTexts and never independently
+  // promoted to its own `object` node — how to address the inner unit is
+  // deferred to WS3.
   // transformChildren/transformInteriorParagraphs (body-objects.ts) recurse
   // into every non-w:p child unconditionally — including a SECOND w:tbl
   // nested inside the outer table's own cell. That nested table's interior

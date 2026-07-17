@@ -372,9 +372,12 @@ should be promoted to its own `object` SpecNode nested inside its parent's
 to walk a captured blob's OWN `w:sdt` anchors (rather than only the flat,
 one-level-deep body walk `merge/extract.ts`'s `readUuidFromSdtPr` performs
 today), how it would disambiguate an anchor nested inside one structural
-container from one nested inside two. No test currently exercises a nested
-table/text-box; this addendum exists so the gap is documented rather than
-discovered by surprise.
+container from one nested inside two. `body-objects.test.ts`'s "KNOWN
+AMBIGUITY: nested table/text box" suite now pins today's flattening behavior
+(a nested table's interior text lands in the OUTER object's `interiorTexts`,
+never promoted to its own `object`); this addendum documents the two open WS3
+promotion/disambiguation questions above so the gap is a reviewed decision
+rather than discovered by surprise.
 
 ## Consequences
 

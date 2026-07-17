@@ -146,6 +146,11 @@ describe('stripAlternateContentFallback', () => {
     expect(result).toEqual(malformed);
   });
 
+  // KNOWN AMBIGUITY: OOXML permits multiple mc:Choice siblings (one per
+  // Requires alternative) inside one mc:AlternateContent; real Word emits
+  // exactly one Choice, so which sibling should win is undecidable from the
+  // fixture alone. This pins the first-wins pick (mirrors the same caveat in
+  // alternate-content.ts's choiceChildren).
   it('KNOWN AMBIGUITY: multiple mc:Choice siblings — the first wins, later ones discarded', () => {
     const choiceOne = attrNode('mc:Choice', { '@_Requires': 'a' }, [
       { 'w:t': [{ '#text': 'first' }] },
