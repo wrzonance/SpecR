@@ -239,8 +239,16 @@ function classifyTableVisibility(
 function buildTableObject(blob: readonly ObjectBlobNode[]): CapturedBodyObject | undefined {
   const tableNode = blob[0];
   if (!tableNode) return undefined;
-  const dims = tableDimensions(tableNode);
-  const anchored = anchorInteriorParagraphs(tableNode);
+  // #517: normalize mc:AlternateContent to its mc:Choice branch BEFORE
+  // walking for interior paragraphs and dimensions, exactly like
+  // buildTextBoxObject below — a table cell can embed its own drawing (e.g.
+  // a logo or a nested text box) wrapped in mc:AlternateContent, and the
+  // depth-agnostic w:p walk in anchorInteriorParagraphs would otherwise find
+  // w:p nodes in BOTH the Choice and the stale mc:Fallback (VML) branch,
+  // doubling interiorTexts.
+  const normalized = stripAlternateContentFallback(tableNode);
+  const dims = tableDimensions(normalized);
+  const anchored = anchorInteriorParagraphs(normalized);
   return {
     kind: 'table',
     floating: false,

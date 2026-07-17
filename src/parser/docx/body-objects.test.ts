@@ -396,6 +396,34 @@ describe('extractBodyObjects — #517 mc:AlternateContent normalization in the c
   });
 });
 
+describe('extractBodyObjects — #517 mc:AlternateContent normalization in table captures', () => {
+  it('captures a single interior text from a table cell embedding an mc:AlternateContent-wrapped drawing (was doubled)', () => {
+    const body = table(
+      row(cell(alternateContentTextBoxParagraph('Choice cell text', 'Fallback cell text')))
+    );
+    const result = extract(body);
+
+    expect(result.tableObjects).toHaveLength(1);
+    const object = result.tableObjects[0]?.object;
+    expect(object?.interiorTexts).toHaveLength(1);
+    expect(object?.interiorTexts[0]?.text).toBe('Choice cell text');
+  });
+
+  it('never leaves mc:Fallback or mc:AlternateContent reachable anywhere in a captured table blob', () => {
+    const body = table(
+      row(cell(alternateContentTextBoxParagraph('Choice cell text', 'Fallback cell text')))
+    );
+    const result = extract(body);
+    const blob = result.tableObjects[0]?.object.blob ?? [];
+    const xml = createOrderedDocumentXmlBuilder().build(blob);
+
+    expect(xml).not.toContain('mc:Fallback');
+    expect(xml).not.toContain('mc:AlternateContent');
+    expect(xml).toContain('Choice cell text');
+    expect(xml).not.toContain('Fallback cell text');
+  });
+});
+
 describe('extractBodyObjects — table dimensions', () => {
   it('derives columns from w:tblGrid/w:gridCol when present', () => {
     const body = tableWithGrid(2, row(cell(para('a')) + cell(para('b'))));

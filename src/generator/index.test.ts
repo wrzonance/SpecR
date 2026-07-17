@@ -705,14 +705,24 @@ describe('generateDocx — #517 body-object re-emit wiring', () => {
   });
 
   it("never recurses into an object node's children — objectText content reaches output exclusively via the blob", async () => {
+    // A string-content check here is a trap: 'objectText' carries no
+    // numbering level (getNodeLevel returns null for it), so its OWN text
+    // can never surface as a paragraph whether or not emitNode recurses —
+    // only a DEEPER descendant (the nested 'continuation' marker) would leak
+    // if the object branch wrongly returned true. Comparing the FULL
+    // rendered document against a baseline built from the exact same object
+    // node with NO children at all is airtight: it catches a leak of the
+    // stray child's own text, its nested marker, or anything else recursion
+    // might someday emit, without depending on which node type happens to
+    // slip through.
+    const baselineXml = await getDocXml(await generateDocx(treeWithObject(tableObjectNode())));
     const buffer = await generateDocx(treeWithObject(tableObjectNode([strayObjectTextChild()])));
     const xml = await getDocXml(buffer);
     // Blob content still renders (the object branch did its job)...
     expect(xml).toContain('Captured cell text value');
-    // ...but neither the objectText child nor its own nested child ever
-    // reach the document as an independently-emitted paragraph.
-    expect(xml).not.toContain('objectText marker');
-    expect(xml).not.toContain('DEEP RECURSION MARKER');
+    // ...and the rendered document is otherwise byte-identical to one with
+    // no children on the object node at all.
+    expect(xml).toBe(baselineXml);
   });
 
   it('throws a GeneratorError carrying the node id when an object node is missing its captured blob (meta.object)', async () => {

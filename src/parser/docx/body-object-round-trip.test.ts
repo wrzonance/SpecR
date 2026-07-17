@@ -224,6 +224,61 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
     );
     expect(promotedToPrTier).toBe(false);
   });
+
+  // Every test above constructs exactly ONE object node — the stated
+  // "N object nodes survive as N object nodes" conservation invariant (see
+  // this file's header) was never exercised past N=1, so a cross-object
+  // mixup (kind/text swapped between objects) or a dropped/duplicated object
+  // would have gone uncaught. These two pin N=2, one mixed-kind and one
+  // same-kind (the latter is the harder case: nothing but ORDER distinguishes
+  // the two tables, so a merge/reorder bug can't hide behind a kind check).
+  it('two DIFFERENT-kind objects (a table and a VML text box) both round-trip without cross-contaminating each other', async () => {
+    const source = await makeDocx(
+      para('Intro paragraph.') +
+        table(row(cell(para('First table cell text')))) +
+        para('Middle paragraph.') +
+        vmlTextBoxParagraph('Second box text')
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const before = objectNodesOf(tree);
+    expect(before).toHaveLength(2);
+    expectObjectMeta(before[0], { kind: 'table' });
+    expect(objectTextsOf(before[0] as SpecNode)).toEqual(['First table cell text']);
+    expectObjectMeta(before[1], { kind: 'textBox', generation: 'vml' });
+    expect(objectTextsOf(before[1] as SpecNode)).toEqual(['Second box text']);
+
+    const reparsedTree = await regenerateAndReparse(tree);
+    const after = objectNodesOf(reparsedTree);
+
+    expect(after).toHaveLength(2);
+    expectObjectMeta(after[0], { kind: 'table' });
+    expect(objectTextsOf(after[0] as SpecNode)).toEqual(['First table cell text']);
+    expectObjectMeta(after[1], { kind: 'textBox', generation: 'vml' });
+    expect(objectTextsOf(after[1] as SpecNode)).toEqual(['Second box text']);
+  });
+
+  it('two SAME-kind objects (two tables) both round-trip in order, without merging or duplicating either', async () => {
+    const source = await makeDocx(
+      para('Intro paragraph.') +
+        table(row(cell(para('Table one text')))) +
+        para('Middle paragraph.') +
+        table(row(cell(para('Table two text'))))
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const before = objectNodesOf(tree);
+    expect(before).toHaveLength(2);
+    expect(objectTextsOf(before[0] as SpecNode)).toEqual(['Table one text']);
+    expect(objectTextsOf(before[1] as SpecNode)).toEqual(['Table two text']);
+
+    const reparsedTree = await regenerateAndReparse(tree);
+    const after = objectNodesOf(reparsedTree);
+
+    expect(after).toHaveLength(2);
+    expectObjectMeta(after[0], { kind: 'table' });
+    expect(objectTextsOf(after[0] as SpecNode)).toEqual(['Table one text']);
+    expectObjectMeta(after[1], { kind: 'table' });
+    expect(objectTextsOf(after[1] as SpecNode)).toEqual(['Table two text']);
+  });
 });
 
 // KNOWN AMBIGUITY (WS3): only the captured object's KIND/generation/floating

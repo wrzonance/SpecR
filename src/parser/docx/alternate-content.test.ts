@@ -64,12 +64,30 @@ const ALTERNATE_CONTENT_RUN_XML =
   '<w:r><w:t>after</w:t></w:r></w:p>';
 
 describe('stripAlternateContentFallback', () => {
-  it('returns a no-AlternateContent tree structurally unchanged', () => {
+  it('returns a no-AlternateContent tree structurally unchanged, but as a FRESH object once it walks any children', () => {
     const xml = '<w:p><w:r><w:t>hello</w:t></w:r></w:p>';
     const node = parseBlob(xml);
     const result = stripAlternateContentFallback(node);
     expect(result).toEqual(node);
     expect(toXml(result)).toBe(xml);
+    // `toEqual` alone can't tell a rebuilt-but-structurally-identical tree
+    // apart from the exact same input reference passed straight through —
+    // this node has children (a `w:r`), so it takes the rebuild branch below
+    // and must come back as a new object, never the original.
+    expect(result).not.toBe(node);
+  });
+
+  // The rebuild branch above only fires once a node has at least one child to
+  // walk. A node with a tag but ZERO children (nothing to rewrite) instead
+  // takes the short-circuit `if (children.length === 0) return node;` path —
+  // deliberately returning the SAME reference rather than paying for an
+  // allocation that would produce an identical copy. Pinned explicitly with
+  // `toBe` so a future change can't silently swap this for a deep-copy (or
+  // vice versa start mutating) without a test noticing either way.
+  it('aliases the input node when it has zero children — nothing to rewrite, no allocation', () => {
+    const node: ObjectBlobNode = { 'w:t': [] };
+    const result = stripAlternateContentFallback(node);
+    expect(result).toBe(node);
   });
 
   it('extracts the mc:Choice content from a realistic nested fixture, discarding mc:Fallback', () => {
