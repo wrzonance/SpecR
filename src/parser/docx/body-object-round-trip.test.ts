@@ -287,4 +287,25 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
 // each capture (parser/docx/object-anchor.ts) — SpecR narrows "round trip"
 // to text-preservation, never id-identity, across a regenerate+re-parse
 // cycle. A future merge-identity requirement (stable ids across
-// regeneration) is explicitly out of scope here.
+// regeneration) is explicitly out of scope here. Pinned below (not just
+// asserted in prose) so a future change to this behavior is a deliberate,
+// reviewed decision, not a silent drift.
+describe('body object round trip — KNOWN AMBIGUITY (WS3): ids are never round-trip invariants', () => {
+  it('mints a fresh uuid for the object node AND every objectText leaf on every regenerate+re-parse cycle', async () => {
+    const source = await makeDocx(
+      para('Intro paragraph.') + table(row(cell(para('Round-trip table cell text'))))
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const beforeObject = objectNodesOf(tree)[0] as SpecNode;
+    const beforeObjectTextId = beforeObject.children.find((c) => c.type === 'objectText')?.id;
+    expect(beforeObjectTextId).toBeDefined();
+
+    const reparsedTree = await regenerateAndReparse(tree);
+    const afterObject = objectNodesOf(reparsedTree)[0] as SpecNode;
+    const afterObjectTextId = afterObject.children.find((c) => c.type === 'objectText')?.id;
+
+    expect(afterObject.id).not.toBe(beforeObject.id);
+    expect(afterObjectTextId).toBeDefined();
+    expect(afterObjectTextId).not.toBe(beforeObjectTextId);
+  });
+});

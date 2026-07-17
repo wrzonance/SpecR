@@ -63,6 +63,23 @@ const ALTERNATE_CONTENT_RUN_XML =
   '</mc:AlternateContent></w:r>' +
   '<w:r><w:t>after</w:t></w:r></w:p>';
 
+// A nested mc:AlternateContent sitting as a DIRECT CHILD of the surviving
+// mc:Choice — the shape real Word output produces when a text box's own
+// DrawingML content is itself wrapped in a further Requires-gated choice
+// (e.g. a wps shape whose graphicData carries a nested wpg alternate). The
+// outer AlternateContent's Choice is chosen first, exposing the inner
+// AlternateContent as one of ITS children — the site the fix targets.
+const NESTED_ALTERNATE_CONTENT_XML =
+  '<w:r><mc:AlternateContent>' +
+  '<mc:Choice Requires="wps">' +
+  '<mc:AlternateContent>' +
+  '<mc:Choice Requires="wpg"><w:t>inner Choice text</w:t></mc:Choice>' +
+  '<mc:Fallback><w:t>inner Fallback text</w:t></mc:Fallback>' +
+  '</mc:AlternateContent>' +
+  '</mc:Choice>' +
+  '<mc:Fallback><w:t>outer Fallback text</w:t></mc:Fallback>' +
+  '</mc:AlternateContent></w:r>';
+
 describe('stripAlternateContentFallback', () => {
   it('returns a no-AlternateContent tree structurally unchanged, but as a FRESH object once it walks any children', () => {
     const xml = '<w:p><w:r><w:t>hello</w:t></w:r></w:p>';
@@ -142,6 +159,18 @@ describe('stripAlternateContentFallback', () => {
     const xml = toXml(stripAlternateContentFallback(multiChoice));
     expect(xml).toContain('first');
     expect(xml).not.toContain('second');
+  });
+
+  it('collapses a nested mc:AlternateContent sitting as a direct child of the surviving mc:Choice (#517 regression)', () => {
+    const node = parseBlob(NESTED_ALTERNATE_CONTENT_XML);
+    const result = stripAlternateContentFallback(node);
+    const xml = toXml(result);
+    expect(xml).toContain('inner Choice text');
+    expect(xml).not.toContain('inner Fallback text');
+    expect(xml).not.toContain('outer Fallback text');
+    expect(collectTags(result)).not.toContain('mc:AlternateContent');
+    expect(collectTags(result)).not.toContain('mc:Choice');
+    expect(collectTags(result)).not.toContain('mc:Fallback');
   });
 
   it('is pure: never mutates the input node', () => {

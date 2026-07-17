@@ -37,7 +37,14 @@ describe.skipIf(!AVAILABLE)(
       // is a REAL <w:tbl>, not some other captured shape that merely happens
       // to carry the same text.
       expect(xml).toContain('<w:tbl>');
-      expect(xml).toContain('Description of Change');
+      // Exactly ONCE, not merely "present": the #517 defect this fixture
+      // motivated re-emitted the object's own text a SECOND time via a
+      // regressed objectText paragraph alongside the object's captured blob
+      // — `toContain` alone can't tell that duplication apart from a single,
+      // correct occurrence. Counting occurrences is what actually catches a
+      // reintroduction of that duplication on real-world data.
+      const occurrences = xml.split('Description of Change').length - 1;
+      expect(occurrences).toBe(1);
     });
   }
 );

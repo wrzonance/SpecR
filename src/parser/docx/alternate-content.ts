@@ -68,7 +68,15 @@ function choiceChildren(node: ObjectBlobNode): readonly ObjectBlobNode[] | undef
 function rewriteChild(child: ObjectBlobNode): readonly ObjectBlobNode[] {
   if (!isAlternateContentNode(child)) return [stripAlternateContentFallback(child)];
   const choice = choiceChildren(child);
-  return choice ? choice.map(stripAlternateContentFallback) : [child];
+  // The winning Choice's own children are re-dispatched through `rewriteChild`
+  // (not straight into `stripAlternateContentFallback`) so a nested
+  // mc:AlternateContent sitting as a DIRECT CHILD of this Choice gets the
+  // same AlternateContent-site detection as any other child — otherwise it
+  // would fall straight into `stripAlternateContentFallback`, which only
+  // rewrites a node's *descendants*, never treats the node passed to it as
+  // an AlternateContent site itself, leaving that nested Choice/Fallback
+  // pair (and the mc:AlternateContent/mc:Fallback tags) in the output.
+  return choice ? choice.flatMap(rewriteChild) : [child];
 }
 
 /**

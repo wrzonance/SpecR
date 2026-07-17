@@ -424,6 +424,36 @@ describe('extractBodyObjects — #517 mc:AlternateContent normalization in table
   });
 });
 
+describe('extractBodyObjects — KNOWN AMBIGUITY: nested table/text box inside a captured object (ADR-072 addendum 20)', () => {
+  // transformChildren/transformInteriorParagraphs (body-objects.ts) recurse
+  // into every non-w:p child unconditionally — including a SECOND w:tbl
+  // nested inside the outer table's own cell. That nested table's interior
+  // paragraph gets the identical w:sdt anchor treatment as the outer table's
+  // own direct cell paragraphs, and its text is flattened into the SAME
+  // interiorTexts array — with no independent id, editability, or way to
+  // address "the nested table" as its own unit. Only ONE `object` (the
+  // outer table) ever surfaces; the nested w:tbl is never independently
+  // promoted (deferred to WS3). This test PINS today's flattening behavior
+  // so a change to it is a deliberate, reviewed decision, not a silent drift.
+  it("KNOWN AMBIGUITY: flattens a nested table's interior text into the OUTER object's interiorTexts — the nested table is never independently addressable", () => {
+    const body = table(
+      row(cell(para('outer cell text') + table(row(cell(para('nested cell text'))))))
+    );
+    const result = extract(body);
+
+    expect(result.tableObjects).toHaveLength(1);
+    const object = result.tableObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual([
+      'outer cell text',
+      'nested cell text',
+    ]);
+    // Both paragraphs get a w:sdt anchor from the SAME captured blob — one
+    // flat id space, no marker distinguishing the nested table's anchors
+    // from the outer table's own.
+    expect(tagValues(object?.blob ?? [])).toHaveLength(2);
+  });
+});
+
 describe('extractBodyObjects — table dimensions', () => {
   it('derives columns from w:tblGrid/w:gridCol when present', () => {
     const body = tableWithGrid(2, row(cell(para('a')) + cell(para('b'))));
