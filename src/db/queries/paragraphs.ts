@@ -18,6 +18,7 @@ import { listAssociationsForParagraph } from './associations.js';
 import { parseNodeType } from './node-type.js';
 import { deriveInference } from './inference-meta.js';
 import { parseObjectMeta } from './object-meta.js';
+import { rewriteObjectTextBlob } from './object-text-edit.js';
 
 export interface Queryable {
   query: Pool['query'];
@@ -270,11 +271,15 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
 }
 
 /** Outcome of {@link updateParagraphText}: the spec/node pairing is validated
- *  before any write so the API can map `not-found` → 404 and `wrong-spec` → 403. */
+ *  before any write so the API can map `not-found` → 404, `wrong-spec` → 403,
+ *  and `locked-object` → 422 (#519, ADR-072 decision 3): an `object` row's
+ *  content is a captured OOXML blob, editable only through its `objectText`
+ *  children, never by replacing the row's own `text` directly. */
 export type UpdateParagraphResult =
   | { readonly status: 'updated'; readonly node: SpecNode }
   | { readonly status: 'not-found' }
-  | { readonly status: 'wrong-spec' };
+  | { readonly status: 'wrong-spec' }
+  | { readonly status: 'locked-object'; readonly nodeType: string };
 
 // Exported for the sibling-insert module (paragraph-insert.ts, #372) — every
 // paragraph write path returns the same reconstructed SpecNode shape.
@@ -315,10 +320,82 @@ export async function fetchSubtreeNode(
  * clobbering a concurrent edit. A successful write bumps `specs.content_version`
  * so the next optimistic precondition sees the change.
  */
+/** Owner row {@link applyParagraphUpdate} needs before it may write: the
+ *  spec/node-type pairing to validate, `baseVersion` to compute the next
+ *  version, and `parentId` — `paragraphs.parent_id` is a real indexed
+ *  self-FK column (migration 003), so an `objectText` row's parent `object`
+ *  row is available with no separate join. */
+async function fetchUpdateOwnerRow(
+  client: PoolClient,
+  nodeId: string
+): Promise<
+  { specId: string; nodeType: string; baseVersion: number; parentId: string | null } | undefined
+> {
+  const owner = await client.query<{
+    spec_id: string;
+    node_type: string;
+    base_version: number;
+    parent_id: string | null;
+  }>(
+    `SELECT spec_id, node_type, base_version, parent_id FROM paragraphs WHERE id = $1 FOR UPDATE`,
+    [nodeId]
+  );
+  const row = owner.rows[0];
+  if (!row) return undefined;
+  return {
+    specId: row.spec_id,
+    nodeType: row.node_type,
+    baseVersion: row.base_version,
+    parentId: row.parent_id,
+  };
+}
+
+/** Validates the fetched owner row before any write: `not-found` (no such
+ *  row), `wrong-spec` (UUIDs compared case-insensitively — `pg` returns
+ *  `spec_id` lowercased while `z.uuid()` preserves an uppercase input, so an
+ *  uppercase specId must not false-403), and `locked-object` — an `object`
+ *  row's content is a captured OOXML blob, editable only through its
+ *  `objectText` children (#519, ADR-072 decision 3), never by replacing the
+ *  row's own `text` directly. Returns `null` when the write may proceed. */
+function validateUpdateOwner(
+  owner: { specId: string; nodeType: string; parentId: string | null } | undefined,
+  specId: string
+): UpdateParagraphResult | null {
+  if (!owner) return { status: 'not-found' };
+  if (owner.specId.toLowerCase() !== specId.toLowerCase()) return { status: 'wrong-spec' };
+  if (owner.nodeType === 'object') return { status: 'locked-object', nodeType: owner.nodeType };
+  return null;
+}
+
+/** After the generic text write below, an `objectText` row also needs its
+ *  parent `object` row's captured blob rewritten (#519): DOCX regeneration
+ *  reads body-object content only from `object_data.blob`, never from an
+ *  `objectText` row's own `text` column. A no-op for every other node type.
+ *  Throws `DatabaseError` if an `objectText` row somehow carries no parent —
+ *  every `objectText` node is inserted as an `object` node's child
+ *  (insertTree/flattenDfs), so a null `parentId` here is a data-integrity
+ *  fault, never a silent skip. */
+async function rewriteObjectTextIfNeeded(
+  client: PoolClient,
+  specId: string,
+  owner: { parentId: string | null; nodeType: string },
+  nodeId: string,
+  text: string
+): Promise<void> {
+  if (owner.nodeType !== 'objectText') return;
+  if (!owner.parentId) {
+    throw new DatabaseError(
+      `applyParagraphUpdate: objectText node ${nodeId} has no parent object row to rewrite`
+    );
+  }
+  await rewriteObjectTextBlob(client, specId, owner.parentId, nodeId, text);
+}
+
 /** In-transaction body of {@link updateParagraphText}: gate → ownership check →
- *  write paragraph → snapshot the post-write text (#377, ADR-052 D1) → bump
- *  specs.content_version. On a non-'updated' outcome the caller rolls back; on
- *  'updated' the caller commits. */
+ *  write paragraph → rewrite the parent object blob when the target is an
+ *  `objectText` row (#519) → snapshot the post-write text (#377, ADR-052 D1)
+ *  → bump specs.content_version. On a non-'updated' outcome the caller rolls
+ *  back; on 'updated' the caller commits. */
 async function applyParagraphUpdate(
   client: PoolClient,
   specId: string,
@@ -332,22 +409,22 @@ async function applyParagraphUpdate(
   // returned contentVersion is the pre-bump generation this write belongs to.
   const gate = await assertSpecWritable(client, specId, expectedVersion);
 
-  const owner = await client.query<{ spec_id: string; node_type: string; base_version: number }>(
-    `SELECT spec_id, node_type, base_version FROM paragraphs WHERE id = $1 FOR UPDATE`,
-    [nodeId]
-  );
-  const ownerRow = owner.rows[0];
-  if (!ownerRow) return { status: 'not-found' };
-  // UUIDs compare case-insensitively in PostgreSQL but `pg` returns spec_id
-  // lowercased, while z.uuid() accepts (and preserves) an uppercase input — so
-  // normalize both sides before comparing, else an uppercase specId false-403s.
-  if (ownerRow.spec_id.toLowerCase() !== specId.toLowerCase()) return { status: 'wrong-spec' };
+  const ownerRow = await fetchUpdateOwnerRow(client, nodeId);
+  const invalid = validateUpdateOwner(ownerRow, specId);
+  if (invalid) return invalid;
+  // Unreachable in practice: validateUpdateOwner only returns null when
+  // ownerRow is defined. Kept so strict-null-checks can narrow ownerRow below
+  // without a non-null assertion (banned outside tests).
+  if (!ownerRow) {
+    throw new DatabaseError('applyParagraphUpdate: owner row missing after passing validation');
+  }
 
-  const nextVersion = ownerRow.base_version + 1;
+  const nextVersion = ownerRow.baseVersion + 1;
   await client.query(
     `UPDATE paragraphs SET text = $2, base_version = $3, updated_at = now() WHERE id = $1`,
     [nodeId, text, nextVersion]
   );
+  await rewriteObjectTextIfNeeded(client, specId, ownerRow, nodeId, text);
 
   const historyContext = await resolveHistoryContext(client, gate.contentVersion, actorLabel);
   await recordParagraphHistory(client, {
@@ -355,7 +432,7 @@ async function applyParagraphUpdate(
     specId,
     version: nextVersion,
     text,
-    nodeType: ownerRow.node_type,
+    nodeType: ownerRow.nodeType,
     op: 'edit',
     contentVersion: historyContext.contentVersion,
     userId: historyContext.userId,

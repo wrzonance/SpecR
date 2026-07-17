@@ -53,6 +53,14 @@ export async function handleUpdateParagraph(args: unknown): Promise<ToolResult> 
     const result = await updateParagraphText(specId, nodeId, text, expectedVersion, actorLabel);
     if (result.status === 'not-found') return toolError(`paragraph not found: id=${nodeId}`);
     if (result.status === 'wrong-spec') return toolError('paragraph does not belong to this spec');
+    if (result.status === 'locked-object') {
+      // Mirrors the REST 422 (src/api/paragraphs.ts) verbatim (#519, ADR-072
+      // decision 3): an `object` row's content is a captured OOXML blob,
+      // editable only through its `objectText` children.
+      return toolError(
+        `node type "${result.nodeType}" is locked and cannot be edited directly — edit its objectText child instead`
+      );
+    }
     return ok(result.node);
   } catch (err) {
     const gate = gateToolError(err);
