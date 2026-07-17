@@ -1210,3 +1210,80 @@ describe('parseDocx — header/footer image media wiring (#487)', () => {
     );
   });
 });
+
+// ─── body object wiring, end to end (#300, ADR-072) ─────────────────────────
+// extractBodyObjects/computeBodyOrder/buildTree's object attachment are each
+// exhaustively unit-tested at their own boundaries (body-objects.test.ts,
+// body-order.test.ts, inference.test.ts). These tests pin only that
+// parseDocx/runPipeline actually wires the whole path together: a real body
+// table/text box lands in the returned tree as an `object` node with
+// `objectText` children, in document order, and an out-of-scope drawable is
+// never silently dropped — it always surfaces as a body-drawing-skipped
+// warning.
+
+const BODY_OBJECT_NS = [
+  'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"',
+  'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"',
+  'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"',
+  'xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"',
+].join(' ');
+
+function docWithBodyObjects(bodyXml: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?><w:document ${BODY_OBJECT_NS}><w:body>${bodyXml}</w:body></w:document>`;
+}
+
+function bodyObjectTable(cellText: string): string {
+  return `<w:tbl><w:tr><w:tc><w:p><w:r><w:t>${cellText}</w:t></w:r></w:p></w:tc></w:tr></w:tbl>`;
+}
+
+// An out-of-scope chart drawable — recognized but never captured (ADR-072
+// decision 10); the only species this suite needs to prove no-silent-loss.
+function bodyObjectChart(): string {
+  return (
+    '<w:p><w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">' +
+    '<c:chart r:id="rId9"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
+  );
+}
+
+describe('parseDocx — body object wiring (#300, ADR-072)', () => {
+  it('document-order conservation: a body table between two paragraphs becomes an object node with its cell text as an objectText child', async () => {
+    const documentXml = docWithBodyObjects(
+      `<w:p><w:r><w:t>intro</w:t></w:r></w:p>${bodyObjectTable('cell one')}<w:p><w:r><w:t>outro</w:t></w:r></w:p>`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+
+    const object = allNodes(tree.parts).find((n) => n.type === 'object');
+    expect(object?.meta.object?.kind).toBe('table');
+    expect(object?.children).toHaveLength(1);
+    expect(object?.children[0]?.type).toBe('objectText');
+    expect(object?.children[0]?.text).toBe('cell one');
+
+    // Document order: the object sits between the intro and outro text, not
+    // reordered to the front or back of the tree.
+    const roots = tree.parts;
+    const objectRootIndex = roots.findIndex((n) => n.type === 'object');
+    expect(objectRootIndex).toBeGreaterThan(0);
+    expect(roots[objectRootIndex - 1]?.text).toBe('intro');
+    expect(roots[objectRootIndex + 1]?.text).toBe('outro');
+  });
+
+  it('no-silent-loss: an out-of-scope chart drawable is never dropped silently — it surfaces a body-drawing-skipped warning', async () => {
+    const documentXml = docWithBodyObjects(
+      `<w:p><w:r><w:t>intro</w:t></w:r></w:p>${bodyObjectChart()}`
+    );
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+
+    expect(tree.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'body-drawing-skipped' })])
+    );
+    expect(allNodes(tree.parts).some((n) => n.type === 'object')).toBe(false);
+  });
+
+  it('no body-level objects or drawables — no object nodes and no body-drawing-skipped warning', async () => {
+    const tree = await parseDocx(await makeDocx({}));
+
+    expect(allNodes(tree.parts).some((n) => n.type === 'object')).toBe(false);
+    expect((tree.warnings ?? []).some((w) => w.type === 'body-drawing-skipped')).toBe(false);
+  });
+});

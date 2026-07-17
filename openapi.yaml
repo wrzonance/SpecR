@@ -205,11 +205,28 @@ paths:
         - name: nodeType
           in: query
           required: false
-          description: Restrict to a paragraph node type (part, article, pr1…pr7, note).
+          description: >-
+            Restrict to a paragraph node type (part, article, pr1…pr7, note,
+            or the object/objectText body-object types, #300).
           schema:
             type: string
             enum:
-              [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation]
+              [
+                spec,
+                part,
+                article,
+                pr1,
+                pr2,
+                pr3,
+                pr4,
+                pr5,
+                pr6,
+                pr7,
+                note,
+                continuation,
+                object,
+                objectText,
+              ]
         - name: limit
           in: query
           required: false
@@ -556,6 +573,11 @@ paths:
         (ADR-022 D2), stored beside — never merged into — the machine classification.
         `editability: null` clears the override so the effective value falls back to
         the machine verdict. The node must belong to the spec in the path (else 403).
+        Setting a non-null override on an `object` or `objectText` node is rejected
+        422 — their editability is fixed at capture time (ADR-072 decision 2: an
+        `object` always `locked`, its `objectText` children always `editable`) and
+        is never a human-editable choice; clearing (`null`) such a node is a no-op
+        ownership-checked 200, since there is never a standing override to clear.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -603,6 +625,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -5404,8 +5428,7 @@ components:
     SearchHit:
       type: object
       description: One ranked paragraph match with stable navigation anchors.
-      required:
-        [paragraphId, text, nodeType, specId, specSection, specTitle, snippet, rank]
+      required: [paragraphId, text, nodeType, specId, specSection, specTitle, snippet, rank]
       properties:
         paragraphId:
           type: string
@@ -5416,7 +5439,9 @@ components:
           description: Full paragraph text.
         nodeType:
           type: string
-          description: CSI node type (part, article, pr1…pr7, note).
+          description: >-
+            CSI node type (part, article, pr1…pr7, note, continuation, or the
+            object/objectText body-object types, #300).
         specId:
           type: string
           format: uuid
@@ -5544,10 +5569,8 @@ components:
       properties:
         rows: { type: integer, description: Total aligned rows in the full matrix. }
         aligned: { type: integer, description: Rows present in ≥2 columns. }
-        identical:
-          { type: integer, description: Rows present in all columns with identical text. }
-        differing:
-          { type: integer, description: Rows that are not identical (rows − identical). }
+        identical: { type: integer, description: Rows present in all columns with identical text. }
+        differing: { type: integer, description: Rows that are not identical (rows − identical). }
         columns:
           type: array
           description: Per-column counts, index-aligned to `columns`.
@@ -6264,6 +6287,7 @@ components:
             - pdf-font-encoding-unrecoverable
             - table-content-skipped
             - header-footer-content-skipped
+            - body-drawing-skipped
         lineHint:
           type: string
           description: 'Source location hint (e.g. "line 12: <text>")'
@@ -6416,7 +6440,23 @@ components:
           description: Normalized ilvl the losing signal reported (part=0 … pr7=8)
         reportedNodeType:
           type: string
-          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation]
+          enum:
+            [
+              spec,
+              part,
+              article,
+              pr1,
+              pr2,
+              pr3,
+              pr4,
+              pr5,
+              pr6,
+              pr7,
+              note,
+              continuation,
+              object,
+              objectText,
+            ]
 
     SpecNodeInference:
       type: object
@@ -6450,8 +6490,7 @@ components:
 
     ScoredParagraph:
       type: object
-      required:
-        [nodeId, nodeType, ilvl, label, preview, confidence, signalUsed, agreed, evidence]
+      required: [nodeId, nodeType, ilvl, label, preview, confidence, signalUsed, agreed, evidence]
       description: >-
         One scored structural paragraph in a GET /specs/{id}/hierarchy-report
         response (WS2, #424) — the same inference provenance as
@@ -6613,7 +6652,27 @@ components:
           format: uuid
         type:
           type: string
-          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation]
+          description: >-
+            'object' and 'objectText' (#300) model a captured body-level
+            table/text-box and its editable interior paragraph text — neither
+            participates in CSI numbering or the 5-signal hierarchy engine.
+          enum:
+            [
+              spec,
+              part,
+              article,
+              pr1,
+              pr2,
+              pr3,
+              pr4,
+              pr5,
+              pr6,
+              pr7,
+              note,
+              continuation,
+              object,
+              objectText,
+            ]
         text:
           type: string
         children:
@@ -6671,6 +6730,50 @@ components:
                 - quality-assurance
                 - delivery-storage-handling
                 - warranty
+            object:
+              description: >-
+                Captured DOCX body object (#300, ADR-072) — a table or text
+                box modeled as an opaque round-trip blob. Present only on
+                `type: object` nodes.
+              $ref: '#/components/schemas/ObjectMeta'
+
+    ObjectMeta:
+      type: object
+      description: >-
+        Metadata for a captured body-level object (#300, ADR-072): SpecR
+        round-trips its OOXML byte-for-byte via `blob` rather than modeling
+        its interior as CSI structure.
+      required: [kind, floating, generation, blob]
+      properties:
+        kind:
+          type: string
+          enum: [table, textBox]
+        floating:
+          type: boolean
+          description: Anchored/wrapped (true) vs. inline (false) placement.
+        generation:
+          type: string
+          description: The OOXML drawing generation the object was authored in.
+          enum: [drawingml, vml]
+        rows:
+          type: integer
+          minimum: 1
+          description: Table row count (table kind only).
+        columns:
+          type: integer
+          minimum: 1
+          description: Table column count (table kind only).
+        blob:
+          type: array
+          description: >-
+            The object's own top-level OOXML node(s), in document order, as
+            fast-xml-parser `preserveOrder: true` JSON — an opaque capture
+            format, never interpreted as modeled CSI structure. Always
+            non-empty.
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: true
 
     SpecTree:
       type: object
@@ -8589,7 +8692,19 @@ components:
       type: object
       description: A registry record (the PUT verdict response).
       required:
-        [id, orgCode, standardCode, title, currentVersion, sourceUrl, status, lastVerifiedAt, notes, createdAt, updatedAt]
+        [
+          id,
+          orgCode,
+          standardCode,
+          title,
+          currentVersion,
+          sourceUrl,
+          status,
+          lastVerifiedAt,
+          notes,
+          createdAt,
+          updatedAt,
+        ]
       properties:
         id: { type: string, format: uuid }
         orgCode: { type: string }

@@ -8,6 +8,7 @@ import type { DocxComment } from './comments.js';
 import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
 import { nestLeadInSublists } from './lead-in-nesting.js';
 import { extractTables } from './tables.js';
+import { captureBodyObjectsForTree } from './body-object-attach.js';
 import {
   applyNumberingProfile,
   mergeProfileConflicts,
@@ -102,6 +103,19 @@ interface ValidEntries {
   readonly mediaByPart: HeaderFooterMediaByPart;
 }
 
+// Visible tables are counted only and surfaced as a warning (#293) — the tree-level
+// `object` capture above models a table's CONTENT; this legacy scan only reports that
+// one exists, so it stays a separate, un-deduped warning source (ADR-038 hidden/visible
+// split untouched).
+function visibleTableWarning(visibleCount: number): ParseWarning | undefined {
+  return visibleCount > 0
+    ? {
+        type: 'table-content-skipped',
+        suggestion: `${visibleCount} visible table(s) detected but not yet modeled into the spec tree`,
+      }
+    : undefined;
+}
+
 function runPipeline(
   entries: ValidEntries,
   onProgress?: (stage: string, pct: number) => void,
@@ -120,8 +134,22 @@ function runPipeline(
     ? parseCoreMetadata(entries.coreXml)
     : { section: UNKNOWN_SECTION_IDENTITY, title: UNKNOWN_SECTION_IDENTITY };
 
+  // Body object capture (#300, ADR-072): a separate preserveOrder pass over the same
+  // document.xml, independent of the paragraph walk above — captures every body-level
+  // table/text box as an `object` SpecNode (with `objectText` children) and supplies
+  // buildTree's attachment points below, so tree assembly places each object exactly
+  // where it sits in document order.
+  const bodyObjects = captureBodyObjectsForTree(entries.documentXml, styleMap);
+
   onProgress?.('complete', 100);
-  const tree = buildTree(classified, meta.section, meta.title, source);
+  const tree = buildTree(
+    classified,
+    meta.section,
+    meta.title,
+    source,
+    bodyObjects.objectsBeforeFirst,
+    bodyObjects.objectsByPrecedingIndex
+  );
   const structuralWarnings = auditTreeStructure(tree.parts);
 
   // Table scan (#293): a separate pass over the same document.xml — parseDocument
@@ -129,13 +157,7 @@ function runPipeline(
   // classify anything the paragraph walk already saw. Hidden tables are retained
   // out-of-band (ADR-038); visible tables are counted only and surfaced as a warning.
   const { hiddenTables, visibleCount } = extractTables(entries.documentXml, styleMap);
-  const tableWarning: ParseWarning | undefined =
-    visibleCount > 0
-      ? {
-          type: 'table-content-skipped',
-          suggestion: `${visibleCount} visible table(s) detected but not yet modeled into the spec tree`,
-        }
-      : undefined;
+  const tableWarning = visibleTableWarning(visibleCount);
 
   // Header/footer capture (#306, ADR-068): `known` is meta.section/meta.title
   // from parseCoreMetadata ONLY — never the content-inference fallback the
@@ -158,6 +180,7 @@ function runPipeline(
     ...structuralWarnings,
     ...(meta.warning ? [meta.warning] : []),
     ...(tableWarning ? [tableWarning] : []),
+    ...(bodyObjects.warning ? [bodyObjects.warning] : []),
     ...hf.warnings,
   ];
   const withWarnings = warnings.length > 0 ? { ...tree, warnings } : tree;

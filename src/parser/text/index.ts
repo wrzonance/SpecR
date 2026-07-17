@@ -71,6 +71,13 @@ const WARNING_SUGGESTIONS: Readonly<Record<ParseWarningType, string>> = {
   // regardless of origin. See raw.unmodeled (#306, ADR-068) for the preserved content.
   'header-footer-content-skipped':
     'One or more header/footer items were detected but not yet modeled; see raw.unmodeled.',
+  // Emitted directly by the DOCX parser (docx/index.ts, via body-objects.ts
+  // extractBodyObjects), not via makeWarning — DOCX-only: a body-level drawing
+  // (chart, smartArt, OLE, image, or an unrecognized shape) was detected but
+  // could not be captured as an 'object' node, so its content is missing from
+  // the spec tree (#300, ADR-072).
+  'body-drawing-skipped':
+    'One or more body drawings (chart, SmartArt, OLE object, image, or unrecognized shape) were detected but not captured; their content is missing from the spec tree.',
 };
 
 const SECTION_EXTRACT_RE = new RegExp(

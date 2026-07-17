@@ -181,3 +181,11 @@ export type {
   PatchNumberingProfileBody,
   SetSpecNumberingProfileBody,
 } from './style-schemas.js';
+export { UUID_TAG_PREFIX } from './uuid-tag.js';
+export {
+  ObjectKindSchema,
+  ObjectGenerationSchema,
+  ObjectBlobNodeSchema,
+  ObjectMetaSchema,
+} from './object-schemas.js';
+export type { ObjectKind, ObjectGeneration, ObjectBlobNode, ObjectMeta } from './object-schemas.js';

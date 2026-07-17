@@ -5,7 +5,7 @@ import {
   ReclassifyBodySchema,
   AcceptNoteBodySchema,
 } from '../ast/index.js';
-import type { ConventionRules } from '../ast/index.js';
+import type { ConventionRules, Editability } from '../ast/index.js';
 import {
   setSpecEditabilityOverride,
   clearSpecEditabilityOverride,
@@ -46,6 +46,10 @@ function sendOwnershipError(result: OwnershipResult, res: Response): boolean {
   return false;
 }
 
+function respondEditability(res: Response, nodeId: string, editability: Editability | null): void {
+  res.status(200).json({ success: true, data: { nodeId, editability } });
+}
+
 export async function patchEditabilityHandler(req: Request, res: Response): Promise<void> {
   const ids = parseIds(req, res);
   if (!ids) return;
@@ -58,12 +62,24 @@ export async function patchEditabilityHandler(req: Request, res: Response): Prom
   }
   try {
     const { editability } = body.data;
-    const result =
-      editability === null
-        ? await clearSpecEditabilityOverride(ids.specId, ids.nodeId)
-        : await setSpecEditabilityOverride(ids.specId, ids.nodeId, editability);
+    if (editability === null) {
+      const result = await clearSpecEditabilityOverride(ids.specId, ids.nodeId);
+      if (sendOwnershipError(result, res)) return;
+      respondEditability(res, ids.nodeId, null);
+      return;
+    }
+    const result = await setSpecEditabilityOverride(ids.specId, ids.nodeId, editability);
+    // object/objectText editability is fixed at capture time (ADR-072 D2) — never
+    // overridable, so this predates the ownership check's not-found/wrong-spec pair.
+    if (result.status === 'fixed-node-type') {
+      res.status(422).json({
+        success: false,
+        error: `node type "${result.nodeType}" has fixed editability and cannot be overridden`,
+      });
+      return;
+    }
     if (sendOwnershipError(result, res)) return;
-    res.status(200).json({ success: true, data: { nodeId: ids.nodeId, editability } });
+    respondEditability(res, ids.nodeId, editability);
   } catch (err) {
     logger.error({ err }, 'patch editability failed');
     res.status(500).json({ success: false, error: 'internal server error' });

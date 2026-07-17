@@ -1,4 +1,5 @@
 import type { SpecNode, SpecTree } from '../ast/types.js';
+import type { ObjectMeta } from '../ast/index.js';
 import { getLabel, consumesNumber } from '../ast/index.js';
 
 // getLabel is re-exported so existing consumers (and the markdown-renderer contract)
@@ -7,6 +8,83 @@ import { getLabel, consumesNumber } from '../ast/index.js';
 export { getLabel };
 
 const INDENT = '   ';
+
+// A captured objectText leaf can still carry a literal newline (a preserved break
+// inside one interior paragraph's run text). Collapse it to a space so neither a GFM
+// cell nor a `>` blockquote line is fractured by a hard break — a stray newline in a
+// blockquote orphans the tail line as a plain paragraph. Shared by every object render
+// path (pipe table, fallback list, text box).
+function collapseBreaks(text: string): string {
+  return text.replace(/\r?\n/g, ' ').trim();
+}
+
+// GFM pipe-table cells additionally can't carry an unescaped `|` — escape it so a cell
+// like "A | B" doesn't fracture the row into extra columns.
+function escapeTableCell(text: string): string {
+  return collapseBreaks(text.replace(/\|/g, '\\|'));
+}
+
+function chunkIntoRows(cells: readonly SpecNode[], columns: number): readonly SpecNode[][] {
+  const rows: SpecNode[][] = [];
+  for (let i = 0; i < cells.length; i += columns) {
+    rows.push(cells.slice(i, i + columns));
+  }
+  return rows;
+}
+
+function renderPipeRow(cells: readonly SpecNode[]): string {
+  return `| ${cells.map((cell) => escapeTableCell(cell.text)).join(' | ')} |`;
+}
+
+// A "simple grid": the captured objectText count exactly matches rows*columns, so
+// document-order cells can be chunked into columns-wide rows with no merge evidence to
+// account for (ADR-072). A blank cell is never captured as an objectText leaf (its text
+// would be empty), so any mismatch here means either a merged cell or a blank one — both
+// degrade to renderObjectFallback rather than guessing at cell positions.
+function isSimpleGrid(node: SpecNode, meta: ObjectMeta): meta is ObjectMeta & { columns: number } {
+  return (
+    meta.rows !== undefined &&
+    meta.columns !== undefined &&
+    node.children.length === meta.rows * meta.columns
+  );
+}
+
+// The first chunked row doubles as the GFM header row — the blob carries no per-row
+// "this is a header" flag, and GFM syntax requires a header/separator regardless.
+function renderGfmTable(node: SpecNode, columns: number): string {
+  const [header, ...body] = chunkIntoRows(node.children, columns);
+  if (!header) return '';
+  const separator = `| ${Array(columns).fill('---').join(' | ')} |`;
+  return `\n${[renderPipeRow(header), separator, ...body.map(renderPipeRow)].join('\n')}`;
+}
+
+// Exotic cases (merged/blank cells the grid heuristic can't place, or a node missing
+// its object metadata entirely) fall back to a labeled block of one line per captured
+// interior text — never a guess at a table shape the blob doesn't cleanly support.
+function renderObjectFallback(node: SpecNode, meta: ObjectMeta | undefined): string {
+  const label = meta?.kind === 'table' ? '[TABLE]' : '[OBJECT]';
+  const lines = node.children.map((child) => `${INDENT}${collapseBreaks(child.text)}`);
+  return [`\n> **${label}**`, ...lines].join('\n');
+}
+
+function renderTextBox(node: SpecNode, meta: ObjectMeta): string {
+  const text = node.children.map((child) => collapseBreaks(child.text)).join(' ');
+  const floatingNote = meta.floating ? ' *(floating)*' : '';
+  return `\n> **[TEXT BOX]** ${text}${floatingNote}`;
+}
+
+// A captured body object (#300, ADR-072) renders out-of-band from CSI numbering: a
+// table as a GFM pipe table when its shape is unambiguous, a text box as a labeled
+// blockquote, and anything else as a labeled fallback list. `node.children` are always
+// the object's own `objectText` leaves (never rendered independently — see the
+// objectText branch in renderNonStructural).
+function renderObjectNode(node: SpecNode): string {
+  const meta = node.meta.object;
+  if (!meta) return renderObjectFallback(node, meta);
+  if (meta.kind === 'textBox') return renderTextBox(node, meta);
+  if (isSimpleGrid(node, meta)) return renderGfmTable(node, meta.columns);
+  return renderObjectFallback(node, meta);
+}
 
 // Render a node's children, advancing the CSI ordinal only past numbered siblings
 // so notes/continuations/vanish nodes interleave without disturbing the sequence.
@@ -26,13 +104,21 @@ function renderChildren(
 // The one rule every depth shares — root and child alike (#296). A note always
 // renders as a [NOTE] blockquote (editorial metadata visible to spec writers,
 // regardless of meta.vanish); hidden (vanish) non-note content is suppressed; a
-// continuation renders as indented plain text. Returns null for a structural
-// (numbered) node — the caller labels it (a part at the root, a pr-tier deeper).
+// continuation renders as indented plain text. An object (#300) renders as a table/
+// text-box block; its objectText leaves fold into that rendering and never render on
+// their own. Returns null for a structural (numbered) node — the caller labels it (a
+// part at the root, a pr-tier deeper).
 function renderNonStructural(node: SpecNode, depth: number): string | null {
   if (node.type === 'note') {
     return `\n> **[NOTE]** ${node.text}`;
   }
   if (node.meta.vanish) {
+    return '';
+  }
+  if (node.type === 'object') {
+    return renderObjectNode(node);
+  }
+  if (node.type === 'objectText') {
     return '';
   }
   if (node.type === 'continuation') {

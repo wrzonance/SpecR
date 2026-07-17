@@ -46,9 +46,18 @@ export function getLabel(type: NodeType, index: number, partNumber = 1): string 
  * Whether a node advances the CSI ordinal. Notes render as [NOTE] blockquotes,
  * continuations as plain text, and vanish nodes not at all — none carry a number,
  * so none may consume an ordinal (counting them shifted numbered siblings, #122).
+ * Body objects ('object', 'objectText' — #300) are captured OOXML blobs rendered
+ * out-of-band (a table/text-box block, or the plain text inside one); they never
+ * sit among numbered CSI siblings, so they don't consume one either.
  * Both the renderer and the parser's label-strip walk the tree with this rule so a
  * node's computed ordinal is identical on both sides.
  */
 export function consumesNumber(node: SpecNode): boolean {
-  return node.type !== 'note' && node.type !== 'continuation' && !node.meta.vanish;
+  return (
+    node.type !== 'note' &&
+    node.type !== 'continuation' &&
+    node.type !== 'object' &&
+    node.type !== 'objectText' &&
+    !node.meta.vanish
+  );
 }

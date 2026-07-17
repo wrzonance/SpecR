@@ -7,6 +7,7 @@ import {
 } from './spec-tree-schemas.js';
 import { StyleNodeTypeSchema, StylePropertiesSchema } from './style-schemas.js';
 import type { HeaderFooterComposition } from './header-footer-schemas.js';
+import type { ObjectMeta } from './object-schemas.js';
 
 export type NodeType = z.infer<typeof NodeTypeSchema>;
 
@@ -121,6 +122,11 @@ export interface SpecNodeMeta {
   readonly associations?: readonly ParagraphAssociation[];
   /** Semantic CSI role of this article (ADR-033). Absent === unknown/non-article. */
   readonly articleRole?: ArticleRole;
+  /**
+   * Captured DOCX body object (#300, ADR-072) — a table or text box modeled
+   * as an opaque round-trip blob. Present only on `type === 'object'` nodes.
+   */
+  readonly object?: ObjectMeta;
 }
 
 export interface SpecNode {
@@ -145,7 +151,8 @@ export type ParseWarningType =
   | 'pdf-font-encoding-remapped'
   | 'pdf-font-encoding-unrecoverable'
   | 'table-content-skipped'
-  | 'header-footer-content-skipped';
+  | 'header-footer-content-skipped'
+  | 'body-drawing-skipped';
 
 export interface ParseWarning {
   readonly type: ParseWarningType;

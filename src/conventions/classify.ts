@@ -17,6 +17,8 @@ import type { ClassificationEvidence, ClassifyResult, ParagraphClassification } 
  * deep-equal output, re-runnable forever without the source document.
  *
  * Precedence when signals conflict (highest first), per ADR-022 D1 / issue O-6:
+ *   0. body-object — `object`/`objectText` nodes (#300, ADR-072 D2) are fixed
+ *      to `locked`/`editable` respectively, never derived from sourceFacts
  *   1. note   — banner fact or a `noteBanners` regex match on the text
  *   2. note/… — comment policy (`comments.treatAs`) when comments are present
  *   3. choice — a choice-token candidate whose `kind` the profile enables
@@ -76,6 +78,7 @@ function classifyNode(
 ): ParagraphClassification {
   const facts: SourceFacts = node.meta.sourceFacts ?? {};
   const verdict =
+    objectFixationRung(node.type) ??
     noteRung(node.text, facts, compiled.noteBanners) ??
     commentRung(facts, rules) ??
     choiceRung(facts, compiled.enabledChoiceKinds) ??
@@ -92,6 +95,26 @@ interface RungVerdict {
   readonly editability: Editability;
   readonly confidence: number;
   readonly evidence: Evidence;
+}
+
+// ── Rung 0: body-object fixation (#300, ADR-072 decision 2) ───────────────────
+// `object`/`objectText` editability is fixed at capture time, never derived by
+// classification: an `object` holds an opaque, un-editable OOXML blob (always
+// `locked`); its `objectText` children are exactly the interior paragraph text
+// an editor may redline (always `editable`). This rung runs FIRST and
+// short-circuits the entire ladder — body-object-attach.ts never populates
+// meta.sourceFacts on these node types, so nothing below it could fire anyway,
+// but skipping the ladder entirely (rather than merely outranking it) keeps
+// the invariant true regardless of what a future signal-capture pass adds.
+
+function objectFixationRung(type: SpecNode['type']): RungVerdict | null {
+  if (type === 'object') return fixed('locked');
+  if (type === 'objectText') return fixed('editable');
+  return null;
+}
+
+function fixed(editability: Editability): RungVerdict {
+  return { editability, confidence: 1, evidence: [{ rule: 'body-object' }] };
 }
 
 // ── Rung 1: note ──────────────────────────────────────────────────────────────

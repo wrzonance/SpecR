@@ -1,9 +1,10 @@
 import { FileChild, XmlComponent, Paragraph, StringValueElement } from 'docx';
+import { UUID_TAG_PREFIX } from '../ast/index.js';
 
 class SdtProperties extends XmlComponent {
   constructor(uuid: string) {
     super('w:sdtPr');
-    this.root.push(new StringValueElement('w:tag', `specr-uuid-${uuid}`));
+    this.root.push(new StringValueElement('w:tag', `${UUID_TAG_PREFIX}${uuid}`));
   }
 }
 

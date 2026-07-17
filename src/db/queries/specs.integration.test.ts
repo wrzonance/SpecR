@@ -131,6 +131,90 @@ describe('getSpecTree', () => {
   });
 });
 
+const TABLE_OBJECT_META = {
+  kind: 'table' as const,
+  floating: false,
+  generation: 'drawingml' as const,
+  rows: 1,
+  columns: 2,
+  blob: [
+    {
+      'w:tbl': [{ 'w:tblPr': [] }, { 'w:tblGrid': [{ 'w:gridCol': [{}] }, { 'w:gridCol': [{}] }] }],
+    },
+  ],
+};
+
+describe('getSpecTree — body objects (#300, ADR-072)', () => {
+  const OBJ_PART_ID = 'c0000000-0000-0000-0000-000000000002';
+  const OBJ_OBJECT_ID = 'c0000000-0000-0000-0000-000000000003';
+  const OBJ_TEXT_ID = 'c0000000-0000-0000-0000-000000000004';
+  let objSpecId: string;
+
+  beforeEach(async () => {
+    objSpecId = await createSpec({ section: '99 00 00', title: 'Object Test', source: 'arcat' });
+    await insertTree(
+      {
+        id: objSpecId,
+        section: '99 00 00',
+        title: 'Object Test',
+        parts: [
+          {
+            id: OBJ_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            children: [
+              {
+                id: OBJ_OBJECT_ID,
+                type: 'object',
+                text: '[TABLE]',
+                children: [
+                  {
+                    id: OBJ_TEXT_ID,
+                    type: 'objectText',
+                    text: 'Cell one text',
+                    children: [],
+                    meta: {},
+                  },
+                ],
+                meta: { object: TABLE_OBJECT_META },
+              },
+            ],
+            meta: {},
+          },
+        ],
+      },
+      objSpecId,
+      pool
+    );
+  });
+
+  afterEach(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [objSpecId]);
+  });
+
+  it('round-trips meta.object on an object node, verbatim', async () => {
+    const result = await getSpecTree(objSpecId);
+    const objectNode = result!.tree.parts[0]!.children[0]!;
+    expect(objectNode.type).toBe('object');
+    expect(objectNode.meta.object).toEqual(TABLE_OBJECT_META);
+  });
+
+  it('threads the objectText child through as a plain leaf, its own text preserved', async () => {
+    const result = await getSpecTree(objSpecId);
+    const objectNode = result!.tree.parts[0]!.children[0]!;
+    expect(objectNode.children).toHaveLength(1);
+    expect(objectNode.children[0]!.type).toBe('objectText');
+    expect(objectNode.children[0]!.text).toBe('Cell one text');
+  });
+
+  it('never spreads meta.object onto a non-object node', async () => {
+    const result = await getSpecTree(objSpecId);
+    const part = result!.tree.parts[0]!;
+    expect(part.meta.object).toBeUndefined();
+    expect(Object.keys(part.meta)).not.toContain('object');
+  });
+});
+
 describe('createSpec', () => {
   it('inserts a spec row and returns the UUID', async () => {
     const id = await createSpec({ section: '99 00 00', title: 'Test Spec', source: 'arcat' });

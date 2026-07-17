@@ -248,6 +248,7 @@ export {
   reclassifySpec,
   acceptCommentAsNote,
   type OwnershipResult,
+  type SetOverrideOutcome,
   type EditabilityDiffEntry,
   type ReclassifyReport,
   type ReclassifyOutcome,

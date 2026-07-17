@@ -243,6 +243,22 @@ describe('tool: set_editability_override / clear_editability_override', () => {
     });
     expect(result.isError).toBe(true);
   });
+
+  // ADR-072 decision 2: object/objectText editability is fixed at capture
+  // time — the MCP surface must reject an override the same as REST (parity).
+  it('returns isError when overriding an "object" node — editability fixation invariant (ADR-072 D2)', async () => {
+    const obj = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position) VALUES ($1, 'object', '', 5) RETURNING id`,
+      [specId]
+    );
+    const result = await mcpTool('set_editability_override', {
+      specId,
+      nodeId: obj.rows[0]!.id,
+      editability: 'editable',
+    });
+    expect(result.isError).toBe(true);
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [obj.rows[0]!.id]);
+  });
 });
 
 describe('tool: reclassify_spec', () => {

@@ -27,7 +27,7 @@ interface TableCell {
 
 type TableRow = readonly TableCell[];
 
-type TableClassification =
+export type ClassifiedTopLevelTable =
   | { readonly kind: 'visible' }
   | { readonly kind: 'hidden'; readonly table: RetainedTable };
 
@@ -96,7 +96,7 @@ function buildRetainedTable(rows: readonly TableRow[]): RetainedTable {
 // No text-bearing evidence anywhere in the table → visible (an empty table has
 // nothing to hide). All evidence vanish → hidden. Any visible evidence → visible,
 // even if some cells are vanish (mixed content is real, retained content).
-function classifyTable(rows: readonly TableRow[]): TableClassification {
+function classifyTable(rows: readonly TableRow[]): ClassifiedTopLevelTable {
   const evidence = rows
     .flatMap((row) => row.flatMap((cell) => cell.paragraphs))
     .filter((p) => p.text.trim().length > 0);
@@ -106,15 +106,24 @@ function classifyTable(rows: readonly TableRow[]): TableClassification {
   return { kind: 'visible' };
 }
 
-export function extractTables(xml: string, styleMap: StyleMap): TableExtractionResult {
+// Promoted extraction step (#300): scans and classifies every body-level w:tbl,
+// independently of the hidden/visible reduction extractTables performs on top.
+// Exported so future body-object modeling (#300 WS1) can reuse the same
+// hidden/visible split without re-parsing word/document.xml a second time.
+export function classifyTopLevelTables(
+  xml: string,
+  styleMap: StyleMap
+): readonly ClassifiedTopLevelTable[] {
   const parsed = parseTablesXml(xml);
   const doc = parsed['w:document'] as Record<string, unknown> | undefined;
   const body = doc?.['w:body'] as Record<string, unknown> | undefined;
-  if (!body) return { hiddenTables: [], visibleCount: 0 };
+  if (!body) return [];
 
-  const classifications = findTopLevelTables(body).map((tbl) =>
-    classifyTable(parseTableRows(tbl, styleMap))
-  );
+  return findTopLevelTables(body).map((tbl) => classifyTable(parseTableRows(tbl, styleMap)));
+}
+
+export function extractTables(xml: string, styleMap: StyleMap): TableExtractionResult {
+  const classifications = classifyTopLevelTables(xml, styleMap);
   return {
     hiddenTables: classifications.flatMap((c) => (c.kind === 'hidden' ? [c.table] : [])),
     visibleCount: classifications.filter((c) => c.kind === 'visible').length,

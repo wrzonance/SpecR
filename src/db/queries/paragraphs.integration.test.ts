@@ -1,6 +1,14 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { pool, getParagraphWithAncestors, insertTree, updateParagraphText } from '../index.js';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import {
+  pool,
+  getParagraphWithAncestors,
+  insertTree,
+  updateParagraphText,
+  createSpec,
+  getSpecTree,
+} from '../index.js';
 import { SYSTEM_ACTOR_LABEL } from './paragraph-history.js';
+import { fetchSubtreeNode } from './paragraphs.js';
 
 const SPEC_ID = 'b0000000-0000-0000-0000-000000000000';
 const PART_ID = 'b0000000-0000-0000-0000-000000000001';
@@ -358,5 +366,84 @@ describe('updateParagraphText — version history capture (#377)', () => {
       [HIST_PAR_ID]
     );
     expect(joined.rows[0]!.label).toBe(SYSTEM_ACTOR_LABEL);
+  });
+});
+
+const TABLE_OBJECT_META = {
+  kind: 'table' as const,
+  floating: false,
+  generation: 'drawingml' as const,
+  rows: 1,
+  columns: 2,
+  blob: [{ 'w:tbl': [{ 'w:tblPr': [] }] }],
+};
+
+describe('body objects — read-path parity (#300, ADR-072)', () => {
+  const OBJ_PART_ID = 'd0000000-0000-0000-0000-000000000002';
+  const OBJ_OBJECT_ID = 'd0000000-0000-0000-0000-000000000003';
+  const OBJ_TEXT_ID = 'd0000000-0000-0000-0000-000000000004';
+  let objSpecId: string;
+
+  beforeEach(async () => {
+    objSpecId = await createSpec({ section: '99 00 00', title: 'Object Parity', source: 'arcat' });
+    await insertTree(
+      {
+        id: objSpecId,
+        section: '99 00 00',
+        title: 'Object Parity',
+        parts: [
+          {
+            id: OBJ_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            children: [
+              {
+                id: OBJ_OBJECT_ID,
+                type: 'object',
+                text: '[TABLE]',
+                children: [
+                  {
+                    id: OBJ_TEXT_ID,
+                    type: 'objectText',
+                    text: 'Cell one text',
+                    children: [],
+                    meta: {},
+                  },
+                ],
+                meta: { object: TABLE_OBJECT_META },
+              },
+            ],
+            meta: {},
+          },
+        ],
+      },
+      objSpecId,
+      pool
+    );
+  });
+
+  afterEach(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [objSpecId]);
+  });
+
+  it('fetchSubtreeNode (paragraphs.ts) round-trips meta.object, verbatim', async () => {
+    const node = await fetchSubtreeNode(pool, objSpecId, OBJ_OBJECT_ID);
+    expect(node).not.toBeNull();
+    expect(node!.type).toBe('object');
+    expect(node!.meta.object).toEqual(TABLE_OBJECT_META);
+  });
+
+  it('getParagraphWithAncestors round-trips meta.object on the target node', async () => {
+    const result = await getParagraphWithAncestors(OBJ_OBJECT_ID);
+    expect(result).not.toBeNull();
+    expect(result!.node.nodeType).toBe('object');
+    expect(result!.node.object).toEqual(TABLE_OBJECT_META);
+  });
+
+  it('parity: subtree read (paragraphs.ts) and full-tree read (specs.ts) produce an identical object node shape', async () => {
+    const subtreeNode = await fetchSubtreeNode(pool, objSpecId, OBJ_OBJECT_ID);
+    const fullTree = await getSpecTree(objSpecId);
+    const fullTreeNode = fullTree!.tree.parts[0]!.children[0]!;
+    expect(subtreeNode).toEqual(fullTreeNode);
   });
 });
