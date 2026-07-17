@@ -33,3 +33,20 @@ describe('ParserError — DOCX_HEADER_FOOTER_XML_INVALID code (#306)', () => {
     expect(err.cause).toBe(cause);
   });
 });
+
+// #300, ADR-072: reserved for body-order.ts's preserveOrder walk of
+// word/document.xml (the body object model's cross-tag ordering recovery) —
+// same "source XML itself doesn't parse, or an ordered node fails
+// ObjectBlobNodeSchema" scope as the codes above, never a downstream
+// capture-code defect.
+describe('ParserError — DOCX_BODY_ORDER_XML_INVALID code (#300)', () => {
+  it('accepts DOCX_BODY_ORDER_XML_INVALID as a ParserErrorCode and preserves cause', () => {
+    const cause = new Error('malformed body markup');
+    const err = new ParserError('failed to order-parse word/document.xml', {
+      code: 'DOCX_BODY_ORDER_XML_INVALID',
+      cause,
+    });
+    expect(err.code).toBe('DOCX_BODY_ORDER_XML_INVALID');
+    expect(err.cause).toBe(cause);
+  });
+});
