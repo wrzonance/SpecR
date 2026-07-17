@@ -85,6 +85,33 @@ function smartArtParagraph(): string {
   );
 }
 
+// A text box wrapped in mc:AlternateContent (#517): mc:Choice carries the
+// DrawingML text box with `interiorText`, mc:Fallback carries an equivalent
+// VML text box with a DIFFERENT ("stale") interior text — the realistic
+// shape Word emits for a modern text box (mirrors alternate-content.test.ts's
+// own ALTERNATE_CONTENT_RUN_XML fixture). Before the #517 fix,
+// anchorInteriorParagraphs's depth-agnostic w:p walk found w:p descendants
+// in BOTH the Choice and the stale Fallback branch, doubling interiorTexts.
+function alternateContentTextBoxParagraph(interiorText: string, fallbackText: string): string {
+  return (
+    '<w:p><w:r><mc:AlternateContent>' +
+    '<mc:Choice Requires="wps">' +
+    '<w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+    '<wps:wsp><wps:txbx><w:txbxContent>' +
+    para(interiorText) +
+    '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing>' +
+    '</mc:Choice>' +
+    '<mc:Fallback>' +
+    '<w:pict><v:shape><v:textbox><w:txbxContent>' +
+    para(fallbackText) +
+    '</w:txbxContent></v:textbox></v:shape></w:pict>' +
+    '</mc:Fallback>' +
+    '</mc:AlternateContent></w:r></w:p>'
+  );
+}
+
 // A single w:r run's own <w:drawing> content, WITHOUT the enclosing <w:p><w:r>
 // wrapper — a building block for a two-run paragraph (see twoDrawingRuns).
 function chartRun(): string {
@@ -342,6 +369,30 @@ describe('extractBodyObjects — objectText non-emptiness', () => {
     const interiorTexts = result.paragraphObjects[0]?.object.interiorTexts ?? [];
     expect(interiorTexts).toHaveLength(1);
     expect(interiorTexts[0]?.text).toBe('kept box text');
+  });
+});
+
+describe('extractBodyObjects — #517 mc:AlternateContent normalization in the capture path', () => {
+  it('captures a single objectText leaf from an mc:AlternateContent text box (was doubled)', () => {
+    const body = alternateContentTextBoxParagraph('Choice text', 'Fallback text');
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts).toHaveLength(1);
+    expect(object?.interiorTexts[0]?.text).toBe('Choice text');
+  });
+
+  it('never leaves mc:Fallback or mc:AlternateContent reachable anywhere in the captured blob', () => {
+    const body = alternateContentTextBoxParagraph('Choice text', 'Fallback text');
+    const result = extract(body);
+    const blob = result.paragraphObjects[0]?.object.blob ?? [];
+    const xml = createOrderedDocumentXmlBuilder().build(blob);
+
+    expect(xml).not.toContain('mc:Fallback');
+    expect(xml).not.toContain('mc:AlternateContent');
+    expect(xml).toContain('Choice text');
+    expect(xml).not.toContain('Fallback text');
   });
 });
 
