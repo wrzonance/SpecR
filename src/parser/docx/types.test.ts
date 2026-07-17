@@ -9,10 +9,12 @@ import { StyleNodeTypeSchema } from '../../ast/style-schemas.js';
 // [NOTE]). This file pins that the field is purely additive: it does not ripple into
 // NodeType, StyleNodeType, or ParseWarningType.
 //
-// The ParseWarningType snapshot below intentionally includes 'header-footer-content-
-// skipped' (#306, ADR-068) — an unrelated, later addition to the same enum. Keep this
-// list in sync with ParseWarningTypeSchema's actual members; a mismatch here means this
-// test (not production code) is stale.
+// The NodeType/ParseWarningType snapshots below intentionally include
+// 'object'/'objectText' and 'body-drawing-skipped' (#300, ADR-072), and
+// 'header-footer-content-skipped' (#306, ADR-068) — unrelated, later
+// additions to the same enums. Keep these lists in sync with the schemas'
+// actual members; a mismatch here means this test (not production code) is
+// stale.
 //
 // The runtime construction/orthogonality invariants (a rule row IS suppressed; a
 // suppressed row need not also set isVanish/isNote; a suppressed row's
@@ -41,6 +43,8 @@ describe('ClassifiedParagraph.suppressed — no ripple into AST-level shapes', (
       'pr7',
       'note',
       'continuation',
+      'object',
+      'objectText',
     ]);
   });
 
@@ -74,6 +78,7 @@ describe('ClassifiedParagraph.suppressed — no ripple into AST-level shapes', (
       'pdf-font-encoding-unrecoverable',
       'table-content-skipped',
       'header-footer-content-skipped',
+      'body-drawing-skipped',
     ]);
   });
 });

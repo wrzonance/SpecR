@@ -5,6 +5,7 @@ import { textEndsWithClosed } from './comment-closure.js';
 import { SignalNumberSchema, SpecNodeInferenceSchema } from './inference-schemas.js';
 import { ActorLabelSchema } from './actor-schemas.js';
 import { HeaderFooterCompositionSchema } from './header-footer-schemas.js';
+import { ObjectMetaSchema } from './object-schemas.js';
 
 export const NodeTypeSchema = z.enum([
   'spec',
@@ -19,6 +20,12 @@ export const NodeTypeSchema = z.enum([
   'pr7',
   'note',
   'continuation',
+  // Body-level DOCX object model (#300, ADR-072): a captured table/text-box
+  // blob ('object') and the editable paragraph text extracted from its cells
+  // ('objectText', an 'object' node's only children). Neither participates in
+  // the 5-signal hierarchy engine or CSI numbering (see labels.ts consumesNumber).
+  'object',
+  'objectText',
 ]);
 
 // Closed enum of recognized CSI article roles (ADR-033). Kebab-case values are
@@ -212,6 +219,7 @@ export const SpecNodeMetaSchema = z.object({
   sourceFacts: SourceFactsSchema.exactOptional(),
   editability: SpecNodeEditabilitySchema.exactOptional(),
   articleRole: ArticleRoleSchema.exactOptional(),
+  object: ObjectMetaSchema.exactOptional(),
 });
 
 export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>
@@ -256,6 +264,7 @@ export const ParseWarningTypeSchema = z.enum([
   'pdf-font-encoding-unrecoverable',
   'table-content-skipped',
   'header-footer-content-skipped',
+  'body-drawing-skipped',
 ]);
 
 export const ParseWarningSchema = z.object({

@@ -1,9 +1,8 @@
 import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
+import { UUID_TAG_PREFIX } from '../ast/index.js';
 import { MergeError } from './error.js';
 import type { ExtractResult, TrackChangeRecord } from './types.js';
-
-const UUID_TAG_PREFIX = 'specr-uuid-';
 
 // preserveOrder keeps w:sdt blocks and bare w:p siblings in document order —
 // required for orphan indexes (non-preserveOrder grouping destroys ordering).
