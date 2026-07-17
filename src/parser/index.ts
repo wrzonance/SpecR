@@ -23,6 +23,8 @@ export {
   extractNumberingProfile,
   extractNumberingProfileFromDocx,
   scoreHierarchyConfidence,
+  findAnchoredParagraph,
+  replaceAnchoredParagraphText,
 } from './docx/index.js';
 export type {
   DocxStyleAnalysis,
