@@ -14,6 +14,7 @@ import {
   isInlineEditable,
   editabilityChip,
 } from './inline-edit.js';
+import { renderObjectBlock } from './object-render.mjs';
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -57,11 +58,18 @@ function renderNote(node, ctx) {
 }
 
 // Notes render as NOTE blocks, continuations with an empty label, vanish nodes
-// as hidden content — none carry a CSI number, so none may consume an ordinal.
-// Counting them shifted numbered siblings (#122): specifier-note banners pushed
-// a 1..15 list to 5..20. Mirrors generator/markdown.ts consumesNumber.
+// as hidden content, and object/objectText nodes as a table/text-box block
+// (#300) — none carry a CSI number, so none may consume an ordinal. Counting
+// them shifted numbered siblings (#122): specifier-note banners pushed a
+// 1..15 list to 5..20. Mirrors ast/labels.ts consumesNumber.
 function consumesNumber(node) {
-  return node.type !== 'note' && node.type !== 'continuation' && !(node.meta && node.meta.vanish);
+  return (
+    node.type !== 'note' &&
+    node.type !== 'continuation' &&
+    node.type !== 'object' &&
+    node.type !== 'objectText' &&
+    !(node.meta && node.meta.vanish)
+  );
 }
 
 // Append each child, advancing the CSI ordinal only past numbered siblings so
@@ -191,6 +199,13 @@ async function commitEdit({ node, ctx, input, save, cancel }) {
 
 function renderPrNode(node, index, ctx) {
   if (node.type === 'note') return renderNote(node, ctx);
+  // A captured body object (#300) renders as its own table/text-box block;
+  // its objectText leaves are consumed internally by renderObjectBlock and
+  // never reach this function through the normal child-recursion path below
+  // — the empty fragment is a defensive no-op mirroring the server's
+  // renderNonStructural, in case one is ever handed here directly.
+  if (node.type === 'object') return renderObjectBlock(node, ctx);
+  if (node.type === 'objectText') return document.createDocumentFragment();
 
   const row = el('div', 'tree-node');
   row.dataset.nodeId = node.id;
