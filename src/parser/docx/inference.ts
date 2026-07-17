@@ -19,19 +19,14 @@ import type {
   StyleNumPr,
 } from './types.js';
 import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
-import {
-  getLabel,
-  consumesNumber,
-  nodeTypeToNormalizedIlvl,
-  NODE_TYPES_BY_NORMALIZED_ILVL,
-} from '../../ast/index.js';
+import { nodeTypeToNormalizedIlvl, NODE_TYPES_BY_NORMALIZED_ILVL } from '../../ast/index.js';
 import {
   planPartStrip,
   planOutlineNumberStrip,
-  planLabelStrip,
   rebaseSourceFacts,
   auditPartNumbering,
 } from '../part-prefix.js';
+import { stripOutlineLabels } from './outline-label-strip.js';
 
 interface SignalHit {
   readonly nodeType: NodeType;
@@ -448,7 +443,10 @@ export function auditTreeStructure(roots: readonly SpecNode[]): ParseWarning[] {
   const warnings: ParseWarning[] = [];
   const visible = roots.filter((n) => n.meta.vanish !== true);
   const partCount = visible.filter((n) => n.type === 'part').length;
-  const junkRoots = visible.filter((n) => n.type !== 'part');
+  // A captured body object (#300, ADR-072) at root — e.g. a table before the
+  // document's first PART heading — is real, modeled content, never preamble
+  // or unclassified junk; excluded here the same way 'part' itself is.
+  const junkRoots = visible.filter((n) => n.type !== 'part' && n.type !== 'object');
 
   if (partCount === 0) {
     warnings.push({
@@ -471,102 +469,84 @@ export function auditTreeStructure(roots: readonly SpecNode[]): ParseWarning[] {
   return warnings;
 }
 
-// Strip a node's author-typed outline label IFF it equals the node's own render-derived
-// CSI label — the article's "P.n" ("1.2 RELATED SECTIONS") or a pr tier's "A." / "1." /
-// "a." ("A. General Cable"). This is the only reliable way to tell an outline LABEL (which
-// IS the node's position) from a value/content that merely opens with it ("2.1 GHz", "A.
-// Datum reference frame"): the strip fires only when the typed token equals the position's
-// label, so a coincidental value is left verbatim. Source-fact offsets rebase onto the
-// shorter text.
-function stripNodeLabel(node: SpecNode, label: string): SpecNode {
-  // The uppercase-title guard is an ARTICLE concern (tell a heading from a decimal value);
-  // pr items are classified by their opening marker and often carry lowercase/numeric
-  // content, so they strip on label-equality alone (Codex PR #432).
-  const plan = planLabelStrip(node.text, label, node.type === 'article');
-  if (!plan) return node;
-  const facts = node.meta.sourceFacts;
-  const meta = facts
-    ? { ...node.meta, sourceFacts: rebaseSourceFacts(facts, plan.removed, plan.text.length) }
-    : node.meta;
-  return { ...node, text: plan.text, meta };
+// Empty paragraphs are layout spacing, not content — excluded from stack/continuation
+// processing. A blank that inherited a numbered style (Signal 2) otherwise became an
+// empty numbered node (#122): a phantom row consuming a CSI number; an empty paragraph
+// at root previously rendered as a phantom PART. A suppressed rule-row delimiter (#292)
+// is excluded the same way — it produces no SpecNode at all. This does NOT exclude the
+// paragraph from body-object attachment (#300) below: a captured table/text-box's
+// precedingParagraphIndex may point at exactly such an empty spacer (2 of 3 real table
+// hosts in the proof fixture are empty spacer paragraphs) — the object must still
+// attach after whatever structural node preceded it.
+function isStructuralContent(cp: ClassifiedParagraph): boolean {
+  return cp.paragraph.text.trim().length > 0 && cp.suppressed !== true;
 }
 
-// The CSI label a structural node renders with, from its type and sibling ordinal. The
-// article label needs the enclosing part's 1-based number ("1.2"); pr tiers ("A.", "1.",
-// "a.") do not.
-function labelFor(node: SpecNode, ordinal: number, partNumber: number): string {
-  return node.type === 'article'
-    ? getLabel('article', ordinal, partNumber)
-    : getLabel(node.type, ordinal);
-}
-
-// Post-pass over the assembled tree: a node's position — and therefore its label — is only
-// known once the whole tree exists, so single-token article/pr labels ("1.1", "A.", "1.")
-// are stripped here, recursively. (Multi-dot pr numbers were already stripped inline.) The
-// walk mirrors the renderer's renderChildren: advance the ordinal only past numbered
-// siblings (consumesNumber) so each node's computed label equals what getLabel prepends at
-// render. Only Signal-4 (manual-outline) nodes strip; a numbered/style node's text is
-// content. `partNumber` is the enclosing part's 1-based number, threaded to the article
-// label and unused below it.
-function stripOutlineLabels(
-  nodes: readonly SpecNode[],
-  s4NodeIds: ReadonlySet<string>,
-  partNumber: number
+// Appends a continuation to the current attachment point, or pops shallower stack
+// frames and pushes a new frame — becoming the new attachment point for whatever
+// follows, continuations and body objects (#300) alike. Returns the attachment point
+// unchanged for a continuation (it never becomes one itself), or the newly pushed
+// frame's own children array when `cp` is structural.
+function processStructuralParagraph(
+  cp: ClassifiedParagraph,
+  stack: StackEntry[],
+  roots: SpecNode[],
+  lastNonContChildren: SpecNode[],
+  source: Source,
+  s4NodeIds: Set<string>
 ): SpecNode[] {
-  let ordinal = 0;
-  return nodes.map((node) => {
-    const labeled =
-      consumesNumber(node) && s4NodeIds.has(node.id)
-        ? stripNodeLabel(node, labelFor(node, ordinal, partNumber))
-        : node;
-    const childPartNumber = node.type === 'part' ? ordinal + 1 : partNumber;
-    const withChildren: SpecNode = {
-      ...labeled,
-      children: stripOutlineLabels(labeled.children, s4NodeIds, childPartNumber),
-    };
-    if (consumesNumber(node)) ordinal += 1;
-    return withChildren;
-  });
+  if (cp.nodeType === 'continuation') {
+    appendContinuation(cp, lastNonContChildren, source);
+    return lastNonContChildren;
+  }
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1];
+    if (top === undefined || top.cp.resolvedIlvl < cp.resolvedIlvl) break;
+    drainTop(stack, roots, source, s4NodeIds);
+  }
+  const entry: StackEntry = { cp, children: [] };
+  stack.push(entry);
+  return entry.children;
 }
 
 export function buildTree(
   classified: readonly ClassifiedParagraph[],
   section: string,
   title: string,
-  source: Source
+  source: Source,
+  // Body objects (#300, ADR-072) a sibling capture pass (index.ts) found and
+  // converted to SpecNodes: a table/text-box before the document's first
+  // paragraph, and everything else keyed on the paragraph index it follows in
+  // the ORIGINAL `classified` array. Both default to "none" so every existing
+  // caller is unaffected.
+  objectsBeforeFirst: readonly SpecNode[] = [],
+  objectsByPrecedingIndex: ReadonlyMap<number, readonly SpecNode[]> = new Map()
 ): SpecTree {
-  const roots: SpecNode[] = [];
+  const roots: SpecNode[] = [...objectsBeforeFirst];
   const stack: StackEntry[] = [];
   // Node ids of Signal-4 (manual text-outline) article/pr nodes — the only nodes whose
   // leading number/letter may be an author-typed label the strip post-pass should remove.
   const s4NodeIds = new Set<string>();
   let lastNonContChildren: SpecNode[] = roots;
 
-  // Empty paragraphs are layout spacing, not content — drop before structuring.
-  // A blank that inherited a numbered style (Signal 2) otherwise became an empty
-  // numbered node (#122): a phantom row consuming a CSI number; an empty paragraph
-  // at root previously rendered as a phantom PART. A suppressed rule-row delimiter
-  // (#292) is dropped the same way — it produces no SpecNode at all.
-  const content = classified.filter(
-    (cp) => cp.paragraph.text.trim().length > 0 && cp.suppressed !== true
-  );
-
-  for (const cp of content) {
-    if (cp.nodeType === 'continuation') {
-      appendContinuation(cp, lastNonContChildren, source);
-      continue;
+  // Iterate EVERY classified paragraph, unfiltered by index (#300): a body object's
+  // attachment key is the paragraph's position in this ORIGINAL array, so a
+  // filtered-out (empty/suppressed) paragraph at that index must still receive its
+  // attached object(s) — only the structural stack/continuation handling skips it.
+  classified.forEach((cp, i) => {
+    if (isStructuralContent(cp)) {
+      lastNonContChildren = processStructuralParagraph(
+        cp,
+        stack,
+        roots,
+        lastNonContChildren,
+        source,
+        s4NodeIds
+      );
     }
-
-    while (stack.length > 0) {
-      const top = stack[stack.length - 1];
-      if (top === undefined || top.cp.resolvedIlvl < cp.resolvedIlvl) break;
-      drainTop(stack, roots, source, s4NodeIds);
-    }
-
-    const entry: StackEntry = { cp, children: [] };
-    stack.push(entry);
-    lastNonContChildren = entry.children;
-  }
+    const objects = objectsByPrecedingIndex.get(i);
+    if (objects) lastNonContChildren.push(...objects);
+  });
 
   while (stack.length > 0) {
     drainTop(stack, roots, source, s4NodeIds);

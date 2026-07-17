@@ -1270,3 +1270,112 @@ describe('auditTreeStructure — non-conforming part numbering (#316)', () => {
     expect(warnings.some((w) => w.type === 'non-conforming-part-numbering')).toBe(false);
   });
 });
+
+// ─── buildTree — body object attachment (#300, ADR-072) ─────────────────────
+// A captured table/text-box SpecNode (index.ts, a sibling task, converts a
+// CapturedBodyObject into one of these) is attached at tree-build time via
+// two new optional buildTree params: `objectsBeforeFirst` (a table before the
+// document's first paragraph) and `objectsByPrecedingIndex` (everything
+// else, keyed on the ORIGINAL classified-paragraph array index it follows).
+// The two invariants pinned below are the ones the spike found buildTree's
+// prior "trailing child after stack-push" mechanism could NOT satisfy:
+//   - Document-order conservation: an object attaches after the exact
+//     paragraph it followed in the source XML, even when that paragraph is
+//     an EMPTY spacer buildTree's own content pre-filter would otherwise
+//     have dropped before ever reaching the stack-push loop (2 of 3 real
+//     table hosts in the proof fixture are exactly this).
+//   - No-silent-loss: every object passed in, at every attachment point
+//     (before the first paragraph, mid-tree, or trailing the very last
+//     paragraph before the final stack drain), survives into the tree.
+function makeObjectNode(id: string, text = 'Table'): SpecNode {
+  return { id, type: 'object', text, children: [], meta: {} };
+}
+
+describe('buildTree — body object attachment: document-order conservation (#300)', () => {
+  it('inference: document-order conservation — object anchored on a filtered EMPTY spacer paragraph still attaches after the preceding structural node', () => {
+    const classified = [
+      makeClassified('part', 0, 'PART 1'),
+      makeClassified('continuation', 0, ''), // empty spacer paragraph at index 1 — dropped by the content pre-filter
+    ];
+    const obj = makeObjectNode('obj-1');
+    const tree = buildTree(classified, '01', 'T', 'unknown', [], new Map([[1, [obj]]]));
+
+    expect(tree.parts).toHaveLength(1);
+    expect(tree.parts[0]?.children).toEqual([obj]);
+  });
+
+  it('inference: document-order conservation — objectsBeforeFirst precedes every root, including the first PART', () => {
+    const classified = [makeClassified('part', 0, 'PART 1')];
+    const obj = makeObjectNode('obj-0');
+    const tree = buildTree(classified, '01', 'T', 'unknown', [obj], new Map());
+
+    expect(tree.parts[0]).toEqual(obj);
+    expect(tree.parts[1]?.type).toBe('part');
+  });
+
+  it('inference: document-order conservation — an object anchored to a structural paragraph nests as ITS child, and the paragraph after it starts a new sibling', () => {
+    const classified = [
+      makeClassified('part', 0, 'PART 1'),
+      makeClassified('article', 1, '1.1'),
+      makeClassified('article', 1, '1.2'),
+    ];
+    const obj = makeObjectNode('obj-mid');
+    // Anchored at index 1 (article "1.1") — a table that follows "1.1" in the
+    // XML but precedes "1.2" nests under 1.1, exactly like a continuation
+    // paragraph in the same position would.
+    const tree = buildTree(classified, '01', 'T', 'unknown', [], new Map([[1, [obj]]]));
+
+    const part = tree.parts[0];
+    expect(part?.children).toHaveLength(2);
+    expect(part?.children[0]?.children).toEqual([obj]);
+    expect(part?.children[1]?.type).toBe('article');
+  });
+});
+
+describe('buildTree — body object attachment: no-silent-loss (#300)', () => {
+  it('inference: no-silent-loss — multiple objects anchored at the same index are ALL attached, in order, none dropped', () => {
+    const classified = [makeClassified('part', 0, 'PART 1')];
+    const objA = makeObjectNode('obj-a');
+    const objB = makeObjectNode('obj-b');
+    const tree = buildTree(classified, '01', 'T', 'unknown', [], new Map([[0, [objA, objB]]]));
+
+    expect(tree.parts[0]?.children).toEqual([objA, objB]);
+  });
+
+  it('inference: no-silent-loss — an object anchored to the LAST classified paragraph survives the final stack drain', () => {
+    const classified = [makeClassified('part', 0, 'PART 1'), makeClassified('article', 1, '1.1')];
+    const obj = makeObjectNode('obj-last');
+    const tree = buildTree(classified, '01', 'T', 'unknown', [], new Map([[1, [obj]]]));
+
+    expect(tree.parts[0]?.children[0]?.children).toEqual([obj]);
+  });
+
+  it('inference: no-silent-loss — an objectsBeforeFirst object and an objectsByPrecedingIndex object both survive in the same tree', () => {
+    const classified = [makeClassified('part', 0, 'PART 1')];
+    const before = makeObjectNode('obj-before');
+    const after = makeObjectNode('obj-after');
+    const tree = buildTree(classified, '01', 'T', 'unknown', [before], new Map([[0, [after]]]));
+
+    expect(tree.parts).toHaveLength(2);
+    expect(tree.parts[0]).toEqual(before);
+    expect(tree.parts[1]?.children).toEqual([after]);
+  });
+
+  it('inference: no-silent-loss — calling buildTree with no object args at all behaves exactly as before (backward-compatible default)', () => {
+    const classified = [makeClassified('part', 0, 'PART 1')];
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+
+    expect(tree.parts).toHaveLength(1);
+    expect(tree.parts[0]?.type).toBe('part');
+  });
+});
+
+describe('auditTreeStructure — object roots are not junk (#300)', () => {
+  it('an object root is excluded from root-continuation and does not count toward the part total', () => {
+    const objectRoot = makeObjectNode('o1');
+    const partRoot: SpecNode = { id: 'p1', type: 'part', text: 'GENERAL', children: [], meta: {} };
+    const warnings = auditTreeStructure([objectRoot, partRoot]);
+
+    expect(warnings.some((w) => w.type === 'root-continuation')).toBe(false);
+  });
+});
