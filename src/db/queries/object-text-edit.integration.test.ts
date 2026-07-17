@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { PoolClient } from 'pg';
-import { pool } from '../index.js';
+import { pool, DatabaseError } from '../index.js';
 import { rewriteObjectTextBlob } from './object-text-edit.js';
 import { findAnchoredParagraph } from '../../parser/index.js';
 import { UUID_TAG_PREFIX } from '../../ast/index.js';
@@ -132,6 +132,25 @@ describe('rewriteObjectTextBlob — DB orchestration for anchored object-blob ed
       )
     ).rejects.toThrow(/no object row/);
   });
+
+  it(
+    'wraps an unexpected raw pg error (e.g. a malformed parentId the SELECT itself rejects) ' +
+      'in DatabaseError with the original error chained as cause, never leaking it unwrapped',
+    async () => {
+      let caught: unknown;
+      try {
+        await runInTransaction((client) =>
+          rewriteObjectTextBlob(client, specId, 'not-a-valid-uuid', UUID_A, 'unused')
+        );
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(DatabaseError);
+      expect((caught as Error).message).toMatch(/rewriteObjectTextBlob/);
+      expect((caught as Error).cause).toBeDefined();
+    }
+  );
 
   it("throws DatabaseError when anchorUuid is not anchored anywhere in the object row's blob", async () => {
     const objectId = await insertObjectRow(twoCellTableMeta('original A', 'original B'));

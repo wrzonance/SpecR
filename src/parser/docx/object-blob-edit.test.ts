@@ -50,6 +50,31 @@ function malformedAnchor(uuid: string): ObjectBlobNode {
   } as ObjectBlobNode;
 }
 
+/** A w:sdt anchor tagged with `uuid` carrying TWO w:sdtContent children —
+ * corrupted capture data: `wrapBlobParagraphWithAnchor` only ever emits
+ * one. Guards against "take the first match" silently rewriting the wrong
+ * (or both) content nodes. */
+function multiContentAnchor(uuid: string): ObjectBlobNode {
+  return {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `${UUID_TAG_PREFIX}${uuid}` } }] },
+      { 'w:sdtContent': [paragraph(run('first'))] },
+      { 'w:sdtContent': [paragraph(run('second'))] },
+    ],
+  } as ObjectBlobNode;
+}
+
+/** A w:sdt anchor whose sole w:sdtContent child is not a w:p paragraph —
+ * corrupted capture data `wrapBlobParagraphWithAnchor` never produces. */
+function nonParagraphContentAnchor(uuid: string): ObjectBlobNode {
+  return {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `${UUID_TAG_PREFIX}${uuid}` } }] },
+      { 'w:sdtContent': [{ 'w:tbl': [] }] },
+    ],
+  } as ObjectBlobNode;
+}
+
 describe('findAnchoredParagraph', () => {
   it('locates the interior w:p node anchored by uuid — not the w:sdt shell', () => {
     const interior = paragraph(run('hello'));
@@ -69,6 +94,18 @@ describe('findAnchoredParagraph', () => {
 
   it('throws ParserError (never undefined) when a matching anchor has a malformed w:sdtContent', () => {
     const blob = [malformedAnchor(UUID_A)];
+
+    expect(() => findAnchoredParagraph(blob, UUID_A)).toThrow(ParserError);
+  });
+
+  it('throws ParserError when a matching anchor carries more than one w:sdtContent child', () => {
+    const blob = [multiContentAnchor(UUID_A)];
+
+    expect(() => findAnchoredParagraph(blob, UUID_A)).toThrow(ParserError);
+  });
+
+  it('throws ParserError when the single w:sdtContent child is not a w:p paragraph', () => {
+    const blob = [nonParagraphContentAnchor(UUID_A)];
 
     expect(() => findAnchoredParagraph(blob, UUID_A)).toThrow(ParserError);
   });
@@ -129,15 +166,18 @@ describe('replaceAnchoredParagraphText', () => {
     expect(result).toBeUndefined();
   });
 
-  it('invariant: multi-run rewrite — collapses 2+ existing runs at the anchor into exactly one new run', () => {
+  it('invariant: multi-run rewrite — preserves every existing run, placing newText in the first and blanking the rest', () => {
     const interior = paragraph(run('Hello '), run('World'));
     const blob = [cell(wrapBlobParagraphWithAnchor(interior, UUID_A))];
 
     const result = replaceAnchoredParagraphText(blob, UUID_A, 'Goodbye');
     expect(result).toBeDefined();
-    const xml = toXml(result as readonly ObjectBlobNode[]);
+    const newBlob = result as readonly ObjectBlobNode[];
+    const found = findAnchoredParagraph(newBlob, UUID_A);
 
-    expect([...xml.matchAll(/<w:r>/g)]).toHaveLength(1);
+    expect(found).toEqual(paragraph(run('Goodbye'), run('')));
+    const xml = toXml(newBlob);
+    expect([...xml.matchAll(/<w:r>/g)]).toHaveLength(2);
     expect(xml).toContain('<w:t>Goodbye</w:t>');
     expect(xml).not.toContain('Hello');
     expect(xml).not.toContain('World');

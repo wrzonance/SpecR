@@ -37,39 +37,47 @@ export async function rewriteObjectTextBlob(
   anchorUuid: string,
   newText: string
 ): Promise<void> {
-  const owner = await client.query<{ object_data: unknown }>(
-    `SELECT object_data FROM paragraphs
-     WHERE id = $1 AND spec_id = $2 AND node_type = 'object'
-     FOR UPDATE`,
-    [parentId, specId]
-  );
-  const found = owner.rows[0];
-  if (!found) {
+  try {
+    const owner = await client.query<{ object_data: unknown }>(
+      `SELECT object_data FROM paragraphs
+       WHERE id = $1 AND spec_id = $2 AND node_type = 'object'
+       FOR UPDATE`,
+      [parentId, specId]
+    );
+    const found = owner.rows[0];
+    if (!found) {
+      throw new DatabaseError(
+        `rewriteObjectTextBlob: no object row ${parentId} found in spec ${specId}`
+      );
+    }
+
+    const meta = parseObjectMeta('object', found.object_data, 'rewriteObjectTextBlob');
+    // parseObjectMeta only returns undefined for a non-'object' nodeType; the
+    // SELECT above already scoped to node_type = 'object', so this branch is
+    // unreachable in practice (a real miss throws inside parseObjectMeta
+    // itself) — kept only to satisfy the ObjectMeta | undefined return type.
+    if (!meta) {
+      throw new DatabaseError(
+        `rewriteObjectTextBlob: object row ${parentId} unexpectedly carries no captured object data`
+      );
+    }
+
+    const newBlob = replaceAnchoredParagraphText(meta.blob, anchorUuid, newText);
+    if (!newBlob) {
+      throw new DatabaseError(
+        `rewriteObjectTextBlob: anchor ${anchorUuid} not found in object ${parentId}'s blob`
+      );
+    }
+
+    // Spread-copy readonly -> mutable at this ONE boundary: replaceAnchoredParagraphText's
+    // own contract stays readonly and side-effect-free (WS3b's merge engine needs that),
+    // so the conversion back to ObjectMeta.blob's mutable-array shape happens here, not there.
+    await updateObjectData(client, specId, parentId, { ...meta, blob: [...newBlob] });
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
     throw new DatabaseError(
-      `rewriteObjectTextBlob: no object row ${parentId} found in spec ${specId}`
+      `rewriteObjectTextBlob: failed to rewrite object ${parentId}'s blob at anchor ${anchorUuid}`,
+      { cause: err }
     );
   }
-
-  const meta = parseObjectMeta('object', found.object_data, 'rewriteObjectTextBlob');
-  // parseObjectMeta only returns undefined for a non-'object' nodeType; the
-  // SELECT above already scoped to node_type = 'object', so this branch is
-  // unreachable in practice (a real miss throws inside parseObjectMeta
-  // itself) — kept only to satisfy the ObjectMeta | undefined return type.
-  if (!meta) {
-    throw new DatabaseError(
-      `rewriteObjectTextBlob: object row ${parentId} unexpectedly carries no captured object data`
-    );
-  }
-
-  const newBlob = replaceAnchoredParagraphText(meta.blob, anchorUuid, newText);
-  if (!newBlob) {
-    throw new DatabaseError(
-      `rewriteObjectTextBlob: anchor ${anchorUuid} not found in object ${parentId}'s blob`
-    );
-  }
-
-  // Spread-copy readonly -> mutable at this ONE boundary: replaceAnchoredParagraphText's
-  // own contract stays readonly and side-effect-free (WS3b's merge engine needs that),
-  // so the conversion back to ObjectMeta.blob's mutable-array shape happens here, not there.
-  await updateObjectData(client, specId, parentId, { ...meta, blob: [...newBlob] });
 }

@@ -98,18 +98,25 @@ function readSdtUuid(sdtNode: ObjectBlobNode): string | undefined {
 }
 
 /** The single interior paragraph `wrapBlobParagraphWithAnchor` wraps
- * (`w:sdt > w:sdtContent > [paragraphNode]`). Throws `ParserError` if the
- * matched anchor's own `w:sdtContent` is missing or does not carry EXACTLY
- * one child — corrupted capture data, never a legitimate "not found" case
- * (that split happens one level up, before this is ever called). */
+ * (`w:sdt > w:sdtContent > [w:p]`). Throws `ParserError` if the matched
+ * anchor does not carry EXACTLY one direct `w:sdtContent` child, that child
+ * does not carry EXACTLY one child of its own, or that child is not itself
+ * a `w:p` paragraph — corrupted capture data, never a legitimate "not
+ * found" case (that split happens one level up, before this is ever
+ * called). Guarding "exactly one" here — rather than taking the first
+ * match — means a malformed multi-`w:sdtContent` anchor is rejected up
+ * front, never silently rewritten by `rebuildMatchedSdt`'s later
+ * `w:sdtContent`-tag `.map`. */
 function interiorParagraphOf(sdtNode: ObjectBlobNode, uuid: string): ObjectBlobNode {
-  const content = directChildByTag(sdtNode, 'w:sdtContent');
+  const contentNodes = childrenOf(sdtNode).filter((child) => tagOf(child) === 'w:sdtContent');
+  const content = contentNodes.length === 1 ? contentNodes[0] : undefined;
   const children = content ? childrenOf(content) : [];
   const paragraph = children.length === 1 ? children[0] : undefined;
-  if (!paragraph) {
+  if (!paragraph || tagOf(paragraph) !== 'w:p') {
     throw new ParserError(
       `anchored object blob paragraph ${uuid} has a malformed w:sdtContent ` +
-        `(expected exactly 1 interior node, found ${children.length})`,
+        `(expected exactly 1 w:sdtContent child carrying exactly 1 w:p node; ` +
+        `found ${contentNodes.length} w:sdtContent node(s), ${children.length} interior node(s))`,
       { code: 'DOCX_OBJECT_BLOB_ANCHOR_MALFORMED' }
     );
   }
@@ -144,15 +151,31 @@ export function findAnchoredParagraph(
   return undefined;
 }
 
+/** Rewrites a single `w:r` run's own `w:t` text (faithful single-value
+ * rewrite — every other child of the run, e.g. `w:rPr` run properties, is
+ * kept untouched). A run with no `w:t` child of its own gets one appended,
+ * never replacing the run wholesale. */
+function rewriteRunText(runNode: ObjectBlobNode, text: string): ObjectBlobNode {
+  const tag = tagOf(runNode);
+  // Malformed defensive no-op — mirrors this file's other malformed-node
+  // guards; a run the parser itself captured always has exactly one tag.
+  if (!tag) return runNode;
+  const children = childrenOf(runNode);
+  const newTextNode: ObjectBlobNode = { 'w:t': [{ '#text': text }] };
+  const hasText = children.some((child) => tagOf(child) === 'w:t');
+  if (!hasText) return withChildren(runNode, tag, [...children, newTextNode]);
+  const newChildren = children.map((child) => (tagOf(child) === 'w:t' ? newTextNode : child));
+  return withChildren(runNode, tag, newChildren);
+}
+
 /**
- * Rebuilds one paragraph node's content: a leading `w:pPr` (paragraph-mark
- * properties — alignment, spacing, …) is kept untouched if present, and
- * every other child — one or more `w:r` runs, hyperlinks, ins/del, … — is
- * collapsed into ONE new `w:r > w:t` run carrying `newText` ("multi-run
- * rewrite"). This mirrors the rest of SpecR's paragraph model: no node
- * anywhere carries per-run rich formatting (`generator/index.ts`'s
- * `plainParagraph` emits a single `TextRun` the same way), so collapsing to
- * one run here is consistent with the model, not an object-specific loss.
+ * Rebuilds one paragraph node's content: `w:pPr` (paragraph-mark
+ * properties) and every non-`w:r` child are kept untouched, in place. Every
+ * existing `w:r` run is PRESERVED — the first carries `newText`, every
+ * subsequent run is blanked to `''` (faithful single-value rewrite: the
+ * paragraph's structure and any per-run formatting survive; only the text
+ * moves). A paragraph with no `w:r` run at all gets exactly one new
+ * `w:r > w:t` run appended, never more than necessary.
  */
 function replaceParagraphContent(paragraph: ObjectBlobNode, newText: string): ObjectBlobNode {
   const tag = tagOf(paragraph);
@@ -160,9 +183,21 @@ function replaceParagraphContent(paragraph: ObjectBlobNode, newText: string): Ob
   // transformInteriorParagraphs guard; a paragraph the parser itself wrapped
   // always has exactly one tag.
   if (!tag) return paragraph;
-  const pPr = directChildByTag(paragraph, 'w:pPr');
-  const newRun: ObjectBlobNode = { 'w:r': [{ 'w:t': [{ '#text': newText }] }] };
-  return withChildren(paragraph, tag, pPr !== undefined ? [pPr, newRun] : [newRun]);
+  const children = childrenOf(paragraph);
+  const hasRun = children.some((child) => tagOf(child) === 'w:r');
+  if (!hasRun) {
+    const newRun: ObjectBlobNode = { 'w:r': [{ 'w:t': [{ '#text': newText }] }] };
+    return withChildren(paragraph, tag, [...children, newRun]);
+  }
+
+  let placedText = false;
+  const newChildren = children.map((child) => {
+    if (tagOf(child) !== 'w:r') return child;
+    const text = placedText ? '' : newText;
+    placedText = true;
+    return rewriteRunText(child, text);
+  });
+  return withChildren(paragraph, tag, newChildren);
 }
 
 function rebuildMatchedSdt(sdtNode: ObjectBlobNode, uuid: string, newText: string): ObjectBlobNode {

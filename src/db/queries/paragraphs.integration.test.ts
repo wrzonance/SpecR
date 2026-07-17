@@ -575,8 +575,9 @@ describe('updateParagraphText — object write path (#519, ADR-072 decision 3)',
 
   it(
     "invariant: interior text reaches the DOCX only through the parent object's blob — " +
-      'updating an objectText row rewrites the parent object_data.blob, collapsing the ' +
-      'original multi-run interior paragraph into one new run (multi-run rewrite)',
+      'updating an objectText row rewrites the parent object_data.blob, preserving the ' +
+      'original multi-run interior paragraph and blanking every run but the first ' +
+      '(faithful single-value rewrite)',
     async () => {
       const result = await updateParagraphText(owSpecId, OW_TEXT_ID, 'Rewritten single run');
       expect(result.status).toBe('updated');
@@ -587,7 +588,10 @@ describe('updateParagraphText — object write path (#519, ADR-072 decision 3)',
       );
       const found = findAnchoredParagraph(objectRow.rows[0]!.object_data.blob, OW_TEXT_ID);
       expect(found).toEqual({
-        'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': 'Rewritten single run' }] }] }],
+        'w:p': [
+          { 'w:r': [{ 'w:t': [{ '#text': 'Rewritten single run' }] }] },
+          { 'w:r': [{ 'w:t': [{ '#text': '' }] }] },
+        ],
       });
 
       // Read-path parity: the objectText row's own text column keeps step with
