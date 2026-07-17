@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
 import { generateDocx } from './index.js';
-import type { SpecTree } from '../ast/types.js';
-import type { StyleRule, HeaderFooterComposition } from '../ast/index.js';
+import { GeneratorError } from './error.js';
+import type { SpecTree, SpecNode } from '../ast/types.js';
+import type { StyleRule, HeaderFooterComposition, ObjectBlobNode } from '../ast/index.js';
 
 // Covers: part, article, pr1, pr2, note, continuation, vanish
 const SYNTHETIC_TREE: SpecTree = {
@@ -534,5 +535,192 @@ describe('generateDocx — #303 header/footer wiring', () => {
     // with `w:val="false"`; the attribute-less self-closing form only
     // appears when #303's `documentLevelOptions` forces it true.
     expect(settingsXml).not.toMatch(/<w:evenAndOddHeaders\/>/);
+  });
+});
+
+// #300/#517: emitNode's object branch re-emits a captured body-object blob via
+// buildObjectBlocks (object-block.ts) instead of walking it as ordinary
+// hierarchy. Pinned invariants at the generateDocx boundary: the blob's own
+// content is the ONLY way an object's interior text reaches the document —
+// emitNode never recurses into an 'object' node's children, so a stray
+// 'objectText' child (or anything nested under it) is never independently
+// emitted as its own paragraph.
+// ObjectMeta['blob'] (schema-inferred) is a mutable ObjectBlobNode[], not a
+// readonly array — these fixtures match that shape so they can be assigned
+// directly into a SpecNode's meta.object.blob below.
+const TABLE_BLOB: ObjectBlobNode[] = [
+  {
+    'w:tbl': [
+      {
+        'w:tr': [
+          {
+            'w:tc': [
+              { 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': 'Captured cell text value' }] }] }] },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+];
+
+const TEXTBOX_HOST_UUID = '00000000-0000-0000-0000-0000000000f1';
+
+// Mirrors parser/docx/object-anchor.ts's wrapBlobParagraphWithAnchor shape as
+// a self-contained fixture literal (this test file never imports across the
+// generator/parser module boundary) — `w:sdt > w:sdtPr > w:tag` +
+// `w:sdtContent > w:p`, the same anchor ordinary body paragraphs get.
+function sdtAnchoredParagraph(uuid: string, text: string): ObjectBlobNode {
+  return {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `specr-uuid-${uuid}` } }] },
+      { 'w:sdtContent': [{ 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': text }] }] }] }] },
+    ],
+  } as ObjectBlobNode;
+}
+
+const TEXTBOX_BLOB: ObjectBlobNode[] = [
+  {
+    'w:p': [
+      {
+        'w:r': [
+          {
+            'w:drawing': [
+              {
+                'w:txbxContent': [
+                  sdtAnchoredParagraph(TEXTBOX_HOST_UUID, 'Textbox interior text value'),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+];
+
+const OBJECT_NODE_ID = '00000000-0000-0000-0000-0000000000e1';
+const OBJECTTEXT_NODE_ID = '00000000-0000-0000-0000-0000000000e2';
+const DEEP_MARKER_ID = '00000000-0000-0000-0000-0000000000e3';
+
+// A stray objectText child, itself carrying a further child — if emitNode's
+// object branch ever recursed into `children`, the objectText node would fall
+// through to the generic path (getNodeLevel('objectText') === null, no
+// paragraph, but STILL recurses into its own children) and this deep marker
+// would surface as a real continuation paragraph.
+function strayObjectTextChild(): SpecNode {
+  return {
+    id: OBJECTTEXT_NODE_ID,
+    type: 'objectText',
+    text: 'objectText marker — must never render as its own paragraph',
+    meta: {},
+    children: [
+      {
+        id: DEEP_MARKER_ID,
+        type: 'continuation',
+        text: 'DEEP RECURSION MARKER — must never render',
+        meta: {},
+        children: [],
+      },
+    ],
+  };
+}
+
+function tableObjectNode(children: readonly SpecNode[] = []): SpecNode {
+  return {
+    id: OBJECT_NODE_ID,
+    type: 'object',
+    text: '',
+    meta: {
+      object: {
+        kind: 'table',
+        floating: false,
+        generation: 'drawingml',
+        rows: 1,
+        columns: 1,
+        blob: TABLE_BLOB,
+      },
+    },
+    children,
+  };
+}
+
+function textBoxObjectNode(): SpecNode {
+  return {
+    id: '00000000-0000-0000-0000-0000000000f0',
+    type: 'object',
+    text: '',
+    meta: {
+      object: {
+        kind: 'textBox',
+        floating: true,
+        generation: 'drawingml',
+        blob: TEXTBOX_BLOB,
+      },
+    },
+    children: [],
+  };
+}
+
+function objectNodeMissingBlob(): SpecNode {
+  return {
+    id: '00000000-0000-0000-0000-0000000000f9',
+    type: 'object',
+    text: '',
+    meta: {},
+    children: [],
+  };
+}
+
+function treeWithObject(objectNode: SpecNode): SpecTree {
+  return {
+    id: '00000000-0000-0000-0000-0000000000e0',
+    section: '06 40 00',
+    title: 'Architectural Woodwork',
+    parts: [
+      {
+        id: '00000000-0000-0000-0000-0000000000df',
+        type: 'part',
+        text: 'GENERAL',
+        meta: {},
+        children: [objectNode],
+      },
+    ],
+  };
+}
+
+describe('generateDocx — #517 body-object re-emit wiring', () => {
+  it('re-emits a captured table object\'s cell text verbatim, with no literal "<undefined>" leak', async () => {
+    const buffer = await generateDocx(treeWithObject(tableObjectNode()));
+    const xml = await getDocXml(buffer);
+    expect(xml).toContain('Captured cell text value');
+    expect(xml).not.toContain('<undefined>');
+  });
+
+  it('textBox object re-emits interior text via its SDT-anchored blob', async () => {
+    const buffer = await generateDocx(treeWithObject(textBoxObjectNode()));
+    const xml = await getDocXml(buffer);
+    expect(xml).toContain('Textbox interior text value');
+    expect(xml).toContain(`specr-uuid-${TEXTBOX_HOST_UUID}`);
+  });
+
+  it("never recurses into an object node's children — objectText content reaches output exclusively via the blob", async () => {
+    const buffer = await generateDocx(treeWithObject(tableObjectNode([strayObjectTextChild()])));
+    const xml = await getDocXml(buffer);
+    // Blob content still renders (the object branch did its job)...
+    expect(xml).toContain('Captured cell text value');
+    // ...but neither the objectText child nor its own nested child ever
+    // reach the document as an independently-emitted paragraph.
+    expect(xml).not.toContain('objectText marker');
+    expect(xml).not.toContain('DEEP RECURSION MARKER');
+  });
+
+  it('throws a GeneratorError carrying the node id when an object node is missing its captured blob (meta.object)', async () => {
+    await expect(generateDocx(treeWithObject(objectNodeMissingBlob()))).rejects.toThrow(
+      GeneratorError
+    );
+    await expect(generateDocx(treeWithObject(objectNodeMissingBlob()))).rejects.toThrow(
+      new RegExp(`${objectNodeMissingBlob().id}.*missing its captured blob`)
+    );
   });
 });

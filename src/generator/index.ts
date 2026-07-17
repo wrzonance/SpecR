@@ -1,5 +1,6 @@
 import { Document, Paragraph, TextRun, Packer, HeadingLevel } from 'docx';
 import { wrapWithControl, SdtBlock } from './controls.js';
+import { buildObjectBlocks, ImportedObjectBlock } from './object-block.js';
 import { buildFrontMatter, type ManualMeta } from './front-matter.js';
 import type {
   SpecNode,
@@ -90,13 +91,30 @@ function titleParagraph(text: string): Paragraph {
   return new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(text)] });
 }
 
-function emitNode(node: SpecNode, out: (Paragraph | SdtBlock)[], ctx: SectionContext): boolean {
+// One section's rendered children: ordinary numbered/note/continuation
+// paragraphs (Paragraph, content-control-anchored as SdtBlock) plus a
+// captured body object's re-emitted OOXML subtree (#300/#517, ADR-072
+// decision 1).
+type SectionChild = Paragraph | SdtBlock | ImportedObjectBlock;
+
+function emitNode(node: SpecNode, out: SectionChild[], ctx: SectionContext): boolean {
   const text = formatSectionReferences(node.text, ctx.format);
   if (node.type === 'note') {
     out.push(wrapWithControl(noteParagraph(text), node.id));
     return true;
   }
   if (node.meta.vanish) return false;
+  if (node.type === 'object') {
+    if (!node.meta.object) {
+      throw new GeneratorError(`object node ${node.id} is missing its captured blob (meta.object)`);
+    }
+    out.push(buildObjectBlocks(node.id, node.meta.object.blob));
+    // A captured object's interior text reaches the document exclusively
+    // through its re-emitted blob — its `objectText` children (#300, ADR-072
+    // decision 2) exist only to carry editable text/merge metadata, never to
+    // be independently walked and emitted as their own paragraphs.
+    return false;
+  }
   if (node.type === 'continuation') {
     out.push(wrapWithControl(plainParagraph(text), node.id));
     return true;
@@ -113,7 +131,7 @@ function emitNode(node: SpecNode, out: (Paragraph | SdtBlock)[], ctx: SectionCon
 
 function collectParagraphs(
   nodes: readonly SpecNode[],
-  out: (Paragraph | SdtBlock)[],
+  out: SectionChild[],
   ctx: SectionContext
 ): void {
   for (const node of nodes) {
@@ -122,8 +140,8 @@ function collectParagraphs(
 }
 
 // Build one section's paragraph list: synthetic title (no anchor) + anchored body.
-function buildSectionChildren(tree: SpecTree, ctx: SectionContext): (Paragraph | SdtBlock)[] {
-  const children: (Paragraph | SdtBlock)[] = [
+function buildSectionChildren(tree: SpecTree, ctx: SectionContext): SectionChild[] {
+  const children: SectionChild[] = [
     titleParagraph(`SECTION ${displaySectionNumber(tree.section, ctx.format)} — ${tree.title}`),
   ];
   collectParagraphs(tree.parts, children, ctx);
