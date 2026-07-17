@@ -151,6 +151,12 @@ every dropped drawable and `index.ts` assembles exactly one aggregate
 the same no-silent-loss posture ADR-068 already established for unmodeled
 header/footer content.
 
+The same no-silent-loss/no-silent-duplication posture extends to WS2's own
+capture-path fix for #517: a text box's `mc:AlternateContent` wrapper must
+be normalized to its `mc:Choice` branch in the *captured blob* the same way
+decision 7 already normalizes it for *classification* — see addendum 19 for
+the full account and `parser/docx/alternate-content.ts`.
+
 ### 10. `buildTree` attaches objects by paragraph index, using the SAME primitive `appendContinuation` already uses for suppressed content
 
 `buildTree` now takes two additional params: `objectsBeforeFirst` (prepended
@@ -247,15 +253,36 @@ DOCX consumer, but not the same bytes. The spike measured an 18335→21005
 character drift on a real table fixture with this flag omitted; it is
 pinned as a negative-control test in `xml-utils.test.ts`.
 
-### 16. `wrapBlobParagraphWithAnchor` needs a raw XML STRING for the WS2 (generator re-emit) bridge, not a direct handoff
+### 16. SUPERSEDED — the WS2 (generator re-emit) bridge is DIRECT CONSTRUCTION, never a raw-string round trip
 
-A future generator task that re-emits a captured blob back into a real
-`docx` document needs `ImportedXmlComponent.fromXmlString`, which takes a
-raw XML string — not an `ObjectBlobNode` tree. The bridge is therefore a
-two-step reserialize: `createOrderedDocumentXmlBuilder().build(blob)` to a
-string, THEN `fromXmlString`. This is recorded here so the generator task
-does not attempt (or need) a direct `ObjectBlobNode`→`ImportedXmlComponent`
-handoff.
+*Original (#300) text, superseded by WS2 (#517) below: "A future generator
+task that re-emits a captured blob back into a real `docx` document needs
+`ImportedXmlComponent.fromXmlString`, which takes a raw XML string — not an
+`ObjectBlobNode` tree. The bridge is therefore a two-step reserialize:
+`createOrderedDocumentXmlBuilder().build(blob)` to a string, THEN
+`fromXmlString`."*
+
+WS2 built and ran three throwaway scripts against a real `Packer` round trip
+before writing any production code, and found the two-step reserialize above
+does not work: `ImportedXmlComponent.fromXmlString` re-parses its input as a
+**standalone XML document** and, verified against the pinned `docx@9.7.1`
+dependency actually installed in this repo (not assumed from memory),
+double-wraps the blob's own root element — a re-serialized `w:tbl` comes
+back out as `<w:tbl><w:tbl>…</w:tbl></w:tbl>`. Re-parsing a string that was
+itself just reserialized from an already-parsed tree throws away the exact
+structural information the bridge needs to preserve.
+
+The actual bridge (`generator/object-block.ts`) never touches an XML string
+at all: `buildImportedXmlComponent` walks the captured `ObjectBlobNode` tree
+directly and builds `ImportedXmlComponent` nodes via its **constructor +
+`push`** — the same tree-shape, node-by-node construction `docx` itself uses
+internally, just driven from `ObjectBlobNode` data instead of from calls to
+`docx`'s own builder API. `ImportedObjectBlock` (a thin `FileChild`) wraps
+the single resulting root component so it can sit in a `Document` section's
+`children` array beside `Paragraph`/`SdtBlock`. `buildObjectBlocks` fails
+loud — `GeneratorError` — on a blob with `!== 1` root node (never valid per
+`ObjectMetaSchema.blob`'s own invariant) and wraps any deeper build failure
+with the object's own node id as context.
 
 ### 17. `UUID_TAG_PREFIX` relocated to `src/ast/uuid-tag.ts` — the single source of truth
 
@@ -283,6 +310,71 @@ unaffected, DOCX-only feature — plus the full gitignored DOCX corpus)
 confirms no paragraph anywhere in the corpus was double-classified by both
 the 5-signal engine and the body-object capture pass. No guard was added
 because none was needed.
+
+### 19. WS2 (#517): `mc:AlternateContent` must be normalized in the captured BLOB, not just at classification time
+
+Decision 7 established that `body-drawings.ts`'s `unwrapAlternateContent`
+always keeps a drawing's `mc:Choice` branch and discards `mc:Fallback` — but
+that function operates on ONE grouped-mode node, purely to decide *what kind*
+of drawing a run carries. It was never meant to (and does not) touch the
+separately-parsed `ObjectBlobNode` blob `body-order.ts` hands to
+`buildTextBoxObject` for capture. Before WS2's generator re-emit made this
+observable, that gap was silent: the blob still round-tripped byte-identical
+(decision 1), it just carried BOTH the `mc:Choice` and the stale
+`mc:Fallback` (VML) branch side by side, unnormalized.
+
+WS2 surfaced the consequence: `anchorInteriorParagraphs`'s depth-agnostic
+`w:p` walk (`body-objects.ts`) finds interior paragraphs in *both* branches
+of an un-normalized `mc:AlternateContent`, so a captured text box's
+`interiorTexts` silently doubled, and an edit to the live (DrawingML)
+paragraph would visibly diverge from a VML fallback nobody edited on the
+next round trip. `parser/docx/alternate-content.ts`'s
+`stripAlternateContentFallback` closes this: a pure, total, recursive
+`preserveOrder`-mode normalizer that replaces every `mc:AlternateContent`
+descendant of a blob root with its `mc:Choice` child's children (discarding
+`mc:Fallback`), called from `buildTextBoxObject` immediately before
+`anchorInteriorParagraphs`. It is deliberately a SEPARATE module from
+`unwrapAlternateContent` rather than a shared extraction: different node
+shape (`preserveOrder` vs. grouped-mode), different scope (normalize an
+entire subtree vs. classify one run), and a different transformation
+(splice `mc:Choice`'s children into the parent's array in place of the
+`mc:AlternateContent` node vs. substitute one node for another). Multiple
+`mc:Choice` siblings inside one `mc:AlternateContent` is a KNOWN AMBIGUITY
+carried over from decision 7's own caveat: OOXML permits it, no known fixture
+exercises it, and the first `mc:Choice` wins.
+
+### 20. KNOWN AMBIGUITY (WS3-scoped): a nested table/text-box inside a captured object's blob is double-anchored but never independently addressable
+
+`body-objects.ts`'s `transformChildren`/`transformInteriorParagraphs` walk
+(decision 3's anchoring pass) recurses into every non-`w:p` child
+unconditionally — it does not stop, or change behavior, at the boundary of a
+SECOND `w:tbl` or text box nested inside the outer object's own blob (e.g. a
+table cell containing its own nested table, or a text box whose interior
+holds another drawing). That nested artifact's own interior paragraphs get
+the identical `w:sdt` merge anchor (`wrapBlobParagraphWithAnchor`) as the
+outer object's own direct interior paragraphs — the anchoring pass has no
+signal that distinguishes "this anchored paragraph is a direct cell of the
+object I'm capturing" from "this anchored paragraph belongs to a table or
+text box nested N levels inside that object." WS1/WS2 only ever promote a
+BODY-level table/text-box (one whose host sits as a direct, document-ordered
+member of `w:body`) to its own top-level `object` SpecNode; a nested one is
+never separately promoted — its anchored paragraphs surface only as
+`objectText` leaves of the OUTER object, with no independent id, no
+independent editability, and no way for a caller to address "the nested
+table" as its own unit.
+
+This is provisionally harmless for WS2's own scope — decision 1's opaque,
+verbatim-blob posture means the nested artifact still round-trips
+byte-identical either way, anchored or not — but it leaves two open
+questions explicitly deferred to WS3: (1) whether a nested table/text-box
+should be promoted to its own `object` SpecNode nested inside its parent's
+`objectText` children, and (2) if a future merge/edit operation ever needs
+to walk a captured blob's OWN `w:sdt` anchors (rather than only the flat,
+one-level-deep body walk `merge/extract.ts`'s `readUuidFromSdtPr` performs
+today), how it would disambiguate an anchor nested inside one structural
+container from one nested inside two. No test currently exercises a nested
+table/text-box; this addendum exists so the gap is documented rather than
+discovered by surprise.
 
 ## Consequences
 
@@ -315,3 +407,19 @@ because none was needed.
 - `UUID_TAG_PREFIX`'s relocation (decision 17) is a small, backward-compatible
   refactor of two pre-existing call sites; both continue to tag identically,
   pinned by regression test.
+- **The generator round-trip gap is now CLOSED (WS2, #517).** At #300/WS1
+  time, an `object`/`objectText` node's captured blob had no generator-side
+  counterpart at all: a DOCX regenerated (`POST /specs/{id}/generate`) from a
+  spec tree containing captured tables/text boxes would have silently
+  dropped that content — the exact gap addendum 16 originally flagged as a
+  "future generator task." WS2 closes it: `generator/index.ts`'s `emitNode`
+  re-emits every `object` node's blob byte-faithfully via
+  `object-block.ts`'s `ImportedObjectBlock`/`buildObjectBlocks` (addendum 16,
+  superseded), and `body-object-round-trip.test.ts` proves the closed loop —
+  parse → generate → re-parse — conserves object kind/generation/floating
+  and every interior text, for both tables and DrawingML/VML text boxes.
+  Discovering this path also surfaced a second, previously-silent gap in the
+  capture side itself (an un-normalized `mc:AlternateContent` in a captured
+  text box's blob), fixed by `alternate-content.ts` and tracked as its own
+  issue, #517 (addendum 19). A nested table/text-box's own promotion and
+  merge-anchor story remains open, deferred to WS3 (addendum 20).
