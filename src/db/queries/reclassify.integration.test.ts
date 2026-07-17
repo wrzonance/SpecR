@@ -66,6 +66,37 @@ describe('setSpecEditabilityOverride', () => {
     );
     expect(r.status).toBe('not-found');
   });
+
+  // ADR-072 decision 2 / classify.ts's objectFixationRung: object/objectText
+  // editability is fixed at capture time (object always locked, objectText
+  // always editable), never a human-editable choice — the write path must
+  // reject an override attempt before it ever reaches the database.
+  it('rejects an override on an "object" node — editability fixation invariant (ADR-072 D2)', async () => {
+    const obj = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position) VALUES ($1, 'object', '', 2) RETURNING id`,
+      [specId]
+    );
+    const objId = obj.rows[0]!.id;
+    const r = await setSpecEditabilityOverride(specId, objId, 'editable');
+    expect(r).toEqual({ status: 'fixed-node-type', nodeType: 'object' });
+    const row = await pool.query<{ editability_override: unknown }>(
+      `SELECT editability_override FROM paragraphs WHERE id = $1`,
+      [objId]
+    );
+    expect(row.rows[0]!.editability_override).toBeNull(); // write never happened
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [objId]);
+  });
+
+  it('rejects an override on an "objectText" node — symmetric editability fixation (ADR-072 D2)', async () => {
+    const objText = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position) VALUES ($1, 'objectText', 'cell text', 3) RETURNING id`,
+      [specId]
+    );
+    const objTextId = objText.rows[0]!.id;
+    const r = await setSpecEditabilityOverride(specId, objTextId, 'locked');
+    expect(r).toEqual({ status: 'fixed-node-type', nodeType: 'objectText' });
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [objTextId]);
+  });
 });
 
 describe('clearSpecEditabilityOverride', () => {

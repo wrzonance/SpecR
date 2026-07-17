@@ -19,8 +19,9 @@
 // itself for an interior leaf.
 
 import { v4 as uuidv4 } from 'uuid';
-import { createOrderedDocumentXmlBuilder } from './xml-utils.js';
+import { createOrderedDocumentXmlBuilder, toArray } from './xml-utils.js';
 import { classifyTopLevelTables } from './tables.js';
+import { extractParagraphText, isParagraphVanish } from './document.js';
 import { classifyBodyDrawing, unwrapAlternateContent } from './body-drawings.js';
 import { isDrawingRun, runsOf } from './header-footer-region.js';
 import { wrapBlobParagraphWithAnchor } from './object-anchor.js';
@@ -265,25 +266,51 @@ function extractTableObjects(
 
 // ─── drawing / text box capture ─────────────────────────────────────────────
 
-// The FIRST drawing-bearing run (after unwrapAlternateContent) decides the
-// whole paragraph's fate. KNOWN AMBIGUITY: a paragraph with two SEPARATE
-// drawing runs (rare — Word normally puts one drawing per paragraph) is
-// classified by its first drawing only; any second drawing round-trips
-// silently inside the same captured blob rather than getting its own
-// dropped/object entry.
-function classifyParagraphDrawing(
-  raw: Record<string, unknown>
-): BodyDrawingClassification | undefined {
+type TextBoxClassification = Extract<BodyDrawingClassification, { kind: 'textBox' }>;
+
+/** One drawing-bearing run's classification, paired with the run itself (post
+ *  unwrapAlternateContent) — the run is kept so a textBox hit can be searched
+ *  for its own interior content (hidden-text-box detection below) without a
+ *  second runsOf() walk. */
+interface DrawingRunEntry {
+  readonly run: Record<string, unknown>;
+  readonly classification: BodyDrawingClassification;
+}
+
+// EVERY drawing-bearing run is classified — never just the first — so a
+// paragraph carrying more than one separate drawing (rare — Word normally
+// puts one drawing per paragraph) never loses one to the other. KNOWN
+// AMBIGUITY: when a paragraph carries TWO SEPARATE text-box drawings, only
+// the first is modeled as the `object` (see collectParagraphDrawing); the
+// second still round-trips byte-identical inside the same captured
+// host-paragraph blob (decision 1's opaque-blob capture), it is simply not
+// given its own objectText interior text.
+function classifyParagraphDrawings(raw: Record<string, unknown>): readonly DrawingRunEntry[] {
+  const entries: DrawingRunEntry[] = [];
   for (const run of runsOf(raw)) {
     const unwrapped = unwrapAlternateContent(run);
-    if (isDrawingRun(unwrapped)) return classifyBodyDrawing(unwrapped);
+    if (isDrawingRun(unwrapped)) {
+      entries.push({ run: unwrapped, classification: classifyBodyDrawing(unwrapped) });
+    }
   }
-  return undefined;
+  return entries;
+}
+
+function isTextBoxEntry(
+  entry: DrawingRunEntry
+): entry is DrawingRunEntry & { classification: TextBoxClassification } {
+  return entry.classification.kind === 'textBox';
+}
+
+function isDroppedEntry(
+  entry: DrawingRunEntry
+): entry is DrawingRunEntry & { classification: DroppedDrawable } {
+  return entry.classification.kind !== 'textBox';
 }
 
 function buildTextBoxObject(
   hostBlob: readonly ObjectBlobNode[],
-  classification: Extract<BodyDrawingClassification, { kind: 'textBox' }>
+  classification: TextBoxClassification
 ): CapturedBodyObject | undefined {
   const hostNode = hostBlob[0];
   if (!hostNode) return undefined;
@@ -302,22 +329,104 @@ interface DrawingExtractionResult {
   readonly dropped: readonly DroppedDrawable[];
 }
 
+function findInAny(items: readonly unknown[], tag: string): Record<string, unknown> | undefined {
+  for (const item of items) {
+    const found = findFirstDescendant(item, tag);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+// Depth-agnostic search for the first descendant keyed `tag`, regardless of
+// nesting depth. Unlike document.ts's collectRuns — which intentionally
+// treats the FIRST w:r it meets as a terminal leaf run and never looks
+// inside it — a text box's own txbxContent interior paragraphs sit several
+// levels INSIDE the host's drawing-bearing w:r, so reaching them needs a walk
+// that does not stop there.
+function findFirstDescendant(value: unknown, tag: string): Record<string, unknown> | undefined {
+  if (Array.isArray(value)) return findInAny(value, tag);
+  if (value === null || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const match = record[tag];
+  if (match !== null && typeof match === 'object') return match as Record<string, unknown>;
+  return findInAny(Object.values(record), tag);
+}
+
+// A text box's own txbxContent interior paragraphs (DrawingML wps:txbx and
+// VML v:textbox both nest content under this same w:txbxContent tag).
+function txbxContentParagraphs(
+  drawingRun: Record<string, unknown>
+): readonly Record<string, unknown>[] {
+  const content = findFirstDescendant(drawingRun, 'w:txbxContent');
+  if (!content) return [];
+  return toArray<Record<string, unknown>>(
+    content['w:p'] as readonly Record<string, unknown>[] | undefined
+  );
+}
+
+// Evidence-based hidden check, mirroring tables.ts's classifyTable exactly:
+// no text-bearing interior paragraph → not hidden (an empty or graphic-only
+// text box has nothing to hide, even if some paragraph is technically
+// vanish); every text-bearing interior paragraph vanish → hidden.
+function isTextBoxInteriorHidden(drawingRun: Record<string, unknown>, styleMap: StyleMap): boolean {
+  const evidence = txbxContentParagraphs(drawingRun).filter(
+    (p) => extractParagraphText(p).trim().length > 0
+  );
+  return evidence.length > 0 && evidence.every((p) => isParagraphVanish(p, styleMap));
+}
+
+// A captured text box that is fully hidden — via its HOST paragraph mark/
+// style (isParagraphVanish on `raw`, ADR-038 parity) OR every text-bearing
+// interior txbxContent paragraph being vanish (isTextBoxInteriorHidden) — is
+// retained out-of-band exactly like a hidden table: never surfaced as a
+// visible `object` node, and never counted in `dropped` either — nothing was
+// lost, the author intentionally hid it.
+function isHiddenTextBox(
+  raw: Record<string, unknown>,
+  drawingRun: Record<string, unknown>,
+  styleMap: StyleMap
+): boolean {
+  return isParagraphVanish(raw, styleMap) || isTextBoxInteriorHidden(drawingRun, styleMap);
+}
+
+// One paragraph's worth of drawing extraction: at most one object (the first
+// textBox entry found, if any and not fully hidden) plus every non-textBox
+// classification collected as its own dropped entry. Returns fresh data
+// rather than mutating a shared accumulator — mirrors transformChildren's
+// own {children, interiorTexts} return-shape above.
+interface ParagraphDrawingResult {
+  readonly object?: CapturedParagraphObject;
+  readonly dropped: readonly DroppedDrawable[];
+}
+
+function collectParagraphDrawing(
+  paragraphBlobs: readonly (readonly ObjectBlobNode[])[],
+  raw: Record<string, unknown>,
+  paragraphIndex: number,
+  styleMap: StyleMap
+): ParagraphDrawingResult {
+  const entries = classifyParagraphDrawings(raw);
+  const textBoxEntry = entries.find(isTextBoxEntry);
+  if (!textBoxEntry) {
+    return { dropped: entries.filter(isDroppedEntry).map((e) => e.classification) };
+  }
+  if (isHiddenTextBox(raw, textBoxEntry.run, styleMap)) return { dropped: [] };
+  const blob = paragraphBlobs[paragraphIndex];
+  const object = blob ? buildTextBoxObject(blob, textBoxEntry.classification) : undefined;
+  return object ? { object: { paragraphIndex, object }, dropped: [] } : { dropped: [] };
+}
+
 function extractDrawingObjects(
   paragraphBlobs: readonly (readonly ObjectBlobNode[])[],
-  rawParagraphs: readonly Record<string, unknown>[]
+  rawParagraphs: readonly Record<string, unknown>[],
+  styleMap: StyleMap
 ): DrawingExtractionResult {
   const paragraphObjects: CapturedParagraphObject[] = [];
   const dropped: DroppedDrawable[] = [];
   rawParagraphs.forEach((raw, paragraphIndex) => {
-    const classification = classifyParagraphDrawing(raw);
-    if (!classification) return;
-    if (classification.kind !== 'textBox') {
-      dropped.push({ kind: classification.kind });
-      return;
-    }
-    const blob = paragraphBlobs[paragraphIndex];
-    const object = blob ? buildTextBoxObject(blob, classification) : undefined;
-    if (object) paragraphObjects.push({ paragraphIndex, object });
+    const result = collectParagraphDrawing(paragraphBlobs, raw, paragraphIndex, styleMap);
+    if (result.object) paragraphObjects.push(result.object);
+    dropped.push(...result.dropped);
   });
   return { paragraphObjects, dropped };
 }
@@ -342,7 +451,8 @@ export function extractBodyObjects(
   const tableObjects = extractTableObjects(bodyOrder.tables, styleMap);
   const { paragraphObjects, dropped } = extractDrawingObjects(
     bodyOrder.paragraphBlobs,
-    rawParagraphs
+    rawParagraphs,
+    styleMap
   );
   return { tableObjects, paragraphObjects, dropped };
 }

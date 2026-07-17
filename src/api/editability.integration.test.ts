@@ -144,6 +144,36 @@ describe('PATCH /specs/:id/paragraphs/:nodeId/editability', () => {
     });
     expect(r.status).toBe(403);
   });
+
+  // ADR-072 decision 2: object/objectText editability is fixed at capture
+  // time — never a human override target. Regression for the API surface of
+  // reclassify.ts's setSpecEditabilityOverride node-type guard.
+  it('422 when overriding an "object" node — editability fixation invariant (ADR-072 D2)', async () => {
+    const obj = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position)
+       VALUES ($1, 'object', '', 2) RETURNING id`,
+      [specId]
+    );
+    const r = await req('PATCH', `/specs/${specId}/paragraphs/${obj.rows[0]!.id}/editability`, {
+      editability: 'editable',
+    });
+    expect(r.status).toBe(422);
+    expect((r.body as { success: boolean }).success).toBe(false);
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [obj.rows[0]!.id]);
+  });
+
+  it('clearing (null) an "object" node override is still 200 — a no-op, never fixed-node-type', async () => {
+    const obj = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position)
+       VALUES ($1, 'object', '', 3) RETURNING id`,
+      [specId]
+    );
+    const r = await req('PATCH', `/specs/${specId}/paragraphs/${obj.rows[0]!.id}/editability`, {
+      editability: null,
+    });
+    expect(r.status).toBe(200);
+    await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [obj.rows[0]!.id]);
+  });
 });
 
 describe('POST /specs/:id/reclassify', () => {

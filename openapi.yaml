@@ -573,6 +573,11 @@ paths:
         (ADR-022 D2), stored beside — never merged into — the machine classification.
         `editability: null` clears the override so the effective value falls back to
         the machine verdict. The node must belong to the spec in the path (else 403).
+        Setting a non-null override on an `object` or `objectText` node is rejected
+        422 — their editability is fixed at capture time (ADR-072 decision 2: an
+        `object` always `locked`, its `objectText` children always `editable`) and
+        is never a human-editable choice; clearing (`null`) such a node is a no-op
+        ownership-checked 200, since there is never a standing override to clear.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -620,6 +625,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -5421,8 +5428,7 @@ components:
     SearchHit:
       type: object
       description: One ranked paragraph match with stable navigation anchors.
-      required:
-        [paragraphId, text, nodeType, specId, specSection, specTitle, snippet, rank]
+      required: [paragraphId, text, nodeType, specId, specSection, specTitle, snippet, rank]
       properties:
         paragraphId:
           type: string
@@ -5561,10 +5567,8 @@ components:
       properties:
         rows: { type: integer, description: Total aligned rows in the full matrix. }
         aligned: { type: integer, description: Rows present in ≥2 columns. }
-        identical:
-          { type: integer, description: Rows present in all columns with identical text. }
-        differing:
-          { type: integer, description: Rows that are not identical (rows − identical). }
+        identical: { type: integer, description: Rows present in all columns with identical text. }
+        differing: { type: integer, description: Rows that are not identical (rows − identical). }
         columns:
           type: array
           description: Per-column counts, index-aligned to `columns`.
@@ -6484,8 +6488,7 @@ components:
 
     ScoredParagraph:
       type: object
-      required:
-        [nodeId, nodeType, ilvl, label, preview, confidence, signalUsed, agreed, evidence]
+      required: [nodeId, nodeType, ilvl, label, preview, confidence, signalUsed, agreed, evidence]
       description: >-
         One scored structural paragraph in a GET /specs/{id}/hierarchy-report
         response (WS2, #424) — the same inference provenance as
@@ -8687,7 +8690,19 @@ components:
       type: object
       description: A registry record (the PUT verdict response).
       required:
-        [id, orgCode, standardCode, title, currentVersion, sourceUrl, status, lastVerifiedAt, notes, createdAt, updatedAt]
+        [
+          id,
+          orgCode,
+          standardCode,
+          title,
+          currentVersion,
+          sourceUrl,
+          status,
+          lastVerifiedAt,
+          notes,
+          createdAt,
+          updatedAt,
+        ]
       properties:
         id: { type: string, format: uuid }
         orgCode: { type: string }

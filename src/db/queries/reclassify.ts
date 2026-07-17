@@ -31,6 +31,24 @@ export type OwnershipResult =
   | { readonly status: 'not-found' }
   | { readonly status: 'wrong-spec' };
 
+/** Outcome of {@link setSpecEditabilityOverride}: adds `fixed-node-type` to
+ *  {@link OwnershipResult} — the write was rejected, not merely not-found/wrong-spec. */
+export type SetOverrideOutcome =
+  | { readonly status: 'ok' }
+  | { readonly status: 'not-found' }
+  | { readonly status: 'wrong-spec' }
+  | { readonly status: 'fixed-node-type'; readonly nodeType: string };
+
+// `object`/`objectText` editability is fixed at capture time, never derived by
+// classification (ADR-072 decision 2, classify.ts's objectFixationRung): an
+// `object` holds an opaque, un-editable OOXML blob (always `locked`); its
+// `objectText` children are exactly the interior text an editor may redline
+// (always `editable`). A human override on either node type would silently
+// break that invariant (e.g. an opaque blob container reporting "editable"),
+// so the write path rejects it before it ever reaches the database — the
+// same guard classify.ts's rung 0 already enforces for the READ side.
+const FIXED_EDITABILITY_NODE_TYPES: ReadonlySet<string> = new Set(['object', 'objectText']);
+
 export interface EditabilityDiffEntry {
   readonly nodeId: string;
   /** Machine classification BEFORE this pass (null = was unclassified). */
@@ -100,20 +118,29 @@ function buildDiff(prior: PriorState, fresh: ClassifyResult): EditabilityDiffEnt
   });
 }
 
+/** Ownership-check success carries the node's own type — callers that must
+ *  respect a node-type invariant (e.g. body-object editability fixation)
+ *  branch on it without a second query. */
+interface OwnedNode {
+  readonly status: 'ok';
+  readonly nodeType: string;
+}
+
 // Verify a paragraph belongs to the spec. Returns the non-'ok' outcome to short
-// out the caller, or null when ownership holds and the write may proceed.
+// out the caller, or the owned node's type when ownership holds and the write
+// may proceed.
 async function checkOwnership(
   specId: string,
   nodeId: string
-): Promise<Exclude<OwnershipResult, { status: 'ok' }> | null> {
-  const owner = await pool.query<{ spec_id: string }>(
-    `SELECT spec_id FROM paragraphs WHERE id = $1`,
+): Promise<Exclude<OwnershipResult, { status: 'ok' }> | OwnedNode> {
+  const owner = await pool.query<{ spec_id: string; node_type: string }>(
+    `SELECT spec_id, node_type FROM paragraphs WHERE id = $1`,
     [nodeId]
   );
   const row = owner.rows[0];
   if (!row) return { status: 'not-found' };
   if (row.spec_id !== specId) return { status: 'wrong-spec' };
-  return null;
+  return { status: 'ok', nodeType: row.node_type };
 }
 
 // Request-supplied rules carry user regexes (noteBanners) that bypass the
@@ -184,10 +211,13 @@ export async function setSpecEditabilityOverride(
   specId: string,
   nodeId: string,
   editability: Editability
-): Promise<OwnershipResult> {
+): Promise<SetOverrideOutcome> {
   try {
-    const bad = await checkOwnership(specId, nodeId);
-    if (bad) return bad;
+    const owned = await checkOwnership(specId, nodeId);
+    if (owned.status !== 'ok') return owned;
+    if (FIXED_EDITABILITY_NODE_TYPES.has(owned.nodeType)) {
+      return { status: 'fixed-node-type', nodeType: owned.nodeType };
+    }
     await setEditabilityOverride(nodeId, editability);
     return { status: 'ok' };
   } catch (err) {
@@ -201,8 +231,8 @@ export async function clearSpecEditabilityOverride(
   nodeId: string
 ): Promise<OwnershipResult> {
   try {
-    const bad = await checkOwnership(specId, nodeId);
-    if (bad) return bad;
+    const owned = await checkOwnership(specId, nodeId);
+    if (owned.status !== 'ok') return owned;
     await clearEditabilityOverride(nodeId);
     return { status: 'ok' };
   } catch (err) {

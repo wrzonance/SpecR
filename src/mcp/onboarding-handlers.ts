@@ -149,6 +149,15 @@ export async function handleSetEditabilityOverride({
 }): Promise<ToolResult> {
   try {
     const result = await setSpecEditabilityOverride(specId, nodeId, editability);
+    // object/objectText editability is fixed at capture time (ADR-072 D2) —
+    // never overridable. Narrowed inline (not via a helper) so TS keeps
+    // `result` typed as the shared OwnershipResult for the ownershipError
+    // call below — 'fixed-node-type' is not part of that shared union.
+    if (result.status === 'fixed-node-type') {
+      return toolError(
+        `Paragraph ${nodeId}: node type "${result.nodeType}" has fixed editability and cannot be overridden`
+      );
+    }
     const failure = ownershipError(result, nodeId);
     if (failure) return failure;
     return jsonResult({ specId, nodeId, editability });

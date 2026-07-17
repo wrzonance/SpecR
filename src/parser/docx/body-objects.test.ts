@@ -85,6 +85,73 @@ function smartArtParagraph(): string {
   );
 }
 
+// A single w:r run's own <w:drawing> content, WITHOUT the enclosing <w:p><w:r>
+// wrapper — a building block for a two-run paragraph (see twoDrawingRuns).
+function chartRun(): string {
+  return (
+    '<w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">' +
+    '<c:chart r:id="rId9"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
+  );
+}
+
+function smartArtRun(): string {
+  return (
+    '<w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram">' +
+    '<dgm:relIds r:dm="rId1" r:lo="rId2" r:qs="rId3" r:cs="rId4"/></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r>'
+  );
+}
+
+function textBoxRun(interiorText: string): string {
+  return (
+    '<w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+    '<wps:wsp><wps:txbx><w:txbxContent>' +
+    para(interiorText) +
+    '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r>'
+  );
+}
+
+// One host paragraph, TWO SEPARATE drawing-bearing runs: `firstRun`'s
+// classification used to decide the WHOLE paragraph's fate (#300 review) —
+// this builder proves every run is now classified independently.
+function twoDrawingRunsParagraph(firstRun: string, secondRun: string): string {
+  return `<w:p>${firstRun}${secondRun}</w:p>`;
+}
+
+// A vanish (hidden) text box: the txbxContent's own interior run carries
+// w:rPr>w:vanish, mirroring vanishPara's convention above but nested inside
+// the drawing rather than a plain body paragraph.
+function hiddenTextBoxParagraph(interiorText: string): string {
+  const hiddenInterior = `<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>${interiorText}</w:t></w:r></w:p>`;
+  return (
+    '<w:p><w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+    '<wps:wsp><wps:txbx><w:txbxContent>' +
+    hiddenInterior +
+    '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r></w:p>'
+  );
+}
+
+// A text box hidden via its HOST paragraph mark (w:pPr>w:rPr>w:vanish) rather
+// than the interior run — the other of the two mechanisms the review finding
+// named.
+function hostMarkHiddenTextBoxParagraph(interiorText: string): string {
+  return (
+    '<w:p><w:pPr><w:rPr><w:vanish/></w:rPr></w:pPr>' +
+    '<w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+    '<wps:wsp><wps:txbx><w:txbxContent>' +
+    para(interiorText) +
+    '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r></w:p>'
+  );
+}
+
 // Mirrors document.ts's own createDocumentXmlParser(['w:p','w:r','w:hyperlink'])
 // config, so this test feeds extractBodyObjects the SAME shape of rawParagraphs
 // index.ts (a later task) will thread in from document.ts's own parse.
@@ -156,6 +223,53 @@ describe('extractBodyObjects — no-silent-loss across tables, text boxes, and d
     const id = object?.interiorTexts[0]?.id;
     expect(id).toBeDefined();
     expect(tagValues(object?.blob ?? [])).toEqual([`${UUID_TAG_PREFIX}${id}`]);
+  });
+});
+
+describe('extractBodyObjects — multiple drawing runs in one paragraph (#300 review)', () => {
+  it('captures a text box even when a NON-textBox drawing (chart) precedes it in the same paragraph', () => {
+    const body = twoDrawingRunsParagraph(chartRun(), textBoxRun('box text 2'));
+    const result = extract(body);
+    expect(result.paragraphObjects).toHaveLength(1);
+    expect(result.paragraphObjects[0]?.object.kind).toBe('textBox');
+    expect(result.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'box text 2',
+    ]);
+    // The chart round-trips verbatim inside the captured host-paragraph blob
+    // (decision 1) — it is part of the object now, never a separate drop.
+    expect(result.dropped).toEqual([]);
+  });
+
+  it('collects EACH non-textBox drawing in one paragraph as its own dropped entry, not just the first', () => {
+    const body = twoDrawingRunsParagraph(chartRun(), smartArtRun());
+    const result = extract(body);
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([{ kind: 'chart' }, { kind: 'smartArt' }]);
+  });
+});
+
+describe('extractBodyObjects — hidden (vanish) text boxes (ADR-038 parity)', () => {
+  it('skips a text box hidden via its interior run (w:rPr>w:vanish) entirely — no object AND no dropped entry', () => {
+    const body = hiddenTextBoxParagraph('secret box text');
+    const result = extract(body);
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  });
+
+  it('skips a text box hidden via its HOST paragraph mark (w:pPr>w:rPr>w:vanish) entirely', () => {
+    const body = hostMarkHiddenTextBoxParagraph('secret box text');
+    const result = extract(body);
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  });
+
+  it('still captures a VISIBLE text box sitting alongside a hidden one — the hidden split is per-paragraph', () => {
+    const body = hiddenTextBoxParagraph('hidden') + textBoxParagraph('visible');
+    const result = extract(body);
+    expect(result.paragraphObjects).toHaveLength(1);
+    expect(result.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible',
+    ]);
   });
 });
 
