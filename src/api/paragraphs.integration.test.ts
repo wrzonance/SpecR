@@ -3,7 +3,7 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import { pool, SYSTEM_ACTOR_LABEL, lockedObjectMessage } from '../db/index.js';
 import { historyActor } from '../test-utils/history-actor.js';
 
 let server: Server;
@@ -342,8 +342,11 @@ describe('PATCH paragraph — locked-object guard (#519, ADR-072 decision 3)', (
       expect(res.status).toBe(422);
       const body = (await res.json()) as { success: boolean; error: string };
       expect(body.success).toBe(false);
-      expect(body.error).toContain('locked');
-      expect(body.error).toContain('objectText');
+      // Exact equality (not a substring match) against the shared helper (#519 review
+      // finding) — this is the same string the MCP tool test below pins, so the two
+      // surfaces are provably identical, not just each individually containing
+      // "locked"/"objectText".
+      expect(body.error).toBe(lockedObjectMessage('object'));
 
       const unchanged = await pool.query<{ text: string; base_version: number }>(
         'SELECT text, base_version FROM paragraphs WHERE id = $1',

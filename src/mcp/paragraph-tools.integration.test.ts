@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import { pool, SYSTEM_ACTOR_LABEL, lockedObjectMessage } from '../db/index.js';
 import { historyActor } from '../test-utils/history-actor.js';
 import {
   handleUpdateParagraph,
@@ -120,8 +120,11 @@ describe('update_paragraph MCP tool', () => {
       text: 'attempted direct rewrite',
     });
     expect(isToolError(res)).toBe(true);
-    expect(res.content[0]!.text).toContain('locked');
-    expect(res.content[0]!.text).toContain('objectText');
+    // Exact equality (not a substring match) against the shared helper (#519 review
+    // finding) — this is the same string the REST test above pins, so the two
+    // surfaces are provably identical, not just each individually containing
+    // "locked"/"objectText".
+    expect(res.content[0]!.text).toBe(lockedObjectMessage('object'));
   });
 });
 

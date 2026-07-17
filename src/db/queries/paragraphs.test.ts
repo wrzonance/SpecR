@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { lockedObjectMessage } from './paragraphs.js';
 
 vi.mock('../index.js', () => {
   const query = vi.fn();
@@ -285,5 +286,22 @@ describe('updateParagraphText — locked-object guard (#519, ADR-072 decision 3)
     ).toBe(false);
     expect(client.query.mock.calls.some(([sql]) => sql === 'ROLLBACK')).toBe(true);
     expect(client.query.mock.calls.some(([sql]) => sql === 'COMMIT')).toBe(false);
+  });
+});
+
+// #519 review finding: REST (src/api/paragraphs.ts) and MCP (src/mcp/paragraph-handlers.ts)
+// both render this exact string for a locked-object rejection. Pinning it here means a
+// future wording change can only happen in one place, and both surfaces' integration
+// tests assert their live output equals this same function's return value — so the two
+// surfaces are provably identical, not just each individually plausible.
+describe('lockedObjectMessage (#519 review — REST/MCP message parity)', () => {
+  it('names the offending node type and points the caller at objectText', () => {
+    expect(lockedObjectMessage('object')).toBe(
+      'node type "object" is locked and cannot be edited directly — edit its objectText child instead'
+    );
+  });
+
+  it('interpolates whatever nodeType it is given, not a hardcoded "object"', () => {
+    expect(lockedObjectMessage('objectText')).toContain('node type "objectText"');
   });
 });

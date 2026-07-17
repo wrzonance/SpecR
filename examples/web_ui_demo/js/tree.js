@@ -61,8 +61,11 @@ function renderNote(node, ctx) {
 // as hidden content, and object/objectText nodes as a table/text-box block
 // (#300) — none carry a CSI number, so none may consume an ordinal. Counting
 // them shifted numbered siblings (#122): specifier-note banners pushed a
-// 1..15 list to 5..20. Mirrors ast/labels.ts consumesNumber.
-function consumesNumber(node) {
+// 1..15 list to 5..20. Mirrors ast/labels.ts consumesNumber. Exported so the
+// predicate is directly unit-testable (tree.test.mjs) — this directory has no
+// jsdom, so DOM-touching code stays untested by precedent, but this is a pure
+// function (#519 review finding).
+export function consumesNumber(node) {
   return (
     node.type !== 'note' &&
     node.type !== 'continuation' &&
@@ -72,14 +75,27 @@ function consumesNumber(node) {
   );
 }
 
-// Append each child, advancing the CSI ordinal only past numbered siblings so
-// notes/continuations/vanish nodes interleave without disturbing the sequence.
-function appendNumberedChildren(container, children, render) {
+// The CSI ordinal each child would render at, advancing only past numbered
+// siblings (consumesNumber) so notes/continuations/vanish/object/objectText
+// nodes interleave without disturbing the sequence. Split out of
+// appendNumberedChildren — a pure array in, array out function — so the
+// resulting ordinal sequence itself is unit-testable without a DOM (#519
+// review finding: the exclusion list alone was tested server-side, but
+// nothing exercised this file's actual numbered-outline path).
+export function computeOrdinals(children) {
+  const ordinals = [];
   let ordinal = 0;
   for (const child of children) {
-    container.appendChild(render(child, ordinal));
+    ordinals.push(ordinal);
     if (consumesNumber(child)) ordinal += 1;
   }
+  return ordinals;
+}
+
+// Append each child at its computed ordinal.
+function appendNumberedChildren(container, children, render) {
+  const ordinals = computeOrdinals(children);
+  children.forEach((child, i) => container.appendChild(render(child, ordinals[i])));
 }
 
 // ── Inline edit + delete affordances (mockup demo) ──────────────────────────

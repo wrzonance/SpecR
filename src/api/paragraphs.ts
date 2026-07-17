@@ -5,7 +5,12 @@ import {
   PatchRemovalBodySchema,
   InsertParagraphBodySchema,
 } from '../ast/index.js';
-import { updateParagraphText, setParagraphVanish, insertParagraphAfter } from '../db/index.js';
+import {
+  updateParagraphText,
+  setParagraphVanish,
+  insertParagraphAfter,
+  lockedObjectMessage,
+} from '../db/index.js';
 import type { UpdateParagraphResult } from '../db/index.js';
 import { gateErrorResponse } from './edit-gate-response.js';
 import { logger } from '../lib/logger.js';
@@ -68,10 +73,12 @@ export async function insertParagraphHandler(req: Request, res: Response): Promi
 
 /** Maps {@link UpdateParagraphResult} to its REST response. Split out of
  *  updateParagraphHandler to keep the handler under the file's line budget —
- *  the mapping mirrors the MCP tool error (src/mcp/paragraph-handlers.ts)
- *  verbatim for `locked-object` (#519, ADR-072 decision 3): an `object` row's
- *  content is a captured OOXML blob, editable only through its `objectText`
- *  children, never by replacing the row's own `text` directly. */
+ *  the `locked-object` message comes from the shared `lockedObjectMessage`
+ *  (src/db/queries/paragraphs.ts) so it is byte-identical to the MCP tool error
+ *  (src/mcp/paragraph-handlers.ts) by construction, not by hand-copying (#519,
+ *  ADR-072 decision 3): an `object` row's content is a captured OOXML blob,
+ *  editable only through its `objectText` children, never by replacing the
+ *  row's own `text` directly. */
 function sendUpdateResult(res: Response, result: UpdateParagraphResult): void {
   switch (result.status) {
     case 'not-found':
@@ -81,10 +88,7 @@ function sendUpdateResult(res: Response, result: UpdateParagraphResult): void {
       res.status(403).json({ success: false, error: 'paragraph does not belong to this spec' });
       return;
     case 'locked-object':
-      res.status(422).json({
-        success: false,
-        error: `node type "${result.nodeType}" is locked and cannot be edited directly — edit its objectText child instead`,
-      });
+      res.status(422).json({ success: false, error: lockedObjectMessage(result.nodeType) });
       return;
     case 'updated':
       res.status(200).json({ success: true, data: result.node });

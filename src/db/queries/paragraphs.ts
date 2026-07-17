@@ -281,6 +281,16 @@ export type UpdateParagraphResult =
   | { readonly status: 'wrong-spec' }
   | { readonly status: 'locked-object'; readonly nodeType: string };
 
+/** The single source of truth for the `locked-object` rejection text (#519 review
+ *  finding): the REST 422 (src/api/paragraphs.ts) and the MCP tool error
+ *  (src/mcp/paragraph-handlers.ts) both call this instead of each hand-copying its
+ *  own template literal, so the two surfaces cannot silently diverge in wording —
+ *  their integration tests assert the exact string this returns, not just a
+ *  substring. */
+export function lockedObjectMessage(nodeType: string): string {
+  return `node type "${nodeType}" is locked and cannot be edited directly — edit its objectText child instead`;
+}
+
 // Exported for the sibling-insert module (paragraph-insert.ts, #372) — every
 // paragraph write path returns the same reconstructed SpecNode shape.
 export async function fetchSubtreeNode(
