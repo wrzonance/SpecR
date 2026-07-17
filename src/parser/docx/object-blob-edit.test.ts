@@ -220,4 +220,58 @@ describe('replaceAnchoredParagraphText', () => {
 
     expect(() => replaceAnchoredParagraphText(blob, UUID_A, 'x')).toThrow(ParserError);
   });
+
+  // Regression (Codex P1): capture reads interior text recursively through run
+  // wrappers (body-objects.ts collectText: w:hyperlink/w:ins/w:sdt), so a
+  // rewrite that only touched DIRECT w:r children left wrapped text stale and
+  // appended a duplicate run beside it.
+  it('rewrite: wrapped text — text inside a w:hyperlink is rewritten in place, never left stale beside an appended run', () => {
+    const hyperlink: ObjectBlobNode = { 'w:hyperlink': [run('linked text')] };
+    const interior = paragraph(hyperlink);
+    const blob = [cell(wrapBlobParagraphWithAnchor(interior, UUID_A))];
+
+    const result = replaceAnchoredParagraphText(blob, UUID_A, 'edited');
+    expect(result).toBeDefined();
+    const xml = toXml(result as readonly ObjectBlobNode[]);
+
+    expect(xml).toContain('<w:hyperlink>');
+    expect(xml).toContain('<w:t>edited</w:t>');
+    expect(xml).not.toContain('linked text');
+    // the single run stays INSIDE the hyperlink — no duplicate appended run
+    expect([...xml.matchAll(/<w:r>/g)]).toHaveLength(1);
+  });
+
+  // Regression (Codex P2): a run's multiple w:t leaves were all overwritten
+  // with the SAME node (X X duplication) and w:t attributes such as
+  // xml:space="preserve" were dropped.
+  it('rewrite: multi-w:t run — newText lands in the first w:t only, later w:t blanked, xml:space attribute preserved', () => {
+    // One run carrying two w:t leaves, the first space-preserving. The `:@`
+    // sits nested inside the outer literal (cast once at the top, like
+    // malformedAnchor/multiContentAnchor above) — the index signature plus the
+    // intersected optional `:@` key can't both be checked against a single
+    // hand-assembled literal at once (a known TS limitation).
+    const interior = {
+      'w:p': [
+        {
+          'w:r': [
+            { 'w:t': [{ '#text': 'lead ' }], ':@': { '@_xml:space': 'preserve' } },
+            { 'w:t': [{ '#text': 'tail' }] },
+          ],
+        },
+      ],
+    } as ObjectBlobNode;
+    const blob = [cell(wrapBlobParagraphWithAnchor(interior, UUID_A))];
+
+    const result = replaceAnchoredParagraphText(blob, UUID_A, 'once');
+    expect(result).toBeDefined();
+    const xml = toXml(result as readonly ObjectBlobNode[]);
+
+    // xml:space survives, and the new text sits in that first (preserving) w:t
+    expect(xml).toContain('xml:space="preserve"');
+    expect(xml).toContain('once');
+    expect(xml).not.toContain('lead');
+    expect(xml).not.toContain('tail');
+    // exactly one occurrence of the new text — no X X duplication
+    expect([...xml.matchAll(/once/g)]).toHaveLength(1);
+  });
 });

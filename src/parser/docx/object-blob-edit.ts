@@ -151,31 +151,68 @@ export function findAnchoredParagraph(
   return undefined;
 }
 
-/** Rewrites a single `w:r` run's own `w:t` text (faithful single-value
- * rewrite — every other child of the run, e.g. `w:rPr` run properties, is
- * kept untouched). A run with no `w:t` child of its own gets one appended,
- * never replacing the run wholesale. */
-function rewriteRunText(runNode: ObjectBlobNode, text: string): ObjectBlobNode {
-  const tag = tagOf(runNode);
-  // Malformed defensive no-op — mirrors this file's other malformed-node
-  // guards; a run the parser itself captured always has exactly one tag.
-  if (!tag) return runNode;
-  const children = childrenOf(runNode);
-  const newTextNode: ObjectBlobNode = { 'w:t': [{ '#text': text }] };
-  const hasText = children.some((child) => tagOf(child) === 'w:t');
-  if (!hasText) return withChildren(runNode, tag, [...children, newTextNode]);
-  const newChildren = children.map((child) => (tagOf(child) === 'w:t' ? newTextNode : child));
-  return withChildren(runNode, tag, newChildren);
+/** Rewrites a `w:t` text leaf's value while PRESERVING its own attributes —
+ * notably `xml:space="preserve"`, which governs whether leading/trailing
+ * spaces survive a round-trip; silently dropping it corrupts space fidelity. */
+function rewriteTextNode(textNode: ObjectBlobNode, text: string): ObjectBlobNode {
+  const attrs = textNode[':@'];
+  // `as ObjectBlobNode` mirrors withChildren's own established narrowing: the
+  // index signature plus the intersected optional `:@` key can't both be
+  // checked against one hand-assembled literal at once (a known TS limit).
+  return (
+    attrs !== undefined
+      ? { 'w:t': [{ '#text': text }], ':@': attrs }
+      : { 'w:t': [{ '#text': text }] }
+  ) as ObjectBlobNode;
+}
+
+interface TextPlacement {
+  readonly node: ObjectBlobNode;
+  readonly placed: boolean;
+}
+
+/** Rewrites the FIRST `w:t` text leaf reached in document order to `newText`
+ * and blanks every subsequent `w:t` to `''`. Descends through EVERY run
+ * wrapper — `w:hyperlink`, `w:ins`/`w:del`, a nested `w:sdt` — exactly as
+ * body-objects.ts's `collectText` gathers the paragraph's text on CAPTURE, so
+ * an edit reaches the text wherever capture read it from: text living inside a
+ * hyperlink or a tracked-change wrapper is rewritten in place, never left
+ * stale beside a freshly appended duplicate run. Each rewritten `w:t` keeps
+ * its own attributes, so a run's multiple `w:t` leaves are handled one-by-one
+ * (no `X X` duplication) and `xml:space="preserve"` survives. */
+function rewriteFirstText(node: ObjectBlobNode, newText: string, placed: boolean): TextPlacement {
+  const tag = tagOf(node);
+  if (!tag) return { node, placed };
+  if (tag === 'w:t') {
+    return { node: rewriteTextNode(node, placed ? '' : newText), placed: true };
+  }
+  const value = node[tag];
+  if (!isBlobNodeArray(value)) return { node, placed };
+  let changed = false;
+  let nowPlaced = placed;
+  const newChildren: ObjectBlobNode[] = [];
+  for (const child of value) {
+    const result = rewriteFirstText(child, newText, nowPlaced);
+    if (result.node !== child) changed = true;
+    nowPlaced = result.placed;
+    newChildren.push(result.node);
+  }
+  if (!changed) return { node, placed: nowPlaced };
+  return { node: withChildren(node, tag, newChildren), placed: nowPlaced };
 }
 
 /**
- * Rebuilds one paragraph node's content: `w:pPr` (paragraph-mark
- * properties) and every non-`w:r` child are kept untouched, in place. Every
- * existing `w:r` run is PRESERVED — the first carries `newText`, every
- * subsequent run is blanked to `''` (faithful single-value rewrite: the
- * paragraph's structure and any per-run formatting survive; only the text
- * moves). A paragraph with no `w:r` run at all gets exactly one new
- * `w:r > w:t` run appended, never more than necessary.
+ * Rebuilds one paragraph node's content: `w:pPr` (paragraph-mark properties)
+ * and every non-text child are kept in place, every existing `w:t` is
+ * preserved with its attributes — the first carries `newText`, every
+ * subsequent one is blanked (faithful single-value rewrite: the paragraph's
+ * run structure and per-run formatting survive; only the text moves). The
+ * rewrite walks into run wrappers (`w:hyperlink`, `w:ins`/`w:del`, a nested
+ * `w:sdt`), so wrapped text is reached the same way capture read it (see
+ * {@link rewriteFirstText}). A paragraph with NO text leaf anywhere gets one
+ * new `w:r > w:t` run appended — unreachable for real captured data (capture
+ * never anchors a whitespace-only paragraph, body-objects.ts's
+ * `transformChildren`), kept only for totality on malformed input.
  */
 function replaceParagraphContent(paragraph: ObjectBlobNode, newText: string): ObjectBlobNode {
   const tag = tagOf(paragraph);
@@ -183,21 +220,11 @@ function replaceParagraphContent(paragraph: ObjectBlobNode, newText: string): Ob
   // transformInteriorParagraphs guard; a paragraph the parser itself wrapped
   // always has exactly one tag.
   if (!tag) return paragraph;
+  const rewritten = rewriteFirstText(paragraph, newText, false);
+  if (rewritten.placed) return rewritten.node;
   const children = childrenOf(paragraph);
-  const hasRun = children.some((child) => tagOf(child) === 'w:r');
-  if (!hasRun) {
-    const newRun: ObjectBlobNode = { 'w:r': [{ 'w:t': [{ '#text': newText }] }] };
-    return withChildren(paragraph, tag, [...children, newRun]);
-  }
-
-  let placedText = false;
-  const newChildren = children.map((child) => {
-    if (tagOf(child) !== 'w:r') return child;
-    const text = placedText ? '' : newText;
-    placedText = true;
-    return rewriteRunText(child, text);
-  });
-  return withChildren(paragraph, tag, newChildren);
+  const newRun: ObjectBlobNode = { 'w:r': [{ 'w:t': [{ '#text': newText }] }] };
+  return withChildren(paragraph, tag, [...children, newRun]);
 }
 
 function rebuildMatchedSdt(sdtNode: ObjectBlobNode, uuid: string, newText: string): ObjectBlobNode {
