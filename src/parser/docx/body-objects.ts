@@ -412,10 +412,18 @@ function collectParagraphDrawing(
 ): ParagraphDrawingResult {
   const entries = classifyParagraphDrawings(raw);
   const textBoxEntry = entries.find(isTextBoxEntry);
+  const dropped = entries.filter(isDroppedEntry).map((e) => e.classification);
   if (!textBoxEntry) {
-    return { dropped: entries.filter(isDroppedEntry).map((e) => e.classification) };
+    return { dropped };
   }
-  if (isHiddenTextBox(raw, textBoxEntry.run, styleMap)) return { dropped: [] };
+  // A hidden text box captures no object, so a co-occurring non-textBox drawable
+  // (chart/smartArt/OLE/image) is preserved nowhere and would be silently lost —
+  // still report it as dropped. The one exception: when the HOST paragraph itself
+  // is vanish, that drawable is intentionally hidden too, so drop nothing (ADR-072
+  // decision 9's no-silent-loss posture only covers genuinely omitted content).
+  if (isHiddenTextBox(raw, textBoxEntry.run, styleMap)) {
+    return { dropped: isParagraphVanish(raw, styleMap) ? [] : dropped };
+  }
   const blob = paragraphBlobs[paragraphIndex];
   const object = blob ? buildTextBoxObject(blob, textBoxEntry.classification) : undefined;
   return object ? { object: { paragraphIndex, object }, dropped: [] } : { dropped: [] };

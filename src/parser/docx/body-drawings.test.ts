@@ -269,9 +269,10 @@ describe('classifyBodyDrawing — no drawing content', () => {
   });
 });
 
-// KNOWN AMBIGUITY (decision 3, ADR-072): a floating object's HOST paragraph
-// (where its run sits in document order) is the only placement SpecR ever
-// records. A wp:anchor's own offset geometry can visually place the shape
+// KNOWN AMBIGUITY: a floating object's placement is recorded as its HOST
+// paragraph, never its true visual position (decision 3, ADR-072). The host
+// paragraph (where its run sits in document order) is the only placement SpecR
+// ever records. A wp:anchor's own offset geometry can visually place the shape
 // far from that host paragraph — SpecR never attempts to resolve or reflect
 // that visual position; floating classification is wp:anchor-vs-wp:inline
 // presence ONLY, regardless of how extreme the anchor's own offsets are.

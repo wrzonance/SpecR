@@ -145,13 +145,25 @@ describe('DOCX object-table verbatim rendering — hidden-text-test.docx (#300, 
       const tree = await parseDocx(readFileSync(path));
       const render = renderMarkdown(tree);
 
+      // Exact counts, not just > 0: a > 0 floor would still pass if paragraph-tier
+      // `*****` regions REGRESSED and leaked into the render (they would only ADD
+      // rows), hiding the very symptom this excluded-fixture pin exists to catch.
+      // hidden-text-test.docx renders exactly 16 note blocks; its body table
+      // contributes exactly 4 asterisk-rule rows (verbatim, as INDENT-prefixed
+      // object-fallback lines) and the paragraph-tier rules contribute none.
       const noteLines = render
         .split('\n')
         .filter((line) => line.trimStart().startsWith(NOTE_PREFIX));
-      expect(noteLines.length).toBeGreaterThan(0);
+      expect(noteLines.length).toBe(16);
 
       const ruleRows = render.split('\n').filter((line) => /\*{5,}/.test(line));
-      expect(ruleRows.length).toBeGreaterThan(0);
+      expect(ruleRows.length).toBe(4);
+      // Every rule row is object-table fallback content — an INDENT-prefixed
+      // (three-space, matching markdown.ts's INDENT) line — never a bare, leaked
+      // paragraph line.
+      for (const row of ruleRows) {
+        expect(row.startsWith('   ')).toBe(true);
+      }
     }
   );
 });

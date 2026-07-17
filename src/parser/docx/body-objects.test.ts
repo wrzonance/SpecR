@@ -122,19 +122,23 @@ function twoDrawingRunsParagraph(firstRun: string, secondRun: string): string {
   return `<w:p>${firstRun}${secondRun}</w:p>`;
 }
 
-// A vanish (hidden) text box: the txbxContent's own interior run carries
+// A vanish (hidden) text box RUN: the txbxContent's own interior run carries
 // w:rPr>w:vanish, mirroring vanishPara's convention above but nested inside
-// the drawing rather than a plain body paragraph.
-function hiddenTextBoxParagraph(interiorText: string): string {
+// the drawing rather than a plain body paragraph. Run-level (no host <w:p>
+// wrapper) so it can compose with other drawing runs via twoDrawingRunsParagraph.
+function hiddenTextBoxRun(interiorText: string): string {
   const hiddenInterior = `<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>${interiorText}</w:t></w:r></w:p>`;
   return (
-    '<w:p><w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
     '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
     '<wps:wsp><wps:txbx><w:txbxContent>' +
     hiddenInterior +
     '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>' +
-    '</wp:inline></w:drawing></w:r></w:p>'
+    '</wp:inline></w:drawing></w:r>'
   );
+}
+function hiddenTextBoxParagraph(interiorText: string): string {
+  return `<w:p>${hiddenTextBoxRun(interiorText)}</w:p>`;
 }
 
 // A text box hidden via its HOST paragraph mark (w:pPr>w:rPr>w:vanish) rather
@@ -258,6 +262,22 @@ describe('extractBodyObjects — hidden (vanish) text boxes (ADR-038 parity)', (
 
   it('skips a text box hidden via its HOST paragraph mark (w:pPr>w:rPr>w:vanish) entirely', () => {
     const body = hostMarkHiddenTextBoxParagraph('secret box text');
+    const result = extract(body);
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  });
+
+  it('reports a co-occurring chart as dropped when only the text box is hidden (interior vanish) and the host paragraph is visible', () => {
+    // Hidden box → no object captures the host blob, so the chart is preserved
+    // nowhere; it must still surface as a dropped drawable (ADR-072 decision 9).
+    const body = twoDrawingRunsParagraph(chartRun(), hiddenTextBoxRun('secret box'));
+    const result = extract(body);
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([{ kind: 'chart' }]);
+  });
+
+  it('drops nothing when the whole host paragraph is vanish — a co-occurring chart is intentionally hidden too', () => {
+    const body = `<w:p><w:pPr><w:rPr><w:vanish/></w:rPr></w:pPr>${chartRun()}${textBoxRun('box')}</w:p>`;
     const result = extract(body);
     expect(result.paragraphObjects).toEqual([]);
     expect(result.dropped).toEqual([]);

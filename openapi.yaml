@@ -5439,7 +5439,9 @@ components:
           description: Full paragraph text.
         nodeType:
           type: string
-          description: CSI node type (part, article, pr1…pr7, note).
+          description: >-
+            CSI node type (part, article, pr1…pr7, note, continuation, or the
+            object/objectText body-object types, #300).
         specId:
           type: string
           format: uuid
