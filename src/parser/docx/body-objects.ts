@@ -25,6 +25,7 @@ import { extractParagraphText, isParagraphVanish } from './document.js';
 import { classifyBodyDrawing, unwrapAlternateContent } from './body-drawings.js';
 import { isDrawingRun, runsOf } from './header-footer-region.js';
 import { wrapBlobParagraphWithAnchor } from './object-anchor.js';
+import { stripAlternateContentFallback } from './alternate-content.js';
 import type { ClassifiedTopLevelTable } from './tables.js';
 import type { BodyDrawingClassification } from './body-drawings.js';
 import type { BodyOrder, BodyOrderTable } from './body-order.js';
@@ -238,8 +239,16 @@ function classifyTableVisibility(
 function buildTableObject(blob: readonly ObjectBlobNode[]): CapturedBodyObject | undefined {
   const tableNode = blob[0];
   if (!tableNode) return undefined;
-  const dims = tableDimensions(tableNode);
-  const anchored = anchorInteriorParagraphs(tableNode);
+  // #517: normalize mc:AlternateContent to its mc:Choice branch BEFORE
+  // walking for interior paragraphs and dimensions, exactly like
+  // buildTextBoxObject below — a table cell can embed its own drawing (e.g.
+  // a logo or a nested text box) wrapped in mc:AlternateContent, and the
+  // depth-agnostic w:p walk in anchorInteriorParagraphs would otherwise find
+  // w:p nodes in BOTH the Choice and the stale mc:Fallback (VML) branch,
+  // doubling interiorTexts.
+  const normalized = stripAlternateContentFallback(tableNode);
+  const dims = tableDimensions(normalized);
+  const anchored = anchorInteriorParagraphs(normalized);
   return {
     kind: 'table',
     floating: false,
@@ -319,7 +328,13 @@ function buildTextBoxObject(
 ): CapturedBodyObject | undefined {
   const hostNode = hostBlob[0];
   if (!hostNode) return undefined;
-  const anchored = anchorInteriorParagraphs(hostNode);
+  // #517: normalize mc:AlternateContent to its mc:Choice branch BEFORE
+  // walking for interior paragraphs — otherwise anchorInteriorParagraphs's
+  // depth-agnostic w:p walk finds w:p nodes in BOTH the Choice and the
+  // stale mc:Fallback (VML) branch, doubling interiorTexts and letting an
+  // interior text edit diverge from a fallback nobody edited.
+  const normalized = stripAlternateContentFallback(hostNode);
+  const anchored = anchorInteriorParagraphs(normalized);
   return {
     kind: 'textBox',
     floating: classification.floating,

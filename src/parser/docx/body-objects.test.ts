@@ -85,6 +85,33 @@ function smartArtParagraph(): string {
   );
 }
 
+// A text box wrapped in mc:AlternateContent (#517): mc:Choice carries the
+// DrawingML text box with `interiorText`, mc:Fallback carries an equivalent
+// VML text box with a DIFFERENT ("stale") interior text — the realistic
+// shape Word emits for a modern text box (mirrors alternate-content.test.ts's
+// own ALTERNATE_CONTENT_RUN_XML fixture). Before the #517 fix,
+// anchorInteriorParagraphs's depth-agnostic w:p walk found w:p descendants
+// in BOTH the Choice and the stale Fallback branch, doubling interiorTexts.
+function alternateContentTextBoxParagraph(interiorText: string, fallbackText: string): string {
+  return (
+    '<w:p><w:r><mc:AlternateContent>' +
+    '<mc:Choice Requires="wps">' +
+    '<w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+    '<wps:wsp><wps:txbx><w:txbxContent>' +
+    para(interiorText) +
+    '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing>' +
+    '</mc:Choice>' +
+    '<mc:Fallback>' +
+    '<w:pict><v:shape><v:textbox><w:txbxContent>' +
+    para(fallbackText) +
+    '</w:txbxContent></v:textbox></v:shape></w:pict>' +
+    '</mc:Fallback>' +
+    '</mc:AlternateContent></w:r></w:p>'
+  );
+}
+
 // A single w:r run's own <w:drawing> content, WITHOUT the enclosing <w:p><w:r>
 // wrapper — a building block for a two-run paragraph (see twoDrawingRuns).
 function chartRun(): string {
@@ -342,6 +369,92 @@ describe('extractBodyObjects — objectText non-emptiness', () => {
     const interiorTexts = result.paragraphObjects[0]?.object.interiorTexts ?? [];
     expect(interiorTexts).toHaveLength(1);
     expect(interiorTexts[0]?.text).toBe('kept box text');
+  });
+});
+
+describe('extractBodyObjects — #517 mc:AlternateContent normalization in the capture path', () => {
+  it('captures a single objectText leaf from an mc:AlternateContent text box (was doubled)', () => {
+    const body = alternateContentTextBoxParagraph('Choice text', 'Fallback text');
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts).toHaveLength(1);
+    expect(object?.interiorTexts[0]?.text).toBe('Choice text');
+  });
+
+  it('never leaves mc:Fallback or mc:AlternateContent reachable anywhere in the captured blob', () => {
+    const body = alternateContentTextBoxParagraph('Choice text', 'Fallback text');
+    const result = extract(body);
+    const blob = result.paragraphObjects[0]?.object.blob ?? [];
+    const xml = createOrderedDocumentXmlBuilder().build(blob);
+
+    expect(xml).not.toContain('mc:Fallback');
+    expect(xml).not.toContain('mc:AlternateContent');
+    expect(xml).toContain('Choice text');
+    expect(xml).not.toContain('Fallback text');
+  });
+});
+
+describe('extractBodyObjects — #517 mc:AlternateContent normalization in table captures', () => {
+  it('captures a single interior text from a table cell embedding an mc:AlternateContent-wrapped drawing (was doubled)', () => {
+    const body = table(
+      row(cell(alternateContentTextBoxParagraph('Choice cell text', 'Fallback cell text')))
+    );
+    const result = extract(body);
+
+    expect(result.tableObjects).toHaveLength(1);
+    const object = result.tableObjects[0]?.object;
+    expect(object?.interiorTexts).toHaveLength(1);
+    expect(object?.interiorTexts[0]?.text).toBe('Choice cell text');
+  });
+
+  it('never leaves mc:Fallback or mc:AlternateContent reachable anywhere in a captured table blob', () => {
+    const body = table(
+      row(cell(alternateContentTextBoxParagraph('Choice cell text', 'Fallback cell text')))
+    );
+    const result = extract(body);
+    const blob = result.tableObjects[0]?.object.blob ?? [];
+    const xml = createOrderedDocumentXmlBuilder().build(blob);
+
+    expect(xml).not.toContain('mc:Fallback');
+    expect(xml).not.toContain('mc:AlternateContent');
+    expect(xml).toContain('Choice cell text');
+    expect(xml).not.toContain('Fallback cell text');
+  });
+});
+
+describe('extractBodyObjects — KNOWN AMBIGUITY: nested table/text box inside a captured object (ADR-072 addendum 20)', () => {
+  // KNOWN AMBIGUITY: a nested table/text box inside a captured object is
+  // flattened into the OUTER object's interiorTexts and never independently
+  // promoted to its own `object` node — how to address the inner unit is
+  // deferred to WS3.
+  // transformChildren/transformInteriorParagraphs (body-objects.ts) recurse
+  // into every non-w:p child unconditionally — including a SECOND w:tbl
+  // nested inside the outer table's own cell. That nested table's interior
+  // paragraph gets the identical w:sdt anchor treatment as the outer table's
+  // own direct cell paragraphs, and its text is flattened into the SAME
+  // interiorTexts array — with no independent id, editability, or way to
+  // address "the nested table" as its own unit. Only ONE `object` (the
+  // outer table) ever surfaces; the nested w:tbl is never independently
+  // promoted (deferred to WS3). This test PINS today's flattening behavior
+  // so a change to it is a deliberate, reviewed decision, not a silent drift.
+  it("KNOWN AMBIGUITY: flattens a nested table's interior text into the OUTER object's interiorTexts — the nested table is never independently addressable", () => {
+    const body = table(
+      row(cell(para('outer cell text') + table(row(cell(para('nested cell text'))))))
+    );
+    const result = extract(body);
+
+    expect(result.tableObjects).toHaveLength(1);
+    const object = result.tableObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual([
+      'outer cell text',
+      'nested cell text',
+    ]);
+    // Both paragraphs get a w:sdt anchor from the SAME captured blob — one
+    // flat id space, no marker distinguishing the nested table's anchors
+    // from the outer table's own.
+    expect(tagValues(object?.blob ?? [])).toHaveLength(2);
   });
 });
 
