@@ -12,7 +12,7 @@
 // numbering" invariant.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { consumesNumber, computeOrdinals } from './js/tree.js';
+import { consumesNumber, computeOrdinals, objectRenderMode } from './js/tree.js';
 
 const node = (type, vanish = false) => ({ type, meta: { vanish } });
 
@@ -69,4 +69,27 @@ test('computeOrdinals: notes, vanished siblings, and object/objectText together 
     node('pr1'),
   ];
   assert.deepEqual(numberedOrdinals(children), [0, 1]);
+});
+
+// renderPrNode's read-only guard for captured body objects (#300, ADR-072:
+// "Scope is READ-ONLY: WS3 adds no edit affordance for object/objectText
+// nodes") was a bare inline early-return with zero test coverage — unlike
+// consumesNumber/computeOrdinals above, it was never extracted into a
+// testable function (#519 review finding). objectRenderMode pulls the
+// decision itself (which render path a node takes) out of the DOM-touching
+// renderPrNode, so the guard is pinned here without jsdom.
+test('objectRenderMode: an object node takes the read-only object-block render path', () => {
+  assert.equal(objectRenderMode(node('object')), 'object');
+});
+
+test('objectRenderMode: an objectText node renders nothing directly — consumed internally by renderObjectBlock', () => {
+  assert.equal(objectRenderMode(node('objectText')), 'empty');
+});
+
+test('objectRenderMode: every other node type takes the standard editable pr-node render path (null — no read-only override)', () => {
+  assert.equal(objectRenderMode(node('pr1')), null);
+  assert.equal(objectRenderMode(node('part')), null);
+  assert.equal(objectRenderMode(node('article')), null);
+  assert.equal(objectRenderMode(node('continuation')), null);
+  assert.equal(objectRenderMode(node('note')), null);
 });

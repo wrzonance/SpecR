@@ -13,6 +13,9 @@ import {
   handleDeleteAssociation,
 } from './association-handlers.js';
 import type { ToolResult } from './handlers.js';
+import { findAnchoredParagraph } from '../parser/index.js';
+import { UUID_TAG_PREFIX } from '../ast/index.js';
+import type { ObjectBlobNode, ObjectMeta } from '../ast/index.js';
 
 const MISSING = '00000000-0000-0000-0000-000000000000';
 let libraryId: string;
@@ -51,6 +54,46 @@ async function insertParagraph(spec: string, nodeType: string, text: string): Pr
   const id = r.rows[0]?.id;
   if (!id) throw new Error('failed to insert test paragraph');
   return id;
+}
+
+/** An `object` row plus a single `objectText` child anchored inside its
+ * captured blob (#519, ADR-072 decision 3) — the minimal fixture the
+ * successful-edit test below needs to exercise the real write path through
+ * `handleUpdateParagraph`, not just db/queries directly. */
+async function insertAnchoredObjectPair(
+  spec: string,
+  anchorText: string
+): Promise<{ objectId: string; textId: string }> {
+  const objectId = await insertParagraph(spec, 'object', '[TABLE]');
+  const textRow = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version)
+     VALUES ($1, $2, 'objectText', $3, 0, 1) RETURNING id`,
+    [spec, objectId, anchorText]
+  );
+  const textId = textRow.rows[0]?.id;
+  if (!textId) throw new Error('failed to insert test objectText row');
+
+  const meta: ObjectMeta = {
+    kind: 'table',
+    floating: false,
+    generation: 'drawingml',
+    rows: 1,
+    columns: 1,
+    blob: [
+      {
+        'w:sdt': [
+          { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `${UUID_TAG_PREFIX}${textId}` } }] },
+          { 'w:sdtContent': [{ 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': anchorText }] }] }] }] },
+        ],
+      } as ObjectBlobNode,
+    ],
+  };
+  await pool.query(`UPDATE paragraphs SET object_data = $2::jsonb WHERE id = $1`, [
+    objectId,
+    JSON.stringify(meta),
+  ]);
+
+  return { objectId, textId };
 }
 
 beforeAll(async () => {
@@ -125,6 +168,33 @@ describe('update_paragraph MCP tool', () => {
     // surfaces are provably identical, not just each individually containing
     // "locked"/"objectText".
     expect(res.content[0]!.text).toBe(lockedObjectMessage('object'));
+  });
+
+  // #519 review finding: the locked-object guard's OTHER half — an objectText
+  // child is ALWAYS editable — had no MCP-layer (or REST-layer) coverage of an
+  // actual successful edit; only a lower-level db/queries.updateParagraphText
+  // unit exercised it. This drives the real tool handler end-to-end.
+  it('a successful objectText edit rewrites the parent object blob, mirroring the REST wire path (#519)', async () => {
+    const { objectId, textId } = await insertAnchoredObjectPair(specId, 'Original interior text.');
+
+    const res = await handleUpdateParagraph({
+      specId,
+      nodeId: textId,
+      text: 'Rewritten interior text.',
+    });
+    expect(isToolError(res)).toBe(false);
+    const node = parse<{ id: string; type: string; text: string }>(res);
+    expect(node.id).toBe(textId);
+    expect(node.type).toBe('objectText');
+    expect(node.text).toBe('Rewritten interior text.');
+
+    const objectRow = await pool.query<{ object_data: ObjectMeta }>(
+      'SELECT object_data FROM paragraphs WHERE id = $1',
+      [objectId]
+    );
+    expect(findAnchoredParagraph(objectRow.rows[0]!.object_data.blob, textId)).toEqual({
+      'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': 'Rewritten interior text.' }] }] }],
+    });
   });
 });
 

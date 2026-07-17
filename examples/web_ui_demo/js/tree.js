@@ -213,15 +213,29 @@ async function commitEdit({ node, ctx, input, save, cancel }) {
   }
 }
 
+// Which read-only render path a node takes instead of the standard editable
+// pr-node path (#300, ADR-072: "Scope is READ-ONLY: WS3 adds no edit
+// affordance for object/objectText nodes"): an `object` row renders as its
+// own captured table/text-box block ('object'); an `objectText` leaf is
+// consumed internally by renderObjectBlock and renders nothing if ever
+// handed here directly ('empty') — a defensive no-op mirroring the server's
+// renderNonStructural, since the normal child-recursion path below never
+// hands one to renderPrNode. Returns null for every other node type, meaning
+// the standard render path applies. Pulled out of renderPrNode's own inline
+// early-return — like consumesNumber/computeOrdinals before it — so the
+// read-only guard itself is unit-testable without a DOM (tree.test.mjs,
+// #519 review finding).
+export function objectRenderMode(node) {
+  if (node.type === 'object') return 'object';
+  if (node.type === 'objectText') return 'empty';
+  return null;
+}
+
 function renderPrNode(node, index, ctx) {
   if (node.type === 'note') return renderNote(node, ctx);
-  // A captured body object (#300) renders as its own table/text-box block;
-  // its objectText leaves are consumed internally by renderObjectBlock and
-  // never reach this function through the normal child-recursion path below
-  // — the empty fragment is a defensive no-op mirroring the server's
-  // renderNonStructural, in case one is ever handed here directly.
-  if (node.type === 'object') return renderObjectBlock(node, ctx);
-  if (node.type === 'objectText') return document.createDocumentFragment();
+  const objectMode = objectRenderMode(node);
+  if (objectMode === 'object') return renderObjectBlock(node, ctx);
+  if (objectMode === 'empty') return document.createDocumentFragment();
 
   const row = el('div', 'tree-node');
   row.dataset.nodeId = node.id;
