@@ -516,6 +516,11 @@ paths:
         is rejected 409 with the current version, so a concurrent edit is never
         silently clobbered. The composed edit gate also rejects writes to an
         archived spec or one locked upstream in a DMS (409).
+
+
+        A body `object` node (#300, ADR-072) is locked — its content is a
+        captured OOXML blob, editable only through its `objectText` children —
+        so a direct write to it is rejected 422.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -561,6 +566,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/WriteConflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 

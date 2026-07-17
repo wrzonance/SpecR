@@ -111,6 +111,18 @@ describe('update_paragraph MCP tool', () => {
     });
     expect(isToolError(res)).toBe(true);
   });
+
+  it('rejects a direct write to a locked object row, mirroring the REST 422 (#519, ADR-072 decision 3)', async () => {
+    const objectId = await insertParagraph(specId, 'object', '[TABLE]');
+    const res = await handleUpdateParagraph({
+      specId,
+      nodeId: objectId,
+      text: 'attempted direct rewrite',
+    });
+    expect(isToolError(res)).toBe(true);
+    expect(res.content[0]!.text).toContain('locked');
+    expect(res.content[0]!.text).toContain('objectText');
+  });
 });
 
 describe('update_paragraph MCP tool — actorLabel attribution (#377)', () => {

@@ -6,6 +6,7 @@ import {
   InsertParagraphBodySchema,
 } from '../ast/index.js';
 import { updateParagraphText, setParagraphVanish, insertParagraphAfter } from '../db/index.js';
+import type { UpdateParagraphResult } from '../db/index.js';
 import { gateErrorResponse } from './edit-gate-response.js';
 import { logger } from '../lib/logger.js';
 
@@ -65,11 +66,39 @@ export async function insertParagraphHandler(req: Request, res: Response): Promi
   }
 }
 
+/** Maps {@link UpdateParagraphResult} to its REST response. Split out of
+ *  updateParagraphHandler to keep the handler under the file's line budget —
+ *  the mapping mirrors the MCP tool error (src/mcp/paragraph-handlers.ts)
+ *  verbatim for `locked-object` (#519, ADR-072 decision 3): an `object` row's
+ *  content is a captured OOXML blob, editable only through its `objectText`
+ *  children, never by replacing the row's own `text` directly. */
+function sendUpdateResult(res: Response, result: UpdateParagraphResult): void {
+  switch (result.status) {
+    case 'not-found':
+      res.status(404).json({ success: false, error: 'paragraph not found' });
+      return;
+    case 'wrong-spec':
+      res.status(403).json({ success: false, error: 'paragraph does not belong to this spec' });
+      return;
+    case 'locked-object':
+      res.status(422).json({
+        success: false,
+        error: `node type "${result.nodeType}" is locked and cannot be edited directly — edit its objectText child instead`,
+      });
+      return;
+    case 'updated':
+      res.status(200).json({ success: true, data: result.node });
+      return;
+  }
+}
+
 /**
  * PATCH /specs/:id/paragraphs/:nodeId — update a single paragraph's text by UUID
  * (ADR-009, #47). The body may carry `expectedVersion` (ADR-018 D1): a stale
  * value is rejected 409 with the current version. The Revit add-in (#48) calls
- * this to push a model-parameter change without replacing the whole spec.
+ * this to push a model-parameter change without replacing the whole spec. An
+ * `object` row is rejected 422 (#519, ADR-072 decision 3): its content is a
+ * captured OOXML blob, editable only through its `objectText` children.
  */
 export async function updateParagraphHandler(req: Request, res: Response): Promise<void> {
   const specId = z.uuid().safeParse(req.params['id']);
@@ -96,17 +125,7 @@ export async function updateParagraphHandler(req: Request, res: Response): Promi
       body.data.expectedVersion,
       body.data.actorLabel
     );
-    switch (result.status) {
-      case 'not-found':
-        res.status(404).json({ success: false, error: 'paragraph not found' });
-        return;
-      case 'wrong-spec':
-        res.status(403).json({ success: false, error: 'paragraph does not belong to this spec' });
-        return;
-      case 'updated':
-        res.status(200).json({ success: true, data: result.node });
-        return;
-    }
+    sendUpdateResult(res, result);
   } catch (err) {
     const gate = gateErrorResponse(err);
     if (gate) {
