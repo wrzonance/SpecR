@@ -354,6 +354,119 @@ describe('renderMarkdown', () => {
     };
     expect(renderMarkdown(suffixed)).toBe('# SECTION 27 05 13.43 — TV Distribution');
   });
+  // #300, ADR-072: object/objectText rendering. A captured body object (table
+  // or text box) must never collapse to nothing — the boundary invariant
+  // every case below pins first, before checking exact shape.
+  function objectTextNode(id: string, text: string): SpecTree['parts'][number] {
+    return { id, type: 'objectText', text, children: [], meta: {} };
+  }
+  function tableObjectNode(
+    id: string,
+    dims: { rows?: number; columns?: number },
+    cells: readonly string[]
+  ): SpecTree['parts'][number] {
+    return {
+      id,
+      type: 'object',
+      text: 'Table',
+      children: cells.map((text, i) => objectTextNode(`${id}-c${i}`, text)),
+      meta: {
+        object: {
+          kind: 'table',
+          floating: false,
+          generation: 'drawingml',
+          ...dims,
+          blob: [{ 'w:tbl': [] }],
+        },
+      },
+    };
+  }
+  function textBoxObjectNode(
+    id: string,
+    floating: boolean,
+    texts: readonly string[]
+  ): SpecTree['parts'][number] {
+    return {
+      id,
+      type: 'object',
+      text: 'Text Box',
+      children: texts.map((text, i) => objectTextNode(`${id}-c${i}`, text)),
+      meta: {
+        object: { kind: 'textBox', floating, generation: 'drawingml', blob: [{ 'w:p': [] }] },
+      },
+    };
+  }
+
+  it('#300: never renders an object node as empty markdown (non-emptiness boundary)', () => {
+    const table = renderMarkdown(
+      rootTree([tableObjectNode('t', { rows: 2, columns: 2 }, ['Item', 'Qty', 'Bolt', '12'])])
+    );
+    const mismatched = renderMarkdown(
+      rootTree([tableObjectNode('t2', { rows: 2, columns: 2 }, ['Item', 'Qty', 'Bolt'])])
+    );
+    const textBox = renderMarkdown(rootTree([textBoxObjectNode('b', false, ['Callout text.'])]));
+    for (const md of [table, mismatched, textBox]) {
+      expect(md).not.toBe('');
+      expect(md.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('#300: renders a simple table grid (cell count === rows*columns) as a GFM pipe table', () => {
+    const md = renderMarkdown(
+      rootTree([tableObjectNode('t', { rows: 2, columns: 2 }, ['Item', 'Qty', 'Bolt', '12'])])
+    );
+    expect(md).toBe(
+      '# SECTION 01 00 00 — Roots\n' + '\n| Item | Qty |\n| --- | --- |\n| Bolt | 12 |'
+    );
+  });
+
+  it('#300: falls back to a labeled blockquote when cell count does not match rows*columns (merge/blank-cell evidence)', () => {
+    const md = renderMarkdown(
+      rootTree([tableObjectNode('t2', { rows: 2, columns: 2 }, ['Item', 'Qty', 'Bolt'])])
+    );
+    expect(md).toBe('# SECTION 01 00 00 — Roots\n' + '\n> **[TABLE]**\n   Item\n   Qty\n   Bolt');
+  });
+
+  it('#300: renders a text box as a labeled blockquote, joining interior paragraph text', () => {
+    const md = renderMarkdown(
+      rootTree([textBoxObjectNode('b', false, ['Line one.', 'Line two.'])])
+    );
+    expect(md).toBe('# SECTION 01 00 00 — Roots\n' + '\n> **[TEXT BOX]** Line one. Line two.');
+  });
+
+  it('#300: appends a floating note for a floating text box', () => {
+    const md = renderMarkdown(rootTree([textBoxObjectNode('b', true, ['Callout.'])]));
+    expect(md).toContain('> **[TEXT BOX]** Callout. *(floating)*');
+  });
+
+  it('#300: escapes pipes and collapses newlines in table cell text', () => {
+    const md = renderMarkdown(
+      rootTree([tableObjectNode('t3', { rows: 2, columns: 1 }, ['A | B', 'Line1\nLine2'])])
+    );
+    expect(md).toBe('# SECTION 01 00 00 — Roots\n' + '\n| A \\| B |\n| --- |\n| Line1 Line2 |');
+  });
+
+  it('#300: an objectText node rendered outside its parent object folds to empty, never leaking raw text', () => {
+    const md = renderMarkdown(
+      rootTree([objectTextNode('stray', 'stray leaf text'), part('GENERAL')])
+    );
+    expect(md).not.toContain('stray leaf text');
+    expect(md).toContain('## PART 1 - GENERAL');
+  });
+
+  it('#300: a root-level object does not shift PART numbering (consumesNumber excludes object)', () => {
+    const md = renderMarkdown(
+      rootTree([
+        tableObjectNode('t', { rows: 1, columns: 1 }, ['solo cell']),
+        part('GENERAL'),
+        part('PRODUCTS'),
+      ])
+    );
+    expect(md).toContain('## PART 1 - GENERAL');
+    expect(md).toContain('## PART 2 - PRODUCTS');
+    expect(md).not.toContain('PART 3');
+  });
+
   it('renders continuation without label', () => {
     const withCont: SpecTree = {
       id: '00000000-0000-0000-0000-000000000001',
