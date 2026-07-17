@@ -1,0 +1,140 @@
+import { describe, it, expect } from 'vitest';
+import { createOrderedDocumentXmlParser, createOrderedDocumentXmlBuilder } from './xml-utils.js';
+import { stripAlternateContentFallback } from './alternate-content.js';
+import type { ObjectBlobNode } from '../../ast/index.js';
+
+function parseBlob(xml: string): ObjectBlobNode {
+  const [root] = createOrderedDocumentXmlParser().parse(xml) as ObjectBlobNode[];
+  if (!root) throw new Error(`fixture XML produced no root node: ${xml}`);
+  return root;
+}
+
+function toXml(node: ObjectBlobNode): string {
+  return createOrderedDocumentXmlBuilder().build([node]);
+}
+
+// Attribute-bearing fixture nodes need a computed-key builder, not a direct
+// object literal: a hand-assembled literal combining a plain element key
+// (whose value is `ObjectBlobNode[]`) with the separately-intersected `:@`
+// attribute key can't be checked against ObjectBlobNode's recursive
+// index-signature-plus-intersection shape in one pass — a known TS
+// limitation, not a sign the literal is the wrong shape (mirrors
+// generator/object-block.test.ts's own established `attrNode` helper for
+// exactly this case).
+function attrNode(
+  tag: string,
+  attrs: Readonly<Record<string, string | number>>,
+  children: readonly ObjectBlobNode[]
+): ObjectBlobNode {
+  return { [tag]: children, ':@': attrs } as ObjectBlobNode;
+}
+
+// Every tag name reachable anywhere in `node`'s subtree (depth-first,
+// including `node`'s own tag) — lets a test assert an eliminated tag
+// (mc:Fallback) never survives anywhere in the rebuilt tree, not just at
+// the top level.
+function collectTags(node: ObjectBlobNode, acc: string[] = []): string[] {
+  const tag = Object.keys(node).find((key) => key !== ':@');
+  if (!tag) return acc;
+  acc.push(tag);
+  const value = node[tag];
+  if (Array.isArray(value)) {
+    for (const child of value as readonly ObjectBlobNode[]) collectTags(child, acc);
+  }
+  return acc;
+}
+
+// A realistic body-paragraph run wrapping a DrawingML text box in
+// mc:AlternateContent, with a VML mc:Fallback carrying its own distinct
+// interior text — the same shape a real Word-authored .docx emits for a
+// modern text box (ADR-072 decision 9, body-drawings.ts's own header
+// comment), sitting between two ordinary sibling runs.
+const ALTERNATE_CONTENT_RUN_XML =
+  '<w:p><w:r><w:t>before</w:t></w:r>' +
+  '<w:r><mc:AlternateContent>' +
+  '<mc:Choice Requires="wps">' +
+  '<w:drawing><wp:inline><a:graphic><a:graphicData>' +
+  '<wps:wsp><wps:txbx><w:txbxContent><w:p><w:r><w:t>Choice text</w:t></w:r></w:p></w:txbxContent></wps:txbx></wps:wsp>' +
+  '</a:graphicData></a:graphic></wp:inline></w:drawing>' +
+  '</mc:Choice>' +
+  '<mc:Fallback>' +
+  '<w:pict><v:shape><v:textbox><w:txbxContent><w:p><w:r><w:t>Fallback text</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict>' +
+  '</mc:Fallback>' +
+  '</mc:AlternateContent></w:r>' +
+  '<w:r><w:t>after</w:t></w:r></w:p>';
+
+describe('stripAlternateContentFallback', () => {
+  it('returns a no-AlternateContent tree structurally unchanged', () => {
+    const xml = '<w:p><w:r><w:t>hello</w:t></w:r></w:p>';
+    const node = parseBlob(xml);
+    const result = stripAlternateContentFallback(node);
+    expect(result).toEqual(node);
+    expect(toXml(result)).toBe(xml);
+  });
+
+  it('extracts the mc:Choice content from a realistic nested fixture, discarding mc:Fallback', () => {
+    const node = parseBlob(ALTERNATE_CONTENT_RUN_XML);
+    const xml = toXml(stripAlternateContentFallback(node));
+    expect(xml).toContain('Choice text');
+    expect(xml).not.toContain('Fallback text');
+    expect(xml).not.toContain('mc:AlternateContent');
+    expect(xml).not.toContain('mc:Choice');
+    expect(xml).not.toContain('mc:Fallback');
+  });
+
+  it('preserves sibling run content (before/after the AlternateContent run) untouched and in order', () => {
+    const node = parseBlob(ALTERNATE_CONTENT_RUN_XML);
+    const xml = toXml(stripAlternateContentFallback(node));
+    const beforeIdx = xml.indexOf('before');
+    const choiceIdx = xml.indexOf('Choice text');
+    const afterIdx = xml.indexOf('after');
+    expect(beforeIdx).toBeGreaterThan(-1);
+    expect(choiceIdx).toBeGreaterThan(beforeIdx);
+    expect(afterIdx).toBeGreaterThan(choiceIdx);
+  });
+
+  it('never leaves an mc:Fallback tag reachable anywhere in the result', () => {
+    const node = parseBlob(ALTERNATE_CONTENT_RUN_XML);
+    const result = stripAlternateContentFallback(node);
+    expect(collectTags(result)).not.toContain('mc:Fallback');
+  });
+
+  it('leaves an mc:AlternateContent with no mc:Choice as-is (malformed input, never faked)', () => {
+    const malformed: ObjectBlobNode = {
+      'w:r': [
+        {
+          'mc:AlternateContent': [{ 'mc:Fallback': [{ 'w:pict': [] }] }],
+        },
+      ],
+    };
+    const result = stripAlternateContentFallback(malformed);
+    expect(result).toEqual(malformed);
+  });
+
+  it('KNOWN AMBIGUITY: multiple mc:Choice siblings — the first wins, later ones discarded', () => {
+    const choiceOne = attrNode('mc:Choice', { '@_Requires': 'a' }, [
+      { 'w:t': [{ '#text': 'first' }] },
+    ]);
+    const choiceTwo = attrNode('mc:Choice', { '@_Requires': 'b' }, [
+      { 'w:t': [{ '#text': 'second' }] },
+    ]);
+    const multiChoice: ObjectBlobNode = {
+      'w:r': [{ 'mc:AlternateContent': [choiceOne, choiceTwo] }],
+    };
+    const xml = toXml(stripAlternateContentFallback(multiChoice));
+    expect(xml).toContain('first');
+    expect(xml).not.toContain('second');
+  });
+
+  it('is pure: never mutates the input node', () => {
+    const node = parseBlob(ALTERNATE_CONTENT_RUN_XML);
+    const before = JSON.parse(JSON.stringify(node)) as unknown;
+    stripAlternateContentFallback(node);
+    expect(JSON.parse(JSON.stringify(node))).toEqual(before);
+  });
+
+  it('is total: never throws, even on a tag-less node', () => {
+    const tagless = {} as ObjectBlobNode;
+    expect(() => stripAlternateContentFallback(tagless)).not.toThrow();
+  });
+});
