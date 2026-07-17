@@ -51,6 +51,21 @@ const DRIFT_REGRESSIONS: ReadonlyArray<{
 
 const DRIFT_DISENGAGED = new Set(DRIFT_REGRESSIONS.map((r) => r.file));
 
+// Body objects (#300, ADR-072): a captured table/text-box's cell text is a faithful,
+// out-of-band, VERBATIM mirror of the original document — never re-run through the
+// paragraph-tier note-region engine (that's a Signal-classification concern the object
+// capture pass sits entirely outside of, ADR-072 decision 8). hidden-text-test.docx has
+// a real submittal-matrix table whose cells include an asterisk-rule row a spec author
+// used as in-cell visual separation; #300 now renders that table's content (previously
+// dropped silently — see the `table-content-skipped` warning it used to only count), so
+// the row surfaces verbatim, same as any other cell. Suppressing it would mean silently
+// reinterpreting locked table content, the opposite of this file's own no-silent-loss
+// contract (see markdown.test.ts:423 for the unit-level pin of this exact fallback
+// rendering). Excluded from the sweep below for that reason; its 16 paragraph-tier
+// `[NOTE]` blocks (unrelated to the table) are unaffected and untouched by #300 —
+// verified directly against origin/main's parse of the same file.
+const OBJECT_VERBATIM_TABLE = new Set(['hidden-text-test.docx']);
+
 // Corpus-wide guard for asterisk-rule note regions (#292): a BARE asterisk-only rule
 // row (5+ '*' and nothing else) must never survive as its own line into rendered
 // output. Where the asterisk convention ENGAGES, each rule row is suppressed as a
@@ -60,8 +75,8 @@ const DRIFT_DISENGAGED = new Set(DRIFT_REGRESSIONS.map((r) => r.file));
 // guard, which deliberately falls back to the pre-feature parse — INCLUDING any stray
 // bare wall base already rendered (asserting otherwise would force the feature back on
 // and re-open the part-loss regression). Their structural integrity is pinned by the
-// drift-guard block below instead. The #430 MANUFACTURER_EXAMPLES fixtures that DO
-// engage the convention (hidden-text-test, paring-fixes) keep this sweep live.
+// drift-guard block below instead. The #430 MANUFACTURER_EXAMPLES fixture that still
+// engages the convention at the PARAGRAPH tier (paring-fixes) keeps this sweep live.
 const REF = resolve('docs/references');
 const CORPUS = existsSync(REF)
   ? globSync(`${REF}/**/*.docx`).sort((a, b) => a.localeCompare(b))
@@ -76,7 +91,9 @@ describe.skipIf(CORPUS.length === 0)(
   () => {
     for (const file of CORPUS) {
       const name = basename(file);
-      if (INVALID.has(name) || DRIFT_DISENGAGED.has(name)) continue;
+      if (INVALID.has(name) || DRIFT_DISENGAGED.has(name) || OBJECT_VERBATIM_TABLE.has(name)) {
+        continue;
+      }
 
       it(`${name}: no bare rule-row line (5+ asterisks) survives to render`, async () => {
         const tree = await parseDocx(readFileSync(file));
@@ -110,6 +127,33 @@ describe('DOCX note-region drift guard — hand-authored unpaired asterisk walls
       }
     });
   }
+});
+
+// ─── Object-table verbatim rendering pin (#300, ADR-072) ───────────────────────
+//
+// hidden-text-test.docx is excluded from the blanket sweep above (see
+// OBJECT_VERBATIM_TABLE) — this pins exactly why that exclusion is safe rather than
+// a silent coverage hole: the file's PARAGRAPH-tier asterisk-rule note regions still
+// suppress correctly (unaffected by #300), while its body TABLE's asterisk-rule cell
+// renders verbatim as locked, out-of-band object content — the two tiers never cross.
+describe('DOCX object-table verbatim rendering — hidden-text-test.docx (#300, ADR-072)', () => {
+  const path = resolve('docs/references/MANUFACTURER_EXAMPLES', 'hidden-text-test.docx');
+
+  it.skipIf(!existsSync(path))(
+    'paragraph-tier note regions still suppress; the body table renders its asterisk-rule cell verbatim',
+    async () => {
+      const tree = await parseDocx(readFileSync(path));
+      const render = renderMarkdown(tree);
+
+      const noteLines = render
+        .split('\n')
+        .filter((line) => line.trimStart().startsWith(NOTE_PREFIX));
+      expect(noteLines.length).toBeGreaterThan(0);
+
+      const ruleRows = render.split('\n').filter((line) => /\*{5,}/.test(line));
+      expect(ruleRows.length).toBeGreaterThan(0);
+    }
+  );
 });
 
 // ─── Synthetic fixture — the renderMarkdown boundary always has one real case ────
