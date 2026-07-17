@@ -1,11 +1,21 @@
 import { describe, it, expect } from 'vitest';
+// XMLBuilder is flagged deprecated (relocated to the separate
+// `fast-xml-builder` package) but still ships and works in the pinned
+// version — same tradeoff as xml-utils.ts's own import. Used here only to
+// build a negative control that pins why createOrderedDocumentXmlBuilder
+// sets suppressEmptyNode.
+// eslint-disable-next-line sonarjs/deprecation -- intentional: see note above
+import { XMLBuilder } from 'fast-xml-parser';
 import {
   createDocumentXmlParser,
+  createOrderedDocumentXmlParser,
+  createOrderedDocumentXmlBuilder,
   getAttrVal,
   getAttrNumVal,
   extractAttrStr,
   toArray,
 } from './xml-utils.js';
+import { ObjectBlobNodeSchema } from '../../ast/index.js';
 
 // The factory is the single source of the document.xml parser config shared by
 // document.ts and tables.ts (#293). These pin the config guarantees the reused
@@ -105,5 +115,80 @@ describe('toArray', () => {
 
   it('returns empty array for undefined', () => {
     expect(toArray(undefined)).toEqual([]);
+  });
+});
+
+// A realistic body-level table fragment (#300, ADR-072): mixed self-closing
+// empty elements (w:tblW, w:gridCol, w:tcPr>w:tcW, w:pPr) alongside text
+// runs, an entity, and a bare-integer run — the exact shapes
+// createOrderedDocumentXmlParser/Builder must round-trip byte-for-byte when
+// captured as an object's `blob`.
+const TABLE_XML =
+  '<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="dxa"/></w:tblPr>' +
+  '<w:tblGrid><w:gridCol w:w="2500"/><w:gridCol w:w="2500"/></w:tblGrid>' +
+  '<w:tr><w:tc><w:tcPr><w:tcW w:w="2500" w:type="dxa"/></w:tcPr>' +
+  '<w:p><w:pPr/><w:r><w:t>A &amp; B</w:t></w:r></w:p></w:tc>' +
+  '<w:tc><w:tcPr><w:tcW w:w="2500" w:type="dxa"/></w:tcPr>' +
+  '<w:p><w:r><w:t>09</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';
+
+// Shared across every round-trip/shape-stability case below — the same
+// parse-then-assert-shape decision repeated 3+ times, per the DRY threshold.
+function parseTableXml(): unknown[] {
+  return createOrderedDocumentXmlParser().parse(TABLE_XML) as unknown[];
+}
+
+describe('createOrderedDocumentXmlParser / createOrderedDocumentXmlBuilder round-trip', () => {
+  it('round-trips a table blob byte-identical, including self-closing empty elements', () => {
+    const rebuilt = createOrderedDocumentXmlBuilder().build(parseTableXml());
+    expect(rebuilt).toBe(TABLE_XML);
+  });
+
+  it('preserves entities across the round-trip (processEntities: true)', () => {
+    const rebuilt = createOrderedDocumentXmlBuilder().build(parseTableXml());
+    expect(rebuilt).toContain('A &amp; B');
+  });
+
+  it('keeps a bare-integer w:t run as a string, never coerced to a number (#120)', () => {
+    const rebuilt = createOrderedDocumentXmlBuilder().build(parseTableXml());
+    // A coerced "09" -> 9 would silently drop the leading zero on rebuild.
+    expect(rebuilt).toContain('<w:t>09</w:t>');
+  });
+
+  it('is not byte-identical without suppressEmptyNode — pins why the builder sets it', () => {
+    // Same base config as createOrderedDocumentXmlBuilder but with the flag
+    // this test exists to protect turned off, to prove it is load-bearing
+    // (spike measured 18335->21005 char drift on a real table fixture
+    // without it — ADR-072). Constructed inline, not exported: this is a
+    // negative control, not part of the module's public contract.
+    // eslint-disable-next-line sonarjs/deprecation -- see XMLBuilder import note
+    const withoutSuppress = new XMLBuilder({
+      ignoreAttributes: false,
+      attributeNamePrefix: '@_',
+      textNodeName: '#text',
+      preserveOrder: true,
+      suppressEmptyNode: false,
+    }).build(parseTableXml());
+    expect(withoutSuppress).not.toBe(TABLE_XML);
+    expect(withoutSuppress).toContain('<w:pPr></w:pPr>');
+  });
+});
+
+describe('createOrderedDocumentXmlParser output — JSONB shape stability', () => {
+  it('produces top-level nodes that satisfy ObjectBlobNodeSchema', () => {
+    expect(() => ObjectBlobNodeSchema.array().min(1).parse(parseTableXml())).not.toThrow();
+  });
+
+  it('survives a JSON.stringify/parse cycle (JSONB storage) with no shape loss', () => {
+    const parsed = parseTableXml();
+    const jsonRoundTripped = JSON.parse(JSON.stringify(parsed)) as unknown[];
+
+    expect(jsonRoundTripped).toEqual(parsed);
+    expect(() => ObjectBlobNodeSchema.array().min(1).parse(jsonRoundTripped)).not.toThrow();
+  });
+
+  it('still rebuilds byte-identical XML after a JSONB storage round-trip', () => {
+    const jsonRoundTripped = JSON.parse(JSON.stringify(parseTableXml())) as unknown[];
+    const rebuilt = createOrderedDocumentXmlBuilder().build(jsonRoundTripped);
+    expect(rebuilt).toBe(TABLE_XML);
   });
 });

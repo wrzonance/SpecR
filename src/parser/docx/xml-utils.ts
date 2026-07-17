@@ -2,6 +2,14 @@
 // fast-xml-parser represents w:val attributes as { '@_w:val': string | number }.
 
 import { XMLParser } from 'fast-xml-parser';
+// XMLBuilder is flagged deprecated (relocated to the separate
+// `fast-xml-builder` package in fast-xml-parser 5.x) but still ships and
+// works in the pinned version. We keep using it rather than take on a whole
+// new dependency — added attack surface — for a single reserialize helper.
+// Same tradeoff as core-metadata.ts's XMLValidator import. Revisit if it is
+// removed upstream.
+// eslint-disable-next-line sonarjs/deprecation -- intentional: see note above
+import { XMLBuilder } from 'fast-xml-parser';
 
 // The word/document.xml full-fidelity parser config, shared by every scanner that reads
 // document.xml runs/paragraphs (document.ts, tables.ts) so the run/text/vanish helpers
@@ -27,6 +35,49 @@ export function createDocumentXmlParser(isArrayTags: readonly string[]): XMLPars
     trimValues: false,
     parseTagValue: false,
     isArray: (name) => isArrayTags.includes(name),
+  });
+}
+
+// Ordered-mode capture config for body-level objects SpecR round-trips as an
+// opaque blob (#300 body object model, ADR-072: `w:tbl` tables, textbox
+// `w:drawing`/`w:pict` content). Same entity/whitespace/#120 guarantees as
+// createDocumentXmlParser above, plus preserveOrder: true — required so a
+// table/textbox's own children stay in true document order instead of being
+// grouped by tag name, which is what lets createOrderedDocumentXmlBuilder
+// reserialize the captured node(s) byte-for-byte. Mirrors the preserveOrder
+// config already established in merge/extract.ts, source-facts.ts, and
+// header-footer-run-order.ts for the same class of ordering problem.
+export function createOrderedDocumentXmlParser(): XMLParser {
+  return new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    textNodeName: '#text',
+    processEntities: true,
+    trimValues: false,
+    parseTagValue: false,
+    preserveOrder: true,
+  });
+}
+
+// Reserializes a createOrderedDocumentXmlParser() node tree back to XML — the
+// other half of the ADR-072 blob round-trip (capture now, re-emit later from
+// generator/WS2's future bridge). suppressEmptyNode: true is LOAD-BEARING for
+// byte-identical fidelity: a self-closing empty OOXML element (e.g.
+// `<w:tcW .../>`) parses to a node with an empty children array; without this
+// flag the builder re-emits it as an explicit open/close pair
+// (`<w:tcW ...></w:tcW>`) — semantically identical to any DOCX consumer, but
+// not the same bytes, which breaks the byte-identical guarantee this blob
+// format promises (spike measured an 18335->21005 char drift on a real table
+// fixture without it — see xml-utils.test.ts's negative-control test).
+// eslint-disable-next-line sonarjs/deprecation -- see XMLBuilder import note
+export function createOrderedDocumentXmlBuilder(): XMLBuilder {
+  // eslint-disable-next-line sonarjs/deprecation -- see XMLBuilder import note
+  return new XMLBuilder({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    textNodeName: '#text',
+    preserveOrder: true,
+    suppressEmptyNode: true,
   });
 }
 
