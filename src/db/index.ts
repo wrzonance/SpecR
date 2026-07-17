@@ -50,6 +50,7 @@ export {
   getParagraphWithAncestors,
   getParagraphSpecId,
   updateParagraphText,
+  lockedObjectMessage,
   type ParagraphRow,
   type ParagraphWithAncestors,
   type UpdateParagraphResult,

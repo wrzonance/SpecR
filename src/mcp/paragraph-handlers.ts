@@ -4,6 +4,7 @@ import {
   setParagraphVanish,
   acceptCommentAsNote,
   insertParagraphAfter,
+  lockedObjectMessage,
   StaleVersionError,
   SpecWriteForbiddenError,
   SpecNotFoundError,
@@ -53,6 +54,13 @@ export async function handleUpdateParagraph(args: unknown): Promise<ToolResult> 
     const result = await updateParagraphText(specId, nodeId, text, expectedVersion, actorLabel);
     if (result.status === 'not-found') return toolError(`paragraph not found: id=${nodeId}`);
     if (result.status === 'wrong-spec') return toolError('paragraph does not belong to this spec');
+    if (result.status === 'locked-object') {
+      // Shares the exact wording with the REST 422 (src/api/paragraphs.ts) via
+      // the common lockedObjectMessage (#519, ADR-072 decision 3): an `object`
+      // row's content is a captured OOXML blob, editable only through its
+      // `objectText` children.
+      return toolError(lockedObjectMessage(result.nodeType));
+    }
     return ok(result.node);
   } catch (err) {
     const gate = gateToolError(err);

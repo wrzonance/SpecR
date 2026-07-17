@@ -9,6 +9,9 @@ import {
 } from '../index.js';
 import { SYSTEM_ACTOR_LABEL } from './paragraph-history.js';
 import { fetchSubtreeNode } from './paragraphs.js';
+import { findAnchoredParagraph } from '../../parser/index.js';
+import { UUID_TAG_PREFIX } from '../../ast/index.js';
+import type { ObjectBlobNode, ObjectMeta } from '../../ast/index.js';
 
 const SPEC_ID = 'b0000000-0000-0000-0000-000000000000';
 const PART_ID = 'b0000000-0000-0000-0000-000000000001';
@@ -446,4 +449,285 @@ describe('body objects — read-path parity (#300, ADR-072)', () => {
     const fullTreeNode = fullTree!.tree.parts[0]!.children[0]!;
     expect(subtreeNode).toEqual(fullTreeNode);
   });
+});
+
+// #519 (ADR-072 decision 3) — the write-path wiring in applyParagraphUpdate:
+// an `object` row is locked (its content is a captured OOXML blob, never a
+// plain text write); an `objectText` row's edit is dispatched into its
+// parent object row's blob instead of only updating its own `text` column.
+
+/** One anchored interior paragraph whose w:sdtContent carries MULTIPLE runs
+ * (a realistic "bold World" mid-run-break shape) — mirrors
+ * object-text-edit.integration.test.ts's own anchoredParagraph helper, built
+ * directly (not imported: db/ may only import parser/'s public barrel, and
+ * that helper lives in a sibling test file, not a module export). */
+function multiRunAnchoredParagraph(uuid: string, runTexts: readonly string[]): ObjectBlobNode {
+  const runs = runTexts.map((text) => ({ 'w:r': [{ 'w:t': [{ '#text': text }] }] }));
+  return {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `${UUID_TAG_PREFIX}${uuid}` } }] },
+      { 'w:sdtContent': [{ 'w:p': runs }] },
+    ],
+  } as ObjectBlobNode;
+}
+
+function multiRunTableMeta(anchorUuid: string, runTexts: readonly string[]): ObjectMeta {
+  return {
+    kind: 'table',
+    floating: false,
+    generation: 'drawingml',
+    rows: 1,
+    columns: 1,
+    blob: [{ 'w:tc': [multiRunAnchoredParagraph(anchorUuid, runTexts)] }],
+  };
+}
+
+/** Two-cell table meta with a DIFFERENT anchor per cell — the shape the
+ * concurrency test below needs: two `objectText` children of the SAME
+ * `object` row, each independently addressable so concurrent edits target
+ * different child rows while sharing one parent blob. */
+function twoAnchorTableMeta(
+  uuidA: string,
+  textA: string,
+  uuidB: string,
+  textB: string
+): ObjectMeta {
+  return {
+    kind: 'table',
+    floating: false,
+    generation: 'drawingml',
+    rows: 1,
+    columns: 2,
+    blob: [
+      { 'w:tc': [multiRunAnchoredParagraph(uuidA, [textA])] },
+      { 'w:tc': [multiRunAnchoredParagraph(uuidB, [textB])] },
+    ],
+  };
+}
+
+describe('updateParagraphText — object write path (#519, ADR-072 decision 3)', () => {
+  const OW_PART_ID = 'e0000000-0000-0000-0000-000000000001';
+  const OW_OBJECT_ID = 'e0000000-0000-0000-0000-000000000002';
+  const OW_TEXT_ID = 'e0000000-0000-0000-0000-000000000003';
+  let owSpecId: string;
+
+  beforeEach(async () => {
+    owSpecId = await createSpec({
+      section: '99 00 01',
+      title: 'Object Write Path',
+      source: 'arcat',
+    });
+    await insertTree(
+      {
+        id: owSpecId,
+        section: '99 00 01',
+        title: 'Object Write Path',
+        parts: [
+          {
+            id: OW_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            children: [
+              {
+                id: OW_OBJECT_ID,
+                type: 'object',
+                text: '[TABLE]',
+                children: [
+                  {
+                    id: OW_TEXT_ID,
+                    type: 'objectText',
+                    text: 'Hello World',
+                    children: [],
+                    meta: {},
+                  },
+                ],
+                meta: { object: multiRunTableMeta(OW_TEXT_ID, ['Hello ', 'World']) },
+              },
+            ],
+            meta: {},
+          },
+        ],
+      },
+      owSpecId,
+      pool
+    );
+  });
+
+  afterEach(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [owSpecId]);
+  });
+
+  it('invariant: locked-object guard parity — the object row is rejected unchanged, never written', async () => {
+    const before = await pool.query<{ text: string; base_version: number }>(
+      'SELECT text, base_version FROM paragraphs WHERE id = $1',
+      [OW_OBJECT_ID]
+    );
+
+    const result = await updateParagraphText(owSpecId, OW_OBJECT_ID, 'attempted direct rewrite');
+
+    expect(result).toEqual({ status: 'locked-object', nodeType: 'object' });
+    const after = await pool.query<{ text: string; base_version: number }>(
+      'SELECT text, base_version FROM paragraphs WHERE id = $1',
+      [OW_OBJECT_ID]
+    );
+    expect(after.rows[0]).toEqual(before.rows[0]);
+  });
+
+  it(
+    "invariant: interior text reaches the DOCX only through the parent object's blob — " +
+      'updating an objectText row rewrites the parent object_data.blob, preserving the ' +
+      'original multi-run interior paragraph and blanking every run but the first ' +
+      '(faithful single-value rewrite)',
+    async () => {
+      const result = await updateParagraphText(owSpecId, OW_TEXT_ID, 'Rewritten single run');
+      expect(result.status).toBe('updated');
+
+      const objectRow = await pool.query<{ object_data: ObjectMeta }>(
+        'SELECT object_data FROM paragraphs WHERE id = $1',
+        [OW_OBJECT_ID]
+      );
+      const found = findAnchoredParagraph(objectRow.rows[0]!.object_data.blob, OW_TEXT_ID);
+      expect(found).toEqual({
+        'w:p': [
+          { 'w:r': [{ 'w:t': [{ '#text': 'Rewritten single run' }] }] },
+          { 'w:r': [{ 'w:t': [{ '#text': '' }] }] },
+        ],
+      });
+
+      // Read-path parity: the objectText row's own text column keeps step with
+      // the general write, even though DOCX regeneration reads the blob only.
+      const textRow = await pool.query<{ text: string }>(
+        'SELECT text FROM paragraphs WHERE id = $1',
+        [OW_TEXT_ID]
+      );
+      expect(textRow.rows[0]!.text).toBe('Rewritten single run');
+    }
+  );
+
+  it('throws DatabaseError when an objectText row somehow has no parent to rewrite into (data-integrity guard)', async () => {
+    const orphan = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+       VALUES ($1, NULL, 'objectText', 'orphan', 99) RETURNING id`,
+      [owSpecId]
+    );
+    const orphanId = orphan.rows[0]!.id;
+
+    await expect(updateParagraphText(owSpecId, orphanId, 'new text')).rejects.toThrow(
+      /has no parent object row/
+    );
+  });
+});
+
+// #519 review finding: object-text-edit.integration.test.ts's own concurrent-safety
+// test calls rewriteObjectTextBlob directly, so it never acquires the child-row
+// FOR UPDATE lock — only fetchUpdateOwnerRow (inside applyParagraphUpdate) does
+// that. The tests below drive the SAME concurrency through updateParagraphText
+// itself, so both locks in the documented "lock the child row, then lock the
+// parent row" ordering (fetchUpdateOwnerRow's `SELECT ... FOR UPDATE` on the
+// objectText row, then rewriteObjectTextBlob's on its parent object row) are
+// actually exercised end-to-end, not just the parent-row half.
+describe('updateParagraphText — concurrent objectText edits exercise the real lock ordering (#519 review finding)', () => {
+  const CO_PART_ID = 'e1000000-0000-0000-0000-000000000001';
+  const CO_OBJECT_ID = 'e1000000-0000-0000-0000-000000000002';
+  const CO_TEXT_A_ID = 'e1000000-0000-0000-0000-000000000003';
+  const CO_TEXT_B_ID = 'e1000000-0000-0000-0000-000000000004';
+  let coSpecId: string;
+
+  beforeEach(async () => {
+    coSpecId = await createSpec({
+      section: '99 00 02',
+      title: 'Concurrent Object Write Path',
+      source: 'arcat',
+    });
+    await insertTree(
+      {
+        id: coSpecId,
+        section: '99 00 02',
+        title: 'Concurrent Object Write Path',
+        parts: [
+          {
+            id: CO_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            children: [
+              {
+                id: CO_OBJECT_ID,
+                type: 'object',
+                text: '[TABLE]',
+                children: [
+                  {
+                    id: CO_TEXT_A_ID,
+                    type: 'objectText',
+                    text: 'original A',
+                    children: [],
+                    meta: {},
+                  },
+                  {
+                    id: CO_TEXT_B_ID,
+                    type: 'objectText',
+                    text: 'original B',
+                    children: [],
+                    meta: {},
+                  },
+                ],
+                meta: {
+                  object: twoAnchorTableMeta(
+                    CO_TEXT_A_ID,
+                    'original A',
+                    CO_TEXT_B_ID,
+                    'original B'
+                  ),
+                },
+              },
+            ],
+            meta: {},
+          },
+        ],
+      },
+      coSpecId,
+      pool
+    );
+  });
+
+  afterEach(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [coSpecId]);
+  });
+
+  it(
+    'two concurrent updateParagraphText calls on DIFFERENT objectText children of the SAME ' +
+      'object row both land — each call is its own self-committing transaction (mirrors ' +
+      "object-text-edit.integration.test.ts's own concurrent-call pattern), so the second " +
+      "writer's fetchUpdateOwnerRow/rewriteObjectTextBlob locks queue behind the first's " +
+      'instead of racing a lost update onto the shared object_data column',
+    async () => {
+      const [resultA, resultB] = await Promise.all([
+        updateParagraphText(coSpecId, CO_TEXT_A_ID, 'concurrent A'),
+        updateParagraphText(coSpecId, CO_TEXT_B_ID, 'concurrent B'),
+      ]);
+      expect(resultA.status).toBe('updated');
+      expect(resultB.status).toBe('updated');
+
+      const objectRow = await pool.query<{ object_data: ObjectMeta }>(
+        'SELECT object_data FROM paragraphs WHERE id = $1',
+        [CO_OBJECT_ID]
+      );
+      const blob = objectRow.rows[0]!.object_data.blob;
+      expect(findAnchoredParagraph(blob, CO_TEXT_A_ID)).toEqual({
+        'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': 'concurrent A' }] }] }],
+      });
+      expect(findAnchoredParagraph(blob, CO_TEXT_B_ID)).toEqual({
+        'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': 'concurrent B' }] }] }],
+      });
+
+      // Read-path parity for both children too — rewriteObjectTextIfNeeded runs
+      // alongside the generic UPDATE, never instead of it, for either writer.
+      const textRows = await pool.query<{ id: string; text: string }>(
+        'SELECT id, text FROM paragraphs WHERE id = ANY($1::uuid[])',
+        [[CO_TEXT_A_ID, CO_TEXT_B_ID]]
+      );
+      const textById = new Map(textRows.rows.map((row) => [row.id, row.text]));
+      expect(textById.get(CO_TEXT_A_ID)).toBe('concurrent A');
+      expect(textById.get(CO_TEXT_B_ID)).toBe('concurrent B');
+    }
+  );
 });

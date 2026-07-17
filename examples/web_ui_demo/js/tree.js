@@ -14,6 +14,7 @@ import {
   isInlineEditable,
   editabilityChip,
 } from './inline-edit.js';
+import { renderObjectBlock } from './object-render.mjs';
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -57,21 +58,44 @@ function renderNote(node, ctx) {
 }
 
 // Notes render as NOTE blocks, continuations with an empty label, vanish nodes
-// as hidden content — none carry a CSI number, so none may consume an ordinal.
-// Counting them shifted numbered siblings (#122): specifier-note banners pushed
-// a 1..15 list to 5..20. Mirrors generator/markdown.ts consumesNumber.
-function consumesNumber(node) {
-  return node.type !== 'note' && node.type !== 'continuation' && !(node.meta && node.meta.vanish);
+// as hidden content, and object/objectText nodes as a table/text-box block
+// (#300) — none carry a CSI number, so none may consume an ordinal. Counting
+// them shifted numbered siblings (#122): specifier-note banners pushed a
+// 1..15 list to 5..20. Mirrors ast/labels.ts consumesNumber. Exported so the
+// predicate is directly unit-testable (tree.test.mjs) — this directory has no
+// jsdom, so DOM-touching code stays untested by precedent, but this is a pure
+// function (#519 review finding).
+export function consumesNumber(node) {
+  return (
+    node.type !== 'note' &&
+    node.type !== 'continuation' &&
+    node.type !== 'object' &&
+    node.type !== 'objectText' &&
+    !(node.meta && node.meta.vanish)
+  );
 }
 
-// Append each child, advancing the CSI ordinal only past numbered siblings so
-// notes/continuations/vanish nodes interleave without disturbing the sequence.
-function appendNumberedChildren(container, children, render) {
+// The CSI ordinal each child would render at, advancing only past numbered
+// siblings (consumesNumber) so notes/continuations/vanish/object/objectText
+// nodes interleave without disturbing the sequence. Split out of
+// appendNumberedChildren — a pure array in, array out function — so the
+// resulting ordinal sequence itself is unit-testable without a DOM (#519
+// review finding: the exclusion list alone was tested server-side, but
+// nothing exercised this file's actual numbered-outline path).
+export function computeOrdinals(children) {
+  const ordinals = [];
   let ordinal = 0;
   for (const child of children) {
-    container.appendChild(render(child, ordinal));
+    ordinals.push(ordinal);
     if (consumesNumber(child)) ordinal += 1;
   }
+  return ordinals;
+}
+
+// Append each child at its computed ordinal.
+function appendNumberedChildren(container, children, render) {
+  const ordinals = computeOrdinals(children);
+  children.forEach((child, i) => container.appendChild(render(child, ordinals[i])));
 }
 
 // ── Inline edit + delete affordances (mockup demo) ──────────────────────────
@@ -189,8 +213,29 @@ async function commitEdit({ node, ctx, input, save, cancel }) {
   }
 }
 
+// Which read-only render path a node takes instead of the standard editable
+// pr-node path (#300, ADR-072: "Scope is READ-ONLY: WS3 adds no edit
+// affordance for object/objectText nodes"): an `object` row renders as its
+// own captured table/text-box block ('object'); an `objectText` leaf is
+// consumed internally by renderObjectBlock and renders nothing if ever
+// handed here directly ('empty') — a defensive no-op mirroring the server's
+// renderNonStructural, since the normal child-recursion path below never
+// hands one to renderPrNode. Returns null for every other node type, meaning
+// the standard render path applies. Pulled out of renderPrNode's own inline
+// early-return — like consumesNumber/computeOrdinals before it — so the
+// read-only guard itself is unit-testable without a DOM (tree.test.mjs,
+// #519 review finding).
+export function objectRenderMode(node) {
+  if (node.type === 'object') return 'object';
+  if (node.type === 'objectText') return 'empty';
+  return null;
+}
+
 function renderPrNode(node, index, ctx) {
   if (node.type === 'note') return renderNote(node, ctx);
+  const objectMode = objectRenderMode(node);
+  if (objectMode === 'object') return renderObjectBlock(node, ctx);
+  if (objectMode === 'empty') return document.createDocumentFragment();
 
   const row = el('div', 'tree-node');
   row.dataset.nodeId = node.id;

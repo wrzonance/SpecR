@@ -110,7 +110,10 @@ describe('actorLabel additive request coverage (#377)', () => {
       path: '/specs/{id}/paragraphs/{nodeId}',
       method: 'patch' as const,
       successStatus: '200',
-      statuses: ['200', '400', '403', '404', '409', '500'],
+      // 422 added (#519, ADR-072 decision 3): a direct write to a locked
+      // `object` row is rejected — its content is a captured OOXML blob,
+      // editable only through its `objectText` children.
+      statuses: ['200', '400', '403', '404', '409', '422', '500'],
       successDataRef: { $ref: '#/components/schemas/SpecNode' },
     },
     {

@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { lockedObjectMessage } from './paragraphs.js';
 
 vi.mock('../index.js', () => {
   const query = vi.fn();
+  const connect = vi.fn();
   return {
-    pool: { query },
+    pool: { query, connect },
     DatabaseError: class DatabaseError extends Error {
       constructor(message: string, options?: ErrorOptions) {
         super(message, options);
@@ -219,5 +221,87 @@ describe('insertTree — error handling', () => {
     await expect(insertTree(tree, 'spec-uuid-1', pool)).rejects.toSatisfy(
       (err) => err instanceof DatabaseError && err.message.includes('part-uuid-1')
     );
+  });
+});
+
+// #519 (ADR-072 decision 3) — applyParagraphUpdate's owner-row split short-circuits
+// on a 'locked-object' node BEFORE issuing the text write. Faking only the low-level
+// client.query (never assertSpecWritable itself, mirrors paragraph-history.test.ts's
+// "fake the client, not the module" approach) exercises the REAL gate + REAL
+// fetchUpdateOwnerRow/validateUpdateOwner control flow end-to-end through the
+// exported updateParagraphText.
+describe('updateParagraphText — locked-object guard (#519, ADR-072 decision 3)', () => {
+  const SPEC_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
+  const OBJECT_ID = 'aaaaaaaa-0000-0000-0000-000000000002';
+
+  type FakeRow = Record<string, unknown>;
+  type FakeQuery = (
+    sql: string,
+    params?: readonly unknown[]
+  ) => Promise<{ rows: FakeRow[]; rowCount: number }>;
+
+  function fakeUpdateClient(ownerRow: FakeRow): {
+    query: ReturnType<typeof vi.fn<FakeQuery>>;
+    release: ReturnType<typeof vi.fn>;
+  } {
+    const query = vi.fn<FakeQuery>((sql: string) => {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      }
+      if (sql.includes('FROM specs WHERE id')) {
+        return Promise.resolve({
+          rows: [{ lifecycle_state: 'draft', external_state: 'editable', content_version: 1 }],
+          rowCount: 1,
+        });
+      }
+      if (sql.includes('FROM paragraphs WHERE id = $1') && sql.includes('FOR UPDATE')) {
+        return Promise.resolve({ rows: [ownerRow], rowCount: 1 });
+      }
+      return Promise.reject(new Error(`fakeUpdateClient: unexpected query: ${sql}`));
+    });
+    return { query, release: vi.fn() };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it('short-circuits on an object row before any UPDATE — the text write is never issued', async () => {
+    const { pool } = await import('../index.js');
+    const client = fakeUpdateClient({
+      spec_id: SPEC_ID,
+      node_type: 'object',
+      base_version: 3,
+      parent_id: null,
+    });
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as never);
+
+    const { updateParagraphText } = await import('./paragraphs.js');
+    const result = await updateParagraphText(SPEC_ID, OBJECT_ID, 'attempted direct rewrite');
+
+    expect(result).toEqual({ status: 'locked-object', nodeType: 'object' });
+    expect(
+      client.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE paragraphs SET text'))
+    ).toBe(false);
+    expect(client.query.mock.calls.some(([sql]) => sql === 'ROLLBACK')).toBe(true);
+    expect(client.query.mock.calls.some(([sql]) => sql === 'COMMIT')).toBe(false);
+  });
+});
+
+// #519 review finding: REST (src/api/paragraphs.ts) and MCP (src/mcp/paragraph-handlers.ts)
+// both render this exact string for a locked-object rejection. Pinning it here means a
+// future wording change can only happen in one place, and both surfaces' integration
+// tests assert their live output equals this same function's return value — so the two
+// surfaces are provably identical, not just each individually plausible.
+describe('lockedObjectMessage (#519 review — REST/MCP message parity)', () => {
+  it('names the offending node type and points the caller at objectText', () => {
+    expect(lockedObjectMessage('object')).toBe(
+      'node type "object" is locked and cannot be edited directly — edit its objectText child instead'
+    );
+  });
+
+  it('interpolates whatever nodeType it is given, not a hardcoded "object"', () => {
+    expect(lockedObjectMessage('objectText')).toContain('node type "objectText"');
   });
 });

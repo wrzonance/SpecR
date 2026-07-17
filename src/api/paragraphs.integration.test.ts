@@ -3,8 +3,11 @@ import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import { pool, SYSTEM_ACTOR_LABEL, lockedObjectMessage } from '../db/index.js';
 import { historyActor } from '../test-utils/history-actor.js';
+import { findAnchoredParagraph } from '../parser/index.js';
+import { UUID_TAG_PREFIX } from '../ast/index.js';
+import type { ObjectBlobNode, ObjectMeta } from '../ast/index.js';
 
 let server: Server;
 let baseUrl: string;
@@ -319,6 +322,116 @@ describe('PATCH paragraph — optimistic concurrency + edit gate (ADR-018)', () 
       expect(after.rows[0]?.text).toBe('Original.');
     } finally {
       await pool.query('DELETE FROM specs WHERE id = $1', [archived]);
+    }
+  });
+});
+
+describe('PATCH paragraph — locked-object guard (#519, ADR-072 decision 3)', () => {
+  it('rejects a direct write to an object row with 422, leaving it unchanged', async () => {
+    const objectRow = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version)
+       VALUES ($1, NULL, 'object', '[TABLE]', 50, 1) RETURNING id`,
+      [specId]
+    );
+    const objectId = objectRow.rows[0]?.id;
+    if (!objectId) throw new Error('failed to insert test object row');
+
+    try {
+      const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${objectId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'attempted direct rewrite' }),
+      });
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as { success: boolean; error: string };
+      expect(body.success).toBe(false);
+      // Exact equality (not a substring match) against the shared helper (#519 review
+      // finding) — this is the same string the MCP tool test below pins, so the two
+      // surfaces are provably identical, not just each individually containing
+      // "locked"/"objectText".
+      expect(body.error).toBe(lockedObjectMessage('object'));
+
+      const unchanged = await pool.query<{ text: string; base_version: number }>(
+        'SELECT text, base_version FROM paragraphs WHERE id = $1',
+        [objectId]
+      );
+      expect(unchanged.rows[0]?.text).toBe('[TABLE]');
+      expect(unchanged.rows[0]?.base_version).toBe(1);
+    } finally {
+      await pool.query('DELETE FROM paragraphs WHERE id = $1', [objectId]);
+    }
+  });
+
+  // #519 review finding: the locked-object guard's OTHER half — an objectText
+  // child is ALWAYS editable — had no REST-layer (or MCP-layer) coverage of an
+  // actual successful edit; only a lower-level db/queries.updateParagraphText
+  // unit exercised it. This drives the real HTTP PATCH handler end-to-end.
+  it('accepts a write to an objectText row with 200, rewriting the parent object_data.blob', async () => {
+    const objectRow = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version)
+       VALUES ($1, NULL, 'object', '[TABLE]', 51, 1) RETURNING id`,
+      [specId]
+    );
+    const objectId = objectRow.rows[0]?.id;
+    if (!objectId) throw new Error('failed to insert test object row');
+
+    const textRow = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version)
+       VALUES ($1, $2, 'objectText', 'Original interior text.', 0, 1) RETURNING id`,
+      [specId, objectId]
+    );
+    const textId = textRow.rows[0]?.id;
+    if (!textId) throw new Error('failed to insert test objectText row');
+
+    const meta: ObjectMeta = {
+      kind: 'table',
+      floating: false,
+      generation: 'drawingml',
+      rows: 1,
+      columns: 1,
+      blob: [
+        {
+          'w:sdt': [
+            { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `${UUID_TAG_PREFIX}${textId}` } }] },
+            {
+              'w:sdtContent': [
+                { 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': 'Original interior text.' }] }] }] },
+              ],
+            },
+          ],
+        } as ObjectBlobNode,
+      ],
+    };
+    await pool.query(`UPDATE paragraphs SET object_data = $2::jsonb WHERE id = $1`, [
+      objectId,
+      JSON.stringify(meta),
+    ]);
+
+    try {
+      const res = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${textId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Rewritten interior text.' }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        success: boolean;
+        data: { id: string; type: string; text: string };
+      };
+      expect(body.success).toBe(true);
+      expect(body.data.id).toBe(textId);
+      expect(body.data.type).toBe('objectText');
+      expect(body.data.text).toBe('Rewritten interior text.');
+
+      const objectAfter = await pool.query<{ object_data: ObjectMeta }>(
+        'SELECT object_data FROM paragraphs WHERE id = $1',
+        [objectId]
+      );
+      expect(findAnchoredParagraph(objectAfter.rows[0]!.object_data.blob, textId)).toEqual({
+        'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': 'Rewritten interior text.' }] }] }],
+      });
+    } finally {
+      await pool.query('DELETE FROM paragraphs WHERE id = $1', [objectId]);
     }
   });
 });
