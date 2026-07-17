@@ -23,6 +23,25 @@ function branch(text: string, children: SpecNode[]): SpecNode {
   return { id: nextId(), type: 'pr1', text, children, meta: {} };
 }
 
+// A node of an explicit type carrying sourceFacts that would fire a
+// higher-precedence rung if it were classified normally — used to prove the
+// body-object fixation rung (#300) short-circuits the ladder entirely rather
+// than merely outranking it.
+function typedNode(
+  type: SpecNode['type'],
+  text: string,
+  sourceFacts?: SourceFacts,
+  children: SpecNode[] = []
+): SpecNode {
+  return {
+    id: nextId(),
+    type,
+    text,
+    children,
+    meta: sourceFacts === undefined ? {} : { sourceFacts },
+  };
+}
+
 function tree(parts: SpecNode[]): SpecTree {
   return { id: nextId(), section: '09 91 23', title: 'Painting', parts };
 }
@@ -36,7 +55,20 @@ function classifyOne(
   readonly confidence: number;
   readonly evidence: readonly { readonly rule: string; readonly fact?: string }[];
 } {
-  const result = classify(tree([node('Body text.', facts)]), rules);
+  return classifySingleNode(node('Body text.', facts), rules);
+}
+
+// Classify a single pre-built node (any type) and return its sole result —
+// used where a test needs control over node.type, not just sourceFacts.
+function classifySingleNode(
+  single: SpecNode,
+  rules: ConventionRules
+): {
+  readonly editability: string;
+  readonly confidence: number;
+  readonly evidence: readonly { readonly rule: string; readonly fact?: string }[];
+} {
+  const result = classify(tree([single]), rules);
   expect(result).toHaveLength(1);
   const [only] = result;
   if (only === undefined) throw new Error('expected one classification');
@@ -273,5 +305,44 @@ describe('classify — purity and tree walk', () => {
     const snapshot = JSON.stringify(t);
     classify(t, rules);
     expect(JSON.stringify(t)).toBe(snapshot);
+  });
+});
+
+// ── Rung 0: body-object fixation (#300, ADR-072 decision 2) ───────────────────
+// `object`/`objectText` editability is fixed at capture time — never derived
+// by classification — because reclassifySpec (db/queries/reclassify.ts) runs
+// classify() over the SAME persisted tree an object/objectText pair lives in.
+// Without this rung, defaultRung(rules) would assign both the locked
+// container AND its per-paragraph-editable interior text the identical
+// rules.defaultEditability value, contradicting the invariant that a captured
+// blob is never editable while its extracted interior text always is.
+
+describe('classify — body-object fixation rung (#300, ADR-072 decision 2)', () => {
+  it('object node → always locked, confidence 1, fixed evidence — even with a note banner fact', () => {
+    const facts: SourceFacts = { banner: 'NOTES TO SPECIFIER' };
+    const out = classifySingleNode(typedNode('object', 'Table (1x1)', facts), {
+      defaultEditability: 'editable',
+    });
+    expect(out.editability).toBe('locked');
+    expect(out.confidence).toBe(1);
+    expect(out.evidence).toEqual([{ rule: 'body-object' }]);
+  });
+
+  it('objectText node → always editable, confidence 1, fixed evidence — even with a locking color', () => {
+    const facts: SourceFacts = { colors: blueColors };
+    const out = classifySingleNode(typedNode('objectText', 'Cell one', facts), {
+      colorMeanings: [{ color: BLUE, meaning: 'locked' }],
+      defaultEditability: 'locked',
+    });
+    expect(out.editability).toBe('editable');
+    expect(out.confidence).toBe(1);
+    expect(out.evidence).toEqual([{ rule: 'body-object' }]);
+  });
+
+  it('an object container and its objectText child are fixed independently in the same tree walk', () => {
+    const objectText = typedNode('objectText', 'Cell one');
+    const object = typedNode('object', 'Table (1x1)', undefined, [objectText]);
+    const out = classify(tree([object]), { defaultEditability: 'locked' });
+    expect(out.map((c) => c.editability)).toEqual(['locked', 'editable']);
   });
 });
