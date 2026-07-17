@@ -24,9 +24,10 @@
 
 import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
-import { parse } from '../index.js';
+import { parse, replaceAnchoredParagraphText } from '../index.js';
 import { generateDocx } from '../../generator/index.js';
 import type { SpecNode, SpecTree } from '../../ast/types.js';
+import type { ObjectBlobNode } from '../../ast/index.js';
 
 // Root namespaces a real Word <w:document> declares — the wordprocessing +
 // wordprocessingDrawing/Shape, VML, and markup-compatibility set docx@9.7.1
@@ -166,6 +167,65 @@ function expectObjectMeta(node: SpecNode | undefined, expected: ExpectedObjectMe
   if (expected.floating !== undefined) {
     expect(node?.meta.object?.floating).toBe(expected.floating);
   }
+}
+
+// ─── #519 WS3 task 2: edit-the-blob round trip helpers ─────────────────────
+// These rebuild a SpecTree the same way a real edit caller (WS3's
+// db/queries/object-text-edit.ts) would: replace ONE object node's
+// `meta.object.blob` via `replaceAnchoredParagraphText`, leaving every other
+// node (including the edited object's own `objectText.text` field, see
+// below) untouched. Deliberately duplicated in this test file rather than
+// imported from production code — no production module needs "find and
+// rewrite one object node inside a whole SpecTree"; only this proof does.
+
+function replaceObjectBlobInTree(
+  nodes: readonly SpecNode[],
+  objectId: string,
+  newBlob: readonly ObjectBlobNode[]
+): readonly SpecNode[] {
+  return nodes.map((node) => {
+    if (node.id !== objectId) {
+      return { ...node, children: replaceObjectBlobInTree(node.children, objectId, newBlob) };
+    }
+    if (!node.meta.object) {
+      throw new Error(`object node ${objectId} is missing meta.object`);
+    }
+    // Spread-copy readonly -> mutable at this boundary: ObjectMeta.blob is
+    // Zod-inferred as mutable `ObjectBlobNode[]`, while
+    // replaceAnchoredParagraphText's return type stays readonly by design
+    // (object-blob-edit.ts's own contract) — a future DB write path
+    // (WS3b) does the identical spread-copy at its own real mutable boundary.
+    return {
+      ...node,
+      meta: { ...node.meta, object: { ...node.meta.object, blob: [...newBlob] } },
+    };
+  });
+}
+
+/**
+ * Rewrites the anchored paragraph identified by `anchorUuid` inside the
+ * object node `objectId`'s captured blob to `newText`, returning a BRAND-NEW
+ * tree. Deliberately never touches the corresponding `objectText.text`
+ * field anywhere in the tree — this is the point of the "interior text
+ * reaches the DOCX only through the blob" invariant below: the generator
+ * (generator/index.ts's `emitNode` 'object' branch) reads only
+ * `meta.object.blob`, never an `objectText` node's own `text`.
+ */
+function withEditedObjectBlob(
+  tree: SpecTree,
+  objectId: string,
+  anchorUuid: string,
+  newText: string
+): SpecTree {
+  const target = flatten(tree.parts).find((n) => n.id === objectId);
+  if (!target?.meta.object) {
+    throw new Error(`object node ${objectId} not found, or missing meta.object`);
+  }
+  const newBlob = replaceAnchoredParagraphText(target.meta.object.blob, anchorUuid, newText);
+  if (!newBlob) {
+    throw new Error(`anchor ${anchorUuid} not found in object ${objectId}'s blob`);
+  }
+  return { ...tree, parts: replaceObjectBlobInTree(tree.parts, objectId, newBlob) };
 }
 
 describe('body object round trip — parse -> generate -> re-parse (#517, WS2 task 5/7)', () => {
@@ -325,6 +385,89 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
     // ...and the a: prefix is bound in scope (inline on the graphic, as Word
     // emits) — never left dangling by docx's a-less generated document root.
     expect(docXml).toMatch(/<a:graphic[^>]*xmlns:a=/);
+  });
+});
+
+// #519 (WS3 task 2/8, this file's own crux acceptance criterion): the DOCX-
+// fidelity proof that an edit made via `object-blob-edit.ts`'s
+// `replaceAnchoredParagraphText` — the primitive WS3b's DB write path
+// (`db/queries/object-text-edit.ts`) will call — actually reaches a
+// regenerated document and survives a re-parse. Every test above proves the
+// CAPTURE path is round-trip-faithful; these two prove the EDIT path is.
+//
+// The fixture is deliberately ONE table with TWO cells (never two separate
+// table objects): `transformChildren` (body-objects.ts) anchors EVERY
+// non-empty interior paragraph independently, so a 2-cell table captures as
+// ONE `object` node whose SINGLE blob carries TWO `w:sdt` anchors — the
+// multi-anchor-sharing-one-blob shape the spike found necessary. Two
+// separate table objects would each get their own wholly independent blob,
+// never exercising the rebuild walk's leaf guard the way a real multi-row/
+// multi-cell table does (see object-blob-edit.ts's own module comment and
+// its "non-anchor siblings are untouched" unit test, which pins the guard in
+// isolation; this file pins it through the real capture + generate + parse
+// pipeline).
+describe('body object round trip — editing an anchored paragraph via replaceAnchoredParagraphText (#519, WS3 task 2/8)', () => {
+  it('invariant: round-trip fidelity — an edit applied to one of two anchored paragraphs sharing the same object survives generateDocx + re-parse, without altering its untouched sibling paragraph', async () => {
+    const source = await makeDocx(
+      para('Intro paragraph.') +
+        table(row(cell(para('First cell text')) + cell(para('Second cell text'))))
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const objects = objectNodesOf(tree);
+    expect(objects).toHaveLength(1);
+    const target = objects[0] as SpecNode;
+    const objectTextNodes = target.children.filter((c) => c.type === 'objectText');
+    expect(objectTextNodes).toHaveLength(2);
+    expect(objectTextNodes.map((n) => n.text)).toEqual(['First cell text', 'Second cell text']);
+
+    const editedTree = withEditedObjectBlob(
+      tree,
+      target.id,
+      objectTextNodes[0]?.id as string,
+      'Edited first cell text'
+    );
+    const reparsedTree = await regenerateAndReparse(editedTree);
+    const after = objectNodesOf(reparsedTree);
+
+    expect(after).toHaveLength(1);
+    expectObjectMeta(after[0], { kind: 'table' });
+    // The edited cell reflects the new text, AND its untouched sibling
+    // anchor — sharing the exact same blob array — survives byte-for-byte.
+    expect(objectTextsOf(after[0] as SpecNode)).toEqual([
+      'Edited first cell text',
+      'Second cell text',
+    ]);
+  });
+
+  it("invariant: interior text reaches the DOCX only through the parent object's blob — a stale objectText.text left untouched in the tree never leaks into the regenerated document", async () => {
+    const source = await makeDocx(
+      para('Intro paragraph.') +
+        table(row(cell(para('First cell text')) + cell(para('Second cell text'))))
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const target = objectNodesOf(tree)[0] as SpecNode;
+    const objectTextNodes = target.children.filter((c) => c.type === 'objectText');
+    const anchorUuid = objectTextNodes[0]?.id as string;
+
+    // Edit the BLOB only — withEditedObjectBlob never touches objectText.text.
+    const editedTree = withEditedObjectBlob(tree, target.id, anchorUuid, 'Blob-only edited text');
+    const editedObject = flatten(editedTree.parts).find((n) => n.id === target.id);
+    const editedFirstText = editedObject?.children.find((c) => c.id === anchorUuid);
+    // The tree's own objectText.text field is deliberately left stale here —
+    // proving the field itself carries no generation authority.
+    expect(editedFirstText?.text).toBe('First cell text');
+
+    const reparsedTree = await regenerateAndReparse(editedTree);
+    const after = objectNodesOf(reparsedTree);
+
+    // The regenerated + re-parsed document reflects the BLOB's text, not the
+    // stale objectText.text the tree still carried going into generateDocx —
+    // and the untouched sibling anchor is unaffected either way.
+    expect(objectTextsOf(after[0] as SpecNode)).toEqual([
+      'Blob-only edited text',
+      'Second cell text',
+    ]);
+    expect(objectTextsOf(after[0] as SpecNode)).not.toContain('First cell text');
   });
 });
 
