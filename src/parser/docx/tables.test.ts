@@ -315,6 +315,7 @@ describe('extractTables — composes byte-identically over classifyTopLevelTable
     'a row with zero w:tc preserved as an empty array': {
       xml: makeDocXml(table(row('') + row(cell(vanishPara('only row with content'))))),
     },
+    // KNOWN AMBIGUITY: Nested tables inside cells are not discovered.
     'nested table inside a cell (KNOWN AMBIGUITY, not discovered)': {
       xml: makeDocXml(
         table(

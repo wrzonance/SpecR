@@ -446,6 +446,24 @@ describe('renderMarkdown', () => {
     expect(md).toBe('# SECTION 01 00 00 — Roots\n' + '\n| A \\| B |\n| --- |\n| Line1 Line2 |');
   });
 
+  it('#300: collapses hard breaks in text-box and fallback content so no line escapes the blockquote', () => {
+    // A literal newline in a `> **[TEXT BOX]** ...` line would orphan the tail as a
+    // plain paragraph outside the blockquote — same hazard escapeTableCell already
+    // handles for the GFM pipe path (see the test above).
+    const textBox = renderMarkdown(
+      rootTree([textBoxObjectNode('b', false, ['Line one\nLine two'])])
+    );
+    expect(textBox).toBe('# SECTION 01 00 00 — Roots\n' + '\n> **[TEXT BOX]** Line one Line two');
+    // Cell count (3) !== rows*columns (4) degrades to renderObjectFallback, whose
+    // indented lines must likewise keep every line inside the blockquote.
+    const fallback = renderMarkdown(
+      rootTree([tableObjectNode('t4', { rows: 2, columns: 2 }, ['Line1\nLine2', 'B', 'C'])])
+    );
+    expect(fallback).toBe(
+      '# SECTION 01 00 00 — Roots\n' + '\n> **[TABLE]**\n   Line1 Line2\n   B\n   C'
+    );
+  });
+
   it('#300: an objectText node rendered outside its parent object folds to empty, never leaking raw text', () => {
     const md = renderMarkdown(
       rootTree([objectTextNode('stray', 'stray leaf text'), part('GENERAL')])

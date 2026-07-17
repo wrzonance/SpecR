@@ -9,11 +9,19 @@ export { getLabel };
 
 const INDENT = '   ';
 
-// GFM pipe-table cells can't carry a literal newline or an unescaped `|` — collapse the
-// former to a space (captured objectText is already single-paragraph text) and escape
-// the latter so a cell like "A | B" doesn't fracture the row into extra columns.
+// A captured objectText leaf can still carry a literal newline (a preserved break
+// inside one interior paragraph's run text). Collapse it to a space so neither a GFM
+// cell nor a `>` blockquote line is fractured by a hard break — a stray newline in a
+// blockquote orphans the tail line as a plain paragraph. Shared by every object render
+// path (pipe table, fallback list, text box).
+function collapseBreaks(text: string): string {
+  return text.replace(/\r?\n/g, ' ').trim();
+}
+
+// GFM pipe-table cells additionally can't carry an unescaped `|` — escape it so a cell
+// like "A | B" doesn't fracture the row into extra columns.
 function escapeTableCell(text: string): string {
-  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim();
+  return collapseBreaks(text.replace(/\|/g, '\\|'));
 }
 
 function chunkIntoRows(cells: readonly SpecNode[], columns: number): readonly SpecNode[][] {
@@ -55,12 +63,12 @@ function renderGfmTable(node: SpecNode, columns: number): string {
 // interior text — never a guess at a table shape the blob doesn't cleanly support.
 function renderObjectFallback(node: SpecNode, meta: ObjectMeta | undefined): string {
   const label = meta?.kind === 'table' ? '[TABLE]' : '[OBJECT]';
-  const lines = node.children.map((child) => `${INDENT}${child.text}`);
+  const lines = node.children.map((child) => `${INDENT}${collapseBreaks(child.text)}`);
   return [`\n> **${label}**`, ...lines].join('\n');
 }
 
 function renderTextBox(node: SpecNode, meta: ObjectMeta): string {
-  const text = node.children.map((child) => child.text).join(' ');
+  const text = node.children.map((child) => collapseBreaks(child.text)).join(' ');
   const floatingNote = meta.floating ? ' *(floating)*' : '';
   return `\n> **[TEXT BOX]** ${text}${floatingNote}`;
 }

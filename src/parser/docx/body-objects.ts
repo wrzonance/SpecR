@@ -279,12 +279,17 @@ interface DrawingRunEntry {
 
 // EVERY drawing-bearing run is classified — never just the first — so a
 // paragraph carrying more than one separate drawing (rare — Word normally
-// puts one drawing per paragraph) never loses one to the other. KNOWN
-// AMBIGUITY: when a paragraph carries TWO SEPARATE text-box drawings, only
-// the first is modeled as the `object` (see collectParagraphDrawing); the
-// second still round-trips byte-identical inside the same captured
-// host-paragraph blob (decision 1's opaque-blob capture), it is simply not
-// given its own objectText interior text.
+// puts one drawing per paragraph) never loses one to the other in the
+// `dropped` accounting. LIMITATION (tracked in #515): two SEPARATE text boxes
+// in ONE host paragraph are only partly handled. collectParagraphDrawing
+// decides visibility from the FIRST text-box run alone, while
+// buildTextBoxObject's anchorInteriorParagraphs walk surfaces objectText from
+// EVERY text box in the host blob — so two visible boxes both contribute
+// objectText, but a mixed visible/hidden pair mis-handles the hidden box
+// (a hidden second box's text is surfaced; a hidden first box suppresses a
+// visible second). The whole host paragraph still round-trips byte-identical
+// either way (decision 1's opaque-blob capture); only read-path objectText is
+// affected.
 function classifyParagraphDrawings(raw: Record<string, unknown>): readonly DrawingRunEntry[] {
   const entries: DrawingRunEntry[] = [];
   for (const run of runsOf(raw)) {
