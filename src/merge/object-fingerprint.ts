@@ -40,7 +40,12 @@ function tagOf(node: FingerprintNode): string | undefined {
 
 function childrenOf(node: FingerprintNode, tag: string): readonly FingerprintNode[] {
   const value = node[tag];
-  return Array.isArray(value) ? (value as FingerprintNode[]) : [];
+  if (!Array.isArray(value)) return [];
+  // Narrow with a type guard rather than asserting `unknown → FingerprintNode`:
+  // preserveOrder arrays hold element objects, so any bare primitive is dropped.
+  return value.filter(
+    (child): child is FingerprintNode => typeof child === 'object' && child !== null
+  );
 }
 
 /** Direct child nodes tagged `tag` (non-recursive) — never descends into a
