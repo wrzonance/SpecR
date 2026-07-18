@@ -11,6 +11,8 @@ const PR1_ID = '00000000-0000-0000-0000-000000000004';
 const NOTE_ID = '00000000-0000-0000-0000-000000000005';
 const U1 = '11111111-1111-1111-1111-111111111111';
 const U2 = '22222222-2222-2222-2222-222222222222';
+const U3 = '33333333-3333-3333-3333-333333333333';
+const U4 = '44444444-4444-4444-4444-444444444444';
 
 const TREE: SpecTree = {
   id: '00000000-0000-0000-0000-000000000001',
@@ -53,6 +55,21 @@ const sdt = (uuid: string, inner: string): string =>
   `<w:sdt><w:sdtPr><w:tag w:val="specr-uuid-${uuid}"/></w:sdtPr><w:sdtContent>${inner}</w:sdtContent></w:sdt>`;
 const para = (content: string): string => `<w:p>${content}</w:p>`;
 const run = (text: string): string => `<w:r><w:t xml:space="preserve">${text}</w:t></w:r>`;
+
+/** DrawingML text box: w:r > w:drawing > wp:inline > a:graphic > a:graphicData > wps:txbx > w:txbxContent */
+const drawingTextBoxRun = (innerXml: string): string =>
+  '<w:r><w:drawing><wp:inline><a:graphic><a:graphicData>' +
+  `<wps:wsp><wps:txbx><w:txbxContent>${innerXml}</w:txbxContent></wps:txbx></wps:wsp>` +
+  '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>';
+
+/** VML text box: w:r > w:pict > v:shape > v:textbox > w:txbxContent */
+const vmlTextBoxRun = (innerXml: string): string =>
+  `<w:r><w:pict><v:shape><v:textbox><w:txbxContent>${innerXml}</w:txbxContent></v:textbox></v:shape></w:pict></w:r>`;
+
+const tableCell = (cellXml: string): string => `<w:tc>${cellXml}</w:tc>`;
+const tableRow = (cellsXml: readonly string[]): string =>
+  `<w:tr>${cellsXml.map(tableCell).join('')}</w:tr>`;
+const table = (rowsXml: readonly string[]): string => `<w:tbl>${rowsXml.join('')}</w:tbl>`;
 
 describe('extractContentControls', () => {
   it('roundtrip: recovers every SpecNode id → text from generateDocx output', async () => {
@@ -236,5 +253,79 @@ describe('extractContentControls', () => {
       { text: 'cell B', index: 2, afterUuid: undefined },
       { text: 'after table', index: 3, afterUuid: U1 },
     ]);
+  });
+});
+
+// gap-1 (#520): a text box's interior specr-uuid anchor lives inside a w:r
+// (run content), which the pre-existing walk only visits via visibleText/
+// visitRunNode — never via walkBlocks, the ONLY place readSdtUuid was called.
+// Without a dedicated w:drawing/w:pict branch, the interior sdt's text was
+// silently absorbed into the host paragraph's own text (generic run-content
+// recursion) instead of being captured under its own uuid.
+describe('extractContentControls — text-box interior anchors (#520 gap-1)', () => {
+  it('DrawingML text box: interior anchor captured under its own uuid, not bled into host paragraph text', async () => {
+    const body = sdt(
+      U1,
+      para(run('before ') + drawingTextBoxRun(sdt(U2, para(run('inside box')))) + run(' after'))
+    );
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('before  after');
+    expect(result.controlled.get(U2)).toBe('inside box');
+    expect(result.controlled.size).toBe(2);
+  });
+
+  it('VML text box: interior anchor captured under its own uuid, not bled into host paragraph text', async () => {
+    const body = sdt(
+      U1,
+      para(run('before ') + vmlTextBoxRun(sdt(U2, para(run('inside box')))) + run(' after'))
+    );
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('before  after');
+    expect(result.controlled.get(U2)).toBe('inside box');
+    expect(result.controlled.size).toBe(2);
+  });
+
+  it('a drawing with no specr-uuid anchor inside contributes no text and no controlled entry', async () => {
+    const body = sdt(
+      U1,
+      para(run('before ') + drawingTextBoxRun(para(run('unanchored box text'))) + run(' after'))
+    );
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('before  after');
+    expect(result.controlled.size).toBe(1);
+  });
+});
+
+describe('extractContentControls — object-block extraction (#520)', () => {
+  it('detects a w:tbl object block with correct kind and interiorUuids in document order', async () => {
+    const body = table([
+      tableRow([sdt(U1, para(run('A1'))), sdt(U2, para(run('B1')))]),
+      tableRow([sdt(U3, para(run('A2'))), sdt(U4, para(run('B2')))]),
+    ]);
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.objectBlocks).toHaveLength(1);
+    expect(result.objectBlocks[0]?.fingerprint.kind).toBe('table');
+    expect(result.objectBlocks[0]?.interiorUuids).toEqual([U1, U2, U3, U4]);
+  });
+
+  it('detects a text-box drawing object block with correct kind and interiorUuids', async () => {
+    const body = para(drawingTextBoxRun(sdt(U1, para(run('box text')))));
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.objectBlocks).toHaveLength(1);
+    expect(result.objectBlocks[0]?.fingerprint.kind).toBe('textBox');
+    expect(result.objectBlocks[0]?.interiorUuids).toEqual([U1]);
+  });
+
+  it('a document with no tables or drawings has no object blocks', async () => {
+    const result = await extractContentControls(await craftDocx(para(run('plain text'))));
+    expect(result.objectBlocks).toEqual([]);
+  });
+
+  it('never double-detects: a table nested inside another table cell yields exactly one object block', async () => {
+    const nestedTable = table([tableRow([sdt(U2, para(run('nested cell')))])]);
+    const body = table([tableRow([sdt(U1, para(run('outer cell'))) + nestedTable])]);
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.objectBlocks).toHaveLength(1);
+    expect(result.objectBlocks[0]?.interiorUuids).toEqual([U1, U2]);
   });
 });

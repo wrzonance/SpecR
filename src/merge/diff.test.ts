@@ -19,6 +19,7 @@ function extract(
     controlled: new Map(controlled),
     orphans: orphans.map((o) => ({ text: o.text, index: o.index, afterUuid: o.afterUuid })),
     trackChanges: { present: records.length > 0, records },
+    objectBlocks: [], // object-block conflict detection lands in a later #520 task
   };
 }
 
