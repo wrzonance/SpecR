@@ -90,6 +90,25 @@ describe('fingerprintBlob', () => {
     expect(tableFp.hash).not.toBe(textBoxFp.hash);
   });
 
+  it('counts only the outer table dimensions — a nested table in a cell does not inflate rows/columns (#520 review)', () => {
+    // Outer table is 1 row x 1 column; its single cell holds a nested 2-row x
+    // 3-column table. findAllByTag-style descent would report rows=3/columns=4;
+    // the fingerprint must report the host table's own 1x1 dimensions.
+    const nestedTable: FingerprintNode = {
+      'w:tbl': [
+        { 'w:tblGrid': [{ 'w:gridCol': [] }, { 'w:gridCol': [] }, { 'w:gridCol': [] }] },
+        { 'w:tr': [{ 'w:tc': [] }, { 'w:tc': [] }, { 'w:tc': [] }] },
+        { 'w:tr': [{ 'w:tc': [] }, { 'w:tc': [] }, { 'w:tc': [] }] },
+      ],
+    };
+    const outer = tableBlobWithCellContent([nestedTable]);
+
+    const fp = fingerprintBlob(outer);
+
+    expect(fp.rows).toBe(1);
+    expect(fp.columns).toBe(1);
+  });
+
   it('is structure-sensitive to non-text tag/attribute shape at a FIXED row/column count (geometry unchanged, formatting shape changed)', () => {
     // Both blobs are 1 row x 1 column — only the cell's INTERNAL tag shape
     // differs (an added w:rPr/w:b formatting wrapper around the run), never

@@ -30,6 +30,7 @@ export interface ObjectStructureFingerprint {
 const TABLE_TAG = 'w:tbl';
 const ROW_TAG = 'w:tr';
 const CELL_TAG = 'w:tc';
+const GRID_TAG = 'w:tblGrid';
 const GRID_COLUMN_TAG = 'w:gridCol';
 const TEXT_TAG = '#text';
 
@@ -42,14 +43,11 @@ function childrenOf(node: FingerprintNode, tag: string): readonly FingerprintNod
   return Array.isArray(value) ? (value as FingerprintNode[]) : [];
 }
 
-/** Depth-first collection of every descendant (including top-level) tagged `tag`. */
-function findAllByTag(nodes: readonly FingerprintNode[], tag: string): readonly FingerprintNode[] {
-  return nodes.flatMap((node) => {
-    const nodeTag = tagOf(node);
-    if (nodeTag === undefined) return [];
-    const nested = findAllByTag(childrenOf(node, nodeTag), tag);
-    return nodeTag === tag ? [node, ...nested] : nested;
-  });
+/** Direct child nodes tagged `tag` (non-recursive) — never descends into a
+ *  nested subtree, so a `w:tbl` inside a cell can't be counted toward its host
+ *  table's grid/row totals (nested tables are a KNOWN AMBIGUITY, ADR-072 §20). */
+function directByTag(nodes: readonly FingerprintNode[], tag: string): readonly FingerprintNode[] {
+  return nodes.filter((node) => tagOf(node) === tag);
 }
 
 /**
@@ -70,12 +68,30 @@ function inferKind(nodes: readonly FingerprintNode[]): ObjectKind {
   return nodes.some((node) => tagOf(node) === TABLE_TAG) ? 'table' : 'textBox';
 }
 
-/** Grid column count from `w:tblGrid`, falling back to the widest row's cell count. */
-function countColumns(nodes: readonly FingerprintNode[]): number {
-  const gridColumns = findAllByTag(nodes, GRID_COLUMN_TAG).length;
-  if (gridColumns > 0) return gridColumns;
-  const rows = findAllByTag(nodes, ROW_TAG);
-  return rows.reduce((widest, row) => Math.max(widest, findAllByTag([row], CELL_TAG).length), 0);
+/**
+ * Row and column counts of the OUTERMOST table only (#520 review): every count
+ * walks the table's direct structure, never descendants, so a nested `w:tbl`
+ * inside a cell can't inflate the host table's `w:tr`/`w:gridCol`/cell totals.
+ * Grid column count comes from the table's own `w:tblGrid`, falling back to the
+ * widest row's direct cell count.
+ */
+function tableDimensions(nodes: readonly FingerprintNode[]): {
+  readonly rows: number;
+  readonly columns: number;
+} {
+  const table = nodes.find((node) => tagOf(node) === TABLE_TAG);
+  const children = table ? childrenOf(table, TABLE_TAG) : [];
+  const rowNodes = directByTag(children, ROW_TAG);
+  const grid = children.find((child) => tagOf(child) === GRID_TAG);
+  const gridColumns = grid ? directByTag(childrenOf(grid, GRID_TAG), GRID_COLUMN_TAG).length : 0;
+  const columns =
+    gridColumns > 0
+      ? gridColumns
+      : rowNodes.reduce(
+          (widest, row) => Math.max(widest, directByTag(childrenOf(row, ROW_TAG), CELL_TAG).length),
+          0
+        );
+  return { rows: rowNodes.length, columns };
 }
 
 /**
@@ -89,7 +105,8 @@ export function fingerprintBlob(nodes: readonly FingerprintNode[]): ObjectStruct
   const kind = inferKind(nodes);
   const hash = createHash('sha256').update(nodes.map(structuralShape).join('|')).digest('hex');
   if (kind !== 'table') return { kind, hash };
-  return { kind, rows: findAllByTag(nodes, ROW_TAG).length, columns: countColumns(nodes), hash };
+  const { rows, columns } = tableDimensions(nodes);
+  return { kind, rows, columns, hash };
 }
 
 /** True when two fingerprints describe structurally different objects. */
