@@ -21,7 +21,11 @@ interface Queryable {
 //
 // `removed_subtree` = vanished non-note roots ∪ their descendants (recursive over
 // parent_id). $1 = specId. Prepend to a snapshot query and exclude its ids.
-const REMOVED_SUBTREE_CTE = `
+// Exported for reuse by object-structure.ts's base-side structural snapshots
+// (#520) — an owner-removed `object` row (or its `objectText` children) must
+// drop from those snapshots for exactly the same reason paragraph snapshots
+// do: the renderers skip the whole vanished subtree.
+export const REMOVED_SUBTREE_CTE = `
   WITH RECURSIVE removed_subtree AS (
     SELECT id FROM paragraphs
      WHERE spec_id = $1 AND vanish = true AND node_type <> 'note'
