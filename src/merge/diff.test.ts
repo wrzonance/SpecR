@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { computeDiff } from './diff.js';
-import type { ExtractResult, TrackChangeRecord } from './types.js';
+import { fingerprintBlob } from './object-fingerprint.js';
+import type { ExtractedObjectBlock, ExtractResult, TrackChangeRecord } from './types.js';
 import type { ParagraphSnapshot } from '../ast/types.js';
+import type { ObjectBlobNode, ObjectMeta } from '../ast/index.js';
+import type { ObjectStructuralSnapshot } from '../db/index.js';
 
 const U1 = '00000000-0000-0000-0000-000000000001';
 const U2 = '00000000-0000-0000-0000-000000000002';
+const OBJ1 = '00000000-0000-0000-0000-0000000000a1';
 
 function snap(uuid: string, text: string, baseVersion = 1): ParagraphSnapshot {
   return { uuid, text, baseVersion };
@@ -13,13 +17,56 @@ function snap(uuid: string, text: string, baseVersion = 1): ParagraphSnapshot {
 function extract(
   controlled: readonly (readonly [string, string])[],
   orphans: readonly { text: string; index: number; afterUuid?: string | undefined }[] = [],
-  records: readonly TrackChangeRecord[] = []
+  records: readonly TrackChangeRecord[] = [],
+  objectBlocks: readonly ExtractedObjectBlock[] = []
 ): ExtractResult {
   return {
     controlled: new Map(controlled),
     orphans: orphans.map((o) => ({ text: o.text, index: o.index, afterUuid: o.afterUuid })),
     trackChanges: { present: records.length > 0, records },
+    objectBlocks,
   };
+}
+
+/** Hand-built fast-xml-parser preserveOrder-shaped table blob, N rows x
+ *  cells[i].length — mirrors object-fingerprint.test.ts's tableBlob, so a
+ *  base ObjectMeta and theirs' ExtractedObjectBlock fingerprint from the same
+ *  canonical shape (#520). */
+function tableBlob(rowTexts: readonly (readonly string[])[]): ObjectBlobNode[] {
+  const columnCount = rowTexts[0]?.length ?? 0;
+  return [
+    {
+      'w:tbl': [
+        { 'w:tblGrid': Array.from({ length: columnCount }, () => ({ 'w:gridCol': [] })) },
+        ...rowTexts.map((cells) => ({
+          'w:tr': cells.map((text) => ({
+            'w:tc': [{ 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': text }] }] }] }],
+          })),
+        })),
+      ],
+    },
+  ];
+}
+
+function tableSnapshot(
+  objectId: string,
+  rowTexts: readonly (readonly string[])[],
+  childUuids: readonly string[]
+): ObjectStructuralSnapshot {
+  const meta: ObjectMeta = {
+    kind: 'table',
+    floating: false,
+    generation: 'drawingml',
+    blob: tableBlob(rowTexts),
+  };
+  return { objectId, meta, childUuids };
+}
+
+function tableBlock(
+  rowTexts: readonly (readonly string[])[],
+  interiorUuids: readonly string[]
+): ExtractedObjectBlock {
+  return { interiorUuids, fingerprint: fingerprintBlob(tableBlob(rowTexts)) };
 }
 
 describe('computeDiff', () => {
@@ -27,7 +74,8 @@ describe('computeDiff', () => {
     const result = computeDiff(
       [snap(U1, 'base text')],
       [snap(U1, 'base text')],
-      extract([[U1, 'owner edit']])
+      extract([[U1, 'owner edit']]),
+      []
     );
     expect(result.modified).toEqual([
       { uuid: U1, base: 'base text', theirs: 'owner edit', ours: 'base text' },
@@ -41,7 +89,8 @@ describe('computeDiff', () => {
     const result = computeDiff(
       [snap(U1, 'base text')],
       [snap(U1, 'writer edit')],
-      extract([[U1, 'base text']])
+      extract([[U1, 'base text']]),
+      []
     );
     expect(result.modified).toEqual([]);
     expect(result.conflicts).toEqual([]);
@@ -52,7 +101,8 @@ describe('computeDiff', () => {
     const result = computeDiff(
       [snap(U1, 'base text')],
       [snap(U1, 'writer edit')],
-      extract([[U1, 'owner edit']])
+      extract([[U1, 'owner edit']]),
+      []
     );
     expect(result.conflicts).toEqual([
       { uuid: U1, base: 'base text', theirs: 'owner edit', ours: 'writer edit' },
@@ -64,16 +114,25 @@ describe('computeDiff', () => {
     const result = computeDiff(
       [snap(U1, 'base text')],
       [snap(U1, 'base text')],
-      extract([[U1, 'base text']])
+      extract([[U1, 'base text']]),
+      []
     );
-    expect(result).toEqual({ added: [], modified: [], deleted: [], conflicts: [], warnings: [] });
+    expect(result).toEqual({
+      added: [],
+      modified: [],
+      deleted: [],
+      conflicts: [],
+      objectConflicts: [],
+      warnings: [],
+    });
   });
 
   it('UUID in base but missing from theirs → deleted', () => {
     const result = computeDiff(
       [snap(U1, 'kept'), snap(U2, 'removed by owner')],
       [snap(U1, 'kept'), snap(U2, 'removed by owner')],
-      extract([[U1, 'kept']])
+      extract([[U1, 'kept']]),
+      []
     );
     expect(result.deleted).toEqual([U2]);
     expect(result.modified).toEqual([]);
@@ -89,14 +148,14 @@ describe('computeDiff', () => {
     // (setVanishRow + paragraph_versions snapshot), but without surfacing the
     // divergence. Pinned here as current behavior; the fix (a delete/modify-conflict
     // category + apply-time guard) is a /diff contract change tracked in #465.
-    const result = computeDiff([snap(U1, 'base text')], [snap(U1, 'writer edit')], extract([]));
+    const result = computeDiff([snap(U1, 'base text')], [snap(U1, 'writer edit')], extract([]), []);
     expect(result.deleted).toEqual([U1]);
     expect(result.conflicts).toEqual([]);
     expect(result.modified).toEqual([]);
   });
 
   it('paragraph absent from ours falls back to base text → theirs change is modified, not conflict', () => {
-    const result = computeDiff([snap(U1, 'base text')], [], extract([[U1, 'owner edit']]));
+    const result = computeDiff([snap(U1, 'base text')], [], extract([[U1, 'owner edit']]), []);
     expect(result.modified).toEqual([
       { uuid: U1, base: 'base text', theirs: 'owner edit', ours: 'base text' },
     ]);
@@ -108,6 +167,7 @@ describe('computeDiff', () => {
       [snap(U1, 'kept')],
       [snap(U1, 'kept')],
       extract([[U1, 'kept']], [{ text: 'new owner paragraph', index: 3, afterUuid: U1 }]),
+      [],
       { uuidGen: () => 'fixed-0' }
     );
     expect(result.added).toEqual([
@@ -127,6 +187,7 @@ describe('computeDiff', () => {
           { text: 'second new', index: 2, afterUuid: U1 },
         ]
       ),
+      [],
       { uuidGen: () => `fixed-${n++}` }
     );
     expect(result.added).toEqual([
@@ -147,21 +208,29 @@ describe('computeDiff', () => {
           { text: 'second', index: 1 },
         ]
       ),
+      [],
       { uuidGen: () => `fixed-${n++}` }
     );
     expect(result.added.map((a) => a.uuid)).toEqual(['fixed-0', 'fixed-1']);
   });
 
   it('defaults to crypto.randomUUID when no uuidGen injected', () => {
-    const result = computeDiff([], [], extract([], [{ text: 'a', index: 0 }]));
+    const result = computeDiff([], [], extract([], [{ text: 'a', index: 0 }]), []);
     expect(result.added[0]?.uuid).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
     );
   });
 
   it('empty inputs → empty DiffResult', () => {
-    const result = computeDiff([], [], extract([]));
-    expect(result).toEqual({ added: [], modified: [], deleted: [], conflicts: [], warnings: [] });
+    const result = computeDiff([], [], extract([]), []);
+    expect(result).toEqual({
+      added: [],
+      modified: [],
+      deleted: [],
+      conflicts: [],
+      objectConflicts: [],
+      warnings: [],
+    });
   });
 
   it('track-change records present → single warning naming the record count', () => {
@@ -172,7 +241,8 @@ describe('computeDiff', () => {
     const result = computeDiff(
       [snap(U1, 'base')],
       [snap(U1, 'base')],
-      extract([[U1, 'base']], [], records)
+      extract([[U1, 'base']], [], records),
+      []
     );
     expect(result.warnings).toEqual([
       'document contained 2 track-change records — diff treats them as accepted',
@@ -180,7 +250,7 @@ describe('computeDiff', () => {
   });
 
   it('no track changes → no warnings', () => {
-    const result = computeDiff([], [], extract([]));
+    const result = computeDiff([], [], extract([]), []);
     expect(result.warnings).toEqual([]);
   });
 
@@ -192,7 +262,8 @@ describe('computeDiff', () => {
       extract([
         [U1, 'base text'],
         [U2, 'surprise text'],
-      ])
+      ]),
+      []
     );
     expect(result.warnings).toEqual([
       '1 controlled paragraph(s) in the returned DOCX carry unknown UUIDs and were ignored',
@@ -210,7 +281,8 @@ describe('computeDiff', () => {
       extract([
         [U1, 'base text'],
         [U2, 'other'],
-      ])
+      ]),
+      []
     );
     expect(result.warnings).toEqual([]);
   });
@@ -229,7 +301,8 @@ describe('computeDiff', () => {
         ],
         [],
         records
-      )
+      ),
+      []
     );
     expect(result.warnings).toEqual([
       '1 controlled paragraph(s) in the returned DOCX carry unknown UUIDs and were ignored',
@@ -243,6 +316,7 @@ describe('computeDiff', () => {
       [snap(U1, 'base text')],
       [snap(U1, 'base text')],
       extract([[U1, 'owner edit']], [{ text: 'new paragraph', index: 5 }]),
+      [],
       { uuidGen: () => `fixed-${n++}` }
     );
     expect(result.modified).toEqual([
@@ -254,5 +328,88 @@ describe('computeDiff', () => {
     expect(result.conflicts).toEqual([]);
     expect(result.deleted).toEqual([]);
     expect(result.warnings).toEqual([]);
+  });
+
+  describe('object structural conflicts (#520)', () => {
+    it("an object row's own uuid never appears in modified/deleted/conflicts, even though theirs carries no anchor for it", () => {
+      // The table itself is never w:sdt-anchored in the DOCX — only its interior
+      // paragraphs are — so without exclusion OBJ1 would read as an ordinary delete.
+      const snapshot = tableSnapshot(OBJ1, [['A1', 'B1']], []);
+      const result = computeDiff([snap(OBJ1, '')], [snap(OBJ1, '')], extract([]), [snapshot]);
+      expect(result.deleted).toEqual([]);
+      expect(result.modified).toEqual([]);
+      expect(result.conflicts).toEqual([]);
+      expect(result.objectConflicts).toEqual([]);
+    });
+
+    it('diverging table structure (base 1 row vs theirs 2 rows) → one objectConflicts entry, affectedUuids excluded from every other bucket', () => {
+      const baseSnapshot = tableSnapshot(OBJ1, [['A1', 'B1']], [U1, U2]);
+      const theirsBlock = tableBlock(
+        [
+          ['A1', 'B1'],
+          ['A2', 'B2'],
+        ],
+        [U1, U2]
+      );
+      const result = computeDiff(
+        [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+        [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+        // U1's text changed and U2 is entirely absent from theirs.controlled — both
+        // would otherwise register as modified/deleted if not excluded below.
+        extract([[U1, 'owner changed cell one']], [], [], [theirsBlock]),
+        [baseSnapshot]
+      );
+      expect(result.objectConflicts).toEqual([
+        {
+          objectId: OBJ1,
+          affectedUuids: [U1, U2],
+          base: fingerprintBlob(baseSnapshot.meta.blob),
+          theirs: theirsBlock.fingerprint,
+        },
+      ]);
+      expect(result.modified).toEqual([]);
+      expect(result.deleted).toEqual([]);
+      expect(result.conflicts).toEqual([]);
+    });
+
+    it('matching structure between base and theirs → no objectConflicts entry, per-cell text diff still applies normally', () => {
+      const rowTexts = [['A1', 'B1']];
+      const baseSnapshot = tableSnapshot(OBJ1, rowTexts, [U1, U2]);
+      const theirsBlock = tableBlock(rowTexts, [U1, U2]);
+      const result = computeDiff(
+        [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+        [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+        extract(
+          [
+            [U1, 'cell one'],
+            [U2, 'owner edited cell'],
+          ],
+          [],
+          [],
+          [theirsBlock]
+        ),
+        [baseSnapshot]
+      );
+      expect(result.objectConflicts).toEqual([]);
+      expect(result.modified).toEqual([
+        { uuid: U2, base: 'cell two', theirs: 'owner edited cell', ours: 'cell two' },
+      ]);
+      expect(result.deleted).toEqual([]);
+      expect(result.conflicts).toEqual([]);
+    });
+
+    it('object with all children absent from theirs (no matching block) falls through to per-child deletes, never a whole-object signal', () => {
+      const baseSnapshot = tableSnapshot(OBJ1, [['A1', 'B1']], [U1, U2]);
+      const result = computeDiff(
+        [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+        [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+        extract([]), // no object blocks and no controlled uuids at all in theirs
+        [baseSnapshot]
+      );
+      expect(result.objectConflicts).toEqual([]);
+      expect(result.deleted).toEqual([U1, U2]);
+      expect(result.modified).toEqual([]);
+      expect(result.conflicts).toEqual([]);
+    });
   });
 });

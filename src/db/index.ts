@@ -62,6 +62,12 @@ export { insertParagraphAfter, insertSiblingRow } from './queries/paragraph-inse
 export type { InsertParagraphResult, InsertParagraphInput } from './queries/paragraph-insert.js';
 export { setParagraphVanish, setVanishRow } from './queries/paragraph-vanish.js';
 export type { SetVanishResult, SetVanishRowResult } from './queries/paragraph-vanish.js';
+// rewriteObjectTextBlob is the DB core behind rewriting an objectText child's
+// text into its parent object row's captured blob (#519) — paragraphs.ts's
+// own write path (applyParagraphUpdate) already calls it internally; the
+// merge engine's accept path (src/merge/conflict.ts, #520) is its second
+// cross-module consumer.
+export { rewriteObjectTextBlob } from './queries/object-text-edit.js';
 export {
   insertRefs,
   getInboundReferences,
@@ -112,6 +118,8 @@ export {
   type SpecSectionResult,
 } from './queries/search.js';
 export { getParagraphSnapshots, getCurrentParagraphSnapshots } from './queries/versions.js';
+export { getObjectStructuralSnapshots } from './queries/object-structure.js';
+export type { ObjectStructuralSnapshot } from './queries/object-structure.js';
 export {
   getTemplate,
   getTemplateByName,

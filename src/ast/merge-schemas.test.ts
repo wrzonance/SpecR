@@ -17,6 +17,7 @@ describe('DiffResultSchema — cross-bucket uuid uniqueness (#374)', () => {
       modified: [{ uuid: U1, base: 'b', theirs: 't', ours: 'o' }],
       deleted: [U1],
       conflicts: [],
+      objectConflicts: [],
       warnings: [],
     });
     expect(result.success).toBe(false);
@@ -31,6 +32,7 @@ describe('DiffResultSchema — cross-bucket uuid uniqueness (#374)', () => {
       modified: [],
       deleted: [],
       conflicts: [{ uuid: U1, base: 'b', theirs: 't', ours: 'o' }],
+      objectConflicts: [],
       warnings: [],
     });
     expect(result.success).toBe(false);
@@ -45,6 +47,7 @@ describe('DiffResultSchema — cross-bucket uuid uniqueness (#374)', () => {
       modified: [{ uuid: U1.toUpperCase(), base: 'b', theirs: 't', ours: 'o' }],
       deleted: [U1],
       conflicts: [],
+      objectConflicts: [],
       warnings: [],
     });
     expect(result.success).toBe(false);
@@ -56,14 +59,146 @@ describe('DiffResultSchema — cross-bucket uuid uniqueness (#374)', () => {
       modified: [{ uuid: U2, base: 'b', theirs: 't', ours: 'o' }],
       deleted: [],
       conflicts: [],
+      objectConflicts: [],
       warnings: [],
     });
     expect(result.success).toBe(true);
   });
 });
 
+// ── DiffResultSchema — objectConflicts (#520) ───────────────────────────────
+const OBJ1 = '33333333-3333-4333-8333-333333333333';
+const TABLE_FINGERPRINT_BASE = { kind: 'table' as const, rows: 2, columns: 2, hash: 'a' };
+const TABLE_FINGERPRINT_THEIRS = { kind: 'table' as const, rows: 3, columns: 2, hash: 'b' };
+
+describe('DiffResultSchema — objectConflicts (#520)', () => {
+  it('parses an objectConflicts entry, rows/columns omittable for a textBox kind', () => {
+    const result = DiffResultSchema.safeParse({
+      added: [],
+      modified: [],
+      deleted: [],
+      conflicts: [],
+      objectConflicts: [
+        {
+          objectId: OBJ1,
+          affectedUuids: [U1],
+          base: { kind: 'textBox', hash: 'a' },
+          theirs: { kind: 'textBox', hash: 'b' },
+        },
+      ],
+      warnings: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a uuid shared across modified and objectConflicts.affectedUuids', () => {
+    const result = DiffResultSchema.safeParse({
+      added: [],
+      modified: [{ uuid: U1, base: 'b', theirs: 't', ours: 'o' }],
+      deleted: [],
+      conflicts: [],
+      objectConflicts: [
+        {
+          objectId: OBJ1,
+          affectedUuids: [U1],
+          base: TABLE_FINGERPRINT_BASE,
+          theirs: TABLE_FINGERPRINT_THEIRS,
+        },
+      ],
+      warnings: [],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.message.includes(U1))).toBe(true);
+    }
+  });
+
+  it('rejects a uuid shared across deleted and objectConflicts.affectedUuids', () => {
+    const result = DiffResultSchema.safeParse({
+      added: [],
+      modified: [],
+      deleted: [U1],
+      conflicts: [],
+      objectConflicts: [
+        {
+          objectId: OBJ1,
+          affectedUuids: [U1],
+          base: TABLE_FINGERPRINT_BASE,
+          theirs: TABLE_FINGERPRINT_THEIRS,
+        },
+      ],
+      warnings: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a uuid shared across conflicts and objectConflicts.affectedUuids', () => {
+    const result = DiffResultSchema.safeParse({
+      added: [],
+      modified: [],
+      deleted: [],
+      conflicts: [{ uuid: U1, base: 'b', theirs: 't', ours: 'o' }],
+      objectConflicts: [
+        {
+          objectId: OBJ1,
+          affectedUuids: [U1],
+          base: TABLE_FINGERPRINT_BASE,
+          theirs: TABLE_FINGERPRINT_THEIRS,
+        },
+      ],
+      warnings: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a case-variant duplicate between deleted and objectConflicts.affectedUuids', () => {
+    const result = DiffResultSchema.safeParse({
+      added: [],
+      modified: [],
+      deleted: [U1.toUpperCase()],
+      conflicts: [],
+      objectConflicts: [
+        {
+          objectId: OBJ1,
+          affectedUuids: [U1],
+          base: TABLE_FINGERPRINT_BASE,
+          theirs: TABLE_FINGERPRINT_THEIRS,
+        },
+      ],
+      warnings: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects the object conflict's own objectId reused as a modified uuid", () => {
+    const result = DiffResultSchema.safeParse({
+      added: [],
+      modified: [{ uuid: OBJ1, base: 'b', theirs: 't', ours: 'o' }],
+      deleted: [],
+      conflicts: [],
+      objectConflicts: [
+        {
+          objectId: OBJ1,
+          affectedUuids: [U1],
+          base: TABLE_FINGERPRINT_BASE,
+          theirs: TABLE_FINGERPRINT_THEIRS,
+        },
+      ],
+      warnings: [],
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 // ── MergeBodySchema — actorLabel passthrough (#377) ─────────────────────────
-const EMPTY_DIFF = { added: [], modified: [], deleted: [], conflicts: [], warnings: [] };
+const EMPTY_DIFF = {
+  added: [],
+  modified: [],
+  deleted: [],
+  conflicts: [],
+  objectConflicts: [],
+  warnings: [],
+};
 
 describe('MergeBodySchema — actorLabel (#377)', () => {
   it('omitting actorLabel parses byte-identical to the pre-#377 shape', () => {

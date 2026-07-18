@@ -39,6 +39,9 @@ export async function handleApplyMerge(args: unknown): Promise<ToolResult> {
   }
   const { specId, accept, diff, expectedVersion, actorLabel } = parsed.data;
   try {
+    // DiffResultSchema carries objectConflicts (#520) end to end, so it passes
+    // straight through — accepting any of its uuids is rejected inside
+    // applyAccepted, never here.
     const outcome = await applyMerge(specId, accept, diff, expectedVersion, actorLabel);
     if (outcome.kind === 'not-found') return toolError(`spec not found: id=${specId}`);
     return ok({ applied: outcome.applied, rejected: outcome.rejected });

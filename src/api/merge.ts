@@ -35,7 +35,9 @@ export async function mergeHandler(req: Request, res: Response): Promise<void> {
   try {
     // The transaction, composed edit gate (ADR-018), applyAccepted, and content_version
     // bump all live in the shared applyMerge service (src/merge) — one orchestration for
-    // both the REST route and the apply_merge MCP tool.
+    // both the REST route and the apply_merge MCP tool. MergeBodySchema.diff carries
+    // objectConflicts (#520) end to end, so it passes straight through — accepting any
+    // of its uuids is rejected inside applyAccepted, never here.
     const outcome = await applyMerge(
       idResult.data,
       bodyResult.data.accept,

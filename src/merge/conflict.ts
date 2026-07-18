@@ -1,5 +1,10 @@
 import type { PoolClient } from 'pg';
-import { insertSiblingRow, setVanishRow, recordParagraphHistory } from '../db/index.js';
+import {
+  insertSiblingRow,
+  setVanishRow,
+  recordParagraphHistory,
+  rewriteObjectTextBlob,
+} from '../db/index.js';
 import type { InsertParagraphResult, ParagraphHistoryContext } from '../db/index.js';
 import { MergeError } from './error.js';
 import type { DiffResult, ModifiedDiff, ParagraphDiff } from './types.js';
@@ -15,15 +20,24 @@ interface ParagraphRow {
   readonly text: string;
   readonly nodeType: string;
   readonly baseVersion: number;
+  /** `objectText` rows only — the owning `object` row's id, needed to rewrite
+   *  its captured blob (see {@link rewriteObjectTextIfNeeded}). Every other
+   *  node type carries this as whatever `parent_id` happens to be; unused. */
+  readonly parentId: string | null;
 }
 
-// One accepted uuid resolves to exactly one of these three apply strategies —
+// One accepted uuid resolves to exactly one of these four apply strategies —
 // 'conflicts' shares the modified/'text' path since it is the same shape
 // (ModifiedDiff) and the same ours/theirs apply logic. `diffKind` on the 'text'
 // variant records WHICH bucket (modified vs conflict) the entry came from, set
 // once here where the origin bucket is still known — applyTextChange has no
 // other way to recover it, and the write-history payload (#377, ADR-052 D1)
-// needs it to describe the merge.
+// needs it to describe the merge. 'object-conflict' (#520) is detection-only:
+// it never reaches an apply strategy — validateAccepted rejects every uuid
+// resolving to it up front, before the write loop in applyAccepted runs, so
+// an atomic object-structural conflict (row/column/kind change on a table or
+// text box) can never be partially materialized by accepting one of its
+// affected child uuids or the object's own row id.
 type ApplicableChange =
   | {
       readonly kind: 'text';
@@ -31,7 +45,8 @@ type ApplicableChange =
       readonly diffKind: 'modified' | 'conflict';
     }
   | { readonly kind: 'added'; readonly change: ParagraphDiff }
-  | { readonly kind: 'deleted' };
+  | { readonly kind: 'deleted' }
+  | { readonly kind: 'object-conflict' };
 
 /** The 'text' branch of {@link ApplicableChange} — applyTextChange's own param
  *  type, so callers narrow once (`change.kind === 'text'`) and pass the whole
@@ -44,6 +59,22 @@ type TextChange = Extract<ApplicableChange, { readonly kind: 'text' }>;
 // case-folded form — otherwise a case-variant accepted uuid is rejected as unknown
 // even though it names a real diff entry. Mirrors the DiffResultSchema dedup guard.
 const uuidKey = (uuid: string): string => uuid.toLowerCase();
+
+// Every uuid a client could plausibly name for an ObjectConflictDiff: the
+// object row's own id (excluded from every other bucket by classifyBase, so
+// it appears nowhere else in applicableChanges) and each affected child
+// anchor (likewise excluded from modified/deleted/conflicts). Both resolve to
+// 'object-conflict' so validateAccepted rejects either with the same clear
+// reason rather than the generic "unknown accepted UUID".
+function objectConflictEntries(diff: DiffResult): readonly [string, ApplicableChange][] {
+  return diff.objectConflicts.flatMap((c): [string, ApplicableChange][] => [
+    [uuidKey(c.objectId), { kind: 'object-conflict' }],
+    ...c.affectedUuids.map((uuid): [string, ApplicableChange] => [
+      uuidKey(uuid),
+      { kind: 'object-conflict' },
+    ]),
+  ]);
+}
 
 function applicableChanges(diff: DiffResult): ReadonlyMap<string, ApplicableChange> {
   return new Map<string, ApplicableChange>([
@@ -60,6 +91,7 @@ function applicableChanges(diff: DiffResult): ReadonlyMap<string, ApplicableChan
       { kind: 'added', change: c },
     ]),
     ...diff.deleted.map((uuid): [string, ApplicableChange] => [uuidKey(uuid), { kind: 'deleted' }]),
+    ...objectConflictEntries(diff),
   ]);
 }
 
@@ -67,13 +99,45 @@ function uniqueAccepted(acceptedIds: readonly string[]): readonly string[] {
   return [...new Set(acceptedIds.map(uuidKey))];
 }
 
+/** Total count of `diff-entry`-granular entries a client could `accept`
+ *  against, per openapi.yaml's `MergeResult.rejected` contract ("Number of
+ *  diff entries omitted from accept"). Deliberately NOT `applicableChanges(
+ *  diff).size` — that map expands each ObjectConflictDiff into
+ *  `1 + affectedUuids.length` keys (the object's own row id plus every
+ *  affected child anchor) so validateAccepted can name-reject any of them,
+ *  but each objectConflicts element is still exactly ONE diff entry, the
+ *  same as one modified/conflict/added/deleted entry (#520 review finding).
+ */
+function diffEntryCount(diff: DiffResult): number {
+  return (
+    diff.modified.length +
+    diff.conflicts.length +
+    diff.added.length +
+    diff.deleted.length +
+    diff.objectConflicts.length
+  );
+}
+
+/** Rejects the whole accept call, before any write, if a uuid is unknown OR
+ *  names part of an atomic object-structural conflict (#520) — a table/text
+ *  box's row/column/kind change cannot be auto-merged by accepting one of its
+ *  pieces; the object must be resolved by hand. Runs over every accepted uuid
+ *  up front (applyAccepted's write loop starts only after this returns), so
+ *  no partial materialization of an object conflict is possible. */
 function validateAccepted(
   acceptedIds: readonly string[],
   applicable: ReadonlyMap<string, ApplicableChange>
 ): void {
   for (const uuid of acceptedIds) {
-    if (!applicable.has(uuid))
+    const change = applicable.get(uuid);
+    if (change === undefined)
       throw new InvalidAcceptedChangeError(`unknown accepted UUID: ${uuid}`);
+    if (change.kind === 'object-conflict') {
+      throw new InvalidAcceptedChangeError(
+        `accepted UUID ${uuid} is part of an atomic object-structural conflict and cannot be ` +
+          'auto-merged — resolve the table/text box by hand (KNOWN AMBIGUITY)'
+      );
+    }
   }
 }
 
@@ -83,7 +147,8 @@ async function lockParagraph(
   client: PoolClient
 ): Promise<ParagraphRow | null> {
   const result = await client.query<ParagraphRow>(
-    `SELECT text, node_type AS "nodeType", base_version AS "baseVersion"
+    `SELECT text, node_type AS "nodeType", base_version AS "baseVersion",
+            parent_id AS "parentId"
      FROM paragraphs
      WHERE spec_id = $1 AND id = $2
      FOR UPDATE`,
@@ -92,13 +157,43 @@ async function lockParagraph(
   return result.rows[0] ?? null;
 }
 
+/** Mirrors `db/queries/paragraphs.ts`'s own `rewriteObjectTextIfNeeded`: an
+ *  `objectText` row stores no text of its own that the generator reads —
+ *  `generator/object-block.ts` re-emits its owning `object` row's captured
+ *  `object_data.blob` verbatim, never `paragraphs.text` — so accepting a merge
+ *  change against an `objectText` uuid must also rewrite that blob, or the
+ *  accepted edit is silently dropped from the next generated DOCX even though
+ *  this call reports it as applied (#520 review finding). A no-op for every
+ *  other node type. Throws if an `objectText` row somehow carries no parent —
+ *  every `objectText` node is inserted as an `object` node's child
+ *  (insertTree/flattenDfs), so a null `parentId` here is a data-integrity
+ *  fault, never a silent skip. */
+async function rewriteObjectTextIfNeeded(
+  client: PoolClient,
+  specId: string,
+  row: ParagraphRow,
+  nodeId: string,
+  text: string
+): Promise<void> {
+  if (row.nodeType !== 'objectText') return;
+  if (!row.parentId) {
+    throw new MergeError(
+      `applyTextChange: objectText node ${nodeId} has no parent object row to rewrite`
+    );
+  }
+  await rewriteObjectTextBlob(client, specId, row.parentId, nodeId, text);
+}
+
 /** Applies one modified/conflict-op text change. Records a paragraph_versions
  *  snapshot (#377, ADR-052 D1) under op 'merge', with a payload naming which
  *  diff bucket (`entry.diffKind`) it resolved — idempotent on
- *  (paragraph_id, version) so a retried apply never duplicates the row.
- *  A no-op (theirs already matches current text) records nothing and never
- *  calls `resolveCtx`, matching applyDeletedChange/applyAddedChange's own
- *  no-op contracts below. */
+ *  (paragraph_id, version) so a retried apply never duplicates the row. When
+ *  the target is an `objectText` row, also rewrites its parent `object`
+ *  row's captured blob (`rewriteObjectTextIfNeeded`, #520 review finding) —
+ *  otherwise the accepted edit would report success but never reach the next
+ *  generated DOCX. A no-op (theirs already matches current text) records
+ *  nothing, rewrites no blob, and never calls `resolveCtx`, matching
+ *  applyDeletedChange/applyAddedChange's own no-op contracts below. */
 async function applyTextChange(
   specId: string,
   entry: TextChange,
@@ -131,6 +226,7 @@ async function applyTextChange(
      WHERE spec_id = $3 AND id = $4`,
     [change.theirs, nextVersion, specId, change.uuid]
   );
+  await rewriteObjectTextIfNeeded(client, specId, row, change.uuid, change.theirs);
   return true;
 }
 
@@ -386,5 +482,9 @@ export async function applyAccepted(
   }
   applied += await applyAcceptedAdded(specId, addedEntries, diff.added, client, resolveCtx);
 
-  return { applied, rejected: applicable.size - accepted.length };
+  // `accepted` never contains an object-conflict uuid here — validateAccepted
+  // already threw above if it did — so every accepted uuid resolves to
+  // exactly one diff-entry-granular change (text/added/deleted), making
+  // `accepted.length` a valid count of diff entries actually accepted.
+  return { applied, rejected: diffEntryCount(diff) - accepted.length };
 }

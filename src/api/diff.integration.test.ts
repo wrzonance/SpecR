@@ -8,6 +8,7 @@ import type { DiffResult } from '../merge/index.js';
 import { registerMcpRoutes } from '../mcp/server.js';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
+import type { ObjectBlobNode, ObjectMeta } from '../ast/index.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const ORIGINAL_TEXT = 'Install listed copper cabling.';
@@ -167,6 +168,7 @@ describe('POST /specs/:id/diff (integration)', () => {
       modified: [],
       deleted: [],
       conflicts: [],
+      objectConflicts: [],
       warnings: [],
     });
   });
@@ -258,6 +260,123 @@ describe('resource: specr://specs/{id}/diff', () => {
     const diff = JSON.parse(contents[0]?.text ?? '{}') as DiffResult;
 
     expect(contents[0]?.mimeType).toBe('application/json');
-    expect(diff).toEqual({ added: [], modified: [], deleted: [], conflicts: [], warnings: [] });
+    expect(diff).toEqual({
+      added: [],
+      modified: [],
+      deleted: [],
+      conflicts: [],
+      objectConflicts: [],
+      warnings: [],
+    });
   });
+});
+
+// #520 review finding: computeSpecDiff's real wiring (DB → generateDocx →
+// extractContentControls → getObjectStructuralSnapshots → computeDiff) was
+// only ever exercised at the computeDiff unit level with hand-built
+// ObjectStructuralSnapshot/ExtractResult fixtures (merge/diff.test.ts) — no
+// test here or in merge.integration.test.ts ever created a node_type='object'
+// row. A wiring bug (e.g. an objectId/interiorUuids casing mismatch between
+// getObjectStructuralSnapshots and extractObjectBlocks, or the generator's own
+// emitted blob not fingerprint-matching itself) would pass every existing
+// test while silently reintroducing "an object row reads as a hard delete".
+function anchoredTableMeta(anchorUuid: string, text: string): ObjectMeta {
+  const anchoredCell: ObjectBlobNode = {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `specr-uuid-${anchorUuid}` } }] },
+      { 'w:sdtContent': [{ 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': text }] }] }] }] },
+    ],
+  } as ObjectBlobNode;
+  return {
+    kind: 'table',
+    floating: false,
+    generation: 'drawingml',
+    rows: 1,
+    columns: 1,
+    blob: [{ 'w:tbl': [{ 'w:tr': [{ 'w:tc': [anchoredCell] }] }] }],
+  };
+}
+
+describe('body-level object round-trip — real wiring (#520 review finding)', () => {
+  const OBJ_PART_ID = randomUUID();
+  const OBJ_OBJECT_ID = randomUUID();
+  const OBJ_TEXT_ID = randomUUID();
+  const OBJ_CELL_TEXT = 'Captured cell text.';
+  let objSpecId: string;
+
+  beforeAll(async () => {
+    objSpecId = await createSpec({
+      section: '09 91 26',
+      title: 'Object Diff Wiring Spec',
+      source: `d520diff_${randomUUID().slice(0, 8)}`,
+    });
+    await insertTree(
+      {
+        id: objSpecId,
+        section: '09 91 26',
+        title: 'Object Diff Wiring Spec',
+        parts: [
+          {
+            id: OBJ_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            meta: {},
+            children: [
+              {
+                id: OBJ_OBJECT_ID,
+                type: 'object',
+                text: '',
+                meta: { object: anchoredTableMeta(OBJ_TEXT_ID, OBJ_CELL_TEXT) },
+                children: [
+                  {
+                    id: OBJ_TEXT_ID,
+                    type: 'objectText',
+                    text: OBJ_CELL_TEXT,
+                    meta: {},
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      objSpecId,
+      pool
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [objSpecId]);
+  });
+
+  it(
+    'an unmodified generated DOCX round-trips through DB → generateDocx → ' +
+      'extractContentControls → getObjectStructuralSnapshots → computeDiff with an empty ' +
+      'diff — the object row itself never reads as a hard delete and its anchored interior ' +
+      'text never reads as modified',
+    async () => {
+      const generateRes = await fetch(`${baseUrl}/specs/${objSpecId}/generate`, { method: 'POST' });
+      expect(generateRes.status).toBe(200);
+      const buffer = Buffer.from(await generateRes.arrayBuffer());
+
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array(buffer)], { type: DOCX_MIME }), 'object.docx');
+      const diffRes = await fetch(`${baseUrl}/specs/${objSpecId}/diff`, {
+        method: 'POST',
+        body: form,
+      });
+      const body = (await diffRes.json()) as ApiResponse<DiffResult>;
+
+      expect(diffRes.status).toBe(200);
+      expect(body.data).toEqual({
+        added: [],
+        modified: [],
+        deleted: [],
+        conflicts: [],
+        objectConflicts: [],
+        warnings: [],
+      });
+    }
+  );
 });

@@ -1306,6 +1306,13 @@ paths:
         merge conditional on the spec being at that `contentVersion` — stale →
         409 with the current version. The composed edit gate also rejects a merge
         on an archived spec or one locked upstream (409).
+
+
+        `diff.objectConflicts` (#520) entries are detection-only: accepting an
+        entry's `objectId` or any of its `affectedUuids` is always rejected
+        400 — a structural change on a table/text box (a row/column added or
+        removed, a kind change) cannot be auto-merged and must be resolved by
+        hand.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -6920,9 +6927,61 @@ components:
           type: string
           description: Current DB text
 
+    ObjectStructureFingerprint:
+      type: object
+      required: [kind, hash]
+      description: >
+        A text-blind, structure-sensitive summary of one body-level table/text
+        box's OOXML shape (#520) — editing cell/paragraph text never changes
+        it, but adding/removing a row, column, or nested element does.
+      properties:
+        kind:
+          type: string
+          enum: [table, textBox]
+        rows:
+          type: integer
+          minimum: 0
+          description: Table-only grid row count; absent for a textBox kind.
+        columns:
+          type: integer
+          minimum: 0
+          description: Table-only grid column count; absent for a textBox kind.
+        hash:
+          type: string
+          description: Digest of the object's structural shape, opaque to clients.
+
+    ObjectConflictDiff:
+      type: object
+      required: [objectId, affectedUuids, base, theirs]
+      description: >
+        One atomic structural conflict on a body-level table/text box (#520):
+        the base-side object's structure diverges from the matching object in
+        the returned DOCX (`theirs`) — a row/column added or removed, a
+        table/text-box kind change, etc. Reported once per object rather than
+        leaking into per-child-paragraph noise; `affectedUuids` (the object's
+        base-side interior child anchors) never also appear in
+        `modified`/`deleted`/`conflicts` above. Detection-only — accepting
+        `objectId` or any `affectedUuids` entry is always rejected 400; the
+        table/text box must be resolved by hand.
+      properties:
+        objectId:
+          type: string
+          format: uuid
+          description: The base-side object row's own id.
+        affectedUuids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: The object's base-side interior child paragraph anchors.
+        base:
+          $ref: '#/components/schemas/ObjectStructureFingerprint'
+        theirs:
+          $ref: '#/components/schemas/ObjectStructureFingerprint'
+
     DiffResult:
       type: object
-      required: [added, modified, deleted, conflicts, warnings]
+      required: [added, modified, deleted, conflicts, objectConflicts, warnings]
       properties:
         added:
           type: array
@@ -6942,6 +7001,13 @@ components:
           description: Same shape as modified; present when ours and theirs both changed
           items:
             $ref: '#/components/schemas/ModifiedDiff'
+        objectConflicts:
+          type: array
+          description: >
+            Atomic structural conflicts on body-level tables/text boxes
+            (#520). Never auto-mergeable — see ObjectConflictDiff.
+          items:
+            $ref: '#/components/schemas/ObjectConflictDiff'
         warnings:
           type: array
           items:

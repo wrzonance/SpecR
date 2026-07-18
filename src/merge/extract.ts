@@ -2,7 +2,8 @@ import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
 import { UUID_TAG_PREFIX } from '../ast/index.js';
 import { MergeError } from './error.js';
-import type { ExtractResult, TrackChangeRecord } from './types.js';
+import { fingerprintBlob } from './object-fingerprint.js';
+import type { ExtractResult, ExtractedObjectBlock, TrackChangeRecord } from './types.js';
 
 // preserveOrder keeps w:sdt blocks and bare w:p siblings in document order —
 // required for orphan indexes (non-preserveOrder grouping destroys ordering).
@@ -27,6 +28,10 @@ interface OrderedNode {
 interface ParaContext {
   readonly uuid: string | undefined;
   readonly records: TrackChangeRecord[];
+  /** shared reference to the top-level walk's controlled map — lets a
+   *  text-box run (visitRunNode's w:drawing/w:pict branch) capture interior
+   *  specr-uuid anchors without threading the whole ExtractAcc through. */
+  readonly controlled: Map<string, string>;
 }
 
 interface ExtractAcc {
@@ -121,7 +126,38 @@ function visitRunNode(node: OrderedNode, tag: string, ctx: ParaContext): string 
     ctx.records.push(makeRecord('del', node, deletedText(childrenOf(node, tag)), ctx.uuid));
     return ''; // virtual-accept: deleted text is excluded from paragraph text
   }
+  if (tag === 'w:drawing' || tag === 'w:pict') {
+    // gap-1 (#520): a text box's interior specr-uuid anchor lives inside this
+    // run's subtree, not among the host paragraph's block-level siblings, so
+    // the generic run-content fallthrough below would otherwise absorb its
+    // text into the host paragraph. Captured separately (collectDrawingAnchors)
+    // and contributes no text here.
+    collectDrawingAnchors(childrenOf(node, tag), ctx);
+    return '';
+  }
   return visibleText(childrenOf(node, tag), ctx); // w:r, w:hyperlink, w:smartTag, …
+}
+
+/**
+ * Walks a text-box drawing's subtree (DrawingML `wps:txbx`/`w:txbxContent` or
+ * VML `v:textbox`/`w:txbxContent`) for interior specr-uuid `w:sdt` anchors,
+ * writing their paragraph text into the shared controlled map. Reuses
+ * `walkBlocks` unmodified: the DrawingML/VML wrapper tags (`wp:inline`,
+ * `a:graphic`, `a:graphicData`, `wps:txbx`, `v:shape`, `v:textbox`, …) all
+ * fall through `walkBlocks`'s generic recursion case with zero tag-specific
+ * dispatch needed. Orphan paragraphs inside a drawing (no specr-uuid anchor)
+ * are discarded — a drawing/shape body has no CSI tier to anchor an addition
+ * against, mirroring the table-cell anchorless rule. Track-change records
+ * ARE preserved: `ctx.records` is the same array reference as the top-level
+ * walk's.
+ */
+function collectDrawingAnchors(nodes: readonly OrderedNode[], ctx: ParaContext): void {
+  const throwawayAcc: ExtractAcc = {
+    controlled: ctx.controlled,
+    orphans: [],
+    records: ctx.records,
+  };
+  walkBlocks(nodes, undefined, throwawayAcc, { index: 0, lastControlledUuid: undefined }, false);
 }
 
 /** Visible (post virtual-accept) text of paragraph content nodes, in order. */
@@ -170,7 +206,11 @@ function visitParagraph(
   state: WalkState,
   inTable: boolean
 ): WalkState {
-  const text = visibleText(childrenOf(node, 'w:p'), { uuid, records: acc.records });
+  const text = visibleText(childrenOf(node, 'w:p'), {
+    uuid,
+    records: acc.records,
+    controlled: acc.controlled,
+  });
   if (!text.trim()) return state; // whitespace-only spacer paragraphs ignored
   if (uuid !== undefined) {
     setControlledText(acc.controlled, uuid, text);
@@ -212,6 +252,56 @@ function walkBlocks(
   return s;
 }
 
+const OBJECT_BLOCK_TAGS = new Set(['w:tbl', 'w:drawing', 'w:pict']);
+
+/** Every specr-uuid `w:sdt` anchor's uuid found anywhere in `nodes`, in document order. */
+function findInteriorUuids(nodes: readonly OrderedNode[]): string[] {
+  const uuids: string[] = [];
+  for (const node of nodes) {
+    const tag = tagOf(node);
+    if (tag === undefined || tag === '#text' || PROPERTY_TAGS.has(tag)) continue;
+    if (tag === 'w:sdt') {
+      const uuid = readSdtUuid(node);
+      if (uuid !== undefined) uuids.push(uuid);
+    }
+    uuids.push(...findInteriorUuids(childrenOf(node, tag)));
+  }
+  return uuids;
+}
+
+/**
+ * Walks the document for body-level object blocks (#520): a `w:tbl` table or
+ * a `w:drawing`/`w:pict` text box, fingerprinted (object-fingerprint.ts) for
+ * structural-conflict detection. `inBlock` dedups nested structure (e.g. a
+ * table nested inside another table's cell) — once inside a detected block,
+ * its subtree is scanned only for interior uuids/fingerprinting, never
+ * re-detected as its own separate block.
+ */
+function walkObjectBlocks(
+  nodes: readonly OrderedNode[],
+  inBlock: boolean,
+  blocks: ExtractedObjectBlock[]
+): void {
+  for (const node of nodes) {
+    const tag = tagOf(node);
+    if (tag === undefined || tag === '#text' || PROPERTY_TAGS.has(tag)) continue;
+    const isObjectTag = OBJECT_BLOCK_TAGS.has(tag);
+    if (isObjectTag && !inBlock) {
+      blocks.push({
+        interiorUuids: findInteriorUuids(childrenOf(node, tag)),
+        fingerprint: fingerprintBlob([node]),
+      });
+    }
+    walkObjectBlocks(childrenOf(node, tag), inBlock || isObjectTag, blocks);
+  }
+}
+
+function extractObjectBlocks(nodes: readonly OrderedNode[]): ExtractedObjectBlock[] {
+  const blocks: ExtractedObjectBlock[] = [];
+  walkObjectBlocks(nodes, false, blocks);
+  return blocks;
+}
+
 async function loadZip(buffer: Buffer): Promise<JSZip> {
   try {
     return await JSZip.loadAsync(buffer);
@@ -250,5 +340,6 @@ export async function extractContentControls(docxBuffer: Buffer): Promise<Extrac
     controlled: acc.controlled,
     orphans: acc.orphans,
     trackChanges: { present: acc.records.length > 0, records: acc.records },
+    objectBlocks: extractObjectBlocks(nodes),
   };
 }

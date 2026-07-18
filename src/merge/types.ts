@@ -1,3 +1,5 @@
+import type { ObjectStructureFingerprint } from './object-fingerprint.js';
+
 // Re-exported for merge consumers' convenience; canonical definition is src/ast/types.ts
 export type { ParagraphSnapshot } from '../ast/types.js';
 
@@ -7,6 +9,18 @@ export interface TrackChangeRecord {
   readonly text: string;
   readonly author?: string | undefined;
   readonly date?: string | undefined; // w:date attr, ISO
+}
+
+/**
+ * One body-level object (a `w:tbl` table or a `w:drawing`/`w:pict` text box,
+ * #520) discovered during extraction: the specr-uuid anchors of its interior
+ * paragraphs (document order, possibly empty for an unanchored object) plus
+ * its text-blind structural fingerprint, for structural-conflict detection
+ * during 3-way merge.
+ */
+export interface ExtractedObjectBlock {
+  readonly interiorUuids: readonly string[];
+  readonly fingerprint: ObjectStructureFingerprint;
 }
 
 export interface ExtractResult {
@@ -23,6 +37,8 @@ export interface ExtractResult {
     readonly present: boolean;
     readonly records: readonly TrackChangeRecord[];
   };
+  /** body-level tables and text boxes, in document order (#520) */
+  readonly objectBlocks: readonly ExtractedObjectBlock[];
 }
 
 export interface ParagraphDiff {
@@ -47,12 +63,30 @@ export interface ModifiedDiff {
 /** Same shape as ModifiedDiff; presence in conflicts[] signals the kind. */
 export type ConflictDiff = ModifiedDiff;
 
+/**
+ * One atomic structural conflict on a body-level object (#520): the base-side
+ * snapshot's fingerprint (object-fingerprint.ts) diverges from the matching
+ * theirs `ExtractedObjectBlock`'s — a row/column added or removed, a
+ * textBox/table kind change, etc. Reported as ONE conflict rather than
+ * leaking into per-child paragraph noise. `affectedUuids` (the object's
+ * base-side interior child anchors) are excluded from modified/deleted/
+ * conflicts above for the same paragraphs.
+ */
+export interface ObjectConflictDiff {
+  readonly objectId: string;
+  readonly affectedUuids: readonly string[];
+  readonly base: ObjectStructureFingerprint;
+  readonly theirs: ObjectStructureFingerprint;
+}
+
 export interface DiffResult {
   readonly added: readonly ParagraphDiff[];
   readonly modified: readonly ModifiedDiff[];
   /** uuids present in base but absent from theirs */
   readonly deleted: readonly string[];
   readonly conflicts: readonly ConflictDiff[];
+  /** atomic structural conflicts on body-level objects (#520) */
+  readonly objectConflicts: readonly ObjectConflictDiff[];
   readonly warnings: readonly string[];
 }
 
