@@ -99,6 +99,25 @@ function uniqueAccepted(acceptedIds: readonly string[]): readonly string[] {
   return [...new Set(acceptedIds.map(uuidKey))];
 }
 
+/** Total count of `diff-entry`-granular entries a client could `accept`
+ *  against, per openapi.yaml's `MergeResult.rejected` contract ("Number of
+ *  diff entries omitted from accept"). Deliberately NOT `applicableChanges(
+ *  diff).size` — that map expands each ObjectConflictDiff into
+ *  `1 + affectedUuids.length` keys (the object's own row id plus every
+ *  affected child anchor) so validateAccepted can name-reject any of them,
+ *  but each objectConflicts element is still exactly ONE diff entry, the
+ *  same as one modified/conflict/added/deleted entry (#520 review finding).
+ */
+function diffEntryCount(diff: DiffResult): number {
+  return (
+    diff.modified.length +
+    diff.conflicts.length +
+    diff.added.length +
+    diff.deleted.length +
+    diff.objectConflicts.length
+  );
+}
+
 /** Rejects the whole accept call, before any write, if a uuid is unknown OR
  *  names part of an atomic object-structural conflict (#520) — a table/text
  *  box's row/column/kind change cannot be auto-merged by accepting one of its
@@ -463,5 +482,9 @@ export async function applyAccepted(
   }
   applied += await applyAcceptedAdded(specId, addedEntries, diff.added, client, resolveCtx);
 
-  return { applied, rejected: applicable.size - accepted.length };
+  // `accepted` never contains an object-conflict uuid here — validateAccepted
+  // already threw above if it did — so every accepted uuid resolves to
+  // exactly one diff-entry-granular change (text/added/deleted), making
+  // `accepted.length` a valid count of diff entries actually accepted.
+  return { applied, rejected: diffEntryCount(diff) - accepted.length };
 }

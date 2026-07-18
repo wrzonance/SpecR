@@ -238,7 +238,7 @@ describe('applyAccepted — validation (#374)', () => {
     expect((await paragraphRow(pr1Id)).vanish).toBe(true);
   });
 
-  it('rejected = applicable.size - accepted.length', async () => {
+  it('rejected = total diff entries - accepted.length', async () => {
     const { specId, pr1Id, pr1SecondId, articleId } = await createFixture();
     const addedUuid = randomUUID();
     const diff = diffWith({
@@ -327,6 +327,36 @@ describe('applyAccepted — object-conflict rejection (#520)', () => {
     const row = await paragraphRow(pr1SecondId);
     expect(row.vanish).toBe(false);
     expect(await paragraphVersions(pr1SecondId)).toEqual([]);
+  });
+
+  it('rejected counts an objectConflict as ONE diff entry, not one per objectId + affectedUuid', async () => {
+    // openapi.yaml: MergeResult.rejected is "Number of diff entries omitted
+    // from accept". applicableChanges() expands one ObjectConflictDiff into
+    // (1 + affectedUuids.length) map entries so validateAccepted can reject
+    // any of those uuids by name — but that expansion must not leak into the
+    // rejected COUNT: only one diff entry (the objectConflict) was actually
+    // omitted here, not 3 (#520 review finding).
+    const { specId, pr1SecondId } = await createFixture();
+    const objectId = randomUUID();
+    const child1 = randomUUID();
+    const child2 = randomUUID();
+    const diff = diffWith({
+      modified: [{ uuid: pr1SecondId, base: PR1_SECOND_TEXT, theirs: 'x', ours: PR1_SECOND_TEXT }],
+      objectConflicts: [
+        {
+          objectId,
+          affectedUuids: [child1, child2],
+          base: baseFingerprint,
+          theirs: theirsFingerprint,
+        },
+      ],
+    });
+
+    const result = await runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, [pr1SecondId], diff, client, ctx)
+    );
+
+    expect(result).toEqual({ applied: 1, rejected: 1 });
   });
 });
 

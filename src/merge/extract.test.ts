@@ -328,4 +328,28 @@ describe('extractContentControls — object-block extraction (#520)', () => {
     expect(result.objectBlocks).toHaveLength(1);
     expect(result.objectBlocks[0]?.interiorUuids).toEqual([U1, U2]);
   });
+
+  it('never double-detects: a table nested inside a text box yields exactly one object block (kind textBox)', async () => {
+    // The outer w:drawing is detected first (walkObjectBlocks visits document
+    // order top-down), so inBlock folds the interior w:tbl into it — the same
+    // dedup as table-in-table, but across the two different OBJECT_BLOCK_TAGS.
+    const nestedTable = table([tableRow([sdt(U2, para(run('nested table cell')))])]);
+    const body = para(drawingTextBoxRun(sdt(U1, para(run('box text'))) + nestedTable));
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.objectBlocks).toHaveLength(1);
+    expect(result.objectBlocks[0]?.fingerprint.kind).toBe('textBox');
+    expect(result.objectBlocks[0]?.interiorUuids).toEqual([U1, U2]);
+  });
+
+  it('never double-detects: a text box nested inside a table cell yields exactly one object block (kind table)', async () => {
+    // Reverse nesting from the above — a w:drawing inside a w:tbl cell folds
+    // into the outer table block rather than being re-detected on its own.
+    const cellContent =
+      sdt(U1, para(run('outer cell'))) + para(drawingTextBoxRun(sdt(U2, para(run('inside box')))));
+    const body = table([tableRow([cellContent])]);
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.objectBlocks).toHaveLength(1);
+    expect(result.objectBlocks[0]?.fingerprint.kind).toBe('table');
+    expect(result.objectBlocks[0]?.interiorUuids).toEqual([U1, U2]);
+  });
 });
