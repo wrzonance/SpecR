@@ -7,6 +7,9 @@ import { applyAccepted, InvalidAcceptedChangeError } from './conflict.js';
 import { applyMerge } from './apply-merge.js';
 import type { DiffResult } from './types.js';
 import type { ObjectStructureFingerprint } from './object-fingerprint.js';
+import { findAnchoredParagraph } from '../parser/index.js';
+import { UUID_TAG_PREFIX } from '../ast/index.js';
+import type { ObjectBlobNode, ObjectMeta } from '../ast/index.js';
 
 // Boundary tests for applyAccepted (#374's added/deleted merge-op support) and,
 // for the write-history lockstep invariants (#377, ADR-052 D1), applyMerge — the
@@ -756,5 +759,164 @@ describe('applyMerge — defers actor resolution until an effective write (#377 
 
     expect(outcome).toMatchObject({ kind: 'applied', applied: 1, rejected: 0 });
     expect(await userExists(actorLabel)).toBe(true);
+  });
+});
+
+// #520 review finding: applyTextChange must rewrite the owning object row's
+// object_data.blob when the accepted uuid resolves to an objectText row —
+// generator/object-block.ts re-emits that blob verbatim, never
+// paragraphs.text, so an edit applied only via the plain UPDATE above is
+// silently dropped from the next generated DOCX. Mirrors
+// paragraphs.integration.test.ts's own "object write path (#519)" coverage
+// of updateParagraphText, for the parallel merge-accept path.
+const OBJECT_TEXT_ORIGINAL = 'Cell interior text.';
+
+function anchoredCellBlob(uuid: string, text: string): ObjectBlobNode {
+  return {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `${UUID_TAG_PREFIX}${uuid}` } }] },
+      { 'w:sdtContent': [{ 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': text }] }] }] }] },
+    ],
+  } as ObjectBlobNode;
+}
+
+function tableObjectMeta(anchorUuid: string, text: string): ObjectMeta {
+  return {
+    kind: 'table',
+    floating: false,
+    generation: 'drawingml',
+    rows: 1,
+    columns: 1,
+    blob: [{ 'w:tc': [anchoredCellBlob(anchorUuid, text)] }],
+  };
+}
+
+interface ObjectFixture {
+  readonly specId: string;
+  readonly objectId: string;
+  readonly objectTextId: string;
+}
+
+async function createObjectFixture(): Promise<ObjectFixture> {
+  const specId = randomUUID();
+  const partId = randomUUID();
+  const objectId = randomUUID();
+  const objectTextId = randomUUID();
+  await pool.query(
+    `INSERT INTO specs (id, section, title, source, library_id)
+     VALUES ($1, '09 91 26', 'Conflict Object Apply Test', $2,
+             (SELECT id FROM libraries WHERE name = 'Default Company Master'))`,
+    [specId, `d520_${randomUUID().slice(0, 8)}`]
+  );
+  await pool.query(
+    `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
+     VALUES ($1, $2, NULL, 'part', 'GENERAL', 1)`,
+    [partId, specId]
+  );
+  await pool.query(
+    `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position, object_data)
+     VALUES ($1, $2, $3, 'object', '', 1, $4::jsonb)`,
+    [objectId, specId, partId, JSON.stringify(tableObjectMeta(objectTextId, OBJECT_TEXT_ORIGINAL))]
+  );
+  await pool.query(
+    `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
+     VALUES ($1, $2, $3, 'objectText', $4, 1)`,
+    [objectTextId, specId, objectId, OBJECT_TEXT_ORIGINAL]
+  );
+  cleanupIds.push(specId);
+  return { specId, objectId, objectTextId };
+}
+
+async function objectBlobOf(objectId: string): Promise<readonly ObjectBlobNode[]> {
+  const row = await pool.query<{ object_data: ObjectMeta }>(
+    'SELECT object_data FROM paragraphs WHERE id = $1',
+    [objectId]
+  );
+  return row.rows[0]!.object_data.blob;
+}
+
+describe('applyAccepted — objectText write path (#520 review finding)', () => {
+  it(
+    "accepting a modified-op against an objectText uuid rewrites the parent object row's " +
+      'object_data.blob (not just paragraphs.text) — otherwise the accepted edit never reaches ' +
+      'the next generated DOCX (generator/object-block.ts re-emits object_data.blob verbatim)',
+    async () => {
+      const { specId, objectId, objectTextId } = await createObjectFixture();
+      const revisedText = 'Revised cell interior text.';
+      const diff = diffWith({
+        modified: [
+          {
+            uuid: objectTextId,
+            base: OBJECT_TEXT_ORIGINAL,
+            theirs: revisedText,
+            ours: OBJECT_TEXT_ORIGINAL,
+          },
+        ],
+      });
+
+      const result = await runApplyAccepted((client, ctx) =>
+        applyAccepted(specId, [objectTextId], diff, client, ctx)
+      );
+
+      expect(result).toEqual({ applied: 1, rejected: 0 });
+      const textRow = await pool.query<{ text: string }>(
+        'SELECT text FROM paragraphs WHERE id = $1',
+        [objectTextId]
+      );
+      expect(textRow.rows[0]!.text).toBe(revisedText);
+      const blob = await objectBlobOf(objectId);
+      expect(findAnchoredParagraph(blob, objectTextId)).toEqual({
+        'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': revisedText }] }] }],
+      });
+    }
+  );
+
+  it('accepting a conflict-op against an objectText uuid also rewrites the parent blob', async () => {
+    const { specId, objectId, objectTextId } = await createObjectFixture();
+    const resolvedText = 'Manually resolved cell text.';
+    const diff = diffWith({
+      conflicts: [
+        {
+          uuid: objectTextId,
+          base: OBJECT_TEXT_ORIGINAL,
+          theirs: resolvedText,
+          ours: OBJECT_TEXT_ORIGINAL,
+        },
+      ],
+    });
+
+    const result = await runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, [objectTextId], diff, client, ctx)
+    );
+
+    expect(result).toEqual({ applied: 1, rejected: 0 });
+    const blob = await objectBlobOf(objectId);
+    expect(findAnchoredParagraph(blob, objectTextId)).toEqual({
+      'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': resolvedText }] }] }],
+    });
+  });
+
+  it('throws when an objectText row somehow has no parent object row (data-integrity guard)', async () => {
+    const specId = randomUUID();
+    const orphanId = randomUUID();
+    await pool.query(
+      `INSERT INTO specs (id, section, title, source, library_id)
+       VALUES ($1, '09 91 27', 'Conflict Object Orphan Test', $2,
+               (SELECT id FROM libraries WHERE name = 'Default Company Master'))`,
+      [specId, `d520o_${randomUUID().slice(0, 8)}`]
+    );
+    await pool.query(
+      `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
+       VALUES ($1, $2, NULL, 'objectText', 'orphan', 1)`,
+      [orphanId, specId]
+    );
+    cleanupIds.push(specId);
+    const diff = diffWith({
+      modified: [{ uuid: orphanId, base: 'orphan', theirs: 'new text', ours: 'orphan' }],
+    });
+
+    await expect(
+      runApplyAccepted((client, ctx) => applyAccepted(specId, [orphanId], diff, client, ctx))
+    ).rejects.toThrow(/has no parent object row/);
   });
 });

@@ -1,5 +1,10 @@
 import type { PoolClient } from 'pg';
-import { insertSiblingRow, setVanishRow, recordParagraphHistory } from '../db/index.js';
+import {
+  insertSiblingRow,
+  setVanishRow,
+  recordParagraphHistory,
+  rewriteObjectTextBlob,
+} from '../db/index.js';
 import type { InsertParagraphResult, ParagraphHistoryContext } from '../db/index.js';
 import { MergeError } from './error.js';
 import type { DiffResult, ModifiedDiff, ParagraphDiff } from './types.js';
@@ -15,6 +20,10 @@ interface ParagraphRow {
   readonly text: string;
   readonly nodeType: string;
   readonly baseVersion: number;
+  /** `objectText` rows only — the owning `object` row's id, needed to rewrite
+   *  its captured blob (see {@link rewriteObjectTextIfNeeded}). Every other
+   *  node type carries this as whatever `parent_id` happens to be; unused. */
+  readonly parentId: string | null;
 }
 
 // One accepted uuid resolves to exactly one of these four apply strategies —
@@ -119,7 +128,8 @@ async function lockParagraph(
   client: PoolClient
 ): Promise<ParagraphRow | null> {
   const result = await client.query<ParagraphRow>(
-    `SELECT text, node_type AS "nodeType", base_version AS "baseVersion"
+    `SELECT text, node_type AS "nodeType", base_version AS "baseVersion",
+            parent_id AS "parentId"
      FROM paragraphs
      WHERE spec_id = $1 AND id = $2
      FOR UPDATE`,
@@ -128,13 +138,43 @@ async function lockParagraph(
   return result.rows[0] ?? null;
 }
 
+/** Mirrors `db/queries/paragraphs.ts`'s own `rewriteObjectTextIfNeeded`: an
+ *  `objectText` row stores no text of its own that the generator reads —
+ *  `generator/object-block.ts` re-emits its owning `object` row's captured
+ *  `object_data.blob` verbatim, never `paragraphs.text` — so accepting a merge
+ *  change against an `objectText` uuid must also rewrite that blob, or the
+ *  accepted edit is silently dropped from the next generated DOCX even though
+ *  this call reports it as applied (#520 review finding). A no-op for every
+ *  other node type. Throws if an `objectText` row somehow carries no parent —
+ *  every `objectText` node is inserted as an `object` node's child
+ *  (insertTree/flattenDfs), so a null `parentId` here is a data-integrity
+ *  fault, never a silent skip. */
+async function rewriteObjectTextIfNeeded(
+  client: PoolClient,
+  specId: string,
+  row: ParagraphRow,
+  nodeId: string,
+  text: string
+): Promise<void> {
+  if (row.nodeType !== 'objectText') return;
+  if (!row.parentId) {
+    throw new MergeError(
+      `applyTextChange: objectText node ${nodeId} has no parent object row to rewrite`
+    );
+  }
+  await rewriteObjectTextBlob(client, specId, row.parentId, nodeId, text);
+}
+
 /** Applies one modified/conflict-op text change. Records a paragraph_versions
  *  snapshot (#377, ADR-052 D1) under op 'merge', with a payload naming which
  *  diff bucket (`entry.diffKind`) it resolved — idempotent on
- *  (paragraph_id, version) so a retried apply never duplicates the row.
- *  A no-op (theirs already matches current text) records nothing and never
- *  calls `resolveCtx`, matching applyDeletedChange/applyAddedChange's own
- *  no-op contracts below. */
+ *  (paragraph_id, version) so a retried apply never duplicates the row. When
+ *  the target is an `objectText` row, also rewrites its parent `object`
+ *  row's captured blob (`rewriteObjectTextIfNeeded`, #520 review finding) —
+ *  otherwise the accepted edit would report success but never reach the next
+ *  generated DOCX. A no-op (theirs already matches current text) records
+ *  nothing, rewrites no blob, and never calls `resolveCtx`, matching
+ *  applyDeletedChange/applyAddedChange's own no-op contracts below. */
 async function applyTextChange(
   specId: string,
   entry: TextChange,
@@ -167,6 +207,7 @@ async function applyTextChange(
      WHERE spec_id = $3 AND id = $4`,
     [change.theirs, nextVersion, specId, change.uuid]
   );
+  await rewriteObjectTextIfNeeded(client, specId, row, change.uuid, change.theirs);
   return true;
 }
 
