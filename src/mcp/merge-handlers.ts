@@ -39,16 +39,10 @@ export async function handleApplyMerge(args: unknown): Promise<ToolResult> {
   }
   const { specId, accept, diff, expectedVersion, actorLabel } = parsed.data;
   try {
-    // objectConflicts (#520) isn't part of DiffResultSchema yet — a client-supplied
-    // diff never carries structural conflicts to accept, so this defaults it to []
-    // rather than widening the wire schema ahead of that work.
-    const outcome = await applyMerge(
-      specId,
-      accept,
-      { ...diff, objectConflicts: [] },
-      expectedVersion,
-      actorLabel
-    );
+    // DiffResultSchema carries objectConflicts (#520) end to end, so it passes
+    // straight through — accepting any of its uuids is rejected inside
+    // applyAccepted, never here.
+    const outcome = await applyMerge(specId, accept, diff, expectedVersion, actorLabel);
     if (outcome.kind === 'not-found') return toolError(`spec not found: id=${specId}`);
     return ok({ applied: outcome.applied, rejected: outcome.rejected });
   } catch (err) {
