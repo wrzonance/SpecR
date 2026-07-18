@@ -1,5 +1,10 @@
 import type { SpecTree } from '../ast/index.js';
-import { getCurrentParagraphSnapshots, getParagraphSnapshots, getSpecTree } from '../db/index.js';
+import {
+  getCurrentParagraphSnapshots,
+  getObjectStructuralSnapshots,
+  getParagraphSnapshots,
+  getSpecTree,
+} from '../db/index.js';
 import { formatSectionNumber, normalizeSectionNumber } from '../lib/section-number.js';
 import { computeDiff } from './diff.js';
 import { extractContentControls } from './extract.js';
@@ -32,10 +37,11 @@ export async function computeSpecDiff(
 ): Promise<DiffResult | null> {
   const spec = await getSpecTree(specId);
   if (!spec) return null;
-  const [base, ours, theirs] = await Promise.all([
+  const [base, ours, theirs, objectSnapshots] = await Promise.all([
     getParagraphSnapshots(specId),
     getCurrentParagraphSnapshots(specId),
     extractContentControls(docxBuffer),
+    getObjectStructuralSnapshots(specId),
   ]);
-  return computeDiff(base, ours, withoutGeneratedTitle(theirs, spec.tree));
+  return computeDiff(base, ours, withoutGeneratedTitle(theirs, spec.tree), objectSnapshots);
 }

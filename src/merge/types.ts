@@ -63,12 +63,30 @@ export interface ModifiedDiff {
 /** Same shape as ModifiedDiff; presence in conflicts[] signals the kind. */
 export type ConflictDiff = ModifiedDiff;
 
+/**
+ * One atomic structural conflict on a body-level object (#520): the base-side
+ * snapshot's fingerprint (object-fingerprint.ts) diverges from the matching
+ * theirs `ExtractedObjectBlock`'s — a row/column added or removed, a
+ * textBox/table kind change, etc. Reported as ONE conflict rather than
+ * leaking into per-child paragraph noise. `affectedUuids` (the object's
+ * base-side interior child anchors) are excluded from modified/deleted/
+ * conflicts above for the same paragraphs.
+ */
+export interface ObjectConflictDiff {
+  readonly objectId: string;
+  readonly affectedUuids: readonly string[];
+  readonly base: ObjectStructureFingerprint;
+  readonly theirs: ObjectStructureFingerprint;
+}
+
 export interface DiffResult {
   readonly added: readonly ParagraphDiff[];
   readonly modified: readonly ModifiedDiff[];
   /** uuids present in base but absent from theirs */
   readonly deleted: readonly string[];
   readonly conflicts: readonly ConflictDiff[];
+  /** atomic structural conflicts on body-level objects (#520) */
+  readonly objectConflicts: readonly ObjectConflictDiff[];
   readonly warnings: readonly string[];
 }
 

@@ -91,6 +91,7 @@ function diffFor(paragraphId: string): DiffResult {
     ],
     deleted: [],
     conflicts: [],
+    objectConflicts: [],
     warnings: [],
   };
 }
@@ -224,6 +225,7 @@ describe('POST /specs/:id/merge (integration)', () => {
       modified: [],
       deleted: [],
       conflicts: [],
+      objectConflicts: [],
       warnings: [],
     };
     const { status, body } = await postMerge(target.specId, {

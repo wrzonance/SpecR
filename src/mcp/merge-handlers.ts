@@ -39,7 +39,16 @@ export async function handleApplyMerge(args: unknown): Promise<ToolResult> {
   }
   const { specId, accept, diff, expectedVersion, actorLabel } = parsed.data;
   try {
-    const outcome = await applyMerge(specId, accept, diff, expectedVersion, actorLabel);
+    // objectConflicts (#520) isn't part of DiffResultSchema yet — a client-supplied
+    // diff never carries structural conflicts to accept, so this defaults it to []
+    // rather than widening the wire schema ahead of that work.
+    const outcome = await applyMerge(
+      specId,
+      accept,
+      { ...diff, objectConflicts: [] },
+      expectedVersion,
+      actorLabel
+    );
     if (outcome.kind === 'not-found') return toolError(`spec not found: id=${specId}`);
     return ok({ applied: outcome.applied, rejected: outcome.rejected });
   } catch (err) {

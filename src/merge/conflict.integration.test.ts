@@ -69,7 +69,15 @@ afterAll(async () => {
 });
 
 function diffWith(overrides: Partial<DiffResult>): DiffResult {
-  return { added: [], modified: [], deleted: [], conflicts: [], warnings: [], ...overrides };
+  return {
+    added: [],
+    modified: [],
+    deleted: [],
+    conflicts: [],
+    objectConflicts: [],
+    warnings: [],
+    ...overrides,
+  };
 }
 
 /** Owns the transaction applyAccepted runs inside — mirrors apply-merge.ts's
