@@ -6,6 +6,7 @@ import type { ParagraphHistoryContext } from '../db/index.js';
 import { applyAccepted, InvalidAcceptedChangeError } from './conflict.js';
 import { applyMerge } from './apply-merge.js';
 import type { DiffResult } from './types.js';
+import type { ObjectStructureFingerprint } from './object-fingerprint.js';
 
 // Boundary tests for applyAccepted (#374's added/deleted merge-op support) and,
 // for the write-history lockstep invariants (#377, ADR-052 D1), applyMerge — the
@@ -248,6 +249,81 @@ describe('applyAccepted — validation (#374)', () => {
     );
 
     expect(result).toEqual({ applied: 1, rejected: 2 });
+  });
+});
+
+describe('applyAccepted — object-conflict rejection (#520)', () => {
+  // Content-blind: only kind/hash need to differ for a divergence, and these
+  // tests never call fingerprintBlob/fingerprintsDiverge — the object-conflict
+  // rejection path never inspects base/theirs, so any two distinct literals do.
+  const baseFingerprint: ObjectStructureFingerprint = {
+    kind: 'table',
+    rows: 2,
+    columns: 2,
+    hash: 'a',
+  };
+  const theirsFingerprint: ObjectStructureFingerprint = {
+    kind: 'table',
+    rows: 3,
+    columns: 2,
+    hash: 'b',
+  };
+
+  it("rejects accepting an object conflict's own object-row id, making no writes", async () => {
+    const { specId, pr1Id } = await createFixture();
+    const objectId = randomUUID();
+    const diff = diffWith({
+      objectConflicts: [
+        { objectId, affectedUuids: [pr1Id], base: baseFingerprint, theirs: theirsFingerprint },
+      ],
+    });
+
+    await expect(
+      runApplyAccepted((client, ctx) => applyAccepted(specId, [objectId], diff, client, ctx))
+    ).rejects.toThrow(/atomic object-structural conflict/);
+
+    const row = await paragraphRow(pr1Id);
+    expect(row.vanish).toBe(false);
+    expect(await paragraphVersions(pr1Id)).toEqual([]);
+  });
+
+  it("rejects accepting one of an object conflict's affected child uuids, making no writes", async () => {
+    const { specId, pr1Id } = await createFixture();
+    const objectId = randomUUID();
+    const diff = diffWith({
+      objectConflicts: [
+        { objectId, affectedUuids: [pr1Id], base: baseFingerprint, theirs: theirsFingerprint },
+      ],
+    });
+
+    await expect(
+      runApplyAccepted((client, ctx) => applyAccepted(specId, [pr1Id], diff, client, ctx))
+    ).rejects.toThrow(/atomic object-structural conflict/);
+
+    const row = await paragraphRow(pr1Id);
+    expect(row.vanish).toBe(false);
+    expect(await paragraphVersions(pr1Id)).toEqual([]);
+  });
+
+  it('an object-conflict uuid rolls back an otherwise-valid accepted uuid from the same call', async () => {
+    const { specId, pr1Id, pr1SecondId } = await createFixture();
+    const objectId = randomUUID();
+    const diff = diffWith({
+      deleted: [pr1SecondId],
+      objectConflicts: [
+        { objectId, affectedUuids: [pr1Id], base: baseFingerprint, theirs: theirsFingerprint },
+      ],
+    });
+
+    await expect(
+      runApplyAccepted((client, ctx) =>
+        applyAccepted(specId, [pr1SecondId, objectId], diff, client, ctx)
+      )
+    ).rejects.toThrow(/atomic object-structural conflict/);
+
+    const row = await paragraphRow(pr1SecondId);
+    expect(row.vanish).toBe(false);
+    expect(await paragraphVersions(pr1SecondId)).toEqual([]);
   });
 });
 

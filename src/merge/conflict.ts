@@ -17,13 +17,18 @@ interface ParagraphRow {
   readonly baseVersion: number;
 }
 
-// One accepted uuid resolves to exactly one of these three apply strategies —
+// One accepted uuid resolves to exactly one of these four apply strategies —
 // 'conflicts' shares the modified/'text' path since it is the same shape
 // (ModifiedDiff) and the same ours/theirs apply logic. `diffKind` on the 'text'
 // variant records WHICH bucket (modified vs conflict) the entry came from, set
 // once here where the origin bucket is still known — applyTextChange has no
 // other way to recover it, and the write-history payload (#377, ADR-052 D1)
-// needs it to describe the merge.
+// needs it to describe the merge. 'object-conflict' (#520) is detection-only:
+// it never reaches an apply strategy — validateAccepted rejects every uuid
+// resolving to it up front, before the write loop in applyAccepted runs, so
+// an atomic object-structural conflict (row/column/kind change on a table or
+// text box) can never be partially materialized by accepting one of its
+// affected child uuids or the object's own row id.
 type ApplicableChange =
   | {
       readonly kind: 'text';
@@ -31,7 +36,8 @@ type ApplicableChange =
       readonly diffKind: 'modified' | 'conflict';
     }
   | { readonly kind: 'added'; readonly change: ParagraphDiff }
-  | { readonly kind: 'deleted' };
+  | { readonly kind: 'deleted' }
+  | { readonly kind: 'object-conflict' };
 
 /** The 'text' branch of {@link ApplicableChange} — applyTextChange's own param
  *  type, so callers narrow once (`change.kind === 'text'`) and pass the whole
@@ -44,6 +50,22 @@ type TextChange = Extract<ApplicableChange, { readonly kind: 'text' }>;
 // case-folded form — otherwise a case-variant accepted uuid is rejected as unknown
 // even though it names a real diff entry. Mirrors the DiffResultSchema dedup guard.
 const uuidKey = (uuid: string): string => uuid.toLowerCase();
+
+// Every uuid a client could plausibly name for an ObjectConflictDiff: the
+// object row's own id (excluded from every other bucket by classifyBase, so
+// it appears nowhere else in applicableChanges) and each affected child
+// anchor (likewise excluded from modified/deleted/conflicts). Both resolve to
+// 'object-conflict' so validateAccepted rejects either with the same clear
+// reason rather than the generic "unknown accepted UUID".
+function objectConflictEntries(diff: DiffResult): readonly [string, ApplicableChange][] {
+  return diff.objectConflicts.flatMap((c): [string, ApplicableChange][] => [
+    [uuidKey(c.objectId), { kind: 'object-conflict' }],
+    ...c.affectedUuids.map((uuid): [string, ApplicableChange] => [
+      uuidKey(uuid),
+      { kind: 'object-conflict' },
+    ]),
+  ]);
+}
 
 function applicableChanges(diff: DiffResult): ReadonlyMap<string, ApplicableChange> {
   return new Map<string, ApplicableChange>([
@@ -60,6 +82,7 @@ function applicableChanges(diff: DiffResult): ReadonlyMap<string, ApplicableChan
       { kind: 'added', change: c },
     ]),
     ...diff.deleted.map((uuid): [string, ApplicableChange] => [uuidKey(uuid), { kind: 'deleted' }]),
+    ...objectConflictEntries(diff),
   ]);
 }
 
@@ -67,13 +90,26 @@ function uniqueAccepted(acceptedIds: readonly string[]): readonly string[] {
   return [...new Set(acceptedIds.map(uuidKey))];
 }
 
+/** Rejects the whole accept call, before any write, if a uuid is unknown OR
+ *  names part of an atomic object-structural conflict (#520) — a table/text
+ *  box's row/column/kind change cannot be auto-merged by accepting one of its
+ *  pieces; the object must be resolved by hand. Runs over every accepted uuid
+ *  up front (applyAccepted's write loop starts only after this returns), so
+ *  no partial materialization of an object conflict is possible. */
 function validateAccepted(
   acceptedIds: readonly string[],
   applicable: ReadonlyMap<string, ApplicableChange>
 ): void {
   for (const uuid of acceptedIds) {
-    if (!applicable.has(uuid))
+    const change = applicable.get(uuid);
+    if (change === undefined)
       throw new InvalidAcceptedChangeError(`unknown accepted UUID: ${uuid}`);
+    if (change.kind === 'object-conflict') {
+      throw new InvalidAcceptedChangeError(
+        `accepted UUID ${uuid} is part of an atomic object-structural conflict and cannot be ` +
+          'auto-merged — resolve the table/text box by hand (KNOWN AMBIGUITY)'
+      );
+    }
   }
 }
 
