@@ -413,6 +413,17 @@ every `affectedUuids` entry), and `classifyBase` excludes those same uuids
 from `modified`/`deleted`/`conflicts` so the same structural edit never also
 surfaces as noisy per-child paragraph diffs.
 
+The hash is text- AND attribute-value-blind by design: it diverges on
+tag-**topology** changes — a row, a column, a border/shading element, or a
+run-property wrapper added or removed — but NOT on attribute-value-only edits
+at a fixed shape (e.g. changing an existing `w:tblW`/`w:gridCol` width number
+with no element added or removed). Hashing all attributes is not a viable fix:
+`theirs` is a freshly Word-saved DOCX, so Word's per-save revision attributes
+(`w:rsidR`, `paraId`, `textId`, …) would diverge the fingerprint on every
+object the editor merely opened. Attribute-value geometry/formatting detection
+via a curated structural-attribute allowlist (widths/extents/spans in, revision
+IDs out) is tracked as follow-up in #524.
+
 Detection-only was the deliberate scope boundary, not a deferred follow-up:
 `conflict.ts`'s `ApplicableChange` gains a 4th `'object-conflict'` variant
 carrying no payload, and `validateAccepted` rejects the WHOLE accept call
