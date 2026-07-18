@@ -167,6 +167,7 @@ describe('POST /specs/:id/diff (integration)', () => {
       modified: [],
       deleted: [],
       conflicts: [],
+      objectConflicts: [],
       warnings: [],
     });
   });
@@ -258,6 +259,13 @@ describe('resource: specr://specs/{id}/diff', () => {
     const diff = JSON.parse(contents[0]?.text ?? '{}') as DiffResult;
 
     expect(contents[0]?.mimeType).toBe('application/json');
-    expect(diff).toEqual({ added: [], modified: [], deleted: [], conflicts: [], warnings: [] });
+    expect(diff).toEqual({
+      added: [],
+      modified: [],
+      deleted: [],
+      conflicts: [],
+      objectConflicts: [],
+      warnings: [],
+    });
   });
 });

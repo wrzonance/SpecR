@@ -379,6 +379,95 @@ never promoted to its own `object`); this addendum documents the two open WS3
 promotion/disambiguation questions above so the gap is a reviewed decision
 rather than discovered by surprise.
 
+### 21. WS4 (#520): merge-time atomic structural-conflict detection, still detection-only — never auto-merged
+
+Before #520, the 3-way merge engine (`src/merge/diff.ts`) had no concept of
+an `object` row at all: a base-side object uuid absent from `theirs.controlled`
+(objects carry no `w:sdt` anchor of their own — decision 3 anchors only their
+*interior* paragraphs) fell straight into `classifyBase`'s ordinary "missing
+from theirs → deleted" rule, and every `objectText` child was diffed as an
+unrelated, independent paragraph. A specifier who added a row to a
+submittal-matrix table in Word would see that table's own row misreported as
+a paragraph-level delete, with no signal that the *shape* of the table
+itself had changed. This addendum extends ADR-072's object model one layer
+further, into the merge boundary, while preserving decision 1's opaque-blob
+posture completely: the diff engine still never interprets a cell's or a
+text box's content, it only detects that the STRUCTURE changed.
+
+`object-fingerprint.ts`'s `fingerprintBlob` computes a text-blind,
+structure-sensitive `ObjectStructureFingerprint` (`kind`, table-only
+`rows`/`columns`, and a `hash` of the blob's tag shape with every `#text`
+node and attribute value dropped) directly from an `ObjectBlobNode` tree —
+editing a cell's text leaves the fingerprint unchanged; adding/removing a
+row, column, or nested element changes the hash. `diff.ts`'s
+`detectObjectConflicts` pairs each base-side `ObjectStructuralSnapshot`
+(`src/db/queries/object-structure.ts`, reusing `versions.ts`'s
+`REMOVED_SUBTREE_CTE` so an owner-removed object is excluded exactly like the
+paragraph snapshots it's paired with) to the matching `theirs`
+`ExtractedObjectBlock` (`merge/extract.ts`'s new `extractObjectBlocks`) BY
+SHARED INTERIOR CHILD UUID — an object has no anchor of its own in the DOCX,
+so `findMatchingBlock` walks each snapshot's `childUuids` against every
+block's `interiorUuids` rather than joining on a shared id. A fingerprint
+divergence is reported as ONE atomic `ObjectConflictDiff` (`objectId` +
+every `affectedUuids` entry), and `classifyBase` excludes those same uuids
+from `modified`/`deleted`/`conflicts` so the same structural edit never also
+surfaces as noisy per-child paragraph diffs.
+
+Detection-only was the deliberate scope boundary, not a deferred follow-up:
+`conflict.ts`'s `ApplicableChange` gains a 4th `'object-conflict'` variant
+carrying no payload, and `validateAccepted` rejects the WHOLE accept call
+(400, before any write) if any accepted uuid — the object's own id or any
+affected child — resolves to it. Materializing a structural table/text-box
+change (actually splicing a new row into the stored blob) is a
+fundamentally different, considerably harder problem than the pure-text
+apply path the rest of `conflict.ts` already handles, and was explicitly
+ruled out of #520's scope: the table/text box must be resolved by hand,
+exactly the same "cannot be auto-merged" posture #374's orphan-addition
+rejection already established for a different unresolvable case —
+`validateAccepted`'s own rejection message says so verbatim (`… resolve the
+table/text box by hand (KNOWN AMBIGUITY)`), pinned by
+`conflict.integration.test.ts`'s `'applyAccepted — object-conflict rejection
+(#520)'` suite.
+
+One design point changed between the pre-implementation spike and shipped
+code: `ObjectStructureFingerprint.rows`/`.columns` were originally spec'd as
+`rows: number | undefined` (a required key whose value may be `undefined`).
+The spike compiled that literally and hit real `TS2345`/`TS2322` errors at
+`src/api/merge.ts` and `src/mcp/merge-handlers.ts` under this repo's
+`exactOptionalPropertyTypes: true` — Zod's natural `.exactOptional()` mirror
+(`src/ast/merge-schemas.ts`'s `ObjectStructureFingerprintSchema`, matching
+the identical pattern `ObjectMetaSchema` already uses for these same two
+field names) infers an OPTIONAL KEY, which is not assignable to an interface
+declaring a required key with an optional value under strict
+`exactOptionalPropertyTypes`. Declaring the TS interface as `rows?: number` /
+`columns?: number` (optional keys, matching Zod's own inferred shape) removes
+the mismatch at its source rather than patching it downstream at every call
+site — the same lesson decision 1's blob-node shape already banked on
+`FingerprintNode`'s deliberately loose `{[key: string]: unknown}` index
+signature to sidestep entirely.
+
+Two touch points the spike found were NOT visible from the type change
+alone: `MergeBodySchema`/`DiffResultSchema`'s Zod-inferred types flow
+straight into `applyMerge`'s signature (`src/api/merge.ts`,
+`src/mcp/merge-handlers.ts` both pass a client-supplied diff straight
+through), so those two call sites only failed to type-check once
+`DiffResultSchema` itself gained the new `objectConflicts` field — a
+schema-level change, not the earlier struct-level one — a two-step failure
+mode worth naming here so a future similar addition doesn't assume "the type
+compiles" means "every dependent schema compiles."
+
+`openapi.yaml` documents `ObjectStructureFingerprint`/`ObjectConflictDiff`
+and `DiffResult.objectConflicts` (required, `[]` when there are none) under
+the existing `/specs/{id}/diff` and `/specs/{id}/merge` operations, and spells
+out the always-400 accept rule directly in the merge endpoint's description
+— no new endpoint was needed. Full-corpus verification
+(`pnpm fixture:snapshot`/`pnpm fixture:diff`, 705 fixtures — the same
+methodology addendum 18 used for #300) confirms 0/705 changed: #520 touches
+only `src/merge/`, `src/db/queries/`, and the two schema-consuming API
+surfaces above, none of which the parser/generator pipeline `fixtureRecord`
+exercises, so the corpus's parsed/rendered output is provably identical
+before and after.
+
 ## Consequences
 
 - A captured table or text box's content is now visible in the parsed spec
@@ -426,3 +515,11 @@ rather than discovered by surprise.
   text box's blob), fixed by `alternate-content.ts` and tracked as its own
   issue, #517 (addendum 19). A nested table/text-box's own promotion and
   merge-anchor story remains open, deferred to WS3 (addendum 20).
+- **The 3-way merge engine now detects — but never auto-applies — a
+  structural change to a body-level table/text box (WS4, #520).** A base row
+  that previously misreported as a silent paragraph-level delete (or a
+  child-by-child flood of unrelated-looking modifications) now surfaces as
+  ONE atomic `ObjectConflictDiff`, always rejected on accept (addendum 21).
+  Actually materializing a structural table/text-box edit through the merge
+  apply path remains explicitly out of scope, tracked as a future follow-up
+  rather than silently deferred.

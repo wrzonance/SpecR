@@ -64,6 +64,7 @@ function diffFor(paragraphId: string): Record<string, unknown> {
     ],
     deleted: [],
     conflicts: [],
+    objectConflicts: [],
     warnings: [],
   };
 }
