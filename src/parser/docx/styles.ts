@@ -14,6 +14,13 @@
 import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { getAttrVal, getAttrNumVal, extractAttrStr, toArray, asRecord } from './xml-utils.js';
+import {
+  defaultParagraphStyleId,
+  defaultRunEmphasis,
+  parseRunEmphasis,
+  resolvedCharacterRunEmphasisMap,
+  resolvedRunEmphasisMap,
+} from './emphasis-styles.js';
 import type { StyleInfo, StyleMap, StyleNumPr } from './types.js';
 
 const xmlParser = new XMLParser({
@@ -78,6 +85,7 @@ function optionalStyleFields(
   const numPrResult = pPr ? parseNumPr(pPr) : ({ kind: 'absent' } as const);
   const outlineLvl = parseOutlineLvl(pPr);
   const jc = pPr ? getAttrVal(pPr['w:jc']) : '';
+  const runEmphasis = parseRunEmphasis(asRecord(raw['w:rPr']));
   return {
     ...(basedOn ? { basedOn } : {}),
     ...(next ? { next } : {}),
@@ -85,6 +93,7 @@ function optionalStyleFields(
     ...(parseVanish(raw) ? { isVanish: true as const } : {}),
     ...(outlineLvl !== undefined ? { outlineLvl } : {}),
     ...(jc ? { jc } : {}),
+    ...(runEmphasis ? { runEmphasis } : {}),
   };
 }
 
@@ -195,6 +204,9 @@ function emptyStyleMap(): StyleMap {
     resolvedJc: new Map(),
     vanishStyleIds: new Set(),
     vanishCharStyleIds: new Set(),
+    defaultRunEmphasis: {},
+    resolvedRunEmphasis: new Map(),
+    resolvedCharacterRunEmphasis: new Map(),
   };
 }
 
@@ -248,11 +260,17 @@ export function buildStyleMap(xml: string): StyleMap {
   if (!root) return emptyStyleMap();
 
   const styles = paragraphStyles(root);
+  const emphasisDefaults = defaultRunEmphasis(root);
+  const defaultStyleId = defaultParagraphStyleId(root);
   return {
     styles,
+    ...(defaultStyleId ? { defaultParagraphStyleId: defaultStyleId } : {}),
     resolvedNumPr: resolvedNumPrMap(styles),
     resolvedJc: resolvedJcMap(styles),
     vanishStyleIds: vanishStyleIdSet(styles),
     vanishCharStyleIds: characterStyleVanishIds(root),
+    defaultRunEmphasis: emphasisDefaults,
+    resolvedRunEmphasis: resolvedRunEmphasisMap(styles, emphasisDefaults),
+    resolvedCharacterRunEmphasis: resolvedCharacterRunEmphasisMap(root),
   };
 }

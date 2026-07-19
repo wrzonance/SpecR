@@ -2,14 +2,21 @@ import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { scanChoiceTokens } from './choice-tokens.js';
 import { isCommentClosed } from './comment-closure.js';
+import {
+  effectiveEmphasisForParagraph,
+  sourcePropertiesForRun,
+  type RunSourceProperties,
+} from './run-source-facts.js';
 import { asRecord, extractAttrStr } from './xml-utils.js';
 import type {
   SourceChoiceTokenFact,
   SourceColorFact,
   SourceCommentFact,
+  SourceEmphasisFact,
   SourceFacts,
 } from '../../ast/types.js';
 import type { DocxComment } from './comments.js';
+import type { StyleMap } from './types.js';
 
 const orderedXmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -39,12 +46,15 @@ interface InlineParagraph {
   readonly text: string;
   readonly markers: readonly CommentMarker[];
   readonly colorSpans: readonly ColorSpan[];
+  readonly emphasis: readonly SourceEmphasisFact[];
 }
 
 interface InlineState {
   text: string;
   readonly markers: CommentMarker[];
   readonly colorSpans: ColorSpan[];
+  readonly emphasis: SourceEmphasisFact[];
+  readonly styleMap: StyleMap;
 }
 
 interface ActiveComment {
@@ -74,14 +84,6 @@ function hasElement(record: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-function findElement(nodes: readonly unknown[], tag: string): Record<string, unknown> | undefined {
-  for (const raw of nodes) {
-    const record = asRecord(raw);
-    if (record && hasElement(record, tag)) return record;
-  }
-  return undefined;
-}
-
 function elementName(record: Record<string, unknown>): string | null {
   return Object.keys(record).find((key) => key !== ':@' && key !== '#text') ?? null;
 }
@@ -104,36 +106,19 @@ function appendMarker(name: string, record: Record<string, unknown>, state: Inli
   if (kind && id) state.markers.push({ id, kind, offset: state.text.length });
 }
 
-function normalizeRunColor(value: string): string | null {
-  const color = value.trim();
-  const lower = color.toLowerCase();
-  if (!color || lower === 'auto' || lower === '000000') return null;
-  return /^[0-9a-f]{6}$/i.test(color) ? color.toUpperCase() : color;
-}
-
-function normalizeHighlight(value: string): string | null {
-  const highlight = value.trim();
-  if (!highlight || highlight.toLowerCase() === 'none') return null;
-  return `highlight:${highlight}`;
-}
-
-function runColorTokens(runChildren: readonly unknown[]): readonly string[] {
-  const rPr = findElement(runChildren, 'w:rPr');
-  const props = rPr ? childNodes(rPr, 'w:rPr') : [];
-  const color = findElement(props, 'w:color');
-  const highlight = findElement(props, 'w:highlight');
-  return [
-    color ? normalizeRunColor(orderedAttr(color, '@_w:val')) : null,
-    highlight ? normalizeHighlight(orderedAttr(highlight, '@_w:val')) : null,
-  ].filter((token): token is string => token !== null);
-}
-
-function appendText(state: InlineState, text: string, colors: readonly string[]): void {
+function appendText(state: InlineState, text: string, properties: RunSourceProperties): void {
   const start = state.text.length;
   state.text += text;
   const end = state.text.length;
   if (start === end) return;
-  colors.forEach((color) => state.colorSpans.push({ color, start, end }));
+  properties.colors.forEach((color) => state.colorSpans.push({ color, start, end }));
+}
+
+function appendEmphasis(state: InlineState, start: number, properties: RunSourceProperties): void {
+  const end = state.text.length;
+  const text = state.text.slice(start, end);
+  if (text.trim().length === 0) return;
+  properties.emphasis.forEach((fact) => state.emphasis.push({ ...fact, text, span: [start, end] }));
 }
 
 // Formatting-property subtrees that must never contribute text content: a
@@ -164,11 +149,11 @@ function collectLayoutElement(name: string, state: InlineState): boolean {
 function collectOne(
   record: Record<string, unknown>,
   state: InlineState,
-  colors: readonly string[]
+  properties: RunSourceProperties
 ): void {
   const text = record['#text'];
   if (typeof text === 'string') {
-    appendText(state, text, colors);
+    appendText(state, text, properties);
     return;
   }
   const name = elementName(record);
@@ -176,24 +161,37 @@ function collectOne(
   if (collectLayoutElement(name, state)) return;
   appendMarker(name, record, state);
   const children = childNodes(record, name);
-  collectInline(children, state, name === 'w:r' ? runColorTokens(children) : colors);
+  if (name === 'w:r') {
+    const runProperties = sourcePropertiesForRun(children, properties.effective, state.styleMap);
+    const start = state.text.length;
+    collectInline(children, state, runProperties);
+    appendEmphasis(state, start, runProperties);
+    return;
+  }
+  collectInline(children, state, properties);
 }
 
 function collectInline(
   nodes: readonly unknown[],
   state: InlineState,
-  colors: readonly string[] = []
+  properties: RunSourceProperties
 ): void {
   for (const raw of nodes) {
     const record = asRecord(raw);
-    if (record) collectOne(record, state, colors);
+    if (record) collectOne(record, state, properties);
   }
 }
 
-function inlineParagraph(children: readonly unknown[]): InlineParagraph {
-  const state: InlineState = { text: '', markers: [], colorSpans: [] };
-  collectInline(children, state);
-  return { text: state.text, markers: state.markers, colorSpans: state.colorSpans };
+function inlineParagraph(children: readonly unknown[], styleMap: StyleMap): InlineParagraph {
+  const effective = effectiveEmphasisForParagraph(children, styleMap);
+  const state: InlineState = { text: '', markers: [], colorSpans: [], emphasis: [], styleMap };
+  collectInline(children, state, { colors: [], emphasis: [], effective });
+  return {
+    text: state.text,
+    markers: state.markers,
+    colorSpans: state.colorSpans,
+    emphasis: state.emphasis,
+  };
 }
 
 function findElementChildren(nodes: readonly unknown[], tag: string): readonly unknown[] {
@@ -206,14 +204,14 @@ function findElementChildren(nodes: readonly unknown[], tag: string): readonly u
   return [];
 }
 
-function extractOrderedParagraphs(parsed: unknown): readonly InlineParagraph[] {
+function extractOrderedParagraphs(parsed: unknown, styleMap: StyleMap): readonly InlineParagraph[] {
   const root = Array.isArray(parsed) ? parsed : [];
   const document = findElementChildren(root, 'w:document');
   const body = findElementChildren(document, 'w:body');
   return body.flatMap((raw) => {
     const record = asRecord(raw);
     if (!record || !hasElement(record, 'w:p')) return [];
-    return [inlineParagraph(childNodes(record, 'w:p'))];
+    return [inlineParagraph(childNodes(record, 'w:p'), styleMap)];
   });
 }
 
@@ -334,13 +332,22 @@ function colorFactsForParagraph(paragraph: InlineParagraph): readonly SourceColo
 function makeSourceFacts(
   comments: readonly SourceCommentFact[],
   colors: readonly SourceColorFact[],
-  choiceTokens: readonly SourceChoiceTokenFact[]
+  choiceTokens: readonly SourceChoiceTokenFact[],
+  emphasis: readonly SourceEmphasisFact[]
 ): SourceFacts | undefined {
-  if (comments.length === 0 && colors.length === 0 && choiceTokens.length === 0) return undefined;
+  if (
+    comments.length === 0 &&
+    colors.length === 0 &&
+    choiceTokens.length === 0 &&
+    emphasis.length === 0
+  ) {
+    return undefined;
+  }
   return {
     ...(comments.length > 0 ? { comments } : {}),
     ...(colors.length > 0 ? { colors } : {}),
     ...(choiceTokens.length > 0 ? { choiceTokens } : {}),
+    ...(emphasis.length > 0 ? { emphasis } : {}),
   };
 }
 
@@ -367,14 +374,16 @@ function buildSourceFactsByParagraph(
     makeSourceFacts(
       buckets[index] ?? [],
       colorFactsForParagraph(paragraph),
-      scanChoiceTokens(paragraph.text)
+      scanChoiceTokens(paragraph.text),
+      paragraph.emphasis
     )
   );
 }
 
 export function parseParagraphSources(
   xml: string,
-  commentsById: ReadonlyMap<string, DocxComment>
+  commentsById: ReadonlyMap<string, DocxComment>,
+  styleMap: StyleMap
 ): readonly ParagraphSource[] {
   let parsed: unknown;
   try {
@@ -382,7 +391,7 @@ export function parseParagraphSources(
   } catch (err) {
     throw new ParserError('failed to parse word/document.xml', { cause: err });
   }
-  const paragraphs = extractOrderedParagraphs(parsed);
+  const paragraphs = extractOrderedParagraphs(parsed, styleMap);
   const sourceFacts = buildSourceFactsByParagraph(paragraphs, commentsById);
   return paragraphs.map((paragraph, index) => {
     const facts = sourceFacts[index];

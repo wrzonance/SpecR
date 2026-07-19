@@ -51,6 +51,13 @@ export interface StyleNumPr {
   readonly ilvl: number;
 }
 
+export interface RunEmphasisStyle {
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly underline?: string;
+  readonly size?: number;
+}
+
 export interface StyleInfo {
   readonly styleId: string;
   readonly name: string;
@@ -66,16 +73,21 @@ export interface StyleInfo {
   // StyleMap.resolvedJc so Signal 5 can ignore a style-centered paragraph's indent.
   readonly jc?: string;
   readonly next?: string;
+  readonly runEmphasis?: RunEmphasisStyle;
 }
 
 export interface StyleMap {
   readonly styles: ReadonlyMap<string, StyleInfo>;
+  readonly defaultParagraphStyleId?: string;
   // Effective numPr for each style after walking basedOn chain
   readonly resolvedNumPr: ReadonlyMap<string, StyleNumPr>;
   // Effective w:jc alignment for each style after walking basedOn chain
   readonly resolvedJc: ReadonlyMap<string, string>;
   readonly vanishStyleIds: ReadonlySet<string>;
   readonly vanishCharStyleIds: ReadonlySet<string>;
+  readonly defaultRunEmphasis?: RunEmphasisStyle;
+  readonly resolvedRunEmphasis?: ReadonlyMap<string, RunEmphasisStyle>;
+  readonly resolvedCharacterRunEmphasis?: ReadonlyMap<string, RunEmphasisStyle>;
 }
 
 // ─── document.xml ─────────────────────────────────────────────────────────────

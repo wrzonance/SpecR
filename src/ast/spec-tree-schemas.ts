@@ -83,11 +83,20 @@ export const SourceChoiceTokenFactSchema = z.object({
   span: SourceTextSpanSchema,
 });
 
+export const SourceEmphasisFactSchema = z.object({
+  property: z.enum(['bold', 'italic', 'underline', 'size']),
+  value: z.union([z.boolean(), z.string(), z.number().int()]),
+  expected: z.union([z.boolean(), z.string(), z.number().int(), z.null()]),
+  text: z.string(),
+  span: SourceTextSpanSchema,
+});
+
 export const SourceFactsSchema = z
   .object({
     colors: z.array(SourceColorFactSchema).exactOptional(),
     comments: z.array(SourceCommentFactSchema).exactOptional(),
     choiceTokens: z.array(SourceChoiceTokenFactSchema).exactOptional(),
+    emphasis: z.array(SourceEmphasisFactSchema).exactOptional(),
     banner: z.string().exactOptional(),
     vanish: z.literal(true).exactOptional(),
   })

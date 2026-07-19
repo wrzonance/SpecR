@@ -270,7 +270,7 @@ export function parseDocument(
     });
   }
 
-  const paragraphSources = parseParagraphSources(xml, commentsById);
+  const paragraphSources = parseParagraphSources(xml, commentsById, styleMap);
   return toArray<Record<string, unknown>>(
     body['w:p'] as readonly Record<string, unknown>[] | undefined
   ).map((p, index) => parseParagraph(p, numberingMap, styleMap, paragraphSources[index]));

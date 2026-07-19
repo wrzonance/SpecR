@@ -73,11 +73,23 @@ export interface SourceChoiceTokenFact {
   readonly span: readonly [number, number];
 }
 
+export type SourceEmphasisProperty = 'bold' | 'italic' | 'underline' | 'size';
+export type SourceEmphasisValue = boolean | string | number | null;
+
+export interface SourceEmphasisFact {
+  readonly property: SourceEmphasisProperty;
+  readonly value: Exclude<SourceEmphasisValue, null>;
+  readonly expected: SourceEmphasisValue;
+  readonly text: string;
+  readonly span: readonly [number, number];
+}
+
 export interface SourceFacts {
   readonly [key: string]: unknown;
   readonly comments?: readonly SourceCommentFact[];
   readonly colors?: readonly SourceColorFact[];
   readonly choiceTokens?: readonly SourceChoiceTokenFact[];
+  readonly emphasis?: readonly SourceEmphasisFact[];
   readonly banner?: string;
   readonly vanish?: true;
 }

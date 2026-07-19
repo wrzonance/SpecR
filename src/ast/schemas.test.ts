@@ -443,6 +443,15 @@ describe('SourceFactsSchema', () => {
       comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19], closed: false }],
       colors: [{ color: '0000FF', coverage: 0.82, spans: [[12, 96]] }],
       choiceTokens: [{ kind: 'bracket', options: ['Provide mockup.'], span: [20, 37] }],
+      emphasis: [
+        {
+          property: 'bold',
+          value: true,
+          expected: false,
+          text: 'manual emphasis',
+          span: [38, 53],
+        },
+      ],
       banner: 'MASTER NOTE',
       vanish: true,
       reviewer: { severity: 'info', count: 2, tags: ['coordination'] },

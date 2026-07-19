@@ -109,6 +109,20 @@ beforeAll(async () => {
     specId,
     pool
   );
+  await pool.query(`UPDATE paragraphs SET source_facts = $2::jsonb WHERE id = $1`, [
+    PR1_ID,
+    JSON.stringify({
+      emphasis: [
+        {
+          property: 'bold',
+          value: true,
+          expected: false,
+          text: 'Coordinate',
+          span: [0, 10],
+        },
+      ],
+    }),
+  ]);
   await storeClassifications(specId, CLASSIFICATION);
 });
 
@@ -180,6 +194,7 @@ describe('tool: get_onboarding_report', () => {
       onboardingStatus: string;
       editability: { counts: Record<string, number> };
       hierarchy: { counts: Record<string, number> };
+      manualEmphasis: { total: number; findings: { nodeId: string }[] };
     }>(result);
     expect(data.specId).toBe(specId);
     expect(data.styleSource).toBeNull();
@@ -188,6 +203,10 @@ describe('tool: get_onboarding_report', () => {
     expect(data.hierarchy.counts['scored']).toBeTypeOf('number');
     expect(data.hierarchy.counts['unscored']).toBeTypeOf('number');
     expect(data.hierarchy.counts['belowThreshold']).toBeTypeOf('number');
+    expect(data.manualEmphasis).toMatchObject({
+      total: 1,
+      findings: [{ nodeId: PR1_ID }],
+    });
   });
 
   it('returns isError for an unknown specId', async () => {

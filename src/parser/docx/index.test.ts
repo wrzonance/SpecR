@@ -90,10 +90,19 @@ interface ChoiceTokenFact {
   readonly span: readonly [number, number];
 }
 
+interface EmphasisFact {
+  readonly property: 'bold' | 'italic' | 'underline' | 'size';
+  readonly value: boolean | string | number;
+  readonly expected: boolean | string | number | null;
+  readonly text: string;
+  readonly span: readonly [number, number];
+}
+
 interface TestSourceFacts {
   readonly comments?: readonly CommentFact[];
   readonly colors?: readonly ColorFact[];
   readonly choiceTokens?: readonly ChoiceTokenFact[];
+  readonly emphasis?: readonly EmphasisFact[];
 }
 
 function allNodes(nodes: readonly SpecNode[]): readonly SpecNode[] {
@@ -115,6 +124,10 @@ function sourceColors(node: SpecNode | undefined): readonly ColorFact[] | undefi
 
 function sourceChoiceTokens(node: SpecNode | undefined): readonly ChoiceTokenFact[] | undefined {
   return sourceFacts(node)?.choiceTokens;
+}
+
+function sourceEmphasis(node: SpecNode | undefined): readonly EmphasisFact[] | undefined {
+  return sourceFacts(node)?.emphasis;
 }
 
 function findNode(nodes: readonly SpecNode[], text: string): SpecNode | undefined {
@@ -505,6 +518,80 @@ describe('parseDocx — source facts: run colors (#129)', () => {
     const colors = sourceColors(findNode(tree.parts, 'Use highlight.'));
 
     expect(colors).toEqual([{ color: 'highlight:yellow', coverage: 9 / 14, spans: [[4, 13]] }]);
+  });
+});
+
+describe('parseDocx — source facts: manual emphasis (#407)', () => {
+  const emphasisStyles = `<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>
+  <w:style w:type="paragraph" w:styleId="Heading"><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:rPr><w:i/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Body"/>
+  <w:style w:type="character" w:styleId="Strong"><w:rPr><w:b/></w:rPr></w:style>
+</w:styles>`;
+
+  it('records b/i/u/size deviations with run text and spans', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="Heading"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="28"/></w:rPr><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
+  <w:p><w:pPr><w:pStyle w:val="Body"/><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/><w:i/><w:u w:val="single"/><w:sz w:val="30"/></w:rPr><w:t>Manual emphasis</w:t></w:r></w:p>
+</w:body></w:document>`;
+    const tree = await parseDocx(
+      await makeDocx({ documentXml, stylesXml: emphasisStyles, numberingXml: STRUCTURED_NUMBERING })
+    );
+    const facts = sourceEmphasis(findNode(tree.parts, 'Manual emphasis'));
+
+    expect(facts).toEqual([
+      { property: 'bold', value: true, expected: false, text: 'Manual emphasis', span: [0, 15] },
+      { property: 'italic', value: true, expected: false, text: 'Manual emphasis', span: [0, 15] },
+      {
+        property: 'underline',
+        value: 'single',
+        expected: 'none',
+        text: 'Manual emphasis',
+        span: [0, 15],
+      },
+      { property: 'size', value: 30, expected: 22, text: 'Manual emphasis', span: [0, 15] },
+    ]);
+  });
+
+  it('does not flag direct formatting that matches the effective paragraph style', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="Heading"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="28"/></w:rPr><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
+</w:body></w:document>`;
+    const tree = await parseDocx(
+      await makeDocx({ documentXml, stylesXml: emphasisStyles, numberingXml: STRUCTURED_NUMBERING })
+    );
+
+    expect(sourceEmphasis(tree.parts[0])).toBeUndefined();
+  });
+
+  it('uses the default paragraph style when the paragraph has no explicit style', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+  <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:i/></w:rPr><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
+</w:body></w:document>`;
+    const tree = await parseDocx(
+      await makeDocx({ documentXml, stylesXml: emphasisStyles, numberingXml: STRUCTURED_NUMBERING })
+    );
+
+    expect(sourceEmphasis(tree.parts[0])).toBeUndefined();
+  });
+
+  it('records emphasis applied through a character style', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="Body"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>PART 1 – </w:t></w:r><w:r><w:rPr><w:rStyle w:val="Strong"/></w:rPr><w:t>GENERAL</w:t></w:r></w:p>
+</w:body></w:document>`;
+    const tree = await parseDocx(
+      await makeDocx({ documentXml, stylesXml: emphasisStyles, numberingXml: STRUCTURED_NUMBERING })
+    );
+
+    expect(sourceEmphasis(tree.parts[0])).toEqual([
+      { property: 'bold', value: true, expected: false, text: 'GENERAL', span: [0, 7] },
+    ]);
   });
 });
 

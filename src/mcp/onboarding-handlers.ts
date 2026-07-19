@@ -23,6 +23,7 @@ import {
 import type { OwnershipResult } from '../db/index.js';
 import { summarizeEditability } from '../lib/editability-summary.js';
 import { summarizeHierarchy } from '../lib/hierarchy-summary.js';
+import { summarizeManualEmphasis } from '../lib/manual-emphasis-report.js';
 import { logger } from '../lib/logger.js';
 import { toolError } from './handlers.js';
 import type { ToolError, ToolOk, ToolResult } from './tool-result.js';
@@ -112,6 +113,7 @@ function buildReport(
     styleSourceNeeded: styleSource === null,
     editability: summarizeEditability(tree),
     hierarchy: summarizeHierarchy(tree, source),
+    manualEmphasis: summarizeManualEmphasis(tree),
     note:
       'styleDerivation and parseWarnings are import-time-only (the raw uploaded ' +
       'bytes are not persisted); re-import the master to regenerate them.',
