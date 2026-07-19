@@ -616,6 +616,16 @@ describe('parseDocx — source facts: onboarding signals (#294)', () => {
 
     expect(sourceVanish(findNode(tree.parts, 'hidden visible'))).toBeUndefined();
   });
+
+  it('does not mark an explicitly visible vanish run as vanished', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:rPr><w:vanish w:val="false"/></w:rPr><w:t>visible line</w:t></w:r></w:p></w:body>
+</w:document>`;
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+
+    expect(sourceVanish(findNode(tree.parts, 'visible line'))).toBeUndefined();
+  });
 });
 
 describe('parseDocx — dc:subject section normalization (#gate)', () => {

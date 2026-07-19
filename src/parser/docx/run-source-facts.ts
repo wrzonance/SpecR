@@ -36,6 +36,12 @@ function normalizeHighlight(value: string): string | null {
   return `highlight:${highlight}`;
 }
 
+function isOnOffActive(element: Record<string, unknown> | undefined): boolean {
+  if (!element) return false;
+  const value = orderedAttr(element, '@_w:val').trim().toLowerCase();
+  return value !== '0' && value !== 'false' && value !== 'off';
+}
+
 export function sourcePropertiesForRun(runChildren: readonly unknown[]): RunSourceProperties {
   const rPr = findElement(runChildren, 'w:rPr');
   const props = rPr ? childNodes(rPr, 'w:rPr') : [];
@@ -45,5 +51,5 @@ export function sourcePropertiesForRun(runChildren: readonly unknown[]): RunSour
     color ? normalizeRunColor(orderedAttr(color, '@_w:val')) : null,
     highlight ? normalizeHighlight(orderedAttr(highlight, '@_w:val')) : null,
   ].filter((token): token is string => token !== null);
-  return { colors, vanish: findElement(props, 'w:vanish') !== undefined };
+  return { colors, vanish: isOnOffActive(findElement(props, 'w:vanish')) };
 }

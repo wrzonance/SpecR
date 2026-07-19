@@ -180,12 +180,11 @@ function buildTree(lines: readonly string[]): BuildResult {
 
   classifications.forEach((cls, lineIdx) => {
     const role = roles[lineIdx] ?? 'none';
-    if (role === 'rule') return;
+    if (role === 'rule' || cls.type === 'blank' || cls.type === 'header') return;
     if (role === 'note') {
       stack[stack.length - 1]?.children.push(makeNode('note', cls.text, []));
       return;
     }
-    if (cls.type === 'blank' || cls.type === 'header') return;
     if (cls.type === 'continuation') {
       pushContinuation(stack, cls.text, lineIdx, droppedAtRoot);
       return;
