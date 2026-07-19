@@ -442,6 +442,6 @@ export async function getPackageRevisionAddendumManualData(
   return {
     ...target,
     baseRevisionId,
-      changedSpecs: changedRevisionSpecs(target.revision.specs, base.revision.specs),
+    changedSpecs: changedRevisionSpecs(target.revision.specs, base.revision.specs),
   };
 }
