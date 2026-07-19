@@ -3497,7 +3497,8 @@ paths:
       description: >
         Freezes the full SpecTree of every member section as JSONB inside one
         transaction — a reproducible point-in-time record of exactly what was
-        issued. Post-issuance edits never alter the stored trees.
+        issued. Post-issuance edits never alter the stored trees. Structured
+        requests may persist an addendum comparison base via baseRevisionId.
       tags: [packages]
       parameters:
         - name: id
@@ -3543,7 +3544,8 @@ paths:
             Validation failed, a member tree cannot be snapshotted losslessly,
             or parentRevisionId fails a custody rule (ADR-066): the parent
             revision does not exist, belongs to a different package, or
-            already has a parent of its own (nesting depth cannot exceed 1).
+            already has a parent of its own (nesting depth cannot exceed 1);
+            or baseRevisionId does not exist or belongs to another package.
           content:
             application/json:
               schema:
@@ -3589,8 +3591,10 @@ paths:
       description: >
         Renders the target package revision from `package_revision_specs.tree`, not
         live paragraph rows, so old issuances remain reproducible after database
-        edits. When `baseRevisionId` is supplied, addendum mode compares the
-        target and base revision snapshots by section-level AST equality and
+        edits. Addendum mode uses the request `baseRevisionId` when supplied,
+        otherwise the target revision's stored `baseRevisionId`; when neither
+        is present the full issued manual is rendered. Addendum mode compares
+        the target and base revision snapshots by section-level AST equality and
         emits only sections whose frozen trees differ, under an addendum cover
         listing the affected sections. Header/footer content is resolved and
         rendered per #481: the client → project → package → revision
@@ -3637,9 +3641,10 @@ paths:
                   type: string
                   format: uuid
                   description: >
-                    Base revision for addendum mode. Must belong to the same
-                    package as the target revision. Omit to render the full
-                    issued manual.
+                    Explicit base revision for addendum mode. Must belong to the
+                    same package as the target revision. Overrides the target's
+                    stored baseRevisionId; when both are omitted, renders the
+                    full issued manual.
       responses:
         '200':
           description: DOCX manual file stream
@@ -7590,6 +7595,13 @@ components:
             UUID of the revision this one was issued from (ADR-066 custody).
             Must belong to the same package and itself be a root revision —
             nesting depth cannot exceed 1. Omit for a root revision.
+        baseRevisionId:
+          type: string
+          format: uuid
+          description: >
+            UUID of the revision used as the immutable addendum comparison
+            base (ADR-066). Must belong to the same package. Omit when this
+            issuance has no stored comparison lineage.
 
     RevisionSummary:
       type: object
@@ -7607,6 +7619,7 @@ components:
           issuedAt,
           specCount,
           parentRevisionId,
+          baseRevisionId,
         ]
       properties:
         revisionId:
@@ -7648,6 +7661,12 @@ components:
           description: >
             UUID of the revision this one was issued from (ADR-066 custody),
             or null for a root revision.
+        baseRevisionId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            UUID of the revision this issuance is compared against for
+            addendum generation (ADR-066), or null when no base was recorded.
 
     RevisionSpecEntry:
       type: object
@@ -7678,6 +7697,7 @@ components:
           issuedAt,
           specs,
           parentRevisionId,
+          baseRevisionId,
         ]
       properties:
         revisionId:
@@ -7715,6 +7735,12 @@ components:
           description: >
             UUID of the revision this one was issued from (ADR-066 custody),
             or null for a root revision.
+        baseRevisionId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            UUID of the revision this issuance is compared against for
+            addendum generation (ADR-066), or null when no base was recorded.
 
     # ── Templates ──────────────────────────────────────────────────────────────
 

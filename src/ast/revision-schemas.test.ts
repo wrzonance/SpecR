@@ -45,6 +45,26 @@ describe('StructuredCreateRevisionBodySchema — parentRevisionId', () => {
   });
 });
 
+describe('StructuredCreateRevisionBodySchema — baseRevisionId', () => {
+  it('accepts an optional UUID comparison base', () => {
+    expect(
+      StructuredCreateRevisionBodySchema.parse({ type: 'addendum', baseRevisionId: VALID_UUID })
+    ).toEqual({ type: 'addendum', baseRevisionId: VALID_UUID });
+    expect(StructuredCreateRevisionBodySchema.parse({ type: 'addendum' })).not.toHaveProperty(
+      'baseRevisionId'
+    );
+  });
+
+  it('rejects a malformed comparison base', () => {
+    expect(
+      StructuredCreateRevisionBodySchema.safeParse({
+        type: 'addendum',
+        baseRevisionId: 'not-a-uuid',
+      }).success
+    ).toBe(false);
+  });
+});
+
 describe('CreateRevisionBodySchema union — legacy body never accepts parentRevisionId', () => {
   it(
     'rejects { label, parentRevisionId } — legacy .strict() has no such field, and the ' +
@@ -69,5 +89,15 @@ describe('CreateRevisionBodySchema union — legacy body never accepts parentRev
       parentRevisionId: VALID_UUID,
     });
     expect(parsed).toEqual({ type: 'addendum', parentRevisionId: VALID_UUID });
+  });
+
+  it('rejects baseRevisionId on the legacy body but accepts it on the structured body', () => {
+    expect(
+      CreateRevisionBodySchema.safeParse({ label: 'Addendum 1', baseRevisionId: VALID_UUID })
+        .success
+    ).toBe(false);
+    expect(
+      CreateRevisionBodySchema.parse({ type: 'addendum', baseRevisionId: VALID_UUID })
+    ).toEqual({ type: 'addendum', baseRevisionId: VALID_UUID });
   });
 });

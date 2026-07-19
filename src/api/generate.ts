@@ -201,12 +201,10 @@ async function withRevisionHeaderFooter(
 }
 
 async function renderIssuedRevision(
-  revisionId: string,
+  data: RevisionManualData,
   body: RevisionGenerateBody,
   rules: readonly StyleRule[] | undefined
-): Promise<RevisionDocx | null> {
-  const data = await getPackageRevisionManualData(revisionId, pool);
-  if (data === null) return null;
+): Promise<RevisionDocx> {
   const trees = data.revision.specs.map((entry) => entry.tree);
   const baseOptions = generateOptions(body.sectionNumberFormat);
   const options = await withRevisionHeaderFooter(data, baseOptions);
@@ -217,13 +215,26 @@ async function renderIssuedRevision(
   };
 }
 
-async function renderAddendumRevision(
+async function renderDefaultRevision(
   revisionId: string,
   body: RevisionGenerateBody,
   rules: readonly StyleRule[] | undefined
 ): Promise<RevisionDocx | null | 'empty-addendum'> {
-  if (body.baseRevisionId === undefined) return null;
-  const data = await getPackageRevisionAddendumManualData(revisionId, body.baseRevisionId, pool);
+  const data = await getPackageRevisionManualData(revisionId, pool);
+  if (data === null) return null;
+  if (data.revision.baseRevisionId !== null) {
+    return renderAddendumRevision(revisionId, data.revision.baseRevisionId, body, rules);
+  }
+  return renderIssuedRevision(data, body, rules);
+}
+
+async function renderAddendumRevision(
+  revisionId: string,
+  baseRevisionId: string,
+  body: RevisionGenerateBody,
+  rules: readonly StyleRule[] | undefined
+): Promise<RevisionDocx | null | 'empty-addendum'> {
+  const data = await getPackageRevisionAddendumManualData(revisionId, baseRevisionId, pool);
   if (data === null) return null;
   if (data.changedSpecs.length === 0) return 'empty-addendum';
   const trees = data.changedSpecs.map((entry) => entry.tree);
@@ -308,8 +319,13 @@ export async function generateRevisionHandler(req: Request, res: Response): Prom
     }
     const docx =
       bodyResult.data.baseRevisionId === undefined
-        ? await renderIssuedRevision(idResult.data, bodyResult.data, resolution.rules)
-        : await renderAddendumRevision(idResult.data, bodyResult.data, resolution.rules);
+        ? await renderDefaultRevision(idResult.data, bodyResult.data, resolution.rules)
+        : await renderAddendumRevision(
+            idResult.data,
+            bodyResult.data.baseRevisionId,
+            bodyResult.data,
+            resolution.rules
+          );
     if (docx === null) {
       res.status(404).json({ success: false, error: 'revision not found' });
       return;

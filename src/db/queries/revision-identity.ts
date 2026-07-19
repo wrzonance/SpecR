@@ -12,6 +12,7 @@ export interface CreatePackageRevisionInput {
   readonly sortOrder?: number;
   readonly attributes?: RevisionAttributes;
   readonly parentRevisionId?: string;
+  readonly baseRevisionId?: string;
 }
 
 export interface RevisionIdentityDraft {

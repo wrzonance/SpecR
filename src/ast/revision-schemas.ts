@@ -95,6 +95,9 @@ export const StructuredCreateRevisionBodySchema = z
     // by the query layer (assertValidParentRevision) — this only pins the
     // shape at the API boundary.
     parentRevisionId: z.uuid().exactOptional(),
+    // ADR-066 (#390): immutable comparison lineage for reproducible addenda.
+    // Existence and same-package rules are enforced transactionally at write.
+    baseRevisionId: z.uuid().exactOptional(),
   })
   .strict();
 

@@ -168,6 +168,47 @@ describe('POST /packages/:id/revisions', () => {
     expect(res.status).toBe(422);
   });
 
+  it('persists and echoes a same-package baseRevisionId (ADR-066 #390)', async () => {
+    const base = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 940 },
+    });
+    const baseId = (await data(base))['revisionId'] as string;
+    const target = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 941 },
+      baseRevisionId: baseId,
+    });
+    expect(target.status).toBe(201);
+    expect((await data(target))['baseRevisionId']).toBe(baseId);
+  });
+
+  it('422 for malformed, missing, and cross-package baseRevisionId (ADR-066 #390)', async () => {
+    const malformed = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 942 },
+      baseRevisionId: 'not-a-uuid',
+    });
+    expect(malformed.status).toBe(422);
+    const missing = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 943 },
+      baseRevisionId: ZERO,
+    });
+    expect(missing.status).toBe(422);
+    const foreign = await json('POST', `/packages/${pkgEmpty}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 944 },
+    });
+    const foreignId = (await data(foreign))['revisionId'] as string;
+    const cross = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 945 },
+      baseRevisionId: foreignId,
+    });
+    expect(cross.status).toBe(422);
+  });
+
   it('accepts a well-formed parentRevisionId and echoes it back (ADR-066 #389)', async () => {
     const root = await json('POST', `/packages/${pkgFull}/revisions`, {
       type: 'addendum',
@@ -317,6 +358,25 @@ describe('GET /revisions/:id', () => {
     expect(d['parentRevisionId']).toBeNull();
   });
 
+  it('echoes baseRevisionId: null by default and the persisted value when declared', async () => {
+    const root = await json('GET', `/revisions/${revisionId}`);
+    expect(await data(root)).toMatchObject({ baseRevisionId: null });
+    const base = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 946 },
+    });
+    const baseId = (await data(base))['revisionId'] as string;
+    const target = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 947 },
+      baseRevisionId: baseId,
+    });
+    const targetId = (await data(target))['revisionId'] as string;
+    expect(await data(await json('GET', `/revisions/${targetId}`))).toMatchObject({
+      baseRevisionId: baseId,
+    });
+  });
+
   it('echoes a non-null parentRevisionId for a revision issued with one (ADR-066 #389)', async () => {
     const root = await json('POST', `/packages/${pkgFull}/revisions`, {
       type: 'addendum',
@@ -375,6 +435,12 @@ describe('GET /packages/:id/revisions', () => {
       expect(rev).toHaveProperty('parentRevisionId');
     }
     expect(list.every((r) => r['parentRevisionId'] === null)).toBe(true);
+  });
+
+  it('echoes baseRevisionId for every summary', async () => {
+    const res = await json('GET', `/packages/${timelinePkg}/revisions`);
+    const list = ((await res.json()) as { data: Array<Record<string, unknown>> }).data;
+    expect(list.every((revision) => revision['baseRevisionId'] === null)).toBe(true);
   });
 
   it('echoes a non-null parentRevisionId for a child revision in the list response (ADR-066 #389)', async () => {

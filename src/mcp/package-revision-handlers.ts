@@ -56,8 +56,8 @@ export async function handleIssuePackageRevision(args: unknown): Promise<ToolRes
   } catch (err) {
     if (err instanceof PackageNotFoundError) return toolError(`package not found: id=${packageId}`);
     // Unprocessable input — a member tree that can't be snapshotted losslessly, a
-    // type outside the project's nomenclature profile, or a parentRevisionId that
-    // fails a custody invariant (not found, cross-package, nesting depth > 1) — all
+    // type outside the project's nomenclature profile, or a parent/base revision
+    // relationship that fails its invariants — all
     // surface the error's own message. The 422 set lives in one predicate
     // (isUnprocessableRevisionInputError) so this MCP handler and the REST boundary
     // stay in sync as error classes are added.
