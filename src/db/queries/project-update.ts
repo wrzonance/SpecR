@@ -4,6 +4,7 @@ import { assertClientExists, ClientNotFoundError } from './clients.js';
 import { getPgCode } from '../../lib/pg-errors.js';
 import { parseSectionNumberFormat } from '../../lib/section-number.js';
 import type { SectionNumberFormat } from '../../lib/section-number.js';
+import { effectiveSectionNumberFormatSql } from './section-number-format-sql.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -53,16 +54,16 @@ function buildProjectUpdate(
 }
 
 function projectUpdateSql(setClauses: readonly string[]): string {
+  const formatSql = effectiveSectionNumberFormatSql('u');
   return `WITH updated AS (
     UPDATE projects SET ${setClauses.join(', ')} WHERE id = $1
     RETURNING id, name, section_number_format, client_id
   )
   SELECT u.id, u.name,
-         COALESCE(u.section_number_format, c.section_number_format, 'canonical')
-           AS section_number_format,
+         ${formatSql.select} AS section_number_format,
          u.client_id
     FROM updated u
-    LEFT JOIN clients c ON c.id = u.client_id`;
+    ${formatSql.clientJoin}`;
 }
 
 /** Partial project update. A null format clears the project override. */

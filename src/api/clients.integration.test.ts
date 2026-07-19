@@ -90,6 +90,15 @@ describe('POST /clients', () => {
     expect(res.status).toBe(400);
   });
 
+  it('describes an invalid create request without blaming a present name', async () => {
+    const res = await req('POST', '/clients', {
+      name: 'api-client-invalid-format',
+      sectionNumberFormat: 'slashes',
+    });
+    expect(res.status).toBe(400);
+    expect((await json(res))['error']).toBe('invalid client create request');
+  });
+
   it('rejects an unknown libraryId with 422', async () => {
     const res = await req('POST', '/clients', {
       name: 'api-client-badlib',

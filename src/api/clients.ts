@@ -22,7 +22,7 @@ const UpdateClientBody = z.object({ sectionNumberFormat: SectionNumberFormatSche
 export async function createClientHandler(req: Request, res: Response): Promise<void> {
   const parsed = CreateClientBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ success: false, error: 'name is required' });
+    res.status(400).json({ success: false, error: 'invalid client create request' });
     return;
   }
   const input = {

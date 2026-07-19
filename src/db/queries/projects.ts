@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import type { LibraryTier } from './libraries.js';
 import { parseSectionNumberFormat } from '../../lib/section-number.js';
 import type { SectionNumberFormat } from '../../lib/section-number.js';
+import { effectiveSectionNumberFormatSql } from './section-number-format-sql.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -286,12 +287,12 @@ export async function findProjectById(id: string, pool: Queryable): Promise<Proj
   try {
     // A soft-deleted project (ADR-031) is still returned here — only listings
     // hide it — so lineage/history and a restore decision still resolve.
+    const formatSql = effectiveSectionNumberFormatSql('p');
     const res = await pool.query<ProjectRow>(
       `SELECT p.id, p.name, p.description, p.deleted_at, p.deleted_by,
-              COALESCE(p.section_number_format, c.section_number_format, 'canonical')
-                AS section_number_format
+              ${formatSql.select} AS section_number_format
          FROM projects p
-         LEFT JOIN clients c ON c.id = p.client_id
+         ${formatSql.clientJoin}
         WHERE p.id = $1`,
       [id]
     );

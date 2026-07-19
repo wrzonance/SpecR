@@ -40,12 +40,15 @@ describe('clients MCP tools', () => {
   it('create_client returns the new client summary', async () => {
     const res = await handleCreateClient({ name: uniq('create'), sectionNumberFormat: 'dots' });
     expect(isToolError(res)).toBe(false);
-    const client = parse<{ id: string; name: string; libraryId: string | null }>(res);
+    const client = parse<{
+      id: string;
+      name: string;
+      libraryId: string | null;
+      sectionNumberFormat: string;
+    }>(res);
     expect(client.name).toContain('clients-mcp-test-create');
     expect(client.libraryId).toBeNull();
-    expect((client as typeof client & { sectionNumberFormat: string }).sectionNumberFormat).toBe(
-      'dots'
-    );
+    expect(client.sectionNumberFormat).toBe('dots');
   });
 
   it('update_client changes the firm section-number default', async () => {

@@ -150,29 +150,31 @@ async function attachSpecToProject(name: string, specId: string, format: string)
 
 describe('POST /specs/:id/generate — project default fallback (#267)', () => {
   it("falls back to the sole project's client/firm default when the project override is null", async () => {
-    const client = await pool.query<{ id: string }>(
-      `INSERT INTO clients (name, section_number_format) VALUES ($1, 'dots') RETURNING id`,
-      ['Spec Firm Fallback Client']
-    );
-    const clientId = client.rows[0]?.id;
-    if (!clientId) throw new Error('failed to insert client');
-    const project = await pool.query<{ id: string }>(
-      `INSERT INTO projects (name, client_id, section_number_format)
-       VALUES ($1, $2, NULL) RETURNING id`,
-      ['Spec Firm Fallback Project', clientId]
-    );
-    const projectId = project.rows[0]?.id;
-    if (!projectId) throw new Error('failed to insert project');
-    await pool.query(
-      `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`,
-      [projectId, testSpecId]
-    );
+    let clientId: string | undefined;
+    let projectId: string | undefined;
     try {
+      const client = await pool.query<{ id: string }>(
+        `INSERT INTO clients (name, section_number_format) VALUES ($1, 'dots') RETURNING id`,
+        ['Spec Firm Fallback Client']
+      );
+      clientId = client.rows[0]?.id;
+      if (!clientId) throw new Error('failed to insert client');
+      const project = await pool.query<{ id: string }>(
+        `INSERT INTO projects (name, client_id, section_number_format)
+         VALUES ($1, $2, NULL) RETURNING id`,
+        ['Spec Firm Fallback Project', clientId]
+      );
+      projectId = project.rows[0]?.id;
+      if (!projectId) throw new Error('failed to insert project');
+      await pool.query(
+        `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`,
+        [projectId, testSpecId]
+      );
       const xml = await specDocXml(testSpecId, {});
       expect(xml).toContain('SECTION 27.13.23');
     } finally {
-      await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
-      await pool.query('DELETE FROM clients WHERE id = $1', [clientId]);
+      if (projectId) await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
+      if (clientId) await pool.query('DELETE FROM clients WHERE id = $1', [clientId]);
     }
   });
 

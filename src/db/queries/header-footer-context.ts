@@ -6,6 +6,7 @@ import { findLibraryById } from './libraries.js';
 import { parseSectionNumberFormat } from '../../lib/section-number.js';
 import type { SectionNumberFormat } from '../../lib/section-number.js';
 import type { HeaderFooterComposition } from '../../ast/index.js';
+import { effectiveSectionNumberFormatSql } from './section-number-format-sql.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -85,12 +86,12 @@ async function findSoleOwningProject(
   db: Queryable
 ): Promise<SoleOwningProjectRow | null> {
   try {
+    const formatSql = effectiveSectionNumberFormatSql('p');
     const { rows } = await db.query<SoleOwningProjectRow>(
       `SELECT DISTINCT p.id, p.name,
-              COALESCE(p.section_number_format, c.section_number_format, 'canonical')
-                AS section_number_format
+              ${formatSql.select} AS section_number_format
        FROM projects p
-       LEFT JOIN clients c ON c.id = p.client_id
+       ${formatSql.clientJoin}
        JOIN project_specs ps ON ps.project_id = p.id
        WHERE ps.spec_id = $1 AND p.deleted_at IS NULL`,
       [specId]
