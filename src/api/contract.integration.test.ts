@@ -86,6 +86,7 @@ const RESPONSE_ALLOWLIST = new Set([
   'post /clients',
   'get /clients',
   'get /clients/{}',
+  'patch /clients/{}',
   'post /users',
   'get /users',
   'get /users/{}',

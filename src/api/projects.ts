@@ -27,7 +27,7 @@ import { SectionNumberFormatSchema } from '../lib/section-number.js';
 const PatchProjectBody = z
   .object({
     name: z.string().check(z.minLength(1)).optional(),
-    sectionNumberFormat: SectionNumberFormatSchema.optional(),
+    sectionNumberFormat: SectionNumberFormatSchema.nullable().optional(),
     // Absent = leave association unchanged; null = disassociate; uuid = associate (ADR-054).
     clientId: z.uuid().nullable().optional(),
   })

@@ -130,6 +130,9 @@ describe('findProjectById', () => {
     expect(result?.sources).toEqual([
       { libraryId: 'lib-1', name: 'Co M', tier: 'company', priority: 1 },
     ]);
+    expect(vi.mocked(pool.query).mock.calls[0]?.[0]).toContain(
+      "COALESCE(p.section_number_format, c.section_number_format, 'canonical')"
+    );
   });
 
   it('throws DatabaseError on query failure', async () => {
@@ -179,7 +182,7 @@ describe('updateProject client association', () => {
       rows: [{ id: 'p1', name: 'P', section_number_format: 'canonical', client_id: 'c1' }],
       rowCount: 1,
     } as never);
-    const { updateProject } = await import('./projects.js');
+    const { updateProject } = await import('./project-update.js');
     const { assertClientExists } = await import('./clients.js');
     const result = await updateProject('p1', { clientId: 'c1' }, pool);
     expect(result?.clientId).toBe('c1');
@@ -195,7 +198,7 @@ describe('updateProject client association', () => {
       rows: [{ id: 'p1', name: 'P', section_number_format: 'canonical', client_id: null }],
       rowCount: 1,
     } as never);
-    const { updateProject } = await import('./projects.js');
+    const { updateProject } = await import('./project-update.js');
     const { assertClientExists } = await import('./clients.js');
     const result = await updateProject('p1', { clientId: null }, pool);
     expect(result?.clientId).toBeNull();
@@ -206,7 +209,7 @@ describe('updateProject client association', () => {
     const { pool, DatabaseError } = await import('../index.js');
     const { assertClientExists } = await import('./clients.js');
     vi.mocked(assertClientExists).mockRejectedValueOnce(new DatabaseError('client x not found'));
-    const { updateProject } = await import('./projects.js');
+    const { updateProject } = await import('./project-update.js');
     await expect(updateProject('p1', { clientId: 'x' }, pool)).rejects.toBeInstanceOf(
       DatabaseError
     );
@@ -220,7 +223,7 @@ describe('updateProject client association', () => {
     // delete and the ON DELETE RESTRICT FK raises 23503 — must surface as 422, not 500.
     const pgErr = Object.assign(new Error('fk violation'), { code: '23503' });
     vi.mocked(pool.query).mockRejectedValueOnce(pgErr);
-    const { updateProject } = await import('./projects.js');
+    const { updateProject } = await import('./project-update.js');
     const err = await updateProject('p1', { clientId: 'c1' }, pool).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ClientNotFoundError);
     expect((err as { cause?: unknown }).cause).toBe(pgErr);

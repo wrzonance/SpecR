@@ -114,6 +114,7 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /clients', 'list_clients'],
   ['post /clients', 'create_client'],
   ['get /clients/{}', 'get_client'],
+  ['patch /clients/{}', 'update_client'],
   // actor identity substrate (#381 / ADR-052 D6)
   ['get /users', 'list_users'],
   ['post /users', 'resolve_user'],

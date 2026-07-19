@@ -7,7 +7,8 @@ import {
   assertClientExists,
   ClientNotFoundError,
 } from './clients.js';
-import { createProject, updateProject, softDeleteProject } from './projects.js';
+import { createProject, softDeleteProject } from './projects.js';
+import { updateProject } from './project-update.js';
 import { findLibraryByName, DEFAULT_COMPANY_LIBRARY } from './libraries.js';
 import { getPgCode } from '../../lib/pg-errors.js';
 
@@ -47,6 +48,15 @@ describe('clients query module (integration)', () => {
     await createClient({ name: 'client-it-dup' });
     const err = await createClient({ name: 'client-it-dup' }).catch((e: unknown) => e);
     expect(getPgCode(err)).toBe('23505');
+  });
+
+  it('the firm section-number default is CHECK-constrained', async () => {
+    const err = await pool
+      .query(
+        `INSERT INTO clients (name, section_number_format) VALUES ('client-it-bad-format', 'slashes')`
+      )
+      .catch((caught: unknown) => caught);
+    expect((err as { code?: string }).code).toBe('23514');
   });
 
   it('getClient returns an associated project with its sources, clientId and clientName', async () => {

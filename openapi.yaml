@@ -1201,9 +1201,9 @@ paths:
                     DOCX title and confidently identified Section references in paragraph
                     text. Canonical emits "09 91 00", dots emits "09.91.00", compact
                     emits "099100", and spaced-compact emits "09 9100". Stored AST and
-                    database values remain canonical. Omitted → falls back to the stored
-                    default of the spec's sole owning project; if the spec belongs to no
-                    project (or several), the canonical format applies.
+                    database values remain canonical. Omitted → the sole owning project's
+                    override, then its client's firm default, then canonical. If the spec
+                    belongs to no project (or several), canonical applies.
             examples:
               dotted-section-numbers:
                 value:
@@ -1482,7 +1482,7 @@ paths:
     get:
       operationId: listClients
       summary: List all clients
-      description: Returns every client as a summary (id, name, libraryId, timestamps), ordered by name.
+      description: Returns every client with its firm-tier section-number default, ordered by name.
       tags: [clients]
       responses:
         '200':
@@ -1525,6 +1525,11 @@ paths:
                   type: string
                   format: uuid
                   description: Optional link to the client's client-tier master library
+                sectionNumberFormat:
+                  type: string
+                  enum: [canonical, dots, compact, spaced-compact]
+                  default: canonical
+                  description: Firm-tier default used when an associated project has no override
       responses:
         '201':
           description: Client created
@@ -1571,6 +1576,42 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/ClientDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateClient
+      summary: Update a client's firm-tier section-number default
+      tags: [clients]
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sectionNumberFormat]
+              properties:
+                sectionNumberFormat:
+                  type: string
+                  enum: [canonical, dots, compact, spaced-compact]
+      responses:
+        '200':
+          description: Client updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ClientSummary'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -1800,11 +1841,11 @@ paths:
                   type: string
                   minLength: 1
                 sectionNumberFormat:
-                  type: string
-                  enum: [canonical, dots, compact, spaced-compact]
+                  type: [string, 'null']
+                  enum: [canonical, dots, compact, spaced-compact, null]
                   description: >
-                    Default section-number display format for generate requests
-                    on this project.
+                    Project override for generated section numbers. Explicit null
+                    clears it so the associated client's firm default applies.
                 clientId:
                   type: [string, 'null']
                   format: uuid
@@ -2060,8 +2101,8 @@ paths:
                   description: >
                     Presentation format for generated section numbers in each
                     section title and confidently identified Section references.
-                    Omitted → falls back to the project's stored
-                    `sectionNumberFormat` default (canonical when unset).
+                    Omitted → project override, then client/firm default, then
+                    canonical.
       responses:
         '200':
           description: DOCX manual file stream
@@ -7244,7 +7285,7 @@ components:
 
     ClientSummary:
       type: object
-      required: [id, name, libraryId, createdAt, updatedAt]
+      required: [id, name, libraryId, sectionNumberFormat, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -7255,6 +7296,10 @@ components:
           type: [string, 'null']
           format: uuid
           description: The client's client-tier master library (a link, not a merge), or null
+        sectionNumberFormat:
+          type: string
+          enum: [canonical, dots, compact, spaced-compact]
+          description: Firm-tier default used when an associated project has no override
         createdAt:
           type: string
           format: date-time
@@ -7386,8 +7431,9 @@ components:
           type: string
           enum: [canonical, dots, compact, spaced-compact]
           description: >
-            Default section-number display format for generate requests on this
-            project. Defaults to `canonical` ("09 91 00").
+            Effective section-number display format for generate requests: the
+            project override, then its client's firm default, then `canonical`
+            ("09 91 00").
 
     BrokenRef:
       type: object

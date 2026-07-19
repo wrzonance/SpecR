@@ -31,6 +31,7 @@ const clientRow = (over: Record<string, unknown> = {}) => ({
   id: 'c1',
   name: 'Acme',
   library_id: null,
+  section_number_format: 'canonical',
   created_at: NOW,
   updated_at: NOW,
   ...over,
@@ -46,9 +47,22 @@ describe('createClient', () => {
       id: 'c1',
       name: 'Acme',
       libraryId: null,
+      sectionNumberFormat: 'canonical',
       createdAt: NOW,
       updatedAt: NOW,
     });
+  });
+
+  it('persists a supplied firm section-number default', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [clientRow({ section_number_format: 'dots' })],
+      rowCount: 1,
+    } as never);
+    const { createClient } = await import('./clients.js');
+    const result = await createClient({ name: 'Acme', sectionNumberFormat: 'dots' }, pool);
+    expect(result.sectionNumberFormat).toBe('dots');
+    expect(vi.mocked(pool.query).mock.calls[0]?.[1]).toEqual(['Acme', null, 'dots']);
   });
 
   it('validates a supplied libraryId before inserting', async () => {
@@ -92,6 +106,29 @@ describe('createClient', () => {
     );
     expect(err).toBeInstanceOf(ClientLibraryNotFoundError);
     expect((err as { cause?: unknown }).cause).toBe(pgErr);
+  });
+});
+
+describe('updateClient', () => {
+  it('updates and returns the firm section-number default', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [clientRow({ section_number_format: 'spaced-compact' })],
+      rowCount: 1,
+    } as never);
+    const { updateClient } = await import('./clients.js');
+    const result = await updateClient('c1', { sectionNumberFormat: 'spaced-compact' }, pool);
+    expect(result?.sectionNumberFormat).toBe('spaced-compact');
+    expect(vi.mocked(pool.query).mock.calls[0]?.[0]).toContain('section_number_format = $2');
+  });
+
+  it('returns null for an unknown client', async () => {
+    const { pool } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
+    const { updateClient } = await import('./clients.js');
+    await expect(
+      updateClient('missing', { sectionNumberFormat: 'dots' }, pool)
+    ).resolves.toBeNull();
   });
 });
 

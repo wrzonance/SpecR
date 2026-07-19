@@ -46,7 +46,12 @@ import {
   getLibraryStandardsHandler,
   recordStandardVerificationHandler,
 } from './standards.js';
-import { createClientHandler, listClientsHandler, getClientHandler } from './clients.js';
+import {
+  createClientHandler,
+  listClientsHandler,
+  getClientHandler,
+  updateClientHandler,
+} from './clients.js';
 import { resolveUserHandler, listUsersHandler, getUserHandler } from './users.js';
 import {
   getLibraryDivisionGeneralSpecHandler,
@@ -222,6 +227,7 @@ router.post('/projects/:id/generate', generateManualHandler);
 router.post('/clients', createClientHandler);
 router.get('/clients', listClientsHandler);
 router.get('/clients/:id', getClientHandler);
+router.patch('/clients/:id', updateClientHandler);
 router.post('/users', resolveUserHandler);
 router.get('/users', listUsersHandler);
 router.get('/users/:id', getUserHandler);
