@@ -644,8 +644,11 @@ const REVISION_FIELD_SOURCE = {
 // comparison target only).
 describe('generateRevisionHandler — header/footer resolution (#481)', () => {
   it('uses the stored comparison base when the request omits baseRevisionId', async () => {
-    const { getPackageRevisionManualData, getPackageRevisionAddendumManualData, getTemplateByName } =
-      await import('../db/index.js');
+    const {
+      getPackageRevisionManualData,
+      getPackageRevisionAddendumManualData,
+      getTemplateByName,
+    } = await import('../db/index.js');
     const { generateManual } = await import('../generator/index.js');
     const stored = buildRevisionManualData({
       revision: { ...buildRevisionManualData().revision, baseRevisionId: BASE_REVISION_ID },
@@ -674,8 +677,11 @@ describe('generateRevisionHandler — header/footer resolution (#481)', () => {
 
   it('explicit baseRevisionId wins over the stored comparison base', async () => {
     const requestedBase = 'eeeeeeee-0000-4000-8000-000000000006';
-    const { getPackageRevisionManualData, getPackageRevisionAddendumManualData, getTemplateByName } =
-      await import('../db/index.js');
+    const {
+      getPackageRevisionManualData,
+      getPackageRevisionAddendumManualData,
+      getTemplateByName,
+    } = await import('../db/index.js');
     const { generateManual } = await import('../generator/index.js');
     const data: RevisionAddendumManualData = {
       ...buildRevisionManualData(),
@@ -688,7 +694,10 @@ describe('generateRevisionHandler — header/footer resolution (#481)', () => {
     const { generateRevisionHandler } = await import('./generate.js');
 
     await generateRevisionHandler(
-      { params: { id: REVISION_ID }, body: { baseRevisionId: requestedBase } } as unknown as Request,
+      {
+        params: { id: REVISION_ID },
+        body: { baseRevisionId: requestedBase },
+      } as unknown as Request,
       mockRes()
     );
 

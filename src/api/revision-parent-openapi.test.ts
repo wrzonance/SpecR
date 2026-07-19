@@ -153,22 +153,27 @@ describe('openapi.yaml — package_revisions.base_revision_id (ADR-066 #390)', (
     expect(base.type).toBe('string');
     expect(base.format).toBe('uuid');
     expect(structured.required ?? []).not.toContain('baseRevisionId');
-    expect(branchRequiring(branches, 'label').properties ?? {}).not.toHaveProperty('baseRevisionId');
+    expect(branchRequiring(branches, 'label').properties ?? {}).not.toHaveProperty(
+      'baseRevisionId'
+    );
   });
 
   it.each([
     ['/packages/{id}/revisions', 'post', false],
     ['/packages/{id}/revisions', 'get', true],
     ['/revisions/{id}', 'get', false],
-  ] as const)('%s %s requires nullable baseRevisionId on its response', async (path, method, list) => {
-    const doc = await loadSpec();
-    const op = operation(doc, path, method);
-    const dataSchema = dataSchemaOf(
-      jsonSchemaOf(op.responses?.[method === 'post' ? '201' : '200']?.content)
-    );
-    const responseSchema = JsonSchemaObjectSchema.parse(list ? itemsOf(dataSchema) : dataSchema);
-    expectNullableUuidField(responseSchema, 'baseRevisionId');
-  });
+  ] as const)(
+    '%s %s requires nullable baseRevisionId on its response',
+    async (path, method, list) => {
+      const doc = await loadSpec();
+      const op = operation(doc, path, method);
+      const dataSchema = dataSchemaOf(
+        jsonSchemaOf(op.responses?.[method === 'post' ? '201' : '200']?.content)
+      );
+      const responseSchema = JsonSchemaObjectSchema.parse(list ? itemsOf(dataSchema) : dataSchema);
+      expectNullableUuidField(responseSchema, 'baseRevisionId');
+    }
+  );
 
   it('documents stored-default generation and explicit-request precedence', async () => {
     const doc = await loadSpec();

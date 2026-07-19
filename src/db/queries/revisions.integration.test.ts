@@ -105,7 +105,9 @@ describe('createPackageRevision — baseRevisionId', () => {
       pool
     );
     expect(target.baseRevisionId).toBe(base.revisionId);
-    expect((await getPackageRevision(target.revisionId, pool))?.baseRevisionId).toBe(base.revisionId);
+    expect((await getPackageRevision(target.revisionId, pool))?.baseRevisionId).toBe(
+      base.revisionId
+    );
     const list = await listPackageRevisions(pkgA, pool);
     expect(list?.find((item) => item.revisionId === target.revisionId)?.baseRevisionId).toBe(
       base.revisionId
@@ -120,7 +122,11 @@ describe('createPackageRevision — baseRevisionId', () => {
 
   it('rejects nonexistent and cross-package comparison bases', async () => {
     await expect(
-      createPackageRevision(pkgA, { label: `missing-base ${suffix}`, baseRevisionId: randomUUID() }, pool)
+      createPackageRevision(
+        pkgA,
+        { label: `missing-base ${suffix}`, baseRevisionId: randomUUID() },
+        pool
+      )
     ).rejects.toBeInstanceOf(RevisionComparisonError);
     const foreign = await createPackageRevision(pkgB, { label: `foreign-base ${suffix}` }, pool);
     await expect(

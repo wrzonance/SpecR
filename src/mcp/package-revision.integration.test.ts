@@ -342,9 +342,9 @@ describe('package revision MCP tools', () => {
       baseRevisionId: baseId,
     });
     const targetId = parse<RevisionSummary>(target).revisionId;
-    expect(parse<RevisionWithTrees>(await handleGetRevision({ revisionId: targetId })).baseRevisionId).toBe(
-      baseId
-    );
+    expect(
+      parse<RevisionWithTrees>(await handleGetRevision({ revisionId: targetId })).baseRevisionId
+    ).toBe(baseId);
     const list = parse<RevisionSummary[]>(await handleListPackageRevisions({ packageId }));
     expect(list.find((revision) => revision.revisionId === targetId)?.baseRevisionId).toBe(baseId);
   });
