@@ -101,7 +101,7 @@ async function historyRows(paragraphId: string, db: Queryable): Promise<readonly
   const result = await db.query<HistoryRow>(
     `SELECT spec_id, version, text, node_type, op, content_version, snapshot_at, payload
      FROM paragraph_versions WHERE paragraph_id = $1
-     ORDER BY snapshot_at, version, id`,
+     ORDER BY version, snapshot_at, id`,
     [paragraphId]
   );
   return result.rows;

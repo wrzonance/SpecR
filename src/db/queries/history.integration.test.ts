@@ -92,12 +92,14 @@ async function seedParagraphs(): Promise<void> {
 }
 
 async function seedHistory(): Promise<void> {
+  // Version 2 is deliberately backdated: transaction-start timestamps can invert
+  // after a row-lock wait, but the paragraph's monotonic version defines history order.
   await pool.query(
     `INSERT INTO paragraph_versions
        (paragraph_id, spec_id, version, text, node_type, op, content_version, snapshot_at)
      VALUES
        ($1, $2, 1, 'Master original', 'pr1', 'insert', 1, '2026-01-01T00:00:00Z'),
-       ($1, $2, 2, 'Master revised', 'pr1', 'edit', 2, '2026-01-02T00:00:00Z'),
+       ($1, $2, 2, 'Master revised', 'pr1', 'edit', 2, '2025-12-31T00:00:00Z'),
        ($3, $4, 3, 'Edited once', 'pr1', 'edit', 2, '2026-02-02T00:00:00Z'),
        ($5, $4, 1, 'Added later', 'pr1', 'insert', 3, '2026-02-03T00:00:00Z'),
        ($3, $4, 4, 'Edited twice', 'pr1', 'edit', 4, '2026-02-04T00:00:00Z'),
