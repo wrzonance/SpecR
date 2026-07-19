@@ -16,6 +16,10 @@ export const up = (pgm: MigrationBuilder): void => {
 };
 
 export const down = (pgm: MigrationBuilder): void => {
+  pgm.sql(`UPDATE projects p
+           SET section_number_format = c.section_number_format
+           FROM clients c
+           WHERE p.client_id = c.id AND p.section_number_format IS NULL`);
   pgm.sql(
     `UPDATE projects SET section_number_format = 'canonical' WHERE section_number_format IS NULL`
   );

@@ -107,12 +107,8 @@ export {
   ClientNotFoundError,
   ClientLibraryNotFoundError,
 } from './queries/clients.js';
-export type {
-  ClientSummary,
-  ClientDetail,
-  CreateClientInput,
-  UpdateClientInput,
-} from './queries/clients.js';
+export type { ClientSummary, ClientDetail } from './queries/clients.js';
+export type { CreateClientInput, UpdateClientInput } from './queries/clients.js';
 export {
   searchParagraphs,
   toSearchOptions,
