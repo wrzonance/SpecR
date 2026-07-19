@@ -2,6 +2,8 @@ import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { scanChoiceTokens } from './choice-tokens.js';
 import { isCommentClosed } from './comment-closure.js';
+import { isSpecifierNote } from './heuristics.js';
+import { sourcePropertiesForRun, type RunSourceProperties } from './run-source-facts.js';
 import { asRecord, extractAttrStr } from './xml-utils.js';
 import type {
   SourceChoiceTokenFact,
@@ -39,12 +41,14 @@ interface InlineParagraph {
   readonly text: string;
   readonly markers: readonly CommentMarker[];
   readonly colorSpans: readonly ColorSpan[];
+  readonly vanish: boolean;
 }
 
 interface InlineState {
   text: string;
   readonly markers: CommentMarker[];
   readonly colorSpans: ColorSpan[];
+  vanishChars: number;
 }
 
 interface ActiveComment {
@@ -74,14 +78,6 @@ function hasElement(record: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-function findElement(nodes: readonly unknown[], tag: string): Record<string, unknown> | undefined {
-  for (const raw of nodes) {
-    const record = asRecord(raw);
-    if (record && hasElement(record, tag)) return record;
-  }
-  return undefined;
-}
-
 function elementName(record: Record<string, unknown>): string | null {
   return Object.keys(record).find((key) => key !== ':@' && key !== '#text') ?? null;
 }
@@ -104,36 +100,13 @@ function appendMarker(name: string, record: Record<string, unknown>, state: Inli
   if (kind && id) state.markers.push({ id, kind, offset: state.text.length });
 }
 
-function normalizeRunColor(value: string): string | null {
-  const color = value.trim();
-  const lower = color.toLowerCase();
-  if (!color || lower === 'auto' || lower === '000000') return null;
-  return /^[0-9a-f]{6}$/i.test(color) ? color.toUpperCase() : color;
-}
-
-function normalizeHighlight(value: string): string | null {
-  const highlight = value.trim();
-  if (!highlight || highlight.toLowerCase() === 'none') return null;
-  return `highlight:${highlight}`;
-}
-
-function runColorTokens(runChildren: readonly unknown[]): readonly string[] {
-  const rPr = findElement(runChildren, 'w:rPr');
-  const props = rPr ? childNodes(rPr, 'w:rPr') : [];
-  const color = findElement(props, 'w:color');
-  const highlight = findElement(props, 'w:highlight');
-  return [
-    color ? normalizeRunColor(orderedAttr(color, '@_w:val')) : null,
-    highlight ? normalizeHighlight(orderedAttr(highlight, '@_w:val')) : null,
-  ].filter((token): token is string => token !== null);
-}
-
-function appendText(state: InlineState, text: string, colors: readonly string[]): void {
+function appendText(state: InlineState, text: string, properties: RunSourceProperties): void {
   const start = state.text.length;
   state.text += text;
   const end = state.text.length;
   if (start === end) return;
-  colors.forEach((color) => state.colorSpans.push({ color, start, end }));
+  properties.colors.forEach((color) => state.colorSpans.push({ color, start, end }));
+  if (properties.vanish) state.vanishChars += end - start;
 }
 
 // Formatting-property subtrees that must never contribute text content: a
@@ -152,10 +125,14 @@ const PROPERTY_TAGS = new Set(['w:pPr', 'w:rPr', 'w:sdtPr', 'w:sdtEndPr']);
 //     paragraphs classify and strip as authored. Uncolored (a structural delimiter carries
 //     no ink), so run color coverage is unaffected. Mirrors merge/extract.ts's w:tab → '\t'
 //     (w:br/w:cr line breaks are a separate word-joining concern, left as-is here).
-function collectLayoutElement(name: string, state: InlineState): boolean {
+function collectLayoutElement(
+  name: string,
+  state: InlineState,
+  properties: RunSourceProperties
+): boolean {
   if (PROPERTY_TAGS.has(name)) return true;
   if (name === 'w:tab') {
-    state.text += '\t';
+    appendText(state, '\t', { colors: [], vanish: properties.vanish });
     return true;
   }
   return false;
@@ -164,36 +141,41 @@ function collectLayoutElement(name: string, state: InlineState): boolean {
 function collectOne(
   record: Record<string, unknown>,
   state: InlineState,
-  colors: readonly string[]
+  properties: RunSourceProperties
 ): void {
   const text = record['#text'];
   if (typeof text === 'string') {
-    appendText(state, text, colors);
+    appendText(state, text, properties);
     return;
   }
   const name = elementName(record);
   if (!name) return;
-  if (collectLayoutElement(name, state)) return;
+  if (collectLayoutElement(name, state, properties)) return;
   appendMarker(name, record, state);
   const children = childNodes(record, name);
-  collectInline(children, state, name === 'w:r' ? runColorTokens(children) : colors);
+  collectInline(children, state, name === 'w:r' ? sourcePropertiesForRun(children) : properties);
 }
 
 function collectInline(
   nodes: readonly unknown[],
   state: InlineState,
-  colors: readonly string[] = []
+  properties: RunSourceProperties = { colors: [], vanish: false }
 ): void {
   for (const raw of nodes) {
     const record = asRecord(raw);
-    if (record) collectOne(record, state, colors);
+    if (record) collectOne(record, state, properties);
   }
 }
 
 function inlineParagraph(children: readonly unknown[]): InlineParagraph {
-  const state: InlineState = { text: '', markers: [], colorSpans: [] };
+  const state: InlineState = { text: '', markers: [], colorSpans: [], vanishChars: 0 };
   collectInline(children, state);
-  return { text: state.text, markers: state.markers, colorSpans: state.colorSpans };
+  return {
+    text: state.text,
+    markers: state.markers,
+    colorSpans: state.colorSpans,
+    vanish: state.text.length > 0 && state.vanishChars === state.text.length,
+  };
 }
 
 function findElementChildren(nodes: readonly unknown[], tag: string): readonly unknown[] {
@@ -331,16 +313,36 @@ function colorFactsForParagraph(paragraph: InlineParagraph): readonly SourceColo
   });
 }
 
+function hasAnySourceFact(
+  comments: readonly SourceCommentFact[],
+  colors: readonly SourceColorFact[],
+  choiceTokens: readonly SourceChoiceTokenFact[],
+  banner: string | undefined,
+  vanish: boolean
+): boolean {
+  return (
+    comments.length > 0 ||
+    colors.length > 0 ||
+    choiceTokens.length > 0 ||
+    banner !== undefined ||
+    vanish
+  );
+}
+
 function makeSourceFacts(
   comments: readonly SourceCommentFact[],
   colors: readonly SourceColorFact[],
-  choiceTokens: readonly SourceChoiceTokenFact[]
+  choiceTokens: readonly SourceChoiceTokenFact[],
+  banner: string | undefined,
+  vanish: boolean
 ): SourceFacts | undefined {
-  if (comments.length === 0 && colors.length === 0 && choiceTokens.length === 0) return undefined;
+  if (!hasAnySourceFact(comments, colors, choiceTokens, banner, vanish)) return undefined;
   return {
     ...(comments.length > 0 ? { comments } : {}),
     ...(colors.length > 0 ? { colors } : {}),
     ...(choiceTokens.length > 0 ? { choiceTokens } : {}),
+    ...(banner !== undefined ? { banner } : {}),
+    ...(vanish ? { vanish: true as const } : {}),
   };
 }
 
@@ -367,7 +369,9 @@ function buildSourceFactsByParagraph(
     makeSourceFacts(
       buckets[index] ?? [],
       colorFactsForParagraph(paragraph),
-      scanChoiceTokens(paragraph.text)
+      scanChoiceTokens(paragraph.text),
+      isSpecifierNote(paragraph.text) ? paragraph.text.trim() : undefined,
+      paragraph.vanish
     )
   );
 }

@@ -94,6 +94,8 @@ interface TestSourceFacts {
   readonly comments?: readonly CommentFact[];
   readonly colors?: readonly ColorFact[];
   readonly choiceTokens?: readonly ChoiceTokenFact[];
+  readonly banner?: string;
+  readonly vanish?: true;
 }
 
 function allNodes(nodes: readonly SpecNode[]): readonly SpecNode[] {
@@ -115,6 +117,14 @@ function sourceColors(node: SpecNode | undefined): readonly ColorFact[] | undefi
 
 function sourceChoiceTokens(node: SpecNode | undefined): readonly ChoiceTokenFact[] | undefined {
   return sourceFacts(node)?.choiceTokens;
+}
+
+function sourceBanner(node: SpecNode | undefined): string | undefined {
+  return sourceFacts(node)?.banner;
+}
+
+function sourceVanish(node: SpecNode | undefined): true | undefined {
+  return sourceFacts(node)?.vanish;
 }
 
 function findNode(nodes: readonly SpecNode[], text: string): SpecNode | undefined {
@@ -571,6 +581,40 @@ describe('parseDocx — source facts: choice tokens (#130)', () => {
     // KNOWN AMBIGUITY: [Section 09 91 26] looks like a CSI cross-reference, not a choice.
     const node = await parseChoiceNode('[Section 09 91 26]');
     expect(sourceChoiceTokens(node)).toBeUndefined();
+  });
+});
+
+describe('parseDocx — source facts: onboarding signals (#294)', () => {
+  it('records specifier-note banners and fully hidden run text', async () => {
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
+    <w:p><w:r><w:t>** NOTE TO SPECIFIER ** keep this.</w:t></w:r></w:p>
+    <w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>hidden line</w:t></w:r></w:p>
+  </w:body>
+</w:document>`;
+    const tree = await parseDocx(
+      await makeDocx({ documentXml, numberingXml: STRUCTURED_NUMBERING })
+    );
+
+    const bannerNode = allNodes(tree.parts).find((node) =>
+      sourceBanner(node)?.includes('NOTE TO SPECIFIER')
+    );
+    expect(sourceBanner(bannerNode)).toContain('NOTE TO SPECIFIER');
+    expect(sourceVanish(findNode(tree.parts, 'hidden line'))).toBe(true);
+  });
+
+  it('does not mark a mixed visible and hidden run paragraph as vanished', async () => {
+    // KNOWN AMBIGUITY: mixed-run paragraphs retain visible content, so the paragraph-level
+    // source fact stays unset even though one run is hidden.
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>hidden </w:t></w:r><w:r><w:t>visible</w:t></w:r></w:p></w:body>
+</w:document>`;
+    const tree = await parseDocx(await makeDocx({ documentXml }));
+
+    expect(sourceVanish(findNode(tree.parts, 'hidden visible'))).toBeUndefined();
   });
 });
 

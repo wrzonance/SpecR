@@ -89,6 +89,31 @@ describe('parseText — UFGS stripped fixture', () => {
   });
 });
 
+describe('parseText — asterisk note delimiters', () => {
+  it('treats asterisk-bracketed lines as notes, not continuation', () => {
+    const text = [
+      'PART 1 - GENERAL',
+      '1.1 SUMMARY',
+      '***********************',
+      'Edit to suit the project.',
+      '***********************',
+      'A. Real requirement.',
+    ].join('\n');
+
+    const { tree } = parseText(text);
+    const collect = (node: SpecNode): readonly SpecNode[] => [
+      node,
+      ...node.children.flatMap(collect),
+    ];
+    const all = tree.parts.flatMap(collect);
+
+    expect(all.some((node) => /^\*{5,}$/.test(node.text.trim()))).toBe(false);
+    expect(all.some((node) => node.type === 'note' && node.text.includes('Edit to suit'))).toBe(
+      true
+    );
+  });
+});
+
 describe('parseText — indent-only fixture', () => {
   const fixture = readFileSync(join('tests', 'fixtures', 'text', 'indent-only.txt'), 'utf-8');
 
