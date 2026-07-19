@@ -2,8 +2,10 @@ import {
   handleListClients,
   handleGetClient,
   handleCreateClient,
+  handleUpdateClient,
   ClientIdShape,
   CreateClientShape,
+  UpdateClientShape,
 } from './clients-handlers.js';
 import type { ToolRegistrar } from './tool-registry.js';
 
@@ -40,5 +42,16 @@ export function registerClientTools(reg: ToolRegistrar): void {
       inputSchema: CreateClientShape,
     },
     handleCreateClient
+  );
+
+  reg.register(
+    'update_client',
+    {
+      description:
+        "Update a client's firm-tier section-number default. Projects with an explicit " +
+        'sectionNumberFormat continue to override it.',
+      inputSchema: UpdateClientShape,
+    },
+    handleUpdateClient
   );
 }

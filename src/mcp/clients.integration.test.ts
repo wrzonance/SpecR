@@ -1,6 +1,11 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { pool, createProject, findLibraryByName, DEFAULT_COMPANY_LIBRARY } from '../db/index.js';
-import { handleListClients, handleGetClient, handleCreateClient } from './clients-handlers.js';
+import {
+  handleListClients,
+  handleGetClient,
+  handleCreateClient,
+  handleUpdateClient,
+} from './clients-handlers.js';
 import { handleUpdateProject } from './project-handlers.js';
 import type { ToolResult } from './handlers.js';
 
@@ -33,11 +38,27 @@ async function companyLibId(): Promise<string> {
 
 describe('clients MCP tools', () => {
   it('create_client returns the new client summary', async () => {
-    const res = await handleCreateClient({ name: uniq('create') });
+    const res = await handleCreateClient({ name: uniq('create'), sectionNumberFormat: 'dots' });
     expect(isToolError(res)).toBe(false);
     const client = parse<{ id: string; name: string; libraryId: string | null }>(res);
     expect(client.name).toContain('clients-mcp-test-create');
     expect(client.libraryId).toBeNull();
+    expect((client as typeof client & { sectionNumberFormat: string }).sectionNumberFormat).toBe(
+      'dots'
+    );
+  });
+
+  it('update_client changes the firm section-number default', async () => {
+    const created = parse<{ id: string }>(await handleCreateClient({ name: uniq('format') }));
+    const result = await handleUpdateClient({
+      clientId: created.id,
+      sectionNumberFormat: 'compact',
+    });
+    expect(isToolError(result)).toBe(false);
+    expect(parse<{ sectionNumberFormat: string }>(result).sectionNumberFormat).toBe('compact');
+    expect(
+      isToolError(await handleUpdateClient({ clientId: MISSING, sectionNumberFormat: 'dots' }))
+    ).toBe(true);
   });
 
   it('create_client rejects a blank name and a duplicate name', async () => {

@@ -1,13 +1,28 @@
 import { z } from 'zod';
-import { createClient, listClients, getClient, ClientLibraryNotFoundError } from '../db/index.js';
+import {
+  createClient,
+  listClients,
+  getClient,
+  updateClient,
+  ClientLibraryNotFoundError,
+} from '../db/index.js';
 import { getPgCode } from '../lib/pg-errors.js';
 import { logger } from '../lib/logger.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
+import { SectionNumberFormatSchema } from '../lib/section-number.js';
 
 export const ClientIdShape = {
   clientId: z.uuid().describe('Client UUID (from list_clients)'),
 };
 const ClientIdArgs = z.object(ClientIdShape);
+
+export const UpdateClientShape = {
+  ...ClientIdShape,
+  sectionNumberFormat: SectionNumberFormatSchema.describe(
+    'Firm-tier default used when a project has no section-number-format override'
+  ),
+};
+const UpdateClientArgs = z.object(UpdateClientShape);
 
 export const CreateClientShape = {
   name: z.string().min(1).describe('Client name (unique)'),
@@ -15,6 +30,9 @@ export const CreateClientShape = {
     .uuid()
     .optional()
     .describe("Optional link to the client's client-tier master library"),
+  sectionNumberFormat: SectionNumberFormatSchema.optional().describe(
+    'Firm-tier default (defaults to canonical)'
+  ),
 };
 const CreateClientArgs = z.object(CreateClientShape);
 
@@ -54,8 +72,12 @@ export async function handleCreateClient(args: unknown): Promise<ToolResult> {
   if (!parsed.success) {
     return toolError(`invalid create_client input: ${issues(parsed.error)}`);
   }
-  const { name, libraryId } = parsed.data;
-  const input = libraryId ? { name, libraryId } : { name };
+  const { name, libraryId, sectionNumberFormat } = parsed.data;
+  const input = {
+    name,
+    ...(libraryId ? { libraryId } : {}),
+    ...(sectionNumberFormat ? { sectionNumberFormat } : {}),
+  };
   try {
     return ok(await createClient(input));
   } catch (err) {
@@ -63,5 +85,18 @@ export async function handleCreateClient(args: unknown): Promise<ToolResult> {
     if (err instanceof ClientLibraryNotFoundError) return toolError(err.message);
     if (getPgCode(err) === '23505') return toolError(NAME_TAKEN_ERROR);
     return internalError(err, 'create_client');
+  }
+}
+
+export async function handleUpdateClient(args: unknown): Promise<ToolResult> {
+  const parsed = UpdateClientArgs.safeParse(args);
+  if (!parsed.success) return toolError(`invalid update_client input: ${issues(parsed.error)}`);
+  try {
+    const client = await updateClient(parsed.data.clientId, {
+      sectionNumberFormat: parsed.data.sectionNumberFormat,
+    });
+    return client ? ok(client) : toolError(`client not found: id=${parsed.data.clientId}`);
+  } catch (err) {
+    return internalError(err, 'update_client');
   }
 }

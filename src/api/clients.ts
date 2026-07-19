@@ -1,14 +1,23 @@
 import { z } from 'zod';
 import type { Request, Response } from 'express';
-import { createClient, listClients, getClient, ClientLibraryNotFoundError } from '../db/index.js';
+import {
+  createClient,
+  listClients,
+  getClient,
+  updateClient,
+  ClientLibraryNotFoundError,
+} from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
+import { SectionNumberFormatSchema } from '../lib/section-number.js';
 
 const UUID_SCHEMA = z.uuid();
 const CreateClientBody = z.object({
   name: z.string().check(z.minLength(1)),
   libraryId: z.uuid().optional(),
+  sectionNumberFormat: SectionNumberFormatSchema.optional(),
 });
+const UpdateClientBody = z.object({ sectionNumberFormat: SectionNumberFormatSchema });
 
 export async function createClientHandler(req: Request, res: Response): Promise<void> {
   const parsed = CreateClientBody.safeParse(req.body);
@@ -16,9 +25,13 @@ export async function createClientHandler(req: Request, res: Response): Promise<
     res.status(400).json({ success: false, error: 'name is required' });
     return;
   }
-  const input = parsed.data.libraryId
-    ? { name: parsed.data.name, libraryId: parsed.data.libraryId }
-    : { name: parsed.data.name };
+  const input = {
+    name: parsed.data.name,
+    ...(parsed.data.libraryId ? { libraryId: parsed.data.libraryId } : {}),
+    ...(parsed.data.sectionNumberFormat
+      ? { sectionNumberFormat: parsed.data.sectionNumberFormat }
+      : {}),
+  };
   try {
     const client = await createClient(input);
     res.status(201).json({ success: true, data: client });
@@ -33,6 +46,26 @@ export async function createClientHandler(req: Request, res: Response): Promise<
       return;
     }
     logger.error({ err }, 'create client failed');
+    res.status(500).json({ success: false, error: 'internal server error' });
+  }
+}
+
+export async function updateClientHandler(req: Request, res: Response): Promise<void> {
+  const id = UUID_SCHEMA.safeParse(req.params['id']);
+  const body = UpdateClientBody.safeParse(req.body);
+  if (!id.success || !body.success) {
+    res.status(400).json({ success: false, error: 'invalid client update' });
+    return;
+  }
+  try {
+    const client = await updateClient(id.data, body.data);
+    if (!client) {
+      res.status(404).json({ success: false, error: 'client not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: client });
+  } catch (err) {
+    logger.error({ err }, 'update client failed');
     res.status(500).json({ success: false, error: 'internal server error' });
   }
 }

@@ -2,6 +2,8 @@ import type { Pool } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import { getPgCode } from '../../lib/pg-errors.js';
 import type { ProjectSummary, ProjectSource } from './projects.js';
+import { parseSectionNumberFormat } from '../../lib/section-number.js';
+import type { SectionNumberFormat } from '../../lib/section-number.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -11,6 +13,8 @@ export interface ClientSummary {
   readonly id: string;
   readonly name: string;
   readonly libraryId: string | null;
+  /** Firm-tier default used when an associated project has no override. */
+  readonly sectionNumberFormat: SectionNumberFormat;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -24,6 +28,11 @@ export interface CreateClientInput {
   readonly name: string;
   /** Optional link to the client's client-tier master library (ADR-054). */
   readonly libraryId?: string;
+  readonly sectionNumberFormat?: SectionNumberFormat;
+}
+
+export interface UpdateClientInput {
+  readonly sectionNumberFormat: SectionNumberFormat;
 }
 
 /** A project's update path referenced an unknown client → 422 at the handler. */
@@ -36,6 +45,7 @@ interface ClientRow {
   readonly id: string;
   readonly name: string;
   readonly library_id: string | null;
+  readonly section_number_format: string;
   readonly created_at: Date;
   readonly updated_at: Date;
 }
@@ -51,13 +61,14 @@ interface ClientProjectRow {
   readonly sources: readonly ProjectSource[] | null;
 }
 
-const CLIENT_COLUMNS = 'id, name, library_id, created_at, updated_at';
+const CLIENT_COLUMNS = 'id, name, library_id, section_number_format, created_at, updated_at';
 
 function mapClientRow(row: ClientRow): ClientSummary {
   return {
     id: row.id,
     name: row.name,
     libraryId: row.library_id,
+    sectionNumberFormat: parseSectionNumberFormat(row.section_number_format),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -102,8 +113,9 @@ export async function createClient(
   try {
     if (input.libraryId) await assertLibraryExists(input.libraryId, db);
     const result = await db.query<ClientRow>(
-      `INSERT INTO clients (name, library_id) VALUES ($1, $2) RETURNING ${CLIENT_COLUMNS}`,
-      [input.name, input.libraryId ?? null]
+      `INSERT INTO clients (name, library_id, section_number_format)
+       VALUES ($1, $2, $3) RETURNING ${CLIENT_COLUMNS}`,
+      [input.name, input.libraryId ?? null, input.sectionNumberFormat ?? 'canonical']
     );
     const row = result.rows[0];
     if (!row) throw new DatabaseError('createClient: no row returned after insert');
@@ -123,6 +135,25 @@ export async function createClient(
       throw new ClientLibraryNotFoundError(`library ${input.libraryId} not found`, { cause: err });
     }
     throw wrapped;
+  }
+}
+
+export async function updateClient(
+  id: string,
+  input: UpdateClientInput,
+  db: Queryable = pool
+): Promise<ClientSummary | null> {
+  try {
+    const result = await db.query<ClientRow>(
+      `UPDATE clients
+       SET section_number_format = $2, updated_at = now()
+       WHERE id = $1 RETURNING ${CLIENT_COLUMNS}`,
+      [id, input.sectionNumberFormat]
+    );
+    const row = result.rows[0];
+    return row ? mapClientRow(row) : null;
+  } catch (err) {
+    throw new DatabaseError(`updateClient: update failed for ${id}`, { cause: err });
   }
 }
 

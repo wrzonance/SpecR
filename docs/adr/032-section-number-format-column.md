@@ -66,11 +66,14 @@ more definitive choice.
 - Generate reads the column as the per-project default (#267) rather than
   requiring every caller to pass the format on each request.
 - The one genuinely-deferred capability — a **firm/library-level default** that a
-  project overrides — resolves as a thin scalar
-  `COALESCE(project.section_number_format, <firm_default>, 'canonical')` once
-  firm/client tiers exist. It does **not** require the JSONB profile machinery.
-  Tracked in re-scoped #250, gated on firm/client tiers (no profile has those
-  tiers yet).
+  project overrides — now lives on the first-class `clients` entity introduced
+  by ADR-054. In SpecR's current hierarchy, a client is the organization above
+  projects and therefore the natural firm/library default tier; a separate
+  `firms` table would add an unused hop and profile machinery would obscure a
+  single constrained scalar. Generation resolves
+  `COALESCE(project.section_number_format, client.section_number_format, 'canonical')`.
+  Existing project values remain explicit overrides; new projects begin with a
+  null override and inherit from their associated client.
 - Supersedes the B2 disposition on this specific field and closes out the
   island-migration rejection for it.
 - This decision is **scoped to a single constrained enum.** If a future need

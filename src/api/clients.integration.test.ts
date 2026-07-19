@@ -62,9 +62,21 @@ describe('POST /clients', () => {
     expect(res.status).toBe(201);
     const data = (await json(res))['data'] as Record<string, unknown>;
     expect(data).toMatchObject({ name: 'api-client-create', libraryId: null });
+    expect(data['sectionNumberFormat']).toBe('canonical');
     expect(typeof data['id']).toBe('string');
     expect(typeof data['createdAt']).toBe('string');
     expect(typeof data['updatedAt']).toBe('string');
+  });
+
+  it('creates a client with a firm section-number default', async () => {
+    const res = await req('POST', '/clients', {
+      name: 'api-client-format-create',
+      sectionNumberFormat: 'compact',
+    });
+    expect(res.status).toBe(201);
+    expect(((await json(res))['data'] as Record<string, unknown>)['sectionNumberFormat']).toBe(
+      'compact'
+    );
   });
 
   it('rejects a duplicate name with 409', async () => {
@@ -94,6 +106,38 @@ describe('POST /clients', () => {
     expect(res.status).toBe(201);
     const data = (await json(res))['data'] as Record<string, unknown>;
     expect(data['libraryId']).toBe(companyLibId);
+  });
+});
+
+describe('PATCH /clients/:id', () => {
+  it('updates the firm section-number default and read endpoints expose it', async () => {
+    const created = (
+      await json(await req('POST', '/clients', { name: 'api-client-format-update' }))
+    )['data'] as { id: string };
+    const patch = await req('PATCH', `/clients/${created.id}`, {
+      sectionNumberFormat: 'spaced-compact',
+    });
+    expect(patch.status).toBe(200);
+    expect(((await json(patch))['data'] as Record<string, unknown>)['sectionNumberFormat']).toBe(
+      'spaced-compact'
+    );
+
+    const detail = (await json(await req('GET', `/clients/${created.id}`)))['data'] as Record<
+      string,
+      unknown
+    >;
+    expect(detail['sectionNumberFormat']).toBe('spaced-compact');
+  });
+
+  it('rejects an invalid format and returns 404 for an unknown client', async () => {
+    const invalid = await req('PATCH', `/clients/${randomUUID()}`, {
+      sectionNumberFormat: 'slashes',
+    });
+    expect(invalid.status).toBe(400);
+    const missing = await req('PATCH', `/clients/${randomUUID()}`, {
+      sectionNumberFormat: 'dots',
+    });
+    expect(missing.status).toBe(404);
   });
 });
 
@@ -173,5 +217,31 @@ describe('PATCH /projects/:id client association', () => {
     const projectId = await makeProject('api-client-unknown-project');
     const res = await req('PATCH', `/projects/${projectId}`, { clientId: randomUUID() });
     expect(res.status).toBe(422);
+  });
+
+  it('resolves project override, then firm default, and allows clearing the override', async () => {
+    const projectId = await makeProject('api-client-format-project');
+    const clientRes = await req('POST', '/clients', {
+      name: 'api-client-format-owner',
+      sectionNumberFormat: 'dots',
+    });
+    const clientId = ((await json(clientRes))['data'] as { id: string }).id;
+
+    const inherited = await req('PATCH', `/projects/${projectId}`, { clientId });
+    expect(
+      ((await json(inherited))['data'] as Record<string, unknown>)['sectionNumberFormat']
+    ).toBe('dots');
+
+    const explicit = await req('PATCH', `/projects/${projectId}`, {
+      sectionNumberFormat: 'compact',
+    });
+    expect(((await json(explicit))['data'] as Record<string, unknown>)['sectionNumberFormat']).toBe(
+      'compact'
+    );
+
+    const cleared = await req('PATCH', `/projects/${projectId}`, { sectionNumberFormat: null });
+    expect(((await json(cleared))['data'] as Record<string, unknown>)['sectionNumberFormat']).toBe(
+      'dots'
+    );
   });
 });

@@ -35,9 +35,9 @@ export async function handleGetProject(args: unknown): Promise<ToolResult> {
 export const UpdateProjectShape = {
   projectId: z.uuid().describe('Project UUID (from list_projects)'),
   name: z.string().min(1).optional().describe('New project name'),
-  sectionNumberFormat: SectionNumberFormatSchema.optional().describe(
-    'Project section-number display format'
-  ),
+  sectionNumberFormat: SectionNumberFormatSchema.nullable()
+    .optional()
+    .describe('Project section-number override; null clears it so the client/firm default applies'),
   clientId: z
     .uuid()
     .nullable()
