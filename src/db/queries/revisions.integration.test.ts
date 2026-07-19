@@ -5,6 +5,7 @@ import {
   createPackageRevision,
   getPackageRevision,
   RevisionParentValidationError,
+  RevisionComparisonError,
 } from './revisions.js';
 import { listPackageRevisions } from './revision-list.js';
 
@@ -92,6 +93,43 @@ describe('createPackageRevision — parentRevisionId', () => {
         pool
       )
     ).rejects.toBeInstanceOf(RevisionParentValidationError);
+  });
+});
+
+describe('createPackageRevision — baseRevisionId', () => {
+  it('persists and echoes a same-package comparison base on every read surface', async () => {
+    const base = await createPackageRevision(pkgA, { label: `base ${suffix}` }, pool);
+    const target = await createPackageRevision(
+      pkgA,
+      { label: `target ${suffix}`, baseRevisionId: base.revisionId },
+      pool
+    );
+    expect(target.baseRevisionId).toBe(base.revisionId);
+    expect((await getPackageRevision(target.revisionId, pool))?.baseRevisionId).toBe(base.revisionId);
+    const list = await listPackageRevisions(pkgA, pool);
+    expect(list?.find((item) => item.revisionId === target.revisionId)?.baseRevisionId).toBe(
+      base.revisionId
+    );
+  });
+
+  it('always emits baseRevisionId: null when no comparison base was declared', async () => {
+    const revision = await createPackageRevision(pkgA, { label: `no-base ${suffix}` }, pool);
+    expect(revision).toHaveProperty('baseRevisionId');
+    expect(revision.baseRevisionId).toBeNull();
+  });
+
+  it('rejects nonexistent and cross-package comparison bases', async () => {
+    await expect(
+      createPackageRevision(pkgA, { label: `missing-base ${suffix}`, baseRevisionId: randomUUID() }, pool)
+    ).rejects.toBeInstanceOf(RevisionComparisonError);
+    const foreign = await createPackageRevision(pkgB, { label: `foreign-base ${suffix}` }, pool);
+    await expect(
+      createPackageRevision(
+        pkgA,
+        { label: `cross-base ${suffix}`, baseRevisionId: foreign.revisionId },
+        pool
+      )
+    ).rejects.toBeInstanceOf(RevisionComparisonError);
   });
 });
 

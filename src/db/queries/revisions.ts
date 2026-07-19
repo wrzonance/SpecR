@@ -12,8 +12,10 @@ import type { RevisionNomenclatureProfile } from './revision-nomenclature.js';
 import { createRevisionIdentityDraft, getRevisionDisplayIdentity } from './revision-identity.js';
 import type { CreatePackageRevisionInput } from './revision-identity.js';
 import { assertValidParentRevision } from './revision-parent.js';
+import { assertValidBaseRevision, RevisionComparisonError } from './revision-comparison.js';
 export { RevisionNomenclatureValidationError } from './revision-identity.js';
 export { RevisionParentValidationError } from './revision-parent.js';
+export { RevisionComparisonError } from './revision-comparison.js';
 
 /** Package revisions (ADR-015 D5, issue #96): immutable issuance snapshots.
  *  Issuing freezes every member section's full SpecTree as JSONB inside one
@@ -44,6 +46,7 @@ export interface RevisionSummary {
   readonly issuedAt: string;
   readonly specCount: number;
   readonly parentRevisionId: string | null;
+  readonly baseRevisionId: string | null;
 }
 
 export interface RevisionSpecEntry {
@@ -65,6 +68,7 @@ export interface RevisionWithTrees {
   readonly issuedAt: string;
   readonly specs: readonly RevisionSpecEntry[];
   readonly parentRevisionId: string | null;
+  readonly baseRevisionId: string | null;
 }
 
 export interface RevisionManualData {
@@ -94,6 +98,7 @@ export interface RevisionRow {
   readonly attributes: unknown;
   readonly issued_at: Date;
   readonly parent_revision_id: string | null;
+  readonly base_revision_id: string | null;
 }
 
 interface PackageRow {
@@ -119,8 +124,6 @@ interface RevisionContextRow {
   readonly project_name: string;
   readonly project_description: string | null;
 }
-
-export class RevisionComparisonError extends DatabaseError {}
 
 function validateTree(candidate: unknown, specId: string): SpecTree {
   const parsed = SpecTreeSchema.safeParse(candidate);
@@ -252,6 +255,7 @@ export function mapSummary(
     issuedAt: row.issued_at.toISOString(),
     specCount,
     parentRevisionId: row.parent_revision_id,
+    baseRevisionId: row.base_revision_id,
   };
 }
 
@@ -288,16 +292,18 @@ async function insertRevisionRow(
   input: string | CreatePackageRevisionInput,
   profile: RevisionNomenclatureProfile,
   parentRevisionId: string | null,
+  baseRevisionId: string | null,
   client: PoolClient
 ): Promise<RevisionRow> {
   const draft = createRevisionIdentityDraft(input, profile);
   const sortOrder = draft.sortOrder ?? (await nextSortOrder(packageId, client));
   const rev = await client.query<RevisionRow>(
     `INSERT INTO package_revisions
-      (package_id, label, revision_type, revision_date, sort_order, attributes, parent_revision_id)
-     VALUES ($1, $2, $3, $4::date, $5, $6::jsonb, $7)
+      (package_id, label, revision_type, revision_date, sort_order, attributes,
+       parent_revision_id, base_revision_id)
+     VALUES ($1, $2, $3, $4::date, $5, $6::jsonb, $7, $8)
      RETURNING id, package_id, label, revision_type, revision_date,
-               sort_order, attributes, issued_at, parent_revision_id`,
+               sort_order, attributes, issued_at, parent_revision_id, base_revision_id`,
     [
       packageId,
       draft.label,
@@ -306,6 +312,7 @@ async function insertRevisionRow(
       sortOrder,
       JSON.stringify(draft.attributes),
       parentRevisionId,
+      baseRevisionId,
     ]
   );
   const row = rev.rows[0];
@@ -327,8 +334,17 @@ export async function createPackageRevision(
     const profile = await getRevisionNomenclatureForProject(locked.project_id, client);
     if (!profile) throw new DatabaseError('createPackageRevision: no nomenclature profile');
     const parentRevisionId = typeof input === 'string' ? null : (input.parentRevisionId ?? null);
+    const baseRevisionId = typeof input === 'string' ? null : (input.baseRevisionId ?? null);
     await assertValidParentRevision(packageId, parentRevisionId, client);
-    const row = await insertRevisionRow(packageId, input, profile, parentRevisionId, client);
+    await assertValidBaseRevision(packageId, baseRevisionId, client);
+    const row = await insertRevisionRow(
+      packageId,
+      input,
+      profile,
+      parentRevisionId,
+      baseRevisionId,
+      client
+    );
     const entries = await snapshotMemberTrees(packageId, client);
     await insertSnapshotRows(row.id, entries, client);
     await markMembersIssued(
@@ -365,7 +381,7 @@ export async function getPackageRevision(
   try {
     const rev = await db.query<RevisionRow>(
       `SELECT id, package_id, label, revision_type, revision_date,
-              sort_order, attributes, issued_at, parent_revision_id
+              sort_order, attributes, issued_at, parent_revision_id, base_revision_id
        FROM package_revisions WHERE id = $1`,
       [revisionId]
     );

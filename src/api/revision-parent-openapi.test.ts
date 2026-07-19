@@ -140,3 +140,45 @@ describe('openapi.yaml — package_revisions.parent_revision_id (ADR-066 #389)',
     expect(description).toMatch(/nesting depth cannot exceed 1/i);
   });
 });
+
+describe('openapi.yaml — package_revisions.base_revision_id (ADR-066 #390)', () => {
+  it('accepts baseRevisionId only on the structured create body', async () => {
+    const doc = await loadSpec();
+    const op = operation(doc, '/packages/{id}/revisions', 'post');
+    const branches = z
+      .object({ oneOf: z.array(z.unknown()) })
+      .parse(jsonSchemaOf(op.requestBody?.content)).oneOf;
+    const structured = branchRequiring(branches, 'type');
+    const base = JsonSchemaObjectSchema.parse((structured.properties ?? {})['baseRevisionId']);
+    expect(base.type).toBe('string');
+    expect(base.format).toBe('uuid');
+    expect(structured.required ?? []).not.toContain('baseRevisionId');
+    expect(branchRequiring(branches, 'label').properties ?? {}).not.toHaveProperty('baseRevisionId');
+  });
+
+  it.each([
+    ['/packages/{id}/revisions', 'post', false],
+    ['/packages/{id}/revisions', 'get', true],
+    ['/revisions/{id}', 'get', false],
+  ] as const)('%s %s requires nullable baseRevisionId on its response', async (path, method, list) => {
+    const doc = await loadSpec();
+    const op = operation(doc, path, method);
+    const dataSchema = dataSchemaOf(
+      jsonSchemaOf(op.responses?.[method === 'post' ? '201' : '200']?.content)
+    );
+    const responseSchema = JsonSchemaObjectSchema.parse(list ? itemsOf(dataSchema) : dataSchema);
+    expectNullableUuidField(responseSchema, 'baseRevisionId');
+  });
+
+  it('documents stored-default generation and explicit-request precedence', async () => {
+    const doc = await loadSpec();
+    const generate = operation(doc, '/revisions/{id}/generate', 'post');
+    const raw = doc.paths['/revisions/{id}/generate']?.['post'];
+    const description = z.object({ description: z.string() }).parse(raw).description;
+    expect(description).toMatch(/request `baseRevisionId` when supplied/i);
+    expect(description).toMatch(/stored `baseRevisionId`/i);
+    const request = JsonSchemaObjectSchema.parse(jsonSchemaOf(generate.requestBody?.content));
+    const base = JsonSchemaObjectSchema.parse((request.properties ?? {})['baseRevisionId']);
+    expect(base.format).toBe('uuid');
+  });
+});
