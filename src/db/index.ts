@@ -119,6 +119,7 @@ export {
   type SpecSectionResult,
 } from './queries/search.js';
 export { getParagraphSnapshots, getCurrentParagraphSnapshots } from './queries/versions.js';
+export * from './queries/history-index.js';
 export { getObjectStructuralSnapshots } from './queries/object-structure.js';
 export type { ObjectStructuralSnapshot } from './queries/object-structure.js';
 export {

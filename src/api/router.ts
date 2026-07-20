@@ -172,6 +172,11 @@ import {
   resolvePackageHeaderFooterHandler,
   resolveRevisionHeaderFooterHandler,
 } from './header-footer-resolve.js';
+import {
+  getParagraphHistoryHandler,
+  getSpecHistoryHandler,
+  getHistoryDiffHandler,
+} from './history.js';
 
 const parseRateLimit = rateLimit({
   windowMs: config.RATE_LIMIT_WINDOW_MS,
@@ -193,6 +198,9 @@ router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/open-comments', getSpecOpenCommentsHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.get('/specs/:id/hierarchy-report', getHierarchyReportHandler);
+router.get('/specs/:id/paragraphs/:nodeId/history', getParagraphHistoryHandler);
+router.get('/specs/:id/history/diff', getHistoryDiffHandler);
+router.get('/specs/:id/history', getSpecHistoryHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.delete('/specs/:id', withdrawSpecHandler);
 router.post('/specs/:id/restore', restoreSpecHandler);

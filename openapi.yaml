@@ -1036,6 +1036,128 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/paragraphs/{nodeId}/history:
+    get:
+      operationId: getParagraphHistory
+      summary: Read one paragraph's stored iterations
+      description: >
+        Returns raw paragraph snapshots oldest-first, including the creation row
+        and current state. A project paragraph starts at its derive point by
+        default; `includeOrigin=true` prepends the direct master's pre-derive
+        iterations through `origin_paragraph_id` (ADR-052 D5).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+        - name: includeOrigin
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Paragraph iterations, oldest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ParagraphHistoryEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/history:
+    get:
+      operationId: getSpecHistory
+      summary: Read a spec's content-version timeline
+      description: >
+        Returns content-version steps with changed-paragraph counts plus derive
+        and immutable package-revision milestones. `packageId` narrows revision
+        milestones to one issuance track; edits remain the same within-spec branch.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - name: packageId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Version timeline and milestones
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecHistory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/history/diff:
+    get:
+      operationId: getSpecHistoryDiff
+      summary: Compare two stored states of one spec
+      description: >
+        Resolves each anchor as a content version, package revision UUID,
+        `origin`, or `current`, then returns paragraph-UUID-aligned
+        added/removed/modified rows in document order. Text is before/after at
+        paragraph grain; word-level highlighting is intentionally client-side.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - name: from
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/HistoryAnchor'
+        - name: to
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/HistoryAnchor'
+      responses:
+        '200':
+          description: Row-level point-to-point diff
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecHistoryDiff'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/hierarchy-report:
     get:
       operationId: getSpecHierarchyReport
@@ -7110,6 +7232,131 @@ components:
           type: integer
           minimum: 0
           description: Number of diff entries omitted from `accept`
+
+    HistoryAnchor:
+      description: A spec content version, immutable package revision UUID, origin, or current
+      oneOf:
+        - type: integer
+          minimum: 1
+        - type: string
+          enum: [origin, current]
+        - type: string
+          format: uuid
+
+    ParagraphHistoryEntry:
+      type: object
+      required: [specId, custody, version, text, nodeType, op, contentVersion, snapshotAt]
+      properties:
+        specId:
+          type: string
+          format: uuid
+        custody:
+          type: string
+          enum: [origin, spec]
+          description: "`origin` is a pre-derive master iteration; `spec` is the requested branch"
+        version:
+          type: integer
+          minimum: 1
+        text:
+          type: string
+        nodeType:
+          type: string
+          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation, object, objectText]
+        op:
+          type: string
+          enum: [edit, insert, remove, restore, merge, accept-note, restructure]
+        contentVersion:
+          type: [integer, 'null']
+          minimum: 1
+          description: Null only for legacy rows that predate complete capture
+        snapshotAt:
+          type: string
+          format: date-time
+
+    HistoryOperationCounts:
+      type: object
+      required: [edited, inserted, removed]
+      properties:
+        edited: { type: integer, minimum: 0 }
+        inserted: { type: integer, minimum: 0 }
+        removed: { type: integer, minimum: 0 }
+
+    SpecHistoryStep:
+      type: object
+      required: [contentVersion, at, ops]
+      properties:
+        contentVersion:
+          type: integer
+          minimum: 1
+        at:
+          type: string
+          format: date-time
+        ops:
+          $ref: '#/components/schemas/HistoryOperationCounts'
+
+    SpecHistoryMilestone:
+      oneOf:
+        - type: object
+          required: [kind, at, parentSpecId, originVersion]
+          properties:
+            kind: { type: string, const: origin }
+            at: { type: string, format: date-time }
+            parentSpecId: { type: [string, 'null'], format: uuid }
+            originVersion: { type: integer, minimum: 1 }
+        - type: object
+          required: [kind, at, revisionId, packageId, label]
+          properties:
+            kind: { type: string, const: revision }
+            at: { type: string, format: date-time }
+            revisionId: { type: string, format: uuid }
+            packageId: { type: string, format: uuid }
+            label: { type: string }
+
+    SpecHistory:
+      type: object
+      required: [specId, currentContentVersion, steps, milestones]
+      properties:
+        specId: { type: string, format: uuid }
+        currentContentVersion: { type: integer, minimum: 1 }
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecHistoryStep'
+        milestones:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecHistoryMilestone'
+
+    HistoryDiffEntry:
+      type: object
+      required: [nodeId, nodeType, beforeText, afterText]
+      properties:
+        nodeId: { type: string, format: uuid }
+        nodeType: { type: string }
+        beforeText: { type: [string, 'null'] }
+        afterText: { type: [string, 'null'] }
+
+    SpecHistoryDiff:
+      type: object
+      required: [specId, from, to, added, removed, modified]
+      properties:
+        specId: { type: string, format: uuid }
+        from:
+          $ref: '#/components/schemas/HistoryAnchor'
+        to:
+          $ref: '#/components/schemas/HistoryAnchor'
+        added:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryDiffEntry'
+        removed:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryDiffEntry'
+        modified:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryDiffEntry'
 
     LineageHop:
       type: object

@@ -49,6 +49,9 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['get_numbering_profile', 'read'],
   ['generate_docx', 'read'],
   ['get_hierarchy_report', 'read'], // per-paragraph 5-signal inference scoring (WS2 #424)
+  ['get_paragraph_history', 'read'],
+  ['get_spec_history', 'read'],
+  ['get_history_diff', 'read'],
   ['coordination_report', 'read'],
   ['get_reference_graph', 'read'],
   ['get_project_keynotes', 'read'],
