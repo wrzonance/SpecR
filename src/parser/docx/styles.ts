@@ -18,7 +18,7 @@ import {
   defaultParagraphStyleId,
   defaultRunEmphasis,
   parseRunEmphasis,
-  resolvedCharacterRunEmphasisMap,
+  characterRunEmphasisChainMap,
   resolvedRunEmphasisMap,
 } from './emphasis-styles.js';
 import type { StyleInfo, StyleMap, StyleNumPr } from './types.js';
@@ -206,7 +206,7 @@ function emptyStyleMap(): StyleMap {
     vanishCharStyleIds: new Set(),
     defaultRunEmphasis: {},
     resolvedRunEmphasis: new Map(),
-    resolvedCharacterRunEmphasis: new Map(),
+    characterRunEmphasisChains: new Map(),
   };
 }
 
@@ -271,6 +271,6 @@ export function buildStyleMap(xml: string): StyleMap {
     vanishCharStyleIds: characterStyleVanishIds(root),
     defaultRunEmphasis: emphasisDefaults,
     resolvedRunEmphasis: resolvedRunEmphasisMap(styles, emphasisDefaults),
-    resolvedCharacterRunEmphasis: resolvedCharacterRunEmphasisMap(root),
+    characterRunEmphasisChains: characterRunEmphasisChainMap(root),
   };
 }

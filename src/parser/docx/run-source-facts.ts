@@ -1,12 +1,10 @@
-import type { SourceEmphasisProperty, SourceEmphasisValue } from '../../ast/types.js';
+import type { SourceEmphasisFact } from '../../ast/types.js';
+import { applyEmphasisStyle } from './emphasis-styles.js';
 import { asRecord, extractAttrStr } from './xml-utils.js';
 import type { RunEmphasisStyle, StyleMap } from './types.js';
 
-export interface EmphasisDeviation {
-  readonly property: SourceEmphasisProperty;
-  readonly value: Exclude<SourceEmphasisValue, null>;
-  readonly expected: SourceEmphasisValue;
-}
+type WithoutLocation<T> = T extends SourceEmphasisFact ? Omit<T, 'text' | 'span'> : never;
+type EmphasisDeviation = WithoutLocation<SourceEmphasisFact>;
 
 export interface RunSourceProperties {
   readonly colors: readonly string[];
@@ -73,12 +71,25 @@ function orderedRunEmphasis(props: readonly unknown[]): RunEmphasisStyle {
   };
 }
 
-function deviation(
-  property: SourceEmphasisProperty,
-  value: Exclude<SourceEmphasisValue, null> | undefined,
-  expected: SourceEmphasisValue
+function booleanDeviation(
+  property: 'bold' | 'italic',
+  value: boolean | undefined,
+  expected: boolean
 ): EmphasisDeviation | null {
   return value !== undefined && value !== expected ? { property, value, expected } : null;
+}
+
+function underlineDeviation(value: string | undefined, expected: string): EmphasisDeviation | null {
+  return value !== undefined && value !== expected
+    ? { property: 'underline', value, expected }
+    : null;
+}
+
+function sizeDeviation(
+  value: number | undefined,
+  expected: number | null
+): EmphasisDeviation | null {
+  return value !== undefined && value !== expected ? { property: 'size', value, expected } : null;
 }
 
 function emphasisDeviations(
@@ -86,17 +97,24 @@ function emphasisDeviations(
   effective: RunEmphasisStyle
 ): readonly EmphasisDeviation[] {
   return [
-    deviation('bold', direct.bold, effective.bold ?? false),
-    deviation('italic', direct.italic, effective.italic ?? false),
-    deviation('underline', direct.underline, effective.underline ?? 'none'),
-    deviation('size', direct.size, effective.size ?? null),
+    booleanDeviation('bold', direct.bold, effective.bold ?? false),
+    booleanDeviation('italic', direct.italic, effective.italic ?? false),
+    underlineDeviation(direct.underline, effective.underline ?? 'none'),
+    sizeDeviation(direct.size, effective.size ?? null),
   ].filter((item): item is EmphasisDeviation => item !== null);
 }
 
-function runStyleEmphasis(props: readonly unknown[], styleMap: StyleMap): RunEmphasisStyle {
+function runStyleEmphasis(
+  props: readonly unknown[],
+  styleMap: StyleMap,
+  effective: RunEmphasisStyle
+): RunEmphasisStyle {
   const rStyle = findElement(props, 'w:rStyle');
   const styleId = rStyle ? orderedAttr(rStyle, '@_w:val') : '';
-  return styleMap.resolvedCharacterRunEmphasis?.get(styleId) ?? {};
+  return (styleMap.characterRunEmphasisChains?.get(styleId) ?? []).reduce(
+    applyEmphasisStyle,
+    effective
+  );
 }
 
 export function effectiveEmphasisForParagraph(
@@ -131,7 +149,10 @@ export function sourcePropertiesForRun(
     color ? normalizeRunColor(orderedAttr(color, '@_w:val')) : null,
     highlight ? normalizeHighlight(orderedAttr(highlight, '@_w:val')) : null,
   ].filter((token): token is string => token !== null);
-  const actual = { ...runStyleEmphasis(props, styleMap), ...orderedRunEmphasis(props) };
+  const actual = {
+    ...runStyleEmphasis(props, styleMap, effective),
+    ...orderedRunEmphasis(props),
+  };
   return {
     colors,
     emphasis: emphasisDeviations(actual, effective),

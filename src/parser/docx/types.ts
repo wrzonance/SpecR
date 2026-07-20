@@ -87,7 +87,7 @@ export interface StyleMap {
   readonly vanishCharStyleIds: ReadonlySet<string>;
   readonly defaultRunEmphasis?: RunEmphasisStyle;
   readonly resolvedRunEmphasis?: ReadonlyMap<string, RunEmphasisStyle>;
-  readonly resolvedCharacterRunEmphasis?: ReadonlyMap<string, RunEmphasisStyle>;
+  readonly characterRunEmphasisChains?: ReadonlyMap<string, readonly RunEmphasisStyle[]>;
 }
 
 // ─── document.xml ─────────────────────────────────────────────────────────────

@@ -83,13 +83,34 @@ export const SourceChoiceTokenFactSchema = z.object({
   span: SourceTextSpanSchema,
 });
 
-export const SourceEmphasisFactSchema = z.object({
-  property: z.enum(['bold', 'italic', 'underline', 'size']),
-  value: z.union([z.boolean(), z.string(), z.number().int()]),
-  expected: z.union([z.boolean(), z.string(), z.number().int(), z.null()]),
-  text: z.string(),
-  span: SourceTextSpanSchema,
-});
+const emphasisLocation = { text: z.string(), span: SourceTextSpanSchema };
+
+export const SourceEmphasisFactSchema = z.discriminatedUnion('property', [
+  z.object({
+    property: z.literal('bold'),
+    value: z.boolean(),
+    expected: z.boolean(),
+    ...emphasisLocation,
+  }),
+  z.object({
+    property: z.literal('italic'),
+    value: z.boolean(),
+    expected: z.boolean(),
+    ...emphasisLocation,
+  }),
+  z.object({
+    property: z.literal('underline'),
+    value: z.string(),
+    expected: z.string(),
+    ...emphasisLocation,
+  }),
+  z.object({
+    property: z.literal('size'),
+    value: z.number().int(),
+    expected: z.number().int().nullable(),
+    ...emphasisLocation,
+  }),
+]);
 
 export const SourceFactsSchema = z
   .object({

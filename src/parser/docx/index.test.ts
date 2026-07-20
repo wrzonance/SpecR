@@ -603,6 +603,44 @@ describe('parseDocx — source facts: manual emphasis (#407)', () => {
       { property: 'bold', value: true, expected: false, text: 'GENERAL', span: [0, 7] },
     ]);
   });
+
+  it('applies OOXML toggle semantics across a paragraph basedOn chain', async () => {
+    const stylesXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:styleId="Base"><w:rPr><w:b/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Child"><w:basedOn w:val="Base"/><w:rPr><w:b/></w:rPr></w:style>
+</w:styles>`;
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="Child"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
+</w:body></w:document>`;
+    const tree = await parseDocx(
+      await makeDocx({ documentXml, stylesXml, numberingXml: STRUCTURED_NUMBERING })
+    );
+
+    expect(sourceEmphasis(tree.parts[0])).toEqual([
+      { property: 'bold', value: true, expected: false, text: 'GENERAL', span: [0, 7] },
+    ]);
+  });
+
+  it('applies a character-style toggle against paragraph emphasis', async () => {
+    const stylesXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:styleId="Heading"><w:rPr><w:b/></w:rPr></w:style>
+  <w:style w:type="character" w:styleId="ToggleBold"><w:rPr><w:b/></w:rPr></w:style>
+</w:styles>`;
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+  <w:p><w:pPr><w:pStyle w:val="Heading"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:rStyle w:val="ToggleBold"/></w:rPr><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
+</w:body></w:document>`;
+    const tree = await parseDocx(
+      await makeDocx({ documentXml, stylesXml, numberingXml: STRUCTURED_NUMBERING })
+    );
+
+    expect(sourceEmphasis(tree.parts[0])).toEqual([
+      { property: 'bold', value: false, expected: true, text: 'GENERAL', span: [0, 7] },
+    ]);
+  });
 });
 
 describe('parseDocx — source facts: choice tokens (#130)', () => {

@@ -10,23 +10,39 @@ describe('summarizeManualEmphasis', () => {
       title: 'Painting',
       parts: [
         {
-          id: 'node',
-          type: 'pr1',
-          text: 'Use coating.',
-          children: [],
-          meta: {
-            sourceFacts: {
-              emphasis: [
+          id: 'part',
+          type: 'part',
+          text: 'GENERAL',
+          meta: {},
+          children: [
+            {
+              id: 'article',
+              type: 'article',
+              text: 'SUMMARY',
+              meta: {},
+              children: [
                 {
-                  property: 'bold',
-                  value: true,
-                  expected: false,
-                  text: 'coating',
-                  span: [4, 11],
+                  id: 'node',
+                  type: 'pr1',
+                  text: 'Use coating.',
+                  children: [],
+                  meta: {
+                    sourceFacts: {
+                      emphasis: [
+                        {
+                          property: 'bold',
+                          value: true,
+                          expected: false,
+                          text: 'coating',
+                          span: [4, 11],
+                        },
+                      ],
+                    },
+                  },
                 },
               ],
             },
-          },
+          ],
         },
       ],
     };
@@ -38,6 +54,7 @@ describe('summarizeManualEmphasis', () => {
           nodeId: 'node',
           nodeType: 'pr1',
           text: 'Use coating.',
+          outlinePath: ['09 91 23', 'GENERAL', 'SUMMARY', 'Use coating.'],
           emphasis: [
             {
               property: 'bold',

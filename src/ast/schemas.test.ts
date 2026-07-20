@@ -487,6 +487,18 @@ describe('SourceFactsSchema', () => {
   it('rejects non-JSON unknown fact values', () => {
     expect(SourceFactsSchema.safeParse({ reviewer: 1n }).success).toBe(false);
   });
+
+  it.each([
+    { property: 'bold', value: 30, expected: false },
+    { property: 'italic', value: true, expected: 'single' },
+    { property: 'underline', value: true, expected: 'none' },
+    { property: 'size', value: '30', expected: 22 },
+  ])('rejects value types that do not match emphasis property $property', (emphasis) => {
+    const result = SourceFactsSchema.safeParse({
+      emphasis: [{ ...emphasis, text: 'invalid', span: [0, 7] }],
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('CreateProjectBodySchema (issue #94)', () => {

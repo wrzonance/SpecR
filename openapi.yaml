@@ -6801,28 +6801,59 @@ components:
           $ref: '#/components/schemas/SourceTextSpan'
 
     SourceEmphasisFact:
-      type: object
-      required: [property, value, expected, text, span]
-      properties:
-        property:
-          type: string
-          enum: [bold, italic, underline, size]
-        value:
-          oneOf:
-            - type: boolean
-            - type: string
-            - type: integer
-        expected:
-          oneOf:
-            - type: boolean
-            - type: string
-            - type: integer
-            - type: 'null'
-        text:
-          type: string
-          description: Text carried by the directly formatted run.
-        span:
-          $ref: '#/components/schemas/SourceTextSpan'
+      description: >-
+        A run-level formatting deviation from the paragraph effective style.
+        Size values use OOXML half-points (for example, 22 means 11 pt).
+      oneOf:
+        - type: object
+          required: [property, value, expected, text, span]
+          properties:
+            property:
+              type: string
+              enum: [bold, italic]
+            value:
+              type: boolean
+            expected:
+              type: boolean
+            text:
+              type: string
+              description: Text carried by the directly formatted run.
+            span:
+              $ref: '#/components/schemas/SourceTextSpan'
+        - type: object
+          required: [property, value, expected, text, span]
+          properties:
+            property:
+              type: string
+              const: underline
+            value:
+              type: string
+            expected:
+              type: string
+            text:
+              type: string
+              description: Text carried by the directly formatted run.
+            span:
+              $ref: '#/components/schemas/SourceTextSpan'
+        - type: object
+          required: [property, value, expected, text, span]
+          properties:
+            property:
+              type: string
+              const: size
+            value:
+              type: integer
+              description: Font size in OOXML half-points.
+            expected:
+              oneOf:
+                - type: integer
+                  description: Effective font size in OOXML half-points.
+                - type: 'null'
+            text:
+              type: string
+              description: Text carried by the directly formatted run.
+            span:
+              $ref: '#/components/schemas/SourceTextSpan'
 
     SourceFacts:
       type: object

@@ -66,7 +66,34 @@ function resolveChain(
   const inherited = style.basedOn
     ? resolveChain(style.basedOn, styles, defaults, depth + 1)
     : defaults;
-  return { ...inherited, ...style.runEmphasis };
+  return style.runEmphasis ? applyEmphasisStyle(inherited, style.runEmphasis) : inherited;
+}
+
+function resolvedToggle(
+  inherited: boolean | undefined,
+  declared: boolean | undefined
+): boolean | undefined {
+  if (declared === undefined) return inherited;
+  if (!declared) return false;
+  return !(inherited ?? false);
+}
+
+/** Apply one OOXML style level. Bold and italic toggle inherited values; other
+ * run properties replace them. Direct run formatting is handled separately. */
+export function applyEmphasisStyle(
+  inherited: RunEmphasisStyle,
+  declared: RunEmphasisStyle
+): RunEmphasisStyle {
+  const bold = resolvedToggle(inherited.bold, declared.bold);
+  const italic = resolvedToggle(inherited.italic, declared.italic);
+  const underline = declared.underline ?? inherited.underline;
+  const size = declared.size ?? inherited.size;
+  return {
+    ...(bold !== undefined ? { bold } : {}),
+    ...(italic !== undefined ? { italic } : {}),
+    ...(underline !== undefined ? { underline } : {}),
+    ...(size !== undefined ? { size } : {}),
+  };
 }
 
 function characterStyles(root: Record<string, unknown>): ReadonlyMap<string, EmphasisStyle> {
@@ -86,13 +113,23 @@ function characterStyles(root: Record<string, unknown>): ReadonlyMap<string, Emp
   return new Map(entries);
 }
 
-export function resolvedCharacterRunEmphasisMap(
+function styleChain(
+  styleId: string,
+  styles: ReadonlyMap<string, EmphasisStyle>,
+  depth: number
+): readonly RunEmphasisStyle[] {
+  if (depth > MAX_BASED_ON_DEPTH) return [];
+  const style = styles.get(styleId);
+  if (!style) return [];
+  const inherited = style.basedOn ? styleChain(style.basedOn, styles, depth + 1) : [];
+  return style.runEmphasis ? [...inherited, style.runEmphasis] : inherited;
+}
+
+export function characterRunEmphasisChainMap(
   root: Record<string, unknown>
-): ReadonlyMap<string, RunEmphasisStyle> {
+): ReadonlyMap<string, readonly RunEmphasisStyle[]> {
   const styles = characterStyles(root);
-  return new Map(
-    [...styles.keys()].map((styleId) => [styleId, resolveChain(styleId, styles, {}, 0)])
-  );
+  return new Map([...styles.keys()].map((styleId) => [styleId, styleChain(styleId, styles, 0)]));
 }
 
 export function resolvedRunEmphasisMap(
