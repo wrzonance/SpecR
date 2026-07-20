@@ -6541,6 +6541,7 @@ components:
           items: { type: string }
         highlights:
           type: array
+          minItems: 1
           items:
             $ref: '#/components/schemas/SourceHighlightFact'
 
