@@ -6,6 +6,7 @@ export type {
   SpecNodeInference,
   SourceFacts,
   SourceColorFact,
+  SourceHighlightFact,
   SourceChoiceTokenFact,
   SourceEmphasisFact,
   SourceEmphasisProperty,

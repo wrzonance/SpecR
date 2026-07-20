@@ -1,10 +1,4 @@
-import type {
-  SourceFacts,
-  SourceColorFact,
-  SourceEmphasisFact,
-  SpecNode,
-  ParseWarning,
-} from '../ast/types.js';
+import type { SourceFacts, SourceColorFact, SpecNode, ParseWarning } from '../ast/types.js';
 
 // Strip a render-derived CSI "PART n -" prefix from a heading's text, leaving
 // only the part name (e.g. "PART 3 - EXECUTION" → "EXECUTION", "PART 1 – GENERAL"
@@ -202,11 +196,9 @@ function rebaseColor(
   return { color: color.color, coverage: newLen > 0 ? covered / newLen : 0, spans };
 }
 
-function rebaseEmphasis(
-  fact: SourceEmphasisFact,
-  removed: number,
-  newLen: number
-): SourceEmphasisFact | null {
+function rebaseLocatedFact<
+  T extends { readonly text: string; readonly span: readonly [number, number] },
+>(fact: T, removed: number, newLen: number): T | null {
   const span = shiftRange(fact.span, removed, newLen);
   if (!span) return null;
   const survivingStart = Math.max(fact.span[0], removed);
@@ -220,6 +212,14 @@ function rebaseEmphasis(
 
 function nonEmpty<T>(items: readonly T[] | undefined): readonly T[] | undefined {
   return items && items.length > 0 ? items : undefined;
+}
+
+function mapNonNull<T, U>(
+  items: readonly T[] | undefined,
+  map: (item: T) => U | null
+): readonly U[] | undefined {
+  if (items === undefined) return undefined;
+  return nonEmpty(items.map(map).filter((item): item is U => item !== null));
 }
 
 /**
@@ -241,33 +241,29 @@ export function rebaseSourceFacts(
       ?.map((comment) => ({ comment, anchor: shiftRange(comment.anchor, removed, newLen) }))
       .flatMap(({ comment, anchor }) => (anchor ? [{ ...comment, anchor }] : []))
   );
-  const colors = nonEmpty(
-    facts.colors
-      ?.map((color) => rebaseColor(color, removed, newLen))
-      .filter((color): color is SourceColorFact => color !== null)
+  const colors = mapNonNull(facts.colors, (color) => rebaseColor(color, removed, newLen));
+  const choiceTokens = mapNonNull(facts.choiceTokens, (token) => {
+    const span = shiftRange(token.span, removed, newLen);
+    return span ? { ...token, span } : null;
+  });
+  const highlights = mapNonNull(facts.highlights, (fact) =>
+    rebaseLocatedFact(fact, removed, newLen)
   );
-  const choiceTokens = nonEmpty(
-    facts.choiceTokens
-      ?.map((token) => ({ token, span: shiftRange(token.span, removed, newLen) }))
-      .flatMap(({ token, span }) => (span ? [{ ...token, span }] : []))
-  );
-  const emphasis = nonEmpty(
-    facts.emphasis
-      ?.map((fact) => rebaseEmphasis(fact, removed, newLen))
-      .filter((fact): fact is SourceEmphasisFact => fact !== null)
-  );
-  // Rebuild without the four positional keys (so empties are omitted, not set to
+  const emphasis = mapNonNull(facts.emphasis, (fact) => rebaseLocatedFact(fact, removed, newLen));
+  // Rebuild without the five positional keys (so empties are omitted, not set to
   // undefined — exactOptionalPropertyTypes), preserving banner/vanish and any extras.
   const rest: Record<string, unknown> = { ...facts };
   delete rest.comments;
   delete rest.colors;
   delete rest.choiceTokens;
+  delete rest.highlights;
   delete rest.emphasis;
   return {
     ...rest,
     ...(comments ? { comments } : {}),
     ...(colors ? { colors } : {}),
     ...(choiceTokens ? { choiceTokens } : {}),
+    ...(highlights ? { highlights } : {}),
     ...(emphasis ? { emphasis } : {}),
   };
 }

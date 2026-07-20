@@ -442,6 +442,9 @@ describe('SourceFactsSchema', () => {
     const facts = {
       comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19], closed: false }],
       colors: [{ color: '0000FF', coverage: 0.82, spans: [[12, 96]] }],
+      highlights: [
+        { color: 'yellow', text: 'select finish', span: [12, 25], vendorMarker: 'draft' },
+      ],
       choiceTokens: [{ kind: 'bracket', options: ['Provide mockup.'], span: [20, 37] }],
       emphasis: [
         {

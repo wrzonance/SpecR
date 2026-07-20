@@ -77,6 +77,14 @@ export const SourceColorFactSchema = z.object({
   spans: z.array(SourceTextSpanSchema),
 });
 
+export const SourceHighlightFactSchema = z
+  .object({
+    color: z.string(),
+    text: z.string(),
+    span: SourceTextSpanSchema,
+  })
+  .catchall(JsonValue);
+
 export const SourceChoiceTokenFactSchema = z.object({
   kind: z.enum(['angle', 'bracket']),
   options: z.array(z.string()),
@@ -115,6 +123,7 @@ export const SourceEmphasisFactSchema = z.discriminatedUnion('property', [
 export const SourceFactsSchema = z
   .object({
     colors: z.array(SourceColorFactSchema).exactOptional(),
+    highlights: z.array(SourceHighlightFactSchema).exactOptional(),
     comments: z.array(SourceCommentFactSchema).exactOptional(),
     choiceTokens: z.array(SourceChoiceTokenFactSchema).exactOptional(),
     emphasis: z.array(SourceEmphasisFactSchema).exactOptional(),
