@@ -623,15 +623,16 @@ describe('parseDocx — source facts: manual emphasis (#407)', () => {
     ]);
   });
 
-  it('applies a character-style toggle against paragraph emphasis', async () => {
+  it('applies a character-style basedOn chain against paragraph emphasis', async () => {
     const stylesXml = `<?xml version="1.0" encoding="UTF-8"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:style w:type="paragraph" w:styleId="Heading"><w:rPr><w:b/></w:rPr></w:style>
   <w:style w:type="character" w:styleId="ToggleBold"><w:rPr><w:b/></w:rPr></w:style>
+  <w:style w:type="character" w:styleId="ToggleBoldItalic"><w:basedOn w:val="ToggleBold"/><w:rPr><w:i/></w:rPr></w:style>
 </w:styles>`;
     const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
-  <w:p><w:pPr><w:pStyle w:val="Heading"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:rStyle w:val="ToggleBold"/></w:rPr><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
+  <w:p><w:pPr><w:pStyle w:val="Heading"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:rPr><w:rStyle w:val="ToggleBoldItalic"/></w:rPr><w:t>PART 1 – GENERAL</w:t></w:r></w:p>
 </w:body></w:document>`;
     const tree = await parseDocx(
       await makeDocx({ documentXml, stylesXml, numberingXml: STRUCTURED_NUMBERING })
@@ -639,6 +640,7 @@ describe('parseDocx — source facts: manual emphasis (#407)', () => {
 
     expect(sourceEmphasis(tree.parts[0])).toEqual([
       { property: 'bold', value: false, expected: true, text: 'GENERAL', span: [0, 7] },
+      { property: 'italic', value: true, expected: false, text: 'GENERAL', span: [0, 7] },
     ]);
   });
 });
