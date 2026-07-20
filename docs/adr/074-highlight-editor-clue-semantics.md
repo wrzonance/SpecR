@@ -1,4 +1,4 @@
-# ADR-073: Highlight is a first-class editor clue
+# ADR-074: Highlight is a first-class editor clue
 
 ## Status: Accepted
 
