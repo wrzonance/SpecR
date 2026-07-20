@@ -51,6 +51,8 @@ export {
   ReleaseLockBodySchema,
 } from './schemas.js';
 export { deriveArticleRole, tagArticleRoles, ARTICLE_ROLE_RULES } from './article-role.js';
+export { resolveSourceHighlights } from './source-highlights.js';
+export type { ResolvedSourceHighlight } from './source-highlights.js';
 export { AstError } from './error.js';
 export {
   NODE_TYPE_TO_NORMALIZED_ILVL,

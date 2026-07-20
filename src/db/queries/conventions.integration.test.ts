@@ -27,6 +27,7 @@ describe('migration 024 — built-in Industry Default seed', () => {
     expect(builtIn).toMatchObject({ libraryId: null, name: BUILT_IN_CONVENTION_NAME });
     expect(builtIn?.rules).toEqual({
       colorMeanings: [{ color: '0000FF', meaning: 'editable' }],
+      highlightMeanings: [{ color: 'yellow', meaning: 'choice' }],
       choiceTokens: [{ kind: 'angle' }, { kind: 'bracket' }],
       noteBanners: [
         '^NOTES? TO (?:THE )?SPEC(?:IFIER|S| WRITER)?S?\\b',

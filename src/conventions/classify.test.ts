@@ -165,6 +165,79 @@ describe('classify — color meanings rung', () => {
   });
 });
 
+describe('classify — highlight meanings rung', () => {
+  const highlighted: SourceFacts = {
+    highlights: [{ color: 'yellow', text: 'select finish', span: [5, 18] }],
+    colors: [{ color: 'highlight:yellow', coverage: 0.5, spans: [[5, 18]] }],
+  };
+
+  it('mapped yellow highlight classifies the paragraph as choice', () => {
+    const out = classifyOne(highlighted, {
+      highlightMeanings: [{ color: 'yellow', meaning: 'choice' }],
+      defaultEditability: 'locked',
+    });
+    expect(out.editability).toBe('choice');
+    expect(out.confidence).toBe(0.85);
+    expect(out.evidence[0]).toEqual({
+      rule: 'highlightMeanings[yellow]',
+      fact: 'highlights[0]',
+    });
+  });
+
+  it('unmapped highlight falls through to the configured default', () => {
+    const out = classifyOne(highlighted, { defaultEditability: 'locked' });
+    expect(out.editability).toBe('locked');
+    expect(out.evidence[0]?.rule).toBe('defaultEditability');
+  });
+
+  it('highlight outranks a conflicting font-color meaning', () => {
+    const out = classifyOne(
+      {
+        ...highlighted,
+        colors: [
+          { color: BLUE, coverage: 1, spans: [[0, 20]] },
+          { color: 'highlight:yellow', coverage: 0.5, spans: [[5, 18]] },
+        ],
+      },
+      {
+        highlightMeanings: [{ color: 'yellow', meaning: 'choice' }],
+        colorMeanings: [{ color: BLUE, meaning: 'editable' }],
+      }
+    );
+    expect(out.editability).toBe('choice');
+    expect(out.evidence[0]?.rule).toBe('highlightMeanings[yellow]');
+  });
+
+  it('legacy highlight-prefixed color facts still use highlight meanings', () => {
+    const legacy: SourceFacts = {
+      colors: [{ color: 'highlight:yellow', coverage: 0.5, spans: [[5, 18]] }],
+    };
+    const out = classifyOne(legacy, {
+      highlightMeanings: [{ color: 'yellow', meaning: 'choice' }],
+    });
+    expect(out.editability).toBe('choice');
+    expect(out.evidence[0]).toEqual({
+      rule: 'highlightMeanings[yellow]',
+      fact: 'colors[0]',
+    });
+  });
+
+  it('explicit choice-token grammar outranks a highlight mapping', () => {
+    const out = classifyOne(
+      {
+        ...highlighted,
+        choiceTokens: [{ kind: 'angle', options: ['one', 'two'], span: [5, 18] }],
+      },
+      {
+        choiceTokens: [{ kind: 'angle' }],
+        highlightMeanings: [{ color: 'yellow', meaning: 'editable' }],
+      }
+    );
+    expect(out.editability).toBe('choice');
+    expect(out.evidence[0]?.rule).toBe('choiceTokens[angle]');
+  });
+});
+
 // ── Rung 3: choice tokens ─────────────────────────────────────────────────────
 
 describe('classify — choice rung', () => {

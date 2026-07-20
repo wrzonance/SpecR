@@ -169,6 +169,10 @@ const ColorMeaningSchema = z
   .object({ color: z.string(), meaning: EditabilitySchema })
   .catchall(JsonValue);
 
+const HighlightMeaningSchema = z
+  .object({ color: z.string(), meaning: EditabilitySchema })
+  .catchall(JsonValue);
+
 const ConventionChoiceTokenSchema = z
   .object({ kind: z.enum(['angle', 'bracket']) })
   .catchall(JsonValue);
@@ -181,6 +185,7 @@ const CommentPolicySchema = z.object({ treatAs: EditabilitySchema }).catchall(Js
 export const ConventionRulesSchema = z
   .object({
     colorMeanings: z.array(ColorMeaningSchema).exactOptional(),
+    highlightMeanings: z.array(HighlightMeaningSchema).exactOptional(),
     choiceTokens: z.array(ConventionChoiceTokenSchema).exactOptional(),
     noteBanners: z.array(z.string()).exactOptional(),
     comments: CommentPolicySchema.exactOptional(),

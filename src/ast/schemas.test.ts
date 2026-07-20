@@ -580,6 +580,7 @@ describe('SetPackageSpecsBodySchema (issue #95)', () => {
 describe('ConventionRulesSchema (ADR-022 D3/D5)', () => {
   const FULL_RULES = {
     colorMeanings: [{ color: '0000FF', meaning: 'editable' }],
+    highlightMeanings: [{ color: 'yellow', meaning: 'choice' }],
     choiceTokens: [{ kind: 'angle' }, { kind: 'bracket' }],
     noteBanners: ['^NOTES? TO (?:THE )?SPEC(?:IFIER)?S?'],
     comments: { treatAs: 'note' },
@@ -610,6 +611,11 @@ describe('ConventionRulesSchema (ADR-022 D3/D5)', () => {
     expect(
       ConventionRulesSchema.safeParse({ colorMeanings: [{ color: '0000FF', meaning: 'maybe' }] })
         .success
+    ).toBe(false);
+    expect(
+      ConventionRulesSchema.safeParse({
+        highlightMeanings: [{ color: 'yellow', meaning: 'maybe' }],
+      }).success
     ).toBe(false);
   });
 
