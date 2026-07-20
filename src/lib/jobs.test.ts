@@ -19,6 +19,7 @@ function baseReport(headerFooter: OnboardingReport['headerFooter']): OnboardingR
       counts: { locked: 0, editable: 0, choice: 0, note: 0 },
       lowConfidence: [],
     },
+    highlightReview: { total: 0, findings: [] },
     hierarchy: {
       counts: { scored: 0, unscored: 0, belowThreshold: 0 },
       lowConfidence: [],

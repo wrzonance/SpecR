@@ -31,6 +31,7 @@ import { parsePool } from '../lib/parse-pool.js';
 import { workerOutputSchema, type WorkerOutput } from '../lib/parse-worker.js';
 import { summarizeEditability } from './onboarding-report.js';
 import { summarizeHierarchy } from '../lib/hierarchy-summary.js';
+import { summarizeHighlightReview } from '../lib/highlight-review.js';
 import { logger } from '../lib/logger.js';
 import { parseLog, logParseWarnings } from '../lib/log-context.js';
 import { sha256Hex } from '../lib/hash.js';
@@ -219,7 +220,7 @@ async function deriveStyleIfDocx(
 async function classifyAndSummarize(
   jobId: string,
   specId: string
-): Promise<Pick<OnboardingReport, 'editability' | 'hierarchy'>> {
+): Promise<Pick<OnboardingReport, 'editability' | 'highlightReview' | 'hierarchy'>> {
   progress(jobId, 'classifying', 85);
   await reclassifySpec(specId, {});
   const treeResult = await getSpecTree(specId);
@@ -227,6 +228,7 @@ async function classifyAndSummarize(
   const source = await getSpecSource(specId);
   return {
     editability: summarizeEditability(treeResult.tree),
+    highlightReview: summarizeHighlightReview(treeResult.tree),
     hierarchy: summarizeHierarchy(treeResult.tree, source),
   };
 }
@@ -258,6 +260,7 @@ async function processOnboardingJob(
       styleSourceNeeded: style.templateId === null,
       headerFooter: tree.headerFooter ?? null,
       editability: summaries.editability,
+      highlightReview: summaries.highlightReview,
       hierarchy: summaries.hierarchy,
       parseWarnings: tree.warnings ?? [],
     };
