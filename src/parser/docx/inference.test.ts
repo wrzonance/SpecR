@@ -719,6 +719,39 @@ describe('buildTree — Pass 2: tree structure', () => {
     expect(article?.children.map((c) => c.text)).toEqual(['General Cable', 'Okonite Company']);
   });
 
+  it('rebases emphasis facts when stripping a matching manual pr-label', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ text: 'PART 1 - GENERAL' }),
+        makePara({ text: '1.1 INSTALLATION' }),
+        makePara({
+          text: 'A. Install anchors',
+          sourceFacts: {
+            emphasis: [
+              {
+                property: 'bold',
+                value: true,
+                expected: false,
+                text: 'anchors',
+                span: [11, 18],
+              },
+            ],
+          },
+        }),
+      ],
+      numMap(),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'unknown');
+    const item = tree.parts[0]?.children[0]?.children[0];
+
+    expect(item?.text).toBe('Install anchors');
+    expect(item?.meta.sourceFacts?.emphasis?.[0]).toMatchObject({
+      text: 'anchors',
+      span: [8, 15],
+    });
+  });
+
   // Multi-tier: a numbered sub-list ("1. Authority …") that genuinely sits at its typed
   // position ("1." at ord 0) loses its duplicate; the position must match the CSI label.
   it('strips manual pr2 numeric labels at their matching position ("1. Authority" → "Authority")', () => {

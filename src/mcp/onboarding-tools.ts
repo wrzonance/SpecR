@@ -47,7 +47,8 @@ function registerReviewTools(reg: ToolRegistrar): void {
         'Onboarding review report for a spec: editability summary (counts + low-confidence nodes), ' +
         'hierarchy-inference confidence summary (scored/unscored/belowThreshold counts + worst-first ' +
         'low-confidence nodes; unscored carries its reason), assigned style source, ' +
-        'styleSourceNeeded, and onboardingStatus. Reuses the same editability ' +
+        'manual-emphasis findings (paragraph locator + run spans), styleSourceNeeded, and ' +
+        'onboardingStatus. Reuses the same editability ' +
         'summarizer the #135 import-job report uses. Note: styleDerivation and parseWarnings are ' +
         'import-time-only (raw uploaded bytes are not persisted) and are not reproduced here.',
       inputSchema: { specId: specIdArg },

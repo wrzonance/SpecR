@@ -83,11 +83,41 @@ export const SourceChoiceTokenFactSchema = z.object({
   span: SourceTextSpanSchema,
 });
 
+const emphasisLocation = { text: z.string(), span: SourceTextSpanSchema };
+
+export const SourceEmphasisFactSchema = z.discriminatedUnion('property', [
+  z.object({
+    property: z.literal('bold'),
+    value: z.boolean(),
+    expected: z.boolean(),
+    ...emphasisLocation,
+  }),
+  z.object({
+    property: z.literal('italic'),
+    value: z.boolean(),
+    expected: z.boolean(),
+    ...emphasisLocation,
+  }),
+  z.object({
+    property: z.literal('underline'),
+    value: z.string(),
+    expected: z.string(),
+    ...emphasisLocation,
+  }),
+  z.object({
+    property: z.literal('size'),
+    value: z.number().int(),
+    expected: z.number().int().nullable(),
+    ...emphasisLocation,
+  }),
+]);
+
 export const SourceFactsSchema = z
   .object({
     colors: z.array(SourceColorFactSchema).exactOptional(),
     comments: z.array(SourceCommentFactSchema).exactOptional(),
     choiceTokens: z.array(SourceChoiceTokenFactSchema).exactOptional(),
+    emphasis: z.array(SourceEmphasisFactSchema).exactOptional(),
     banner: z.string().exactOptional(),
     vanish: z.literal(true).exactOptional(),
   })

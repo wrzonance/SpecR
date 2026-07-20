@@ -2,16 +2,22 @@ import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { scanChoiceTokens } from './choice-tokens.js';
 import { isCommentClosed } from './comment-closure.js';
+import {
+  effectiveEmphasisForParagraph,
+  sourcePropertiesForRun,
+  type RunSourceProperties,
+} from './run-source-facts.js';
 import { isSpecifierNote } from './heuristics.js';
-import { sourcePropertiesForRun, type RunSourceProperties } from './run-source-facts.js';
 import { asRecord, extractAttrStr } from './xml-utils.js';
 import type {
   SourceChoiceTokenFact,
   SourceColorFact,
   SourceCommentFact,
+  SourceEmphasisFact,
   SourceFacts,
 } from '../../ast/types.js';
 import type { DocxComment } from './comments.js';
+import type { StyleMap } from './types.js';
 
 const orderedXmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -41,6 +47,7 @@ interface InlineParagraph {
   readonly text: string;
   readonly markers: readonly CommentMarker[];
   readonly colorSpans: readonly ColorSpan[];
+  readonly emphasis: readonly SourceEmphasisFact[];
   readonly vanish: boolean;
 }
 
@@ -48,6 +55,8 @@ interface InlineState {
   text: string;
   readonly markers: CommentMarker[];
   readonly colorSpans: ColorSpan[];
+  readonly emphasis: SourceEmphasisFact[];
+  readonly styleMap: StyleMap;
   vanishChars: number;
 }
 
@@ -109,6 +118,13 @@ function appendText(state: InlineState, text: string, properties: RunSourcePrope
   if (properties.vanish) state.vanishChars += end - start;
 }
 
+function appendEmphasis(state: InlineState, start: number, properties: RunSourceProperties): void {
+  const end = state.text.length;
+  const text = state.text.slice(start, end);
+  if (text.trim().length === 0) return;
+  properties.emphasis.forEach((fact) => state.emphasis.push({ ...fact, text, span: [start, end] }));
+}
+
 // Formatting-property subtrees that must never contribute text content: a
 // w:pPr > w:tabs > w:tab (a tab-STOP definition) would otherwise inject a phantom
 // tab now that w:tab renders as whitespace. Mirrors merge/extract.ts PROPERTY_TAGS.
@@ -132,7 +148,12 @@ function collectLayoutElement(
 ): boolean {
   if (PROPERTY_TAGS.has(name)) return true;
   if (name === 'w:tab') {
-    appendText(state, '\t', { colors: [], vanish: properties.vanish });
+    appendText(state, '\t', {
+      colors: [],
+      emphasis: [],
+      effective: properties.effective,
+      vanish: properties.vanish,
+    });
     return true;
   }
   return false;
@@ -153,13 +174,20 @@ function collectOne(
   if (collectLayoutElement(name, state, properties)) return;
   appendMarker(name, record, state);
   const children = childNodes(record, name);
-  collectInline(children, state, name === 'w:r' ? sourcePropertiesForRun(children) : properties);
+  if (name === 'w:r') {
+    const runProperties = sourcePropertiesForRun(children, properties.effective, state.styleMap);
+    const start = state.text.length;
+    collectInline(children, state, runProperties);
+    appendEmphasis(state, start, runProperties);
+    return;
+  }
+  collectInline(children, state, properties);
 }
 
 function collectInline(
   nodes: readonly unknown[],
   state: InlineState,
-  properties: RunSourceProperties = { colors: [], vanish: false }
+  properties: RunSourceProperties
 ): void {
   for (const raw of nodes) {
     const record = asRecord(raw);
@@ -167,13 +195,22 @@ function collectInline(
   }
 }
 
-function inlineParagraph(children: readonly unknown[]): InlineParagraph {
-  const state: InlineState = { text: '', markers: [], colorSpans: [], vanishChars: 0 };
-  collectInline(children, state);
+function inlineParagraph(children: readonly unknown[], styleMap: StyleMap): InlineParagraph {
+  const effective = effectiveEmphasisForParagraph(children, styleMap);
+  const state: InlineState = {
+    text: '',
+    markers: [],
+    colorSpans: [],
+    emphasis: [],
+    styleMap,
+    vanishChars: 0,
+  };
+  collectInline(children, state, { colors: [], emphasis: [], effective, vanish: false });
   return {
     text: state.text,
     markers: state.markers,
     colorSpans: state.colorSpans,
+    emphasis: state.emphasis,
     vanish: state.text.length > 0 && state.vanishChars === state.text.length,
   };
 }
@@ -188,14 +225,14 @@ function findElementChildren(nodes: readonly unknown[], tag: string): readonly u
   return [];
 }
 
-function extractOrderedParagraphs(parsed: unknown): readonly InlineParagraph[] {
+function extractOrderedParagraphs(parsed: unknown, styleMap: StyleMap): readonly InlineParagraph[] {
   const root = Array.isArray(parsed) ? parsed : [];
   const document = findElementChildren(root, 'w:document');
   const body = findElementChildren(document, 'w:body');
   return body.flatMap((raw) => {
     const record = asRecord(raw);
     if (!record || !hasElement(record, 'w:p')) return [];
-    return [inlineParagraph(childNodes(record, 'w:p'))];
+    return [inlineParagraph(childNodes(record, 'w:p'), styleMap)];
   });
 }
 
@@ -317,6 +354,7 @@ function hasAnySourceFact(
   comments: readonly SourceCommentFact[],
   colors: readonly SourceColorFact[],
   choiceTokens: readonly SourceChoiceTokenFact[],
+  emphasis: readonly SourceEmphasisFact[],
   banner: string | undefined,
   vanish: boolean
 ): boolean {
@@ -324,6 +362,7 @@ function hasAnySourceFact(
     comments.length > 0 ||
     colors.length > 0 ||
     choiceTokens.length > 0 ||
+    emphasis.length > 0 ||
     banner !== undefined ||
     vanish
   );
@@ -333,14 +372,16 @@ function makeSourceFacts(
   comments: readonly SourceCommentFact[],
   colors: readonly SourceColorFact[],
   choiceTokens: readonly SourceChoiceTokenFact[],
+  emphasis: readonly SourceEmphasisFact[],
   banner: string | undefined,
   vanish: boolean
 ): SourceFacts | undefined {
-  if (!hasAnySourceFact(comments, colors, choiceTokens, banner, vanish)) return undefined;
+  if (!hasAnySourceFact(comments, colors, choiceTokens, emphasis, banner, vanish)) return undefined;
   return {
     ...(comments.length > 0 ? { comments } : {}),
     ...(colors.length > 0 ? { colors } : {}),
     ...(choiceTokens.length > 0 ? { choiceTokens } : {}),
+    ...(emphasis.length > 0 ? { emphasis } : {}),
     ...(banner !== undefined ? { banner } : {}),
     ...(vanish ? { vanish: true as const } : {}),
   };
@@ -370,6 +411,7 @@ function buildSourceFactsByParagraph(
       buckets[index] ?? [],
       colorFactsForParagraph(paragraph),
       scanChoiceTokens(paragraph.text),
+      paragraph.emphasis,
       isSpecifierNote(paragraph.text) ? paragraph.text.trim() : undefined,
       paragraph.vanish
     )
@@ -378,7 +420,8 @@ function buildSourceFactsByParagraph(
 
 export function parseParagraphSources(
   xml: string,
-  commentsById: ReadonlyMap<string, DocxComment>
+  commentsById: ReadonlyMap<string, DocxComment>,
+  styleMap: StyleMap
 ): readonly ParagraphSource[] {
   let parsed: unknown;
   try {
@@ -386,7 +429,7 @@ export function parseParagraphSources(
   } catch (err) {
     throw new ParserError('failed to parse word/document.xml', { cause: err });
   }
-  const paragraphs = extractOrderedParagraphs(parsed);
+  const paragraphs = extractOrderedParagraphs(parsed, styleMap);
   const sourceFacts = buildSourceFactsByParagraph(paragraphs, commentsById);
   return paragraphs.map((paragraph, index) => {
     const facts = sourceFacts[index];

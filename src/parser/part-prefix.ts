@@ -1,4 +1,10 @@
-import type { SourceFacts, SourceColorFact, SpecNode, ParseWarning } from '../ast/types.js';
+import type {
+  SourceFacts,
+  SourceColorFact,
+  SourceEmphasisFact,
+  SpecNode,
+  ParseWarning,
+} from '../ast/types.js';
 
 // Strip a render-derived CSI "PART n -" prefix from a heading's text, leaving
 // only the part name (e.g. "PART 3 - EXECUTION" → "EXECUTION", "PART 1 – GENERAL"
@@ -196,6 +202,22 @@ function rebaseColor(
   return { color: color.color, coverage: newLen > 0 ? covered / newLen : 0, spans };
 }
 
+function rebaseEmphasis(
+  fact: SourceEmphasisFact,
+  removed: number,
+  newLen: number
+): SourceEmphasisFact | null {
+  const span = shiftRange(fact.span, removed, newLen);
+  if (!span) return null;
+  const survivingStart = Math.max(fact.span[0], removed);
+  const survivingEnd = Math.min(fact.span[1], removed + newLen);
+  return {
+    ...fact,
+    text: fact.text.slice(survivingStart - fact.span[0], survivingEnd - fact.span[0]),
+    span,
+  };
+}
+
 function nonEmpty<T>(items: readonly T[] | undefined): readonly T[] | undefined {
   return items && items.length > 0 ? items : undefined;
 }
@@ -229,16 +251,23 @@ export function rebaseSourceFacts(
       ?.map((token) => ({ token, span: shiftRange(token.span, removed, newLen) }))
       .flatMap(({ token, span }) => (span ? [{ ...token, span }] : []))
   );
-  // Rebuild without the three positional keys (so empties are omitted, not set to
+  const emphasis = nonEmpty(
+    facts.emphasis
+      ?.map((fact) => rebaseEmphasis(fact, removed, newLen))
+      .filter((fact): fact is SourceEmphasisFact => fact !== null)
+  );
+  // Rebuild without the four positional keys (so empties are omitted, not set to
   // undefined — exactOptionalPropertyTypes), preserving banner/vanish and any extras.
   const rest: Record<string, unknown> = { ...facts };
   delete rest.comments;
   delete rest.colors;
   delete rest.choiceTokens;
+  delete rest.emphasis;
   return {
     ...rest,
     ...(comments ? { comments } : {}),
     ...(colors ? { colors } : {}),
     ...(choiceTokens ? { choiceTokens } : {}),
+    ...(emphasis ? { emphasis } : {}),
   };
 }

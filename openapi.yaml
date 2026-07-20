@@ -6800,6 +6800,61 @@ components:
         span:
           $ref: '#/components/schemas/SourceTextSpan'
 
+    SourceEmphasisFact:
+      description: >-
+        A run-level formatting deviation from the paragraph effective style.
+        Size values use OOXML half-points (for example, 22 means 11 pt).
+      oneOf:
+        - type: object
+          required: [property, value, expected, text, span]
+          properties:
+            property:
+              type: string
+              enum: [bold, italic]
+            value:
+              type: boolean
+            expected:
+              type: boolean
+            text:
+              type: string
+              description: Text carried by the directly formatted run.
+            span:
+              $ref: '#/components/schemas/SourceTextSpan'
+        - type: object
+          required: [property, value, expected, text, span]
+          properties:
+            property:
+              type: string
+              const: underline
+            value:
+              type: string
+            expected:
+              type: string
+            text:
+              type: string
+              description: Text carried by the directly formatted run.
+            span:
+              $ref: '#/components/schemas/SourceTextSpan'
+        - type: object
+          required: [property, value, expected, text, span]
+          properties:
+            property:
+              type: string
+              const: size
+            value:
+              type: integer
+              description: Font size in OOXML half-points.
+            expected:
+              oneOf:
+                - type: integer
+                  description: Effective font size in OOXML half-points.
+                - type: 'null'
+            text:
+              type: string
+              description: Text carried by the directly formatted run.
+            span:
+              $ref: '#/components/schemas/SourceTextSpan'
+
     SourceFacts:
       type: object
       description: >-
@@ -6819,6 +6874,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SourceChoiceTokenFact'
+        emphasis:
+          type: array
+          description: >-
+            Advisory run-level formatting deviations from the paragraph effective
+            style. Captured for review only; parsing never rewrites the source.
+          items:
+            $ref: '#/components/schemas/SourceEmphasisFact'
         banner:
           type: string
         vanish:

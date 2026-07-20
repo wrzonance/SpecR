@@ -245,6 +245,40 @@ describe('rebaseSourceFacts (Codex review: keep fact offsets valid after prefix 
     expect(rebaseSourceFacts(facts, 9, 9).colors).toBeUndefined();
   });
 
+  it('rebases emphasis spans and clips their run snippet to surviving text', () => {
+    const facts: SourceFacts = {
+      emphasis: [
+        {
+          property: 'bold',
+          value: true,
+          expected: false,
+          text: 'PART 3 - EXECUTION',
+          span: [0, 18],
+        },
+      ],
+    };
+
+    expect(rebaseSourceFacts(facts, 9, 9).emphasis).toEqual([
+      {
+        property: 'bold',
+        value: true,
+        expected: false,
+        text: 'EXECUTION',
+        span: [0, 9],
+      },
+    ]);
+  });
+
+  it('drops emphasis facts contained entirely in the stripped prefix', () => {
+    const facts: SourceFacts = {
+      emphasis: [
+        { property: 'italic', value: true, expected: false, text: 'PART 3', span: [0, 6] },
+      ],
+    };
+
+    expect(rebaseSourceFacts(facts, 9, 9).emphasis).toBeUndefined();
+  });
+
   it('keeps a zero-length (point) comment anchor sitting after the prefix (w:commentReference)', () => {
     // A point comment at the start of "EXECUTION" → anchor [9,9]; after removing
     // "PART 3 - " it must shift to [0,0], not be dropped as if it were prefix-only.
