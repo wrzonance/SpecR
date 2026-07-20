@@ -19,6 +19,11 @@ import { getSubmittalRegister } from './submittal-register.js';
 import type { SubmittalFinding } from '../../submittals/index.js';
 import { readImpliedRelatedFindings } from './coordination-implied.js';
 import type { ImpliedRelatedSectionFinding } from '../../coordination/index.js';
+import type {
+  GeneralRequirementDuplicatedFinding,
+  GeneralRequirementDuplicationResult,
+} from '../../coordination/index.js';
+import { readGeneralRequirementDuplication } from './coordination-general-requirements.js';
 import {
   buildUmbrellaCalloutFindings,
   type UmbrellaNotCalledOutFinding,
@@ -76,7 +81,8 @@ export type Finding =
     }
   | SubmittalFinding
   | ImpliedRelatedSectionFinding
-  | UmbrellaNotCalledOutFinding;
+  | UmbrellaNotCalledOutFinding
+  | GeneralRequirementDuplicatedFinding;
 
 export interface CoordinationSummary {
   readonly requiredNotPresent: number;
@@ -90,6 +96,7 @@ export interface CoordinationSummary {
   readonly productMissingDatasheet: number;
   readonly impliedRelatedSection: number;
   readonly umbrellaNotCalledOut: number;
+  readonly generalRequirementDuplicated: number;
   readonly total: number;
 }
 
@@ -193,6 +200,18 @@ function toReferenceFinding(f: ReferenceConsistencyFinding): Finding {
   return { type: f.type, ...base, section: f.value };
 }
 
+function reportNotes(
+  emptyRequired: boolean,
+  umbrellaResult: UmbrellaCalloutResult,
+  generalRequirementResult: GeneralRequirementDuplicationResult
+): readonly string[] {
+  return [
+    ...(emptyRequired ? [EMPTY_REQUIRED_NOTE] : []),
+    ...umbrellaResult.notes,
+    ...generalRequirementResult.notes,
+  ];
+}
+
 function buildFindings(
   required: readonly RequiredSection[],
   present: readonly PresentSpec[],
@@ -200,7 +219,8 @@ function buildFindings(
   referenceFindings: readonly Finding[],
   submittalFindings: readonly SubmittalFinding[],
   impliedFindings: readonly Finding[],
-  umbrellaResult: UmbrellaCalloutResult
+  umbrellaResult: UmbrellaCalloutResult,
+  generalRequirementResult: GeneralRequirementDuplicationResult
 ): { readonly findings: readonly Finding[]; readonly notes: readonly string[] } {
   const requiredSections = new Set(required.map((r) => r.section));
   const presentSections = new Set(present.map((p) => p.section));
@@ -243,8 +263,9 @@ function buildFindings(
       ...submittalFindings,
       ...impliedFindings,
       ...umbrellaResult.findings,
+      ...generalRequirementResult.findings,
     ],
-    notes: [...(empty ? [EMPTY_REQUIRED_NOTE] : []), ...umbrellaResult.notes],
+    notes: reportNotes(empty, umbrellaResult, generalRequirementResult),
   };
 }
 
@@ -262,6 +283,7 @@ function summarize(findings: readonly Finding[]): CoordinationSummary {
     productMissingDatasheet: count('product_missing_datasheet'),
     impliedRelatedSection: count('implied_related_section'),
     umbrellaNotCalledOut: count('umbrella_not_called_out'),
+    generalRequirementDuplicated: count('general_requirement_duplicated'),
     total: findings.length,
   };
 }
@@ -292,6 +314,7 @@ async function assembleCoordinationReport(
     classified,
     client
   );
+  const generalRequirementResult = await readGeneralRequirementDuplication(present, client);
   await client.query('COMMIT');
   const referenceFindings = buildReferenceConsistencyFindings(classified).map(toReferenceFinding);
   const umbrellaResult = buildUmbrellaCalloutFindings(present, sectionRefs(classified));
@@ -306,7 +329,8 @@ async function assembleCoordinationReport(
     referenceFindings,
     submittals.findings,
     impliedFindings,
-    umbrellaResult
+    umbrellaResult,
+    generalRequirementResult
   );
   return {
     projectId,

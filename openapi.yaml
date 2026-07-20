@@ -5937,6 +5937,7 @@ components:
           productMissingDatasheet,
           impliedRelatedSection,
           umbrellaNotCalledOut,
+          generalRequirementDuplicated,
           total,
         ]
       properties:
@@ -5951,6 +5952,7 @@ components:
         productMissingDatasheet: { type: integer }
         impliedRelatedSection: { type: integer }
         umbrellaNotCalledOut: { type: integer }
+        generalRequirementDuplicated: { type: integer }
         total: { type: integer }
     RevitLinkInventory:
       type: object
@@ -6047,6 +6049,7 @@ components:
         - $ref: '#/components/schemas/FindingProductMissingDatasheet'
         - $ref: '#/components/schemas/FindingImpliedRelatedSection'
         - $ref: '#/components/schemas/FindingUmbrellaNotCalledOut'
+        - $ref: '#/components/schemas/FindingGeneralRequirementDuplicated'
       discriminator:
         propertyName: type
         mapping:
@@ -6061,6 +6064,7 @@ components:
           product_missing_datasheet: '#/components/schemas/FindingProductMissingDatasheet'
           implied_related_section: '#/components/schemas/FindingImpliedRelatedSection'
           umbrella_not_called_out: '#/components/schemas/FindingUmbrellaNotCalledOut'
+          general_requirement_duplicated: '#/components/schemas/FindingGeneralRequirementDuplicated'
     FindingRequiredNotPresent:
       type: object
       required: [type, section, title, requiredId]
@@ -6212,6 +6216,54 @@ components:
         umbrellaSpecSection:
           type: string
           description: Expected division umbrella section number, e.g. `26 00 00`.
+
+    FindingGeneralRequirementDuplicated:
+      type: object
+      description: >
+        Advisory title-level overlap: a technical section's PART 1 article has the
+        same derived role or exact normalized title as an article in a present
+        Division 00/01 spec or its applicable `DD 00 00` umbrella. References and
+        Related Sections are pointer-only roles and are excluded (ADR-073).
+      required:
+        [
+          type,
+          sourceSpecId,
+          sourceSpecSection,
+          sourceParagraphId,
+          sourceArticleTitle,
+          authoritySpecId,
+          authoritySpecSection,
+          authorityParagraphId,
+          authorityArticleTitle,
+          authorityKind,
+          matchBasis,
+          matchedValue,
+        ]
+      properties:
+        type: { type: string, enum: [general_requirement_duplicated] }
+        sourceSpecId: { type: string, format: uuid }
+        sourceSpecSection: { type: string }
+        sourceParagraphId:
+          type: string
+          format: uuid
+          description: Technical-section PART 1 article that overlaps the authority article.
+        sourceArticleTitle: { type: string }
+        authoritySpecId: { type: string, format: uuid }
+        authoritySpecSection: { type: string }
+        authorityParagraphId:
+          type: string
+          format: uuid
+          description: Division 00/01 or division-umbrella article used for comparison.
+        authorityArticleTitle: { type: string }
+        authorityKind:
+          type: string
+          enum: [division_00_01, division_umbrella]
+        matchBasis:
+          type: string
+          enum: [article_role, normalized_title]
+        matchedValue:
+          type: string
+          description: Derived role or normalized article title that established the overlap.
 
     FindingProductWithoutSubmittalType:
       type: object
