@@ -50,6 +50,12 @@ const BASE_GROUPS = [
     empty: 'Every subordinate section references its division umbrella.',
     flag: 'umbrellaCallout',
   },
+  {
+    type: 'general_requirement_duplicated',
+    title: 'GENERAL REQUIREMENT DUPLICATED',
+    empty: 'No technical Part 1 article restates a Division 00/01 or umbrella general requirement.',
+    flag: 'generalRequirementDuplicated',
+  },
 ];
 
 const SUBMITTAL_GROUPS = [
@@ -84,6 +90,7 @@ function findingSection(finding) {
   if (finding.type === 'standard_cited_not_listed') return finding.sourceSpecSection;
   if (finding.type === 'implied_related_section') return finding.impliedSection;
   if (finding.type === 'umbrella_not_called_out') return finding.sourceSpecSection;
+  if (finding.type === 'general_requirement_duplicated') return finding.sourceSpecSection;
   return finding.section;
 }
 
@@ -183,6 +190,24 @@ function renderUmbrellaNotCalledOut(finding, ctx) {
   return row;
 }
 
+// A technical section's Part 1 article restates a general requirement owned by
+// a Division 00/01 or division-umbrella authority (#410): source article on the
+// left, the authoritative article it duplicates on the right.
+function renderGeneralRequirementDuplicated(finding, ctx) {
+  const row = el('li', `coord-finding is-${finding.type}`);
+  row.appendChild(sectionButton(finding.sourceSpecSection, ctx));
+  row.appendChild(el('span', 'coord-text', finding.sourceArticleTitle));
+  row.appendChild(el('span', 'coord-arrow', 'duplicates'));
+  row.appendChild(
+    el(
+      'span',
+      'coord-target',
+      `${finding.authoritySpecSection} ${finding.authorityArticleTitle}`.trim()
+    )
+  );
+  return row;
+}
+
 function renderFinding(finding, ctx) {
   const reference = REFERENCE_FINDINGS[finding.type];
   if (reference) return renderReferenceFinding(finding, ctx, reference);
@@ -191,6 +216,9 @@ function renderFinding(finding, ctx) {
     return renderImpliedRelatedSection(finding, ctx);
   }
   if (finding.type === 'umbrella_not_called_out') return renderUmbrellaNotCalledOut(finding, ctx);
+  if (finding.type === 'general_requirement_duplicated') {
+    return renderGeneralRequirementDuplicated(finding, ctx);
+  }
 
   const row = el('li', `coord-finding is-${finding.type}`);
   if (finding.type === 'present_not_required') {
@@ -323,7 +351,10 @@ export function visibleCoordinationTotal(report) {
   const hiddenImplied = API_FEATURES.impliedRelated
     ? 0
     : (report.summary.impliedRelatedSection ?? 0);
-  return Math.max(0, report.summary.total - hiddenImplied);
+  const hiddenGeneralRequirement = API_FEATURES.generalRequirementDuplicated
+    ? 0
+    : (report.summary.generalRequirementDuplicated ?? 0);
+  return Math.max(0, report.summary.total - hiddenImplied - hiddenGeneralRequirement);
 }
 
 export function renderCoordinationReport(container, report, ctx = {}) {
@@ -367,6 +398,15 @@ export function renderCoordinationReport(container, report, ctx = {}) {
   if (API_FEATURES.umbrellaCallout) {
     summary.appendChild(
       el('span', 'coord-chip', `${report.summary.umbrellaNotCalledOut || 0} UMBRELLA CALLOUTS`)
+    );
+  }
+  if (API_FEATURES.generalRequirementDuplicated) {
+    summary.appendChild(
+      el(
+        'span',
+        'coord-chip',
+        `${report.summary.generalRequirementDuplicated ?? 0} GEN REQ DUPLICATED`
+      )
     );
   }
   container.appendChild(summary);
