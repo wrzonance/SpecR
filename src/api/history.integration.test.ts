@@ -93,7 +93,7 @@ describe('version-history REST and MCP surfaces (#378)', () => {
     await assertResponse('get', '/specs/{id}/history/diff', 200, diffBody);
   });
 
-  it('rejects malformed ids, booleans, package ids, and anchors at the boundary', async () => {
+  it('rejects malformed ids, package ids, and anchors at the boundary', async () => {
     expect((await fetch(`${baseUrl}/specs/nope/paragraphs/${ids.paragraph}/history`)).status).toBe(
       400
     );
@@ -103,7 +103,7 @@ describe('version-history REST and MCP surfaces (#378)', () => {
           `${baseUrl}/specs/${ids.spec}/paragraphs/${ids.paragraph}/history?includeOrigin=yes`
         )
       ).status
-    ).toBe(400);
+    ).toBe(200);
     expect((await fetch(`${baseUrl}/specs/${ids.spec}/history?packageId=nope`)).status).toBe(400);
     expect(
       (await fetch(`${baseUrl}/specs/${ids.spec}/history/diff?from=nope&to=current`)).status
@@ -123,8 +123,8 @@ describe('version-history REST and MCP surfaces (#378)', () => {
     ).toEqual(
       expect.objectContaining({ modified: [expect.objectContaining({ nodeId: ids.paragraph })] })
     );
-    await expect(handleGetHistoryDiff({ specId: 'nope', from: 1, to: 'current' })).resolves.toEqual(
-      expect.objectContaining({ isError: true })
-    );
+    const invalid = await handleGetHistoryDiff({ specId: 'nope', from: 1, to: 'current' });
+    expect('isError' in invalid && invalid.isError).toBe(true);
+    expect(invalid.content[0]?.text).toContain('Invalid UUID');
   });
 });

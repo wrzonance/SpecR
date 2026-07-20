@@ -9,7 +9,6 @@ import {
 import { HistoryAnchorSchema } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
 
-const IncludeOriginSchema = z.enum(['true', 'false']).optional();
 const PackageIdSchema = z.uuid().optional();
 
 function badRequest(res: Response, error: string): void {
@@ -28,8 +27,7 @@ function internalError(res: Response, err: unknown, operation: string): void {
 export async function getParagraphHistoryHandler(req: Request, res: Response): Promise<void> {
   const specId = z.uuid().safeParse(req.params['id']);
   const nodeId = z.uuid().safeParse(req.params['nodeId']);
-  const includeOrigin = IncludeOriginSchema.safeParse(req.query['includeOrigin']);
-  if (!specId.success || !nodeId.success || !includeOrigin.success) {
+  if (!specId.success || !nodeId.success) {
     badRequest(res, 'invalid history request');
     return;
   }
@@ -37,7 +35,7 @@ export async function getParagraphHistoryHandler(req: Request, res: Response): P
     const history = await getParagraphHistory(
       specId.data,
       nodeId.data,
-      includeOrigin.data === 'true'
+      req.query['includeOrigin'] === 'true'
     );
     if (!history) {
       notFound(res, 'spec or paragraph not found');

@@ -96,14 +96,15 @@ async function seedHistory(): Promise<void> {
   // after a row-lock wait, but the paragraph's monotonic version defines history order.
   await pool.query(
     `INSERT INTO paragraph_versions
-       (paragraph_id, spec_id, version, text, node_type, op, content_version, snapshot_at)
+       (paragraph_id, spec_id, version, text, node_type, op, content_version, snapshot_at, payload)
      VALUES
-       ($1, $2, 1, 'Master original', 'pr1', 'insert', 1, '2026-01-01T00:00:00Z'),
-       ($1, $2, 2, 'Master revised', 'pr1', 'edit', 2, '2025-12-31T00:00:00Z'),
-       ($3, $4, 3, 'Edited once', 'pr1', 'edit', 2, '2026-02-02T00:00:00Z'),
-       ($5, $4, 1, 'Added later', 'pr1', 'insert', 3, '2026-02-03T00:00:00Z'),
-       ($3, $4, 4, 'Edited twice', 'pr1', 'edit', 4, '2026-02-04T00:00:00Z'),
-       ($6, $4, 2, 'Removed later', 'pr1', 'remove', 4, '2026-02-04T00:00:00Z')`,
+       ($1, $2, 1, 'Master original', 'pr1', 'insert', 1, '2026-01-01T00:00:00Z', NULL),
+       ($1, $2, 2, 'Master revised', 'pr1', 'edit', 2, '2025-12-31T00:00:00Z', NULL),
+       ($3, $4, 3, 'Edited once', 'pr1', 'edit', 2, '2026-02-02T00:00:00Z', NULL),
+       ($5, $4, 1, 'Added later', 'pr1', 'merge', 3, '2026-02-03T00:00:00Z',
+        '{"diffKind":"added"}'::jsonb),
+       ($3, $4, 4, 'Edited twice', 'pr1', 'edit', 4, '2026-02-04T00:00:00Z', NULL),
+       ($6, $4, 2, 'Removed later', 'pr1', 'remove', 4, '2026-02-04T00:00:00Z', NULL)`,
     [
       ids.masterParagraph,
       ids.masterSpec,

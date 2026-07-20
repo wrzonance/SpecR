@@ -100,6 +100,12 @@ function mergeVisibility(row: VersionRow, visible: boolean): boolean {
   return visible;
 }
 
+function createsParagraph(row: VersionRow): boolean {
+  if (row.op === 'insert' || row.op === 'accept-note') return true;
+  if (row.op !== 'merge' || typeof row.payload !== 'object' || row.payload === null) return false;
+  return 'diffKind' in row.payload && row.payload.diffKind === 'added';
+}
+
 interface HistoricalNodeState {
   readonly ownVisible: boolean;
   readonly latest: VersionRow | undefined;
@@ -113,7 +119,7 @@ function historicalNodeState(
   const candidates = versions.filter(
     (version) => contentVersion === 'current' || (version.content_version ?? 0) <= contentVersion
   );
-  const creation = versions.find((version) => version.op === 'insert');
+  const creation = versions.find(createsParagraph);
   let ownVisible =
     contentVersion === 'current' ||
     creation === undefined ||

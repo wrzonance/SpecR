@@ -29,8 +29,12 @@ export const HistoryDiffShape = {
 };
 const DiffArgs = z.object(HistoryDiffShape);
 
-function invalid(tool: string): ToolResult {
-  return toolError(`invalid ${tool} input`);
+function issues(err: z.ZodError): string {
+  return err.issues.map((issue) => issue.message).join('; ');
+}
+
+function invalid(tool: string, err: z.ZodError): ToolResult {
+  return toolError(`invalid ${tool} input: ${issues(err)}`);
 }
 
 function internal(err: unknown, tool: string): ToolResult {
@@ -40,7 +44,7 @@ function internal(err: unknown, tool: string): ToolResult {
 
 export async function handleGetParagraphHistory(args: unknown): Promise<ToolResult> {
   const parsed = ParagraphArgs.safeParse(args);
-  if (!parsed.success) return invalid('get_paragraph_history');
+  if (!parsed.success) return invalid('get_paragraph_history', parsed.error);
   try {
     const history = await getParagraphHistory(
       parsed.data.specId,
@@ -55,7 +59,7 @@ export async function handleGetParagraphHistory(args: unknown): Promise<ToolResu
 
 export async function handleGetSpecHistory(args: unknown): Promise<ToolResult> {
   const parsed = SpecArgs.safeParse(args);
-  if (!parsed.success) return invalid('get_spec_history');
+  if (!parsed.success) return invalid('get_spec_history', parsed.error);
   try {
     const history = await getSpecHistory(parsed.data.specId, parsed.data.packageId);
     return history ? ok(history) : toolError(`spec not found: id=${parsed.data.specId}`);
@@ -66,7 +70,7 @@ export async function handleGetSpecHistory(args: unknown): Promise<ToolResult> {
 
 export async function handleGetHistoryDiff(args: unknown): Promise<ToolResult> {
   const parsed = DiffArgs.safeParse(args);
-  if (!parsed.success) return invalid('get_history_diff');
+  if (!parsed.success) return invalid('get_history_diff', parsed.error);
   try {
     const diff = await getSpecHistoryDiff(parsed.data.specId, parsed.data.from, parsed.data.to);
     return diff ? ok(diff) : toolError(`spec not found: id=${parsed.data.specId}`);
