@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { inferSectionMeta } from '../../lib/infer-section.js';
+import { classifyNoteRoles } from '../../lib/note-delimiters.js';
 import {
   parseSectionNumberCandidate,
   sectionNumberCandidateFragment,
@@ -169,10 +170,21 @@ function buildTree(lines: readonly string[]): BuildResult {
   const stack: StackEntry[] = [rootEntry];
   const droppedAtRoot: DroppedLine[] = [];
   const partLineIndex = new Map<string, number>();
+  const classifications = lines.map((line) => classifyLine(line));
+  const roles = classifyNoteRoles(
+    classifications.map((classification) => ({
+      text: classification.text,
+      isHeading: isStructural(classification.type),
+    }))
+  );
 
-  lines.forEach((line, lineIdx) => {
-    const cls = classifyLine(line);
-    if (cls.type === 'blank' || cls.type === 'header') return;
+  classifications.forEach((cls, lineIdx) => {
+    const role = roles[lineIdx] ?? 'none';
+    if (role === 'rule' || cls.type === 'blank' || cls.type === 'header') return;
+    if (role === 'note') {
+      stack[stack.length - 1]?.children.push(makeNode('note', cls.text, []));
+      return;
+    }
     if (cls.type === 'continuation') {
       pushContinuation(stack, cls.text, lineIdx, droppedAtRoot);
       return;

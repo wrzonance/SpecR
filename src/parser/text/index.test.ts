@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { parseText } from './index.js';
 import type { SpecNode } from '../../ast/types.js';
 
+function collectNodes(node: SpecNode): readonly SpecNode[] {
+  return [node, ...node.children.flatMap(collectNodes)];
+}
+
 describe('parseText — numbered-prefixes fixture', () => {
   const fixture = readFileSync(join('tests', 'fixtures', 'text', 'numbered-prefixes.txt'), 'utf-8');
 
@@ -86,6 +90,43 @@ describe('parseText — UFGS stripped fixture', () => {
 
   it('produces at least 1 part node', () => {
     expect(parseText(fixture).tree.parts.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('parseText — asterisk note delimiters', () => {
+  it('treats asterisk-bracketed lines as notes, not continuation', () => {
+    const text = [
+      'PART 1 - GENERAL',
+      '1.1 SUMMARY',
+      '***********************',
+      'Edit to suit the project.',
+      '***********************',
+      'A. Real requirement.',
+    ].join('\n');
+
+    const { tree } = parseText(text);
+    const all = tree.parts.flatMap(collectNodes);
+
+    expect(all.some((node) => /^\*{5,}$/.test(node.text.trim()))).toBe(false);
+    expect(all.some((node) => node.type === 'note' && node.text.includes('Edit to suit'))).toBe(
+      true
+    );
+  });
+
+  it('does not emit empty notes for blank rows inside a note region', () => {
+    const { tree } = parseText(
+      [
+        'PART 1 - GENERAL',
+        '1.1 SUMMARY',
+        '***********************',
+        'Edit to suit the project.',
+        '',
+        '***********************',
+      ].join('\n')
+    );
+    const notes = tree.parts.flatMap(collectNodes).filter((node) => node.type === 'note');
+
+    expect(notes.map((node) => node.text)).toEqual(['Edit to suit the project.']);
   });
 });
 

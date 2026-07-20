@@ -622,6 +622,7 @@ function buildRevisionManualData(overrides: Partial<RevisionManualData> = {}): R
         },
       ],
       parentRevisionId: null,
+      baseRevisionId: null,
     },
     project: { name: 'Acme HQ', description: null },
     designPackage: { packageId: 'ffffffff-0000-4000-8000-000000000005', name: 'Package One' },
@@ -642,6 +643,72 @@ const REVISION_FIELD_SOURCE = {
 // (the changed revision being rendered), never body.baseRevisionId (the
 // comparison target only).
 describe('generateRevisionHandler — header/footer resolution (#481)', () => {
+  it('uses the stored comparison base when the request omits baseRevisionId', async () => {
+    const {
+      getPackageRevisionManualData,
+      getPackageRevisionAddendumManualData,
+      getTemplateByName,
+    } = await import('../db/index.js');
+    const { generateManual } = await import('../generator/index.js');
+    const stored = buildRevisionManualData({
+      revision: { ...buildRevisionManualData().revision, baseRevisionId: BASE_REVISION_ID },
+    });
+    vi.mocked(getPackageRevisionManualData).mockResolvedValueOnce(stored);
+    vi.mocked(getPackageRevisionAddendumManualData).mockResolvedValueOnce({
+      ...stored,
+      baseRevisionId: BASE_REVISION_ID,
+      changedSpecs: stored.revision.specs,
+    });
+    vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
+    vi.mocked(generateManual).mockResolvedValueOnce(Buffer.from('manual'));
+    const { generateRevisionHandler } = await import('./generate.js');
+
+    await generateRevisionHandler(
+      { params: { id: REVISION_ID }, body: {} } as unknown as Request,
+      mockRes()
+    );
+
+    expect(getPackageRevisionAddendumManualData).toHaveBeenCalledWith(
+      REVISION_ID,
+      BASE_REVISION_ID,
+      expect.anything()
+    );
+  });
+
+  it('explicit baseRevisionId wins over the stored comparison base', async () => {
+    const requestedBase = 'eeeeeeee-0000-4000-8000-000000000006';
+    const {
+      getPackageRevisionManualData,
+      getPackageRevisionAddendumManualData,
+      getTemplateByName,
+    } = await import('../db/index.js');
+    const { generateManual } = await import('../generator/index.js');
+    const data: RevisionAddendumManualData = {
+      ...buildRevisionManualData(),
+      baseRevisionId: requestedBase,
+      changedSpecs: buildRevisionManualData().revision.specs,
+    };
+    vi.mocked(getPackageRevisionAddendumManualData).mockResolvedValueOnce(data);
+    vi.mocked(getTemplateByName).mockResolvedValueOnce(null);
+    vi.mocked(generateManual).mockResolvedValueOnce(Buffer.from('manual'));
+    const { generateRevisionHandler } = await import('./generate.js');
+
+    await generateRevisionHandler(
+      {
+        params: { id: REVISION_ID },
+        body: { baseRevisionId: requestedBase },
+      } as unknown as Request,
+      mockRes()
+    );
+
+    expect(getPackageRevisionAddendumManualData).toHaveBeenCalledWith(
+      REVISION_ID,
+      requestedBase,
+      expect.anything()
+    );
+    expect(getPackageRevisionManualData).not.toHaveBeenCalled();
+  });
+
   it('issued revision, configured chain -> generateManual receives populated headerFooter sourced from RevisionManualData', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-14T12:00:00Z'));

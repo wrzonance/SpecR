@@ -139,7 +139,9 @@ beforeAll(async () => {
   );
 
   const addendum = await json('POST', `/packages/${packageId}/revisions`, {
-    label: 'Addendum 1',
+    type: 'addendum',
+    attributes: { number: 1 },
+    baseRevisionId,
   });
   addendumRevisionId = (await data(addendum))['revisionId'] as string;
 });
@@ -190,6 +192,26 @@ describe('POST /revisions/:id/generate', () => {
     expect(xml).not.toContain('Original controls text.');
     expect(xml).not.toContain('<w:headerReference');
     expect(xml).not.toContain('<w:footerReference');
+  });
+
+  it('stored base renders the same addendum when the request body is empty', async () => {
+    const res = await json('POST', `/revisions/${addendumRevisionId}/generate`, {});
+    expect(res.status).toBe(200);
+    const xml = await getDocXml(Buffer.from(await res.arrayBuffer()));
+    expect(xml).toContain('Affected Sections');
+    expect(xml).toContain('09 91 00 - Painting');
+    expect(xml).not.toContain('SECTION 03 30 00');
+    expect(xml).not.toContain('SECTION 23 09 23');
+  });
+
+  it('explicit request base wins over the stored base', async () => {
+    const res = await json('POST', `/revisions/${addendumRevisionId}/generate`, {
+      baseRevisionId: addendumRevisionId,
+    });
+    // Comparing the addendum against itself has no changed sections. If the
+    // stored base incorrectly won, this would render the painting addendum.
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: 'addendum has no changed sections' });
   });
 
   // Regression (ADR-033 / Codex P2): the article-role deriver added meta.articleRole

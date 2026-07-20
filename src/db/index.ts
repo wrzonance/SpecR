@@ -81,7 +81,6 @@ export {
   findProjectById,
   listProjects,
   setProjectSources,
-  updateProject,
   softDeleteProject,
   restoreProject,
   InvalidSourceLibraryError,
@@ -92,9 +91,9 @@ export {
   type ProjectSource,
   type ProjectTombstone,
   type CreateProjectInput,
-  type UpdateProjectInput,
-  type UpdateProjectResult,
 } from './queries/projects.js';
+export { updateProject } from './queries/project-update.js';
+export type { UpdateProjectInput, UpdateProjectResult } from './queries/project-update.js';
 export { listProjectSpecs } from './queries/project-specs.js';
 export type { ProjectSpec, ProjectSpecListOptions } from './queries/project-specs.js';
 export { getBrokenRefs } from './queries/project-refs.js';
@@ -103,11 +102,13 @@ export {
   createClient,
   listClients,
   getClient,
+  updateClient,
   assertClientExists,
   ClientNotFoundError,
   ClientLibraryNotFoundError,
 } from './queries/clients.js';
-export type { ClientSummary, ClientDetail, CreateClientInput } from './queries/clients.js';
+export type { ClientSummary, ClientDetail } from './queries/clients.js';
+export type { CreateClientInput, UpdateClientInput } from './queries/clients.js';
 export {
   searchParagraphs,
   toSearchOptions,
@@ -118,6 +119,7 @@ export {
   type SpecSectionResult,
 } from './queries/search.js';
 export { getParagraphSnapshots, getCurrentParagraphSnapshots } from './queries/versions.js';
+export * from './queries/history-index.js';
 export { getObjectStructuralSnapshots } from './queries/object-structure.js';
 export type { ObjectStructuralSnapshot } from './queries/object-structure.js';
 export {

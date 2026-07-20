@@ -29,8 +29,8 @@ export async function createRevisionHandler(req: Request, res: Response): Promis
       return;
     }
     // Unprocessable input — a member tree that can't be snapshotted losslessly, a
-    // type outside the project's nomenclature profile, or a parentRevisionId that
-    // fails a custody invariant (not found, cross-package, nesting depth > 1) — all
+    // type outside the project's nomenclature profile, or a parent/base revision
+    // relationship that fails its invariants — all
     // map to 422 with the error's own message. The 422 set lives in one predicate
     // (isUnprocessableRevisionInputError) so this API boundary and the MCP handler
     // stay in sync as error classes are added.

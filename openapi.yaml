@@ -1036,6 +1036,128 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/paragraphs/{nodeId}/history:
+    get:
+      operationId: getParagraphHistory
+      summary: Read one paragraph's stored iterations
+      description: >
+        Returns raw paragraph snapshots oldest-first, including the creation row
+        and current state. A project paragraph starts at its derive point by
+        default; `includeOrigin=true` prepends the direct master's pre-derive
+        iterations through `origin_paragraph_id` (ADR-052 D5).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+        - name: includeOrigin
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Paragraph iterations, oldest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ParagraphHistoryEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/history:
+    get:
+      operationId: getSpecHistory
+      summary: Read a spec's content-version timeline
+      description: >
+        Returns content-version steps with changed-paragraph counts plus derive
+        and immutable package-revision milestones. `packageId` narrows revision
+        milestones to one issuance track; edits remain the same within-spec branch.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - name: packageId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Version timeline and milestones
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecHistory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/history/diff:
+    get:
+      operationId: getSpecHistoryDiff
+      summary: Compare two stored states of one spec
+      description: >
+        Resolves each anchor as a content version, package revision UUID,
+        `origin`, or `current`, then returns paragraph-UUID-aligned
+        added/removed/modified rows in document order. Text is before/after at
+        paragraph grain; word-level highlighting is intentionally client-side.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - name: from
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/HistoryAnchor'
+        - name: to
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/HistoryAnchor'
+      responses:
+        '200':
+          description: Row-level point-to-point diff
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecHistoryDiff'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/hierarchy-report:
     get:
       operationId: getSpecHierarchyReport
@@ -1201,9 +1323,9 @@ paths:
                     DOCX title and confidently identified Section references in paragraph
                     text. Canonical emits "09 91 00", dots emits "09.91.00", compact
                     emits "099100", and spaced-compact emits "09 9100". Stored AST and
-                    database values remain canonical. Omitted → falls back to the stored
-                    default of the spec's sole owning project; if the spec belongs to no
-                    project (or several), the canonical format applies.
+                    database values remain canonical. Omitted → the sole owning project's
+                    override, then its client's firm default, then canonical. If the spec
+                    belongs to no project (or several), canonical applies.
             examples:
               dotted-section-numbers:
                 value:
@@ -1482,7 +1604,7 @@ paths:
     get:
       operationId: listClients
       summary: List all clients
-      description: Returns every client as a summary (id, name, libraryId, timestamps), ordered by name.
+      description: Returns every client with its firm-tier section-number default, ordered by name.
       tags: [clients]
       responses:
         '200':
@@ -1525,6 +1647,11 @@ paths:
                   type: string
                   format: uuid
                   description: Optional link to the client's client-tier master library
+                sectionNumberFormat:
+                  type: string
+                  enum: [canonical, dots, compact, spaced-compact]
+                  default: canonical
+                  description: Firm-tier default used when an associated project has no override
       responses:
         '201':
           description: Client created
@@ -1571,6 +1698,42 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/ClientDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateClient
+      summary: Update a client's firm-tier section-number default
+      tags: [clients]
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sectionNumberFormat]
+              properties:
+                sectionNumberFormat:
+                  type: string
+                  enum: [canonical, dots, compact, spaced-compact]
+      responses:
+        '200':
+          description: Client updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ClientSummary'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -1800,11 +1963,11 @@ paths:
                   type: string
                   minLength: 1
                 sectionNumberFormat:
-                  type: string
-                  enum: [canonical, dots, compact, spaced-compact]
+                  type: [string, 'null']
+                  enum: [canonical, dots, compact, spaced-compact, null]
                   description: >
-                    Default section-number display format for generate requests
-                    on this project.
+                    Project override for generated section numbers. Explicit null
+                    clears it so the associated client's firm default applies.
                 clientId:
                   type: [string, 'null']
                   format: uuid
@@ -2060,8 +2223,8 @@ paths:
                   description: >
                     Presentation format for generated section numbers in each
                     section title and confidently identified Section references.
-                    Omitted → falls back to the project's stored
-                    `sectionNumberFormat` default (canonical when unset).
+                    Omitted → project override, then client/firm default, then
+                    canonical.
       responses:
         '200':
           description: DOCX manual file stream
@@ -3497,7 +3660,8 @@ paths:
       description: >
         Freezes the full SpecTree of every member section as JSONB inside one
         transaction — a reproducible point-in-time record of exactly what was
-        issued. Post-issuance edits never alter the stored trees.
+        issued. Post-issuance edits never alter the stored trees. Structured
+        requests may persist an addendum comparison base via baseRevisionId.
       tags: [packages]
       parameters:
         - name: id
@@ -3543,7 +3707,8 @@ paths:
             Validation failed, a member tree cannot be snapshotted losslessly,
             or parentRevisionId fails a custody rule (ADR-066): the parent
             revision does not exist, belongs to a different package, or
-            already has a parent of its own (nesting depth cannot exceed 1).
+            already has a parent of its own (nesting depth cannot exceed 1);
+            or baseRevisionId does not exist or belongs to another package.
           content:
             application/json:
               schema:
@@ -3589,8 +3754,10 @@ paths:
       description: >
         Renders the target package revision from `package_revision_specs.tree`, not
         live paragraph rows, so old issuances remain reproducible after database
-        edits. When `baseRevisionId` is supplied, addendum mode compares the
-        target and base revision snapshots by section-level AST equality and
+        edits. Addendum mode uses the request `baseRevisionId` when supplied,
+        otherwise the target revision's stored `baseRevisionId`; when neither
+        is present the full issued manual is rendered. Addendum mode compares
+        the target and base revision snapshots by section-level AST equality and
         emits only sections whose frozen trees differ, under an addendum cover
         listing the affected sections. Header/footer content is resolved and
         rendered per #481: the client → project → package → revision
@@ -3637,9 +3804,10 @@ paths:
                   type: string
                   format: uuid
                   description: >
-                    Base revision for addendum mode. Must belong to the same
-                    package as the target revision. Omit to render the full
-                    issued manual.
+                    Explicit base revision for addendum mode. Must belong to the
+                    same package as the target revision. Overrides the target's
+                    stored baseRevisionId; when both are omitted, renders the
+                    full issued manual.
       responses:
         '200':
           description: DOCX manual file stream
@@ -7096,6 +7264,131 @@ components:
           minimum: 0
           description: Number of diff entries omitted from `accept`
 
+    HistoryAnchor:
+      description: A spec content version, immutable package revision UUID, origin, or current
+      oneOf:
+        - type: integer
+          minimum: 1
+        - type: string
+          enum: [origin, current]
+        - type: string
+          format: uuid
+
+    ParagraphHistoryEntry:
+      type: object
+      required: [specId, custody, version, text, nodeType, op, contentVersion, snapshotAt]
+      properties:
+        specId:
+          type: string
+          format: uuid
+        custody:
+          type: string
+          enum: [origin, spec]
+          description: "`origin` is a pre-derive master iteration; `spec` is the requested branch"
+        version:
+          type: integer
+          minimum: 1
+        text:
+          type: string
+        nodeType:
+          type: string
+          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation, object, objectText]
+        op:
+          type: string
+          enum: [edit, insert, remove, restore, merge, accept-note, restructure]
+        contentVersion:
+          type: [integer, 'null']
+          minimum: 1
+          description: Null only for legacy rows that predate complete capture
+        snapshotAt:
+          type: string
+          format: date-time
+
+    HistoryOperationCounts:
+      type: object
+      required: [edited, inserted, removed]
+      properties:
+        edited: { type: integer, minimum: 0 }
+        inserted: { type: integer, minimum: 0 }
+        removed: { type: integer, minimum: 0 }
+
+    SpecHistoryStep:
+      type: object
+      required: [contentVersion, at, ops]
+      properties:
+        contentVersion:
+          type: integer
+          minimum: 1
+        at:
+          type: string
+          format: date-time
+        ops:
+          $ref: '#/components/schemas/HistoryOperationCounts'
+
+    SpecHistoryMilestone:
+      oneOf:
+        - type: object
+          required: [kind, at, parentSpecId, originVersion]
+          properties:
+            kind: { type: string, const: origin }
+            at: { type: string, format: date-time }
+            parentSpecId: { type: [string, 'null'], format: uuid }
+            originVersion: { type: integer, minimum: 1 }
+        - type: object
+          required: [kind, at, revisionId, packageId, label]
+          properties:
+            kind: { type: string, const: revision }
+            at: { type: string, format: date-time }
+            revisionId: { type: string, format: uuid }
+            packageId: { type: string, format: uuid }
+            label: { type: string }
+
+    SpecHistory:
+      type: object
+      required: [specId, currentContentVersion, steps, milestones]
+      properties:
+        specId: { type: string, format: uuid }
+        currentContentVersion: { type: integer, minimum: 1 }
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecHistoryStep'
+        milestones:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecHistoryMilestone'
+
+    HistoryDiffEntry:
+      type: object
+      required: [nodeId, nodeType, beforeText, afterText]
+      properties:
+        nodeId: { type: string, format: uuid }
+        nodeType: { type: string }
+        beforeText: { type: [string, 'null'] }
+        afterText: { type: [string, 'null'] }
+
+    SpecHistoryDiff:
+      type: object
+      required: [specId, from, to, added, removed, modified]
+      properties:
+        specId: { type: string, format: uuid }
+        from:
+          $ref: '#/components/schemas/HistoryAnchor'
+        to:
+          $ref: '#/components/schemas/HistoryAnchor'
+        added:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryDiffEntry'
+        removed:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryDiffEntry'
+        modified:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryDiffEntry'
+
     LineageHop:
       type: object
       required: [specId, scope, name, contentVersion, originVersion, behindBy]
@@ -7270,7 +7563,7 @@ components:
 
     ClientSummary:
       type: object
-      required: [id, name, libraryId, createdAt, updatedAt]
+      required: [id, name, libraryId, sectionNumberFormat, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -7281,6 +7574,10 @@ components:
           type: [string, 'null']
           format: uuid
           description: The client's client-tier master library (a link, not a merge), or null
+        sectionNumberFormat:
+          type: string
+          enum: [canonical, dots, compact, spaced-compact]
+          description: Firm-tier default used when an associated project has no override
         createdAt:
           type: string
           format: date-time
@@ -7412,8 +7709,9 @@ components:
           type: string
           enum: [canonical, dots, compact, spaced-compact]
           description: >
-            Default section-number display format for generate requests on this
-            project. Defaults to `canonical` ("09 91 00").
+            Effective section-number display format for generate requests: the
+            project override, then its client's firm default, then `canonical`
+            ("09 91 00").
 
     BrokenRef:
       type: object
@@ -7621,6 +7919,13 @@ components:
             UUID of the revision this one was issued from (ADR-066 custody).
             Must belong to the same package and itself be a root revision —
             nesting depth cannot exceed 1. Omit for a root revision.
+        baseRevisionId:
+          type: string
+          format: uuid
+          description: >
+            UUID of the revision used as the immutable addendum comparison
+            base (ADR-066). Must belong to the same package. Omit when this
+            issuance has no stored comparison lineage.
 
     RevisionSummary:
       type: object
@@ -7638,6 +7943,7 @@ components:
           issuedAt,
           specCount,
           parentRevisionId,
+          baseRevisionId,
         ]
       properties:
         revisionId:
@@ -7679,6 +7985,12 @@ components:
           description: >
             UUID of the revision this one was issued from (ADR-066 custody),
             or null for a root revision.
+        baseRevisionId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            UUID of the revision this issuance is compared against for
+            addendum generation (ADR-066), or null when no base was recorded.
 
     RevisionSpecEntry:
       type: object
@@ -7709,6 +8021,7 @@ components:
           issuedAt,
           specs,
           parentRevisionId,
+          baseRevisionId,
         ]
       properties:
         revisionId:
@@ -7746,6 +8059,12 @@ components:
           description: >
             UUID of the revision this one was issued from (ADR-066 custody),
             or null for a root revision.
+        baseRevisionId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            UUID of the revision this issuance is compared against for
+            addendum generation (ADR-066), or null when no base was recorded.
 
     # ── Templates ──────────────────────────────────────────────────────────────
 

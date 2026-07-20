@@ -67,4 +67,12 @@ describe('registerPackageRevisionTools — parentRevisionId doc parity (ADR-066 
     registerPackageRevisionTools(registrar);
     expect(descriptions.get('list_package_revisions') ?? '').toContain('parentRevisionId');
   });
+
+  it('all three tools document baseRevisionId comparison lineage', () => {
+    const { registrar, descriptions } = fakeRegistrar();
+    registerPackageRevisionTools(registrar);
+    expect(descriptions.get('issue_package_revision') ?? '').toContain('baseRevisionId');
+    expect(descriptions.get('get_revision') ?? '').toContain('baseRevisionId');
+    expect(descriptions.get('list_package_revisions') ?? '').toContain('baseRevisionId');
+  });
 });

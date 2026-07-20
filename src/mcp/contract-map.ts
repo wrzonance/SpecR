@@ -12,6 +12,9 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /specs/{}', 'get_spec'],
   ['get /specs/{}/lineage', 'get_spec_lineage'],
   ['get /specs/{}/hierarchy-report', 'get_hierarchy_report'], // WS2 #424 scoring report
+  ['get /specs/{}/paragraphs/{}/history', 'get_paragraph_history'],
+  ['get /specs/{}/history', 'get_spec_history'],
+  ['get /specs/{}/history/diff', 'get_history_diff'],
   ['post /specs/{}/diff', 'get_spec_diff'],
   ['post /specs/{}/generate', 'generate_docx'],
   ['post /parse', 'parse_document'],
@@ -114,6 +117,7 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /clients', 'list_clients'],
   ['post /clients', 'create_client'],
   ['get /clients/{}', 'get_client'],
+  ['patch /clients/{}', 'update_client'],
   // actor identity substrate (#381 / ADR-052 D6)
   ['get /users', 'list_users'],
   ['post /users', 'resolve_user'],
@@ -252,6 +256,9 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'search_library',
   'get_spec_lineage',
   'get_hierarchy_report',
+  'get_paragraph_history',
+  'get_spec_history',
+  'get_history_diff',
   'coordination_report',
   'get_reference_graph',
   'get_project_keynotes',

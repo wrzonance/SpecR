@@ -46,7 +46,12 @@ import {
   getLibraryStandardsHandler,
   recordStandardVerificationHandler,
 } from './standards.js';
-import { createClientHandler, listClientsHandler, getClientHandler } from './clients.js';
+import {
+  createClientHandler,
+  listClientsHandler,
+  getClientHandler,
+  updateClientHandler,
+} from './clients.js';
 import { resolveUserHandler, listUsersHandler, getUserHandler } from './users.js';
 import {
   getLibraryDivisionGeneralSpecHandler,
@@ -167,6 +172,11 @@ import {
   resolvePackageHeaderFooterHandler,
   resolveRevisionHeaderFooterHandler,
 } from './header-footer-resolve.js';
+import {
+  getParagraphHistoryHandler,
+  getSpecHistoryHandler,
+  getHistoryDiffHandler,
+} from './history.js';
 
 const parseRateLimit = rateLimit({
   windowMs: config.RATE_LIMIT_WINDOW_MS,
@@ -188,6 +198,9 @@ router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/open-comments', getSpecOpenCommentsHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.get('/specs/:id/hierarchy-report', getHierarchyReportHandler);
+router.get('/specs/:id/paragraphs/:nodeId/history', getParagraphHistoryHandler);
+router.get('/specs/:id/history/diff', getHistoryDiffHandler);
+router.get('/specs/:id/history', getSpecHistoryHandler);
 router.patch('/specs/:id', validateBody(PatchSpecBodySchema), updateSpecHandler);
 router.delete('/specs/:id', withdrawSpecHandler);
 router.post('/specs/:id/restore', restoreSpecHandler);
@@ -222,6 +235,7 @@ router.post('/projects/:id/generate', generateManualHandler);
 router.post('/clients', createClientHandler);
 router.get('/clients', listClientsHandler);
 router.get('/clients/:id', getClientHandler);
+router.patch('/clients/:id', updateClientHandler);
 router.post('/users', resolveUserHandler);
 router.get('/users', listUsersHandler);
 router.get('/users/:id', getUserHandler);

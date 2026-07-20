@@ -12,6 +12,7 @@ export interface RunSourceProperties {
   readonly colors: readonly string[];
   readonly emphasis: readonly EmphasisDeviation[];
   readonly effective: RunEmphasisStyle;
+  readonly vanish: boolean;
 }
 
 function childNodes(record: Record<string, unknown>, key: string): readonly unknown[] {
@@ -111,6 +112,12 @@ export function effectiveEmphasisForParagraph(
   return styleMap.resolvedRunEmphasis?.get(styleId) ?? styleMap.defaultRunEmphasis ?? {};
 }
 
+function isOnOffActive(element: Record<string, unknown> | undefined): boolean {
+  if (!element) return false;
+  const value = orderedAttr(element, '@_w:val').trim().toLowerCase();
+  return value !== '0' && value !== 'false' && value !== 'off';
+}
+
 export function sourcePropertiesForRun(
   runChildren: readonly unknown[],
   effective: RunEmphasisStyle,
@@ -125,5 +132,10 @@ export function sourcePropertiesForRun(
     highlight ? normalizeHighlight(orderedAttr(highlight, '@_w:val')) : null,
   ].filter((token): token is string => token !== null);
   const actual = { ...runStyleEmphasis(props, styleMap), ...orderedRunEmphasis(props) };
-  return { colors, emphasis: emphasisDeviations(actual, effective), effective };
+  return {
+    colors,
+    emphasis: emphasisDeviations(actual, effective),
+    effective,
+    vanish: isOnOffActive(findElement(props, 'w:vanish')),
+  };
 }
