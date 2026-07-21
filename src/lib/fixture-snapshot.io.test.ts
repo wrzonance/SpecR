@@ -39,3 +39,34 @@ describe.skipIf(!ONE_SEC)('fixtureRecord on a real .sec fixture', () => {
     expect(Array.isArray(rec.refs)).toBe(true);
   });
 });
+
+// docs/references (the corpus fixture:snapshot/diff sweeps) is entirely
+// SpecsIntact .SEC/.sec — 665 .SEC + 1 .sec, zero .docx (verified via
+// `find docs/references -type f`). .SEC has no w:pgSz/OOXML sectPr, so
+// pageSize (#509) can never appear there: the corpus-wide diff reporting
+// 0/666 changed after wiring pageSize through the parser only proves the
+// .SEC path is untouched, not that pageSize is additive against a DOCX body.
+// That claim is pinned here instead, against the one real, non-copyrighted
+// DOCX fixture committed to the repo (tests/fixtures/libreoffice), mirroring
+// the ONE_SEC pattern above: present at tree root, but invisible to the
+// render-derived fixture record (parts/noteLeaks/refs/render) — the same
+// property the corpus diff tool would flag as a "body/AST-structure delta"
+// if pageSize ever leaked into it.
+const ONE_DOCX = 'tests/fixtures/libreoffice/csi-spec-sample.docx';
+
+describe('pageSize is additive-only at the fixture-record boundary', () => {
+  it('populates tree.pageSize without perturbing the render-derived record', async () => {
+    const { tree, refs } = await parse(readFileSync(ONE_DOCX), ONE_DOCX);
+
+    expect(tree.pageSize).toBeDefined();
+    expect(tree.pageSize?.width).toBeGreaterThan(0);
+    expect(tree.pageSize?.height).toBeGreaterThan(0);
+
+    const rec = fixtureRecord(tree, refs);
+    expect(typeof rec.parts).toBe('number');
+    expect(typeof rec.render).toBe('string');
+    // pageSize is page-setup metadata, not document body content — it must
+    // never leak into the rendered markdown.
+    expect(rec.render).not.toMatch(/pgSz|pageSize|orientation/i);
+  });
+});
