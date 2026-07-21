@@ -1496,4 +1496,138 @@ describe('buildTree — meta.pageBreakBefore propagation (ADR-075)', () => {
     expect(note?.type).toBe('note');
     expect(note?.meta.pageBreakBefore).toBe(true);
   });
+
+  // #497 review finding: a page break preceding a paragraph that isStructuralContent
+  // filters out entirely (an empty/blank spacer, or a suppressed rule-row delimiter,
+  // #292) was silently discarded — buildTree never calls makeNode/makeContinuationNode
+  // for a filtered paragraph, so pageBreakMeta never ran for it. The break must instead
+  // surface on the next paragraph that actually becomes a SpecNode.
+  it('#497: propagates pageBreakBefore across a filtered blank/empty spacer paragraph onto the next emitted node', () => {
+    const blankSpacer: ClassifiedParagraph = {
+      paragraph: { text: '   ', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const afterSpacer: ClassifiedParagraph = {
+      paragraph: { text: 'Paragraph two text.', isVanish: false },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const tree = buildTree(
+      [
+        makeClassified('part', 0, 'PART 1'),
+        makeClassified('article', 1, '1.1'),
+        blankSpacer,
+        afterSpacer,
+      ],
+      '01',
+      'T',
+      'arcat'
+    );
+    const article = tree.parts[0]?.children[0];
+    // The blank spacer produced no node of its own — only the real paragraph did.
+    expect(article?.children).toHaveLength(1);
+    expect(article?.children[0]?.text).toBe('Paragraph two text.');
+    expect(article?.children[0]?.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('#497: propagates pageBreakBefore across a suppressed rule-row delimiter (#292) onto the next emitted node', () => {
+    const ruleRow: ClassifiedParagraph = {
+      paragraph: { text: '*****', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+      suppressed: true,
+    };
+    const afterRuleRow: ClassifiedParagraph = {
+      paragraph: { text: 'Note text after rule row.', isVanish: false },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const tree = buildTree(
+      [
+        makeClassified('part', 0, 'PART 1'),
+        makeClassified('article', 1, '1.1'),
+        ruleRow,
+        afterRuleRow,
+      ],
+      '01',
+      'T',
+      'arcat'
+    );
+    const article = tree.parts[0]?.children[0];
+    // The suppressed rule row produced no node of its own.
+    expect(article?.children).toHaveLength(1);
+    expect(article?.children[0]?.text).toBe('Note text after rule row.');
+    expect(article?.children[0]?.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('KNOWN AMBIGUITY: a pageBreakBefore forwarded through a filtered paragraph with nothing structural after it (EOF) is silently dropped, never throws', () => {
+    const trailingBlank: ClassifiedParagraph = {
+      paragraph: { text: '', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const tree = buildTree(
+      [makeClassified('part', 0, 'PART 1'), makeClassified('article', 1, '1.1'), trailingBlank],
+      '01',
+      'T',
+      'arcat'
+    );
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children).toHaveLength(0);
+  });
+
+  // #497 review finding: document.ts's page-break lookback walks the raw <w:p>-only
+  // array, oblivious to an interleaved w:tbl — so when a body object (table/text-box,
+  // ADR-072) is captured immediately after the page-break-bearing paragraph, document.ts
+  // still marks the NEXT PARAGRAPH (skipping the object entirely) as pageBreakBefore.
+  // KNOWN AMBIGUITY (docs/adr/075-manual-page-break-round-trip.md): an object node has
+  // no pageBreakBefore attachment point (decision 4 — ImportedObjectBlock re-emits raw
+  // w:tbl XML, not a Paragraph), so the misattributed flag is dropped rather than
+  // misapplied to the wrong paragraph.
+  it('#497 KNOWN AMBIGUITY: a page break misattributed across an interposed body object is dropped, not misattached to the paragraph after the object', () => {
+    const afterTable: ClassifiedParagraph = {
+      paragraph: { text: 'Paragraph after table.', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const obj = makeObjectNode('table-obj');
+    const tree = buildTree(
+      [makeClassified('part', 0, 'PART 1'), makeClassified('article', 1, '1.1'), afterTable],
+      '01',
+      'T',
+      'arcat',
+      [],
+      new Map([[1, [obj]]])
+    );
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children[0]).toEqual(obj);
+    expect(article?.children[0]?.meta.pageBreakBefore).toBeUndefined();
+    expect(article?.children[1]?.text).toBe('Paragraph after table.');
+    expect(article?.children[1]?.meta.pageBreakBefore).toBeUndefined();
+  });
 });

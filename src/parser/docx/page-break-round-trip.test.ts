@@ -123,4 +123,47 @@ describe('manual page break round trip — parse -> generate (#497, ADR-075)', (
     const xml = await generatedDocumentXml(tree);
     expect(xml).not.toContain('<w:pageBreakBefore/>');
   });
+
+  // #497 review finding: an empty spacer paragraph between the break and the next
+  // real paragraph previously swallowed the flag entirely (buildTree's content
+  // pre-filter drops a blank paragraph before it ever reaches makeContinuationNode).
+  it('carries pageBreakBefore past an intervening blank/empty spacer paragraph onto the next real paragraph', async () => {
+    const source = await makeDocx(
+      paraWithTrailingPageBreak('Paragraph one text.') + para('') + para('Paragraph two text.')
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const nodes = flatten(tree.parts);
+
+    const first = nodes.find((n) => n.text === 'Paragraph one text.');
+    const second = nodes.find((n) => n.text === 'Paragraph two text.');
+    expect(first?.meta.pageBreakBefore).toBeUndefined();
+    expect(second?.meta.pageBreakBefore).toBe(true);
+
+    const xml = await generatedDocumentXml(tree);
+    const paragraphs = xml.match(/<w:p>(?:(?!<w:p>).)*?<\/w:p>/gs) ?? [];
+    const secondPara = paragraphs.find((p) => p.includes('Paragraph two text.'));
+    expect(secondPara).toContain('<w:pageBreakBefore/>');
+  });
+
+  it('KNOWN AMBIGUITY: a page break immediately before a body-level table (#300, ADR-072) is dropped, never misattached to the paragraph after the table', async () => {
+    const table =
+      '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell text</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';
+    const source = await makeDocx(
+      paraWithTrailingPageBreak('Paragraph before table.') + table + para('Paragraph after table.')
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const nodes = flatten(tree.parts);
+
+    const before = nodes.find((n) => n.text === 'Paragraph before table.');
+    const after = nodes.find((n) => n.text === 'Paragraph after table.');
+    const table_ = nodes.find((n) => n.type === 'object');
+    expect(before?.meta.pageBreakBefore).toBeUndefined();
+    expect(table_?.meta.pageBreakBefore).toBeUndefined();
+    // Misattributed by document.ts's raw <w:p>-only lookback (it never sees the
+    // interleaved w:tbl) — dropped rather than incorrectly landing here.
+    expect(after?.meta.pageBreakBefore).toBeUndefined();
+
+    const xml = await generatedDocumentXml(tree);
+    expect(xml).not.toContain('<w:pageBreakBefore/>');
+  });
 });

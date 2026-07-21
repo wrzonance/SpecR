@@ -27,6 +27,7 @@ import {
   auditPartNumbering,
 } from '../part-prefix.js';
 import { stripOutlineLabels } from './outline-label-strip.js';
+import { pageBreakMeta, resolvePageBreakBefore } from './page-break.js';
 
 interface SignalHit {
   readonly nodeType: NodeType;
@@ -308,6 +309,10 @@ type Source = 'arcat' | 'cpi' | 'unknown';
 interface StackEntry {
   readonly cp: ClassifiedParagraph;
   readonly children: SpecNode[];
+  // Resolved at push time (buildTree's forwarding/redirect logic), since drainTop
+  // may build this entry's SpecNode much later — the raw cp.paragraph.pageBreakBefore
+  // is not authoritative on its own (see isPageBreakOwnedByPrecedingObject below).
+  readonly pageBreakBefore: boolean;
 }
 
 function sourceFactsMeta(cp: ClassifiedParagraph): {
@@ -316,21 +321,16 @@ function sourceFactsMeta(cp: ClassifiedParagraph): {
   return cp.paragraph.sourceFacts ? { sourceFacts: cp.paragraph.sourceFacts } : {};
 }
 
-// Mirrors sourceFactsMeta(cp): a manual page break (ADR-075) found before the
-// immediately preceding raw paragraph is carried onto whichever SpecNode this
-// classified paragraph becomes — structural (makeNode) or continuation/note
-// (makeContinuationNode) alike, so a break preceding suppressed/hidden content
-// is never silently dropped.
-function pageBreakMeta(cp: ClassifiedParagraph): { readonly pageBreakBefore?: boolean } {
-  return cp.paragraph.pageBreakBefore ? { pageBreakBefore: true } : {};
-}
-
 // Non-structural paragraphs (classifyParagraphs routes every vanish/note here as
 // a 'continuation'). A genuine specifier note becomes a 'note' (rendered as
 // [NOTE]); hidden non-note content becomes a suppressed 'continuation' carrying
 // meta.vanish, which every renderer drops (#296). Text is kept verbatim — hidden
 // content is retained as-authored for document-control tracking.
-function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode {
+function makeContinuationNode(
+  cp: ClassifiedParagraph,
+  source: Source,
+  pageBreakBefore: boolean
+): SpecNode {
   return {
     id: uuidv4(),
     type: cp.isNote ? 'note' : 'continuation',
@@ -345,7 +345,7 @@ function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
       ...(cp.isVanish ? { vanish: true } : {}),
       ...sourceFactsMeta(cp),
-      ...pageBreakMeta(cp),
+      ...pageBreakMeta(pageBreakBefore),
     },
   };
 }
@@ -390,7 +390,8 @@ function makeNode(
   cp: ClassifiedParagraph,
   children: SpecNode[],
   source: Source,
-  s4NodeIds: Set<string>
+  s4NodeIds: Set<string>,
+  pageBreakBefore: boolean
 ): SpecNode {
   const content = nodeContent(cp);
   const inference = scoreHierarchyConfidence(
@@ -408,15 +409,11 @@ function makeNode(
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
       ...(content.sourceFacts ? { sourceFacts: content.sourceFacts } : {}),
       ...(inference ? { inference } : {}),
-      ...pageBreakMeta(cp),
+      ...pageBreakMeta(pageBreakBefore),
     },
   };
   if (cp.signalUsed === 4 && cp.nodeType !== 'part') s4NodeIds.add(node.id);
   return node;
-}
-
-function appendContinuation(cp: ClassifiedParagraph, target: SpecNode[], source: Source): void {
-  target.push(makeContinuationNode(cp, source));
 }
 
 function drainTop(
@@ -427,7 +424,7 @@ function drainTop(
 ): void {
   const popped = stack.pop();
   if (!popped) return;
-  const node = makeNode(popped.cp, popped.children, source, s4NodeIds);
+  const node = makeNode(popped.cp, popped.children, source, s4NodeIds, popped.pageBreakBefore);
   const top = stack[stack.length - 1];
   const parentChildren = top !== undefined ? top.children : roots;
   parentChildren.push(node);
@@ -497,17 +494,20 @@ function isStructuralContent(cp: ClassifiedParagraph): boolean {
 // frames and pushes a new frame — becoming the new attachment point for whatever
 // follows, continuations and body objects (#300) alike. Returns the attachment point
 // unchanged for a continuation (it never becomes one itself), or the newly pushed
-// frame's own children array when `cp` is structural.
+// frame's own children array when `cp` is structural. `pageBreakBefore` is the
+// EFFECTIVE flag buildTree already resolved for this cp (#497) — never read from
+// cp.paragraph directly here, since forwarding/redirect may have moved it.
 function processStructuralParagraph(
   cp: ClassifiedParagraph,
   stack: StackEntry[],
   roots: SpecNode[],
   lastNonContChildren: SpecNode[],
   source: Source,
-  s4NodeIds: Set<string>
+  s4NodeIds: Set<string>,
+  pageBreakBefore: boolean
 ): SpecNode[] {
   if (cp.nodeType === 'continuation') {
-    appendContinuation(cp, lastNonContChildren, source);
+    lastNonContChildren.push(makeContinuationNode(cp, source, pageBreakBefore));
     return lastNonContChildren;
   }
   while (stack.length > 0) {
@@ -515,7 +515,7 @@ function processStructuralParagraph(
     if (top === undefined || top.cp.resolvedIlvl < cp.resolvedIlvl) break;
     drainTop(stack, roots, source, s4NodeIds);
   }
-  const entry: StackEntry = { cp, children: [] };
+  const entry: StackEntry = { cp, children: [], pageBreakBefore };
   stack.push(entry);
   return entry.children;
 }
@@ -539,29 +539,41 @@ export function buildTree(
   // leading number/letter may be an author-typed label the strip post-pass should remove.
   const s4NodeIds = new Set<string>();
   let lastNonContChildren: SpecNode[] = roots;
+  // Carries a page break (#497) forward across a paragraph isStructuralContent
+  // filters out (empty/blank spacer, or a suppressed rule-row delimiter, #292) until
+  // it reaches the next paragraph that actually becomes a SpecNode. Reset to false
+  // the moment a structural paragraph consumes it.
+  let pendingPageBreak = false;
 
   // Iterate EVERY classified paragraph, unfiltered by index (#300): a body object's
   // attachment key is the paragraph's position in this ORIGINAL array, so a
   // filtered-out (empty/suppressed) paragraph at that index must still receive its
   // attached object(s) — only the structural stack/continuation handling skips it.
   classified.forEach((cp, i) => {
+    const pageBreakBefore = resolvePageBreakBefore(
+      cp,
+      i,
+      pendingPageBreak,
+      objectsByPrecedingIndex
+    );
     if (isStructuralContent(cp)) {
+      pendingPageBreak = false;
       lastNonContChildren = processStructuralParagraph(
         cp,
         stack,
         roots,
         lastNonContChildren,
         source,
-        s4NodeIds
+        s4NodeIds,
+        pageBreakBefore
       );
+    } else {
+      pendingPageBreak = pageBreakBefore;
     }
-    const objects = objectsByPrecedingIndex.get(i);
-    if (objects) lastNonContChildren.push(...objects);
+    lastNonContChildren.push(...(objectsByPrecedingIndex.get(i) ?? []));
   });
 
-  while (stack.length > 0) {
-    drainTop(stack, roots, source, s4NodeIds);
-  }
+  while (stack.length > 0) drainTop(stack, roots, source, s4NodeIds);
 
   return { id: uuidv4(), section, title, parts: stripOutlineLabels(roots, s4NodeIds, 1) };
 }

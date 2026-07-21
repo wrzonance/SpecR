@@ -54,19 +54,44 @@ array. Any detector that assumes one shape misses the others.
    `numberedParagraph` (the structural paragraph builder) both take an optional
    trailing `pageBreakBefore` argument, forwarded from `node.meta.pageBreakBefore`,
    and spread it onto the constructed `Paragraph`'s properties only when true.
+6. **Suppression-safe propagation** (`src/parser/docx/page-break.ts`,
+   `resolvePageBreakBefore`, review follow-up on #497). A page break is
+   captured on the raw paragraph immediately following the source `w:br` (decision
+   1), but that paragraph is not guaranteed to become a SpecNode itself:
+   `buildTree`'s content pre-filter (`isStructuralContent`) drops an empty/blank
+   spacer paragraph and a suppressed asterisk rule-row delimiter (#292) before
+   either ever reaches `makeNode`/`makeContinuationNode`. `buildTree` now carries
+   a `pendingPageBreak` flag forward across every such filtered paragraph until it
+   reaches the next paragraph that actually becomes a node — a break preceding
+   suppressed/collapsed content is never silently dropped just because the
+   paragraph it first landed on produced nothing.
 
 ### KNOWN AMBIGUITY — scope limits accepted, not solved
 
 - **Trailing break at end-of-document.** A `w:br type="page"` in the last
   paragraph of a document has no following paragraph to attach `pageBreakBefore`
-  to, and is silently dropped. There is no AST node to carry it.
+  to, and is silently dropped. There is no AST node to carry it. This also covers
+  a break whose forwarding chain (decision 6) never reaches a real node before
+  the document ends — same root cause, no attachment point exists.
 - **Two or more breaks collapsed within one paragraph, or a break sandwiched
   between runs of the same paragraph.** These all collapse to a single boolean
   on the next node. The parser already flattens intra-paragraph run position
   ahead of this signal, so no richer positional model is available without a
   larger, out-of-scope change to paragraph-level run tracking.
+- **A page break immediately preceding a body-level table/text-box** (#300,
+  ADR-072). `document.ts`'s lookback (`previousParagraphHasPageBreak`) walks the
+  raw `<w:p>`-only paragraph array, oblivious to an interleaved `w:tbl` — so it
+  attributes the break to the paragraph *after* the captured object instead of to
+  the object itself, which sits between them in real document order. Per decision
+  4, an `object` node has no `pageBreakBefore` attachment point at all (its
+  `ImportedObjectBlock` re-emits raw `w:tbl` XML, not a `Paragraph`), so
+  `resolvePageBreakBefore` (`src/parser/docx/page-break.ts`) detects this case
+  (`isPageBreakOwnedByPrecedingObject`) and drops the flag rather than
+  misattaching it to the wrong paragraph. Solving this for real would mean giving
+  the generator a way to force a page break ahead of a re-emitted table — a
+  larger, out-of-scope change to the object-block generation path.
 
-Both are documented here per the repo's OOXML ambiguity rule rather than
+All three are documented here per the repo's OOXML ambiguity rule rather than
 addressed by an invented behavior, and are pinned by tests marked
 `// KNOWN AMBIGUITY: ...`.
 
@@ -91,3 +116,8 @@ addressed by an invented behavior, and are pinned by tests marked
 - No database migration and no `SpecNode`/`SpecTree` reshaping — the field
   rides inside the existing `meta` JSONB blob, following the same pattern as
   `meta.vanish` and `meta.conflicts`.
+- Decision 6's forwarding/redirect logic (`pageBreakMeta`,
+  `resolvePageBreakBefore`) was extracted into its own sibling module,
+  `src/parser/docx/page-break.ts`, purely to keep `inference.ts` under the
+  repo's 400-line file budget — no module-boundary change, both files stay in
+  the same `parser/docx` package.
