@@ -261,6 +261,90 @@ describe('parseDocumentSettings', () => {
   });
 });
 
+describe('parseSectionHeaderFooterInfo — pageSize (#509, ADR-075)', () => {
+  it('reads width/height/orientation from w:pgSz on the trailing body-level w:sectPr (Letter portrait)', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/></w:sectPr>')
+    );
+    expect(info.pageSize).toEqual({ width: 12240, height: 15840, orientation: 'portrait' });
+  });
+
+  it('reads a landscape A4 w:pgSz', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/></w:sectPr>')
+    );
+    expect(info.pageSize).toEqual({ width: 16838, height: 11906, orientation: 'landscape' });
+  });
+
+  it('omits orientation when @w:orient is absent, without fabricating a default', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:pgSz w:w="12240" w:h="15840"/></w:sectPr>')
+    );
+    expect(info.pageSize).toEqual({ width: 12240, height: 15840 });
+    expect(info.pageSize).not.toHaveProperty('orientation');
+  });
+
+  it('leaves pageSize undefined when w:pgSz is absent from the trailing w:sectPr', () => {
+    const info = parseSectionHeaderFooterInfo(makeDocXml('<w:sectPr/>'));
+    expect(info.pageSize).toBeUndefined();
+  });
+
+  it('leaves pageSize undefined (never a partial shape) when w:pgSz is missing @w:h', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:pgSz w:w="12240"/></w:sectPr>')
+    );
+    expect(info.pageSize).toBeUndefined();
+  });
+
+  it('leaves pageSize undefined when a dimension is non-positive (zero)', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:pgSz w:w="0" w:h="15840"/></w:sectPr>')
+    );
+    expect(info.pageSize).toBeUndefined();
+  });
+
+  it('leaves pageSize undefined when a dimension is negative', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:pgSz w:w="-100" w:h="15840"/></w:sectPr>')
+    );
+    expect(info.pageSize).toBeUndefined();
+  });
+
+  it('leaves pageSize undefined when a dimension is non-numeric', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:pgSz w:w="abc" w:h="15840"/></w:sectPr>')
+    );
+    expect(info.pageSize).toBeUndefined();
+  });
+
+  it('drops an unrecognized @w:orient value instead of fabricating one', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:pgSz w:w="12240" w:h="15840" w:orient="sideways"/></w:sectPr>')
+    );
+    expect(info.pageSize).toEqual({ width: 12240, height: 15840 });
+  });
+
+  // KNOWN AMBIGUITY (ADR-068 single-sectPr scope, extended by ADR-075 to
+  // pageSize): a document with a mid-body w:pPr/w:sectPr section break can
+  // declare a DIFFERENT w:pgSz for that earlier section than the trailing
+  // body-level one this parser reads. This capture models only the single
+  // trailing section's page size — a per-section page-size sequence is not
+  // decidable from this slice, and is surfaced only indirectly via the
+  // existing hasAdditionalSectionBreaks flag, not by fabricating a merged
+  // or first-section page size.
+  it('KNOWN AMBIGUITY: only the trailing w:sectPr pageSize is captured when an earlier section break declares a different page size', () => {
+    const midBreakWithDifferentPageSize = `<w:p><w:pPr><w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/></w:sectPr></w:pPr><w:r><w:t>section break</w:t></w:r></w:p>`;
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml(
+        '<w:sectPr><w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/></w:sectPr>',
+        midBreakWithDifferentPageSize
+      )
+    );
+    expect(info.pageSize).toEqual({ width: 12240, height: 15840, orientation: 'portrait' });
+    expect(info.hasAdditionalSectionBreaks).toBe(true);
+  });
+});
+
 describe('resolveReferenceTargets', () => {
   it('resolves a reference whose rId is present in the relationship map', () => {
     const references: readonly HeaderFooterReference[] = [
