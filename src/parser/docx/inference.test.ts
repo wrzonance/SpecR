@@ -1508,4 +1508,15 @@ describe('buildTree — #510 leading title-block suppression', () => {
     expect(tree.parts).toHaveLength(1);
     expect(tree.parts[0]?.type).toBe('part');
   });
+
+  it('inference: #510 — a genuine leading note whose text coincidentally equals the title is preserved as a note SpecNode, never swallowed', () => {
+    const noteCp = { ...makeContinuation(title), isNote: true };
+    const classified = [noteCp, makeClassified('part', 0, 'PART 1 - GENERAL')];
+    const tree = buildTree(classified, section, title, 'unknown');
+
+    expect(tree.parts).toHaveLength(2);
+    expect(tree.parts[0]?.type).toBe('note');
+    expect(tree.parts[0]?.text).toBe(title);
+    expect(tree.parts[1]?.type).toBe('part');
+  });
 });

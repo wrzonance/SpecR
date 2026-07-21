@@ -381,7 +381,7 @@ describe('isTitleIdentityLine — #510 title-block duplication', () => {
 function makeCp(
   nodeType: NodeType,
   text: string,
-  opts: { readonly suppressed?: boolean } = {}
+  opts: { readonly suppressed?: boolean; readonly isNote?: boolean } = {}
 ): ClassifiedParagraph {
   return {
     paragraph: { text, isVanish: false },
@@ -392,6 +392,7 @@ function makeCp(
     agreed: [],
     isVanish: false,
     ...(opts.suppressed !== undefined ? { suppressed: opts.suppressed } : {}),
+    ...(opts.isNote !== undefined ? { isNote: opts.isNote } : {}),
   };
 }
 
@@ -444,5 +445,19 @@ describe('leadingTitleBlockIndices — #510 title-block duplication', () => {
       makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'), // a real body repeat, left alone
     ];
     expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0]));
+  });
+
+  // A genuine editorial note (isNote: true) is real content that renders as
+  // "> **[NOTE]** ..." — it must never be treated as a round-trip duplicate of
+  // the canonical heading merely because its text coincidentally matches the
+  // title/section, or buildTree would drop the note entirely (no SpecNode at
+  // all), which is strictly worse than the note-leakage failure mode this
+  // module already guards against elsewhere.
+  it('never matches a note-flagged continuation, even when its text equals the title', () => {
+    const classified = [
+      makeCp('continuation', title, { isNote: true }),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set());
   });
 });

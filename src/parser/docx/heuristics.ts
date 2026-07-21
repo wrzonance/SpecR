@@ -273,6 +273,13 @@ function classifyLeadingCandidate(
 ): LeadingScanStep {
   if (cp.nodeType !== 'continuation') return 'stop';
   if (isBlankOrSuppressed(cp)) return 'skip';
+  // A genuine editorial note (isNote: true) is real content that renders as
+  // "> **[NOTE]** ..." — never a round-trip duplicate of the canonical heading,
+  // even when its text coincidentally equals the section/title. Matching it here
+  // would drop the note's SpecNode entirely (buildTree never calls
+  // appendContinuation for a suppressed index), which is strictly worse than
+  // leaking it unbannered — the note would simply vanish, unrecoverable.
+  if (cp.isNote === true) return 'stop';
   const text = cp.paragraph.text;
   if (isSectionIdentityLine(text, section) || isTitleIdentityLine(text, title)) return 'match';
   return 'stop';
@@ -286,9 +293,11 @@ function classifyLeadingCandidate(
  *   title line),
  * - continues without adding an index on a blank/already-suppressed paragraph
  *   (it consumes no slot but does not close the leading zone),
- * - stops permanently on the first real structural (non-continuation) node, or
- *   the first continuation whose text matches neither identity — a
- *   coincidental repeat later in the document is never touched.
+ * - stops permanently on the first real structural (non-continuation) node,
+ *   the first note-flagged continuation (genuine editorial content is never a
+ *   round-trip duplicate, whatever its text), or the first continuation whose
+ *   text matches neither identity — a coincidental repeat later in the
+ *   document is never touched.
  *
  * Returns an empty set immediately when `section` and `title` are both
  * `UNKNOWN_SECTION_IDENTITY` — there is nothing resolved to compare against.
