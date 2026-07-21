@@ -7063,6 +7063,14 @@ components:
             vanish:
               type: boolean
               description: Hidden (w:vanish) paragraph — editorial note, not owner-facing
+            pageBreakBefore:
+              type: boolean
+              description: >-
+                This node should begin on a new page in the rendered DOCX (#497,
+                ADR-075) — captured from a manual `w:br w:type="page"` run in the
+                immediately preceding source paragraph. Present only when true;
+                absent means no manual page break. Never set on `type: object`
+                nodes — their OOXML is already preserved verbatim in `meta.object`.
             source:
               type: string
               enum: [ufgs, arcat, cpi, unknown]
