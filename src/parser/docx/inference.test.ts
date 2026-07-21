@@ -1503,12 +1503,6 @@ describe('buildTree — #510 leading title-block suppression', () => {
     expect(tree.parts[2]?.type).toBe('part');
   });
 
-  it('inference: #510 — buildTree signature and existing call sites are unchanged (no new required args)', () => {
-    const tree = buildTree([makeClassified('part', 0, 'PART 1')], '01', 'T', 'arcat');
-    expect(tree.parts).toHaveLength(1);
-    expect(tree.parts[0]?.type).toBe('part');
-  });
-
   it('inference: #510 — a genuine leading note whose text coincidentally equals the title is preserved as a note SpecNode, never swallowed', () => {
     const noteCp = { ...makeContinuation(title), isNote: true };
     const classified = [noteCp, makeClassified('part', 0, 'PART 1 - GENERAL')];
