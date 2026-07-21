@@ -429,6 +429,16 @@ describe('leadingTitleBlockIndices — #510 title-block duplication', () => {
     expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
   });
 
+  it('skips (does not break on) a non-blank suppressed paragraph interleaved in the leading run', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', '*****', { suppressed: true }), // rule-row delimiter, already suppressed
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
+  });
+
   it('stops the scan at the first real structural (non-continuation) node', () => {
     const classified = [
       makeCp('continuation', 'SECTION 01 8813.13'),
