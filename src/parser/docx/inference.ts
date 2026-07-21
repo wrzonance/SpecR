@@ -316,6 +316,15 @@ function sourceFactsMeta(cp: ClassifiedParagraph): {
   return cp.paragraph.sourceFacts ? { sourceFacts: cp.paragraph.sourceFacts } : {};
 }
 
+// Mirrors sourceFactsMeta(cp): a manual page break (ADR-075) found before the
+// immediately preceding raw paragraph is carried onto whichever SpecNode this
+// classified paragraph becomes — structural (makeNode) or continuation/note
+// (makeContinuationNode) alike, so a break preceding suppressed/hidden content
+// is never silently dropped.
+function pageBreakMeta(cp: ClassifiedParagraph): { readonly pageBreakBefore?: boolean } {
+  return cp.paragraph.pageBreakBefore ? { pageBreakBefore: true } : {};
+}
+
 // Non-structural paragraphs (classifyParagraphs routes every vanish/note here as
 // a 'continuation'). A genuine specifier note becomes a 'note' (rendered as
 // [NOTE]); hidden non-note content becomes a suppressed 'continuation' carrying
@@ -336,6 +345,7 @@ function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
       ...(cp.isVanish ? { vanish: true } : {}),
       ...sourceFactsMeta(cp),
+      ...pageBreakMeta(cp),
     },
   };
 }
@@ -398,6 +408,7 @@ function makeNode(
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
       ...(content.sourceFacts ? { sourceFacts: content.sourceFacts } : {}),
       ...(inference ? { inference } : {}),
+      ...pageBreakMeta(cp),
     },
   };
   if (cp.signalUsed === 4 && cp.nodeType !== 'part') s4NodeIds.add(node.id);

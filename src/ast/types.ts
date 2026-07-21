@@ -152,6 +152,17 @@ export interface SpecNodeMeta {
    * as an opaque round-trip blob. Present only on `type === 'object'` nodes.
    */
   readonly object?: ObjectMeta;
+  /**
+   * Marks that this node should begin on a new page in the rendered DOCX
+   * (ADR-075) — captured from a source `w:br type="page"` run in the
+   * immediately preceding paragraph, round-tripped as this node's own
+   * `w:pageBreakBefore` paragraph property on generate (a deliberate
+   * run→paragraph-property normalization: pagination-equivalent, not
+   * byte-identical OOXML). Absent === no manual page break. Never set on
+   * `type === 'object'` nodes — their OOXML, including any interior `w:br`,
+   * is already preserved verbatim in `meta.object` (ADR-072).
+   */
+  readonly pageBreakBefore?: boolean;
 }
 
 export interface SpecNode {

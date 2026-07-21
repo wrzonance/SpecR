@@ -1412,3 +1412,88 @@ describe('auditTreeStructure — object roots are not junk (#300)', () => {
     expect(warnings.some((w) => w.type === 'root-continuation')).toBe(false);
   });
 });
+
+describe('buildTree — meta.pageBreakBefore propagation (ADR-075)', () => {
+  it('propagates pageBreakBefore onto a structural node (part/article)', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 – GENERAL' }),
+        makePara({ numId: 1, ilvl: 1, text: '1.1 SUMMARY', pageBreakBefore: true }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    expect(tree.parts[0]?.meta.pageBreakBefore).toBeUndefined();
+    expect(tree.parts[0]?.children[0]?.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('omits meta.pageBreakBefore entirely when the paragraph carries no page break', () => {
+    const tree = buildTree([makeClassified('part', 0, 'PART 1')], '01', 'T', 'arcat');
+    expect(tree.parts[0]?.meta.pageBreakBefore).toBeUndefined();
+    expect(Object.keys(tree.parts[0]?.meta ?? {})).not.toContain('pageBreakBefore');
+  });
+
+  it('propagates pageBreakBefore onto a plain continuation node (suppression-safe)', () => {
+    const cont: ClassifiedParagraph = {
+      paragraph: { text: 'cont text', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const tree = buildTree(
+      [makeClassified('part', 0, 'PART 1'), makeClassified('article', 1, '1.1'), cont],
+      '01',
+      'T',
+      'arcat'
+    );
+    const node = tree.parts[0]?.children[0]?.children[0];
+    expect(node?.type).toBe('continuation');
+    expect(node?.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('propagates pageBreakBefore onto a hidden (vanish) continuation node — a break preceding suppressed content is not dropped', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ isVanish: true, pageBreakBefore: true, text: 'PROCESSING FORM — internal use' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    const hidden = tree.parts[0]?.children[0];
+    expect(hidden?.type).toBe('continuation');
+    expect(hidden?.meta.vanish).toBe(true);
+    expect(hidden?.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('propagates pageBreakBefore onto a note node', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({
+          isVanish: true,
+          pageBreakBefore: true,
+          styleId: 'NoteStyle',
+          text: '*Note: editorial guidance.',
+        }),
+      ],
+      numMap(1),
+      {
+        styles: new Map([['NoteStyle', { styleId: 'NoteStyle', name: 'Note Style' }]]),
+        resolvedNumPr: new Map(),
+        resolvedJc: new Map(),
+        vanishStyleIds: new Set(['NoteStyle']),
+        vanishCharStyleIds: new Set(),
+      }
+    );
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    const note = tree.parts[0]?.children[0];
+    expect(note?.type).toBe('note');
+    expect(note?.meta.pageBreakBefore).toBe(true);
+  });
+});
