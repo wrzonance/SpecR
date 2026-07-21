@@ -1307,6 +1307,36 @@ describe('parseDocx — header/footer capture wiring (#306)', () => {
   });
 });
 
+// ─── page size wiring, end-to-end (#509) ────────────────────────────────────
+// extractPageSize (header-footer-relationships.ts) is exhaustively unit-tested
+// at its own boundary. This test pins only that index.ts's runPipeline
+// actually threads captureHeaderFooter's pageSize through onto the returned
+// SpecTree, independent of the headerFooter/hiddenTables conditionals — a doc
+// can carry w:pgSz with zero header/footer content, so pageSize must still
+// surface even when hf.composition is undefined.
+describe('parseDocx — page size wiring (#509)', () => {
+  it('a body sectPr with an explicit w:pgSz surfaces as tree.pageSize, with no header/footer content present', async () => {
+    const zip = new JSZip();
+    zip.file('word/styles.xml', MINIMAL_STYLES);
+    zip.file(
+      'word/document.xml',
+      docWithSectPr('<w:sectPr><w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/></w:sectPr>')
+    );
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const tree = await parseDocx(buffer);
+
+    expect(tree.pageSize).toEqual({ width: 12240, height: 15840, orientation: 'portrait' });
+    expect(Object.prototype.hasOwnProperty.call(tree, 'headerFooter')).toBe(false);
+  });
+
+  it('no w:pgSz anywhere in the body sectPr — tree.pageSize key is absent, never a fabricated default', async () => {
+    const tree = await parseDocx(await makeDocx({}));
+
+    expect(Object.prototype.hasOwnProperty.call(tree, 'pageSize')).toBe(false);
+  });
+});
+
 // ─── header/footer image media wiring, end-to-end (#487) ───────────────────
 // header-footer-media-parts.ts (readHeaderFooterMedia) and
 // header-footer-images.ts (resolveDrawingImage) are each exhaustively
