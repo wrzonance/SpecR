@@ -67,6 +67,14 @@ export interface SourceColorFact {
   readonly spans: readonly (readonly [number, number])[];
 }
 
+/** One directly highlighted DOCX run, retained at paragraph-relative offsets. */
+export interface SourceHighlightFact {
+  readonly [key: string]: unknown;
+  readonly color: string;
+  readonly text: string;
+  readonly span: readonly [number, number];
+}
+
 export interface SourceChoiceTokenFact {
   readonly kind: 'angle' | 'bracket';
   readonly options: readonly string[];
@@ -92,6 +100,7 @@ export interface SourceFacts {
   readonly [key: string]: unknown;
   readonly comments?: readonly SourceCommentFact[];
   readonly colors?: readonly SourceColorFact[];
+  readonly highlights?: readonly SourceHighlightFact[];
   readonly choiceTokens?: readonly SourceChoiceTokenFact[];
   readonly emphasis?: readonly SourceEmphasisFact[];
   readonly banner?: string;

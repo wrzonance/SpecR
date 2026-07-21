@@ -112,6 +112,8 @@ beforeAll(async () => {
   await pool.query(`UPDATE paragraphs SET source_facts = $2::jsonb WHERE id = $1`, [
     PR1_ID,
     JSON.stringify({
+      highlights: [{ color: 'yellow', text: 'Coordinate', span: [0, 10] }],
+      colors: [{ color: 'highlight:yellow', coverage: 10 / 16, spans: [[0, 10]] }],
       emphasis: [
         {
           property: 'bold',
@@ -139,12 +141,19 @@ describe('tool: review_editability', () => {
     expect(result.isError).not.toBe(true);
     const data = parseResult<{
       total: number;
-      entries: { nodeId: string; value: string; confidence: number; evidence: unknown[] }[];
+      entries: {
+        nodeId: string;
+        value: string;
+        confidence: number;
+        evidence: unknown[];
+        highlights?: unknown[];
+      }[];
     }>(result);
     expect(data.total).toBe(2);
     const pr1 = data.entries.find((e) => e.nodeId === PR1_ID);
     expect(pr1).toMatchObject({ value: 'editable', confidence: 0.92 });
     expect(pr1?.evidence).toEqual([{ rule: 'colorMeanings[0000FF]', fact: 'colors[0]' }]);
+    expect(pr1?.highlights).toEqual([{ color: 'yellow', text: 'Coordinate', span: [0, 10] }]);
   });
 
   it('evidence and confidence equal what getSpecTree surfaces (single source)', async () => {
@@ -198,6 +207,10 @@ describe('tool: get_onboarding_report', () => {
         total: number;
         findings: { nodeId: string; outlinePath: string[] }[];
       };
+      highlightReview: {
+        total: number;
+        findings: { nodeId: string; outlinePath: string[]; highlights: unknown[] }[];
+      };
     }>(result);
     expect(data.specId).toBe(specId);
     expect(data.styleSource).toBeNull();
@@ -212,6 +225,18 @@ describe('tool: get_onboarding_report', () => {
         {
           nodeId: PR1_ID,
           outlinePath: ['09 91 23', 'GENERAL', 'REFERENCES', 'Coordinate work.'],
+        },
+      ],
+    });
+    expect(data.highlightReview).toEqual({
+      total: 1,
+      findings: [
+        {
+          nodeId: PR1_ID,
+          nodeType: 'pr1',
+          text: 'Coordinate work.',
+          outlinePath: ['09 91 23', 'GENERAL', 'REFERENCES', 'Coordinate work.'],
+          highlights: [{ color: 'yellow', text: 'Coordinate', span: [0, 10] }],
         },
       ],
     });

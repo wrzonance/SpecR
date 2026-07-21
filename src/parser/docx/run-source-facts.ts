@@ -8,6 +8,7 @@ type EmphasisDeviation = WithoutLocation<SourceEmphasisFact>;
 
 export interface RunSourceProperties {
   readonly colors: readonly string[];
+  readonly highlight: string | null;
   readonly emphasis: readonly EmphasisDeviation[];
   readonly effective: RunEmphasisStyle;
   readonly vanish: boolean;
@@ -41,7 +42,7 @@ function normalizeRunColor(value: string): string | null {
 function normalizeHighlight(value: string): string | null {
   const highlight = value.trim();
   if (!highlight || highlight.toLowerCase() === 'none') return null;
-  return `highlight:${highlight}`;
+  return highlight;
 }
 
 function toggle(element: Record<string, unknown> | undefined): boolean | undefined {
@@ -145,9 +146,10 @@ export function sourcePropertiesForRun(
   const props = rPr ? childNodes(rPr, 'w:rPr') : [];
   const color = findElement(props, 'w:color');
   const highlight = findElement(props, 'w:highlight');
+  const highlightColor = highlight ? normalizeHighlight(orderedAttr(highlight, '@_w:val')) : null;
   const colors = [
     color ? normalizeRunColor(orderedAttr(color, '@_w:val')) : null,
-    highlight ? normalizeHighlight(orderedAttr(highlight, '@_w:val')) : null,
+    highlightColor ? `highlight:${highlightColor}` : null,
   ].filter((token): token is string => token !== null);
   const actual = {
     ...runStyleEmphasis(props, styleMap, effective),
@@ -155,6 +157,7 @@ export function sourcePropertiesForRun(
   };
   return {
     colors,
+    highlight: highlightColor,
     emphasis: emphasisDeviations(actual, effective),
     effective,
     vanish: isOnOffActive(findElement(props, 'w:vanish')),

@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { DerivationReport } from '../parser/index.js';
 import type { ParseWarning, Editability, HeaderFooterComposition } from '../ast/index.js';
 import type { HierarchySummary } from './hierarchy-summary.js';
+import type { HighlightReviewReport } from './highlight-review.js';
 
 export type ParseStage =
   | 'queued'
@@ -109,6 +110,8 @@ export interface OnboardingReport {
   /** Header/footer composition captured at parse time (#306); null when the source had none. Review draft only — not persisted here; save via PUT .../header-footer (#208/#480). */
   readonly headerFooter: HeaderFooterComposition | null;
   readonly editability: EditabilitySummary;
+  /** Highlighted paragraphs that still carry draft/editor-decision clues. */
+  readonly highlightReview: HighlightReviewReport;
   /** Hierarchy-inference confidence summary (ADR-055). */
   readonly hierarchy: HierarchySummary;
   readonly parseWarnings: readonly ParseWarning[];

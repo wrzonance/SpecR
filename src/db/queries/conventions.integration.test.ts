@@ -20,13 +20,14 @@ afterEach(async () => {
   await pool.query(`DELETE FROM libraries WHERE name LIKE 'conv-test-%'`);
 });
 
-describe('migration 024 — built-in Industry Default seed', () => {
-  it('db: built-in convention is present after migrate with the documented rules', async () => {
+describe('built-in Industry Default migrations', () => {
+  it('db: built-in convention is present after migrations with the documented rules', async () => {
     const builtIn = await getBuiltInConvention();
     expect(builtIn).not.toBeNull();
     expect(builtIn).toMatchObject({ libraryId: null, name: BUILT_IN_CONVENTION_NAME });
     expect(builtIn?.rules).toEqual({
       colorMeanings: [{ color: '0000FF', meaning: 'editable' }],
+      highlightMeanings: [{ color: 'yellow', meaning: 'choice' }],
       choiceTokens: [{ kind: 'angle' }, { kind: 'bracket' }],
       noteBanners: [
         '^NOTES? TO (?:THE )?SPEC(?:IFIER|S| WRITER)?S?\\b',

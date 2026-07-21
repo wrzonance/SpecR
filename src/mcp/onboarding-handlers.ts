@@ -3,12 +3,14 @@
 // adapter over the SAME db/index.js query the REST handler calls — no logic is
 // reimplemented, so the two surfaces cannot drift. Handlers NEVER throw: every
 // failure path returns { isError: true } (CLAUDE.md MCP rule).
-import type {
-  SpecNode,
-  SpecTree,
-  Editability,
-  ConventionRules,
-  ClassificationEvidence,
+import {
+  resolveSourceHighlights,
+  type SpecNode,
+  type SpecTree,
+  type Editability,
+  type ConventionRules,
+  type ClassificationEvidence,
+  type SourceHighlightFact,
 } from '../ast/index.js';
 import {
   getSpecTree,
@@ -24,6 +26,7 @@ import type { OwnershipResult } from '../db/index.js';
 import { summarizeEditability } from '../lib/editability-summary.js';
 import { summarizeHierarchy } from '../lib/hierarchy-summary.js';
 import { summarizeManualEmphasis } from '../lib/manual-emphasis-report.js';
+import { summarizeHighlightReview } from '../lib/highlight-review.js';
 import { logger } from '../lib/logger.js';
 import { toolError } from './handlers.js';
 import type { ToolError, ToolOk, ToolResult } from './tool-result.js';
@@ -50,6 +53,7 @@ export interface EditabilityReviewEntry {
   readonly confidence: number;
   readonly evidence: readonly ClassificationEvidence[];
   readonly override?: Editability;
+  readonly highlights?: readonly SourceHighlightFact[];
 }
 
 // Walk the persisted tree and emit one entry per CLASSIFIED node. value /
@@ -63,12 +67,16 @@ function collectEditability(
   for (const n of nodes) {
     const e = n.meta.editability;
     if (e && e.confidence <= maxConfidence) {
+      const highlights = resolveSourceHighlights(n.text, n.meta.sourceFacts ?? {}).map(
+        (resolved) => resolved.fact
+      );
       out.push({
         nodeId: n.id,
         value: e.value,
         confidence: e.confidence,
         evidence: e.evidence,
         ...(e.override !== undefined ? { override: e.override } : {}),
+        ...(highlights.length > 0 ? { highlights } : {}),
       });
     }
     collectEditability(n.children, maxConfidence, out);
@@ -112,6 +120,7 @@ function buildReport(
     styleSource,
     styleSourceNeeded: styleSource === null,
     editability: summarizeEditability(tree),
+    highlightReview: summarizeHighlightReview(tree),
     hierarchy: summarizeHierarchy(tree, source),
     manualEmphasis: summarizeManualEmphasis(tree),
     note:

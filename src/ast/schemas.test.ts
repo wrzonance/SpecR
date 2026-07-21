@@ -442,6 +442,9 @@ describe('SourceFactsSchema', () => {
     const facts = {
       comments: [{ author: 'Specifier', text: 'Verify product.', anchor: [4, 19], closed: false }],
       colors: [{ color: '0000FF', coverage: 0.82, spans: [[12, 96]] }],
+      highlights: [
+        { color: 'yellow', text: 'select finish', span: [12, 25], vendorMarker: 'draft' },
+      ],
       choiceTokens: [{ kind: 'bracket', options: ['Provide mockup.'], span: [20, 37] }],
       emphasis: [
         {
@@ -577,6 +580,7 @@ describe('SetPackageSpecsBodySchema (issue #95)', () => {
 describe('ConventionRulesSchema (ADR-022 D3/D5)', () => {
   const FULL_RULES = {
     colorMeanings: [{ color: '0000FF', meaning: 'editable' }],
+    highlightMeanings: [{ color: 'yellow', meaning: 'choice' }],
     choiceTokens: [{ kind: 'angle' }, { kind: 'bracket' }],
     noteBanners: ['^NOTES? TO (?:THE )?SPEC(?:IFIER)?S?'],
     comments: { treatAs: 'note' },
@@ -607,6 +611,11 @@ describe('ConventionRulesSchema (ADR-022 D3/D5)', () => {
     expect(
       ConventionRulesSchema.safeParse({ colorMeanings: [{ color: '0000FF', meaning: 'maybe' }] })
         .success
+    ).toBe(false);
+    expect(
+      ConventionRulesSchema.safeParse({
+        highlightMeanings: [{ color: 'yellow', meaning: 'maybe' }],
+      }).success
     ).toBe(false);
   });
 

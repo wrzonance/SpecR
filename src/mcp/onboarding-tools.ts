@@ -22,7 +22,8 @@ function registerReviewTools(reg: ToolRegistrar): void {
     {
       description:
         'List per-paragraph effective editability for a spec: value (locked|editable|choice|note), ' +
-        'machine confidence, evidence, and a human override when one is set. Evidence and confidence ' +
+        'machine confidence, evidence, highlight clues, and a human override when one is set. ' +
+        'Evidence and confidence ' +
         'are the same the REST tree surfaces (shared getSpecTree query). Pass maxConfidence to return ' +
         'only nodes at or below that confidence — the human review queue for an onboarded master.',
       inputSchema: {
@@ -47,8 +48,9 @@ function registerReviewTools(reg: ToolRegistrar): void {
         'Onboarding review report for a spec: editability summary (counts + low-confidence nodes), ' +
         'hierarchy-inference confidence summary (scored/unscored/belowThreshold counts + worst-first ' +
         'low-confidence nodes; unscored carries its reason), assigned style source, ' +
-        'manual-emphasis findings (paragraph locator + run spans), styleSourceNeeded, and ' +
-        'onboardingStatus. Reuses the same editability ' +
+        'manual-emphasis findings (paragraph locator + run spans), highlight-review findings ' +
+        '(paragraph locator + run text/color/spans), styleSourceNeeded, and onboardingStatus. ' +
+        'Reuses the same editability ' +
         'summarizer the #135 import-job report uses. Note: styleDerivation and parseWarnings are ' +
         'import-time-only (raw uploaded bytes are not persisted) and are not reproduced here.',
       inputSchema: { specId: specIdArg },

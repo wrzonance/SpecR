@@ -6561,6 +6561,55 @@ components:
               value: { $ref: '#/components/schemas/EditabilityValue' }
               confidence: { type: number, minimum: 0, maximum: 1 }
 
+    HighlightReviewFinding:
+      type: object
+      required: [nodeId, nodeType, text, outlinePath, highlights]
+      properties:
+        nodeId: { type: string, format: uuid }
+        nodeType:
+          type: string
+          enum:
+            [
+              spec,
+              part,
+              article,
+              pr1,
+              pr2,
+              pr3,
+              pr4,
+              pr5,
+              pr6,
+              pr7,
+              note,
+              continuation,
+              object,
+              objectText,
+            ]
+        text:
+          type: string
+        outlinePath:
+          type: array
+          description: Section number and ancestor headings ending at the flagged paragraph.
+          items: { type: string }
+        highlights:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SourceHighlightFact'
+
+    HighlightReviewReport:
+      type: object
+      required: [total, findings]
+      properties:
+        total:
+          type: integer
+          minimum: 0
+          description: Number of paragraphs carrying one or more highlight clues.
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/HighlightReviewFinding'
+
     HierarchySummary:
       type: object
       required: [counts, lowConfidence]
@@ -6598,7 +6647,15 @@ components:
     OnboardingReport:
       type: object
       required:
-        [styleDerivation, styleSourceNeeded, headerFooter, editability, hierarchy, parseWarnings]
+        [
+          styleDerivation,
+          styleSourceNeeded,
+          headerFooter,
+          editability,
+          highlightReview,
+          hierarchy,
+          parseWarnings,
+        ]
       properties:
         styleDerivation:
           oneOf:
@@ -6619,6 +6676,9 @@ components:
             (#208/#480).
         editability:
           $ref: '#/components/schemas/EditabilitySummary'
+        highlightReview:
+          $ref: '#/components/schemas/HighlightReviewReport'
+          description: Highlighted paragraphs requiring draft/editor-decision review.
         hierarchy:
           $ref: '#/components/schemas/HierarchySummary'
         parseWarnings:
@@ -6838,6 +6898,21 @@ components:
           items:
             $ref: '#/components/schemas/SourceTextSpan'
 
+    SourceHighlightFact:
+      type: object
+      description: A directly highlighted DOCX run and its paragraph-relative location.
+      required: [color, text, span]
+      additionalProperties: true
+      properties:
+        color:
+          type: string
+          description: Named OOXML highlight color (for example, yellow).
+        text:
+          type: string
+          description: Exact text carried by the highlighted run.
+        span:
+          $ref: '#/components/schemas/SourceTextSpan'
+
     SourceChoiceTokenFact:
       type: object
       required: [kind, options, span]
@@ -6922,6 +6997,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SourceColorFact'
+        highlights:
+          type: array
+          description: >-
+            First-class highlighted runs. The parser also retains legacy
+            `highlight:<color>` entries in `colors` for compatibility.
+          items:
+            $ref: '#/components/schemas/SourceHighlightFact'
         choiceTokens:
           type: array
           items:
@@ -8481,6 +8563,18 @@ components:
           items:
             type: object
             additionalProperties: true
+        highlightMeanings:
+          type: array
+          description: >-
+            Per-highlight-color editability meanings. Matching is case-insensitive;
+            the built-in profile maps yellow to choice.
+          items:
+            type: object
+            required: [color, meaning]
+            additionalProperties: true
+            properties:
+              color: { type: string }
+              meaning: { $ref: '#/components/schemas/EditabilityValue' }
         choiceTokens:
           type: array
           items:
