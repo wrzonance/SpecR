@@ -1,3 +1,4 @@
+import { resolveSourceHighlights } from '../ast/index.js';
 import type {
   ConventionRules,
   Editability,
@@ -22,8 +23,9 @@ import type { ClassificationEvidence, ClassifyResult, ParagraphClassification } 
  *   1. note   — banner fact or a `noteBanners` regex match on the text
  *   2. note/… — comment policy (`comments.treatAs`) when comments are present
  *   3. choice — a choice-token candidate whose `kind` the profile enables
- *   4. color  — highest-coverage run color with a `colorMeanings` entry
- *   5. default — `defaultEditability` (and `locked` when unset)
+ *   4. highlight — first highlighted run with a `highlightMeanings` entry
+ *   5. color  — highest-coverage run color with a `colorMeanings` entry
+ *   6. default — `defaultEditability` (and `locked` when unset)
  */
 export function classify(tree: SpecTree, rules: ConventionRules): ClassifyResult {
   const out: ParagraphClassification[] = [];
@@ -39,6 +41,7 @@ export function classify(tree: SpecTree, rules: ConventionRules): ClassifyResult
 interface CompiledRules {
   readonly noteBanners: readonly (RegExp | null)[];
   readonly enabledChoiceKinds: ReadonlySet<SourceChoiceTokenFact['kind']>;
+  readonly highlightMeanings: ReadonlyMap<string, Editability>;
   readonly colorMeanings: ReadonlyMap<string, Editability>;
 }
 
@@ -46,8 +49,20 @@ function compileRules(rules: ConventionRules): CompiledRules {
   return {
     noteBanners: compilePatterns(rules.noteBanners),
     enabledChoiceKinds: new Set((rules.choiceTokens ?? []).map((t) => t.kind)),
+    highlightMeanings: buildHighlightMeanings(rules.highlightMeanings),
     colorMeanings: buildColorMeanings(rules.colorMeanings),
   };
+}
+
+function buildHighlightMeanings(
+  meanings: ConventionRules['highlightMeanings']
+): ReadonlyMap<string, Editability> {
+  const map = new Map<string, Editability>();
+  for (const meaning of meanings ?? []) {
+    const color = meaning.color.toLowerCase();
+    if (!map.has(color)) map.set(color, meaning.meaning);
+  }
+  return map;
 }
 
 // First mapping for a color wins, matching the prior `Array.find` semantics.
@@ -82,6 +97,7 @@ function classifyNode(
     noteRung(node.text, facts, compiled.noteBanners) ??
     commentRung(facts, rules) ??
     choiceRung(facts, compiled.enabledChoiceKinds) ??
+    highlightRung(node.text, facts, compiled.highlightMeanings) ??
     colorRung(facts, compiled.colorMeanings) ??
     defaultRung(rules);
   return { nodeId: node.id, ...verdict };
@@ -212,7 +228,36 @@ function findEnabledToken(
   return null;
 }
 
-// ── Rung 4: color meanings ────────────────────────────────────────────────────
+// ── Rung 4: highlight meanings ───────────────────────────────────────────────
+// Highlight is an explicit draft/editor marker, so it outranks incidental font
+// color. The first mapped run in document order decides, matching choice-token
+// semantics; presence is a binary signal, independent of paragraph coverage.
+
+function highlightRung(
+  text: string,
+  facts: SourceFacts,
+  meanings: ReadonlyMap<string, Editability>
+): RungVerdict | null {
+  if (meanings.size === 0) return null;
+  const highlights = resolveSourceHighlights(text, facts);
+  for (const highlight of highlights) {
+    const meaning = meanings.get(highlight.fact.color.toLowerCase());
+    if (meaning === undefined) continue;
+    return {
+      editability: meaning,
+      confidence: 0.85,
+      evidence: [
+        {
+          rule: `highlightMeanings[${highlight.fact.color}]`,
+          fact: highlight.factPath,
+        },
+      ],
+    };
+  }
+  return null;
+}
+
+// ── Rung 5: color meanings ────────────────────────────────────────────────────
 // The highest-coverage run color that has a colorMeanings entry decides; a color
 // without a mapped meaning does NOT fire this rung (AC — it falls through to
 // default). Confidence scales with that color's coverage (full vs sparse).
@@ -255,7 +300,7 @@ function bestMappedColor(
   return best;
 }
 
-// ── Rung 5: default ───────────────────────────────────────────────────────────
+// ── Rung 6: default ───────────────────────────────────────────────────────────
 
 function defaultRung(rules: ConventionRules): RungVerdict {
   const editability: Editability = rules.defaultEditability ?? 'locked';

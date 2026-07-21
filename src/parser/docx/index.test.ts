@@ -84,6 +84,12 @@ interface ColorFact {
   readonly spans: readonly (readonly [number, number])[];
 }
 
+interface HighlightFact {
+  readonly color: string;
+  readonly text: string;
+  readonly span: readonly [number, number];
+}
+
 interface ChoiceTokenFact {
   readonly kind: 'angle' | 'bracket';
   readonly options: readonly string[];
@@ -101,6 +107,7 @@ interface EmphasisFact {
 interface TestSourceFacts {
   readonly comments?: readonly CommentFact[];
   readonly colors?: readonly ColorFact[];
+  readonly highlights?: readonly HighlightFact[];
   readonly choiceTokens?: readonly ChoiceTokenFact[];
   readonly emphasis?: readonly EmphasisFact[];
   readonly banner?: string;
@@ -122,6 +129,10 @@ function sourceComments(node: SpecNode | undefined): readonly CommentFact[] | un
 
 function sourceColors(node: SpecNode | undefined): readonly ColorFact[] | undefined {
   return sourceFacts(node)?.colors;
+}
+
+function sourceHighlights(node: SpecNode | undefined): readonly HighlightFact[] | undefined {
+  return sourceFacts(node)?.highlights;
 }
 
 function sourceChoiceTokens(node: SpecNode | undefined): readonly ChoiceTokenFact[] | undefined {
@@ -520,14 +531,17 @@ describe('parseDocx — source facts: run colors (#129)', () => {
     ]);
   });
 
-  it('records highlight as a highlight-prefixed color fact', async () => {
+  it('records a highlighted run as a first-class fact and retains the compatibility color token', async () => {
     const documentXml = colorDoc(
       `<w:p><w:r><w:t>Use </w:t></w:r>${highlightRun('yellow', 'highlight')}<w:r><w:t>.</w:t></w:r></w:p>`
     );
     const tree = await parseDocx(await makeDocx({ documentXml }));
-    const colors = sourceColors(findNode(tree.parts, 'Use highlight.'));
+    const node = findNode(tree.parts, 'Use highlight.');
 
-    expect(colors).toEqual([{ color: 'highlight:yellow', coverage: 9 / 14, spans: [[4, 13]] }]);
+    expect(sourceHighlights(node)).toEqual([{ color: 'yellow', text: 'highlight', span: [4, 13] }]);
+    expect(sourceColors(node)).toEqual([
+      { color: 'highlight:yellow', coverage: 9 / 14, spans: [[4, 13]] },
+    ]);
   });
 });
 

@@ -226,17 +226,19 @@ describe('planLabelStrip (single-dot article number — only when it IS the labe
 });
 
 describe('rebaseSourceFacts (Codex review: keep fact offsets valid after prefix strip)', () => {
-  it('shifts comment/color/choice offsets left by the removed prefix length', () => {
+  it('shifts comment/color/highlight/choice offsets left by the removed prefix length', () => {
     // "PART 3 - EXECUTION" (facts on EXECUTION at 9..18) → "EXECUTION" (0..9)
     const facts: SourceFacts = {
       comments: [{ author: 'A', text: 'see spec', anchor: [9, 18], closed: false }],
       colors: [{ color: 'FF0000', coverage: 0.5, spans: [[9, 18]] }],
+      highlights: [{ color: 'yellow', text: 'EXECUTION', span: [9, 18] }],
       choiceTokens: [{ kind: 'bracket', options: ['x'], span: [9, 18] }],
     };
     const out = rebaseSourceFacts(facts, 9, 9);
     expect(out.comments?.[0]?.anchor).toEqual([0, 9]);
     expect(out.colors?.[0]?.spans).toEqual([[0, 9]]);
     expect(out.colors?.[0]?.coverage).toBe(1); // 9 covered / 9 new length
+    expect(out.highlights).toEqual([{ color: 'yellow', text: 'EXECUTION', span: [0, 9] }]);
     expect(out.choiceTokens?.[0]?.span).toEqual([0, 9]);
   });
 
@@ -277,6 +279,16 @@ describe('rebaseSourceFacts (Codex review: keep fact offsets valid after prefix 
     };
 
     expect(rebaseSourceFacts(facts, 9, 9).emphasis).toBeUndefined();
+  });
+
+  it('clips a highlight fact that crosses the stripped prefix', () => {
+    const facts: SourceFacts = {
+      highlights: [{ color: 'yellow', text: 'PART 3 - EXECUTION', span: [0, 18] }],
+    };
+
+    expect(rebaseSourceFacts(facts, 9, 9).highlights).toEqual([
+      { color: 'yellow', text: 'EXECUTION', span: [0, 9] },
+    ]);
   });
 
   it('keeps a zero-length (point) comment anchor sitting after the prefix (w:commentReference)', () => {

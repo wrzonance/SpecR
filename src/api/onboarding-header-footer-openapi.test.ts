@@ -37,6 +37,7 @@ const OnboardingReportSchema = z.object({
           styleDerivation: z.object({
             oneOf: z.array(z.unknown()),
           }),
+          highlightReview: z.object({ $ref: z.string() }),
         }),
       }),
     }),
@@ -52,6 +53,7 @@ function baseReport(headerFooter: unknown): Record<string, unknown> {
       counts: { locked: 0, editable: 0, choice: 0, note: 0 },
       lowConfidence: [],
     },
+    highlightReview: { total: 0, findings: [] },
     hierarchy: {
       counts: { scored: 0, unscored: 0, belowThreshold: 0 },
       lowConfidence: [],
@@ -121,5 +123,14 @@ describe('openapi.yaml — OnboardingReport.headerFooter (#307)', () => {
       .object({ type: z.literal('null') })
       .parse(OnboardingReport.properties.headerFooter.oneOf[1]);
     expect(nullBranch.type).toBe('null');
+  });
+
+  it('requires the highlight review report in every completed onboarding result', async () => {
+    const raw = await loadRawSpec();
+    const { OnboardingReport } = OnboardingReportSchema.parse(raw).components.schemas;
+    expect(OnboardingReport.required).toContain('highlightReview');
+    expect(OnboardingReport.properties.highlightReview.$ref).toBe(
+      '#/components/schemas/HighlightReviewReport'
+    );
   });
 });

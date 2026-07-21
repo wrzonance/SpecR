@@ -2,6 +2,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { ParserError } from '../error.js';
 import { scanChoiceTokens } from './choice-tokens.js';
 import { isCommentClosed } from './comment-closure.js';
+import { colorFactsForParagraph, type ColorSpan } from './source-color-facts.js';
 import {
   effectiveEmphasisForParagraph,
   sourcePropertiesForRun,
@@ -15,6 +16,7 @@ import type {
   SourceCommentFact,
   SourceEmphasisFact,
   SourceFacts,
+  SourceHighlightFact,
 } from '../../ast/types.js';
 import type { DocxComment } from './comments.js';
 import type { StyleMap } from './types.js';
@@ -37,16 +39,11 @@ interface CommentMarker {
   readonly offset: number;
 }
 
-interface ColorSpan {
-  readonly color: string;
-  readonly start: number;
-  readonly end: number;
-}
-
 interface InlineParagraph {
   readonly text: string;
   readonly markers: readonly CommentMarker[];
   readonly colorSpans: readonly ColorSpan[];
+  readonly highlights: readonly SourceHighlightFact[];
   readonly emphasis: readonly SourceEmphasisFact[];
   readonly vanish: boolean;
 }
@@ -55,6 +52,7 @@ interface InlineState {
   text: string;
   readonly markers: CommentMarker[];
   readonly colorSpans: ColorSpan[];
+  readonly highlights: SourceHighlightFact[];
   readonly emphasis: SourceEmphasisFact[];
   readonly styleMap: StyleMap;
   vanishChars: number;
@@ -125,6 +123,16 @@ function appendEmphasis(state: InlineState, start: number, properties: RunSource
   properties.emphasis.forEach((fact) => state.emphasis.push({ ...fact, text, span: [start, end] }));
 }
 
+function appendHighlight(state: InlineState, start: number, properties: RunSourceProperties): void {
+  const end = state.text.length;
+  if (properties.highlight === null || start === end) return;
+  state.highlights.push({
+    color: properties.highlight,
+    text: state.text.slice(start, end),
+    span: [start, end],
+  });
+}
+
 // Formatting-property subtrees that must never contribute text content: a
 // w:pPr > w:tabs > w:tab (a tab-STOP definition) would otherwise inject a phantom
 // tab now that w:tab renders as whitespace. Mirrors merge/extract.ts PROPERTY_TAGS.
@@ -150,6 +158,7 @@ function collectLayoutElement(
   if (name === 'w:tab') {
     appendText(state, '\t', {
       colors: [],
+      highlight: null,
       emphasis: [],
       effective: properties.effective,
       vanish: properties.vanish,
@@ -179,6 +188,7 @@ function collectOne(
     const start = state.text.length;
     collectInline(children, state, runProperties);
     appendEmphasis(state, start, runProperties);
+    appendHighlight(state, start, runProperties);
     return;
   }
   collectInline(children, state, properties);
@@ -201,15 +211,23 @@ function inlineParagraph(children: readonly unknown[], styleMap: StyleMap): Inli
     text: '',
     markers: [],
     colorSpans: [],
+    highlights: [],
     emphasis: [],
     styleMap,
     vanishChars: 0,
   };
-  collectInline(children, state, { colors: [], emphasis: [], effective, vanish: false });
+  collectInline(children, state, {
+    colors: [],
+    highlight: null,
+    emphasis: [],
+    effective,
+    vanish: false,
+  });
   return {
     text: state.text,
     markers: state.markers,
     colorSpans: state.colorSpans,
+    highlights: state.highlights,
     emphasis: state.emphasis,
     vanish: state.text.length > 0 && state.vanishChars === state.text.length,
   };
@@ -321,38 +339,10 @@ function handleMarker(
   handleReferenceMarker(marker, paragraphIndex, context);
 }
 
-function mergeSpans(spans: readonly ColorSpan[]): readonly (readonly [number, number])[] {
-  const merged: [number, number][] = [];
-  spans.forEach((span) => {
-    const last = merged.at(-1);
-    if (last && last[1] === span.start) {
-      merged[merged.length - 1] = [last[0], span.end];
-      return;
-    }
-    merged.push([span.start, span.end]);
-  });
-  return merged;
-}
-
-function coveredLength(spans: readonly (readonly [number, number])[]): number {
-  return spans.reduce((sum, span) => sum + span[1] - span[0], 0);
-}
-
-function colorFactsForParagraph(paragraph: InlineParagraph): readonly SourceColorFact[] {
-  if (paragraph.text.length === 0) return [];
-  const byColor = new Map<string, ColorSpan[]>();
-  paragraph.colorSpans.forEach((span) => {
-    byColor.set(span.color, [...(byColor.get(span.color) ?? []), span]);
-  });
-  return [...byColor.entries()].map(([color, spans]) => {
-    const merged = mergeSpans(spans);
-    return { color, coverage: coveredLength(merged) / paragraph.text.length, spans: merged };
-  });
-}
-
 function hasAnySourceFact(
   comments: readonly SourceCommentFact[],
   colors: readonly SourceColorFact[],
+  highlights: readonly SourceHighlightFact[],
   choiceTokens: readonly SourceChoiceTokenFact[],
   emphasis: readonly SourceEmphasisFact[],
   banner: string | undefined,
@@ -361,6 +351,7 @@ function hasAnySourceFact(
   return (
     comments.length > 0 ||
     colors.length > 0 ||
+    highlights.length > 0 ||
     choiceTokens.length > 0 ||
     emphasis.length > 0 ||
     banner !== undefined ||
@@ -371,15 +362,19 @@ function hasAnySourceFact(
 function makeSourceFacts(
   comments: readonly SourceCommentFact[],
   colors: readonly SourceColorFact[],
+  highlights: readonly SourceHighlightFact[],
   choiceTokens: readonly SourceChoiceTokenFact[],
   emphasis: readonly SourceEmphasisFact[],
   banner: string | undefined,
   vanish: boolean
 ): SourceFacts | undefined {
-  if (!hasAnySourceFact(comments, colors, choiceTokens, emphasis, banner, vanish)) return undefined;
+  if (!hasAnySourceFact(comments, colors, highlights, choiceTokens, emphasis, banner, vanish)) {
+    return undefined;
+  }
   return {
     ...(comments.length > 0 ? { comments } : {}),
     ...(colors.length > 0 ? { colors } : {}),
+    ...(highlights.length > 0 ? { highlights } : {}),
     ...(choiceTokens.length > 0 ? { choiceTokens } : {}),
     ...(emphasis.length > 0 ? { emphasis } : {}),
     ...(banner !== undefined ? { banner } : {}),
@@ -409,7 +404,8 @@ function buildSourceFactsByParagraph(
   return paragraphs.map((paragraph, index) =>
     makeSourceFacts(
       buckets[index] ?? [],
-      colorFactsForParagraph(paragraph),
+      colorFactsForParagraph(paragraph.text, paragraph.colorSpans),
+      paragraph.highlights,
       scanChoiceTokens(paragraph.text),
       paragraph.emphasis,
       isSpecifierNote(paragraph.text) ? paragraph.text.trim() : undefined,
