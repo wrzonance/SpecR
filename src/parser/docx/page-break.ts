@@ -39,19 +39,21 @@ function isPageBreakOwnedByPrecedingObject(
 // #292) must still surface on whatever paragraph is next actually emitted — it is
 // never simply dropped just because the paragraph it landed on produced no node.
 // Resolves the EFFECTIVE pageBreakBefore at index `i`: forwarded from an earlier
-// filtered paragraph (`pendingPageBreak`), OR'd with this cp's own flag — unless
-// that flag was misattributed across an interposed body object, in which case it
-// is excluded (dropped, per isPageBreakOwnedByPrecedingObject). The same result
-// doubles as the NEXT pendingPageBreak when `cp` itself turns out to be filtered —
-// "the break due here" is identical whether it lands on a node now or forwards on.
+// filtered paragraph (`pendingPageBreak`), OR'd with this cp's own flag — unless a
+// body object sits immediately before index `i` (isPageBreakOwnedByPrecedingObject),
+// in which case the break is excluded (dropped) regardless of whether it is `cp`'s
+// own flag or one forwarded from a filtered paragraph: an object attached to i-1 sits
+// physically between that filtered paragraph and `cp` in real document order, so a
+// break forwarded across it is exactly as misattributed as one read directly off
+// `cp.paragraph`. The result doubles as the NEXT pendingPageBreak when `cp` itself
+// turns out to be filtered — "the break due here" is identical whether it lands on
+// a node now or forwards on.
 export function resolvePageBreakBefore(
   cp: ClassifiedParagraph,
   i: number,
   pendingPageBreak: boolean,
   objectsByPrecedingIndex: ReadonlyMap<number, readonly SpecNode[]>
 ): boolean {
-  const ownFlag =
-    cp.paragraph.pageBreakBefore === true &&
-    !isPageBreakOwnedByPrecedingObject(i, objectsByPrecedingIndex);
-  return pendingPageBreak || ownFlag;
+  if (isPageBreakOwnedByPrecedingObject(i, objectsByPrecedingIndex)) return false;
+  return pendingPageBreak || cp.paragraph.pageBreakBefore === true;
 }

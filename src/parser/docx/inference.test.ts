@@ -1630,4 +1630,56 @@ describe('buildTree — meta.pageBreakBefore propagation (ADR-075)', () => {
     expect(article?.children[1]?.text).toBe('Paragraph after table.');
     expect(article?.children[1]?.meta.pageBreakBefore).toBeUndefined();
   });
+
+  // #497 review finding: resolvePageBreakBefore only ran the object-adjacency
+  // exclusion against a paragraph's OWN pageBreakBefore flag — `pendingPageBreak`
+  // (a break forwarded through an earlier FILTERED paragraph, e.g. a spacer) was
+  // OR'd in unconditionally, bypassing isPageBreakOwnedByPrecedingObject entirely.
+  // A body object is a documented, real attachment target for a filtered spacer's
+  // index (buildTree's own comment: "2 of 3 real table hosts in the proof fixture
+  // are empty spacer paragraphs"), so the forwarded break must be dropped the same
+  // way the direct-adjacency case is — never misattached to the paragraph AFTER
+  // the object.
+  it('#497 KNOWN AMBIGUITY: a page break forwarded through a filtered spacer is dropped when a body object is attached to that spacer, not misattached to the paragraph after the object', () => {
+    const blankSpacer: ClassifiedParagraph = {
+      paragraph: { text: '   ', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const afterTable: ClassifiedParagraph = {
+      paragraph: { text: 'Paragraph after table.', isVanish: false },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const obj = makeObjectNode('table-obj');
+    const tree = buildTree(
+      [
+        makeClassified('part', 0, 'PART 1'),
+        makeClassified('article', 1, '1.1'),
+        blankSpacer,
+        afterTable,
+      ],
+      '01',
+      'T',
+      'arcat',
+      [],
+      new Map([[2, [obj]]])
+    );
+    const article = tree.parts[0]?.children[0];
+    // The blank spacer produced no node of its own — only the object and the real
+    // paragraph did.
+    expect(article?.children).toHaveLength(2);
+    expect(article?.children[0]).toEqual(obj);
+    expect(article?.children[0]?.meta.pageBreakBefore).toBeUndefined();
+    expect(article?.children[1]?.text).toBe('Paragraph after table.');
+    expect(article?.children[1]?.meta.pageBreakBefore).toBeUndefined();
+  });
 });

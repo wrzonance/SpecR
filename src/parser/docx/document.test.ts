@@ -373,6 +373,25 @@ describe('parseDocument — pageBreakBefore (ADR-075)', () => {
     expect(result[1]?.pageBreakBefore).toBe(true);
   });
 
+  // #497 review finding: runHasPageBreak's own comment (ADR-075) names 3 verified
+  // parse shapes for run['w:br'] — object, empty string '', and ARRAY (2+ sibling
+  // w:br in the SAME w:r) — but no fixture before this one ever produced the array
+  // shape: the "collapses 2+ page breaks" test above uses two SEPARATE <w:r>
+  // elements, each contributing a single-object run['w:br']. Verified directly
+  // against createDocumentXmlParser: <w:r><w:br .../><w:br .../></w:r> parses
+  // run['w:br'] to an array of two objects, a materially different shape that
+  // toArray<unknown> must still walk. Pins the array-detection path so it cannot
+  // silently regress (e.g. a "simplification" to a direct single-value read).
+  it('detects a page break when 2+ sibling <w:br> live in the SAME <w:r> (array shape)', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>text</w:t></w:r>` +
+        `<w:r><w:br w:type="page"/><w:br w:type="page"/></w:r></w:p>` +
+        `<w:p><w:r><w:t>after</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[1]?.pageBreakBefore).toBe(true);
+  });
+
   // A w:br sandwiched between two w:t runs inside the SAME w:r must still be
   // detected — no special-casing on run position within the paragraph.
   it('detects a page break sandwiched between two w:t runs in the same w:r', () => {
