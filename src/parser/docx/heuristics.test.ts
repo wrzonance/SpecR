@@ -7,7 +7,13 @@ import {
   isPartHeading,
   isDecorationSeparator,
   leadingMarkerOrdinal,
+  isSectionIdentityLine,
+  isTitleIdentityLine,
+  leadingTitleBlockIndices,
 } from './heuristics.js';
+import { UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
+import type { ClassifiedParagraph } from './types.js';
+import type { NodeType } from '../../ast/types.js';
 
 describe('matchTextSignal', () => {
   it('detects PART heading', () => {
@@ -309,4 +315,134 @@ describe('leadingMarkerOrdinal', () => {
       expect(leadingMarkerOrdinal(text)).toBeNull();
     });
   }
+});
+
+describe('isSectionIdentityLine — #510 title-block duplication', () => {
+  it('matches a "SECTION <n>" line against the resolved canonical section, tolerating missing-space drift', () => {
+    // Regression fixture (parsing-needs-fixing.docx): the source line is typed
+    // "SECTION 01 8813.13" (missing space before the suffix), but core.xml/S4
+    // resolve the canonical section as "01 88 13.13". strong-mode parsing must
+    // still recognize the identity so the duplicated line is suppressed.
+    expect(isSectionIdentityLine('SECTION 01 8813.13', '01 88 13.13')).toBe(true);
+  });
+
+  it('matches regardless of the "SECTION" keyword casing', () => {
+    expect(isSectionIdentityLine('Section 01 88 13.13', '01 88 13.13')).toBe(true);
+  });
+
+  it('does NOT match a section line for a different section number', () => {
+    expect(isSectionIdentityLine('SECTION 09 91 26', '01 88 13.13')).toBe(false);
+  });
+
+  it('does NOT match plain body text that never resolves to a section number', () => {
+    expect(isSectionIdentityLine('Provide materials as indicated.', '01 88 13.13')).toBe(false);
+  });
+
+  it('is always false when the resolved section is UNKNOWN_SECTION_IDENTITY', () => {
+    expect(isSectionIdentityLine('SECTION 01 88 13.13', UNKNOWN_SECTION_IDENTITY)).toBe(false);
+  });
+});
+
+describe('isTitleIdentityLine — #510 title-block duplication', () => {
+  it('matches the exact resolved title', () => {
+    expect(
+      isTitleIdentityLine(
+        'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS',
+        'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'
+      )
+    ).toBe(true);
+  });
+
+  it('matches case-insensitively and with collapsed whitespace', () => {
+    expect(
+      isTitleIdentityLine(
+        '  Clean  Zone   Pre-Certification Protocols ',
+        'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'
+      )
+    ).toBe(true);
+  });
+
+  it('does NOT match a different title', () => {
+    expect(isTitleIdentityLine('SOME OTHER TITLE', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS')).toBe(
+      false
+    );
+  });
+
+  it('is always false when the resolved title is UNKNOWN_SECTION_IDENTITY', () => {
+    expect(
+      isTitleIdentityLine('CLEAN ZONE PRE-CERTIFICATION PROTOCOLS', UNKNOWN_SECTION_IDENTITY)
+    ).toBe(false);
+  });
+});
+
+// Builds a minimal ClassifiedParagraph for leadingTitleBlockIndices scenarios —
+// mirrors inference.test.ts's makeClassified helper (kept local: heuristics.ts
+// must not import from inference.ts, which already imports heuristics.ts).
+function makeCp(
+  nodeType: NodeType,
+  text: string,
+  opts: { readonly suppressed?: boolean } = {}
+): ClassifiedParagraph {
+  return {
+    paragraph: { text, isVanish: false },
+    resolvedIlvl: nodeType === 'continuation' ? 8 : 0,
+    nodeType,
+    signalUsed: 3,
+    conflicts: [],
+    agreed: [],
+    isVanish: false,
+    ...(opts.suppressed !== undefined ? { suppressed: opts.suppressed } : {}),
+  };
+}
+
+describe('leadingTitleBlockIndices — #510 title-block duplication', () => {
+  const section = '01 88 13.13';
+  const title = 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS';
+
+  it('suppresses a strictly-leading run of section/title continuation lines', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 1]));
+  });
+
+  it('is always the empty set when both section and title are UNKNOWN_SECTION_IDENTITY', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'),
+    ];
+    expect(
+      leadingTitleBlockIndices(classified, UNKNOWN_SECTION_IDENTITY, UNKNOWN_SECTION_IDENTITY)
+    ).toEqual(new Set());
+  });
+
+  it('skips (does not break on) a blank/suppressed paragraph interleaved in the leading run', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', ''), // blank spacer paragraph
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
+  });
+
+  it('stops the scan at the first real structural (non-continuation) node', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('part', 'PART 1 - GENERAL'),
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'), // never reached
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0]));
+  });
+
+  it('permanently stops at the first non-matching continuation, leaving a coincidental mid-document repeat untouched', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', 'Some unrelated lead-in text.'), // closes the leading zone
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'), // a real body repeat, left alone
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0]));
+  });
 });

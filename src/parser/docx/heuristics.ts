@@ -1,4 +1,7 @@
 import type { NodeType } from '../../ast/types.js';
+import type { ClassifiedParagraph } from './types.js';
+import { UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
+import { parseSectionNumberCandidate } from '../../lib/section-number.js';
 
 interface TextSignalEntry {
   readonly pattern: RegExp;
@@ -216,4 +219,93 @@ export function matchIndentSignal(leftIndent: number | undefined): number | null
   if (estimated <= 0 || estimated > MAX_ILVL) return null;
 
   return estimated;
+}
+
+// #510: a source authored with typed "SECTION <n>" / title lines duplicates the
+// generator's injected canonical heading on round-trip — the two source lines
+// survive as body continuation nodes even though their content is already
+// canonicalized into the tree's own section/title. Strips a leading "SECTION"
+// keyword (a CSI format-convention marker, not a vendor label) before delegating
+// to parseSectionNumberCandidate so the comparison tolerates the same drift the
+// candidate parser already tolerates elsewhere (missing spaces, dot suffixes).
+const SECTION_KEYWORD_PREFIX = /^SECTION\s+/i;
+
+/**
+ * Returns true when `text` is a "SECTION <n>" line whose number resolves to the
+ * exact same canonical section already resolved for the document (core.xml or
+ * Signal 4). Always false when `section` is `UNKNOWN_SECTION_IDENTITY` — there is
+ * nothing trustworthy to compare against.
+ */
+export function isSectionIdentityLine(text: string, section: string): boolean {
+  if (section === UNKNOWN_SECTION_IDENTITY) return false;
+  const stripped = text.trim().replace(SECTION_KEYWORD_PREFIX, '');
+  const parsed = parseSectionNumberCandidate(stripped, 'strong');
+  return parsed.ok && parsed.canonical === section;
+}
+
+function normalizeIdentityText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+/**
+ * Returns true when `text`, trimmed/whitespace-collapsed and compared
+ * case-insensitively, is identical to the document's already-resolved `title`.
+ * Always false when `title` is `UNKNOWN_SECTION_IDENTITY`.
+ */
+export function isTitleIdentityLine(text: string, title: string): boolean {
+  if (title === UNKNOWN_SECTION_IDENTITY) return false;
+  return normalizeIdentityText(text) === normalizeIdentityText(title);
+}
+
+// The per-candidate decision for leadingTitleBlockIndices's scan, extracted into
+// its own pure helper specifically to keep the scan loop under the enforced
+// sonarjs/cognitive-complexity budget (measured 12 inlined vs. a budget of 10).
+type LeadingScanStep = 'match' | 'skip' | 'stop';
+
+function isBlankOrSuppressed(cp: ClassifiedParagraph): boolean {
+  return cp.paragraph.text.trim().length === 0 || cp.suppressed === true;
+}
+
+function classifyLeadingCandidate(
+  cp: ClassifiedParagraph,
+  section: string,
+  title: string
+): LeadingScanStep {
+  if (cp.nodeType !== 'continuation') return 'stop';
+  if (isBlankOrSuppressed(cp)) return 'skip';
+  const text = cp.paragraph.text;
+  if (isSectionIdentityLine(text, section) || isTitleIdentityLine(text, title)) return 'match';
+  return 'stop';
+}
+
+/**
+ * Scans `classified` from index 0, identifying the strictly-leading run of
+ * continuation nodes that merely re-type the document's own already-resolved
+ * section/title identity (#510 round-trip duplication). The scan:
+ * - adds an index on a match (a continuation whose text is the section or
+ *   title line),
+ * - continues without adding an index on a blank/already-suppressed paragraph
+ *   (it consumes no slot but does not close the leading zone),
+ * - stops permanently on the first real structural (non-continuation) node, or
+ *   the first continuation whose text matches neither identity — a
+ *   coincidental repeat later in the document is never touched.
+ *
+ * Returns an empty set immediately when `section` and `title` are both
+ * `UNKNOWN_SECTION_IDENTITY` — there is nothing resolved to compare against.
+ */
+export function leadingTitleBlockIndices(
+  classified: readonly ClassifiedParagraph[],
+  section: string,
+  title: string
+): ReadonlySet<number> {
+  const indices = new Set<number>();
+  if (section === UNKNOWN_SECTION_IDENTITY && title === UNKNOWN_SECTION_IDENTITY) {
+    return indices;
+  }
+  for (const [i, cp] of classified.entries()) {
+    const step = classifyLeadingCandidate(cp, section, title);
+    if (step === 'stop') break;
+    if (step === 'match') indices.add(i);
+  }
+  return indices;
 }
