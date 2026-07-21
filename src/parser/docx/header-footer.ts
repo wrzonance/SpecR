@@ -9,7 +9,7 @@
 // (mirrors the pre-existing table-content-skipped pattern in index.ts).
 
 import { HeaderFooterCompositionSchema } from '../../ast/index.js';
-import type { HeaderFooterComposition, ParseWarning } from '../../ast/index.js';
+import type { HeaderFooterComposition, PageSize, ParseWarning } from '../../ast/index.js';
 import { compact } from './xml-utils.js';
 import {
   parseDocumentRelationships,
@@ -55,6 +55,10 @@ export interface HeaderFooterCaptureEntries {
 export interface HeaderFooterCaptureResult {
   readonly composition: HeaderFooterComposition | undefined;
   readonly warnings: readonly ParseWarning[];
+  // Sibling of `composition`, never nested inside it (ADR-075): every
+  // document carries a page size, unlike the occasional header/footer
+  // content, so it must survive even when composition is undefined.
+  readonly pageSize?: PageSize;
 }
 
 type VariantKind = HeaderFooterUnmodeledEntry['variant'];
@@ -387,5 +391,6 @@ export function captureHeaderFooter(
   return {
     composition: buildComposition(variants, unmodeled, rawWarnings, sectionInfo.pgNumStart),
     warnings: buildTreeWarnings(rawWarnings),
+    ...(sectionInfo.pageSize !== undefined ? { pageSize: sectionInfo.pageSize } : {}),
   };
 }

@@ -510,6 +510,56 @@ describe('captureHeaderFooter — pgNumStart preservation (ADR-068)', () => {
   });
 });
 
+// ADR-075: pageSize is a sibling of `composition`/`warnings` on
+// HeaderFooterCaptureResult — every document has a page size (unlike the
+// occasional pgNumStart), so it is never nested inside composition/raw and
+// must survive even when there is no header/footer content to capture at
+// all (composition undefined). Reuses sectionInfo.pageSize already computed
+// by parseSectionHeaderFooterInfo — no second sectPr parse.
+describe('captureHeaderFooter — pageSize pass-through (ADR-075)', () => {
+  it('surfaces a fully-populated w:pgSz as a sibling pageSize field, independent of composition', () => {
+    const sectPr = '<w:sectPr><w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/></w:sectPr>';
+    const result = captureHeaderFooter(baseEntries({ documentXml: makeDocXml(sectPr) }), KNOWN);
+    expect(result.pageSize).toEqual({ width: 12240, height: 15840, orientation: 'portrait' });
+    expect(result.composition).toBeUndefined();
+  });
+
+  it('omits orientation when @w:orient is absent, never fabricating a default', () => {
+    const sectPr = '<w:sectPr><w:pgSz w:w="15840" w:h="12240"/></w:sectPr>';
+    const result = captureHeaderFooter(baseEntries({ documentXml: makeDocXml(sectPr) }), KNOWN);
+    expect(result.pageSize).toEqual({ width: 15840, height: 12240 });
+  });
+
+  it('leaves pageSize undefined for a document with no sectPr at all', () => {
+    const result = captureHeaderFooter(baseEntries(), KNOWN);
+    expect(result.pageSize).toBeUndefined();
+  });
+
+  it('leaves pageSize undefined (never a partial shape) when w:pgSz is missing a dimension', () => {
+    const sectPr = '<w:sectPr><w:pgSz w:w="12240"/></w:sectPr>';
+    const result = captureHeaderFooter(baseEntries({ documentXml: makeDocXml(sectPr) }), KNOWN);
+    expect(result.pageSize).toBeUndefined();
+  });
+
+  it('surfaces pageSize alongside real header/footer content, unaffected by variant capture', () => {
+    const sectPr =
+      '<w:sectPr>' +
+      '<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>' +
+      headerRef('rId1', 'default') +
+      '</w:sectPr>';
+    const result = captureHeaderFooter(
+      baseEntries({
+        documentXml: makeDocXml(sectPr),
+        documentRelsXml: makeRelsXml(relationship('rId1', 'header1.xml')),
+        headerParts: new Map([['word/header1.xml', makeHdrXml('Default')]]),
+      }),
+      KNOWN
+    );
+    expect(result.pageSize).toEqual({ width: 12240, height: 15840, orientation: 'portrait' });
+    expect(result.composition?.variants?.default?.header).toBeDefined();
+  });
+});
+
 // Regression (#306 review): findResolvedRef used Array.find(), so when two
 // w:headerReference/w:footerReference elements of the SAME (variant, region)
 // both resolve to real relationship targets (a non-conforming document — real
