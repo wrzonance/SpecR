@@ -538,6 +538,47 @@ describe('generateDocx — #303 header/footer wiring', () => {
   });
 });
 
+// #509: sectionHeaderFooterOptions previously only set `properties.page` when
+// a header/footer render carried a pageNumberStart override, so any tree
+// with no #303 header/footer options at all fell through to docx's implicit
+// A4 default (11906x16838) — silently wrong for every US Letter source doc.
+// `properties.page.size` must now be unconditional: present on every
+// generated section, sourced from `resolvePageSize(tree.pageSize)`.
+describe('generateDocx — #509 page size', () => {
+  it('defaults to Letter (12240x15840 portrait) when tree.pageSize is absent — never the docx library implicit A4 fallback', async () => {
+    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE));
+    expect(xml).toMatch(/<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"\/>/);
+    expect(xml).not.toContain('w:w="11906"');
+  });
+
+  it('emits the tree’s captured pageSize verbatim in w:pgSz when present', async () => {
+    const tree: SpecTree = {
+      ...SYNTHETIC_TREE,
+      pageSize: { width: 15840, height: 12240, orientation: 'landscape' },
+    };
+    const xml = await getDocXml(await generateDocx(tree));
+    expect(xml).toMatch(/<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"\/>/);
+  });
+
+  it('a SpecTree with no orientation captured still emits a size (docx defaults the attribute, never fabricated by SpecR)', async () => {
+    // Legal (12240x20160) — deliberately distinct from both Letter and
+    // docx's own A4 fallback (11906x16838) so this can't pass vacuously.
+    const tree: SpecTree = { ...SYNTHETIC_TREE, pageSize: { width: 12240, height: 20160 } };
+    const xml = await getDocXml(await generateDocx(tree));
+    expect(xml).toMatch(/<w:pgSz w:w="12240" w:h="20160"/);
+  });
+
+  it('.SEC-sourced (or any non-DOCX) tree — pageSize undefined — generates Letter via the identical default path, no format-specific special-casing', async () => {
+    // A .SEC-parsed SpecTree never sets `pageSize` — mechanically identical
+    // to SYNTHETIC_TREE here, which also carries no `pageSize` field. Pinned
+    // as its own named invariant so the .SEC acceptance criterion has an
+    // explicit regression test, not just an implicit side effect of the
+    // "absent" case above.
+    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE));
+    expect(xml).toMatch(/<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"\/>/);
+  });
+});
+
 // #300/#517: emitNode's object branch re-emits a captured body-object blob via
 // buildObjectBlocks (object-block.ts) instead of walking it as ordinary
 // hierarchy. Pinned invariants at the generateDocx boundary: the blob's own

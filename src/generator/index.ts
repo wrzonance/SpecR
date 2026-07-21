@@ -8,7 +8,9 @@ import type {
   StyleProperties,
   StyleRule,
   HeaderFooterComposition,
+  PageSize,
 } from '../ast/index.js';
+import { resolvePageSize, toDocxPageSize, type PageSizeOption } from './page-size.js';
 import { GeneratorError } from './error.js';
 import { buildSpecNumberingConfig, getNodeLevel } from './numbering.js';
 import { buildRuleMap, paragraphStyleOptions, runStyleOptions } from './styles.js';
@@ -182,28 +184,39 @@ function documentLevelOptions(render: HeaderFooterRenderResult | undefined): {
 
 // Section-level options driven by a header/footer render: docx's
 // ISectionOptions carries `headers`/`footers` as siblings of `properties`,
-// while titlePage/page-number-start live inside `properties` — this bundles
-// both so the call site can spread `{ ...sectionHeaderFooterOptions(render),
-// children }` without any conditional branching of its own.
-function sectionHeaderFooterOptions(render: HeaderFooterRenderResult | undefined): {
+// while titlePage/page-number-start/page-size live inside `properties` —
+// this bundles all three so the call site can spread
+// `{ ...sectionHeaderFooterOptions(render, pageSize), children }` without any
+// conditional branching of its own. `properties.page.size` (#509) is always
+// present — an absent `size` is exactly what triggers dolanmiu/docx's
+// implicit A4 fallback, so every generated section must set it explicitly,
+// independent of whether a header/footer was ever requested.
+function sectionHeaderFooterOptions(
+  render: HeaderFooterRenderResult | undefined,
+  pageSize: PageSize
+): {
   readonly headers?: NonNullable<HeaderFooterRenderResult['headers']>;
   readonly footers?: NonNullable<HeaderFooterRenderResult['footers']>;
-  readonly properties: { readonly titlePage?: boolean; readonly page?: PageNumberStartOption };
+  readonly properties: { readonly titlePage?: boolean; readonly page: PageSectionOption };
 } {
   return {
     ...(render?.headers !== undefined ? { headers: render.headers } : {}),
     ...(render?.footers !== undefined ? { footers: render.footers } : {}),
     properties: {
       ...(render?.titlePage ? { titlePage: true } : {}),
-      ...(render?.pageNumberStart !== undefined
-        ? { page: { pageNumbers: { start: render.pageNumberStart } } }
-        : {}),
+      page: {
+        size: toDocxPageSize(pageSize),
+        ...(render?.pageNumberStart !== undefined
+          ? { pageNumbers: { start: render.pageNumberStart } }
+          : {}),
+      },
     },
   };
 }
 
-interface PageNumberStartOption {
-  readonly pageNumbers: { readonly start: number };
+interface PageSectionOption {
+  readonly size: PageSizeOption;
+  readonly pageNumbers?: { readonly start: number };
 }
 
 /**
@@ -226,10 +239,11 @@ export async function generateDocx(
     const ctx = sectionContext(format, SPEC_NUM_REF, rules);
     const children = buildSectionChildren(tree, ctx);
     const render = renderOptionalHeaderFooter(tree, format, options);
+    const pageSize = resolvePageSize(tree.pageSize);
     const doc = new Document({
       ...documentLevelOptions(render),
       numbering: { config: [buildSpecNumberingConfig(rules, SPEC_NUM_REF)] },
-      sections: [{ ...sectionHeaderFooterOptions(render), children }],
+      sections: [{ ...sectionHeaderFooterOptions(render, pageSize), children }],
     });
     return await Packer.toBuffer(doc);
   } catch (err) {
@@ -296,16 +310,26 @@ export async function generateManual(
       const render = renderOptionalHeaderFooter(tree, format, options);
       return {
         reference,
-        ...sectionHeaderFooterOptions(render),
+        ...sectionHeaderFooterOptions(render, resolvePageSize(tree.pageSize)),
         children: buildSectionChildren(tree, sectionContext(format, reference, rules)),
       };
     });
     const firstRender =
       trees[0] !== undefined ? renderOptionalHeaderFooter(trees[0], format, options) : undefined;
+    // Front matter has no source SpecTree of its own — its page size (#509)
+    // resolves from `trees[0]`, deliberately not `firstRender` (a
+    // header/footer render, unrelated to page dimensions).
+    const frontMatterPageSize = resolvePageSize(trees[0]?.pageSize);
     const doc = new Document({
       ...documentLevelOptions(firstRender),
       numbering: { config: sections.map((s) => buildSpecNumberingConfig(rules, s.reference)) },
-      sections: [{ properties: {}, children: frontMatter }, ...sections],
+      sections: [
+        {
+          properties: { page: { size: toDocxPageSize(frontMatterPageSize) } },
+          children: frontMatter,
+        },
+        ...sections,
+      ],
     });
     return await Packer.toBuffer(doc);
   } catch (err) {
