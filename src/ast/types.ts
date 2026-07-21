@@ -194,6 +194,18 @@ export interface RetainedTable {
   readonly rows: readonly (readonly string[])[];
 }
 
+/**
+ * Captured DOCX page dimensions (`w:pgSz`, #509). All-or-nothing: width and
+ * height are always both present — never a partial `{ width: NaN }` shape.
+ * `orientation` mirrors `w:pgSz/@w:orient` when the source declares it;
+ * absent === not declared, never fabricated.
+ */
+export interface PageSize {
+  readonly width: number;
+  readonly height: number;
+  readonly orientation?: 'portrait' | 'landscape';
+}
+
 export interface SpecTree {
   readonly id: string;
   readonly section: string;
@@ -211,6 +223,12 @@ export interface SpecTree {
    * or footer content was captured (or the source format has none, e.g. .SEC).
    */
   readonly headerFooter?: HeaderFooterComposition;
+  /**
+   * Captured DOCX page dimensions (`w:pgSz`, #509). Absent === no explicit
+   * `w:pgSz` captured (or non-DOCX source, e.g. `.SEC`); the generator
+   * defaults to Letter (`resolvePageSize`, `src/generator/page-size.ts`).
+   */
+  readonly pageSize?: PageSize;
 }
 
 export type SecRef = z.infer<typeof SecRefSchema>;
