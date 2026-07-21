@@ -103,6 +103,27 @@ async function newArticle(specId: string, headingText: string, position: number)
   if (id === undefined) throw new Error('newArticle: no id');
   return id;
 }
+async function newPartOneArticle(
+  specId: string,
+  headingText: string,
+  partPosition = 1
+): Promise<{ readonly partId: string; readonly articleId: string }> {
+  const part = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, node_type, text, position)
+     VALUES ($1, 'part', 'GENERAL', $2) RETURNING id`,
+    [specId, partPosition]
+  );
+  const partId = part.rows[0]?.id;
+  if (partId === undefined) throw new Error('newPartOneArticle: no part id');
+  const child = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+     VALUES ($1, $2, 'article', $3, 1) RETURNING id`,
+    [specId, partId, headingText]
+  );
+  const articleId = child.rows[0]?.id;
+  if (articleId === undefined) throw new Error('newPartOneArticle: no article id');
+  return { partId, articleId };
+}
 async function addParagraph(specId: string, text: string, position: number): Promise<string> {
   const r = await pool.query<{ id: string }>(
     `INSERT INTO paragraphs (spec_id, node_type, text, position) VALUES ($1, 'pr1', $2, $3) RETURNING id`,
@@ -212,9 +233,14 @@ describe('getCoordinationReport', () => {
       productMissingDatasheet: 0,
       impliedRelatedSection: 0,
       umbrellaNotCalledOut: 2,
+      generalRequirementDuplicated: 0,
       total: 7,
     });
-    expect(report.notes).toEqual(['umbrella call-out check covers all divisions in scope: 03, 05']);
+    expect(report.notes).toEqual([
+      'umbrella call-out check covers all divisions in scope: 03, 05',
+      'general-requirement duplicate check skipped Division 00/01 comparison: no Division 00/01 specs in scope',
+      'general-requirement duplicate check skipped umbrella comparison for absent sections: 03 00 00, 05 00 00',
+    ]);
   });
 
   it('coordination: Div 26 subordinate without 26 00 00 citation -> umbrella_not_called_out', async () => {
@@ -251,6 +277,81 @@ describe('getCoordinationReport', () => {
 
     expect(ofType(report.findings, 'umbrella_not_called_out')).toHaveLength(0);
     expect(report.summary.umbrellaNotCalledOut).toBe(0);
+  });
+
+  it('coordination: technical PART 1 role duplicated in Div 01 and its umbrella -> locator findings', async () => {
+    const projectId = await newProject('coord-general-duplicate');
+    const div01 = await newSpec('01 00 00', 'General Requirements');
+    const umbrella = await newSpec('26 00 00', 'Electrical General Requirements');
+    const technical = await newSpec('26 05 33', 'Raceways and Boxes');
+    await addProjectSpec(projectId, div01, 1);
+    await addProjectSpec(projectId, umbrella, 2);
+    await addProjectSpec(projectId, technical, 3);
+    await setRequiredSections({ kind: 'baseline', projectId }, [
+      { section: '01 00 00' },
+      { section: '26 00 00' },
+      { section: '26 05 33' },
+    ]);
+    const divArticle = await newPartOneArticle(div01, 'QUALITY ASSURANCE');
+    const umbrellaArticle = await newPartOneArticle(umbrella, 'QUALITY ASSURANCE');
+    await pool.query(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position)
+       VALUES ($1, 'note', 'Specifier note before PART 1.', 1)`,
+      [technical]
+    );
+    const technicalArticle = await newPartOneArticle(technical, '1.5 QUALITY ASSURANCE', 2);
+
+    const report = await getCoordinationReport(projectId, undefined);
+    const findings = ofType(report.findings, 'general_requirement_duplicated');
+
+    expect(findings).toEqual([
+      {
+        type: 'general_requirement_duplicated',
+        sourceSpecId: technical,
+        sourceSpecSection: '26 05 33',
+        sourceParagraphId: technicalArticle.articleId,
+        sourceArticleTitle: '1.5 QUALITY ASSURANCE',
+        authoritySpecId: div01,
+        authoritySpecSection: '01 00 00',
+        authorityParagraphId: divArticle.articleId,
+        authorityArticleTitle: 'QUALITY ASSURANCE',
+        authorityKind: 'division_00_01',
+        matchBasis: 'article_role',
+        matchedValue: 'quality-assurance',
+      },
+      {
+        type: 'general_requirement_duplicated',
+        sourceSpecId: technical,
+        sourceSpecSection: '26 05 33',
+        sourceParagraphId: technicalArticle.articleId,
+        sourceArticleTitle: '1.5 QUALITY ASSURANCE',
+        authoritySpecId: umbrella,
+        authoritySpecSection: '26 00 00',
+        authorityParagraphId: umbrellaArticle.articleId,
+        authorityArticleTitle: 'QUALITY ASSURANCE',
+        authorityKind: 'division_umbrella',
+        matchBasis: 'article_role',
+        matchedValue: 'quality-assurance',
+      },
+    ]);
+    expect(report.summary.generalRequirementDuplicated).toBe(2);
+  });
+
+  it('coordination: absent Div 00/01 and applicable umbrella authorities produce distinct notes', async () => {
+    const projectId = await newProject('coord-general-skipped');
+    const technical = await newSpec('26 05 33', 'Raceways and Boxes');
+    await addProjectSpec(projectId, technical, 1);
+    await newPartOneArticle(technical, 'QUALITY ASSURANCE');
+
+    const report = await getCoordinationReport(projectId, undefined);
+
+    expect(report.notes).toContain(
+      'general-requirement duplicate check skipped Division 00/01 comparison: no Division 00/01 specs in scope'
+    );
+    expect(report.notes).toContain(
+      'general-requirement duplicate check skipped umbrella comparison for absent sections: 26 00 00'
+    );
+    expect(report.summary.generalRequirementDuplicated).toBe(0);
   });
 
   it('coordination: Div 08 subordinate (outside 26/27/28) without umbrella citation -> flagged, not skipped (ADR-042)', async () => {
@@ -523,6 +624,8 @@ describe('getCoordinationReport', () => {
     expect(report.notes).toEqual([
       'no required sections authored at this scope — every present section is reported as present-not-required',
       'umbrella call-out check covers all divisions in scope: 03',
+      'general-requirement duplicate check skipped Division 00/01 comparison: no Division 00/01 specs in scope',
+      'general-requirement duplicate check skipped umbrella comparison for absent sections: 03 00 00',
     ]);
   });
 

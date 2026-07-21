@@ -54,7 +54,7 @@ const LOOKUP: ReadonlyMap<string, ArticleRole> = new Map(
 //     is never treated as a prefix.
 const NUMBER_PREFIX_RE = /^\d+(?:\.\d+)+(?:\s*[-–—.)]\s*|\s+)/;
 
-function normalizeHeading(text: string): string {
+export function normalizeArticleTitle(text: string): string {
   // Trim FIRST so the ^-anchored prefix strip survives incidental leading
   // whitespace ("  1.1 REFERENCES" → "REFERENCES"); the second trim drops any
   // space the prefix terminator left behind. The "3D MODELING" anchor is
@@ -64,7 +64,7 @@ function normalizeHeading(text: string): string {
 
 /** Resolve a CSI article role from its heading text, or undefined if unknown. */
 export function deriveArticleRole(text: string): ArticleRole | undefined {
-  return LOOKUP.get(normalizeHeading(text));
+  return LOOKUP.get(normalizeArticleTitle(text));
 }
 
 /** Deep, immutable: set meta.articleRole on every `article` node whose heading

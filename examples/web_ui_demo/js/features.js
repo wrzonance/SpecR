@@ -20,6 +20,7 @@ export const API_FEATURES = {
   submittalRegister: true, // POST submittal-register + product-driven findings (landed #263)
   impliedRelated: false, // hidden: false-positive inference (single "control" token) — see #327
   umbrellaCallout: true, // umbrella_not_called_out coordination finding (landed #264)
+  generalRequirementDuplicated: true, // general_requirement_duplicated coordination finding (landed #410)
   numberingProfiles: true, // numbering-profile CRUD + DOCX snapshot + ingress (landed #299/#317/#320)
   compareReport: true, // POST /reports/compare — grounded comparison matrix        (landed ADR-047)
   compareAlignment: false, // compare alignment/include request options            (#384 — flip when landed)
