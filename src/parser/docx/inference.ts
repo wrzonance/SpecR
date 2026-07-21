@@ -6,6 +6,7 @@ import {
   matchIndentSignal,
   isPartHeading,
   isDecorationSeparator,
+  leadingTitleBlockIndices,
 } from './heuristics.js';
 import { computeNoteRoles, isNoteParagraph } from './note-roles.js';
 import type { NoteRole } from '../../lib/note-delimiters.js';
@@ -528,13 +529,21 @@ export function buildTree(
   // leading number/letter may be an author-typed label the strip post-pass should remove.
   const s4NodeIds = new Set<string>();
   let lastNonContChildren: SpecNode[] = roots;
+  // #510: a leading run of continuation paragraphs that merely re-type the
+  // document's own already-resolved section/title identity (round-trip
+  // duplication of the generator's injected canonical heading). These indices
+  // are excluded below the same way suppressed/blank paragraphs are — no
+  // SpecNode is produced for them, matching the #292 "suppressed -> no
+  // SpecNode" precedent. No signal fires and nothing is lost: the identity is
+  // already carried on the tree's own section/title fields.
+  const titleBlockIndices = leadingTitleBlockIndices(classified, section, title);
 
   // Iterate EVERY classified paragraph, unfiltered by index (#300): a body object's
   // attachment key is the paragraph's position in this ORIGINAL array, so a
   // filtered-out (empty/suppressed) paragraph at that index must still receive its
   // attached object(s) — only the structural stack/continuation handling skips it.
   classified.forEach((cp, i) => {
-    if (isStructuralContent(cp)) {
+    if (isStructuralContent(cp) && !titleBlockIndices.has(i)) {
       lastNonContChildren = processStructuralParagraph(
         cp,
         stack,
