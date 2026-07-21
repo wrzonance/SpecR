@@ -310,6 +310,81 @@ describe('extractParagraphText — exported for table extraction reuse (#293)', 
   });
 });
 
+// ADR-075: a manual page break (`w:br w:type="page"`) found among the runs of a
+// paragraph marks the NEXT paragraph as pageBreakBefore=true — the after-the-source
+// signal is normalized to a before-the-target flag so it matches docx's own
+// Paragraph.pageBreakBefore 1:1 at the generator boundary.
+describe('parseDocument — pageBreakBefore (ADR-075)', () => {
+  it('sets pageBreakBefore on the paragraph following a manual page break', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>before</w:t></w:r><w:r><w:br w:type="page"/></w:r></w:p>` +
+        `<w:p><w:r><w:t>after</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.pageBreakBefore).toBeUndefined();
+    expect(result[1]?.pageBreakBefore).toBe(true);
+  });
+
+  // A page break with no following paragraph (trailing/EOF) has nothing to attach
+  // the flag to and is silently dropped — a documented scoping limit (ADR-075), not
+  // a bug: parsing must still succeed and produce no spurious flag anywhere.
+  it('drops a trailing page break with no following paragraph (KNOWN AMBIGUITY)', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>first</w:t></w:r></w:p>` +
+        `<w:p><w:r><w:t>last</w:t></w:r><w:r><w:br w:type="page"/></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result).toHaveLength(2);
+    expect(result[0]?.pageBreakBefore).toBeUndefined();
+    expect(result[1]?.pageBreakBefore).toBeUndefined();
+  });
+
+  // A bare <w:br/> with no w:type attribute is an ordinary line break, not a page
+  // break — must not set the flag.
+  it('does not set pageBreakBefore for a bare line break (<w:br/> with no w:type)', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>line one</w:t></w:r><w:r><w:br/></w:r></w:p>` +
+        `<w:p><w:r><w:t>line two</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[1]?.pageBreakBefore).toBeUndefined();
+  });
+
+  // w:type="column" is a column break, a different OOXML break kind — must not be
+  // misread as a page break.
+  it('does not set pageBreakBefore for a column break (w:type="column")', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>col one</w:t></w:r><w:r><w:br w:type="column"/></w:r></w:p>` +
+        `<w:p><w:r><w:t>col two</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[1]?.pageBreakBefore).toBeUndefined();
+  });
+
+  // Two-or-more page breaks in a single paragraph collapse to a single true — the
+  // parser has no richer positional model (documented KNOWN AMBIGUITY, ADR-075).
+  it('collapses 2+ page breaks in one paragraph to a single true', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>text</w:t></w:r>` +
+        `<w:r><w:br w:type="page"/></w:r><w:r><w:br w:type="page"/></w:r></w:p>` +
+        `<w:p><w:r><w:t>after</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[1]?.pageBreakBefore).toBe(true);
+  });
+
+  // A w:br sandwiched between two w:t runs inside the SAME w:r must still be
+  // detected — no special-casing on run position within the paragraph.
+  it('detects a page break sandwiched between two w:t runs in the same w:r', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>foo</w:t><w:br w:type="page"/><w:t>bar</w:t></w:r></w:p>` +
+        `<w:p><w:r><w:t>after</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[1]?.pageBreakBefore).toBe(true);
+  });
+});
+
 describe('isParagraphVanish — exported for table extraction reuse (#293)', () => {
   it('detects vanish from the paragraph mark (w:pPr > w:rPr > w:vanish)', () => {
     const raw = { 'w:pPr': { 'w:rPr': { 'w:vanish': '' } }, 'w:r': [{ 'w:t': 'hidden mark' }] };

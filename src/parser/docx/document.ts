@@ -1,5 +1,6 @@
 import { ParserError } from '../error.js';
 import {
+  asRecord,
   createDocumentXmlParser,
   extractAttrStr,
   getAttrVal,
@@ -24,6 +25,7 @@ interface ParagraphFields {
   readonly outlineLvl: number | undefined;
   readonly jc: string | undefined;
   readonly sourceFacts: SourceFacts | undefined;
+  readonly pageBreakBefore: boolean | undefined;
 }
 
 function extractRunText(run: Record<string, unknown>): string {
@@ -213,14 +215,50 @@ function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxP
     ...(fields.outlineLvl !== undefined ? { outlineLvl: fields.outlineLvl } : {}),
     ...(fields.jc !== undefined ? { jc: fields.jc } : {}),
     ...(fields.sourceFacts !== undefined ? { sourceFacts: fields.sourceFacts } : {}),
+    ...(fields.pageBreakBefore !== undefined ? { pageBreakBefore: fields.pageBreakBefore } : {}),
   };
+}
+
+// ADR-075: detects a manual page break (`<w:br w:type="page"/>`) within a single run.
+// run['w:br'] is already `unknown` (run: Record<string, unknown>) so it is directly
+// assignable to toArray<unknown>'s parameter — no cast needed. Handles all 3 verified
+// parse shapes: object ({'@_w:type':'page'}), empty string '' (bare self-closing
+// <w:br/>, NOT an object), and array (2+ sibling w:br in the same run).
+function runHasPageBreak(run: Record<string, unknown>): boolean {
+  const breaks = toArray<unknown>(run['w:br']);
+  return breaks.some((br) => {
+    const rec = asRecord(br);
+    return rec !== undefined && extractAttrStr(rec, '@_w:type') === 'page';
+  });
+}
+
+// ADR-075: reuses collectRuns (same traversal as allTextRunsVanish/extractParagraphText)
+// so hyperlink-, w:ins/w:del-, and w:sdt-wrapped runs are covered identically. Multiple
+// page breaks in one paragraph collapse to a single true — KNOWN AMBIGUITY: the parser
+// has no richer positional model.
+function paragraphHasPageBreak(raw: Record<string, unknown>): boolean {
+  const runs: Record<string, unknown>[] = [];
+  collectRuns(raw, runs);
+  return runs.some(runHasPageBreak);
+}
+
+// ADR-075: guards index-0 (no predecessor) and the noUncheckedIndexedAccess lookback
+// without a non-null assertion.
+function previousParagraphHasPageBreak(
+  rawParagraphs: readonly Record<string, unknown>[],
+  index: number
+): boolean {
+  if (index === 0) return false;
+  const prev = rawParagraphs[index - 1];
+  return prev !== undefined && paragraphHasPageBreak(prev);
 }
 
 function parseParagraph(
   raw: Record<string, unknown>,
   numberingMap: NumberingMap,
   styleMap: StyleMap,
-  source: ParagraphSource | undefined
+  source: ParagraphSource | undefined,
+  pageBreakBefore: boolean
 ): DocxParagraph {
   const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
   const styleVal = pPr ? getAttrVal(pPr['w:pStyle']) : '';
@@ -241,6 +279,7 @@ function parseParagraph(
     outlineLvl,
     jc,
     sourceFacts: source?.sourceFacts,
+    pageBreakBefore: pageBreakBefore ? true : undefined,
   });
 }
 
@@ -271,7 +310,16 @@ export function parseDocument(
   }
 
   const paragraphSources = parseParagraphSources(xml, commentsById, styleMap);
-  return toArray<Record<string, unknown>>(
+  const rawParagraphs = toArray<Record<string, unknown>>(
     body['w:p'] as readonly Record<string, unknown>[] | undefined
-  ).map((p, index) => parseParagraph(p, numberingMap, styleMap, paragraphSources[index]));
+  );
+  return rawParagraphs.map((p, index) =>
+    parseParagraph(
+      p,
+      numberingMap,
+      styleMap,
+      paragraphSources[index],
+      previousParagraphHasPageBreak(rawParagraphs, index)
+    )
+  );
 }

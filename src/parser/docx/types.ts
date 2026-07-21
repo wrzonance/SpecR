@@ -105,6 +105,12 @@ export interface DocxParagraph {
   readonly jc?: string;
   readonly isVanish: boolean;
   readonly sourceFacts?: SourceFacts;
+  // True when a manual page break (`w:br w:type="page"`) was found among the
+  // immediately preceding raw paragraph's runs — this paragraph should start on a
+  // new page. Absent === no manual page break before this paragraph. A break with
+  // no following paragraph (trailing/EOF), and 2+ page breaks collapsed within one
+  // paragraph, are both known-ambiguity scope limits — see ADR-075.
+  readonly pageBreakBefore?: boolean;
 }
 
 // ─── inference.ts output ──────────────────────────────────────────────────────
