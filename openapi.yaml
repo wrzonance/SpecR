@@ -7067,10 +7067,14 @@ components:
               type: boolean
               description: >-
                 This node should begin on a new page in the rendered DOCX (#497,
-                ADR-075) — captured from a manual `w:br w:type="page"` run in the
-                immediately preceding source paragraph. Present only when true;
-                absent means no manual page break. Never set on `type: object`
-                nodes — their OOXML is already preserved verbatim in `meta.object`.
+                ADR-075) — captured from either source form of a manual break: a
+                `w:br w:type="page"` run in the immediately preceding paragraph
+                (Word "Insert → Page Break"), or a `w:pageBreakBefore` property on
+                the paragraph itself (Word "Page break before"). Persisted and
+                round-tripped through the full upload → store → generate flow.
+                Present only when true; absent means no manual page break. Never
+                set on `type: object` nodes — their OOXML is already preserved
+                verbatim in `meta.object`.
             source:
               type: string
               enum: [ufgs, arcat, cpi, unknown]

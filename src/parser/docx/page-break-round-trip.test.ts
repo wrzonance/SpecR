@@ -52,6 +52,15 @@ function paraWithTrailingPageBreak(text: string): string {
   return `<w:p><w:r><w:t>${text}</w:t></w:r>` + '<w:r><w:br w:type="page"/></w:r></w:p>';
 }
 
+// A paragraph carrying the OTHER real source form of a manual page break: the
+// paragraph-level `w:pageBreakBefore` property, produced by Word's Paragraph
+// dialog → "Line and Page Breaks" → "Page break before" (and set by many
+// heading styles). Unlike the run-level w:br, the break lives ON the paragraph
+// that begins the new page, not in the one before it.
+function paraWithOwnPageBreak(text: string): string {
+  return `<w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
+}
+
 function flatten(nodes: readonly SpecNode[]): SpecNode[] {
   return [...nodes, ...nodes.flatMap((n) => flatten(n.children))];
 }
@@ -96,6 +105,41 @@ describe('manual page break round trip — parse -> generate (#497, ADR-075)', (
     expect(firstPara).toBeDefined();
     expect(secondPara).toBeDefined();
 
+    expect(firstPara).not.toContain('<w:pageBreakBefore/>');
+    expect(secondPara).toContain('<w:pageBreakBefore/>');
+  });
+
+  // #497 review finding: a source Word doc can express the SAME manual page break
+  // as a paragraph-level `w:pageBreakBefore` property (Paragraph dialog / heading
+  // style) instead of a run-level `w:br` in the preceding paragraph. The parser
+  // must capture that form too, and it must land on the paragraph that carries it
+  // — not shifted onto a neighbour like the run-level form. This proves the own-
+  // property capture and the generator's re-emission agree on the same node.
+  //
+  // NOTE this exercises the capture form directly from a source paragraph, NOT a
+  // re-import of SpecR's own generated .docx: the generator wraps every content
+  // paragraph in a `w:sdt` UUID merge anchor, and `parse()` reads only direct
+  // `w:body/w:p` children — so a generated .docx is re-integrated through the
+  // UUID-anchored merge engine, never re-parsed into a fresh tree (that is not a
+  // supported flow, page break or otherwise).
+  it('round-trips a source paragraph-level w:pageBreakBefore property (Word "Page break before") through parse -> generate', async () => {
+    const source = await makeDocx(
+      para('Paragraph one text.') + paraWithOwnPageBreak('Paragraph two text.')
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const nodes = flatten(tree.parts);
+
+    const first = nodes.find((n) => n.text === 'Paragraph one text.');
+    const second = nodes.find((n) => n.text === 'Paragraph two text.');
+    // The break lives ON paragraph two — it must mark itself, never its predecessor.
+    expect(first?.meta.pageBreakBefore).toBeUndefined();
+    expect(second?.meta.pageBreakBefore).toBe(true);
+
+    // And it re-emits as `w:pageBreakBefore` on that same paragraph on generate.
+    const xml = await generatedDocumentXml(tree);
+    const paragraphs = xml.match(/<w:p>(?:(?!<w:p>).)*?<\/w:p>/gs) ?? [];
+    const firstPara = paragraphs.find((p) => p.includes('Paragraph one text.'));
+    const secondPara = paragraphs.find((p) => p.includes('Paragraph two text.'));
     expect(firstPara).not.toContain('<w:pageBreakBefore/>');
     expect(secondPara).toContain('<w:pageBreakBefore/>');
   });

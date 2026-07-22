@@ -65,6 +65,35 @@ array. Any detector that assumes one shape misses the others.
    reaches the next paragraph that actually becomes a node — a break preceding
    suppressed/collapsed content is never silently dropped just because the
    paragraph it first landed on produced nothing.
+7. **Persist as a dedicated column** (`page_break_before`, migration 050;
+   #497 review finding). `paragraphs` has no catch-all `meta` JSONB — every
+   `meta.*` field maps to an explicit column written and reconstructed by name
+   (`vanish`, `conflicts`, `source_facts`, `signal_provenance`, `object_data`).
+   `pageBreakBefore` is a paragraph-level boolean with exactly `vanish`'s shape
+   and lifecycle, so it takes its own `boolean NOT NULL DEFAULT false` column,
+   wired symmetrically into the write path (`insertTree`/`flattenDfs`), both read
+   paths (`getSpecTree`→`buildNodeTree` and `getParagraphWithAncestors`), and the
+   project-derive clone (`derive.ts cloneParagraphs`). Without persistence the
+   flag survives only the in-memory parser→generator path and is silently dropped
+   by the real upload → parse → **persist** → generate REST flow — the path every
+   uploaded document actually takes.
+8. **Capture BOTH source forms of a manual break** (`document.ts`,
+   `ownPageBreakBefore`; #497 review finding). A manual page break appears in a
+   real source `.docx` in two forms, and the original lookback caught only one.
+   The first is a `w:br type="page"` run at the end of the *preceding* paragraph
+   (Word's "Insert → Page Break") — the predecessor's `previousParagraphHasPageBreak`
+   lookback. The second is a paragraph-level `w:pageBreakBefore` property *on* the
+   paragraph that begins the new page, produced by Word's Paragraph dialog → "Line
+   and Page Breaks" → "Page break before" and set by many heading styles — captured
+   by `ownPageBreakBefore`. Both are common authoring patterns; a document using
+   only the property form previously lost its breaks entirely. (This is also the
+   exact property the generator re-emits per decision 1, so capture and emission
+   name the same node — but the justification is the source-authoring form, NOT a
+   re-import of SpecR's own generated `.docx`: the generator wraps every content
+   paragraph in a `w:sdt` UUID merge anchor and `parse()` reads only direct
+   `w:body/w:p` children, so a generated file is re-integrated through the merge
+   engine, never re-parsed into a fresh tree.) CT_OnOff toggle semantics: the
+   element present === on, unless an explicit falsey `w:val` (false/0/off) disables it.
 
 ### KNOWN AMBIGUITY — scope limits accepted, not solved
 
@@ -113,9 +142,15 @@ addressed by an invented behavior, and are pinned by tests marked
   call sites. Neither name had external references, so this is a clean,
   low-risk single-file rename/merge, not a new abstraction reaching across
   module boundaries.
-- No database migration and no `SpecNode`/`SpecTree` reshaping — the field
-  rides inside the existing `meta` JSONB blob, following the same pattern as
-  `meta.vanish` and `meta.conflicts`.
+- One additive, reversible migration (050) and no `SpecNode`/`SpecTree`
+  reshaping. The field persists as a dedicated `page_break_before` column
+  following the same pattern as `meta.vanish`'s `vanish` column (decision 7) —
+  `paragraphs` has no shared `meta` JSONB, so a new `meta.*` field is a new
+  column, wired by name into the write path, both read paths, and the
+  project-derive clone. (An earlier draft of this ADR mistakenly asserted no
+  migration was needed "because the field rides inside the existing meta JSONB
+  blob" — there is no such blob; that omission silently dropped the flag on
+  every persisted spec and was caught in review.)
 - Decision 6's forwarding/redirect logic (`pageBreakMeta`,
   `resolvePageBreakBefore`) was extracted into its own sibling module,
   `src/parser/docx/page-break.ts`, purely to keep `inference.ts` under the

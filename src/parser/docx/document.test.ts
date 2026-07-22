@@ -402,6 +402,29 @@ describe('parseDocument — pageBreakBefore (ADR-075)', () => {
     const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
     expect(result[1]?.pageBreakBefore).toBe(true);
   });
+
+  // #497 review finding: a source Word doc can carry a manual page break as a
+  // paragraph-level `w:pageBreakBefore` property (Paragraph dialog / heading
+  // style), not only as a run-level w:br in the preceding paragraph, so the
+  // parser must ALSO read a paragraph's own property. Detected ON the paragraph
+  // itself, not shifted from a predecessor.
+  it('sets pageBreakBefore from a paragraph OWN w:pageBreakBefore property (Word "Page break before")', () => {
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t>starts new page</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.pageBreakBefore).toBe(true);
+  });
+
+  // CT_OnOff toggle: an explicit falsey w:val (e.g. a style disabling an
+  // inherited break) means the property is OFF, not on.
+  it('does not set pageBreakBefore for an own w:pageBreakBefore explicitly disabled (w:val="false")', () => {
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:pageBreakBefore w:val="false"/></w:pPr><w:r><w:t>no break</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.pageBreakBefore).toBeUndefined();
+  });
 });
 
 describe('isParagraphVanish — exported for table extraction reuse (#293)', () => {

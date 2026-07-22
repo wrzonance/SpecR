@@ -253,6 +253,22 @@ function previousParagraphHasPageBreak(
   return prev !== undefined && paragraphHasPageBreak(prev);
 }
 
+// ADR-075: a manual page break appears in a source .docx in TWO forms, and both
+// must be captured. The first is a `w:br type="page"` run at the end of the
+// PRECEDING paragraph (Word's "Insert → Page Break"), handled by
+// previousParagraphHasPageBreak. The second — this function — is the paragraph-
+// level `w:pageBreakBefore` property ON the paragraph that begins the new page,
+// produced by Word's Paragraph dialog → "Line and Page Breaks" → "Page break
+// before" and set by many heading styles. It maps directly to
+// `meta.pageBreakBefore` (and is also the exact property the generator re-emits).
+// CT_OnOff toggle semantics: element present === on, unless an explicit falsey
+// `w:val` (false/0/off, e.g. a style disabling an inherited break) turns it off.
+function ownPageBreakBefore(pPr: Record<string, unknown> | undefined): boolean {
+  if (!pPr || !('w:pageBreakBefore' in pPr)) return false;
+  const val = getAttrVal(pPr['w:pageBreakBefore']);
+  return val !== 'false' && val !== '0' && val !== 'off';
+}
+
 function parseParagraph(
   raw: Record<string, unknown>,
   numberingMap: NumberingMap,
@@ -279,7 +295,7 @@ function parseParagraph(
     outlineLvl,
     jc,
     sourceFacts: source?.sourceFacts,
-    pageBreakBefore: pageBreakBefore ? true : undefined,
+    pageBreakBefore: pageBreakBefore || ownPageBreakBefore(pPr) ? true : undefined,
   });
 }
 
