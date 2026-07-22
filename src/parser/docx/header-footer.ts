@@ -55,7 +55,7 @@ export interface HeaderFooterCaptureEntries {
 export interface HeaderFooterCaptureResult {
   readonly composition: HeaderFooterComposition | undefined;
   readonly warnings: readonly ParseWarning[];
-  // Sibling of `composition`, never nested inside it (ADR-075): every
+  // Sibling of `composition`, never nested inside it (ADR-077): every
   // document carries a page size, unlike the occasional header/footer
   // content, so it must survive even when composition is undefined.
   readonly pageSize?: PageSize;

@@ -323,7 +323,7 @@ export const RetainedTableSchema = z.object({
   rows: z.array(z.array(z.string())),
 });
 
-// Captured DOCX page dimensions (`w:pgSz`, #509, ADR-075). All-or-nothing —
+// Captured DOCX page dimensions (`w:pgSz`, #509, ADR-077). All-or-nothing —
 // width/height are both required, never a partial shape — kept in lockstep
 // with the `PageSize` TS type (ast/types.ts): SpecTreeSchema has no
 // `.catchall()`, so a field added to the type but not mirrored here would
@@ -347,6 +347,6 @@ export const SpecTreeSchema = z.object({
   // slice — no DB/REST/MCP persistence; see ADR-068.
   headerFooter: HeaderFooterCompositionSchema.exactOptional(),
   // Captured DOCX page dimensions (#509). Absent === no explicit w:pgSz
-  // captured (or non-DOCX source); see ADR-075.
+  // captured (or non-DOCX source); see ADR-077.
   pageSize: PageSizeSchema.exactOptional(),
 });

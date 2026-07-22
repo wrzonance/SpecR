@@ -539,7 +539,7 @@ describe('persistParsedSpec — explicit libraryId target (O-8)', () => {
   });
 });
 
-describe('persistParsedSpec ↔ getSpecTree — pageSize round-trip (#509, ADR-075)', () => {
+describe('persistParsedSpec ↔ getSpecTree — pageSize round-trip (#509, ADR-077)', () => {
   afterEach(async () => {
     await pool.query("DELETE FROM specs WHERE section = '99 68 00'");
   });

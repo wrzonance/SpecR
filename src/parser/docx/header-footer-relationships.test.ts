@@ -261,7 +261,7 @@ describe('parseDocumentSettings', () => {
   });
 });
 
-describe('parseSectionHeaderFooterInfo — pageSize (#509, ADR-075)', () => {
+describe('parseSectionHeaderFooterInfo — pageSize (#509, ADR-077)', () => {
   it('reads width/height/orientation from w:pgSz on the trailing body-level w:sectPr (Letter portrait)', () => {
     const info = parseSectionHeaderFooterInfo(
       makeDocXml('<w:sectPr><w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/></w:sectPr>')
@@ -330,7 +330,7 @@ describe('parseSectionHeaderFooterInfo — pageSize (#509, ADR-075)', () => {
     expect(info.pageSize).toBeUndefined();
   });
 
-  // Regression guard (#509, ADR-075): Number('12240.5') === 12240.5 is finite
+  // Regression guard (#509, ADR-077): Number('12240.5') === 12240.5 is finite
   // and positive, so a Number.isFinite-only guard would admit a fractional twip
   // that PageSizeSchema (.int()) rejects — a schema-validated tree would fail
   // the whole spec, while a direct parse→generate would let the docx library
@@ -349,7 +349,7 @@ describe('parseSectionHeaderFooterInfo — pageSize (#509, ADR-075)', () => {
     expect(info.pageSize).toEqual({ width: 12240, height: 15840 });
   });
 
-  // KNOWN AMBIGUITY (ADR-068 single-sectPr scope, extended by ADR-075 to
+  // KNOWN AMBIGUITY (ADR-068 single-sectPr scope, extended by ADR-077 to
   // pageSize): a document with a mid-body w:pPr/w:sectPr section break can
   // declare a DIFFERENT w:pgSz for that earlier section than the trailing
   // body-level one this parser reads. This capture models only the single

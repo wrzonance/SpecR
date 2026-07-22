@@ -208,7 +208,7 @@ function extractOrientation(sectPr: Record<string, unknown>): 'portrait' | 'land
   return orient === 'portrait' || orient === 'landscape' ? orient : undefined;
 }
 
-// ADR-075 §3: width/height/orientation as one all-or-nothing unit — never a
+// ADR-077 §3: width/height/orientation as one all-or-nothing unit — never a
 // partial { width: NaN } shape. Reads only the trailing body-level w:sectPr's
 // own w:pgSz (ADR-068 single-sectPr scope, extended here to page size: a
 // mid-body w:pPr/w:sectPr section break declaring a different page size is a

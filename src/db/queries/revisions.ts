@@ -175,7 +175,7 @@ async function snapshotMemberTrees(
       section: member.section ?? '',
       title: member.title ?? '',
       parts: buildNodeTree(paras.rows),
-      // #509/ADR-075: freeze the captured page size too, so a regenerated
+      // #509/ADR-077: freeze the captured page size too, so a regenerated
       // revision keeps the source geometry (validateTree checks it against
       // PageSizeSchema). Absent column → key omitted, Letter default applies.
       ...(member.page_size != null ? { pageSize: member.page_size } : {}),

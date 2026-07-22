@@ -510,13 +510,13 @@ describe('captureHeaderFooter — pgNumStart preservation (ADR-068)', () => {
   });
 });
 
-// ADR-075: pageSize is a sibling of `composition`/`warnings` on
+// ADR-077: pageSize is a sibling of `composition`/`warnings` on
 // HeaderFooterCaptureResult — every document has a page size (unlike the
 // occasional pgNumStart), so it is never nested inside composition/raw and
 // must survive even when there is no header/footer content to capture at
 // all (composition undefined). Reuses sectionInfo.pageSize already computed
 // by parseSectionHeaderFooterInfo — no second sectPr parse.
-describe('captureHeaderFooter — pageSize pass-through (ADR-075)', () => {
+describe('captureHeaderFooter — pageSize pass-through (ADR-077)', () => {
   it('surfaces a fully-populated w:pgSz as a sibling pageSize field, independent of composition', () => {
     const sectPr = '<w:sectPr><w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/></w:sectPr>';
     const result = captureHeaderFooter(baseEntries({ documentXml: makeDocXml(sectPr) }), KNOWN);

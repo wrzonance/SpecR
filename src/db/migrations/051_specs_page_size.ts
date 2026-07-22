@@ -1,6 +1,6 @@
 import type { MigrationBuilder } from 'node-pg-migrate';
 
-// #509 (ADR-075): persist the captured DOCX page size (`w:pgSz`) so it survives
+// #509 (ADR-077): persist the captured DOCX page size (`w:pgSz`) so it survives
 // the upload → persistParsedSpec → getSpecTree → generateDocx round-trip. Before
 // this column the parser captured `SpecTree.pageSize` in memory but persistence
 // decomposed the tree into specs/paragraphs rows without it, so every A4/Legal/

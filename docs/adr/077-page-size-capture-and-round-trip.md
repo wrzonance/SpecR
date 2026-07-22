@@ -1,4 +1,4 @@
-# ADR-075: page size capture and round-trip (`w:pgSz`)
+# ADR-077: page size capture and round-trip (`w:pgSz`)
 
 ## Status
 

@@ -1,7 +1,7 @@
 import { PageSizeSchema } from '../../ast/index.js';
 import type { PageSize, SpecTree } from '../../ast/index.js';
 
-// Read/write helpers for the specs.page_size JSONB column (#509, ADR-075),
+// Read/write helpers for the specs.page_size JSONB column (#509, ADR-077),
 // kept out of specs.ts so that file stays within its 400-line budget.
 
 /**

@@ -10,7 +10,7 @@ import type { SpecTree } from '../../ast/index.js';
 // generator/index.test.ts feeds hand-crafted PageSize objects straight into
 // generateDocx. Neither pins the actual parse -> generate glue this feature
 // promises: "a DOCX source with an explicit, valid w:pgSz reproduces the
-// same width/height/orientation in the generated OOXML" (ADR-075). A
+// same width/height/orientation in the generated OOXML" (ADR-077). A
 // regression that flips the twips-reading convention in extractPageSize
 // (parser side) and independently flips the landscape swap direction in
 // toDocxPageSize (generator side) in a way that happens to cancel out for
@@ -57,7 +57,7 @@ async function packedDocumentXml(tree: SpecTree): Promise<string> {
   return file.async('string');
 }
 
-describe('parseSectionHeaderFooterInfo → generateDocx → Packer → JSZip round-trip (#509, ADR-075)', () => {
+describe('parseSectionHeaderFooterInfo → generateDocx → Packer → JSZip round-trip (#509, ADR-077)', () => {
   it('a captured portrait Letter w:pgSz reproduces the identical width/height/orientation in the generated document.xml', async () => {
     const xml = makeDocXml('<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>');
     const info = parseSectionHeaderFooterInfo(xml);

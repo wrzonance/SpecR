@@ -166,7 +166,7 @@ export interface SectionHeaderFooterInfo {
   readonly pgNumStart?: number;
   /**
    * Captured `w:pgSz` off the same trailing body-level `w:sectPr` (#509,
-   * ADR-075). Absent === no `w:pgSz`, or one that is malformed/partial (a
+   * ADR-077). Absent === no `w:pgSz`, or one that is malformed/partial (a
    * missing/non-positive/non-numeric dimension) — never a partial shape.
    */
   readonly pageSize?: PageSize;
