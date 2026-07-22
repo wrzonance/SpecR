@@ -180,12 +180,17 @@ function extractPgNumStart(sectPr: Record<string, unknown>): number | undefined 
 }
 
 // Shared by width and height (w:pgSz/@w:w, @w:h): stricter than
-// extractPgNumStart's isNaN-only guard above — a zero/negative page
-// dimension is unrenderable, not merely odd, so this also rejects <= 0.
+// extractPgNumStart's isNaN-only guard above in two ways — (1) a
+// zero/negative page dimension is unrenderable, not merely odd, so this also
+// rejects <= 0; (2) `Number(raw)` (not `parseInt`) is used for the string
+// case so a value with a valid leading numeric prefix but trailing garbage
+// (e.g. "12240abc") fails closed to undefined instead of silently parsing
+// its numeric prefix — `parseInt` would accept it, which is the wrong
+// invariant at a boundary that must reject anything not purely numeric.
 // Pure, total, no throw.
 function parsePositiveDimension(raw: unknown): number | undefined {
   if (typeof raw !== 'string' && typeof raw !== 'number') return undefined;
-  const n = typeof raw === 'number' ? raw : parseInt(raw, 10);
+  const n = typeof raw === 'number' ? raw : Number(raw);
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 

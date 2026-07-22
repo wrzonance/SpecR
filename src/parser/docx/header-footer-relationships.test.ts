@@ -317,6 +317,19 @@ describe('parseSectionHeaderFooterInfo — pageSize (#509, ADR-075)', () => {
     expect(info.pageSize).toBeUndefined();
   });
 
+  // Regression guard: parseInt('12240abc', 10) === 12240 — a leading numeric
+  // prefix followed by trailing garbage is NOT the same as isNaN, so a naive
+  // parseInt-based guard silently accepts a malformed @w:w/@w:h instead of
+  // failing closed to undefined. A well-formed OOXML producer never emits
+  // this, but the parser boundary must not trust that — fail closed on any
+  // string that isn't purely numeric, not merely non-numeric.
+  it('leaves pageSize undefined when a dimension has a valid numeric prefix but trailing garbage', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:pgSz w:w="12240abc" w:h="15840"/></w:sectPr>')
+    );
+    expect(info.pageSize).toBeUndefined();
+  });
+
   it('drops an unrecognized @w:orient value instead of fabricating one', () => {
     const info = parseSectionHeaderFooterInfo(
       makeDocXml('<w:sectPr><w:pgSz w:w="12240" w:h="15840" w:orient="sideways"/></w:sectPr>')
