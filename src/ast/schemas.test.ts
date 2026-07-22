@@ -350,6 +350,15 @@ describe('SpecNodeMetaSchema', () => {
     expect(() => SpecNodeMetaSchema.parse({ source: 'unknown-vendor' })).toThrow();
   });
 
+  // #497 review finding: pageBreakBefore is a canonical AST meta field. If the
+  // schema omits it, z.object strips it on every validation path (revision
+  // snapshots validate through SpecTreeSchema), silently dropping manual page
+  // breaks from persisted/round-tripped trees.
+  it('preserves pageBreakBefore through validation (#497)', () => {
+    const result = SpecNodeMetaSchema.parse({ pageBreakBefore: true });
+    expect(result.pageBreakBefore).toBe(true);
+  });
+
   it('rejects invalid source color coverage', () => {
     expect(() =>
       SpecNodeMetaSchema.parse({

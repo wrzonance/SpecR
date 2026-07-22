@@ -264,6 +264,7 @@ export const SpecNodeMetaSchema = z.object({
   editability: SpecNodeEditabilitySchema.exactOptional(),
   articleRole: ArticleRoleSchema.exactOptional(),
   object: ObjectMetaSchema.exactOptional(),
+  pageBreakBefore: z.boolean().exactOptional(),
 });
 
 export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>

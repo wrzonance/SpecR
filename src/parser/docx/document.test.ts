@@ -407,23 +407,27 @@ describe('parseDocument — pageBreakBefore (ADR-075)', () => {
   // paragraph-level `w:pageBreakBefore` property (Paragraph dialog / heading
   // style), not only as a run-level w:br in the preceding paragraph, so the
   // parser must ALSO read a paragraph's own property. Detected ON the paragraph
-  // itself, not shifted from a predecessor.
-  it('sets pageBreakBefore from a paragraph OWN w:pageBreakBefore property (Word "Page break before")', () => {
+  // itself as `ownPageBreakBefore` — kept distinct from the predecessor-lookback
+  // `pageBreakBefore` so buildTree can treat the two differently across an
+  // interposed body object (ADR-075 decision 8).
+  it('sets ownPageBreakBefore from a paragraph OWN w:pageBreakBefore property (Word "Page break before")', () => {
     const xml = makeDocXml(
       `<w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t>starts new page</w:t></w:r></w:p>`
     );
     const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
-    expect(result[0]?.pageBreakBefore).toBe(true);
+    expect(result[0]?.ownPageBreakBefore).toBe(true);
+    // NOT the predecessor-lookback field — this break is intrinsic to the paragraph.
+    expect(result[0]?.pageBreakBefore).toBeUndefined();
   });
 
   // CT_OnOff toggle: an explicit falsey w:val (e.g. a style disabling an
   // inherited break) means the property is OFF, not on.
-  it('does not set pageBreakBefore for an own w:pageBreakBefore explicitly disabled (w:val="false")', () => {
+  it('does not set ownPageBreakBefore for an own w:pageBreakBefore explicitly disabled (w:val="false")', () => {
     const xml = makeDocXml(
       `<w:p><w:pPr><w:pageBreakBefore w:val="false"/></w:pPr><w:r><w:t>no break</w:t></w:r></w:p>`
     );
     const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
-    expect(result[0]?.pageBreakBefore).toBeUndefined();
+    expect(result[0]?.ownPageBreakBefore).toBeUndefined();
   });
 });
 

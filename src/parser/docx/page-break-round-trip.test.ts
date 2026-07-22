@@ -210,4 +210,55 @@ describe('manual page break round trip — parse -> generate (#497, ADR-075)', (
     const xml = await generatedDocumentXml(tree);
     expect(xml).not.toContain('<w:pageBreakBefore/>');
   });
+
+  // #497 review finding: a paragraph's OWN w:pageBreakBefore property is intrinsic
+  // to it — never a misattribution — so unlike the predecessor-w:br form above it
+  // must SURVIVE an interposed body object. (The predecessor-lookback form is
+  // dropped across a table because document.ts's w:p-only lookback can't see the
+  // interleaved w:tbl; the own-property form has no such blindness.)
+  it("keeps a paragraph's OWN w:pageBreakBefore even when a body-level table sits immediately before it", async () => {
+    const table =
+      '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell text</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';
+    const source = await makeDocx(
+      para('Paragraph before table.') + table + paraWithOwnPageBreak('Paragraph after table.')
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const nodes = flatten(tree.parts);
+
+    const after = nodes.find((n) => n.text === 'Paragraph after table.');
+    expect(after?.meta.pageBreakBefore).toBe(true);
+
+    const xml = await generatedDocumentXml(tree);
+    const paragraphs = xml.match(/<w:p>(?:(?!<w:p>).)*?<\/w:p>/gs) ?? [];
+    const afterPara = paragraphs.find((p) => p.includes('Paragraph after table.'));
+    expect(afterPara).toContain('<w:pageBreakBefore/>');
+  });
+
+  // #497 review finding: a hidden non-note paragraph becomes a meta.vanish node the
+  // generator drops entirely (#296). A page break landing on it would vanish with
+  // it, so the break must forward to the next ACTUALLY-emitted node instead.
+  it('forwards a page break past a hidden non-note paragraph onto the next visible node', async () => {
+    const hidden = '<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>hidden text</w:t></w:r></w:p>';
+    const source = await makeDocx(
+      paraWithTrailingPageBreak('Visible one.') + hidden + para('Visible two.')
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const nodes = flatten(tree.parts);
+
+    const hiddenNode = nodes.find((n) => n.text === 'hidden text');
+    const visibleTwo = nodes.find((n) => n.text === 'Visible two.');
+    expect(hiddenNode?.meta.vanish).toBe(true);
+    // The break must NOT rest on the dropped hidden node — it lands on the next
+    // emitted node.
+    expect(hiddenNode?.meta.pageBreakBefore).toBeUndefined();
+    expect(visibleTwo?.meta.pageBreakBefore).toBe(true);
+
+    const xml = await generatedDocumentXml(tree);
+    // Exactly one break survives to the generated doc — not zero (swallowed by the
+    // hidden node), not two.
+    expect((xml.match(/<w:pageBreakBefore\/>/g) ?? []).length).toBe(1);
+    const paragraphs = xml.match(/<w:p>(?:(?!<w:p>).)*?<\/w:p>/gs) ?? [];
+    const visibleTwoPara = paragraphs.find((p) => p.includes('Visible two.'));
+    expect(visibleTwoPara).toContain('<w:pageBreakBefore/>');
+  });
 });

@@ -107,10 +107,18 @@ export interface DocxParagraph {
   readonly sourceFacts?: SourceFacts;
   // True when a manual page break (`w:br w:type="page"`) was found among the
   // immediately preceding raw paragraph's runs — this paragraph should start on a
-  // new page. Absent === no manual page break before this paragraph. A break with
-  // no following paragraph (trailing/EOF), and 2+ page breaks collapsed within one
+  // new page. Absent === no such break. This is the PREDECESSOR-lookback form: it
+  // can be a misattribution when a body object (#300) sits between the two raw
+  // paragraphs (document.ts's w:p-only lookback is blind to an interleaved w:tbl),
+  // so buildTree suppresses it across an interposed object. A break with no
+  // following paragraph (trailing/EOF), and 2+ page breaks collapsed within one
   // paragraph, are both known-ambiguity scope limits — see ADR-075.
   readonly pageBreakBefore?: boolean;
+  // True when THIS paragraph carries its own `w:pPr/w:pageBreakBefore` property
+  // (Word "Page break before"; #497, ADR-075 decision 8). Intrinsic to the
+  // paragraph — never a misattribution — so buildTree keeps it even across an
+  // interposed object, unlike the predecessor-lookback `pageBreakBefore` above.
+  readonly ownPageBreakBefore?: boolean;
 }
 
 // ─── inference.ts output ──────────────────────────────────────────────────────

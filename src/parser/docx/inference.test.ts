@@ -1455,11 +1455,16 @@ describe('buildTree — meta.pageBreakBefore propagation (ADR-075)', () => {
     expect(node?.meta.pageBreakBefore).toBe(true);
   });
 
-  it('propagates pageBreakBefore onto a hidden (vanish) continuation node — a break preceding suppressed content is not dropped', () => {
+  // #497 review finding: a hidden non-note paragraph becomes a meta.vanish
+  // 'continuation' the generator drops entirely (#296). A break preceding it must
+  // NOT rest on that dropped node (it would silently vanish from the output) — it
+  // forwards to the next actually-emitted node instead.
+  it('forwards pageBreakBefore past a hidden (vanish) continuation node onto the next visible node', () => {
     const classified = classifyParagraphs(
       [
         makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
         makePara({ isVanish: true, pageBreakBefore: true, text: 'PROCESSING FORM — internal use' }),
+        makePara({ numId: 1, ilvl: 0, text: 'PART 2 - PRODUCTS' }),
       ],
       numMap(1),
       emptyStyleMap()
@@ -1468,7 +1473,10 @@ describe('buildTree — meta.pageBreakBefore propagation (ADR-075)', () => {
     const hidden = tree.parts[0]?.children[0];
     expect(hidden?.type).toBe('continuation');
     expect(hidden?.meta.vanish).toBe(true);
-    expect(hidden?.meta.pageBreakBefore).toBe(true);
+    // The break does not strand on the dropped hidden node …
+    expect(hidden?.meta.pageBreakBefore).toBeUndefined();
+    // … it lands on the next emitted node (PART 2).
+    expect(tree.parts[1]?.meta.pageBreakBefore).toBe(true);
   });
 
   it('propagates pageBreakBefore onto a note node', () => {

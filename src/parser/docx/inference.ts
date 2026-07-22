@@ -557,7 +557,12 @@ export function buildTree(
       objectsByPrecedingIndex
     );
     if (isStructuralContent(cp)) {
-      pendingPageBreak = false;
+      // #497 review finding: a hidden non-note paragraph becomes a meta.vanish
+      // 'continuation' that every renderer drops (#296) — so a page break attached
+      // to it would silently vanish from the generated DOCX. Forward it to the next
+      // ACTUALLY-EMITTED node instead of consuming it on a node no one will render.
+      // (A note is exempt: it renders as [NOTE] and carries the break itself.)
+      const generatorDropsNode = cp.isVanish && cp.isNote !== true;
       lastNonContChildren = processStructuralParagraph(
         cp,
         stack,
@@ -565,8 +570,9 @@ export function buildTree(
         lastNonContChildren,
         source,
         s4NodeIds,
-        pageBreakBefore
+        generatorDropsNode ? false : pageBreakBefore
       );
+      pendingPageBreak = generatorDropsNode ? pageBreakBefore : false;
     } else {
       pendingPageBreak = pageBreakBefore;
     }

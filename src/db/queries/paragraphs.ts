@@ -236,6 +236,7 @@ interface SubtreeRow {
   readonly sourceFacts: SourceFacts;
   readonly signalProvenance: unknown;
   readonly objectData: unknown;
+  readonly pageBreakBefore: boolean;
 }
 
 /** Assemble subtree rows (a node plus all its descendants) into one SpecNode
@@ -271,6 +272,7 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
         ...(articleRole !== undefined ? { articleRole } : {}),
         ...(inference ? { inference } : {}),
         ...(objectMeta ? { object: objectMeta } : {}),
+        ...(row.pageBreakBefore ? { pageBreakBefore: true } : {}),
       },
     };
   };
@@ -309,17 +311,18 @@ export async function fetchSubtreeNode(
   const result = await db.query<SubtreeRow>(
     `WITH RECURSIVE subtree AS (
        SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              signal_provenance, object_data
+              signal_provenance, object_data, page_break_before
        FROM paragraphs WHERE id = $1 AND spec_id = $2
        UNION ALL
        SELECT p.id, p.parent_id, p.node_type, p.text, p.position, p.vanish,
-              p.conflicts, p.source_facts, p.signal_provenance, p.object_data
+              p.conflicts, p.source_facts, p.signal_provenance, p.object_data, p.page_break_before
        FROM paragraphs p JOIN subtree s ON p.parent_id = s.id
        WHERE p.spec_id = $2
      )
      SELECT id, parent_id AS "parentId", node_type AS "nodeType", text, position,
             vanish, conflicts, source_facts AS "sourceFacts",
-            signal_provenance AS "signalProvenance", object_data AS "objectData"
+            signal_provenance AS "signalProvenance", object_data AS "objectData",
+            page_break_before AS "pageBreakBefore"
      FROM subtree`,
     [nodeId, specId]
   );

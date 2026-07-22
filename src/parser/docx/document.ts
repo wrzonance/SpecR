@@ -26,6 +26,7 @@ interface ParagraphFields {
   readonly jc: string | undefined;
   readonly sourceFacts: SourceFacts | undefined;
   readonly pageBreakBefore: boolean | undefined;
+  readonly ownPageBreakBefore: boolean | undefined;
 }
 
 function extractRunText(run: Record<string, unknown>): string {
@@ -216,6 +217,9 @@ function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxP
     ...(fields.jc !== undefined ? { jc: fields.jc } : {}),
     ...(fields.sourceFacts !== undefined ? { sourceFacts: fields.sourceFacts } : {}),
     ...(fields.pageBreakBefore !== undefined ? { pageBreakBefore: fields.pageBreakBefore } : {}),
+    ...(fields.ownPageBreakBefore !== undefined
+      ? { ownPageBreakBefore: fields.ownPageBreakBefore }
+      : {}),
   };
 }
 
@@ -295,7 +299,11 @@ function parseParagraph(
     outlineLvl,
     jc,
     sourceFacts: source?.sourceFacts,
-    pageBreakBefore: pageBreakBefore || ownPageBreakBefore(pPr) ? true : undefined,
+    // Kept as two distinct signals — buildTree treats them differently across an
+    // interposed body object (predecessor-lookback can be misattributed; the
+    // paragraph's own property never is). See ADR-075 decision 8 and page-break.ts.
+    pageBreakBefore: pageBreakBefore ? true : undefined,
+    ownPageBreakBefore: ownPageBreakBefore(pPr) ? true : undefined,
   });
 }
 

@@ -38,22 +38,30 @@ function isPageBreakOwnedByPrecedingObject(
 // filters out entirely (empty/blank spacer, or a suppressed rule-row delimiter,
 // #292) must still surface on whatever paragraph is next actually emitted — it is
 // never simply dropped just because the paragraph it landed on produced no node.
-// Resolves the EFFECTIVE pageBreakBefore at index `i`: forwarded from an earlier
-// filtered paragraph (`pendingPageBreak`), OR'd with this cp's own flag — unless a
-// body object sits immediately before index `i` (isPageBreakOwnedByPrecedingObject),
-// in which case the break is excluded (dropped) regardless of whether it is `cp`'s
-// own flag or one forwarded from a filtered paragraph: an object attached to i-1 sits
-// physically between that filtered paragraph and `cp` in real document order, so a
-// break forwarded across it is exactly as misattributed as one read directly off
-// `cp.paragraph`. The result doubles as the NEXT pendingPageBreak when `cp` itself
-// turns out to be filtered — "the break due here" is identical whether it lands on
-// a node now or forwards on.
+// Resolves the EFFECTIVE pageBreakBefore at index `i` from TWO independently-sourced
+// signals (ADR-075 decision 8), which behave differently across an interposed object:
+//
+//   • FORWARDABLE — a break forwarded from an earlier filtered paragraph
+//     (`pendingPageBreak`) OR read off the PRECEDING raw paragraph's trailing
+//     `w:br` (`cp.paragraph.pageBreakBefore`). When a body object sits immediately
+//     before index `i` (isPageBreakOwnedByPrecedingObject), that object physically
+//     separates the source of this break from `cp` in real document order, so the
+//     break is a misattribution (document.ts's w:p-only lookback is blind to the
+//     interleaved w:tbl) and is dropped — objects can't carry it (decision 4).
+//   • OWN — `cp`'s own `w:pPr/w:pageBreakBefore` property
+//     (`cp.paragraph.ownPageBreakBefore`). Intrinsic to `cp`, never a
+//     misattribution, so it survives EVEN across an interposed object.
+//
+// The result doubles as the NEXT pendingPageBreak when `cp` itself turns out to be
+// filtered — "the break due here" is identical whether it lands on a node now or
+// forwards on.
 export function resolvePageBreakBefore(
   cp: ClassifiedParagraph,
   i: number,
   pendingPageBreak: boolean,
   objectsByPrecedingIndex: ReadonlyMap<number, readonly SpecNode[]>
 ): boolean {
-  if (isPageBreakOwnedByPrecedingObject(i, objectsByPrecedingIndex)) return false;
-  return pendingPageBreak || cp.paragraph.pageBreakBefore === true;
+  const own = cp.paragraph.ownPageBreakBefore === true;
+  if (isPageBreakOwnedByPrecedingObject(i, objectsByPrecedingIndex)) return own;
+  return own || pendingPageBreak || cp.paragraph.pageBreakBefore === true;
 }

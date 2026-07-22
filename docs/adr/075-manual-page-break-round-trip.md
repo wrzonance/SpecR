@@ -94,6 +94,34 @@ array. Any detector that assumes one shape misses the others.
    `w:body/w:p` children, so a generated file is re-integrated through the merge
    engine, never re-parsed into a fresh tree.) CT_OnOff toggle semantics: the
    element present === on, unless an explicit falsey `w:val` (false/0/off) disables it.
+9. **Keep the two capture signals distinct on `DocxParagraph`** (`pageBreakBefore`
+   vs `ownPageBreakBefore`; #497 second review round). Decision 8's two forms are
+   NOT interchangeable across an interposed body object. The predecessor-`w:br`
+   form can be a misattribution (decision 4 / the third KNOWN AMBIGUITY below), so
+   `resolvePageBreakBefore` drops it when an object sits at `i-1`. The paragraph's
+   OWN `w:pageBreakBefore` property never is — it is intrinsic to that paragraph —
+   so it must survive across the interposed object. Collapsing both into one
+   boolean (the first draft did) wrongly dropped a legitimate own-property break
+   after a table; keeping them separate fixes it.
+10. **Forward a break past a node the generator will drop** (`inference.ts`
+    `buildTree`; #497 second review round). A hidden non-note paragraph becomes a
+    `meta.vanish` `continuation` that every renderer drops (#296). A break resolved
+    onto it would vanish from the generated DOCX, so `buildTree` forwards it (via
+    `pendingPageBreak`) to the next ACTUALLY-emitted node instead of consuming it
+    on a node no one renders. A note is exempt — it renders as `[NOTE]` and carries
+    the break itself.
+11. **Persist AND round-trip the field through every tree path, not just the
+    primary read** (#497 second review round). `meta.pageBreakBefore` is a
+    first-class canonical AST field, so it must be wired into: the AST Zod schema
+    (`SpecNodeMetaSchema` — a plain `z.object` silently STRIPS any field it does
+    not declare, so an omission drops the flag on every validated path, including
+    package-revision snapshots that validate through `SpecTreeSchema` before
+    storing); and every path that rebuilds a `SpecNode` tree from paragraph rows —
+    `getSpecTree`→`buildNodeTree`, `getParagraphWithAncestors`, the subtree
+    reconstruction (`paragraphs.ts` `buildSubtree`/`fetchSubtreeNode`, which backs
+    PATCH/insert/vanish responses), the package-revision snapshot SELECT
+    (`revisions.ts`), and the project-derive clone (`derive.ts`). A single missed
+    path is a silent, path-dependent data loss.
 
 ### KNOWN AMBIGUITY — scope limits accepted, not solved
 
