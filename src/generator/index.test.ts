@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
 import { generateDocx } from './index.js';
 import { GeneratorError } from './error.js';
+import { parseSec } from '../parser/index.js';
 import type { SpecTree, SpecNode } from '../ast/types.js';
 import type { StyleRule, HeaderFooterComposition, ObjectBlobNode } from '../ast/index.js';
 
@@ -569,12 +570,20 @@ describe('generateDocx — #509 page size', () => {
   });
 
   it('.SEC-sourced (or any non-DOCX) tree — pageSize undefined — generates Letter via the identical default path, no format-specific special-casing', async () => {
-    // A .SEC-parsed SpecTree never sets `pageSize` — mechanically identical
-    // to SYNTHETIC_TREE here, which also carries no `pageSize` field. Pinned
-    // as its own named invariant so the .SEC acceptance criterion has an
-    // explicit regression test, not just an implicit side effect of the
-    // "absent" case above.
-    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE));
+    // Runs a real .SEC document through parseSec (not a synthetic stand-in)
+    // to prove the parser itself never populates `pageSize` — the .SEC
+    // format has no page-geometry concept — and that the resulting tree
+    // still lands on the same Letter default as the "absent" case, with no
+    // .SEC-specific branch in the generator.
+    const secXml = `<?xml version="1.0" encoding="windows-1252"?>
+<SEC>
+  <SCN>SECTION 27 10 00</SCN>
+  <STL>BUILDING TELECOMMUNICATIONS CABLING SYSTEM</STL>
+</SEC>`;
+    const { tree } = parseSec(secXml);
+    expect(tree.pageSize).toBeUndefined();
+
+    const xml = await getDocXml(await generateDocx(tree));
     expect(xml).toMatch(/<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"\/>/);
   });
 });
