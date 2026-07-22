@@ -1,4 +1,4 @@
-# ADR-075: Title-Block Deduplication and Heading Color
+# ADR-076: Title-Block Deduplication and Heading Color
 
 ## Status
 
