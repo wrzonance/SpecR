@@ -381,16 +381,20 @@ describe('isTitleIdentityLine — #510 title-block duplication', () => {
 function makeCp(
   nodeType: NodeType,
   text: string,
-  opts: { readonly suppressed?: boolean; readonly isNote?: boolean } = {}
+  opts: {
+    readonly suppressed?: boolean;
+    readonly isNote?: boolean;
+    readonly isVanish?: boolean;
+  } = {}
 ): ClassifiedParagraph {
   return {
-    paragraph: { text, isVanish: false },
+    paragraph: { text, isVanish: opts.isVanish === true },
     resolvedIlvl: nodeType === 'continuation' ? 8 : 0,
     nodeType,
     signalUsed: 3,
     conflicts: [],
     agreed: [],
-    isVanish: false,
+    isVanish: opts.isVanish === true,
     ...(opts.suppressed !== undefined ? { suppressed: opts.suppressed } : {}),
     ...(opts.isNote !== undefined ? { isNote: opts.isNote } : {}),
   };
@@ -469,5 +473,35 @@ describe('leadingTitleBlockIndices — #510 title-block duplication', () => {
       makeCp('part', 'PART 1 - GENERAL'),
     ];
     expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set());
+  });
+
+  // Regression (Codex draft review, P2): a blank spacer paragraph that inherits a
+  // numbered/structural style classifies as 'part' (nodeType !== 'continuation'),
+  // yet produces NO SpecNode (isStructuralContent requires non-empty text). The
+  // blank/suppressed check must run BEFORE the nodeType check, or such a blank
+  // wrongly closes the leading zone and leaks the title line that follows it.
+  it('skips a blank paragraph even when it carries a structural nodeType', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('part', ''), // blank spacer that inherited a numbered/part style
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
+  });
+
+  // Regression (Codex draft review, P1): a hidden (isVanish) line is retained as a
+  // meta.vanish SpecNode that renders as '' (#292/#296) — never a VISIBLE duplicate.
+  // It must not be suppressed (which would DROP the deliberately-retained hidden
+  // content), but must also not close the zone: the visible title line after it is
+  // still a real duplicate. Index 1 (hidden) is skipped; index 2 (visible) matched.
+  it('retains a hidden isVanish line without closing the zone, still catching a later visible duplicate', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', title, { isVanish: true }), // hidden copy — retained, not dropped
+      makeCp('continuation', title),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
   });
 });
