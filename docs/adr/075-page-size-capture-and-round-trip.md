@@ -116,15 +116,52 @@ is not assignable to an optional key. The fix is this codebase's existing
 conditional-spread idiom:
 `{ width, height, ...(pageSize.orientation !== undefined ? { orientation: pageSize.orientation } : {}) }`.
 
+### 7. Persistence: a dedicated `specs.page_size` column, not a phantom tree payload
+
+A first draft of this ADR asserted persistence was free — that `pageSize` would
+"live in the existing `SpecTree` JSONB payload, no migration." That was **wrong**
+and is retracted here: there is no whole-tree JSONB payload. `persistParsedSpec`
+decomposes a `SpecTree` into a `specs` row plus `paragraphs` rows, and
+`getSpecTree` reconstructs only `id`/`section`/`title`/`parts`. A field left off
+those two sites simply never survives the REST upload → persist → retrieve →
+generate round-trip — which, because `generateDocx` reads its tree from
+`getSpecTree` (not the in-memory parse), meant an A4/Legal/landscape source
+regenerated as Letter through the actual product path, the exact bug #509 exists
+to close. (This is unlike `hiddenTables`/`headerFooter`, which are deliberately
+parse-output-only — their absence loses inert retained data, not correct output.)
+
+So `pageSize` is genuinely persisted, at three sites that must move together:
+
+- **Migration 050** adds a nullable `page_size jsonb` column to `specs`
+  (`{ width, height, orientation? }`, twips; NULL === no capture).
+- **`upsertParsedSpecRow`** writes `serializePageSize(tree)`, `COALESCE`-ing on
+  re-import exactly like `origin_meta` (a re-parse that captured none keeps the
+  prior geometry rather than wiping it). **`getSpecTree`** reads it back through
+  `parseStoredPageSize`, which re-validates the untrusted column against
+  `PageSizeSchema` and drops a malformed value to `undefined` (Letter default).
+  Package-revision snapshots (`snapshotMemberTrees`) freeze it too, so a
+  regenerated revision keeps the source geometry. Both helpers live in
+  `src/db/queries/spec-page-size.ts` to keep `specs.ts` within its 400-line cap.
+- **`workerOutputSchema`** (`src/lib/parse-worker.ts`) declares `pageSize`, or
+  Zod's default unknown-key stripping silently drops it at the Piscina
+  cross-thread boundary before persistence — the same hazard already guarded for
+  `hiddenTables`/`headerFooter`.
+
+The public `SpecTree` OpenAPI component and a new `PageSize` schema document the
+field, per the authoritative-contract rule now that it appears on `GET /specs/{id}`.
+
 ## Consequences
 
 - A regenerated DOCX now carries the source document's own page dimensions
   and orientation when captured, instead of always defaulting to Letter
   portrait — closing a fidelity gap that previously affected any
-  non-Letter-sized or landscape-oriented source.
-- `paragraphs`/`specs` persistence is unaffected: `pageSize` lives in the
-  existing `SpecTree` JSONB payload governed by `SpecTreeSchema` — additive,
-  backward-compatible, no migration.
+  non-Letter-sized or landscape-oriented source, **across the REST/DB path the
+  `tools/verify` harness actually exercises**, not only the in-memory
+  parse→generate call.
+- `pageSize` persists in a dedicated additive `specs.page_size` column
+  (migration 050, reversible, backward-compatible — NULL for every existing
+  row and every non-DOCX source); see Decision §7 for why the "no migration"
+  assumption was wrong.
 - No behavior change for a `.SEC` source, or any DOCX whose trailing
   `w:sectPr` lacks a `w:pgSz` (or carries a zero/negative/non-finite
   dimension): `pageSize` stays absent and the generator's existing Letter

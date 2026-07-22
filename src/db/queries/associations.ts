@@ -1,11 +1,32 @@
 import type { Pool } from 'pg';
 import { pool, DatabaseError } from '../index.js';
-import type { ParagraphAssociation } from '../../ast/index.js';
+import type { ParagraphAssociation, SpecNode } from '../../ast/index.js';
 import { getPgCode } from '../../lib/pg-errors.js';
 import { logger } from '../../lib/logger.js';
 
 interface Queryable {
   query: Pool['query'];
+}
+
+/** Recursively fold each paragraph's associations onto its SpecNode's meta,
+ *  keyed by node id. Nodes with no (or empty) associations are left untouched —
+ *  no empty `associations` key is fabricated. Pure over the input tree. */
+export function attachAssociations(
+  nodes: readonly SpecNode[],
+  byParagraph: ReadonlyMap<string, readonly ParagraphAssociation[]>
+): readonly SpecNode[] {
+  return nodes.map((node) => {
+    const associations = byParagraph.get(node.id);
+    const children = attachAssociations(node.children, byParagraph);
+    return {
+      ...node,
+      children,
+      meta: {
+        ...node.meta,
+        ...(associations !== undefined && associations.length > 0 ? { associations } : {}),
+      },
+    };
+  });
 }
 
 /** Target paragraph does not exist → 404 at the API layer. */

@@ -1,7 +1,6 @@
 import { pool, DatabaseError } from '../index.js';
 import { parseSourceFacts } from '../../ast/index.js';
 import type {
-  ParagraphAssociation,
   SignalConflict,
   SourceFacts,
   SpecNode,
@@ -10,13 +9,14 @@ import type {
   SecRef,
 } from '../../ast/index.js';
 import { deriveArticleRole } from '../../ast/index.js';
+import { parseStoredPageSize, serializePageSize } from './spec-page-size.js';
 import type { Pool } from 'pg';
 import { insertTree } from './paragraphs.js';
 import { insertRefs } from './refs.js';
 import { resolveDefaultLibraryId } from './libraries.js';
 import { reconcileLibraryDivisionGeneralSpec } from './division-general.js';
 import { ClassificationSchema, OverrideSchema } from './editability.js';
-import { listAssociationsForSpec } from './associations.js';
+import { attachAssociations, listAssociationsForSpec } from './associations.js';
 import { deriveInference } from './inference-meta.js';
 import { parseNodeType } from './node-type.js';
 import { parseObjectMeta } from './object-meta.js';
@@ -25,6 +25,7 @@ interface SpecRow {
   readonly id: string;
   readonly section: string | null;
   readonly title: string | null;
+  readonly page_size: unknown;
 }
 
 interface UpdateRow {
@@ -196,28 +197,10 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
   return (childrenByParent.get(null) ?? []).sort((a, b) => a.position - b.position).map(buildNode);
 }
 
-function attachAssociations(
-  nodes: readonly SpecNode[],
-  byParagraph: ReadonlyMap<string, readonly ParagraphAssociation[]>
-): readonly SpecNode[] {
-  return nodes.map((node) => {
-    const associations = byParagraph.get(node.id);
-    const children = attachAssociations(node.children, byParagraph);
-    return {
-      ...node,
-      children,
-      meta: {
-        ...node.meta,
-        ...(associations !== undefined && associations.length > 0 ? { associations } : {}),
-      },
-    };
-  });
-}
-
 export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
   try {
     const specResult = await pool.query<SpecRow>(
-      'SELECT id, section, title FROM specs WHERE id = $1',
+      'SELECT id, section, title, page_size FROM specs WHERE id = $1',
       [id]
     );
     const specRow = specResult.rows[0];
@@ -242,11 +225,13 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
     );
 
     const associationMap = await listAssociationsForSpec(id);
+    const pageSize = parseStoredPageSize(specRow.page_size);
     const tree: SpecTree = {
       id: specRow.id,
       section: specRow.section ?? '',
       title: specRow.title ?? '',
       parts: attachAssociations(buildNodeTree(paraResult.rows), associationMap),
+      ...(pageSize !== undefined ? { pageSize } : {}),
     };
 
     const references: readonly SpecReference[] = refResult.rows.map((row) => ({
@@ -428,16 +413,24 @@ async function upsertParsedSpecRow(
   db: Queryable
 ): Promise<string> {
   const res = await db.query<{ id: string }>(
-    `INSERT INTO specs (section, title, source, library_id, origin_meta, onboarding_status)
-     VALUES ($1, $2, $3, $4, $5::jsonb, 'review')
+    `INSERT INTO specs (section, title, source, library_id, origin_meta, page_size, onboarding_status)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, 'review')
      ON CONFLICT (section, source, library_id) WHERE library_id IS NOT NULL DO UPDATE
        SET title = EXCLUDED.title,
            updated_at = now(),
            content_version = specs.content_version + 1,
            origin_meta = COALESCE(EXCLUDED.origin_meta, specs.origin_meta),
+           page_size = COALESCE(EXCLUDED.page_size, specs.page_size),
            withdrawn_at = NULL
      RETURNING id`,
-    [tree.section, tree.title, source, libraryId, originMeta ? JSON.stringify(originMeta) : null]
+    [
+      tree.section,
+      tree.title,
+      source,
+      libraryId,
+      originMeta ? JSON.stringify(originMeta) : null,
+      serializePageSize(tree),
+    ]
   );
   const specId = res.rows[0]?.id;
   if (!specId) throw new DatabaseError('upsert spec returned no id');

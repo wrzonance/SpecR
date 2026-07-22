@@ -538,3 +538,61 @@ describe('persistParsedSpec — explicit libraryId target (O-8)', () => {
     expect(row.rows[0]?.library_id).toBe(lib.id);
   });
 });
+
+describe('persistParsedSpec ↔ getSpecTree — pageSize round-trip (#509, ADR-075)', () => {
+  afterEach(async () => {
+    await pool.query("DELETE FROM specs WHERE section = '99 68 00'");
+  });
+
+  const treeWith = (pageSize?: {
+    width: number;
+    height: number;
+    orientation?: 'portrait' | 'landscape';
+  }) => ({
+    tree: {
+      id: '',
+      section: '99 68 00',
+      title: 'Page Size Round-Trip',
+      parts: [
+        {
+          id: randomUUID(),
+          type: 'part' as const,
+          text: 'GENERAL',
+          children: [],
+          meta: { source: 'arcat' as const },
+        },
+      ],
+      ...(pageSize !== undefined ? { pageSize } : {}),
+    },
+    refs: [],
+  });
+
+  it('persists a captured page size and reconstructs it verbatim through getSpecTree', async () => {
+    const pageSize = { width: 16838, height: 11906, orientation: 'landscape' as const };
+    const specId = await persistParsedSpec(treeWith(pageSize));
+    const result = await getSpecTree(specId);
+    expect(result?.tree.pageSize).toEqual(pageSize);
+  });
+
+  it('round-trips a page size with no orientation, without fabricating one', async () => {
+    const specId = await persistParsedSpec(treeWith({ width: 12240, height: 15840 }));
+    const result = await getSpecTree(specId);
+    expect(result?.tree.pageSize).toEqual({ width: 12240, height: 15840 });
+    expect(result?.tree.pageSize).not.toHaveProperty('orientation');
+  });
+
+  it('omits pageSize on the reconstructed tree when no page size was captured', async () => {
+    const specId = await persistParsedSpec(treeWith());
+    const result = await getSpecTree(specId);
+    expect(result?.tree).not.toHaveProperty('pageSize');
+  });
+
+  it('keeps the prior page size on a re-import that captured none (COALESCE, not wipe)', async () => {
+    const pageSize = { width: 12240, height: 15840, orientation: 'portrait' as const };
+    const first = await persistParsedSpec(treeWith(pageSize));
+    const second = await persistParsedSpec(treeWith());
+    expect(second).toBe(first);
+    const result = await getSpecTree(first);
+    expect(result?.tree.pageSize).toEqual(pageSize);
+  });
+});

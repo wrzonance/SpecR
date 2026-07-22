@@ -111,6 +111,7 @@ interface MemberRow {
   readonly section: string | null;
   readonly title: string | null;
   readonly position: number;
+  readonly page_size: unknown;
 }
 
 interface SnapshotRow {
@@ -156,7 +157,7 @@ async function snapshotMemberTrees(
   client: PoolClient
 ): Promise<readonly RevisionSpecEntry[]> {
   const members = await client.query<MemberRow>(
-    `SELECT ps.spec_id, ps.position, s.section, s.title
+    `SELECT ps.spec_id, ps.position, s.section, s.title, s.page_size
      FROM package_specs ps JOIN specs s ON s.id = ps.spec_id
      WHERE ps.package_id = $1 ORDER BY ps.position`,
     [packageId]
@@ -174,6 +175,10 @@ async function snapshotMemberTrees(
       section: member.section ?? '',
       title: member.title ?? '',
       parts: buildNodeTree(paras.rows),
+      // #509/ADR-075: freeze the captured page size too, so a regenerated
+      // revision keeps the source geometry (validateTree checks it against
+      // PageSizeSchema). Absent column → key omitted, Letter default applies.
+      ...(member.page_size != null ? { pageSize: member.page_size } : {}),
     };
     entries.push({
       specId: member.spec_id,
