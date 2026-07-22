@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import JSZip from 'jszip';
 import { parseDocx } from './index.js';
+import { parse } from '../index.js';
 
 const SECTION = '01 88 13.13';
 const TITLE = 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS';
@@ -62,6 +63,30 @@ async function buildTitleBlockDuplicationDocx(): Promise<Buffer> {
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 
+// Same shape as above but with NO docProps/core.xml — section/title are recovered
+// by content inference (the common case for hand-authored/foreign DOCX, and the
+// shape the #510 evidence describes: the source types "01 8813.13", which only the
+// canonicalizing content-inference path resolves to "01 88 13.13"). The source
+// SECTION line is typed longhand to exercise that canonicalization.
+const DOCUMENT_XML_LONGHAND = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>SECTION 01 8813.13</w:t></w:r></w:p>
+    <w:p><w:r><w:t>${TITLE}</w:t></w:r></w:p>
+    <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>GENERAL</w:t></w:r></w:p>
+    <w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>SUMMARY</w:t></w:r></w:p>
+  </w:body>
+</w:document>`;
+
+async function buildTitleBlockDuplicationDocxNoCore(): Promise<Buffer> {
+  const zip = new JSZip();
+  zip.file('word/styles.xml', STYLES_XML);
+  zip.file('word/document.xml', DOCUMENT_XML_LONGHAND);
+  zip.file('word/numbering.xml', NUMBERING_XML);
+  // Deliberately NO docProps/core.xml — identity comes from content inference.
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
+
 describe('#510 leading title-block suppression — a synthetic doc (always runs in CI)', () => {
   it('drops the leading SECTION-line + title-line pair, leaving only PART roots', async () => {
     const buffer = await buildTitleBlockDuplicationDocx();
@@ -70,6 +95,28 @@ describe('#510 leading title-block suppression — a synthetic doc (always runs 
     expect(leakedIdentityRoots(tree)).toHaveLength(0);
     // Every root is a real PART heading — the duplicated lines produced no
     // SpecNode at all, matching the #292 "suppressed -> no SpecNode" precedent.
+    expect(tree.parts.every((n) => n.type === 'part')).toBe(true);
+  });
+});
+
+// Regression (Codex draft review, P1): buildTree's classified-level strip only
+// has the core.xml identity, so a DOCX WITHOUT docProps/core.xml — identity
+// recovered by content inference — reached the tree with both duplicate lines
+// still standing as root continuations. The parser's post-inference
+// stripLeadingTitleBlockRoots pass closes that gap. Uses parse() (not parseDocx)
+// because content inference runs in the parser orchestrator, not the DOCX parser.
+describe('#510 leading title-block suppression — content-inferred identity (no core.xml)', () => {
+  it('drops the leading SECTION-line + title-line pair when section/title come from content inference', async () => {
+    const buffer = await buildTitleBlockDuplicationDocxNoCore();
+    const { tree, sectionInference } = await parse(buffer, 'no-core.docx');
+
+    // Precondition: identity really did come from content, not metadata — else
+    // this would silently re-test the core.xml path above.
+    expect(sectionInference.method).not.toBe('metadata');
+    expect(tree.section).toBe(SECTION);
+    expect(tree.title).toBe(TITLE);
+
+    expect(leakedIdentityRoots(tree)).toHaveLength(0);
     expect(tree.parts.every((n) => n.type === 'part')).toBe(true);
   });
 });

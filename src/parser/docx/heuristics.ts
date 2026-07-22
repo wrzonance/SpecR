@@ -1,4 +1,4 @@
-import type { NodeType } from '../../ast/types.js';
+import type { NodeType, SpecNode, SpecTree } from '../../ast/types.js';
 import type { ClassifiedParagraph } from './types.js';
 import { UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
 import { parseSectionNumberCandidate } from '../../lib/section-number.js';
@@ -329,4 +329,50 @@ export function leadingTitleBlockIndices(
     if (step === 'match') indices.add(i);
   }
   return indices;
+}
+
+// The tree-level analogue of classifyLeadingCandidate, applied to a resolved
+// SpecNode root instead of a ClassifiedParagraph. buildTree drops blanks and
+// suppressed paragraphs before assembly, so those cases never reach here; the
+// remaining decisions mirror the classified scan exactly:
+// - a non-continuation root (a real PART/article, or a retained note) closes the
+//   zone — genuine content is never a round-trip duplicate;
+// - a retained hidden (meta.vanish) continuation renders as '' (#292/#296) and is
+//   never a VISIBLE duplicate — skip it (keep the node, keep scanning);
+// - a continuation whose text re-types the resolved section/title identity is a
+//   visible duplicate — remove it;
+// - any other continuation closes the zone.
+function classifyLeadingRoot(node: SpecNode, section: string, title: string): LeadingScanStep {
+  if (node.type !== 'continuation') return 'stop';
+  if (node.meta.vanish === true) return 'skip';
+  if (isSectionIdentityLine(node.text, section) || isTitleIdentityLine(node.text, title)) {
+    return 'match';
+  }
+  return 'stop';
+}
+
+/**
+ * Strips the strictly-leading run of root continuation nodes that merely re-type
+ * the tree's own already-resolved section/title identity (#510). This is the
+ * post-inference safety net for buildTree's classified-level strip
+ * (leadingTitleBlockIndices): that strip runs during tree assembly with the
+ * core.xml identity only, so a document whose identity is recovered by content
+ * inference instead (docProps/core.xml absent or non-conforming) reaches this
+ * point with the duplicate SECTION/title lines still standing as root
+ * continuations. Called by the parser orchestrator once section/title are
+ * resolved. Returns the same tree reference when nothing is removed — a metadata
+ * document whose duplicates buildTree already dropped is a clean no-op.
+ */
+export function stripLeadingTitleBlockRoots(tree: SpecTree): SpecTree {
+  if (tree.section === UNKNOWN_SECTION_IDENTITY && tree.title === UNKNOWN_SECTION_IDENTITY) {
+    return tree;
+  }
+  const remove = new Set<number>();
+  for (const [i, node] of tree.parts.entries()) {
+    const step = classifyLeadingRoot(node, tree.section, tree.title);
+    if (step === 'stop') break;
+    if (step === 'match') remove.add(i);
+  }
+  if (remove.size === 0) return tree;
+  return { ...tree, parts: tree.parts.filter((_, i) => !remove.has(i)) };
 }

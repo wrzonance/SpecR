@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { assertSecSafe, parseSec } from './sec/index.js';
-import { parseDocx } from './docx/index.js';
+import { parseDocx, stripLeadingTitleBlockRoots } from './docx/index.js';
 import { parsePdf } from './pdf/index.js';
 import type { ParsePdfOptions } from './pdf/index.js';
 import { parseText } from './text/index.js';
@@ -95,7 +95,12 @@ async function parseDocxBuffer(buffer: Buffer, options?: ParseOptions): Promise<
   const tree =
     profile === undefined ? await parseDocx(buffer, noop) : await parseDocx(buffer, noop, profile);
   const sectionInference = inferSectionMeta(tree);
-  const finalTree = withArticleRoles(applyInference(tree, sectionInference));
+  // Strip the leading #510 title-block duplicates AFTER identity is resolved.
+  // buildTree's classified-level strip only sees the core.xml identity; when that
+  // is absent and section/title are recovered by content inference, the duplicate
+  // SECTION/title lines survive as root continuations until this post-pass.
+  const dedupedTree = stripLeadingTitleBlockRoots(applyInference(tree, sectionInference));
+  const finalTree = withArticleRoles(dedupedTree);
   return { tree: finalTree, refs: extractRefsFromTree(finalTree), sectionInference };
 }
 

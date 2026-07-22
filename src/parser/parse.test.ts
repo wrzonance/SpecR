@@ -9,6 +9,10 @@ vi.mock('./sec/index.js', () => ({
 vi.mock('./docx/index.js', () => ({
   parseDocx: vi.fn(),
   assertDocxSafe: vi.fn(),
+  // Passthrough: the #510 leading-title-block strip is exercised in
+  // heuristics.test.ts / the integration test; here it must not alter the tree
+  // the dispatcher forwards, so the docx-dispatch assertions stay meaningful.
+  stripLeadingTitleBlockRoots: vi.fn((tree: unknown) => tree),
 }));
 vi.mock('./pdf/index.js', () => ({
   parsePdf: vi.fn(),

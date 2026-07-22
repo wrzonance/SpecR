@@ -10,10 +10,11 @@ import {
   isSectionIdentityLine,
   isTitleIdentityLine,
   leadingTitleBlockIndices,
+  stripLeadingTitleBlockRoots,
 } from './heuristics.js';
 import { UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
 import type { ClassifiedParagraph } from './types.js';
-import type { NodeType } from '../../ast/types.js';
+import type { NodeType, SpecNode, SpecNodeMeta, SpecTree } from '../../ast/types.js';
 
 describe('matchTextSignal', () => {
   it('detects PART heading', () => {
@@ -503,5 +504,72 @@ describe('leadingTitleBlockIndices — #510 title-block duplication', () => {
       makeCp('part', 'PART 1 - GENERAL'),
     ];
     expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
+  });
+});
+
+describe('stripLeadingTitleBlockRoots — #510 post-inference title-block dedup', () => {
+  const section = '01 88 13.13';
+  const title = 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS';
+
+  function makeRoot(type: NodeType, text: string, meta: SpecNodeMeta = {}): SpecNode {
+    return { id: `id-${text}`, type, text, children: [], meta };
+  }
+
+  function makeTree(parts: readonly SpecNode[], sec = section, ttl = title): SpecTree {
+    return { id: 'tree', section: sec, title: ttl, parts };
+  }
+
+  it('removes the leading SECTION-line + title-line continuation roots, leaving PARTs', () => {
+    const tree = makeTree([
+      makeRoot('continuation', 'SECTION 01 8813.13'),
+      makeRoot('continuation', title),
+      makeRoot('part', 'GENERAL'),
+    ]);
+    const result = stripLeadingTitleBlockRoots(tree);
+    expect(result.parts.map((n) => n.type)).toEqual(['part']);
+  });
+
+  it('returns the SAME tree reference when nothing matches (clean no-op)', () => {
+    const tree = makeTree([makeRoot('part', 'GENERAL'), makeRoot('part', 'PRODUCTS')]);
+    expect(stripLeadingTitleBlockRoots(tree)).toBe(tree);
+  });
+
+  it('retains a hidden (meta.vanish) leading continuation without closing the zone', () => {
+    const tree = makeTree([
+      makeRoot('continuation', title, { vanish: true }), // hidden — kept, scan continues
+      makeRoot('continuation', 'SECTION 01 8813.13'), // visible duplicate — removed
+      makeRoot('part', 'GENERAL'),
+    ]);
+    const result = stripLeadingTitleBlockRoots(tree);
+    expect(result.parts.map((n) => n.type)).toEqual(['continuation', 'part']);
+    expect(result.parts[0]?.meta.vanish).toBe(true);
+  });
+
+  it('stops at a leading note root, never dropping genuine editorial content', () => {
+    const tree = makeTree([
+      makeRoot('note', title), // coincidental text match — a note is never a duplicate
+      makeRoot('continuation', title),
+      makeRoot('part', 'GENERAL'),
+    ]);
+    expect(stripLeadingTitleBlockRoots(tree)).toBe(tree);
+  });
+
+  it('leaves a coincidental mid-document identity repeat untouched (stops at first non-match)', () => {
+    const tree = makeTree([
+      makeRoot('continuation', 'SECTION 01 8813.13'),
+      makeRoot('continuation', 'Some unrelated lead-in.'), // closes the zone
+      makeRoot('continuation', title), // real body repeat — left alone
+    ]);
+    const result = stripLeadingTitleBlockRoots(tree);
+    expect(result.parts.map((n) => n.text)).toEqual(['Some unrelated lead-in.', title]);
+  });
+
+  it('is a no-op when both section and title are unknown', () => {
+    const tree = makeTree(
+      [makeRoot('continuation', 'SECTION 01 8813.13'), makeRoot('part', 'GENERAL')],
+      UNKNOWN_SECTION_IDENTITY,
+      UNKNOWN_SECTION_IDENTITY
+    );
+    expect(stripLeadingTitleBlockRoots(tree)).toBe(tree);
   });
 });
