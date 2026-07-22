@@ -330,6 +330,18 @@ describe('parseSectionHeaderFooterInfo — pageSize (#509, ADR-075)', () => {
     expect(info.pageSize).toBeUndefined();
   });
 
+  // Regression guard (#509, ADR-075): Number('12240.5') === 12240.5 is finite
+  // and positive, so a Number.isFinite-only guard would admit a fractional twip
+  // that PageSizeSchema (.int()) rejects — a schema-validated tree would fail
+  // the whole spec, while a direct parse→generate would let the docx library
+  // silently floor it. The parser boundary must fail closed on non-integers.
+  it('leaves pageSize undefined when a dimension is a positive but fractional twip', () => {
+    const info = parseSectionHeaderFooterInfo(
+      makeDocXml('<w:sectPr><w:pgSz w:w="12240.5" w:h="15840"/></w:sectPr>')
+    );
+    expect(info.pageSize).toBeUndefined();
+  });
+
   it('drops an unrecognized @w:orient value instead of fabricating one', () => {
     const info = parseSectionHeaderFooterInfo(
       makeDocXml('<w:sectPr><w:pgSz w:w="12240" w:h="15840" w:orient="sideways"/></w:sectPr>')
