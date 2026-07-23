@@ -128,6 +128,30 @@ describe('workerOutputSchema', () => {
       expect(result.data.tree.headerFooter).toEqual(headerFooter);
     }
   });
+
+  // #509 regression (mirrors #293/#306): the worker's structured-clone boundary
+  // must round-trip tree.pageSize, not silently strip it. If workerOutputSchema
+  // omits pageSize, every extractPageSize() result vanishes here before
+  // persistParsedSpec — so a captured A4/Legal/landscape source regenerates as
+  // Letter through the REST upload path, the exact bug #509 exists to close.
+  it('preserves tree.pageSize across the worker boundary instead of stripping it', async () => {
+    const { workerOutputSchema } = await import('./parse-worker.js');
+    const pageSize = { width: 16838, height: 11906, orientation: 'landscape' as const };
+    const result = workerOutputSchema.safeParse({
+      tree: {
+        id: 's1',
+        section: '09 91 26',
+        title: 'Painting',
+        parts: [],
+        pageSize,
+      },
+      refs: [],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.tree.pageSize).toEqual(pageSize);
+    }
+  });
 });
 
 describe('parseWorker', () => {

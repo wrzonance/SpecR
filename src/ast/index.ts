@@ -176,6 +176,8 @@ export type { SubmittalRegisterBody } from './submittal-register-schemas.js';
 export type { ParagraphAssociation } from './types.js';
 export type { ParseWarning, ParseWarningType, RetainedTable } from './types.js';
 export { RetainedTableSchema } from './spec-tree-schemas.js';
+export type { PageSize } from './types.js';
+export { PageSizeSchema } from './spec-tree-schemas.js';
 export { textEndsWithClosed } from './comment-closure.js';
 export {
   NumberingProfileSchema,

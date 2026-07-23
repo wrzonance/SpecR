@@ -343,3 +343,56 @@ describe('generateManual — #481 header/footer wiring', () => {
     expect(frontMatterXml).not.toContain('<w:titlePg');
   });
 });
+
+// #509: each spec section's own `w:pgSz` must reflect that tree's own
+// captured pageSize (never a sibling's, never the manual-wide first
+// section's), and the front-matter section — which has no source SpecTree
+// of its own — resolves from `trees[0]?.pageSize`, not from any header/footer
+// render. `w:pgSz` blocks appear in document order: front matter, then one
+// per spec section (confirmed via a real generated document).
+describe('generateManual — #509 page size', () => {
+  function pgSzBlocks(xml: string): readonly string[] {
+    return [...xml.matchAll(/<w:pgSz\b[^/]*\/>/g)].map((m) => m[0]);
+  }
+
+  it('front matter takes its page size from trees[0], and each section keeps its own — never a sibling’s', async () => {
+    const sectionA: SpecTree = {
+      ...SECTION_A,
+      pageSize: { width: 12240, height: 15840, orientation: 'portrait' },
+    };
+    const sectionB: SpecTree = {
+      ...SECTION_B,
+      pageSize: { width: 15840, height: 12240, orientation: 'landscape' },
+    };
+    const xml = await getDocXml(await generateManual([sectionA, sectionB], META));
+    const blocks = pgSzBlocks(xml);
+    expect(blocks).toHaveLength(3);
+    // Front matter (no SpecTree of its own) resolves from trees[0] — section A.
+    expect(blocks[0]).toBe('<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>');
+    expect(blocks[1]).toBe('<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>');
+    expect(blocks[2]).toBe('<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/>');
+  });
+
+  it('defaults every section (front matter included) to Letter when no tree carries a pageSize', async () => {
+    const xml = await getDocXml(await generateManual([SECTION_A, SECTION_B], META));
+    const blocks = pgSzBlocks(xml);
+    expect(blocks).toHaveLength(3);
+    for (const block of blocks) {
+      expect(block).toBe('<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>');
+    }
+  });
+
+  it('front matter resolves from trees[0].pageSize, not from any header/footer render (#303 render is unrelated to page size)', async () => {
+    const sectionA: SpecTree = {
+      ...SECTION_A,
+      pageSize: { width: 15840, height: 12240, orientation: 'landscape' },
+    };
+    const xml = await getDocXml(
+      await generateManual([sectionA, SECTION_B], META, undefined, {
+        headerFooter: { composition: HEADER_FOOTER_COMPOSITION, current: {} },
+      })
+    );
+    const blocks = pgSzBlocks(xml);
+    expect(blocks[0]).toBe('<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/>');
+  });
+});

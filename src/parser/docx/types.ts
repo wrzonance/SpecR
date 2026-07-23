@@ -1,6 +1,6 @@
 // OOXML intermediate types — normalized shapes used across the DOCX parser pipeline.
 
-import type { NodeType, SourceFacts } from '../../ast/types.js';
+import type { NodeType, PageSize, SourceFacts } from '../../ast/types.js';
 
 // ─── numbering.xml ────────────────────────────────────────────────────────────
 
@@ -188,6 +188,12 @@ export interface SectionHeaderFooterInfo {
   readonly references: readonly HeaderFooterReference[];
   readonly titlePg: boolean;
   readonly pgNumStart?: number;
+  /**
+   * Captured `w:pgSz` off the same trailing body-level `w:sectPr` (#509,
+   * ADR-077). Absent === no `w:pgSz`, or one that is malformed/partial (a
+   * missing/non-positive/non-numeric dimension) — never a partial shape.
+   */
+  readonly pageSize?: PageSize;
   // true when the body contains any w:pPr/w:sectPr beyond the single
   // trailing body-level w:sectPr this parser reads — a second section with
   // its own header/footer references that this slice does not model

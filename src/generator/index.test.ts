@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
 import { generateDocx } from './index.js';
 import { GeneratorError } from './error.js';
+import { parseSec } from '../parser/index.js';
 import type { SpecTree, SpecNode } from '../ast/types.js';
 import type { StyleRule, HeaderFooterComposition, ObjectBlobNode } from '../ast/index.js';
 
@@ -554,6 +555,55 @@ describe('generateDocx — #303 header/footer wiring', () => {
     // with `w:val="false"`; the attribute-less self-closing form only
     // appears when #303's `documentLevelOptions` forces it true.
     expect(settingsXml).not.toMatch(/<w:evenAndOddHeaders\/>/);
+  });
+});
+
+// #509: sectionHeaderFooterOptions previously only set `properties.page` when
+// a header/footer render carried a pageNumberStart override, so any tree
+// with no #303 header/footer options at all fell through to docx's implicit
+// A4 default (11906x16838) — silently wrong for every US Letter source doc.
+// `properties.page.size` must now be unconditional: present on every
+// generated section, sourced from `resolvePageSize(tree.pageSize)`.
+describe('generateDocx — #509 page size', () => {
+  it('defaults to Letter (12240x15840 portrait) when tree.pageSize is absent — never the docx library implicit A4 fallback', async () => {
+    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE));
+    expect(xml).toMatch(/<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"\/>/);
+    expect(xml).not.toContain('w:w="11906"');
+  });
+
+  it('emits the tree’s captured pageSize verbatim in w:pgSz when present', async () => {
+    const tree: SpecTree = {
+      ...SYNTHETIC_TREE,
+      pageSize: { width: 15840, height: 12240, orientation: 'landscape' },
+    };
+    const xml = await getDocXml(await generateDocx(tree));
+    expect(xml).toMatch(/<w:pgSz w:w="15840" w:h="12240" w:orient="landscape"\/>/);
+  });
+
+  it('a SpecTree with no orientation captured still emits a size (docx defaults the attribute, never fabricated by SpecR)', async () => {
+    // Legal (12240x20160) — deliberately distinct from both Letter and
+    // docx's own A4 fallback (11906x16838) so this can't pass vacuously.
+    const tree: SpecTree = { ...SYNTHETIC_TREE, pageSize: { width: 12240, height: 20160 } };
+    const xml = await getDocXml(await generateDocx(tree));
+    expect(xml).toMatch(/<w:pgSz w:w="12240" w:h="20160"/);
+  });
+
+  it('.SEC-sourced (or any non-DOCX) tree — pageSize undefined — generates Letter via the identical default path, no format-specific special-casing', async () => {
+    // Runs a real .SEC document through parseSec (not a synthetic stand-in)
+    // to prove the parser itself never populates `pageSize` — the .SEC
+    // format has no page-geometry concept — and that the resulting tree
+    // still lands on the same Letter default as the "absent" case, with no
+    // .SEC-specific branch in the generator.
+    const secXml = `<?xml version="1.0" encoding="windows-1252"?>
+<SEC>
+  <SCN>SECTION 27 10 00</SCN>
+  <STL>BUILDING TELECOMMUNICATIONS CABLING SYSTEM</STL>
+</SEC>`;
+    const { tree } = parseSec(secXml);
+    expect(tree.pageSize).toBeUndefined();
+
+    const xml = await getDocXml(await generateDocx(tree));
+    expect(xml).toMatch(/<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"\/>/);
   });
 });
 

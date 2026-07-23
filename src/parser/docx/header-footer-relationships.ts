@@ -14,6 +14,7 @@ import {
   getAttrVal,
   toArray,
 } from './xml-utils.js';
+import type { PageSize } from '../../ast/types.js';
 import type {
   DocumentSettingsInfo,
   HeaderFooterReference,
@@ -178,6 +179,51 @@ function extractPgNumStart(sectPr: Record<string, unknown>): number | undefined 
   return isNaN(n) ? undefined : n;
 }
 
+// Shared by width and height (w:pgSz/@w:w, @w:h): stricter than
+// extractPgNumStart's isNaN-only guard above in three ways — (1) a
+// zero/negative page dimension is unrenderable, not merely odd, so this also
+// rejects <= 0; (2) `Number(raw)` (not `parseInt`) is used for the string
+// case so a value with a valid leading numeric prefix but trailing garbage
+// (e.g. "12240abc") fails closed to undefined instead of silently parsing
+// its numeric prefix — `parseInt` would accept it, which is the wrong
+// invariant at a boundary that must reject anything not purely numeric;
+// (3) `Number.isInteger` (not `Number.isFinite`) rejects a fractional twip
+// (e.g. "12240.5"), matching PageSizeSchema's `.int()`: a schema-validated
+// tree would reject the whole spec on a fractional value, so a fail-closed
+// parser must not admit one that the docx library would then silently floor.
+// Pure, total, no throw.
+function parsePositiveDimension(raw: unknown): number | undefined {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return undefined;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+// Mirrors isKnownVariant's drop-unrecognized-value precedent above: kept
+// only when w:pgSz/@w:orient is exactly one of the two known values,
+// otherwise undefined — never fabricated.
+function extractOrientation(sectPr: Record<string, unknown>): 'portrait' | 'landscape' | undefined {
+  const pgSz = asRecord(sectPr['w:pgSz']);
+  if (!pgSz) return undefined;
+  const orient = extractAttrStr(pgSz, '@_w:orient');
+  return orient === 'portrait' || orient === 'landscape' ? orient : undefined;
+}
+
+// ADR-077 §3: width/height/orientation as one all-or-nothing unit — never a
+// partial { width: NaN } shape. Reads only the trailing body-level w:sectPr's
+// own w:pgSz (ADR-068 single-sectPr scope, extended here to page size: a
+// mid-body w:pPr/w:sectPr section break declaring a different page size is a
+// KNOWN AMBIGUITY this parser does not model, surfaced only indirectly via
+// hasAdditionalSectionBreaks).
+function extractPageSize(sectPr: Record<string, unknown>): PageSize | undefined {
+  const pgSz = asRecord(sectPr['w:pgSz']);
+  if (!pgSz) return undefined;
+  const width = parsePositiveDimension(pgSz['@_w:w']);
+  const height = parsePositiveDimension(pgSz['@_w:h']);
+  if (width === undefined || height === undefined) return undefined;
+  const orientation = extractOrientation(sectPr);
+  return { width, height, ...(orientation !== undefined ? { orientation } : {}) };
+}
+
 // True when the body carries any w:pPr/w:sectPr beyond the single trailing
 // body-level w:sectPr this parser reads (ADR-068: single-sectPr scope) — a
 // second section this slice does not model its own header/footer set for.
@@ -221,10 +267,12 @@ export function parseSectionHeaderFooterInfo(documentXml: string): SectionHeader
   if (!sectPr) return { references: [], titlePg: false, hasAdditionalSectionBreaks };
 
   const pgNumStart = extractPgNumStart(sectPr);
+  const pageSize = extractPageSize(sectPr);
   return {
     references: readSectPrReferences(sectPr),
     titlePg: isOnOffActive(sectPr['w:titlePg']),
     ...(pgNumStart !== undefined ? { pgNumStart } : {}),
+    ...(pageSize !== undefined ? { pageSize } : {}),
     hasAdditionalSectionBreaks,
   };
 }

@@ -7223,6 +7223,39 @@ components:
             source has no headers or footers.
           allOf:
             - $ref: '#/components/schemas/HeaderFooterComposition'
+        pageSize:
+          description: >
+            Captured DOCX page size (`w:pgSz`, #509, ADR-077), persisted and
+            round-tripped so a regenerated document keeps the source geometry.
+            Absent when no explicit page size was captured (a `.SEC` source, or
+            a DOCX whose trailing `w:sectPr` lacks `w:pgSz`); the generator then
+            defaults to US Letter.
+          allOf:
+            - $ref: '#/components/schemas/PageSize'
+
+    PageSize:
+      type: object
+      required: [width, height]
+      description: >
+        DOCX page dimensions in twips (twentieths of a point), mirroring
+        `w:pgSz/@w:w` and `@w:h` (#509, ADR-077). All-or-nothing: width and
+        height are both present or the whole object is absent — never a partial
+        shape. US Letter is `{ width: 12240, height: 15840 }`.
+      properties:
+        width:
+          type: integer
+          minimum: 1
+          description: Page width in twips (`w:pgSz/@w:w`).
+        height:
+          type: integer
+          minimum: 1
+          description: Page height in twips (`w:pgSz/@w:h`).
+        orientation:
+          type: string
+          enum: [portrait, landscape]
+          description: >
+            Page orientation (`w:pgSz/@w:orient`). Absent unless the source
+            declared exactly one of the two known values.
 
     StyleSource:
       type: object

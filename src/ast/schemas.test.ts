@@ -21,6 +21,7 @@ import {
   ParseWarningTypeSchema,
   ParseWarningSchema,
   RetainedTableSchema,
+  PageSizeSchema,
 } from './spec-tree-schemas.js';
 import { HeaderFooterCompositionSchema } from './header-footer-schemas.js';
 import {
@@ -290,6 +291,88 @@ describe('SpecTreeSchema — headerFooter (#306)', () => {
         headerFooter: { header: { center: { content: [{ kind: 'not-a-real-kind' }] } } },
       })
     ).toThrow();
+  });
+});
+
+// #509 — captured page size (w:pgSz) round-trips through the SpecTree, so the
+// generator can re-emit the source document's own page dimensions instead of
+// always defaulting to Letter.
+describe('PageSizeSchema (#509)', () => {
+  it('accepts a full { width, height, orientation } shape', () => {
+    const result = PageSizeSchema.parse({ width: 12240, height: 15840, orientation: 'portrait' });
+    expect(result).toEqual({ width: 12240, height: 15840, orientation: 'portrait' });
+  });
+
+  it('accepts width/height with orientation absent (exactOptional, no default injected)', () => {
+    const result = PageSizeSchema.parse({ width: 12240, height: 15840 });
+    expect(result).toEqual({ width: 12240, height: 15840 });
+    expect('orientation' in result).toBe(false);
+  });
+
+  // INV: PageSize is all-or-nothing — width and height are both required, never
+  // a partial shape. A source that captures only one dimension must fail here
+  // rather than silently produce e.g. { width: NaN } downstream.
+  it('rejects a missing height (never a partial shape)', () => {
+    expect(() => PageSizeSchema.parse({ width: 12240 })).toThrow();
+  });
+
+  it('rejects a missing width (never a partial shape)', () => {
+    expect(() => PageSizeSchema.parse({ height: 15840 })).toThrow();
+  });
+
+  it('rejects a zero or negative width', () => {
+    expect(() => PageSizeSchema.parse({ width: 0, height: 15840 })).toThrow();
+    expect(() => PageSizeSchema.parse({ width: -100, height: 15840 })).toThrow();
+  });
+
+  it('rejects a non-integer height', () => {
+    expect(() => PageSizeSchema.parse({ width: 12240, height: 15840.5 })).toThrow();
+  });
+
+  it('rejects an orientation value outside the closed enum', () => {
+    expect(() =>
+      PageSizeSchema.parse({ width: 12240, height: 15840, orientation: 'sideways' })
+    ).toThrow();
+  });
+
+  it('rejects an explicit orientation: undefined (exactOptional, not optional)', () => {
+    const result = PageSizeSchema.safeParse({
+      width: 12240,
+      height: 15840,
+      orientation: undefined,
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// #509 — SpecTree.pageSize stays in lockstep with PageSizeSchema (no
+// .catchall() on SpecTreeSchema, so an unmirrored field silently vanishes on
+// every DB round-trip). Mirrors the hiddenTables (#293) / headerFooter (#306)
+// blocks above exactly.
+describe('SpecTreeSchema — pageSize (#509)', () => {
+  const base = { id: VALID_UUID, section: VALID_SECTION, title: 'Cabling', parts: [] };
+  const pageSize = { width: 12240, height: 15840, orientation: 'portrait' as const };
+
+  it('accepts a SpecTree with pageSize', () => {
+    const result = SpecTreeSchema.parse({ ...base, pageSize });
+    expect(result.pageSize).toEqual(pageSize);
+  });
+
+  it('omits pageSize when absent (no default injected)', () => {
+    const result = SpecTreeSchema.parse(base);
+    expect('pageSize' in result).toBe(false);
+  });
+
+  // Mirrors the hiddenTables/headerFooter exactOptional regression guard:
+  // distinguishes "key absent" from "key present with value undefined"
+  // (exactOptionalPropertyTypes, CLAUDE.md).
+  it('rejects an explicit pageSize: undefined (exactOptional, not optional)', () => {
+    const result = SpecTreeSchema.safeParse({ ...base, pageSize: undefined });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a pageSize missing height (never a partial shape end-to-end)', () => {
+    expect(() => SpecTreeSchema.parse({ ...base, pageSize: { width: 12240 } })).toThrow();
   });
 });
 

@@ -5,6 +5,7 @@ import {
   RetainedTableSchema,
   SecRefSchema,
   HeaderFooterCompositionSchema,
+  PageSizeSchema,
 } from '../ast/index.js';
 import type { SpecTree, SecRef, NumberingProfile } from '../ast/index.js';
 import { SectionNumberSchema } from './section-number.js';
@@ -46,6 +47,10 @@ export const workerOutputSchema = z.object({
     // cross-thread stripping risk as hiddenTables above; must be declared
     // here or every captureHeaderFooter() result vanishes at this boundary.
     headerFooter: HeaderFooterCompositionSchema.optional(),
+    // #509: captured DOCX page size (ADR-077) — same cross-thread stripping
+    // risk; without it every extractPageSize() result vanishes here before
+    // persistParsedSpec, so an A4/Legal/landscape source regenerates as Letter.
+    pageSize: PageSizeSchema.optional(),
   }),
   refs: z.array(SecRefSchema).default([]),
   capabilities: z.array(z.string()).optional(),

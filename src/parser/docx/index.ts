@@ -14,7 +14,7 @@ import {
   mergeProfileConflicts,
   extractNumberingProfile,
 } from './numbering-profile.js';
-import type { ParseWarning, SpecTree, StyleProperties } from '../../ast/types.js';
+import type { ParseWarning, RetainedTable, SpecTree, StyleProperties } from '../../ast/types.js';
 import type { NumberingProfile } from '../../ast/index.js';
 import type { NumberingMap, StyleMap, ClassifiedParagraph, DocxParagraph } from './types.js';
 import { resolveStyleCascade } from './resolver.js';
@@ -22,6 +22,7 @@ import { detectSource, detectArticleIlvl } from './source-detection.js';
 import { parseCoreMetadata, UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
 import type { CoreMetadata } from './core-metadata.js';
 import { captureHeaderFooter } from './header-footer.js';
+import type { HeaderFooterCaptureResult } from './header-footer.js';
 import { readHeaderFooterParts } from './header-footer-parts.js';
 import { readHeaderFooterMedia } from './header-footer-media-parts.js';
 import type { HeaderFooterMediaByPart } from './header-footer-media-parts.js';
@@ -116,6 +117,27 @@ function visibleTableWarning(visibleCount: number): ParseWarning | undefined {
     : undefined;
 }
 
+// Composes the optional tree fields that each fire independently of one
+// another — a doc can carry w:pgSz with zero header/footer content, hidden
+// tables with no warnings, etc. — so each is spread conditionally in turn
+// rather than assuming any one implies another.
+function assembleTree(
+  tree: SpecTree,
+  warnings: readonly ParseWarning[],
+  hiddenTables: readonly RetainedTable[],
+  hf: HeaderFooterCaptureResult
+): SpecTree {
+  const withWarnings = warnings.length > 0 ? { ...tree, warnings } : tree;
+  const withHiddenTables =
+    hiddenTables.length > 0 ? { ...withWarnings, hiddenTables } : withWarnings;
+  const withHeaderFooter = hf.composition
+    ? { ...withHiddenTables, headerFooter: hf.composition }
+    : withHiddenTables;
+  return hf.pageSize !== undefined
+    ? { ...withHeaderFooter, pageSize: hf.pageSize }
+    : withHeaderFooter;
+}
+
 function runPipeline(
   entries: ValidEntries,
   onProgress?: (stage: string, pct: number) => void,
@@ -183,10 +205,7 @@ function runPipeline(
     ...(bodyObjects.warning ? [bodyObjects.warning] : []),
     ...hf.warnings,
   ];
-  const withWarnings = warnings.length > 0 ? { ...tree, warnings } : tree;
-  const withHiddenTables =
-    hiddenTables.length > 0 ? { ...withWarnings, hiddenTables } : withWarnings;
-  return hf.composition ? { ...withHiddenTables, headerFooter: hf.composition } : withHiddenTables;
+  return assembleTree(tree, warnings, hiddenTables, hf);
 }
 
 // ─── Internal classification helper ──────────────────────────────────────────

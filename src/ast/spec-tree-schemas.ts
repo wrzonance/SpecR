@@ -324,6 +324,17 @@ export const RetainedTableSchema = z.object({
   rows: z.array(z.array(z.string())),
 });
 
+// Captured DOCX page dimensions (`w:pgSz`, #509, ADR-077). All-or-nothing —
+// width/height are both required, never a partial shape — kept in lockstep
+// with the `PageSize` TS type (ast/types.ts): SpecTreeSchema has no
+// `.catchall()`, so a field added to the type but not mirrored here would
+// silently vanish on every DB round-trip.
+export const PageSizeSchema = z.object({
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  orientation: z.enum(['portrait', 'landscape']).exactOptional(),
+});
+
 export const SpecTreeSchema = z.object({
   id: z.uuid(),
   // Canonical expanded shape, or the 'unknown' sentinel emitted by parsers
@@ -336,4 +347,7 @@ export const SpecTreeSchema = z.object({
   // Captured DOCX header/footer composition (#306). Parse-output only in this
   // slice — no DB/REST/MCP persistence; see ADR-068.
   headerFooter: HeaderFooterCompositionSchema.exactOptional(),
+  // Captured DOCX page dimensions (#509). Absent === no explicit w:pgSz
+  // captured (or non-DOCX source); see ADR-077.
+  pageSize: PageSizeSchema.exactOptional(),
 });
