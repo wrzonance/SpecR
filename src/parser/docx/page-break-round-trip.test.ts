@@ -144,6 +144,9 @@ describe('manual page break round trip — parse -> generate (#497, ADR-075)', (
     expect(secondPara).toContain('<w:pageBreakBefore/>');
   });
 
+  // KNOWN AMBIGUITY: pageBreakBefore is a property of the paragraph AFTER the
+  // break — a w:br at the very end of the document has no following paragraph,
+  // so there is no node to carry the flag and the break is dropped on parse.
   it('KNOWN AMBIGUITY: a trailing page break with no following paragraph is silently dropped (no node to attach it to)', async () => {
     const source = await makeDocx(paraWithTrailingPageBreak('Last paragraph text.'));
     const { tree } = await parse(source, 'source.docx');
@@ -189,6 +192,11 @@ describe('manual page break round trip — parse -> generate (#497, ADR-075)', (
     expect(secondPara).toContain('<w:pageBreakBefore/>');
   });
 
+  // KNOWN AMBIGUITY: document.ts's page-break lookback walks the raw <w:p>-only
+  // array and never sees an interleaved w:tbl, so the break is misattributed to
+  // the paragraph after the table; an object node has no pageBreakBefore
+  // attachment point (ADR-072/075), so the flag is dropped rather than landing
+  // on a paragraph the break never preceded.
   it('KNOWN AMBIGUITY: a page break immediately before a body-level table (#300, ADR-072) is dropped, never misattached to the paragraph after the table', async () => {
     const table =
       '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell text</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';

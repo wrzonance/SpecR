@@ -1585,6 +1585,10 @@ describe('buildTree — meta.pageBreakBefore propagation (ADR-075)', () => {
     expect(article?.children[0]?.meta.pageBreakBefore).toBe(true);
   });
 
+  // KNOWN AMBIGUITY: a break forwarded through a filtered paragraph that has no
+  // emitted node after it (end of document) has no attachment target left; the
+  // pendingPageBreak is dropped rather than crashing or being retro-attached to
+  // an earlier node it never preceded.
   it('KNOWN AMBIGUITY: a pageBreakBefore forwarded through a filtered paragraph with nothing structural after it (EOF) is silently dropped, never throws', () => {
     const trailingBlank: ClassifiedParagraph = {
       paragraph: { text: '', isVanish: false, pageBreakBefore: true },
@@ -1648,6 +1652,9 @@ describe('buildTree — meta.pageBreakBefore propagation (ADR-075)', () => {
   // are empty spacer paragraphs"), so the forwarded break must be dropped the same
   // way the direct-adjacency case is — never misattached to the paragraph AFTER
   // the object.
+  // KNOWN AMBIGUITY: an object node has no pageBreakBefore attachment point
+  // (ADR-075 decision 4), so a break forwarded onto a spacer that hosts a body
+  // object is dropped, never misapplied to the paragraph after the object.
   it('#497 KNOWN AMBIGUITY: a page break forwarded through a filtered spacer is dropped when a body object is attached to that spacer, not misattached to the paragraph after the object', () => {
     const blankSpacer: ClassifiedParagraph = {
       paragraph: { text: '   ', isVanish: false, pageBreakBefore: true },
@@ -1684,6 +1691,68 @@ describe('buildTree — meta.pageBreakBefore propagation (ADR-075)', () => {
     const article = tree.parts[0]?.children[0];
     // The blank spacer produced no node of its own — only the object and the real
     // paragraph did.
+    expect(article?.children).toHaveLength(2);
+    expect(article?.children[0]).toEqual(obj);
+    expect(article?.children[0]?.meta.pageBreakBefore).toBeUndefined();
+    expect(article?.children[1]?.text).toBe('Paragraph after table.');
+    expect(article?.children[1]?.meta.pageBreakBefore).toBeUndefined();
+  });
+
+  // CPI fixture coverage (coding guideline: test inference changes against both
+  // ARCAT and CPI). buildTree receives resolvedIlvl AFTER the CPI ilvl-offset
+  // normalization, so the forwarding and object-adjacency behavior proven above
+  // for 'arcat' must hold unchanged under source 'cpi' — these mirror those cases.
+  it('cpi: forwards pageBreakBefore past a hidden (vanish) continuation onto the next visible node', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ isVanish: true, pageBreakBefore: true, text: 'PROCESSING FORM — internal use' }),
+        makePara({ numId: 1, ilvl: 0, text: 'PART 2 - PRODUCTS' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'cpi');
+    const hidden = tree.parts[0]?.children[0];
+    expect(hidden?.type).toBe('continuation');
+    expect(hidden?.meta.pageBreakBefore).toBeUndefined();
+    expect(tree.parts[1]?.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('cpi: a page break forwarded through a filtered spacer is dropped when a body object is attached to that spacer', () => {
+    const blankSpacer: ClassifiedParagraph = {
+      paragraph: { text: '   ', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const afterTable: ClassifiedParagraph = {
+      paragraph: { text: 'Paragraph after table.', isVanish: false },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const obj = makeObjectNode('table-obj');
+    const tree = buildTree(
+      [
+        makeClassified('part', 0, 'PART 1'),
+        makeClassified('article', 1, '1.1'),
+        blankSpacer,
+        afterTable,
+      ],
+      '01',
+      'T',
+      'cpi',
+      [],
+      new Map([[2, [obj]]])
+    );
+    const article = tree.parts[0]?.children[0];
     expect(article?.children).toHaveLength(2);
     expect(article?.children[0]).toEqual(obj);
     expect(article?.children[0]?.meta.pageBreakBefore).toBeUndefined();
