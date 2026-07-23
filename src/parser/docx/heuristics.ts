@@ -1,4 +1,7 @@
-import type { NodeType } from '../../ast/types.js';
+import type { NodeType, SpecNode, SpecTree } from '../../ast/types.js';
+import type { ClassifiedParagraph } from './types.js';
+import { UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
+import { parseSectionNumberCandidate } from '../../lib/section-number.js';
 
 interface TextSignalEntry {
   readonly pattern: RegExp;
@@ -216,4 +219,167 @@ export function matchIndentSignal(leftIndent: number | undefined): number | null
   if (estimated <= 0 || estimated > MAX_ILVL) return null;
 
   return estimated;
+}
+
+// #510: a source authored with typed "SECTION <n>" / title lines duplicates the
+// generator's injected canonical heading on round-trip — the two source lines
+// survive as body continuation nodes even though their content is already
+// canonicalized into the tree's own section/title. Strips a leading "SECTION"
+// keyword (a CSI format-convention marker, not a vendor label) before delegating
+// to parseSectionNumberCandidate so the comparison tolerates the same drift the
+// candidate parser already tolerates elsewhere (missing spaces, dot suffixes).
+const SECTION_KEYWORD_PREFIX = /^SECTION\s+/i;
+
+/**
+ * Returns true when `text` is a "SECTION <n>" line whose number resolves to the
+ * exact same canonical section already resolved for the document (core.xml or
+ * Signal 4). Always false when `section` is `UNKNOWN_SECTION_IDENTITY` — there is
+ * nothing trustworthy to compare against.
+ */
+export function isSectionIdentityLine(text: string, section: string): boolean {
+  if (section === UNKNOWN_SECTION_IDENTITY) return false;
+  const stripped = text.trim().replace(SECTION_KEYWORD_PREFIX, '');
+  const parsed = parseSectionNumberCandidate(stripped, 'strong');
+  return parsed.ok && parsed.canonical === section;
+}
+
+function normalizeIdentityText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+/**
+ * Returns true when `text`, trimmed/whitespace-collapsed and compared
+ * case-insensitively, is identical to the document's already-resolved `title`.
+ * Always false when `title` is `UNKNOWN_SECTION_IDENTITY`.
+ */
+export function isTitleIdentityLine(text: string, title: string): boolean {
+  if (title === UNKNOWN_SECTION_IDENTITY) return false;
+  return normalizeIdentityText(text) === normalizeIdentityText(title);
+}
+
+// The per-candidate decision for leadingTitleBlockIndices's scan, extracted into
+// its own pure helper specifically to keep the scan loop under the enforced
+// sonarjs/cognitive-complexity budget (measured 12 inlined vs. a budget of 10).
+type LeadingScanStep = 'match' | 'skip' | 'stop';
+
+function isBlankOrSuppressed(cp: ClassifiedParagraph): boolean {
+  return cp.paragraph.text.trim().length === 0 || cp.suppressed === true;
+}
+
+function classifyLeadingCandidate(
+  cp: ClassifiedParagraph,
+  section: string,
+  title: string
+): LeadingScanStep {
+  // Checked BEFORE nodeType: a blank or already-suppressed paragraph produces no
+  // SpecNode (isStructuralContent requires non-empty, non-suppressed text), so it
+  // can never be a visible round-trip duplicate and must not close the leading
+  // zone. A blank spacer can still carry a numbered/structural style that would
+  // otherwise classify as 'part' and, checked first, wrongly stop the scan.
+  if (isBlankOrSuppressed(cp)) return 'skip';
+  if (cp.nodeType !== 'continuation') return 'stop';
+  // A genuine editorial note (isNote: true) is real content that renders as
+  // "> **[NOTE]** ..." — never a round-trip duplicate of the canonical heading,
+  // even when its text coincidentally equals the section/title. Matching it here
+  // would drop the note's SpecNode entirely (buildTree never calls
+  // appendContinuation for a suppressed index), which is strictly worse than
+  // leaking it unbannered — the note would simply vanish, unrecoverable.
+  // Checked BEFORE isVanish (CodeRabbit #510): a hidden note is STILL a note —
+  // note nodes render their [NOTE] banner regardless of meta.vanish — so the
+  // vanish branch's renders-as-'' rationale does not apply to it, and it must
+  // close the zone exactly like a visible note.
+  if (cp.isNote === true) return 'stop';
+  // A hidden (isVanish) non-note line is retained as a meta.vanish SpecNode that
+  // renders as '' (#292/#296) — it is never a VISIBLE duplicate of the canonical
+  // heading, and matching it would DROP that deliberately-retained hidden content
+  // (buildTree emits no SpecNode for a suppressed index). Skip it like a blank:
+  // keep the node, keep scanning so a later visible duplicate is still caught.
+  // (Non-note is guaranteed here: the isNote check above already returned.)
+  if (cp.isVanish === true) return 'skip';
+  const text = cp.paragraph.text;
+  if (isSectionIdentityLine(text, section) || isTitleIdentityLine(text, title)) return 'match';
+  return 'stop';
+}
+
+/**
+ * Scans `classified` from index 0, identifying the strictly-leading run of
+ * continuation nodes that merely re-type the document's own already-resolved
+ * section/title identity (#510 round-trip duplication). The scan:
+ * - adds an index on a match (a continuation whose text is the section or
+ *   title line),
+ * - continues without adding an index on a blank/already-suppressed paragraph
+ *   OR a hidden (isVanish) NON-note line — neither renders as a visible
+ *   duplicate, so each is retained and consumes no slot without closing the
+ *   leading zone,
+ * - stops permanently on the first real structural (non-continuation) node,
+ *   the first note-flagged continuation — hidden or visible: a note's [NOTE]
+ *   banner renders regardless of meta.vanish, so genuine editorial content is
+ *   never a round-trip duplicate, whatever its text — or the first
+ *   continuation whose text matches neither identity; a coincidental repeat
+ *   later in the document is never touched.
+ *
+ * Returns an empty set immediately when `section` and `title` are both
+ * `UNKNOWN_SECTION_IDENTITY` — there is nothing resolved to compare against.
+ */
+export function leadingTitleBlockIndices(
+  classified: readonly ClassifiedParagraph[],
+  section: string,
+  title: string
+): ReadonlySet<number> {
+  const indices = new Set<number>();
+  if (section === UNKNOWN_SECTION_IDENTITY && title === UNKNOWN_SECTION_IDENTITY) {
+    return indices;
+  }
+  for (const [i, cp] of classified.entries()) {
+    const step = classifyLeadingCandidate(cp, section, title);
+    if (step === 'stop') break;
+    if (step === 'match') indices.add(i);
+  }
+  return indices;
+}
+
+// The tree-level analogue of classifyLeadingCandidate, applied to a resolved
+// SpecNode root instead of a ClassifiedParagraph. buildTree drops blanks and
+// suppressed paragraphs before assembly, so those cases never reach here; the
+// remaining decisions mirror the classified scan exactly:
+// - a non-continuation root (a real PART/article, or a retained note) closes the
+//   zone — genuine content is never a round-trip duplicate;
+// - a retained hidden (meta.vanish) continuation renders as '' (#292/#296) and is
+//   never a VISIBLE duplicate — skip it (keep the node, keep scanning);
+// - a continuation whose text re-types the resolved section/title identity is a
+//   visible duplicate — remove it;
+// - any other continuation closes the zone.
+function classifyLeadingRoot(node: SpecNode, section: string, title: string): LeadingScanStep {
+  if (node.type !== 'continuation') return 'stop';
+  if (node.meta.vanish === true) return 'skip';
+  if (isSectionIdentityLine(node.text, section) || isTitleIdentityLine(node.text, title)) {
+    return 'match';
+  }
+  return 'stop';
+}
+
+/**
+ * Strips the strictly-leading run of root continuation nodes that merely re-type
+ * the tree's own already-resolved section/title identity (#510). This is the
+ * post-inference safety net for buildTree's classified-level strip
+ * (leadingTitleBlockIndices): that strip runs during tree assembly with the
+ * core.xml identity only, so a document whose identity is recovered by content
+ * inference instead (docProps/core.xml absent or non-conforming) reaches this
+ * point with the duplicate SECTION/title lines still standing as root
+ * continuations. Called by the parser orchestrator once section/title are
+ * resolved. Returns the same tree reference when nothing is removed — a metadata
+ * document whose duplicates buildTree already dropped is a clean no-op.
+ */
+export function stripLeadingTitleBlockRoots(tree: SpecTree): SpecTree {
+  if (tree.section === UNKNOWN_SECTION_IDENTITY && tree.title === UNKNOWN_SECTION_IDENTITY) {
+    return tree;
+  }
+  const remove = new Set<number>();
+  for (const [i, node] of tree.parts.entries()) {
+    const step = classifyLeadingRoot(node, tree.section, tree.title);
+    if (step === 'stop') break;
+    if (step === 'match') remove.add(i);
+  }
+  if (remove.size === 0) return tree;
+  return { ...tree, parts: tree.parts.filter((_, i) => !remove.has(i)) };
 }

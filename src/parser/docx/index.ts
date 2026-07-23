@@ -301,6 +301,7 @@ function buildClassification(
 // ─── Public exports ───────────────────────────────────────────────────────────
 
 export { assertDocxSafe } from './safety.js';
+export { stripLeadingTitleBlockRoots } from './heuristics.js';
 export { resolveStyleCascade } from './resolver.js';
 export { scoreHierarchyConfidence } from './hierarchy-confidence.js';
 export { findAnchoredParagraph, replaceAnchoredParagraphText } from './object-blob-edit.js';

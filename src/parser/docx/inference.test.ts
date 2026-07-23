@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { classifyParagraphs, buildTree, auditTreeStructure } from './inference.js';
 import { emptyNumberingMap } from './numbering.js';
+import { UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
 import type { ClassifiedParagraph, DocxParagraph, NumberingMap, StyleMap } from './types.js';
 import type { NodeType, SpecNode } from '../../ast/types.js';
 
@@ -1410,6 +1411,107 @@ describe('auditTreeStructure — object roots are not junk (#300)', () => {
     const warnings = auditTreeStructure([objectRoot, partRoot]);
 
     expect(warnings.some((w) => w.type === 'root-continuation')).toBe(false);
+  });
+});
+
+// #510: a source authored with typed "SECTION <n>" / title lines duplicates the
+// generator's injected canonical heading on round-trip. These fixtures reproduce
+// the issue's exact opening shape: leading continuation lines that merely re-type
+// the tree's own resolved section/title identity, immediately followed by the
+// first real PART heading.
+function makeContinuation(text: string, opts: { readonly suppressed?: boolean } = {}) {
+  return {
+    ...makeClassified('continuation', 8, text),
+    ...(opts.suppressed !== undefined ? { suppressed: opts.suppressed } : {}),
+  };
+}
+
+describe('buildTree — #510 leading title-block suppression', () => {
+  const section = '01 88 13.13';
+  const title = 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS';
+
+  it('inference: #510 round-trip duplication — a leading SECTION-line + title-line pair produce no continuation SpecNode', () => {
+    const classified = [
+      makeContinuation('SECTION 01 8813.13'), // missing-space drift, still resolves to the same canonical section
+      makeContinuation(title),
+      makeClassified('part', 0, 'PART 1 - GENERAL'),
+    ];
+    const tree = buildTree(classified, section, title, 'unknown');
+
+    expect(tree.parts).toHaveLength(1);
+    expect(tree.parts[0]?.type).toBe('part');
+    expect(tree.parts.some((n) => n.text === 'SECTION 01 8813.13' || n.text === title)).toBe(false);
+  });
+
+  it('inference: #510 — a blank paragraph interleaved in the leading run does not break suppression (skip, not stop)', () => {
+    const classified = [
+      makeContinuation('SECTION 01 8813.13'),
+      makeContinuation(''), // blank spacer paragraph
+      makeContinuation(title),
+      makeClassified('part', 0, 'PART 1 - GENERAL'),
+    ];
+    const tree = buildTree(classified, section, title, 'unknown');
+
+    expect(tree.parts).toHaveLength(1);
+    expect(tree.parts[0]?.type).toBe('part');
+  });
+
+  it('inference: #510 — a non-matching leading continuation is retained, not suppressed', () => {
+    const classified = [
+      makeContinuation('Some unrelated lead-in text.'),
+      makeClassified('part', 0, 'PART 1 - GENERAL'),
+    ];
+    const tree = buildTree(classified, section, title, 'unknown');
+
+    expect(tree.parts).toHaveLength(2);
+    expect(tree.parts[0]?.type).toBe('continuation');
+    expect(tree.parts[0]?.text).toBe('Some unrelated lead-in text.');
+    expect(tree.parts[1]?.type).toBe('part');
+  });
+
+  it('inference: #510 — a coincidental mid-document repeat of the title, past real structural content, is left untouched', () => {
+    const classified = [
+      makeContinuation(title),
+      makeClassified('part', 0, 'PART 1 - GENERAL'),
+      makeClassified('article', 1, '1.1 SUMMARY'),
+      makeContinuation(title), // a genuine body repeat, not part of the leading run
+    ];
+    const tree = buildTree(classified, section, title, 'unknown');
+
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children).toHaveLength(1);
+    expect(article?.children[0]?.type).toBe('continuation');
+    expect(article?.children[0]?.text).toBe(title);
+  });
+
+  it('inference: #510 — UNKNOWN_SECTION_IDENTITY short-circuits: nothing is suppressed even when text looks like a duplicate', () => {
+    const classified = [
+      makeContinuation('SECTION 01 8813.13'),
+      makeContinuation(title),
+      makeClassified('part', 0, 'PART 1 - GENERAL'),
+    ];
+    const tree = buildTree(
+      classified,
+      UNKNOWN_SECTION_IDENTITY,
+      UNKNOWN_SECTION_IDENTITY,
+      'unknown'
+    );
+
+    expect(tree.parts).toHaveLength(3);
+    expect(tree.parts[0]?.type).toBe('continuation');
+    expect(tree.parts[1]?.type).toBe('continuation');
+    expect(tree.parts[2]?.type).toBe('part');
+  });
+
+  it('inference: #510 — a genuine leading note whose text coincidentally equals the title is preserved as a note SpecNode, never swallowed', () => {
+    const noteCp = { ...makeContinuation(title), isNote: true };
+    const classified = [noteCp, makeClassified('part', 0, 'PART 1 - GENERAL')];
+    const tree = buildTree(classified, section, title, 'unknown');
+
+    expect(tree.parts).toHaveLength(2);
+    expect(tree.parts[0]?.type).toBe('note');
+    expect(tree.parts[0]?.text).toBe(title);
+    expect(tree.parts[1]?.type).toBe('part');
   });
 });
 
