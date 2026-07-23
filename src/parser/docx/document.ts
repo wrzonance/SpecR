@@ -1,5 +1,6 @@
 import { ParserError } from '../error.js';
 import {
+  asRecord,
   createDocumentXmlParser,
   extractAttrStr,
   getAttrVal,
@@ -24,6 +25,8 @@ interface ParagraphFields {
   readonly outlineLvl: number | undefined;
   readonly jc: string | undefined;
   readonly sourceFacts: SourceFacts | undefined;
+  readonly pageBreakBefore: boolean | undefined;
+  readonly ownPageBreakBefore: boolean | undefined;
 }
 
 function extractRunText(run: Record<string, unknown>): string {
@@ -213,14 +216,79 @@ function addParagraphFields(base: DocxParagraph, fields: ParagraphFields): DocxP
     ...(fields.outlineLvl !== undefined ? { outlineLvl: fields.outlineLvl } : {}),
     ...(fields.jc !== undefined ? { jc: fields.jc } : {}),
     ...(fields.sourceFacts !== undefined ? { sourceFacts: fields.sourceFacts } : {}),
+    ...(fields.pageBreakBefore !== undefined ? { pageBreakBefore: fields.pageBreakBefore } : {}),
+    ...(fields.ownPageBreakBefore !== undefined
+      ? { ownPageBreakBefore: fields.ownPageBreakBefore }
+      : {}),
   };
+}
+
+// ADR-075: detects a manual page break (`<w:br w:type="page"/>`) within a single run.
+// run['w:br'] is already `unknown` (run: Record<string, unknown>) so it is directly
+// assignable to toArray<unknown>'s parameter — no cast needed. Handles all 3 verified
+// parse shapes: object ({'@_w:type':'page'}), empty string '' (bare self-closing
+// <w:br/>, NOT an object), and array (2+ sibling w:br in the same run).
+function runHasPageBreak(run: Record<string, unknown>): boolean {
+  const breaks = toArray<unknown>(run['w:br']);
+  return breaks.some((br) => {
+    const rec = asRecord(br);
+    return rec !== undefined && extractAttrStr(rec, '@_w:type') === 'page';
+  });
+}
+
+// ADR-075: reuses collectRuns (same traversal as allTextRunsVanish/extractParagraphText)
+// so hyperlink-, w:ins/w:del-, and w:sdt-wrapped runs are covered identically. Multiple
+// page breaks in one paragraph collapse to a single true — KNOWN AMBIGUITY: the parser
+// has no richer positional model.
+function paragraphHasPageBreak(raw: Record<string, unknown>): boolean {
+  const runs: Record<string, unknown>[] = [];
+  collectRuns(raw, runs);
+  return runs.some(runHasPageBreak);
+}
+
+// ADR-075: guards index-0 (no predecessor) and the noUncheckedIndexedAccess lookback
+// without a non-null assertion.
+function previousParagraphHasPageBreak(
+  rawParagraphs: readonly Record<string, unknown>[],
+  index: number
+): boolean {
+  if (index === 0) return false;
+  const prev = rawParagraphs[index - 1];
+  return prev !== undefined && paragraphHasPageBreak(prev);
+}
+
+// ADR-075: a manual page break appears in a source .docx in TWO forms, and both
+// must be captured. The first is a `w:br type="page"` run at the end of the
+// PRECEDING paragraph (Word's "Insert → Page Break"), handled by
+// previousParagraphHasPageBreak. The second — this function — is the paragraph-
+// level `w:pageBreakBefore` property ON the paragraph that begins the new page,
+// produced by Word's Paragraph dialog → "Line and Page Breaks" → "Page break
+// before" and set by many heading styles. It maps directly to
+// `meta.pageBreakBefore` (and is also the exact property the generator re-emits).
+// CT_OnOff toggle semantics: element present === on, unless an explicit falsey
+// `w:val` (false/0/off) turns it off. The property is EFFECTIVE, not only local
+// (CodeRabbit #497): a heading style commonly supplies it from styles.xml with
+// no local pPr key at all, so direct formatting wins when present (including an
+// explicit local false disabling a style-supplied break), else the selected
+// w:pStyle's basedOn-resolved value (StyleMap.pageBreakStyleIds) decides.
+function ownPageBreakBefore(
+  pPr: Record<string, unknown> | undefined,
+  styleId: string | undefined,
+  styleMap: StyleMap
+): boolean {
+  if (pPr && 'w:pageBreakBefore' in pPr) {
+    const val = getAttrVal(pPr['w:pageBreakBefore']);
+    return val !== 'false' && val !== '0' && val !== 'off';
+  }
+  return styleId !== undefined && styleMap.pageBreakStyleIds?.has(styleId) === true;
 }
 
 function parseParagraph(
   raw: Record<string, unknown>,
   numberingMap: NumberingMap,
   styleMap: StyleMap,
-  source: ParagraphSource | undefined
+  source: ParagraphSource | undefined,
+  pageBreakBefore: boolean
 ): DocxParagraph {
   const pPr = raw['w:pPr'] as Record<string, unknown> | undefined;
   const styleVal = pPr ? getAttrVal(pPr['w:pStyle']) : '';
@@ -241,6 +309,11 @@ function parseParagraph(
     outlineLvl,
     jc,
     sourceFacts: source?.sourceFacts,
+    // Kept as two distinct signals — buildTree treats them differently across an
+    // interposed body object (predecessor-lookback can be misattributed; the
+    // paragraph's own property never is). See ADR-075 decision 8 and page-break.ts.
+    pageBreakBefore: pageBreakBefore ? true : undefined,
+    ownPageBreakBefore: ownPageBreakBefore(pPr, styleId, styleMap) ? true : undefined,
   });
 }
 
@@ -271,7 +344,16 @@ export function parseDocument(
   }
 
   const paragraphSources = parseParagraphSources(xml, commentsById, styleMap);
-  return toArray<Record<string, unknown>>(
+  const rawParagraphs = toArray<Record<string, unknown>>(
     body['w:p'] as readonly Record<string, unknown>[] | undefined
-  ).map((p, index) => parseParagraph(p, numberingMap, styleMap, paragraphSources[index]));
+  );
+  return rawParagraphs.map((p, index) =>
+    parseParagraph(
+      p,
+      numberingMap,
+      styleMap,
+      paragraphSources[index],
+      previousParagraphHasPageBreak(rawParagraphs, index)
+    )
+  );
 }

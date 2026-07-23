@@ -753,3 +753,92 @@ describe('generateDocx — #517 body-object re-emit wiring', () => {
     );
   });
 });
+
+// #497/ADR-075: a manual page break captured on the DOCX source (a `w:br
+// type="page"` run) round-trips as `node.meta.pageBreakBefore` on the
+// FOLLOWING node, and generate re-emits it as that node's own OOXML
+// `w:pageBreakBefore` paragraph property. Pinned at the generateDocx
+// boundary across every paragraph-emitting node type — note, continuation,
+// and structural (numbered) — plus the one node type with NO attachment
+// point at all: 'object' builds an ImportedObjectBlock, never a Paragraph,
+// so the flag has nowhere to land even if incorrectly present.
+function treeWithSingleNode(node: SpecNode): SpecTree {
+  return {
+    id: '00000000-0000-0000-0000-0000000000a0',
+    section: '08 71 00',
+    title: 'Door Hardware',
+    parts: [
+      {
+        id: '00000000-0000-0000-0000-0000000000a1',
+        type: 'part',
+        text: 'GENERAL',
+        meta: {},
+        children: [node],
+      },
+    ],
+  };
+}
+
+const PAGE_BREAK_TAG = '<w:pageBreakBefore/>';
+
+describe('generateDocx — #497 manual page break round-trip (ADR-075)', () => {
+  it('note node: meta.pageBreakBefore emits w:pageBreakBefore on its paragraph', async () => {
+    const xml = await getDocXml(
+      await generateDocx(
+        treeWithSingleNode({
+          id: '00000000-0000-0000-0000-0000000000a2',
+          type: 'note',
+          text: 'Verify before proceeding.',
+          meta: { pageBreakBefore: true },
+          children: [],
+        })
+      )
+    );
+    expect(xml).toContain(PAGE_BREAK_TAG);
+  });
+
+  it('continuation node: meta.pageBreakBefore emits w:pageBreakBefore on its paragraph', async () => {
+    const xml = await getDocXml(
+      await generateDocx(
+        treeWithSingleNode({
+          id: '00000000-0000-0000-0000-0000000000a3',
+          type: 'continuation',
+          text: 'Continued text.',
+          meta: { pageBreakBefore: true },
+          children: [],
+        })
+      )
+    );
+    expect(xml).toContain(PAGE_BREAK_TAG);
+  });
+
+  it('structural node (pr1): meta.pageBreakBefore emits w:pageBreakBefore on its numbered paragraph', async () => {
+    const xml = await getDocXml(
+      await generateDocx(
+        treeWithSingleNode({
+          id: '00000000-0000-0000-0000-0000000000a4',
+          type: 'pr1',
+          text: 'Submit product data.',
+          meta: { pageBreakBefore: true },
+          children: [],
+        })
+      )
+    );
+    expect(xml).toContain(PAGE_BREAK_TAG);
+  });
+
+  it('absent meta.pageBreakBefore emits no w:pageBreakBefore anywhere in the document', async () => {
+    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE));
+    expect(xml).not.toContain(PAGE_BREAK_TAG);
+  });
+
+  it('object node: meta.pageBreakBefore has no attachment point — never emitted, even if a caller wrongly sets it (object nodes build ImportedObjectBlock, not Paragraph)', async () => {
+    const objectNodeWithFlag: SpecNode = {
+      ...tableObjectNode(),
+      meta: { ...tableObjectNode().meta, pageBreakBefore: true },
+    };
+    const xml = await getDocXml(await generateDocx(treeWithObject(objectNodeWithFlag)));
+    expect(xml).toContain('Captured cell text value');
+    expect(xml).not.toContain(PAGE_BREAK_TAG);
+  });
+});

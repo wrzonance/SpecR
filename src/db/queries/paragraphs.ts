@@ -38,6 +38,8 @@ interface FlatRow {
   readonly signalProvenance: SignalProvenance | null;
   /** Captured DOCX body object (#300, ADR-072). Non-null only on `type: 'object'` rows. */
   readonly objectData: ObjectMeta | null;
+  /** Manual page break (#497, ADR-075). True === node begins on a new page. */
+  readonly pageBreakBefore: boolean;
 }
 
 function hasSourceFacts(sourceFacts: SourceFacts): boolean {
@@ -65,6 +67,7 @@ function flattenDfs(
         ? { signalUsed: node.meta.inference.signalUsed, agreed: node.meta.inference.agreed }
         : null,
       objectData: node.meta.object ?? null,
+      pageBreakBefore: node.meta.pageBreakBefore ?? false,
     });
     flattenDfs(node.children, specId, node.id, rows);
   });
@@ -84,8 +87,8 @@ export async function insertTree(tree: SpecTree, specId: string, pool: Queryable
       await pool.query(
         `INSERT INTO paragraphs
            (id, spec_id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-            signal_provenance, object_data)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb)`,
+            signal_provenance, object_data, page_break_before)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12)`,
         [
           row.id,
           row.specId,
@@ -98,6 +101,7 @@ export async function insertTree(tree: SpecTree, specId: string, pool: Queryable
           JSON.stringify(row.sourceFacts),
           row.signalProvenance ? JSON.stringify(row.signalProvenance) : null,
           row.objectData ? JSON.stringify(row.objectData) : null,
+          row.pageBreakBefore,
         ]
       );
     } catch (err) {
@@ -122,6 +126,8 @@ export interface ParagraphRow {
   readonly associations?: readonly ParagraphAssociation[];
   /** Captured DOCX body object (#300, ADR-072). Present only on `nodeType === 'object'`. */
   readonly object?: ObjectMeta;
+  /** Manual page break (#497, ADR-075). Present only when true. */
+  readonly pageBreakBefore?: boolean;
 }
 
 export interface ParagraphWithAncestors {
@@ -138,6 +144,7 @@ interface ChainRow {
   readonly sourceFacts: SourceFacts;
   readonly signalProvenance: unknown;
   readonly objectData: unknown;
+  readonly pageBreakBefore: boolean;
   readonly depth: number;
 }
 
@@ -164,6 +171,7 @@ function toParagraphRow(r: ChainRow): ParagraphRow {
     ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
     ...(inference ? { inference } : {}),
     ...(objectMeta ? { object: objectMeta } : {}),
+    ...(r.pageBreakBefore ? { pageBreakBefore: true } : {}),
   };
 }
 
@@ -188,17 +196,17 @@ export async function getParagraphWithAncestors(
     const result = await pool.query<ChainRow>(
       `WITH RECURSIVE chain AS (
          SELECT id, node_type, text, vanish, conflicts, source_facts, signal_provenance,
-                object_data, parent_id, 0 AS depth
+                object_data, page_break_before, parent_id, 0 AS depth
          FROM paragraphs WHERE id = $1
          UNION ALL
          SELECT p.id, p.node_type, p.text, p.vanish, p.conflicts, p.source_facts,
-                p.signal_provenance, p.object_data, p.parent_id, c.depth + 1
+                p.signal_provenance, p.object_data, p.page_break_before, p.parent_id, c.depth + 1
          FROM paragraphs p JOIN chain c ON p.id = c.parent_id
          WHERE c.depth + 1 < 10
        )
        SELECT id, node_type AS "nodeType", text, vanish, conflicts,
               source_facts AS "sourceFacts", signal_provenance AS "signalProvenance",
-              object_data AS "objectData", depth
+              object_data AS "objectData", page_break_before AS "pageBreakBefore", depth
        FROM chain ORDER BY depth DESC`,
       [id]
     );
@@ -228,6 +236,7 @@ interface SubtreeRow {
   readonly sourceFacts: SourceFacts;
   readonly signalProvenance: unknown;
   readonly objectData: unknown;
+  readonly pageBreakBefore: boolean;
 }
 
 /** Assemble subtree rows (a node plus all its descendants) into one SpecNode
@@ -263,6 +272,7 @@ function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | n
         ...(articleRole !== undefined ? { articleRole } : {}),
         ...(inference ? { inference } : {}),
         ...(objectMeta ? { object: objectMeta } : {}),
+        ...(row.pageBreakBefore ? { pageBreakBefore: true } : {}),
       },
     };
   };
@@ -301,17 +311,18 @@ export async function fetchSubtreeNode(
   const result = await db.query<SubtreeRow>(
     `WITH RECURSIVE subtree AS (
        SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              signal_provenance, object_data
+              signal_provenance, object_data, page_break_before
        FROM paragraphs WHERE id = $1 AND spec_id = $2
        UNION ALL
        SELECT p.id, p.parent_id, p.node_type, p.text, p.position, p.vanish,
-              p.conflicts, p.source_facts, p.signal_provenance, p.object_data
+              p.conflicts, p.source_facts, p.signal_provenance, p.object_data, p.page_break_before
        FROM paragraphs p JOIN subtree s ON p.parent_id = s.id
        WHERE p.spec_id = $2
      )
      SELECT id, parent_id AS "parentId", node_type AS "nodeType", text, position,
             vanish, conflicts, source_facts AS "sourceFacts",
-            signal_provenance AS "signalProvenance", object_data AS "objectData"
+            signal_provenance AS "signalProvenance", object_data AS "objectData",
+            page_break_before AS "pageBreakBefore"
      FROM subtree`,
     [nodeId, specId]
   );

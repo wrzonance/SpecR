@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { pool, DatabaseError } from '../index.js';
 import { EditabilitySchema, ClassificationEvidenceSchema } from '../../ast/index.js';
-import type { Editability } from '../../ast/index.js';
+import type { Editability, SpecNodeEditability } from '../../ast/index.js';
 import type { ClassifyResult } from '../../conventions/index.js';
 
 /**
@@ -33,6 +33,35 @@ export const OverrideSchema = z
   .strict();
 
 export type StoredOverride = z.infer<typeof OverrideSchema>;
+
+/**
+ * Derive the effective `meta.editability` from the two raw JSONB columns,
+ * validating both via the closed schemas (a corrupt row is a loud DatabaseError,
+ * never a silent drop). Returns undefined when the paragraph is unclassified, so
+ * the field is omitted entirely (mirrors the conflicts/sourceFacts omit-when-empty
+ * pattern). Effective `value` = override ?? machine; the machine's verdict stays
+ * readable so a UI can show what was overridden (#134 §5).
+ */
+export function deriveEditability(
+  classification: unknown,
+  override: unknown
+): SpecNodeEditability | undefined {
+  // Validate the override first so a malformed payload fails loud at the DB
+  // boundary even on an unclassified row — the early return must not let a
+  // corrupt override slip through silently (#205 review).
+  const overrideValue =
+    override === null || override === undefined
+      ? undefined
+      : OverrideSchema.parse(override).editability;
+  if (classification === null || classification === undefined) return undefined;
+  const machine = ClassificationSchema.parse(classification);
+  return {
+    value: overrideValue ?? machine.editability,
+    confidence: machine.confidence,
+    evidence: machine.evidence,
+    ...(overrideValue !== undefined ? { override: overrideValue } : {}),
+  };
+}
 
 /**
  * Persist a whole-spec classification pass (ADR-022 D2). For each result,

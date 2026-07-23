@@ -63,25 +63,33 @@ function sectionContext(
   return { format, reference, ...(rules !== undefined ? { rules } : {}) };
 }
 
-function noteParagraph(text: string): Paragraph {
-  return new Paragraph({ children: [new TextRun(text)] });
+// Backs both the note and continuation/plain emitNode call sites (#497):
+// they were byte-identical bodies before this change, and adding the same
+// `pageBreakBefore` conditional spread to each independently trips
+// sonarjs/no-identical-functions — the rule's body-size threshold no longer
+// clears once both grow past a single statement. No external references to
+// the pre-#497 `noteParagraph`/`plainParagraph` names exist, so merging them
+// is a clean, low-risk single-file change.
+function simpleParagraph(text: string, pageBreakBefore?: boolean): Paragraph {
+  return new Paragraph({
+    children: [new TextRun(text)],
+    ...(pageBreakBefore ? { pageBreakBefore: true } : {}),
+  });
 }
 
 function numberedParagraph(
   text: string,
   level: number,
   reference: string,
-  props?: StyleProperties
+  props?: StyleProperties,
+  pageBreakBefore?: boolean
 ): Paragraph {
   return new Paragraph({
     numbering: { reference, level },
     children: [new TextRun({ text, ...runStyleOptions(props?.rPr) })],
     ...paragraphStyleOptions(props?.pPr),
+    ...(pageBreakBefore ? { pageBreakBefore: true } : {}),
   });
-}
-
-function plainParagraph(text: string): Paragraph {
-  return new Paragraph({ children: [new TextRun(text)] });
 }
 
 // Word's Heading1 style renders blue by default; spec deliverables are black
@@ -113,7 +121,7 @@ type SectionChild = Paragraph | SdtBlock | ImportedObjectBlock;
 function emitNode(node: SpecNode, out: SectionChild[], ctx: SectionContext): boolean {
   const text = formatSectionReferences(node.text, ctx.format);
   if (node.type === 'note') {
-    out.push(wrapWithControl(noteParagraph(text), node.id));
+    out.push(wrapWithControl(simpleParagraph(text, node.meta.pageBreakBefore), node.id));
     return true;
   }
   if (node.meta.vanish) return false;
@@ -129,14 +137,20 @@ function emitNode(node: SpecNode, out: SectionChild[], ctx: SectionContext): boo
     return false;
   }
   if (node.type === 'continuation') {
-    out.push(wrapWithControl(plainParagraph(text), node.id));
+    out.push(wrapWithControl(simpleParagraph(text, node.meta.pageBreakBefore), node.id));
     return true;
   }
   // 'spec' is a root-container type; never appears as a paragraph node in tree.parts.
   // All unknown types fall through: getNodeLevel returns null, no paragraph emitted.
   const level = getNodeLevel(node.type);
   if (level !== null) {
-    const para = numberedParagraph(text, level, ctx.reference, ctx.rules?.get(node.type));
+    const para = numberedParagraph(
+      text,
+      level,
+      ctx.reference,
+      ctx.rules?.get(node.type),
+      node.meta.pageBreakBefore
+    );
     out.push(wrapWithControl(para, node.id));
   }
   return true;

@@ -1514,3 +1514,351 @@ describe('buildTree — #510 leading title-block suppression', () => {
     expect(tree.parts[1]?.type).toBe('part');
   });
 });
+
+describe('buildTree — meta.pageBreakBefore propagation (ADR-075)', () => {
+  it('propagates pageBreakBefore onto a structural node (part/article)', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 – GENERAL' }),
+        makePara({ numId: 1, ilvl: 1, text: '1.1 SUMMARY', pageBreakBefore: true }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    expect(tree.parts[0]?.meta.pageBreakBefore).toBeUndefined();
+    expect(tree.parts[0]?.children[0]?.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('omits meta.pageBreakBefore entirely when the paragraph carries no page break', () => {
+    const tree = buildTree([makeClassified('part', 0, 'PART 1')], '01', 'T', 'arcat');
+    expect(tree.parts[0]?.meta.pageBreakBefore).toBeUndefined();
+    expect(Object.keys(tree.parts[0]?.meta ?? {})).not.toContain('pageBreakBefore');
+  });
+
+  it('propagates pageBreakBefore onto a plain continuation node (suppression-safe)', () => {
+    const cont: ClassifiedParagraph = {
+      paragraph: { text: 'cont text', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const tree = buildTree(
+      [makeClassified('part', 0, 'PART 1'), makeClassified('article', 1, '1.1'), cont],
+      '01',
+      'T',
+      'arcat'
+    );
+    const node = tree.parts[0]?.children[0]?.children[0];
+    expect(node?.type).toBe('continuation');
+    expect(node?.meta.pageBreakBefore).toBe(true);
+  });
+
+  // #497 review finding: a hidden non-note paragraph becomes a meta.vanish
+  // 'continuation' the generator drops entirely (#296). A break preceding it must
+  // NOT rest on that dropped node (it would silently vanish from the output) — it
+  // forwards to the next actually-emitted node instead.
+  it('forwards pageBreakBefore past a hidden (vanish) continuation node onto the next visible node', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ isVanish: true, pageBreakBefore: true, text: 'PROCESSING FORM — internal use' }),
+        makePara({ numId: 1, ilvl: 0, text: 'PART 2 - PRODUCTS' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    const hidden = tree.parts[0]?.children[0];
+    expect(hidden?.type).toBe('continuation');
+    expect(hidden?.meta.vanish).toBe(true);
+    // The break does not strand on the dropped hidden node …
+    expect(hidden?.meta.pageBreakBefore).toBeUndefined();
+    // … it lands on the next emitted node (PART 2).
+    expect(tree.parts[1]?.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('propagates pageBreakBefore onto a note node', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({
+          isVanish: true,
+          pageBreakBefore: true,
+          styleId: 'NoteStyle',
+          text: '*Note: editorial guidance.',
+        }),
+      ],
+      numMap(1),
+      {
+        styles: new Map([['NoteStyle', { styleId: 'NoteStyle', name: 'Note Style' }]]),
+        resolvedNumPr: new Map(),
+        resolvedJc: new Map(),
+        vanishStyleIds: new Set(['NoteStyle']),
+        vanishCharStyleIds: new Set(),
+      }
+    );
+    const tree = buildTree(classified, '01', 'T', 'arcat');
+    const note = tree.parts[0]?.children[0];
+    expect(note?.type).toBe('note');
+    expect(note?.meta.pageBreakBefore).toBe(true);
+  });
+
+  // #497 review finding: a page break preceding a paragraph that isStructuralContent
+  // filters out entirely (an empty/blank spacer, or a suppressed rule-row delimiter,
+  // #292) was silently discarded — buildTree never calls makeNode/makeContinuationNode
+  // for a filtered paragraph, so pageBreakMeta never ran for it. The break must instead
+  // surface on the next paragraph that actually becomes a SpecNode.
+  it('#497: propagates pageBreakBefore across a filtered blank/empty spacer paragraph onto the next emitted node', () => {
+    const blankSpacer: ClassifiedParagraph = {
+      paragraph: { text: '   ', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const afterSpacer: ClassifiedParagraph = {
+      paragraph: { text: 'Paragraph two text.', isVanish: false },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const tree = buildTree(
+      [
+        makeClassified('part', 0, 'PART 1'),
+        makeClassified('article', 1, '1.1'),
+        blankSpacer,
+        afterSpacer,
+      ],
+      '01',
+      'T',
+      'arcat'
+    );
+    const article = tree.parts[0]?.children[0];
+    // The blank spacer produced no node of its own — only the real paragraph did.
+    expect(article?.children).toHaveLength(1);
+    expect(article?.children[0]?.text).toBe('Paragraph two text.');
+    expect(article?.children[0]?.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('#497: propagates pageBreakBefore across a suppressed rule-row delimiter (#292) onto the next emitted node', () => {
+    const ruleRow: ClassifiedParagraph = {
+      paragraph: { text: '*****', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+      suppressed: true,
+    };
+    const afterRuleRow: ClassifiedParagraph = {
+      paragraph: { text: 'Note text after rule row.', isVanish: false },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const tree = buildTree(
+      [
+        makeClassified('part', 0, 'PART 1'),
+        makeClassified('article', 1, '1.1'),
+        ruleRow,
+        afterRuleRow,
+      ],
+      '01',
+      'T',
+      'arcat'
+    );
+    const article = tree.parts[0]?.children[0];
+    // The suppressed rule row produced no node of its own.
+    expect(article?.children).toHaveLength(1);
+    expect(article?.children[0]?.text).toBe('Note text after rule row.');
+    expect(article?.children[0]?.meta.pageBreakBefore).toBe(true);
+  });
+
+  // KNOWN AMBIGUITY: a break forwarded through a filtered paragraph that has no
+  // emitted node after it (end of document) has no attachment target left; the
+  // pendingPageBreak is dropped rather than crashing or being retro-attached to
+  // an earlier node it never preceded.
+  it('KNOWN AMBIGUITY: a pageBreakBefore forwarded through a filtered paragraph with nothing structural after it (EOF) is silently dropped, never throws', () => {
+    const trailingBlank: ClassifiedParagraph = {
+      paragraph: { text: '', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const tree = buildTree(
+      [makeClassified('part', 0, 'PART 1'), makeClassified('article', 1, '1.1'), trailingBlank],
+      '01',
+      'T',
+      'arcat'
+    );
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children).toHaveLength(0);
+  });
+
+  // #497 review finding: document.ts's page-break lookback walks the raw <w:p>-only
+  // array, oblivious to an interleaved w:tbl — so when a body object (table/text-box,
+  // ADR-072) is captured immediately after the page-break-bearing paragraph, document.ts
+  // still marks the NEXT PARAGRAPH (skipping the object entirely) as pageBreakBefore.
+  // KNOWN AMBIGUITY (docs/adr/075-manual-page-break-round-trip.md): an object node has
+  // no pageBreakBefore attachment point (decision 4 — ImportedObjectBlock re-emits raw
+  // w:tbl XML, not a Paragraph), so the misattributed flag is dropped rather than
+  // misapplied to the wrong paragraph.
+  it('#497 KNOWN AMBIGUITY: a page break misattributed across an interposed body object is dropped, not misattached to the paragraph after the object', () => {
+    const afterTable: ClassifiedParagraph = {
+      paragraph: { text: 'Paragraph after table.', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const obj = makeObjectNode('table-obj');
+    const tree = buildTree(
+      [makeClassified('part', 0, 'PART 1'), makeClassified('article', 1, '1.1'), afterTable],
+      '01',
+      'T',
+      'arcat',
+      [],
+      new Map([[1, [obj]]])
+    );
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children[0]).toEqual(obj);
+    expect(article?.children[0]?.meta.pageBreakBefore).toBeUndefined();
+    expect(article?.children[1]?.text).toBe('Paragraph after table.');
+    expect(article?.children[1]?.meta.pageBreakBefore).toBeUndefined();
+  });
+
+  // #497 review finding: resolvePageBreakBefore only ran the object-adjacency
+  // exclusion against a paragraph's OWN pageBreakBefore flag — `pendingPageBreak`
+  // (a break forwarded through an earlier FILTERED paragraph, e.g. a spacer) was
+  // OR'd in unconditionally, bypassing isPageBreakOwnedByPrecedingObject entirely.
+  // A body object is a documented, real attachment target for a filtered spacer's
+  // index (buildTree's own comment: "2 of 3 real table hosts in the proof fixture
+  // are empty spacer paragraphs"), so the forwarded break must be dropped the same
+  // way the direct-adjacency case is — never misattached to the paragraph AFTER
+  // the object.
+  // KNOWN AMBIGUITY: an object node has no pageBreakBefore attachment point
+  // (ADR-075 decision 4), so a break forwarded onto a spacer that hosts a body
+  // object is dropped, never misapplied to the paragraph after the object.
+  it('#497 KNOWN AMBIGUITY: a page break forwarded through a filtered spacer is dropped when a body object is attached to that spacer, not misattached to the paragraph after the object', () => {
+    const blankSpacer: ClassifiedParagraph = {
+      paragraph: { text: '   ', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const afterTable: ClassifiedParagraph = {
+      paragraph: { text: 'Paragraph after table.', isVanish: false },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const obj = makeObjectNode('table-obj');
+    const tree = buildTree(
+      [
+        makeClassified('part', 0, 'PART 1'),
+        makeClassified('article', 1, '1.1'),
+        blankSpacer,
+        afterTable,
+      ],
+      '01',
+      'T',
+      'arcat',
+      [],
+      new Map([[2, [obj]]])
+    );
+    const article = tree.parts[0]?.children[0];
+    // The blank spacer produced no node of its own — only the object and the real
+    // paragraph did.
+    expect(article?.children).toHaveLength(2);
+    expect(article?.children[0]).toEqual(obj);
+    expect(article?.children[0]?.meta.pageBreakBefore).toBeUndefined();
+    expect(article?.children[1]?.text).toBe('Paragraph after table.');
+    expect(article?.children[1]?.meta.pageBreakBefore).toBeUndefined();
+  });
+
+  // CPI fixture coverage (coding guideline: test inference changes against both
+  // ARCAT and CPI). buildTree receives resolvedIlvl AFTER the CPI ilvl-offset
+  // normalization, so the forwarding and object-adjacency behavior proven above
+  // for 'arcat' must hold unchanged under source 'cpi' — these mirror those cases.
+  it('cpi: forwards pageBreakBefore past a hidden (vanish) continuation onto the next visible node', () => {
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ isVanish: true, pageBreakBefore: true, text: 'PROCESSING FORM — internal use' }),
+        makePara({ numId: 1, ilvl: 0, text: 'PART 2 - PRODUCTS' }),
+      ],
+      numMap(1),
+      emptyStyleMap()
+    );
+    const tree = buildTree(classified, '01', 'T', 'cpi');
+    const hidden = tree.parts[0]?.children[0];
+    expect(hidden?.type).toBe('continuation');
+    expect(hidden?.meta.pageBreakBefore).toBeUndefined();
+    expect(tree.parts[1]?.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('cpi: a page break forwarded through a filtered spacer is dropped when a body object is attached to that spacer', () => {
+    const blankSpacer: ClassifiedParagraph = {
+      paragraph: { text: '   ', isVanish: false, pageBreakBefore: true },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const afterTable: ClassifiedParagraph = {
+      paragraph: { text: 'Paragraph after table.', isVanish: false },
+      resolvedIlvl: 2,
+      nodeType: 'continuation',
+      signalUsed: 3,
+      conflicts: [],
+      agreed: [],
+      isVanish: false,
+    };
+    const obj = makeObjectNode('table-obj');
+    const tree = buildTree(
+      [
+        makeClassified('part', 0, 'PART 1'),
+        makeClassified('article', 1, '1.1'),
+        blankSpacer,
+        afterTable,
+      ],
+      '01',
+      'T',
+      'cpi',
+      [],
+      new Map([[2, [obj]]])
+    );
+    const article = tree.parts[0]?.children[0];
+    expect(article?.children).toHaveLength(2);
+    expect(article?.children[0]).toEqual(obj);
+    expect(article?.children[0]?.meta.pageBreakBefore).toBeUndefined();
+    expect(article?.children[1]?.text).toBe('Paragraph after table.');
+    expect(article?.children[1]?.meta.pageBreakBefore).toBeUndefined();
+  });
+});

@@ -19,15 +19,11 @@ import type {
   StyleMap,
   StyleNumPr,
 } from './types.js';
-import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
+import type { SpecNode, SpecTree, NodeType } from '../../ast/types.js';
 import { nodeTypeToNormalizedIlvl, NODE_TYPES_BY_NORMALIZED_ILVL } from '../../ast/index.js';
-import {
-  planPartStrip,
-  planOutlineNumberStrip,
-  rebaseSourceFacts,
-  auditPartNumbering,
-} from '../part-prefix.js';
+import { planPartStrip, planOutlineNumberStrip, rebaseSourceFacts } from '../part-prefix.js';
 import { stripOutlineLabels } from './outline-label-strip.js';
+import { pageBreakMeta, resolvePageBreakBefore } from './page-break.js';
 
 interface SignalHit {
   readonly nodeType: NodeType;
@@ -309,6 +305,10 @@ type Source = 'arcat' | 'cpi' | 'unknown';
 interface StackEntry {
   readonly cp: ClassifiedParagraph;
   readonly children: SpecNode[];
+  // Resolved at push time (buildTree's forwarding/redirect logic), since drainTop
+  // may build this entry's SpecNode much later — the raw cp.paragraph.pageBreakBefore
+  // is not authoritative on its own (see isPageBreakOwnedByPrecedingObject below).
+  readonly pageBreakBefore: boolean;
 }
 
 function sourceFactsMeta(cp: ClassifiedParagraph): {
@@ -322,7 +322,11 @@ function sourceFactsMeta(cp: ClassifiedParagraph): {
 // [NOTE]); hidden non-note content becomes a suppressed 'continuation' carrying
 // meta.vanish, which every renderer drops (#296). Text is kept verbatim — hidden
 // content is retained as-authored for document-control tracking.
-function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode {
+function makeContinuationNode(
+  cp: ClassifiedParagraph,
+  source: Source,
+  pageBreakBefore: boolean
+): SpecNode {
   return {
     id: uuidv4(),
     type: cp.isNote ? 'note' : 'continuation',
@@ -337,6 +341,7 @@ function makeContinuationNode(cp: ClassifiedParagraph, source: Source): SpecNode
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
       ...(cp.isVanish ? { vanish: true } : {}),
       ...sourceFactsMeta(cp),
+      ...pageBreakMeta(pageBreakBefore),
     },
   };
 }
@@ -381,7 +386,8 @@ function makeNode(
   cp: ClassifiedParagraph,
   children: SpecNode[],
   source: Source,
-  s4NodeIds: Set<string>
+  s4NodeIds: Set<string>,
+  pageBreakBefore: boolean
 ): SpecNode {
   const content = nodeContent(cp);
   const inference = scoreHierarchyConfidence(
@@ -399,14 +405,11 @@ function makeNode(
       ...(cp.conflicts.length > 0 ? { conflicts: cp.conflicts } : {}),
       ...(content.sourceFacts ? { sourceFacts: content.sourceFacts } : {}),
       ...(inference ? { inference } : {}),
+      ...pageBreakMeta(pageBreakBefore),
     },
   };
   if (cp.signalUsed === 4 && cp.nodeType !== 'part') s4NodeIds.add(node.id);
   return node;
-}
-
-function appendContinuation(cp: ClassifiedParagraph, target: SpecNode[], source: Source): void {
-  target.push(makeContinuationNode(cp, source));
 }
 
 function drainTop(
@@ -417,7 +420,7 @@ function drainTop(
 ): void {
   const popped = stack.pop();
   if (!popped) return;
-  const node = makeNode(popped.cp, popped.children, source, s4NodeIds);
+  const node = makeNode(popped.cp, popped.children, source, s4NodeIds, popped.pageBreakBefore);
   const top = stack[stack.length - 1];
   const parentChildren = top !== undefined ? top.children : roots;
   parentChildren.push(node);
@@ -425,50 +428,7 @@ function drainTop(
 
 // MasterFormat specs typically have 3 parts; more is permitted but uncommon
 // (warn above 3), and counts past 5 usually mean headings were over-matched.
-const TYPICAL_PART_COUNT = 3;
-const PLAUSIBLE_MAX_PARTS = 5;
-
-function partCountWarning(partCount: number): ParseWarning | null {
-  if (partCount <= TYPICAL_PART_COUNT) return null;
-  const suggestion =
-    partCount > PLAUSIBLE_MAX_PARTS
-      ? `${partCount} PART nodes detected — more than ${PLAUSIBLE_MAX_PARTS} usually means headings were over-matched`
-      : `${partCount} PART nodes detected — MasterFormat allows this, but specs typically have ${TYPICAL_PART_COUNT}`;
-  return { type: 'unusual-part-count', suggestion };
-}
-
-// Sanity post-pass: a healthy CSI parse has a small number of part-type roots
-// (typically 3) and nothing else at root. Degraded parses previously rendered
-// silently — 21 11 00agf.docx produced 34 roots with zero warnings.
-export function auditTreeStructure(roots: readonly SpecNode[]): ParseWarning[] {
-  const warnings: ParseWarning[] = [];
-  const visible = roots.filter((n) => n.meta.vanish !== true);
-  const partCount = visible.filter((n) => n.type === 'part').length;
-  // A captured body object (#300, ADR-072) at root — e.g. a table before the
-  // document's first PART heading — is real, modeled content, never preamble
-  // or unclassified junk; excluded here the same way 'part' itself is.
-  const junkRoots = visible.filter((n) => n.type !== 'part' && n.type !== 'object');
-
-  if (partCount === 0) {
-    warnings.push({
-      type: 'no-structure-found',
-      suggestion:
-        'no PART headings detected — document may not be a CSI spec, or its numbering convention is unrecognized',
-    });
-  }
-  if (junkRoots.length > 0) {
-    const first = junkRoots[0];
-    warnings.push({
-      type: 'root-continuation',
-      ...(first && first.text ? { lineHint: first.text.slice(0, 60) } : {}),
-      suggestion: `${junkRoots.length} node(s) at root level are not PART headings (preamble or unclassified content)`,
-    });
-  }
-  const countWarning = partCountWarning(partCount);
-  if (countWarning) warnings.push(countWarning);
-  warnings.push(...auditPartNumbering(visible));
-  return warnings;
-}
+export { auditTreeStructure } from './tree-audit.js';
 
 // Empty paragraphs are layout spacing, not content — excluded from stack/continuation
 // processing. A blank that inherited a numbered style (Signal 2) otherwise became an
@@ -487,17 +447,20 @@ function isStructuralContent(cp: ClassifiedParagraph): boolean {
 // frames and pushes a new frame — becoming the new attachment point for whatever
 // follows, continuations and body objects (#300) alike. Returns the attachment point
 // unchanged for a continuation (it never becomes one itself), or the newly pushed
-// frame's own children array when `cp` is structural.
+// frame's own children array when `cp` is structural. `pageBreakBefore` is the
+// EFFECTIVE flag buildTree already resolved for this cp (#497) — never read from
+// cp.paragraph directly here, since forwarding/redirect may have moved it.
 function processStructuralParagraph(
   cp: ClassifiedParagraph,
   stack: StackEntry[],
   roots: SpecNode[],
   lastNonContChildren: SpecNode[],
   source: Source,
-  s4NodeIds: Set<string>
+  s4NodeIds: Set<string>,
+  pageBreakBefore: boolean
 ): SpecNode[] {
   if (cp.nodeType === 'continuation') {
-    appendContinuation(cp, lastNonContChildren, source);
+    lastNonContChildren.push(makeContinuationNode(cp, source, pageBreakBefore));
     return lastNonContChildren;
   }
   while (stack.length > 0) {
@@ -505,7 +468,7 @@ function processStructuralParagraph(
     if (top === undefined || top.cp.resolvedIlvl < cp.resolvedIlvl) break;
     drainTop(stack, roots, source, s4NodeIds);
   }
-  const entry: StackEntry = { cp, children: [] };
+  const entry: StackEntry = { cp, children: [], pageBreakBefore };
   stack.push(entry);
   return entry.children;
 }
@@ -537,29 +500,50 @@ export function buildTree(
   // SpecNode" precedent. No signal fires and nothing is lost: the identity is
   // already carried on the tree's own section/title fields.
   const titleBlockIndices = leadingTitleBlockIndices(classified, section, title);
+  // Carries a page break (#497) forward across a paragraph isStructuralContent
+  // filters out (empty/blank spacer, or a suppressed rule-row delimiter, #292) until
+  // it reaches the next paragraph that actually becomes a SpecNode. Reset to false
+  // the moment a structural paragraph consumes it.
+  let pendingPageBreak = false;
 
   // Iterate EVERY classified paragraph, unfiltered by index (#300): a body object's
   // attachment key is the paragraph's position in this ORIGINAL array, so a
   // filtered-out (empty/suppressed) paragraph at that index must still receive its
   // attached object(s) — only the structural stack/continuation handling skips it.
   classified.forEach((cp, i) => {
+    const pageBreakBefore = resolvePageBreakBefore(
+      cp,
+      i,
+      pendingPageBreak,
+      objectsByPrecedingIndex
+    );
+    // #510 x #497: a suppressed title-block index produces no SpecNode, so —
+    // exactly like a filtered blank/spacer — a break resolved onto it forwards
+    // via pendingPageBreak to the next emitted node (the else branch below).
     if (isStructuralContent(cp) && !titleBlockIndices.has(i)) {
+      // #497 review finding: a hidden non-note paragraph becomes a meta.vanish
+      // 'continuation' that every renderer drops (#296) — so a page break attached
+      // to it would silently vanish from the generated DOCX. Forward it to the next
+      // ACTUALLY-EMITTED node instead of consuming it on a node no one will render.
+      // (A note is exempt: it renders as [NOTE] and carries the break itself.)
+      const generatorDropsNode = cp.isVanish && cp.isNote !== true;
       lastNonContChildren = processStructuralParagraph(
         cp,
         stack,
         roots,
         lastNonContChildren,
         source,
-        s4NodeIds
+        s4NodeIds,
+        generatorDropsNode ? false : pageBreakBefore
       );
+      pendingPageBreak = generatorDropsNode ? pageBreakBefore : false;
+    } else {
+      pendingPageBreak = pageBreakBefore;
     }
-    const objects = objectsByPrecedingIndex.get(i);
-    if (objects) lastNonContChildren.push(...objects);
+    lastNonContChildren.push(...(objectsByPrecedingIndex.get(i) ?? []));
   });
 
-  while (stack.length > 0) {
-    drainTop(stack, roots, source, s4NodeIds);
-  }
+  while (stack.length > 0) drainTop(stack, roots, source, s4NodeIds);
 
   return { id: uuidv4(), section, title, parts: stripOutlineLabels(roots, s4NodeIds, 1) };
 }

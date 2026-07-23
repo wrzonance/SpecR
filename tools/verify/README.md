@@ -488,22 +488,20 @@ false "mismatch" against a non-blank expectation — never a meaningful comparis
 bug and not `src/` drift: it's a genuine gap in the vendored preview library between "the OOXML is
 correct" and "a static screenshot can show it."
 
-### Round-tripped output never reaches page 2 for a manual page break
-Filed as [issue #497](https://github.com/wrzonance/SpecR/issues/497) — not fixed here, per this
-task's "file a separate issue for `src/` drift, don't fix inline" convention. `src/parser/`, `src/ast/`,
-and `src/generator/` have no `pageBreak` concept anywhere: a reference DOCX's run-level page break
-(decision 12's fix) round-trips through `parse → import → generate` as if it were never there —
-confirmed via jszip (the generated `document.xml` has no `w:br w:type="page"` anywhere) and via
-Playwright (`window.__measure('roundtrip').pageCount` stays `1` while the reference pane correctly
-shows `2`). Practical consequence for this harness: the `'first'`/`'even'` scenarios' page-variant
-header can be visually verified on the **reference** pane's page 2, but the **round-tripped** pane
-never has a page 2 to compare it against — `diffPaneRegions`'s single-side-present fallback (decision 7
-in the original #150 build) would crop the round-tripped screenshot at the reference's page-2 header
-coordinates, which fall outside that screenshot's actual (1-page-tall) bounds; `render/regions.ts`'s
-`cropRegion()` bounds-check throws `VerifyRenderError` rather than producing a garbage crop — the
-correct, safe failure mode, but not a diff. **Don't trust `diffPaneRegions` for a `'first'`/`'even'`
-scenario's page-2+ header/footer region until #497 is resolved** — page 1 (the `default` variant, on
-both scenarios) diffs correctly today.
+### Round-tripped output never reaches page 2 for a manual page break — RESOLVED at `src/` (ADR-075)
+Filed as [issue #497](https://github.com/wrzonance/SpecR/issues/497) and now resolved at the `src/`
+level by [ADR-075](../../docs/adr/075-manual-page-break-round-trip.md) — `tools/verify` itself is
+untouched by that fix, this entry is kept as history plus a pointer. `src/parser/docx/` now detects a
+manual `w:br w:type="page"` on the *preceding* paragraph's runs and carries it forward as
+`DocxParagraph.pageBreakBefore` / `SpecNodeMeta.pageBreakBefore`; `src/generator/` re-emits it as the
+following node's native `Paragraph({ pageBreakBefore: true })`. A reference DOCX's manual page break
+therefore now round-trips through `parse → import → generate` and the regenerated document reaches a
+real page 2 again. This harness was never modified to re-run or re-assert that: the fix and its
+regression coverage live entirely in `src/parser/docx/*.test.ts`, `src/ast/*.test.ts`, and
+`src/generator/*.test.ts` (unit-level, no DOCX-rendering harness involved), not here. If a future
+`'first'`/`'even'` scenario is added to this harness that exercises a page-2+ header/footer, it should
+now diff correctly via `diffPaneRegions` — re-verify empirically rather than assuming from this note,
+since no such scenario has actually been re-run through `tools/verify` since the `src/` fix landed.
 
 ## Manual smoke test (task 8)
 

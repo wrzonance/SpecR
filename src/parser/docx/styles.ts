@@ -55,6 +55,15 @@ function parseVanish(raw: Record<string, unknown>): boolean {
   return (pRpr !== undefined && 'w:vanish' in pRpr) || (rPr !== undefined && 'w:vanish' in rPr);
 }
 
+// CT_OnOff, presence-aware: undefined when the style's pPr has no
+// w:pageBreakBefore at all; an explicit falsey w:val (false/0/off) is a stored
+// FALSE that must override an ancestor's true in resolvePageBreakChain (ADR-075).
+function parsePageBreakBefore(pPr: Record<string, unknown> | undefined): boolean | undefined {
+  if (!pPr || !('w:pageBreakBefore' in pPr)) return undefined;
+  const val = getAttrVal(pPr['w:pageBreakBefore']);
+  return val !== 'false' && val !== '0' && val !== 'off';
+}
+
 function parseOutlineLvl(pPr: Record<string, unknown> | undefined): number | undefined {
   if (!pPr) return undefined;
   const rawVal = getAttrVal(pPr['w:outlineLvl']);
@@ -85,6 +94,7 @@ function optionalStyleFields(
   const numPrResult = pPr ? parseNumPr(pPr) : ({ kind: 'absent' } as const);
   const outlineLvl = parseOutlineLvl(pPr);
   const jc = pPr ? getAttrVal(pPr['w:jc']) : '';
+  const pageBreakBefore = parsePageBreakBefore(pPr);
   const runEmphasis = parseRunEmphasis(asRecord(raw['w:rPr']));
   return {
     ...(basedOn ? { basedOn } : {}),
@@ -93,6 +103,7 @@ function optionalStyleFields(
     ...(parseVanish(raw) ? { isVanish: true as const } : {}),
     ...(outlineLvl !== undefined ? { outlineLvl } : {}),
     ...(jc ? { jc } : {}),
+    ...(pageBreakBefore !== undefined ? { pageBreakBefore } : {}),
     ...(runEmphasis ? { runEmphasis } : {}),
   };
 }
@@ -151,6 +162,23 @@ function resolveVanishChain(
   return style.basedOn ? resolveVanishChain(style.basedOn, styles, depth + 1) : false;
 }
 
+// Effective w:pageBreakBefore for a style: its own explicit CT_OnOff value wins
+// (a child style's w:val="false" disables an ancestor's break), else the nearest
+// basedOn ancestor's. Nearest-specified-wins like resolveJcChain — NOT the
+// any-ancestor-true walk of resolveVanishChain, because pageBreakBefore stores
+// explicit falses (ADR-075).
+function resolvePageBreakChain(
+  styleId: string,
+  styles: ReadonlyMap<string, StyleInfo>,
+  depth: number
+): boolean | undefined {
+  if (depth > MAX_BASED_ON_DEPTH) return undefined;
+  const style = styles.get(styleId);
+  if (!style) return undefined;
+  if (style.pageBreakBefore !== undefined) return style.pageBreakBefore;
+  return style.basedOn ? resolvePageBreakChain(style.basedOn, styles, depth + 1) : undefined;
+}
+
 interface CharStyleInfo {
   readonly basedOn?: string;
   readonly isVanish: boolean;
@@ -204,6 +232,7 @@ function emptyStyleMap(): StyleMap {
     resolvedJc: new Map(),
     vanishStyleIds: new Set(),
     vanishCharStyleIds: new Set(),
+    pageBreakStyleIds: new Set(),
     defaultRunEmphasis: {},
     resolvedRunEmphasis: new Map(),
     characterRunEmphasisChains: new Map(),
@@ -238,6 +267,14 @@ function resolvedJcMap(styles: ReadonlyMap<string, StyleInfo>): Map<string, stri
   return resolvedJc;
 }
 
+function pageBreakStyleIdSet(styles: ReadonlyMap<string, StyleInfo>): Set<string> {
+  const ids = new Set<string>();
+  for (const styleId of styles.keys()) {
+    if (resolvePageBreakChain(styleId, styles, 0) === true) ids.add(styleId);
+  }
+  return ids;
+}
+
 function vanishStyleIdSet(styles: ReadonlyMap<string, StyleInfo>): Set<string> {
   const vanishStyleIds = new Set<string>();
   for (const styleId of styles.keys()) {
@@ -269,6 +306,7 @@ export function buildStyleMap(xml: string): StyleMap {
     resolvedJc: resolvedJcMap(styles),
     vanishStyleIds: vanishStyleIdSet(styles),
     vanishCharStyleIds: characterStyleVanishIds(root),
+    pageBreakStyleIds: pageBreakStyleIdSet(styles),
     defaultRunEmphasis: emphasisDefaults,
     resolvedRunEmphasis: resolvedRunEmphasisMap(styles, emphasisDefaults),
     characterRunEmphasisChains: characterRunEmphasisChainMap(root),
