@@ -132,7 +132,7 @@ parse-output-only — their absence loses inert retained data, not correct outpu
 
 So `pageSize` is genuinely persisted, at three sites that must move together:
 
-- **Migration 050** adds a nullable `page_size jsonb` column to `specs`
+- **Migration 051** adds a nullable `page_size jsonb` column to `specs`
   (`{ width, height, orientation? }`, twips; NULL === no capture).
 - **`upsertParsedSpecRow`** writes `serializePageSize(tree)`, `COALESCE`-ing on
   re-import exactly like `origin_meta` (a re-parse that captured none keeps the
@@ -159,7 +159,7 @@ field, per the authoritative-contract rule now that it appears on `GET /specs/{i
   `tools/verify` harness actually exercises**, not only the in-memory
   parse→generate call.
 - `pageSize` persists in a dedicated additive `specs.page_size` column
-  (migration 050, reversible, backward-compatible — NULL for every existing
+  (migration 051, reversible, backward-compatible — NULL for every existing
   row and every non-DOCX source); see Decision §7 for why the "no migration"
   assumption was wrong.
 - No behavior change for a `.SEC` source, or any DOCX whose trailing
