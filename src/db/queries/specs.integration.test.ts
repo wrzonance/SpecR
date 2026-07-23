@@ -45,6 +45,7 @@ describe('getSpecTree', () => {
                     meta: {
                       conflicts: [{ signal: 5, reportedIlvl: 1, reportedNodeType: 'article' }],
                       sourceFacts: SOURCE_FACTS,
+                      pageBreakBefore: true,
                     },
                   },
                 ],
@@ -111,6 +112,23 @@ describe('getSpecTree', () => {
     const part = result!.tree.parts[0]!;
     expect(part.meta.sourceFacts).toBeUndefined();
     expect(Object.keys(part.meta)).not.toContain('sourceFacts');
+  });
+
+  // #497 review finding: the direct parser→generator test passed while the real
+  // upload → parse → persist → generate flow silently dropped the flag, because
+  // insertTree/getSpecTree had no page_break_before column. This pins the
+  // persistence round trip that flow depends on.
+  it('round-trips meta.pageBreakBefore on inner nodes (#497)', async () => {
+    const result = await getSpecTree(treeSpecId);
+    const pr1 = result!.tree.parts[0]!.children[0]!.children[0]!;
+    expect(pr1.meta.pageBreakBefore).toBe(true);
+  });
+
+  it('omits meta.pageBreakBefore when the stored flag is false (#497)', async () => {
+    const result = await getSpecTree(treeSpecId);
+    const part = result!.tree.parts[0]!;
+    expect(part.meta.pageBreakBefore).toBeUndefined();
+    expect(Object.keys(part.meta)).not.toContain('pageBreakBefore');
   });
 
   it('backfills closed=true for a legacy suffix-closed comment fact (#262)', async () => {

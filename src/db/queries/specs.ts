@@ -4,7 +4,7 @@ import type {
   SignalConflict,
   SourceFacts,
   SpecNode,
-  SpecNodeEditability,
+  SpecNodeMeta,
   SpecTree,
   SecRef,
 } from '../../ast/index.js';
@@ -15,7 +15,7 @@ import { insertTree } from './paragraphs.js';
 import { insertRefs } from './refs.js';
 import { resolveDefaultLibraryId } from './libraries.js';
 import { reconcileLibraryDivisionGeneralSpec } from './division-general.js';
-import { ClassificationSchema, OverrideSchema } from './editability.js';
+import { deriveEditability } from './editability.js';
 import { attachAssociations, listAssociationsForSpec } from './associations.js';
 import { deriveInference } from './inference-meta.js';
 import { parseNodeType } from './node-type.js';
@@ -122,38 +122,36 @@ export interface ParagraphTreeRow {
   readonly classification: unknown;
   readonly editability_override: unknown;
   readonly object_data: unknown;
+  readonly page_break_before: boolean;
 }
 
 function hasSourceFacts(sourceFacts: SourceFacts): boolean {
   return Object.keys(sourceFacts).length > 0;
 }
 
-/**
- * Derive the effective `meta.editability` from the two raw JSONB columns,
- * validating both via the closed schemas (a corrupt row is a loud DatabaseError,
- * never a silent drop). Returns undefined when the paragraph is unclassified, so
- * the field is omitted entirely (mirrors the conflicts/sourceFacts omit-when-empty
- * pattern). Effective `value` = override ?? machine; the machine's verdict stays
- * readable so a UI can show what was overridden (#134 §5).
- */
-function deriveEditability(
-  classification: unknown,
-  override: unknown
-): SpecNodeEditability | undefined {
-  // Validate the override first so a malformed payload fails loud at the DB
-  // boundary even on an unclassified row — the early return must not let a
-  // corrupt override slip through silently (#205 review).
-  const overrideValue =
-    override === null || override === undefined
-      ? undefined
-      : OverrideSchema.parse(override).editability;
-  if (classification === null || classification === undefined) return undefined;
-  const machine = ClassificationSchema.parse(classification);
+/** Assemble a node's `meta` from its row and the values derived from it, each
+ *  field omitted when empty (mirrors the omit-when-empty pattern elsewhere).
+ *  Extracted from `buildNode` so that function stays under the complexity cap. */
+function buildNodeMeta(
+  row: ParagraphTreeRow,
+  derived: {
+    readonly sourceFacts: SourceFacts;
+    readonly inference: ReturnType<typeof deriveInference>;
+    readonly editability: ReturnType<typeof deriveEditability>;
+    readonly articleRole: ReturnType<typeof deriveArticleRole>;
+    readonly objectMeta: ReturnType<typeof parseObjectMeta>;
+  }
+): SpecNodeMeta {
+  const { sourceFacts, inference, editability, articleRole, objectMeta } = derived;
   return {
-    value: overrideValue ?? machine.editability,
-    confidence: machine.confidence,
-    evidence: machine.evidence,
-    ...(overrideValue !== undefined ? { override: overrideValue } : {}),
+    ...(row.vanish ? { vanish: true } : {}),
+    ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
+    ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
+    ...(inference ? { inference } : {}),
+    ...(editability ? { editability } : {}),
+    ...(articleRole !== undefined ? { articleRole } : {}),
+    ...(objectMeta ? { object: objectMeta } : {}),
+    ...(row.page_break_before ? { pageBreakBefore: true } : {}),
   };
 }
 
@@ -182,15 +180,7 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
       type: nodeType,
       text: row.text,
       children,
-      meta: {
-        ...(row.vanish ? { vanish: true } : {}),
-        ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
-        ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
-        ...(inference ? { inference } : {}),
-        ...(editability ? { editability } : {}),
-        ...(articleRole !== undefined ? { articleRole } : {}),
-        ...(objectMeta ? { object: objectMeta } : {}),
-      },
+      meta: buildNodeMeta(row, { sourceFacts, inference, editability, articleRole, objectMeta }),
     };
   }
 
@@ -208,7 +198,8 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
 
     const paraResult = await pool.query<ParagraphTreeRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              signal_provenance, classification, editability_override, object_data
+              signal_provenance, classification, editability_override, object_data,
+              page_break_before
        FROM paragraphs WHERE spec_id = $1`,
       [id]
     );
