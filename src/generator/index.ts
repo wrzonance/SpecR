@@ -94,11 +94,24 @@ function numberedParagraph(
   });
 }
 
+// Word's Heading1 style renders blue by default; spec deliverables are black
+// unless a style template's 'part' rule says otherwise (#510).
+const DEFAULT_TITLE_COLOR = '000000';
+
+function titleParagraphColor(rules?: StyleRuleMap): string {
+  return rules?.get('part')?.rPr?.color ?? DEFAULT_TITLE_COLOR;
+}
+
 // Section titles are Heading1 so the manual's Word TOC field (headingStyleRange
 // '1-1') resolves exactly one entry per section. Harmless in single-section
-// output, which carries no TOC.
-function titleParagraph(text: string): Paragraph {
-  return new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(text)] });
+// output, which carries no TOC. The run's explicit color overrides Word's
+// Heading1 style-level blue (#510) — deliberately narrower than
+// runStyleOptions (styles.ts marks color out of scope for #32).
+function titleParagraph(text: string, rules?: StyleRuleMap): Paragraph {
+  return new Paragraph({
+    heading: HeadingLevel.HEADING_1,
+    children: [new TextRun({ text, color: titleParagraphColor(rules) })],
+  });
 }
 
 // One section's rendered children: ordinary numbered/note/continuation
@@ -158,7 +171,10 @@ function collectParagraphs(
 // Build one section's paragraph list: synthetic title (no anchor) + anchored body.
 function buildSectionChildren(tree: SpecTree, ctx: SectionContext): SectionChild[] {
   const children: SectionChild[] = [
-    titleParagraph(`SECTION ${displaySectionNumber(tree.section, ctx.format)} — ${tree.title}`),
+    titleParagraph(
+      `SECTION ${displaySectionNumber(tree.section, ctx.format)} — ${tree.title}`,
+      ctx.rules
+    ),
   ];
   collectParagraphs(tree.parts, children, ctx);
   return children;

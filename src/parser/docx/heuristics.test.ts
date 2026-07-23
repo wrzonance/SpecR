@@ -7,7 +7,14 @@ import {
   isPartHeading,
   isDecorationSeparator,
   leadingMarkerOrdinal,
+  isSectionIdentityLine,
+  isTitleIdentityLine,
+  leadingTitleBlockIndices,
+  stripLeadingTitleBlockRoots,
 } from './heuristics.js';
+import { UNKNOWN_SECTION_IDENTITY } from './core-metadata.js';
+import type { ClassifiedParagraph } from './types.js';
+import type { NodeType, SpecNode, SpecNodeMeta, SpecTree } from '../../ast/types.js';
 
 describe('matchTextSignal', () => {
   it('detects PART heading', () => {
@@ -309,4 +316,278 @@ describe('leadingMarkerOrdinal', () => {
       expect(leadingMarkerOrdinal(text)).toBeNull();
     });
   }
+});
+
+describe('isSectionIdentityLine — #510 title-block duplication', () => {
+  it('matches a "SECTION <n>" line against the resolved canonical section, tolerating missing-space drift', () => {
+    // Regression fixture (parsing-needs-fixing.docx): the source line is typed
+    // "SECTION 01 8813.13" (missing space before the suffix), but core.xml/S4
+    // resolve the canonical section as "01 88 13.13". strong-mode parsing must
+    // still recognize the identity so the duplicated line is suppressed.
+    expect(isSectionIdentityLine('SECTION 01 8813.13', '01 88 13.13')).toBe(true);
+  });
+
+  it('matches regardless of the "SECTION" keyword casing', () => {
+    expect(isSectionIdentityLine('Section 01 88 13.13', '01 88 13.13')).toBe(true);
+  });
+
+  it('does NOT match a section line for a different section number', () => {
+    expect(isSectionIdentityLine('SECTION 09 91 26', '01 88 13.13')).toBe(false);
+  });
+
+  it('does NOT match plain body text that never resolves to a section number', () => {
+    expect(isSectionIdentityLine('Provide materials as indicated.', '01 88 13.13')).toBe(false);
+  });
+
+  it('is always false when the resolved section is UNKNOWN_SECTION_IDENTITY', () => {
+    expect(isSectionIdentityLine('SECTION 01 88 13.13', UNKNOWN_SECTION_IDENTITY)).toBe(false);
+  });
+});
+
+describe('isTitleIdentityLine — #510 title-block duplication', () => {
+  it('matches the exact resolved title', () => {
+    expect(
+      isTitleIdentityLine(
+        'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS',
+        'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'
+      )
+    ).toBe(true);
+  });
+
+  it('matches case-insensitively and with collapsed whitespace', () => {
+    expect(
+      isTitleIdentityLine(
+        '  Clean  Zone   Pre-Certification Protocols ',
+        'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'
+      )
+    ).toBe(true);
+  });
+
+  it('does NOT match a different title', () => {
+    expect(isTitleIdentityLine('SOME OTHER TITLE', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS')).toBe(
+      false
+    );
+  });
+
+  it('is always false when the resolved title is UNKNOWN_SECTION_IDENTITY', () => {
+    expect(
+      isTitleIdentityLine('CLEAN ZONE PRE-CERTIFICATION PROTOCOLS', UNKNOWN_SECTION_IDENTITY)
+    ).toBe(false);
+  });
+});
+
+// Builds a minimal ClassifiedParagraph for leadingTitleBlockIndices scenarios —
+// mirrors inference.test.ts's makeClassified helper (kept local: heuristics.ts
+// must not import from inference.ts, which already imports heuristics.ts).
+function makeCp(
+  nodeType: NodeType,
+  text: string,
+  opts: {
+    readonly suppressed?: boolean;
+    readonly isNote?: boolean;
+    readonly isVanish?: boolean;
+  } = {}
+): ClassifiedParagraph {
+  return {
+    paragraph: { text, isVanish: opts.isVanish === true },
+    resolvedIlvl: nodeType === 'continuation' ? 8 : 0,
+    nodeType,
+    signalUsed: 3,
+    conflicts: [],
+    agreed: [],
+    isVanish: opts.isVanish === true,
+    ...(opts.suppressed !== undefined ? { suppressed: opts.suppressed } : {}),
+    ...(opts.isNote !== undefined ? { isNote: opts.isNote } : {}),
+  };
+}
+
+describe('leadingTitleBlockIndices — #510 title-block duplication', () => {
+  const section = '01 88 13.13';
+  const title = 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS';
+
+  it('suppresses a strictly-leading run of section/title continuation lines', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 1]));
+  });
+
+  it('is always the empty set when both section and title are UNKNOWN_SECTION_IDENTITY', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'),
+    ];
+    expect(
+      leadingTitleBlockIndices(classified, UNKNOWN_SECTION_IDENTITY, UNKNOWN_SECTION_IDENTITY)
+    ).toEqual(new Set());
+  });
+
+  it('skips (does not break on) a blank/suppressed paragraph interleaved in the leading run', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', ''), // blank spacer paragraph
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
+  });
+
+  it('skips (does not break on) a non-blank suppressed paragraph interleaved in the leading run', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', '*****', { suppressed: true }), // rule-row delimiter, already suppressed
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
+  });
+
+  it('stops the scan at the first real structural (non-continuation) node', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('part', 'PART 1 - GENERAL'),
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'), // never reached
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0]));
+  });
+
+  it('permanently stops at the first non-matching continuation, leaving a coincidental mid-document repeat untouched', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', 'Some unrelated lead-in text.'), // closes the leading zone
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'), // a real body repeat, left alone
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0]));
+  });
+
+  // A genuine editorial note (isNote: true) is real content that renders as
+  // "> **[NOTE]** ..." — it must never be treated as a round-trip duplicate of
+  // the canonical heading merely because its text coincidentally matches the
+  // title/section, or buildTree would drop the note entirely (no SpecNode at
+  // all), which is strictly worse than the note-leakage failure mode this
+  // module already guards against elsewhere.
+  it('never matches a note-flagged continuation, even when its text equals the title', () => {
+    const classified = [
+      makeCp('continuation', title, { isNote: true }),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set());
+  });
+
+  // Regression (Codex draft review, P2): a blank spacer paragraph that inherits a
+  // numbered/structural style classifies as 'part' (nodeType !== 'continuation'),
+  // yet produces NO SpecNode (isStructuralContent requires non-empty text). The
+  // blank/suppressed check must run BEFORE the nodeType check, or such a blank
+  // wrongly closes the leading zone and leaks the title line that follows it.
+  it('skips a blank paragraph even when it carries a structural nodeType', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('part', ''), // blank spacer that inherited a numbered/part style
+      makeCp('continuation', 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS'),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
+  });
+
+  // Regression (Codex draft review, P1): a hidden (isVanish) line is retained as a
+  // meta.vanish SpecNode that renders as '' (#292/#296) — never a VISIBLE duplicate.
+  // It must not be suppressed (which would DROP the deliberately-retained hidden
+  // content), but must also not close the zone: the visible title line after it is
+  // still a real duplicate. Index 1 (hidden) is skipped; index 2 (visible) matched.
+  it('retains a hidden isVanish line without closing the zone, still catching a later visible duplicate', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', title, { isVanish: true }), // hidden copy — retained, not dropped
+      makeCp('continuation', title),
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
+  });
+
+  // Regression (CodeRabbit #510 review): heuristics — hidden NOTE skipped the zone
+  // instead of closing it. A continuation that is BOTH isVanish and isNote is a
+  // note node whose [NOTE] banner renders regardless of meta.vanish — real content,
+  // not a renders-as-'' hidden line — so the isNote stop must win over the isVanish
+  // skip: the zone closes, and a title line after the hidden note is left alone.
+  it('a hidden note (isVanish AND isNote) closes the zone like a visible note — a later title line is not suppressed', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', 'Specifier: coordinate with Division 01.', {
+        isVanish: true,
+        isNote: true,
+      }),
+      makeCp('continuation', title), // after real note content — no longer the leading block
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0]));
+  });
+});
+
+describe('stripLeadingTitleBlockRoots — #510 post-inference title-block dedup', () => {
+  const section = '01 88 13.13';
+  const title = 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS';
+
+  function makeRoot(type: NodeType, text: string, meta: SpecNodeMeta = {}): SpecNode {
+    return { id: `id-${text}`, type, text, children: [], meta };
+  }
+
+  function makeTree(parts: readonly SpecNode[], sec = section, ttl = title): SpecTree {
+    return { id: 'tree', section: sec, title: ttl, parts };
+  }
+
+  it('removes the leading SECTION-line + title-line continuation roots, leaving PARTs', () => {
+    const tree = makeTree([
+      makeRoot('continuation', 'SECTION 01 8813.13'),
+      makeRoot('continuation', title),
+      makeRoot('part', 'GENERAL'),
+    ]);
+    const result = stripLeadingTitleBlockRoots(tree);
+    expect(result.parts.map((n) => n.type)).toEqual(['part']);
+  });
+
+  it('returns the SAME tree reference when nothing matches (clean no-op)', () => {
+    const tree = makeTree([makeRoot('part', 'GENERAL'), makeRoot('part', 'PRODUCTS')]);
+    expect(stripLeadingTitleBlockRoots(tree)).toBe(tree);
+  });
+
+  it('retains a hidden (meta.vanish) leading continuation without closing the zone', () => {
+    const tree = makeTree([
+      makeRoot('continuation', title, { vanish: true }), // hidden — kept, scan continues
+      makeRoot('continuation', 'SECTION 01 8813.13'), // visible duplicate — removed
+      makeRoot('part', 'GENERAL'),
+    ]);
+    const result = stripLeadingTitleBlockRoots(tree);
+    expect(result.parts.map((n) => n.type)).toEqual(['continuation', 'part']);
+    expect(result.parts[0]?.meta.vanish).toBe(true);
+  });
+
+  it('stops at a leading note root, never dropping genuine editorial content', () => {
+    const tree = makeTree([
+      makeRoot('note', title), // coincidental text match — a note is never a duplicate
+      makeRoot('continuation', title),
+      makeRoot('part', 'GENERAL'),
+    ]);
+    expect(stripLeadingTitleBlockRoots(tree)).toBe(tree);
+  });
+
+  it('leaves a coincidental mid-document identity repeat untouched (stops at first non-match)', () => {
+    const tree = makeTree([
+      makeRoot('continuation', 'SECTION 01 8813.13'),
+      makeRoot('continuation', 'Some unrelated lead-in.'), // closes the zone
+      makeRoot('continuation', title), // real body repeat — left alone
+    ]);
+    const result = stripLeadingTitleBlockRoots(tree);
+    expect(result.parts.map((n) => n.text)).toEqual(['Some unrelated lead-in.', title]);
+  });
+
+  it('is a no-op when both section and title are unknown', () => {
+    const tree = makeTree(
+      [makeRoot('continuation', 'SECTION 01 8813.13'), makeRoot('part', 'GENERAL')],
+      UNKNOWN_SECTION_IDENTITY,
+      UNKNOWN_SECTION_IDENTITY
+    );
+    expect(stripLeadingTitleBlockRoots(tree)).toBe(tree);
+  });
 });

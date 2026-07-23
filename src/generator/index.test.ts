@@ -426,6 +426,25 @@ describe('generateDocx — style rules', () => {
     expect(plain).not.toContain('Arial');
   });
 
+  it('title paragraph run defaults to black (000000), overriding Word Heading1 blue (#510)', async () => {
+    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE));
+    const titleRunMatch =
+      /<w:r><w:rPr>.*?<\/w:rPr><w:t[^>]*>SECTION 27 21 00.*?<\/w:t><\/w:r>/s.exec(xml);
+    expect(titleRunMatch).not.toBeNull();
+    expect(titleRunMatch?.[0]).toMatch(/<w:color w:val="000000"\/>/);
+  });
+
+  it('title paragraph run color is overridden by a "part" style rule (#510)', async () => {
+    const redTitleRules: readonly StyleRule[] = [
+      { nodeType: 'part', properties: { rPr: { color: 'FF0000' } } },
+    ];
+    const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE, redTitleRules));
+    const titleRunMatch =
+      /<w:r><w:rPr>.*?<\/w:rPr><w:t[^>]*>SECTION 27 21 00.*?<\/w:t><\/w:r>/s.exec(xml);
+    expect(titleRunMatch).not.toBeNull();
+    expect(titleRunMatch?.[0]).toMatch(/<w:color w:val="FF0000"\/>/);
+  });
+
   it('note and continuation runs carry no run-style properties under template rules', async () => {
     const xml = await getDocXml(await generateDocx(SYNTHETIC_TREE, ARIAL_RULES));
 

@@ -6,6 +6,7 @@ import {
   matchIndentSignal,
   isPartHeading,
   isDecorationSeparator,
+  leadingTitleBlockIndices,
 } from './heuristics.js';
 import { computeNoteRoles, isNoteParagraph } from './note-roles.js';
 import type { NoteRole } from '../../lib/note-delimiters.js';
@@ -18,14 +19,9 @@ import type {
   StyleMap,
   StyleNumPr,
 } from './types.js';
-import type { SpecNode, SpecTree, NodeType, ParseWarning } from '../../ast/types.js';
+import type { SpecNode, SpecTree, NodeType } from '../../ast/types.js';
 import { nodeTypeToNormalizedIlvl, NODE_TYPES_BY_NORMALIZED_ILVL } from '../../ast/index.js';
-import {
-  planPartStrip,
-  planOutlineNumberStrip,
-  rebaseSourceFacts,
-  auditPartNumbering,
-} from '../part-prefix.js';
+import { planPartStrip, planOutlineNumberStrip, rebaseSourceFacts } from '../part-prefix.js';
 import { stripOutlineLabels } from './outline-label-strip.js';
 import { pageBreakMeta, resolvePageBreakBefore } from './page-break.js';
 
@@ -432,50 +428,7 @@ function drainTop(
 
 // MasterFormat specs typically have 3 parts; more is permitted but uncommon
 // (warn above 3), and counts past 5 usually mean headings were over-matched.
-const TYPICAL_PART_COUNT = 3;
-const PLAUSIBLE_MAX_PARTS = 5;
-
-function partCountWarning(partCount: number): ParseWarning | null {
-  if (partCount <= TYPICAL_PART_COUNT) return null;
-  const suggestion =
-    partCount > PLAUSIBLE_MAX_PARTS
-      ? `${partCount} PART nodes detected — more than ${PLAUSIBLE_MAX_PARTS} usually means headings were over-matched`
-      : `${partCount} PART nodes detected — MasterFormat allows this, but specs typically have ${TYPICAL_PART_COUNT}`;
-  return { type: 'unusual-part-count', suggestion };
-}
-
-// Sanity post-pass: a healthy CSI parse has a small number of part-type roots
-// (typically 3) and nothing else at root. Degraded parses previously rendered
-// silently — 21 11 00agf.docx produced 34 roots with zero warnings.
-export function auditTreeStructure(roots: readonly SpecNode[]): ParseWarning[] {
-  const warnings: ParseWarning[] = [];
-  const visible = roots.filter((n) => n.meta.vanish !== true);
-  const partCount = visible.filter((n) => n.type === 'part').length;
-  // A captured body object (#300, ADR-072) at root — e.g. a table before the
-  // document's first PART heading — is real, modeled content, never preamble
-  // or unclassified junk; excluded here the same way 'part' itself is.
-  const junkRoots = visible.filter((n) => n.type !== 'part' && n.type !== 'object');
-
-  if (partCount === 0) {
-    warnings.push({
-      type: 'no-structure-found',
-      suggestion:
-        'no PART headings detected — document may not be a CSI spec, or its numbering convention is unrecognized',
-    });
-  }
-  if (junkRoots.length > 0) {
-    const first = junkRoots[0];
-    warnings.push({
-      type: 'root-continuation',
-      ...(first && first.text ? { lineHint: first.text.slice(0, 60) } : {}),
-      suggestion: `${junkRoots.length} node(s) at root level are not PART headings (preamble or unclassified content)`,
-    });
-  }
-  const countWarning = partCountWarning(partCount);
-  if (countWarning) warnings.push(countWarning);
-  warnings.push(...auditPartNumbering(visible));
-  return warnings;
-}
+export { auditTreeStructure } from './tree-audit.js';
 
 // Empty paragraphs are layout spacing, not content — excluded from stack/continuation
 // processing. A blank that inherited a numbered style (Signal 2) otherwise became an
@@ -539,6 +492,14 @@ export function buildTree(
   // leading number/letter may be an author-typed label the strip post-pass should remove.
   const s4NodeIds = new Set<string>();
   let lastNonContChildren: SpecNode[] = roots;
+  // #510: a leading run of continuation paragraphs that merely re-type the
+  // document's own already-resolved section/title identity (round-trip
+  // duplication of the generator's injected canonical heading). These indices
+  // are excluded below the same way suppressed/blank paragraphs are — no
+  // SpecNode is produced for them, matching the #292 "suppressed -> no
+  // SpecNode" precedent. No signal fires and nothing is lost: the identity is
+  // already carried on the tree's own section/title fields.
+  const titleBlockIndices = leadingTitleBlockIndices(classified, section, title);
   // Carries a page break (#497) forward across a paragraph isStructuralContent
   // filters out (empty/blank spacer, or a suppressed rule-row delimiter, #292) until
   // it reaches the next paragraph that actually becomes a SpecNode. Reset to false
@@ -556,7 +517,10 @@ export function buildTree(
       pendingPageBreak,
       objectsByPrecedingIndex
     );
-    if (isStructuralContent(cp)) {
+    // #510 x #497: a suppressed title-block index produces no SpecNode, so —
+    // exactly like a filtered blank/spacer — a break resolved onto it forwards
+    // via pendingPageBreak to the next emitted node (the else branch below).
+    if (isStructuralContent(cp) && !titleBlockIndices.has(i)) {
       // #497 review finding: a hidden non-note paragraph becomes a meta.vanish
       // 'continuation' that every renderer drops (#296) — so a page break attached
       // to it would silently vanish from the generated DOCX. Forward it to the next
