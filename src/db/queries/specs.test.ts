@@ -139,6 +139,7 @@ describe('buildNodeTree editability derivation', () => {
     classification: null,
     editability_override: null,
     object_data: null,
+    page_break_before: false,
   } as const;
 
   it('editability: corrupt override fails loud even when classification is null', async () => {
@@ -168,6 +169,7 @@ function row(
     classification: null,
     editability_override: null,
     object_data: null,
+    page_break_before: false,
     ...p,
   };
 }

@@ -310,6 +310,184 @@ describe('extractParagraphText — exported for table extraction reuse (#293)', 
   });
 });
 
+// ADR-075: a manual page break (`w:br w:type="page"`) found among the runs of a
+// paragraph marks the NEXT paragraph as pageBreakBefore=true — the after-the-source
+// signal is normalized to a before-the-target flag so it matches docx's own
+// Paragraph.pageBreakBefore 1:1 at the generator boundary.
+describe('parseDocument — pageBreakBefore (ADR-075)', () => {
+  it('sets pageBreakBefore on the paragraph following a manual page break', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>before</w:t></w:r><w:r><w:br w:type="page"/></w:r></w:p>` +
+        `<w:p><w:r><w:t>after</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.pageBreakBefore).toBeUndefined();
+    expect(result[1]?.pageBreakBefore).toBe(true);
+  });
+
+  // A page break with no following paragraph (trailing/EOF) has nothing to attach
+  // the flag to and is silently dropped — a documented scoping limit (ADR-075), not
+  // a bug: parsing must still succeed and produce no spurious flag anywhere.
+  it('drops a trailing page break with no following paragraph (KNOWN AMBIGUITY)', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>first</w:t></w:r></w:p>` +
+        `<w:p><w:r><w:t>last</w:t></w:r><w:r><w:br w:type="page"/></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result).toHaveLength(2);
+    expect(result[0]?.pageBreakBefore).toBeUndefined();
+    expect(result[1]?.pageBreakBefore).toBeUndefined();
+  });
+
+  // A bare <w:br/> with no w:type attribute is an ordinary line break, not a page
+  // break — must not set the flag.
+  it('does not set pageBreakBefore for a bare line break (<w:br/> with no w:type)', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>line one</w:t></w:r><w:r><w:br/></w:r></w:p>` +
+        `<w:p><w:r><w:t>line two</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[1]?.pageBreakBefore).toBeUndefined();
+  });
+
+  // w:type="column" is a column break, a different OOXML break kind — must not be
+  // misread as a page break.
+  it('does not set pageBreakBefore for a column break (w:type="column")', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>col one</w:t></w:r><w:r><w:br w:type="column"/></w:r></w:p>` +
+        `<w:p><w:r><w:t>col two</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[1]?.pageBreakBefore).toBeUndefined();
+  });
+
+  // Two-or-more page breaks in a single paragraph collapse to a single true — the
+  // parser has no richer positional model (documented KNOWN AMBIGUITY, ADR-075).
+  it('collapses 2+ page breaks in one paragraph to a single true', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>text</w:t></w:r>` +
+        `<w:r><w:br w:type="page"/></w:r><w:r><w:br w:type="page"/></w:r></w:p>` +
+        `<w:p><w:r><w:t>after</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[1]?.pageBreakBefore).toBe(true);
+  });
+
+  // #497 review finding: runHasPageBreak's own comment (ADR-075) names 3 verified
+  // parse shapes for run['w:br'] — object, empty string '', and ARRAY (2+ sibling
+  // w:br in the SAME w:r) — but no fixture before this one ever produced the array
+  // shape: the "collapses 2+ page breaks" test above uses two SEPARATE <w:r>
+  // elements, each contributing a single-object run['w:br']. Verified directly
+  // against createDocumentXmlParser: <w:r><w:br .../><w:br .../></w:r> parses
+  // run['w:br'] to an array of two objects, a materially different shape that
+  // toArray<unknown> must still walk. Pins the array-detection path so it cannot
+  // silently regress (e.g. a "simplification" to a direct single-value read).
+  it('detects a page break when 2+ sibling <w:br> live in the SAME <w:r> (array shape)', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>text</w:t></w:r>` +
+        `<w:r><w:br w:type="page"/><w:br w:type="page"/></w:r></w:p>` +
+        `<w:p><w:r><w:t>after</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[1]?.pageBreakBefore).toBe(true);
+  });
+
+  // A w:br sandwiched between two w:t runs inside the SAME w:r must still be
+  // detected — no special-casing on run position within the paragraph.
+  it('detects a page break sandwiched between two w:t runs in the same w:r', () => {
+    const xml = makeDocXml(
+      `<w:p><w:r><w:t>foo</w:t><w:br w:type="page"/><w:t>bar</w:t></w:r></w:p>` +
+        `<w:p><w:r><w:t>after</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[1]?.pageBreakBefore).toBe(true);
+  });
+
+  // #497 review finding: a source Word doc can carry a manual page break as a
+  // paragraph-level `w:pageBreakBefore` property (Paragraph dialog / heading
+  // style), not only as a run-level w:br in the preceding paragraph, so the
+  // parser must ALSO read a paragraph's own property. Detected ON the paragraph
+  // itself as `ownPageBreakBefore` — kept distinct from the predecessor-lookback
+  // `pageBreakBefore` so buildTree can treat the two differently across an
+  // interposed body object (ADR-075 decision 8).
+  it('sets ownPageBreakBefore from a paragraph OWN w:pageBreakBefore property (Word "Page break before")', () => {
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t>starts new page</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.ownPageBreakBefore).toBe(true);
+    // NOT the predecessor-lookback field — this break is intrinsic to the paragraph.
+    expect(result[0]?.pageBreakBefore).toBeUndefined();
+  });
+
+  // CT_OnOff toggle: an explicit falsey w:val (e.g. a style disabling an
+  // inherited break) means the property is OFF, not on.
+  it('does not set ownPageBreakBefore for an own w:pageBreakBefore explicitly disabled (w:val="false")', () => {
+    const xml = makeDocXml(
+      `<w:p><w:pPr><w:pageBreakBefore w:val="false"/></w:pPr><w:r><w:t>no break</w:t></w:r></w:p>`
+    );
+    const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
+    expect(result[0]?.ownPageBreakBefore).toBeUndefined();
+  });
+
+  // CodeRabbit #497: `ownPageBreakBefore` must read the EFFECTIVE property, not
+  // only local pPr — a heading style ("Page break before" checked in the style
+  // definition) stores w:pageBreakBefore in styles.xml, so the paragraph itself
+  // has no local key at all and previously lost the break.
+  describe('style-supplied w:pageBreakBefore (effective-property resolution)', () => {
+    const stylesXml = (styles: string): string =>
+      `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${styles}</w:styles>`;
+
+    it('parse: heading-style w:pageBreakBefore lost — paragraph with w:pStyle only, no local pPr key', () => {
+      const styleMap = buildStyleMap(
+        stylesXml(
+          `<w:style w:type="paragraph" w:styleId="Heading1"><w:pPr><w:pageBreakBefore/></w:pPr></w:style>`
+        )
+      );
+      const xml = makeDocXml(makePara({ text: 'heading text', styleId: 'Heading1' }));
+      const result = parseDocument(xml, emptyNumberingMap(), styleMap);
+      expect(result[0]?.ownPageBreakBefore).toBe(true);
+    });
+
+    it('resolves w:pageBreakBefore through the basedOn chain (child style inherits ancestor break)', () => {
+      const styleMap = buildStyleMap(
+        stylesXml(
+          `<w:style w:type="paragraph" w:styleId="Base"><w:pPr><w:pageBreakBefore/></w:pPr></w:style>` +
+            `<w:style w:type="paragraph" w:styleId="Child"><w:basedOn w:val="Base"/></w:style>`
+        )
+      );
+      const xml = makeDocXml(makePara({ text: 'child-styled', styleId: 'Child' }));
+      const result = parseDocument(xml, emptyNumberingMap(), styleMap);
+      expect(result[0]?.ownPageBreakBefore).toBe(true);
+    });
+
+    it('a child style explicit w:val="false" disables an ancestor style break (stored false, not absence)', () => {
+      const styleMap = buildStyleMap(
+        stylesXml(
+          `<w:style w:type="paragraph" w:styleId="Base"><w:pPr><w:pageBreakBefore/></w:pPr></w:style>` +
+            `<w:style w:type="paragraph" w:styleId="NoBreak"><w:basedOn w:val="Base"/><w:pPr><w:pageBreakBefore w:val="false"/></w:pPr></w:style>`
+        )
+      );
+      const xml = makeDocXml(makePara({ text: 'no break', styleId: 'NoBreak' }));
+      const result = parseDocument(xml, emptyNumberingMap(), styleMap);
+      expect(result[0]?.ownPageBreakBefore).toBeUndefined();
+    });
+
+    it('a local explicit w:val="false" overrides a style-supplied break (direct formatting wins)', () => {
+      const styleMap = buildStyleMap(
+        stylesXml(
+          `<w:style w:type="paragraph" w:styleId="Heading1"><w:pPr><w:pageBreakBefore/></w:pPr></w:style>`
+        )
+      );
+      const xml = makeDocXml(
+        `<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:pageBreakBefore w:val="false"/></w:pPr><w:r><w:t>suppressed</w:t></w:r></w:p>`
+      );
+      const result = parseDocument(xml, emptyNumberingMap(), styleMap);
+      expect(result[0]?.ownPageBreakBefore).toBeUndefined();
+    });
+  });
+});
+
 describe('isParagraphVanish — exported for table extraction reuse (#293)', () => {
   it('detects vanish from the paragraph mark (w:pPr > w:rPr > w:vanish)', () => {
     const raw = { 'w:pPr': { 'w:rPr': { 'w:vanish': '' } }, 'w:r': [{ 'w:t': 'hidden mark' }] };
