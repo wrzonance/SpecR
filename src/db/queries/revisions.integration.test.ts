@@ -181,3 +181,54 @@ describe('parentRevisionId — read surfaces & immutability', () => {
     expect(reread?.parentRevisionId).toBe(root.revisionId);
   });
 });
+
+// #509/ADR-077 (CodeRabbit #536 review): specs.page_size is untrusted DB-boundary
+// JSONB. snapshotMemberTrees passed the raw column value straight into
+// validateTree, so a malformed legacy/manually-edited value threw
+// SnapshotValidationError and blocked revision creation entirely — unlike
+// getSpecTree, which already degraded it to the Letter default through
+// parseStoredPageSize. Both read paths now share that contract.
+describe('snapshotMemberTrees — page_size DB-boundary normalization (#509/ADR-077)', () => {
+  let pkgId: string;
+
+  // The file-level afterAll deletes the shared project; this project-owned spec
+  // must go first (specs_project_id_fkey), and its package before it (revision
+  // snapshot rows reference the spec).
+  afterAll(async () => {
+    await pool.query('DELETE FROM design_packages WHERE id = $1', [pkgId]);
+    await pool.query('DELETE FROM specs WHERE project_id = $1', [projectId]);
+  });
+
+  it('revision creation survives a malformed specs.page_size JSONB — pageSize omitted from the frozen tree, not SnapshotValidationError', async () => {
+    const pkg = await pool.query<{ id: string }>(
+      `INSERT INTO design_packages (project_id, name, position) VALUES ($1,$2,3) RETURNING id`,
+      [projectId, `RevPageSize Pkg ${suffix}`]
+    );
+    pkgId = pkg.rows[0]!.id;
+    const spec = await pool.query<{ id: string }>(
+      // Project-owned (specs_owner_xor) so this fixture cannot collide with any
+      // library-scoped (section, source, library_id) unique-index row seeded by
+      // other integration tests.
+      `INSERT INTO specs (section, title, source, project_id, page_size)
+       VALUES ('09 91 26', $1, 'unknown', $2, '{"width":"bogus"}'::jsonb) RETURNING id`,
+      [`Malformed PageSize ${suffix}`, projectId]
+    );
+    const specId = spec.rows[0]!.id;
+    await pool.query(
+      `INSERT INTO paragraphs (spec_id, node_type, text, position)
+       VALUES ($1, 'part', 'GENERAL', 1)`,
+      [specId]
+    );
+    await pool.query(`INSERT INTO package_specs (package_id, spec_id, position) VALUES ($1,$2,1)`, [
+      pkgId,
+      specId,
+    ]);
+
+    const rev = await createPackageRevision(pkgId, { label: `malformed-psz ${suffix}` }, pool);
+    const full = await getPackageRevision(rev.revisionId, pool);
+    const frozen = full?.specs.find((s) => s.specId === specId);
+    expect(frozen).toBeDefined();
+    // Malformed value degrades exactly like getSpecTree: key omitted, Letter default.
+    expect(frozen?.tree).not.toHaveProperty('pageSize');
+  });
+});

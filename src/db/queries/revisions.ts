@@ -2,10 +2,10 @@ import type { Pool, PoolClient } from 'pg';
 import { pool } from '../index.js';
 import { DatabaseError } from '../errors.js';
 import { logger } from '../../lib/logger.js';
-import { RevisionAttributesSchema, SpecTreeSchema } from '../../ast/index.js';
-import type { RevisionAttributes, SpecTree } from '../../ast/index.js';
-import { buildNodeTree } from './specs.js';
-import type { ParagraphTreeRow } from './specs.js';
+import { RevisionAttributesSchema } from '../../ast/index.js';
+import type { RevisionAttributes } from '../../ast/index.js';
+import { snapshotMemberTrees, insertSnapshotRows, validateTree } from './revision-snapshot.js';
+import type { RevisionSpecEntry } from './revision-snapshot.js';
 import { PackageNotFoundError } from './packages.js';
 import { getRevisionNomenclatureForProject } from './revision-nomenclature.js';
 import type { RevisionNomenclatureProfile } from './revision-nomenclature.js';
@@ -17,6 +17,8 @@ import { changedRevisionSpecs } from './revision-diff.js';
 export { RevisionNomenclatureValidationError } from './revision-identity.js';
 export { RevisionParentValidationError } from './revision-parent.js';
 export { RevisionComparisonError } from './revision-comparison.js';
+export { SnapshotValidationError } from './revision-snapshot.js';
+export type { RevisionSpecEntry } from './revision-snapshot.js';
 
 /** Package revisions (ADR-015 D5, issue #96): immutable issuance snapshots.
  *  Issuing freezes every member section's full SpecTree as JSONB inside one
@@ -29,10 +31,6 @@ export { RevisionComparisonError } from './revision-comparison.js';
 interface Queryable {
   query: Pool['query'];
 }
-
-/** A snapshot tree failed SpecTreeSchema validation. At write → 422 (the
- *  package content cannot be issued); at read → 500 (integrity failure). */
-export class SnapshotValidationError extends DatabaseError {}
 
 export interface RevisionSummary {
   readonly revisionId: string;
@@ -48,12 +46,6 @@ export interface RevisionSummary {
   readonly specCount: number;
   readonly parentRevisionId: string | null;
   readonly baseRevisionId: string | null;
-}
-
-export interface RevisionSpecEntry {
-  readonly specId: string;
-  readonly position: number;
-  readonly tree: SpecTree;
 }
 
 export interface RevisionWithTrees {
@@ -106,14 +98,6 @@ interface PackageRow {
   readonly project_id: string;
 }
 
-interface MemberRow {
-  readonly spec_id: string;
-  readonly section: string | null;
-  readonly title: string | null;
-  readonly position: number;
-  readonly page_size: unknown;
-}
-
 interface SnapshotRow {
   readonly spec_id: string;
   readonly position: number;
@@ -127,18 +111,6 @@ interface RevisionContextRow {
   readonly project_description: string | null;
 }
 
-function validateTree(candidate: unknown, specId: string): SpecTree {
-  const parsed = SpecTreeSchema.safeParse(candidate);
-  if (!parsed.success) {
-    // User-facing via the 422 surface at write — no function-name prefix.
-    throw new SnapshotValidationError(
-      `snapshot tree for spec ${specId} failed SpecTree validation`,
-      { cause: parsed.error }
-    );
-  }
-  return parsed.data;
-}
-
 async function lockPackage(packageId: string, client: PoolClient): Promise<PackageRow> {
   const res = await client.query<PackageRow>(
     'SELECT project_id FROM design_packages WHERE id = $1 FOR UPDATE',
@@ -149,58 +121,6 @@ async function lockPackage(packageId: string, client: PoolClient): Promise<Packa
     throw new PackageNotFoundError(`createPackageRevision: package ${packageId} not found`);
   }
   return row;
-}
-
-/** Freeze every member section's tree, in membership order. */
-async function snapshotMemberTrees(
-  packageId: string,
-  client: PoolClient
-): Promise<readonly RevisionSpecEntry[]> {
-  const members = await client.query<MemberRow>(
-    `SELECT ps.spec_id, ps.position, s.section, s.title, s.page_size
-     FROM package_specs ps JOIN specs s ON s.id = ps.spec_id
-     WHERE ps.package_id = $1 ORDER BY ps.position`,
-    [packageId]
-  );
-  const entries: RevisionSpecEntry[] = [];
-  for (const member of members.rows) {
-    const paras = await client.query<ParagraphTreeRow>(
-      `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              signal_provenance, classification, editability_override
-       FROM paragraphs WHERE spec_id = $1`,
-      [member.spec_id]
-    );
-    const candidate = {
-      id: member.spec_id,
-      section: member.section ?? '',
-      title: member.title ?? '',
-      parts: buildNodeTree(paras.rows),
-      // #509/ADR-077: freeze the captured page size too, so a regenerated
-      // revision keeps the source geometry (validateTree checks it against
-      // PageSizeSchema). Absent column → key omitted, Letter default applies.
-      ...(member.page_size != null ? { pageSize: member.page_size } : {}),
-    };
-    entries.push({
-      specId: member.spec_id,
-      position: member.position,
-      tree: validateTree(candidate, member.spec_id),
-    });
-  }
-  return entries;
-}
-
-async function insertSnapshotRows(
-  revisionId: string,
-  entries: readonly RevisionSpecEntry[],
-  client: PoolClient
-): Promise<void> {
-  for (const entry of entries) {
-    await client.query(
-      `INSERT INTO package_revision_specs (revision_id, spec_id, position, tree)
-       VALUES ($1, $2, $3, $4::jsonb)`,
-      [revisionId, entry.specId, entry.position, JSON.stringify(entry.tree)]
-    );
-  }
 }
 
 /** ADR-018 D3 issuance hook: a spec that participates in a package revision
