@@ -48,8 +48,14 @@ duplicate" was also available in principle, alongside extending
      + case-insensitive compare);
    - continues without consuming a slot on a blank or already-suppressed
      paragraph (interleaved blank lines don't break the run);
+   - continues without consuming a slot on a hidden (`isVanish`) NON-note
+     continuation — it is retained as a `meta.vanish` SpecNode that renders as
+     `''`, so it is never a VISIBLE duplicate and must not close the leading
+     zone;
    - stops permanently at the first real structural (non-continuation) node,
-     the first note-flagged continuation, or the first continuation whose text
+     the first note-flagged continuation — hidden or visible: the note check
+     runs BEFORE the vanish skip, because a note's **[NOTE]** banner renders
+     regardless of `meta.vanish` — or the first continuation whose text
      matches neither identity.
    - returns an empty set immediately when both `section` and `title` are
      `UNKNOWN_SECTION_IDENTITY` — there is nothing resolved to compare against.
@@ -102,10 +108,11 @@ function classifyLeadingCandidate(
 
 The loop now just calls `classifyLeadingCandidate` per entry and switches on
 its result. This is a mechanical split with no behavioral change — every
-scenario (match, skip-blank, stop-at-structural, stop-at-note,
-stop-at-non-matching-continuation, coincidental mid-document repeat left
-untouched, `UNKNOWN_SECTION_IDENTITY` short-circuit) maps directly onto one of
-the three `LeadingScanStep` values. `LeadingScanStep` is the one new struct
+scenario (match, skip-blank, skip-hidden-non-note, stop-at-structural,
+stop-at-note — including a hidden note, since the note check precedes the
+vanish skip — stop-at-non-matching-continuation, coincidental mid-document
+repeat left untouched, `UNKNOWN_SECTION_IDENTITY` short-circuit) maps directly
+onto one of the three `LeadingScanStep` values. `LeadingScanStep` is the one new struct
 this change introduces; nothing else in `src/ast/types.ts` or any migration
 changed.
 

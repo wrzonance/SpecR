@@ -505,6 +505,24 @@ describe('leadingTitleBlockIndices — #510 title-block duplication', () => {
     ];
     expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0, 2]));
   });
+
+  // Regression (CodeRabbit #510 review): heuristics — hidden NOTE skipped the zone
+  // instead of closing it. A continuation that is BOTH isVanish and isNote is a
+  // note node whose [NOTE] banner renders regardless of meta.vanish — real content,
+  // not a renders-as-'' hidden line — so the isNote stop must win over the isVanish
+  // skip: the zone closes, and a title line after the hidden note is left alone.
+  it('a hidden note (isVanish AND isNote) closes the zone like a visible note — a later title line is not suppressed', () => {
+    const classified = [
+      makeCp('continuation', 'SECTION 01 8813.13'),
+      makeCp('continuation', 'Specifier: coordinate with Division 01.', {
+        isVanish: true,
+        isNote: true,
+      }),
+      makeCp('continuation', title), // after real note content — no longer the leading block
+      makeCp('part', 'PART 1 - GENERAL'),
+    ];
+    expect(leadingTitleBlockIndices(classified, section, title)).toEqual(new Set([0]));
+  });
 });
 
 describe('stripLeadingTitleBlockRoots — #510 post-inference title-block dedup', () => {

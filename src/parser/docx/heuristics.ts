@@ -278,19 +278,24 @@ function classifyLeadingCandidate(
   // otherwise classify as 'part' and, checked first, wrongly stop the scan.
   if (isBlankOrSuppressed(cp)) return 'skip';
   if (cp.nodeType !== 'continuation') return 'stop';
-  // A hidden (isVanish) non-note line is retained as a meta.vanish SpecNode that
-  // renders as '' (#292/#296) — it is never a VISIBLE duplicate of the canonical
-  // heading, and matching it would DROP that deliberately-retained hidden content
-  // (buildTree emits no SpecNode for a suppressed index). Skip it like a blank:
-  // keep the node, keep scanning so a later visible duplicate is still caught.
-  if (cp.isVanish === true) return 'skip';
   // A genuine editorial note (isNote: true) is real content that renders as
   // "> **[NOTE]** ..." — never a round-trip duplicate of the canonical heading,
   // even when its text coincidentally equals the section/title. Matching it here
   // would drop the note's SpecNode entirely (buildTree never calls
   // appendContinuation for a suppressed index), which is strictly worse than
   // leaking it unbannered — the note would simply vanish, unrecoverable.
+  // Checked BEFORE isVanish (CodeRabbit #510): a hidden note is STILL a note —
+  // note nodes render their [NOTE] banner regardless of meta.vanish — so the
+  // vanish branch's renders-as-'' rationale does not apply to it, and it must
+  // close the zone exactly like a visible note.
   if (cp.isNote === true) return 'stop';
+  // A hidden (isVanish) non-note line is retained as a meta.vanish SpecNode that
+  // renders as '' (#292/#296) — it is never a VISIBLE duplicate of the canonical
+  // heading, and matching it would DROP that deliberately-retained hidden content
+  // (buildTree emits no SpecNode for a suppressed index). Skip it like a blank:
+  // keep the node, keep scanning so a later visible duplicate is still caught.
+  // (Non-note is guaranteed here: the isNote check above already returned.)
+  if (cp.isVanish === true) return 'skip';
   const text = cp.paragraph.text;
   if (isSectionIdentityLine(text, section) || isTitleIdentityLine(text, title)) return 'match';
   return 'stop';
@@ -303,13 +308,15 @@ function classifyLeadingCandidate(
  * - adds an index on a match (a continuation whose text is the section or
  *   title line),
  * - continues without adding an index on a blank/already-suppressed paragraph
- *   OR a hidden (isVanish) line — none renders as a visible duplicate, so each
- *   is retained and consumes no slot without closing the leading zone,
+ *   OR a hidden (isVanish) NON-note line — neither renders as a visible
+ *   duplicate, so each is retained and consumes no slot without closing the
+ *   leading zone,
  * - stops permanently on the first real structural (non-continuation) node,
- *   the first note-flagged continuation (genuine editorial content is never a
- *   round-trip duplicate, whatever its text), or the first continuation whose
- *   text matches neither identity — a coincidental repeat later in the
- *   document is never touched.
+ *   the first note-flagged continuation — hidden or visible: a note's [NOTE]
+ *   banner renders regardless of meta.vanish, so genuine editorial content is
+ *   never a round-trip duplicate, whatever its text — or the first
+ *   continuation whose text matches neither identity; a coincidental repeat
+ *   later in the document is never touched.
  *
  * Returns an empty set immediately when `section` and `title` are both
  * `UNKNOWN_SECTION_IDENTITY` — there is nothing resolved to compare against.
