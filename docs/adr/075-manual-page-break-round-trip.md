@@ -94,6 +94,12 @@ array. Any detector that assumes one shape misses the others.
    `w:body/w:p` children, so a generated file is re-integrated through the merge
    engine, never re-parsed into a fresh tree.) CT_OnOff toggle semantics: the
    element present === on, unless an explicit falsey `w:val` (false/0/off) disables it.
+   The property is resolved as EFFECTIVE, not only local (#497 CodeRabbit finding):
+   a heading style stores `w:pageBreakBefore` in styles.xml, leaving the paragraph's
+   own `w:pPr` with no key at all, so `ownPageBreakBefore` falls back to the selected
+   `w:pStyle`'s basedOn-resolved value (`StyleMap.pageBreakStyleIds`, nearest-specified-
+   wins like `resolvedJc` — a child style's or the paragraph's own explicit
+   `w:val="false"` disables an inherited break).
 9. **Keep the two capture signals distinct on `DocxParagraph`** (`pageBreakBefore`
    vs `ownPageBreakBefore`; #497 second review round). Decision 8's two forms are
    NOT interchangeable across an interposed body object. The predecessor-`w:br`

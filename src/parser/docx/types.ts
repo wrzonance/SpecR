@@ -72,6 +72,11 @@ export interface StyleInfo {
   // alignment in the style, not the paragraph). Resolved through basedOn into
   // StyleMap.resolvedJc so Signal 5 can ignore a style-centered paragraph's indent.
   readonly jc?: string;
+  // w:pageBreakBefore declared in the style's own pPr (CT_OnOff; an explicit
+  // w:val="false" is a STORED false that disables an inherited break, distinct
+  // from the property being absent). Resolved through basedOn into
+  // StyleMap.pageBreakStyleIds (ADR-075).
+  readonly pageBreakBefore?: boolean;
   readonly next?: string;
   readonly runEmphasis?: RunEmphasisStyle;
 }
@@ -85,6 +90,11 @@ export interface StyleMap {
   readonly resolvedJc: ReadonlyMap<string, string>;
   readonly vanishStyleIds: ReadonlySet<string>;
   readonly vanishCharStyleIds: ReadonlySet<string>;
+  // Style ids whose EFFECTIVE w:pageBreakBefore (own explicit CT_OnOff value,
+  // else the nearest basedOn ancestor's) is ON — heading styles commonly set
+  // this (ADR-075). Optional so test-local StyleMap literals stay valid; absent
+  // means no style supplies a page break.
+  readonly pageBreakStyleIds?: ReadonlySet<string>;
   readonly defaultRunEmphasis?: RunEmphasisStyle;
   readonly resolvedRunEmphasis?: ReadonlyMap<string, RunEmphasisStyle>;
   readonly characterRunEmphasisChains?: ReadonlyMap<string, readonly RunEmphasisStyle[]>;

@@ -266,11 +266,21 @@ function previousParagraphHasPageBreak(
 // before" and set by many heading styles. It maps directly to
 // `meta.pageBreakBefore` (and is also the exact property the generator re-emits).
 // CT_OnOff toggle semantics: element present === on, unless an explicit falsey
-// `w:val` (false/0/off, e.g. a style disabling an inherited break) turns it off.
-function ownPageBreakBefore(pPr: Record<string, unknown> | undefined): boolean {
-  if (!pPr || !('w:pageBreakBefore' in pPr)) return false;
-  const val = getAttrVal(pPr['w:pageBreakBefore']);
-  return val !== 'false' && val !== '0' && val !== 'off';
+// `w:val` (false/0/off) turns it off. The property is EFFECTIVE, not only local
+// (CodeRabbit #497): a heading style commonly supplies it from styles.xml with
+// no local pPr key at all, so direct formatting wins when present (including an
+// explicit local false disabling a style-supplied break), else the selected
+// w:pStyle's basedOn-resolved value (StyleMap.pageBreakStyleIds) decides.
+function ownPageBreakBefore(
+  pPr: Record<string, unknown> | undefined,
+  styleId: string | undefined,
+  styleMap: StyleMap
+): boolean {
+  if (pPr && 'w:pageBreakBefore' in pPr) {
+    const val = getAttrVal(pPr['w:pageBreakBefore']);
+    return val !== 'false' && val !== '0' && val !== 'off';
+  }
+  return styleId !== undefined && styleMap.pageBreakStyleIds?.has(styleId) === true;
 }
 
 function parseParagraph(
@@ -303,7 +313,7 @@ function parseParagraph(
     // interposed body object (predecessor-lookback can be misattributed; the
     // paragraph's own property never is). See ADR-075 decision 8 and page-break.ts.
     pageBreakBefore: pageBreakBefore ? true : undefined,
-    ownPageBreakBefore: ownPageBreakBefore(pPr) ? true : undefined,
+    ownPageBreakBefore: ownPageBreakBefore(pPr, styleId, styleMap) ? true : undefined,
   });
 }
 

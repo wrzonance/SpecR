@@ -429,6 +429,63 @@ describe('parseDocument — pageBreakBefore (ADR-075)', () => {
     const result = parseDocument(xml, emptyNumberingMap(), EMPTY_STYLES);
     expect(result[0]?.ownPageBreakBefore).toBeUndefined();
   });
+
+  // CodeRabbit #497: `ownPageBreakBefore` must read the EFFECTIVE property, not
+  // only local pPr — a heading style ("Page break before" checked in the style
+  // definition) stores w:pageBreakBefore in styles.xml, so the paragraph itself
+  // has no local key at all and previously lost the break.
+  describe('style-supplied w:pageBreakBefore (effective-property resolution)', () => {
+    const stylesXml = (styles: string): string =>
+      `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${styles}</w:styles>`;
+
+    it('parse: heading-style w:pageBreakBefore lost — paragraph with w:pStyle only, no local pPr key', () => {
+      const styleMap = buildStyleMap(
+        stylesXml(
+          `<w:style w:type="paragraph" w:styleId="Heading1"><w:pPr><w:pageBreakBefore/></w:pPr></w:style>`
+        )
+      );
+      const xml = makeDocXml(makePara({ text: 'heading text', styleId: 'Heading1' }));
+      const result = parseDocument(xml, emptyNumberingMap(), styleMap);
+      expect(result[0]?.ownPageBreakBefore).toBe(true);
+    });
+
+    it('resolves w:pageBreakBefore through the basedOn chain (child style inherits ancestor break)', () => {
+      const styleMap = buildStyleMap(
+        stylesXml(
+          `<w:style w:type="paragraph" w:styleId="Base"><w:pPr><w:pageBreakBefore/></w:pPr></w:style>` +
+            `<w:style w:type="paragraph" w:styleId="Child"><w:basedOn w:val="Base"/></w:style>`
+        )
+      );
+      const xml = makeDocXml(makePara({ text: 'child-styled', styleId: 'Child' }));
+      const result = parseDocument(xml, emptyNumberingMap(), styleMap);
+      expect(result[0]?.ownPageBreakBefore).toBe(true);
+    });
+
+    it('a child style explicit w:val="false" disables an ancestor style break (stored false, not absence)', () => {
+      const styleMap = buildStyleMap(
+        stylesXml(
+          `<w:style w:type="paragraph" w:styleId="Base"><w:pPr><w:pageBreakBefore/></w:pPr></w:style>` +
+            `<w:style w:type="paragraph" w:styleId="NoBreak"><w:basedOn w:val="Base"/><w:pPr><w:pageBreakBefore w:val="false"/></w:pPr></w:style>`
+        )
+      );
+      const xml = makeDocXml(makePara({ text: 'no break', styleId: 'NoBreak' }));
+      const result = parseDocument(xml, emptyNumberingMap(), styleMap);
+      expect(result[0]?.ownPageBreakBefore).toBeUndefined();
+    });
+
+    it('a local explicit w:val="false" overrides a style-supplied break (direct formatting wins)', () => {
+      const styleMap = buildStyleMap(
+        stylesXml(
+          `<w:style w:type="paragraph" w:styleId="Heading1"><w:pPr><w:pageBreakBefore/></w:pPr></w:style>`
+        )
+      );
+      const xml = makeDocXml(
+        `<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:pageBreakBefore w:val="false"/></w:pPr><w:r><w:t>suppressed</w:t></w:r></w:p>`
+      );
+      const result = parseDocument(xml, emptyNumberingMap(), styleMap);
+      expect(result[0]?.ownPageBreakBefore).toBeUndefined();
+    });
+  });
 });
 
 describe('isParagraphVanish — exported for table extraction reuse (#293)', () => {
