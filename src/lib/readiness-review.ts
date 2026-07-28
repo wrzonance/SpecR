@@ -105,8 +105,24 @@ function assessNode(node: SpecNode): readonly ReadinessFinding[] {
   return [...choiceTokenFindings(node), ...openCommentFindings(node), ...bodyObjectFinding(node)];
 }
 
+// A vanished non-note node hides its whole subtree in every renderer
+// (generator/index.ts's collectParagraphs skips recursing once emitNode
+// returns false; markdown.ts's renderNonStructural short-circuits the caller
+// before it ever calls renderChildren; sec/index.ts's isHidden filter drops
+// "its whole subtree"). A descendant that is not itself vanished still never
+// reaches a reader once an ancestor is, so walkReadiness must not descend
+// into it either — otherwise a hidden article's still-open comment or
+// unresolved choice token would block an issuance no format ever renders.
+function isSuppressedSubtree(node: SpecNode): boolean {
+  return node.type !== 'note' && node.meta.vanish === true;
+}
+
 function walkReadiness(nodes: readonly SpecNode[]): readonly ReadinessFinding[] {
-  return nodes.flatMap((node) => [...assessNode(node), ...walkReadiness(node.children)]);
+  return nodes.flatMap((node) => {
+    const findings = assessNode(node);
+    if (isSuppressedSubtree(node)) return findings;
+    return [...findings, ...walkReadiness(node.children)];
+  });
 }
 
 /**

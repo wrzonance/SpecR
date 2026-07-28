@@ -117,6 +117,34 @@ describe('evaluateSpecReadiness', () => {
     expect(result.highlightAdvisory.total).toBe(1);
   });
 
+  it("suppresses findings for an entire vanished subtree, including a nested note (regression: walkReadiness recursed into a vanished node's children)", () => {
+    const nestedNote = node({ id: 'c1', type: 'note', text: 'Nested under hidden parent.' });
+    const nestedChoice = node({
+      id: 'c2',
+      type: 'pr1',
+      text: 'Provide <manufacturer>.',
+      meta: {
+        sourceFacts: {
+          choiceTokens: [{ kind: 'angle', options: ['A', 'B'], span: [8, 22] }],
+        },
+      },
+    });
+    const vanishedParent = node({
+      id: 'p1',
+      type: 'article',
+      text: 'HIDDEN ARTICLE',
+      meta: { vanish: true },
+      children: [nestedNote, nestedChoice],
+    });
+
+    const result = evaluateSpecReadiness(treeOf([vanishedParent]));
+
+    // No renderer (DOCX/Markdown/.SEC) emits a single byte of a vanished
+    // node's subtree, so nothing beneath it — not even a note — can block
+    // an issuance the reader will never see (ADR-079 decision 5).
+    expect(result.findings).toEqual([]);
+  });
+
   it('walks nested children', () => {
     const child = node({ id: 'c1', type: 'note', text: 'Nested note.' });
     const parent = node({ id: 'p1', type: 'article', text: 'REFERENCES', children: [child] });
