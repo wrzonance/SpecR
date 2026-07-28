@@ -4,7 +4,7 @@ import express from 'express';
 import type { Server } from 'node:http';
 import { router } from '../api/router.js';
 import { errorHandler } from '../api/middleware/error.js';
-import { pool, addSectionToProject } from '../db/index.js';
+import { pool, addSectionToProject, createPackageRevision } from '../db/index.js';
 import type { ComparisonReport } from './index.js';
 
 type ApiOk = { success: true; data: ComparisonReport };
@@ -333,6 +333,130 @@ describe('POST /reports/compare — independently-ingested (structural fallback)
     const colB = report.summary.columns.find((c) => c.specId === indieB);
     expect(colB?.onlyIn).toBe(1);
     expect(report.summary.aligned).toBe(4);
+  });
+});
+
+describe('POST /reports/compare — frozen revision sources (#392, ADR-078)', () => {
+  let frozenLib: string;
+  let frozenProjectId: string;
+  let frozenSpecId: string;
+  let frozenPkgId: string;
+  let revA: string; // first frozen snapshot
+  let revB: string; // second frozen snapshot of the SAME package, after an edit
+  let clauseId: string;
+
+  beforeAll(async () => {
+    frozenLib = await insertLibrary(`Frozen Lib ${suffix}`);
+    frozenSpecId = await insertMaster(frozenLib, '01 10 00');
+    const part = await insertPara(frozenSpecId, null, 'part', 'PART 1 GENERAL', 1);
+    const article = await insertPara(frozenSpecId, part, 'article', 'SUMMARY', 1);
+    clauseId = await insertPara(frozenSpecId, article, 'pr1', 'Original frozen clause.', 1);
+
+    const proj = await pool.query<{ id: string }>(
+      `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+      [`Frozen Project ${suffix}`]
+    );
+    frozenProjectId = proj.rows[0]!.id;
+
+    const pkg = await pool.query<{ id: string }>(
+      `INSERT INTO design_packages (project_id, name, position) VALUES ($1, $2, 1) RETURNING id`,
+      [frozenProjectId, `Frozen Package ${suffix}`]
+    );
+    frozenPkgId = pkg.rows[0]!.id;
+    await pool.query(
+      `INSERT INTO package_specs (package_id, spec_id, position) VALUES ($1, $2, 1)`,
+      [frozenPkgId, frozenSpecId]
+    );
+
+    const first = await createPackageRevision(frozenPkgId, { label: `rev-a-${suffix}` }, pool);
+    revA = first.revisionId;
+
+    // Edit the live paragraph, then freeze a SECOND revision of the SAME
+    // package — revA and revB both snapshot the SAME underlying paragraph
+    // UUIDs (same live spec, frozen twice); only revB captures the edit.
+    await pool.query(`UPDATE paragraphs SET text = 'EDITED frozen clause.' WHERE id = $1`, [
+      clauseId,
+    ]);
+    const second = await createPackageRevision(frozenPkgId, { label: `rev-b-${suffix}` }, pool);
+    revB = second.revisionId;
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM design_packages WHERE project_id = $1', [frozenProjectId]);
+    await pool.query('DELETE FROM projects WHERE id = $1', [frozenProjectId]);
+    await pool.query('DELETE FROM paragraphs WHERE spec_id = $1', [frozenSpecId]);
+    await pool.query('DELETE FROM specs WHERE id = $1', [frozenSpecId]);
+    await pool.query('DELETE FROM libraries WHERE id = $1', [frozenLib]);
+  });
+
+  it('aligns two same-package frozen revisions by the shared raw paragraph id — no originParagraphId needed', async () => {
+    const { status, body } = await post({
+      sources: [
+        { revisionId: revA, specId: frozenSpecId },
+        { revisionId: revB, specId: frozenSpecId },
+      ],
+    });
+    expect(status).toBe(200);
+    const report = okData(body);
+    expect(report.alignedBy).toBe('origin');
+
+    // Both snapshots freeze the same live paragraphs, so every row aligns —
+    // nothing is only-in-one-side.
+    const allAligned = report.rows.every((r) => r.cells[0]?.present && r.cells[1]?.present);
+    expect(allAligned).toBe(true);
+
+    const edited = report.rows.find((r) => cellText(r, 0) === 'Original frozen clause.');
+    expect(edited && cellText(edited, 1)).toBe('EDITED frozen clause.');
+  });
+
+  it('every ComparisonColumn resolved from a frozen source carries both revisionId and revisionLabel; a live column carries neither', async () => {
+    const { body } = await post({
+      sources: [frozenSpecId, { revisionId: revA, specId: frozenSpecId }],
+    });
+    const report = okData(body);
+    const [liveCol, frozenCol] = report.columns;
+
+    expect(liveCol?.revisionId).toBeUndefined();
+    expect(liveCol?.revisionLabel).toBeUndefined();
+    expect(frozenCol?.revisionId).toBe(revA);
+    expect(frozenCol?.revisionLabel).toBe(`rev-a-${suffix}`);
+  });
+
+  it('drift (behindBy) is computed only over the live-bucket sources — a frozen source is never queried for lineage', async () => {
+    const { body } = await post({
+      sources: [p1Spec, { revisionId: revA, specId: frozenSpecId }],
+    });
+    const report = okData(body);
+    const drift = driftMap(report);
+    expect(drift.get(p1Spec)).toBe(2); // p1Spec's real drift vs its master (outer fixture)
+    expect(drift.has(frozenSpecId)).toBe(false);
+    expect(report.drift?.length).toBe(1);
+  });
+
+  it('baseline resolves against a frozen source’s specId, not literal array membership', async () => {
+    const { body } = await post({
+      sources: [p1Spec, { revisionId: revA, specId: frozenSpecId }],
+      baseline: frozenSpecId,
+    });
+    const report = okData(body);
+    expect(report.baseline).toBeDefined();
+    expect(report.baseline?.specId).toBe(frozenSpecId);
+  });
+
+  it('returns 404 naming the source when a frozen source’s revision does not exist', async () => {
+    const { status, body } = await post({
+      sources: [p1Spec, { revisionId: randomUUID(), specId: frozenSpecId }],
+    });
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+  });
+
+  it('returns 404 when a frozen source’s specId was never a member of that revision', async () => {
+    const { status, body } = await post({
+      sources: [p1Spec, { revisionId: revA, specId: randomUUID() }],
+    });
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
   });
 });
 
