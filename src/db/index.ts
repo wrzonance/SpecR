@@ -370,13 +370,9 @@ export {
   SubmittalRegisterSpecNotInProjectError,
 } from './queries/submittal-register.js';
 export type { ProjectSubmittalRegister } from './queries/submittal-register.js';
-export { getOpenCommentsReport } from './queries/open-comments.js';
-export type {
-  OpenComment,
-  OpenCommentsScope,
-  OpenCommentsSummary,
-  OpenCommentsReport,
-} from './queries/open-comments.js';
+// Open-comments report + all issuance-readiness (ADR-079, #406) exports live
+// in this sub-barrel — see index-readiness.ts for why.
+export * from './index-readiness.js';
 export {
   createAssociation,
   listAssociationsForParagraph,
