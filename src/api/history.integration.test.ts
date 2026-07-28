@@ -134,10 +134,13 @@ describe('version-history REST and MCP surfaces (#378, #380)', () => {
   });
 
   it('MCP tools mirror all three REST reads and never throw on invalid input', async () => {
-    const paragraph = payload(
+    // get_paragraph_history defaults to coalesced tier-1 sessions (ADR-052
+    // D3/D9, issue #380 task 10) — `afterText` per session, not raw `.text`
+    // per entry, matching the REST default asserted above.
+    const sessions = payload(
       await handleGetParagraphHistory({ specId: ids.spec, nodeId: ids.paragraph })
-    ) as readonly { text: string }[];
-    expect(paragraph.map((entry) => entry.text)).toEqual(['Before', 'After']);
+    ) as readonly { afterText: string }[];
+    expect(sessions.map((session) => session.afterText)).toEqual(['Before', 'After']);
     expect(payload(await handleGetSpecHistory({ specId: ids.spec }))).toEqual(
       expect.objectContaining({ currentContentVersion: 2 })
     );
