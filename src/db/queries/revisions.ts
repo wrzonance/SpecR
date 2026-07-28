@@ -3,7 +3,7 @@ import { pool } from '../index.js';
 import { DatabaseError } from '../errors.js';
 import { logger } from '../../lib/logger.js';
 import { RevisionAttributesSchema } from '../../ast/index.js';
-import type { RevisionAttributes } from '../../ast/index.js';
+import type { RevisionAttributes, IssuanceMode } from '../../ast/index.js';
 import { snapshotMemberTrees, insertSnapshotRows, validateTree } from './revision-snapshot.js';
 import type { RevisionSpecEntry } from './revision-snapshot.js';
 import { PackageNotFoundError } from './packages.js';
@@ -14,11 +14,17 @@ import type { CreatePackageRevisionInput } from './revision-identity.js';
 import { assertValidParentRevision } from './revision-parent.js';
 import { assertValidBaseRevision, RevisionComparisonError } from './revision-comparison.js';
 import { changedRevisionSpecs } from './revision-diff.js';
+import { assertReadyForFinal } from './readiness-gate.js';
 export { RevisionNomenclatureValidationError } from './revision-identity.js';
 export { RevisionParentValidationError } from './revision-parent.js';
 export { RevisionComparisonError } from './revision-comparison.js';
 export { SnapshotValidationError } from './revision-snapshot.js';
 export type { RevisionSpecEntry } from './revision-snapshot.js';
+// ADR-079 (#406): re-exported here so this file stays the one place
+// `db/index.ts` reaches for revision-issuance error classes — matching the
+// four sibling re-exports above (SnapshotValidationError et al.), all
+// DatabaseError subclasses representing a business-rule refusal.
+export { ReadinessBlockedError } from './readiness-gate.js';
 
 /** Package revisions (ADR-015 D5, issue #96): immutable issuance snapshots.
  *  Issuing freezes every member section's full SpecTree as JSONB inside one
@@ -154,6 +160,21 @@ function parseAttributes(candidate: unknown): RevisionAttributes {
   return RevisionAttributesSchema.parse(candidate);
 }
 
+interface ReadinessGateInput {
+  readonly mode: IssuanceMode | undefined;
+  readonly overrideReadinessGate: boolean | undefined;
+}
+
+/** ADR-079 (#406): pulls the two issuance-readiness-gate inputs out of either
+ *  accepted `createPackageRevision` shape. Extracted purely to keep
+ *  `createPackageRevision` under this repo's `max-lines-per-function`/
+ *  `complexity` budgets — functionally identical to inlining the same
+ *  destructure. The legacy string body never carries either field. */
+function readinessInputFrom(input: string | CreatePackageRevisionInput): ReadinessGateInput {
+  if (typeof input === 'string') return { mode: undefined, overrideReadinessGate: undefined };
+  return { mode: input.mode, overrideReadinessGate: input.overrideReadinessGate };
+}
+
 export function mapSummary(
   row: RevisionRow,
   profile: RevisionNomenclatureProfile | null,
@@ -272,6 +293,8 @@ export async function createPackageRevision(
       client
     );
     const entries = await snapshotMemberTrees(packageId, client);
+    const { mode, overrideReadinessGate } = readinessInputFrom(input);
+    assertReadyForFinal(entries, mode, overrideReadinessGate);
     await insertSnapshotRows(row.id, entries, client);
     await markMembersIssued(
       entries.map((e) => e.specId),
