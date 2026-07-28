@@ -133,7 +133,7 @@ export { ActorLabelSchema, AcceptNoteBodySchema } from './actor-schemas.js';
 export type { AcceptNoteBody } from './actor-schemas.js';
 export { InsertParagraphBodySchema, InsertableNodeTypeSchema } from './paragraph-schemas.js';
 export type { InsertParagraphBody, InsertableNodeType } from './paragraph-schemas.js';
-export { HistoryAnchorSchema } from './history-schemas.js';
+export { HistoryAnchorSchema, parseCheckpointAnchor } from './history-schemas.js';
 export type { HistoryAnchorInput } from './history-schemas.js';
 export {
   CreateTemplateBodySchema,

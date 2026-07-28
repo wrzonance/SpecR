@@ -1,8 +1,9 @@
-import { SpecTreeSchema } from '../../ast/index.js';
+import { SpecTreeSchema, parseCheckpointAnchor } from '../../ast/index.js';
 import type { SpecNode, SpecTree } from '../../ast/index.js';
 import { pool, DatabaseError } from '../index.js';
 import type { ParagraphHistoryOp } from './paragraph-history.js';
 import type { Queryable } from './history.js';
+import { getCheckpointById } from './checkpoints.js';
 
 export type HistoryAnchor = number | string;
 
@@ -237,6 +238,36 @@ async function originSnapshot(
   });
 }
 
+/** checkpoint:<uuid> anchor (ADR-052 D3/D9, issue #380 task 6) — resolves to
+ *  the content_version the checkpoint sealed for `specId`, never a default.
+ *  Two distinct failure modes, both surfaced as HistoryAnchorError (422) so a
+ *  caller can never mistake "no such checkpoint" for "this checkpoint never
+ *  covered this spec": the checkpoint row itself may not exist, or it may
+ *  exist (sealing some other spec/project) without `specId` as a key in its
+ *  content_version_map. */
+async function checkpointSnapshot(
+  specId: string,
+  checkpointId: string,
+  context: SpecAnchorContext,
+  db: Queryable
+): Promise<readonly SnapshotNode[]> {
+  const checkpoint = await getCheckpointById(checkpointId, db);
+  if (!checkpoint) {
+    throw new HistoryAnchorError(`checkpoint ${checkpointId} does not exist`);
+  }
+  const contentVersion = checkpoint.contentVersionMap[specId];
+  if (contentVersion === undefined) {
+    throw new HistoryAnchorError(
+      `checkpoint ${checkpointId} never sealed spec ${specId} (not in its content_version_map)`
+    );
+  }
+  const baseline =
+    context.parent_spec_id && context.origin_version !== null
+      ? await originSnapshot(specId, context, db)
+      : [];
+  return contentSnapshot(specId, contentVersion, db, baseline);
+}
+
 async function resolveSnapshot(
   specId: string,
   anchor: HistoryAnchor,
@@ -257,6 +288,8 @@ async function resolveSnapshot(
         : [];
     return contentSnapshot(specId, anchor, db, baseline);
   }
+  const checkpointId = parseCheckpointAnchor(anchor);
+  if (checkpointId !== null) return checkpointSnapshot(specId, checkpointId, context, db);
   return revisionSnapshot(specId, anchor, db);
 }
 
