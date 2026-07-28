@@ -1326,6 +1326,13 @@ paths:
                     database values remain canonical. Omitted → the sole owning project's
                     override, then its client's firm default, then canonical. If the spec
                     belongs to no project (or several), canonical applies.
+                mode:
+                  $ref: '#/components/schemas/IssuanceMode'
+                overrideReadinessGate:
+                  type: boolean
+                  description: >
+                    Unaudited escape hatch (ADR-079 decision 8, #406) — renders
+                    despite outstanding findings. Ignored unless mode is final.
             examples:
               dotted-section-numbers:
                 value:
@@ -1342,6 +1349,17 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: >
+            `mode: 'final'` is blocked by the ADR-079 (#406) issuance-readiness
+            gate — the spec has one or more outstanding ReadinessFinding
+            entries. The error message reports the finding count and points at
+            `GET /specs/{id}/readiness-report` for the full list; pass
+            `overrideReadinessGate: true` to generate anyway.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -2225,6 +2243,13 @@ paths:
                     section title and confidently identified Section references.
                     Omitted → project override, then client/firm default, then
                     canonical.
+                mode:
+                  $ref: '#/components/schemas/IssuanceMode'
+                overrideReadinessGate:
+                  type: boolean
+                  description: >
+                    Unaudited escape hatch (ADR-079 decision 8, #406) — renders
+                    despite outstanding findings. Ignored unless mode is final.
       responses:
         '200':
           description: DOCX manual file stream
@@ -2238,7 +2263,15 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: Project has no sections to assemble
+          description: >
+            Project has no sections to assemble, or `mode: 'final'` is blocked
+            by the ADR-079 (#406) issuance-readiness gate — one or more of the
+            assembled TOC sections has an outstanding ReadinessFinding. There
+            is no project-scoped readiness report; the gate error message
+            reports the finding count across all TOC sections combined — use
+            `GET /specs/{id}/readiness-report` per section to see which one(s)
+            are outstanding. Pass `overrideReadinessGate: true` to generate
+            anyway.
           content:
             application/json:
               schema:
@@ -3705,10 +3738,16 @@ paths:
         '422':
           description: >
             Validation failed, a member tree cannot be snapshotted losslessly,
-            or parentRevisionId fails a custody rule (ADR-066): the parent
+            parentRevisionId fails a custody rule (ADR-066): the parent
             revision does not exist, belongs to a different package, or
             already has a parent of its own (nesting depth cannot exceed 1);
-            or baseRevisionId does not exist or belongs to another package.
+            baseRevisionId does not exist or belongs to another package; or
+            `mode: 'final'` is blocked by the ADR-079 (#406) issuance-readiness
+            gate — one or more outstanding ReadinessFinding entries remain
+            across the package's current member specs. The error message
+            reports the finding count and points at
+            `GET /packages/{id}/readiness-report` for the full list; pass
+            `overrideReadinessGate: true` to issue anyway.
           content:
             application/json:
               schema:
@@ -3808,6 +3847,13 @@ paths:
                     same package as the target revision. Overrides the target's
                     stored baseRevisionId; when both are omitted, renders the
                     full issued manual.
+                mode:
+                  $ref: '#/components/schemas/IssuanceMode'
+                overrideReadinessGate:
+                  type: boolean
+                  description: >
+                    Unaudited escape hatch (ADR-079 decision 8, #406) — renders
+                    despite outstanding findings. Ignored unless mode is final.
       responses:
         '200':
           description: DOCX manual file stream
@@ -3821,7 +3867,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: Invalid addendum comparison, or no changed sections to render
+          description: >
+            Invalid addendum comparison, no changed sections to render, or
+            `mode: 'final'` is blocked by the ADR-079 (#406) issuance-readiness
+            gate. In addendum mode the gate covers only the sections that
+            actually changed against the base revision (#406 decision 15) — a
+            carried-over section already evaluated at a prior issuance is
+            never re-gated here. The error message reports the finding count;
+            pass `overrideReadinessGate: true` to generate anyway.
           content:
             application/json:
               schema:
@@ -6486,6 +6539,17 @@ components:
 
     # ── Issuance readiness (ADR-079, #406) ────────────────────────────────────────
 
+    IssuanceMode:
+      type: string
+      enum: [draft, final]
+      description: >
+        Issuance-readiness gate mode (ADR-079, #406). `draft` (or an omitted
+        `mode`) is a complete no-op at zero evaluation cost. `final` evaluates
+        every ReadinessFinding across the resolved tree(s) and blocks with 422
+        unless the result is already clean or `overrideReadinessGate: true` is
+        set. Shared by `POST /packages/{id}/revisions` (structured body) and
+        all three `generate` endpoints.
+
     ReadinessFinding:
       description: >
         One resolvable blocker an editor must clear before a spec can leave
@@ -8310,6 +8374,18 @@ components:
             UUID of the revision used as the immutable addendum comparison
             base (ADR-066). Must belong to the same package. Omit when this
             issuance has no stored comparison lineage.
+        mode:
+          $ref: '#/components/schemas/IssuanceMode'
+        overrideReadinessGate:
+          type: boolean
+          description: >
+            Unaudited escape hatch (ADR-079 decision 8, #406): `true` lets a
+            `mode: 'final'` issuance through even with outstanding
+            ReadinessFinding entries. Ignored unless `mode` is `final`. Only
+            the structured body accepts this — the legacy `{ label }` body
+            stays `.strict()`, so a stray `mode`/`overrideReadinessGate` on it
+            fails closed with a 422 (unrecognized-key validation failure),
+            never a silently-ignored field.
 
     RevisionSummary:
       type: object
