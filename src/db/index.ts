@@ -62,6 +62,11 @@ export { insertParagraphAfter, insertSiblingRow } from './queries/paragraph-inse
 export type { InsertParagraphResult, InsertParagraphInput } from './queries/paragraph-insert.js';
 export { setParagraphVanish, setVanishRow } from './queries/paragraph-vanish.js';
 export type { SetVanishResult, SetVanishRowResult } from './queries/paragraph-vanish.js';
+// Per-paragraph reject (#380, ADR-052 D4) — a restore-to-version write through
+// updateParagraphText above, so its result mirrors UpdateParagraphResult plus
+// two checkpoint-lookup-specific statuses.
+export { rejectParagraphToCheckpoint } from './queries/paragraph-reject.js';
+export type { RejectParagraphResult } from './queries/paragraph-reject.js';
 // rewriteObjectTextBlob is the DB core behind rewriting an objectText child's
 // text into its parent object row's captured blob (#519) — paragraphs.ts's
 // own write path (applyParagraphUpdate) already calls it internally; the
@@ -160,28 +165,13 @@ export type {
   RevitLinkSummary,
   RevitLinkFilter,
 } from './queries/revit-links.js';
-export {
-  createLibrary,
-  createClientLibrary,
-  findLibraryById,
-  findLibraryByName,
-  listLibraries,
-  listLibrarySpecs,
-  updateLibraryName,
-  resolveDefaultLibraryId,
-  ParentLibraryNotFoundError,
-  ParentLibraryNotCompanyError,
-  DefaultCompanyLibraryError,
-  UFGS_REFERENCE_LIBRARY,
-  DEFAULT_COMPANY_LIBRARY,
-  LibraryNotFoundError,
-  type Library,
-  type LibraryTier,
-  type CreateLibraryInput,
-  type CreateClientLibraryInput,
-  type LibrarySpec,
-  type LibrarySpecListOptions,
-} from './queries/libraries.js';
+// Flattened to `export *` (#380 task 7 groundwork) — this block previously
+// named all 19 of libraries.ts's exports individually; verified identical to
+// a full `export *` (every symbol libraries.ts exports was already listed),
+// freeing 21 lines so the rejectParagraphToCheckpoint export above fits under
+// the enforced max-lines: 400 (see ADR-052's D3 amendment note on this file's
+// line budget).
+export * from './queries/libraries.js';
 export { getReferenceGraph } from './queries/reference-graph-read.js';
 export type { GraphScope } from './queries/reference-graph-read.js';
 export type {
