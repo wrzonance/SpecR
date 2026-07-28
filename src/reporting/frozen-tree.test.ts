@@ -148,23 +148,22 @@ describe('flattenSpecTree', () => {
   });
 });
 
-// #392 review finding: the only structural-fallback ('structure') coverage
-// (structure.test.ts, align.test.ts) exercises computeStructuralKeys over
-// synthetic fixtures or compares two genuinely DIFFERENT specs — nothing pins
-// that flattenSpecTree's frozen-side flatten and getComparisonParagraphs' live
-// DB-position flatten (src/db/queries/reporting.ts) produce the SAME
-// node-id -> structural-address map for the SAME unedited spec. This cross-
-// validates that invariant directly: one shared logical tree, expressed
-// independently in each loader's native shape (same node ids throughout —
-// mirroring a real freeze, which stamps the frozen tree with the live
-// paragraph UUIDs — but DELIBERATELY different raw `position` conventions:
-// live rows use 1-based per-parent integers with a realistic gap, matching
-// the DB fixture helpers in frozen-sources.integration.test.ts, while
-// flattenSpecTree recomputes a 0-based DFS index per its own docstring).
-// computeStructuralKeys keys only on relative sibling ORDER (structure.ts:
-// `byPositionThenId`), not the literal integers, so this only holds if both
-// loaders actually preserve the same sibling order for the same tree.
-describe('flattenSpecTree <-> live-loader parity — computeStructuralKeys agree for the SAME spec (#392 review)', () => {
+// #392 review finding: this suite's `liveLoaderRows()` is a HAND-AUTHORED
+// stand-in for `getComparisonParagraphs` (src/db/queries/reporting.ts), not
+// the real query — so it only proves computeStructuralKeys is invariant to
+// differing raw `position` conventions (1-based-with-gaps vs. flattenSpecTree's
+// own 0-based DFS index), which is a property of the pure aligner alone
+// (structure.ts: `byPositionThenId` keys on relative sibling ORDER, never the
+// literal integers). It does NOT prove flattenSpecTree's DFS sibling order and
+// getComparisonParagraphs'/buildNodeTree's sibling order actually agree for a
+// real spec — that cross-loader half of the invariant is pinned separately,
+// against the REAL loaders and a real frozen revision, by
+// frozen-sources.integration.test.ts's "flattenSpecTree <-> live-loader
+// parity — real loaders, same spec (#392 review)" suite. Keep both: this one
+// is fast/DB-free and pins the aligner's position-convention invariance; the
+// integration suite pins the thing this test's name might otherwise imply it
+// already covers.
+describe('flattenSpecTree <-> synthetic live-loader-shaped rows — computeStructuralKeys tolerates differing position conventions (#392 review)', () => {
   const SPEC_ID = 'spec-1';
 
   function liveRow(

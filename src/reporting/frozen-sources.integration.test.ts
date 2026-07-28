@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { pool, createPackageRevision } from '../db/index.js';
+import {
+  pool,
+  createPackageRevision,
+  getComparisonParagraphs,
+  getFrozenComparisonSource,
+} from '../db/index.js';
 import { buildComparisonReport } from './report.js';
+import { flattenSpecTree } from './frozen-tree.js';
+import { computeStructuralKeys } from './structure.js';
 import { SpecNotFoundError } from './error.js';
 import type { ComparisonReport } from './types.js';
 
@@ -374,5 +381,76 @@ describe('frozen comparison sources — pre-#392 snapshot degrade (#392, ADR-078
     expect(report.alignedBy).toBe('origin');
     const row = report.rows.find((r) => cellText(r, 0) === 'GENERAL');
     expect(row && cellText(row, 1)).toBe('EDITED after freeze.');
+  });
+});
+
+// ── flattenSpecTree <-> live-loader parity, against the REAL loaders ───────
+
+// #392 review finding: frozen-tree.test.ts's "flattenSpecTree <-> synthetic
+// live-loader-shaped rows" suite pins that computeStructuralKeys agrees
+// between the two flatten paths using a hand-authored stand-in for
+// `getComparisonParagraphs` — never the real query. That only proves
+// computeStructuralKeys is invariant to differing `position` conventions
+// (already true of the pure aligner); it does not prove flattenSpecTree's
+// DFS sibling order and buildNodeTree's
+// (shared by GET /specs/:id/tree AND the freeze path)/getComparisonParagraphs'
+// sibling order actually agree for a real, unedited spec. This suite freezes
+// a real spec and calls the two REAL loaders — getComparisonParagraphs
+// (src/db/queries/reporting.ts) for the live side, getFrozenComparisonSource
+// + flattenSpecTree for the frozen side — against the SAME spec, so a future
+// divergence in buildNodeTree's or getComparisonParagraphs' sibling tie-break
+// would actually fail a test instead of leaving this invariant unpinned.
+describe('flattenSpecTree <-> live-loader parity — real loaders, same spec (#392 review)', () => {
+  let projectId: string;
+  let specId: string;
+  let rev: RevisionRef;
+
+  beforeAll(async () => {
+    projectId = await insertProject(`StructParity Proj ${suffix}`);
+    specId = await insertProjectSpec(projectId, '11 11 11', `StructParity Spec ${suffix}`);
+    const part1 = await insertPara(specId, null, 'part', 'PART 1 GENERAL', 1);
+    const artA = await insertPara(specId, part1, 'article', 'SUMMARY', 1);
+    await insertPara(specId, artA, 'pr1', 'Clause A1.', 1);
+    await insertPara(specId, artA, 'pr1', 'Clause A2.', 2);
+    await insertPara(specId, part1, 'article', 'REFERENCES', 2);
+    const part2 = await insertPara(specId, null, 'part', 'PART 2 PRODUCTS', 2);
+    await insertPara(specId, part2, 'article', 'MATERIALS', 1);
+
+    const packageId = await insertPackage(projectId, `StructParity Pkg ${suffix}`);
+    await addPackageMember(packageId, specId);
+    rev = await freezeRevision(packageId, `struct-parity-${suffix}`);
+  });
+
+  afterAll(async () => {
+    await cleanupProject(projectId);
+  });
+
+  it('computeStructuralKeys produces the SAME node-id -> structural-address map from getComparisonParagraphs (live) and flattenSpecTree (frozen) for the SAME unedited spec', async () => {
+    const liveRows = await getComparisonParagraphs([specId]);
+    const frozen = await getFrozenComparisonSource(rev.revisionId, specId);
+    if (frozen === null) throw new Error('expected a frozen comparison source to exist');
+    const frozenRows = flattenSpecTree(frozen.tree, specId);
+
+    const liveKeys = computeStructuralKeys(liveRows);
+    const frozenKeys = computeStructuralKeys(frozenRows);
+
+    expect(frozenKeys.size).toBe(liveKeys.size);
+    for (const [id, liveAddress] of liveKeys) {
+      expect(frozenKeys.get(id)).toBe(liveAddress);
+    }
+  });
+
+  it('forcing alignment: "structure" on a live spec vs. its own unedited freeze fully aligns every row (production-path parity)', async () => {
+    const report = await buildComparisonReport([specId, { revisionId: rev.revisionId, specId }], {
+      alignment: 'structure',
+    });
+    expect(report.alignedBy).toBe('structure');
+    expect(report.rows.length).toBeGreaterThan(0);
+    expect(report.summary.differing).toBe(0);
+    for (const row of report.rows) {
+      expect(row.cells[0]?.present).toBe(true);
+      expect(row.cells[1]?.present).toBe(true);
+      expect(cellText(row, 0)).toBe(cellText(row, 1));
+    }
   });
 });
