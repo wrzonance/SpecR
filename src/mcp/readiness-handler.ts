@@ -13,6 +13,7 @@ import {
   PackageNotFoundError,
   type ReadinessScope,
 } from '../db/index.js';
+import { logger } from '../lib/logger.js';
 import type { ToolError, ToolResult } from './tool-result.js';
 
 function toolErr(text: string): ToolError {
@@ -48,6 +49,13 @@ export async function handleReadinessReport({
     if (err instanceof SpecNotFoundError || err instanceof PackageNotFoundError) {
       return toolErr(err.message);
     }
+    // Unlike the SpecNotFoundError/PackageNotFoundError branch above (whose
+    // own message is safe to surface verbatim), an unrecognized failure gets
+    // a generic message to the caller — but the original error, with its
+    // stack/cause chain, must still reach the server-side log (matching
+    // readiness.ts's REST mapError), or a production incident here leaves no
+    // record of what actually broke.
+    logger.error({ err }, 'mcp tool readiness_report failed');
     return toolErr('Internal error — readiness report failed');
   }
 }

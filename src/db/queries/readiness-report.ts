@@ -85,8 +85,8 @@ function buildReport(scope: ReadinessScope, members: readonly ReadinessMember[])
   };
 }
 
-async function readSpecMember(specId: string): Promise<readonly ReadinessMember[]> {
-  const result = await getSpecTree(specId);
+async function readSpecMember(specId: string, db: Pool): Promise<readonly ReadinessMember[]> {
+  const result = await getSpecTree(specId, db);
   if (result === null) throw new SpecNotFoundError(`spec ${specId} not found`);
   return [{ specId, tree: result.tree }];
 }
@@ -124,7 +124,7 @@ async function readPackageMembers(
 
 async function readMembers(scope: ReadinessScope, db: Pool): Promise<readonly ReadinessMember[]> {
   return scope.kind === 'spec'
-    ? readSpecMember(scope.specId)
+    ? readSpecMember(scope.specId, db)
     : readPackageMembers(scope.packageId, db);
 }
 

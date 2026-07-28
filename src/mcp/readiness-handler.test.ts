@@ -22,6 +22,10 @@ vi.mock('../db/index.js', () => ({
   PackageNotFoundError: FakePackageNotFound,
 }));
 
+vi.mock('../lib/logger.js', () => ({
+  logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
+}));
+
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -109,6 +113,22 @@ describe('handleReadinessReport — error mapping never swallows into a generic 
 
     expect(result).toMatchObject({ isError: true });
     expect(result.content[0]?.text).not.toContain('pg connection reset');
+  });
+
+  // Review finding (#406): unlike readiness.ts's REST mapError (logger.error
+  // before the generic 500), this MCP catch-all dropped `err` entirely — an
+  // unexpected failure (pool exhaustion, snapshotMemberTrees fault, ...) left
+  // zero server-side record of what actually broke.
+  it('logs the original error before returning the generic message, matching readiness.ts', async () => {
+    const db = await import('../db/index.js');
+    const err = new Error('pg connection reset');
+    vi.mocked(db.getReadinessReport).mockRejectedValue(err);
+    const { logger } = await import('../lib/logger.js');
+    const { handleReadinessReport } = await import('./readiness-handler.js');
+
+    await handleReadinessReport({ specId: SPEC });
+
+    expect(logger.error).toHaveBeenCalledWith({ err }, 'mcp tool readiness_report failed');
   });
 });
 

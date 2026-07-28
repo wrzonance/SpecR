@@ -300,9 +300,12 @@ function registerReadinessTools(reg: ToolRegistrar): void {
         'Dry-run the ADR-079 issuance-readiness gate for a spec or an entire design package — ' +
         'every outstanding unresolved choice token, visible specifier note, open Word comment, ' +
         'and body-level text box, plus the advisory-only highlight report (never a blocker). ' +
-        'readyForFinal: true is exactly the set a mode: "final" issuance (issue_package_revision, ' +
-        'generate_docx) would let through. Provide exactly one of specId (see get_spec) or ' +
-        'packageId (see list_packages).',
+        'readyForFinal: true is exactly the set a mode: "final" issue_package_revision would let ' +
+        'through — its REST route (POST /packages/{id}/revisions) and MCP tool both enforce this ' +
+        'gate. The generate_docx tool does NOT: its inputSchema has no mode/overrideReadinessGate ' +
+        'fields, so it never gates on readiness (only its mapped REST route, ' +
+        'POST /specs/{id}/generate, does) — a documented MCP gap, not an oversight; see #539. ' +
+        'Provide exactly one of specId (see get_spec) or packageId (see list_packages).',
       inputSchema: {
         specId: z.uuid().optional().describe('Spec UUID — readiness findings for one spec'),
         packageId: z

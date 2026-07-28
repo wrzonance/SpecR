@@ -973,6 +973,28 @@ describe('capability gating (#43)', () => {
   });
 });
 
+// Review finding (#406): readiness_report's description previously claimed
+// generate_docx honors `mode: 'final'` gating alongside issue_package_revision —
+// false. generate_docx's inputSchema carries no mode/overrideReadinessGate
+// fields and handleGenerateDocx never calls the readiness gate (only the REST
+// POST /specs/:id/generate route does). The description must document that
+// gap accurately instead of promising a guarantee the tool doesn't keep.
+describe('tool: readiness_report — description accuracy (review finding, #406)', () => {
+  it('does not claim generate_docx enforces the mode: "final" readiness gate', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/list', {});
+    const b = body as { result: { tools: { name: string; description?: string }[] } };
+    const tool = b.result.tools.find((t) => t.name === 'readiness_report');
+    expect(tool).toBeDefined();
+    const description = tool?.description ?? '';
+    expect(description).not.toMatch(/generate_docx\)\s*would let through/);
+    // Still documents the one MCP tool that genuinely gates on mode: 'final'.
+    expect(description).toContain('issue_package_revision');
+    // Documents generate_docx's gap explicitly rather than staying silent
+    // about the divergence from the REST route it's mapped to.
+    expect(description).toMatch(/generate_docx.*(does not|doesn't|never).*(mode|gate)/is);
+  });
+});
+
 describe('load_files tool', () => {
   it('returns LoadResult JSON for a valid glob', async () => {
     const url = `${baseUrl}/mcp`;

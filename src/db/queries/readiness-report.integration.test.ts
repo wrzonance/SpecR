@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { pool } from '../index.js';
 import { config } from '../../lib/env.js';
 import { getReadinessReport } from './readiness-report.js';
@@ -287,6 +287,29 @@ describe('getReadinessReport — package-scope transaction safety (INV-14)', () 
       expect(report.readyForFinal).toBe(true);
     } finally {
       await soloPool.end();
+    }
+  });
+});
+
+describe('getReadinessReport — spec-scope db injection (review finding, #406)', () => {
+  it('routes spec-scope reads through the injected db, not the module-level pool', async () => {
+    const specId = await newSpec('09 91 29', 'Painting — DB Injection');
+    await addParagraph(specId, 'Provide finish coat.');
+
+    // A dedicated pool distinct from the module-level `pool` singleton.
+    // getReadinessReport's spec-scope path (readSpecMember -> getSpecTree)
+    // must issue its queries through THIS pool when it's passed as the `db`
+    // argument — not silently fall through to the module-level pool, which
+    // would make this spy see zero calls despite the report resolving
+    // successfully off the shared connection.
+    const injectedPool = new Pool({ connectionString: config.DATABASE_URL, max: 1 });
+    const querySpy = vi.spyOn(injectedPool, 'query');
+    try {
+      const report = await getReadinessReport({ kind: 'spec', specId }, injectedPool);
+      expect(report.readyForFinal).toBe(true);
+      expect(querySpy).toHaveBeenCalled();
+    } finally {
+      await injectedPool.end();
     }
   });
 });

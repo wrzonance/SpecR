@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import { GenerateBodySchema } from './generate-schemas.js';
 
 // ADR-079 (#406): issuance-readiness gate. `mode`/`overrideReadinessGate` are
@@ -31,5 +32,29 @@ describe('GenerateBodySchema — mode / overrideReadinessGate (ADR-079)', () => 
     expect(
       GenerateBodySchema.safeParse({ mode: 'final', overrideReadinessGate: 'yes' }).success
     ).toBe(false);
+  });
+
+  // Review finding (#406): a misspelled/unrecognized field must not silently
+  // strip past the ADR-079 readiness gate — `.strict()` surfaces it as a 400
+  // instead of the request quietly parsing as if the field were never sent.
+  it('rejects an unrecognized top-level field instead of silently stripping it', () => {
+    expect(GenerateBodySchema.safeParse({ mdoe: 'final' }).success).toBe(false);
+  });
+
+  it('still parses baseRevisionId through RevisionGenerateBodySchema’s .extend()', () => {
+    const RevisionGenerateBodySchema = GenerateBodySchema.extend({
+      baseRevisionId: z.uuid().optional(),
+    });
+    const uuid = '123e4567-e89b-42d3-a456-426614174000';
+    const parsed = RevisionGenerateBodySchema.safeParse({ mode: 'final', baseRevisionId: uuid });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.baseRevisionId).toBe(uuid);
+  });
+
+  it('still rejects an unrecognized field on the extended revision schema', () => {
+    const RevisionGenerateBodySchema = GenerateBodySchema.extend({
+      baseRevisionId: z.uuid().optional(),
+    });
+    expect(RevisionGenerateBodySchema.safeParse({ mdoe: 'final' }).success).toBe(false);
   });
 });
