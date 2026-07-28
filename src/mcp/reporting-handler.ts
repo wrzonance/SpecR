@@ -15,7 +15,13 @@ function toolErr(text: string): ToolError {
  *  positionally — never by a `specId`-keyed lookup. Two columns can legally
  *  share a specId (the same spec frozen at two different revisions, or a
  *  live spec vs. its own frozen snapshot, #392), and a specId-keyed map would
- *  collapse to one column's section for every such cell. */
+ *  collapse to one column's section for every such cell.
+ *
+ *  A frozen column's `revisionId` (ComparisonColumn, #392 ADR-078 §5) is
+ *  carried onto its anchors too (#392 review finding): `paragraphUuid` there
+ *  names a paragraph as it existed AT ISSUANCE, which may since have been
+ *  edited or deleted in the live spec — a client needs `revisionId` to know
+ *  the anchor is historical rather than trying to locate it live. */
 function anchorsFromReport(report: ComparisonReport): McpAnchor[] {
   const out: McpAnchor[] = [];
   for (const row of report.rows) {
@@ -23,7 +29,12 @@ function anchorsFromReport(report: ComparisonReport): McpAnchor[] {
       if (!cell.present) return;
       const column = report.columns[columnIndex];
       if (column !== undefined) {
-        out.push({ section: column.section, specId: cell.specId, paragraphId: cell.paragraphUuid });
+        out.push({
+          section: column.section,
+          specId: cell.specId,
+          paragraphId: cell.paragraphUuid,
+          ...(column.revisionId ? { revisionId: column.revisionId } : {}),
+        });
       }
     });
   }

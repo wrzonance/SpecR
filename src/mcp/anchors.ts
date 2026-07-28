@@ -17,15 +17,27 @@ export interface McpAnchor {
   readonly section: string;
   readonly specId?: string;
   readonly paragraphId?: string;
+  /** Present iff `paragraphId` names a paragraph inside a frozen revision
+   *  snapshot rather than the live spec (#392 review finding). Without this,
+   *  a UI client cannot tell a frozen anchor from a live one and may try to
+   *  navigate to `paragraphId` in the CURRENT live spec — which can 404 or
+   *  show stale content if the paragraph was since edited or deleted. */
+  readonly revisionId?: string;
 }
 
 // Omit id fields that are absent — exactOptionalPropertyTypes forbids
 // `{ specId: undefined }`. `null` (nullable columns) is treated as absent.
-function anchor(section: string, specId?: string | null, paragraphId?: string | null): McpAnchor {
+function anchor(
+  section: string,
+  specId?: string | null,
+  paragraphId?: string | null,
+  revisionId?: string | null
+): McpAnchor {
   return {
     section,
     ...(specId ? { specId } : {}),
     ...(paragraphId ? { paragraphId } : {}),
+    ...(revisionId ? { revisionId } : {}),
   };
 }
 

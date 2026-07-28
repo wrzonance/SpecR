@@ -384,6 +384,103 @@ describe('frozen comparison sources — pre-#392 snapshot degrade (#392, ADR-078
   });
 });
 
+// ── MIXED legacy + new-format snapshots of the SAME spec (#392 review finding) ─
+//
+// The suite above deliberately strips meta.originParagraphId from BOTH
+// revisions, explicitly to avoid this exact scenario (see its comment). This
+// suite exercises what actually happens the day #392 ships: every revision
+// frozen BEFORE deploy permanently lacks the field (no backfill, ADR-078 D6
+// non-goal), while every revision frozen AFTER deploy carries it. A target
+// spec with even one locally-authored paragraph (the common case — that's
+// what editing a project copy IS) triggers `sharesCrossSourceOrigin` to
+// resolve `auto` to 'origin' via that local paragraph's own-id match, and
+// origin-keying a lineage-carrying paragraph then mismatches: the legacy side
+// keys on its own id (field absent), the new side keys on its master's id
+// (field present) — silently showing an unedited cloned paragraph as
+// removed-then-added instead of unchanged.
+describe('frozen comparison sources — MIXED legacy/new-format same-spec pair (#392 review finding)', () => {
+  let projectId: string;
+  let targetSpecId: string;
+  let revLegacy: RevisionRef;
+  let revCurrent: RevisionRef;
+  let clonedParaId: string;
+  let localParaId: string;
+
+  beforeAll(async () => {
+    projectId = await insertProject(`MixedFormat Proj ${suffix}`);
+    const originSpecId = await insertProjectSpec(
+      projectId,
+      '09 22 00',
+      `MixedFormat Origin ${suffix}`
+    );
+    const originParaId = await insertPara(originSpecId, null, 'part', 'GENERAL', 1);
+
+    targetSpecId = await insertProjectSpec(projectId, '09 22 01', `MixedFormat Target ${suffix}`);
+    // A cloned (lineage-carrying) paragraph AND a locally-authored one —
+    // exactly what a real edited project-copy spec looks like.
+    clonedParaId = await insertPara(targetSpecId, null, 'part', 'GENERAL', 1, originParaId);
+    localParaId = await insertPara(targetSpecId, null, 'part', 'Project-specific clause.', 2);
+
+    const packageId = await insertPackage(projectId, `MixedFormat Pkg ${suffix}`);
+    await addPackageMember(packageId, targetSpecId);
+
+    // revLegacy simulates a revision frozen BEFORE #392 shipped — strip the
+    // field, permanently and irrecoverably (no backfill).
+    revLegacy = await freezeRevision(packageId, `mixed-legacy-${suffix}`);
+    await stripOriginParagraphId(revLegacy.revisionId, targetSpecId);
+
+    // revCurrent is a fresh freeze AFTER #392 ships — left untouched, so the
+    // cloned paragraph's meta.originParagraphId is embedded normally. Neither
+    // paragraph's text changed between freezes.
+    revCurrent = await freezeRevision(packageId, `mixed-current-${suffix}`);
+  });
+
+  afterAll(async () => {
+    await cleanupProject(projectId);
+  });
+
+  it('revLegacy lacks meta.originParagraphId; revCurrent carries it — the genuine mixed pair', async () => {
+    const { rows } = await pool.query<{ revisionId: string; meta: Record<string, unknown> | null }>(
+      `SELECT revision_id AS "revisionId", tree #> '{parts,0,meta}' AS meta
+       FROM package_revision_specs
+       WHERE revision_id = ANY($1::uuid[]) AND spec_id = $2`,
+      [[revLegacy.revisionId, revCurrent.revisionId], targetSpecId]
+    );
+    const legacyMeta = rows.find((r) => r.revisionId === revLegacy.revisionId)?.meta;
+    const currentMeta = rows.find((r) => r.revisionId === revCurrent.revisionId)?.meta;
+    expect(legacyMeta).not.toHaveProperty('originParagraphId');
+    expect(currentMeta).toHaveProperty('originParagraphId');
+  });
+
+  it('an unedited cloned paragraph aligns as unchanged across a legacy/current pair, not removed-then-added', async () => {
+    const report = await buildComparisonReport([
+      { revisionId: revLegacy.revisionId, specId: targetSpecId },
+      { revisionId: revCurrent.revisionId, specId: targetSpecId },
+    ]);
+    expect(report.alignedBy).toBe('origin');
+
+    // Exactly 2 rows (cloned + local paragraph), not 3 — a 3rd row would mean
+    // the cloned paragraph split into a false removed/added pair.
+    expect(report.rows).toHaveLength(2);
+
+    const clonedRow = report.rows.find((r) => cellText(r, 0) === 'GENERAL');
+    expect(clonedRow).toBeDefined();
+    expect(clonedRow?.cells[0]).toMatchObject({ present: true, paragraphUuid: clonedParaId });
+    expect(clonedRow?.cells[1]).toMatchObject({ present: true, paragraphUuid: clonedParaId });
+
+    const localRow = report.rows.find((r) => cellText(r, 0) === 'Project-specific clause.');
+    expect(localRow).toBeDefined();
+    expect(localRow?.cells[1]).toMatchObject({
+      present: true,
+      paragraphUuid: localParaId,
+      text: 'Project-specific clause.',
+    });
+
+    // Grounded: summary reports the pair as fully identical, not differing.
+    expect(report.summary.differing).toBe(0);
+  });
+});
+
 // ── flattenSpecTree <-> live-loader parity, against the REAL loaders ───────
 
 // #392 review finding: frozen-tree.test.ts's "flattenSpecTree <-> synthetic

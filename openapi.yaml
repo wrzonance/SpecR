@@ -7186,6 +7186,17 @@ components:
                 box modeled as an opaque round-trip blob. Present only on
                 `type: object` nodes.
               $ref: '#/components/schemas/ObjectMeta'
+            originParagraphId:
+              type: string
+              format: uuid
+              description: >-
+                The live paragraph this node was frozen from, at revision-freeze
+                time (#392, ADR-078). Present only in a revision's frozen
+                `SpecTree` (e.g. `GET /revisions/{id}`) — never on a live
+                `GET /specs/{id}/tree` response — and only for a paragraph that
+                itself has project-copy lineage (migration 018); absent for a
+                locally-authored paragraph or a snapshot frozen before this
+                field existed.
 
     ObjectMeta:
       type: object

@@ -104,7 +104,31 @@ describe('handleCompareSpecs — anchors trace each cell to its own column, even
     if ('isError' in result) throw new Error('expected an ok result, got isError');
     expect(result._meta?.[ANCHORS_META_KEY]).toEqual([
       { section: '09 91 26', specId: A, paragraphId: 'live-para' },
-      { section: '09 91 26 (as issued)', specId: A, paragraphId: 'frozen-para' },
+      {
+        section: '09 91 26 (as issued)',
+        specId: A,
+        paragraphId: 'frozen-para',
+        revisionId: REV1,
+      },
     ]);
+  });
+
+  // #392 review finding: a frozen cell's paragraphUuid names a paragraph AS
+  // ISSUED, which may since have been edited/deleted live — omitting
+  // revisionId left a UI client with no way to tell the anchor is historical
+  // before trying (and possibly failing) to locate it in the live spec.
+  it('a live column carries no revisionId on its anchor; a frozen column always does', async () => {
+    const reporting = await import('../reporting/index.js');
+    vi.mocked(reporting.buildComparisonReport).mockResolvedValueOnce(TWO_COLUMNS_SAME_SPEC);
+    const { handleCompareSpecs } = await import('./reporting-handler.js');
+
+    const result = await handleCompareSpecs({
+      sources: [A, { revisionId: REV1, specId: A }],
+    });
+
+    if ('isError' in result) throw new Error('expected an ok result, got isError');
+    const anchors = result._meta?.[ANCHORS_META_KEY] as { revisionId?: string }[] | undefined;
+    expect(anchors?.[0]?.revisionId).toBeUndefined();
+    expect(anchors?.[1]?.revisionId).toBe(REV1);
   });
 });
