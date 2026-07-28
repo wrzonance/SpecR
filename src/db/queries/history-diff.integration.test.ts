@@ -146,4 +146,21 @@ describe('getSpecHistoryDiff — checkpoint:<uuid> anchor (issue #380 task 6)', 
       }),
     ]);
   });
+
+  it('resolves the checkpoint anchor when specId is cased differently than the checkpoint used at seal time (regression, #380 review finding)', async () => {
+    const diff = await getSpecHistoryDiff(
+      ids.spec.toUpperCase(),
+      `checkpoint:${sealingCheckpointId}`,
+      'current',
+      pool
+    );
+
+    expect(diff?.modified).toEqual([
+      expect.objectContaining({
+        nodeId: ids.paragraph,
+        beforeText: 'Sealed at version 1',
+        afterText: 'Edited after seal',
+      }),
+    ]);
+  });
 });

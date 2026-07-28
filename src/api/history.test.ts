@@ -133,3 +133,91 @@ describe('getParagraphHistoryHandler — raw/coalesced dispatch (#380 default fl
     expect(getCoalescedParagraphHistory).not.toHaveBeenCalled();
   });
 });
+
+describe('getHistoryDiffHandler (#380 review finding — 422 mapping was untested)', () => {
+  it('rejects a malformed spec id or anchor before touching the db', async () => {
+    const { getHistoryDiffHandler } = await import('./history.js');
+    const { getSpecHistoryDiff } = await import('../db/index.js');
+    const res = makeRes();
+
+    await getHistoryDiffHandler(
+      makeReq({ params: { id: 'nope' }, query: { from: 'current', to: 'current' } }),
+      res as unknown as Response
+    );
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(getSpecHistoryDiff).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the spec does not exist', async () => {
+    const { getHistoryDiffHandler } = await import('./history.js');
+    const { getSpecHistoryDiff } = await import('../db/index.js');
+    vi.mocked(getSpecHistoryDiff).mockResolvedValueOnce(null);
+    const res = makeRes();
+
+    await getHistoryDiffHandler(
+      makeReq({ params: { id: SPEC_ID }, query: { from: 'origin', to: 'current' } }),
+      res as unknown as Response
+    );
+
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('returns 200 with the diff on success', async () => {
+    const { getHistoryDiffHandler } = await import('./history.js');
+    const { getSpecHistoryDiff } = await import('../db/index.js');
+    const diff = {
+      specId: SPEC_ID,
+      from: 'origin' as const,
+      to: 'current' as const,
+      added: [],
+      removed: [],
+      modified: [],
+    };
+    vi.mocked(getSpecHistoryDiff).mockResolvedValueOnce(diff);
+    const res = makeRes();
+
+    await getHistoryDiffHandler(
+      makeReq({ params: { id: SPEC_ID }, query: { from: 'origin', to: 'current' } }),
+      res as unknown as Response
+    );
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: diff });
+  });
+
+  it('maps a HistoryAnchorError (unresolvable checkpoint/version/revision anchor) to 422, never the generic 500', async () => {
+    const { getHistoryDiffHandler } = await import('./history.js');
+    const { getSpecHistoryDiff, HistoryAnchorError } = await import('../db/index.js');
+    const checkpointAnchor = `checkpoint:${SPEC_ID}`;
+    vi.mocked(getSpecHistoryDiff).mockRejectedValueOnce(
+      new HistoryAnchorError(`checkpoint ${SPEC_ID} does not exist`)
+    );
+    const res = makeRes();
+
+    await getHistoryDiffHandler(
+      makeReq({ params: { id: SPEC_ID }, query: { from: checkpointAnchor, to: 'current' } }),
+      res as unknown as Response
+    );
+
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: `checkpoint ${SPEC_ID} does not exist`,
+    });
+  });
+
+  it('maps an unrelated db error to 500, not 422', async () => {
+    const { getHistoryDiffHandler } = await import('./history.js');
+    const { getSpecHistoryDiff } = await import('../db/index.js');
+    vi.mocked(getSpecHistoryDiff).mockRejectedValueOnce(new Error('db down'));
+    const res = makeRes();
+
+    await getHistoryDiffHandler(
+      makeReq({ params: { id: SPEC_ID }, query: { from: 'origin', to: 'current' } }),
+      res as unknown as Response
+    );
+
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
+});

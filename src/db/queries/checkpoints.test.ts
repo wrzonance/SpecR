@@ -73,6 +73,11 @@ describe('createCheckpoint', () => {
     const params = vi.mocked(pool.query).mock.calls[0]?.[1];
     expect(sql).toContain('INSERT INTO checkpoints (name, spec_id, user_id, content_version_map)');
     expect(sql).toContain('SELECT content_version FROM specs WHERE id = $2');
+    // Case-fold regression (#380 review finding): the JSONB key must be built
+    // from $2::uuid::text (canonical-cased), never a bare $2::text — otherwise
+    // a scopeId supplied in different letter-casing than a later reader's
+    // spec id makes the checkpoint invisible to every boundary lookup.
+    expect(sql).toContain('jsonb_build_object($2::uuid::text,');
     expect(params).toEqual(['Reviewed 07/27', 's1', 'u1']);
   });
 
@@ -243,7 +248,11 @@ describe('getCheckpointBoundariesForSpec', () => {
     ]);
     const sql = vi.mocked(pool.query).mock.calls[0]?.[0];
     const params = vi.mocked(pool.query).mock.calls[0]?.[1];
-    expect(sql).toContain('content_version_map ? $1::text');
+    // Case-fold regression (#380 review finding): both the extraction and the
+    // existence check must normalize the lookup key through ::uuid::text, or
+    // a specId cased differently than the stored key never matches.
+    expect(sql).toContain('(content_version_map ->> $1::uuid::text)::int');
+    expect(sql).toContain('content_version_map ? $1::uuid::text');
     expect(sql).toContain('ORDER BY content_version ASC, created_at ASC, id ASC');
     expect(params).toEqual(['s1']);
   });
@@ -286,6 +295,9 @@ describe('getLatestCheckpointBoundary', () => {
 
     expect(result).toEqual({ checkpointId: 'cp-2', at: NOW.toISOString(), contentVersion: 7 });
     const sql = vi.mocked(pool.query).mock.calls[0]?.[0];
+    // Case-fold regression (#380 review finding) — see getCheckpointBoundariesForSpec above.
+    expect(sql).toContain('(content_version_map ->> $1::uuid::text)::int');
+    expect(sql).toContain('content_version_map ? $1::uuid::text');
     expect(sql).toContain('ORDER BY content_version DESC, created_at DESC, id DESC');
     expect(sql).toContain('LIMIT 1');
   });

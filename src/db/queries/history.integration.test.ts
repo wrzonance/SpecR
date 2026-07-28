@@ -362,4 +362,18 @@ describe('actor attribution, checkpoint milestones, coalesced sessions (issue #3
       ])
     );
   });
+
+  it('getSpecHistory surfaces the checkpoint milestone even when specId is cased differently than at seal time (regression, #380 review finding)', async () => {
+    const timeline = await getSpecHistory(ids.actorSpec.toUpperCase(), undefined, pool);
+
+    expect(timeline?.milestones).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'checkpoint',
+          checkpointId: actorCheckpointId,
+          contentVersion: 1,
+        }),
+      ])
+    );
+  });
 });

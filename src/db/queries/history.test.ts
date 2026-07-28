@@ -151,7 +151,10 @@ describe('getSpecHistory — checkpoint milestones (ADR-052 D3/D4)', () => {
     );
     const checkpointSql = vi.mocked(pool.query).mock.calls[3]?.[0];
     const checkpointParams = vi.mocked(pool.query).mock.calls[3]?.[1];
-    expect(checkpointSql).toContain('content_version_map ? $1::text');
+    // Case-fold regression (#380 review finding) — mirrors checkpoints.ts's
+    // getCheckpointBoundariesForSpec: a bare $1::text never matches a
+    // differently-cased jsonb key.
+    expect(checkpointSql).toContain('content_version_map ? $1::uuid::text');
     expect(checkpointParams).toEqual(['s1']);
   });
 });
@@ -220,7 +223,8 @@ describe('getCoalescedParagraphHistory — tier-1 read (ADR-052 D3)', () => {
     );
     const boundarySql = vi.mocked(pool.query).mock.calls[2]?.[0];
     const boundaryParams = vi.mocked(pool.query).mock.calls[2]?.[1];
-    expect(boundarySql).toContain('content_version_map ? $1::text');
+    // Case-fold regression (#380 review finding) — see checkpointMilestones above.
+    expect(boundarySql).toContain('content_version_map ? $1::uuid::text');
     expect(boundaryParams).toEqual(['s1']);
   });
 

@@ -250,4 +250,36 @@ describe('checkpoints query layer (issue #380 task 3)', () => {
     expect(await getCheckpointBoundariesForSpec(untouchedSpecId, pool)).toEqual([]);
     expect(await getLatestCheckpointBoundary(untouchedSpecId, pool)).toBeNull();
   });
+
+  it('content_version_map key is case-folded to canonical form, so a checkpoint stays visible to boundary lookups regardless of scopeId/specId letter-casing (regression, #380 review finding)', async () => {
+    const { createCheckpoint, getCheckpointBoundariesForSpec, getLatestCheckpointBoundary } =
+      await import('./checkpoints.js');
+    await pool.query('UPDATE specs SET content_version = 5 WHERE id = $1', [qlLoneSpecId]);
+    const uppercasedScopeId = qlLoneSpecId.toUpperCase();
+
+    const checkpoint = await createCheckpoint(
+      { name: label('case-fold'), scope: 'spec', scopeId: uppercasedScopeId, userId },
+      pool
+    );
+
+    // The stored map key is always the canonical (lowercase) spec id, never
+    // the caller's original casing.
+    expect(Object.keys(checkpoint.contentVersionMap)).toEqual([qlLoneSpecId]);
+    expect(checkpoint.contentVersionMap).toEqual({ [qlLoneSpecId]: 5 });
+
+    // A later boundary lookup by the canonical id resolves it...
+    const canonicalBoundaries = await getCheckpointBoundariesForSpec(qlLoneSpecId, pool);
+    expect(canonicalBoundaries.some((b) => b.checkpointId === checkpoint.id)).toBe(true);
+
+    // ...and so does a lookup using a DIFFERENT casing of that same id.
+    const uppercaseBoundaries = await getCheckpointBoundariesForSpec(uppercasedScopeId, pool);
+    expect(uppercaseBoundaries.some((b) => b.checkpointId === checkpoint.id)).toBe(true);
+
+    // getLatestCheckpointBoundary must agree regardless of which casing of
+    // the spec id is used to ask — it's a pure lookup-key difference, never a
+    // different answer.
+    const latestCanonical = await getLatestCheckpointBoundary(qlLoneSpecId, pool);
+    const latestUppercase = await getLatestCheckpointBoundary(uppercasedScopeId, pool);
+    expect(latestUppercase).toEqual(latestCanonical);
+  });
 });

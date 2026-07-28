@@ -355,15 +355,18 @@ interface CheckpointMilestoneRow {
 
 /** Checkpoints applying to `specId` (own + covering project-scoped),
  *  ascending — own query rather than getCheckpointBoundariesForSpec because
- *  the timeline also needs the checkpoint's `name`. */
+ *  the timeline also needs the checkpoint's `name`. $1::uuid::text (not a bare
+ *  $1::text, #380 review finding) canonicalizes specId's letter-casing before
+ *  it's compared against the jsonb keys — mirrors checkpoints.ts's own
+ *  boundary queries, so this duplicated read path can't regress separately. */
 async function checkpointMilestones(
   specId: string,
   db: Queryable
 ): Promise<readonly SpecHistoryMilestone[]> {
   const result = await db.query<CheckpointMilestoneRow>(
-    `SELECT id, name, created_at, (content_version_map ->> $1::text)::int AS content_version
+    `SELECT id, name, created_at, (content_version_map ->> $1::uuid::text)::int AS content_version
      FROM checkpoints
-     WHERE content_version_map ? $1::text
+     WHERE content_version_map ? $1::uuid::text
      ORDER BY content_version ASC, created_at ASC, id ASC`,
     [specId]
   );

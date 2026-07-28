@@ -119,17 +119,28 @@ function mapBoundaryRow(row: CheckpointBoundaryRow): CheckpointBoundary {
  * 23503, remapped to CheckpointScopeNotFoundError by createCheckpoint.
  */
 function insertSql(scope: CheckpointScope): string {
-  // Every occurrence of $2 casts explicitly (::uuid or ::text). Postgres infers
-  // one global type per parameter across a whole statement — leaving even one
-  // occurrence unadorned while another casts it (e.g. to ::text for the jsonb
-  // key) makes the server unify on that cast type everywhere, turning the
-  // plain `spec_id`/`project_id` column assignment into a `uuid = text`
-  // operator error. Explicit casts at every site route around that inference.
+  // Every occurrence of $2 casts explicitly (::uuid or ::uuid::text). Postgres
+  // infers one global type per parameter across a whole statement — leaving
+  // even one occurrence unadorned while another casts it (e.g. to ::text for
+  // the jsonb key) makes the server unify on that cast type everywhere,
+  // turning the plain `spec_id`/`project_id` column assignment into a
+  // `uuid = text` operator error. Explicit casts at every site route around
+  // that inference.
+  //
+  // The jsonb key is built from $2::uuid::text, never a bare $2::text
+  // (review finding, #380): jsonb `?`/`->>` compare keys as plain text with
+  // no UUID-aware case folding, so a caller-supplied scopeId preserves
+  // whatever letter-casing it arrived in. Routing it through ::uuid first
+  // forces Postgres's canonical (lowercase) rendering — the same
+  // representation `id::text` already produces for the project-scope
+  // aggregate below (a uuid column's text cast is always canonical) — so a
+  // later boundary lookup keyed on the canonical spec id can never miss this
+  // checkpoint over a mere case difference.
   if (scope === 'spec') {
     return `INSERT INTO checkpoints (name, spec_id, user_id, content_version_map)
       VALUES (
         $1, $2::uuid, $3,
-        jsonb_build_object($2::text, (SELECT content_version FROM specs WHERE id = $2::uuid))
+        jsonb_build_object($2::uuid::text, (SELECT content_version FROM specs WHERE id = $2::uuid))
       )
       RETURNING ${CHECKPOINT_COLUMNS}`;
   }
@@ -223,10 +234,15 @@ export async function getCheckpointBoundariesForSpec(
   db: Queryable = pool
 ): Promise<readonly CheckpointBoundary[]> {
   try {
+    // $1::uuid::text (not a bare $1::text, #380 review finding) canonicalizes
+    // specId's letter-casing before it's compared against the jsonb keys —
+    // mirroring the ::uuid::text write in insertSql — so a spec id supplied
+    // in different casing than the checkpoint used at seal time still
+    // resolves every boundary that applies to it.
     const result = await db.query<CheckpointBoundaryRow>(
-      `SELECT id, created_at, (content_version_map ->> $1::text)::int AS content_version
+      `SELECT id, created_at, (content_version_map ->> $1::uuid::text)::int AS content_version
        FROM checkpoints
-       WHERE content_version_map ? $1::text
+       WHERE content_version_map ? $1::uuid::text
        ORDER BY content_version ASC, created_at ASC, id ASC`,
       [specId]
     );
@@ -248,10 +264,11 @@ export async function getLatestCheckpointBoundary(
   db: Queryable = pool
 ): Promise<CheckpointBoundary | null> {
   try {
+    // Case-fold via $1::uuid::text — see getCheckpointBoundariesForSpec above.
     const result = await db.query<CheckpointBoundaryRow>(
-      `SELECT id, created_at, (content_version_map ->> $1::text)::int AS content_version
+      `SELECT id, created_at, (content_version_map ->> $1::uuid::text)::int AS content_version
        FROM checkpoints
-       WHERE content_version_map ? $1::text
+       WHERE content_version_map ? $1::uuid::text
        ORDER BY content_version DESC, created_at DESC, id DESC
        LIMIT 1`,
       [specId]

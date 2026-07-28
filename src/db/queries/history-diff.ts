@@ -9,6 +9,15 @@ export type HistoryAnchor = number | string;
 
 export class HistoryAnchorError extends DatabaseError {}
 
+// UUIDs are case-insensitive (z.uuid() accepts either case, PostgreSQL's uuid
+// type compares canonically) but a checkpoint's content_version_map is a
+// plain JS object keyed by the exact text checkpoints.ts stored — a bare
+// `map[specId]` lookup is case-SENSITIVE. Case-fold before indexing so a
+// specId supplied in different letter-casing than the checkpoint used at seal
+// time still resolves (#380 review finding). Mirrors merge/conflict.ts's
+// uuidKey.
+const uuidKey = (uuid: string): string => uuid.toLowerCase();
+
 export interface HistoryDiffEntry {
   readonly nodeId: string;
   readonly nodeType: string;
@@ -255,7 +264,7 @@ async function checkpointSnapshot(
   if (!checkpoint) {
     throw new HistoryAnchorError(`checkpoint ${checkpointId} does not exist`);
   }
-  const contentVersion = checkpoint.contentVersionMap[specId];
+  const contentVersion = checkpoint.contentVersionMap[uuidKey(specId)];
   if (contentVersion === undefined) {
     throw new HistoryAnchorError(
       `checkpoint ${checkpointId} never sealed spec ${specId} (not in its content_version_map)`
