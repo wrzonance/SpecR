@@ -85,6 +85,7 @@ export {
   RevisionAttributesSchema,
   CreateRevisionBodySchema,
   StructuredCreateRevisionBodySchema,
+  IssuanceModeSchema,
 } from './revision-schemas.js';
 export type {
   RevisionNomenclatureType,
@@ -94,6 +95,7 @@ export type {
   RevisionAttributes,
   CreateRevisionBody,
   StructuredCreateRevisionBody,
+  IssuanceMode,
 } from './revision-schemas.js';
 export type {
   StyleNodeType,

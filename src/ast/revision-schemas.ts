@@ -73,6 +73,15 @@ export const RevisionAttributesSchema = z
 
 export type RevisionAttributes = z.infer<typeof RevisionAttributesSchema>;
 
+// ADR-079 (#406): issuance readiness gate. `draft` (or omitted) is a
+// complete no-op for the gate at zero evaluation cost; only an explicit
+// `final` triggers `evaluateSpecReadiness` (INV-1). Shared with
+// `GenerateBodySchema` (generate-schemas.ts) since the same gate wires into
+// both package-revision issuance and every `generate` endpoint.
+export const IssuanceModeSchema = z.enum(['draft', 'final']);
+
+export type IssuanceMode = z.infer<typeof IssuanceModeSchema>;
+
 // Immutable package revision snapshot (ADR-015 D5 + ADR-025). The legacy label
 // body remains accepted; structured writes use a profile-defined type plus an
 // open attributes bag.
@@ -98,6 +107,14 @@ export const StructuredCreateRevisionBodySchema = z
     // ADR-066 (#390): immutable comparison lineage for reproducible addenda.
     // Existence and same-package rules are enforced transactionally at write.
     baseRevisionId: z.uuid().exactOptional(),
+    // ADR-079 (#406): `final` triggers the readiness gate; `overrideReadinessGate`
+    // is an unaudited escape hatch for this slice only (decision 8, #380–#382
+    // follow-up owns audit trail). `LegacyCreateRevisionBodySchema` stays
+    // `.strict()` and untouched — a stray `mode` on a legacy `{ label }` body
+    // fails closed with Zod's own unrecognized-key 422 (INV-10), never a
+    // silently-ignored field.
+    mode: IssuanceModeSchema.exactOptional(),
+    overrideReadinessGate: z.boolean().exactOptional(),
   })
   .strict();
 
