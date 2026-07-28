@@ -62,11 +62,13 @@ export { insertParagraphAfter, insertSiblingRow } from './queries/paragraph-inse
 export type { InsertParagraphResult, InsertParagraphInput } from './queries/paragraph-insert.js';
 export { setParagraphVanish, setVanishRow } from './queries/paragraph-vanish.js';
 export type { SetVanishResult, SetVanishRowResult } from './queries/paragraph-vanish.js';
-// Per-paragraph reject (#380, ADR-052 D4) — a restore-to-version write through
-// updateParagraphText above, so its result mirrors UpdateParagraphResult plus
-// two checkpoint-lookup-specific statuses.
-export { rejectParagraphToCheckpoint } from './queries/paragraph-reject.js';
-export type { RejectParagraphResult } from './queries/paragraph-reject.js';
+// ADR-052 D3/D4/D9 (#380) — checkpoints, coalesced paragraph-history sessions,
+// per-paragraph reject (a restore-to-version write through updateParagraphText
+// above), and pending-change summaries all barrel through checkpoint-index.ts
+// (mirrors history-index.ts's history.js + history-diff.js pattern) — one
+// export line standing in for what would otherwise be four separate
+// multi-symbol blocks.
+export * from './queries/checkpoint-index.js';
 // rewriteObjectTextBlob is the DB core behind rewriting an objectText child's
 // text into its parent object row's captured blob (#519) — paragraphs.ts's
 // own write path (applyParagraphUpdate) already calls it internally; the
