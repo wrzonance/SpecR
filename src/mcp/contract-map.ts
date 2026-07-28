@@ -149,6 +149,17 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /projects/{}/header-footer/resolved', 'resolve_project_header_footer'],
   ['get /packages/{}/header-footer/resolved', 'resolve_package_header_footer'],
   ['get /revisions/{}/header-footer/resolved', 'resolve_revision_header_footer'],
+  // wave 7i — version-history checkpoints & pending summaries (#380 / ADR-052 D3/D4/D9).
+  // 4 tools cover 7 REST ops: one tool per operation PAIR (spec-scoped + project-scoped),
+  // the get_reference_graph one-tool-two-routes precedent (see above). Per-paragraph
+  // reject stays MCP_UNEXPOSED below, deferred to its own follow-up.
+  ['post /specs/{}/checkpoints', 'create_checkpoint'],
+  ['post /projects/{}/checkpoints', 'create_checkpoint'],
+  ['get /specs/{}/checkpoints', 'list_checkpoints'],
+  ['get /projects/{}/checkpoints', 'list_checkpoints'],
+  ['get /checkpoints/{}', 'get_checkpoint'],
+  ['get /specs/{}/pending-summary', 'get_pending_summary'],
+  ['get /projects/{}/pending-summary', 'get_pending_summary'],
 ]);
 
 /**
@@ -189,28 +200,13 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
     'get /projects/{}/specs/{}/references',
     'outbound-reference read — covered by get_references (MCP-native)',
   ],
-  // --- Pending burn-down: version-history checkpoints/pending-summary/reject
-  //     (ADR-052 D3/D4/D9, issue #380). REST-first (task 9); MCP tools land
-  //     in the immediate follow-up task of the same issue (task 10). ---
-  ['post /specs/{}/checkpoints', 'pending — issue #380 task 10: seal a spec-scoped checkpoint'],
-  ['get /specs/{}/checkpoints', 'pending — issue #380 task 10: list spec-scoped checkpoints'],
-  [
-    'post /projects/{}/checkpoints',
-    'pending — issue #380 task 10: seal a project-scoped checkpoint',
-  ],
-  ['get /projects/{}/checkpoints', 'pending — issue #380 task 10: list project-scoped checkpoints'],
-  ['get /checkpoints/{}', 'pending — issue #380 task 10: read a single checkpoint'],
-  [
-    'get /specs/{}/pending-summary',
-    'pending — issue #380 task 10: pending-change summary for one spec',
-  ],
-  [
-    'get /projects/{}/pending-summary',
-    'pending — issue #380 task 10: pending-change summary across a project',
-  ],
+  // --- Pending burn-down: per-paragraph reject (ADR-052 D4, issue #380).
+  //     REST-first (task 9); checkpoint/pending-summary reads and creation
+  //     landed as MCP tools in task 10 (see OP_TO_TOOL above) — reject is a
+  //     distinct write-tier tool deferred to its own follow-up. ---
   [
     'patch /specs/{}/paragraphs/{}/reject',
-    'pending — issue #380 task 10: revert a paragraph to its last-checkpoint state',
+    'pending — issue #380 follow-up: revert a paragraph to its last-checkpoint state',
   ],
 ]);
 
@@ -282,6 +278,12 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'get_paragraph_history',
   'get_spec_history',
   'get_history_diff',
+  // version-history checkpoints & pending summaries (#380 / ADR-052 D3/D4/D9): mirror
+  // their mapped REST GETs 1:1, but need a seeded checkpoint (a create_checkpoint call)
+  // beyond `pnpm seed`.
+  'list_checkpoints',
+  'get_checkpoint',
+  'get_pending_summary',
   'coordination_report',
   'get_reference_graph',
   'get_project_keynotes',

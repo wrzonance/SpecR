@@ -52,6 +52,9 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['get_paragraph_history', 'read'],
   ['get_spec_history', 'read'],
   ['get_history_diff', 'read'],
+  ['list_checkpoints', 'read'],
+  ['get_checkpoint', 'read'],
+  ['get_pending_summary', 'read'],
   ['coordination_report', 'read'],
   ['get_reference_graph', 'read'],
   ['get_project_keynotes', 'read'],
@@ -153,6 +156,8 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['list_users', 'read'],
   ['get_user', 'read'],
   ['resolve_user', 'write'],
+  // version-history checkpoints (#380 / ADR-052 D3/D4)
+  ['create_checkpoint', 'write'],
   // discipline mapping (#448 / ADR-065)
   ['list_disciplines', 'read'],
   ['list_project_specs', 'read'],
