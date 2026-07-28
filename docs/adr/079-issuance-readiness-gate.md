@@ -278,7 +278,21 @@ never participates in the computation (reaffirming Decision 3).
 - `db/index.ts` and `api/generate.ts` both grow beyond what the feature's
   apparent size would suggest — Decisions 12–14 explain why: pre-existing
   ESLint budget pressure on `main`, not scope creep in this PR.
-- Whether the 422 response should carry more than a message plus a pointer
-  to the readiness-report endpoint (e.g. inlining the findings array
-  directly in the error body) is left as an explicitly open UX call for a
-  future iteration, not decided here.
+- **Resolved** (Codex review, #544): the 422 response now carries `findings`
+  inline alongside the message, not only a count and a readiness-report
+  pointer — `enforceReadinessGate` (`api/readiness-guard.ts`) needed this for
+  `POST /revisions/:id/generate` in particular, which gates an immutable
+  revision snapshot with no readiness-report endpoint of its own; the live
+  spec/package report the pointer names can read clean while the frozen
+  revision it actually gated remains blocked.
+- **Known limitation** (Codex review, #544; tracked at #545): "a human can
+  fix the source and retry" (Decision 1) assumes a supported edit path back
+  to a clean state. For three of the four finding kinds — unresolved choice
+  token, specifier note, open comment — no such path exists today:
+  `source_facts` (choice tokens, comment-closed state) is a parse-time
+  snapshot no write path refreshes, and `note`/text-box `object` nodes have
+  no delete/resolve operation (`REMOVABLE_NODE_TYPES` excludes both). Today
+  `overrideReadinessGate: true` is the only way past these three kinds on
+  content already in the database — a real but blunt bypass, not the
+  resolution path the "block, never strip" framing implies. `#545` scopes
+  the fix; not addressed in this PR.
