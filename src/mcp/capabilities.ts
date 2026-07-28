@@ -59,6 +59,7 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['compare_specs', 'read'],
   ['submittal_register', 'read'],
   ['open_comments_report', 'read'],
+  ['readiness_report', 'read'], // ADR-079 (#406) — issuance-readiness dry-run
   ['get_onboarding_report', 'read'],
   ['review_editability', 'read'],
   // writes (persist state)

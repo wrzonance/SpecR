@@ -17,6 +17,7 @@ import {
   handleOpenCommentsReport,
   handleGetNumberingProfile,
 } from './handlers.js';
+import { handleReadinessReport } from './readiness-handler.js';
 import { registerLibraryTools } from './library-tools.js';
 import { registerOnboardingTools } from './onboarding-tools.js';
 import { registerProjectTools } from './project-tools.js';
@@ -291,6 +292,29 @@ function registerOpenCommentsTools(reg: ToolRegistrar): void {
   );
 }
 
+function registerReadinessTools(reg: ToolRegistrar): void {
+  reg.register(
+    'readiness_report',
+    {
+      description:
+        'Dry-run the ADR-079 issuance-readiness gate for a spec or an entire design package — ' +
+        'every outstanding unresolved choice token, visible specifier note, open Word comment, ' +
+        'and body-level text box, plus the advisory-only highlight report (never a blocker). ' +
+        'readyForFinal: true is exactly the set a mode: "final" issuance (issue_package_revision, ' +
+        'generate_docx) would let through. Provide exactly one of specId (see get_spec) or ' +
+        'packageId (see list_packages).',
+      inputSchema: {
+        specId: z.uuid().optional().describe('Spec UUID — readiness findings for one spec'),
+        packageId: z
+          .uuid()
+          .optional()
+          .describe('Design package UUID — aggregate readiness findings across every member spec'),
+      },
+    },
+    handleReadinessReport
+  );
+}
+
 function registerLoaderTools(reg: ToolRegistrar): void {
   reg.register(
     'load_files',
@@ -354,6 +378,7 @@ export function registerTools(
   registerHistoryTools(reg);
   registerSubmittalTools(reg);
   registerOpenCommentsTools(reg);
+  registerReadinessTools(reg);
   registerOnboardingTools(reg);
   return reg.declared;
 }

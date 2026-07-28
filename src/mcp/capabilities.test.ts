@@ -38,4 +38,8 @@ describe('capabilities', () => {
     expect(TOOL_TIERS.get('parse_document')).toBe('write');
     expect(TOOL_TIERS.size).toBeGreaterThanOrEqual(20);
   });
+
+  it('readiness_report (#406 / ADR-079) is read-tier — a dry-run report writes nothing', () => {
+    expect(TOOL_TIERS.get('readiness_report')).toBe('read');
+  });
 });

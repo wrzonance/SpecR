@@ -27,6 +27,9 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['post /projects/{}/submittal-register', 'submittal_register'],
   ['get /specs/{}/open-comments', 'open_comments_report'],
   ['get /projects/{}/open-comments', 'open_comments_report'],
+  // issuance-readiness dry-run (#406 / ADR-079)
+  ['get /specs/{}/readiness-report', 'readiness_report'],
+  ['get /packages/{}/readiness-report', 'readiness_report'],
   ['post /specs/{}/reclassify', 'reclassify_spec'],
   ['patch /specs/{}/paragraphs/{}/editability', 'set_editability_override'],
   ['post /projects', 'create_project'], // added in Task 7
@@ -174,11 +177,18 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ],
   [
     'post /projects/{}/generate',
-    'batch manual DOCX egress — generate_docx covers single-spec render',
+    'batch manual DOCX egress — generate_docx covers single-spec render. Body gained ' +
+      'mode/overrideReadinessGate (#406 / ADR-079); this route stays permanently unexposed, so ' +
+      'those fields have no MCP-native way to reach a batch manual render — a documented gap, ' +
+      'not an oversight.',
   ],
   [
     'post /revisions/{}/generate',
-    'issued-revision DOCX egress — generate_docx covers single-spec render',
+    'issued-revision DOCX egress — generate_docx covers single-spec render. Body gained ' +
+      'mode/overrideReadinessGate (#406 / ADR-079), whose gate is scoped to changedSpecs only for ' +
+      'an addendum revision (ADR-079 decision 15); this route stays permanently unexposed, so an ' +
+      'agent cannot trigger a revision-scoped Final render via MCP — a documented gap, not an ' +
+      'oversight.',
   ],
   ['get /projects/{}/references/broken', 'broken-reference read — surfaced by coordination_report'],
   [
@@ -264,6 +274,10 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'get_project_keynotes',
   'list_revit_links',
   'open_comments_report',
+  // readiness_report (#406 / ADR-079) mirrors its mapped REST GETs 1:1, but a non-vacuous
+  // assertion needs a spec/package with seeded readiness-triggering content (a choice token,
+  // note, open comment, or text box) beyond `pnpm seed` — same posture as open_comments_report.
+  'readiness_report',
   'get_project',
   'list_associations',
   'get_spec_lock',

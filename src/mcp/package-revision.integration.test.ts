@@ -40,6 +40,25 @@ async function insertMaster(libraryId: string, section: string): Promise<void> {
   );
 }
 
+// A master with a `note` node — assessNode (readiness-review.ts) unconditionally yields a
+// `specifier_note_present` finding for it, giving the ADR-079 gate tests below a real blocker.
+async function insertMasterWithNote(libraryId: string, section: string): Promise<void> {
+  const r = await pool.query<{ id: string }>(
+    `INSERT INTO specs (section, title, source, library_id) VALUES ($1, $2, 'unknown', $3) RETURNING id`,
+    [section, `w2c ${section}`, libraryId]
+  );
+  const specId = r.rows[0]!.id;
+  const part = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position) VALUES ($1, NULL, 'part', 'GENERAL', 0) RETURNING id`,
+    [specId]
+  );
+  await pool.query(
+    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position)
+     VALUES ($1, $2, 'note', 'Confirm topcoat sheen with owner.', 0)`,
+    [specId, part.rows[0]!.id]
+  );
+}
+
 // A project + a design package holding one member spec — returns the packageId.
 async function packageWithMember(section: string): Promise<string> {
   const lib = await insertLibrary();
@@ -57,6 +76,32 @@ async function packageWithMember(section: string): Promise<string> {
   const added = await addSectionToProject(projectId, section, pool);
   const pkg = await createPackage(projectId, `pkg ${randomUUID().slice(0, 6)}`, pool);
   await setPackageSpecs(pkg.packageId, [added.specId], pool);
+  return pkg.packageId;
+}
+
+// A project + design package with two members: one carrying a blocking specifier note, one
+// clean — the ADR-079 gate tests below need a mixed-membership package.
+async function packageWithNoteAndCleanMembers(
+  noteSection: string,
+  cleanSection: string
+): Promise<string> {
+  const lib = await insertLibrary();
+  await insertMasterWithNote(lib, noteSection);
+  await insertMaster(lib, cleanSection);
+  const pr = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+    [`w2c project ${randomUUID().slice(0, 8)}`]
+  );
+  const projectId = pr.rows[0]!.id;
+  createdProjects.push(projectId);
+  await pool.query(
+    `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
+    [projectId, lib]
+  );
+  const addedNote = await addSectionToProject(projectId, noteSection, pool);
+  const addedClean = await addSectionToProject(projectId, cleanSection, pool);
+  const pkg = await createPackage(projectId, `pkg ${randomUUID().slice(0, 6)}`, pool);
+  await setPackageSpecs(pkg.packageId, [addedNote.specId, addedClean.specId], pool);
   return pkg.packageId;
 }
 
@@ -375,4 +420,75 @@ describe('package revision MCP tools', () => {
     expect(isToolError(await handleListPackageRevisions({ packageId: MISSING }))).toBe(true);
     expect(isToolError(await handleListPackageRevisions({ packageId: 'nope' }))).toBe(true);
   });
+});
+
+// ADR-079 (#406): issue_package_revision's `mode`/`overrideReadinessGate` fields need zero
+// schema edits — IssuePackageRevisionShape already spreads StructuredCreateRevisionBodySchema's
+// .shape — but the gate's actual block/override behavior, and how it interacts with
+// baseRevisionId, was never exercised through this MCP boundary. isUnprocessableRevisionInputError
+// already includes ReadinessBlockedError (revision-input-errors.ts), so this confirms that wiring
+// end to end rather than driving new production code.
+describe('package revision MCP tools — issuance-readiness gate (ADR-079, #406)', () => {
+  it('mode: final blocks issuance, routed through its own branch — never the generic catch-all (INV-13)', async () => {
+    const packageId = await packageWithNoteAndCleanMembers('12 01 00', '12 02 00');
+    const result = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+      mode: 'final',
+    });
+    expect(isToolError(result)).toBe(true);
+    // Proves isUnprocessableRevisionInputError's ReadinessBlockedError branch fired and
+    // returned the error's own message (assertReadyForFinal's raw text, unlike the
+    // API layer's enforceReadinessGate which appends a readiness-report pointer) —
+    // not internalError's generic "Internal error — issue_package_revision failed".
+    expect(result.content[0]!.text).toBe(
+      'final issuance blocked: 1 readiness finding(s) outstanding'
+    );
+  });
+
+  it('mode: final + overrideReadinessGate issues the revision despite the outstanding note', async () => {
+    const packageId = await packageWithNoteAndCleanMembers('12 03 00', '12 04 00');
+    const result = await handleIssuePackageRevision({
+      packageId,
+      type: 'addendum',
+      attributes: { number: 1 },
+      mode: 'final',
+      overrideReadinessGate: true,
+    });
+    expect(isToolError(result)).toBe(false);
+    expect(parse<RevisionSummary>(result).specCount).toBe(2);
+  });
+
+  it(
+    "addendum-type issuance gates EVERY current member spec, not just a 'changed' one — " +
+      "contrast with generate.ts's changed-only scope for POST /revisions/:id/generate " +
+      '(ADR-079 decision 15) — INV-12',
+    async () => {
+      const packageId = await packageWithNoteAndCleanMembers('12 05 00', '12 06 00');
+      // A clean base revision first — mode omitted, never gated (INV-1).
+      const base = await handleIssuePackageRevision({
+        packageId,
+        type: 'addendum',
+        attributes: { number: 1 },
+      });
+      expect(isToolError(base)).toBe(false);
+      const baseRevisionId = parse<RevisionSummary>(base).revisionId;
+
+      // createPackageRevision's snapshotMemberTrees has no "changed since base" concept —
+      // it re-snapshots the package's FULL current membership on every issuance, unlike
+      // generate.ts's addendumRevisionContextFor (which scopes the gate to changedSpecs
+      // only). The note-carrying member — already present, unissued, in the base revision
+      // above — still blocks this addendum.
+      const addendum = await handleIssuePackageRevision({
+        packageId,
+        type: 'addendum',
+        attributes: { number: 2 },
+        baseRevisionId,
+        mode: 'final',
+      });
+      expect(isToolError(addendum)).toBe(true);
+      expect(addendum.content[0]!.text).toContain('1 readiness finding(s) outstanding');
+    }
+  );
 });
