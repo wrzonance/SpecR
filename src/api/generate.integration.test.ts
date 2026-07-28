@@ -375,3 +375,112 @@ describe('POST /specs/:id/generate — templateId (integration)', () => {
     expect(body['success']).toBe(false);
   });
 });
+
+// ADR-079 (#406): POST /specs/:id/generate is the FIRST of three `generate`
+// call sites the issuance-readiness gate is wired into (the second is
+// POST /projects/:id/generate, exercised indirectly via generate.test.ts's
+// mocked unit coverage; the third — POST /revisions/:id/generate — has its
+// own dedicated addendum-scope pin in generate-revision.integration.test.ts,
+// INV-12). blockedSpecId's sole content is a `note` node, which
+// unconditionally yields a `specifier_note_present` finding
+// (readiness-review.ts assessNode) — every case below is pinned against that
+// one fixture except the clean-final case, which reuses testSpecId (no
+// note/choice-token/comment/textBox content).
+describe('POST /specs/:id/generate — issuance-readiness gate (ADR-079, #406)', () => {
+  let blockedSpecId: string;
+
+  beforeAll(async () => {
+    const specRes = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ($1, $2, $3, (SELECT id FROM libraries WHERE name = 'UFGS Reference'))
+       RETURNING id`,
+      ['09 91 13', 'Exterior Painting Generate Gate Test', 'ufgs']
+    );
+    const specRow = specRes.rows[0];
+    if (!specRow) throw new Error('failed to insert blocked spec');
+    blockedSpecId = specRow.id;
+
+    const partRes = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, vanish)
+       VALUES ($1, NULL, 'part', 'GENERAL', 1, false) RETURNING id`,
+      [blockedSpecId]
+    );
+    const partRow = partRes.rows[0];
+    if (!partRow) throw new Error('failed to insert blocked part');
+
+    const articleRes = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, vanish)
+       VALUES ($1, $2, 'article', 'SUMMARY', 1, false) RETURNING id`,
+      [blockedSpecId, partRow.id]
+    );
+    const articleRow = articleRes.rows[0];
+    if (!articleRow) throw new Error('failed to insert blocked article');
+
+    await pool.query(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, vanish)
+       VALUES ($1, $2, 'note', 'Confirm topcoat sheen with owner.', 1, false)`,
+      [blockedSpecId, articleRow.id]
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [blockedSpecId]);
+  });
+
+  it('mode omitted stays ungated against a blocking specifier note — INV-1', async () => {
+    const res = await fetch(`${baseUrl}/specs/${blockedSpecId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('mode: draft is unaffected by the same blocking content — INV-1', async () => {
+    const res = await fetch(`${baseUrl}/specs/${blockedSpecId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'draft' }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('mode: final blocks with a 422 pointing at the readiness-report endpoint — INV-4/INV-13', async () => {
+    const res = await fetch(`${baseUrl}/specs/${blockedSpecId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'final' }),
+    });
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(res.status).toBe(422);
+    expect(body.success).toBe(false);
+    // Proves enforceReadinessGate's `instanceof ReadinessBlockedError` check
+    // routed this to its own 422 branch rather than falling through to the
+    // handler's generic catch-all 500 (INV-13).
+    expect(body.error).toBe(
+      'final issuance blocked: 1 readiness finding(s) outstanding — see GET .../readiness-report'
+    );
+  });
+
+  it('mode: final + overrideReadinessGate renders a real DOCX despite the outstanding finding — INV-2', async () => {
+    const res = await fetch(`${baseUrl}/specs/${blockedSpecId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'final', overrideReadinessGate: true }),
+    });
+    expect(res.status).toBe(200);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    expect(buffer.length).toBeGreaterThan(0);
+    expect(buffer[0]).toBe(0x50); // 'P'
+    expect(buffer[1]).toBe(0x4b); // 'K'
+  });
+
+  it('mode: final renders cleanly against a fixture with no readiness findings — INV-3', async () => {
+    const res = await fetch(`${baseUrl}/specs/${testSpecId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'final' }),
+    });
+    expect(res.status).toBe(200);
+  });
+});

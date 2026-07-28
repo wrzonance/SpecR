@@ -38,7 +38,20 @@ function pr1(text: string): SpecNode {
   return { id: randomUUID(), type: 'pr1', text, children: [], meta: {} };
 }
 
-function smallTree(specId: string, section: string, title: string, body: string): SpecTree {
+function note(text: string): SpecNode {
+  return { id: randomUUID(), type: 'note', text, children: [], meta: {} };
+}
+
+// `bodyNodeType` defaults to 'pr1' (plain content) so every pre-existing call
+// site is unaffected; 'note' produces an issuance-readiness-gate blocker
+// (ADR-079, #406 — a specifier note always yields `specifier_note_present`).
+function smallTree(
+  specId: string,
+  section: string,
+  title: string,
+  body: string,
+  bodyNodeType: 'pr1' | 'note' = 'pr1'
+): SpecTree {
   return {
     id: specId,
     section,
@@ -53,7 +66,7 @@ function smallTree(specId: string, section: string, title: string, body: string)
             id: randomUUID(),
             type: 'article',
             text: 'SUMMARY',
-            children: [pr1(body)],
+            children: [bodyNodeType === 'note' ? note(body) : pr1(body)],
             meta: {},
           },
         ],
@@ -63,7 +76,12 @@ function smallTree(specId: string, section: string, title: string, body: string)
   };
 }
 
-async function insertMasterWithTree(section: string, title: string, body: string): Promise<void> {
+async function insertMasterWithTree(
+  section: string,
+  title: string,
+  body: string,
+  bodyNodeType: 'pr1' | 'note' = 'pr1'
+): Promise<string> {
   const res = await pool.query<{ id: string }>(
     `INSERT INTO specs (section, title, source, library_id)
      VALUES ($1, $2, 'unknown', $3) RETURNING id`,
@@ -72,7 +90,8 @@ async function insertMasterWithTree(section: string, title: string, body: string
   const row = res.rows[0];
   if (!row) throw new Error(`failed to insert master ${section}`);
   masterIds.push(row.id);
-  await insertTree(smallTree(row.id, section, title, body), row.id, pool);
+  await insertTree(smallTree(row.id, section, title, body, bodyNodeType), row.id, pool);
+  return row.id;
 }
 
 async function addSection(section: string): Promise<string> {
@@ -259,5 +278,100 @@ describe('POST /revisions/:id/generate', () => {
     expect(xml).toContain('09 91 00 - Painting');
     expect(xml).not.toContain('SECTION 03 30 00');
     expect(xml).not.toContain('SECTION 23 09 23');
+  });
+});
+
+// ADR-079 (#406) decision 15: an addendum's readiness gate covers
+// `changedSpecs` ONLY — a spec carried over unchanged from the base revision
+// was already evaluated (or issued) at that prior point. This describe block
+// is its own isolated project/package/revision chain (never touching the
+// shared base/addendum fixture above) so the note-carrying fixture spec can't
+// perturb any of that describe block's exact-XML assertions.
+describe('POST /revisions/:id/generate — issuance-readiness gate (ADR-079, #406)', () => {
+  let gateProjectId: string;
+  let unchangedNoteSpecId: string; // carries the blocking note; never in changedSpecs
+  let changedSpecId: string;
+  let gatePackageId: string;
+  let gateBaseRevisionId: string;
+  let gateAddendumRevisionId: string;
+
+  beforeAll(async () => {
+    await insertMasterWithTree(
+      '26 05 19',
+      'Low-Voltage Wire — Gate Fixture',
+      'Confirm conductor gauge with owner.',
+      'note'
+    );
+    await insertMasterWithTree(
+      '09 91 26',
+      'Exterior Painting — Gate Fixture',
+      'Original gate painting text.'
+    );
+
+    const created = await json('POST', '/projects', {
+      name: `Readiness Gate Revision Render P1 ${Date.now()}`,
+      sourceLibraryIds: [companyId],
+    });
+    gateProjectId = (await data(created))['projectId'] as string;
+    projectIds.push(gateProjectId);
+
+    async function addGateSection(section: string): Promise<string> {
+      const res = await json('POST', `/projects/${gateProjectId}/specs`, { section });
+      return (await data(res))['specId'] as string;
+    }
+    unchangedNoteSpecId = await addGateSection('26 05 19');
+    changedSpecId = await addGateSection('09 91 26');
+
+    const pkg = await json('POST', `/projects/${gateProjectId}/packages`, { name: 'Gate CD Set' });
+    gatePackageId = (await data(pkg))['packageId'] as string;
+    const membership = await json('PUT', `/packages/${gatePackageId}/specs`, {
+      specIds: [unchangedNoteSpecId, changedSpecId],
+    });
+    if (membership.status !== 200) throw new Error('failed to set gate package membership');
+
+    // mode omitted (INV-1) — the note-carrying spec must never block package
+    // issuance itself; this describe block is only about the generate-time gate.
+    const base = await json('POST', `/packages/${gatePackageId}/revisions`, {
+      label: 'Gate 100% CD',
+    });
+    gateBaseRevisionId = (await data(base))['revisionId'] as string;
+
+    await pool.query(
+      `UPDATE paragraphs SET text = 'Changed gate painting text for addendum.'
+       WHERE spec_id = $1 AND node_type = 'pr1'`,
+      [changedSpecId]
+    );
+
+    const addendum = await json('POST', `/packages/${gatePackageId}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 1 },
+      baseRevisionId: gateBaseRevisionId,
+    });
+    gateAddendumRevisionId = (await data(addendum))['revisionId'] as string;
+  });
+
+  it(
+    'addendum readiness gate covers changed specs only — an outstanding note on the ' +
+      'unchanged base-only spec never blocks final generation — INV-12',
+    async () => {
+      const res = await json('POST', `/revisions/${gateAddendumRevisionId}/generate`, {
+        baseRevisionId: gateBaseRevisionId,
+        mode: 'final',
+      });
+      // unchangedNoteSpecId (26 05 19) carries the blocking note but is NOT
+      // part of changedSpecs (only the painting text edit is) — the gate
+      // must never see it.
+      expect(res.status).toBe(200);
+    }
+  );
+
+  it('contrast: the full (non-addendum) revision gates every member spec, including the unchanged one — INV-4', async () => {
+    const res = await json('POST', `/revisions/${gateBaseRevisionId}/generate`, {
+      mode: 'final',
+    });
+    // The base/full revision has no "changed" concept — every member spec
+    // (including the note-carrying one) is in scope, unlike the addendum
+    // case above.
+    expect(res.status).toBe(422);
   });
 });

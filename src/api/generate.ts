@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { GenerateBodySchema } from '../ast/index.js';
-import type { StyleRule, SpecTree } from '../ast/index.js';
+import type { StyleRule, SpecTree, IssuanceMode } from '../ast/index.js';
 import type { SectionNumberFormat } from '../lib/section-number.js';
 import {
   getSpecTree,
@@ -26,6 +26,7 @@ import { generateDocx, generateManual } from '../generator/index.js';
 import type { GenerateDocxOptions, ManualMeta, ManualSectionListing } from '../generator/index.js';
 import { logger } from '../lib/logger.js';
 import { buildHeaderFooterOptions } from './generate-header-footer.js';
+import { enforceReadinessGate } from './readiness-guard.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const RevisionGenerateBodySchema = GenerateBodySchema.extend({
@@ -70,44 +71,86 @@ function generateOptions(
   return format === undefined ? undefined : { sectionNumberFormat: format };
 }
 
-export async function generateHandler(req: Request, res: Response): Promise<void> {
+interface SingleSpecGenerationContext {
+  readonly tree: SpecTree;
+  readonly rules: readonly StyleRule[] | undefined;
+  readonly options: GenerateDocxOptions | undefined;
+  readonly mode: IssuanceMode | undefined;
+  readonly overrideReadinessGate: boolean | undefined;
+}
+
+/**
+ * Resolves everything `generateHandler` needs before it may render or gate:
+ * spec id + body validation, the spec's tree, style rules, and the merged
+ * section-number-format/header-footer options — the same steps the handler
+ * inlined before ADR-079 (#406), extracted only to reclaim room under this
+ * repo's `max-lines-per-function`/`complexity` budgets for the new gate call.
+ * Writes the appropriate 400/404 response and returns `null` itself on any
+ * failure, so the caller's only job is an early return.
+ */
+async function loadSingleSpecGenerationContext(
+  req: Request,
+  res: Response
+): Promise<SingleSpecGenerationContext | null> {
   const idResult = z.uuid().safeParse(req.params['id']);
   if (!idResult.success) {
     res.status(400).json({ success: false, error: 'invalid spec id' });
-    return;
+    return null;
   }
   const bodyResult = GenerateBodySchema.safeParse(req.body ?? {});
   if (!bodyResult.success) {
     res.status(400).json({ success: false, error: 'invalid generate request body' });
-    return;
+    return null;
   }
+  const result = await getSpecTree(idResult.data);
+  if (!result) {
+    res.status(404).json({ success: false, error: 'spec not found' });
+    return null;
+  }
+  const resolution = await resolveStyleRules(bodyResult.data.templateId);
+  if (!resolution.found) {
+    res.status(404).json({ success: false, error: 'template not found' });
+    return null;
+  }
+  // One ownership snapshot feeds BOTH the section-number-format fallback
+  // (issue #267) and the header/footer context (issue #304), so a concurrent
+  // project_specs membership change can never pair one project's numbering
+  // with another's header/footer. Request body wins for the format; null
+  // (orphan or multi-project) → canonical. Header/footer is omitted entirely
+  // when nothing applies, keeping an orphan or unconfigured spec's output
+  // byte-identical to the pre-#304 baseline (buildHeaderFooterOptions's
+  // undefined gate).
+  const specContext = await resolveSpecGenerationContext(idResult.data, pool);
+  const format =
+    bodyResult.data.sectionNumberFormat ?? specContext.sectionNumberFormat ?? undefined;
+  const headerFooter = buildHeaderFooterOptions(specContext.headerFooter);
+  const baseOptions = generateOptions(format);
+  const options = headerFooter ? { ...baseOptions, headerFooter } : baseOptions;
+  return {
+    tree: result.tree,
+    rules: resolution.rules,
+    options,
+    mode: bodyResult.data.mode,
+    overrideReadinessGate: bodyResult.data.overrideReadinessGate,
+  };
+}
+
+export async function generateHandler(req: Request, res: Response): Promise<void> {
   try {
-    const result = await getSpecTree(idResult.data);
-    if (!result) {
-      res.status(404).json({ success: false, error: 'spec not found' });
+    const context = await loadSingleSpecGenerationContext(req, res);
+    if (context === null) return;
+    if (
+      enforceReadinessGate(
+        res,
+        [{ tree: context.tree }],
+        context.mode,
+        context.overrideReadinessGate
+      )
+    ) {
       return;
     }
-    const resolution = await resolveStyleRules(bodyResult.data.templateId);
-    if (!resolution.found) {
-      res.status(404).json({ success: false, error: 'template not found' });
-      return;
-    }
-    // One ownership snapshot feeds BOTH the section-number-format fallback
-    // (issue #267) and the header/footer context (issue #304), so a concurrent
-    // project_specs membership change can never pair one project's numbering
-    // with another's header/footer. Request body wins for the format; null
-    // (orphan or multi-project) → canonical. Header/footer is omitted entirely
-    // when nothing applies, keeping an orphan or unconfigured spec's output
-    // byte-identical to the pre-#304 baseline (buildHeaderFooterOptions's
-    // undefined gate).
-    const specContext = await resolveSpecGenerationContext(idResult.data, pool);
-    const format =
-      bodyResult.data.sectionNumberFormat ?? specContext.sectionNumberFormat ?? undefined;
-    const headerFooter = buildHeaderFooterOptions(specContext.headerFooter);
-    const baseOptions = generateOptions(format);
-    const options = headerFooter ? { ...baseOptions, headerFooter } : baseOptions;
-    const buffer = await generateDocx(result.tree, resolution.rules, options);
-    const filename = safeFilename(result.tree.section, result.tree.title);
+    const buffer = await generateDocx(context.tree, context.rules, context.options);
+    const filename = safeFilename(context.tree.section, context.tree.title);
     res.setHeader('Content-Type', DOCX_MIME);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);
@@ -166,9 +209,95 @@ function addendumManualMeta(data: RevisionAddendumManualData): ManualMeta {
   };
 }
 
-interface RevisionDocx {
-  readonly buffer: Buffer;
-  readonly filename: string;
+interface ManualGenerationContext {
+  readonly trees: readonly SpecTree[];
+  readonly rules: readonly StyleRule[] | undefined;
+  readonly options: GenerateDocxOptions | undefined;
+  readonly meta: ManualMeta;
+  readonly mode: IssuanceMode | undefined;
+  readonly overrideReadinessGate: boolean | undefined;
+}
+
+/** Same extraction rationale as `loadSingleSpecGenerationContext`, for
+ *  `generateManualHandler` (ADR-079, #406). */
+async function loadManualGenerationContext(
+  req: Request,
+  res: Response
+): Promise<ManualGenerationContext | null> {
+  const idResult = z.uuid().safeParse(req.params['id']);
+  if (!idResult.success) {
+    res.status(400).json({ success: false, error: 'invalid project id' });
+    return null;
+  }
+  const bodyResult = GenerateBodySchema.safeParse(req.body ?? {});
+  if (!bodyResult.success) {
+    res.status(400).json({ success: false, error: 'invalid generate request body' });
+    return null;
+  }
+  const project = await findProjectById(idResult.data, pool);
+  if (!project) {
+    res.status(404).json({ success: false, error: 'project not found' });
+    return null;
+  }
+  if (project.toc.length === 0) {
+    res.status(422).json({ success: false, error: 'project has no sections to assemble' });
+    return null;
+  }
+  const resolution = await resolveStyleRules(bodyResult.data.templateId);
+  if (!resolution.found) {
+    res.status(404).json({ success: false, error: 'template not found' });
+    return null;
+  }
+  const trees = await collectSectionTrees(project.toc);
+  // Request body wins; otherwise fall back to the project's stored default
+  // (issue #267). findProjectById already carries section_number_format.
+  const format = bodyResult.data.sectionNumberFormat ?? project.sectionNumberFormat;
+  const baseOptions = generateOptions(format);
+  // #481: whole-manual counterpart to generateHandler's #304 wiring — the
+  // project is already resolved above (findProjectById), so there is no
+  // second ownership lookup to race; headerFooter stays omitted entirely
+  // when the project's client→project chain has zero configured layers.
+  const headerFooterContext = await resolveProjectManualHeaderFooterContext(
+    project.projectId,
+    project.name,
+    pool
+  );
+  const headerFooter = buildHeaderFooterOptions(headerFooterContext);
+  const options = headerFooter ? { ...baseOptions, headerFooter } : baseOptions;
+  return {
+    trees,
+    rules: resolution.rules,
+    options,
+    meta: { name: project.name, description: project.description },
+    mode: bodyResult.data.mode,
+    overrideReadinessGate: bodyResult.data.overrideReadinessGate,
+  };
+}
+
+export async function generateManualHandler(req: Request, res: Response): Promise<void> {
+  try {
+    const context = await loadManualGenerationContext(req, res);
+    if (context === null) return;
+    const gateTrees = context.trees.map((tree) => ({ tree }));
+    if (enforceReadinessGate(res, gateTrees, context.mode, context.overrideReadinessGate)) {
+      return;
+    }
+    const buffer = await generateManual(
+      context.trees,
+      context.meta,
+      context.rules,
+      context.options
+    );
+    res.setHeader('Content-Type', DOCX_MIME);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${manualFilename(context.meta.name)}"`
+    );
+    res.send(buffer);
+  } catch (err) {
+    logger.error({ err }, 'manual generation failed');
+    res.status(500).json({ success: false, error: 'generation failed' });
+  }
 }
 
 /**
@@ -200,143 +329,137 @@ async function withRevisionHeaderFooter(
   return headerFooter ? { ...baseOptions, headerFooter } : baseOptions;
 }
 
-async function renderIssuedRevision(
+interface RevisionRenderContext {
+  readonly trees: readonly SpecTree[];
+  readonly meta: ManualMeta;
+  readonly options: GenerateDocxOptions | undefined;
+  readonly filename: string;
+}
+
+async function issuedRevisionContext(
   data: RevisionManualData,
-  body: RevisionGenerateBody,
-  rules: readonly StyleRule[] | undefined
-): Promise<RevisionDocx> {
+  body: RevisionGenerateBody
+): Promise<RevisionRenderContext> {
   const trees = data.revision.specs.map((entry) => entry.tree);
   const baseOptions = generateOptions(body.sectionNumberFormat);
   const options = await withRevisionHeaderFooter(data, baseOptions);
-  const buffer = await generateManual(trees, revisionManualMeta(data), rules, options);
   return {
-    buffer,
+    trees,
+    meta: revisionManualMeta(data),
+    options,
     filename: revisionManualFilename(data.project.name, data.revision.displayName),
   };
 }
 
-async function renderDefaultRevision(
-  revisionId: string,
-  body: RevisionGenerateBody,
-  rules: readonly StyleRule[] | undefined
-): Promise<RevisionDocx | null | 'empty-addendum'> {
-  const data = await getPackageRevisionManualData(revisionId, pool);
-  if (data === null) return null;
-  if (data.revision.baseRevisionId !== null) {
-    return renderAddendumRevision(revisionId, data.revision.baseRevisionId, body, rules);
-  }
-  return renderIssuedRevision(data, body, rules);
-}
-
-async function renderAddendumRevision(
+/**
+ * ADR-079 (#406) decision 15: an addendum's readiness gate covers
+ * `changedSpecs` ONLY — the same set this function already renders. A spec
+ * carried over unchanged from the base revision was already evaluated (or
+ * issued) at that prior point; re-gating unchanged content on every
+ * subsequent generate call would be redundant work with no new finding
+ * possible. This is a deliberate, documented scope limit, not an oversight —
+ * see the `addendumRevisionId`-vs-full-revision contrast pinned by name in
+ * `generate-revision.integration.test.ts` (INV-12).
+ */
+async function addendumRevisionContextFor(
   revisionId: string,
   baseRevisionId: string,
-  body: RevisionGenerateBody,
-  rules: readonly StyleRule[] | undefined
-): Promise<RevisionDocx | null | 'empty-addendum'> {
+  body: RevisionGenerateBody
+): Promise<RevisionRenderContext | null | 'empty-addendum'> {
   const data = await getPackageRevisionAddendumManualData(revisionId, baseRevisionId, pool);
   if (data === null) return null;
   if (data.changedSpecs.length === 0) return 'empty-addendum';
   const trees = data.changedSpecs.map((entry) => entry.tree);
   const baseOptions = generateOptions(body.sectionNumberFormat);
   const options = await withRevisionHeaderFooter(data, baseOptions);
-  const buffer = await generateManual(trees, addendumManualMeta(data), rules, options);
   return {
-    buffer,
+    trees,
+    meta: addendumManualMeta(data),
+    options,
     filename: revisionManualFilename(data.project.name, data.revision.displayName),
   };
 }
 
-export async function generateManualHandler(req: Request, res: Response): Promise<void> {
-  const idResult = z.uuid().safeParse(req.params['id']);
-  if (!idResult.success) {
-    res.status(400).json({ success: false, error: 'invalid project id' });
-    return;
+async function defaultRevisionContext(
+  revisionId: string,
+  body: RevisionGenerateBody
+): Promise<RevisionRenderContext | null | 'empty-addendum'> {
+  const data = await getPackageRevisionManualData(revisionId, pool);
+  if (data === null) return null;
+  if (data.revision.baseRevisionId !== null) {
+    return addendumRevisionContextFor(revisionId, data.revision.baseRevisionId, body);
   }
-  const bodyResult = GenerateBodySchema.safeParse(req.body ?? {});
-  if (!bodyResult.success) {
-    res.status(400).json({ success: false, error: 'invalid generate request body' });
-    return;
-  }
-  try {
-    const project = await findProjectById(idResult.data, pool);
-    if (!project) {
-      res.status(404).json({ success: false, error: 'project not found' });
-      return;
-    }
-    if (project.toc.length === 0) {
-      res.status(422).json({ success: false, error: 'project has no sections to assemble' });
-      return;
-    }
-    const resolution = await resolveStyleRules(bodyResult.data.templateId);
-    if (!resolution.found) {
-      res.status(404).json({ success: false, error: 'template not found' });
-      return;
-    }
-    const trees = await collectSectionTrees(project.toc);
-    // Request body wins; otherwise fall back to the project's stored default
-    // (issue #267). findProjectById already carries section_number_format.
-    const format = bodyResult.data.sectionNumberFormat ?? project.sectionNumberFormat;
-    const baseOptions = generateOptions(format);
-    // #481: whole-manual counterpart to generateHandler's #304 wiring — the
-    // project is already resolved above (findProjectById), so there is no
-    // second ownership lookup to race; headerFooter stays omitted entirely
-    // when the project's client→project chain has zero configured layers.
-    const headerFooterContext = await resolveProjectManualHeaderFooterContext(
-      project.projectId,
-      project.name,
-      pool
-    );
-    const headerFooter = buildHeaderFooterOptions(headerFooterContext);
-    const options = headerFooter ? { ...baseOptions, headerFooter } : baseOptions;
-    const meta = { name: project.name, description: project.description };
-    const buffer = await generateManual(trees, meta, resolution.rules, options);
-    res.setHeader('Content-Type', DOCX_MIME);
-    res.setHeader('Content-Disposition', `attachment; filename="${manualFilename(project.name)}"`);
-    res.send(buffer);
-  } catch (err) {
-    logger.error({ err }, 'manual generation failed');
-    res.status(500).json({ success: false, error: 'generation failed' });
-  }
+  return issuedRevisionContext(data, body);
 }
 
-export async function generateRevisionHandler(req: Request, res: Response): Promise<void> {
+interface RevisionGenerationContext extends RevisionRenderContext {
+  readonly rules: readonly StyleRule[] | undefined;
+  readonly mode: IssuanceMode | undefined;
+  readonly overrideReadinessGate: boolean | undefined;
+}
+
+/** Same extraction rationale as `loadSingleSpecGenerationContext`, for
+ *  `generateRevisionHandler` (ADR-079, #406). */
+async function loadRevisionGenerationContext(
+  req: Request,
+  res: Response
+): Promise<RevisionGenerationContext | null> {
   const idResult = z.uuid().safeParse(req.params['id']);
   if (!idResult.success) {
     res.status(400).json({ success: false, error: 'invalid revision id' });
-    return;
+    return null;
   }
   const bodyResult = RevisionGenerateBodySchema.safeParse(req.body ?? {});
   if (!bodyResult.success) {
     res.status(400).json({ success: false, error: 'invalid generate request body' });
-    return;
+    return null;
   }
+  const resolution = await resolveStyleRules(bodyResult.data.templateId);
+  if (!resolution.found) {
+    res.status(404).json({ success: false, error: 'template not found' });
+    return null;
+  }
+  const context =
+    bodyResult.data.baseRevisionId === undefined
+      ? await defaultRevisionContext(idResult.data, bodyResult.data)
+      : await addendumRevisionContextFor(
+          idResult.data,
+          bodyResult.data.baseRevisionId,
+          bodyResult.data
+        );
+  if (context === null) {
+    res.status(404).json({ success: false, error: 'revision not found' });
+    return null;
+  }
+  if (context === 'empty-addendum') {
+    res.status(422).json({ success: false, error: 'addendum has no changed sections' });
+    return null;
+  }
+  return {
+    ...context,
+    rules: resolution.rules,
+    mode: bodyResult.data.mode,
+    overrideReadinessGate: bodyResult.data.overrideReadinessGate,
+  };
+}
+
+export async function generateRevisionHandler(req: Request, res: Response): Promise<void> {
   try {
-    const resolution = await resolveStyleRules(bodyResult.data.templateId);
-    if (!resolution.found) {
-      res.status(404).json({ success: false, error: 'template not found' });
+    const context = await loadRevisionGenerationContext(req, res);
+    if (context === null) return;
+    const gateTrees = context.trees.map((tree) => ({ tree }));
+    if (enforceReadinessGate(res, gateTrees, context.mode, context.overrideReadinessGate)) {
       return;
     }
-    const docx =
-      bodyResult.data.baseRevisionId === undefined
-        ? await renderDefaultRevision(idResult.data, bodyResult.data, resolution.rules)
-        : await renderAddendumRevision(
-            idResult.data,
-            bodyResult.data.baseRevisionId,
-            bodyResult.data,
-            resolution.rules
-          );
-    if (docx === null) {
-      res.status(404).json({ success: false, error: 'revision not found' });
-      return;
-    }
-    if (docx === 'empty-addendum') {
-      res.status(422).json({ success: false, error: 'addendum has no changed sections' });
-      return;
-    }
+    const buffer = await generateManual(
+      context.trees,
+      context.meta,
+      context.rules,
+      context.options
+    );
     res.setHeader('Content-Type', DOCX_MIME);
-    res.setHeader('Content-Disposition', `attachment; filename="${docx.filename}"`);
-    res.send(docx.buffer);
+    res.setHeader('Content-Disposition', `attachment; filename="${context.filename}"`);
+    res.send(buffer);
   } catch (err) {
     if (err instanceof RevisionComparisonError) {
       res.status(422).json({ success: false, error: err.message });
