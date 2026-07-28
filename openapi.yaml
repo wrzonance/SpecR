@@ -704,6 +704,74 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/paragraphs/{nodeId}/reject:
+    patch:
+      operationId: rejectParagraph
+      summary: Revert a paragraph's pending edits to its last-checkpoint state
+      description: >
+        Per-paragraph reject (ADR-052 D4): reverts `nodeId` to the text it held
+        at `checkpointId`'s sealed content_version, shipped as an unconditional
+        restore-to-version write through the same machinery as PATCH
+        `/specs/{id}/paragraphs/{nodeId}` — no `expectedVersion` is threaded,
+        so any edit made after the checkpoint sealed is discarded rather than
+        blocking on a stale-version conflict. The write is itself an ordinary
+        history row, so a reject is always visible in the oplog, never a
+        silent no-op. `checkpointId` must have sealed this exact spec (spec-
+        or project-scoped alike); one that never sealed it, or has never
+        recorded state for this paragraph before its cutoff, is rejected.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [checkpointId]
+              properties:
+                checkpointId:
+                  type: string
+                  format: uuid
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
+      responses:
+        '200':
+          description: Reverted paragraph node (with its subtree)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecNode'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Paragraph not found, or checkpointId never sealed this spec
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          $ref: '#/components/responses/WriteConflict'
+        '422':
+          description: >
+            The target is a locked `object` node, or no state was recorded
+            for this paragraph at or before the checkpoint's cutoff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/reclassify:
     post:
       operationId: reclassifySpec
@@ -1041,10 +1109,14 @@ paths:
       operationId: getParagraphHistory
       summary: Read one paragraph's stored iterations
       description: >
-        Returns raw paragraph snapshots oldest-first, including the creation row
-        and current state. A project paragraph starts at its derive point by
-        default; `includeOrigin=true` prepends the direct master's pre-derive
-        iterations through `origin_paragraph_id` (ADR-052 D5).
+        Defaults to tier-1 coalesced sessions (ADR-052 D3/D9): consecutive
+        tier-0 edits by one actor fold into one session with a net
+        before/after diff, still carrying the raw span as each session's
+        nested `entries`. `raw=true` returns the tier-0 snapshots directly,
+        oldest-first, including the creation row and current state. A project
+        paragraph starts at its derive point by default; `includeOrigin=true`
+        prepends the direct master's pre-derive iterations through
+        `origin_paragraph_id` (ADR-052 D5) for either shape.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -1055,9 +1127,16 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: raw
+          in: query
+          required: false
+          description: Return tier-0 raw iterations instead of the default coalesced sessions.
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
-          description: Paragraph iterations, oldest first
+          description: Paragraph iterations — coalesced sessions by default, raw when `raw=true`
           content:
             application/json:
               schema:
@@ -1067,9 +1146,13 @@ paths:
                     required: [data]
                     properties:
                       data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/ParagraphHistoryEntry'
+                        oneOf:
+                          - type: array
+                            items:
+                              $ref: '#/components/schemas/ParagraphHistorySession'
+                          - type: array
+                            items:
+                              $ref: '#/components/schemas/ParagraphHistoryEntry'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -4518,6 +4601,229 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  # ─── Version history: checkpoints & pending summaries (#380, ADR-052) ────────
+
+  /specs/{id}/checkpoints:
+    post:
+      operationId: createSpecCheckpoint
+      summary: Seal a spec at its current content_version (checkpoint)
+      description: >
+        Stores a named marker (the Word "accept changes" moment, ADR-052
+        D3/D4) sealing this spec at its current content_version. Everything
+        recorded after the latest checkpoint reads as pending until the next
+        one. `actorLabel` is REQUIRED — checkpoints.user_id is NOT NULL, so
+        (unlike an ordinary paragraph write) there is no system-actor
+        fallback.
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, actorLabel]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
+      responses:
+        '201':
+          description: Checkpoint sealed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/Checkpoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    get:
+      operationId: listSpecCheckpoints
+      summary: List checkpoints sealed directly against this spec
+      description: >
+        Checkpoints created directly against this spec, most recent first.
+        Does NOT include project-scoped checkpoints that also covered it —
+        see `sealedByCheckpointId` on the pending-summary and coalesced
+        history reads for "which checkpoint (spec- or project-scoped) most
+        recently sealed this spec".
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Spec-scoped checkpoints, most recent first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Checkpoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/checkpoints:
+    post:
+      operationId: createProjectCheckpoint
+      summary: Seal every spec in a project at its current content_version (checkpoint)
+      description: >
+        Same sealing semantics as `POST /specs/{id}/checkpoints`, scoped to
+        every spec directly owned by this project (ADR-015 branch
+        membership, `specs.project_id` — never the `project_specs`
+        package/TOC curation join). One row seals all in-scope specs at once.
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, actorLabel]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
+      responses:
+        '201':
+          description: Checkpoint sealed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/Checkpoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    get:
+      operationId: listProjectCheckpoints
+      summary: List checkpoints sealed directly against this project
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project-scoped checkpoints, most recent first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Checkpoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /checkpoints/{id}:
+    get:
+      operationId: getCheckpoint
+      summary: Retrieve a single checkpoint
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/CheckpointId'
+      responses:
+        '200':
+          description: The checkpoint
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/Checkpoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /specs/{id}/pending-summary:
+    get:
+      operationId: getSpecPendingSummary
+      summary: Everything a spec has accumulated since its last checkpoint
+      description: >
+        Counts DISTINCT pending paragraphs (never raw op count) — a paragraph
+        edited five times since the checkpoint is one pending change — and
+        rolls them up by the actor of each paragraph's LATEST pending edit
+        (ADR-052 D9). A spec never checkpointed reports its whole recorded
+        history as pending.
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Spec pending-change summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/SpecPendingSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/pending-summary:
+    get:
+      operationId: getProjectPendingSummary
+      summary: Everything every spec in a project has accumulated since its own last checkpoint
+      description: >
+        Aggregates `SpecPendingSummary` across every spec directly owned by
+        this project (ADR-015 branch membership) — each spec measured against
+        ITS OWN last checkpoint, never a single project-wide cutoff.
+        `packageId` is echoed back for the caller's own issuance-deadline
+        framing (ADR-052 D9) and never scopes the query.
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: packageId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Project pending-change summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ProjectPendingSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
   # ─── Numbering profiles (#299) ───────────────────────────────────────────────
 
   /libraries/{id}/numbering-profiles:
@@ -5412,6 +5718,14 @@ components:
       in: path
       required: true
       description: Paragraph (node) UUID
+      schema:
+        type: string
+        format: uuid
+    CheckpointId:
+      name: id
+      in: path
+      required: true
+      description: Checkpoint UUID
       schema:
         type: string
         format: uuid
@@ -7475,7 +7789,11 @@ components:
           description: Number of diff entries omitted from `accept`
 
     HistoryAnchor:
-      description: A spec content version, immutable package revision UUID, origin, or current
+      description: >
+        A spec content version, immutable package revision UUID, origin,
+        current, or a `checkpoint:<uuid>`-prefixed checkpoint anchor
+        (ADR-052 D3/D9, #380) — the prefix disambiguates it from an
+        otherwise-identical bare revision UUID.
       oneOf:
         - type: integer
           minimum: 1
@@ -7483,10 +7801,13 @@ components:
           enum: [origin, current]
         - type: string
           format: uuid
+        - type: string
+          pattern: '^checkpoint:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 
     ParagraphHistoryEntry:
       type: object
-      required: [specId, custody, version, text, nodeType, op, contentVersion, snapshotAt]
+      required:
+        [specId, custody, version, text, nodeType, op, contentVersion, snapshotAt, userId, actorLabel]
       properties:
         specId:
           type: string
@@ -7513,6 +7834,83 @@ components:
         snapshotAt:
           type: string
           format: date-time
+        userId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            Actor who produced this row (ADR-052 D1/D6); null for a synthetic
+            tip/derive-point entry or a pre-046 row with no attributed actor.
+        actorLabel:
+          type: [string, 'null']
+          description: "`users.label` for `userId` — null exactly when userId is null."
+
+    ParagraphHistorySession:
+      type: object
+      required:
+        [
+          userId,
+          firstVersion,
+          lastVersion,
+          beforeText,
+          beforeNodeType,
+          afterText,
+          afterNodeType,
+          startedAt,
+          endedAt,
+          sealedContentVersion,
+          sealedByCheckpointId,
+          entries,
+        ]
+      description: >
+        A tier-1 coalesced read-time session (ADR-052 D3): consecutive tier-0
+        edits by one actor, with no intervening foreign-actor entry, no gap
+        exceeding the server's session window, and no crossed checkpoint
+        boundary, folded into one session with a net before/after diff. A
+        null-userId entry is always its own singleton session.
+      properties:
+        userId:
+          type: [string, 'null']
+          format: uuid
+        firstVersion:
+          type: integer
+          minimum: 1
+          description: Paragraph-local version of the session's first entry — display/ordering only.
+        lastVersion:
+          type: integer
+          minimum: 1
+          description: Paragraph-local version of the session's last entry — display/ordering only.
+        beforeText:
+          type: [string, 'null']
+          description: Null iff the session's first entry is the paragraph's creation (op insert).
+        beforeNodeType:
+          type: [string, 'null']
+        afterText:
+          type: string
+        afterNodeType:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        sealedContentVersion:
+          type: [integer, 'null']
+          minimum: 1
+          description: >
+            The session's last entry's contentVersion — the checkpoint join
+            key. Null when that entry predates migration 046 ("never sealed").
+        sealedByCheckpointId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            The checkpoint that sealed this session, or null when still
+            pending or sealedContentVersion is null.
+        entries:
+          type: array
+          description: The raw tier-0 span this session coalesces, oldest first.
+          items:
+            $ref: '#/components/schemas/ParagraphHistoryEntry'
 
     HistoryOperationCounts:
       type: object
@@ -7552,6 +7950,14 @@ components:
             revisionId: { type: string, format: uuid }
             packageId: { type: string, format: uuid }
             label: { type: string }
+        - type: object
+          required: [kind, at, checkpointId, name, contentVersion]
+          properties:
+            kind: { type: string, const: checkpoint }
+            at: { type: string, format: date-time }
+            checkpointId: { type: string, format: uuid }
+            name: { type: string }
+            contentVersion: { type: integer, minimum: 1 }
 
     SpecHistory:
       type: object
@@ -7598,6 +8004,109 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/HistoryDiffEntry'
+
+    ContentVersionMap:
+      type: object
+      description: >
+        `{ [specId]: contentVersion }`, snapshotted once at checkpoint
+        creation (ADR-052 D3/D4) — a spec-scoped checkpoint's map has exactly
+        one key; a project-scoped checkpoint's map has one key per spec that
+        was in-scope at seal time.
+      additionalProperties:
+        type: integer
+        minimum: 1
+
+    Checkpoint:
+      type: object
+      required: [id, name, scope, scopeId, userId, contentVersionMap, createdAt]
+      description: >
+        A stored named marker sealing a spec (or every spec in a project) at
+        its current content_version(s) — the Word "accept changes" moment
+        (ADR-052 D3/D4). Never mutated after creation.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        scope: { type: string, enum: [spec, project] }
+        scopeId:
+          type: string
+          format: uuid
+          description: The sealed spec's or project's UUID, matching `scope`.
+        userId:
+          type: string
+          format: uuid
+          description: The sealing actor (ADR-052 D6) — always attributed, never null.
+        contentVersionMap:
+          $ref: '#/components/schemas/ContentVersionMap'
+        createdAt:
+          type: string
+          format: date-time
+
+    PendingActorRollup:
+      type: object
+      required: [userId, actorLabel, changedParagraphCount]
+      description: One actor's share of a pending set — DISTINCT changed paragraphs, never raw op count.
+      properties:
+        userId:
+          type: [string, 'null']
+          format: uuid
+          description: Null covers a legacy pre-046 row with no attributed user.
+        actorLabel:
+          type: string
+        changedParagraphCount:
+          type: integer
+          minimum: 0
+
+    SpecPendingSummary:
+      type: object
+      required:
+        [
+          specId,
+          sealedByCheckpointId,
+          sealedContentVersion,
+          currentContentVersion,
+          changedParagraphCount,
+          actorRollup,
+        ]
+      description: >
+        Everything a spec has accumulated since its last checkpoint — or its
+        whole recorded history, if never checkpointed (ADR-052 D9).
+      properties:
+        specId: { type: string, format: uuid }
+        sealedByCheckpointId: { type: [string, 'null'], format: uuid }
+        sealedContentVersion: { type: [integer, 'null'], minimum: 1 }
+        currentContentVersion: { type: integer, minimum: 1 }
+        changedParagraphCount: { type: integer, minimum: 0 }
+        actorRollup:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingActorRollup'
+
+    ProjectPendingSummary:
+      type: object
+      required:
+        [projectId, packageId, changedSpecCount, changedParagraphCount, actorRollup, perSpec]
+      description: >
+        Everything every spec directly owned by a project (ADR-015 branch
+        membership) has accumulated since ITS OWN last checkpoint (ADR-052 D9).
+      properties:
+        projectId: { type: string, format: uuid }
+        packageId:
+          type: [string, 'null']
+          format: uuid
+          description: Echoed back for the caller's own issuance-deadline framing — never scopes the query.
+        changedSpecCount:
+          type: integer
+          minimum: 0
+          description: Specs with at least one pending paragraph — not the project's total spec count.
+        changedParagraphCount: { type: integer, minimum: 0 }
+        actorRollup:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingActorRollup'
+        perSpec:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecPendingSummary'
 
     LineageHop:
       type: object

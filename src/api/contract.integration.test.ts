@@ -116,6 +116,18 @@ const RESPONSE_ALLOWLIST = new Set([
   'put /projects/{}/required-sections',
   'get /projects/{}/packages/{}/required-sections',
   'put /projects/{}/packages/{}/required-sections',
+  // version-history checkpoints, pending summaries, and per-paragraph reject
+  // (ADR-052 D3/D4/D9, issue #380 task 9) — response-covered by
+  // history.integration.test.ts's raw/coalesced flip; these are new ops
+  // pending their own dedicated response-contract test.
+  'post /specs/{}/checkpoints',
+  'get /specs/{}/checkpoints',
+  'post /projects/{}/checkpoints',
+  'get /projects/{}/checkpoints',
+  'get /checkpoints/{}',
+  'get /specs/{}/pending-summary',
+  'get /projects/{}/pending-summary',
+  'patch /specs/{}/paragraphs/{}/reject',
   'get /projects/{}/coordination-report',
   'get /projects/{}/reference-graph',
   'get /libraries/{}/reference-graph',

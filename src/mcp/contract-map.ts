@@ -189,6 +189,29 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
     'get /projects/{}/specs/{}/references',
     'outbound-reference read — covered by get_references (MCP-native)',
   ],
+  // --- Pending burn-down: version-history checkpoints/pending-summary/reject
+  //     (ADR-052 D3/D4/D9, issue #380). REST-first (task 9); MCP tools land
+  //     in the immediate follow-up task of the same issue (task 10). ---
+  ['post /specs/{}/checkpoints', 'pending — issue #380 task 10: seal a spec-scoped checkpoint'],
+  ['get /specs/{}/checkpoints', 'pending — issue #380 task 10: list spec-scoped checkpoints'],
+  [
+    'post /projects/{}/checkpoints',
+    'pending — issue #380 task 10: seal a project-scoped checkpoint',
+  ],
+  ['get /projects/{}/checkpoints', 'pending — issue #380 task 10: list project-scoped checkpoints'],
+  ['get /checkpoints/{}', 'pending — issue #380 task 10: read a single checkpoint'],
+  [
+    'get /specs/{}/pending-summary',
+    'pending — issue #380 task 10: pending-change summary for one spec',
+  ],
+  [
+    'get /projects/{}/pending-summary',
+    'pending — issue #380 task 10: pending-change summary across a project',
+  ],
+  [
+    'patch /specs/{}/paragraphs/{}/reject',
+    'pending — issue #380 task 10: revert a paragraph to its last-checkpoint state',
+  ],
 ]);
 
 /** Tools with no single REST equivalent — allowed to map to nothing (INV-2). */

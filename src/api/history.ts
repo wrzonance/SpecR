@@ -2,11 +2,14 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import {
   getParagraphHistory,
+  getCoalescedParagraphHistory,
   getSpecHistory,
   getSpecHistoryDiff,
   HistoryAnchorError,
 } from '../db/index.js';
+import type { ParagraphHistoryEntry, ParagraphHistorySession } from '../db/index.js';
 import { HistoryAnchorSchema } from '../ast/index.js';
+import { config } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
 
 const PackageIdSchema = z.uuid().optional();
@@ -24,6 +27,25 @@ function internalError(res: Response, err: unknown, operation: string): void {
   res.status(500).json({ success: false, error: 'internal server error' });
 }
 
+/** Tier-0 raw iterations (`?raw=true`) or, by default, tier-1 coalesced
+ *  sessions (ADR-052 D3/D9) — the read-time view folds consecutive same-actor
+ *  edits into one session with a net before/after diff, still carrying the
+ *  raw span as each session's nested `entries` for drill-down. */
+async function loadParagraphHistory(
+  specId: string,
+  nodeId: string,
+  includeOrigin: boolean,
+  raw: boolean
+): Promise<readonly ParagraphHistoryEntry[] | readonly ParagraphHistorySession[] | null> {
+  if (raw) return getParagraphHistory(specId, nodeId, includeOrigin);
+  return getCoalescedParagraphHistory(
+    specId,
+    nodeId,
+    config.HISTORY_SESSION_WINDOW_MS,
+    includeOrigin
+  );
+}
+
 export async function getParagraphHistoryHandler(req: Request, res: Response): Promise<void> {
   const specId = z.uuid().safeParse(req.params['id']);
   const nodeId = z.uuid().safeParse(req.params['nodeId']);
@@ -32,10 +54,11 @@ export async function getParagraphHistoryHandler(req: Request, res: Response): P
     return;
   }
   try {
-    const history = await getParagraphHistory(
+    const history = await loadParagraphHistory(
       specId.data,
       nodeId.data,
-      req.query['includeOrigin'] === 'true'
+      req.query['includeOrigin'] === 'true',
+      req.query['raw'] === 'true'
     );
     if (!history) {
       notFound(res, 'spec or paragraph not found');

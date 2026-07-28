@@ -135,6 +135,8 @@ export { InsertParagraphBodySchema, InsertableNodeTypeSchema } from './paragraph
 export type { InsertParagraphBody, InsertableNodeType } from './paragraph-schemas.js';
 export { HistoryAnchorSchema, parseCheckpointAnchor } from './history-schemas.js';
 export type { HistoryAnchorInput } from './history-schemas.js';
+export { CreateCheckpointBodySchema, RejectParagraphBodySchema } from './checkpoint-schemas.js';
+export type { CreateCheckpointBody, RejectParagraphBody } from './checkpoint-schemas.js';
 export {
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
