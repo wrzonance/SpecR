@@ -45,12 +45,11 @@ describe('enforceReadinessGate', () => {
 
   it('writes a 422 pointing at the readiness-report endpoint and returns true on ReadinessBlockedError (INV-4)', async () => {
     const { assertReadyForFinal, ReadinessBlockedError } = await import('../db/index.js');
+    const findings = [{ type: 'specifier_note_present' as const, nodeId: 'n1', text: 'note' }];
     vi.mocked(assertReadyForFinal).mockImplementationOnce(() => {
       throw new ReadinessBlockedError(
         'final issuance blocked: 1 readiness finding(s) outstanding',
-        {
-          findings: [],
-        }
+        { findings }
       );
     });
     const { enforceReadinessGate } = await import('./readiness-guard.js');
@@ -60,10 +59,16 @@ describe('enforceReadinessGate', () => {
 
     expect(blocked).toBe(true);
     expect(res.status).toHaveBeenCalledWith(422);
+    // findings travel on the response (Codex review finding, #406) so a
+    // caller gating a frozen revision snapshot — which has no
+    // readiness-report endpoint of its own — still gets the exact
+    // diagnostic, not just a count and a pointer to a live report that may
+    // no longer match.
     expect(res.json).toHaveBeenCalledWith({
       success: false,
       error:
         'final issuance blocked: 1 readiness finding(s) outstanding — see GET .../readiness-report',
+      findings,
     });
   });
 

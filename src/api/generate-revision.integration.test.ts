@@ -373,5 +373,17 @@ describe('POST /revisions/:id/generate — issuance-readiness gate (ADR-079, #40
     // (including the note-carrying one) is in scope, unlike the addendum
     // case above.
     expect(res.status).toBe(422);
+    // This handler gates a frozen revision snapshot, which has no
+    // readiness-report endpoint of its own — the live spec's readiness could
+    // since have changed independently of the frozen tree, so the caller
+    // must be able to see what actually blocked THIS generate call directly
+    // on the response rather than following the message's live-report
+    // pointer (Codex review finding, #406).
+    const body = (await res.json()) as { findings: readonly { type: string; text: string }[] };
+    expect(body.findings).toHaveLength(1);
+    expect(body.findings[0]).toMatchObject({
+      type: 'specifier_note_present',
+      text: 'Confirm conductor gauge with owner.',
+    });
   });
 });

@@ -18,6 +18,15 @@ interface ReadinessCheckedEntry {
  * immediately without generating a document. Returns `false` when
  * generation should proceed (draft, clean, or explicitly overridden).
  *
+ * The 422 body carries `err.findings` directly (Codex review finding, #406)
+ * rather than only a count plus a "see GET .../readiness-report" pointer —
+ * `generateRevisionHandler` gates an immutable revision snapshot, which has
+ * no readiness-report endpoint of its own, and the live spec/package report
+ * the message points at can read clean while a frozen revision's own
+ * findings remain outstanding once its source content has since diverged.
+ * Returning the findings inline answers the caller correctly regardless of
+ * which tree(s) were actually gated.
+ *
  * Any error other than `ReadinessBlockedError` is rethrown unchanged so each
  * handler's own catch-all still surfaces an unexpected failure as its
  * existing 500 — this helper never swallows an error it doesn't recognize.
@@ -40,6 +49,7 @@ export function enforceReadinessGate(
     res.status(422).json({
       success: false,
       error: `${err.message} — see GET .../readiness-report`,
+      findings: err.findings,
     });
     return true;
   }

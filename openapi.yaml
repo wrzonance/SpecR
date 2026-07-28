@@ -1353,13 +1353,20 @@ paths:
           description: >
             `mode: 'final'` is blocked by the ADR-079 (#406) issuance-readiness
             gate — the spec has one or more outstanding ReadinessFinding
-            entries. The error message reports the finding count and points at
+            entries, returned inline as `findings`. The error message also
+            reports the finding count and points at
             `GET /specs/{id}/readiness-report` for the full list; pass
             `overrideReadinessGate: true` to generate anyway.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      findings:
+                        type: array
+                        items: { $ref: '#/components/schemas/ReadinessFinding' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -2266,16 +2273,22 @@ paths:
           description: >
             Project has no sections to assemble, or `mode: 'final'` is blocked
             by the ADR-079 (#406) issuance-readiness gate — one or more of the
-            assembled TOC sections has an outstanding ReadinessFinding. There
-            is no project-scoped readiness report; the gate error message
-            reports the finding count across all TOC sections combined — use
-            `GET /specs/{id}/readiness-report` per section to see which one(s)
-            are outstanding. Pass `overrideReadinessGate: true` to generate
-            anyway.
+            assembled TOC sections has an outstanding ReadinessFinding,
+            returned inline as `findings` across all TOC sections combined.
+            There is no project-scoped readiness report; use
+            `GET /specs/{id}/readiness-report` per section to see which
+            section each finding came from. Pass
+            `overrideReadinessGate: true` to generate anyway.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      findings:
+                        type: array
+                        items: { $ref: '#/components/schemas/ReadinessFinding' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -3873,12 +3886,22 @@ paths:
             gate. In addendum mode the gate covers only the sections that
             actually changed against the base revision (#406 decision 15) — a
             carried-over section already evaluated at a prior issuance is
-            never re-gated here. The error message reports the finding count;
-            pass `overrideReadinessGate: true` to generate anyway.
+            never re-gated here. This route gates an immutable revision
+            snapshot, which has no readiness-report endpoint of its own, so
+            the blocking findings are returned inline as `findings` rather
+            than only a count — a live spec/package readiness report can
+            since have diverged from what this frozen revision actually
+            contains. Pass `overrideReadinessGate: true` to generate anyway.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      findings:
+                        type: array
+                        items: { $ref: '#/components/schemas/ReadinessFinding' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 

@@ -388,6 +388,7 @@ describe('POST /specs/:id/generate — templateId (integration)', () => {
 // note/choice-token/comment/textBox content).
 describe('POST /specs/:id/generate — issuance-readiness gate (ADR-079, #406)', () => {
   let blockedSpecId: string;
+  let blockedNoteId: string;
 
   beforeAll(async () => {
     const specRes = await pool.query<{ id: string }>(
@@ -416,11 +417,14 @@ describe('POST /specs/:id/generate — issuance-readiness gate (ADR-079, #406)',
     const articleRow = articleRes.rows[0];
     if (!articleRow) throw new Error('failed to insert blocked article');
 
-    await pool.query(
+    const noteRes = await pool.query<{ id: string }>(
       `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, vanish)
-       VALUES ($1, $2, 'note', 'Confirm topcoat sheen with owner.', 1, false)`,
+       VALUES ($1, $2, 'note', 'Confirm topcoat sheen with owner.', 1, false) RETURNING id`,
       [blockedSpecId, articleRow.id]
     );
+    const noteRow = noteRes.rows[0];
+    if (!noteRow) throw new Error('failed to insert blocked note');
+    blockedNoteId = noteRow.id;
   });
 
   afterAll(async () => {
@@ -451,7 +455,11 @@ describe('POST /specs/:id/generate — issuance-readiness gate (ADR-079, #406)',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode: 'final' }),
     });
-    const body = (await res.json()) as { success: boolean; error: string };
+    const body = (await res.json()) as {
+      success: boolean;
+      error: string;
+      findings: readonly { type: string }[];
+    };
     expect(res.status).toBe(422);
     expect(body.success).toBe(false);
     // Proves enforceReadinessGate's `instanceof ReadinessBlockedError` check
@@ -460,6 +468,16 @@ describe('POST /specs/:id/generate — issuance-readiness gate (ADR-079, #406)',
     expect(body.error).toBe(
       'final issuance blocked: 1 readiness finding(s) outstanding — see GET .../readiness-report'
     );
+    // The findings travel on the response body itself (Codex review finding,
+    // #406) — not just a count and a pointer — so a caller never has to make
+    // a second request to see what actually blocked the issuance.
+    expect(body.findings).toEqual([
+      {
+        type: 'specifier_note_present',
+        nodeId: blockedNoteId,
+        text: 'Confirm topcoat sheen with owner.',
+      },
+    ]);
   });
 
   it('mode: final + overrideReadinessGate renders a real DOCX despite the outstanding finding — INV-2', async () => {

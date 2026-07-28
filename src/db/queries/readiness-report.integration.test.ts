@@ -263,6 +263,42 @@ describe('getReadinessReport — package scope (#406)', () => {
     );
     expect(report.summary.total).toBe(2);
   });
+
+  it('reports a captured text box across the package instead of throwing (Codex review finding, #406)', async () => {
+    // Regression for snapshotMemberTrees omitting object_data from its
+    // paragraph SELECT: buildNodeTree's parseObjectMeta rejects the resulting
+    // `undefined` for an `object`-typed row, which previously surfaced as an
+    // unconditional throw out of getReadinessReport for ANY package
+    // containing a captured table/text box — never a `body_object_present`
+    // finding. The spec-scope path (getSpecTree) already selected object_data
+    // and never had this gap; only the package-scope snapshot path did.
+    const projectId = await newProject('readiness-object');
+    const packageId = await newPackage(projectId, 'Object Package', 1);
+    const specId = await newSpec('08 11 02', 'Metal Doors — Object');
+    await addPackageSpec(packageId, specId, 1);
+    // 'Text Box' matches what the DOCX parser actually stores for an object
+    // node's text (body-object-attach.ts's toObjectNode) — snapshotMemberTrees
+    // validates every member tree against SpecTreeSchema, which requires a
+    // non-empty text, unlike getSpecTree's spec-scope path.
+    const objectId = await addParagraph(specId, 'Text Box', {
+      nodeType: 'object',
+      objectData: textBoxObject,
+    });
+
+    const report = await getReadinessReport({ kind: 'package', packageId });
+
+    expect(report.readyForFinal).toBe(false);
+    expect(report.findings).toEqual([
+      {
+        type: 'body_object_present',
+        nodeId: objectId,
+        text: 'Text Box',
+        objectKind: 'textBox',
+        specId,
+        specSection: '08 11 02',
+      },
+    ]);
+  });
 });
 
 describe('getReadinessReport — package-scope transaction safety (INV-14)', () => {
