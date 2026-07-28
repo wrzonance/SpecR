@@ -1,11 +1,10 @@
 import { z } from 'zod';
 import {
-  createCheckpoint,
+  createCheckpointForActor,
   listCheckpoints,
   getCheckpointById,
   getSpecPendingSummary,
   getProjectPendingSummary,
-  resolveOrCreateUserByLabel,
   CheckpointScopeNotFoundError,
   SpecNotFoundError,
   ProjectNotFoundError,
@@ -95,12 +94,11 @@ export async function handleCreateCheckpoint(args: unknown): Promise<ToolResult>
   const scope = resolveCheckpointScope(owner.data.specId, owner.data.projectId);
   if ('isError' in scope) return scope;
   try {
-    const user = await resolveOrCreateUserByLabel(body.data.actorLabel);
-    const checkpoint = await createCheckpoint({
+    const checkpoint = await createCheckpointForActor({
       name: body.data.name,
       scope: scope.scope,
       scopeId: scope.scopeId,
-      userId: user.id,
+      actorLabel: body.data.actorLabel,
     });
     return ok(checkpoint);
   } catch (err) {

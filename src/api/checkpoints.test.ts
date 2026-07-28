@@ -2,10 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response } from 'express';
 
 vi.mock('../db/index.js', () => ({
-  createCheckpoint: vi.fn(),
+  createCheckpointForActor: vi.fn(),
   listCheckpoints: vi.fn(),
   getCheckpointById: vi.fn(),
-  resolveOrCreateUserByLabel: vi.fn(),
   CheckpointScopeNotFoundError: class CheckpointScopeNotFoundError extends Error {},
 }));
 
@@ -36,7 +35,7 @@ beforeEach(() => {
 describe('checkpoints API — request validation', () => {
   it('rejects a malformed spec id at the boundary before touching the db', async () => {
     const { createSpecCheckpointHandler } = await import('./checkpoints.js');
-    const { createCheckpoint } = await import('../db/index.js');
+    const { createCheckpointForActor } = await import('../db/index.js');
     const res = makeRes();
 
     await createSpecCheckpointHandler(
@@ -45,12 +44,12 @@ describe('checkpoints API — request validation', () => {
     );
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(createCheckpoint).not.toHaveBeenCalled();
+    expect(createCheckpointForActor).not.toHaveBeenCalled();
   });
 
   it('rejects a body missing the required actorLabel', async () => {
     const { createProjectCheckpointHandler } = await import('./checkpoints.js');
-    const { createCheckpoint } = await import('../db/index.js');
+    const { createCheckpointForActor } = await import('../db/index.js');
     const res = makeRes();
 
     await createProjectCheckpointHandler(
@@ -59,7 +58,7 @@ describe('checkpoints API — request validation', () => {
     );
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(createCheckpoint).not.toHaveBeenCalled();
+    expect(createCheckpointForActor).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed checkpoint id on the single-resource read', async () => {
@@ -73,14 +72,9 @@ describe('checkpoints API — request validation', () => {
 });
 
 describe('checkpoints API — create', () => {
-  it('resolves actorLabel to a userId before sealing a spec-scoped checkpoint', async () => {
+  it('seals a spec-scoped checkpoint by delegating name/scope/actorLabel to createCheckpointForActor', async () => {
     const { createSpecCheckpointHandler } = await import('./checkpoints.js');
-    const { createCheckpoint, resolveOrCreateUserByLabel } = await import('../db/index.js');
-    vi.mocked(resolveOrCreateUserByLabel).mockResolvedValueOnce({
-      id: USER_ID,
-      label: 'alice',
-      createdAt: new Date('2026-07-27T00:00:00Z'),
-    });
+    const { createCheckpointForActor } = await import('../db/index.js');
     const checkpoint = {
       id: CHECKPOINT_ID,
       name: 'Review 1',
@@ -90,7 +84,7 @@ describe('checkpoints API — create', () => {
       contentVersionMap: { [SPEC_ID]: 3 },
       createdAt: '2026-07-27T00:00:00.000Z',
     };
-    vi.mocked(createCheckpoint).mockResolvedValueOnce(checkpoint);
+    vi.mocked(createCheckpointForActor).mockResolvedValueOnce(checkpoint);
     const res = makeRes();
 
     await createSpecCheckpointHandler(
@@ -98,12 +92,14 @@ describe('checkpoints API — create', () => {
       res as unknown as Response
     );
 
-    expect(resolveOrCreateUserByLabel).toHaveBeenCalledWith('alice');
-    expect(createCheckpoint).toHaveBeenCalledWith({
+    // Actor resolution and the checkpoint insert are ONE transaction inside
+    // createCheckpointForActor (#380 review finding) — the handler itself
+    // makes exactly this one call, never resolving the actor separately.
+    expect(createCheckpointForActor).toHaveBeenCalledWith({
       name: 'Review 1',
       scope: 'spec',
       scopeId: SPEC_ID,
-      userId: USER_ID,
+      actorLabel: 'alice',
     });
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalledWith({ success: true, data: checkpoint });
@@ -111,14 +107,9 @@ describe('checkpoints API — create', () => {
 
   it('maps CheckpointScopeNotFoundError to 404', async () => {
     const { createProjectCheckpointHandler } = await import('./checkpoints.js');
-    const { createCheckpoint, resolveOrCreateUserByLabel, CheckpointScopeNotFoundError } =
+    const { createCheckpointForActor, CheckpointScopeNotFoundError } =
       await import('../db/index.js');
-    vi.mocked(resolveOrCreateUserByLabel).mockResolvedValueOnce({
-      id: USER_ID,
-      label: 'alice',
-      createdAt: new Date(),
-    });
-    vi.mocked(createCheckpoint).mockRejectedValueOnce(
+    vi.mocked(createCheckpointForActor).mockRejectedValueOnce(
       new CheckpointScopeNotFoundError('project nope not found')
     );
     const res = makeRes();
@@ -133,15 +124,10 @@ describe('checkpoints API — create', () => {
 
   it('logs and returns 500 on an unexpected create failure', async () => {
     const { createSpecCheckpointHandler } = await import('./checkpoints.js');
-    const { createCheckpoint, resolveOrCreateUserByLabel } = await import('../db/index.js');
+    const { createCheckpointForActor } = await import('../db/index.js');
     const { logger } = await import('../lib/logger.js');
-    vi.mocked(resolveOrCreateUserByLabel).mockResolvedValueOnce({
-      id: USER_ID,
-      label: 'alice',
-      createdAt: new Date(),
-    });
     const err = new Error('connection lost');
-    vi.mocked(createCheckpoint).mockRejectedValueOnce(err);
+    vi.mocked(createCheckpointForActor).mockRejectedValueOnce(err);
     const res = makeRes();
 
     await createSpecCheckpointHandler(

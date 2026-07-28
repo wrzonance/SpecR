@@ -63,6 +63,14 @@ function differentActor(prev: CoalescableHistoryEntry, next: CoalescableHistoryE
   return prev.userId !== next.userId;
 }
 
+/** Origin and local entries (ADR-052 D5, includeOrigin) belong to different
+ *  specs with independent content_version counters — crossing that seam is
+ *  always its own session break, never coalesced by actor/window/checkpoint
+ *  rules that only make sense within one spec's axis (#380 review finding). */
+function differentSpec(prev: CoalescableHistoryEntry, next: CoalescableHistoryEntry): boolean {
+  return prev.specId !== next.specId;
+}
+
 function exceedsSessionWindow(
   prev: CoalescableHistoryEntry,
   next: CoalescableHistoryEntry,
@@ -74,7 +82,11 @@ function exceedsSessionWindow(
 /** ADR-052 D3 amendment #3: `prev <= N < next`, never `(prev, next]`. Skips
  *  the test entirely when either side's `contentVersion` is null (a legacy
  *  pre-046 row) — there is no recoverable axis to join a boundary against,
- *  so a null-`contentVersion` neighbor can never itself trigger a split. */
+ *  so a null-`contentVersion` neighbor can never itself trigger a split. Only
+ *  boundaries scoped to `prev`'s own spec apply — `differentSpec` already
+ *  forces a break at the origin/local seam itself, so prev/next share one
+ *  spec by the time this runs (#380 review finding: this used to compare
+ *  against EVERY passed-in boundary regardless of which spec it sealed). */
 function crossesCheckpointBoundary(
   prev: CoalescableHistoryEntry,
   next: CoalescableHistoryEntry,
@@ -84,7 +96,10 @@ function crossesCheckpointBoundary(
   const nextVersion = next.contentVersion;
   if (prevVersion === null || nextVersion === null) return false;
   return checkpointBoundaries.some(
-    (boundary) => prevVersion <= boundary.contentVersion && boundary.contentVersion < nextVersion
+    (boundary) =>
+      boundary.specId === prev.specId &&
+      prevVersion <= boundary.contentVersion &&
+      boundary.contentVersion < nextVersion
   );
 }
 
@@ -96,6 +111,7 @@ function shouldStartNewSession(
 ): boolean {
   return (
     differentActor(prev, next) ||
+    differentSpec(prev, next) ||
     exceedsSessionWindow(prev, next, sessionWindowMs) ||
     crossesCheckpointBoundary(prev, next, checkpointBoundaries)
   );
@@ -177,16 +193,19 @@ function partitionIntoSpans(
 }
 
 /** The checkpoint with the smallest `contentVersion >= sealedContentVersion`
- *  — ascending `checkpointBoundaries` makes this the first match found,
- *  independent of whether it was also the boundary that split this span from
- *  the next one. */
+ *  on `specId`'s own axis — ascending `checkpointBoundaries` makes this the
+ *  first match found, independent of whether it was also the boundary that
+ *  split this span from the next one. Every entry in one session shares a
+ *  spec (`differentSpec` forces a break at the seam), so the session's own
+ *  `specId` is unambiguous here. */
 function findSealingCheckpointId(
   sealedContentVersion: number | null,
+  specId: string,
   checkpointBoundaries: readonly CheckpointBoundary[]
 ): string | null {
   if (sealedContentVersion === null) return null;
   const sealing = checkpointBoundaries.find(
-    (boundary) => boundary.contentVersion >= sealedContentVersion
+    (boundary) => boundary.specId === specId && boundary.contentVersion >= sealedContentVersion
   );
   return sealing?.checkpointId ?? null;
 }
@@ -216,7 +235,11 @@ function toSession(
     startedAt: first.snapshotAt,
     endedAt: last.snapshotAt,
     sealedContentVersion,
-    sealedByCheckpointId: findSealingCheckpointId(sealedContentVersion, checkpointBoundaries),
+    sealedByCheckpointId: findSealingCheckpointId(
+      sealedContentVersion,
+      last.specId,
+      checkpointBoundaries
+    ),
     entries: span.entries,
   };
 }

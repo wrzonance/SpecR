@@ -249,8 +249,12 @@ export async function getParagraphHistory(
 }
 
 /** Tier-1 read (ADR-052 D3): {@link getParagraphHistory}'s entries folded into
- *  coalesced sessions against this spec's checkpoint boundaries. Same
- *  not-found `null` as getParagraphHistory — coalescing changes shape only. */
+ *  coalesced sessions. When includeOrigin, also fetches the origin spec's OWN
+ *  boundaries — origin/local specs keep independent content_version counters
+ *  (ADR-052 D5), so sealing origin entries against only the local spec's
+ *  boundaries would use an unrelated axis (#380 review finding); each
+ *  CheckpointBoundary now carries its own specId so the coalescer can tell
+ *  them apart once merged. Same not-found `null` as getParagraphHistory. */
 export async function getCoalescedParagraphHistory(
   specId: string,
   paragraphId: string,
@@ -261,7 +265,11 @@ export async function getCoalescedParagraphHistory(
   try {
     const entries = await getParagraphHistory(specId, paragraphId, includeOrigin, db);
     if (!entries) return null;
-    const boundaries = await getCheckpointBoundariesForSpec(specId, db);
+    const originSpecId = entries.find((entry) => entry.custody === 'origin')?.specId;
+    const originBoundaries = originSpecId
+      ? await getCheckpointBoundariesForSpec(originSpecId, db)
+      : [];
+    const boundaries = [...originBoundaries, ...(await getCheckpointBoundariesForSpec(specId, db))];
     return coalesceParagraphSessions(entries, boundaries, sessionWindowMs);
   } catch (err) {
     if (err instanceof DatabaseError) throw err;

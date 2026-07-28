@@ -237,4 +237,50 @@ describe('getCoalescedParagraphHistory — tier-1 read (ADR-052 D3)', () => {
       getCoalescedParagraphHistory('s1', 'p1', SESSION_WINDOW_MS, false, pool)
     ).rejects.toBeInstanceOf(DatabaseError);
   });
+
+  // #380 review finding: origin and local specs each keep an independent
+  // content_version counter (ADR-052 D5) — sealing origin entries against
+  // only the LOCAL spec's checkpoint boundaries would seal/unseal them
+  // against a completely unrelated axis. includeOrigin must fetch the
+  // ORIGIN spec's own boundaries too, not just the derived spec's.
+  it('includeOrigin fetches the ORIGIN spec’s own checkpoint boundaries, not just the local spec’s', async () => {
+    const { pool } = await import('../index.js');
+    const originContext = contextRow({
+      id: 'origin-p1',
+      spec_id: 'origin-spec',
+      content_version: 2,
+      parent_spec_id: null,
+      origin_version: null,
+    });
+    const localContext = contextRow({
+      id: 'p1',
+      spec_id: 's1',
+      parent_spec_id: 'origin-spec',
+      origin_paragraph_id: 'origin-p1',
+      origin_version: 2,
+    });
+    vi.mocked(pool.query)
+      .mockResolvedValueOnce({ rows: [localContext], rowCount: 1 } as never) // paragraphContext(local)
+      .mockResolvedValueOnce({
+        rows: [historyRow({ spec_id: 's1', version: 1, content_version: 1 })],
+        rowCount: 1,
+      } as never) // historyRows(local)
+      .mockResolvedValueOnce({ rows: [originContext], rowCount: 1 } as never) // paragraphContext(origin)
+      .mockResolvedValueOnce({
+        rows: [historyRow({ spec_id: 'origin-spec', version: 1, content_version: 1 })],
+        rowCount: 1,
+      } as never) // historyRows(origin)
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 } as never) // getCheckpointBoundariesForSpec(local)
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 } as never); // getCheckpointBoundariesForSpec(origin)
+    const { getCoalescedParagraphHistory } = await import('./history.js');
+
+    const sessions = await getCoalescedParagraphHistory('s1', 'p1', SESSION_WINDOW_MS, true, pool);
+
+    expect(sessions?.some((s) => s.entries.some((e) => e.specId === 'origin-spec'))).toBe(true);
+    expect(vi.mocked(pool.query)).toHaveBeenCalledTimes(6);
+    const calls = vi.mocked(pool.query).mock.calls;
+    // The two boundary fetches are the last two calls, scoped to each spec in turn.
+    expect(calls[4]?.[1]).toEqual(['origin-spec']);
+    expect(calls[5]?.[1]).toEqual(['s1']);
+  });
 });

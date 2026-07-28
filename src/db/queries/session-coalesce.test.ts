@@ -55,9 +55,10 @@ function historyEntry(overrides: EntryOverrides = {}): CoalescableHistoryEntry {
 function boundary(
   checkpointId: string,
   contentVersion: number,
-  at = '2026-07-01T00:00:00.000Z'
+  at = '2026-07-01T00:00:00.000Z',
+  specId = 'spec-1'
 ): CheckpointBoundary {
-  return { checkpointId, at, contentVersion };
+  return { checkpointId, at, contentVersion, specId };
 }
 
 describe('coalesceParagraphSessions — purity and totality', () => {
@@ -249,6 +250,82 @@ describe('coalesceParagraphSessions — checkpoint boundary sealing is prev <= N
     const [session] = coalesceParagraphSessions(entries, [boundary('cp-1', 3)], SESSION_WINDOW_MS);
 
     expect(session?.sealedByCheckpointId).toBeNull();
+  });
+});
+
+// #380 review finding: includeOrigin prepends the origin spec's own pre-derive
+// entries ahead of the local spec's entries (ADR-052 D5). Origin and local
+// specs each keep an INDEPENDENT content_version counter, so a boundary
+// sealed on one spec must never seal/split entries on the other — every
+// CheckpointBoundary now carries its own specId, and the coalescer must
+// respect it even when both specs' boundaries are passed in one merged list.
+describe('coalesceParagraphSessions — origin/local axis scoping (includeOrigin, #380 review finding)', () => {
+  it('a same-actor, no-gap pair spanning specs still splits into two sessions (custody seam is its own break)', () => {
+    const entries = [
+      historyEntry({
+        specId: 'origin-spec',
+        custody: 'origin',
+        version: 1,
+        contentVersion: 2,
+        snapshotAt: '2026-07-01T00:00:00.000Z',
+      }),
+      historyEntry({
+        specId: 'local-spec',
+        custody: 'spec',
+        version: 1,
+        contentVersion: 1,
+        snapshotAt: '2026-07-01T00:00:01.000Z', // 1s later — well within the session window
+      }),
+    ];
+
+    const sessions = coalesceParagraphSessions(entries, [], SESSION_WINDOW_MS);
+
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]?.entries.every((e) => e.specId === 'origin-spec')).toBe(true);
+    expect(sessions[1]?.entries.every((e) => e.specId === 'local-spec')).toBe(true);
+  });
+
+  it('a local checkpoint boundary never seals an origin entry whose contentVersion numerically overlaps it', () => {
+    // Origin entry at contentVersion 2 on the ORIGIN axis; a checkpoint sealed
+    // the LOCAL spec at contentVersion 2 — an unrelated counter that happens
+    // to share the same number. The origin entry must NOT be reported sealed.
+    const entries = [
+      historyEntry({
+        specId: 'origin-spec',
+        custody: 'origin',
+        version: 1,
+        contentVersion: 2,
+      }),
+    ];
+    const boundaries = [boundary('cp-local', 2, '2026-07-01T00:00:00.000Z', 'local-spec')];
+
+    const [session] = coalesceParagraphSessions(entries, boundaries, SESSION_WINDOW_MS);
+
+    expect(session?.sealedContentVersion).toBe(2);
+    expect(session?.sealedByCheckpointId).toBeNull();
+  });
+
+  it("an origin checkpoint boundary correctly seals the origin entries it applies to, ignoring the local spec's boundaries entirely", () => {
+    const entries = [
+      historyEntry({ specId: 'origin-spec', custody: 'origin', version: 1, contentVersion: 2 }),
+      historyEntry({
+        specId: 'origin-spec',
+        custody: 'origin',
+        version: 2,
+        contentVersion: 3,
+        snapshotAt: '2026-07-01T00:01:00.000Z',
+      }),
+    ];
+    const boundaries = [
+      boundary('cp-origin', 2, '2026-07-01T00:00:00.000Z', 'origin-spec'),
+      boundary('cp-local', 2, '2026-07-01T00:00:00.000Z', 'local-spec'),
+    ];
+
+    const sessions = coalesceParagraphSessions(entries, boundaries, SESSION_WINDOW_MS);
+
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]?.sealedByCheckpointId).toBe('cp-origin');
+    expect(sessions[1]?.sealedByCheckpointId).toBeNull(); // CV 3 not yet reached by any origin checkpoint
   });
 });
 

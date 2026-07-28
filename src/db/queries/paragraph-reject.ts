@@ -44,7 +44,12 @@ async function findCheckpointBoundary(
   checkpointId: string
 ): Promise<CheckpointBoundary | null> {
   const boundaries = await getCheckpointBoundariesForSpec(specId);
-  return boundaries.find((boundary) => boundary.checkpointId === checkpointId) ?? null;
+  // pg's checkpointId (row.id) is canonical lowercase; z.uuid() preserves an
+  // uppercase input — normalize both, mirroring classifyMissingSealedState's
+  // specId comparison below (#380 review finding: this comparison was missed
+  // when that fix landed).
+  const normalized = checkpointId.toLowerCase();
+  return boundaries.find((boundary) => boundary.checkpointId.toLowerCase() === normalized) ?? null;
 }
 
 interface SealedTextRow {

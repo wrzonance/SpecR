@@ -14,8 +14,9 @@ class MockDatabaseError extends Error {
 vi.mock('../errors.js', () => ({ DatabaseError: MockDatabaseError }));
 vi.mock('../index.js', () => ({
   DatabaseError: MockDatabaseError,
-  pool: { query: vi.fn() },
+  pool: { query: vi.fn(), connect: vi.fn() },
 }));
+vi.mock('./users.js', () => ({ resolveOrCreateUserByLabel: vi.fn() }));
 
 beforeEach(() => {
   vi.resetModules();
@@ -243,8 +244,8 @@ describe('getCheckpointBoundariesForSpec', () => {
     const result = await getCheckpointBoundariesForSpec('s1', pool);
 
     expect(result).toEqual([
-      { checkpointId: 'cp-1', at: NOW.toISOString(), contentVersion: 3 },
-      { checkpointId: 'cp-2', at: NOW.toISOString(), contentVersion: 7 },
+      { checkpointId: 'cp-1', at: NOW.toISOString(), contentVersion: 3, specId: 's1' },
+      { checkpointId: 'cp-2', at: NOW.toISOString(), contentVersion: 7, specId: 's1' },
     ]);
     const sql = vi.mocked(pool.query).mock.calls[0]?.[0];
     const params = vi.mocked(pool.query).mock.calls[0]?.[1];
@@ -293,7 +294,12 @@ describe('getLatestCheckpointBoundary', () => {
 
     const result = await getLatestCheckpointBoundary('s1', pool);
 
-    expect(result).toEqual({ checkpointId: 'cp-2', at: NOW.toISOString(), contentVersion: 7 });
+    expect(result).toEqual({
+      checkpointId: 'cp-2',
+      at: NOW.toISOString(),
+      contentVersion: 7,
+      specId: 's1',
+    });
     const sql = vi.mocked(pool.query).mock.calls[0]?.[0];
     // Case-fold regression (#380 review finding) — see getCheckpointBoundariesForSpec above.
     expect(sql).toContain('(content_version_map ->> $1::uuid::text)::int');
@@ -308,5 +314,84 @@ describe('getLatestCheckpointBoundary', () => {
     const { getLatestCheckpointBoundary } = await import('./checkpoints.js');
 
     await expect(getLatestCheckpointBoundary('s1', pool)).rejects.toBeInstanceOf(DatabaseError);
+  });
+});
+
+// #380 review finding: resolveOrCreateUserByLabel and createCheckpoint used to run as two
+// independent statements at the REST/MCP edge — an invalid scopeId left a newly-upserted
+// users row committed for a checkpoint that was never created. createCheckpointForActor
+// wraps both in one pool.connect/BEGIN/COMMIT transaction (mirrors updateParagraphText,
+// paragraphs.ts) so a failed create rolls back the actor upsert too.
+describe('createCheckpointForActor', () => {
+  function fakeTransactionClient(insertResult: { rows: Record<string, unknown>[] }): {
+    query: ReturnType<typeof vi.fn>;
+    release: ReturnType<typeof vi.fn>;
+  } {
+    const query = vi.fn((sql: string) => {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      }
+      if (sql.includes('INSERT INTO checkpoints')) {
+        return Promise.resolve({ rows: insertResult.rows, rowCount: insertResult.rows.length });
+      }
+      return Promise.reject(new Error(`fakeTransactionClient: unexpected query: ${sql}`));
+    });
+    return { query, release: vi.fn() };
+  }
+
+  it('resolves the actor and inserts the checkpoint on the SAME client, then commits', async () => {
+    const { pool } = await import('../index.js');
+    const { resolveOrCreateUserByLabel } = await import('./users.js');
+    const client = fakeTransactionClient({ rows: [specCheckpointRow()] });
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as never);
+    vi.mocked(resolveOrCreateUserByLabel).mockResolvedValueOnce({
+      id: 'u1',
+      label: 'alice',
+      createdAt: NOW,
+    });
+    const { createCheckpointForActor } = await import('./checkpoints.js');
+
+    const result = await createCheckpointForActor({
+      name: 'Reviewed 07/27',
+      scope: 'spec',
+      scopeId: 's1',
+      actorLabel: 'alice',
+    });
+
+    expect(result.id).toBe('cp-1');
+    // The actor upsert runs on the transaction client, not the bare pool.
+    expect(resolveOrCreateUserByLabel).toHaveBeenCalledWith('alice', client);
+    expect(client.query.mock.calls.some(([sql]) => sql === 'BEGIN')).toBe(true);
+    expect(client.query.mock.calls.some(([sql]) => sql === 'COMMIT')).toBe(true);
+    expect(client.query.mock.calls.some(([sql]) => sql === 'ROLLBACK')).toBe(false);
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('rolls back the actor upsert when the checkpoint insert fails (no orphaned users row)', async () => {
+    const { pool } = await import('../index.js');
+    const { resolveOrCreateUserByLabel } = await import('./users.js');
+    const pgErr = Object.assign(new Error('fk violation'), { code: '23503' });
+    const query = vi.fn((sql: string) => {
+      if (sql === 'BEGIN' || sql === 'ROLLBACK') return Promise.resolve({ rows: [], rowCount: 0 });
+      if (sql.includes('INSERT INTO checkpoints')) return Promise.reject(pgErr);
+      return Promise.reject(new Error(`unexpected query: ${sql}`));
+    });
+    const client = { query, release: vi.fn() };
+    vi.mocked(pool.connect).mockResolvedValueOnce(client as never);
+    vi.mocked(resolveOrCreateUserByLabel).mockResolvedValueOnce({
+      id: 'u1',
+      label: 'alice',
+      createdAt: NOW,
+    });
+    const { createCheckpointForActor, CheckpointScopeNotFoundError } =
+      await import('./checkpoints.js');
+
+    await expect(
+      createCheckpointForActor({ name: 'n', scope: 'spec', scopeId: 'nope', actorLabel: 'alice' })
+    ).rejects.toBeInstanceOf(CheckpointScopeNotFoundError);
+
+    expect(client.query.mock.calls.some(([sql]) => sql === 'ROLLBACK')).toBe(true);
+    expect(client.query.mock.calls.some(([sql]) => sql === 'COMMIT')).toBe(false);
+    expect(client.release).toHaveBeenCalledOnce();
   });
 });

@@ -10,12 +10,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../db/index.js', () => ({
-  createCheckpoint: vi.fn(),
+  createCheckpointForActor: vi.fn(),
   listCheckpoints: vi.fn(),
   getCheckpointById: vi.fn(),
   getSpecPendingSummary: vi.fn(),
   getProjectPendingSummary: vi.fn(),
-  resolveOrCreateUserByLabel: vi.fn(),
   CheckpointScopeNotFoundError: class CheckpointScopeNotFoundError extends Error {},
   SpecNotFoundError: class SpecNotFoundError extends Error {},
   ProjectNotFoundError: class ProjectNotFoundError extends Error {},
@@ -71,14 +70,9 @@ describe('handleCreateCheckpoint — scope resolution', () => {
 });
 
 describe('handleCreateCheckpoint — writes', () => {
-  it('resolves actorLabel then seals a spec-scoped checkpoint', async () => {
+  it('seals a spec-scoped checkpoint by delegating name/scope/actorLabel to createCheckpointForActor', async () => {
     const db = await import('../db/index.js');
-    vi.mocked(db.resolveOrCreateUserByLabel).mockResolvedValueOnce({
-      id: 'user-1',
-      label: 'reviewer',
-      createdAt: '2026-01-01T00:00:00.000Z',
-    } as never);
-    vi.mocked(db.createCheckpoint).mockResolvedValueOnce({
+    vi.mocked(db.createCheckpointForActor).mockResolvedValueOnce({
       id: CHECKPOINT_ID,
       name: 'Baseline',
       scope: 'spec',
@@ -96,18 +90,20 @@ describe('handleCreateCheckpoint — writes', () => {
     });
 
     expect(isError(res)).toBe(false);
-    expect(db.createCheckpoint).toHaveBeenCalledWith({
+    // Actor resolution and the checkpoint insert are ONE transaction inside
+    // createCheckpointForActor (#380 review finding) — the handler makes
+    // exactly this one call, never resolving the actor separately.
+    expect(db.createCheckpointForActor).toHaveBeenCalledWith({
       name: 'Baseline',
       scope: 'spec',
       scopeId: SPEC_ID,
-      userId: 'user-1',
+      actorLabel: 'reviewer',
     });
   });
 
   it('maps CheckpointScopeNotFoundError to a tool error', async () => {
     const db = await import('../db/index.js');
-    vi.mocked(db.resolveOrCreateUserByLabel).mockResolvedValueOnce({ id: 'user-1' } as never);
-    vi.mocked(db.createCheckpoint).mockRejectedValueOnce(
+    vi.mocked(db.createCheckpointForActor).mockRejectedValueOnce(
       new db.CheckpointScopeNotFoundError('project not found')
     );
     const { handleCreateCheckpoint } = await import('./checkpoint-handlers.js');
@@ -124,7 +120,7 @@ describe('handleCreateCheckpoint — writes', () => {
 
   it('a non-domain rejection surfaces as Internal error, not a throw', async () => {
     const db = await import('../db/index.js');
-    vi.mocked(db.resolveOrCreateUserByLabel).mockRejectedValueOnce(new Error('connection reset'));
+    vi.mocked(db.createCheckpointForActor).mockRejectedValueOnce(new Error('connection reset'));
     const { handleCreateCheckpoint } = await import('./checkpoint-handlers.js');
 
     const res = await handleCreateCheckpoint({

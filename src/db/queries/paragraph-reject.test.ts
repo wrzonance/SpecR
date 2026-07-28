@@ -33,6 +33,7 @@ const SEALED_BOUNDARY = {
   checkpointId: CHECKPOINT_ID,
   at: '2026-01-01T00:00:00Z',
   contentVersion: 3,
+  specId: SPEC_ID,
 };
 
 describe('rejectParagraphToCheckpoint', () => {
@@ -127,6 +128,25 @@ describe('rejectParagraphToCheckpoint', () => {
     const result = await rejectParagraphToCheckpoint(SPEC_ID, PARAGRAPH_ID, CHECKPOINT_ID);
 
     expect(result).toEqual({ status: 'locked-object', nodeType: 'object' });
+  });
+
+  it('paragraph-reject: uppercase checkpointId still resolves the sealed boundary (case-fold gap)', async () => {
+    const { getCheckpointBoundariesForSpec } = await import('./checkpoints.js');
+    vi.mocked(getCheckpointBoundariesForSpec).mockResolvedValue([SEALED_BOUNDARY]);
+    const { pool, getParagraphSpecId } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValue({ rows: [] } as never);
+    vi.mocked(getParagraphSpecId).mockResolvedValue(SPEC_ID);
+
+    const { rejectParagraphToCheckpoint } = await import('./paragraph-reject.js');
+    // CHECKPOINT_ID as stored by pg is canonical lowercase; a caller-supplied
+    // uppercase UUID is still valid per z.uuid() and must resolve the same boundary.
+    const result = await rejectParagraphToCheckpoint(
+      SPEC_ID,
+      PARAGRAPH_ID,
+      CHECKPOINT_ID.toUpperCase()
+    );
+
+    expect(result).toEqual({ status: 'no-checkpointed-state' });
   });
 
   it('wraps a raw failure (e.g. a lost connection) in DatabaseError', async () => {

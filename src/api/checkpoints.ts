@@ -1,10 +1,9 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import {
-  createCheckpoint,
+  createCheckpointForActor,
   listCheckpoints,
   getCheckpointById,
-  resolveOrCreateUserByLabel,
   CheckpointScopeNotFoundError,
 } from '../db/index.js';
 import type { CheckpointScope } from '../db/index.js';
@@ -57,12 +56,11 @@ async function createCheckpointForScope(
   res: Response
 ): Promise<void> {
   try {
-    const user = await resolveOrCreateUserByLabel(body.actorLabel);
-    const checkpoint = await createCheckpoint({
+    const checkpoint = await createCheckpointForActor({
       name: body.name,
       scope,
       scopeId,
-      userId: user.id,
+      actorLabel: body.actorLabel,
     });
     res.status(201).json({ success: true, data: checkpoint });
   } catch (err) {

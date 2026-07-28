@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import { getPgCode } from '../../lib/pg-errors.js';
+import { resolveOrCreateUserByLabel } from './users.js';
 
 // ADR-052 D3/D4 (issue #380) — the checkpoints query layer over migration 052's
 // table. A checkpoint is a stored named marker sealing a spec (or every spec in
@@ -46,11 +47,16 @@ export interface CreateCheckpointInput {
 }
 
 /** The coalescer's exact join-key shape (ADR-052 D3 amendment #1):
- *  `contentVersion`, never a paragraph-local version. */
+ *  `contentVersion`, never a paragraph-local version. `specId` is the spec
+ *  this boundary's contentVersion is scoped to — origin and local specs each
+ *  keep their own independent content_version counter (ADR-052 D5), so the
+ *  coalescer must never compare a boundary against an entry from a different
+ *  spec (#380 review finding: includeOrigin used to mix both axes). */
 export interface CheckpointBoundary {
   readonly checkpointId: string;
   readonly at: string;
   readonly contentVersion: number;
+  readonly specId: string;
 }
 
 /** createCheckpoint was given a spec/project scopeId with no matching row
@@ -105,8 +111,13 @@ function mapCheckpointRow(row: CheckpointRow): Checkpoint {
   };
 }
 
-function mapBoundaryRow(row: CheckpointBoundaryRow): CheckpointBoundary {
-  return { checkpointId: row.id, at: iso(row.created_at), contentVersion: row.content_version };
+function mapBoundaryRow(row: CheckpointBoundaryRow, specId: string): CheckpointBoundary {
+  return {
+    checkpointId: row.id,
+    at: iso(row.created_at),
+    contentVersion: row.content_version,
+    specId,
+  };
 }
 
 /**
@@ -184,6 +195,47 @@ export async function createCheckpoint(
   }
 }
 
+export interface CreateCheckpointForActorInput {
+  readonly name: string;
+  readonly scope: CheckpointScope;
+  readonly scopeId: string;
+  readonly actorLabel: string;
+}
+
+/**
+ * Resolve `actorLabel` to a real users.id and seal the checkpoint in ONE
+ * transaction (mirrors updateParagraphText's pool.connect/BEGIN/COMMIT
+ * pattern, paragraphs.ts) — #380 review finding: the REST/MCP handlers used
+ * to call resolveOrCreateUserByLabel and createCheckpoint as two independent
+ * statements, so an invalid scopeId (23503 -> CheckpointScopeNotFoundError)
+ * left a newly-upserted users row committed for a checkpoint that was never
+ * created. Rolling both back together means a failed create has no side effect.
+ */
+export async function createCheckpointForActor(
+  input: CreateCheckpointForActorInput
+): Promise<Checkpoint> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const user = await resolveOrCreateUserByLabel(input.actorLabel, client);
+    const checkpoint = await createCheckpoint(
+      { name: input.name, scope: input.scope, scopeId: input.scopeId, userId: user.id },
+      client
+    );
+    await client.query('COMMIT');
+    return checkpoint;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* best-effort */
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 /** Checkpoints created directly against `scopeId`, most recent first. Does
  *  NOT include project-scoped checkpoints for a spec's own project when
  *  scope: 'spec' — use getCheckpointBoundariesForSpec for "every checkpoint
@@ -246,7 +298,11 @@ export async function getCheckpointBoundariesForSpec(
        ORDER BY content_version ASC, created_at ASC, id ASC`,
       [specId]
     );
-    return result.rows.map(mapBoundaryRow);
+    // Canonicalize once here too, so a boundary's specId always matches the
+    // canonical lowercase specId a ParagraphHistoryEntry carries (pg's own
+    // spec_id column rendering) regardless of this call's input casing.
+    const canonicalSpecId = specId.toLowerCase();
+    return result.rows.map((row) => mapBoundaryRow(row, canonicalSpecId));
   } catch (err) {
     throw new DatabaseError(`getCheckpointBoundariesForSpec: query failed for ${specId}`, {
       cause: err,
@@ -274,7 +330,7 @@ export async function getLatestCheckpointBoundary(
       [specId]
     );
     const row = result.rows[0];
-    return row ? mapBoundaryRow(row) : null;
+    return row ? mapBoundaryRow(row, specId.toLowerCase()) : null;
   } catch (err) {
     throw new DatabaseError(`getLatestCheckpointBoundary: query failed for ${specId}`, {
       cause: err,

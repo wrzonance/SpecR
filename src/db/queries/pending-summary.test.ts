@@ -83,6 +83,7 @@ describe('getSpecPendingSummary', () => {
       checkpointId: 'cp-1',
       at: '2026-01-01T00:00:00Z',
       contentVersion: 7,
+      specId: SPEC_ID,
     });
     vi.mocked(pool.query)
       .mockResolvedValueOnce({ rows: [{ content_version: 10 }] } as never)
