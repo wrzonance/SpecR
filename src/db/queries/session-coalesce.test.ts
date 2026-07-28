@@ -29,6 +29,9 @@ interface EntryOverrides {
 // only way to tell "caller passed null on purpose" apart from "caller passed
 // nothing" — the `?? null` after it only guards the pathological
 // `{ field: undefined }` case, never the deliberate-null one.
+// actorLabel is inert here — no coalescer rule branches on it, only userId —
+// so a fixed placeholder (never null-vs-default ambiguous like userId/
+// contentVersion) is enough; no override plumbing needed.
 const DEFAULT_ENTRY: Omit<CoalescableHistoryEntry, 'contentVersion' | 'userId'> = {
   specId: 'spec-1',
   custody: 'spec',
@@ -37,6 +40,7 @@ const DEFAULT_ENTRY: Omit<CoalescableHistoryEntry, 'contentVersion' | 'userId'> 
   nodeType: 'paragraph',
   op: 'edit',
   snapshotAt: '2026-07-01T00:00:00.000Z',
+  actorLabel: null,
 };
 
 function historyEntry(overrides: EntryOverrides = {}): CoalescableHistoryEntry {

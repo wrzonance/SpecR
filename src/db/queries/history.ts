@@ -1,6 +1,9 @@
 import type { Pool } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import type { ParagraphHistoryOp } from './paragraph-history.js';
+import { getCheckpointBoundariesForSpec } from './checkpoints.js';
+import { coalesceParagraphSessions } from './session-coalesce.js';
+import type { ParagraphHistorySession } from './session-coalesce.js';
 
 export interface Queryable {
   query: Pool['query'];
@@ -15,6 +18,11 @@ export interface ParagraphHistoryEntry {
   readonly op: ParagraphHistoryOp;
   readonly contentVersion: number | null;
   readonly snapshotAt: string;
+  /** Actor who produced this row; null for a synthetic tip/derive-point
+   *  entry (no actor column on paragraphs/specs) or a pre-046 row. */
+  readonly userId: string | null;
+  /** `users.label` for {@link userId} — null exactly when userId is null. */
+  readonly actorLabel: string | null;
 }
 
 export interface HistoryOperationCounts {
@@ -42,6 +50,13 @@ export type SpecHistoryMilestone =
       readonly revisionId: string;
       readonly packageId: string;
       readonly label: string;
+    }
+  | {
+      readonly kind: 'checkpoint';
+      readonly at: string;
+      readonly checkpointId: string;
+      readonly name: string;
+      readonly contentVersion: number;
     };
 
 export interface SpecHistory {
@@ -75,6 +90,8 @@ interface HistoryRow {
   readonly content_version: number | null;
   readonly snapshot_at: Date;
   readonly payload: unknown;
+  readonly user_id: string | null;
+  readonly actor_label: string | null;
 }
 
 function iso(value: Date | string): string {
@@ -99,9 +116,12 @@ async function paragraphContext(
 
 async function historyRows(paragraphId: string, db: Queryable): Promise<readonly HistoryRow[]> {
   const result = await db.query<HistoryRow>(
-    `SELECT spec_id, version, text, node_type, op, content_version, snapshot_at, payload
-     FROM paragraph_versions WHERE paragraph_id = $1
-     ORDER BY version, snapshot_at, id`,
+    `SELECT pv.spec_id, pv.version, pv.text, pv.node_type, pv.op, pv.content_version,
+            pv.snapshot_at, pv.payload, pv.user_id, u.label AS actor_label
+     FROM paragraph_versions pv
+     LEFT JOIN users u ON u.id = pv.user_id
+     WHERE pv.paragraph_id = $1
+     ORDER BY pv.version, pv.snapshot_at, pv.id`,
     [paragraphId]
   );
   return result.rows;
@@ -117,6 +137,8 @@ function mapEntry(row: HistoryRow, custody: 'origin' | 'spec'): ParagraphHistory
     op: row.op,
     contentVersion: row.content_version,
     snapshotAt: iso(row.snapshot_at),
+    userId: row.user_id,
+    actorLabel: row.actor_label,
   };
 }
 
@@ -145,6 +167,8 @@ function ensureCurrentTip(
       op: last ? 'edit' : 'insert',
       contentVersion: last ? context.content_version : 1,
       snapshotAt: iso(last ? context.updated_at : context.created_at),
+      userId: null, // synthetic — no actor column on paragraphs/specs
+      actorLabel: null,
     },
   ];
 }
@@ -169,6 +193,8 @@ function prependDerivePoint(
       op: 'insert',
       contentVersion: 1,
       snapshotAt: iso(context.spec_created_at),
+      userId: null, // synthetic — see ensureCurrentTip
+      actorLabel: null,
     },
     ...entries,
   ];
@@ -222,6 +248,29 @@ export async function getParagraphHistory(
   }
 }
 
+/** Tier-1 read (ADR-052 D3): {@link getParagraphHistory}'s entries folded into
+ *  coalesced sessions against this spec's checkpoint boundaries. Same
+ *  not-found `null` as getParagraphHistory — coalescing changes shape only. */
+export async function getCoalescedParagraphHistory(
+  specId: string,
+  paragraphId: string,
+  sessionWindowMs: number,
+  includeOrigin = false,
+  db: Queryable = pool
+): Promise<readonly ParagraphHistorySession[] | null> {
+  try {
+    const entries = await getParagraphHistory(specId, paragraphId, includeOrigin, db);
+    if (!entries) return null;
+    const boundaries = await getCheckpointBoundariesForSpec(specId, db);
+    return coalesceParagraphSessions(entries, boundaries, sessionWindowMs);
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError(`getCoalescedParagraphHistory failed for paragraph ${paragraphId}`, {
+      cause: err,
+    });
+  }
+}
+
 function emptyCounts(): HistoryOperationCounts {
   return { edited: 0, inserted: 0, removed: 0 };
 }
@@ -232,7 +281,20 @@ function mergeDiffKind(payload: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-function increment(counts: HistoryOperationCounts, row: HistoryRow): HistoryOperationCounts {
+/** getSpecHistory's own step-aggregation columns — narrower than
+ *  {@link HistoryRow}, which now also carries actor-join columns this
+ *  content_version-scoped query never selects. */
+interface ContentVersionStepRow {
+  readonly content_version: number | null;
+  readonly snapshot_at: Date;
+  readonly op: ParagraphHistoryOp;
+  readonly payload: unknown;
+}
+
+function increment(
+  counts: HistoryOperationCounts,
+  row: ContentVersionStepRow
+): HistoryOperationCounts {
   const diffKind = row.op === 'merge' ? mergeDiffKind(row.payload) : null;
   if (
     row.op === 'insert' ||
@@ -284,6 +346,63 @@ async function revisionMilestones(
   }));
 }
 
+interface CheckpointMilestoneRow {
+  readonly id: string;
+  readonly name: string;
+  readonly created_at: Date;
+  readonly content_version: number;
+}
+
+/** Checkpoints applying to `specId` (own + covering project-scoped),
+ *  ascending — own query rather than getCheckpointBoundariesForSpec because
+ *  the timeline also needs the checkpoint's `name`. */
+async function checkpointMilestones(
+  specId: string,
+  db: Queryable
+): Promise<readonly SpecHistoryMilestone[]> {
+  const result = await db.query<CheckpointMilestoneRow>(
+    `SELECT id, name, created_at, (content_version_map ->> $1::text)::int AS content_version
+     FROM checkpoints
+     WHERE content_version_map ? $1::text
+     ORDER BY content_version ASC, created_at ASC, id ASC`,
+    [specId]
+  );
+  return result.rows.map((row) => ({
+    kind: 'checkpoint',
+    at: iso(row.created_at),
+    checkpointId: row.id,
+    name: row.name,
+    contentVersion: row.content_version,
+  }));
+}
+
+async function specHistorySteps(
+  specId: string,
+  context: SpecContextRow,
+  db: Queryable
+): Promise<readonly SpecHistoryStep[]> {
+  const history = await db.query<ContentVersionStepRow>(
+    `SELECT op, content_version, snapshot_at, payload
+     FROM paragraph_versions
+     WHERE spec_id = $1 AND content_version IS NOT NULL AND content_version <= $2
+     ORDER BY content_version, snapshot_at, id`,
+    [specId, context.content_version]
+  );
+  const groups = new Map<number, { at: string; ops: HistoryOperationCounts }>();
+  for (const row of history.rows) {
+    if (row.content_version === null) continue;
+    const current = groups.get(row.content_version) ?? {
+      at: iso(row.snapshot_at),
+      ops: emptyCounts(),
+    };
+    groups.set(row.content_version, { at: current.at, ops: increment(current.ops, row) });
+  }
+  if (!groups.has(1)) groups.set(1, { at: iso(context.created_at), ops: emptyCounts() });
+  return [...groups.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([contentVersion, value]) => ({ contentVersion, ...value }));
+}
+
 /** Spec content-version steps with paragraph-op summaries and immutable
  * issuance milestones. packageId narrows only revision milestones; the spec's
  * own edit timeline remains branch-wide. */
@@ -299,26 +418,7 @@ export async function getSpecHistory(
     );
     const context = spec.rows[0];
     if (!context) return null;
-    const history = await db.query<HistoryRow>(
-      `SELECT spec_id, version, text, node_type, op, content_version, snapshot_at, payload
-       FROM paragraph_versions
-       WHERE spec_id = $1 AND content_version IS NOT NULL AND content_version <= $2
-       ORDER BY content_version, snapshot_at, id`,
-      [specId, context.content_version]
-    );
-    const groups = new Map<number, { at: string; ops: HistoryOperationCounts }>();
-    for (const row of history.rows) {
-      if (row.content_version === null) continue;
-      const current = groups.get(row.content_version) ?? {
-        at: iso(row.snapshot_at),
-        ops: emptyCounts(),
-      };
-      groups.set(row.content_version, { at: current.at, ops: increment(current.ops, row) });
-    }
-    if (!groups.has(1)) groups.set(1, { at: iso(context.created_at), ops: emptyCounts() });
-    const steps = [...groups.entries()]
-      .sort(([left], [right]) => left - right)
-      .map(([contentVersion, value]) => ({ contentVersion, ...value }));
+    const steps = await specHistorySteps(specId, context, db);
     const origin: SpecHistoryMilestone = {
       kind: 'origin',
       at: iso(context.created_at),
@@ -329,7 +429,11 @@ export async function getSpecHistory(
       specId,
       currentContentVersion: context.content_version,
       steps,
-      milestones: [origin, ...(await revisionMilestones(specId, packageId, db))],
+      milestones: [
+        origin,
+        ...(await revisionMilestones(specId, packageId, db)),
+        ...(await checkpointMilestones(specId, db)),
+      ],
     };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;

@@ -1,6 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { getParagraphHistory, getSpecHistory, getSpecHistoryDiff, pool } from '../index.js';
+import {
+  getParagraphHistory,
+  getCoalescedParagraphHistory,
+  getSpecHistory,
+  getSpecHistoryDiff,
+  pool,
+} from '../index.js';
+import { createCheckpoint } from './checkpoints.js';
+
+const SESSION_WINDOW_MS = 30 * 60 * 1000;
 
 const ids = {
   library: randomUUID(),
@@ -13,6 +22,13 @@ const ids = {
   removedParagraph: randomUUID(),
   package: randomUUID(),
   revision: randomUUID(),
+  // Task 5 (actor attribution / checkpoint milestones / coalesced sessions) —
+  // a standalone spec+paragraph so checkpoint sealing doesn't interact with
+  // the revision-tree fixture above.
+  actorSpec: randomUUID(),
+  actorParagraph: randomUUID(),
+  alice: randomUUID(),
+  bob: randomUUID(),
 };
 
 const revisionTree = {
@@ -116,6 +132,57 @@ async function seedHistory(): Promise<void> {
   );
 }
 
+let actorCheckpointId: string;
+
+/** A standalone spec+paragraph (task 5): one edit by alice, sealed by a
+ *  checkpoint at content_version 1, then one pending edit by bob at
+ *  content_version 2 — exercises actor attribution, checkpoint milestones,
+ *  and coalesced-session sealing together against real rows. */
+async function seedActorFixture(): Promise<void> {
+  await pool.query(`INSERT INTO users (id, label) VALUES ($1, $2), ($3, $4)`, [
+    ids.alice,
+    `history-actor-alice-${ids.alice}`,
+    ids.bob,
+    `history-actor-bob-${ids.bob}`,
+  ]);
+  await pool.query(
+    `INSERT INTO specs (id, section, title, source, library_id, content_version)
+     VALUES ($1, '09 91 30', 'Actor Fixture', 'docx', $2, 1)`,
+    [ids.actorSpec, ids.library]
+  );
+  await pool.query(
+    `INSERT INTO paragraphs (id, spec_id, node_type, text, position, base_version)
+     VALUES ($1, $2, 'pr1', 'Created by alice', 1, 1)`,
+    [ids.actorParagraph, ids.actorSpec]
+  );
+  await pool.query(
+    `INSERT INTO paragraph_versions
+       (paragraph_id, spec_id, version, text, node_type, op, content_version, user_id, snapshot_at)
+     VALUES ($1, $2, 1, 'Created by alice', 'pr1', 'insert', 1, $3, '2026-03-01T00:00:00Z')`,
+    [ids.actorParagraph, ids.actorSpec, ids.alice]
+  );
+  const checkpoint = await createCheckpoint(
+    {
+      name: `Reviewed by alice ${ids.actorSpec}`,
+      scope: 'spec',
+      scopeId: ids.actorSpec,
+      userId: ids.alice,
+    },
+    pool
+  );
+  actorCheckpointId = checkpoint.id;
+  await pool.query(`UPDATE paragraphs SET base_version = 2, text = 'Edited by bob' WHERE id = $1`, [
+    ids.actorParagraph,
+  ]);
+  await pool.query(
+    `INSERT INTO paragraph_versions
+       (paragraph_id, spec_id, version, text, node_type, op, content_version, user_id, snapshot_at)
+     VALUES ($1, $2, 2, 'Edited by bob', 'pr1', 'edit', 2, $3, '2026-03-02T00:00:00Z')`,
+    [ids.actorParagraph, ids.actorSpec, ids.bob]
+  );
+  await pool.query(`UPDATE specs SET content_version = 2 WHERE id = $1`, [ids.actorSpec]);
+}
+
 async function seedRevision(): Promise<void> {
   await pool.query(
     `INSERT INTO design_packages (id, project_id, name, position)
@@ -140,6 +207,7 @@ beforeAll(async () => {
   await seedParagraphs();
   await seedHistory();
   await seedRevision();
+  await seedActorFixture();
 });
 
 afterAll(async () => {
@@ -147,6 +215,10 @@ afterAll(async () => {
   await pool.query('DELETE FROM specs WHERE id = $1', [ids.projectSpec]);
   await pool.query('DELETE FROM projects WHERE id = $1', [ids.project]);
   await pool.query('DELETE FROM specs WHERE id = $1', [ids.masterSpec]);
+  // Cascades paragraphs/paragraph_versions/checkpoints for this spec (each
+  // FKs to specs ON DELETE CASCADE).
+  await pool.query('DELETE FROM specs WHERE id = $1', [ids.actorSpec]);
+  await pool.query('DELETE FROM users WHERE id = ANY($1)', [[ids.alice, ids.bob]]);
   await pool.query('DELETE FROM libraries WHERE id = $1', [ids.library]);
 });
 
@@ -213,5 +285,81 @@ describe('version-history read model (#378)', () => {
     expect(diff?.added.map((row) => row.nodeId)).toEqual([ids.insertedParagraph]);
     expect(diff?.removed.map((row) => row.nodeId)).toEqual([ids.removedParagraph]);
     expect(diff?.modified.map((row) => row.nodeId)).toEqual([ids.editedParagraph]);
+  });
+});
+
+describe('actor attribution, checkpoint milestones, coalesced sessions (issue #380 task 5)', () => {
+  it('getParagraphHistory attaches real userId/actorLabel per row', async () => {
+    const entries = await getParagraphHistory(ids.actorSpec, ids.actorParagraph, false, pool);
+
+    expect(entries).toEqual([
+      expect.objectContaining({
+        version: 1,
+        userId: ids.alice,
+        actorLabel: `history-actor-alice-${ids.alice}`,
+      }),
+      expect.objectContaining({
+        version: 2,
+        userId: ids.bob,
+        actorLabel: `history-actor-bob-${ids.bob}`,
+      }),
+    ]);
+  });
+
+  it('getCoalescedParagraphHistory and getParagraphHistory agree null for the same not-found paragraph', async () => {
+    const missing = randomUUID();
+
+    const raw = await getParagraphHistory(ids.actorSpec, missing, false, pool);
+    const coalesced = await getCoalescedParagraphHistory(
+      ids.actorSpec,
+      missing,
+      SESSION_WINDOW_MS,
+      false,
+      pool
+    );
+
+    expect(raw).toBeNull();
+    expect(coalesced).toBeNull();
+  });
+
+  it('getCoalescedParagraphHistory splits on the actor change and seals the alice session at the real checkpoint', async () => {
+    const sessions = await getCoalescedParagraphHistory(
+      ids.actorSpec,
+      ids.actorParagraph,
+      SESSION_WINDOW_MS,
+      false,
+      pool
+    );
+
+    expect(sessions).toHaveLength(2);
+    expect(sessions?.[0]).toEqual(
+      expect.objectContaining({
+        userId: ids.alice,
+        sealedContentVersion: 1,
+        sealedByCheckpointId: actorCheckpointId,
+      })
+    );
+    expect(sessions?.[1]).toEqual(
+      expect.objectContaining({
+        userId: ids.bob,
+        sealedContentVersion: 2,
+        sealedByCheckpointId: null,
+      })
+    );
+  });
+
+  it('getSpecHistory surfaces the checkpoint as a milestone alongside origin', async () => {
+    const timeline = await getSpecHistory(ids.actorSpec, undefined, pool);
+
+    expect(timeline?.milestones).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'origin' }),
+        expect.objectContaining({
+          kind: 'checkpoint',
+          checkpointId: actorCheckpointId,
+          contentVersion: 1,
+        }),
+      ])
+    );
   });
 });
