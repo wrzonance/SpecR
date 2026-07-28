@@ -149,6 +149,14 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /projects/{}/header-footer/resolved', 'resolve_project_header_footer'],
   ['get /packages/{}/header-footer/resolved', 'resolve_package_header_footer'],
   ['get /revisions/{}/header-footer/resolved', 'resolve_revision_header_footer'],
+  // wave 7i — language-lint rule profiles + findings report (#411 / ADR-080)
+  ['get /libraries/{}/language-rules', 'get_library_language_rules'],
+  ['put /libraries/{}/language-rules', 'set_library_language_rules'],
+  ['delete /libraries/{}/language-rules', 'clear_library_language_rules'],
+  ['get /projects/{}/language-rules', 'get_project_language_rules'],
+  ['put /projects/{}/language-rules', 'set_project_language_rules'],
+  ['delete /projects/{}/language-rules', 'clear_project_language_rules'],
+  ['get /projects/{}/language-findings', 'get_language_findings'],
 ]);
 
 /**
@@ -301,4 +309,10 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'resolve_project_header_footer',
   'resolve_package_header_footer',
   'resolve_revision_header_footer',
+  // language-lint rule profile reads (#411 / ADR-080): mirror their mapped REST GETs
+  // 1:1, but need a seeded language_rule_profiles row (a set_*_language_rules call)
+  // or a present-spec project graph beyond `pnpm seed`.
+  'get_library_language_rules',
+  'get_project_language_rules',
+  'get_language_findings',
 ]);
