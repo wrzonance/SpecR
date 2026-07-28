@@ -1,7 +1,7 @@
 import { buildComparisonReport, ReportingError, SpecNotFoundError } from '../reporting/index.js';
 import { logger } from '../lib/logger.js';
 import { anchorsMeta, type McpAnchor } from './anchors.js';
-import type { ComparisonReport } from '../reporting/index.js';
+import type { ComparisonReport, CompareSource } from '../reporting/index.js';
 import type { ToolError, ToolResult } from './tool-result.js';
 
 function toolErr(text: string): ToolError {
@@ -31,7 +31,7 @@ export async function handleCompareSpecs({
   alignment,
   include,
 }: {
-  sources: string[];
+  sources: CompareSource[];
   baseline?: string | undefined;
   alignment?: 'origin' | 'structure' | 'auto' | undefined;
   include?: 'all' | 'differences' | undefined;
