@@ -265,6 +265,11 @@ export const SpecNodeMetaSchema = z.object({
   articleRole: ArticleRoleSchema.exactOptional(),
   object: ObjectMetaSchema.exactOptional(),
   pageBreakBefore: z.boolean().exactOptional(),
+  // Origin paragraph UUID captured at revision-freeze time (#392, ADR-078).
+  // Kept in lockstep with the `SpecNodeMeta` TS type (ast/types.ts): this
+  // schema has no `.catchall()`, so a field added to the type but not
+  // mirrored here would silently vanish on every JSONB round-trip.
+  originParagraphId: z.uuid().exactOptional(),
 });
 
 export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>
