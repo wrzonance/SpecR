@@ -54,11 +54,11 @@ async function makeSpec(input: MakeSpecInput): Promise<string> {
   return id;
 }
 
-async function addProjectSpec(projectId: string, specId: string): Promise<void> {
-  await pool.query(`INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`, [
-    projectId,
-    specId,
-  ]);
+async function addProjectSpec(projectId: string, specId: string, position = 1): Promise<void> {
+  await pool.query(
+    `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, $3)`,
+    [projectId, specId, position]
+  );
 }
 
 async function addParagraph(
@@ -130,6 +130,31 @@ describe('getLanguageFindingsReport (task 5/8)', () => {
         specId: copyId,
       }),
     ]);
+  });
+
+  it('findings: report order follows project_specs.position, not row-insertion order', async () => {
+    const libraryId = await makeLibrary('Findings Ordering Library');
+    await upsertLanguageRuleProfile(
+      { scope: 'library', ownerId: libraryId },
+      { bannedTerms: [{ term: 'shall' }] }
+    );
+    const masterId = await makeSpec({ section: '01 10 00', libraryId });
+    const projectId = await makeProject('Findings Ordering Project');
+
+    // Insert the two memberships in the OPPOSITE order to their positions, so
+    // a query without ORDER BY has every chance to return insertion order.
+    const secondId = await makeSpec({ section: '01 20 00', projectId, parentSpecId: masterId });
+    await addProjectSpec(projectId, secondId, 2);
+    await addParagraph(secondId, 'The Contractor shall submit the second section.');
+
+    const firstId = await makeSpec({ section: '01 10 00', projectId, parentSpecId: masterId });
+    await addProjectSpec(projectId, firstId, 1);
+    await addParagraph(firstId, 'The Contractor shall submit the first section.');
+
+    const report = await getLanguageFindingsReport(projectId, undefined);
+
+    expect(report.summary.bannedTerm).toBe(2);
+    expect(report.findings.map((f) => f.specId)).toEqual([firstId, secondId]);
   });
 
   it('vanish/note exclusion — a matching term in a vanished or note paragraph is never flagged', async () => {

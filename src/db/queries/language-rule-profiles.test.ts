@@ -69,6 +69,29 @@ describe('mergeLanguageRules — additive across layers (ADR-080 D5)', () => {
     expect(merged.bannedTerms).toEqual([{ term: 'test' }, { term: 'test', isRegex: true }]);
   });
 
+  it('merge: regex dedupe key is case-SENSITIVE — `\\s` and `\\S` are two rules, not one', () => {
+    const broad = profile('library', 'lib-1', {
+      bannedTerms: [{ term: '\\s+$', isRegex: true, suggestion: 'trailing whitespace' }],
+    });
+    const narrow = profile('project', 'proj-1', {
+      bannedTerms: [{ term: '\\S+$', isRegex: true, suggestion: 'unbroken run' }],
+    });
+    const merged = mergeLanguageRules([broad, narrow]);
+    // Lowercasing the regex source would collapse these onto one key and drop
+    // the library layer's rule entirely.
+    expect(merged.bannedTerms).toEqual([
+      { term: '\\s+$', isRegex: true, suggestion: 'trailing whitespace' },
+      { term: '\\S+$', isRegex: true, suggestion: 'unbroken run' },
+    ]);
+  });
+
+  it('merge: literal terms stay case-INSENSITIVE — folding applies to literals only', () => {
+    const broad = profile('library', 'lib-1', { bannedTerms: [{ term: 'Owner' }] });
+    const narrow = profile('project', 'proj-1', { bannedTerms: [{ term: 'OWNER' }] });
+    const merged = mergeLanguageRules([broad, narrow]);
+    expect(merged.bannedTerms).toEqual([{ term: 'OWNER' }]);
+  });
+
   it('merges each category independently — a term in one never leaks into another', () => {
     const layer = profile('library', 'lib-1', {
       bannedTerms: [{ term: 'if required' }],

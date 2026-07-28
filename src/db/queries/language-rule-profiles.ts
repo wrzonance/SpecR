@@ -314,11 +314,18 @@ export async function resolveLanguageRulesForSpec(
   return { layers, rules: mergeLanguageRules(layers) };
 }
 
-// Case-insensitive term text plus its matching mode: a literal "Owner" and a
-// regex "Owner" are distinct rules, but "Owner" vs "owner" in the same mode
-// collide — the narrowest (last) layer's entry wins the collision.
+// Term text plus its matching mode: a literal "Owner" and a regex "Owner" are
+// distinct rules, and the narrowest (last) layer's entry wins a collision.
+//
+// Only LITERAL text is case-folded. Literals are matched case-insensitively, so
+// "Owner" and "owner" really are one rule. A regex SOURCE is not folded: the
+// `i` flag does not make character-class escapes equivalent — `\s` and `\S`
+// (likewise `\d`/`\D`, `\b`/`\B`, `\w`/`\W`) mean opposite things, so folding
+// the source would collapse two opposite rules onto one key and silently drop
+// the broader layer's entry from the merge.
 function dedupeKey(term: LanguageRuleTerm): string {
-  return `${term.term.toLowerCase()}::${term.isRegex ?? false}`;
+  const isRegex = term.isRegex ?? false;
+  return `${isRegex ? term.term : term.term.toLowerCase()}::${isRegex}`;
 }
 
 function mergeCategory<K extends keyof LanguageRules>(

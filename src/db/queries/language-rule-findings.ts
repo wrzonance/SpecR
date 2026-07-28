@@ -236,14 +236,23 @@ async function readPresentSpecs(
   packageId: string | undefined,
   db: Queryable
 ): Promise<readonly PresentSpec[]> {
+  // ORDER BY is load-bearing, not cosmetic: without it Postgres may return the
+  // same membership rows in a different order per request, and because
+  // scanPresentSpecs preserves this order into the response, two identical
+  // findings requests could report the same findings in a different sequence.
+  // Ordering by the membership table's own `position` also makes the report
+  // read in the project's / package's table-of-contents order; `s.id` breaks
+  // any tie deterministically.
   const sql =
     packageId === undefined
       ? `SELECT s.id AS spec_id, s.section
          FROM project_specs ps JOIN specs s ON s.id = ps.spec_id
-         WHERE ps.project_id = $1 AND s.withdrawn_at IS NULL`
+         WHERE ps.project_id = $1 AND s.withdrawn_at IS NULL
+         ORDER BY ps.position, s.id`
       : `SELECT s.id AS spec_id, s.section
          FROM package_specs ks JOIN specs s ON s.id = ks.spec_id
-         WHERE ks.package_id = $1 AND s.withdrawn_at IS NULL`;
+         WHERE ks.package_id = $1 AND s.withdrawn_at IS NULL
+         ORDER BY ks.position, s.id`;
   const result = await db.query<{ spec_id: string; section: string }>(sql, [
     packageId ?? projectId,
   ]);
