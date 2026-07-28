@@ -4518,6 +4518,64 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /specs/{id}/readiness-report:
+    get:
+      operationId: getSpecReadinessReport
+      summary: Issuance-readiness dry-run for a single spec (ADR-079)
+      description: >
+        Every ReadinessFinding an unresolved choice token, a visible specifier
+        note, an open Word comment, or a body-level text box currently in
+        this spec, alongside the advisory-only highlight report (#406).
+        `readyForFinal: true` is exactly the set the issuance-readiness gate
+        would let through under `mode: 'final'`; a Draft issuance is never
+        gated on these findings.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Readiness report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ReadinessReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /packages/{id}/readiness-report:
+    get:
+      operationId: getPackageReadinessReport
+      summary: Issuance-readiness dry-run across a design package (ADR-079)
+      description: >
+        Aggregates the ADR-079 issuance-readiness findings (#406) across
+        every member spec of the package, each stamped with the spec section
+        that produced it. `readyForFinal: true` means every member is clean;
+        the highlight advisory never affects it.
+      tags: [packages]
+      parameters:
+        - $ref: '#/components/parameters/PackageId'
+      responses:
+        '200':
+          description: Readiness report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ReadinessReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
   # ─── Numbering profiles (#299) ───────────────────────────────────────────────
 
   /libraries/{id}/numbering-profiles:
@@ -6425,6 +6483,122 @@ components:
           type: array
           items: { $ref: '#/components/schemas/OpenComment' }
         summary: { $ref: '#/components/schemas/OpenCommentsSummary' }
+
+    # ── Issuance readiness (ADR-079, #406) ────────────────────────────────────────
+
+    ReadinessFinding:
+      description: >
+        One resolvable blocker an editor must clear before a spec can leave
+        the firm as Final. Every variant carries nodeId/text plus
+        kind-specific detail.
+      oneOf:
+        - type: object
+          required: [type, nodeId, text, kind, options]
+          properties:
+            type: { type: string, enum: [unresolved_choice_token] }
+            nodeId: { type: string, format: uuid }
+            text: { type: string }
+            kind:
+              type: string
+              enum: [angle, bracket]
+              description: The choice-token delimiter style — `<__>` vs `[__]`.
+            options:
+              type: array
+              items: { type: string }
+              description: The pick-one/fill-in choices captured at parse time.
+        - type: object
+          required: [type, nodeId, text]
+          properties:
+            type: { type: string, enum: [specifier_note_present] }
+            nodeId: { type: string, format: uuid }
+            text: { type: string }
+        - type: object
+          required: [type, nodeId, text, author]
+          properties:
+            type: { type: string, enum: [open_comment] }
+            nodeId: { type: string, format: uuid }
+            text: { type: string }
+            author: { type: string }
+        - type: object
+          required: [type, nodeId, text, objectKind]
+          properties:
+            type: { type: string, enum: [body_object_present] }
+            nodeId: { type: string, format: uuid }
+            text: { type: string }
+            objectKind:
+              type: string
+              enum: [textBox]
+              description: >-
+                Always textBox — a body-level table is structural content
+                (ADR-072) and never fires this finding.
+      discriminator:
+        propertyName: type
+
+    StampedReadinessFinding:
+      description: A ReadinessFinding stamped with the spec that produced it (package scope).
+      allOf:
+        - $ref: '#/components/schemas/ReadinessFinding'
+        - type: object
+          required: [specId, specSection]
+          properties:
+            specId: { type: string, format: uuid }
+            specSection: { type: string }
+
+    StampedHighlightAdvisory:
+      type: object
+      required: [specId, specSection, finding]
+      properties:
+        specId: { type: string, format: uuid }
+        specSection: { type: string }
+        finding: { $ref: '#/components/schemas/HighlightReviewFinding' }
+
+    ReadinessSummary:
+      type: object
+      required:
+        [unresolvedChoiceToken, specifierNotePresent, openComment, bodyObjectPresent, total]
+      properties:
+        unresolvedChoiceToken: { type: integer, minimum: 0 }
+        specifierNotePresent: { type: integer, minimum: 0 }
+        openComment: { type: integer, minimum: 0 }
+        bodyObjectPresent: { type: integer, minimum: 0 }
+        total:
+          type: integer
+          minimum: 0
+          description: Always equals findings.length — the highlight advisory never counts here.
+
+    ReadinessScope:
+      oneOf:
+        - type: object
+          required: [kind, specId]
+          properties:
+            kind: { type: string, enum: [spec] }
+            specId: { type: string, format: uuid }
+        - type: object
+          required: [kind, packageId]
+          properties:
+            kind: { type: string, enum: [package] }
+            packageId: { type: string, format: uuid }
+      discriminator:
+        propertyName: kind
+
+    ReadinessReport:
+      type: object
+      required: [scope, findings, highlightAdvisory, summary, readyForFinal]
+      properties:
+        scope: { $ref: '#/components/schemas/ReadinessScope' }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/StampedReadinessFinding' }
+        highlightAdvisory:
+          type: array
+          description: Advisory-only (ADR-079 decision 3) — never factors into readyForFinal.
+          items: { $ref: '#/components/schemas/StampedHighlightAdvisory' }
+        summary: { $ref: '#/components/schemas/ReadinessSummary' }
+        readyForFinal:
+          type: boolean
+          description: >-
+            findings.length === 0 — a computed convenience, never a second
+            source of truth; the highlight advisory never gates it.
 
     # ── Parse ──────────────────────────────────────────────────────────────────
 

@@ -137,6 +137,7 @@ import { compareReportHandler } from './reporting.js';
 import { CompareRequestSchema } from '../reporting/index.js';
 import { postSubmittalRegisterHandler } from './submittal-register.js';
 import { getSpecOpenCommentsHandler, getProjectOpenCommentsHandler } from './open-comments.js';
+import { getSpecReadinessHandler, getPackageReadinessHandler } from './readiness.js';
 import { patchEditabilityHandler, reclassifyHandler, acceptAsNoteHandler } from './editability.js';
 import {
   createAssociationHandler,
@@ -196,6 +197,7 @@ router.get('/health', healthHandler);
 router.get('/search', searchHandler);
 router.get('/specs/:id', getSpecHandler);
 router.get('/specs/:id/open-comments', getSpecOpenCommentsHandler);
+router.get('/specs/:id/readiness-report', getSpecReadinessHandler);
 router.get('/specs/:id/lineage', getSpecLineageHandler);
 router.get('/specs/:id/hierarchy-report', getHierarchyReportHandler);
 router.get('/specs/:id/paragraphs/:nodeId/history', getParagraphHistoryHandler);
@@ -284,6 +286,7 @@ router.get('/projects/:id/packages', listPackagesHandler);
 router.put('/packages/:id/specs', validateBody(SetPackageSpecsBodySchema), setPackageSpecsHandler);
 router.delete('/packages/:id', deletePackageHandler);
 router.get('/packages/:id/revisions', listPackageRevisionsHandler);
+router.get('/packages/:id/readiness-report', getPackageReadinessHandler);
 router.post(
   '/packages/:id/revisions',
   validateBody(CreateRevisionBodySchema),
