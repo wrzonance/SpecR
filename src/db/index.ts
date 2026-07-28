@@ -421,4 +421,7 @@ export {
 // list) to stay within the barrel's enforced 400-code-line ceiling; see
 // 318e8c2's history-index.ts precedent for the same constraint.
 export * from './queries/language-rule-profiles.js';
+// Language-rule findings scan engine (#411, ADR-080) — same `export *`
+// rationale as language-rule-profiles.js just above.
+export * from './queries/language-rule-findings.js';
 export type { ParagraphHistoryContext } from './queries/paragraph-history.js';
