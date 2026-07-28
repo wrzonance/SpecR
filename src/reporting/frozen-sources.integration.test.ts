@@ -218,6 +218,32 @@ describe('frozen comparison sources — same-package acceptance (#392, ADR-078)'
       `revisionId=${revA.revisionId}, specId=${badSpecId}`
     );
   });
+
+  // #392 review finding: the compare_specs MCP tool description documents
+  // that an ambiguous baseline — one matching more than one source's
+  // underlying specId, e.g. the same spec frozen at two different revisions —
+  // "silently uses the first matching source in request order" rather than
+  // rejecting (unlike the REST endpoint's CompareRequestSchema, which rejects
+  // it at the 422 boundary). Prior coverage only regex-matched that
+  // description string (report-tools.test.ts); nothing called
+  // buildComparisonReport itself — what the MCP tool actually delegates to —
+  // with a genuinely ambiguous baseline to confirm the runtime behavior
+  // matches the documented claim. revA and revB both share `specId` here, so
+  // `baseline: specId` matches both.
+  it('an ambiguous baseline (matches both revA and revB, which share specId) silently resolves to the FIRST source in request order — the compare_specs MCP-tool behavior', async () => {
+    const sources = [
+      { revisionId: revA.revisionId, specId },
+      { revisionId: revB.revisionId, specId },
+    ];
+    const report = await buildComparisonReport(sources, { baseline: specId });
+
+    expect(report.baseline).toBeDefined();
+    const matrixRow = report.rows.find((r) => cellText(r, 0) === 'Original frozen clause.');
+    expect(matrixRow).toBeDefined();
+    const lensRow = report.baseline?.rows.find((r) => r.originId === matrixRow?.originId);
+    expect(lensRow?.states[0]).toBe('baseline'); // revA (first request-order match) is the baseline column
+    expect(lensRow?.states[1]).not.toBe('baseline'); // revB (second match) is reframed relative to it, never re-chosen
+  });
 });
 
 // ── cross-lineage: independently-authored specs of the same section ────────

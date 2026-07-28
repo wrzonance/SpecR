@@ -8,6 +8,7 @@
 // instanceof checks in the handler's catch block are exercised faithfully.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ReportingError, SpecNotFoundError } from '../reporting/error.js';
+import { ANCHORS_META_KEY } from './anchors.js';
 import type { ComparisonReport } from '../reporting/types.js';
 
 vi.mock('../reporting/index.js', () => ({
@@ -57,5 +58,53 @@ describe('handleCompareSpecs — accepts polymorphic CompareSource[] (#392)', ()
     const result = await handleCompareSpecs({ sources: [A, { revisionId: REV1, specId: A }] });
 
     expect('isError' in result).toBe(true);
+  });
+});
+
+// #392 review finding: two columns can legally share the same underlying
+// specId — the same spec frozen at two different revisions, or a live spec
+// compared against its own frozen snapshot (isFrozenSource/sourceSpecId,
+// src/reporting/types.ts). Anchors must trace each present cell back to ITS
+// OWN column (section + specId + paragraph UUID), never a section borrowed
+// from whichever column happened to be indexed last under a shared specId key.
+describe('handleCompareSpecs — anchors trace each cell to its own column, even when columns share a specId (#392)', () => {
+  const TWO_COLUMNS_SAME_SPEC: ComparisonReport = {
+    columns: [
+      { specId: A, section: '09 91 26', title: 'Live' },
+      {
+        specId: A,
+        section: '09 91 26 (as issued)',
+        title: 'Frozen',
+        revisionId: REV1,
+        revisionLabel: 'Issued A',
+      },
+    ],
+    rows: [
+      {
+        originId: 'origin-1',
+        cells: [
+          { present: true, specId: A, paragraphUuid: 'live-para', text: 'Live text' },
+          { present: true, specId: A, paragraphUuid: 'frozen-para', text: 'Frozen text' },
+        ],
+      },
+    ],
+    summary: { rows: 1, aligned: 1, identical: 0, differing: 1, columns: [] },
+    alignedBy: 'origin',
+  };
+
+  it('anchors each present cell against its own column, not a specId-collapsed lookup', async () => {
+    const reporting = await import('../reporting/index.js');
+    vi.mocked(reporting.buildComparisonReport).mockResolvedValueOnce(TWO_COLUMNS_SAME_SPEC);
+    const { handleCompareSpecs } = await import('./reporting-handler.js');
+
+    const result = await handleCompareSpecs({
+      sources: [A, { revisionId: REV1, specId: A }],
+    });
+
+    if ('isError' in result) throw new Error('expected an ok result, got isError');
+    expect(result._meta?.[ANCHORS_META_KEY]).toEqual([
+      { section: '09 91 26', specId: A, paragraphId: 'live-para' },
+      { section: '09 91 26 (as issued)', specId: A, paragraphId: 'frozen-para' },
+    ]);
   });
 });

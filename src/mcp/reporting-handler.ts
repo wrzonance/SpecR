@@ -9,18 +9,23 @@ function toolErr(text: string): ToolError {
 }
 
 /** Every present cell → a navigation anchor (section + real spec + paragraph
- *  UUID), so a UI client can trace each grounded fact back to its source. */
+ *  UUID), so a UI client can trace each grounded fact back to its source.
+ *  `row.cells` is index-aligned to `report.columns` (ComparisonMatrixRow,
+ *  src/reporting/types.ts), so each cell is matched to its own column
+ *  positionally — never by a `specId`-keyed lookup. Two columns can legally
+ *  share a specId (the same spec frozen at two different revisions, or a
+ *  live spec vs. its own frozen snapshot, #392), and a specId-keyed map would
+ *  collapse to one column's section for every such cell. */
 function anchorsFromReport(report: ComparisonReport): McpAnchor[] {
-  const bySpec = new Map(report.columns.map((c) => [c.specId, c.section]));
   const out: McpAnchor[] = [];
   for (const row of report.rows) {
-    for (const cell of row.cells) {
-      if (!cell.present) continue;
-      const section = bySpec.get(cell.specId);
-      if (section !== undefined) {
-        out.push({ section, specId: cell.specId, paragraphId: cell.paragraphUuid });
+    row.cells.forEach((cell, columnIndex) => {
+      if (!cell.present) return;
+      const column = report.columns[columnIndex];
+      if (column !== undefined) {
+        out.push({ section: column.section, specId: cell.specId, paragraphId: cell.paragraphUuid });
       }
-    }
+    });
   }
   return out;
 }

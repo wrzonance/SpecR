@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
 import { SpecNodeMetaSchema, SpecTreeSchema } from './spec-tree-schemas.js';
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
@@ -36,19 +35,19 @@ describe('SpecNodeMetaSchema — originParagraphId (#392)', () => {
   // #392 spike finding: SpecNodeMetaSchema has no `.catchall()`, so ANY key
   // present on the SpecNodeMeta TS type but not mirrored into the Zod shape
   // is silently stripped by z.object() on every validation pass — never
-  // rejected, never warned. This reproduces the exact failure mode the #392
-  // spike hit when it first tried originParagraphId without this mirror
-  // (the same class of bug PR #536 found for pageSize): a decoy schema
-  // missing the field demonstrates the drop directly, so a future field
-  // added to SpecNodeMeta without its Zod counterpart is provably silent —
-  // motivating why the mirror step is mandatory, not tidiness.
-  it('demonstrates the catchall-drop an unmirrored meta key silently hits (PR #536 failure mode)', () => {
-    const unmirroredMetaSchema = z.object({ vanish: z.boolean().exactOptional() });
-    const parsed = unmirroredMetaSchema.parse({
+  // rejected, never warned (the same class of bug PR #536 found for
+  // pageSize). Exercises the REAL, production `SpecNodeMetaSchema` on both
+  // sides of the mechanism it documents — unlike a decoy stand-in schema,
+  // this fails if a future PR ever removes `originParagraphId` from
+  // SpecNodeMetaSchema while leaving it declared on SpecNodeMeta (ast/types.ts).
+  it('a mirrored key (originParagraphId) survives SpecNodeMetaSchema validation; an unmirrored key is silently dropped (PR #536 failure mode)', () => {
+    const parsed = SpecNodeMetaSchema.parse({
       vanish: true,
       originParagraphId: VALID_ORIGIN_UUID,
+      notMirroredIntoSchema: 'a hypothetical future field with no Zod counterpart',
     });
-    expect('originParagraphId' in parsed).toBe(false);
+    expect(parsed.originParagraphId).toBe(VALID_ORIGIN_UUID);
+    expect('notMirroredIntoSchema' in parsed).toBe(false);
   });
 });
 

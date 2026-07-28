@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { flattenSpecTree } from './frozen-tree.js';
+import { computeStructuralKeys } from './structure.js';
 import type { SpecNode, SpecNodeMeta, SpecTree } from '../ast/index.js';
+import type { ComparisonParagraph } from './types.js';
 
 function node(
   id: string,
@@ -143,5 +145,81 @@ describe('flattenSpecTree', () => {
     const rows = flattenSpecTree(t, 'spec-1');
 
     expect(rows.map((r) => r.text)).toEqual(['']);
+  });
+});
+
+// #392 review finding: the only structural-fallback ('structure') coverage
+// (structure.test.ts, align.test.ts) exercises computeStructuralKeys over
+// synthetic fixtures or compares two genuinely DIFFERENT specs — nothing pins
+// that flattenSpecTree's frozen-side flatten and getComparisonParagraphs' live
+// DB-position flatten (src/db/queries/reporting.ts) produce the SAME
+// node-id -> structural-address map for the SAME unedited spec. This cross-
+// validates that invariant directly: one shared logical tree, expressed
+// independently in each loader's native shape (same node ids throughout —
+// mirroring a real freeze, which stamps the frozen tree with the live
+// paragraph UUIDs — but DELIBERATELY different raw `position` conventions:
+// live rows use 1-based per-parent integers with a realistic gap, matching
+// the DB fixture helpers in frozen-sources.integration.test.ts, while
+// flattenSpecTree recomputes a 0-based DFS index per its own docstring).
+// computeStructuralKeys keys only on relative sibling ORDER (structure.ts:
+// `byPositionThenId`), not the literal integers, so this only holds if both
+// loaders actually preserve the same sibling order for the same tree.
+describe('flattenSpecTree <-> live-loader parity — computeStructuralKeys agree for the SAME spec (#392 review)', () => {
+  const SPEC_ID = 'spec-1';
+
+  function liveRow(
+    over: Partial<ComparisonParagraph> & Pick<ComparisonParagraph, 'id' | 'nodeType' | 'position'>
+  ): ComparisonParagraph {
+    return {
+      specId: SPEC_ID,
+      originParagraphId: null,
+      text: 'x',
+      parentId: null,
+      ...over,
+    };
+  }
+
+  // As `getComparisonParagraphs` would return it: 1-based per-parent
+  // positions, with a gap at part1's position 2 (an owner-removed sibling
+  // there was already excluded upstream by the CTE, same as production).
+  function liveLoaderRows(): readonly ComparisonParagraph[] {
+    return [
+      liveRow({ id: 'part1', nodeType: 'part', position: 1 }),
+      liveRow({ id: 'artA', nodeType: 'article', position: 1, parentId: 'part1' }),
+      liveRow({ id: 'artB', nodeType: 'article', position: 3, parentId: 'part1' }),
+      liveRow({ id: 'c1', nodeType: 'pr1', position: 1, parentId: 'artA' }),
+      liveRow({ id: 'c2', nodeType: 'pr1', position: 2, parentId: 'artA' }),
+      liveRow({ id: 'part2', nodeType: 'part', position: 2 }),
+      liveRow({ id: 'artC', nodeType: 'article', position: 1, parentId: 'part2' }),
+    ];
+  }
+
+  // The SAME logical tree, same node ids, expressed as the SpecTree a freeze
+  // of this exact (unedited) spec would snapshot — flattenSpecTree recomputes
+  // its own 0-based `position` from array order, never the integers above.
+  function frozenTree(): SpecTree {
+    return tree([
+      node('part1', 'part', 'PART 1', [
+        node('artA', 'article', 'ARTICLE A', [
+          node('c1', 'pr1', 'Clause 1', []),
+          node('c2', 'pr1', 'Clause 2', []),
+        ]),
+        node('artB', 'article', 'ARTICLE B', []),
+      ]),
+      node('part2', 'part', 'PART 2', [node('artC', 'article', 'ARTICLE C', [])]),
+    ]);
+  }
+
+  it('produces identical node-id -> structural-address maps from both flatten paths', () => {
+    const liveKeys = computeStructuralKeys(liveLoaderRows());
+    const frozenRows = flattenSpecTree(frozenTree(), SPEC_ID);
+    const frozenKeys = computeStructuralKeys(frozenRows);
+
+    const sortedIds = (keys: ReadonlyMap<string, string>): readonly string[] =>
+      [...keys.keys()].sort((a, b) => a.localeCompare(b));
+    expect(sortedIds(frozenKeys)).toEqual(sortedIds(liveKeys));
+    for (const [id, liveAddress] of liveKeys) {
+      expect(frozenKeys.get(id)).toBe(liveAddress);
+    }
   });
 });
