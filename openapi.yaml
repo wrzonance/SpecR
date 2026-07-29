@@ -5395,6 +5395,228 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /libraries/{id}/language-rules:
+    get:
+      operationId: getLibraryLanguageRules
+      summary: Get a library's language-lint rule profile
+      description: >
+        Returns the library's own language-lint rule profile (ADR-080):
+        banned terms, reinforcing words to avoid, recognized party
+        vocabulary, and required phrases. Linting is opt-in — SpecR ships no
+        default content, so a library with nothing configured returns 404,
+        never a fallback profile.
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ConventionLibraryId'
+      responses:
+        '200':
+          description: The library's language-rule profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/LanguageRuleProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: putLibraryLanguageRules
+      summary: Create or replace a library's language-lint rule profile
+      description: >
+        Upsert (ADR-080) — one profile per library. Malformed rules shape is
+        rejected with 400; an unsafe or oversized `isRegex: true` term pattern
+        is bounded at the write boundary and rejected with 422.
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ConventionLibraryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutLanguageRulesBody'
+      responses:
+        '200':
+          description: Language-rule profile created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/LanguageRuleProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Unsafe or oversized `isRegex` term pattern
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteLibraryLanguageRules
+      summary: Delete a library's language-lint rule profile
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ConventionLibraryId'
+      responses:
+        '200':
+          description: Profile deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [libraryId]
+                        properties:
+                          libraryId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: No language-rule profile configured for this library
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/language-rules:
+    get:
+      operationId: getProjectLanguageRules
+      summary: Get a project's language-lint rule profile
+      description: >
+        Returns the project's own language-lint rule profile (ADR-080). This
+        is the project's own profile only, not the merged effective set used
+        by GET /projects/{id}/language-findings. Linting is opt-in — a
+        project with nothing configured returns 404, never a fallback.
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: The project's language-rule profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/LanguageRuleProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: putProjectLanguageRules
+      summary: Create or replace a project's language-lint rule profile
+      description: >
+        Upsert (ADR-080) — one profile per project. Malformed rules shape is
+        rejected with 400; an unsafe or oversized `isRegex: true` term pattern
+        is bounded at the write boundary and rejected with 422.
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutLanguageRulesBody'
+      responses:
+        '200':
+          description: Language-rule profile created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/LanguageRuleProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Unsafe or oversized `isRegex` term pattern
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteProjectLanguageRules
+      summary: Delete a project's language-lint rule profile
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Profile deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId]
+                        properties:
+                          projectId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: No language-rule profile configured for this project
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/language-findings:
+    get:
+      operationId: getLanguageFindings
+      summary: Language-lint findings report for a project (or one of its packages)
+      description: >
+        Scans every present spec in the project (or, with `packageId`, just
+        that package) against its resolved language-rule layers — the
+        authoring library, the project's client library, and the project's
+        own profile, ADR-080 D5 — and reports findings. `configured: false`
+        (with an explanatory note, no findings) means linting is off for
+        every present spec; that is a normal opt-in state, never a 404/500.
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: packageId
+          in: query
+          required: false
+          description: Scope the report to one design package
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Language-lint findings report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/LanguageFindingsReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
 # ─── Components ───────────────────────────────────────────────────────────────
 
 components:
@@ -5954,6 +6176,74 @@ components:
         umbrellaNotCalledOut: { type: integer }
         generalRequirementDuplicated: { type: integer }
         total: { type: integer }
+
+    # ── Language-lint rule profiles + findings (#411 / ADR-080) ───────────────
+
+    LanguageFindingsReport:
+      type: object
+      required: [projectId, packageId, configured, findings, summary, notes]
+      properties:
+        projectId: { type: string, format: uuid }
+        packageId: { type: [string, 'null'], format: uuid }
+        configured:
+          type: boolean
+          description: >
+            False when NOT ONE present spec resolved a language-rule layer
+            anywhere in its chain — linting is opt-in, so this is a normal
+            state (empty findings), never an error.
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/LanguageFinding' }
+        summary: { $ref: '#/components/schemas/LanguageFindingsSummary' }
+        notes:
+          type: array
+          items: { type: string }
+    LanguageFindingsSummary:
+      type: object
+      required: [bannedTerm, reinforcingWord, partyVocabulary, phraseMissing, total]
+      properties:
+        bannedTerm: { type: integer }
+        reinforcingWord: { type: integer }
+        partyVocabulary: { type: integer }
+        phraseMissing: { type: integer }
+        total: { type: integer }
+    LanguageFinding:
+      oneOf:
+        - $ref: '#/components/schemas/LanguageTermFlaggedFinding'
+        - $ref: '#/components/schemas/LanguagePhraseMissingFinding'
+      discriminator:
+        propertyName: type
+        mapping:
+          language_term_flagged: '#/components/schemas/LanguageTermFlaggedFinding'
+          language_phrase_missing: '#/components/schemas/LanguagePhraseMissingFinding'
+    LanguageTermFlaggedFinding:
+      type: object
+      description: A banned term, reinforcing word, or flagged party-vocabulary match at one paragraph.
+      required: [type, category, term, suggestion, specId, section, paragraphId, matchedText]
+      properties:
+        type: { type: string, enum: [language_term_flagged] }
+        category:
+          type: string
+          enum: [bannedTerm, reinforcingWord, partyVocabulary]
+        term: { type: string }
+        suggestion: { type: [string, 'null'] }
+        specId: { type: string, format: uuid }
+        section: { type: string }
+        paragraphId: { type: string, format: uuid }
+        matchedText: { type: string }
+    LanguagePhraseMissingFinding:
+      type: object
+      description: >
+        A required phrase absent anywhere in the spec's scanned text — a
+        whole-spec fact, never paragraph-located (ADR-080 D8).
+      required: [type, phrase, suggestion, specId, section]
+      properties:
+        type: { type: string, enum: [language_phrase_missing] }
+        phrase: { type: string }
+        suggestion: { type: [string, 'null'] }
+        specId: { type: string, format: uuid }
+        section: { type: string }
+
     RevitLinkInventory:
       type: object
       description: Project-scoped Revit link inventory (#103) — element↔spec read model.
@@ -8804,6 +9094,62 @@ components:
           type: string
           format: uuid
           description: A built-in or another library's convention profile id
+
+    # ── Language-lint rule profiles (#411 / ADR-080) ──────────────────────────
+    # SpecR ships the schema and matching engine, never rule content — every
+    # category is optional and starts empty until a firm authors it.
+
+    LanguageRuleTerm:
+      type: object
+      additionalProperties: false
+      required: [term]
+      properties:
+        term:
+          type: string
+          minLength: 1
+        isRegex:
+          type: boolean
+          description: Interpret `term` as a regex pattern; a literal term is boundary-matched instead.
+        suggestion:
+          type: string
+          description: Optional replacement text shown alongside a finding.
+    LanguageRules:
+      type: object
+      additionalProperties: false
+      properties:
+        bannedTerms:
+          type: array
+          items: { $ref: '#/components/schemas/LanguageRuleTerm' }
+        reinforcingWords:
+          type: array
+          items: { $ref: '#/components/schemas/LanguageRuleTerm' }
+        partyVocabulary:
+          type: array
+          items: { $ref: '#/components/schemas/LanguageRuleTerm' }
+        requiredPhrases:
+          type: array
+          items: { $ref: '#/components/schemas/LanguageRuleTerm' }
+    LanguageRuleProfile:
+      type: object
+      required: [id, scope, ownerId, rules, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        scope:
+          type: string
+          enum: [library, project]
+        ownerId:
+          type: string
+          format: uuid
+          description: The library or project id that owns this profile
+        rules: { $ref: '#/components/schemas/LanguageRules' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PutLanguageRulesBody:
+      type: object
+      additionalProperties: false
+      required: [rules]
+      properties:
+        rules: { $ref: '#/components/schemas/LanguageRules' }
 
     # ── Revision nomenclature profiles (ADR-025 / #209) ───────────────────────
 
