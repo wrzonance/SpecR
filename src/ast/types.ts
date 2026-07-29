@@ -163,6 +163,15 @@ export interface SpecNodeMeta {
    * is already preserved verbatim in `meta.object` (ADR-072).
    */
   readonly pageBreakBefore?: boolean;
+  /**
+   * The live paragraph UUID this node was frozen from (#392, ADR-078).
+   * Written only by `snapshotMemberTrees` at revision-freeze time — never set
+   * on the live `GET /specs/:id/tree` path. Absent === a live node, or a
+   * frozen node predating this field. Needed only for cross-lineage/cross-
+   * project comparison alignment; same-package revision-pair alignment
+   * derives `alignedBy: 'origin'` from structural keys alone (ADR-078 D6).
+   */
+  readonly originParagraphId?: string;
 }
 
 export interface SpecNode {

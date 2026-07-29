@@ -96,8 +96,7 @@ export { updateProject } from './queries/project-update.js';
 export type { UpdateProjectInput, UpdateProjectResult } from './queries/project-update.js';
 export { listProjectSpecs } from './queries/project-specs.js';
 export type { ProjectSpec, ProjectSpecListOptions } from './queries/project-specs.js';
-export { getBrokenRefs } from './queries/project-refs.js';
-export type { BrokenRef } from './queries/project-refs.js';
+export { getBrokenRefs, type BrokenRef } from './queries/project-refs.js';
 export {
   createClient,
   listClients,
@@ -372,10 +371,11 @@ export {
   AssociationParagraphNotFoundError,
 } from './queries/associations.js';
 export type { CreateAssociationInput } from './queries/associations.js';
-export { getProjectKeynotes } from './queries/keynotes.js';
-export type { ProjectKeynote } from './queries/keynotes.js';
+export { getProjectKeynotes, type ProjectKeynote } from './queries/keynotes.js';
 export { getComparisonColumns, getComparisonParagraphs } from './queries/reporting.js';
 export type { ComparisonColumnMeta, ComparisonParagraphRow } from './queries/reporting.js';
+export { getFrozenComparisonSource } from './queries/reporting.js';
+export type { FrozenComparisonSource } from './queries/reporting.js';
 // ADR-065 — discipline mapping (scoped-profile: built-in default + per-library override).
 // resolveEffectiveRules/disciplineForSection and the resolved-view types stay internal to the
 // db module (used by the listing queries via relative import), so only the externally-consumed

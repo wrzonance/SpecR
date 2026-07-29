@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import { DatabaseError } from '../errors.js';
 import { SpecTreeSchema } from '../../ast/index.js';
-import type { SpecTree } from '../../ast/index.js';
+import type { SpecTree, SpecNode } from '../../ast/index.js';
 import { buildNodeTree } from './specs.js';
 import type { ParagraphTreeRow } from './specs.js';
 import { parseStoredPageSize } from './spec-page-size.js';
@@ -26,6 +26,37 @@ interface MemberRow {
   readonly title: string | null;
   readonly position: number;
   readonly page_size: unknown;
+}
+
+/** `paras` row shape, extended with the live paragraph's own project-copy
+ *  lineage column (migration 018) — the source `embedOriginIds` reads to
+ *  populate `meta.originParagraphId` at freeze time (#392, ADR-078). Local to
+ *  this file so `ParagraphTreeRow`/`buildNodeTree` (specs.ts) stay untouched —
+ *  the live `GET /specs/:id/tree` path never selects this column. */
+interface SnapshotParagraphRow extends ParagraphTreeRow {
+  readonly originParagraphId: string | null;
+}
+
+/** Freeze-time-only embedding (#392, ADR-078): stamps each node's
+ *  `meta.originParagraphId` from the live paragraph it was built from, omitted
+ *  (never `null`) when the paragraph carries no lineage. Mirrors
+ *  `attachAssociations` (associations.ts) — same map-by-id-then-recurse shape. */
+function embedOriginIds(
+  nodes: readonly SpecNode[],
+  originById: ReadonlyMap<string, string | null>
+): readonly SpecNode[] {
+  return nodes.map((node) => {
+    const originParagraphId = originById.get(node.id);
+    const children = embedOriginIds(node.children, originById);
+    return {
+      ...node,
+      children,
+      meta: {
+        ...node.meta,
+        ...(originParagraphId ? { originParagraphId } : {}),
+      },
+    };
+  });
 }
 
 export function validateTree(candidate: unknown, specId: string): SpecTree {
@@ -53,9 +84,19 @@ export async function snapshotMemberTrees(
   );
   const entries: RevisionSpecEntry[] = [];
   for (const member of members.rows) {
-    const paras = await client.query<ParagraphTreeRow>(
+    // object_data must be selected alongside every other ParagraphTreeRow
+    // column (matches getSpecTree's own query in specs.ts) — buildNodeTree's
+    // parseObjectMeta reads it unconditionally for every `object`-typed row.
+    // Omitting it left any package containing a captured table/text box unable
+    // to snapshot at all: parseObjectMeta rejects the resulting `undefined`
+    // against ObjectMetaSchema and throws, surfacing as an unconditional 500
+    // from createPackageRevision. Pre-existing gap (#300/ADR-072 objects
+    // predate this PR), not introduced by the #392 lineage column below.
+    const paras = await client.query<SnapshotParagraphRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              signal_provenance, classification, editability_override, page_break_before
+              signal_provenance, classification, editability_override, object_data,
+              page_break_before,
+              origin_paragraph_id AS "originParagraphId"
        FROM paragraphs WHERE spec_id = $1`,
       [member.spec_id]
     );
@@ -63,11 +104,12 @@ export async function snapshotMemberTrees(
     // parseStoredPageSize boundary contract as getSpecTree — malformed JSONB
     // degrades to the Letter default instead of blocking revision creation.
     const pageSize = parseStoredPageSize(member.page_size);
+    const originById = new Map(paras.rows.map((row) => [row.id, row.originParagraphId]));
     const candidate = {
       id: member.spec_id,
       section: member.section ?? '',
       title: member.title ?? '',
-      parts: buildNodeTree(paras.rows),
+      parts: embedOriginIds(buildNodeTree(paras.rows), originById),
       ...(pageSize !== undefined ? { pageSize } : {}),
     };
     entries.push({

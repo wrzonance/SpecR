@@ -86,11 +86,33 @@ function registerCoordinationTool(reg: ToolRegistrar): void {
   );
 }
 
+// Hand-duplicated mirror of the frozen half of CompareSource (src/reporting/types.ts,
+// #392, ADR-078) — the MCP inputSchema is a ZodRawShape (see ToolRegistrar), which
+// cannot host CompareRequestSchema's cross-field superRefine, so this shape is kept
+// in lockstep by test (report-tools.test.ts) rather than by import.
+const FrozenCompareSourceShape = z.object({ revisionId: z.uuid(), specId: z.uuid() }).strict();
+
+/** Canonical identity for distinctness, mirroring `sourceKey` in
+ *  src/reporting/types.ts. Reference-equality `Set` fails to dedupe two
+ *  structurally-identical frozen objects (`{revisionId, specId}` literals are
+ *  never `===`); `live:<uuid>` vs. `frozen:<revisionId>:<specId>` also legally
+ *  distinguishes a live source from a frozen source of the SAME underlying
+ *  spec — that pair is a genuine, intentional comparison. */
+function compareSourceKey(source: z.infer<typeof FrozenCompareSourceShape> | string): string {
+  return typeof source === 'string'
+    ? `live:${source}`
+    : `frozen:${source.revisionId}:${source.specId}`;
+}
+
 const COMPARE_DESCRIPTION =
   'Grounded, deterministic cross-spec comparison matrix. Aligns exactly two ' +
-  'live specs and returns a symmetric matrix — one row per aligned paragraph, ' +
+  'sources and returns a symmetric matrix — one row per aligned paragraph, ' +
   'one column per source, each cell the source’s verbatim text or absent. Every ' +
   'present cell traces to a real specId + paragraph UUID; nothing is synthesized. ' +
+  'Each entry in `sources` is either a live spec UUID (project or master) or a ' +
+  'frozen source object { revisionId, specId } naming the frozen tree of that spec ' +
+  'within one issued package revision (#392) — e.g. compare a live spec against a ' +
+  'past issuance, or two past issuances of the same package against each other. ' +
   'Alignment (see `alignment`): by resolved paragraph origin for clones of a ' +
   'shared master (project↔project / project↔master, surfacing behindBy drift), or ' +
   'by canonical structural address for independently-ingested specs of the same ' +
@@ -98,8 +120,14 @@ const COMPARE_DESCRIPTION =
   'the agent within a token budget); a `summary` rollup ({rows, aligned, identical, ' +
   'differing} + per-column {present, onlyIn}) is ALWAYS emitted over the full ' +
   'matrix, and `alignedBy` echoes the mode used. Optionally designate one source ' +
-  'as the baseline to reframe cells as added/removed/modified/unchanged. Returns ' +
-  'isError when a source id is not a live spec (frozen package/revision ids 404).';
+  'as the baseline (matched against each source’s underlying specId, not literal ' +
+  'array membership) to reframe cells as added/removed/modified/unchanged — if ' +
+  '`baseline` matches more than one source (e.g. the same spec frozen at two ' +
+  'different revisions) this is an AMBIGUOUS match: unlike the REST comparison ' +
+  'endpoint, this tool does not reject it, it silently uses the first matching ' +
+  'source in request order, so list your intended baseline source first when ' +
+  'that overlap is possible. Returns isError when a live source id does not ' +
+  'exist, or a frozen source’s (revisionId, specId) pair does not exist.';
 
 function registerCompareTool(reg: ToolRegistrar): void {
   reg.register(
@@ -108,16 +136,27 @@ function registerCompareTool(reg: ToolRegistrar): void {
       description: COMPARE_DESCRIPTION,
       inputSchema: {
         sources: z
-          .array(z.uuid())
+          .array(z.union([z.uuid(), FrozenCompareSourceShape]))
           .length(2)
-          .refine((s) => new Set(s).size === s.length, {
-            message: 'the two sources must be distinct (a spec cannot be compared with itself)',
+          .refine((s) => new Set(s.map(compareSourceKey)).size === s.length, {
+            message:
+              'the two sources must be distinct (a spec cannot be compared with itself); ' +
+              'two frozen sources of the same revisionId + specId also count as identical',
           })
-          .describe('Exactly two distinct live spec UUIDs (project or master) to compare'),
+          .describe(
+            'Exactly two distinct sources to compare. Each is either a live spec UUID ' +
+              '(project or master) or a frozen source object { revisionId, specId } naming ' +
+              'the frozen tree of that spec within one issued package revision (#392). A ' +
+              'live source and a frozen source of the SAME underlying spec are a legal, ' +
+              'distinct pair — two structurally-identical frozen objects are not.'
+          ),
         baseline: z
           .uuid()
           .optional()
-          .describe('Optional: one of sources, to project a baseline lens over the matrix'),
+          .describe(
+            'Optional: the underlying specId of one of sources, to project a baseline ' +
+              'lens over the matrix. See the tool description for the ambiguous-match rule.'
+          ),
         alignment: z
           .enum(['origin', 'structure', 'auto'])
           .optional()

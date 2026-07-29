@@ -4389,20 +4389,30 @@ paths:
   /reports/compare:
     post:
       operationId: postCompareReport
-      summary: Cross-spec comparison matrix — align two live specs by origin or structure, with summary, differences filter, and optional baseline lens
+      summary: Cross-spec comparison matrix — align two live or frozen sources by origin or structure, with summary, differences filter, and optional baseline lens
       description: >
-        Grounded, deterministic cross-spec comparison (ADR-047/053). Aligns exactly two
-        live specs and returns a symmetric matrix: one row per aligned paragraph, one
-        column per source, each cell the source's verbatim text or absent. Every present
-        cell traces to a real specId + paragraph UUID; nothing is synthesized. Alignment
-        is by resolved paragraph origin for clones of a shared master (project↔project,
+        Grounded, deterministic cross-spec comparison (ADR-047/053, extended by #392/
+        ADR-078). Aligns exactly two sources and returns a symmetric matrix: one row
+        per aligned paragraph, one column per source, each cell the source's verbatim
+        text or absent. Every present cell traces to a real specId + paragraph UUID;
+        nothing is synthesized. Each entry in `sources` is either a live spec UUID
+        (project or master) or a frozen `{revisionId, specId}` object naming the
+        frozen tree of that spec within one issued package revision (see
+        CompareSource) — e.g. a live spec against a past issuance of itself, or two
+        past issuances of the same package against each other. Alignment is by
+        resolved paragraph origin for clones of a shared master (project↔project,
         project↔master with behindBy drift) or by canonical structural address for
         independently-ingested specs of the same section — selected via `alignment`
         (default `auto`) and echoed as `alignedBy`. `include: differences` returns only
         non-identical rows; a `summary` rollup is always emitted over the full matrix.
-        Optionally designate one source as the baseline to reframe cells as
-        added/removed/modified/unchanged. A source id that is not a live spec (frozen
-        package/revision ids) returns 404.
+        Optionally designate one source's underlying specId as `baseline` to reframe
+        cells as added/removed/modified/unchanged; a `baseline` matching zero or more
+        than one source (e.g. the same spec frozen at two different revisions) is
+        rejected as ambiguous (422) rather than silently resolved. `drift` (version
+        drift from the lineage chain) is reported only for live columns — a frozen
+        column has no lineage of its own to walk, so it is omitted there, never faked.
+        A source id that does not resolve — an unknown live spec UUID, or a frozen
+        `(revisionId, specId)` pair that does not exist — returns 404.
       tags: [reports]
       requestBody:
         required: true
@@ -5865,20 +5875,58 @@ components:
 
     # ── Cross-spec comparison (reports) ────────────────────────────────────────
 
+    CompareSource:
+      description: >
+        One comparison source (#392, ADR-078). A bare UUID names a LIVE spec
+        (project or master) — the original, back-compat shape. An object names
+        the FROZEN tree of one spec within one issued package revision: a
+        point-in-time `package_revision_specs.tree` snapshot, not the live
+        `specs` row. `baseline` resolves against a source's underlying `specId`
+        (see `sourceSpecId`), not literal array membership, so a live source and
+        a frozen source of the SAME underlying spec are a legal, distinct pair —
+        e.g. a live spec compared against one of its own past issuances.
+      oneOf:
+        - type: string
+          format: uuid
+          description: A live spec UUID.
+        - type: object
+          description: A frozen source — the tree of `specId` as issued in `revisionId`.
+          required: [revisionId, specId]
+          additionalProperties: false
+          properties:
+            revisionId:
+              type: string
+              format: uuid
+              description: Issued package-revision UUID (see GET /packages/{id}/revisions).
+            specId:
+              type: string
+              format: uuid
+              description: The spec's id as of that revision (a package_revision_specs member).
+
     CompareRequest:
       type: object
       required: [sources]
       properties:
         sources:
           type: array
-          description: Exactly two live spec UUIDs (project or master) to compare.
-          items: { type: string, format: uuid }
+          description: >
+            Exactly two distinct sources to compare. Each is either a live spec
+            UUID or a frozen `{revisionId, specId}` object (see CompareSource).
+            A live source and a frozen source of the same underlying spec are a
+            legal, distinct pair; two structurally-identical frozen objects are
+            not — both are rejected as non-distinct (422).
+          items: { $ref: '#/components/schemas/CompareSource' }
           minItems: 2
           maxItems: 2
         baseline:
           type: string
           format: uuid
-          description: Optional — must be one of `sources`; projects a baseline lens over the matrix.
+          description: >
+            Optional — the underlying specId of one of `sources` (resolved via
+            each source's `specId`, not literal array membership). Must match
+            exactly one source; zero or multiple matches (e.g. the same spec
+            frozen at two different revisions) is rejected as ambiguous (422)
+            rather than silently resolved to the first match.
         alignment:
           type: string
           enum: [origin, structure, auto]
@@ -5906,6 +5954,18 @@ components:
         specId: { type: string, format: uuid }
         section: { type: string }
         title: { type: [string, 'null'] }
+        revisionId:
+          type: string
+          format: uuid
+          description: >
+            Present iff this column was resolved from a frozen source (#392); a
+            live column never carries this (omitted, not null).
+        revisionLabel:
+          type: string
+          description: >
+            The frozen revision's raw `package_revisions.label` — not a
+            nomenclature-resolved display name. Present iff `revisionId` is
+            present.
 
     ComparisonCell:
       description: A grounded cell — either a source's verbatim paragraph, or an absent sentinel.
@@ -7416,6 +7476,17 @@ components:
                 box modeled as an opaque round-trip blob. Present only on
                 `type: object` nodes.
               $ref: '#/components/schemas/ObjectMeta'
+            originParagraphId:
+              type: string
+              format: uuid
+              description: >-
+                The live paragraph this node was frozen from, at revision-freeze
+                time (#392, ADR-078). Present only in a revision's frozen
+                `SpecTree` (e.g. `GET /revisions/{id}`) — never on a live
+                `GET /specs/{id}/tree` response — and only for a paragraph that
+                itself has project-copy lineage (migration 018); absent for a
+                locally-authored paragraph or a snapshot frozen before this
+                field existed.
 
     ObjectMeta:
       type: object

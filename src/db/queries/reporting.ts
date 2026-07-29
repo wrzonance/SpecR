@@ -1,6 +1,8 @@
 import type { Pool } from 'pg';
 import { pool } from '../index.js';
 import { DatabaseError } from '../errors.js';
+import type { SpecTree } from '../../ast/index.js';
+import { validateTree } from './revision-snapshot.js';
 
 interface Queryable {
   query: Pool['query'];
@@ -93,5 +95,49 @@ export async function getComparisonParagraphs(
     return result.rows;
   } catch (err) {
     throw new DatabaseError('getComparisonParagraphs failed', { cause: err });
+  }
+}
+
+/** A frozen `package_revision_specs.tree` snapshot plus the revision's raw
+ *  `label` (#392, ADR-078) — the frozen-side counterpart of a live comparison
+ *  column. `revisionLabel` is deliberately the raw label, not a
+ *  nomenclature-resolved `displayName`: keeps this loader independent of the
+ *  nomenclature-profile machinery. */
+export interface FrozenComparisonSource {
+  readonly tree: SpecTree;
+  readonly revisionLabel: string;
+}
+
+interface FrozenSourceRow {
+  readonly tree: unknown;
+  readonly revisionLabel: string;
+}
+
+/** One dedicated JOIN rather than a `getPackageRevision` reuse (ADR-078 D3):
+ *  that loader fetches every member spec's tree plus a nomenclature-profile
+ *  lookup this call site never needs — O(package-size) overfetch for a
+ *  single-spec read. Returns null both when `revisionId` doesn't exist and
+ *  when it exists but `specId` isn't one of its frozen members; report.ts
+ *  raises one `SpecNotFoundError` naming both ids, so the two null causes
+ *  don't need to be told apart here. */
+export async function getFrozenComparisonSource(
+  revisionId: string,
+  specId: string,
+  db: Queryable = pool
+): Promise<FrozenComparisonSource | null> {
+  try {
+    const result = await db.query<FrozenSourceRow>(
+      `SELECT prs.tree, pr.label AS "revisionLabel"
+       FROM package_revision_specs prs
+       JOIN package_revisions pr ON pr.id = prs.revision_id
+       WHERE prs.revision_id = $1 AND prs.spec_id = $2`,
+      [revisionId, specId]
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return { tree: validateTree(row.tree, specId), revisionLabel: row.revisionLabel };
+  } catch (err) {
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError('getFrozenComparisonSource failed', { cause: err });
   }
 }
