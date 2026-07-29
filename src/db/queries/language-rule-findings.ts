@@ -306,11 +306,23 @@ async function scanSpec(spec: PresentSpec, db: Queryable): Promise<SpecScanResul
   return { findings: [...termFindings, ...phraseFindings], configured: true };
 }
 
+// scanSpec issues several queries per spec, and a project can carry hundreds of
+// present specs. Fanning all of them out at once would queue every query against
+// the shared pool and starve unrelated requests for the length of the report, so
+// the scan advances a batch at a time. Sequential batches also keep the findings
+// in present-spec order, which readPresentSpecs' ORDER BY established.
+const SCAN_BATCH_SIZE = 8;
+
 async function scanPresentSpecs(
   present: readonly PresentSpec[],
   db: Queryable
 ): Promise<{ readonly findings: readonly LanguageFinding[]; readonly configured: boolean }> {
-  const results = await Promise.all(present.map((spec) => scanSpec(spec, db)));
+  const results: { readonly findings: readonly LanguageFinding[]; readonly configured: boolean }[] =
+    [];
+  for (let i = 0; i < present.length; i += SCAN_BATCH_SIZE) {
+    const batch = present.slice(i, i + SCAN_BATCH_SIZE);
+    results.push(...(await Promise.all(batch.map((spec) => scanSpec(spec, db)))));
+  }
   return {
     findings: results.flatMap((r) => r.findings),
     configured: results.some((r) => r.configured),
@@ -349,7 +361,7 @@ const NOT_CONFIGURED_NOTE =
 export async function getLanguageFindingsReport(
   projectId: string,
   packageId: string | undefined,
-  db: Pool = pool
+  db: Queryable = pool
 ): Promise<LanguageFindingsReport> {
   try {
     await assertScope(projectId, packageId, db);

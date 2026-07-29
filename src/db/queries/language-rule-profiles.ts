@@ -106,9 +106,18 @@ function allRegexTerms(rules: LanguageRules): readonly string[] {
  * isRegex:true term's pattern across all four categories with the shared
  * ReDoS/length/count guard (ADR-080 D6). Captured facts are never rejected;
  * unsafe regex authoring is.
+ *
+ * The shape failure is wrapped, not rethrown: `parse` would surface a raw
+ * ZodError at this module's boundary, and only the REST handler pre-validates
+ * its body — MCP and direct db callers do not. The ZodError is chained as the
+ * cause so the field-level detail survives.
  */
 export function validateRules(rules: LanguageRules): LanguageRules {
-  const parsed = LanguageRulesSchema.parse(rules);
+  const result = LanguageRulesSchema.safeParse(rules);
+  if (!result.success) {
+    throw new LanguageRuleValidationError('malformed language rules', { cause: result.error });
+  }
+  const parsed = result.data;
   const safety = checkRegexPatterns(allRegexTerms(parsed));
   if (!safety.safe) {
     throw new LanguageRuleValidationError(`unsafe language rule regex: ${safety.reason}`);
@@ -201,44 +210,45 @@ export async function deleteLanguageRuleProfile(
   }
 }
 
-interface AuthoringLibraryRow {
+interface SpecOwnershipRow {
   readonly authoring_library_id: string | null;
+  readonly project_id: string | null;
+}
+
+interface SpecOwnership {
+  readonly authoringLibraryId: string | null;
+  readonly projectId: string | null;
 }
 
 /**
+ * Both of a spec's ownership facts in ONE round-trip — they come off the same
+ * `specs` row, and this runs once per present spec in a findings report, so a
+ * second lookup would double the per-spec connection cost for nothing.
+ *
  * ADR-080 D4 — a project-copy spec (specs.parent_spec_id set) must still see
  * its originating master's library rules, not only its own project profile.
  * COALESCE picks the spec's own library_id when it IS a master (library_id
  * set); otherwise it falls back to the parent master's library_id. Spike-
- * verified against both shapes. Returns null when neither resolves (e.g. an
- * unknown specId) — resolution degrades to "no library layer", never throws.
+ * verified against both shapes. Either field is null when it does not resolve
+ * (e.g. an unknown specId) — resolution degrades to "no layer", never throws.
  */
-async function resolveAuthoringLibraryId(specId: string, db: Queryable): Promise<string | null> {
+async function resolveSpecOwnership(specId: string, db: Queryable): Promise<SpecOwnership> {
   try {
-    const result = await db.query<AuthoringLibraryRow>(
-      `SELECT COALESCE(s.library_id, master.library_id) AS authoring_library_id
+    const result = await db.query<SpecOwnershipRow>(
+      `SELECT COALESCE(s.library_id, master.library_id) AS authoring_library_id,
+              s.project_id
        FROM specs s
        LEFT JOIN specs master ON master.id = s.parent_spec_id
        WHERE s.id = $1`,
       [specId]
     );
-    return result.rows[0]?.authoring_library_id ?? null;
+    const row = result.rows[0];
+    return {
+      authoringLibraryId: row?.authoring_library_id ?? null,
+      projectId: row?.project_id ?? null,
+    };
   } catch (err) {
-    throw new DatabaseError(`resolveAuthoringLibraryId: query failed for spec ${specId}`, {
-      cause: err,
-    });
-  }
-}
-
-async function resolveSpecProjectId(specId: string, db: Queryable): Promise<string | null> {
-  try {
-    const result = await db.query<{ project_id: string | null }>(
-      `SELECT project_id FROM specs WHERE id = $1`,
-      [specId]
-    );
-    return result.rows[0]?.project_id ?? null;
-  } catch (err) {
-    throw new DatabaseError(`resolveSpecProjectId: query failed for spec ${specId}`, {
+    throw new DatabaseError(`resolveSpecOwnership: query failed for spec ${specId}`, {
       cause: err,
     });
   }
@@ -281,15 +291,18 @@ async function buildResolutionScopes(
   specId: string,
   db: Queryable
 ): Promise<readonly LanguageRuleScope[]> {
-  const [authoringLibraryId, projectId] = await Promise.all([
-    resolveAuthoringLibraryId(specId, db),
-    resolveSpecProjectId(specId, db),
-  ]);
+  const { authoringLibraryId, projectId } = await resolveSpecOwnership(specId, db);
   const clientLibraryId = projectId ? await resolveProjectClientLibraryId(projectId, db) : null;
 
   const scopes: LanguageRuleScope[] = [];
   if (authoringLibraryId) scopes.push({ scope: 'library', ownerId: authoringLibraryId });
-  if (clientLibraryId) scopes.push({ scope: 'library', ownerId: clientLibraryId });
+  // A client whose library IS the authoring library is one layer, not two. The
+  // merge is idempotent either way, but ResolvedLanguageRules.layers is the
+  // report's provenance — listing the same profile twice would misreport where
+  // a rule came from.
+  if (clientLibraryId && clientLibraryId !== authoringLibraryId) {
+    scopes.push({ scope: 'library', ownerId: clientLibraryId });
+  }
   if (projectId) scopes.push({ scope: 'project', ownerId: projectId });
   return scopes;
 }

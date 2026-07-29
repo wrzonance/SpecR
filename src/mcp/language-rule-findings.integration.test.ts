@@ -102,4 +102,12 @@ describe('get_language_findings MCP tool', () => {
     });
     expect(isToolError(res)).toBe(true);
   });
+
+  it('validation error names the field that failed — a bad packageId is not reported as projectId', async () => {
+    const res = await handleGetLanguageFindings({ projectId, packageId: 'not-a-uuid' });
+    expect(isToolError(res)).toBe(true);
+    const message = res.content[0]?.text ?? '';
+    expect(message).toContain('packageId');
+    expect(message).not.toContain('projectId');
+  });
 });

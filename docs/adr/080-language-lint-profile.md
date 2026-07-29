@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-#411: SpecR has zero prose-linting substrate. Firms have real, standing language
+Issue #411: SpecR has zero prose-linting substrate. Firms have real, standing language
 conventions — "furnish and install" over ambiguous "if required" phrasing, "Owner"
 and "Contractor" as the only recognized parties (never "subcontractor" or
 "electrical contractor"), the firm's own name for the architect/engineer of record
@@ -84,7 +84,11 @@ library master. This mirrors the existing `parent_spec_id` chain-of-custody use
 — resolved authoring library, then (if the spec's project has a client with a
 library) the client library, then the project's own profile — and
 `mergeLanguageRules` concatenates each of the four categories across layers,
-de-duplicating on `` `${term.toLowerCase()}::${isRegex ?? false}` `` with the
+de-duplicating on `` `${isRegex ? term : term.toLowerCase()}::${isRegex ?? false}` ``
+— literal terms are case-folded because they match case-insensitively, regex
+sources are **not**, because the `i` flag does not make character-class escapes
+equivalent (`\s` and `\S`, `\d`/`\D`, `\b`/`\B`, `\w`/`\W` are opposite rules,
+and folding the source would collapse two of them onto one key) — with the
 narrowest (last) layer winning a collision. This is additive-with-override-on-
 conflict, not last-layer-replaces-all: a project profile that adds one banned term
 does not silently drop the firm's whole list, which is the failure mode a naive

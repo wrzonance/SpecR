@@ -18,10 +18,16 @@ export const LanguageFindingsShape = {
 };
 const LanguageFindingsArgs = z.object(LanguageFindingsShape);
 
+// Two UUID fields, so the failure has to name the one that failed: a fixed
+// "projectId must be a UUID" would misreport a bad optional packageId.
+function describeIssues(err: z.ZodError): string {
+  return err.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+}
+
 export async function handleGetLanguageFindings(args: unknown): Promise<ToolResult> {
   const parsed = LanguageFindingsArgs.safeParse(args);
   if (!parsed.success) {
-    return toolError('invalid get_language_findings input: projectId must be a UUID');
+    return toolError(`invalid get_language_findings input: ${describeIssues(parsed.error)}`);
   }
   try {
     const report = await getLanguageFindingsReport(parsed.data.projectId, parsed.data.packageId);

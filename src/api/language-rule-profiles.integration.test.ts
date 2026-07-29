@@ -33,7 +33,14 @@ afterAll(async () => {
 });
 
 afterEach(async () => {
-  await pool.query(`DELETE FROM language_rule_profiles`);
+  // Scoped to this file's own fixtures, exactly like the sibling deletes below:
+  // an unscoped `DELETE FROM language_rule_profiles` would also wipe rows owned
+  // by test files running concurrently against the same database.
+  await pool.query(
+    `DELETE FROM language_rule_profiles
+     WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'lang-api-%')
+        OR project_id IN (SELECT id FROM projects WHERE name LIKE 'lang-api-%')`
+  );
   await pool.query(`DELETE FROM libraries WHERE name LIKE 'lang-api-%'`);
   await pool.query(`DELETE FROM projects WHERE name LIKE 'lang-api-%'`);
 });

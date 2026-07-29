@@ -3,6 +3,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { pool } from '../index.js';
 import { upsertLanguageRuleProfile } from './language-rule-profiles.js';
 import { getLanguageFindingsReport } from './language-rule-findings.js';
+import { PackageNotFoundError } from './packages.js';
 
 // #411 / ADR-080 — integration coverage for the findings scan engine (task
 // 5/8), run against a real Postgres per CLAUDE.md. Pure-function coverage
@@ -61,15 +62,40 @@ async function addProjectSpec(projectId: string, specId: string, position = 1): 
   );
 }
 
+// loadScannableParagraphs orders by p.position, so inserting every fixture
+// paragraph at position 1 would leave intra-spec order up to Postgres. Number
+// them in call order per spec instead — deterministic, and it keeps intra-spec
+// ordering assertable.
+const nextParagraphPosition = new Map<string, number>();
+
 async function addParagraph(
   specId: string,
   text: string,
   opts: { readonly vanish?: boolean; readonly nodeType?: string } = {}
 ): Promise<void> {
+  const position = (nextParagraphPosition.get(specId) ?? 0) + 1;
+  nextParagraphPosition.set(specId, position);
   await pool.query(
     `INSERT INTO paragraphs (spec_id, node_type, text, position, vanish)
-     VALUES ($1, $2, $3, 1, $4)`,
-    [specId, opts.nodeType ?? 'pr1', text, opts.vanish ?? false]
+     VALUES ($1, $2, $3, $4, $5)`,
+    [specId, opts.nodeType ?? 'pr1', text, position, opts.vanish ?? false]
+  );
+}
+
+async function makePackage(projectId: string, name: string): Promise<string> {
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO design_packages (project_id, name, position) VALUES ($1, $2, 1) RETURNING id`,
+    [projectId, `${name} (#411) ${suffix}`]
+  );
+  const id = res.rows[0]?.id;
+  if (id === undefined) throw new Error('makePackage: no id');
+  return id;
+}
+
+async function addPackageSpec(packageId: string, specId: string, position = 1): Promise<void> {
+  await pool.query(
+    `INSERT INTO package_specs (package_id, spec_id, position) VALUES ($1, $2, $3)`,
+    [packageId, specId, position]
   );
 }
 
@@ -86,6 +112,10 @@ afterAll(async () => {
   // libraries (CASCADEs any remaining language_rule_profiles rows).
   if (specIds.length) {
     await pool.query(`DELETE FROM project_specs WHERE spec_id = ANY($1::uuid[])`, [specIds]);
+    // package_specs.spec_id is RESTRICT too, and design_packages only CASCADEs
+    // when its project goes — which happens AFTER specs below, so drop the
+    // membership rows explicitly or the specs delete is blocked.
+    await pool.query(`DELETE FROM package_specs WHERE spec_id = ANY($1::uuid[])`, [specIds]);
   }
   if (specIds.length) await pool.query(`DELETE FROM specs WHERE id = ANY($1::uuid[])`, [specIds]);
   if (projectIds.length) {
@@ -223,5 +253,56 @@ describe('getLanguageFindingsReport (task 5/8)', () => {
     });
     expect(report.notes).toHaveLength(1);
     expect(report.notes[0]).toMatch(/opt-in/);
+  });
+
+  it('package scope reads package_specs — only the package’s own specs are scanned', async () => {
+    const libraryId = await makeLibrary('Findings Package Library');
+    await upsertLanguageRuleProfile(
+      { scope: 'library', ownerId: libraryId },
+      { bannedTerms: [{ term: 'shall' }] }
+    );
+    const masterId = await makeSpec({ section: '26 05 00', libraryId });
+    const projectId = await makeProject('Findings Package Project');
+
+    const inPackageId = await makeSpec({ section: '26 05 00', projectId, parentSpecId: masterId });
+    await addProjectSpec(projectId, inPackageId, 1);
+    await addParagraph(inPackageId, 'The Contractor shall bond all raceways.');
+
+    const outOfPackageId = await makeSpec({
+      section: '26 05 19',
+      projectId,
+      parentSpecId: masterId,
+    });
+    await addProjectSpec(projectId, outOfPackageId, 2);
+    await addParagraph(outOfPackageId, 'The Contractor shall label all conductors.');
+
+    const packageId = await makePackage(projectId, 'Bid Set A');
+    await addPackageSpec(packageId, inPackageId);
+
+    // Same project, two scopes: the project-wide report sees both specs, so a
+    // package-scoped report returning one proves it read package_specs rather
+    // than falling back to the project's whole TOC.
+    const projectReport = await getLanguageFindingsReport(projectId, undefined);
+    expect(projectReport.summary.bannedTerm).toBe(2);
+
+    const report = await getLanguageFindingsReport(projectId, packageId);
+
+    expect(report.configured).toBe(true);
+    expect(report.packageId).toBe(packageId);
+    expect(report.summary.bannedTerm).toBe(1);
+    expect(report.findings.map((f) => f.specId)).toEqual([inPackageId]);
+  });
+
+  it('a package owned by another project is PackageNotFoundError, not an empty report', async () => {
+    const projectId = await makeProject('Findings Package Guard Project');
+    const otherProjectId = await makeProject('Findings Package Guard Other');
+    const foreignPackageId = await makePackage(otherProjectId, 'Foreign Bid Set');
+
+    // assertScope matches on (id, project_id): a real package id that belongs
+    // to a different project must be rejected, not silently scanned as if the
+    // caller owned it.
+    await expect(getLanguageFindingsReport(projectId, foreignPackageId)).rejects.toBeInstanceOf(
+      PackageNotFoundError
+    );
   });
 });

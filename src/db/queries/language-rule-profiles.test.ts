@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { ZodError } from 'zod';
 import {
   mergeLanguageRules,
   validateRules,
@@ -145,6 +146,22 @@ describe('validateRules — regex write-boundary safety (ADR-080 D6)', () => {
       requiredPhrases: [{ term: '(x*)*', isRegex: true }],
     };
     expect(() => validateRules(rules)).toThrow(LanguageRuleValidationError);
+  });
+
+  it('validate: a shape failure is a LanguageRuleValidationError chaining the ZodError, not a raw ZodError', () => {
+    // An empty term satisfies the TS type but violates the schema's
+    // minLength(1). Before the fix `parse` let that escape the db module as an
+    // unwrapped ZodError — only the REST handler pre-validates its body; MCP
+    // and direct db callers do not.
+    const rules: LanguageRules = { bannedTerms: [{ term: '' }] };
+    let thrown: unknown;
+    try {
+      validateRules(rules);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(LanguageRuleValidationError);
+    expect(thrown instanceof LanguageRuleValidationError && thrown.cause).toBeInstanceOf(ZodError);
   });
 
   // ADR-080 "Negative" consequences — a conscious v1 trade-off, not a gap:
