@@ -15,23 +15,52 @@ import type {
 } from './types.js';
 
 /** The per-row alignment key: two rows in different sources align iff their keys
- *  match. `origin` and `structure` keyers below produce comparable keys. */
-type Keyer = (p: ComparisonParagraph) => string;
+ *  match. `origin` and `structure` keyers below produce comparable keys.
+ *  `sourceIndex` is which `sources[]` slot the row was drawn from — needed
+ *  because paragraph ids are no longer globally unique across sources once a
+ *  spec can appear more than once (live + frozen, or frozen at two different
+ *  revisions, #392); the origin keyer ignores it, the structural keyer does not. */
+type Keyer = (p: ComparisonParagraph, sourceIndex: number) => string;
 
-/** Origin keyer (ADR-047). One COALESCE covers both slice comparisons: a cloned
- *  paragraph aligns on its master origin; a NULL-origin paragraph (added-after-
- *  clone or origin-deleted, or a root master) keys on its own id and surfaces as
- *  only-in-X. */
-const originKeyOf: Keyer = (p) => p.originParagraphId ?? p.id;
+/** True iff every source names the SAME underlying live spec (#392: a spec may
+ *  appear live once and frozen at 1-2 different revisions, or twice frozen).
+ *  Same-spec columns share literal paragraph UUIDs by construction (ADR-078
+ *  §6) for any unedited/undeleted paragraph — this is the stable identity to
+ *  key on, independent of whether either snapshot happens to carry embedded
+ *  lineage metadata. */
+function isSameSpecComparison(sources: readonly AlignSource[]): boolean {
+  return sources.length > 1 && new Set(sources.map((s) => s.column.specId)).size === 1;
+}
 
-/** True iff any origin key occurs in ≥2 distinct sources — i.e. the pair descends
- *  from a shared master (project↔project) or is project↔its-own-master. Drives the
- *  `auto` fallback: no cross-source origin overlap → independently-ingested. */
-function sharesCrossSourceOrigin(sources: readonly AlignSource[]): boolean {
+/** Origin keyer (ADR-047), specId-aware (#392 review finding). For a SAME-spec
+ *  pair, `originParagraphId` must not be trusted: it is embedded only at
+ *  freeze time (revision-snapshot.ts) and is entirely absent from any
+ *  snapshot frozen before #392 shipped. Mixing a legacy (absent) snapshot
+ *  against a new (embedded) snapshot of the SAME spec would key a locally-
+ *  authored paragraph by its own id on both sides (matches, correctly) while
+ *  keying a lineage-carrying paragraph by its own id on the legacy side but
+ *  by its MASTER's id on the new side (never matches) — silently showing an
+ *  unedited cloned paragraph as removed-then-added. Own-id keying sidesteps
+ *  this entirely: same-spec snapshots share real paragraph UUIDs natively
+ *  (ADR-078 §6), so lineage metadata is never needed for this case. A
+ *  cross-spec pair (clone vs. its master, or two clones of the same master)
+ *  keeps the original COALESCE: a cloned paragraph aligns on its master
+ *  origin; a NULL-origin paragraph (added-after-clone, origin-deleted, or a
+ *  root master) keys on its own id and surfaces as only-in-X. */
+function originKeyerFor(sources: readonly AlignSource[]): Keyer {
+  const sameSpec = isSameSpecComparison(sources);
+  return (p) => (sameSpec ? p.id : (p.originParagraphId ?? p.id));
+}
+
+/** True iff any key occurs in ≥2 distinct sources under the given keyer — i.e.
+ *  the pair descends from a shared master (project↔project), is project↔its-
+ *  own-master, or is a same-spec pair (own ids trivially recur). Drives the
+ *  `auto` fallback: no cross-source overlap → independently-ingested. */
+function sharesCrossSourceOrigin(sources: readonly AlignSource[], keyOf: Keyer): boolean {
   const firstSeenIn = new Map<string, number>();
   for (let i = 0; i < sources.length; i += 1) {
     for (const row of sources[i]?.rows ?? []) {
-      const k = originKeyOf(row);
+      const k = keyOf(row, i);
       const seen = firstSeenIn.get(k);
       if (seen !== undefined && seen !== i) return true;
       if (seen === undefined) firstSeenIn.set(k, i);
@@ -53,25 +82,28 @@ function resolveAlignment(
   requested: AlignmentRequest
 ): AlignmentMode {
   if (requested !== 'auto') return requested;
-  if (sharesCrossSourceOrigin(sources)) return 'origin';
+  if (sharesCrossSourceOrigin(sources, originKeyerFor(sources))) return 'origin';
   // No shared origin: fall back to structure only for same-section peers. Different
   // sections stay on origin (→ all only-in rows), never falsely paired by address.
   return sourcesShareSection(sources) ? 'structure' : 'origin';
 }
 
-/** Structural keyer (ADR-053) over ALL sources at once — paragraph ids are
- *  globally unique, and identical structural addresses across sources are exactly
- *  what aligns them. A row with no computed address falls back to its own id. */
+/** Structural keyer (ADR-053), ONE address map PER SOURCE (#392 review
+ *  finding) — paragraph ids can now repeat ACROSS sources (same spec live +
+ *  frozen, or frozen at two different revisions), so a single map merged
+ *  across all sources would let a later source's computed address silently
+ *  clobber an earlier source's entry for a shared id, corrupting that
+ *  source's own alignment (and, via `buildSourceMap`'s first-wins collision
+ *  rule, potentially dropping one of its rows outright). Each row looks up
+ *  its address ONLY in its own source's map. A row with no computed address
+ *  falls back to its own id. */
 function structuralKeyer(sources: readonly AlignSource[]): Keyer {
-  const merged = new Map<string, string>();
-  for (const source of sources) {
-    for (const [id, address] of computeStructuralKeys(source.rows)) merged.set(id, address);
-  }
-  return (p) => merged.get(p.id) ?? p.id;
+  const perSource = sources.map((source) => computeStructuralKeys(source.rows));
+  return (p, sourceIndex) => perSource[sourceIndex]?.get(p.id) ?? p.id;
 }
 
 function keyerFor(sources: readonly AlignSource[], mode: AlignmentMode): Keyer {
-  return mode === 'origin' ? originKeyOf : structuralKeyer(sources);
+  return mode === 'origin' ? originKeyerFor(sources) : structuralKeyer(sources);
 }
 
 /** First-wins on collision. Rows arrive pre-sorted by (position, id) so the
@@ -80,11 +112,12 @@ function keyerFor(sources: readonly AlignSource[], mode: AlignmentMode): Keyer {
  *  // — first by (position, id) wins; the loser is dropped from that column. */
 function buildSourceMap(
   rows: readonly ComparisonParagraph[],
+  sourceIndex: number,
   keyOf: Keyer
 ): ReadonlyMap<string, ComparisonParagraph> {
   const map = new Map<string, ComparisonParagraph>();
   for (const row of rows) {
-    const k = keyOf(row);
+    const k = keyOf(row, sourceIndex);
     if (!map.has(k)) map.set(k, row);
   }
   return map;
@@ -95,9 +128,9 @@ function buildSourceMap(
 function sweepOrderedKeys(sources: readonly AlignSource[], keyOf: Keyer): readonly string[] {
   const seen = new Set<string>();
   const ordered: string[] = [];
-  for (const source of sources) {
-    for (const row of source.rows) {
-      const k = keyOf(row);
+  for (let i = 0; i < sources.length; i += 1) {
+    for (const row of sources[i]?.rows ?? []) {
+      const k = keyOf(row, i);
       if (!seen.has(k)) {
         seen.add(k);
         ordered.push(k);
@@ -128,7 +161,7 @@ export function alignTrees(
   const alignedBy = resolveAlignment(sources, options?.alignment ?? 'auto');
   const keyOf = keyerFor(sources, alignedBy);
   const columns: readonly ComparisonColumn[] = sources.map((s) => s.column);
-  const maps = sources.map((s) => buildSourceMap(s.rows, keyOf));
+  const maps = sources.map((s, i) => buildSourceMap(s.rows, i, keyOf));
   const orderedKeys = sweepOrderedKeys(sources, keyOf);
   const rows: readonly ComparisonMatrixRow[] = orderedKeys.map((key) => ({
     originId: key,

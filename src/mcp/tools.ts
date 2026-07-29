@@ -44,6 +44,8 @@ import { registerHierarchyReportTools } from './hierarchy-report-tools.js';
 import { registerHeaderFooterTools } from './header-footer-tools.js';
 import { registerHistoryTools } from './history-tools.js';
 import { registerCheckpointTools } from './checkpoint-tools.js';
+import { registerLanguageRuleTools } from './language-rule-tools.js';
+import { registerLanguageRuleFindingsTools } from './language-rule-findings-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
@@ -354,6 +356,8 @@ export function registerTools(
   registerHeaderFooterTools(reg);
   registerHistoryTools(reg);
   registerCheckpointTools(reg);
+  registerLanguageRuleTools(reg);
+  registerLanguageRuleFindingsTools(reg);
   registerSubmittalTools(reg);
   registerOpenCommentsTools(reg);
   registerOnboardingTools(reg);

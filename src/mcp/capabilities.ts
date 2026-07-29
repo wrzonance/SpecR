@@ -183,6 +183,14 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['clear_project_header_footer', 'write'], // clears override (reversible), not destructive
   ['clear_package_header_footer', 'write'], // clears override (reversible), not destructive
   ['clear_revision_header_footer', 'write'], // clears override (reversible), not destructive
+  // language-lint rule profiles + findings (#411 / ADR-080)
+  ['get_library_language_rules', 'read'],
+  ['get_project_language_rules', 'read'],
+  ['get_language_findings', 'read'],
+  ['set_library_language_rules', 'write'],
+  ['set_project_language_rules', 'write'],
+  ['clear_library_language_rules', 'write'], // clears profile (reversible), not destructive
+  ['clear_project_language_rules', 'write'], // clears profile (reversible), not destructive
   // destructive (gated off by default — MCP_ALLOWED_TIERS excludes it)
   ['delete_project', 'destructive'],
   ['delete_association', 'destructive'], // hard delete of the link row

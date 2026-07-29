@@ -103,8 +103,7 @@ export { updateProject } from './queries/project-update.js';
 export type { UpdateProjectInput, UpdateProjectResult } from './queries/project-update.js';
 export { listProjectSpecs } from './queries/project-specs.js';
 export type { ProjectSpec, ProjectSpecListOptions } from './queries/project-specs.js';
-export { getBrokenRefs } from './queries/project-refs.js';
-export type { BrokenRef } from './queries/project-refs.js';
+export { getBrokenRefs, type BrokenRef } from './queries/project-refs.js';
 export {
   createClient,
   listClients,
@@ -274,25 +273,12 @@ export {
   SpecWriteForbiddenError,
   StaleVersionError,
 } from './queries/edit-gate.js';
-export {
-  getLibraryDivisionGeneralSpec,
-  getProjectDivisionGeneralSpec,
-  setLibraryDivisionGeneralSpec,
-  setProjectDivisionGeneralSpec,
-  reconcileLibraryDivisionGeneralSpec,
-  reconcileProjectDivisionGeneralSpec,
-  DivisionGeneralOwnerNotFoundError,
-  DivisionGeneralSpecNotInScopeError,
-  type DivisionGeneralSpecResult,
-  type DivisionGeneralSpecRef,
-  type DivisionGeneralCandidate,
-  type DivisionGeneralScope,
-  type DivisionGeneralStatus,
-  type DivisionGeneralMethod,
-  type DivisionGeneralCandidateReason,
-  type DivisionGeneralConfidence,
-  type SetDivisionGeneralSpecInput,
-} from './queries/division-general.js';
+// division-general.js's named list above was a complete 1:1 re-export of its
+// public surface (verified against the module source) — collapsed to `export
+// *` to free budget in the barrel's enforced 400-code-line ceiling (see
+// 318e8c2's history-index.ts precedent) for the new language-rule-profiles
+// export just below.
+export * from './queries/division-general.js';
 export {
   upsertHeaderFooterConfig,
   findHeaderFooterConfig,
@@ -377,10 +363,11 @@ export {
   AssociationParagraphNotFoundError,
 } from './queries/associations.js';
 export type { CreateAssociationInput } from './queries/associations.js';
-export { getProjectKeynotes } from './queries/keynotes.js';
-export type { ProjectKeynote } from './queries/keynotes.js';
+export { getProjectKeynotes, type ProjectKeynote } from './queries/keynotes.js';
 export { getComparisonColumns, getComparisonParagraphs } from './queries/reporting.js';
 export type { ComparisonColumnMeta, ComparisonParagraphRow } from './queries/reporting.js';
+export { getFrozenComparisonSource } from './queries/reporting.js';
+export type { FrozenComparisonSource } from './queries/reporting.js';
 // ADR-065 — discipline mapping (scoped-profile: built-in default + per-library override).
 // resolveEffectiveRules/disciplineForSection and the resolved-view types stay internal to the
 // db module (used by the listing queries via relative import), so only the externally-consumed
@@ -422,4 +409,11 @@ export {
   lazyHistoryContext,
   SYSTEM_ACTOR_LABEL,
 } from './queries/paragraph-history.js';
+// Language-rule profiles (#411, ADR-080) — routed via `export *` (not a named
+// list) to stay within the barrel's enforced 400-code-line ceiling; see
+// 318e8c2's history-index.ts precedent for the same constraint.
+export * from './queries/language-rule-profiles.js';
+// Language-rule findings scan engine (#411, ADR-080) — same `export *`
+// rationale as language-rule-profiles.js just above.
+export * from './queries/language-rule-findings.js';
 export type { ParagraphHistoryContext } from './queries/paragraph-history.js';

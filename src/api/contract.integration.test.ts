@@ -62,6 +62,14 @@ const RESPONSE_COVERED = new Set([
   'get /checkpoints/{}',
   'get /specs/{}/pending-summary',
   'get /projects/{}/pending-summary',
+  // language-lint rule profiles + findings report (#411, ADR-080)
+  'get /libraries/{}/language-rules',
+  'put /libraries/{}/language-rules',
+  'delete /libraries/{}/language-rules',
+  'get /projects/{}/language-rules',
+  'put /projects/{}/language-rules',
+  'delete /projects/{}/language-rules',
+  'get /projects/{}/language-findings',
 ]);
 
 // Documented JSON ops not yet response-verified (burned down in PR2…N).
@@ -221,6 +229,7 @@ let baseUrl: string;
 let projectId: string;
 let disciplineLibraryId: string;
 let headerFooterFixture: HeaderFooterFixture;
+let languageRuleLibraryId: string;
 
 beforeAll(async () => {
   const app = express();
@@ -249,6 +258,11 @@ beforeAll(async () => {
   if (!libRow) throw new Error('failed to create contract discipline library');
   disciplineLibraryId = libRow.id;
   headerFooterFixture = await createHeaderFooterFixture();
+  const langLib = await createLibrary({
+    tier: 'client',
+    name: `contract-language-rules-${Date.now()}`,
+  });
+  languageRuleLibraryId = langLib.id;
 });
 
 afterAll(async () => {
@@ -257,6 +271,15 @@ afterAll(async () => {
       disciplineLibraryId,
     ]);
     await pool.query('DELETE FROM libraries WHERE id = $1', [disciplineLibraryId]);
+  }
+  if (languageRuleLibraryId) {
+    await pool.query('DELETE FROM language_rule_profiles WHERE library_id = $1', [
+      languageRuleLibraryId,
+    ]);
+    await pool.query('DELETE FROM libraries WHERE id = $1', [languageRuleLibraryId]);
+  }
+  if (projectId) {
+    await pool.query('DELETE FROM language_rule_profiles WHERE project_id = $1', [projectId]);
   }
   if (projectId) await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
   if (headerFooterFixture) await deleteHeaderFooterFixture(headerFooterFixture);
@@ -678,5 +701,104 @@ describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D
     expect(reject.status).toBe(200);
     const rejectBody = (await reject.json()) as { data: { text: string } };
     expect(rejectBody.data.text).toBe(ORIGINAL_TEXT);
+  });
+});
+
+describe('language-lint rule profile + findings endpoints (#411, ADR-080)', () => {
+  const SAMPLE_RULES = {
+    bannedTerms: [{ term: 'shall', suggestion: 'will' }],
+    requiredPhrases: [{ term: 'Contract Documents' }],
+  };
+
+  it('library-scope PUT/GET/DELETE match their documented schemas', async () => {
+    const url = `${baseUrl}/libraries/${languageRuleLibraryId}/language-rules`;
+
+    const put = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rules: SAMPLE_RULES }),
+    });
+    expect(put.status).toBe(200);
+    await assertResponse('put', '/libraries/{id}/language-rules', 200, await put.json());
+
+    const get = await fetch(url);
+    expect(get.status).toBe(200);
+    await assertResponse('get', '/libraries/{id}/language-rules', 200, await get.json());
+
+    const del = await fetch(url, { method: 'DELETE' });
+    expect(del.status).toBe(200);
+    const delBody = (await del.json()) as { data: { libraryId: string } };
+    expect(delBody.data.libraryId).toBe(languageRuleLibraryId);
+    await assertResponse('delete', '/libraries/{id}/language-rules', 200, delBody);
+  });
+
+  it('project-scope PUT/GET/DELETE match their documented schemas', async () => {
+    const url = `${baseUrl}/projects/${projectId}/language-rules`;
+
+    const put = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rules: SAMPLE_RULES }),
+    });
+    expect(put.status).toBe(200);
+    await assertResponse('put', '/projects/{id}/language-rules', 200, await put.json());
+
+    const get = await fetch(url);
+    expect(get.status).toBe(200);
+    await assertResponse('get', '/projects/{id}/language-rules', 200, await get.json());
+
+    const del = await fetch(url, { method: 'DELETE' });
+    expect(del.status).toBe(200);
+    const delBody = (await del.json()) as { data: { projectId: string } };
+    expect(delBody.data.projectId).toBe(projectId);
+    await assertResponse('delete', '/projects/{id}/language-rules', 200, delBody);
+  });
+
+  it('GET /projects/{id}/language-findings matches its documented schema, configured or not', async () => {
+    // Nothing configured (previous test's profile was deleted) -> configured: false.
+    const unconfigured = await fetch(`${baseUrl}/projects/${projectId}/language-findings`);
+    expect(unconfigured.status).toBe(200);
+    const unconfiguredBody = (await unconfigured.json()) as { data: { configured: boolean } };
+    expect(unconfiguredBody.data.configured).toBe(false);
+    await assertResponse('get', '/projects/{id}/language-findings', 200, unconfiguredBody);
+
+    // `configured` can only ever be true for a project with at least one present
+    // spec whose resolution chain finds a layer (ADR-080 — resolution runs per
+    // present spec) — this project has no present specs yet, so give it one
+    // authored by languageRuleLibraryId, then set that library's profile so the
+    // schema also validates the non-degenerate `configured: true` shape.
+    const spec = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ('05 12 00', 'Steel', 'contractlangfind', $1)
+       RETURNING id`,
+      [languageRuleLibraryId]
+    );
+    const specRow = spec.rows[0];
+    if (!specRow) throw new Error('failed to create contract language-findings spec');
+    try {
+      await pool.query(
+        `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`,
+        [projectId, specRow.id]
+      );
+
+      const put = await fetch(`${baseUrl}/libraries/${languageRuleLibraryId}/language-rules`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rules: SAMPLE_RULES }),
+      });
+      expect(put.status).toBe(200);
+
+      const configured = await fetch(`${baseUrl}/projects/${projectId}/language-findings`);
+      expect(configured.status).toBe(200);
+      const configuredBody = (await configured.json()) as { data: { configured: boolean } };
+      expect(configuredBody.data.configured).toBe(true);
+      await assertResponse('get', '/projects/{id}/language-findings', 200, configuredBody);
+    } finally {
+      await fetch(`${baseUrl}/libraries/${languageRuleLibraryId}/language-rules`, {
+        method: 'DELETE',
+      });
+      await pool.query(`DELETE FROM project_specs WHERE spec_id = $1`, [specRow.id]);
+      await pool.query(`DELETE FROM specs WHERE id = $1`, [specRow.id]);
+    }
   });
 });

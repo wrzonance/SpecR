@@ -64,7 +64,10 @@ export function loadRawSpec(): Promise<unknown> {
   return rawSpecPromise;
 }
 
-function getValidator(schema: AnySchemaObject): ValidateFunction {
+// Exported so contract tests can compile+run an arbitrary component schema directly
+// (e.g. cross-checking a request-body schema against a hand-duplicated Zod shape),
+// not just a response schema reached through assertResponse.
+export function getValidator(schema: AnySchemaObject): ValidateFunction {
   const cached = validators.get(schema);
   if (cached !== undefined) return cached;
   const compiled = ajv.compile(schema);
