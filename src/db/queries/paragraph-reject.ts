@@ -113,7 +113,10 @@ export async function rejectParagraphToCheckpoint(
     if (!boundary) return { status: 'checkpoint-not-found' };
 
     const sealedText = await findSealedText(paragraphId, specId, boundary.contentVersion);
-    if (sealedText === null) return classifyMissingSealedState(paragraphId, specId);
+    // `return await` is load-bearing inside this try: without it the promise
+    // settles after the catch has already exited, so a raw error would escape
+    // the module boundary unwrapped.
+    if (sealedText === null) return await classifyMissingSealedState(paragraphId, specId);
 
     const result = await updateParagraphText(
       specId,

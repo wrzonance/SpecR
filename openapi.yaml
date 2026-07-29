@@ -8160,8 +8160,14 @@ components:
           minimum: 1
         - type: string
           enum: [origin, current]
+        # Both string branches carry an explicit `pattern`: `format` is
+        # annotation-only in many validators, so without one a bare
+        # `format: uuid` branch matches every string — including `origin`
+        # and `checkpoint:<uuid>` — and `oneOf` would reject them for
+        # matching two branches at once.
         - type: string
           format: uuid
+          pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
         - type: string
           pattern: '^checkpoint:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 

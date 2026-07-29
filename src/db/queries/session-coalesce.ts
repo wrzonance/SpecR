@@ -1,5 +1,8 @@
 import type { ParagraphHistoryEntry } from './history.js';
 import type { CheckpointBoundary } from './checkpoints.js';
+// errors.ts is pure (no pool) — importing it keeps this module DB-free while
+// still throwing the db-layer typed error (article-refs.ts precedent).
+import { DatabaseError } from '../errors.js';
 
 // ADR-052 D3 (issue #380, task 4) — the tier-1 coalescer: folds tier-0
 // paragraph_versions rows into read-time sessions, one per uninterrupted span
@@ -17,15 +20,11 @@ import type { CheckpointBoundary } from './checkpoints.js';
 // See docs/adr/052-version-history-review-grain-identity.md.
 
 /**
- * `ParagraphHistoryEntry` (history.ts) does not yet carry actor identity — a
- * sibling task in this issue extends it with `userId`/`actorLabel`. This
- * coalescer needs the actor per entry to partition sessions, so it depends on
- * that shape structurally rather than blocking on history.ts's extension
- * landing first: once `ParagraphHistoryEntry` itself carries
- * `userId: string | null`, every real entry already satisfies this type
- * unmodified, and callers can drop this alias in favor of the plain import.
+ * The entry shape this coalescer folds. `ParagraphHistoryEntry` (history.ts)
+ * now carries the `userId` this module partitions sessions on, so this is a
+ * plain alias kept only as the named vocabulary of the coalescer's input.
  */
-export type CoalescableHistoryEntry = ParagraphHistoryEntry & { readonly userId: string | null };
+export type CoalescableHistoryEntry = ParagraphHistoryEntry;
 
 /** One read-time session: a coalesced, uninterrupted span of tier-0 edits by
  *  a single actor, with a net before/after diff (ADR-052 D3). */
@@ -220,7 +219,7 @@ function toSession(
   // silent non-null assertion if that invariant is ever violated (mirrors
   // checkpoints.ts's scope-XOR safety net).
   if (!first || !last) {
-    throw new Error('coalesceParagraphSessions: internal error — empty session span');
+    throw new DatabaseError('coalesceParagraphSessions: internal error — empty session span');
   }
   const sealedContentVersion = last.contentVersion;
   const isOpeningInsert = first.op === 'insert';
@@ -250,7 +249,9 @@ function toSession(
  * foreign-actor entry, no gap exceeding `sessionWindowMs`, and no crossed
  * checkpoint boundary, read as one session with a net before/after diff. A
  * null-`userId` entry is always its own singleton, checked before any other
- * rule. Pure and total — never throws, never performs I/O; `[]` in, `[]` out.
+ * rule. Pure and total for every reachable input — never performs I/O; `[]`
+ * in, `[]` out. The one throw is an unreachable internal-invariant guard
+ * (empty session span), raised as `DatabaseError` rather than asserted away.
  */
 export function coalesceParagraphSessions(
   entries: readonly CoalescableHistoryEntry[],

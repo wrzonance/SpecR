@@ -247,6 +247,20 @@ async function originSnapshot(
   });
 }
 
+/** The origin baseline a spec-local content snapshot layers on top of: the
+ *  parent spec's snapshot for a derived spec, nothing for a root spec. Shared
+ *  by both anchor kinds that resolve to a content version (checkpoint and
+ *  numeric) so the derived-spec rule can only be changed in one place. */
+async function resolveBaseline(
+  specId: string,
+  context: SpecAnchorContext,
+  db: Queryable
+): Promise<readonly SnapshotNode[]> {
+  return context.parent_spec_id && context.origin_version !== null
+    ? originSnapshot(specId, context, db)
+    : [];
+}
+
 /** checkpoint:<uuid> anchor (ADR-052 D3/D9, issue #380 task 6) — resolves to
  *  the content_version the checkpoint sealed for `specId`, never a default.
  *  Two distinct failure modes, both surfaced as HistoryAnchorError (422) so a
@@ -270,10 +284,7 @@ async function checkpointSnapshot(
       `checkpoint ${checkpointId} never sealed spec ${specId} (not in its content_version_map)`
     );
   }
-  const baseline =
-    context.parent_spec_id && context.origin_version !== null
-      ? await originSnapshot(specId, context, db)
-      : [];
+  const baseline = await resolveBaseline(specId, context, db);
   return contentSnapshot(specId, contentVersion, db, baseline);
 }
 
@@ -291,10 +302,7 @@ async function resolveSnapshot(
         `content version ${anchor} is outside spec ${specId}'s history (1-${context.content_version})`
       );
     }
-    const baseline =
-      context.parent_spec_id && context.origin_version !== null
-        ? await originSnapshot(specId, context, db)
-        : [];
+    const baseline = await resolveBaseline(specId, context, db);
     return contentSnapshot(specId, anchor, db, baseline);
   }
   const checkpointId = parseCheckpointAnchor(anchor);

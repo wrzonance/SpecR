@@ -1,7 +1,12 @@
 import type { Pool } from 'pg';
 import { pool, DatabaseError } from '../index.js';
 import type { ParagraphHistoryOp } from './paragraph-history.js';
-import { getCheckpointBoundariesForSpec } from './checkpoints.js';
+import { getCheckpointBoundariesForSpec, type CheckpointBoundary } from './checkpoints.js';
+import {
+  revisionMilestones,
+  checkpointMilestones,
+  type SpecHistoryMilestone,
+} from './history-milestones.js';
 import { coalesceParagraphSessions } from './session-coalesce.js';
 import type { ParagraphHistorySession } from './session-coalesce.js';
 
@@ -37,27 +42,7 @@ export interface SpecHistoryStep {
   readonly ops: HistoryOperationCounts;
 }
 
-export type SpecHistoryMilestone =
-  | {
-      readonly kind: 'origin';
-      readonly at: string;
-      readonly parentSpecId: string | null;
-      readonly originVersion: number;
-    }
-  | {
-      readonly kind: 'revision';
-      readonly at: string;
-      readonly revisionId: string;
-      readonly packageId: string;
-      readonly label: string;
-    }
-  | {
-      readonly kind: 'checkpoint';
-      readonly at: string;
-      readonly checkpointId: string;
-      readonly name: string;
-      readonly contentVersion: number;
-    };
+export type { SpecHistoryMilestone };
 
 export interface SpecHistory {
   readonly specId: string;
@@ -266,10 +251,15 @@ export async function getCoalescedParagraphHistory(
     const entries = await getParagraphHistory(specId, paragraphId, includeOrigin, db);
     if (!entries) return null;
     const originSpecId = entries.find((entry) => entry.custody === 'origin')?.specId;
-    const originBoundaries = originSpecId
-      ? await getCheckpointBoundariesForSpec(originSpecId, db)
-      : [];
-    const boundaries = [...originBoundaries, ...(await getCheckpointBoundariesForSpec(specId, db))];
+    // Independent reads on two different specs — issue them together; the
+    // origin-then-local ordering of the merged array is preserved below.
+    const [originBoundaries, localBoundaries] = await Promise.all([
+      originSpecId
+        ? getCheckpointBoundariesForSpec(originSpecId, db)
+        : Promise.resolve<readonly CheckpointBoundary[]>([]),
+      getCheckpointBoundariesForSpec(specId, db),
+    ]);
+    const boundaries = [...originBoundaries, ...localBoundaries];
     return coalesceParagraphSessions(entries, boundaries, sessionWindowMs);
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
@@ -325,68 +315,6 @@ interface SpecContextRow {
   readonly origin_version: number | null;
 }
 
-interface RevisionMilestoneRow {
-  readonly revision_id: string;
-  readonly package_id: string;
-  readonly label: string;
-  readonly issued_at: Date;
-}
-
-async function revisionMilestones(
-  specId: string,
-  packageId: string | undefined,
-  db: Queryable
-): Promise<readonly SpecHistoryMilestone[]> {
-  const result = await db.query<RevisionMilestoneRow>(
-    `SELECT pr.id AS revision_id, pr.package_id, pr.label, pr.issued_at
-     FROM package_revision_specs prs
-     JOIN package_revisions pr ON pr.id = prs.revision_id
-     WHERE prs.spec_id = $1 AND ($2::uuid IS NULL OR pr.package_id = $2)
-     ORDER BY pr.issued_at, pr.id`,
-    [specId, packageId ?? null]
-  );
-  return result.rows.map((row) => ({
-    kind: 'revision',
-    at: iso(row.issued_at),
-    revisionId: row.revision_id,
-    packageId: row.package_id,
-    label: row.label,
-  }));
-}
-
-interface CheckpointMilestoneRow {
-  readonly id: string;
-  readonly name: string;
-  readonly created_at: Date;
-  readonly content_version: number;
-}
-
-/** Checkpoints applying to `specId` (own + covering project-scoped),
- *  ascending — own query rather than getCheckpointBoundariesForSpec because
- *  the timeline also needs the checkpoint's `name`. $1::uuid::text (not a bare
- *  $1::text, #380 review finding) canonicalizes specId's letter-casing before
- *  it's compared against the jsonb keys — mirrors checkpoints.ts's own
- *  boundary queries, so this duplicated read path can't regress separately. */
-async function checkpointMilestones(
-  specId: string,
-  db: Queryable
-): Promise<readonly SpecHistoryMilestone[]> {
-  const result = await db.query<CheckpointMilestoneRow>(
-    `SELECT id, name, created_at, (content_version_map ->> $1::uuid::text)::int AS content_version
-     FROM checkpoints
-     WHERE content_version_map ? $1::uuid::text
-     ORDER BY content_version ASC, created_at ASC, id ASC`,
-    [specId]
-  );
-  return result.rows.map((row) => ({
-    kind: 'checkpoint',
-    at: iso(row.created_at),
-    checkpointId: row.id,
-    name: row.name,
-    contentVersion: row.content_version,
-  }));
-}
-
 async function specHistorySteps(
   specId: string,
   context: SpecContextRow,
@@ -436,15 +364,17 @@ export async function getSpecHistory(
       parentSpecId: context.parent_spec_id,
       originVersion: context.origin_version ?? 1,
     };
+    // Independent milestone reads — issue them together, keep the
+    // origin → revisions → checkpoints assembly order.
+    const [revisions, checkpoints] = await Promise.all([
+      revisionMilestones(specId, packageId, db),
+      checkpointMilestones(specId, db),
+    ]);
     return {
       specId,
       currentContentVersion: context.content_version,
       steps,
-      milestones: [
-        origin,
-        ...(await revisionMilestones(specId, packageId, db)),
-        ...(await checkpointMilestones(specId, db)),
-      ],
+      milestones: [origin, ...revisions, ...checkpoints],
     };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;

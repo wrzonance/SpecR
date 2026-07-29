@@ -160,4 +160,21 @@ describe('rejectParagraphToCheckpoint', () => {
       rejectParagraphToCheckpoint(SPEC_ID, PARAGRAPH_ID, CHECKPOINT_ID)
     ).rejects.toBeInstanceOf(DatabaseError);
   });
+
+  it('paragraph-reject: a failure inside the missing-sealed-state classifier is still wrapped in DatabaseError (unawaited-return gap)', async () => {
+    // Regression: the classifier was `return`ed, not `await`ed, from inside the
+    // try — its rejection settled after the catch had already exited, so a raw
+    // Error escaped this module boundary unwrapped.
+    const { getCheckpointBoundariesForSpec } = await import('./checkpoints.js');
+    vi.mocked(getCheckpointBoundariesForSpec).mockResolvedValue([SEALED_BOUNDARY]);
+    const { pool, getParagraphSpecId, DatabaseError } = await import('../index.js');
+    vi.mocked(pool.query).mockResolvedValue({ rows: [] } as never);
+    vi.mocked(getParagraphSpecId).mockRejectedValue(new Error('connection lost'));
+
+    const { rejectParagraphToCheckpoint } = await import('./paragraph-reject.js');
+
+    await expect(
+      rejectParagraphToCheckpoint(SPEC_ID, PARAGRAPH_ID, CHECKPOINT_ID)
+    ).rejects.toBeInstanceOf(DatabaseError);
+  });
 });

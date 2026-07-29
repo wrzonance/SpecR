@@ -69,4 +69,11 @@ function addCheckpointsIndexes(pgm: MigrationBuilder): void {
     where: 'project_id IS NOT NULL',
   });
   pgm.createIndex('checkpoints', 'user_id', { name: 'checkpoints_user_id_idx' });
+  // "which checkpoints sealed this spec" reads filter on `content_version_map ? <specId>`
+  // (getCheckpointBoundariesForSpec / getLatestCheckpointBoundary). Only the default
+  // jsonb_ops GIN class supports the `?` key-existence operator — jsonb_path_ops does not.
+  pgm.createIndex('checkpoints', 'content_version_map', {
+    name: 'checkpoints_content_version_map_gin_idx',
+    method: 'gin',
+  });
 }
