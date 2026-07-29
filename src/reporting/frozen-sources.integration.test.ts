@@ -193,7 +193,10 @@ describe('frozen comparison sources — same-package acceptance (#392, ADR-078)'
     ];
     const first = await buildComparisonReport(sources);
     const second = await buildComparisonReport(sources);
-    expect(second).toEqual(first);
+    // Serialized, not toEqual: the claim is BYTE-identical, and toEqual ignores
+    // object key order — exactly the serialization-order regression this test
+    // exists to catch.
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
   });
 
   it('include=differences narrows rows while summary stays full-matrix — parity with the live-source engine', async () => {

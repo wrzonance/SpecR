@@ -96,6 +96,53 @@ describe('snapshotMemberTrees — originParagraphId embedding (#392, ADR-078)', 
     expect(article!.meta).not.toHaveProperty('originParagraphId');
   });
 
+  it('snapshot: a member spec containing an object node freezes — object_data was missing from the SELECT', async () => {
+    // Regression for the exact symptom: snapshotMemberTrees omitted
+    // `object_data` from its paragraph SELECT, so buildNodeTree's
+    // parseObjectMeta saw `undefined` for every `object`-typed row, failed
+    // ObjectMetaSchema, and threw — a package holding any captured table or
+    // text box (#300/ADR-072) could never be frozen at all.
+    const objectPara = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, object_data)
+       VALUES ($1, $2, 'object', '[TABLE]', 2, $3::jsonb) RETURNING id`,
+      [
+        targetSpecId,
+        clonedParaId,
+        JSON.stringify({
+          kind: 'table',
+          floating: false,
+          generation: 'drawingml',
+          rows: 1,
+          columns: 2,
+          blob: [
+            {
+              'w:tbl': [
+                { 'w:tblPr': [] },
+                { 'w:tblGrid': [{ 'w:gridCol': [{}] }, { 'w:gridCol': [{}] }] },
+              ],
+            },
+          ],
+        }),
+      ]
+    );
+    const objectParaId = objectPara.rows[0]!.id;
+
+    try {
+      const rev = await createPackageRevision(pkgId, { label: `object-freeze ${suffix}` }, pool);
+      const full = await getPackageRevision(rev.revisionId, pool);
+      const frozen = full?.specs.find((s) => s.specId === targetSpecId);
+      expect(frozen).toBeDefined();
+
+      const objectNode = frozen!.tree.parts[0]?.children.find((c) => c.id === objectParaId);
+      expect(objectNode).toBeDefined();
+      expect(objectNode!.type).toBe('object');
+      // The payload survives the freeze — not merely "did not throw".
+      expect(objectNode!.meta.object).toMatchObject({ kind: 'table', generation: 'drawingml' });
+    } finally {
+      await pool.query(`DELETE FROM paragraphs WHERE id = $1`, [objectParaId]);
+    }
+  });
+
   it('never surfaces originParagraphId on the live GET-tree path — freeze-time only', async () => {
     const live = await getSpecTree(targetSpecId);
     expect(live).not.toBeNull();

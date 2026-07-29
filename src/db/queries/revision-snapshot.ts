@@ -84,9 +84,18 @@ export async function snapshotMemberTrees(
   );
   const entries: RevisionSpecEntry[] = [];
   for (const member of members.rows) {
+    // object_data must be selected alongside every other ParagraphTreeRow
+    // column (matches getSpecTree's own query in specs.ts) — buildNodeTree's
+    // parseObjectMeta reads it unconditionally for every `object`-typed row.
+    // Omitting it left any package containing a captured table/text box unable
+    // to snapshot at all: parseObjectMeta rejects the resulting `undefined`
+    // against ObjectMetaSchema and throws, surfacing as an unconditional 500
+    // from createPackageRevision. Pre-existing gap (#300/ADR-072 objects
+    // predate this PR), not introduced by the #392 lineage column below.
     const paras = await client.query<SnapshotParagraphRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              signal_provenance, classification, editability_override, page_break_before,
+              signal_provenance, classification, editability_override, object_data,
+              page_break_before,
               origin_paragraph_id AS "originParagraphId"
        FROM paragraphs WHERE spec_id = $1`,
       [member.spec_id]

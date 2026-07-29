@@ -30,6 +30,14 @@ function indexMeta(
   return new Map(metas.map((m) => [m.specId, m]));
 }
 
+/** The distinct LIVE (bare-uuid) sources, in first-occurrence request order.
+ *  Shared by the batch loader and the drift walker: drift ordering only lines
+ *  up with the loaded population while both derive it the same way, so this is
+ *  one function rather than two expressions that must stay identical. */
+function liveSpecIdsOf(sources: readonly CompareSource[]): readonly string[] {
+  return [...new Set(sources.filter((s): s is string => typeof s === 'string'))];
+}
+
 /** Batch-load column metadata + paragraphs for every LIVE (bare-uuid) source in
  *  one round trip each, keyed for `resolveSource` to look up positionally.
  *  Frozen sources are resolved individually in `resolveSource` — a revision
@@ -38,7 +46,7 @@ async function resolveLiveSources(sources: readonly CompareSource[]): Promise<{
   readonly metaMap: ReadonlyMap<string, ComparisonColumnMeta>;
   readonly rows: readonly ComparisonParagraphRow[];
 }> {
-  const liveSpecIds = [...new Set(sources.filter((s): s is string => typeof s === 'string'))];
+  const liveSpecIds = liveSpecIdsOf(sources);
   if (liveSpecIds.length === 0) return { metaMap: new Map(), rows: [] };
 
   const metas = await getComparisonColumns(liveSpecIds);
@@ -119,8 +127,7 @@ function liveOrderedMetas(
   sources: readonly CompareSource[],
   metaMap: ReadonlyMap<string, ComparisonColumnMeta>
 ): readonly ComparisonColumnMeta[] {
-  const liveSpecIds = [...new Set(sources.filter((s): s is string => typeof s === 'string'))];
-  return liveSpecIds
+  return liveSpecIdsOf(sources)
     .map((specId) => metaMap.get(specId))
     .filter((m): m is ComparisonColumnMeta => m !== undefined);
 }
