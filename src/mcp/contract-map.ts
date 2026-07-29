@@ -152,6 +152,25 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['get /projects/{}/header-footer/resolved', 'resolve_project_header_footer'],
   ['get /packages/{}/header-footer/resolved', 'resolve_package_header_footer'],
   ['get /revisions/{}/header-footer/resolved', 'resolve_revision_header_footer'],
+  // wave 7i — version-history checkpoints & pending summaries (#380 / ADR-052 D3/D4/D9).
+  // 4 tools cover 7 REST ops: one tool per operation PAIR (spec-scoped + project-scoped),
+  // the get_reference_graph one-tool-two-routes precedent (see above). Per-paragraph
+  // reject stays MCP_UNEXPOSED below, deferred to its own follow-up.
+  ['post /specs/{}/checkpoints', 'create_checkpoint'],
+  ['post /projects/{}/checkpoints', 'create_checkpoint'],
+  ['get /specs/{}/checkpoints', 'list_checkpoints'],
+  ['get /projects/{}/checkpoints', 'list_checkpoints'],
+  ['get /checkpoints/{}', 'get_checkpoint'],
+  ['get /specs/{}/pending-summary', 'get_pending_summary'],
+  ['get /projects/{}/pending-summary', 'get_pending_summary'],
+  // wave 7i — language-lint rule profiles + findings report (#411 / ADR-080)
+  ['get /libraries/{}/language-rules', 'get_library_language_rules'],
+  ['put /libraries/{}/language-rules', 'set_library_language_rules'],
+  ['delete /libraries/{}/language-rules', 'clear_library_language_rules'],
+  ['get /projects/{}/language-rules', 'get_project_language_rules'],
+  ['put /projects/{}/language-rules', 'set_project_language_rules'],
+  ['delete /projects/{}/language-rules', 'clear_project_language_rules'],
+  ['get /projects/{}/language-findings', 'get_language_findings'],
 ]);
 
 /**
@@ -198,6 +217,14 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   [
     'get /projects/{}/specs/{}/references',
     'outbound-reference read — covered by get_references (MCP-native)',
+  ],
+  // --- Pending burn-down: per-paragraph reject (ADR-052 D4, issue #380).
+  //     REST-first (task 9); checkpoint/pending-summary reads and creation
+  //     landed as MCP tools in task 10 (see OP_TO_TOOL above) — reject is a
+  //     distinct write-tier tool deferred to its own follow-up. ---
+  [
+    'patch /specs/{}/paragraphs/{}/reject',
+    'pending — issue #380 follow-up: revert a paragraph to its last-checkpoint state',
   ],
 ]);
 
@@ -269,6 +296,12 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'get_paragraph_history',
   'get_spec_history',
   'get_history_diff',
+  // version-history checkpoints & pending summaries (#380 / ADR-052 D3/D4/D9): mirror
+  // their mapped REST GETs 1:1, but need a seeded checkpoint (a create_checkpoint call)
+  // beyond `pnpm seed`.
+  'list_checkpoints',
+  'get_checkpoint',
+  'get_pending_summary',
   'coordination_report',
   'get_reference_graph',
   'get_project_keynotes',
@@ -315,4 +348,10 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'resolve_project_header_footer',
   'resolve_package_header_footer',
   'resolve_revision_header_footer',
+  // language-lint rule profile reads (#411 / ADR-080): mirror their mapped REST GETs
+  // 1:1, but need a seeded language_rule_profiles row (a set_*_language_rules call)
+  // or a present-spec project graph beyond `pnpm seed`.
+  'get_library_language_rules',
+  'get_project_language_rules',
+  'get_language_findings',
 ]);

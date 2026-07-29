@@ -288,6 +288,148 @@ describe('alignTrees — alignment mode', () => {
   });
 });
 
+describe('alignTrees — same-spec pair keys on raw id, ignoring embedded lineage (#392 review finding)', () => {
+  // Two columns of the SAME spec (two frozen revisions, or live vs. its own
+  // frozen snapshot). `local` has no master lineage (originParagraphId always
+  // null); `cloned` DOES trace back to a master (MA) — the case that breaks
+  // if the origin keyer ever trusts originParagraphId for a same-spec pair.
+  const localId = 'same-spec-local';
+  const clonedId = 'same-spec-cloned';
+
+  function oldSnapshot(): AlignSource {
+    // Simulates a revision frozen BEFORE #392 shipped: meta.originParagraphId
+    // was never written for ANY node, even a genuinely cloned one — so both
+    // rows here carry `originParagraphId: null`, matching what
+    // flattenSpecTree/toComparisonParagraph produce when the raw JSONB never
+    // had the key (frozen-tree.ts's `?? null`).
+    return {
+      column: { specId: 'X', section: '07 21 00', title: 'T' },
+      rows: [
+        para({
+          specId: 'X',
+          id: localId,
+          text: 'Local para',
+          originParagraphId: null,
+          position: 0,
+        }),
+        para({
+          specId: 'X',
+          id: clonedId,
+          text: 'Cloned para',
+          originParagraphId: null,
+          position: 1,
+        }),
+      ],
+    };
+  }
+
+  function newSnapshot(): AlignSource {
+    // Simulates a revision frozen AFTER #392 shipped, same spec, unedited:
+    // real paragraph ids are identical to oldSnapshot's (ADR-078 §6), but the
+    // cloned paragraph now carries its embedded master lineage.
+    return {
+      column: { specId: 'X', section: '07 21 00', title: 'T' },
+      rows: [
+        para({
+          specId: 'X',
+          id: localId,
+          text: 'Local para',
+          originParagraphId: null,
+          position: 0,
+        }),
+        para({
+          specId: 'X',
+          id: clonedId,
+          text: 'Cloned para',
+          originParagraphId: MA,
+          position: 1,
+        }),
+      ],
+    };
+  }
+
+  it('an unedited lineage-carrying paragraph still aligns when one side lacks embedded originParagraphId', () => {
+    const { matrix, alignedBy } = alignTrees([oldSnapshot(), newSnapshot()]);
+    expect(alignedBy).toBe('origin');
+    expect(matrix.rows).toHaveLength(2); // no false-split rows
+
+    const clonedRow = matrix.rows.find((r) =>
+      r.cells.some((c) => c.present && c.text === 'Cloned para')
+    );
+    expect(clonedRow).toBeDefined();
+    // Must be a single aligned row present in BOTH columns, not one row
+    // "removed" from the old column and a second "added" row in the new one.
+    expect(clonedRow?.cells[0]).toMatchObject({ present: true, text: 'Cloned para' });
+    expect(clonedRow?.cells[1]).toMatchObject({ present: true, text: 'Cloned para' });
+  });
+
+  it('explicit alignment: "origin" also uses raw id for a same-spec pair (not just auto)', () => {
+    const { matrix } = alignTrees([oldSnapshot(), newSnapshot()], { alignment: 'origin' });
+    expect(matrix.rows).toHaveLength(2);
+    expect(matrix.rows.every((r) => r.cells.every((c) => c.present))).toBe(true);
+  });
+
+  it('a cross-spec pair is unaffected: originParagraphId still governs alignment', () => {
+    // p1/p2 (different specIds) share master-origin MA/MB/MC — must still
+    // align on that shared origin, not degrade to raw-id matching.
+    const { alignedBy } = alignTrees([p1(), p2()]);
+    expect(alignedBy).toBe('origin');
+  });
+});
+
+describe('alignTrees — structural keyer never clobbers across sources sharing an id (#392 review finding)', () => {
+  // Same spec (id "shared") frozen twice: revision "old" has two siblings
+  // (A, B); revision "new" deleted A, leaving B as the sole (and therefore
+  // re-ordinaled) sibling — same raw id, DIFFERENT structural address.
+  // A globally-merged id->address map lets "new"'s recomputed address for B
+  // clobber "old"'s own address for B, corrupting "old"'s alignment.
+  function oldRevision(): AlignSource {
+    return {
+      column: { specId: 'shared', section: '07 21 00', title: 'T' },
+      rows: [
+        para({ specId: 'shared', id: 'A', text: 'Alpha', nodeType: 'pr1', position: 0 }),
+        para({ specId: 'shared', id: 'B', text: 'Bravo', nodeType: 'pr1', position: 1 }),
+      ],
+    };
+  }
+
+  function newRevision(): AlignSource {
+    return {
+      column: { specId: 'shared', section: '07 21 00', title: 'T' },
+      rows: [para({ specId: 'shared', id: 'B', text: 'Bravo', nodeType: 'pr1', position: 0 })],
+    };
+  }
+
+  it('old source keeps its own structural address for a shared id, independent of the other source', () => {
+    const { matrix } = alignTrees([oldRevision(), newRevision()], { alignment: 'structure' });
+
+    // Both of "old"'s rows must survive — neither silently dropped by a
+    // cross-source address collision in buildSourceMap's first-wins rule.
+    // Pre-fix, a globally-merged map let "new"'s recomputed "pr1:0" for B
+    // overwrite "old"'s own "pr1:1" entry for B, so old's OWN map collapsed
+    // both its rows onto one key and silently lost row B entirely — it never
+    // appeared anywhere in the output, not even as a removed/absent row.
+    const oldPresentCount = matrix.rows.filter((r) => r.cells[0]?.present).length;
+    expect(oldPresentCount).toBe(2);
+
+    const alpha = matrix.rows.find((r) => r.cells[0]?.present && r.cells[0].text === 'Alpha');
+    const bravo = matrix.rows.find((r) => r.cells[0]?.present && r.cells[0].text === 'Bravo');
+    expect(alpha).toBeDefined();
+    expect(bravo).toBeDefined();
+    // "old"'s Bravo now correctly keys on ITS OWN address ("pr1:1", unaffected
+    // by "new"'s recomputation) and has no counterpart there — it surfaces as
+    // removed, not silently dropped from the matrix.
+    expect(bravo?.cells[1]).toEqual({ present: false });
+    // "old"'s Alpha happens to share "new"'s re-ordinaled address for B
+    // ("pr1:0") — a coincidental mispairing from the sibling deletion shifting
+    // ordinals, the SAME pre-existing ADR-053 structural-address limitation
+    // already accepted elsewhere (// KNOWN AMBIGUITY: an inserted sibling
+    // shifts downstream ordinals, above). This fix targets silent row loss,
+    // not this pre-existing ordinal-shift ambiguity.
+    expect(alpha?.cells[1]).toMatchObject({ present: true, text: 'Bravo' });
+  });
+});
+
 function indexRows(sources: readonly AlignSource[]): Map<string, ComparisonParagraph> {
   const map = new Map<string, ComparisonParagraph>();
   for (const s of sources) {

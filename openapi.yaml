@@ -704,6 +704,74 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/paragraphs/{nodeId}/reject:
+    patch:
+      operationId: rejectParagraph
+      summary: Revert a paragraph's pending edits to its last-checkpoint state
+      description: >
+        Per-paragraph reject (ADR-052 D4): reverts `nodeId` to the text it held
+        at `checkpointId`'s sealed content_version, shipped as an unconditional
+        restore-to-version write through the same machinery as PATCH
+        `/specs/{id}/paragraphs/{nodeId}` — no `expectedVersion` is threaded,
+        so any edit made after the checkpoint sealed is discarded rather than
+        blocking on a stale-version conflict. The write is itself an ordinary
+        history row, so a reject is always visible in the oplog, never a
+        silent no-op. `checkpointId` must have sealed this exact spec (spec-
+        or project-scoped alike); one that never sealed it, or has never
+        recorded state for this paragraph before its cutoff, is rejected.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [checkpointId]
+              properties:
+                checkpointId:
+                  type: string
+                  format: uuid
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
+      responses:
+        '200':
+          description: Reverted paragraph node (with its subtree)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecNode'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Paragraph not found, or checkpointId never sealed this spec
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          $ref: '#/components/responses/WriteConflict'
+        '422':
+          description: >
+            The target is a locked `object` node, or no state was recorded
+            for this paragraph at or before the checkpoint's cutoff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/reclassify:
     post:
       operationId: reclassifySpec
@@ -1041,10 +1109,14 @@ paths:
       operationId: getParagraphHistory
       summary: Read one paragraph's stored iterations
       description: >
-        Returns raw paragraph snapshots oldest-first, including the creation row
-        and current state. A project paragraph starts at its derive point by
-        default; `includeOrigin=true` prepends the direct master's pre-derive
-        iterations through `origin_paragraph_id` (ADR-052 D5).
+        Defaults to tier-1 coalesced sessions (ADR-052 D3/D9): consecutive
+        tier-0 edits by one actor fold into one session with a net
+        before/after diff, still carrying the raw span as each session's
+        nested `entries`. `raw=true` returns the tier-0 snapshots directly,
+        oldest-first, including the creation row and current state. A project
+        paragraph starts at its derive point by default; `includeOrigin=true`
+        prepends the direct master's pre-derive iterations through
+        `origin_paragraph_id` (ADR-052 D5) for either shape.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -1055,9 +1127,16 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: raw
+          in: query
+          required: false
+          description: Return tier-0 raw iterations instead of the default coalesced sessions.
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
-          description: Paragraph iterations, oldest first
+          description: Paragraph iterations — coalesced sessions by default, raw when `raw=true`
           content:
             application/json:
               schema:
@@ -1067,9 +1146,13 @@ paths:
                     required: [data]
                     properties:
                       data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/ParagraphHistoryEntry'
+                        oneOf:
+                          - type: array
+                            items:
+                              $ref: '#/components/schemas/ParagraphHistorySession'
+                          - type: array
+                            items:
+                              $ref: '#/components/schemas/ParagraphHistoryEntry'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -4465,20 +4548,30 @@ paths:
   /reports/compare:
     post:
       operationId: postCompareReport
-      summary: Cross-spec comparison matrix — align two live specs by origin or structure, with summary, differences filter, and optional baseline lens
+      summary: Cross-spec comparison matrix — align two live or frozen sources by origin or structure, with summary, differences filter, and optional baseline lens
       description: >
-        Grounded, deterministic cross-spec comparison (ADR-047/053). Aligns exactly two
-        live specs and returns a symmetric matrix: one row per aligned paragraph, one
-        column per source, each cell the source's verbatim text or absent. Every present
-        cell traces to a real specId + paragraph UUID; nothing is synthesized. Alignment
-        is by resolved paragraph origin for clones of a shared master (project↔project,
+        Grounded, deterministic cross-spec comparison (ADR-047/053, extended by #392/
+        ADR-078). Aligns exactly two sources and returns a symmetric matrix: one row
+        per aligned paragraph, one column per source, each cell the source's verbatim
+        text or absent. Every present cell traces to a real specId + paragraph UUID;
+        nothing is synthesized. Each entry in `sources` is either a live spec UUID
+        (project or master) or a frozen `{revisionId, specId}` object naming the
+        frozen tree of that spec within one issued package revision (see
+        CompareSource) — e.g. a live spec against a past issuance of itself, or two
+        past issuances of the same package against each other. Alignment is by
+        resolved paragraph origin for clones of a shared master (project↔project,
         project↔master with behindBy drift) or by canonical structural address for
         independently-ingested specs of the same section — selected via `alignment`
         (default `auto`) and echoed as `alignedBy`. `include: differences` returns only
         non-identical rows; a `summary` rollup is always emitted over the full matrix.
-        Optionally designate one source as the baseline to reframe cells as
-        added/removed/modified/unchanged. A source id that is not a live spec (frozen
-        package/revision ids) returns 404.
+        Optionally designate one source's underlying specId as `baseline` to reframe
+        cells as added/removed/modified/unchanged; a `baseline` matching zero or more
+        than one source (e.g. the same spec frozen at two different revisions) is
+        rejected as ambiguous (422) rather than silently resolved. `drift` (version
+        drift from the lineage chain) is reported only for live columns — a frozen
+        column has no lineage of its own to walk, so it is omitted there, never faked.
+        A source id that does not resolve — an unknown live spec UUID, or a frozen
+        `(revisionId, specId)` pair that does not exist — returns 404.
       tags: [reports]
       requestBody:
         required: true
@@ -4648,6 +4741,229 @@ paths:
                     required: [data]
                     properties:
                       data: { $ref: '#/components/schemas/ReadinessReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  # ─── Version history: checkpoints & pending summaries (#380, ADR-052) ────────
+
+  /specs/{id}/checkpoints:
+    post:
+      operationId: createSpecCheckpoint
+      summary: Seal a spec at its current content_version (checkpoint)
+      description: >
+        Stores a named marker (the Word "accept changes" moment, ADR-052
+        D3/D4) sealing this spec at its current content_version. Everything
+        recorded after the latest checkpoint reads as pending until the next
+        one. `actorLabel` is REQUIRED — checkpoints.user_id is NOT NULL, so
+        (unlike an ordinary paragraph write) there is no system-actor
+        fallback.
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, actorLabel]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
+      responses:
+        '201':
+          description: Checkpoint sealed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/Checkpoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    get:
+      operationId: listSpecCheckpoints
+      summary: List checkpoints sealed directly against this spec
+      description: >
+        Checkpoints created directly against this spec, most recent first.
+        Does NOT include project-scoped checkpoints that also covered it —
+        see `sealedByCheckpointId` on the pending-summary and coalesced
+        history reads for "which checkpoint (spec- or project-scoped) most
+        recently sealed this spec".
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Spec-scoped checkpoints, most recent first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Checkpoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/checkpoints:
+    post:
+      operationId: createProjectCheckpoint
+      summary: Seal every spec in a project at its current content_version (checkpoint)
+      description: >
+        Same sealing semantics as `POST /specs/{id}/checkpoints`, scoped to
+        every spec directly owned by this project (ADR-015 branch
+        membership, `specs.project_id` — never the `project_specs`
+        package/TOC curation join). One row seals all in-scope specs at once.
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, actorLabel]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
+      responses:
+        '201':
+          description: Checkpoint sealed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/Checkpoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    get:
+      operationId: listProjectCheckpoints
+      summary: List checkpoints sealed directly against this project
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project-scoped checkpoints, most recent first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Checkpoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /checkpoints/{id}:
+    get:
+      operationId: getCheckpoint
+      summary: Retrieve a single checkpoint
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/CheckpointId'
+      responses:
+        '200':
+          description: The checkpoint
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/Checkpoint' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /specs/{id}/pending-summary:
+    get:
+      operationId: getSpecPendingSummary
+      summary: Everything a spec has accumulated since its last checkpoint
+      description: >
+        Counts DISTINCT pending paragraphs (never raw op count) — a paragraph
+        edited five times since the checkpoint is one pending change — and
+        rolls them up by the actor of each paragraph's LATEST pending edit
+        (ADR-052 D9). A spec never checkpointed reports its whole recorded
+        history as pending.
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Spec pending-change summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/SpecPendingSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/pending-summary:
+    get:
+      operationId: getProjectPendingSummary
+      summary: Everything every spec in a project has accumulated since its own last checkpoint
+      description: >
+        Aggregates `SpecPendingSummary` across every spec directly owned by
+        this project (ADR-015 branch membership) — each spec measured against
+        ITS OWN last checkpoint, never a single project-wide cutoff.
+        `packageId` is echoed back for the caller's own issuance-deadline
+        framing (ADR-052 D9) and never scopes the query.
+      tags: [checkpoints]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: packageId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Project pending-change summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ProjectPendingSummary' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
@@ -5529,6 +5845,228 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /libraries/{id}/language-rules:
+    get:
+      operationId: getLibraryLanguageRules
+      summary: Get a library's language-lint rule profile
+      description: >
+        Returns the library's own language-lint rule profile (ADR-080):
+        banned terms, reinforcing words to avoid, recognized party
+        vocabulary, and required phrases. Linting is opt-in — SpecR ships no
+        default content, so a library with nothing configured returns 404,
+        never a fallback profile.
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ConventionLibraryId'
+      responses:
+        '200':
+          description: The library's language-rule profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/LanguageRuleProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: putLibraryLanguageRules
+      summary: Create or replace a library's language-lint rule profile
+      description: >
+        Upsert (ADR-080) — one profile per library. Malformed rules shape is
+        rejected with 400; an unsafe or oversized `isRegex: true` term pattern
+        is bounded at the write boundary and rejected with 422.
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ConventionLibraryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutLanguageRulesBody'
+      responses:
+        '200':
+          description: Language-rule profile created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/LanguageRuleProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Unsafe or oversized `isRegex` term pattern
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteLibraryLanguageRules
+      summary: Delete a library's language-lint rule profile
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ConventionLibraryId'
+      responses:
+        '200':
+          description: Profile deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [libraryId]
+                        properties:
+                          libraryId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: No language-rule profile configured for this library
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/language-rules:
+    get:
+      operationId: getProjectLanguageRules
+      summary: Get a project's language-lint rule profile
+      description: >
+        Returns the project's own language-lint rule profile (ADR-080). This
+        is the project's own profile only, not the merged effective set used
+        by GET /projects/{id}/language-findings. Linting is opt-in — a
+        project with nothing configured returns 404, never a fallback.
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: The project's language-rule profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/LanguageRuleProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: putProjectLanguageRules
+      summary: Create or replace a project's language-lint rule profile
+      description: >
+        Upsert (ADR-080) — one profile per project. Malformed rules shape is
+        rejected with 400; an unsafe or oversized `isRegex: true` term pattern
+        is bounded at the write boundary and rejected with 422.
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutLanguageRulesBody'
+      responses:
+        '200':
+          description: Language-rule profile created or replaced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/LanguageRuleProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Unsafe or oversized `isRegex` term pattern
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteProjectLanguageRules
+      summary: Delete a project's language-lint rule profile
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Profile deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [projectId]
+                        properties:
+                          projectId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: No language-rule profile configured for this project
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/language-findings:
+    get:
+      operationId: getLanguageFindings
+      summary: Language-lint findings report for a project (or one of its packages)
+      description: >
+        Scans every present spec in the project (or, with `packageId`, just
+        that package) against its resolved language-rule layers — the
+        authoring library, the project's client library, and the project's
+        own profile, ADR-080 D5 — and reports findings. `configured: false`
+        (with an explanatory note, no findings) means linting is off for
+        every present spec; that is a normal opt-in state, never a 404/500.
+      tags: [language-rules]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: packageId
+          in: query
+          required: false
+          description: Scope the report to one design package
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Language-lint findings report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/LanguageFindingsReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
 # ─── Components ───────────────────────────────────────────────────────────────
 
 components:
@@ -5546,6 +6084,14 @@ components:
       in: path
       required: true
       description: Paragraph (node) UUID
+      schema:
+        type: string
+        format: uuid
+    CheckpointId:
+      name: id
+      in: path
+      required: true
+      description: Checkpoint UUID
       schema:
         type: string
         format: uuid
@@ -5777,20 +6323,58 @@ components:
 
     # ── Cross-spec comparison (reports) ────────────────────────────────────────
 
+    CompareSource:
+      description: >
+        One comparison source (#392, ADR-078). A bare UUID names a LIVE spec
+        (project or master) — the original, back-compat shape. An object names
+        the FROZEN tree of one spec within one issued package revision: a
+        point-in-time `package_revision_specs.tree` snapshot, not the live
+        `specs` row. `baseline` resolves against a source's underlying `specId`
+        (see `sourceSpecId`), not literal array membership, so a live source and
+        a frozen source of the SAME underlying spec are a legal, distinct pair —
+        e.g. a live spec compared against one of its own past issuances.
+      oneOf:
+        - type: string
+          format: uuid
+          description: A live spec UUID.
+        - type: object
+          description: A frozen source — the tree of `specId` as issued in `revisionId`.
+          required: [revisionId, specId]
+          additionalProperties: false
+          properties:
+            revisionId:
+              type: string
+              format: uuid
+              description: Issued package-revision UUID (see GET /packages/{id}/revisions).
+            specId:
+              type: string
+              format: uuid
+              description: The spec's id as of that revision (a package_revision_specs member).
+
     CompareRequest:
       type: object
       required: [sources]
       properties:
         sources:
           type: array
-          description: Exactly two live spec UUIDs (project or master) to compare.
-          items: { type: string, format: uuid }
+          description: >
+            Exactly two distinct sources to compare. Each is either a live spec
+            UUID or a frozen `{revisionId, specId}` object (see CompareSource).
+            A live source and a frozen source of the same underlying spec are a
+            legal, distinct pair; two structurally-identical frozen objects are
+            not — both are rejected as non-distinct (422).
+          items: { $ref: '#/components/schemas/CompareSource' }
           minItems: 2
           maxItems: 2
         baseline:
           type: string
           format: uuid
-          description: Optional — must be one of `sources`; projects a baseline lens over the matrix.
+          description: >
+            Optional — the underlying specId of one of `sources` (resolved via
+            each source's `specId`, not literal array membership). Must match
+            exactly one source; zero or multiple matches (e.g. the same spec
+            frozen at two different revisions) is rejected as ambiguous (422)
+            rather than silently resolved to the first match.
         alignment:
           type: string
           enum: [origin, structure, auto]
@@ -5818,6 +6402,18 @@ components:
         specId: { type: string, format: uuid }
         section: { type: string }
         title: { type: [string, 'null'] }
+        revisionId:
+          type: string
+          format: uuid
+          description: >
+            Present iff this column was resolved from a frozen source (#392); a
+            live column never carries this (omitted, not null).
+        revisionLabel:
+          type: string
+          description: >
+            The frozen revision's raw `package_revisions.label` — not a
+            nomenclature-resolved display name. Present iff `revisionId` is
+            present.
 
     ComparisonCell:
       description: A grounded cell — either a source's verbatim paragraph, or an absent sentinel.
@@ -6088,6 +6684,74 @@ components:
         umbrellaNotCalledOut: { type: integer }
         generalRequirementDuplicated: { type: integer }
         total: { type: integer }
+
+    # ── Language-lint rule profiles + findings (#411 / ADR-080) ───────────────
+
+    LanguageFindingsReport:
+      type: object
+      required: [projectId, packageId, configured, findings, summary, notes]
+      properties:
+        projectId: { type: string, format: uuid }
+        packageId: { type: [string, 'null'], format: uuid }
+        configured:
+          type: boolean
+          description: >
+            False when NOT ONE present spec resolved a language-rule layer
+            anywhere in its chain — linting is opt-in, so this is a normal
+            state (empty findings), never an error.
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/LanguageFinding' }
+        summary: { $ref: '#/components/schemas/LanguageFindingsSummary' }
+        notes:
+          type: array
+          items: { type: string }
+    LanguageFindingsSummary:
+      type: object
+      required: [bannedTerm, reinforcingWord, partyVocabulary, phraseMissing, total]
+      properties:
+        bannedTerm: { type: integer }
+        reinforcingWord: { type: integer }
+        partyVocabulary: { type: integer }
+        phraseMissing: { type: integer }
+        total: { type: integer }
+    LanguageFinding:
+      oneOf:
+        - $ref: '#/components/schemas/LanguageTermFlaggedFinding'
+        - $ref: '#/components/schemas/LanguagePhraseMissingFinding'
+      discriminator:
+        propertyName: type
+        mapping:
+          language_term_flagged: '#/components/schemas/LanguageTermFlaggedFinding'
+          language_phrase_missing: '#/components/schemas/LanguagePhraseMissingFinding'
+    LanguageTermFlaggedFinding:
+      type: object
+      description: A banned term, reinforcing word, or flagged party-vocabulary match at one paragraph.
+      required: [type, category, term, suggestion, specId, section, paragraphId, matchedText]
+      properties:
+        type: { type: string, enum: [language_term_flagged] }
+        category:
+          type: string
+          enum: [bannedTerm, reinforcingWord, partyVocabulary]
+        term: { type: string }
+        suggestion: { type: [string, 'null'] }
+        specId: { type: string, format: uuid }
+        section: { type: string }
+        paragraphId: { type: string, format: uuid }
+        matchedText: { type: string }
+    LanguagePhraseMissingFinding:
+      type: object
+      description: >
+        A required phrase absent anywhere in the spec's scanned text — a
+        whole-spec fact, never paragraph-located (ADR-080 D8).
+      required: [type, phrase, suggestion, specId, section]
+      properties:
+        type: { type: string, enum: [language_phrase_missing] }
+        phrase: { type: string }
+        suggestion: { type: [string, 'null'] }
+        specId: { type: string, format: uuid }
+        section: { type: string }
+
     RevitLinkInventory:
       type: object
       description: Project-scoped Revit link inventory (#103) — element↔spec read model.
@@ -7387,6 +8051,17 @@ components:
                 box modeled as an opaque round-trip blob. Present only on
                 `type: object` nodes.
               $ref: '#/components/schemas/ObjectMeta'
+            originParagraphId:
+              type: string
+              format: uuid
+              description: >-
+                The live paragraph this node was frozen from, at revision-freeze
+                time (#392, ADR-078). Present only in a revision's frozen
+                `SpecTree` (e.g. `GET /revisions/{id}`) — never on a live
+                `GET /specs/{id}/tree` response — and only for a paragraph that
+                itself has project-copy lineage (migration 018); absent for a
+                locally-authored paragraph or a snapshot frozen before this
+                field existed.
 
     ObjectMeta:
       type: object
@@ -7736,18 +8411,31 @@ components:
           description: Number of diff entries omitted from `accept`
 
     HistoryAnchor:
-      description: A spec content version, immutable package revision UUID, origin, or current
+      description: >
+        A spec content version, immutable package revision UUID, origin,
+        current, or a `checkpoint:<uuid>`-prefixed checkpoint anchor
+        (ADR-052 D3/D9, #380) — the prefix disambiguates it from an
+        otherwise-identical bare revision UUID.
       oneOf:
         - type: integer
           minimum: 1
         - type: string
           enum: [origin, current]
+        # Both string branches carry an explicit `pattern`: `format` is
+        # annotation-only in many validators, so without one a bare
+        # `format: uuid` branch matches every string — including `origin`
+        # and `checkpoint:<uuid>` — and `oneOf` would reject them for
+        # matching two branches at once.
         - type: string
           format: uuid
+          pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        - type: string
+          pattern: '^checkpoint:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 
     ParagraphHistoryEntry:
       type: object
-      required: [specId, custody, version, text, nodeType, op, contentVersion, snapshotAt]
+      required:
+        [specId, custody, version, text, nodeType, op, contentVersion, snapshotAt, userId, actorLabel]
       properties:
         specId:
           type: string
@@ -7774,6 +8462,83 @@ components:
         snapshotAt:
           type: string
           format: date-time
+        userId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            Actor who produced this row (ADR-052 D1/D6); null for a synthetic
+            tip/derive-point entry or a pre-046 row with no attributed actor.
+        actorLabel:
+          type: [string, 'null']
+          description: "`users.label` for `userId` — null exactly when userId is null."
+
+    ParagraphHistorySession:
+      type: object
+      required:
+        [
+          userId,
+          firstVersion,
+          lastVersion,
+          beforeText,
+          beforeNodeType,
+          afterText,
+          afterNodeType,
+          startedAt,
+          endedAt,
+          sealedContentVersion,
+          sealedByCheckpointId,
+          entries,
+        ]
+      description: >
+        A tier-1 coalesced read-time session (ADR-052 D3): consecutive tier-0
+        edits by one actor, with no intervening foreign-actor entry, no gap
+        exceeding the server's session window, and no crossed checkpoint
+        boundary, folded into one session with a net before/after diff. A
+        null-userId entry is always its own singleton session.
+      properties:
+        userId:
+          type: [string, 'null']
+          format: uuid
+        firstVersion:
+          type: integer
+          minimum: 1
+          description: Paragraph-local version of the session's first entry — display/ordering only.
+        lastVersion:
+          type: integer
+          minimum: 1
+          description: Paragraph-local version of the session's last entry — display/ordering only.
+        beforeText:
+          type: [string, 'null']
+          description: Null iff the session's first entry is the paragraph's creation (op insert).
+        beforeNodeType:
+          type: [string, 'null']
+        afterText:
+          type: string
+        afterNodeType:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        sealedContentVersion:
+          type: [integer, 'null']
+          minimum: 1
+          description: >
+            The session's last entry's contentVersion — the checkpoint join
+            key. Null when that entry predates migration 046 ("never sealed").
+        sealedByCheckpointId:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            The checkpoint that sealed this session, or null when still
+            pending or sealedContentVersion is null.
+        entries:
+          type: array
+          description: The raw tier-0 span this session coalesces, oldest first.
+          items:
+            $ref: '#/components/schemas/ParagraphHistoryEntry'
 
     HistoryOperationCounts:
       type: object
@@ -7813,6 +8578,14 @@ components:
             revisionId: { type: string, format: uuid }
             packageId: { type: string, format: uuid }
             label: { type: string }
+        - type: object
+          required: [kind, at, checkpointId, name, contentVersion]
+          properties:
+            kind: { type: string, const: checkpoint }
+            at: { type: string, format: date-time }
+            checkpointId: { type: string, format: uuid }
+            name: { type: string }
+            contentVersion: { type: integer, minimum: 1 }
 
     SpecHistory:
       type: object
@@ -7859,6 +8632,109 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/HistoryDiffEntry'
+
+    ContentVersionMap:
+      type: object
+      description: >
+        `{ [specId]: contentVersion }`, snapshotted once at checkpoint
+        creation (ADR-052 D3/D4) — a spec-scoped checkpoint's map has exactly
+        one key; a project-scoped checkpoint's map has one key per spec that
+        was in-scope at seal time.
+      additionalProperties:
+        type: integer
+        minimum: 1
+
+    Checkpoint:
+      type: object
+      required: [id, name, scope, scopeId, userId, contentVersionMap, createdAt]
+      description: >
+        A stored named marker sealing a spec (or every spec in a project) at
+        its current content_version(s) — the Word "accept changes" moment
+        (ADR-052 D3/D4). Never mutated after creation.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        scope: { type: string, enum: [spec, project] }
+        scopeId:
+          type: string
+          format: uuid
+          description: The sealed spec's or project's UUID, matching `scope`.
+        userId:
+          type: string
+          format: uuid
+          description: The sealing actor (ADR-052 D6) — always attributed, never null.
+        contentVersionMap:
+          $ref: '#/components/schemas/ContentVersionMap'
+        createdAt:
+          type: string
+          format: date-time
+
+    PendingActorRollup:
+      type: object
+      required: [userId, actorLabel, changedParagraphCount]
+      description: One actor's share of a pending set — DISTINCT changed paragraphs, never raw op count.
+      properties:
+        userId:
+          type: [string, 'null']
+          format: uuid
+          description: Null covers a legacy pre-046 row with no attributed user.
+        actorLabel:
+          type: string
+        changedParagraphCount:
+          type: integer
+          minimum: 0
+
+    SpecPendingSummary:
+      type: object
+      required:
+        [
+          specId,
+          sealedByCheckpointId,
+          sealedContentVersion,
+          currentContentVersion,
+          changedParagraphCount,
+          actorRollup,
+        ]
+      description: >
+        Everything a spec has accumulated since its last checkpoint — or its
+        whole recorded history, if never checkpointed (ADR-052 D9).
+      properties:
+        specId: { type: string, format: uuid }
+        sealedByCheckpointId: { type: [string, 'null'], format: uuid }
+        sealedContentVersion: { type: [integer, 'null'], minimum: 1 }
+        currentContentVersion: { type: integer, minimum: 1 }
+        changedParagraphCount: { type: integer, minimum: 0 }
+        actorRollup:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingActorRollup'
+
+    ProjectPendingSummary:
+      type: object
+      required:
+        [projectId, packageId, changedSpecCount, changedParagraphCount, actorRollup, perSpec]
+      description: >
+        Everything every spec directly owned by a project (ADR-015 branch
+        membership) has accumulated since ITS OWN last checkpoint (ADR-052 D9).
+      properties:
+        projectId: { type: string, format: uuid }
+        packageId:
+          type: [string, 'null']
+          format: uuid
+          description: Echoed back for the caller's own issuance-deadline framing — never scopes the query.
+        changedSpecCount:
+          type: integer
+          minimum: 0
+          description: Specs with at least one pending paragraph — not the project's total spec count.
+        changedParagraphCount: { type: integer, minimum: 0 }
+        actorRollup:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingActorRollup'
+        perSpec:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecPendingSummary'
 
     LineageHop:
       type: object
@@ -9077,6 +9953,62 @@ components:
           type: string
           format: uuid
           description: A built-in or another library's convention profile id
+
+    # ── Language-lint rule profiles (#411 / ADR-080) ──────────────────────────
+    # SpecR ships the schema and matching engine, never rule content — every
+    # category is optional and starts empty until a firm authors it.
+
+    LanguageRuleTerm:
+      type: object
+      additionalProperties: false
+      required: [term]
+      properties:
+        term:
+          type: string
+          minLength: 1
+        isRegex:
+          type: boolean
+          description: Interpret `term` as a regex pattern; a literal term is boundary-matched instead.
+        suggestion:
+          type: string
+          description: Optional replacement text shown alongside a finding.
+    LanguageRules:
+      type: object
+      additionalProperties: false
+      properties:
+        bannedTerms:
+          type: array
+          items: { $ref: '#/components/schemas/LanguageRuleTerm' }
+        reinforcingWords:
+          type: array
+          items: { $ref: '#/components/schemas/LanguageRuleTerm' }
+        partyVocabulary:
+          type: array
+          items: { $ref: '#/components/schemas/LanguageRuleTerm' }
+        requiredPhrases:
+          type: array
+          items: { $ref: '#/components/schemas/LanguageRuleTerm' }
+    LanguageRuleProfile:
+      type: object
+      required: [id, scope, ownerId, rules, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        scope:
+          type: string
+          enum: [library, project]
+        ownerId:
+          type: string
+          format: uuid
+          description: The library or project id that owns this profile
+        rules: { $ref: '#/components/schemas/LanguageRules' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PutLanguageRulesBody:
+      type: object
+      additionalProperties: false
+      required: [rules]
+      properties:
+        rules: { $ref: '#/components/schemas/LanguageRules' }
 
     # ── Revision nomenclature profiles (ADR-025 / #209) ───────────────────────
 

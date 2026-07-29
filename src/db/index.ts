@@ -62,6 +62,13 @@ export { insertParagraphAfter, insertSiblingRow } from './queries/paragraph-inse
 export type { InsertParagraphResult, InsertParagraphInput } from './queries/paragraph-insert.js';
 export { setParagraphVanish, setVanishRow } from './queries/paragraph-vanish.js';
 export type { SetVanishResult, SetVanishRowResult } from './queries/paragraph-vanish.js';
+// ADR-052 D3/D4/D9 (#380) — checkpoints, coalesced paragraph-history sessions,
+// per-paragraph reject (a restore-to-version write through updateParagraphText
+// above), and pending-change summaries all barrel through checkpoint-index.ts
+// (mirrors history-index.ts's history.js + history-diff.js pattern) — one
+// export line standing in for what would otherwise be four separate
+// multi-symbol blocks.
+export * from './queries/checkpoint-index.js';
 // rewriteObjectTextBlob is the DB core behind rewriting an objectText child's
 // text into its parent object row's captured blob (#519) — paragraphs.ts's
 // own write path (applyParagraphUpdate) already calls it internally; the
@@ -96,8 +103,7 @@ export { updateProject } from './queries/project-update.js';
 export type { UpdateProjectInput, UpdateProjectResult } from './queries/project-update.js';
 export { listProjectSpecs } from './queries/project-specs.js';
 export type { ProjectSpec, ProjectSpecListOptions } from './queries/project-specs.js';
-export { getBrokenRefs } from './queries/project-refs.js';
-export type { BrokenRef } from './queries/project-refs.js';
+export { getBrokenRefs, type BrokenRef } from './queries/project-refs.js';
 export {
   createClient,
   listClients,
@@ -160,28 +166,13 @@ export type {
   RevitLinkSummary,
   RevitLinkFilter,
 } from './queries/revit-links.js';
-export {
-  createLibrary,
-  createClientLibrary,
-  findLibraryById,
-  findLibraryByName,
-  listLibraries,
-  listLibrarySpecs,
-  updateLibraryName,
-  resolveDefaultLibraryId,
-  ParentLibraryNotFoundError,
-  ParentLibraryNotCompanyError,
-  DefaultCompanyLibraryError,
-  UFGS_REFERENCE_LIBRARY,
-  DEFAULT_COMPANY_LIBRARY,
-  LibraryNotFoundError,
-  type Library,
-  type LibraryTier,
-  type CreateLibraryInput,
-  type CreateClientLibraryInput,
-  type LibrarySpec,
-  type LibrarySpecListOptions,
-} from './queries/libraries.js';
+// Flattened to `export *` (#380 task 7 groundwork) — this block previously
+// named all 19 of libraries.ts's exports individually; verified identical to
+// a full `export *` (every symbol libraries.ts exports was already listed),
+// freeing 21 lines so the rejectParagraphToCheckpoint export above fits under
+// the enforced max-lines: 400 (see ADR-052's D3 amendment note on this file's
+// line budget).
+export * from './queries/libraries.js';
 export { getReferenceGraph } from './queries/reference-graph-read.js';
 export type { GraphScope } from './queries/reference-graph-read.js';
 export type {
@@ -282,25 +273,12 @@ export {
   SpecWriteForbiddenError,
   StaleVersionError,
 } from './queries/edit-gate.js';
-export {
-  getLibraryDivisionGeneralSpec,
-  getProjectDivisionGeneralSpec,
-  setLibraryDivisionGeneralSpec,
-  setProjectDivisionGeneralSpec,
-  reconcileLibraryDivisionGeneralSpec,
-  reconcileProjectDivisionGeneralSpec,
-  DivisionGeneralOwnerNotFoundError,
-  DivisionGeneralSpecNotInScopeError,
-  type DivisionGeneralSpecResult,
-  type DivisionGeneralSpecRef,
-  type DivisionGeneralCandidate,
-  type DivisionGeneralScope,
-  type DivisionGeneralStatus,
-  type DivisionGeneralMethod,
-  type DivisionGeneralCandidateReason,
-  type DivisionGeneralConfidence,
-  type SetDivisionGeneralSpecInput,
-} from './queries/division-general.js';
+// division-general.js's named list above was a complete 1:1 re-export of its
+// public surface (verified against the module source) — collapsed to `export
+// *` to free budget in the barrel's enforced 400-code-line ceiling (see
+// 318e8c2's history-index.ts precedent) for the new language-rule-profiles
+// export just below.
+export * from './queries/division-general.js';
 export {
   upsertHeaderFooterConfig,
   findHeaderFooterConfig,
@@ -381,10 +359,11 @@ export {
   AssociationParagraphNotFoundError,
 } from './queries/associations.js';
 export type { CreateAssociationInput } from './queries/associations.js';
-export { getProjectKeynotes } from './queries/keynotes.js';
-export type { ProjectKeynote } from './queries/keynotes.js';
+export { getProjectKeynotes, type ProjectKeynote } from './queries/keynotes.js';
 export { getComparisonColumns, getComparisonParagraphs } from './queries/reporting.js';
 export type { ComparisonColumnMeta, ComparisonParagraphRow } from './queries/reporting.js';
+export { getFrozenComparisonSource } from './queries/reporting.js';
+export type { FrozenComparisonSource } from './queries/reporting.js';
 // ADR-065 — discipline mapping (scoped-profile: built-in default + per-library override).
 // resolveEffectiveRules/disciplineForSection and the resolved-view types stay internal to the
 // db module (used by the listing queries via relative import), so only the externally-consumed
@@ -426,4 +405,11 @@ export {
   lazyHistoryContext,
   SYSTEM_ACTOR_LABEL,
 } from './queries/paragraph-history.js';
+// Language-rule profiles (#411, ADR-080) — routed via `export *` (not a named
+// list) to stay within the barrel's enforced 400-code-line ceiling; see
+// 318e8c2's history-index.ts precedent for the same constraint.
+export * from './queries/language-rule-profiles.js';
+// Language-rule findings scan engine (#411, ADR-080) — same `export *`
+// rationale as language-rule-profiles.js just above.
+export * from './queries/language-rule-findings.js';
 export type { ParagraphHistoryContext } from './queries/paragraph-history.js';

@@ -178,6 +178,8 @@ import {
   getSpecHistoryHandler,
   getHistoryDiffHandler,
 } from './history.js';
+import { registerCheckpointRoutes } from './checkpoint-routes.js';
+import { registerLanguageRuleRoutes } from './language-rule-router.js';
 
 const parseRateLimit = rateLimit({
   windowMs: config.RATE_LIMIT_WINDOW_MS,
@@ -277,6 +279,7 @@ router.post(
   postSubmittalRegisterHandler
 );
 router.get('/projects/:id/open-comments', getProjectOpenCommentsHandler);
+registerCheckpointRoutes(router);
 router.get('/projects/:id/references/inbound', getInboundReferencesHandler);
 router.get('/projects/:id/reference-graph', getProjectReferenceGraphHandler);
 router.get('/projects/:id/standards', getProjectStandardsHandler);
@@ -409,3 +412,9 @@ router.delete('/revisions/:id/header-footer', deleteRevisionHeaderFooterHandler)
 router.get('/projects/:id/header-footer/resolved', resolveProjectHeaderFooterHandler);
 router.get('/packages/:id/header-footer/resolved', resolvePackageHeaderFooterHandler);
 router.get('/revisions/:id/header-footer/resolved', resolveRevisionHeaderFooterHandler);
+// Language-lint rule profiles + findings report (#411, ADR-080) — opt-in,
+// scoped by library/project; no default content is ever seeded. Routes are
+// registered by language-rule-router.ts (kept out of this file to stay
+// under its enforced 400-line budget), directly onto this same `router` so
+// they behave identically to every route declared inline above.
+registerLanguageRuleRoutes(router);

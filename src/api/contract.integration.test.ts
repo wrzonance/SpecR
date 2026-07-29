@@ -51,6 +51,25 @@ const RESPONSE_COVERED = new Set([
   'get /projects/{}/header-footer/resolved',
   'get /packages/{}/header-footer/resolved',
   'get /revisions/{}/header-footer/resolved',
+  // version-history checkpoints and pending summaries (ADR-052 D3/D4/D9,
+  // issue #380 task 11) — dedicated response-contract test below. Sibling op
+  // `patch /specs/{}/paragraphs/{}/reject` returns a SpecNode and is
+  // allowlisted instead (see the SpecNode-cycle comment above).
+  'post /specs/{}/checkpoints',
+  'get /specs/{}/checkpoints',
+  'post /projects/{}/checkpoints',
+  'get /projects/{}/checkpoints',
+  'get /checkpoints/{}',
+  'get /specs/{}/pending-summary',
+  'get /projects/{}/pending-summary',
+  // language-lint rule profiles + findings report (#411, ADR-080)
+  'get /libraries/{}/language-rules',
+  'put /libraries/{}/language-rules',
+  'delete /libraries/{}/language-rules',
+  'get /projects/{}/language-rules',
+  'put /projects/{}/language-rules',
+  'delete /projects/{}/language-rules',
+  'get /projects/{}/language-findings',
 ]);
 
 // Documented JSON ops not yet response-verified (burned down in PR2…N).
@@ -82,9 +101,16 @@ const RESPONSE_ALLOWLIST = new Set([
   'get /templates/{}',
   'patch /libraries/{}',
   'patch /specs/{}',
+  // SpecNode is self-referential (children: SpecNode[]); loadSpec()'s full
+  // $ref dereference turns that into a real object-identity cycle that blows
+  // ajv's schema-traversal stack (json-schema-traverse has no cycle guard).
+  // Every op whose success body embeds a SpecNode is allowlisted for that
+  // structural reason, not because it lacks a test — see each op's own
+  // integration test for real (non-schema) response assertions instead.
   'patch /specs/{}/paragraphs/{}',
   'patch /specs/{}/paragraphs/{}/removal',
   'post /specs/{}/paragraphs',
+  'patch /specs/{}/paragraphs/{}/reject', // ADR-052 D4, issue #380 — same SpecNode cycle
   'patch /templates/{}',
   'post /clients',
   'get /clients',
@@ -208,6 +234,7 @@ let baseUrl: string;
 let projectId: string;
 let disciplineLibraryId: string;
 let headerFooterFixture: HeaderFooterFixture;
+let languageRuleLibraryId: string;
 
 beforeAll(async () => {
   const app = express();
@@ -236,6 +263,11 @@ beforeAll(async () => {
   if (!libRow) throw new Error('failed to create contract discipline library');
   disciplineLibraryId = libRow.id;
   headerFooterFixture = await createHeaderFooterFixture();
+  const langLib = await createLibrary({
+    tier: 'client',
+    name: `contract-language-rules-${Date.now()}`,
+  });
+  languageRuleLibraryId = langLib.id;
 });
 
 afterAll(async () => {
@@ -244,6 +276,15 @@ afterAll(async () => {
       disciplineLibraryId,
     ]);
     await pool.query('DELETE FROM libraries WHERE id = $1', [disciplineLibraryId]);
+  }
+  if (languageRuleLibraryId) {
+    await pool.query('DELETE FROM language_rule_profiles WHERE library_id = $1', [
+      languageRuleLibraryId,
+    ]);
+    await pool.query('DELETE FROM libraries WHERE id = $1', [languageRuleLibraryId]);
+  }
+  if (projectId) {
+    await pool.query('DELETE FROM language_rule_profiles WHERE project_id = $1', [projectId]);
   }
   if (projectId) await pool.query('DELETE FROM projects WHERE id = $1', [projectId]);
   if (headerFooterFixture) await deleteHeaderFooterFixture(headerFooterFixture);
@@ -506,6 +547,263 @@ describe('header/footer config CRUD + resolve endpoints (#476, ADR-040)', () => 
       const resolved = await fetch(`${baseUrl}${urlBase}/header-footer/resolved`);
       expect(resolved.status).toBe(200);
       await assertResponse('get', pathTemplate, 200, await resolved.json());
+    }
+  });
+});
+
+// ── version-history checkpoints, pending summaries, paragraph reject ────────
+// (ADR-052 D3/D4/D9, issue #380 task 11). One project-owned spec (never a
+// library-owned one — specs_owner_xor) so a project-scoped checkpoint has a
+// real spec in scope, not the degenerate zero-owned-specs case other suites
+// in this program already exercise.
+interface CheckpointFixture {
+  readonly projectId: string;
+  readonly specId: string;
+  readonly paragraphId: string;
+}
+
+const ORIGINAL_TEXT = 'Original pending-summary text.';
+
+async function createCheckpointFixture(): Promise<CheckpointFixture> {
+  const project = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+    [`contract-checkpoints-${Date.now()}`]
+  );
+  const projectRow = project.rows[0];
+  if (!projectRow) throw new Error('failed to create contract checkpoint project');
+  const spec = await pool.query<{ id: string }>(
+    `INSERT INTO specs (section, title, source, project_id)
+     VALUES ('09 91 26', 'Contract Checkpoint Spec', 'docx', $1) RETURNING id`,
+    [projectRow.id]
+  );
+  const specRow = spec.rows[0];
+  if (!specRow) throw new Error('failed to create contract checkpoint spec');
+  const paragraph = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version)
+     VALUES ($1, NULL, 'pr1', $2, 0, 1) RETURNING id`,
+    [specRow.id, ORIGINAL_TEXT]
+  );
+  const paragraphRow = paragraph.rows[0];
+  if (!paragraphRow) throw new Error('failed to create contract checkpoint paragraph');
+  // A raw INSERT into `paragraphs` (above) leaves no paragraph_versions row —
+  // only the application write path (insertParagraph) records history. The
+  // reject flow's findSealedText reads paragraph_versions, so the checkpoint
+  // it later seals at content_version 1 needs a real op:'insert' row here to
+  // revert to, matching history.integration.test.ts's fixture precedent.
+  await pool.query(
+    `INSERT INTO paragraph_versions
+       (paragraph_id, spec_id, version, text, node_type, op, content_version, snapshot_at)
+     VALUES ($1, $2, 1, $3, 'pr1', 'insert', 1, now())`,
+    [paragraphRow.id, specRow.id, ORIGINAL_TEXT]
+  );
+  return { projectId: projectRow.id, specId: specRow.id, paragraphId: paragraphRow.id };
+}
+
+async function deleteCheckpointFixture(fixture: CheckpointFixture): Promise<void> {
+  await pool.query('DELETE FROM specs WHERE id = $1', [fixture.specId]);
+  await pool.query('DELETE FROM projects WHERE id = $1', [fixture.projectId]);
+}
+
+describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D3/D4/D9, #380)', () => {
+  let fixture: CheckpointFixture;
+
+  beforeAll(async () => {
+    fixture = await createCheckpointFixture();
+  });
+
+  afterAll(async () => {
+    await deleteCheckpointFixture(fixture);
+  });
+
+  it('checkpoint, pending-summary, and reject responses match their documented schemas end to end', async () => {
+    const { specId, projectId, paragraphId } = fixture;
+    const actorLabel = 'contract-checkpoint-tester';
+
+    // 1. Seal a spec-scoped checkpoint while content_version is still 1.
+    const createSpecCp = await fetch(`${baseUrl}/specs/${specId}/checkpoints`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Contract baseline', actorLabel }),
+    });
+    expect(createSpecCp.status).toBe(201);
+    const specCpBody = (await createSpecCp.json()) as { data: { id: string } };
+    await assertResponse('post', '/specs/{id}/checkpoints', 201, specCpBody);
+    const checkpointId = specCpBody.data.id;
+
+    // 2. List + get round-trip the sealed checkpoint.
+    const listSpecCp = await fetch(`${baseUrl}/specs/${specId}/checkpoints`);
+    expect(listSpecCp.status).toBe(200);
+    const listSpecCpBody = (await listSpecCp.json()) as { data: readonly { id: string }[] };
+    expect(listSpecCpBody.data.map((c) => c.id)).toContain(checkpointId);
+    await assertResponse('get', '/specs/{id}/checkpoints', 200, listSpecCpBody);
+
+    const getCp = await fetch(`${baseUrl}/checkpoints/${checkpointId}`);
+    expect(getCp.status).toBe(200);
+    await assertResponse('get', '/checkpoints/{id}', 200, await getCp.json());
+
+    // 3. An edit made after the checkpoint is pending — content_version 1 -> 2.
+    const edit = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${paragraphId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Edited pending text.', actorLabel }),
+    });
+    expect(edit.status).toBe(200);
+
+    // 4. The spec pending-summary reflects exactly that one pending paragraph.
+    const specPending = await fetch(`${baseUrl}/specs/${specId}/pending-summary`);
+    expect(specPending.status).toBe(200);
+    const specPendingBody = (await specPending.json()) as {
+      data: {
+        sealedByCheckpointId: string | null;
+        sealedContentVersion: number | null;
+        currentContentVersion: number;
+        changedParagraphCount: number;
+        actorRollup: readonly { changedParagraphCount: number }[];
+      };
+    };
+    expect(specPendingBody.data.sealedByCheckpointId).toBe(checkpointId);
+    expect(specPendingBody.data.sealedContentVersion).toBe(1);
+    expect(specPendingBody.data.currentContentVersion).toBe(2);
+    expect(specPendingBody.data.changedParagraphCount).toBe(1);
+    expect(specPendingBody.data.actorRollup).toHaveLength(1);
+    await assertResponse('get', '/specs/{id}/pending-summary', 200, specPendingBody);
+
+    // 5. Sealing a project checkpoint now catches this spec's pending edit too.
+    const createProjectCp = await fetch(`${baseUrl}/projects/${projectId}/checkpoints`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Contract project baseline', actorLabel }),
+    });
+    expect(createProjectCp.status).toBe(201);
+    await assertResponse('post', '/projects/{id}/checkpoints', 201, await createProjectCp.json());
+
+    const listProjectCp = await fetch(`${baseUrl}/projects/${projectId}/checkpoints`);
+    expect(listProjectCp.status).toBe(200);
+    await assertResponse('get', '/projects/{id}/checkpoints', 200, await listProjectCp.json());
+
+    // 6. The project pending-summary now reports zero pending work for this spec.
+    const projectPending = await fetch(`${baseUrl}/projects/${projectId}/pending-summary`);
+    expect(projectPending.status).toBe(200);
+    const projectPendingBody = (await projectPending.json()) as {
+      data: { changedSpecCount: number; perSpec: readonly { specId: string }[] };
+    };
+    expect(projectPendingBody.data.changedSpecCount).toBe(0);
+    expect(projectPendingBody.data.perSpec.map((s) => s.specId)).toContain(specId);
+    await assertResponse('get', '/projects/{id}/pending-summary', 200, projectPendingBody);
+
+    // 7. Rejecting to the ORIGINAL (earlier) checkpoint restores the pre-edit
+    //    text — proving the boundary lookup targets checkpointId's own sealed
+    //    content_version (1), not the project checkpoint's later one (2).
+    //    No assertResponse here: the response body is a SpecNode, whose
+    //    self-referential schema stack-overflows ajv after loadSpec()'s full
+    //    dereference (see the RESPONSE_ALLOWLIST comment above) — the same
+    //    reason its sibling paragraph-mutation ops skip schema validation.
+    const reject = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${paragraphId}/reject`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checkpointId, actorLabel }),
+    });
+    expect(reject.status).toBe(200);
+    const rejectBody = (await reject.json()) as { data: { text: string } };
+    expect(rejectBody.data.text).toBe(ORIGINAL_TEXT);
+  });
+});
+
+describe('language-lint rule profile + findings endpoints (#411, ADR-080)', () => {
+  const SAMPLE_RULES = {
+    bannedTerms: [{ term: 'shall', suggestion: 'will' }],
+    requiredPhrases: [{ term: 'Contract Documents' }],
+  };
+
+  it('library-scope PUT/GET/DELETE match their documented schemas', async () => {
+    const url = `${baseUrl}/libraries/${languageRuleLibraryId}/language-rules`;
+
+    const put = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rules: SAMPLE_RULES }),
+    });
+    expect(put.status).toBe(200);
+    await assertResponse('put', '/libraries/{id}/language-rules', 200, await put.json());
+
+    const get = await fetch(url);
+    expect(get.status).toBe(200);
+    await assertResponse('get', '/libraries/{id}/language-rules', 200, await get.json());
+
+    const del = await fetch(url, { method: 'DELETE' });
+    expect(del.status).toBe(200);
+    const delBody = (await del.json()) as { data: { libraryId: string } };
+    expect(delBody.data.libraryId).toBe(languageRuleLibraryId);
+    await assertResponse('delete', '/libraries/{id}/language-rules', 200, delBody);
+  });
+
+  it('project-scope PUT/GET/DELETE match their documented schemas', async () => {
+    const url = `${baseUrl}/projects/${projectId}/language-rules`;
+
+    const put = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rules: SAMPLE_RULES }),
+    });
+    expect(put.status).toBe(200);
+    await assertResponse('put', '/projects/{id}/language-rules', 200, await put.json());
+
+    const get = await fetch(url);
+    expect(get.status).toBe(200);
+    await assertResponse('get', '/projects/{id}/language-rules', 200, await get.json());
+
+    const del = await fetch(url, { method: 'DELETE' });
+    expect(del.status).toBe(200);
+    const delBody = (await del.json()) as { data: { projectId: string } };
+    expect(delBody.data.projectId).toBe(projectId);
+    await assertResponse('delete', '/projects/{id}/language-rules', 200, delBody);
+  });
+
+  it('GET /projects/{id}/language-findings matches its documented schema, configured or not', async () => {
+    // Nothing configured (previous test's profile was deleted) -> configured: false.
+    const unconfigured = await fetch(`${baseUrl}/projects/${projectId}/language-findings`);
+    expect(unconfigured.status).toBe(200);
+    const unconfiguredBody = (await unconfigured.json()) as { data: { configured: boolean } };
+    expect(unconfiguredBody.data.configured).toBe(false);
+    await assertResponse('get', '/projects/{id}/language-findings', 200, unconfiguredBody);
+
+    // `configured` can only ever be true for a project with at least one present
+    // spec whose resolution chain finds a layer (ADR-080 — resolution runs per
+    // present spec) — this project has no present specs yet, so give it one
+    // authored by languageRuleLibraryId, then set that library's profile so the
+    // schema also validates the non-degenerate `configured: true` shape.
+    const spec = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ('05 12 00', 'Steel', 'contractlangfind', $1)
+       RETURNING id`,
+      [languageRuleLibraryId]
+    );
+    const specRow = spec.rows[0];
+    if (!specRow) throw new Error('failed to create contract language-findings spec');
+    try {
+      await pool.query(
+        `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`,
+        [projectId, specRow.id]
+      );
+
+      const put = await fetch(`${baseUrl}/libraries/${languageRuleLibraryId}/language-rules`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rules: SAMPLE_RULES }),
+      });
+      expect(put.status).toBe(200);
+
+      const configured = await fetch(`${baseUrl}/projects/${projectId}/language-findings`);
+      expect(configured.status).toBe(200);
+      const configuredBody = (await configured.json()) as { data: { configured: boolean } };
+      expect(configuredBody.data.configured).toBe(true);
+      await assertResponse('get', '/projects/{id}/language-findings', 200, configuredBody);
+    } finally {
+      await fetch(`${baseUrl}/libraries/${languageRuleLibraryId}/language-rules`, {
+        method: 'DELETE',
+      });
+      await pool.query(`DELETE FROM project_specs WHERE spec_id = $1`, [specRow.id]);
+      await pool.query(`DELETE FROM specs WHERE id = $1`, [specRow.id]);
     }
   });
 });

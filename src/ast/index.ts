@@ -135,8 +135,10 @@ export { ActorLabelSchema, AcceptNoteBodySchema } from './actor-schemas.js';
 export type { AcceptNoteBody } from './actor-schemas.js';
 export { InsertParagraphBodySchema, InsertableNodeTypeSchema } from './paragraph-schemas.js';
 export type { InsertParagraphBody, InsertableNodeType } from './paragraph-schemas.js';
-export { HistoryAnchorSchema } from './history-schemas.js';
+export { HistoryAnchorSchema, parseCheckpointAnchor } from './history-schemas.js';
 export type { HistoryAnchorInput } from './history-schemas.js';
+export { CreateCheckpointBodySchema, RejectParagraphBodySchema } from './checkpoint-schemas.js';
+export type { CreateCheckpointBody, RejectParagraphBody } from './checkpoint-schemas.js';
 export {
   CreateTemplateBodySchema,
   PatchTemplateBodySchema,
@@ -206,3 +208,13 @@ export {
   ObjectMetaSchema,
 } from './object-schemas.js';
 export type { ObjectKind, ObjectGeneration, ObjectBlobNode, ObjectMeta } from './object-schemas.js';
+export {
+  LanguageRuleTermSchema,
+  LanguageRulesSchema,
+  PutLanguageRulesBodySchema,
+} from './language-rule-schemas.js';
+export type {
+  LanguageRuleTerm,
+  LanguageRules,
+  PutLanguageRulesBody,
+} from './language-rule-schemas.js';
