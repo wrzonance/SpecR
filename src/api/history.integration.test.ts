@@ -68,14 +68,37 @@ afterAll(async () => {
   });
 });
 
-describe('version-history REST and MCP surfaces (#378)', () => {
-  it('GET paragraph history supports includeOrigin and returns the raw iterations', async () => {
+describe('version-history REST and MCP surfaces (#378, #380)', () => {
+  it('GET paragraph history: ?raw=true returns the tier-0 iterations, includeOrigin included', async () => {
     const response = await fetch(
-      `${baseUrl}/specs/${ids.spec}/paragraphs/${ids.paragraph}/history?includeOrigin=true`
+      `${baseUrl}/specs/${ids.spec}/paragraphs/${ids.paragraph}/history?includeOrigin=true&raw=true`
     );
     const body = (await response.json()) as { data: readonly { text: string }[] };
     expect(response.status).toBe(200);
     expect(body.data.map((entry) => entry.text)).toEqual(['Before', 'After']);
+    await assertResponse('get', '/specs/{id}/paragraphs/{nodeId}/history', 200, body);
+  });
+
+  it('GET paragraph history defaults to coalesced tier-1 sessions (ADR-052 D3/D9)', async () => {
+    const response = await fetch(
+      `${baseUrl}/specs/${ids.spec}/paragraphs/${ids.paragraph}/history?includeOrigin=true`
+    );
+    const body = (await response.json()) as {
+      data: readonly {
+        userId: string | null;
+        afterText: string;
+        sealedByCheckpointId: string | null;
+        entries: readonly { text: string }[];
+      }[];
+    };
+    expect(response.status).toBe(200);
+    // Both rows are unattributed (userId null) — ADR-052 D3 amendment: a
+    // null-userId entry is always its own singleton session, so the insert
+    // and the edit stay two one-entry sessions rather than merging into one.
+    expect(body.data.map((session) => session.afterText)).toEqual(['Before', 'After']);
+    expect(body.data.every((session) => session.userId === null)).toBe(true);
+    expect(body.data.every((session) => session.sealedByCheckpointId === null)).toBe(true);
+    expect(body.data.map((session) => session.entries.length)).toEqual([1, 1]);
     await assertResponse('get', '/specs/{id}/paragraphs/{nodeId}/history', 200, body);
   });
 
@@ -111,10 +134,13 @@ describe('version-history REST and MCP surfaces (#378)', () => {
   });
 
   it('MCP tools mirror all three REST reads and never throw on invalid input', async () => {
-    const paragraph = payload(
+    // get_paragraph_history defaults to coalesced tier-1 sessions (ADR-052
+    // D3/D9, issue #380 task 10) — `afterText` per session, not raw `.text`
+    // per entry, matching the REST default asserted above.
+    const sessions = payload(
       await handleGetParagraphHistory({ specId: ids.spec, nodeId: ids.paragraph })
-    ) as readonly { text: string }[];
-    expect(paragraph.map((entry) => entry.text)).toEqual(['Before', 'After']);
+    ) as readonly { afterText: string }[];
+    expect(sessions.map((session) => session.afterText)).toEqual(['Before', 'After']);
     expect(payload(await handleGetSpecHistory({ specId: ids.spec }))).toEqual(
       expect.objectContaining({ currentContentVersion: 2 })
     );

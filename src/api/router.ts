@@ -177,6 +177,7 @@ import {
   getSpecHistoryHandler,
   getHistoryDiffHandler,
 } from './history.js';
+import { registerCheckpointRoutes } from './checkpoint-routes.js';
 import { registerLanguageRuleRoutes } from './language-rule-router.js';
 
 const parseRateLimit = rateLimit({
@@ -276,6 +277,7 @@ router.post(
   postSubmittalRegisterHandler
 );
 router.get('/projects/:id/open-comments', getProjectOpenCommentsHandler);
+registerCheckpointRoutes(router);
 router.get('/projects/:id/references/inbound', getInboundReferencesHandler);
 router.get('/projects/:id/reference-graph', getProjectReferenceGraphHandler);
 router.get('/projects/:id/standards', getProjectStandardsHandler);

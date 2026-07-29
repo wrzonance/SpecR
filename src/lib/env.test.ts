@@ -126,6 +126,57 @@ describe('env validation — MCP_ALLOWED_TIERS', () => {
   });
 });
 
+describe('env validation — HISTORY_SESSION_WINDOW_MS (ADR-052 D3)', () => {
+  it('defaults to 1800000 (30 minutes) when not set', async () => {
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    delete process.env['HISTORY_SESSION_WINDOW_MS'];
+
+    const { config } = await import('./env.js');
+
+    expect(config.HISTORY_SESSION_WINDOW_MS).toBe(1800000);
+  });
+
+  it('coerces a numeric string to a number', async () => {
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    process.env['HISTORY_SESSION_WINDOW_MS'] = '60000';
+
+    const { config } = await import('./env.js');
+
+    expect(config.HISTORY_SESSION_WINDOW_MS).toBe(60000);
+    expect(typeof config.HISTORY_SESSION_WINDOW_MS).toBe('number');
+  });
+
+  it('exits with code 1 when set to zero (must be positive)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    process.env['HISTORY_SESSION_WINDOW_MS'] = '0';
+
+    await expect(import('./env.js')).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+
+  it('exits with code 1 when set to a non-integer', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+
+    process.env['DATABASE_URL'] = 'postgres://test:test@localhost:5432/test';
+    process.env['NODE_ENV'] = 'test';
+    process.env['HISTORY_SESSION_WINDOW_MS'] = '1.5';
+
+    await expect(import('./env.js')).rejects.toThrow();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+});
+
 describe('env validation — invalid env exits process', () => {
   it('exits with code 1 when DATABASE_URL is missing', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {

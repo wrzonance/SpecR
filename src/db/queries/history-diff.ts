@@ -1,12 +1,22 @@
-import { SpecTreeSchema } from '../../ast/index.js';
+import { SpecTreeSchema, parseCheckpointAnchor } from '../../ast/index.js';
 import type { SpecNode, SpecTree } from '../../ast/index.js';
 import { pool, DatabaseError } from '../index.js';
 import type { ParagraphHistoryOp } from './paragraph-history.js';
 import type { Queryable } from './history.js';
+import { getCheckpointById } from './checkpoints.js';
 
 export type HistoryAnchor = number | string;
 
 export class HistoryAnchorError extends DatabaseError {}
+
+// UUIDs are case-insensitive (z.uuid() accepts either case, PostgreSQL's uuid
+// type compares canonically) but a checkpoint's content_version_map is a
+// plain JS object keyed by the exact text checkpoints.ts stored — a bare
+// `map[specId]` lookup is case-SENSITIVE. Case-fold before indexing so a
+// specId supplied in different letter-casing than the checkpoint used at seal
+// time still resolves (#380 review finding). Mirrors merge/conflict.ts's
+// uuidKey.
+const uuidKey = (uuid: string): string => uuid.toLowerCase();
 
 export interface HistoryDiffEntry {
   readonly nodeId: string;
@@ -237,6 +247,47 @@ async function originSnapshot(
   });
 }
 
+/** The origin baseline a spec-local content snapshot layers on top of: the
+ *  parent spec's snapshot for a derived spec, nothing for a root spec. Shared
+ *  by both anchor kinds that resolve to a content version (checkpoint and
+ *  numeric) so the derived-spec rule can only be changed in one place. */
+async function resolveBaseline(
+  specId: string,
+  context: SpecAnchorContext,
+  db: Queryable
+): Promise<readonly SnapshotNode[]> {
+  return context.parent_spec_id && context.origin_version !== null
+    ? originSnapshot(specId, context, db)
+    : [];
+}
+
+/** checkpoint:<uuid> anchor (ADR-052 D3/D9, issue #380 task 6) — resolves to
+ *  the content_version the checkpoint sealed for `specId`, never a default.
+ *  Two distinct failure modes, both surfaced as HistoryAnchorError (422) so a
+ *  caller can never mistake "no such checkpoint" for "this checkpoint never
+ *  covered this spec": the checkpoint row itself may not exist, or it may
+ *  exist (sealing some other spec/project) without `specId` as a key in its
+ *  content_version_map. */
+async function checkpointSnapshot(
+  specId: string,
+  checkpointId: string,
+  context: SpecAnchorContext,
+  db: Queryable
+): Promise<readonly SnapshotNode[]> {
+  const checkpoint = await getCheckpointById(checkpointId, db);
+  if (!checkpoint) {
+    throw new HistoryAnchorError(`checkpoint ${checkpointId} does not exist`);
+  }
+  const contentVersion = checkpoint.contentVersionMap[uuidKey(specId)];
+  if (contentVersion === undefined) {
+    throw new HistoryAnchorError(
+      `checkpoint ${checkpointId} never sealed spec ${specId} (not in its content_version_map)`
+    );
+  }
+  const baseline = await resolveBaseline(specId, context, db);
+  return contentSnapshot(specId, contentVersion, db, baseline);
+}
+
 async function resolveSnapshot(
   specId: string,
   anchor: HistoryAnchor,
@@ -251,12 +302,11 @@ async function resolveSnapshot(
         `content version ${anchor} is outside spec ${specId}'s history (1-${context.content_version})`
       );
     }
-    const baseline =
-      context.parent_spec_id && context.origin_version !== null
-        ? await originSnapshot(specId, context, db)
-        : [];
+    const baseline = await resolveBaseline(specId, context, db);
     return contentSnapshot(specId, anchor, db, baseline);
   }
+  const checkpointId = parseCheckpointAnchor(anchor);
+  if (checkpointId !== null) return checkpointSnapshot(specId, checkpointId, context, db);
   return revisionSnapshot(specId, anchor, db);
 }
 

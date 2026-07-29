@@ -48,6 +48,15 @@ const schema = z.object({
   RATE_LIMIT_UPLOAD_MAX: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_MCP_MAX: z.coerce.number().int().positive().default(20),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
+  // Coalesced edit-session window (ADR-052 D3): consecutive tier-0 history ops by
+  // the same actor on the same paragraph, with no intervening foreign-actor edit
+  // or checkpoint boundary, fold into one read-time session while the gap between
+  // them stays under this window. Server-configurable; default 30 minutes.
+  HISTORY_SESSION_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30 * 60 * 1000),
 });
 
 const result = schema.safeParse(process.env);

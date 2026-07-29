@@ -43,6 +43,7 @@ import { registerRevitLinksTools } from './revit-links-tools.js';
 import { registerHierarchyReportTools } from './hierarchy-report-tools.js';
 import { registerHeaderFooterTools } from './header-footer-tools.js';
 import { registerHistoryTools } from './history-tools.js';
+import { registerCheckpointTools } from './checkpoint-tools.js';
 import { registerLanguageRuleTools } from './language-rule-tools.js';
 import { registerLanguageRuleFindingsTools } from './language-rule-findings-tools.js';
 import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
@@ -354,6 +355,7 @@ export function registerTools(
   registerHierarchyReportTools(reg);
   registerHeaderFooterTools(reg);
   registerHistoryTools(reg);
+  registerCheckpointTools(reg);
   registerLanguageRuleTools(reg);
   registerLanguageRuleFindingsTools(reg);
   registerSubmittalTools(reg);

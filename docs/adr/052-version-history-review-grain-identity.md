@@ -95,6 +95,37 @@ Default timeline reads return tiers 1–2 only — a dozen stops, never 1,500.
 The spec-grain `content_version` stamped on every history row (D1) is the join
 key that keeps paragraph iterations, document timelines, and diffs consistent.
 
+**D3 amendment (2026-07-27, issue #380 design spike):** a throwaway
+implementation of the coalescing algorithm surfaced two boundary bugs that a
+future implementer would very likely re-derive incorrectly without this pin,
+so both are fixed here in the design text rather than left as prose an
+implementation could get subtly wrong:
+
+1. **The join key is `contentVersion`, never `version`.** Each
+   `ParagraphHistoryEntry` carries two version numbers: `version`
+   (paragraph-local, D1's per-row snapshot lineage — display/ordering only)
+   and `contentVersion` (the spec-grain axis this section names as the join
+   key). A coalesced session's sealed/pending status — and the checkpoint it
+   was sealed by, if any — must be derived from the session's *last* entry's
+   `contentVersion`. Falling back to `version` when reasoning about sealing
+   silently joins against the wrong axis and will misattribute which
+   checkpoint sealed a session.
+2. **A `contentVersion: null` last entry is unconditionally unsealed.**
+   Migration 046 leaves `content_version` NULL on backfilled pre-046
+   `paragraph_versions` rows — genuinely unrecoverable history, per
+   `CLAUDE.md`'s no-invented-backfill rule. A session whose last entry
+   predates migration 046 resolves as "never sealed" outright (no sealing
+   checkpoint, full stop) — it must never fall back to guessing a seal via
+   `version` instead.
+3. **The checkpoint-boundary sealing test is `prev <= N < next`, not
+   `(prev, next]`.** For a checkpoint boundary `{checkpointId, at,
+   contentVersion: N}` landing between two adjacent entries' `contentVersion`
+   values within an otherwise-mergeable run, the edit that reaches *exactly*
+   `N` is the one the checkpoint sealed; the next edit strictly past `N`
+   opens the new pending session. Using an exclusive lower bound
+   (`(prev, next]`) instead either seals one edit too many or leaves the
+   sealing edit itself pending — both wrong in opposite directions.
+
 ### D4 — Checkpoints are advisory; reject ships in v1
 
 Issuing a package while pending unreviewed changes exist raises a

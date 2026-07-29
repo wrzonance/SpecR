@@ -2,10 +2,13 @@ import { z } from 'zod';
 import { HistoryAnchorSchema } from '../ast/index.js';
 import {
   getParagraphHistory,
+  getCoalescedParagraphHistory,
   getSpecHistory,
   getSpecHistoryDiff,
   HistoryAnchorError,
 } from '../db/index.js';
+import type { ParagraphHistoryEntry, ParagraphHistorySession } from '../db/index.js';
+import { config } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
 import { ok, toolError, type ToolResult } from './handlers.js';
 
@@ -13,6 +16,14 @@ export const ParagraphHistoryShape = {
   specId: z.uuid().describe('Spec UUID'),
   nodeId: z.uuid().describe('Paragraph UUID within the spec'),
   includeOrigin: z.boolean().optional().describe('Include the master paragraph before derive'),
+  raw: z
+    .boolean()
+    .optional()
+    .describe(
+      'Return tier-0 raw iterations instead of the default tier-1 coalesced sessions ' +
+        '(ADR-052 D3/D9) — sessions carry sealedByCheckpointId/sealedContentVersion, the ' +
+        'checkpoint (from get_checkpoint/list_checkpoints) that sealed them, or null if pending.'
+    ),
 };
 const ParagraphArgs = z.object(ParagraphHistoryShape);
 
@@ -42,14 +53,33 @@ function internal(err: unknown, tool: string): ToolResult {
   return toolError(`Internal error — ${tool} failed`);
 }
 
+/** Tier-0 raw iterations (`raw: true`) or, by default, tier-1 coalesced
+ *  sessions (ADR-052 D3/D9) — mirrors the REST `?raw=true` toggle
+ *  (src/api/history.ts's loadParagraphHistory). */
+async function loadParagraphHistory(
+  specId: string,
+  nodeId: string,
+  includeOrigin: boolean,
+  raw: boolean
+): Promise<readonly ParagraphHistoryEntry[] | readonly ParagraphHistorySession[] | null> {
+  if (raw) return getParagraphHistory(specId, nodeId, includeOrigin);
+  return getCoalescedParagraphHistory(
+    specId,
+    nodeId,
+    config.HISTORY_SESSION_WINDOW_MS,
+    includeOrigin
+  );
+}
+
 export async function handleGetParagraphHistory(args: unknown): Promise<ToolResult> {
   const parsed = ParagraphArgs.safeParse(args);
   if (!parsed.success) return invalid('get_paragraph_history', parsed.error);
   try {
-    const history = await getParagraphHistory(
+    const history = await loadParagraphHistory(
       parsed.data.specId,
       parsed.data.nodeId,
-      parsed.data.includeOrigin ?? false
+      parsed.data.includeOrigin ?? false,
+      parsed.data.raw ?? false
     );
     return history ? ok(history) : toolError('spec or paragraph not found');
   } catch (err) {
