@@ -153,6 +153,11 @@ const RESPONSE_ALLOWLIST = new Set([
   'post /projects/{}/submittal-register',
   'get /specs/{}/open-comments',
   'get /projects/{}/open-comments',
+  // issuance-readiness dry-run report (#406, ADR-079) — response-verified in
+  // its own src/api/readiness.integration.test.ts, same posture as
+  // open-comments above.
+  'get /specs/{}/readiness-report',
+  'get /packages/{}/readiness-report',
   'patch /specs/{}/paragraphs/{}/editability',
   'post /specs/{}/reclassify',
   'post /specs/{}/finalize',

@@ -15,6 +15,12 @@ vi.mock('../db/index.js', () => ({
   getPackageRevisionManualData: vi.fn(),
   getPackageRevisionAddendumManualData: vi.fn(),
   RevisionComparisonError: class RevisionComparisonError extends Error {},
+  // ADR-079 (#406): every test in this file omits `mode`, so the real
+  // assertReadyForFinal would already no-op (INV-1) — this mock only exists
+  // so `enforceReadinessGate` (imported transitively via readiness-guard.ts)
+  // has something callable, never so it changes behavior here.
+  assertReadyForFinal: vi.fn(),
+  ReadinessBlockedError: class ReadinessBlockedError extends Error {},
   pool: {},
 }));
 vi.mock('../generator/index.js', () => ({

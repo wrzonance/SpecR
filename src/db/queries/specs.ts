@@ -187,16 +187,26 @@ export function buildNodeTree(rows: readonly ParagraphTreeRow[]): readonly SpecN
   return (childrenByParent.get(null) ?? []).sort((a, b) => a.position - b.position).map(buildNode);
 }
 
-export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
+/**
+ * `db` defaults to the module-level pool but is honored end-to-end (both
+ * queries below plus the `listAssociationsForSpec` delegate) so a caller that
+ * needs a pinned connection — a read-only snapshot transaction, a dedicated
+ * pool under test — gets it for the whole read, not just part of it (review
+ * finding, #406: previously silently ignored, always querying `pool`).
+ */
+export async function getSpecTree(
+  id: string,
+  db: Queryable = pool
+): Promise<SpecTreeResult | null> {
   try {
-    const specResult = await pool.query<SpecRow>(
+    const specResult = await db.query<SpecRow>(
       'SELECT id, section, title, page_size FROM specs WHERE id = $1',
       [id]
     );
     const specRow = specResult.rows[0];
     if (!specRow) return null;
 
-    const paraResult = await pool.query<ParagraphTreeRow>(
+    const paraResult = await db.query<ParagraphTreeRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
               signal_provenance, classification, editability_override, object_data,
               page_break_before
@@ -204,7 +214,7 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
       [id]
     );
 
-    const refResult = await pool.query<{
+    const refResult = await db.query<{
       reference_text: string;
       target_spec_section: string | null;
       target_spec_id: string | null;
@@ -215,7 +225,7 @@ export async function getSpecTree(id: string): Promise<SpecTreeResult | null> {
       [id]
     );
 
-    const associationMap = await listAssociationsForSpec(id);
+    const associationMap = await listAssociationsForSpec(id, db);
     const pageSize = parseStoredPageSize(specRow.page_size);
     const tree: SpecTree = {
       id: specRow.id,

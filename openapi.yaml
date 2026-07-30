@@ -1409,6 +1409,13 @@ paths:
                     database values remain canonical. Omitted → the sole owning project's
                     override, then its client's firm default, then canonical. If the spec
                     belongs to no project (or several), canonical applies.
+                mode:
+                  $ref: '#/components/schemas/IssuanceMode'
+                overrideReadinessGate:
+                  type: boolean
+                  description: >
+                    Unaudited escape hatch (ADR-079 decision 8, #406) — renders
+                    despite outstanding findings. Ignored unless mode is final.
             examples:
               dotted-section-numbers:
                 value:
@@ -1425,6 +1432,24 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: >
+            `mode: 'final'` is blocked by the ADR-079 (#406) issuance-readiness
+            gate — the spec has one or more outstanding ReadinessFinding
+            entries, returned inline as `findings`. The error message also
+            reports the finding count and points at
+            `GET /specs/{id}/readiness-report` for the full list; pass
+            `overrideReadinessGate: true` to generate anyway.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      findings:
+                        type: array
+                        items: { $ref: '#/components/schemas/ReadinessFinding' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -2308,6 +2333,13 @@ paths:
                     section title and confidently identified Section references.
                     Omitted → project override, then client/firm default, then
                     canonical.
+                mode:
+                  $ref: '#/components/schemas/IssuanceMode'
+                overrideReadinessGate:
+                  type: boolean
+                  description: >
+                    Unaudited escape hatch (ADR-079 decision 8, #406) — renders
+                    despite outstanding findings. Ignored unless mode is final.
       responses:
         '200':
           description: DOCX manual file stream
@@ -2321,11 +2353,25 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: Project has no sections to assemble
+          description: >
+            Project has no sections to assemble, or `mode: 'final'` is blocked
+            by the ADR-079 (#406) issuance-readiness gate — one or more of the
+            assembled TOC sections has an outstanding ReadinessFinding,
+            returned inline as `findings` across all TOC sections combined.
+            There is no project-scoped readiness report; use
+            `GET /specs/{id}/readiness-report` per section to see which
+            section each finding came from. Pass
+            `overrideReadinessGate: true` to generate anyway.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      findings:
+                        type: array
+                        items: { $ref: '#/components/schemas/ReadinessFinding' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -3788,10 +3834,19 @@ paths:
         '422':
           description: >
             Validation failed, a member tree cannot be snapshotted losslessly,
-            or parentRevisionId fails a custody rule (ADR-066): the parent
+            parentRevisionId fails a custody rule (ADR-066): the parent
             revision does not exist, belongs to a different package, or
             already has a parent of its own (nesting depth cannot exceed 1);
-            or baseRevisionId does not exist or belongs to another package.
+            baseRevisionId does not exist or belongs to another package; or
+            `mode: 'final'` is blocked by the ADR-079 (#406) issuance-readiness
+            gate — one or more outstanding ReadinessFinding entries remain
+            across the package's current member specs. Unlike the generate
+            endpoints, this route returns `assertReadyForFinal`'s raw message
+            (the finding count only) with no `findings` array and no
+            readiness-report pointer: it is reached before any revision
+            exists, so `GET /packages/{id}/readiness-report` is authoritative
+            for the same member specs the gate just evaluated — call it for
+            the full list. Pass `overrideReadinessGate: true` to issue anyway.
           content:
             application/json:
               schema:
@@ -3891,6 +3946,13 @@ paths:
                     same package as the target revision. Overrides the target's
                     stored baseRevisionId; when both are omitted, renders the
                     full issued manual.
+                mode:
+                  $ref: '#/components/schemas/IssuanceMode'
+                overrideReadinessGate:
+                  type: boolean
+                  description: >
+                    Unaudited escape hatch (ADR-079 decision 8, #406) — renders
+                    despite outstanding findings. Ignored unless mode is final.
       responses:
         '200':
           description: DOCX manual file stream
@@ -3904,11 +3966,28 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: Invalid addendum comparison, or no changed sections to render
+          description: >
+            Invalid addendum comparison, no changed sections to render, or
+            `mode: 'final'` is blocked by the ADR-079 (#406) issuance-readiness
+            gate. In addendum mode the gate covers only the sections that
+            actually changed against the base revision (#406 decision 15) — a
+            carried-over section already evaluated at a prior issuance is
+            never re-gated here. This route gates an immutable revision
+            snapshot, which has no readiness-report endpoint of its own, so
+            the blocking findings are returned inline as `findings` rather
+            than only a count — a live spec/package readiness report can
+            since have diverged from what this frozen revision actually
+            contains. Pass `overrideReadinessGate: true` to generate anyway.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      findings:
+                        type: array
+                        items: { $ref: '#/components/schemas/ReadinessFinding' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -4607,6 +4686,64 @@ paths:
                     required: [data]
                     properties:
                       data: { $ref: '#/components/schemas/OpenCommentsReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /specs/{id}/readiness-report:
+    get:
+      operationId: getSpecReadinessReport
+      summary: Issuance-readiness dry-run for a single spec (ADR-079)
+      description: >
+        Every ReadinessFinding an unresolved choice token, a visible specifier
+        note, an open Word comment, or a body-level text box currently in
+        this spec, alongside the advisory-only highlight report (#406).
+        `readyForFinal: true` is exactly the set the issuance-readiness gate
+        would let through under `mode: 'final'`; a Draft issuance is never
+        gated on these findings.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Readiness report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ReadinessReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /packages/{id}/readiness-report:
+    get:
+      operationId: getPackageReadinessReport
+      summary: Issuance-readiness dry-run across a design package (ADR-079)
+      description: >
+        Aggregates the ADR-079 issuance-readiness findings (#406) across
+        every member spec of the package, each stamped with the spec section
+        that produced it. `readyForFinal: true` means every member is clean;
+        the highlight advisory never affects it.
+      tags: [packages]
+      parameters:
+        - $ref: '#/components/parameters/PackageId'
+      responses:
+        '200':
+          description: Readiness report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/ReadinessReport' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
@@ -7090,6 +7227,133 @@ components:
           items: { $ref: '#/components/schemas/OpenComment' }
         summary: { $ref: '#/components/schemas/OpenCommentsSummary' }
 
+    # ── Issuance readiness (ADR-079, #406) ────────────────────────────────────────
+
+    IssuanceMode:
+      type: string
+      enum: [draft, final]
+      description: >
+        Issuance-readiness gate mode (ADR-079, #406). `draft` (or an omitted
+        `mode`) is a complete no-op at zero evaluation cost. `final` evaluates
+        every ReadinessFinding across the resolved tree(s) and blocks with 422
+        unless the result is already clean or `overrideReadinessGate: true` is
+        set. Shared by `POST /packages/{id}/revisions` (structured body) and
+        all three `generate` endpoints.
+
+    ReadinessFinding:
+      description: >
+        One resolvable blocker an editor must clear before a spec can leave
+        the firm as Final. Every variant carries nodeId/text plus
+        kind-specific detail.
+      oneOf:
+        - type: object
+          required: [type, nodeId, text, kind, options]
+          properties:
+            type: { type: string, enum: [unresolved_choice_token] }
+            nodeId: { type: string, format: uuid }
+            text: { type: string }
+            kind:
+              type: string
+              enum: [angle, bracket]
+              description: The choice-token delimiter style — `<__>` vs `[__]`.
+            options:
+              type: array
+              items: { type: string }
+              description: The pick-one/fill-in choices captured at parse time.
+        - type: object
+          required: [type, nodeId, text]
+          properties:
+            type: { type: string, enum: [specifier_note_present] }
+            nodeId: { type: string, format: uuid }
+            text: { type: string }
+        - type: object
+          required: [type, nodeId, text, author]
+          properties:
+            type: { type: string, enum: [open_comment] }
+            nodeId: { type: string, format: uuid }
+            text: { type: string }
+            author: { type: string }
+        - type: object
+          required: [type, nodeId, text, objectKind]
+          properties:
+            type: { type: string, enum: [body_object_present] }
+            nodeId: { type: string, format: uuid }
+            text: { type: string }
+            objectKind:
+              type: string
+              enum: [textBox]
+              description: >-
+                Always textBox — a body-level table is structural content
+                (ADR-072) and never fires this finding.
+      discriminator:
+        propertyName: type
+
+    StampedReadinessFinding:
+      description: A ReadinessFinding stamped with the spec that produced it (package scope).
+      allOf:
+        - $ref: '#/components/schemas/ReadinessFinding'
+        - type: object
+          required: [specId, specSection]
+          properties:
+            specId: { type: string, format: uuid }
+            specSection: { type: string }
+
+    StampedHighlightAdvisory:
+      type: object
+      required: [specId, specSection, finding]
+      properties:
+        specId: { type: string, format: uuid }
+        specSection: { type: string }
+        finding: { $ref: '#/components/schemas/HighlightReviewFinding' }
+
+    ReadinessSummary:
+      type: object
+      required:
+        [unresolvedChoiceToken, specifierNotePresent, openComment, bodyObjectPresent, total]
+      properties:
+        unresolvedChoiceToken: { type: integer, minimum: 0 }
+        specifierNotePresent: { type: integer, minimum: 0 }
+        openComment: { type: integer, minimum: 0 }
+        bodyObjectPresent: { type: integer, minimum: 0 }
+        total:
+          type: integer
+          minimum: 0
+          description: Always equals findings.length — the highlight advisory never counts here.
+
+    ReadinessScope:
+      oneOf:
+        - type: object
+          required: [kind, specId]
+          properties:
+            kind: { type: string, enum: [spec] }
+            specId: { type: string, format: uuid }
+        - type: object
+          required: [kind, packageId]
+          properties:
+            kind: { type: string, enum: [package] }
+            packageId: { type: string, format: uuid }
+      discriminator:
+        propertyName: kind
+
+    ReadinessReport:
+      type: object
+      required: [scope, findings, highlightAdvisory, summary, readyForFinal]
+      properties:
+        scope: { $ref: '#/components/schemas/ReadinessScope' }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/StampedReadinessFinding' }
+        highlightAdvisory:
+          type: array
+          description: Advisory-only (ADR-079 decision 3) — never factors into readyForFinal.
+          items: { $ref: '#/components/schemas/StampedHighlightAdvisory' }
+        summary: { $ref: '#/components/schemas/ReadinessSummary' }
+        readyForFinal:
+          type: boolean
+          description: >-
+            findings.length === 0 — a computed convenience, never a second
+            source of truth; the highlight advisory never gates it.
+
     # ── Parse ──────────────────────────────────────────────────────────────────
 
     ParseStage:
@@ -9012,6 +9276,18 @@ components:
             UUID of the revision used as the immutable addendum comparison
             base (ADR-066). Must belong to the same package. Omit when this
             issuance has no stored comparison lineage.
+        mode:
+          $ref: '#/components/schemas/IssuanceMode'
+        overrideReadinessGate:
+          type: boolean
+          description: >
+            Unaudited escape hatch (ADR-079 decision 8, #406): `true` lets a
+            `mode: 'final'` issuance through even with outstanding
+            ReadinessFinding entries. Ignored unless `mode` is `final`. Only
+            the structured body accepts this — the legacy `{ label }` body
+            stays `.strict()`, so a stray `mode`/`overrideReadinessGate` on it
+            fails closed with a 422 (unrecognized-key validation failure),
+            never a silently-ignored field.
 
     RevisionSummary:
       type: object

@@ -1,5 +1,9 @@
 import { RevisionAttributesSchema, RevisionDateSchema } from '../../ast/index.js';
-import type { RevisionAttributes, RevisionNomenclatureType } from '../../ast/index.js';
+import type {
+  IssuanceMode,
+  RevisionAttributes,
+  RevisionNomenclatureType,
+} from '../../ast/index.js';
 import { DatabaseError } from '../errors.js';
 import type { RevisionNomenclatureProfile } from './revision-nomenclature.js';
 
@@ -13,6 +17,13 @@ export interface CreatePackageRevisionInput {
   readonly attributes?: RevisionAttributes;
   readonly parentRevisionId?: string;
   readonly baseRevisionId?: string;
+  // ADR-079 (#406): transient request-boundary inputs to the issuance-
+  // readiness gate (`assertReadyForFinal`, wired in `createPackageRevision`).
+  // Neither field is ever persisted — `createRevisionIdentityDraft` below
+  // does not read them, so a caller passing either has zero effect on the
+  // resulting `RevisionIdentityDraft` (INV-11).
+  readonly mode?: IssuanceMode;
+  readonly overrideReadinessGate?: boolean;
 }
 
 export interface RevisionIdentityDraft {

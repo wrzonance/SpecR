@@ -37,7 +37,20 @@ function pr1(text: string): SpecNode {
   return { id: randomUUID(), type: 'pr1', text, children: [], meta: {} };
 }
 
-function smallTree(specId: string, section: string, title: string, body: string): SpecTree {
+function note(text: string): SpecNode {
+  return { id: randomUUID(), type: 'note', text, children: [], meta: {} };
+}
+
+// `bodyNodeType` defaults to 'pr1' (plain content) so every pre-existing call
+// site is unaffected; 'note' produces a readiness-gate blocker (ADR-079,
+// #406 — a specifier note always yields `specifier_note_present`).
+function smallTree(
+  specId: string,
+  section: string,
+  title: string,
+  body: string,
+  bodyNodeType: 'pr1' | 'note' = 'pr1'
+): SpecTree {
   return {
     id: specId,
     section,
@@ -52,7 +65,7 @@ function smallTree(specId: string, section: string, title: string, body: string)
             id: randomUUID(),
             type: 'article',
             text: 'SUMMARY',
-            children: [pr1(body)],
+            children: [bodyNodeType === 'note' ? note(body) : pr1(body)],
             meta: {},
           },
         ],
@@ -62,7 +75,12 @@ function smallTree(specId: string, section: string, title: string, body: string)
   };
 }
 
-async function insertMasterWithTree(section: string, title: string, body: string): Promise<string> {
+async function insertMasterWithTree(
+  section: string,
+  title: string,
+  body: string,
+  bodyNodeType: 'pr1' | 'note' = 'pr1'
+): Promise<string> {
   const r = await pool.query<{ id: string }>(
     `INSERT INTO specs (section, title, source, library_id)
      VALUES ($1, $2, 'unknown', $3) RETURNING id`,
@@ -71,7 +89,7 @@ async function insertMasterWithTree(section: string, title: string, body: string
   const row = r.rows[0];
   if (!row) throw new Error(`failed to insert master ${section}`);
   masterIds.push(row.id);
-  await insertTree(smallTree(row.id, section, title, body), row.id, pool);
+  await insertTree(smallTree(row.id, section, title, body, bodyNodeType), row.id, pool);
   return row.id;
 }
 
@@ -302,6 +320,96 @@ describe('POST /packages/:id/revisions', () => {
       // assertion above throws.
       await pool.query(`UPDATE specs SET lifecycle_state = 'draft' WHERE id = $1`, [hvac1]);
     }
+  });
+});
+
+// ADR-079 (#406): package-revision issuance is the FIRST live enforcement
+// point for the issuance-readiness gate (assertReadyForFinal, wired in
+// createPackageRevision between snapshotMemberTrees and insertSnapshotRows).
+// pkgBlocked's sole member carries a `note` node, which unconditionally
+// yields a `specifier_note_present` finding (readiness-review.ts assessNode) —
+// every case below is pinned against that one fixture except the clean-final
+// case, which reuses pkgFull (no note/choice-token/comment/textBox content).
+describe('POST /packages/:id/revisions — issuance-readiness gate (ADR-079, #406)', () => {
+  let pkgBlocked: string;
+  let blockedSpec: string;
+
+  beforeAll(async () => {
+    await insertMasterWithTree(
+      '09 91 13',
+      'Exterior Painting',
+      'Confirm topcoat sheen with owner.',
+      'note'
+    );
+    const added = await json('POST', `/projects/${p1}/specs`, { section: '09 91 13' });
+    blockedSpec = (await data(added))['specId'] as string;
+    pkgBlocked = await createPackage(p1, `Readiness Gate ${Date.now()}`);
+    const put = await json('PUT', `/packages/${pkgBlocked}/specs`, { specIds: [blockedSpec] });
+    if (put.status !== 200) throw new Error('failed to set blocked-package membership');
+  });
+
+  it('mode omitted stays ungated against a blocking specifier note — INV-1 regression', async () => {
+    const res = await json('POST', `/packages/${pkgBlocked}/revisions`, {
+      label: `No Mode ${Date.now()}`,
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it('mode: draft is unaffected by the same blocking content — INV-1', async () => {
+    const res = await json('POST', `/packages/${pkgBlocked}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 950 },
+      mode: 'draft',
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it('mode: final blocks issuance with a 422 pointing at the readiness finding — INV-4/INV-13', async () => {
+    const res = await json('POST', `/packages/${pkgBlocked}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 951 },
+      mode: 'final',
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    // The ReadinessBlockedError message itself — proves isUnprocessableRevisionInputError
+    // (widened to include ReadinessBlockedError) routed this to the existing 422
+    // branch rather than falling through to a 500 (INV-13: still `instanceof
+    // DatabaseError`, so the pre-existing catch guard needed no changes).
+    expect(body.error).toBe('final issuance blocked: 1 readiness finding(s) outstanding');
+  });
+
+  it('mode: final + overrideReadinessGate issues despite the outstanding finding — INV-2', async () => {
+    const res = await json('POST', `/packages/${pkgBlocked}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 952 },
+      mode: 'final',
+      overrideReadinessGate: true,
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it('mode: final issues cleanly when the package carries no readiness findings — INV-3', async () => {
+    const res = await json('POST', `/packages/${pkgFull}/revisions`, {
+      type: 'addendum',
+      attributes: { number: 953 },
+      mode: 'final',
+    });
+    expect(res.status).toBe(201);
+  });
+
+  // The 422 above proves Zod's own `.strict()` union rejection maps through this
+  // repo's validateBody middleware, same as every other schema-boundary failure
+  // in this file (e.g. "422 for empty label" above) — not the 400 a schema
+  // violation gets in some other frameworks. See revision-schemas.ts's own
+  // comment on `StructuredCreateRevisionBodySchema.mode` (INV-10).
+  it('legacy { label } body with a stray mode fails closed at the schema boundary — INV-10 regression', async () => {
+    const res = await json('POST', `/packages/${pkgFull}/revisions`, {
+      label: `Legacy Plus Mode ${Date.now()}`,
+      mode: 'final',
+    });
+    expect(res.status).toBe(422);
   });
 });
 

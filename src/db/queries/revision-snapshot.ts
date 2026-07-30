@@ -90,8 +90,10 @@ export async function snapshotMemberTrees(
     // Omitting it left any package containing a captured table/text box unable
     // to snapshot at all: parseObjectMeta rejects the resulting `undefined`
     // against ObjectMetaSchema and throws, surfacing as an unconditional 500
-    // from createPackageRevision. Pre-existing gap (#300/ADR-072 objects
-    // predate this PR), not introduced by the #392 lineage column below.
+    // from createPackageRevision and (ADR-079, #406) from
+    // GET /packages/:id/readiness-report's body_object_present detection.
+    // Pre-existing gap (#300/ADR-072 objects predate both PRs), not introduced
+    // by the #392 lineage column below.
     const paras = await client.query<SnapshotParagraphRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
               signal_provenance, classification, editability_override, object_data,
