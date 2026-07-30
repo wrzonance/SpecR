@@ -3840,10 +3840,13 @@ paths:
             baseRevisionId does not exist or belongs to another package; or
             `mode: 'final'` is blocked by the ADR-079 (#406) issuance-readiness
             gate — one or more outstanding ReadinessFinding entries remain
-            across the package's current member specs. The error message
-            reports the finding count and points at
-            `GET /packages/{id}/readiness-report` for the full list; pass
-            `overrideReadinessGate: true` to issue anyway.
+            across the package's current member specs. Unlike the generate
+            endpoints, this route returns `assertReadyForFinal`'s raw message
+            (the finding count only) with no `findings` array and no
+            readiness-report pointer: it is reached before any revision
+            exists, so `GET /packages/{id}/readiness-report` is authoritative
+            for the same member specs the gate just evaluated — call it for
+            the full list. Pass `overrideReadinessGate: true` to issue anyway.
           content:
             application/json:
               schema:
