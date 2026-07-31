@@ -146,10 +146,14 @@ server continues to persist nothing; the browser keeps the transcript.
 |---|---|---|
 | `OPENAI_MODEL` | `gpt-4o-mini` | `gpt-5.6-luna` |
 | OpenAI endpoint | `${OPENAI_BASE}/chat/completions` | `${OPENAI_BASE}/responses` |
-| `ANTHROPIC_MODEL` | `claude-opus-4-8` | unchanged — already qualifies |
+| `ANTHROPIC_MODEL` | `claude-opus-4-8` | `claude-sonnet-4-6` |
 
 `gpt-5.6-luna` is $0.20/$1.20 per M against `gpt-4o-mini`'s $0.15/$0.60 — a
 marginal increase, and the cheapest tier clearing the gpt-5.4 floor.
+
+`claude-sonnet-4-6` replaces a flagship default on a Q&A sidebar: materially
+cheaper than Opus 4.8, stronger tool selection than Haiku. Both defaults are
+overridable via `.env`.
 
 **No boot-time model validation.** A regex guessing whether a model string clears
 the gpt-5.4 floor will break on the next model name. The provider returns a
@@ -204,10 +208,12 @@ Manual verification against both providers using the reported failing query:
 ## Risks and open items
 
 - **Residual `tools` array cap on the Responses API when all but the core set are
-  deferred is undocumented** (Anthropic documents 10,000). Must be verified
-  against the live API. The guard **fails loudly rather than truncating** —
-  silent truncation is the failure mode that produced a demo that looked fine and
-  answered wrong.
+  deferred is undocumented** (Anthropic documents 10,000). **Resolution: verify
+  against the live API during implementation** — one request carrying the full
+  131-tool catalog (5 core, 126 deferred) — and record the result here before the
+  PR opens. Regardless of outcome, the guard **fails loudly rather than
+  truncating**: silent truncation is the failure mode that produces a demo that
+  looks fine and answers wrong.
 - **Namespacing not adopted.** OpenAI recommends grouping deferred functions into
   namespaces of <10 for search quality. SpecR's 131 names are flat `snake_case`.
   Ship flat; treat namespacing as a measured follow-up, because renaming tools
