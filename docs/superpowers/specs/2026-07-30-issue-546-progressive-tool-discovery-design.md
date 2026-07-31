@@ -260,12 +260,19 @@ for this issue — including the regression test — is decorative.
 ## Risks and open items
 
 - **Residual `tools` array cap on the Responses API when all but the core set are
-  deferred is undocumented** (Anthropic documents 10,000). **Resolution: verify
-  against the live API during implementation** — one request carrying the full
-  131-tool catalog (5 core, 126 deferred) — and record the result here before the
-  PR opens. Regardless of outcome, the guard **fails loudly rather than
-  truncating**: silent truncation is the failure mode that produces a demo that
-  looks fine and answers wrong.
+  deferred is undocumented** (Anthropic documents 10,000). **Not verified against
+  the live API in this implementation** — the implementing agent does not make
+  live provider calls (see project convention); this is left for the user to
+  confirm with a real key before relying on the demo in production. What IS
+  verified: `providers/catalog-regression.test.mjs` proves the wire request for a
+  131-tool catalog carries 5 live function tools + 1 `tool_search` tool + 126
+  `defer_loading:true` entries — i.e. the code sends the right SHAPE. Whether the
+  Responses API accepts that shape without its own residual cap remains open.
+  Regardless of outcome, the guard **fails loudly rather than truncating**: silent
+  truncation is the failure mode that produces a demo that looks fine and answers
+  wrong. **Action for the user:** run one real `/chat` turn with
+  `OPENAI_API_KEY` + `OPENAI_MODEL=gpt-5.6-luna` set (see PR Testing checklist)
+  and record the result here.
 - **Namespacing not adopted.** OpenAI recommends grouping deferred functions into
   namespaces of <10 for search quality. SpecR's 131 names are flat `snake_case`.
   Ship flat; treat namespacing as a measured follow-up, because renaming tools
@@ -276,8 +283,32 @@ for this issue — including the regression test — is decorative.
   reviewer burden is real and is flagged up front rather than at PR time.
 - **Report quality re-verification.** Rewriting `REPORT_SYSTEM_PROMPT` for
   discovery can change report output. Reports must be spot-checked against
-  pre-change behavior, not just asserted to run.
+  pre-change behavior, not just asserted to run — left to the user, since it
+  requires a live provider call.
 - **No ADR.** Demo-only change; ADRs are `src/`-scoped in this repo.
+- **Task-7 correction found during implementation (not a plan defect this doc
+  originally flagged, but real).** The plan's literal `report-bridge.mjs`
+  replacement code, if implemented verbatim, would have introduced two
+  regressions the plan's own tests didn't catch: (1) it checked the tool-call
+  budget once AFTER an entire round's calls had already executed, silently
+  loosening `REPORT_MAX_TOOL_CALLS` for any single model turn emitting several
+  calls at once; (2) it emitted a single `{n, detail}` step event per call, but
+  `js/compose.js`'s `renderStep` requires the two-phase
+  `{n, tool, label, status:'running'}` → `{...,status:'done'|'error'}` pair to
+  key its step rows and toggle their CSS state — the literal code would have
+  shipped blank, never-resolving report steps. Both were verified by direct
+  reads of the pre-migration `report-bridge.mjs` and `js/compose.js` before
+  implementing, and the shipped code restores both behaviors while still
+  migrating onto the session interface. See `report-bridge.test.mjs`'s
+  `'runReport stops mid-batch when the per-call budget is exhausted'` and the
+  `defence in depth` test for the pinning coverage.
+- **Second plan gap found during implementation:** `server.report.test.mjs`'s
+  black-box mock still spoke the retired `POST /v1/chat/completions` wire and
+  its `tools/list` fixture carried no `REPORT_CORE_TOOLS` name, which would
+  make the real adapter's `splitCoreAndDeferred` throw on an all-deferred
+  catalog. Neither the plan's file list nor its "Notes for the implementer"
+  mentioned this file. It now mocks `POST /v1/responses` and includes
+  `list_projects` in its fixture.
 
 ## References
 
