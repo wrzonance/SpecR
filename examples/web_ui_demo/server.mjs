@@ -484,8 +484,8 @@ async function handleReport(req, res) {
         tokenBudget: REPORT_TOKEN_BUDGET,
       },
       deps: {
-        listTools: listOpenAiTools,
-        callModel: PROVIDER.makeCallModel(),
+        listTools: listMcpTools,
+        createSession: (opts) => createSession({ ...opts, provider: PROVIDER.name, config: PROVIDER.config }),
         execTool: execToolCall,
       },
     });

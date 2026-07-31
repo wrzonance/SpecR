@@ -8,23 +8,23 @@ import {
   filterReadOnlyTools,
   humanizeToolStep,
   dedupeAnchors,
-  estimateTokens,
-  buildReportMessages,
+  buildReportInput,
   runReport,
   clampToolText,
   MAX_TOOL_RESULT_CHARS,
   REPORT_SYSTEM_PROMPT,
 } from './report-bridge.mjs';
 
-test('filterReadOnlyTools keeps only read-only tools', () => {
+test('filterReadOnlyTools keeps only readOnly tools — the write tools never reach the agent', () => {
   const tools = [
-    { function: { name: 'coordination_report' }, __readOnly: true },
-    { function: { name: 'create_project' }, __readOnly: false },
-    { function: { name: 'unknown_tier' } }, // missing flag ⇒ treated as not read-only
+    { name: 'get_spec', readOnly: true },
+    { name: 'update_paragraph', readOnly: false },
+    { name: 'delete_project', readOnly: false },
   ];
-  const kept = filterReadOnlyTools(tools);
-  assert.equal(kept.length, 1);
-  assert.equal(kept[0].function.name, 'coordination_report');
+  assert.deepEqual(
+    filterReadOnlyTools(tools).map((t) => t.name),
+    ['get_spec']
+  );
 });
 
 test('humanizeToolStep gives a friendly label for known tools and falls back for unknown', () => {
@@ -51,55 +51,48 @@ test('dedupeAnchors collapses duplicates, drops empties, and caps at 50', () => 
   assert.ok(out.every((a) => typeof a.section === 'string' && a.section !== ''));
 });
 
-test('estimateTokens approximates 4 chars per token', () => {
-  assert.equal(estimateTokens([{ content: 'x'.repeat(40) }]), 10);
-  assert.equal(estimateTokens([{ content: null }, {}]), 0);
+test('buildReportInput seeds userContent with the request and scope label', () => {
+  const { userContent } = buildReportInput('compare 03 30 00', { label: 'Projects: A, B' });
+  assert.match(userContent, /03 30 00/);
+  assert.match(userContent, /A, B/);
 });
 
-test('buildReportMessages seeds system + user with the request and scope label', () => {
-  const msgs = buildReportMessages(
-    'compare 03 30 00',
-    { label: 'Projects: A, B' },
-    REPORT_SYSTEM_PROMPT
-  );
-  assert.equal(msgs[0].role, 'system');
-  assert.equal(msgs[0].content, REPORT_SYSTEM_PROMPT);
-  assert.equal(msgs.at(-1).role, 'user');
-  assert.match(msgs.at(-1).content, /03 30 00/);
-  assert.match(msgs.at(-1).content, /A, B/);
+test('buildReportInput omits the scope line when no label is given', () => {
+  const { userContent } = buildReportInput('hello', undefined);
+  assert.equal(userContent, 'hello');
 });
 
-test('buildReportMessages omits the scope line when no label is given', () => {
-  const msgs = buildReportMessages('hello', undefined, REPORT_SYSTEM_PROMPT);
-  assert.equal(msgs.length, 2);
-  assert.equal(msgs.at(-1).content, 'hello');
+test('REPORT_SYSTEM_PROMPT tells the model most tools are discovered on demand', () => {
+  assert.match(REPORT_SYSTEM_PROMPT, /not preloaded|search for them/i);
 });
+
+// A fake session honouring the shared interface, driven by a fixed queue of
+// send() replies — the same double chat-loop.test.mjs uses.
+function fakeSession(turns, { finalText = 'final', finalUsage = { inputTokens: 0, outputTokens: 0 } } = {}) {
+  return {
+    async send() {
+      return turns.shift();
+    },
+    addToolResults() {},
+    async finalize() {
+      return { text: finalText, usage: finalUsage };
+    },
+  };
+}
 
 test('runReport runs the tool loop, emits steps, returns deterministic citations', async () => {
   const anchor = { section: '03 30 00', specId: 's1', paragraphId: 'p1' };
   const deps = {
-    listTools: async () => [{ function: { name: 'compare_specs' }, __readOnly: true }],
-    callModel: async (messages) => {
-      const priorTool = messages.some((m) => m.role === 'tool');
-      return priorTool
-        ? { choices: [{ message: { role: 'assistant', content: 'Section 03 30 00 diverges.' } }] }
-        : {
-            choices: [
-              {
-                message: {
-                  role: 'assistant',
-                  content: null,
-                  tool_calls: [
-                    {
-                      id: 't1',
-                      function: { name: 'compare_specs', arguments: '{"sources":["s1","s2"]}' },
-                    },
-                  ],
-                },
-              },
-            ],
-          };
-    },
+    listTools: async () => [{ name: 'compare_specs', description: 'd', inputSchema: {}, readOnly: true }],
+    createSession: () =>
+      fakeSession([
+        {
+          text: '',
+          toolCalls: [{ id: 't1', name: 'compare_specs', args: { sources: ['s1', 's2'] } }],
+          usage: { inputTokens: 5, outputTokens: 5 },
+        },
+        { text: 'Section 03 30 00 diverges.', toolCalls: [], usage: { inputTokens: 5, outputTokens: 5 } },
+      ]),
     execTool: async () => ({ text: '{"rows":[]}', ok: true, anchors: [anchor, anchor] }),
   };
   const steps = [];
@@ -123,143 +116,84 @@ test('runReport runs the tool loop, emits steps, returns deterministic citations
   assert.equal(out.usage.toolCalls, 1);
 });
 
-test('runReport surfaces the read-only tool set to the model (no write tools reach it)', async () => {
-  let toolsSeen = null;
+test('runReport builds its session over the READ-ONLY pool only', async () => {
+  // The security invariant: if write tools were deferred rather than excluded,
+  // the model could DISCOVER and call one via tool search.
+  let seenCatalog = null;
   const deps = {
     listTools: async () => [
-      { function: { name: 'coordination_report' }, __readOnly: true },
-      { function: { name: 'create_project' }, __readOnly: false },
+      { name: 'get_spec', description: 'd', inputSchema: {}, readOnly: true },
+      { name: 'list_projects', description: 'd', inputSchema: {}, readOnly: true },
+      { name: 'update_paragraph', description: 'd', inputSchema: {}, readOnly: false },
     ],
-    callModel: async (_messages, tools) => {
-      toolsSeen = tools;
-      return { choices: [{ message: { role: 'assistant', content: 'done' } }] };
+    createSession: ({ catalog }) => {
+      seenCatalog = catalog;
+      return fakeSession([{ text: 'report body', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } }]);
     },
-    execTool: async () => ({ text: '', ok: true, anchors: [] }),
+    execTool: async () => ({ text: 'x', ok: true, anchors: [] }),
   };
   await runReport({
-    request: 'x',
-    scope: undefined,
+    request: 'compare things',
+    scope: {},
     deps,
-    limits: { maxRounds: 4, maxToolCalls: 8, tokenBudget: 100000 },
+    limits: { maxRounds: 4, maxToolCalls: 4, tokenBudget: 100000 },
     emit: () => {},
   });
   assert.deepEqual(
-    toolsSeen.map((t) => t.function.name),
-    ['coordination_report']
+    seenCatalog.map((t) => t.name),
+    ['get_spec', 'list_projects'],
+    'update_paragraph must be absent entirely, not merely deferred'
   );
 });
 
-test('runReport stops at maxToolCalls and still returns a reply', async () => {
+test('runReport enforces the execution-time allow-list as defence in depth', async () => {
+  const emitted = [];
   const deps = {
-    listTools: async () => [{ function: { name: 'list_projects' }, __readOnly: true }],
-    callModel: async (messages) => {
-      // Always ask for another tool call unless tools are disabled (final turn).
-      const toolsDisabled = messages.at(-1)?.role === 'tool' && messages.length > 8;
-      if (toolsDisabled)
-        return { choices: [{ message: { role: 'assistant', content: 'capped.' } }] };
-      return {
-        choices: [
-          {
-            message: {
-              role: 'assistant',
-              content: null,
-              tool_calls: [{ id: 't', function: { name: 'list_projects', arguments: '{}' } }],
-            },
-          },
-        ],
-      };
-    },
-    execTool: async () => ({ text: '[]', ok: true, anchors: [] }),
-  };
-  const out = await runReport({
-    request: 'x',
-    scope: undefined,
-    deps,
-    limits: { maxRounds: 10, maxToolCalls: 2, tokenBudget: 100000 },
-    emit: () => {},
-  });
-  assert.ok(out.toolCalls.length <= 2, `expected <= 2 tool calls, got ${out.toolCalls.length}`);
-  assert.equal(typeof out.reply, 'string');
-  assert.ok(out.reply.length > 0);
-});
-
-test('rejects a tool call outside the read-only allow-list — never reaches MCP', async () => {
-  // The MCP server advertises a write tool, but filterReadOnlyTools drops it, so it
-  // is NOT in the allow-list. The model nonetheless emits a call to it (hallucinated
-  // or injected via untrusted content). It must be blocked before touching MCP.
-  const execToolCalls = [];
-  const deps = {
-    listTools: async () => [
-      { function: { name: 'coordination_report' }, __readOnly: true },
-      { function: { name: 'update_paragraph' }, __readOnly: false },
-    ],
-    callModel: async (messages) => {
-      const sawToolResult = messages.some((m) => m.role === 'tool');
-      return sawToolResult
-        ? { choices: [{ message: { role: 'assistant', content: 'Done — no writes performed.' } }] }
-        : {
-            choices: [
-              {
-                message: {
-                  role: 'assistant',
-                  content: null,
-                  tool_calls: [
-                    {
-                      id: 'evil',
-                      function: {
-                        name: 'update_paragraph',
-                        arguments: '{"paragraphId":"p","text":"pwned"}',
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
-          };
-    },
-    // Spy: records every invocation. Must NEVER be called for a blocked tool.
-    execTool: async (call) => {
-      execToolCalls.push(call.function?.name);
-      return { text: 'ok', ok: true, anchors: [] };
+    listTools: async () => [{ name: 'get_spec', description: 'd', inputSchema: {}, readOnly: true }],
+    createSession: () =>
+      fakeSession(
+        [
+          { text: '', toolCalls: [{ id: 'evil', name: 'update_paragraph', args: {} }], usage: { inputTokens: 1, outputTokens: 1 } },
+          { text: 'Done — no writes performed.', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } },
+        ]
+      ),
+    // Spy: records every invocation. Must NEVER be called for a disallowed tool.
+    execTool: async () => {
+      throw new Error('execTool must never run for a disallowed tool');
     },
   };
-  const steps = [];
   const out = await runReport({
     request: 'summarize the coordination report',
     scope: undefined,
     deps,
     limits: { maxRounds: 4, maxToolCalls: 8, tokenBudget: 100000 },
-    emit: (e) => steps.push(e),
+    emit: (e) => emitted.push(e),
   });
-  // The write tool NEVER reached MCP.
-  assert.deepEqual(execToolCalls, [], 'execTool (MCP) must not be invoked for a blocked tool');
-  // The blocked call was surfaced as an error step and recorded ok:false…
+  // The write tool NEVER reached MCP; the blocked call was surfaced as an
+  // error step keyed by tool/label/status — js/compose.js's renderStep contract.
   assert.ok(
-    steps.some((s) => s.type === 'step' && s.tool === 'update_paragraph' && s.status === 'error')
+    emitted.some(
+      (e) => e.type === 'step' && e.tool === 'update_paragraph' && e.status === 'error' && /not a read-only tool/i.test(e.label ?? '')
+    )
   );
   assert.deepEqual(out.toolCalls, [{ name: 'update_paragraph', ok: false }]);
-  // …and a tool response was still fed back (the model got a second turn and
-  // answered), so blocking did not corrupt the message history.
+  // …and a tool response was still fed back (the session got a second turn and
+  // answered), so blocking did not corrupt the transcript.
   assert.match(out.reply, /no writes/i);
 });
 
-test('stops mid-batch when maxToolCalls budget is exhausted — excess calls never reach MCP', async () => {
-  // One assistant message carries FIVE tool calls; the budget is 2. Only two may
-  // execute; the rest are skipped without touching MCP, yet every tool_call_id is
-  // answered so the forced final turn has a valid message history.
+test('runReport stops mid-batch when the per-call budget is exhausted — excess calls never reach MCP', async () => {
+  // One turn carries FIVE tool calls; the budget is 2. Only two may execute;
+  // the rest are skipped WITHOUT touching MCP — proving the gate is checked
+  // per call inside the batch, not once after the whole round completes.
   const execToolCalls = [];
-  const fiveCalls = Array.from({ length: 5 }, (_, i) => ({
-    id: `c${i}`,
-    function: { name: 'list_projects', arguments: '{}' },
-  }));
+  const fiveCalls = Array.from({ length: 5 }, (_, i) => ({ id: `c${i}`, name: 'list_projects', args: {} }));
   const deps = {
-    listTools: async () => [{ function: { name: 'list_projects' }, __readOnly: true }],
-    callModel: async (_messages, tools) =>
-      tools.length === 0
-        ? { choices: [{ message: { role: 'assistant', content: 'Capped — partial scope.' } }] }
-        : {
-            choices: [{ message: { role: 'assistant', content: null, tool_calls: fiveCalls } }],
-          },
+    listTools: async () => [{ name: 'list_projects', description: 'd', inputSchema: {}, readOnly: true }],
+    createSession: () =>
+      fakeSession([{ text: '', toolCalls: fiveCalls, usage: { inputTokens: 1, outputTokens: 1 } }], {
+        finalText: 'Capped — partial scope.',
+      }),
     execTool: async (call) => {
       execToolCalls.push(call.id);
       return { text: '[]', ok: true, anchors: [] };
@@ -273,9 +207,7 @@ test('stops mid-batch when maxToolCalls budget is exhausted — excess calls nev
     limits: { maxRounds: 6, maxToolCalls: 2, tokenBudget: 100000 },
     emit: (e) => steps.push(e),
   });
-  // At most the budget's worth of calls actually hit MCP.
   assert.equal(execToolCalls.length, 2, `expected 2 MCP calls, got ${execToolCalls.length}`);
-  // The over-budget calls were surfaced as skip steps.
   const skipped = steps.filter((s) => s.type === 'step' && /budget/i.test(s.label || ''));
   assert.equal(skipped.length, 3);
   assert.equal(typeof out.reply, 'string');
@@ -291,29 +223,22 @@ test('clampToolText truncates an oversized MCP result with an explicit marker', 
   assert.match(out, /truncated 500 chars/);
 });
 
-test('runReport clamps a broad tool result so it cannot blow the token budget', async () => {
-  const huge = 'y'.repeat(200_000); // ~50k tokens unclamped; clamped it stays small
+test('runReport tracks real provider usage and stops once the token budget is exceeded', async () => {
   const deps = {
-    listTools: async () => [{ function: { name: 'coordination_report' }, __readOnly: true }],
-    callModel: async (messages) => {
-      const sawTool = messages.some((m) => m.role === 'tool');
-      return sawTool
-        ? { choices: [{ message: { role: 'assistant', content: 'summary.' } }] }
-        : {
-            choices: [
-              {
-                message: {
-                  role: 'assistant',
-                  content: null,
-                  tool_calls: [
-                    { id: 't', function: { name: 'coordination_report', arguments: '{}' } },
-                  ],
-                },
-              },
-            ],
-          };
-    },
-    execTool: async () => ({ text: huge, ok: true, anchors: [] }),
+    listTools: async () => [{ name: 'coordination_report', description: 'd', inputSchema: {}, readOnly: true }],
+    createSession: () =>
+      fakeSession(
+        [
+          {
+            text: '',
+            toolCalls: [{ id: 't', name: 'coordination_report', args: {} }],
+            usage: { inputTokens: 90000, outputTokens: 40000 },
+          },
+          { text: '', toolCalls: [{ id: 't2', name: 'coordination_report', args: {} }], usage: { inputTokens: 1, outputTokens: 1 } },
+        ],
+        { finalText: 'summary.' }
+      ),
+    execTool: async () => ({ text: 'x', ok: true, anchors: [] }),
   };
   const out = await runReport({
     request: 'coordination report',
@@ -322,28 +247,31 @@ test('runReport clamps a broad tool result so it cannot blow the token budget', 
     limits: { maxRounds: 4, maxToolCalls: 8, tokenBudget: 120000 },
     emit: () => {},
   });
-  assert.ok(out.usage.tokens < 4000, `tokens should stay bounded, got ${out.usage.tokens}`);
+  assert.equal(out.usage.tokens, 130000, 'usage.tokens should be the real provider total, not an estimate');
   assert.match(out.reply, /summary/);
 });
 
 test('runReport reports the ACTUAL rounds used after a budget break, not the max', async () => {
-  // Budget (2 calls) trips at round 2 of a max-10 loop; usage.rounds must read 2.
+  // Budget (2 calls) trips after round 2 of a max-10 loop; usage.rounds must read 2.
   const deps = {
-    listTools: async () => [{ function: { name: 'list_projects' }, __readOnly: true }],
-    callModel: async (_messages, tools) =>
-      tools.length === 0
-        ? { choices: [{ message: { role: 'assistant', content: 'capped.' } }] }
-        : {
-            choices: [
-              {
-                message: {
-                  role: 'assistant',
-                  content: null,
-                  tool_calls: [{ id: 't', function: { name: 'list_projects', arguments: '{}' } }],
-                },
-              },
-            ],
-          },
+    listTools: async () => [{ name: 'list_projects', description: 'd', inputSchema: {}, readOnly: true }],
+    createSession: () => {
+      let round = 0;
+      return {
+        async send() {
+          round += 1;
+          return {
+            text: '',
+            toolCalls: [{ id: `t${round}`, name: 'list_projects', args: {} }],
+            usage: { inputTokens: 1, outputTokens: 1 },
+          };
+        },
+        addToolResults() {},
+        async finalize() {
+          return { text: 'capped.', usage: { inputTokens: 0, outputTokens: 0 } };
+        },
+      };
+    },
     execTool: async () => ({ text: '[]', ok: true, anchors: [] }),
   };
   const out = await runReport({
