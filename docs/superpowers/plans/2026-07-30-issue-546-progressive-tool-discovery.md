@@ -858,6 +858,48 @@ test('all tool results for one turn land in a single user message', async () => 
   assert.equal(userTurns[0].content.length, 2);
 });
 
+test('a history starting on an assistant turn has that turn dropped (#457 regression)', async () => {
+  // chat.js sends history.slice(-CONTEXT_WINDOW), which can cut the transcript
+  // so it opens on an assistant reply. The Messages API requires the first
+  // message to be a user turn. PR #457 fixed this in the module this adapter
+  // replaces — the guard must survive the migration.
+  const fetchImpl = stubFetch([textResponse('ok')]);
+  const session = createAnthropicSession({
+    system: 'SYS',
+    userMessages: [
+      { role: 'assistant', content: 'earlier reply' },
+      { role: 'user', content: 'real question' },
+    ],
+    catalog,
+    coreToolNames: ['list_projects'],
+    config: CONFIG,
+    fetchImpl,
+  });
+  await session.send();
+  const { messages } = fetchImpl.calls[0].body;
+  assert.equal(messages[0].role, 'user');
+  assert.equal(messages[0].content, 'real question');
+});
+
+test('consecutive user turns merge — the API requires alternating roles (#457)', async () => {
+  const fetchImpl = stubFetch([textResponse('ok')]);
+  const session = createAnthropicSession({
+    system: 'SYS',
+    userMessages: [
+      { role: 'user', content: 'first' },
+      { role: 'user', content: 'second' },
+    ],
+    catalog,
+    coreToolNames: ['list_projects'],
+    config: CONFIG,
+    fetchImpl,
+  });
+  await session.send();
+  const { messages } = fetchImpl.calls[0].body;
+  assert.equal(messages.length, 1);
+  assert.match(messages[0].content, /first[\s\S]*second/);
+});
+
 test('finalize keeps tools declared and suppresses new calls', async () => {
   const fetchImpl = stubFetch([textResponse('final')]);
   const result = await newSession(fetchImpl).finalize();
@@ -900,13 +942,30 @@ function buildTools(catalog, coreToolNames) {
   ];
 }
 
+// The Messages API requires alternating roles starting on a user turn. The
+// browser sends a fixed-size slice of its transcript (chat.js history.slice), so
+// the history can open on an assistant reply or carry back-to-back user turns
+// after a failed send. Normalizing here preserves the fix from PR #457, which
+// lived in the module this adapter replaces.
+function normalizeHistory(userMessages) {
+  const out = [];
+  for (const message of userMessages) {
+    const role = message.role === 'assistant' ? 'assistant' : 'user';
+    const previous = out[out.length - 1];
+    if (role === 'user' && previous?.role === 'user') {
+      previous.content = `${previous.content}\n\n${message.content}`;
+      continue;
+    }
+    out.push({ role, content: message.content });
+  }
+  while (out.length > 0 && out[0].role === 'assistant') out.shift();
+  return out;
+}
+
 export function createAnthropicSession({ system, userMessages, catalog, coreToolNames, config, fetchImpl }) {
   const doFetch = fetchImpl || fetch;
   const tools = buildTools(catalog, coreToolNames);
-  const messages = userMessages.map((m) => ({
-    role: m.role === 'assistant' ? 'assistant' : 'user',
-    content: m.content,
-  }));
+  const messages = normalizeHistory(userMessages);
 
   async function post(extra) {
     const controller = new AbortController();
@@ -2115,6 +2174,18 @@ gh-project-move 546 "In review"
 ```
 
 ---
+
+## Prior art (read before implementing)
+
+- **PR #453** (`feat(demo): Anthropic API key + model support`) created
+  `llm-providers.mjs`, the module Task 6 deletes. Its translation approach is
+  superseded, not wrong — it predates native tool search.
+- **PR #457** (`fix(demo): drop leading assistant turns so sliced Anthropic chat
+  histories stay valid`) fixed a live bug inside that module: `chat.js` sends
+  `history.slice(-CONTEXT_WINDOW)`, which can open the transcript on an assistant
+  reply, and the Messages API rejects that. **Deleting the module must not delete
+  the fix** — Task 4's `normalizeHistory` carries it forward and two tests pin it.
+  Any reviewer should check that guard survived.
 
 ## Notes for the implementer
 
