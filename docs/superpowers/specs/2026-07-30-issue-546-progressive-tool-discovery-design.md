@@ -1,7 +1,8 @@
 # Progressive tool discovery for the demo chat bridge (#546)
 
 **Status:** approved, pending implementation plan
-**Scope:** `examples/web_ui_demo/` only — no `src/` changes
+**Scope:** `examples/web_ui_demo/` plus a CI gate in `.github/workflows/ci.yml` —
+no `src/` changes
 **Issue:** [#546](https://github.com/wrzonance/SpecR/issues/546)
 
 ## Problem
@@ -127,6 +128,40 @@ search.
 Core tools absent from the catalog (tier-gated away) must not produce phantom
 entries; the partition is computed against what `tools/list` actually returned.
 
+### `/report` is in scope
+
+An earlier scoping call limited this work to `/chat`. That is not achievable:
+`server.mjs:595-598` wires `runReport` to the same `PROVIDER.makeCallModel()` and
+`listOpenAiTools` this design deletes, and `report-bridge.mjs` is fully coupled to
+the chat-completions IR (`completion.choices[0].message`, `.tool_calls`,
+`role:'tool'` messages). **Revised decision: both surfaces move to the session
+interface and both get progressive discovery.**
+
+**Security invariant — the report catalog is the read-only pool, not the full
+catalog.** `filterReadOnlyTools` exists so the reporting agent is structurally
+incapable of mutating state during composition. If `/report` deferred all 131
+tools, the model could *discover and call a write tool* — a real regression, not a
+style issue. The partition for `/report` is therefore computed over
+`filterReadOnlyTools(catalog)` (64 tools), and the execution-time `allowed`
+allow-list stays as defense in depth.
+
+**Report core set (3):** `list_projects`, `list_sections`, `search_library` —
+exactly the discovery tools `REPORT_SYSTEM_PROMPT` already instructs the model to
+use first.
+
+`REPORT_SYSTEM_PROMPT` needs less rework than feared. It already enumerates the
+grounded tools by name, which is precisely what both vendors recommend for
+discoverability ("add a system prompt section describing available tool
+categories"). It needs only a note that those tools are found by searching, not
+preloaded.
+
+**Token accounting changes.** `estimateTokens` walks message string content at
+≈4 chars/token; opaque adapter transcripts make that impossible. The session
+exposes real `usage` from each provider response instead. This is more accurate,
+but `REPORT_TOKEN_BUDGET` (120,000) was calibrated against the approximation and
+must be re-checked against real numbers — which will fall sharply once tool
+definitions leave the prompt.
+
 ### System prompt
 
 Both vendors recommend naming the available tool categories so the model knows
@@ -205,6 +240,23 @@ they cover.
 Manual verification against both providers using the reported failing query:
 *"show me the submittals section in the architectural lighting control system spec"*.
 
+### CI gate
+
+**CI runs none of the demo's tests.** `.github/workflows/ci.yml` has no reference
+to `examples/`, yet the demo carries **306 passing `node --test` tests**. That gap
+is the systemic reason a completely dead chat sidebar reached a user: the demo has
+real coverage and no enforcement.
+
+This PR adds the gate:
+
+```yaml
+- name: Demo unit tests
+  run: node --test "examples/web_ui_demo/*.test.mjs"
+```
+
+All 306 pass today, so it goes green on arrival. Without it, every test written
+for this issue — including the regression test — is decorative.
+
 ## Risks and open items
 
 - **Residual `tools` array cap on the Responses API when all but the core set are
@@ -218,8 +270,13 @@ Manual verification against both providers using the reported failing query:
   namespaces of <10 for search quality. SpecR's 131 names are flat `snake_case`.
   Ship flat; treat namespacing as a measured follow-up, because renaming tools
   ripples into `contract-map.ts` and the CI parity gates.
-- **LOC.** Likely near or over the 500-line `loc-check` warn threshold even with
-  `llm-providers.mjs` deleted. Warn-only; flagged for the reviewer up front.
+- **LOC.** Will **exceed** the 500-line `loc-check` warn threshold, now that both
+  surfaces migrate. Warn-only, and the change is genuinely one indivisible unit —
+  the IR cannot be deleted for one caller and kept for the other — but the
+  reviewer burden is real and is flagged up front rather than at PR time.
+- **Report quality re-verification.** Rewriting `REPORT_SYSTEM_PROMPT` for
+  discovery can change report output. Reports must be spot-checked against
+  pre-change behavior, not just asserted to run.
 - **No ADR.** Demo-only change; ADRs are `src/`-scoped in this repo.
 
 ## References
