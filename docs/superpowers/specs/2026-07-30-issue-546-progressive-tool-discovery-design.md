@@ -108,10 +108,21 @@ examples/web_ui_demo/
 into an always-loaded core set and defers the rest; each adapter renders that
 partition into its own wire format.
 
-**Core set (4, non-deferred):** `list_projects`, `list_sections`,
-`search_library`, `get_spec`. Both vendors recommend 3–5 always-loaded tools, and
-both reject an all-deferred request — the core set is a protocol requirement, not
-an optimization.
+**Core set (5, non-deferred):** `list_projects`, `list_sections`,
+`search_library`, `get_spec`, `get_references`. Both vendors recommend 3–5
+always-loaded tools, and both reject an all-deferred request — the core set is a
+protocol requirement, not an optimization.
+
+`get_references` earns its slot from usage, not architecture: the chat greeting
+(`index.html:735`) advertises three example questions, and *"which sections cite
+09 22 00?"* is one of them. A third advertised question — *"are there open review
+comments?"* (`open_comments_report`) — was considered and **deliberately left
+deferred** to hold the core set at five. It costs one discovery round on first
+use, which is the accepted trade.
+
+Core slots buy a fast, reliable *first* turn at the cost of context on every
+request. They do not affect capability: every deferred tool stays reachable via
+search.
 
 Core tools absent from the catalog (tier-gated away) must not produce phantom
 entries; the partition is computed against what `tools/list` actually returned.
