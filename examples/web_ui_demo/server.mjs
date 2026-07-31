@@ -6,7 +6,8 @@ import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import { runReport } from './report-bridge.mjs';
-import { fromAnthropicResponse, toAnthropicRequest, toAnthropicTools } from './llm-providers.mjs';
+import { createSession, CHAT_CORE_TOOLS } from './providers/index.mjs';
+import { runChat } from './chat-loop.mjs';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 
@@ -246,6 +247,9 @@ const SYSTEM_PROMPT = [
   'search_library, then call the specific tool. Cross-references need a projectId.',
   'Keep answers concise and cite section numbers (e.g. "09 22 00") where relevant.',
   'If a tool returns an error or empty result, say so plainly rather than guessing.',
+  'Most tools are discovered on demand — search for them by capability. Categories:',
+  'projects, specs and paragraphs, packages and issued revisions, headers/footers,',
+  'language rules, coordination and reporting, templates and numbering profiles.',
 ].join(' ');
 
 let mcpRequestId = 0;
@@ -276,43 +280,35 @@ async function mcpRpc(method, params) {
   return parsed.result;
 }
 
-// Shape one MCP tool as an OpenAI function tool. inputSchema is already JSON
-// Schema on the wire, so it maps straight to `function.parameters`. `__readOnly`
-// carries the server's readOnlyHint annotation so the reporting bridge can drop
-// every write/destructive tool before handing the set to the model.
-function toOpenAiTool(tool) {
+// Shape one MCP tool for the adapters. inputSchema is already JSON Schema on the
+// wire. readOnly carries the server's readOnlyHint so /report can restrict its
+// catalog to tools that cannot mutate state.
+function toMcpTool(tool) {
   return {
-    type: 'function',
-    function: {
-      name: tool.name,
-      description: tool.description || '',
-      parameters:
-        tool.inputSchema && typeof tool.inputSchema === 'object'
-          ? tool.inputSchema
-          : { type: 'object', properties: {} },
-    },
-    __readOnly: tool.annotations?.readOnlyHint === true,
+    name: tool.name,
+    description: tool.description || '',
+    inputSchema:
+      tool.inputSchema && typeof tool.inputSchema === 'object'
+        ? tool.inputSchema
+        : { type: 'object', properties: {} },
+    readOnly: tool.annotations?.readOnlyHint === true,
   };
 }
 
-// Discover every MCP tool and shape it for OpenAI. Used by the free-form /chat.
-async function listOpenAiTools() {
+// Discover every MCP tool. Used by both /chat and /report (the latter narrows
+// it with filterReadOnlyTools before building a session).
+async function listMcpTools() {
   const result = await mcpRpc('tools/list', {});
   const tools = Array.isArray(result?.tools) ? result.tools : [];
-  return tools.map(toOpenAiTool);
+  return tools.map(toMcpTool);
 }
 
-// Execute one OpenAI tool_call against MCP; return the text result (truncated)
-// and whether it succeeded. Never throws — a failed tool becomes a tool message.
+// Execute one session-shaped tool call ({id, name, args}) against MCP; return
+// the text result (truncated) and whether it succeeded. Never throws — a
+// failed tool becomes a tool result the model can react to.
 async function execToolCall(call) {
-  let args = {};
   try {
-    args = JSON.parse(call.function?.arguments || '{}');
-  } catch {
-    args = {};
-  }
-  try {
-    const result = await mcpRpc('tools/call', { name: call.function?.name, arguments: args });
+    const result = await mcpRpc('tools/call', { name: call.name, arguments: call.args });
     const text =
       (result?.content || [])
         .map((part) => part.text)
@@ -326,159 +322,32 @@ async function execToolCall(call) {
   }
 }
 
-async function callOpenAI(messages, tools) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60_000);
-  try {
-    const body = { model: OPENAI_MODEL, messages };
-    // Send only the OpenAI-recognized shape — our internal `__readOnly` flag must
-    // not reach the API (it rejects unrecognized tool keys).
-    if (tools && tools.length > 0) {
-      body.tools = tools.map(({ type, function: fn }) => ({ type, function: fn }));
-    }
-    const res = await fetch(`${OPENAI_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      throw new Error(`OpenAI ${res.status}: ${detail.slice(0, 300)}`);
-    }
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Anthropic Messages API call, symmetric to callOpenAI. Accepts and returns
-// the demo's internal OpenAI chat-completions shapes; llm-providers.mjs
-// translates at the wire. toolChoice is Anthropic-shaped ({type:'none'}) or
-// undefined to let the model decide.
-async function callAnthropic(openAiMessages, openAiTools, toolChoice) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60_000);
-  try {
-    const { system, messages } = toAnthropicRequest(openAiMessages);
-    const body = { model: ANTHROPIC_MODEL, max_tokens: ANTHROPIC_MAX_TOKENS, messages };
-    if (system) body.system = system;
-    const tools = toAnthropicTools(openAiTools);
-    if (tools.length > 0) {
-      body.tools = tools;
-      if (toolChoice) body.tool_choice = toolChoice;
-    }
-    const res = await fetch(`${ANTHROPIC_BASE}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': ANTHROPIC_VERSION,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      throw new Error(`Anthropic ${res.status}: ${detail.slice(0, 300)}`);
-    }
-    return fromAnthropicResponse(await res.json());
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Per-request callModel factory. The Anthropic wrapper remembers the last
-// non-empty tool list: the loops signal "final answer, no more tools" by
-// passing empty tools, but the Messages API rejects tool_use/tool_result
-// history when the request defines no tools — so the wrapper re-sends the
-// tools it saw and forbids new calls with tool_choice {type:'none'}.
-function makeAnthropicCallModel() {
-  let lastTools = [];
-  return (messages, tools) => {
-    if (tools && tools.length > 0) {
-      lastTools = tools;
-      return callAnthropic(messages, tools, undefined);
-    }
-    return callAnthropic(messages, lastTools, { type: 'none' });
-  };
-}
-
-// The single active provider, resolved once at boot from LLM_PROVIDER.
+// The single active provider, resolved once at boot from LLM_PROVIDER. Each
+// entry's `config` is createSession's config param verbatim.
 const PROVIDERS = {
   openai: {
     name: 'openai',
     model: OPENAI_MODEL,
     keyName: 'OPENAI_API_KEY',
     hasKey: OPENAI_API_KEY !== '',
-    makeCallModel: () => (messages, tools) => callOpenAI(messages, tools),
+    config: { model: OPENAI_MODEL, apiKey: OPENAI_API_KEY, baseUrl: OPENAI_BASE, timeoutMs: 60_000 },
   },
   anthropic: {
     name: 'anthropic',
     model: ANTHROPIC_MODEL,
     keyName: 'ANTHROPIC_API_KEY',
     hasKey: ANTHROPIC_API_KEY !== '',
-    makeCallModel: makeAnthropicCallModel,
+    config: {
+      model: ANTHROPIC_MODEL,
+      apiKey: ANTHROPIC_API_KEY,
+      baseUrl: ANTHROPIC_BASE,
+      version: ANTHROPIC_VERSION,
+      maxTokens: ANTHROPIC_MAX_TOKENS,
+      timeoutMs: 60_000,
+    },
   },
 };
 const PROVIDER = PROVIDERS[LLM_PROVIDER];
-
-// Collapse duplicate navigation anchors (a search may return the same section
-// many times) and cap the payload so a broad answer can't flood the UI.
-function dedupeAnchors(anchors) {
-  const seen = new Set();
-  const out = [];
-  for (const a of anchors) {
-    if (!a || typeof a.section !== 'string' || a.section === '') continue;
-    const key = `${a.section}|${a.specId ?? ''}|${a.paragraphId ?? ''}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(a);
-    if (out.length >= 50) break;
-  }
-  return out;
-}
-
-// The tool-calling loop: ask the active provider's model, run any tool calls against MCP, feed results
-// back, repeat until the model answers with plain text or we hit the round cap.
-// The answering turn's navigation anchors (last successful enriched tool call)
-// ride back as `focus` so the browser can highlight the sections in the active tab.
-async function runChat(userMessages, callModel) {
-  const tools = await listOpenAiTools();
-  const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...userMessages];
-  const toolCalls = [];
-  let focusAnchors = [];
-  for (let round = 0; round < CHAT_MAX_TOOL_ROUNDS; round++) {
-    const completion = await callModel(messages, tools);
-    const message = completion.choices?.[0]?.message;
-    if (!message) throw new Error('model returned no message');
-    messages.push(message);
-    const calls = message.tool_calls;
-    if (!calls || calls.length === 0) {
-      return {
-        reply: message.content || '',
-        toolCalls,
-        focus: { anchors: dedupeAnchors(focusAnchors) },
-      };
-    }
-    for (const call of calls) {
-      const { text, ok, anchors } = await execToolCall(call);
-      toolCalls.push({ name: call.function?.name, ok });
-      if (ok && anchors.length > 0) focusAnchors = anchors; // last enriched answer wins
-      messages.push({ role: 'tool', tool_call_id: call.id, content: text });
-    }
-  }
-  // Round cap reached — force a final answer with tools disabled.
-  const finalMessage = (await callModel(messages, undefined)).choices?.[0]?.message;
-  return {
-    reply: finalMessage?.content || 'Reached the tool-call limit.',
-    toolCalls,
-    focus: { anchors: dedupeAnchors(focusAnchors) },
-  };
-}
 
 // Keep only well-formed user/assistant turns with string content, length-capped.
 function sanitizeMessages(messages) {
@@ -523,13 +392,31 @@ async function handleChat(req, res) {
     return;
   }
   try {
-    const { reply, toolCalls, focus } = await runChat(clean, PROVIDER.makeCallModel());
+    const catalog = await listMcpTools();
+    const session = createSession({
+      provider: PROVIDER.name,
+      system: SYSTEM_PROMPT,
+      userMessages: clean,
+      catalog,
+      coreToolNames: CHAT_CORE_TOOLS,
+      config: PROVIDER.config,
+    });
+    const { reply, toolCalls, focus } = await runChat({
+      session,
+      execTool: execToolCall,
+      maxRounds: CHAT_MAX_TOOL_ROUNDS,
+    });
     sendJson(res, 200, {
       success: true,
       data: { reply, toolCalls, focus, provider: PROVIDER.name, model: PROVIDER.model },
     });
   } catch (err) {
-    sendJson(res, 502, { success: false, error: `chat failed: ${err.message}` });
+    sendJson(res, 502, {
+      success: false,
+      code: err.code ?? null,
+      error: err.message,
+      detail: err.detail ?? '',
+    });
   }
 }
 
