@@ -135,8 +135,15 @@ async function processCall(call, ctx, limits, deps) {
       label: `Skipped ${call.name} — call budget reached`,
       status: 'error',
     });
-    ctx.toolCalls.push({ name: call.name, ok: false });
-    return { id: call.id, text: 'tool error: report call budget reached; this call was not executed.' };
+    // Not pushed to ctx.toolCalls: this call never reached MCP, so counting it
+    // would inflate the reported "grounded call" total (out.toolCalls / usage.
+    // toolCalls) beyond the calls actually executed. The overBudget gate above
+    // is driven by the same counter and is monotonic once tripped, so omitting
+    // skipped calls here does not change which calls get skipped.
+    return {
+      id: call.id,
+      text: 'tool error: report call budget reached; this call was not executed.',
+    };
   }
   if (!ctx.allowed.has(call.name)) {
     ctx.emit({
@@ -152,7 +159,13 @@ async function processCall(call, ctx, limits, deps) {
       text: `tool error: "${call.name}" is not an available read-only reporting tool; it was blocked and not executed.`,
     };
   }
-  const step = { type: 'step', n, tool: call.name, label: humanizeToolStep(call.name, call.args), status: 'running' };
+  const step = {
+    type: 'step',
+    n,
+    tool: call.name,
+    label: humanizeToolStep(call.name, call.args),
+    status: 'running',
+  };
   ctx.emit(step);
   const { text, ok, anchors } = await deps.execTool(call);
   ctx.toolCalls.push({ name: call.name, ok });
@@ -197,8 +210,11 @@ export async function runReport({ request, scope, deps, limits, emit }) {
     if (overBudget(ctx, limits)) break;
   }
   // Guardrail or round cap tripped — force ONE closing answer with new tool
-  // calls suppressed. Report the actual rounds used, not the max.
+  // calls suppressed. Report the actual rounds used, not the max. This forced
+  // call costs real provider tokens too, so it counts toward ctx.tokens just
+  // like every session.send() call above.
   const final = await session.finalize();
+  ctx.tokens += (final.usage?.inputTokens ?? 0) + (final.usage?.outputTokens ?? 0);
   return finish(final.text || 'Reached the report scope limit.', ctx, roundsUsed);
 }
 

@@ -68,7 +68,10 @@ test('REPORT_SYSTEM_PROMPT tells the model most tools are discovered on demand',
 
 // A fake session honouring the shared interface, driven by a fixed queue of
 // send() replies — the same double chat-loop.test.mjs uses.
-function fakeSession(turns, { finalText = 'final', finalUsage = { inputTokens: 0, outputTokens: 0 } } = {}) {
+function fakeSession(
+  turns,
+  { finalText = 'final', finalUsage = { inputTokens: 0, outputTokens: 0 } } = {}
+) {
   return {
     async send() {
       return turns.shift();
@@ -83,7 +86,9 @@ function fakeSession(turns, { finalText = 'final', finalUsage = { inputTokens: 0
 test('runReport runs the tool loop, emits steps, returns deterministic citations', async () => {
   const anchor = { section: '03 30 00', specId: 's1', paragraphId: 'p1' };
   const deps = {
-    listTools: async () => [{ name: 'compare_specs', description: 'd', inputSchema: {}, readOnly: true }],
+    listTools: async () => [
+      { name: 'compare_specs', description: 'd', inputSchema: {}, readOnly: true },
+    ],
     createSession: () =>
       fakeSession([
         {
@@ -91,7 +96,11 @@ test('runReport runs the tool loop, emits steps, returns deterministic citations
           toolCalls: [{ id: 't1', name: 'compare_specs', args: { sources: ['s1', 's2'] } }],
           usage: { inputTokens: 5, outputTokens: 5 },
         },
-        { text: 'Section 03 30 00 diverges.', toolCalls: [], usage: { inputTokens: 5, outputTokens: 5 } },
+        {
+          text: 'Section 03 30 00 diverges.',
+          toolCalls: [],
+          usage: { inputTokens: 5, outputTokens: 5 },
+        },
       ]),
     execTool: async () => ({ text: '{"rows":[]}', ok: true, anchors: [anchor, anchor] }),
   };
@@ -128,7 +137,9 @@ test('runReport builds its session over the READ-ONLY pool only', async () => {
     ],
     createSession: ({ catalog }) => {
       seenCatalog = catalog;
-      return fakeSession([{ text: 'report body', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } }]);
+      return fakeSession([
+        { text: 'report body', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } },
+      ]);
     },
     execTool: async () => ({ text: 'x', ok: true, anchors: [] }),
   };
@@ -149,14 +160,22 @@ test('runReport builds its session over the READ-ONLY pool only', async () => {
 test('runReport enforces the execution-time allow-list as defence in depth', async () => {
   const emitted = [];
   const deps = {
-    listTools: async () => [{ name: 'get_spec', description: 'd', inputSchema: {}, readOnly: true }],
+    listTools: async () => [
+      { name: 'get_spec', description: 'd', inputSchema: {}, readOnly: true },
+    ],
     createSession: () =>
-      fakeSession(
-        [
-          { text: '', toolCalls: [{ id: 'evil', name: 'update_paragraph', args: {} }], usage: { inputTokens: 1, outputTokens: 1 } },
-          { text: 'Done — no writes performed.', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 } },
-        ]
-      ),
+      fakeSession([
+        {
+          text: '',
+          toolCalls: [{ id: 'evil', name: 'update_paragraph', args: {} }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        {
+          text: 'Done — no writes performed.',
+          toolCalls: [],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ]),
     // Spy: records every invocation. Must NEVER be called for a disallowed tool.
     execTool: async () => {
       throw new Error('execTool must never run for a disallowed tool');
@@ -173,7 +192,11 @@ test('runReport enforces the execution-time allow-list as defence in depth', asy
   // error step keyed by tool/label/status — js/compose.js's renderStep contract.
   assert.ok(
     emitted.some(
-      (e) => e.type === 'step' && e.tool === 'update_paragraph' && e.status === 'error' && /not a read-only tool/i.test(e.label ?? '')
+      (e) =>
+        e.type === 'step' &&
+        e.tool === 'update_paragraph' &&
+        e.status === 'error' &&
+        /not a read-only tool/i.test(e.label ?? '')
     )
   );
   assert.deepEqual(out.toolCalls, [{ name: 'update_paragraph', ok: false }]);
@@ -187,13 +210,22 @@ test('runReport stops mid-batch when the per-call budget is exhausted — excess
   // the rest are skipped WITHOUT touching MCP — proving the gate is checked
   // per call inside the batch, not once after the whole round completes.
   const execToolCalls = [];
-  const fiveCalls = Array.from({ length: 5 }, (_, i) => ({ id: `c${i}`, name: 'list_projects', args: {} }));
+  const fiveCalls = Array.from({ length: 5 }, (_, i) => ({
+    id: `c${i}`,
+    name: 'list_projects',
+    args: {},
+  }));
   const deps = {
-    listTools: async () => [{ name: 'list_projects', description: 'd', inputSchema: {}, readOnly: true }],
+    listTools: async () => [
+      { name: 'list_projects', description: 'd', inputSchema: {}, readOnly: true },
+    ],
     createSession: () =>
-      fakeSession([{ text: '', toolCalls: fiveCalls, usage: { inputTokens: 1, outputTokens: 1 } }], {
-        finalText: 'Capped — partial scope.',
-      }),
+      fakeSession(
+        [{ text: '', toolCalls: fiveCalls, usage: { inputTokens: 1, outputTokens: 1 } }],
+        {
+          finalText: 'Capped — partial scope.',
+        }
+      ),
     execTool: async (call) => {
       execToolCalls.push(call.id);
       return { text: '[]', ok: true, anchors: [] };
@@ -212,6 +244,14 @@ test('runReport stops mid-batch when the per-call budget is exhausted — excess
   assert.equal(skipped.length, 3);
   assert.equal(typeof out.reply, 'string');
   assert.ok(out.reply.length > 0);
+  // The reported "grounded call" count must reflect calls that actually
+  // reached MCP, not the 3 calls skipped for being over budget.
+  assert.equal(
+    out.toolCalls.length,
+    2,
+    `reported toolCalls must exclude budget-skipped calls, got ${out.toolCalls.length}`
+  );
+  assert.equal(out.usage.toolCalls, 2);
 });
 
 test('clampToolText truncates an oversized MCP result with an explicit marker', () => {
@@ -225,7 +265,9 @@ test('clampToolText truncates an oversized MCP result with an explicit marker', 
 
 test('runReport tracks real provider usage and stops once the token budget is exceeded', async () => {
   const deps = {
-    listTools: async () => [{ name: 'coordination_report', description: 'd', inputSchema: {}, readOnly: true }],
+    listTools: async () => [
+      { name: 'coordination_report', description: 'd', inputSchema: {}, readOnly: true },
+    ],
     createSession: () =>
       fakeSession(
         [
@@ -234,7 +276,11 @@ test('runReport tracks real provider usage and stops once the token budget is ex
             toolCalls: [{ id: 't', name: 'coordination_report', args: {} }],
             usage: { inputTokens: 90000, outputTokens: 40000 },
           },
-          { text: '', toolCalls: [{ id: 't2', name: 'coordination_report', args: {} }], usage: { inputTokens: 1, outputTokens: 1 } },
+          {
+            text: '',
+            toolCalls: [{ id: 't2', name: 'coordination_report', args: {} }],
+            usage: { inputTokens: 1, outputTokens: 1 },
+          },
         ],
         { finalText: 'summary.' }
       ),
@@ -247,14 +293,57 @@ test('runReport tracks real provider usage and stops once the token budget is ex
     limits: { maxRounds: 4, maxToolCalls: 8, tokenBudget: 120000 },
     emit: () => {},
   });
-  assert.equal(out.usage.tokens, 130000, 'usage.tokens should be the real provider total, not an estimate');
+  assert.equal(
+    out.usage.tokens,
+    130000,
+    'usage.tokens should be the real provider total, not an estimate'
+  );
   assert.match(out.reply, /summary/);
+});
+
+test("runReport counts session.finalize()'s own usage toward the reported token total", async () => {
+  // The forced closing call via session.finalize() costs real input/output
+  // tokens too — omitting it under-reports the cost/scope guardrail metric
+  // that js/compose.js's renderUsage surfaces to the user.
+  const deps = {
+    listTools: async () => [
+      { name: 'list_projects', description: 'd', inputSchema: {}, readOnly: true },
+    ],
+    createSession: () => ({
+      async send() {
+        return {
+          text: '',
+          toolCalls: [{ id: 't1', name: 'list_projects', args: {} }],
+          usage: { inputTokens: 100000, outputTokens: 25000 }, // trips the 120000 token budget
+        };
+      },
+      addToolResults() {},
+      async finalize() {
+        return { text: 'final summary.', usage: { inputTokens: 3000, outputTokens: 1500 } };
+      },
+    }),
+    execTool: async () => ({ text: 'x', ok: true, anchors: [] }),
+  };
+  const out = await runReport({
+    request: 'x',
+    scope: undefined,
+    deps,
+    limits: { maxRounds: 4, maxToolCalls: 8, tokenBudget: 120000 },
+    emit: () => {},
+  });
+  assert.equal(
+    out.usage.tokens,
+    129500,
+    "usage.tokens must include finalize()'s own token cost, not just prior rounds"
+  );
 });
 
 test('runReport reports the ACTUAL rounds used after a budget break, not the max', async () => {
   // Budget (2 calls) trips after round 2 of a max-10 loop; usage.rounds must read 2.
   const deps = {
-    listTools: async () => [{ name: 'list_projects', description: 'd', inputSchema: {}, readOnly: true }],
+    listTools: async () => [
+      { name: 'list_projects', description: 'd', inputSchema: {}, readOnly: true },
+    ],
     createSession: () => {
       let round = 0;
       return {
