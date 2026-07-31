@@ -3505,6 +3505,30 @@ body {
   font-style: italic;
 }
 
+.chat-bubble.is-error {
+  border-left: 3px solid var(--danger, #c0392b);
+}
+
+.chat-error-detail {
+  margin-top: 0.5rem;
+  font-size: 0.85em;
+}
+
+.chat-error-detail summary {
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.chat-error-detail pre {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface-sunken, rgba(0, 0, 0, 0.06));
+  border-radius: 4px;
+}
+
 .chat-role {
   font-family: var(--mono);
   font-size: 0.56rem;
