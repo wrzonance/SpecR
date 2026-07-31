@@ -241,7 +241,7 @@ const PROVIDERS = {
 };
 const PROVIDER = PROVIDERS[LLM_PROVIDER];
 
-const mcpBridge = createMcpBridge(API_BASE);
+const mcpBridge = createMcpBridge(API_BASE, { timeoutMs: 60_000 });
 
 const handleChat = createChatHandler({
   provider: PROVIDER,

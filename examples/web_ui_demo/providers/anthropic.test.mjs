@@ -212,6 +212,29 @@ test('a history of only assistant turns normalizes to an empty transcript', asyn
   assert.deepEqual(messages, []);
 });
 
+test('empty turns are dropped — the Messages API rejects a turn with empty content', async () => {
+  const fetchImpl = stubFetch([textResponse('ok')]);
+  const session = createAnthropicSession({
+    system: 'SYS',
+    userMessages: [
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: '   ' },
+      { role: 'user', content: 'second' },
+    ],
+    catalog,
+    coreToolNames: ['list_projects'],
+    config: CONFIG,
+    fetchImpl,
+  });
+  await session.send();
+  const { messages } = fetchImpl.calls[0].body;
+  // The blank assistant turn is gone, so the two user turns coalesce rather
+  // than straddling an invalid message.
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].role, 'user');
+  assert.match(messages[0].content, /first[\s\S]*second/);
+});
+
 test('consecutive user turns merge — the API requires alternating roles (#457)', async () => {
   const fetchImpl = stubFetch([textResponse('ok')]);
   const session = createAnthropicSession({

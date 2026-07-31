@@ -263,6 +263,12 @@ test('clampToolText truncates an oversized MCP result with an explicit marker', 
   assert.match(out, /truncated 500 chars/);
 });
 
+test('clampToolText is idempotent — the transport and boundary guards never double-mark', () => {
+  const once = clampToolText('x'.repeat(MAX_TOOL_RESULT_CHARS + 500));
+  assert.equal(clampToolText(once), once);
+  assert.equal(once.match(/truncated/g).length, 1);
+});
+
 test('runReport tracks real provider usage and stops once the token budget is exceeded', async () => {
   const deps = {
     listTools: async () => [

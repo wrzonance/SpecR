@@ -31,6 +31,10 @@ function buildTools(catalog, coreToolNames) {
 function normalizeHistory(userMessages) {
   const out = [];
   for (const message of userMessages) {
+    // An empty turn is rejected by the API outright, and merging one into a
+    // neighbour would inject a blank line rather than content. Drop it here so
+    // the wire history is valid no matter what the caller passed.
+    if (typeof message.content !== 'string' || message.content.trim() === '') continue;
     const role = message.role === 'assistant' ? 'assistant' : 'user';
     const previous = out[out.length - 1];
     if (role === 'user' && previous?.role === 'user') {

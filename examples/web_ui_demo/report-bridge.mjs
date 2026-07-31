@@ -8,6 +8,11 @@
 // parsing the model's prose. Everything here is I/O-free: the session + MCP calls
 // are injected as `deps`, so the loop is unit-testable (report-bridge.test.mjs).
 import { REPORT_CORE_TOOLS } from './providers/tools.mjs';
+import { clampToolText, MAX_TOOL_RESULT_CHARS } from './mcp-bridge.mjs';
+
+// Re-exported so this module keeps owning the report-side truncation contract
+// even though the transport (mcp-bridge) is where the clamp is applied.
+export { clampToolText, MAX_TOOL_RESULT_CHARS };
 
 // The agent composes reports; it does not invent facts. This prompt keeps the
 // model out of the fact-production path and steers it to the grounded tools.
@@ -92,17 +97,10 @@ export function dedupeAnchors(anchors) {
   return out;
 }
 
-// A single MCP result is clamped before it is fed back to the session, so one
-// broad tool payload cannot blow the token budget or bloat the forced final
-// compose turn. Fail-closed at the module boundary — independent of any
-// truncation the transport (server.mjs) also applies.
-export const MAX_TOOL_RESULT_CHARS = 8000;
-
-export function clampToolText(text) {
-  const s = typeof text === 'string' ? text : '';
-  if (s.length <= MAX_TOOL_RESULT_CHARS) return s;
-  return `${s.slice(0, MAX_TOOL_RESULT_CHARS)}\n…[truncated ${s.length - MAX_TOOL_RESULT_CHARS} chars]`;
-}
+// clampToolText stays applied at this module boundary (runToolCall below) as
+// well as in the transport: `execTool` is injected, so a caller supplying its
+// own exec still gets a bounded, explicitly-marked result. The clamp is
+// idempotent, so the two applications never double-mark.
 
 export function buildReportInput(request, scope) {
   const label = scope && typeof scope.label === 'string' ? scope.label.trim() : '';

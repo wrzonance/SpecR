@@ -21,12 +21,17 @@ export const SYSTEM_PROMPT = [
 ].join(' ');
 
 // Keep only well-formed user/assistant turns with string content, length-capped.
+// Empty content is dropped, not forwarded: both providers reject a turn whose
+// content is the empty string, and an assistant turn can end up empty when a
+// previous send failed before any text arrived.
 function sanitizeMessages(messages) {
   const clean = [];
   for (const message of messages) {
     if (!message || typeof message.content !== 'string') continue;
+    const content = message.content.slice(0, 4000);
+    if (content.trim() === '') continue;
     const role = message.role === 'assistant' ? 'assistant' : 'user';
-    clean.push({ role, content: message.content.slice(0, 4000) });
+    clean.push({ role, content });
   }
   return clean;
 }

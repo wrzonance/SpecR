@@ -19,21 +19,50 @@ function toMcpTool(tool) {
   };
 }
 
-export function createMcpBridge(apiBase) {
+// A single MCP result is clamped before any consumer sees it, so one broad tool
+// payload cannot blow the token budget or bloat a forced final compose turn.
+// Truncation ALWAYS carries the marker: a silently shortened result produces a
+// demo that looks fine and answers wrong, which is the failure mode this design
+// rejects outright.
+export const MAX_TOOL_RESULT_CHARS = 8000;
+const TRUNCATION_MARK = '\n…[truncated ';
+
+export function clampToolText(text) {
+  const s = typeof text === 'string' ? text : '';
+  if (s.length <= MAX_TOOL_RESULT_CHARS) return s;
+  // Already clamped upstream. Re-clamping would slice the marker off and report
+  // a wrong remainder, so the second guard (report-bridge) passes it through.
+  if (s.startsWith(TRUNCATION_MARK, MAX_TOOL_RESULT_CHARS)) return s;
+  return `${s.slice(0, MAX_TOOL_RESULT_CHARS)}${TRUNCATION_MARK}${s.length - MAX_TOOL_RESULT_CHARS} chars]`;
+}
+
+// `timeoutMs` bounds every MCP round-trip. Without it a wedged MCP endpoint
+// holds the demo's /chat or /report request open forever — the provider calls
+// are already bounded the same way (server.mjs).
+export function createMcpBridge(apiBase, { timeoutMs = 60_000 } = {}) {
   let requestId = 0;
 
   // One JSON-RPC round-trip to the SpecR MCP endpoint. The Streamable-HTTP
   // transport answers with either SSE (a `data:` line) or plain JSON; handle both.
   async function mcpRpc(method, params) {
-    const res = await fetch(new URL('/mcp', apiBase), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({ jsonrpc: '2.0', id: ++requestId, method, params }),
-    });
-    const text = await res.text();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
+    let text;
+    try {
+      res = await fetch(new URL('/mcp', apiBase), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: ++requestId, method, params }),
+        signal: controller.signal,
+      });
+      text = await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
     // An HTTP-level failure (429 rate-limit / 5xx) carries the API's
     // {success:false, error} shape, not a JSON-RPC envelope — surface it as
     // an error instead of parsing it into a phantom "successful" tool result.
@@ -72,7 +101,7 @@ export function createMcpBridge(apiBase) {
           .join('\n') || '(no content)';
       const raw = result?._meta?.['specr/anchors'];
       const anchors = Array.isArray(raw) ? raw : [];
-      return { text: text.slice(0, 8000), ok: result?.isError !== true, anchors };
+      return { text: clampToolText(text), ok: result?.isError !== true, anchors };
     } catch (err) {
       return { text: `tool error: ${err.message}`, ok: false, anchors: [] };
     }
