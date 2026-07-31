@@ -170,6 +170,48 @@ test('a history starting on an assistant turn has that turn dropped (#457 regres
   assert.equal(messages[0].content, 'real question');
 });
 
+test('a history starting on multiple assistant turns has all of them dropped, not just the first', async () => {
+  // The /chat boundary forwards whatever role sequence the client sends
+  // (chat.js's history.slice can land on any offset), so more than one
+  // leading assistant turn is a realistic input, not just exactly one.
+  const fetchImpl = stubFetch([textResponse('ok')]);
+  const session = createAnthropicSession({
+    system: 'SYS',
+    userMessages: [
+      { role: 'assistant', content: 'stale reply 1' },
+      { role: 'assistant', content: 'stale reply 2' },
+      { role: 'user', content: 'real question' },
+    ],
+    catalog,
+    coreToolNames: ['list_projects'],
+    config: CONFIG,
+    fetchImpl,
+  });
+  await session.send();
+  const { messages } = fetchImpl.calls[0].body;
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].role, 'user');
+  assert.equal(messages[0].content, 'real question');
+});
+
+test('a history of only assistant turns normalizes to an empty transcript', async () => {
+  const fetchImpl = stubFetch([textResponse('ok')]);
+  const session = createAnthropicSession({
+    system: 'SYS',
+    userMessages: [
+      { role: 'assistant', content: 'stale reply 1' },
+      { role: 'assistant', content: 'stale reply 2' },
+    ],
+    catalog,
+    coreToolNames: ['list_projects'],
+    config: CONFIG,
+    fetchImpl,
+  });
+  await session.send();
+  const { messages } = fetchImpl.calls[0].body;
+  assert.deepEqual(messages, []);
+});
+
 test('consecutive user turns merge — the API requires alternating roles (#457)', async () => {
   const fetchImpl = stubFetch([textResponse('ok')]);
   const session = createAnthropicSession({
