@@ -3,6 +3,7 @@ import path from 'node:path';
 import { glob, realpath } from 'node:fs/promises';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { SubmittalRegisterBodySchema } from '../ast/index.js';
 import { loadFiles } from '../lib/file-loader.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -267,7 +268,7 @@ function registerSubmittalTools(reg: ToolRegistrar): void {
         'from the PART 1 Submittals article, and datasheet links come from paragraph associations.',
       inputSchema: {
         projectId: z.uuid().describe('Project UUID (from list_projects)'),
-        specIds: z.array(z.uuid()).describe('Selected project spec UUIDs to include'),
+        ...SubmittalRegisterBodySchema.shape,
       },
     },
     handleSubmittalRegister
