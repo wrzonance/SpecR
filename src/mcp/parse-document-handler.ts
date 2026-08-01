@@ -6,26 +6,31 @@
 // other standalone handler files (coordination-handler.ts,
 // submittal-register-handler.ts, numbering-profile-handler.ts,
 // open-comments-handler.ts).
+//
+// #567: dispatchParse's own hand-rolled per-extension branching (and the
+// inference it re-derived on top) is gone — this now calls parser/index.ts's
+// unified `parse()`, the same orchestrator src/lib/parse-worker.ts already
+// runs for REST uploads. That buys three things in one move: .pdf support,
+// the three override params (section/title/numberingProfileId), and
+// `applyInference`'s existing "never let an 'unknown' inference overwrite a
+// real value" guard — the old inline enrichInferenceForMcp lacked that guard
+// and could stomp a real title with 'unknown' when only the section was
+// content-inferred.
 import path from 'node:path';
 import type { SpecNode, SpecTree, SecRef } from '../ast/types.js';
-import { persistParsedSpec, lookupSpecSectionTitle } from '../db/index.js';
+import type { NumberingProfile } from '../ast/index.js';
+import { persistParsedSpec, lookupSpecSectionTitle, getNumberingProfile } from '../db/index.js';
 import type { OriginMeta } from '../db/index.js';
-import { inferSectionMeta, computeTitleMatch } from '../lib/infer-section.js';
+import { computeTitleMatch } from '../lib/infer-section.js';
 import type { SectionInference } from '../lib/infer-section.js';
-import {
-  parseSec,
-  parseDocx,
-  parseText,
-  extractRefsFromTree,
-  assertDocxSafe,
-  assertSecSafe,
-} from '../parser/index.js';
-import { decodeTextBuffer } from '../lib/decode-text.js';
+import { parse, assertDocxSafe, assertSecSafe, assertPdfSafe } from '../parser/index.js';
+import { parseSectionNumberCandidate } from '../lib/section-number.js';
 import { decodeBase64Payload } from '../lib/decode-base64.js';
 import { logger } from '../lib/logger.js';
 import { parseLog, logParseWarnings } from '../lib/log-context.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
+import { ALLOWED_PARSE_EXTENSIONS } from '../lib/parse-extensions.js';
 import type { ToolError, ToolResult } from './tool-result.js';
 
 // Sourced from UFGS reference corpus — not authoritative CSI MasterFormat.
@@ -44,22 +49,23 @@ function countNodes(nodes: readonly SpecNode[]): number {
   return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
 }
 
-async function decodeSafeBuffer(
-  ext: string,
-  contentBase64: string
-): Promise<Buffer | string | ToolError> {
+async function decodeSafeBuffer(ext: string, contentBase64: string): Promise<Buffer | ToolError> {
   const decoded = decodeBase64Payload(contentBase64);
   if ('error' in decoded) return toolErr(decoded.error);
   const buf = decoded.buffer;
   try {
     if (ext === '.docx') {
       await assertDocxSafe(buf);
-      return buf;
+    } else if (ext === '.pdf') {
+      assertPdfSafe(buf); // synchronous — matches REST's own un-awaited call site
     } else if (ext === '.sec') {
-      return assertSecSafe(buf);
-    } else {
-      return buf;
+      // Return value (decoded text) discarded here — parser/index.ts's parse()
+      // re-derives it internally. Matches REST's own pre-existing
+      // assertUploadSafe → runParseWorker double-assert on .sec (not a
+      // regression introduced by this change).
+      assertSecSafe(buf);
     }
+    return buf;
   } catch (err) {
     return toolErr(err instanceof Error ? err.message : 'invalid file');
   }
@@ -73,47 +79,29 @@ async function resolveStandardTitleForMcp(section: string): Promise<string | nul
   }
 }
 
+// Only adds the DB-dependent standardTitle/titleMatch/titleMatchScore fields —
+// section/title inference itself (incl. the "never overwrite a real value with
+// 'unknown'" guard) already ran inside parser/index.ts's parse().
 async function enrichInferenceForMcp(
   tree: SpecTree,
-  refs: readonly SecRef[]
+  refs: readonly SecRef[],
+  sectionInference: SectionInference
 ): Promise<{ tree: SpecTree; refs: readonly SecRef[]; sectionInference: SectionInference }> {
-  const raw = inferSectionMeta(tree);
-  if (raw.method === 'metadata' || raw.confidence === 'none') {
-    return { tree, refs, sectionInference: raw };
+  if (sectionInference.method === 'metadata' || sectionInference.confidence === 'none') {
+    return { tree, refs, sectionInference };
   }
-  const updatedTree = { ...tree, section: raw.inferredSection, title: raw.inferredTitle };
-  const standardTitle = await resolveStandardTitleForMcp(raw.inferredSection);
-  const { titleMatch, titleMatchScore } = computeTitleMatch(raw.inferredTitle, standardTitle);
-  const sectionInference: SectionInference = {
-    ...raw,
+  const standardTitle = await resolveStandardTitleForMcp(sectionInference.inferredSection);
+  const { titleMatch, titleMatchScore } = computeTitleMatch(
+    sectionInference.inferredTitle,
+    standardTitle
+  );
+  const enriched: SectionInference = {
+    ...sectionInference,
     ...(standardTitle !== null ? { standardTitle } : {}),
     titleMatch,
     ...(titleMatchScore !== undefined ? { titleMatchScore } : {}),
   };
-  return { tree: updatedTree, refs, sectionInference };
-}
-
-async function dispatchParse(
-  ext: string,
-  buf: Buffer | string
-): Promise<{ tree: SpecTree; refs: readonly SecRef[] } | ToolError> {
-  const noop = (_stage: string, _pct: number): void => {};
-  if (ext === '.sec') {
-    if (typeof buf !== 'string') return toolErr('invalid .sec payload');
-    return parseSec(buf);
-  }
-  if (ext === '.txt') {
-    if (!Buffer.isBuffer(buf)) return toolErr('invalid .txt payload');
-    const { tree, refs } = parseText(decodeTextBuffer(buf));
-    return { tree, refs };
-  }
-  if (!Buffer.isBuffer(buf)) return toolErr('invalid .docx payload');
-  // Derive refs from the parsed tree, matching the REST parse/load path
-  // (parseDocxBuffer → extractRefsFromTree). Section/title inference downstream
-  // only reshapes the tree root, so node ids — and thus ref sourceNodeIds —
-  // stay aligned with the paragraphs persisted by persistParsedSpec (#332).
-  const tree = await parseDocx(buf, noop);
-  return { tree, refs: extractRefsFromTree(tree) };
+  return { tree, refs, sectionInference: enriched };
 }
 
 function buildMcpOriginMeta(filename: string, contentBase64: string): OriginMeta {
@@ -148,33 +136,103 @@ export function buildParseResponse(
   return response;
 }
 
+interface McpParseOverrides {
+  readonly section?: string;
+  readonly title?: string;
+  readonly numberingProfile?: NumberingProfile;
+}
+
+interface RawMcpParseOverrides {
+  readonly section: string | undefined;
+  readonly title: string | undefined;
+  readonly numberingProfileId: string | undefined;
+}
+
+// Mirrors api/parse.ts's resolveSectionOverride: same candidate parser, same
+// 'strong' context, same error text — a section override an agent supplies
+// must survive the exact same canonicalization REST applies. Returns are
+// wrapped in `{ value }` (rather than a bare `string | undefined`) so this
+// stays a two-shape union — `{ value }` or `ToolError` — instead of three,
+// per CLAUDE.md's ESLint `sonarjs/function-return-type` gate.
+function resolveMcpSectionOverride(
+  raw: string | undefined
+): { readonly value: string | undefined } | ToolError {
+  if (raw === undefined) return { value: undefined };
+  const parsed = parseSectionNumberCandidate(raw, 'strong');
+  if (parsed?.ok !== true) return toolErr('invalid section override format');
+  return { value: parsed.canonical };
+}
+
+// Mirrors api/parse.ts's resolveRequestedProfile: same lookup, same error text
+// for an id that doesn't resolve to a stored profile.
+async function resolveMcpNumberingProfile(
+  id: string | undefined
+): Promise<{ readonly value: NumberingProfile | undefined } | ToolError> {
+  if (id === undefined) return { value: undefined };
+  const profile = await getNumberingProfile(id);
+  if (!profile) return toolErr('numbering profile not found');
+  return { value: profile.rules };
+}
+
+async function resolveMcpParseOverrides(
+  raw: RawMcpParseOverrides
+): Promise<McpParseOverrides | ToolError> {
+  const sectionResult = resolveMcpSectionOverride(raw.section);
+  if (isToolError(sectionResult)) return sectionResult;
+  const profileResult = await resolveMcpNumberingProfile(raw.numberingProfileId);
+  if (isToolError(profileResult)) return profileResult;
+  return {
+    ...(sectionResult.value !== undefined ? { section: sectionResult.value } : {}),
+    ...(raw.title !== undefined ? { title: raw.title } : {}),
+    ...(profileResult.value !== undefined ? { numberingProfile: profileResult.value } : {}),
+  };
+}
+
 export async function handleParseDocument({
   filename,
   contentBase64,
+  section,
+  title,
+  numberingProfileId,
 }: {
   filename: string;
   contentBase64: string;
+  section?: string | undefined;
+  title?: string | undefined;
+  numberingProfileId?: string | undefined;
 }): Promise<ToolResult> {
   try {
     const ext = path.extname(filename).toLowerCase();
-    if (ext !== '.docx' && ext !== '.sec' && ext !== '.txt') {
-      return toolErr(`Unsupported extension: ${ext}. Use .docx, .sec, or .txt`);
+    if (!ALLOWED_PARSE_EXTENSIONS.has(ext)) {
+      return toolErr(`Unsupported extension: ${ext}. Use .docx, .pdf, .sec, or .txt`);
     }
+    const overrides = await resolveMcpParseOverrides({ section, title, numberingProfileId });
+    if (isToolError(overrides)) return overrides;
     const bufOrErr = await decodeSafeBuffer(ext, contentBase64);
     if (isToolError(bufOrErr)) return bufOrErr;
-    const rawOrErr = await dispatchParse(ext, bufOrErr);
-    if (isToolError(rawOrErr)) return rawOrErr;
-    const enriched = await enrichInferenceForMcp(rawOrErr.tree, rawOrErr.refs);
-    const originMeta = buildMcpOriginMeta(filename, contentBase64);
-    const specId = await persistParsedSpec({ ...enriched, originMeta });
-    const nodeCount = countNodes(enriched.tree.parts);
-    const response = buildParseResponse(
-      specId,
-      enriched.tree,
-      enriched.sectionInference,
-      nodeCount
+
+    const parsed = await parse(
+      bufOrErr,
+      filename,
+      overrides.numberingProfile !== undefined
+        ? { numberingProfile: overrides.numberingProfile }
+        : undefined
     );
-    logParseWarnings(parseLog({ ...originMeta, specId }), enriched.tree.warnings ?? []);
+    const enriched = await enrichInferenceForMcp(parsed.tree, parsed.refs, parsed.sectionInference);
+    // Overrides apply LAST — REST's own override-always-wins precedence
+    // (api/parse.ts:220-224): an explicit caller-supplied section/title beats
+    // whatever the parser detected or inferred.
+    const finalTree: SpecTree = {
+      ...enriched.tree,
+      ...(overrides.section !== undefined ? { section: overrides.section } : {}),
+      ...(overrides.title !== undefined ? { title: overrides.title } : {}),
+    };
+
+    const originMeta = buildMcpOriginMeta(filename, contentBase64);
+    const specId = await persistParsedSpec({ tree: finalTree, refs: enriched.refs, originMeta });
+    const nodeCount = countNodes(finalTree.parts);
+    const response = buildParseResponse(specId, finalTree, enriched.sectionInference, nodeCount);
+    logParseWarnings(parseLog({ ...originMeta, specId }), finalTree.warnings ?? []);
     return { content: [{ type: 'text' as const, text: JSON.stringify(response, null, 2) }] };
   } catch (err) {
     logger.error({ err }, 'mcp tool parse_document failed');

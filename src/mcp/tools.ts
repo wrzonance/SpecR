@@ -139,14 +139,30 @@ function registerParserTools(reg: ToolRegistrar): void {
     'parse_document',
     {
       description:
-        'Parse a DOCX or SEC specification file and store it in the database. Pass the file content as base64. Returns the new spec ID and summary. Note: computation-intensive for large DOCX files.',
+        'Parse a DOCX, PDF, SEC, or TXT specification file and store it in the database. Pass the file content as base64. Returns the new spec ID and summary. Note: computation-intensive for large DOCX/PDF files.',
       inputSchema: {
         filename: z
           .string()
           .describe(
-            'Original filename — extension determines format (.docx, .sec, or .txt). Plaintext .txt returns capabilities: ["read-only"] in result.'
+            'Original filename — extension determines format (.docx, .pdf, .sec, or .txt). Plaintext .txt returns capabilities: ["read-only"] in result.'
           ),
         contentBase64: z.string().describe('Base64-encoded file content (max 10 MB decoded)'),
+        section: z
+          .string()
+          .optional()
+          .describe(
+            'Override the parsed/inferred section number (canonical or well-formed candidate). Wins over parsing/inference.'
+          ),
+        title: z
+          .string()
+          .optional()
+          .describe('Override the parsed/inferred title. Wins over parsing/inference.'),
+        numberingProfileId: z
+          .uuid()
+          .optional()
+          .describe(
+            'Structural numbering profile (#299) to apply during this parse, instead of generic 5-signal inference.'
+          ),
       },
     },
     handleParseDocument
