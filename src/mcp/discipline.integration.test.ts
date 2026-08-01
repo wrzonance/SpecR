@@ -118,6 +118,36 @@ describe('discipline MCP tools', () => {
     expect(typeof rows[0]!.specId).toBe('string');
   });
 
+  it('list_project_specs: blank discipline filter returns all specs, not none', async () => {
+    const project = await pool.query<{ id: string }>(
+      `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+      [`disc-mcp-${randomUUID()}`]
+    );
+    const projectId = project.rows[0]!.id;
+    const spec = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, project_id) VALUES ('26 05 19', 'Elec', 'arcat', $1) RETURNING id`,
+      [projectId]
+    );
+    await pool.query(
+      `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`,
+      [projectId, spec.rows[0]!.id]
+    );
+
+    // Blank means "no filter" — the same listing an omitted param returns (#548).
+    for (const discipline of ['', '   ']) {
+      const rows = parse<{ section: string }[]>(
+        await handleListProjectSpecs({ projectId, discipline })
+      );
+      expect(rows.map((s) => s.section)).toEqual(['26 05 19']);
+    }
+
+    // A real key still filters.
+    const other = parse<{ section: string }[]>(
+      await handleListProjectSpecs({ projectId, discipline: 'hvac' })
+    );
+    expect(other).toEqual([]);
+  });
+
   it('rejects unknown library / project ids', async () => {
     expect(isToolError(await handleClearLibraryDisciplines({ libraryId: MISSING }))).toBe(true);
     expect(isToolError(await handleListProjectSpecs({ projectId: MISSING }))).toBe(true);

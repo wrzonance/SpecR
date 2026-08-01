@@ -10,6 +10,7 @@ import {
   ParentLibraryNotCompanyError,
   DefaultCompanyLibraryError,
 } from '../db/index.js';
+import { DisciplineFilter } from '../lib/discipline-filter.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
 
@@ -47,7 +48,8 @@ export async function listLibrarySpecsHandler(req: Request, res: Response): Prom
   // the spec UUID that POST /specs/:id/restore needs (#416); default hides them.
   const includeWithdrawn = req.query['includeWithdrawn'] === 'true';
   // Optional discipline filter (ADR-065): a discipline key from GET /disciplines.
-  const parsedDiscipline = z.string().optional().safeParse(req.query['discipline']);
+  // Blank is unset — `?discipline=` returns the full listing, not an empty one (#548).
+  const parsedDiscipline = DisciplineFilter.safeParse(req.query['discipline']);
   if (!parsedDiscipline.success) {
     res.status(400).json({ success: false, error: 'discipline filter must be a single value' });
     return;

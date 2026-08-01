@@ -36,7 +36,8 @@ function registerDisciplineReadTools(reg: ToolRegistrar): void {
       description:
         "List a project's specs (its table-of-contents rows), each with its resolved discipline " +
         'under the built-in default mapping (ADR-065). Pass discipline to keep only specs ' +
-        'resolving to that key. Returns isError when the project UUID is not found.',
+        'resolving to that key; a blank or whitespace-only discipline means no filter. ' +
+        'Returns isError when the project UUID is not found.',
       inputSchema: ListProjectSpecsShape,
     },
     handleListProjectSpecs

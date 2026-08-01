@@ -10,6 +10,7 @@ import {
   pool,
 } from '../db/index.js';
 import { SetDisciplinesBodySchema } from '../ast/index.js';
+import { DisciplineFilter } from '../lib/discipline-filter.js';
 import { logger } from '../lib/logger.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
 
@@ -40,10 +41,11 @@ const ClearLibraryDisciplinesArgs = z.object(ClearLibraryDisciplinesShape);
 
 export const ListProjectSpecsShape = {
   projectId: z.uuid().describe('Project UUID (from list_projects)'),
-  discipline: z
-    .string()
-    .describe('Keep only specs resolving to this discipline key (from list_disciplines)')
-    .optional(),
+  discipline: DisciplineFilter.describe(
+    'Keep only specs resolving to this discipline key (from list_disciplines). The value is ' +
+      'trimmed before matching, and a blank or whitespace-only value means no filter, ' +
+      'exactly like omitting it.'
+  ),
 };
 const ListProjectSpecsArgs = z.object(ListProjectSpecsShape);
 

@@ -20,6 +20,7 @@ import {
 } from '../db/index.js';
 import { SetProjectSourcesBodySchema } from '../ast/index.js';
 import type { CreateProjectBody, AddSectionToProjectBody } from '../ast/index.js';
+import { DisciplineFilter } from '../lib/discipline-filter.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
 import { SectionNumberFormatSchema } from '../lib/section-number.js';
@@ -133,7 +134,8 @@ export async function getProjectHandler(req: Request, res: Response): Promise<vo
 
 /**
  * GET /projects/{id}/specs — list a project's specs, each with its resolved discipline
- * (ADR-065, built-in default mapping). Optional `discipline` query param filters by key.
+ * (ADR-065, built-in default mapping). Optional `discipline` query param filters by key;
+ * a blank or whitespace-only value means no filter.
  */
 export async function listProjectSpecsHandler(req: Request, res: Response): Promise<void> {
   const parsedId = z.uuid().safeParse(req.params['id']);
@@ -141,7 +143,8 @@ export async function listProjectSpecsHandler(req: Request, res: Response): Prom
     res.status(400).json({ success: false, error: 'invalid project id' });
     return;
   }
-  const parsedDiscipline = z.string().optional().safeParse(req.query['discipline']);
+  // Blank is unset — `?discipline=` returns the full listing, not an empty one (#548).
+  const parsedDiscipline = DisciplineFilter.safeParse(req.query['discipline']);
   if (!parsedDiscipline.success) {
     res.status(400).json({ success: false, error: 'discipline filter must be a single value' });
     return;

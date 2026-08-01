@@ -86,6 +86,39 @@ describe('library-management MCP tools', () => {
     expect(typeof all.find((r) => r.specId === withdrawn)?.withdrawnAt).toBe('string');
   });
 
+  it('list_library_specs: blank discipline filter returns all specs, not none', async () => {
+    const lib = await createLibrary({ tier: 'client', name: uniq('blank-disc') });
+    await createSpec({
+      section: '26 05 19',
+      title: uniq('elec'),
+      source: 'arcat',
+      libraryId: lib.id,
+    });
+    await createSpec({
+      section: '23 07 00',
+      title: uniq('hvac'),
+      source: 'arcat',
+      libraryId: lib.id,
+    });
+
+    const bySection = (a: string, b: string): number => a.localeCompare(b);
+    const all = parse<{ section: string }[]>(await handleListLibrarySpecs({ libraryId: lib.id }));
+    expect(all.map((s) => s.section).sort(bySection)).toEqual(['23 07 00', '26 05 19']);
+
+    // A blank/whitespace-only key means "no filter" — never an empty listing (#548).
+    for (const discipline of ['', '   ']) {
+      const rows = parse<{ section: string }[]>(
+        await handleListLibrarySpecs({ libraryId: lib.id, discipline })
+      );
+      expect(rows.map((s) => s.section).sort(bySection)).toEqual(['23 07 00', '26 05 19']);
+    }
+
+    const filtered = parse<{ section: string }[]>(
+      await handleListLibrarySpecs({ libraryId: lib.id, discipline: 'electrical' })
+    );
+    expect(filtered.map((s) => s.section)).toEqual(['26 05 19']);
+  });
+
   it('renames a client library', async () => {
     const lib = await createLibrary({ tier: 'client', name: uniq('rename-old') });
     const newName = uniq('rename-new');

@@ -21,7 +21,8 @@ function registerLibraryManagementReadTools(reg: ToolRegistrar): void {
         'List the specs a library owns (specId, section, title, node count, withdrawnAt), ordered ' +
         'by section. Withdrawn masters are excluded by default; pass includeWithdrawn=true to ' +
         'surface them (each with a withdrawnAt timestamp) so restore_spec can find their UUID. ' +
-        'Returns isError when the library UUID is not found.',
+        'Pass discipline to keep only specs resolving to that key; a blank or whitespace-only ' +
+        'discipline means no filter. Returns isError when the library UUID is not found.',
       inputSchema: ListLibrarySpecsShape,
     },
     handleListLibrarySpecs
