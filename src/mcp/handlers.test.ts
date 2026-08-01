@@ -6,6 +6,8 @@ vi.mock('../db/index.js', () => ({
   listSpecSections: vi.fn(),
   getSpecTree: vi.fn(),
   getSpecStyleSource: vi.fn(),
+  getOnboardingStatus: vi.fn(),
+  getSpecWithdrawnAt: vi.fn(),
   getParagraphWithAncestors: vi.fn(),
   persistParsedSpec: vi.fn(),
   lookupSpecSectionTitle: vi.fn(),
@@ -71,6 +73,43 @@ describe('handleGetNumberingProfile', () => {
     const text = (result as { isError: true; content: { text: string }[] }).content[0]?.text ?? '';
     expect(text).toContain(UNKNOWN_SPEC_ID);
     expect(vi.mocked(db.getEffectiveNumberingProfile)).toHaveBeenCalledWith(UNKNOWN_SPEC_ID);
+  });
+});
+
+describe('handleGetSpec', () => {
+  it('get_spec: withdrawn master surfaces withdrawnAt (ADR-030 tombstone)', async () => {
+    const db = await import('../db/index.js');
+    const { handleGetSpec } = await import('./handlers.js');
+
+    vi.mocked(db.getSpecTree).mockResolvedValueOnce(STUB_SPEC_TREE as never);
+    vi.mocked(db.getSpecStyleSource).mockResolvedValueOnce(null);
+    vi.mocked(db.getOnboardingStatus).mockResolvedValueOnce('active');
+    vi.mocked(db.getSpecWithdrawnAt).mockResolvedValueOnce('2026-06-27T00:00:00.000Z');
+
+    const result = await handleGetSpec({ specId: FAKE_SPEC_ID });
+
+    expect(result).not.toMatchObject({ isError: true });
+    const text = (result as { content: { text: string }[] }).content[0]?.text ?? '';
+    const parsed = JSON.parse(text) as { withdrawnAt: string | null };
+    expect(parsed.withdrawnAt).toBe('2026-06-27T00:00:00.000Z');
+    expect(vi.mocked(db.getSpecWithdrawnAt)).toHaveBeenCalledWith(FAKE_SPEC_ID);
+  });
+
+  it('get_spec: active master surfaces withdrawnAt=null', async () => {
+    const db = await import('../db/index.js');
+    const { handleGetSpec } = await import('./handlers.js');
+
+    vi.mocked(db.getSpecTree).mockResolvedValueOnce(STUB_SPEC_TREE as never);
+    vi.mocked(db.getSpecStyleSource).mockResolvedValueOnce(null);
+    vi.mocked(db.getOnboardingStatus).mockResolvedValueOnce('active');
+    vi.mocked(db.getSpecWithdrawnAt).mockResolvedValueOnce(null);
+
+    const result = await handleGetSpec({ specId: FAKE_SPEC_ID });
+
+    expect(result).not.toMatchObject({ isError: true });
+    const text = (result as { content: { text: string }[] }).content[0]?.text ?? '';
+    const parsed = JSON.parse(text) as { withdrawnAt: string | null };
+    expect(parsed.withdrawnAt).toBeNull();
   });
 });
 

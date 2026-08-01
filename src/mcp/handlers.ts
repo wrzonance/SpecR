@@ -6,6 +6,7 @@ import {
   getSpecTree,
   getSpecStyleSource,
   getOnboardingStatus,
+  getSpecWithdrawnAt,
   getParagraphWithAncestors,
   getSpecLineage,
   findProjectById,
@@ -85,9 +86,14 @@ export async function handleGetSpec({ specId }: { specId: string }): Promise<Too
     if (!result) return toolError(`Spec not found: id=${specId}`);
     // Surface the manual style-source pick (#138) alongside the tree:
     // { templateId, templateName } | null. onboardingStatus (#139): 'review' | 'active'.
-    const styleSource = await getSpecStyleSource(specId);
-    const onboardingStatus = await getOnboardingStatus(specId);
-    const text = JSON.stringify({ ...result, styleSource, onboardingStatus }, null, 2);
+    // withdrawnAt (ADR-030 tombstone, #567) mirrors REST's GET /specs/{id} sibling
+    // field: ISO timestamp for a withdrawn library master, null otherwise.
+    const [styleSource, onboardingStatus, withdrawnAt] = await Promise.all([
+      getSpecStyleSource(specId),
+      getOnboardingStatus(specId),
+      getSpecWithdrawnAt(specId),
+    ]);
+    const text = JSON.stringify({ ...result, styleSource, onboardingStatus, withdrawnAt }, null, 2);
     const meta = anchorsMeta(anchorsFromSpecTree(result.tree));
     return { content: [{ type: 'text' as const, text }], ...(meta ? { _meta: meta } : {}) };
   } catch (err) {
