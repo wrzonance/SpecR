@@ -1,10 +1,10 @@
-import { createReadStream, readFileSync, statSync } from 'node:fs';
+import { createReadStream, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseEnv } from 'node:util';
+import { loadLocalEnv } from './env-file.mjs';
 import { sendJson, readRequestBody } from './http-utils.mjs';
 import { createMcpBridge } from './mcp-bridge.mjs';
 import { createChatHandler } from './chat-handler.mjs';
@@ -12,24 +12,9 @@ import { createReportHandler } from './report-handler.mjs';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 
-// Load a local .env sitting next to this server (examples/web_ui_demo/.env) so
-// the demo is configured from its own folder — LLM provider key, model, ports —
-// rather than the repo root. A missing .env is fine (the defaults below apply); a
-// real shell/CI environment variable always wins over a value set in the file, so
-// the one-command launchers (which pass PORT/SPECR_API_BASE inline) keep control
-// of the ports while .env supplies the LLM provider settings.
-function loadLocalEnv(path) {
-  let raw;
-  try {
-    raw = readFileSync(path, 'utf8');
-  } catch {
-    return false; // no local .env — rely on the real environment + defaults
-  }
-  for (const [key, value] of Object.entries(parseEnv(raw))) {
-    if (process.env[key] === undefined) process.env[key] = value;
-  }
-  return true;
-}
+// The demo is configured from its own folder (examples/web_ui_demo/.env) rather
+// than the repo root — LLM provider key, model, ports. preflight.mjs loads the
+// same file through the same helper (env-file.mjs).
 const ENV_FILE = join(ROOT, '.env');
 const ENV_LOADED = loadLocalEnv(ENV_FILE);
 

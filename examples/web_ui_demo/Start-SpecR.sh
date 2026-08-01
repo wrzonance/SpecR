@@ -308,9 +308,18 @@ if [[ "$api_ready" -ne 1 ]]; then
   exit 1
 fi
 
+cd "$EXAMPLE_ROOT"
+
+# One real round-trip to the configured LLM provider before the demo starts, so
+# a key that is missing, unauthorized, or lacking the permissions this demo
+# needs is reported HERE rather than on the user's first chat message. Never
+# fatal: the rest of the demo works without an LLM, so preflight.mjs always
+# exits 0 and this only prints.
+printf '\n==> Checking the LLM provider connection\n'
+node preflight.mjs || true
+
 printf '\n==> Starting web UI demo from %s\n' "$EXAMPLE_ROOT"
 printf '    API:  http://127.0.0.1:%s\n' "$API_PORT"
 printf '    Demo: http://127.0.0.1:%s\n\n' "$WEB_PORT"
 
-cd "$EXAMPLE_ROOT"
 SPECR_API_BASE="http://127.0.0.1:$API_PORT" PORT="$WEB_PORT" node server.mjs

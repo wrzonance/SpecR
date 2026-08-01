@@ -266,6 +266,17 @@ try {
         throw "SpecR API did not become ready on port $ApiPort after ~30s"
     }
 
+    Set-Location $ExampleRoot
+
+    # One real round-trip to the configured LLM provider before the demo starts,
+    # so a key that is missing, unauthorized, or lacking the permissions this
+    # demo needs is reported HERE rather than on the user's first chat message.
+    # Never fatal: the rest of the demo works without an LLM, so preflight.mjs
+    # always exits 0 and this only prints.
+    Write-Host ''
+    Write-Host '==> Checking the LLM provider connection' -ForegroundColor Cyan
+    & node preflight.mjs
+
     Write-Host ''
     Write-Host "==> Starting web UI demo from $ExampleRoot" -ForegroundColor Cyan
     Write-Host "    API:  http://127.0.0.1:$ApiPort"
@@ -275,7 +286,6 @@ try {
     $env:SPECR_API_BASE = "http://127.0.0.1:$ApiPort"
     $env:PORT = $WebPort
     Start-Process "http://127.0.0.1:$WebPort"
-    Set-Location $ExampleRoot
     & node server.mjs
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
