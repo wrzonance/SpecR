@@ -70,3 +70,43 @@ describe('lock_spec: held lock returns holder/expiresAt as structuredContent alo
     expect(structuredContentOf(result)).toBeUndefined();
   });
 });
+
+// "MCP tool handlers never throw" (CLAUDE.md gotcha): every handler here wraps
+// its DB call in try/catch and resolves to an isError toolError rather than
+// rejecting, regardless of the structuredContent addition above.
+describe('lock_spec family: MCP tool handlers never throw', () => {
+  it('get_spec_lock: a rejected DB call resolves to an Internal error, not a throw', async () => {
+    const db = await import('../db/index.js');
+    vi.mocked(db.getLock).mockRejectedValueOnce(new Error('connection reset'));
+    const { handleGetSpecLock } = await import('./lock-handlers.js');
+
+    const result = await handleGetSpecLock({ specId: SPEC_ID });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(textOf(result)).toContain('Internal error');
+  });
+
+  it('lock_spec: a rejected acquireLock call resolves to an Internal error, not a throw', async () => {
+    const db = await import('../db/index.js');
+    vi.mocked(db.findSpecById).mockResolvedValueOnce({ id: SPEC_ID } as never);
+    vi.mocked(db.acquireLock).mockRejectedValueOnce(new Error('connection reset'));
+    const { handleLockSpec } = await import('./lock-handlers.js');
+
+    const result = await handleLockSpec({ specId: SPEC_ID, holder: 'editor-a' });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(textOf(result)).toContain('Internal error');
+    expect(structuredContentOf(result)).toBeUndefined();
+  });
+
+  it('unlock_spec: a rejected releaseLock call resolves to an Internal error, not a throw', async () => {
+    const db = await import('../db/index.js');
+    vi.mocked(db.releaseLock).mockRejectedValueOnce(new Error('connection reset'));
+    const { handleUnlockSpec } = await import('./lock-handlers.js');
+
+    const result = await handleUnlockSpec({ specId: SPEC_ID, holder: 'editor-a' });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(textOf(result)).toContain('Internal error');
+  });
+});
