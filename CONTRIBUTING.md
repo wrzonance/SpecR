@@ -1,10 +1,39 @@
 # Contributing
 
-This project is TypeScript/Node 22, Express, Zod, PostgreSQL, Vitest, and pnpm. The repository is ESM (`"type": "module"`), so relative TypeScript imports use `.js` extensions.
+This project is TypeScript/Node 24 LTS (pinned via `.nvmrc` — see [Node version](#node-version) and ADR-081), Express, Zod, PostgreSQL, Vitest, and pnpm. The repository is ESM (`"type": "module"`), so relative TypeScript imports use `.js` extensions.
+
+## Node version
+
+The repo is pinned to **Node 24 LTS** (ADR-081). `.nvmrc` is the single source of truth — CI reads
+the same file via `actions/setup-node`'s `node-version-file`, so local and CI run the identical
+major. Switch before installing:
+
+| Manager | Command |
+| --- | --- |
+| nvm | `nvm use` (`nvm install` first if you don't have 24) |
+| fnm | `fnm use` — add `eval "$(fnm env --use-on-cd)"` to your shell rc to switch automatically on `cd` |
+| asdf | `asdf install nodejs` (needs the `asdf-nodejs` plugin) |
+| mise | `mise settings add idiomatic_version_file_enable_tools node` once, then `mise install` |
+
+Volta is the exception: it ignores `.nvmrc` entirely and reads only a `volta` key in
+`package.json`. We deliberately don't add one — it would be a second source of truth that can
+silently win over `engines.node`. If you use Volta, switch to 24 manually.
+
+This is convention, not the enforcement. `pnpm install` **fails** on the wrong major
+(`engineStrict` in `pnpm-workspace.yaml`), so a missed switch is loud rather than silent:
+
+```
+Expected version: >=24 <25
+Got: v26.4.0
+```
+
+`pnpm check:node-pin` asserts `.nvmrc`, both `engines.node` ranges, both `@types/node` majors and
+the running interpreter all agree; it runs in CI and locally.
 
 ## Setup
 
 ```bash
+nvm use                 # or fnm/asdf/mise — see Node version above
 pnpm install
 cp .env.example .env
 docker compose up -d postgres

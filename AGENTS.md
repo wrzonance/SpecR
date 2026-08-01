@@ -2,7 +2,7 @@
 
 Follows the global `~/.claude/rules` (code · workflow · security · agents). This file holds only SpecR-specific facts and overrides. Full design: `ARCHITECTURE.md`.
 
-Headless REST API for CSI MasterFormat specification automation: round-trip DOCX (and UFGS `.SEC`) ↔ canonical CSI AST in PostgreSQL, with a git-style 3-way merge engine for owner/editor redlines. TypeScript/Node 22, Express, Zod, pnpm.
+Headless REST API for CSI MasterFormat specification automation: round-trip DOCX (and UFGS `.SEC`) ↔ canonical CSI AST in PostgreSQL, with a git-style 3-way merge engine for owner/editor redlines. TypeScript/Node 24 LTS (pinned — ADR-081), Express, Zod, pnpm.
 
 ## Talking to users
 

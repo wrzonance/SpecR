@@ -114,7 +114,11 @@ CI's lint job and locally.
 **A wrong local runtime now fails loudly.** `pnpm install` exits 1 with the
 expected-vs-actual versions. This is the intended behavior and it lands
 immediately: anyone not on Node 24 must install it before working in the repo.
-A version manager reading `.nvmrc` is the ergonomic path; the README documents it.
+A version manager reading `.nvmrc` is the ergonomic path; the README's Quick Start and
+CONTRIBUTING's "Node version" section document the per-manager commands. Note
+Volta is the one manager that ignores `.nvmrc` — it reads only a `volta` key in
+`package.json`, which is deliberately not added here because it would be a second
+source of truth that can silently win over `engines.node`.
 
 **Moving majors becomes a deliberate, visible change.** No single automated PR
 can advance the runtime. The move touches `.nvmrc`, two `engines.node` ranges,

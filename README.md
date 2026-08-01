@@ -83,7 +83,11 @@ The Streamable HTTP server at `POST /mcp` exposes these tools (all stateless, re
 
 ## Quick Start
 
+Requires **Node 24 LTS** — pinned via `.nvmrc`, and `pnpm install` fails on anything else. See
+[CONTRIBUTING → Node version](CONTRIBUTING.md#node-version) for per-version-manager setup.
+
 ```bash
+nvm use                 # or fnm/asdf/mise — reads .nvmrc
 pnpm install
 docker compose up -d postgres
 pnpm migrate
