@@ -22,7 +22,7 @@ silently win over `engines.node`. If you use Volta, switch to 24 manually.
 This is convention, not the enforcement. `pnpm install` **fails** on the wrong major
 (`engineStrict` in `pnpm-workspace.yaml`), so a missed switch is loud rather than silent:
 
-```
+```text
 Expected version: >=24 <25
 Got: v26.4.0
 ```
@@ -32,8 +32,10 @@ the running interpreter all agree; it runs in CI and locally.
 
 ## Setup
 
+Switch to Node 24 first — run your version manager's command from the
+[Node version](#node-version) table, then:
+
 ```bash
-nvm use                 # or fnm/asdf/mise — see Node version above
 pnpm install
 cp .env.example .env
 docker compose up -d postgres

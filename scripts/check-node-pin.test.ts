@@ -67,6 +67,21 @@ describe('majorFromEngineRange', () => {
     it('does not call a bounded-but-noncanonical range "open-ended"', () => {
       expect(() => parse('>=24 <=24.20')).toThrow(/not a recognized single-major pin/);
     });
+
+    // Regression: these resolve to bounded ranges in semver ("24" and "24.x" →
+    // >=24.0.0 <25.0.0, "~24.2" → >=24.2.0 <24.3.0), so diagnosing them as
+    // "open-ended" named a problem they do not have.
+    it.each(['24', '24.x', '24.X', '~24.2'])(
+      'diagnoses %s as non-canonical, not open-ended',
+      (range) => {
+        expect(() => parse(range)).toThrow(/not a recognized single-major pin/);
+      }
+    );
+
+    // The complement: a bare floor genuinely is open-ended and must still say so.
+    it.each(['>=24', '>= 24', '>=24.17.0'])('still calls %s open-ended', (range) => {
+      expect(() => parse(range)).toThrow(/open-ended/);
+    });
   });
 
   it('never returns a major for a range satisfied by a later major', () => {

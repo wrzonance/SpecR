@@ -13,7 +13,7 @@ tied those together, and nothing tied any of them to the runtime a developer
 actually ran.
 
 The result, measured on 2026-08-01: **CI ran Node 22 while a maintainer's machine
-ran Node 26.4.0**, three majors apart, with no warning from any tool. The
+ran Node 26.4.0**, four major versions apart, with no warning from any tool. The
 open-ended `>=22.17.0` is satisfied by Node 26, so `pnpm install` was content.
 
 Two distinct costs motivated fixing this:

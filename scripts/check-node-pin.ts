@@ -81,7 +81,11 @@ export const majorFromEngineRange = (range: string, source: string): number => {
   }
 
   // Not canonical — say specifically why rather than "cannot parse".
-  if (!/<|\^/.test(trimmed)) {
+  // Only a bare ">=N" floor is genuinely open-ended. A bare major ("24"), an
+  // x-range ("24.x") and a tilde range ("~24.2") already resolve to a bounded
+  // range in semver, so they are non-canonical spellings rather than leaks into
+  // the next major; they fall through to the generic message below.
+  if (/^>=\s*\d+(?:\.\d+){0,2}\s*$/.test(trimmed)) {
     throw new NodePinError(
       `${source}: engines.node "${range}" is open-ended — it admits the next major and does not pin. ` +
         `Use a bounded range such as ">=24 <25".`
