@@ -3,13 +3,19 @@
 // Pins the "MCP tool handlers never throw" invariant for the header/footer
 // CRUD tools' generic-error catch branch (#476 review finding): every
 // run*HeaderFooter() wraps its DB call in try/catch and falls through to
-// internalError() for anything that isn't a HeaderFooterValidationError or
-// HeaderFooterScopeError. The integration suite only ever exercises
-// semantic rejections (not-found, wrong-tier, malformed body) — never a
-// plain/unexpected Error — so the internalError() branch itself (lines
-// 84-118 of header-footer-handlers.ts) was previously unpinned.
+// internalError() for anything that isn't a HeaderFooterValidationError,
+// HeaderFooterScopeError, or a pgErrorToHttp-classified pg error (#569).
+// The integration suite only ever exercises semantic rejections (not-found,
+// wrong-tier, malformed body) — never a plain/unexpected Error or a raw FK
+// violation — so the internalError() branch and the 23503 classification
+// branch were previously unpinned.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// The 23503 classification relies on getPgCode(err) unwrapping a
+// DatabaseError's cause (pg-errors.ts imports DatabaseError from this same
+// mocked module and does an `instanceof` check), so the mock must export a
+// real DatabaseError class — see src/mcp/assignment-handlers.test.ts for the
+// same precedent.
 vi.mock('../db/index.js', () => ({
   findHeaderFooterConfig: vi.fn(),
   upsertHeaderFooterConfig: vi.fn(),
@@ -17,6 +23,14 @@ vi.mock('../db/index.js', () => ({
   findLibraryById: vi.fn(),
   HeaderFooterValidationError: class HeaderFooterValidationError extends Error {},
   HeaderFooterScopeError: class HeaderFooterScopeError extends Error {},
+  DatabaseError: class DatabaseError extends Error {
+    cause?: unknown;
+    constructor(message: string, options?: ErrorOptions) {
+      super(message, options);
+      this.name = 'DatabaseError';
+      this.cause = options?.cause;
+    }
+  },
 }));
 
 vi.mock('../lib/logger.js', () => ({
@@ -116,5 +130,82 @@ describe('client-scope header/footer handlers — unexpected-error catch branch 
 
     expect(result).toMatchObject({ isError: true });
     expect(textOf(result)).toContain('Internal error');
+  });
+});
+
+// #569: a nonexistent project/package/revision scope id must surface the
+// same "referenced scope not found" class of error the REST route returns
+// (src/api/header-footer.ts's mapWriteError on a 23503 FK violation), not a
+// generic "Internal error" that hides a typo'd id behind a retry-worthy
+// server-fault message.
+describe('header/footer handlers — scope-not-found (23503) surfaces as a classified error, not internal (#569)', () => {
+  function fkViolation(): Error {
+    return Object.assign(new Error('fk violation'), { code: '23503' });
+  }
+
+  it('set_project_header_footer: nonexistent project id → "referenced scope not found", not Internal error', async () => {
+    const db = await import('../db/index.js');
+    vi.mocked(db.upsertHeaderFooterConfig).mockRejectedValueOnce(
+      new db.DatabaseError('upsertHeaderFooterConfig failed', { cause: fkViolation() })
+    );
+    const { handleSetProjectHeaderFooter } = await import('./header-footer-handlers.js');
+
+    const result = await handleSetProjectHeaderFooter({
+      projectId: PROJECT_ID,
+      config: SAMPLE_CONFIG,
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(textOf(result)).toBe('referenced scope not found');
+    expect(textOf(result)).not.toContain('Internal error');
+  });
+
+  it('set_package_header_footer: nonexistent package id → "referenced scope not found", not Internal error', async () => {
+    const db = await import('../db/index.js');
+    vi.mocked(db.upsertHeaderFooterConfig).mockRejectedValueOnce(
+      new db.DatabaseError('upsertHeaderFooterConfig failed', { cause: fkViolation() })
+    );
+    const { handleSetPackageHeaderFooter } = await import('./header-footer-handlers.js');
+
+    const result = await handleSetPackageHeaderFooter({
+      packageId: PROJECT_ID,
+      config: SAMPLE_CONFIG,
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(textOf(result)).toBe('referenced scope not found');
+  });
+
+  it('set_revision_header_footer: nonexistent revision id → "referenced scope not found", not Internal error', async () => {
+    const db = await import('../db/index.js');
+    vi.mocked(db.upsertHeaderFooterConfig).mockRejectedValueOnce(
+      new db.DatabaseError('upsertHeaderFooterConfig failed', { cause: fkViolation() })
+    );
+    const { handleSetRevisionHeaderFooter } = await import('./header-footer-handlers.js');
+
+    const result = await handleSetRevisionHeaderFooter({
+      revisionId: PROJECT_ID,
+      config: SAMPLE_CONFIG,
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(textOf(result)).toBe('referenced scope not found');
+  });
+
+  it('a non-23503 pg error (e.g. 23514) still surfaces its classified message, not Internal error', async () => {
+    const db = await import('../db/index.js');
+    const pgErr = Object.assign(new Error('check violation'), { code: '23514' });
+    vi.mocked(db.upsertHeaderFooterConfig).mockRejectedValueOnce(
+      new db.DatabaseError('upsertHeaderFooterConfig failed', { cause: pgErr })
+    );
+    const { handleSetProjectHeaderFooter } = await import('./header-footer-handlers.js');
+
+    const result = await handleSetProjectHeaderFooter({
+      projectId: PROJECT_ID,
+      config: SAMPLE_CONFIG,
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(textOf(result)).not.toContain('Internal error');
   });
 });

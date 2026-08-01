@@ -39,8 +39,19 @@ export type { ToolResult };
 
 type ReferenceDirection = 'from' | 'to' | 'both';
 
-export function toolError(text: string): ToolError {
-  return { isError: true, content: [{ type: 'text' as const, text }] };
+// ADR-081: the options object exists only to carry structuredContent, so the
+// field is required within it — an empty/no-op options call has no legitimate
+// use and would just be call-site noise.
+export interface ToolErrorOptions {
+  readonly structuredContent: Record<string, unknown>;
+}
+
+export function toolError(text: string, options?: ToolErrorOptions): ToolError {
+  return {
+    isError: true,
+    content: [{ type: 'text' as const, text }],
+    ...(options ? { structuredContent: options.structuredContent } : {}),
+  };
 }
 
 /** Wrap a JSON-serializable payload as a successful tool result. Shared by every

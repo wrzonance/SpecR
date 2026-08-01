@@ -11,6 +11,7 @@ import type { HeaderFooterScopeInput } from '../db/index.js';
 import { HeaderFooterCompositionWriteSchema } from '../ast/index.js';
 import type { HeaderFooterComposition } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
+import { pgErrorToHttp } from '../lib/pg-errors.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
 
 type ScopeKind = 'client' | 'project' | 'package' | 'revision';
@@ -91,13 +92,18 @@ function internalError(err: unknown, tool: string): ToolResult {
 
 // HeaderFooterValidationError/HeaderFooterScopeError are semantic write
 // rejections from the DB layer (malformed config, wrong-tier client scope,
-// etc.) — surface their message as a tool error. Anything else is
+// etc.) — surface their message as a tool error. A pg-code-classified error
+// (23503 on a nonexistent project/package/revision scope, mirroring REST's
+// mapWriteError in src/api/header-footer.ts) is the write's other structured
+// rejection — reusing the shared src/lib/pg-errors.ts classifier keeps the
+// two surfaces from drifting apart again (#569). Anything else is
 // unexpected and goes through internalError instead.
 function headerFooterToolError(err: unknown): ToolResult | null {
   if (err instanceof HeaderFooterValidationError || err instanceof HeaderFooterScopeError) {
     return toolError(err.message);
   }
-  return null;
+  const mapped = pgErrorToHttp(err, { '23503': 'referenced scope not found' });
+  return mapped ? toolError(mapped.error) : null;
 }
 
 // Client scope is the one kind whose anchor (a library) has no other lookup

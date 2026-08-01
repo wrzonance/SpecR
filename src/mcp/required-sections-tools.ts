@@ -10,7 +10,21 @@ import {
 } from './required-sections-handlers.js';
 import type { ToolRegistrar } from './tool-registry.js';
 
-const SET_DESCRIPTION =
+// #569: the project-baseline and package tools advertise different accepted
+// `seedFrom` values because validateSeedForScope (src/db/queries/required-
+// sections.ts) restricts ONLY the baseline scope to 'toc' — package scope
+// accepts all three seed kinds. A single shared description previously
+// advertised 'baseline' and { packageId } as valid seeds for the baseline
+// tool, which the validator rejects outright — split so neither description
+// can lie about what its own scope's validator accepts.
+const BASELINE_SET_DESCRIPTION =
+  'Provide either an explicit `sections` list (section number + optional title, no ' +
+  'duplicates) OR `seedFrom: "toc"` to derive them from the package table of contents ' +
+  '(the only seed source a project baseline accepts) — never both. Replaces the ' +
+  'current set. Returns the stored required sections. These drive the ' +
+  'coordination_report’s required-but-absent check.';
+
+const PACKAGE_SET_DESCRIPTION =
   'Provide either an explicit `sections` list (section number + optional title, no ' +
   'duplicates) OR `seedFrom` to derive them — "baseline" (project baseline), "toc" (the ' +
   'package table of contents), or { packageId } — never both. Replaces the current set. ' +
@@ -50,7 +64,7 @@ function registerRequiredSectionsWriteTools(reg: ToolRegistrar): void {
   reg.register(
     'set_required_sections',
     {
-      description: `Set the required sections for a project baseline. ${SET_DESCRIPTION}`,
+      description: `Set the required sections for a project baseline. ${BASELINE_SET_DESCRIPTION}`,
       inputSchema: SetRequiredSectionsShape,
     },
     handleSetRequiredSections
@@ -59,7 +73,7 @@ function registerRequiredSectionsWriteTools(reg: ToolRegistrar): void {
   reg.register(
     'set_package_required_sections',
     {
-      description: `Set the required sections for a design package. ${SET_DESCRIPTION}`,
+      description: `Set the required sections for a design package. ${PACKAGE_SET_DESCRIPTION}`,
       inputSchema: SetPackageRequiredSectionsShape,
     },
     handleSetPackageRequiredSections
