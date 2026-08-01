@@ -1,0 +1,58 @@
+# Dependabot runs alongside Mend Renovate (renovate.json) on purpose.
+#
+# Every Renovate run in this org was suppressed by Mend's platform-level
+# `mode=silent`, which blocked all PRs and Dependency Dashboards. Dependabot is
+# enabled here so dependency updates stay visible, and so the two tools can be
+# compared side by side before we settle on one. Expect duplicate PRs until then
+# -- that is intentional, not a misconfiguration.
+version: 2
+
+updates:
+  # --- root pnpm workspace (Dependabot handles pnpm under the npm ecosystem) ---
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 20
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Mirrors renovate.json: major bumps to the OOXML/DOCX libs can change
+      # numbering or content-control behavior, so they are opted out entirely
+      # rather than opened and closed every week.
+      - dependency-name: "docx"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jszip"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "npm"
+    directory: "/tools/verify"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 20
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      verify-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # --- workflow action pins ---
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 20
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      github-actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
