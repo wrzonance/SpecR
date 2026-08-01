@@ -21,7 +21,9 @@
 - Model defaults: `OPENAI_MODEL=gpt-5.6-luna`, `ANTHROPIC_MODEL=claude-sonnet-4-6`.
 - OpenAI endpoint: `${OPENAI_BASE}/responses`. Anthropic unchanged: `${ANTHROPIC_BASE}/v1/messages`.
 - Anthropic tool-search tool: `tool_search_tool_bm25_20251119`, name `tool_search_tool_bm25`.
-- Both APIs reject an all-deferred request — at least one tool must stay non-deferred.
+- Both APIs require at least one non-deferred *provider* tool. Each adapter's own
+  search tool (`tool_search` / bm25) satisfies that unconditionally, so an empty
+  application-tool core is legal — the core set is a first-turn optimization.
 - Commit trailer on every commit: `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
 
 ---
@@ -38,7 +40,8 @@
   - `CHAT_CORE_TOOLS: string[]`, `REPORT_CORE_TOOLS: string[]`
   - `splitCoreAndDeferred(catalog, coreNames) → { core: McpTool[], deferred: McpTool[] }`
   - `McpTool` shape: `{ name: string, description: string, inputSchema: object, readOnly: boolean }`
-  - Throws `Error` when the resulting core set would be empty.
+  - Returns an empty `core` when tier gating removes every named core tool; the
+    adapter's own non-deferred search tool keeps the request valid.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1964,6 +1967,7 @@ Expected: PASS — 4 tests
 
 ```bash
 git add examples/web_ui_demo/js/chat.js examples/web_ui_demo/css/app.css \
+        examples/web_ui_demo/js/chat-error-view.mjs \
         examples/web_ui_demo/chat-error-view.test.mjs
 git commit -m "fix(demo): render chat failures as readable errors, not raw JSON
 

@@ -111,8 +111,11 @@ partition into its own wire format.
 
 **Core set (5, non-deferred):** `list_projects`, `list_sections`,
 `search_library`, `get_spec`, `get_references`. Both vendors recommend 3–5
-always-loaded tools, and both reject an all-deferred request — the core set is a
-protocol requirement, not an optimization.
+always-loaded tools. What the APIs actually *require* is at least one
+non-deferred tool, and each adapter prepends its own search tool (`tool_search`
+for OpenAI, the bm25 server tool for Anthropic) outside the partition — so that
+requirement is met unconditionally and an empty application-tool core is legal.
+The core set is a first-turn optimization, not a protocol requirement.
 
 `get_references` earns its slot from usage, not architecture: the chat greeting
 (`index.html:735`) advertises three example questions, and *"which sections cite
@@ -226,10 +229,10 @@ Adapters take an injected `fetch`, following the `deps` pattern already used by
 
 | Test file | Pins |
 |---|---|
-| `providers/tools.test.mjs` | Core non-deferred, rest deferred, never all-deferred, no phantom core entry when tier-gated |
+| `providers/tools.test.mjs` | Core non-deferred, rest deferred, empty core tolerated when tier-gated, no phantom core entry |
 | `providers/openai.test.mjs` | Flat function tools, `tool_search` present, `store: false`, encrypted reasoning echoed across rounds |
 | `providers/anthropic.test.mjs` | bm25 tool present; `server_tool_use` / `tool_search_tool_result` preserved verbatim; no `tool_result` for a `srvtoolu_` id |
-| `chat-error.test.mjs` | OpenAI body, Anthropic body, network failure, non-JSON body all normalize to message + code + detail |
+| `chat-error-view.test.mjs` | OpenAI body, Anthropic body, network failure, non-JSON body all normalize to message + code + detail |
 
 Regression test named for the symptom, per repo convention:
 `'chat: 131-tool catalog is deferred, not sent as 131 live tools'`.
@@ -251,8 +254,11 @@ This PR adds the gate:
 
 ```yaml
 - name: Demo unit tests
-  run: node --test "examples/web_ui_demo/*.test.mjs"
+  run: node --test "examples/web_ui_demo/*.test.mjs" "examples/web_ui_demo/providers/*.test.mjs"
 ```
+
+Both globs are required: the provider adapter and catalog-regression tests live
+under `providers/`, and the first glob alone would leave them unenforced.
 
 All 306 pass today, so it goes green on arrival. Without it, every test written
 for this issue — including the regression test — is decorative.

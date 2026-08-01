@@ -5,7 +5,7 @@
 // leaves the server process.
 import { createSession, CHAT_CORE_TOOLS } from './providers/index.mjs';
 import { runChat } from './chat-loop.mjs';
-import { sendJson, readRequestBody } from './http-utils.mjs';
+import { sendJson, readBoundedBody } from './http-utils.mjs';
 
 export const SYSTEM_PROMPT = [
   'You are the SpecR assistant, embedded in a CSI MasterFormat specification tool.',
@@ -39,13 +39,19 @@ function sanitizeMessages(messages) {
 // Parse + validate the /chat request body down to a clean message list, or an
 // error string for the caller to surface as a 400. Isolated from handleChat
 // so the handler itself stays a short, flat sequence of guard clauses.
-async function parseChatBody(req, maxMessages) {
+//
+// The read is BOUNDED, matching /report: maxMessages and sanitizeMessages'
+// per-turn slice both run after parsing, so neither bounds memory — only
+// refusing to buffer an oversized body does.
+async function parseChatBody(req, maxMessages, maxBodyBytes) {
   let payload;
   try {
-    const raw = await readRequestBody(req);
+    const raw = await readBoundedBody(req, maxBodyBytes);
     payload = raw ? JSON.parse(raw.toString('utf8')) : null;
-  } catch {
-    return { error: 'invalid JSON body' };
+  } catch (err) {
+    return {
+      error: err?.code === 'BODY_TOO_LARGE' ? 'request body too large' : 'invalid JSON body',
+    };
   }
   const messages = payload?.messages;
   if (!Array.isArray(messages) || messages.length === 0) return { error: 'messages[] required' };
@@ -58,7 +64,7 @@ async function parseChatBody(req, maxMessages) {
 // `provider` is one PROVIDERS entry (name/model/keyName/hasKey/config) and
 // `bridge` is the createMcpBridge(apiBase) result — both resolved once at
 // boot in server.mjs and injected here so this module never reads process.env.
-export function createChatHandler({ provider, bridge, maxMessages, maxRounds }) {
+export function createChatHandler({ provider, bridge, maxMessages, maxRounds, maxBodyBytes }) {
   return async function handleChat(req, res) {
     if (!provider.hasKey) {
       sendJson(res, 200, {
@@ -68,7 +74,7 @@ export function createChatHandler({ provider, bridge, maxMessages, maxRounds }) 
       });
       return;
     }
-    const parsed = await parseChatBody(req, maxMessages);
+    const parsed = await parseChatBody(req, maxMessages, maxBodyBytes);
     if (parsed.error) {
       sendJson(res, 400, { success: false, error: parsed.error });
       return;

@@ -4,7 +4,9 @@
 // (step → usage → done) and that the internal `readOnly` flag never leaks onto
 // the OpenAI wire. Run:
 //   node --test examples/web_ui_demo/server.report.test.mjs
-// Not part of CI (examples/ is outside the vitest projects).
+// Outside the Vitest projects, but CI DOES run it — the "Demo unit tests" step
+// in .github/workflows/ci.yml matches it via the examples/web_ui_demo/*.test.mjs
+// glob.
 //
 // NOTE (#546): this mock speaks the Responses API (POST /responses), not the
 // retired Chat Completions wire — /report now runs on the same progressive
@@ -106,8 +108,14 @@ function responsesReply(body, captured) {
   // First turn emits a tool call. Tests can override which tool the model asks
   // for (e.g. a write tool it should never be allowed to execute).
   const toolName = captured.firstCallTool || 'coordination_report';
+  // coordination_report is DEFERRED, so a real turn reaches it through hosted
+  // tool search first. The adapter echoes every output item back verbatim next
+  // round, so the search items belong in the mock: they prove the transcript
+  // round-trips them without the loop mistaking them for a tool call.
   return {
     output: [
+      { type: 'tool_search_call', id: 'ts_1', status: 'completed' },
+      { type: 'tool_search_output', id: 'tso_1', tool_names: [toolName] },
       { type: 'function_call', call_id: 'call_1', name: toolName, arguments: '{"projectId":"p"}' },
     ],
     usage: { input_tokens: 10, output_tokens: 5 },
@@ -187,6 +195,12 @@ test('POST /report streams grounded steps + a done event with deterministic cita
     .filter((ttool) => ttool.type === 'function')
     .map((ttool) => ttool.name);
   assert.ok(!toolNames.includes('create_project'), 'a write tool must never reach the provider');
+  // Positive counterpart: without it, an empty tools array or a changed
+  // Responses tool shape would satisfy every negative assertion vacuously.
+  assert.ok(
+    toolNames.includes('list_projects'),
+    'the core read-only tool must reach the provider, so the checks here are not vacuous'
+  );
   assert.ok(
     (firstBody.tools || []).every((ttool) => !('readOnly' in ttool) && !('__readOnly' in ttool)),
     'readOnly must not be sent to OpenAI'

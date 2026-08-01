@@ -20,6 +20,9 @@ test('filterReadOnlyTools keeps only readOnly tools — the write tools never re
     { name: 'get_spec', readOnly: true },
     { name: 'update_paragraph', readOnly: false },
     { name: 'delete_project', readOnly: false },
+    // No readOnly property at all — an unannotated tool is DENIED, not admitted
+    // by default. filterReadOnlyTools compares against exactly `true`.
+    { name: 'unannotated_tool' },
   ];
   assert.deepEqual(
     filterReadOnlyTools(tools).map((t) => t.name),
@@ -72,11 +75,21 @@ function fakeSession(
   turns,
   { finalText = 'final', finalUsage = { inputTokens: 0, outputTokens: 0 } } = {}
 ) {
+  // Every result handed back to the session is recorded, so a test can assert
+  // that processCall returns one result per call keyed to that call's id.
+  const submitted = [];
   return {
+    submitted,
     async send() {
+      // An over-running loop would otherwise destructure `undefined` and fail
+      // with an opaque TypeError instead of naming the cause.
+      if (turns.length === 0)
+        throw new Error('fakeSession: send() called more times than queued turns');
       return turns.shift();
     },
-    addToolResults() {},
+    addToolResults(results) {
+      submitted.push(...results);
+    },
     async finalize() {
       return { text: finalText, usage: finalUsage };
     },
@@ -159,6 +172,7 @@ test('runReport builds its session over the READ-ONLY pool only', async () => {
 
 test('runReport enforces the execution-time allow-list as defence in depth', async () => {
   const emitted = [];
+  const execCalls = [];
   const deps = {
     listTools: async () => [
       { name: 'get_spec', description: 'd', inputSchema: {}, readOnly: true },
@@ -177,8 +191,12 @@ test('runReport enforces the execution-time allow-list as defence in depth', asy
         },
       ]),
     // Spy: records every invocation. Must NEVER be called for a disallowed tool.
-    execTool: async () => {
-      throw new Error('execTool must never run for a disallowed tool');
+    // It RECORDS rather than throws — processCall now catches execTool
+    // rejections, so a throwing spy would be silently swallowed into an
+    // ordinary failed tool result and prove nothing.
+    execTool: async (call) => {
+      execCalls.push(call.name);
+      return { text: 'x', ok: true, anchors: [] };
     },
   };
   const out = await runReport({
@@ -200,9 +218,55 @@ test('runReport enforces the execution-time allow-list as defence in depth', asy
     )
   );
   assert.deepEqual(out.toolCalls, [{ name: 'update_paragraph', ok: false }]);
+  // The load-bearing assertion: the gate is proven by non-invocation itself,
+  // not by an exception escaping the loop.
+  assert.deepEqual(execCalls, [], 'execTool must never run for a disallowed tool');
   // …and a tool response was still fed back (the session got a second turn and
   // answered), so blocking did not corrupt the transcript.
   assert.match(out.reply, /no writes/i);
+});
+
+test('runReport survives an execTool rejection — one failing call never discards the report', async () => {
+  // `execTool` is injected, so its contract cannot be assumed. A rejection used
+  // to escape processCall and abort the whole run.
+  const emitted = [];
+  const session = fakeSession([
+    {
+      text: '',
+      toolCalls: [{ id: 'c1', name: 'get_spec', args: {} }],
+      usage: { inputTokens: 1, outputTokens: 1 },
+    },
+    {
+      text: 'Report despite the failed lookup.',
+      toolCalls: [],
+      usage: { inputTokens: 1, outputTokens: 1 },
+    },
+  ]);
+  const out = await runReport({
+    request: 'summarize',
+    scope: undefined,
+    deps: {
+      listTools: async () => [
+        { name: 'get_spec', description: 'd', inputSchema: {}, readOnly: true },
+      ],
+      createSession: () => session,
+      execTool: async () => {
+        throw new Error('socket hang up');
+      },
+    },
+    limits: { maxRounds: 4, maxToolCalls: 8, tokenBudget: 100000 },
+    emit: (e) => emitted.push(e),
+  });
+  assert.match(out.reply, /despite the failed lookup/);
+  assert.deepEqual(out.toolCalls, [{ name: 'get_spec', ok: false }]);
+  assert.ok(
+    emitted.some((e) => e.type === 'step' && e.tool === 'get_spec' && e.status === 'error'),
+    'the failure must surface as an error step, not vanish'
+  );
+  // The model still got a session-shaped result keyed to the call id, so the
+  // transcript stayed valid for the next turn.
+  assert.deepEqual(session.submitted.map((r) => r.id), ['c1']);
+  assert.match(session.submitted[0].text, /socket hang up/);
 });
 
 test('runReport stops mid-batch when the per-call budget is exhausted — excess calls never reach MCP', async () => {

@@ -72,6 +72,11 @@ const ANTHROPIC_VERSION = '2023-06-01';
 const ANTHROPIC_MAX_TOKENS = 16_000; // Messages API requires max_tokens; ample for concise replies
 const CHAT_MAX_TOOL_ROUNDS = 8; // +2 over the pre-discovery cap: a search can cost a round
 const CHAT_MAX_MESSAGES = 40; // reject oversized histories
+// Hard byte cap on the /chat request body, enforced DURING accumulation — the
+// same protection /report has. maxMessages and the 4000-char per-turn slice
+// both run AFTER parsing, so only this bounds memory. 40 turns × 4000 chars is
+// ~160 KiB of retained content; 256 KiB leaves room for the JSON envelope.
+const CHAT_MAX_BODY_BYTES = 256 * 1024;
 
 // Grounded-reporting loop guardrails (#353). A report composes several grounded
 // tool calls, so it gets a wider budget than free-form chat — but still bounded so
@@ -248,6 +253,7 @@ const handleChat = createChatHandler({
   bridge: mcpBridge,
   maxMessages: CHAT_MAX_MESSAGES,
   maxRounds: CHAT_MAX_TOOL_ROUNDS,
+  maxBodyBytes: CHAT_MAX_BODY_BYTES,
 });
 
 const handleReport = createReportHandler({

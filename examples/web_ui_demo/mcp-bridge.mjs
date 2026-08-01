@@ -36,11 +36,31 @@ export function clampToolText(text) {
   return `${s.slice(0, MAX_TOOL_RESULT_CHARS)}${TRUNCATION_MARK}${s.length - MAX_TOOL_RESULT_CHARS} chars]`;
 }
 
+// Extract the JSON payload from an SSE body per the spec's field grammar: the
+// optional single space after `data:` is stripped, and a value split across
+// several `data` lines is rejoined with newlines. The MCP transport emits the
+// spaced single-line form today — parsing to the spec removes the dependency
+// on that formatting rather than relying on it.
+function readSseData(text) {
+  const data = text
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).replace(/^ /, ''))
+    .join('\n');
+  return data === '' ? '{}' : data;
+}
+
 // `timeoutMs` bounds every MCP round-trip. Without it a wedged MCP endpoint
 // holds the demo's /chat or /report request open forever — the provider calls
 // are already bounded the same way (server.mjs).
 export function createMcpBridge(apiBase, { timeoutMs = 60_000 } = {}) {
   let requestId = 0;
+  // Resolve RELATIVE to the base so a SPECR_API_BASE carrying a path prefix
+  // (a gateway mount like https://gw.example/specr) keeps it. An absolute
+  // '/mcp' would discard the prefix and break the documented {apiBase}/mcp
+  // contract. The trailing slash is what makes URL append rather than replace
+  // the last path segment.
+  const mcpUrl = new URL('mcp', `${String(apiBase).replace(/\/+$/, '')}/`);
 
   // One JSON-RPC round-trip to the SpecR MCP endpoint. The Streamable-HTTP
   // transport answers with either SSE (a `data:` line) or plain JSON; handle both.
@@ -50,7 +70,7 @@ export function createMcpBridge(apiBase, { timeoutMs = 60_000 } = {}) {
     let res;
     let text;
     try {
-      res = await fetch(new URL('/mcp', apiBase), {
+      res = await fetch(mcpUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -68,13 +88,9 @@ export function createMcpBridge(apiBase, { timeoutMs = 60_000 } = {}) {
     // an error instead of parsing it into a phantom "successful" tool result.
     if (!res.ok) throw new Error(`MCP HTTP ${res.status}: ${text.slice(0, 200)}`);
     const contentType = res.headers.get('content-type') || '';
-    const payload = contentType.includes('text/event-stream')
-      ? (text
-          .split('\n')
-          .find((line) => line.startsWith('data: '))
-          ?.slice(6) ?? '{}')
-      : text;
-    const parsed = JSON.parse(payload);
+    const parsed = JSON.parse(
+      contentType.includes('text/event-stream') ? readSseData(text) : text
+    );
     if (parsed.error) throw new Error(parsed.error.message || 'MCP error');
     if (!('result' in parsed)) throw new Error('MCP response missing result');
     return parsed.result;

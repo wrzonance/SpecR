@@ -97,7 +97,7 @@ export function dedupeAnchors(anchors) {
   return out;
 }
 
-// clampToolText stays applied at this module boundary (runToolCall below) as
+// clampToolText stays applied at this module boundary (processCall below) as
 // well as in the transport: `execTool` is injected, so a caller supplying its
 // own exec still gets a bounded, explicitly-marked result. The clamp is
 // idempotent, so the two applications never double-mark.
@@ -165,7 +165,19 @@ async function processCall(call, ctx, limits, deps) {
     status: 'running',
   };
   ctx.emit(step);
-  const { text, ok, anchors } = await deps.execTool(call);
+  // `execTool` is INJECTED, so its contract cannot be assumed: the MCP bridge's
+  // execToolCall never throws, but a different exec can. An escaping rejection
+  // would abort runReport and discard an otherwise complete report, so one
+  // failing call is degraded into a normal failed tool result instead.
+  let result;
+  try {
+    result = await deps.execTool(call);
+  } catch (err) {
+    ctx.emit({ ...step, status: 'error' });
+    ctx.toolCalls.push({ name: call.name, ok: false });
+    return { id: call.id, text: `tool error: ${err?.message ?? String(err)}` };
+  }
+  const { text, ok, anchors } = result;
   ctx.toolCalls.push({ name: call.name, ok });
   if (ok && Array.isArray(anchors) && anchors.length > 0) ctx.anchors.push(...anchors);
   ctx.emit({ ...step, status: ok ? 'done' : 'error' });
@@ -199,7 +211,10 @@ export async function runReport({ request, scope, deps, limits, emit }) {
     roundsUsed = round;
     const { text, toolCalls: calls, usage } = await session.send();
     ctx.tokens += (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
-    if (!calls || calls.length === 0) return finish(text || '', ctx, round);
+    // Same non-empty guarantee the guardrail path below gives: a `done` event
+    // carrying an empty reply renders as a blank report in the UI.
+    if (!calls || calls.length === 0)
+      return finish(text || 'The model returned no report content.', ctx, round);
 
     const results = [];
     for (const call of calls) results.push(await processCall(call, ctx, limits, deps));

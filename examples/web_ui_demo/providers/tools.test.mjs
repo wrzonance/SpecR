@@ -59,11 +59,17 @@ test('splitCoreAndDeferred: a core name absent from the catalog produces no phan
   );
 });
 
-test('splitCoreAndDeferred throws when no core tool survives — both APIs reject all-deferred', () => {
+test('splitCoreAndDeferred allows an empty core — the adapter’s own search tool is the non-deferred one', () => {
+  // Tier gating can remove every named core tool. What the APIs require is at
+  // least one NON-DEFERRED tool, and each adapter prepends its search tool
+  // (tool_search / bm25) outside this partition — so an empty application core
+  // is legal and must not take chat and report down.
   const catalog = [tool('submittal_register')];
-  assert.throws(
-    () => splitCoreAndDeferred(catalog, ['list_projects']),
-    /at least one non-deferred/i
+  const { core, deferred } = splitCoreAndDeferred(catalog, ['list_projects']);
+  assert.deepEqual(core, []);
+  assert.deepEqual(
+    deferred.map((t) => t.name),
+    ['submittal_register']
   );
 });
 

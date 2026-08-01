@@ -73,3 +73,88 @@ test('a wedged MCP endpoint aborts on the bridge timeout rather than hanging', a
   assert.equal(out.ok, false);
   assert.match(out.text, /tool error/);
 });
+
+// A transport-level failure must never be parsed into a plausible-looking tool
+// result: the model would treat the fabricated text as grounding.
+function respondWith({ ok = true, status = 200, contentType = 'application/json', body }) {
+  return async () => ({
+    ok,
+    status,
+    headers: { get: () => contentType },
+    text: async () => body,
+  });
+}
+
+const execWithBase = (impl, apiBase = 'http://mcp.test') =>
+  withFetch(impl, () =>
+    createMcpBridge(apiBase).execToolCall({ id: 'c1', name: 'get_spec', args: {} })
+  );
+
+test('a non-2xx MCP response surfaces as a tool error, not a phantom result', async () => {
+  const impl = respondWith({
+    ok: false,
+    status: 503,
+    body: '{"success":false,"error":"upstream down"}',
+  });
+  const out = await execWithBase(impl);
+  assert.equal(out.ok, false);
+  assert.match(out.text, /MCP HTTP 503/);
+});
+
+test('a JSON-RPC error envelope surfaces as a tool error, not a successful result', async () => {
+  const impl = respondWith({
+    body: '{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"unknown tool"}}',
+  });
+  const out = await execWithBase(impl);
+  assert.equal(out.ok, false);
+  assert.match(out.text, /unknown tool/);
+});
+
+test('a response with no result and no error is rejected rather than read as empty', async () => {
+  const impl = respondWith({ body: '{"jsonrpc":"2.0","id":1}' });
+  const out = await execWithBase(impl);
+  assert.equal(out.ok, false);
+  assert.match(out.text, /missing result/);
+});
+
+test('an SSE response body is parsed — with and without the optional space after data:', async () => {
+  const result = '{"jsonrpc":"2.0","id":1,"result":{"content":[{"text":"sse ok"}]}}';
+  for (const field of [`data: ${result}`, `data:${result}`]) {
+    const impl = respondWith({
+      contentType: 'text/event-stream',
+      body: `event: message\n${field}\n\n`,
+    });
+    const out = await execWithBase(impl);
+    assert.equal(out.text, 'sse ok', `failed for field form: ${field.slice(0, 6)}`);
+  }
+});
+
+test('an SSE value split across several data lines is rejoined before parsing', async () => {
+  const impl = respondWith({
+    contentType: 'text/event-stream',
+    body: 'event: message\ndata: {"jsonrpc":"2.0","id":1,\ndata: "result":{"content":[{"text":"joined"}]}}\n\n',
+  });
+  const out = await execWithBase(impl);
+  assert.equal(out.text, 'joined');
+});
+
+test('a SPECR_API_BASE path prefix is preserved — the endpoint is {apiBase}/mcp', async () => {
+  const seen = [];
+  const impl = async (url) => {
+    seen.push(String(url));
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      text: async () => '{"jsonrpc":"2.0","id":1,"result":{"content":[{"text":"ok"}]}}',
+    };
+  };
+  await execWithBase(impl, 'https://gw.example/specr');
+  await execWithBase(impl, 'https://gw.example/specr/');
+  await execWithBase(impl, 'http://127.0.0.1:3000');
+  assert.deepEqual(seen, [
+    'https://gw.example/specr/mcp',
+    'https://gw.example/specr/mcp',
+    'http://127.0.0.1:3000/mcp',
+  ]);
+});

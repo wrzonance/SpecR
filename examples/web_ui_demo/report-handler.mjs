@@ -7,8 +7,16 @@ import { runReport } from './report-bridge.mjs';
 import { createSession } from './providers/index.mjs';
 import { readBoundedBody } from './http-utils.mjs';
 
+// A report streams for as long as the loop runs, so the client can disconnect
+// mid-flight. runReport keeps going (request-scoped cancellation is out of
+// scope), and every later write would then target a destroyed socket and raise
+// an unhandled error on the response stream. Skipping the write is enough to
+// keep that path quiet without touching the session interface.
 function reportEmitter(res) {
-  return (obj) => res.write(`${JSON.stringify(obj)}\n`);
+  return (obj) => {
+    if (res.writableEnded || res.destroyed) return;
+    res.write(`${JSON.stringify(obj)}\n`, () => {});
+  };
 }
 
 function parseReportRequest(payload, maxRequestChars) {
@@ -16,9 +24,13 @@ function parseReportRequest(payload, maxRequestChars) {
   if (typeof request !== 'string' || request.trim() === '')
     return { error: 'request text required' };
   if (request.length > maxRequestChars) return { error: 'request too long' };
+  // buildReportInput appends the label to the user content, so it inflates the
+  // provider prompt exactly like `request` does — bound it the same way rather
+  // than letting it run to the body cap.
   const rawLabel = payload?.scope?.label;
-  const scope =
-    typeof rawLabel === 'string' && rawLabel.trim() !== '' ? { label: rawLabel } : undefined;
+  const label = typeof rawLabel === 'string' ? rawLabel.trim() : '';
+  if (label.length > maxRequestChars) return { error: 'scope label too long' };
+  const scope = label ? { label } : undefined;
   return { request, scope };
 }
 
@@ -81,7 +93,16 @@ export function createReportHandler({ provider, bridge, limits, maxBodyBytes, ma
       });
       emit({ type: 'done', ...result, provider: provider.name, model: provider.model });
     } catch (err) {
-      emit({ type: 'error', error: `report failed: ${err.message}` });
+      // Same shape /chat returns for a provider failure ({code, error, detail}),
+      // so the report UI can tell an auth failure from a rate limit instead of
+      // receiving one undifferentiated sentence. A non-Error throw would make
+      // `err.message` undefined, hence the String() fallback.
+      emit({
+        type: 'error',
+        code: err?.code ?? null,
+        error: `report failed: ${err?.message ?? String(err)}`,
+        detail: err?.detail ?? '',
+      });
     } finally {
       res.end();
     }
