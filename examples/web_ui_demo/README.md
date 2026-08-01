@@ -161,13 +161,14 @@ folder):
 # examples/web_ui_demo/.env — OpenAI
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...                        # required — stays server-side, never sent to the browser
-OPENAI_MODEL=gpt-5.4                         # optional (default gpt-4o-mini; any tool-calling model)
+                                             # restricted keys need the Responses write permission (see below)
+OPENAI_MODEL=gpt-5.6-luna                    # optional (default gpt-5.6-luna; requires gpt-5.4+, see below)
 OPENAI_BASE_URL=https://api.openai.com/v1    # optional — point at an OpenAI-compatible server
 
 # …or Anthropic
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...                 # required — stays server-side, never sent to the browser
-ANTHROPIC_MODEL=claude-opus-4-8              # optional (default claude-opus-4-8; any tool-calling model)
+ANTHROPIC_MODEL=claude-sonnet-4-6            # optional (default claude-sonnet-4-6; requires Sonnet/Opus 4.5+, see below)
 ANTHROPIC_BASE_URL=https://api.anthropic.com # optional — enterprise gateway/proxy (no /v1 suffix)
 ```
 
@@ -179,7 +180,13 @@ Restart `node server.mjs` after editing `.env`. The startup log prints which
 config file it loaded and whether the chat bridge is enabled.
 
 The bridge auto-discovers every MCP tool via `tools/list`, so it stays in sync as
-SpecR adds tools. No admin controls or per-user permissions — it's an MVP.
+SpecR adds tools. The demo exposes SpecR's **full** MCP catalog — well past either
+provider's per-turn tool budget — through each provider's **native progressive
+tool discovery** (OpenAI: Responses API `tool_search` + `defer_loading`;
+Anthropic: Messages API `tool_search_tool_bm25` + `defer_loading`), so the model
+searches for a tool by capability instead of holding every definition in
+context. The selected model must support it: `gpt-5.4+` on OpenAI, Sonnet 4.5 /
+Opus 4.5+ on Anthropic. No admin controls or per-user permissions — it's an MVP.
 
 ## Compose — agent-driven grounded reporting (#353)
 

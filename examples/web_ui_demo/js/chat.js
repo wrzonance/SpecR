@@ -7,6 +7,7 @@
 // render the final assistant message plus a small trace of which MCP tools ran.
 
 import { renderMarkdownInto } from './render-markdown.mjs';
+import { buildErrorBubble } from './chat-error-view.mjs';
 
 const CHAT_ENDPOINT = '/chat';
 // Persist the running conversation so a page reload keeps context. The demo has
@@ -126,8 +127,14 @@ export function initChat(opts = {}) {
           code === 'no-key'
             ? body?.error ||
               'Chat is not configured — set the selected provider key (OPENAI_API_KEY or ANTHROPIC_API_KEY) on the demo server.'
-            : body?.error || `chat failed: ${res.status}`;
-        addBubble('assistant', message);
+            : body?.error || `The chat service returned HTTP ${res.status}.`;
+        const bubble = buildErrorBubble(document, {
+          error: message,
+          code: body?.code ?? null,
+          detail: body?.detail ?? '',
+        });
+        list.appendChild(bubble);
+        scrollToEnd();
         return;
       }
       const reply = body.data.reply || '(no response)';
@@ -139,7 +146,13 @@ export function initChat(opts = {}) {
       if (onFocus && Array.isArray(anchors) && anchors.length > 0) onFocus(anchors);
     } catch (err) {
       pending.remove();
-      addBubble('assistant', `Could not reach the chat service: ${err.message}`);
+      const bubble = buildErrorBubble(document, {
+        error: 'Could not reach the chat service. Is the demo server running?',
+        code: null,
+        detail: err.message,
+      });
+      list.appendChild(bubble);
+      scrollToEnd();
     } finally {
       busy = false;
     }

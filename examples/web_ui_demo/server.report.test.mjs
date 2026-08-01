@@ -1,9 +1,16 @@
 // Black-box integration test for the demo's POST /report streaming bridge (#353).
-// Spawns server.mjs as a child process pointed at a mock OpenAI endpoint and a
-// mock SpecR MCP endpoint, then asserts the NDJSON stream (step → usage → done)
-// and that our internal __readOnly flag never leaks onto the OpenAI wire. Run:
+// Spawns server.mjs as a child process pointed at a mock OpenAI Responses API
+// endpoint and a mock SpecR MCP endpoint, then asserts the NDJSON stream
+// (step → usage → done) and that the internal `readOnly` flag never leaks onto
+// the OpenAI wire. Run:
 //   node --test examples/web_ui_demo/server.report.test.mjs
-// Not part of CI (examples/ is outside the vitest projects).
+// Outside the Vitest projects, but CI DOES run it — the "Demo unit tests" step
+// in .github/workflows/ci.yml matches it via the examples/web_ui_demo/*.test.mjs
+// glob.
+//
+// NOTE (#546): this mock speaks the Responses API (POST /responses), not the
+// retired Chat Completions wire — /report now runs on the same progressive
+// tool-discovery session interface as /chat.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -22,15 +29,15 @@ function readBody(req) {
 }
 
 // A single mock that plays both the SpecR MCP endpoint (POST /mcp) and the
-// OpenAI chat-completions endpoint (POST /v1/chat/completions).
+// OpenAI Responses endpoint (POST /v1/responses).
 function startMock(captured) {
   const server = createServer(async (req, res) => {
     const body = await readBody(req);
     res.setHeader('content-type', 'application/json');
     if (req.url === '/mcp') return res.end(JSON.stringify(mcpResponse(body, captured)));
-    if (req.url.endsWith('/chat/completions')) {
+    if (req.url.endsWith('/responses')) {
       captured.openaiBodies.push(body);
-      return res.end(JSON.stringify(openaiResponse(body, captured)));
+      return res.end(JSON.stringify(responsesReply(body, captured)));
     }
     res.statusCode = 404;
     res.end('{}');
@@ -46,6 +53,15 @@ function mcpResponse(body, captured) {
       id: body.id,
       result: {
         tools: [
+          // A REPORT_CORE_TOOLS name must be present, or splitCoreAndDeferred
+          // (both real adapters use it) throws — every provider rejects an
+          // all-deferred tool set.
+          {
+            name: 'list_projects',
+            description: 'List projects',
+            inputSchema: { type: 'object', properties: {} },
+            annotations: { readOnlyHint: true },
+          },
           {
             name: 'coordination_report',
             description: 'E&O report',
@@ -73,28 +89,36 @@ function mcpResponse(body, captured) {
   };
 }
 
-function openaiResponse(body, captured) {
-  const usedTool = body.messages.some((m) => m.role === 'tool');
+// Responses-API-shaped reply. `input` carries the running transcript; a
+// function_call_output item means a tool already ran this conversation.
+function responsesReply(body, captured) {
+  const usedTool = (body.input || []).some((item) => item.type === 'function_call_output');
   if (usedTool) {
     return {
-      choices: [
-        { message: { role: 'assistant', content: '03 30 00 has no coordination findings.' } },
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: '03 30 00 has no coordination findings.' }],
+        },
       ],
+      usage: { input_tokens: 10, output_tokens: 5 },
     };
   }
-  // First turn emits a tool call. Tests can override which tool the model asks for
-  // (e.g. a write tool it should never be allowed to execute).
+  // First turn emits a tool call. Tests can override which tool the model asks
+  // for (e.g. a write tool it should never be allowed to execute).
   const toolName = captured.firstCallTool || 'coordination_report';
+  // coordination_report is DEFERRED, so a real turn reaches it through hosted
+  // tool search first. The adapter echoes every output item back verbatim next
+  // round, so the search items belong in the mock: they prove the transcript
+  // round-trips them without the loop mistaking them for a tool call.
   return {
-    choices: [
-      {
-        message: {
-          role: 'assistant',
-          content: null,
-          tool_calls: [{ id: 'c1', function: { name: toolName, arguments: '{"projectId":"p"}' } }],
-        },
-      },
+    output: [
+      { type: 'tool_search_call', id: 'ts_1', status: 'completed' },
+      { type: 'tool_search_output', id: 'tso_1', tool_names: [toolName] },
+      { type: 'function_call', call_id: 'call_1', name: toolName, arguments: '{"projectId":"p"}' },
     ],
+    usage: { input_tokens: 10, output_tokens: 5 },
   };
 }
 
@@ -113,6 +137,7 @@ function spawnDemo(mockPort, demoPort) {
       PORT: String(demoPort),
       HOST: '127.0.0.1',
       OPENAI_API_KEY: 'test-key',
+      OPENAI_MODEL: 'gpt-5.6-luna',
       OPENAI_BASE_URL: `http://127.0.0.1:${mockPort}/v1`,
       SPECR_API_BASE: `http://127.0.0.1:${mockPort}`,
     },
@@ -163,14 +188,22 @@ test('POST /report streams grounded steps + a done event with deterministic cita
   assert.match(done.reply, /coordination findings/);
   assert.deepEqual(done.citations, [{ section: '03 30 00', specId: 's1', paragraphId: 'p1' }]);
 
-  // The write tool must never reach the model, and the internal __readOnly flag
-  // must be stripped before hitting the OpenAI wire.
+  // The write tool (create_project) must never be sent to OpenAI, and the
+  // internal `readOnly` flag must be stripped before hitting the wire.
   const firstBody = captured.openaiBodies[0];
-  const toolNames = (firstBody.tools || []).map((ttool) => ttool.function.name);
-  assert.deepEqual(toolNames, ['coordination_report']);
+  const toolNames = (firstBody.tools || [])
+    .filter((ttool) => ttool.type === 'function')
+    .map((ttool) => ttool.name);
+  assert.ok(!toolNames.includes('create_project'), 'a write tool must never reach the provider');
+  // Positive counterpart: without it, an empty tools array or a changed
+  // Responses tool shape would satisfy every negative assertion vacuously.
   assert.ok(
-    (firstBody.tools || []).every((tool) => !('__readOnly' in tool)),
-    '__readOnly must not be sent to OpenAI'
+    toolNames.includes('list_projects'),
+    'the core read-only tool must reach the provider, so the checks here are not vacuous'
+  );
+  assert.ok(
+    (firstBody.tools || []).every((ttool) => !('readOnly' in ttool) && !('__readOnly' in ttool)),
+    'readOnly must not be sent to OpenAI'
   );
 });
 

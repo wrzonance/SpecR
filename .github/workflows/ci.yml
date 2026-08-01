@@ -96,6 +96,9 @@ jobs:
       - name: Run unit tests
         run: pnpm test --reporter=verbose
 
+      - name: Demo unit tests
+        run: node --test "examples/web_ui_demo/*.test.mjs" "examples/web_ui_demo/providers/*.test.mjs"
+
       - name: Run integration tests
         run: pnpm test:integration --reporter=verbose
 
