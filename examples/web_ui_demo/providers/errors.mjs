@@ -13,14 +13,35 @@ export class ProviderError extends Error {
   }
 }
 
-// Tool search needs a model floor on both platforms (gpt-5.4+ / Opus 4.5+). The
-// providers report that as a generic unknown-parameter error, which tells a demo
-// user nothing actionable — so we translate it.
-function hintFor(provider, message) {
+// Two provider errors are really CONFIGURATION problems, and both are made
+// reachable by this demo's move to native tool search. Reported verbatim they
+// are provider jargon; translated, each names the exact setting to change.
+
+// 1. Tool search needs a model floor on both platforms (gpt-5.4+ / Opus 4.5+).
+//    The providers report that as a generic unknown-parameter error.
+function modelFloorHint(provider, message) {
   if (!/tool_search|defer_loading/i.test(message)) return null;
   return provider === 'openai'
     ? 'This demo needs an OpenAI model of gpt-5.4 or newer (set OPENAI_MODEL).'
     : 'This demo needs a Claude model of Sonnet 4.5 / Opus 4.5 or newer (set ANTHROPIC_MODEL).';
+}
+
+// 2. Tool search runs on OpenAI's Responses API, so a RESTRICTED key granted
+//    only Chat Completions authenticates fine and then fails on the first turn.
+//    The provider's own sentence never mentions which key or which product.
+function scopeHint(provider, message) {
+  if (provider !== 'openai') return null;
+  if (!/missing scopes|insufficient permissions/i.test(message)) return null;
+  if (!/responses/i.test(message)) return null;
+  return (
+    'This demo calls the OpenAI Responses API, so OPENAI_API_KEY needs the ' +
+    'Responses write permission — enable it on the key (API keys → your key → ' +
+    'Permissions), or use an unrestricted key.'
+  );
+}
+
+function hintFor(provider, message) {
+  return modelFloorHint(provider, message) ?? scopeHint(provider, message);
 }
 
 export function normalizeProviderError(provider, status, bodyText) {

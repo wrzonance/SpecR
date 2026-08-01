@@ -58,3 +58,28 @@ test('normalizeProviderError adds a model-floor hint when the model rejects tool
   const err = normalizeProviderError('openai', 400, body);
   assert.match(err.message, /gpt-5\.4 or newer/i);
 });
+
+// Reported live (2026-08-01) running the demo against a restricted OpenAI key:
+// the chat rendered OpenAI's scope jargon with no action the operator could
+// take. This PR's migration to the Responses API is what surfaces it — a key
+// granted only Chat Completions passes every other check and fails here.
+test('a missing Responses scope is translated into an actionable hint', () => {
+  const body = JSON.stringify({
+    error: {
+      message:
+        'You have insufficient permissions for this operation. Missing scopes: api.responses.write. Check that you have the correct role in your organization (Reader, Writer, Owner) and project (Member, Owner), and if you’re using a restricted API key, that it has the necessary scopes.',
+      type: 'invalid_request_error',
+      param: null,
+      code: null,
+    },
+  });
+  const err = normalizeProviderError('openai', 401, body);
+  assert.match(err.message, /Missing scopes/, 'the provider sentence is preserved');
+  assert.match(
+    err.message,
+    /Responses/i,
+    'the hint must name the Responses permission the key is missing'
+  );
+  assert.match(err.message, /OPENAI_API_KEY/, 'and point at the key the demo actually reads');
+  assert.equal(err.detail, body, 'raw body still kept separate for the disclosure');
+});

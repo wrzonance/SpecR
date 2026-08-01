@@ -161,6 +161,7 @@ folder):
 # examples/web_ui_demo/.env — OpenAI
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...                        # required — stays server-side, never sent to the browser
+                                             # restricted keys need the Responses write permission (see below)
 OPENAI_MODEL=gpt-5.6-luna                    # optional (default gpt-5.6-luna; requires gpt-5.4+, see below)
 OPENAI_BASE_URL=https://api.openai.com/v1    # optional — point at an OpenAI-compatible server
 
