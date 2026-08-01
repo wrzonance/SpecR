@@ -473,6 +473,7 @@ describe('PUT /projects/:id/sources', () => {
   it('400 — malformed project id (not a UUID)', async () => {
     const res = await putSources('not-a-uuid', [companyId]);
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
   });
 });
 
@@ -583,6 +584,7 @@ describe('DELETE /projects/:id (soft-delete) + POST /projects/:id/restore', () =
   it('400 — malformed (non-UUID) project id on delete', async () => {
     const res = await deleteProject('not-a-uuid', { deletedBy: 'alice' });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
   });
 
   it('404 — delete unknown project', async () => {
@@ -593,6 +595,7 @@ describe('DELETE /projects/:id (soft-delete) + POST /projects/:id/restore', () =
   it('400 — malformed (non-UUID) project id on restore', async () => {
     const res = await fetch(`${baseUrl}/projects/not-a-uuid/restore`, { method: 'POST' });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
   });
 
   it('404 — restore unknown project', async () => {
@@ -641,6 +644,7 @@ describe('PATCH /projects/:id', () => {
       body: JSON.stringify({ name: 'x' }),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
   });
 
   it('400s an empty name', async () => {
