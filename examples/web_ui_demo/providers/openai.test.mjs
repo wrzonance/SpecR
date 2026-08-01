@@ -162,3 +162,55 @@ test('a non-ok response raises a ProviderError with a clean message and separate
     return true;
   });
 });
+
+// Found by live verification against the real Responses API (2026-08-01), not
+// by any static review: posting `{type:'tool_search'}` with nothing deferred is
+// rejected outright —
+//   Invalid Value: 'tools.tool_search'. tools.tool_search requires at least one
+//   deferred tool.
+// Reachable whenever the catalog is a subset of the core names (tier gating, or
+// a report catalog narrowed to read-only tools) and whenever the catalog is
+// empty. Search has nothing to find in that state anyway, so the tool is
+// omitted rather than sent and 400'd.
+test('openai: tool_search is omitted when nothing is deferred — the API rejects a search tool with no deferred tools', async () => {
+  const fetchImpl = stubFetch([textResponse('hello')]);
+  const session = createOpenAiSession({
+    system: 'SYS',
+    userMessages: [{ role: 'user', content: 'hi' }],
+    catalog,
+    // Every tool in the catalog is core, so the deferred remainder is empty.
+    coreToolNames: catalog.map((t) => t.name),
+    config: CONFIG,
+    fetchImpl,
+  });
+  await session.send();
+
+  const { body } = fetchImpl.calls[0];
+  assert.ok(
+    !body.tools.some((t) => t.type === 'tool_search'),
+    'tool_search must not be sent when no tool is deferred'
+  );
+  // The tools themselves are still declared and directly callable.
+  assert.deepEqual(
+    body.tools.map((t) => t.name),
+    catalog.map((t) => t.name)
+  );
+  assert.ok(
+    body.tools.every((t) => !t.defer_loading),
+    'nothing is deferred in this state'
+  );
+});
+
+test('openai: an empty catalog sends no tools at all rather than a lone tool_search', async () => {
+  const fetchImpl = stubFetch([textResponse('hello')]);
+  const session = createOpenAiSession({
+    system: 'SYS',
+    userMessages: [{ role: 'user', content: 'hi' }],
+    catalog: [],
+    coreToolNames: ['list_projects'],
+    config: CONFIG,
+    fetchImpl,
+  });
+  await session.send();
+  assert.deepEqual(fetchImpl.calls[0].body.tools, []);
+});

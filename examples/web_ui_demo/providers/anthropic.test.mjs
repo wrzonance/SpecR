@@ -261,3 +261,28 @@ test('finalize keeps tools declared and suppresses new calls', async () => {
   assert.deepEqual(fetchImpl.calls[0].body.tool_choice, { type: 'none' });
   assert.ok(fetchImpl.calls[0].body.tools.length > 0);
 });
+
+// Symmetry with the OpenAI adapter (see openai.test.mjs): with nothing deferred
+// the search tool has nothing to find, so it is not sent. Everything left is
+// non-deferred, which is what the Messages API requires.
+test('anthropic: the bm25 search tool is omitted when nothing is deferred', async () => {
+  const fetchImpl = stubFetch([textResponse('hello')]);
+  const session = createAnthropicSession({
+    system: 'SYS',
+    userMessages: [{ role: 'user', content: 'hi' }],
+    catalog,
+    coreToolNames: catalog.map((t) => t.name),
+    config: CONFIG,
+    fetchImpl,
+  });
+  await session.send();
+  const { body } = fetchImpl.calls[0];
+  assert.ok(
+    !body.tools.some((t) => t.type === 'tool_search_tool_bm25_20251119'),
+    'no deferred tools ⇒ no search tool'
+  );
+  assert.ok(
+    body.tools.every((t) => !t.defer_loading),
+    'everything left is non-deferred'
+  );
+});

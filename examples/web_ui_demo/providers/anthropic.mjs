@@ -14,13 +14,19 @@ function toAnthropicTool(tool) {
   return { name: tool.name, description: tool.description, input_schema: tool.inputSchema };
 }
 
+// Symmetric with the OpenAI adapter: no deferred tools means nothing for search
+// to find, so the search tool is omitted rather than occupying a slot and
+// context on every request. Unlike the OpenAI side — where sending it in that
+// state is a live-verified 400 — this is a consistency choice, not a known
+// Anthropic constraint. It is safe either way: what remains is entirely
+// non-deferred, which is exactly what the Messages API requires.
 function buildTools(catalog, coreToolNames) {
   const { core, deferred } = splitCoreAndDeferred(catalog, coreToolNames);
-  return [
-    SEARCH_TOOL,
+  const declared = [
     ...core.map(toAnthropicTool),
     ...deferred.map((tool) => ({ ...toAnthropicTool(tool), defer_loading: true })),
   ];
+  return deferred.length > 0 ? [SEARCH_TOOL, ...declared] : declared;
 }
 
 // The Messages API requires alternating roles starting on a user turn. The

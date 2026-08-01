@@ -18,13 +18,19 @@ function toFunctionTool(tool) {
   };
 }
 
+// The search tool ships only when something is actually deferred. The API
+// rejects the alternative outright — "tools.tool_search requires at least one
+// deferred tool" — which is reachable whenever the catalog is a subset of the
+// core names (tier gating, or /report's read-only narrowing) or is empty.
+// Nothing is lost by omitting it: with no deferred tools every definition is
+// already declared and directly callable, so search has nothing to find.
 function buildTools(catalog, coreToolNames) {
   const { core, deferred } = splitCoreAndDeferred(catalog, coreToolNames);
-  return [
-    { type: 'tool_search' },
+  const declared = [
     ...core.map(toFunctionTool),
     ...deferred.map((tool) => ({ ...toFunctionTool(tool), defer_loading: true })),
   ];
+  return deferred.length > 0 ? [{ type: 'tool_search' }, ...declared] : declared;
 }
 
 function parseArguments(raw) {
