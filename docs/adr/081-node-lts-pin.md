@@ -68,6 +68,24 @@ Note this contradicts the common guidance that pnpm fails on a root-project
 `engines` mismatch by default, and the npm-style `.npmrc` spelling. Neither holds
 for pnpm 11.
 
+**The setting must be repeated in every workspace root.** pnpm reads settings
+from the nearest `pnpm-workspace.yaml` walking up from the cwd and stops at the
+first one. `tools/verify` is deliberately its own isolated workspace root, so the
+repo root's `engineStrict` does not reach it: `pnpm --dir tools/verify install`
+on Node 26.4.0 exited 0 against its own `">=24 <25"` until the setting was added
+to `tools/verify/pnpm-workspace.yaml` as well. Any future isolated workspace
+needs the same line.
+
+**The range parser fails closed.** `scripts/check-node-pin.ts` accepts only `^N`
+and `>=N <N+1`. Two classes of range look valid to a naive parser but are
+satisfied by a later major, and both are rejected explicitly: unions
+(`^24 || ^27` — the caret prefix parses fine) and leaky upper bounds
+(`>=24 <25.5` — admits 25.0–25.4). Ranges that do pin one major in semver but are
+not canonical (`24.x`, `~24.2`, `<25 >=24`) are also rejected rather than
+guessed at, with a message naming the actual problem. `scripts/check-node-pin.test.ts`
+pins these cases; `vitest.config.ts`'s unit project was extended to cover
+`scripts/**/*.test.ts` so repo-owned gates carry tests like any other code.
+
 **`@types/node` tracks the runtime major** (`^24.13.3`) in both packages.
 
 **`pnpm check:node-pin`** (`scripts/check-node-pin.ts`) asserts that `.nvmrc`,
@@ -116,6 +134,15 @@ requiring a newer Node is not caught by it.
 rather than on the appearance of a newer major. Node 26 should not be adopted
 before it is LTS (2026-10-28) and has accumulated ecosystem and training-data
 coverage after that.
+
+**A dead CodeQL job was found while aligning the workflows.** `codeql.yml`
+pinned pnpm 9, which cannot read a pnpm 11 `pnpm-workspace.yaml` (`packages field
+missing or empty`); its `pnpm install` had failed on every scheduled run since at
+least 2026-06-22, so JS/TS CodeQL analysis was silently not running for roughly
+six weeks. Because CodeQL is cron-only, no PR ever surfaced it. Pinned to
+`11.11.0` to match the other workflows. This is pre-existing and unrelated to the
+Node pin — measured identically on `main` — but it was fixed here rather than
+left broken in a file this change already touches.
 
 **`target: "ESNext"` in `tsconfig.json` is left unchanged** and remains a
 separate, unaddressed drift risk: it emits whatever the current TypeScript
