@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// ADR-079/#567 — mirrors src/api/readiness-guard.test.ts's db/index.js mock
+// shape: a stand-in ReadinessBlockedError class (so `instanceof` works the
+// same way the REST test's stub does) plus a mockable assertReadyForFinal.
+// The real gate/override semantics are pinned once, at their own source of
+// truth (db/queries/readiness-gate.test.ts); this file only pins THIS
+// boundary's wiring — that generate_docx forwards mode/overrideReadinessGate
+// and maps a block into an MCP-shaped toolError.
 vi.mock('../db/index.js', () => ({
   pool: {},
   getSpecTree: vi.fn(),
@@ -7,6 +14,14 @@ vi.mock('../db/index.js', () => ({
   getTemplateByName: vi.fn(),
   resolveSpecGenerationContext: vi.fn(),
   resolveSpecHeaderFooterContext: vi.fn(),
+  assertReadyForFinal: vi.fn(),
+  ReadinessBlockedError: class ReadinessBlockedError extends Error {
+    readonly findings: readonly unknown[];
+    constructor(message: string, options: { findings: readonly unknown[] }) {
+      super(message);
+      this.findings = options.findings;
+    }
+  },
 }));
 
 vi.mock('../generator/index.js', () => ({
@@ -201,5 +216,148 @@ describe('handleGenerateDocx', () => {
       sizeBytes: buf.byteLength,
       contentBase64: buf.toString('base64'),
     });
+  });
+});
+
+// #567 — generate_docx previously had no mode/overrideReadinessGate
+// wiring at all (readiness_report's own description called this out as a
+// documented gap, #539). checkMcpReadinessGate mirrors
+// src/api/readiness-guard.ts's enforceReadinessGate: same
+// assertReadyForFinal/ReadinessBlockedError call, mapped to a ToolError
+// instead of an Express 422 write.
+describe('checkMcpReadinessGate (ADR-079 mirror)', () => {
+  it('returns blocked:false and writes nothing when assertReadyForFinal no-ops (INV-1/INV-2/INV-3)', async () => {
+    const db = await import('../db/index.js');
+    vi.mocked(db.assertReadyForFinal).mockImplementationOnce(() => undefined);
+    const { checkMcpReadinessGate } = await import('./generate-docx-handler.js');
+
+    const outcome = checkMcpReadinessGate([{ tree: STUB_TREE.tree }], 'final', undefined);
+
+    expect(outcome).toEqual({ blocked: false });
+  });
+
+  it('returns blocked:true with a toolError carrying {error, findings} on ReadinessBlockedError (INV-4)', async () => {
+    const db = await import('../db/index.js');
+    const findings = [{ type: 'specifier_note_present' as const, nodeId: 'n1', text: 'note' }];
+    vi.mocked(db.assertReadyForFinal).mockImplementationOnce(() => {
+      throw new db.ReadinessBlockedError(
+        'final issuance blocked: 1 readiness finding(s) outstanding',
+        { findings }
+      );
+    });
+    const { checkMcpReadinessGate } = await import('./generate-docx-handler.js');
+
+    const outcome = checkMcpReadinessGate([{ tree: STUB_TREE.tree }], 'final', undefined);
+
+    expect(outcome.blocked).toBe(true);
+    if (!outcome.blocked) throw new Error('unreachable');
+    expect(outcome.toolError).toMatchObject({ isError: true });
+    const text = outcome.toolError.content[0]?.text ?? '';
+    const parsed = JSON.parse(text) as { error: string; findings: readonly unknown[] };
+    expect(parsed.error).toContain('final issuance blocked: 1 readiness finding(s) outstanding');
+    expect(parsed.findings).toEqual(findings);
+  });
+
+  it('rethrows an error that is not ReadinessBlockedError rather than swallowing it (INV-13)', async () => {
+    const db = await import('../db/index.js');
+    const unrelated = new Error('unexpected failure');
+    vi.mocked(db.assertReadyForFinal).mockImplementationOnce(() => {
+      throw unrelated;
+    });
+    const { checkMcpReadinessGate } = await import('./generate-docx-handler.js');
+
+    expect(() => checkMcpReadinessGate([{ tree: STUB_TREE.tree }], 'final', undefined)).toThrow(
+      unrelated
+    );
+  });
+});
+
+describe('handleGenerateDocx — readiness gate wiring (#567)', () => {
+  it("forwards args.mode/args.overrideReadinessGate to the gate, scoped to the spec's own tree", async () => {
+    await stubBaselineResolution();
+    const db = await import('../db/index.js');
+    const generator = await import('../generator/index.js');
+    vi.mocked(generator.generateDocx).mockResolvedValueOnce(Buffer.from('docx'));
+    const { handleGenerateDocx } = await import('./generate-docx-handler.js');
+
+    await handleGenerateDocx({ specId: FAKE_SPEC_ID, mode: 'final', overrideReadinessGate: true });
+
+    expect(vi.mocked(db.assertReadyForFinal)).toHaveBeenCalledWith(
+      [{ tree: STUB_TREE.tree }],
+      'final',
+      true
+    );
+  });
+
+  it("mode: 'draft' (or omitted) never blocks — generateDocx still runs", async () => {
+    await stubBaselineResolution();
+    const generator = await import('../generator/index.js');
+    vi.mocked(generator.generateDocx).mockResolvedValueOnce(Buffer.from('docx'));
+    const { handleGenerateDocx } = await import('./generate-docx-handler.js');
+
+    const result = await handleGenerateDocx({ specId: FAKE_SPEC_ID });
+
+    expect(result).not.toMatchObject({ isError: true });
+    expect(vi.mocked(generator.generateDocx)).toHaveBeenCalled();
+  });
+
+  it("mode: 'final' blocked -> isError carrying REST's {error, findings} shape, generateDocx never called", async () => {
+    await stubBaselineResolution();
+    const db = await import('../db/index.js');
+    const generator = await import('../generator/index.js');
+    const findings = [{ type: 'open_comment' as const, nodeId: 'c1', text: 'x', author: 'Jane' }];
+    vi.mocked(db.assertReadyForFinal).mockImplementationOnce(() => {
+      throw new db.ReadinessBlockedError(
+        'final issuance blocked: 1 readiness finding(s) outstanding',
+        {
+          findings,
+        }
+      );
+    });
+    const { handleGenerateDocx } = await import('./generate-docx-handler.js');
+
+    const result = await handleGenerateDocx({ specId: FAKE_SPEC_ID, mode: 'final' });
+
+    expect(result).toMatchObject({ isError: true });
+    const text = (result as { content: { text: string }[] }).content[0]?.text ?? '';
+    const parsed = JSON.parse(text) as { error: string; findings: readonly unknown[] };
+    expect(parsed.findings).toEqual(findings);
+    expect(vi.mocked(generator.generateDocx)).not.toHaveBeenCalled();
+  });
+
+  it('a blocked gate short-circuits before the section-format/header-footer DB round trip', async () => {
+    await stubBaselineResolution();
+    const db = await import('../db/index.js');
+    vi.mocked(db.assertReadyForFinal).mockImplementationOnce(() => {
+      throw new db.ReadinessBlockedError(
+        'final issuance blocked: 1 readiness finding(s) outstanding',
+        {
+          findings: [{ type: 'open_comment' as const, nodeId: 'c1', text: 'x', author: 'Jane' }],
+        }
+      );
+    });
+    vi.mocked(db.resolveSpecGenerationContext).mockClear();
+    vi.mocked(db.resolveSpecHeaderFooterContext).mockClear();
+    const { handleGenerateDocx } = await import('./generate-docx-handler.js');
+
+    await handleGenerateDocx({ specId: FAKE_SPEC_ID, mode: 'final' });
+
+    expect(vi.mocked(db.resolveSpecGenerationContext)).not.toHaveBeenCalled();
+    expect(vi.mocked(db.resolveSpecHeaderFooterContext)).not.toHaveBeenCalled();
+  });
+
+  it('a gate error that is not ReadinessBlockedError surfaces via the generic catch-all, never swallowed silently', async () => {
+    await stubBaselineResolution();
+    const db = await import('../db/index.js');
+    vi.mocked(db.assertReadyForFinal).mockImplementationOnce(() => {
+      throw new Error('pg connection reset');
+    });
+    const { handleGenerateDocx } = await import('./generate-docx-handler.js');
+
+    const result = await handleGenerateDocx({ specId: FAKE_SPEC_ID, mode: 'final' });
+
+    expect(result).toMatchObject({ isError: true });
+    const text = (result as { content: { text: string }[] }).content[0]?.text ?? '';
+    expect(text).not.toContain('pg connection reset');
   });
 });

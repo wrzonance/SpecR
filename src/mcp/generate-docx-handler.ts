@@ -9,7 +9,7 @@
 // numbering-profile-handler.ts, open-comments-handler.ts,
 // parse-document-handler.ts) rather than importing handlers.ts's toolError
 // and creating a handlers.ts <-> generate-docx-handler.ts import cycle.
-import type { GenerateBody, StyleRule, SpecTree } from '../ast/index.js';
+import type { GenerateBody, StyleRule, SpecTree, IssuanceMode } from '../ast/index.js';
 import type { SectionNumberFormat } from '../lib/section-number.js';
 import {
   getSpecTree,
@@ -17,6 +17,8 @@ import {
   getTemplateByName,
   resolveSpecGenerationContext,
   resolveSpecHeaderFooterContext,
+  assertReadyForFinal,
+  ReadinessBlockedError,
   pool,
 } from '../db/index.js';
 import { generateDocx } from '../generator/index.js';
@@ -98,6 +100,45 @@ export async function resolveHeaderFooterInput(
   return { composition: context.composition, current };
 }
 
+export type McpReadinessOutcome =
+  | { readonly blocked: false }
+  | { readonly blocked: true; readonly toolError: ToolError };
+
+interface ReadinessCheckedEntry {
+  readonly tree: SpecTree;
+}
+
+/** Mirrors src/api/readiness-guard.ts's `enforceReadinessGate`: runs the
+ *  ADR-079 issuance-readiness gate via the same `assertReadyForFinal` call
+ *  REST uses, and maps a block into the same two-key `{error, findings}`
+ *  shape REST's 422 body carries — packaged as a `ToolError` instead of an
+ *  Express response write, since generate_docx has no HTTP status to set.
+ *  `mode` omitted (or `'draft'`) and a clean or explicitly overridden
+ *  `'final'` all no-op at zero evaluation cost (INV-1/INV-2/INV-3) — this
+ *  was previously reachable behavior REST already had that generate_docx's
+ *  MCP tool lacked entirely (readiness_report's own description flagged the
+ *  gap, #539). Synchronous — `assertReadyForFinal` never awaits anything.
+ *  Any error other than `ReadinessBlockedError` is rethrown unchanged so
+ *  `handleGenerateDocx`'s own catch-all still surfaces an unexpected
+ *  failure as its existing generic isError, never silently absorbed here
+ *  (INV-13). */
+export function checkMcpReadinessGate(
+  trees: readonly ReadinessCheckedEntry[],
+  mode: IssuanceMode | undefined,
+  overrideReadinessGate: boolean | undefined
+): McpReadinessOutcome {
+  try {
+    assertReadyForFinal(trees, mode, overrideReadinessGate);
+    return { blocked: false };
+  } catch (err) {
+    if (!(err instanceof ReadinessBlockedError)) throw err;
+    return {
+      blocked: true,
+      toolError: toolErr(JSON.stringify({ error: err.message, findings: err.findings })),
+    };
+  }
+}
+
 async function resolveGenerateOptions(
   specId: string,
   body: GenerateBody
@@ -133,7 +174,7 @@ function generateDocxResult(specId: string, tree: SpecTree, buf: Buffer): ToolRe
 export async function handleGenerateDocx(
   args: { specId: string } & GenerateBody
 ): Promise<ToolResult> {
-  const { specId, templateId } = args;
+  const { specId, templateId, mode, overrideReadinessGate } = args;
   try {
     const result = await getSpecTree(specId);
     if (!result) {
@@ -142,6 +183,14 @@ export async function handleGenerateDocx(
     const resolution = await resolveStyleRulesForMcp(templateId);
     if (!resolution.found) {
       return toolErr(`template not found: id=${templateId ?? ''}`);
+    }
+    // Gated before resolveGenerateOptions's header/footer + section-format
+    // DB round trip (#567) — a blocked Final issuance skips work REST's own
+    // loadSingleSpecGenerationContext still pays for, since here the gate
+    // only needs the tree already in hand.
+    const gateOutcome = checkMcpReadinessGate([{ tree: result.tree }], mode, overrideReadinessGate);
+    if (gateOutcome.blocked) {
+      return gateOutcome.toolError;
     }
     const options = await resolveGenerateOptions(specId, args);
     const buf = await generateDocx(result.tree, resolution.rules, options);
