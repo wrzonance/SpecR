@@ -177,6 +177,13 @@ describe('POST /packages/:id/revisions', () => {
     expect(res.status).toBe(422);
   });
 
+  it('400 — malformed (non-UUID) package id (#568)', async () => {
+    const res = await json('POST', '/packages/not-a-uuid/revisions', { label: 'X' });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ success: false, error: 'invalid package id' });
+  });
+
   it('422 for a malformed parentRevisionId (ADR-066 #389 — schema boundary)', async () => {
     const res = await json('POST', `/packages/${pkgFull}/revisions`, {
       type: 'addendum',
@@ -459,6 +466,13 @@ describe('GET /revisions/:id', () => {
     expect(res.status).toBe(404);
   });
 
+  it('400 — malformed (non-UUID) revision id (#568)', async () => {
+    const res = await json('GET', '/revisions/not-a-uuid');
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ success: false, error: 'invalid revision id' });
+  });
+
   it('echoes parentRevisionId: null by default, present as a key (ADR-066 #389)', async () => {
     const res = await json('GET', `/revisions/${revisionId}`);
     const d = await data(res);
@@ -586,6 +600,13 @@ describe('GET /packages/:id/revisions', () => {
   it('404 for an unknown package', async () => {
     const res = await json('GET', `/packages/${ZERO}/revisions`);
     expect(res.status).toBe(404);
+  });
+
+  it('400 — malformed (non-UUID) package id (#568)', async () => {
+    const res = await json('GET', '/packages/not-a-uuid/revisions');
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ success: false, error: 'invalid package id' });
   });
 });
 

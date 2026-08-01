@@ -1,37 +1,49 @@
 import path from 'node:path';
-import { z } from 'zod';
 import type { Request, Response } from 'express';
 import { analyzeDocxStyles, deriveTemplate, assertDocxSafe, ParserError } from '../parser/index.js';
+import { CreateTemplateBodySchema } from '../ast/index.js';
 import { createTemplateWithRules } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-const ImportBodySchema = z.object({
-  name: z.string().check(z.minLength(1)),
-  owner: z.string().check(z.minLength(1)).exactOptional(),
-});
+// Reuses the shared schema (`.trim()` before `minLength(1)`) instead of a
+// hand-written one — the exact bug this closes is a second, weaker copy of
+// this check letting a whitespace-only name through Zod to trip the DB's
+// `style_templates_name_non_empty_check` CHECK constraint instead (#568).
+const ImportBodySchema = CreateTemplateBodySchema.omit({ libraryId: true });
 
-function validateRequest(
-  req: Request
-): { error: string } | { file: Express.Multer.File; name: string; owner: string | undefined } {
-  if (!req.file) return { error: 'file required' };
+type ImportValidation =
+  | { readonly status: number; readonly error: string }
+  | {
+      readonly file: Express.Multer.File;
+      readonly name: string;
+      readonly owner: string | undefined;
+    };
+
+function validateImportRequest(req: Request): ImportValidation {
+  if (!req.file) return { status: 400, error: 'file required' };
 
   const ext = path.extname(req.file.originalname).toLowerCase();
-  if (ext !== '.docx') return { error: 'unsupported file extension — only .docx is accepted' };
-  if (req.file.mimetype !== DOCX_MIME) return { error: 'MIME type mismatch for .docx' };
+  if (ext !== '.docx') {
+    return { status: 400, error: 'unsupported file extension — only .docx is accepted' };
+  }
+  if (req.file.mimetype !== DOCX_MIME)
+    return { status: 400, error: 'MIME type mismatch for .docx' };
 
   const bodyResult = ImportBodySchema.safeParse(req.body ?? {});
-  if (!bodyResult.success) return { error: 'name is required' };
+  // Message matches validateBody middleware's convention verbatim (#568) so
+  // this route is indistinguishable from every other Zod-validated route.
+  if (!bodyResult.success) return { status: 422, error: 'validation failed' };
 
   return { file: req.file, name: bodyResult.data.name, owner: bodyResult.data.owner };
 }
 
 export async function importTemplateHandler(req: Request, res: Response): Promise<void> {
-  const validation = validateRequest(req);
+  const validation = validateImportRequest(req);
   if ('error' in validation) {
-    res.status(400).json({ success: false, error: validation.error });
+    res.status(validation.status).json({ success: false, error: validation.error });
     return;
   }
 

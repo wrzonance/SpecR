@@ -290,4 +290,10 @@ describe('GET /projects/{id}/specs — discipline field + filter', () => {
     const res = await get(`/projects/${projectId}/specs?discipline=hvac&discipline=electrical`);
     expect(res.status).toBe(400);
   });
+
+  it('400 — malformed (non-UUID) project id (#568)', async () => {
+    const res = await get('/projects/not-a-uuid/specs');
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
+  });
 });

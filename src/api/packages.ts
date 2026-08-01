@@ -11,13 +11,11 @@ import {
 import type { CreatePackageBody, SetPackageSpecsBody } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
+import { parsePathUuid } from './path-params.js';
 
 export async function createPackageHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing project id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'project id');
+  if (id === null) return;
   try {
     const body = req.body as CreatePackageBody;
     const pkg = await createPackage(id, body.name, pool);
@@ -37,11 +35,8 @@ export async function createPackageHandler(req: Request, res: Response): Promise
 }
 
 export async function listPackagesHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing project id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'project id');
+  if (id === null) return;
   try {
     const packages = await listPackages(id, pool);
     if (packages === null) {
@@ -56,11 +51,8 @@ export async function listPackagesHandler(req: Request, res: Response): Promise<
 }
 
 export async function setPackageSpecsHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing package id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'package id');
+  if (id === null) return;
   try {
     const body = req.body as SetPackageSpecsBody;
     const specs = await setPackageSpecs(id, body.specIds, pool);
@@ -80,11 +72,8 @@ export async function setPackageSpecsHandler(req: Request, res: Response): Promi
 }
 
 export async function deletePackageHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing package id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'package id');
+  if (id === null) return;
   try {
     const deleted = await deletePackage(id, pool);
     if (!deleted) {
