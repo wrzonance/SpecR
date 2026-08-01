@@ -295,4 +295,4 @@ export { handleSubmittalRegister } from './submittal-register-handler.js';
 export { handleOpenCommentsReport } from './open-comments-handler.js';
 export { handleGetNumberingProfile } from './numbering-profile-handler.js';
 export { handleParseDocument } from './parse-document-handler.js';
-export { handleGenerateDocx, resolveHeaderFooterInput } from './generate-docx-handler.js';
+export { handleGenerateDocx, toHeaderFooterInput } from './generate-docx-handler.js';

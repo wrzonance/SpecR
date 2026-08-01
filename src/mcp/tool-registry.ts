@@ -1,17 +1,28 @@
 import type { McpServer, ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { AnySchema, ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js';
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
-import type { ZodRawShape } from 'zod';
 import { McpError } from './error.js';
 import { TOOL_TIERS, tierAnnotations, type ToolTier } from './capabilities.js';
 
-interface ToolConfig<Args extends ZodRawShape> {
+/** A tool's declared arguments: the usual raw `{ name: zodType }` shape, or a
+ *  whole Zod object schema. The schema form exists because a raw shape LOSES
+ *  any `.strict()` on the schema it came from — the SDK rebuilds it with
+ *  `z.object(shape)`, whose default behavior silently STRIPS unknown keys. For
+ *  a tool whose behavior is gated on an optional field, that turns a caller's
+ *  typo into a no-op instead of an error (see generate_docx in tools.ts, and
+ *  the `mdoe`/`mode` note in ast/generate-schemas.ts). Passing the object
+ *  schema through unchanged keeps strict mode, and the SDK then rejects the
+ *  unknown key with an InvalidParams error. */
+type ToolInputSchema = ZodRawShapeCompat | AnySchema;
+
+interface ToolConfig<Args extends ToolInputSchema> {
   readonly description: string;
   readonly inputSchema?: Args;
   readonly annotations?: ToolAnnotations;
 }
 
 export interface ToolRegistrar {
-  register<Args extends ZodRawShape>(
+  register<Args extends ToolInputSchema>(
     name: string,
     config: ToolConfig<Args>,
     handler: ToolCallback<Args>

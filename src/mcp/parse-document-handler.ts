@@ -24,6 +24,7 @@ import type { OriginMeta } from '../db/index.js';
 import { computeTitleMatch } from '../lib/infer-section.js';
 import type { SectionInference } from '../lib/infer-section.js';
 import { parse, assertDocxSafe, assertSecSafe, assertPdfSafe } from '../parser/index.js';
+import type { ParseOptions } from '../parser/index.js';
 import { parseSectionNumberCandidate } from '../lib/section-number.js';
 import { decodeBase64Payload } from '../lib/decode-base64.js';
 import { logger } from '../lib/logger.js';
@@ -31,6 +32,7 @@ import { parseLog, logParseWarnings } from '../lib/log-context.js';
 import { sha256Hex } from '../lib/hash.js';
 import { sanitizeFilename } from '../lib/filename.js';
 import { ALLOWED_PARSE_EXTENSIONS } from '../lib/parse-extensions.js';
+import { parseOptionsFromConfig } from '../lib/parse-options.js';
 import type { ToolError, ToolResult } from './tool-result.js';
 
 // Sourced from UFGS reference corpus — not authoritative CSI MasterFormat.
@@ -121,7 +123,8 @@ export function buildParseResponse(
   specId: string,
   tree: SpecTree,
   sectionInference: SectionInference,
-  nodeCount: number
+  nodeCount: number,
+  capabilities?: readonly string[]
 ): Record<string, unknown> {
   const response: Record<string, unknown> = {
     specId,
@@ -129,6 +132,11 @@ export function buildParseResponse(
     title: tree.title,
     nodeCount,
   };
+  // Mirrors REST's own `...(capabilities !== undefined ? { capabilities } : {})`
+  // (api/parse.ts). parse_document's tool description promises callers a
+  // `capabilities: ["read-only"]` for .txt/.pdf sources, so dropping the
+  // parser's flags here would make the tool contradict its own contract.
+  if (capabilities !== undefined) response['capabilities'] = capabilities;
   if (tree.warnings && tree.warnings.length > 0) response['warnings'] = tree.warnings;
   if (sectionInference.method !== 'metadata') {
     response['sectionInference'] = { ...sectionInference, note: INFERENCE_NOTE };
@@ -183,8 +191,29 @@ async function resolveMcpParseOverrides(
   if (isToolError(profileResult)) return profileResult;
   return {
     ...(sectionResult.value !== undefined ? { section: sectionResult.value } : {}),
-    ...(raw.title !== undefined ? { title: raw.title } : {}),
+    // Truthiness, not `!== undefined` — deliberately REST's exact test
+    // (api/parse.ts: `...(body.title ? { title: body.title } : {})`). An empty
+    // string is a no-op override on both surfaces; treating it as a real value
+    // would persist a tree whose title violates SpecTreeSchema's minLength(1).
+    ...(raw.title ? { title: raw.title } : {}),
     ...(profileResult.value !== undefined ? { numberingProfile: profileResult.value } : {}),
+  };
+}
+
+// The env-derived OCR policy is NOT optional here: this path parses .pdf, and
+// parseOptionsFromConfig carries OCR_REQUIRE_LOCAL_TRAINEDDATA (which blocks
+// Tesseract's network fetch of trained data) plus the configured thresholds,
+// cache path, render scale and init timeout. Passing only the numbering
+// profile would let an MCP upload bypass the very policy the REST worker
+// enforces on every upload (#567 review finding) — both ingest paths derive
+// their options from lib/parse-options.ts so a setting can never apply to one
+// surface and not the other.
+function parseOptionsFor(overrides: McpParseOverrides): ParseOptions {
+  return {
+    ...parseOptionsFromConfig(),
+    ...(overrides.numberingProfile !== undefined
+      ? { numberingProfile: overrides.numberingProfile }
+      : {}),
   };
 }
 
@@ -211,13 +240,7 @@ export async function handleParseDocument({
     const bufOrErr = await decodeSafeBuffer(ext, contentBase64);
     if (isToolError(bufOrErr)) return bufOrErr;
 
-    const parsed = await parse(
-      bufOrErr,
-      filename,
-      overrides.numberingProfile !== undefined
-        ? { numberingProfile: overrides.numberingProfile }
-        : undefined
-    );
+    const parsed = await parse(bufOrErr, filename, parseOptionsFor(overrides));
     const enriched = await enrichInferenceForMcp(parsed.tree, parsed.refs, parsed.sectionInference);
     // Overrides apply LAST — REST's own override-always-wins precedence
     // (api/parse.ts:220-224): an explicit caller-supplied section/title beats
@@ -231,7 +254,13 @@ export async function handleParseDocument({
     const originMeta = buildMcpOriginMeta(filename, contentBase64);
     const specId = await persistParsedSpec({ tree: finalTree, refs: enriched.refs, originMeta });
     const nodeCount = countNodes(finalTree.parts);
-    const response = buildParseResponse(specId, finalTree, enriched.sectionInference, nodeCount);
+    const response = buildParseResponse(
+      specId,
+      finalTree,
+      enriched.sectionInference,
+      nodeCount,
+      parsed.capabilities
+    );
     logParseWarnings(parseLog({ ...originMeta, specId }), finalTree.warnings ?? []);
     return { content: [{ type: 'text' as const, text: JSON.stringify(response, null, 2) }] };
   } catch (err) {

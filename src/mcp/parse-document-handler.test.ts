@@ -133,6 +133,28 @@ describe('buildParseResponse', () => {
     expect(r['sectionInference']).toMatchObject({ method: 'content-high' });
     expect((r['sectionInference'] as { note: string }).note).toContain('Section metadata missing');
   });
+
+  // #567 review finding: parse() returns the parser's capability flags
+  // ('read-only', 'parse-warnings' for TXT/PDF) and REST forwards them, but
+  // this builder dropped them — while parse_document's own tool description
+  // promises callers a `capabilities: ["read-only"]` for plaintext sources.
+  it('capabilities: forwards the parser flags REST returns and the tool description promises', async () => {
+    const { buildParseResponse } = await import('./parse-document-handler.js');
+    const tree = { id: 'r', section: '09 91 23', title: 't', parts: [] };
+
+    const r = buildParseResponse('s1', tree, METADATA_INFERENCE, 2, ['read-only']);
+
+    expect(r['capabilities']).toEqual(['read-only']);
+  });
+
+  it('capabilities: omitted entirely when the parser reported none (REST parity)', async () => {
+    const { buildParseResponse } = await import('./parse-document-handler.js');
+    const tree = { id: 'r', section: '09 91 23', title: 't', parts: [] };
+
+    const r = buildParseResponse('s1', tree, METADATA_INFERENCE, 2);
+
+    expect('capabilities' in r).toBe(false);
+  });
 });
 
 describe('handleParseDocument', () => {
@@ -151,7 +173,10 @@ describe('handleParseDocument', () => {
     });
 
     expect(result).not.toMatchObject({ isError: true });
-    expect(parser.parse).toHaveBeenCalledWith(expect.any(Buffer), 'spec.pdf', undefined);
+    // Options are always present now — .pdf is exactly the format the
+    // env-derived OCR policy governs (see the dedicated `ocr:` test below).
+    expect(parser.parse).toHaveBeenCalledWith(expect.any(Buffer), 'spec.pdf', expect.anything());
+    expect(vi.mocked(parser.parse).mock.calls[0]?.[2]).toHaveProperty('ocrRequireLocalTraineddata');
     expect(vi.mocked(parser.assertPdfSafe)).toHaveBeenCalled();
   });
 
@@ -204,6 +229,53 @@ describe('handleParseDocument', () => {
     expect(persisted?.tree.title).toBe('Motor Controllers');
   });
 
+  // #567 review finding: the override test was `!== undefined`, so an empty
+  // string counted as a real override and got written into the tree AND the
+  // database — a title that violates SpecTreeSchema's minLength(1). REST uses
+  // a truthiness test (`body.title ? ...`), which makes '' a no-op; this
+  // surface must agree.
+  it('overrides: an empty title override is a no-op, never persisted over the parsed title (REST parity)', async () => {
+    const parser = await import('../parser/index.js');
+    vi.mocked(parser.parse).mockResolvedValue({
+      tree: BASE_TREE,
+      refs: [],
+      sectionInference: METADATA_INFERENCE,
+    });
+    const db = await import('../db/index.js');
+    const { handleParseDocument } = await import('./parse-document-handler.js');
+
+    await handleParseDocument({
+      filename: 'spec.txt',
+      contentBase64: b64('plain text'),
+      title: '',
+    });
+
+    const persisted = vi.mocked(db.persistParsedSpec).mock.calls[0]?.[0];
+    expect(persisted?.tree.title).toBe('Painting');
+  });
+
+  // #567 review finding: this handler calls parse() directly — the same
+  // orchestrator the REST worker runs — but originally passed ONLY the
+  // numbering profile. That dropped the env-derived OCR policy for the .pdf
+  // support this change introduced: with OCR_REQUIRE_LOCAL_TRAINEDDATA=true a
+  // scanned PDF over MCP could still spawn Tesseract and fetch trained data
+  // over the network. Both ingest paths must derive options from the same
+  // place, or an OCR setting silently applies to one surface and not the other.
+  it('ocr: forwards the env-derived OCR policy to parse(), not just the numbering profile', async () => {
+    const parser = await import('../parser/index.js');
+    vi.mocked(parser.parse).mockResolvedValue({
+      tree: BASE_TREE,
+      refs: [],
+      sectionInference: METADATA_INFERENCE,
+    });
+    const { parseOptionsFromConfig } = await import('../lib/parse-options.js');
+    const { handleParseDocument } = await import('./parse-document-handler.js');
+
+    await handleParseDocument({ filename: 'scan.pdf', contentBase64: b64('%PDF-1.4') });
+
+    expect(vi.mocked(parser.parse).mock.calls[0]?.[2]).toMatchObject(parseOptionsFromConfig());
+  });
+
   it("overrides: an invalid section override format is rejected with REST's exact message", async () => {
     const { handleParseDocument } = await import('./parse-document-handler.js');
 
@@ -243,9 +315,13 @@ describe('handleParseDocument', () => {
     });
 
     expect(vi.mocked(db.getNumberingProfile)).toHaveBeenCalledWith(FAKE_PROFILE_ID);
-    expect(parser.parse).toHaveBeenCalledWith(expect.any(Buffer), 'spec.txt', {
-      numberingProfile: fakeRules,
-    });
+    // objectContaining, not an exact match: the resolved profile now rides
+    // alongside the env-derived OCR policy every parse carries.
+    expect(parser.parse).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      'spec.txt',
+      expect.objectContaining({ numberingProfile: fakeRules })
+    );
   });
 
   it("overrides: an unknown numberingProfileId is rejected with REST's exact message", async () => {

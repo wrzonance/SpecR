@@ -9,7 +9,7 @@ import {
 } from '../ast/index.js';
 import type { SpecTree, SecRef, NumberingProfile } from '../ast/index.js';
 import { SectionNumberSchema } from './section-number.js';
-import { config } from './env.js';
+import { parseOptionsFromConfig } from './parse-options.js';
 
 export interface WorkerInput {
   readonly buffer: Buffer;
@@ -55,18 +55,6 @@ export const workerOutputSchema = z.object({
   refs: z.array(SecRefSchema).default([]),
   capabilities: z.array(z.string()).optional(),
 });
-
-function parseOptionsFromConfig() {
-  return {
-    ocrMinCharsPerPage: config.OCR_MIN_CHARS_PER_PAGE,
-    ocrLowConfidenceThreshold: config.OCR_LOW_CONFIDENCE_THRESHOLD,
-    ocrRenderScale: config.OCR_RENDER_SCALE,
-    ocrInitTimeoutMs: config.OCR_INIT_TIMEOUT_MS,
-    ocrRequireLocalTraineddata: config.OCR_REQUIRE_LOCAL_TRAINEDDATA,
-    ...(config.OCR_LANG_PATH !== undefined ? { ocrLangPath: config.OCR_LANG_PATH } : {}),
-    ...(config.OCR_CACHE_PATH !== undefined ? { ocrCachePath: config.OCR_CACHE_PATH } : {}),
-  };
-}
 
 // Delegates to the parse() orchestrator so the upload path runs the same
 // pipeline as CLI ingest — including lib/infer-section section/title recovery,

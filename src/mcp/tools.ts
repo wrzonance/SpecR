@@ -175,10 +175,19 @@ function registerGeneratorTools(reg: ToolRegistrar): void {
     {
       description:
         'Generate a DOCX file from a stored spec. Returns base64-encoded content (typically 50–400 KB). Note: generates on-demand from current database state — not cached. Avoid calling in tight loops.',
-      inputSchema: {
+      // `.extend()`, NOT `{ ...GenerateBodySchema.shape }`: spreading the shape
+      // discards the schema's `.strict()`, and the SDK's rebuilt `z.object()`
+      // then STRIPS unknown keys instead of rejecting them. `{ specId, mdoe:
+      // 'final' }` would reach the handler with `mode` undefined, so the
+      // ADR-079 readiness gate would silently no-op on a dirty spec and hand
+      // back a draft with no error at all — the exact bypass `.strict()` was
+      // added to close for REST (#406), re-opened for MCP (#567 review
+      // finding). `.extend()` carries strict mode forward; validation has to
+      // live in the registered schema because the SDK strips the typo before
+      // the handler ever runs.
+      inputSchema: GenerateBodySchema.extend({
         specId: z.uuid().describe('Spec UUID to generate DOCX for'),
-        ...GenerateBodySchema.shape,
-      },
+      }),
     },
     handleGenerateDocx
   );

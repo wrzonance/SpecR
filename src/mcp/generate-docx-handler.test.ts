@@ -13,7 +13,6 @@ vi.mock('../db/index.js', () => ({
   getTemplate: vi.fn(),
   getTemplateByName: vi.fn(),
   resolveSpecGenerationContext: vi.fn(),
-  resolveSpecHeaderFooterContext: vi.fn(),
   assertReadyForFinal: vi.fn(),
   ReadinessBlockedError: class ReadinessBlockedError extends Error {
     readonly findings: readonly unknown[];
@@ -57,7 +56,6 @@ async function stubBaselineResolution(): Promise<void> {
   vi.mocked(db.getSpecTree).mockResolvedValue(STUB_TREE as never);
   vi.mocked(db.getTemplateByName).mockResolvedValue(null);
   vi.mocked(db.resolveSpecGenerationContext).mockResolvedValue(NO_PROJECT_CONTEXT);
-  vi.mocked(db.resolveSpecHeaderFooterContext).mockResolvedValue(null);
 }
 
 describe('handleGenerateDocx', () => {
@@ -170,23 +168,30 @@ describe('handleGenerateDocx', () => {
     );
   });
 
-  it('resolves header/footer input as a separate call and layers it onto options', async () => {
+  // #567 review finding: the section-number format and the header/footer must
+  // come from ONE ownership snapshot. Two independent reads left a window in
+  // which a project-membership change between them could pair Project A's
+  // numbering with Project B's branding — the race ADR-079/#304 closed for the
+  // REST path. Asserting the single call is what keeps it closed.
+  it('layers header/footer onto options from the SAME ownership snapshot as the section format', async () => {
     await stubBaselineResolution();
     const db = await import('../db/index.js');
     const generator = await import('../generator/index.js');
     const composition = { header: { left: { content: [] } } };
-    vi.mocked(db.resolveSpecHeaderFooterContext).mockResolvedValueOnce({
-      composition,
-      fieldValues: { projectName: 'Acme HQ' },
-    });
+    vi.mocked(db.resolveSpecGenerationContext).mockResolvedValueOnce({
+      sectionNumberFormat: 'ufgs',
+      headerFooter: { composition, fieldValues: { projectName: 'Acme HQ' } },
+    } as never);
     vi.mocked(generator.generateDocx).mockResolvedValueOnce(Buffer.from('docx'));
     const { handleGenerateDocx } = await import('./generate-docx-handler.js');
 
     await handleGenerateDocx({ specId: FAKE_SPEC_ID });
 
-    expect(vi.mocked(db.resolveSpecHeaderFooterContext)).toHaveBeenCalledWith(FAKE_SPEC_ID, {});
+    expect(vi.mocked(db.resolveSpecGenerationContext)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(db.resolveSpecGenerationContext)).toHaveBeenCalledWith(FAKE_SPEC_ID, {});
     const call = vi.mocked(generator.generateDocx).mock.calls[0];
     expect(call?.[2]).toMatchObject({
+      sectionNumberFormat: 'ufgs',
       headerFooter: { composition, current: { projectName: 'Acme HQ' } },
     });
   });
@@ -337,13 +342,11 @@ describe('handleGenerateDocx — readiness gate wiring (#567)', () => {
       );
     });
     vi.mocked(db.resolveSpecGenerationContext).mockClear();
-    vi.mocked(db.resolveSpecHeaderFooterContext).mockClear();
     const { handleGenerateDocx } = await import('./generate-docx-handler.js');
 
     await handleGenerateDocx({ specId: FAKE_SPEC_ID, mode: 'final' });
 
     expect(vi.mocked(db.resolveSpecGenerationContext)).not.toHaveBeenCalled();
-    expect(vi.mocked(db.resolveSpecHeaderFooterContext)).not.toHaveBeenCalled();
   });
 
   it('a gate error that is not ReadinessBlockedError surfaces via the generic catch-all, never swallowed silently', async () => {

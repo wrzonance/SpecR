@@ -790,6 +790,31 @@ describe('tool: generate_docx', () => {
     const result = b['result'] as Record<string, unknown>;
     expect(result['isError']).toBe(true);
   });
+
+  // #567 review finding: generate_docx's inputSchema was built by SPREADING
+  // GenerateBodySchema.shape, which drops the schema's `.strict()`. The SDK
+  // rebuilds a raw shape with `z.object()`, whose default behavior STRIPS
+  // unknown keys — so `mdoe: 'final'` arrived with `mode` undefined and the
+  // ADR-079 readiness gate silently no-opped, handing back a draft DOCX with
+  // no error at all. REST rejects the same typo (#406). Registering the
+  // strict object schema itself is what closes it; the typo must never
+  // produce a document.
+  it('generate_docx: a misspelled `mdoe` is rejected, never silently stripped into a gate no-op', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'generate_docx',
+      arguments: { specId: mcpSpecId, mdoe: 'final' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    // The SDK's own InvalidParams (-32602) surfaces as an isError tool result.
+    expect(result['isError']).toBe(true);
+    const text = (result['content'] as { text: string }[])[0]?.text ?? '';
+    expect(text).toContain('unrecognized_keys');
+    expect(text).toContain('mdoe');
+    // The load-bearing part: no document came back. A stripped key would have
+    // produced a perfectly valid draft DOCX instead.
+    expect(text).not.toContain('contentBase64');
+  });
 });
 
 describe('GET /mcp', () => {

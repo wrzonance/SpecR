@@ -16,11 +16,11 @@ import {
   getTemplate,
   getTemplateByName,
   resolveSpecGenerationContext,
-  resolveSpecHeaderFooterContext,
   assertReadyForFinal,
   ReadinessBlockedError,
   pool,
 } from '../db/index.js';
+import type { HeaderFooterGenerationContext } from '../db/index.js';
 import { generateDocx } from '../generator/index.js';
 import type {
   GenerateDocxOptions,
@@ -71,30 +71,26 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Resolve the generator-ready header/footer input for a spec's sole owning
- *  project (#304), or undefined when nothing applies — mirrors
+/** Map an already-resolved header/footer context to the generator-ready
+ *  input (#304), or undefined when nothing applies — mirrors
  *  src/api/generate-header-footer.ts's `buildHeaderFooterOptions` inline
  *  rather than importing it (see `todayIsoDate`), so generate_docx renders
- *  in lockstep with POST /specs/:id/generate (ADR-044). Exported so a
- *  dedicated unit test can pin its no-mutation invariant (I5) the same way
- *  `buildHeaderFooterOptions`'s own suite does
- *  (src/api/generate-header-footer.test.ts) — `server.integration.test.ts`
- *  re-fetches fresh rows from Postgres on every call, so a mutation here
- *  would otherwise never surface as a failure.
+ *  in lockstep with POST /specs/:id/generate (ADR-044).
  *
- *  Deliberately a SEPARATE DB round trip from `resolveSpecGenerationContext`
- *  below rather than folded into one combined lookup: `handlers.test.ts`
- *  pins this function's exact `(specId, pool)` call signature via dedicated
- *  mock-based tests (I2/I5/I9), so unifying the two calls would mean
- *  changing that test contract — a separate decision, not a side effect of
- *  this extraction. This reopens a narrow ownership-snapshot race window
- *  that unifying the two reads would close (ADR-079/#304 originally closed
- *  it for the REST path by unifying them there); accepted as a pre-existing
- *  tradeoff already present in this MCP handler before this change. */
-export async function resolveHeaderFooterInput(
-  specId: string
-): Promise<HeaderFooterGenerationInput | undefined> {
-  const context = await resolveSpecHeaderFooterContext(specId, pool);
+ *  Takes the context rather than fetching it (#567 review finding): its
+ *  caller now reads the section-number format and the header/footer from
+ *  ONE `resolveSpecGenerationContext` snapshot. Two independent ownership
+ *  reads left a race window in which a project-membership change between
+ *  them could pair Project A's numbering with Project B's branding — the
+ *  window ADR-079/#304 closed for the REST path by unifying the same two
+ *  reads there. Pure, so its no-mutation invariant (I5) is pinned directly
+ *  by unit test, the way `buildHeaderFooterOptions`'s own suite does
+ *  (src/api/generate-header-footer.test.ts); `server.integration.test.ts`
+ *  re-fetches fresh rows from Postgres on every call, so a mutation here
+ *  would otherwise never surface as a failure. */
+export function toHeaderFooterInput(
+  context: HeaderFooterGenerationContext | null
+): HeaderFooterGenerationInput | undefined {
   if (context === null) return undefined;
   const current: HeaderFooterFieldValues = { date: todayIsoDate(), ...context.fieldValues };
   return { composition: context.composition, current };
@@ -143,9 +139,12 @@ async function resolveGenerateOptions(
   specId: string,
   body: GenerateBody
 ): Promise<GenerateDocxOptions | undefined> {
+  // ONE ownership snapshot for both the section-number format and the
+  // header/footer — see toHeaderFooterInput's note on the race a second
+  // independent read would reopen.
   const specContext = await resolveSpecGenerationContext(specId, pool);
   const format = body.sectionNumberFormat ?? specContext.sectionNumberFormat ?? undefined;
-  const headerFooter = await resolveHeaderFooterInput(specId);
+  const headerFooter = toHeaderFooterInput(specContext.headerFooter);
   const baseOptions = generateOptionsFor(format);
   return headerFooter ? { ...baseOptions, headerFooter } : baseOptions;
 }
