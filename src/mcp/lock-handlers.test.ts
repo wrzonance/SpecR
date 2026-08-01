@@ -34,6 +34,14 @@ function structuredContentOf(result: unknown): unknown {
   return (result as { structuredContent?: unknown }).structuredContent;
 }
 
+// `structuredContentOf(result)).toBeUndefined()` alone can't distinguish "no
+// structuredContent key" from "structuredContent: undefined" — use `in` to
+// pin key-absence (see handlers.test.ts's direct toolError coverage for the
+// invariant this backs).
+function hasStructuredContentKey(result: unknown): boolean {
+  return typeof result === 'object' && result !== null && 'structuredContent' in result;
+}
+
 describe('lock_spec: held lock returns holder/expiresAt as structuredContent alongside prose (#569)', () => {
   it('returns structuredContent.holder/expiresAt matching the prose sentence', async () => {
     const db = await import('../db/index.js');
@@ -68,6 +76,7 @@ describe('lock_spec: held lock returns holder/expiresAt as structuredContent alo
 
     expect(result).not.toMatchObject({ isError: true });
     expect(structuredContentOf(result)).toBeUndefined();
+    expect(hasStructuredContentKey(result)).toBe(false);
   });
 });
 
@@ -97,6 +106,7 @@ describe('lock_spec family: MCP tool handlers never throw', () => {
     expect(result).toMatchObject({ isError: true });
     expect(textOf(result)).toContain('Internal error');
     expect(structuredContentOf(result)).toBeUndefined();
+    expect(hasStructuredContentKey(result)).toBe(false);
   });
 
   it('unlock_spec: a rejected releaseLock call resolves to an Internal error, not a throw', async () => {
@@ -108,5 +118,6 @@ describe('lock_spec family: MCP tool handlers never throw', () => {
 
     expect(result).toMatchObject({ isError: true });
     expect(textOf(result)).toContain('Internal error');
+    expect(hasStructuredContentKey(result)).toBe(false);
   });
 });
