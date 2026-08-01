@@ -289,4 +289,24 @@ describe('handleParseDocument', () => {
     const persisted = vi.mocked(db.persistParsedSpec).mock.calls[0]?.[0];
     expect(persisted?.tree.title).toBe('Real Detected Title');
   });
+
+  it('never throws past its own catch — an unexpected persistParsedSpec rejection surfaces as isError (#567 sweep)', async () => {
+    const parser = await import('../parser/index.js');
+    vi.mocked(parser.parse).mockResolvedValue({
+      tree: BASE_TREE,
+      refs: [],
+      sectionInference: METADATA_INFERENCE,
+    });
+    const db = await import('../db/index.js');
+    vi.mocked(db.persistParsedSpec).mockRejectedValueOnce(new Error('connection reset'));
+    const { handleParseDocument } = await import('./parse-document-handler.js');
+
+    const result = await handleParseDocument({
+      filename: 'spec.txt',
+      contentBase64: b64('plain text'),
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    expect((result.content[0] as { text: string }).text).toBe('Internal error — parse failed');
+  });
 });
