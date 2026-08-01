@@ -144,12 +144,15 @@ files:
 - `src/mcp/merge-handlers.ts`
 - `src/mcp/paragraph-handlers.ts`
 
-Both are live surfaces that sibling PRs #567 (MCP surface parity) and #568
-(REST input hardening) may be touching concurrently in parallel worktrees.
-Converting them here risks merge conflicts on files this issue does not own
-and was explicitly told not to cross into. They are deferred, not forgotten
-— a follow-up issue should apply the same `structuredContent` pattern
-established here to those two files' 409-equivalent branches.
+Neither file is in this issue's owned paths, and converting them is a
+separate demonstrable change: it needs its own regression tests per tool and
+its own decision about which fields each conflict class should carry
+(`stale_version` wants the current version; `write_forbidden` wants the
+gating reason — neither maps onto `lock_spec`'s `holder`/`expiresAt` shape).
+Folding that into this PR would widen it past one reviewable change without
+making either conversion better. They are deferred, not forgotten — #583
+tracks applying the `structuredContent` pattern established here to those
+two files' 409-equivalent branches.
 
 ## Consequences
 
