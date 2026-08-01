@@ -5,7 +5,7 @@
   "description": "Visual round-trip verification harness (#150): docx-preview + pixel diff, agent-driven. Isolated pnpm package — see pnpm-workspace.yaml.",
   "type": "module",
   "engines": {
-    "node": ">=22.17.0",
+    "node": ">=24 <25",
     "pnpm": ">=11.0.0"
   },
   "scripts": {
@@ -30,7 +30,7 @@
     "@eslint/js": "latest",
     "@types/express": "^5.0.6",
     "@types/multer": "^1.0.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^24.13.3",
     "@types/pngjs": "^6.0.5",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^10.1.8",
