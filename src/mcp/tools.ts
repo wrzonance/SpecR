@@ -3,7 +3,7 @@ import path from 'node:path';
 import { glob, realpath } from 'node:fs/promises';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { SubmittalRegisterBodySchema } from '../ast/index.js';
+import { GenerateBodySchema, SubmittalRegisterBodySchema } from '../ast/index.js';
 import { loadFiles } from '../lib/file-loader.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -161,6 +161,7 @@ function registerGeneratorTools(reg: ToolRegistrar): void {
         'Generate a DOCX file from a stored spec. Returns base64-encoded content (typically 50–400 KB). Note: generates on-demand from current database state — not cached. Avoid calling in tight loops.',
       inputSchema: {
         specId: z.uuid().describe('Spec UUID to generate DOCX for'),
+        ...GenerateBodySchema.shape,
       },
     },
     handleGenerateDocx
