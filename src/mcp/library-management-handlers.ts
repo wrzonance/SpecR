@@ -8,6 +8,7 @@ import {
   ParentLibraryNotCompanyError,
   DefaultCompanyLibraryError,
 } from '../db/index.js';
+import { DisciplineFilter } from '../lib/discipline-filter.js';
 import { getPgCode } from '../lib/pg-errors.js';
 import { logger } from '../lib/logger.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
@@ -28,10 +29,11 @@ export const ListLibrarySpecsShape = {
     .boolean()
     .describe('Include withdrawn masters (default false), each with its withdrawnAt timestamp')
     .optional(),
-  discipline: z
-    .string()
-    .describe('Keep only specs resolving to this discipline key (from list_disciplines)')
-    .optional(),
+  discipline: DisciplineFilter.describe(
+    'Keep only specs resolving to this discipline key (from list_disciplines). The value is ' +
+      'trimmed before matching, and a blank or whitespace-only value means no filter, ' +
+      'exactly like omitting it.'
+  ),
 };
 const ListLibrarySpecsArgs = z.object(ListLibrarySpecsShape);
 

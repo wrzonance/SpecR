@@ -2629,7 +2629,9 @@ paths:
           required: false
           description: >
             Discipline key (from GET /disciplines) to filter the listing by, resolved
-            under the library's mapping (ADR-065).
+            under the library's mapping (ADR-065). The value is trimmed before matching,
+            and blank is unset: an empty or whitespace-only value is treated as no filter,
+            so `?discipline=` returns the full listing rather than an empty one.
           schema:
             type: string
       responses:
@@ -3293,7 +3295,11 @@ paths:
         - name: discipline
           in: query
           required: false
-          description: Discipline key (from GET /disciplines) to filter the listing by.
+          description: >
+            Discipline key (from GET /disciplines) to filter the listing by. The value is
+            trimmed before matching, and blank is unset: an empty or whitespace-only value
+            is treated as no filter, so `?discipline=` returns the full listing rather
+            than an empty one.
           schema:
             type: string
       responses:

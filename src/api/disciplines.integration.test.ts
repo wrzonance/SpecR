@@ -130,6 +130,24 @@ describe('GET /libraries/{id}/specs — discipline field + filter', () => {
     expect(body.data.map((s) => s.section)).toEqual(['26 05 19']);
   });
 
+  it('libraries: blank discipline filter returns all specs, not none', async () => {
+    const libId = await seedLibraryWithSpecs();
+    const unfiltered = (await (await get(`/libraries/${libId}/specs`)).json()) as {
+      data: SpecRow[];
+    };
+    const expected = unfiltered.data.map((s) => s.section);
+    expect(expected).toHaveLength(3);
+
+    // `?discipline=` and a whitespace-only value both mean "no filter", not "match the
+    // empty discipline key" — the latter silently returns [] from a populated library (#548).
+    for (const raw of ['', '%20%20%20']) {
+      const res = await get(`/libraries/${libId}/specs?discipline=${raw}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: SpecRow[] };
+      expect(body.data.map((s) => s.section)).toEqual(expected);
+    }
+  });
+
   it('400 — a repeated (non-scalar) discipline filter is rejected, not silently ignored', async () => {
     const libId = await seedLibraryWithSpecs();
     const res = await get(`/libraries/${libId}/specs?discipline=electrical&discipline=hvac`);
@@ -249,6 +267,22 @@ describe('GET /projects/{id}/specs — discipline field + filter', () => {
   it('404 — an unknown project', async () => {
     const res = await get(`/projects/${randomUUID()}/specs`);
     expect(res.status).toBe(404);
+  });
+
+  it('projects: blank discipline filter returns all specs, not none', async () => {
+    const projectId = await seedProjectWithSpecs();
+    const unfiltered = (await (await get(`/projects/${projectId}/specs`)).json()) as {
+      data: SpecRow[];
+    };
+    const expected = unfiltered.data.map((s) => s.section);
+    expect(expected).toHaveLength(2);
+
+    for (const raw of ['', '%20%20%20']) {
+      const res = await get(`/projects/${projectId}/specs?discipline=${raw}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: SpecRow[] };
+      expect(body.data.map((s) => s.section)).toEqual(expected);
+    }
   });
 
   it('400 — a repeated (non-scalar) discipline filter is rejected, not silently ignored', async () => {
