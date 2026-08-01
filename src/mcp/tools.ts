@@ -324,7 +324,7 @@ function registerReadinessTools(reg: ToolRegistrar): void {
         'readyForFinal: true is exactly the set a mode: "final" issue_package_revision or ' +
         'generate_docx call would let through — REST (POST /packages/{id}/revisions, ' +
         'POST /specs/{id}/generate) and their MCP tool counterparts all enforce this same gate ' +
-        '(ADR-081; #567 closed the earlier generate_docx gap). ' +
+        '(ADR-082; #567 closed the earlier generate_docx gap). ' +
         'Provide exactly one of specId (see get_spec) or packageId (see list_packages).',
       inputSchema: {
         specId: z.uuid().optional().describe('Spec UUID — readiness findings for one spec'),

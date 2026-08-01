@@ -1,4 +1,4 @@
-# ADR-081: generate_docx keeps its `read` tier even with the readiness gate reachable
+# ADR-082: generate_docx keeps its `read` tier even with the readiness gate reachable
 
 ## Status
 
@@ -10,8 +10,8 @@ Accepted
 `assertReadyForFinal`/`ReadinessBlockedError` call REST's `enforceReadinessGate` already makes, now
 reachable from `generate_docx`'s `mode`/`overrideReadinessGate` body fields (spread from the shared
 `GenerateBodySchema`, matching REST's own request shape). The issue that opened this workstream (#550
-Workstream A) flagged this explicitly: *"`overrideReadinessGate` is capability-sensitive — decide and
-document whether it stays exposed at the `write` tier or is gated."*
+Workstream A) flagged this explicitly: _"`overrideReadinessGate` is capability-sensitive — decide and
+document whether it stays exposed at the `write` tier or is gated."_
 
 `generate_docx` has been `TOOL_TIERS.get('generate_docx') === 'read'` (`src/mcp/capabilities.ts`)
 since the tier map was introduced (ADR-045) — it reads a spec's stored tree and renders bytes back to
@@ -42,7 +42,7 @@ tier or per-parameter gate is introduced.
    surfaces diverge on authorization semantics, the opposite of ADR-044's contract-parity goal.
 
 4. **The gate itself is the real control, not the tool tier.** `overrideReadinessGate` does not
-   bypass validation — it bypasses a *refusal*. Every finding it lets through was already visible via
+   bypass validation — it bypasses a _refusal_. Every finding it lets through was already visible via
    `readiness_report` (a `read`-tier tool) before the call, and the generated DOCX still reflects the
    spec's actual current content; nothing is fabricated or silently mutated. The tier system answers
    "can this caller reach this tool at all," which is orthogonal to "should a **final**-mode render be
@@ -57,7 +57,7 @@ tier or per-parameter gate is introduced.
   worked before this change loses access to `generate_docx` because of this change.
 - `overrideReadinessGate: true` is available to any caller who can already call `generate_docx` at
   all — the same blunt, unaudited bypass ADR-079 Decision 8 already accepted for REST, now reachable
-  from MCP too. This is a widening of *reachability*, not a widening of *authorization*: REST already
+  from MCP too. This is a widening of _reachability_, not a widening of _authorization_: REST already
   allowed exactly this for the same field.
 - If a future audit-trail feature (#380–#382) introduces per-action authorization finer than tool
   tiers, `overrideReadinessGate` is the natural first candidate to gate under it — this ADR does not

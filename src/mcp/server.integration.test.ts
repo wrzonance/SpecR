@@ -978,12 +978,12 @@ describe('capability gating (#43)', () => {
 // false at the time, because generate_docx's inputSchema carried no
 // mode/overrideReadinessGate fields and handleGenerateDocx never called the
 // readiness gate (only the REST POST /specs/:id/generate route did). #567
-// closed that gap (ADR-081): generate_docx now accepts mode/overrideReadinessGate
+// closed that gap (ADR-082): generate_docx now accepts mode/overrideReadinessGate
 // and handleGenerateDocx calls checkMcpReadinessGate, the same
 // assertReadyForFinal path enforceReadinessGate uses on the REST side. The
 // description now documents that generate_docx and issue_package_revision
 // both enforce the gate, rather than carrying the old, now-false disclaimer.
-describe('tool: readiness_report — description accuracy (#406, closed by #567/ADR-081)', () => {
+describe('tool: readiness_report — description accuracy (#406, closed by #567/ADR-082)', () => {
   it('documents that generate_docx now enforces the mode: "final" readiness gate', async () => {
     const body = await mcpCall(`${baseUrl}/mcp`, 'tools/list', {});
     const b = body as { result: { tools: { name: string; description?: string }[] } };
