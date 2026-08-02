@@ -96,11 +96,14 @@ describe('run-store (immutability + manifest persistence)', () => {
 
 // #604: trackPending/waitForIdle let a lifecycle owner (e.g. a test's
 // afterEach) drain a detached run's outstanding async work before removing
-// workRoot out from under it. Deliberately not testing "the internal Set
-// self-cleans" as its own case — that's an internal-memory concern, not a
-// boundary invariant (see repo convention: test module boundaries, not
-// internals); it's exercised implicitly by every waitForIdle call below
-// actually settling rather than hanging.
+// workRoot out from under it. The tests below pin waitForIdle's observable
+// contract (resolves once tracked work settles, snapshots at call time,
+// never rejects/hangs). The "pending never grows unbounded" self-cleaning
+// claim is a distinct, memory-only invariant — no timing/rejection
+// assertion on waitForIdle can distinguish a self-cleaning Set from one
+// that retains settled promises forever, so it is NOT implicitly covered
+// by those cases. It gets its own explicit, reachability-based regression
+// test below (WeakRef + --expose-gc, skipped when the flag isn't present).
 describe('run-store (trackPending / waitForIdle — #604)', () => {
   let workRoot: string;
   let store: RunStore;
@@ -185,4 +188,29 @@ describe('run-store (trackPending / waitForIdle — #604)', () => {
   it('waitForIdle no-ops immediately when nothing is pending', async () => {
     await expect(store.waitForIdle()).resolves.toBeUndefined();
   });
+
+  // Requires `--expose-gc` (wired into this package's `test` script) to
+  // force a deterministic collection; skips rather than false-passing on a
+  // runner that starts node without the flag.
+  it.skipIf(typeof globalThis.gc !== 'function')(
+    'trackPending releases its reference to a settled promise, so pending never grows unbounded',
+    async () => {
+      let ref!: WeakRef<Promise<void>>;
+      (() => {
+        const completion = Promise.resolve();
+        ref = new WeakRef(completion);
+        store.trackPending(completion);
+      })();
+
+      // Let the tracked promise settle and its `.finally` cleanup run
+      // before forcing a collection pass.
+      await store.waitForIdle();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      globalThis.gc?.();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(ref.deref()).toBeUndefined();
+    }
+  );
 });
