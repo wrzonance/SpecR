@@ -39,7 +39,7 @@ export type { ToolResult };
 
 type ReferenceDirection = 'from' | 'to' | 'both';
 
-// ADR-081: the options object exists only to carry structuredContent, so the
+// ADR-083: the options object exists only to carry structuredContent, so the
 // field is required within it — an empty/no-op options call has no legitimate
 // use and would just be call-site noise.
 export interface ToolErrorOptions {

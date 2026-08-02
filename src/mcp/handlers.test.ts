@@ -152,7 +152,7 @@ describe('resolveHeaderFooterInput', () => {
 
 // Review finding (#569 follow-up): `structuredContentOf(result)).toBeUndefined()`
 // passes identically whether the `structuredContent` key is absent or present
-// with value `undefined`, so it doesn't actually pin ADR-081's conditional
+// with value `undefined`, so it doesn't actually pin ADR-083's conditional
 // spread. Assert key-absence with `in` directly against `toolError` itself —
 // the one place the spread lives — so a regression to an unconditional
 // `structuredContent: options?.structuredContent` assignment is caught even

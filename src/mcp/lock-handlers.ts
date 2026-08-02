@@ -45,7 +45,7 @@ export async function handleLockSpec(args: unknown): Promise<ToolResult> {
     if (!(await findSpecById(specId))) return toolError(`spec not found: id=${specId}`);
     const result = await acquireLock(specId, holder, ttlSeconds);
     if (result.status === 'held') {
-      // ADR-081: preserve the human-readable sentence in `content` while also
+      // ADR-083: preserve the human-readable sentence in `content` while also
       // surfacing `holder`/`expiresAt` as structuredContent — mirrors REST's
       // 409 body (src/api/locks.ts) field-for-field so an agent can schedule a
       // retry without regexing prose.

@@ -4,7 +4,7 @@
 // superset (some handlers attach navigation anchors under _meta); handlers that
 // never set _meta are still structurally compatible.
 //
-// ToolError.structuredContent (ADR-081) is an OPTIONAL machine-readable
+// ToolError.structuredContent (ADR-083) is an OPTIONAL machine-readable
 // payload alongside the always-present human-readable `content` text — added
 // so conflict-class failures (e.g. a 409-equivalent lock contention) can
 // carry fields like `holder`/`expiresAt` without an agent having to regex

@@ -1,4 +1,4 @@
-# ADR-081: MCP tool-error structured content, scope 404 reuse, and seed-description accuracy
+# ADR-083: MCP tool-error structured content, scope 404 reuse, and seed-description accuracy
 
 ## Status
 
