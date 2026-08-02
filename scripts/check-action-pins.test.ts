@@ -35,15 +35,11 @@ describe('parsePinnedActionRef', () => {
   });
 
   it('rejects a floating full-semver tag', () => {
-    expect(() => parsePinnedActionRef('actions/checkout@v7.0.1', 'test')).toThrow(
-      /floating tag/
-    );
+    expect(() => parsePinnedActionRef('actions/checkout@v7.0.1', 'test')).toThrow(/floating tag/);
   });
 
   it('rejects a branch ref', () => {
-    expect(() => parsePinnedActionRef('actions/checkout@main', 'test')).toThrow(
-      /floating tag/
-    );
+    expect(() => parsePinnedActionRef('actions/checkout@main', 'test')).toThrow(/floating tag/);
   });
 
   it('rejects a ref with no @ at all', () => {
