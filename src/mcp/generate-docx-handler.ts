@@ -97,8 +97,7 @@ export function toHeaderFooterInput(
 }
 
 export type McpReadinessOutcome =
-  | { readonly blocked: false }
-  | { readonly blocked: true; readonly toolError: ToolError };
+  { readonly blocked: false } | { readonly blocked: true; readonly toolError: ToolError };
 
 interface ReadinessCheckedEntry {
   readonly tree: SpecTree;
