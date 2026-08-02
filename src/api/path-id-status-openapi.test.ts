@@ -70,7 +70,7 @@ function expectErrorResponseSchema(
 
 // Every {method, path} whose handler reads a uuid-typed path param through
 // parsePathUuid. Mirrors the call sites wired in router.ts — see
-// src/api/projects.ts, packages.ts, and revisions.ts.
+// src/api/projects.ts, packages.ts, revisions.ts, and specs.ts.
 const PATH_ID_VALIDATED_OPS: readonly { readonly method: string; readonly path: string }[] = [
   { method: 'get', path: '/projects/{id}' },
   { method: 'patch', path: '/projects/{id}' },
@@ -88,6 +88,8 @@ const PATH_ID_VALIDATED_OPS: readonly { readonly method: string; readonly path: 
   { method: 'get', path: '/packages/{id}/revisions' },
   { method: 'post', path: '/packages/{id}/revisions' },
   { method: 'get', path: '/revisions/{id}' },
+  { method: 'get', path: '/specs/{id}' },
+  { method: 'patch', path: '/specs/{id}' },
 ];
 
 describe('openapi.yaml documents the parsePathUuid 400 on every migrated operation (#568)', () => {
