@@ -177,3 +177,34 @@ describe('toHeaderFooterInput', () => {
     vi.useRealTimers();
   });
 });
+
+// Review finding (#569 follow-up): `structuredContentOf(result)).toBeUndefined()`
+// passes identically whether the `structuredContent` key is absent or present
+// with value `undefined`, so it doesn't actually pin ADR-083's conditional
+// spread. Assert key-absence with `in` directly against `toolError` itself —
+// the one place the spread lives — so a regression to an unconditional
+// `structuredContent: options?.structuredContent` assignment is caught even
+// though it would still read as `undefined` under a truthiness check.
+describe('toolError: omitting options never adds a structuredContent key', () => {
+  it('toolError(text) with no options has no own "structuredContent" key', async () => {
+    const { toolError } = await import('./handlers.js');
+
+    const result = toolError('Internal error — lock acquire failed');
+
+    expect('structuredContent' in result).toBe(false);
+  });
+
+  it('toolError(text, options) with options carries the structuredContent key', async () => {
+    const { toolError } = await import('./handlers.js');
+
+    const result = toolError('spec is locked by editor-b until 2026-08-01T12:00:00.000Z', {
+      structuredContent: { holder: 'editor-b', expiresAt: '2026-08-01T12:00:00.000Z' },
+    });
+
+    expect('structuredContent' in result).toBe(true);
+    expect(result.structuredContent).toEqual({
+      holder: 'editor-b',
+      expiresAt: '2026-08-01T12:00:00.000Z',
+    });
+  });
+});
