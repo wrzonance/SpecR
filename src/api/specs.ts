@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import { parsePathUuid } from './path-params.js';
 import {
   getSpecTree,
   updateSpec,
@@ -22,11 +23,8 @@ const PROJECT_COPY_WITHDRAW =
 const PROJECT_COPY_RESTORE = 'spec is a project copy — withdrawal applies only to library masters';
 
 export async function getSpecHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing spec id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'spec id');
+  if (id === null) return;
   try {
     const result = await getSpecTree(id);
     if (!result) {
@@ -95,11 +93,8 @@ export async function getHierarchyReportHandler(req: Request, res: Response): Pr
 }
 
 export async function updateSpecHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing spec id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'spec id');
+  if (id === null) return;
   try {
     const body = req.body as { readonly title?: string; readonly section?: string };
     const spec = await updateSpec(id, body);
