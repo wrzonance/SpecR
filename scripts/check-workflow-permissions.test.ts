@@ -48,4 +48,38 @@ describe('extractJobPermissions', () => {
     ].join('\n');
     expect(extractJobPermissions(yaml, 'claude')).toEqual({ contents: 'read' });
   });
+
+  // Regression: the search for a job's `permissions:` block used to scan
+  // forward across the REST of the file, not bounded to that job's own text —
+  // so a job with no permissions block would silently inherit a later
+  // sibling job's block instead of throwing.
+  it('does not attribute a later sibling job permissions block to a job with none', () => {
+    const yaml = [
+      'jobs:',
+      '  claude:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - uses: actions/checkout@deadbeef',
+      '  other:',
+      '    permissions:',
+      '      contents: read',
+      '      id-token: write',
+    ].join('\n');
+    expect(() => extractJobPermissions(yaml, 'claude')).toThrow(WorkflowPermissionsError);
+    expect(() => extractJobPermissions(yaml, 'claude')).toThrow(/no "permissions:" block/);
+  });
+
+  it('reads the correct permissions when the named job itself has a block and a sibling follows', () => {
+    const yaml = [
+      'jobs:',
+      '  claude:',
+      '    permissions:',
+      '      contents: read',
+      '  other:',
+      '    permissions:',
+      '      contents: write',
+      '      id-token: write',
+    ].join('\n');
+    expect(extractJobPermissions(yaml, 'claude')).toEqual({ contents: 'read' });
+  });
 });

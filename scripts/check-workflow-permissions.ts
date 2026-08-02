@@ -33,6 +33,20 @@ const BLOCK_HEADER_INDENT = '    ';
 const ENTRY_INDENT = '      ';
 
 /**
+ * Slice out just the named job's own body — from right after its header up
+ * to (but not including) the next sibling job header (a line back at
+ * `JOB_INDENT` followed by non-whitespace), or end of file if it's the last
+ * job. Without this bound, a search for `permissions:` run against the rest
+ * of the whole file can walk past this job's body and match a LATER job's
+ * block instead.
+ */
+const sliceJobBody = (afterJobHeader: string): string => {
+  const nextJobHeader = new RegExp(`^${JOB_INDENT}\\S`, 'm');
+  const nextMatch = nextJobHeader.exec(afterJobHeader);
+  return nextMatch === null ? afterJobHeader : afterJobHeader.slice(0, nextMatch.index);
+};
+
+/**
  * Extract the flat `key: value` grants under a named job's `permissions:`
  * block. Assumes the two-space-per-nesting-level indentation this repo's
  * workflow files use throughout (`jobs:` > `<job>:` > `permissions:` >
@@ -45,14 +59,14 @@ export const extractJobPermissions = (yaml: string, jobName: string): Record<str
     throw new WorkflowPermissionsError(`no "${jobName}:" job found`);
   }
 
-  const afterJob = yaml.slice(jobMatch.index + jobMatch[0].length);
+  const jobBody = sliceJobBody(yaml.slice(jobMatch.index + jobMatch[0].length));
   const permsHeader = new RegExp(`^${BLOCK_HEADER_INDENT}permissions:\\s*$`, 'm');
-  const permsMatch = permsHeader.exec(afterJob);
+  const permsMatch = permsHeader.exec(jobBody);
   if (permsMatch === null) {
     throw new WorkflowPermissionsError(`job "${jobName}" has no "permissions:" block`);
   }
 
-  return parsePermissionEntries(afterJob.slice(permsMatch.index + permsMatch[0].length));
+  return parsePermissionEntries(jobBody.slice(permsMatch.index + permsMatch[0].length));
 };
 
 /** Read `key: value` lines until the block dedents (a shallower indent ends it). */

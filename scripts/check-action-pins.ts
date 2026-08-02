@@ -100,9 +100,19 @@ const workflowFiles = (): string[] => {
   return entries.filter((f) => f.endsWith('.yml') || f.endsWith('.yaml')).sort();
 };
 
-const checkFile = (filename: string): ActionPinError[] => {
+/**
+ * Exported so `check-action-pins.test.ts` can assert the readFileSync failure
+ * path is wrapped with context, mirroring workflowFiles()'s readdirSync
+ * wrapping just below.
+ */
+export const checkFile = (filename: string): ActionPinError[] => {
   const path = join(WORKFLOWS_DIR, filename);
-  const yaml = readFileSync(path, 'utf8');
+  let yaml: string;
+  try {
+    yaml = readFileSync(path, 'utf8');
+  } catch (err) {
+    throw new ActionPinError(`could not read ${path}`, { cause: err });
+  }
   const errors: ActionPinError[] = [];
   for (const usesValue of extractUsesValues(yaml)) {
     try {

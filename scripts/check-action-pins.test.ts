@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ActionPinError,
   checkAllWorkflowRefs,
+  checkFile,
   extractUsesValues,
   parsePinnedActionRef,
 } from './check-action-pins.js';
@@ -84,6 +85,24 @@ describe('extractUsesValues', () => {
 
   it('returns an empty list for a file with no uses: lines', () => {
     expect(extractUsesValues('name: CI\non:\n  push:\n')).toEqual([]);
+  });
+});
+
+describe('checkFile', () => {
+  // Regression: unlike its sibling workflowFiles() (which wraps a readdirSync
+  // failure in ActionPinError with a `cause`), checkFile's readFileSync used
+  // to let the raw Node fs error escape unwrapped — inconsistent error
+  // context within the same module.
+  it('wraps a read failure in ActionPinError, chaining the fs error as cause', () => {
+    let thrown: unknown;
+    try {
+      checkFile('does-not-exist.yml');
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(ActionPinError);
+    expect((thrown as ActionPinError).message).toMatch(/could not read/);
+    expect((thrown as ActionPinError).cause).toBeInstanceOf(Error);
   });
 });
 
