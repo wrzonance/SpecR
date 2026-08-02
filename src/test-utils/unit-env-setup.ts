@@ -17,11 +17,18 @@
  * fails fast and loud instead of hanging on (or silently succeeding
  * against) a developer's real local Postgres on :5432.
  *
- * `NODE_ENV` is `'test'`, never `'development'`: per project memory,
- * `NODE_ENV=development` arms the rate limiter and produces false 429s.
+ * `NODE_ENV` is `'test'`, never `'development'`: `development` arms the
+ * configurable rate limiter (ADR-046) and produces false 429s.
  *
- * Never clobbers an already-set value — a real ambient value (CI,
- * docker-compose, or a test's own beforeEach override) always wins.
+ * Both values are seeded **unconditionally**, overwriting anything ambient.
+ * Deferring to an ambient value would mean a unit test that forgets to mock
+ * its DB silently runs against whatever `DATABASE_URL` the developer or CI
+ * job happens to export — a real database — instead of failing fast against
+ * the unresolvable placeholder. The `unit` project is the no-DB suite by
+ * definition, so there is no legitimate ambient value for it to inherit,
+ * and inheriting `NODE_ENV=development` would re-arm the rate limiter this
+ * placeholder exists to keep out. A test that needs a different value still
+ * sets it in its own `beforeEach` — that runs long after this file.
  */
 export const UNIT_TEST_DATABASE_URL_PLACEHOLDER =
   'postgres://unit-test:unit-test@unit-test-stub.invalid:5432/specr_unit_test_placeholder';
@@ -29,12 +36,8 @@ export const UNIT_TEST_DATABASE_URL_PLACEHOLDER =
 export const UNIT_TEST_NODE_ENV_PLACEHOLDER = 'test';
 
 export function applyUnitTestEnvDefaults(): void {
-  if (!process.env['DATABASE_URL']) {
-    process.env['DATABASE_URL'] = UNIT_TEST_DATABASE_URL_PLACEHOLDER;
-  }
-  if (!process.env['NODE_ENV']) {
-    process.env['NODE_ENV'] = UNIT_TEST_NODE_ENV_PLACEHOLDER;
-  }
+  process.env['DATABASE_URL'] = UNIT_TEST_DATABASE_URL_PLACEHOLDER;
+  process.env['NODE_ENV'] = UNIT_TEST_NODE_ENV_PLACEHOLDER;
 }
 
 applyUnitTestEnvDefaults();
