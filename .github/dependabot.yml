@@ -8,10 +8,16 @@
 # Renovate owns npm because it is the only one of the two that can honor the
 # Node 24 pin (ADR-081). Renovate auto-detects the constraint from `engines.node`
 # and `.nvmrc` and filters candidate releases through `constraintsFiltering:
-# "strict"`, so a package requiring a newer Node is never proposed. Dependabot
-# has no equivalent — its ignore / allow / versioning-strategy / groups levers
-# all operate on the semver update *type*, never on runtime compatibility, so it
-# cannot be told "only propose updates whose engines.node overlaps ours".
+# "strict"`, so a runtime dependency requiring a newer Node is never proposed.
+# That filter is scoped to `dependencies` in renovate.json — deliberately, since
+# strict filtering across devDependencies excludes far more than expected — so
+# devDependencies fall back to the same CI backstop everything else has:
+# `pnpm check:node-pin` plus pnpm's `engineStrict`.
+#
+# Dependabot has no equivalent filter at any scope — its ignore / allow /
+# versioning-strategy / groups levers all operate on the semver update *type*,
+# never on runtime compatibility, so it cannot be told "only propose updates
+# whose engines.node overlaps ours".
 #
 # Running both across npm also produced two competing PRs for every update, each
 # needing the same manual fix (e.g. #578 and #564 on 2026-08-01, both red because
