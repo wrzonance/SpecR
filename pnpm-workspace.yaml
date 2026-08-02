@@ -1,3 +1,13 @@
+# Fail `pnpm install` outright when the running Node does not satisfy the
+# `engines.node` range in package.json, instead of printing a warning and
+# continuing. This is what makes the Node 24 pin real rather than advisory —
+# see .nvmrc and ADR-081.
+#
+# pnpm 11 reads this key HERE, in camelCase. Neither `engine-strict=true` in
+# .npmrc (the npm spelling) nor `engine-strict` in kebab-case has any effect —
+# both were measured to exit 0 on a violating runtime.
+engineStrict: true
+
 # pnpm 11 — allow esbuild postinstall binary build (required by vitest/tsx).
 # core-js/protobufjs (transitive deps of @redocly/cli) have install scripts we
 # explicitly DENY — they are not needed for `redocly lint` and false silences

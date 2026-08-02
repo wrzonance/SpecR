@@ -5,6 +5,18 @@
 # enabled here so dependency updates stay visible, and so the two tools can be
 # compared side by side before we settle on one. Expect duplicate PRs until then
 # -- that is intentional, not a misconfiguration.
+#
+# Node pin (ADR-081): Dependabot has NO equivalent of Renovate's
+# `constraintsFiltering` — its ignore/allow/versioning-strategy/groups levers all
+# operate on semver update *type*, never on runtime compatibility. It therefore
+# cannot be told "only propose updates whose engines.node overlaps ours".
+#
+# Two mitigations, since it stays enabled for coverage:
+#   1. `@types/node` majors are ignored below, so it cannot repeat PR #557
+#      (proposing @types/node 26 against a pinned Node 24 runtime).
+#   2. Everything else relies on CI: `pnpm check:node-pin` fails on declaration
+#      drift, and pnpm's `engineStrict` fails the install itself on a wrong
+#      runtime. Treat any Dependabot npm PR as needing an engines glance.
 version: 2
 
 updates:
@@ -29,6 +41,9 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "jszip"
         update-types: ["version-update:semver-major"]
+      # Node pin (ADR-081): @types/node tracks the runtime major, never ahead of it.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/tools/verify"
@@ -42,6 +57,10 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Node pin (ADR-081): @types/node tracks the runtime major, never ahead of it.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # --- workflow action pins ---
   - package-ecosystem: "github-actions"

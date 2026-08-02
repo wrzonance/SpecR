@@ -4,7 +4,7 @@
   "description": "Headless REST API for round-trip automation of CSI MasterFormat®-compatible specification documents (UFGS, generic DOCX). Independent project; not affiliated with CSI.",
   "type": "module",
   "engines": {
-    "node": ">=22.17.0",
+    "node": ">=24 <25",
     "pnpm": ">=11.0.0"
   },
   "scripts": {
@@ -14,6 +14,7 @@
     "build": "tsc",
     "start": "node --env-file-if-exists=.env dist/index.js",
     "lint": "eslint src/ && tsc --noEmit && prettier --check src/",
+    "check:node-pin": "tsx scripts/check-node-pin.ts",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
     "test": "vitest run --project unit",
@@ -63,11 +64,11 @@
     "@eslint/js": "latest",
     "@redocly/cli": "^2.32.0",
     "@types/express": "^5.0.6",
-    "@types/multer": "^1.0.0",
-    "@types/node": "^22.0.0",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^24.13.3",
     "@types/pg": "^8.20.0",
     "@types/uuid": "^10.0.0",
-    "@types/yauzl": "^2.10.3",
+    "@types/yauzl": "^3.4.0",
     "@vitest/coverage-v8": "^4.1.5",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",

@@ -69,3 +69,8 @@ tmp/
 # tools/verify's local working directory (screenshots, rendered artifacts) —
 # local dev tool, out of CI; see issue #150 design decision 5.
 tools/verify/work/
+
+# pnpm's content-addressable store. Appears at the repo root whenever pnpm runs
+# with a HOME that cannot host the default store location — notably `pnpm install`
+# inside a container that bind-mounts this directory. Pure cache; never committed.
+.pnpm-store/
