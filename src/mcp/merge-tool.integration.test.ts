@@ -16,6 +16,12 @@ function isToolError(res: ToolResult): boolean {
 function parse<T>(res: ToolResult): T {
   return JSON.parse(res.content[0]!.text) as T;
 }
+function textOf(res: ToolResult): string {
+  return res.content[0]?.text ?? '';
+}
+function structuredContentOf(res: ToolResult): unknown {
+  return 'structuredContent' in res ? res.structuredContent : undefined;
+}
 
 async function createSpecFixture(): Promise<{ specId: string; paragraphId: string }> {
   const paragraphId = randomUUID();
@@ -125,6 +131,19 @@ describe('apply_merge MCP tool', () => {
       expectedVersion: current + 100,
     });
     expect(isToolError(res)).toBe(true);
+    // #583/ADR-084: mirrors REST's gateErrorResponse 409 body field-for-field
+    // so an agent can re-read the current version instead of regexing prose.
+    expect(structuredContentOf(res)).toEqual({ currentVersion: current });
+  });
+
+  it('an archived spec is a write-forbidden tool error with no structuredContent (#583/ADR-084)', async () => {
+    const { specId, paragraphId } = await createSpecFixture();
+    await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [specId]);
+    const res = await handleApplyMerge({ specId, accept: [], diff: diffFor(paragraphId) });
+    expect(isToolError(res)).toBe(true);
+    expect(textOf(res)).toBe('spec is archived and cannot be edited');
+    expect(structuredContentOf(res)).toBeUndefined();
+    expect('structuredContent' in res).toBe(false);
   });
 
   it('a missing spec and a malformed diff are tool errors', async () => {
