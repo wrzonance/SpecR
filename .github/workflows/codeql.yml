@@ -28,12 +28,16 @@ jobs:
         if: matrix.language == 'javascript-typescript'
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
-          # Must match the other workflows' PNPM_VERSION. This job was pinned to
-          # pnpm 9, which cannot read a pnpm 11 pnpm-workspace.yaml ("packages
-          # field missing or empty") — `pnpm install` here had failed on every
-          # scheduled run since at least 2026-06-22, so JS/TS CodeQL analysis
-          # was silently not running. CodeQL is cron-only, so no PR ever
-          # surfaced it.
+          # Must match ci.yml and release.yml's PNPM_VERSION — keep all three in
+          # step when bumping. Renovate manages this literal but NOT the
+          # PNPM_VERSION env vars, so a bump here silently drifts from the
+          # others (it did: this read 11.17.0 while both env vars said 11.11.0).
+          #
+          # This job was previously pinned to pnpm 9, which cannot read a pnpm 11
+          # pnpm-workspace.yaml ("packages field missing or empty") — `pnpm
+          # install` here failed on every scheduled run since at least
+          # 2026-06-22, so JS/TS CodeQL analysis was silently not running.
+          # CodeQL is cron-only, so no PR ever surfaced it.
           version: "11.17.0"
 
       - name: Setup Node.js
