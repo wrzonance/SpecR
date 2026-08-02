@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { pool, DatabaseError, countSpecsUsingTemplate } from '../index.js';
-import { getPgCode } from '../../lib/pg-errors.js';
+import { isRestrictedDeleteViolation } from '../../lib/pg-errors.js';
 import type { StyleNodeType, StyleProperties, StyleRule } from '../../ast/types.js';
 import { STYLE_NODE_TYPES } from '../../ast/types.js';
 import { StylePropertiesSchema } from '../../ast/index.js';
@@ -257,7 +257,8 @@ export type DeleteTemplateResult =
  * Delete a template, enforcing the ON DELETE RESTRICT contract via an explicit
  * reference-count pre-check (issue #138). A template referenced by any spec is
  * NOT deletable — the pre-check yields a clear 409 message and sidesteps the
- * pg 23503 ambiguity (the same code means 404 on assign, 409 on delete).
+ * ambiguity of the raw FK code (on Postgres <=16 the same 23503 means 404 on
+ * assign, 409 on delete; Postgres 18 splits the delete case out as 23001).
  */
 export async function deleteTemplate(id: string): Promise<DeleteTemplateResult> {
   try {
@@ -272,11 +273,12 @@ export async function deleteTemplate(id: string): Promise<DeleteTemplateResult> 
         ? err
         : new DatabaseError('failed to delete template', { cause: err });
     // RESTRICT race: a spec assigned to this template between the pre-check and
-    // the DELETE makes Postgres reject the delete with a 23503 FK violation —
-    // the authoritative in_use signal. (A SELECT … FOR UPDATE on the template
-    // row would NOT close this: the concurrent assign UPDATEs `specs`, not the
-    // locked row.) Re-count for the message.
-    if (getPgCode(dbErr) === '23503') {
+    // the DELETE makes Postgres reject the delete with a RESTRICT FK violation —
+    // the authoritative in_use signal (23503 on Postgres <=16, 23001 on Postgres
+    // 18 — see isRestrictedDeleteViolation). (A SELECT … FOR UPDATE on the
+    // template row would NOT close this: the concurrent assign UPDATEs `specs`,
+    // not the locked row.) Re-count for the message.
+    if (isRestrictedDeleteViolation(dbErr)) {
       const inUseBy = await countSpecsUsingTemplate(id);
       return { deleted: false, reason: 'in_use', inUseBy };
     }

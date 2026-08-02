@@ -6,6 +6,11 @@
 # pnpm 11 reads this key HERE, in camelCase. Neither `engine-strict=true` in
 # .npmrc (the npm spelling) nor `engine-strict` in kebab-case has any effect —
 # both were measured to exit 0 on a violating runtime.
+#
+# Renovate strips this block whenever it rewrites the overrides below (#602,
+# #606). If it goes missing again, restore it — the note is what stops someone
+# "tidying" the key back into .npmrc and silently reducing the Node pin to
+# advisory.
 engineStrict: true
 
 # pnpm 11 — allow esbuild postinstall binary build (required by vitest/tsx).
@@ -33,6 +38,22 @@ overrides:
   esbuild@<0.28.1: '>=0.28.1' # GHSA-gv7w-rqvm-qjhr (high), -g7r4-m6w7-qqqr
   dompurify@<3.4.11: '>=3.4.11' # GHSA-vxr8-fq34-vvx9, GHSA-cmwh-pvxp-8882 (≤3.4.10)
   js-yaml@4.1.1: '>=4.2.0' # GHSA-h67p-54hq-rp68 (eslint's 4.x consumer)
-  js-yaml@<3.15.0: '>=3.15.0 <4' # GHSA-h67p-54hq-rp68 3.x backport (dev, via depcheck ^3.14.1; <4 keeps the safeLoad-era API depcheck calls)
+  # GHSA-h67p-54hq-rp68 3.x backport (dev, via depcheck ^3.14.1). Ceiling raised
+  # 3.x → 5.x in #606; depcheck now resolves js-yaml 5.2.3. js-yaml 4 REMOVED
+  # `safeLoad`, which depcheck still calls in three places, so this was verified
+  # by cold-install rather than assumed: `pnpm exec depcheck` (release.yml) is
+  # byte-identical on 3.15.1 and 5.2.3 today, because all three call sites are
+  # unreachable here — two need a .travis.yml / serverless.yml (this repo has
+  # neither), and utils/cli-tools.js wraps its call in a try/catch that swallows
+  # the TypeError. That last one degrades silently rather than failing loudly:
+  # if a YAML-based tool config is ever added, depcheck will stop parsing it and
+  # may report a used dependency as unused. Revisit if depcheck ever moves off
+  # the safeLoad-era API, or drop to `<4` if that silent gap starts to bite.
+  js-yaml@<3.15.0: '>=3.15.0 <6'
   vite: ^8.0.16 # GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3
-  undici@<6.27.0: '>=6.27.0 <7' # GHSA-35p6-xmwp-9g52, GHSA-g8m3-5g58-fq7m, GHSA-p88m-4jfj-68fv, GHSA-vxpw-j846-p89q (dev, via @redocly/cli's exact undici@6.24.0 pin; <7 stays on its major)
+  # GHSA-35p6-xmwp-9g52, GHSA-g8m3-5g58-fq7m, GHSA-p88m-4jfj-68fv,
+  # GHSA-vxpw-j846-p89q (dev, via @redocly/cli). Ceiling raised 7 → 9 in #606,
+  # but the raise is inert: @redocly/cli's own range caps undici inside 6.x, so
+  # a cold install still resolves 6.28.0 either way. The floor is what matters
+  # here; the ceiling is now decorative.
+  undici@<6.27.0: '>=6.27.0 <9'
