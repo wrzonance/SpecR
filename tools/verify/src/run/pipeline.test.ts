@@ -100,6 +100,37 @@ describe('pipeline (orchestration + no-escape boundary)', () => {
     expect(record?.referenceFilename).toBe('reference.docx');
   });
 
+  it('tracks a detached run started through a spread-wrapped RunStore, so waitForIdle drains it (#604)', async () => {
+    let uploadResolved = false;
+    const apiClient = stubApiClient({
+      uploadForParse: () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            uploadResolved = true;
+            resolve('job-1');
+          }, 20);
+        }),
+    });
+    // A plain spread — like brokenRunStore's own `{ ...base, ... }` shape —
+    // must still forward to trackPending/waitForIdle's closure-bound
+    // functions over the *base* store's `pending` Set, not lose them.
+    const wrappedStore: RunStore = { ...runStore };
+    const pipeline = createPipeline({ apiClient, runStore: wrappedStore });
+
+    pipeline.startRun({
+      referenceBuffer: Buffer.from('docx bytes'),
+      referenceFilename: 'reference.docx',
+    });
+
+    // If startRun still discarded executeRun's completion via a bare
+    // `void`, nothing would be registered in the base store's pending set,
+    // and this would resolve immediately — well before the delayed
+    // uploadForParse settles.
+    await runStore.waitForIdle();
+
+    expect(uploadResolved).toBe(true);
+  });
+
   it('drives a successful run through upload -> parse -> import -> generate, then stops', async () => {
     const apiClient = stubApiClient();
     const pipeline = createPipeline({ apiClient, runStore });
