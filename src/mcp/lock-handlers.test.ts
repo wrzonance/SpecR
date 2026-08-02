@@ -8,6 +8,8 @@
 // human-readable text.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+import type { ToolResult } from './tool-result.js';
+
 vi.mock('../db/index.js', () => ({
   acquireLock: vi.fn(),
   releaseLock: vi.fn(),
@@ -26,20 +28,23 @@ beforeEach(() => {
 
 const SPEC_ID = '10000000-0000-4000-8000-000000000001';
 
-function textOf(result: unknown): string {
-  return (result as { content: { text: string }[] }).content[0]?.text ?? '';
+// Typed against the handlers' own return type rather than `unknown`, so a
+// drift in ToolResult's shape fails here at compile time instead of being
+// absorbed by a structural cast.
+function textOf(result: ToolResult): string {
+  return result.content[0]?.text ?? '';
 }
 
-function structuredContentOf(result: unknown): unknown {
-  return (result as { structuredContent?: unknown }).structuredContent;
+function structuredContentOf(result: ToolResult): unknown {
+  return 'structuredContent' in result ? result.structuredContent : undefined;
 }
 
 // `structuredContentOf(result)).toBeUndefined()` alone can't distinguish "no
 // structuredContent key" from "structuredContent: undefined" — use `in` to
 // pin key-absence (see handlers.test.ts's direct toolError coverage for the
 // invariant this backs).
-function hasStructuredContentKey(result: unknown): boolean {
-  return typeof result === 'object' && result !== null && 'structuredContent' in result;
+function hasStructuredContentKey(result: ToolResult): boolean {
+  return 'structuredContent' in result;
 }
 
 describe('lock_spec: held lock returns holder/expiresAt as structuredContent alongside prose (#569)', () => {
