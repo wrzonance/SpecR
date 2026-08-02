@@ -27,9 +27,7 @@ import type { ClassifyResult } from '../../conventions/index.js';
  *  write so the API maps `not-found` → 404 and `wrong-spec` → 403 (mirrors
  *  updateParagraphText). `ok` means the write was applied. */
 export type OwnershipResult =
-  | { readonly status: 'ok' }
-  | { readonly status: 'not-found' }
-  | { readonly status: 'wrong-spec' };
+  { readonly status: 'ok' } | { readonly status: 'not-found' } | { readonly status: 'wrong-spec' };
 
 /** Outcome of {@link setSpecEditabilityOverride}: adds `fixed-node-type` to
  *  {@link OwnershipResult} — the write was rejected, not merely not-found/wrong-spec. */

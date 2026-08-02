@@ -182,10 +182,7 @@ export async function deleteNumberingProfile(id: string): Promise<boolean> {
 
 /** Outcome of assigning a numbering profile to a spec (library scoping enforced). */
 export type SetSpecProfileResult =
-  | 'assigned'
-  | 'spec-not-found'
-  | 'profile-not-found'
-  | 'library-mismatch';
+  'assigned' | 'spec-not-found' | 'profile-not-found' | 'library-mismatch';
 
 /**
  * Assign (or replace) a spec's numbering profile, enforcing library scoping: a

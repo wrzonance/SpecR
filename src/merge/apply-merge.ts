@@ -9,8 +9,7 @@ import { applyAccepted, type ApplyAcceptedResult } from './conflict.js';
 import type { DiffResult } from './types.js';
 
 export type ApplyMergeOutcome =
-  | { readonly kind: 'not-found' }
-  | ({ readonly kind: 'applied' } & ApplyAcceptedResult);
+  { readonly kind: 'not-found' } | ({ readonly kind: 'applied' } & ApplyAcceptedResult);
 
 /**
  * Apply an accepted-changes merge to a spec inside one transaction: the composed

@@ -59,8 +59,7 @@ describe('handleSearchLibrary — _meta anchors (focus channel)', () => {
     const result = await handleSearchLibrary({ query: UNIQUE, division: undefined, limit: 10 });
     expect('isError' in result).toBe(false);
     const anchors = (result as { _meta?: Record<string, unknown> })._meta?.[ANCHORS_META_KEY] as
-      | McpAnchor[]
-      | undefined;
+      McpAnchor[] | undefined;
     expect(anchors).toBeDefined();
     const mine = anchors!.find((a) => a.specId === specId);
     expect(mine).toEqual({ section: '27 15 00', specId, paragraphId: PARA_ID });

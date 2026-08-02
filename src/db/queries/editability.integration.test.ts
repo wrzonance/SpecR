@@ -121,6 +121,9 @@ describe('editability storage (O-7 / #134)', () => {
     expect(pr1.meta.editability?.value).toBe('note');
     expect(pr1.meta.editability?.override).toBe('note');
     // ...while the machine's why-chain reflects the NEW reclassify pass.
+    // 0.4 is a literal constant set by the reclassify pass, not computed —
+    // exact equality is the assertion we want.
+    // eslint-disable-next-line sonarjs/no-floating-point-equality
     expect(pr1.meta.editability?.confidence).toBe(0.4);
     expect(pr1.meta.editability?.evidence).toEqual([
       { rule: 'defaultEditability', detail: 'color cleared on second pass' },

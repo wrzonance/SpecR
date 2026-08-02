@@ -292,8 +292,7 @@ export function buildStyleMap(xml: string): StyleMap {
   }
 
   const root = (parsed as Record<string, unknown>)['w:styles'] as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   if (!root) return emptyStyleMap();
 
   const styles = paragraphStyles(root);

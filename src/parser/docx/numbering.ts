@@ -155,8 +155,7 @@ export function buildNumberingMap(xml: string): NumberingMap {
     });
   }
   const root = (parsed as Record<string, unknown>)['w:numbering'] as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   if (!root) return emptyNumberingMap();
 
   const abstractNums = parseAbstractNums(

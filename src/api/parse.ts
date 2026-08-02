@@ -39,6 +39,11 @@ const ALLOWED_EXT = new Set(['.docx', '.pdf', '.sec', '.txt']);
 export const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
+    // sonarjs/content-length is a security *hotspot*: it flags the limit for human
+    // review rather than detecting a missing one. Reviewed — 10 MB compressed is
+    // deliberate, and decompression-bomb protection for the *uncompressed* size
+    // lives in assertUploadSafe/assertDocxSafe (yauzl), not here.
+    // eslint-disable-next-line sonarjs/content-length
     fileSize: 10 * 1024 * 1024, // 10 MB compressed limit (yauzl enforces uncompressed)
     files: 1,
     fields: 5,
