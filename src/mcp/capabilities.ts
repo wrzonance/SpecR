@@ -47,6 +47,8 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['get_spec_lineage', 'read'],
   ['get_spec_diff', 'read'],
   ['get_numbering_profile', 'read'],
+  // Stays 'read' even with the ADR-079 readiness gate (mode/overrideReadinessGate)
+  // reachable from this tool (#567) — no DB mutation occurs either way; see ADR-082.
   ['generate_docx', 'read'],
   ['get_hierarchy_report', 'read'], // per-paragraph 5-signal inference scoring (WS2 #424)
   ['get_paragraph_history', 'read'],

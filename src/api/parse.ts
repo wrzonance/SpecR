@@ -15,6 +15,7 @@ import { sanitizeFilename } from '../lib/filename.js';
 import type { SpecNode, SpecTree } from '../ast/types.js';
 import type { NumberingProfile } from '../ast/index.js';
 import { parseSectionNumberCandidate } from '../lib/section-number.js';
+import { ALLOWED_PARSE_EXTENSIONS } from '../lib/parse-extensions.js';
 
 interface ParseBody {
   readonly section?: string;
@@ -34,7 +35,7 @@ const ParseBodySchema = z.object({
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const PDF_MIME = 'application/pdf';
-const ALLOWED_EXT = new Set(['.docx', '.pdf', '.sec', '.txt']);
+const ALLOWED_EXT = ALLOWED_PARSE_EXTENSIONS;
 
 export const upload = multer({
   storage: multer.memoryStorage(),

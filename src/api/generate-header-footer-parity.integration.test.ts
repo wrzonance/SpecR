@@ -2,7 +2,7 @@
 //
 // #304 review finding (I8): REST's POST /specs/:id/generate
 // (buildHeaderFooterOptions, src/api/generate-header-footer.ts) and MCP's
-// generate_docx tool (resolveHeaderFooterInput, src/mcp/handlers.ts)
+// generate_docx tool (toHeaderFooterInput, src/mcp/generate-docx-handler.ts)
 // independently re-implement the same header/footer resolution — documented
 // in both files as a deliberate duplication across the api/↔mcp/ module
 // boundary. The existing #304 suites (src/api/generate.integration.test.ts,

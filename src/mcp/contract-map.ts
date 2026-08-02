@@ -250,10 +250,11 @@ export const MCP_NATIVE: ReadonlySet<string> = new Set([
 export const INV5_SHAPE_EXEMPT: ReadonlyMap<string, string> = new Map([
   [
     'get_spec',
-    'reshapes: returns { tree, references } nested plus MCP _meta navigation anchors, whereas ' +
-      'REST GET /specs/{id} returns the flattened spec tree with styleSource/onboardingStatus/' +
-      'withdrawnAt at the top level — a deliberately different agent-facing shape, not the REST ' +
-      'body 1:1.',
+    'reshapes: nests the tree under { tree, references } plus MCP _meta navigation anchors, ' +
+      'whereas REST GET /specs/{id} flattens it to the top level — a deliberately different ' +
+      'agent-facing envelope, not the REST body 1:1. Every REST field (styleSource, ' +
+      'onboardingStatus, withdrawnAt) is still present, just relocated by the nesting — none is ' +
+      'dropped.',
   ],
   [
     'get_library_conventions',

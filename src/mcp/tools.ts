@@ -3,6 +3,7 @@ import path from 'node:path';
 import { glob, realpath } from 'node:fs/promises';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { GenerateBodySchema, SubmittalRegisterBodySchema } from '../ast/index.js';
 import { loadFiles } from '../lib/file-loader.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -138,14 +139,30 @@ function registerParserTools(reg: ToolRegistrar): void {
     'parse_document',
     {
       description:
-        'Parse a DOCX or SEC specification file and store it in the database. Pass the file content as base64. Returns the new spec ID and summary. Note: computation-intensive for large DOCX files.',
+        'Parse a DOCX, PDF, SEC, or TXT specification file and store it in the database. Pass the file content as base64. Returns the new spec ID and summary. Note: computation-intensive for large DOCX/PDF files.',
       inputSchema: {
         filename: z
           .string()
           .describe(
-            'Original filename — extension determines format (.docx, .sec, or .txt). Plaintext .txt returns capabilities: ["read-only"] in result.'
+            'Original filename — extension determines format (.docx, .pdf, .sec, or .txt). Plaintext .txt returns capabilities: ["read-only"] in result.'
           ),
         contentBase64: z.string().describe('Base64-encoded file content (max 10 MB decoded)'),
+        section: z
+          .string()
+          .optional()
+          .describe(
+            'Override the parsed/inferred section number (canonical or well-formed candidate). Wins over parsing/inference.'
+          ),
+        title: z
+          .string()
+          .optional()
+          .describe('Override the parsed/inferred title. Wins over parsing/inference.'),
+        numberingProfileId: z
+          .uuid()
+          .optional()
+          .describe(
+            'Structural numbering profile (#299) to apply during this parse, instead of generic 5-signal inference.'
+          ),
       },
     },
     handleParseDocument
@@ -158,9 +175,19 @@ function registerGeneratorTools(reg: ToolRegistrar): void {
     {
       description:
         'Generate a DOCX file from a stored spec. Returns base64-encoded content (typically 50–400 KB). Note: generates on-demand from current database state — not cached. Avoid calling in tight loops.',
-      inputSchema: {
+      // `.extend()`, NOT `{ ...GenerateBodySchema.shape }`: spreading the shape
+      // discards the schema's `.strict()`, and the SDK's rebuilt `z.object()`
+      // then STRIPS unknown keys instead of rejecting them. `{ specId, mdoe:
+      // 'final' }` would reach the handler with `mode` undefined, so the
+      // ADR-079 readiness gate would silently no-op on a dirty spec and hand
+      // back a draft with no error at all — the exact bypass `.strict()` was
+      // added to close for REST (#406), re-opened for MCP (#567 review
+      // finding). `.extend()` carries strict mode forward; validation has to
+      // live in the registered schema because the SDK strips the typo before
+      // the handler ever runs.
+      inputSchema: GenerateBodySchema.extend({
         specId: z.uuid().describe('Spec UUID to generate DOCX for'),
-      },
+      }),
     },
     handleGenerateDocx
   );
@@ -267,7 +294,7 @@ function registerSubmittalTools(reg: ToolRegistrar): void {
         'from the PART 1 Submittals article, and datasheet links come from paragraph associations.',
       inputSchema: {
         projectId: z.uuid().describe('Project UUID (from list_projects)'),
-        specIds: z.array(z.uuid()).describe('Selected project spec UUIDs to include'),
+        ...SubmittalRegisterBodySchema.shape,
       },
     },
     handleSubmittalRegister
@@ -303,11 +330,10 @@ function registerReadinessTools(reg: ToolRegistrar): void {
         'Dry-run the ADR-079 issuance-readiness gate for a spec or an entire design package — ' +
         'every outstanding unresolved choice token, visible specifier note, open Word comment, ' +
         'and body-level text box, plus the advisory-only highlight report (never a blocker). ' +
-        'readyForFinal: true is exactly the set a mode: "final" issue_package_revision would let ' +
-        'through — its REST route (POST /packages/{id}/revisions) and MCP tool both enforce this ' +
-        'gate. The generate_docx tool does NOT: its inputSchema has no mode/overrideReadinessGate ' +
-        'fields, so it never gates on readiness (only its mapped REST route, ' +
-        'POST /specs/{id}/generate, does) — a documented MCP gap, not an oversight; see #539. ' +
+        'readyForFinal: true is exactly the set a mode: "final" issue_package_revision or ' +
+        'generate_docx call would let through — REST (POST /packages/{id}/revisions, ' +
+        'POST /specs/{id}/generate) and their MCP tool counterparts all enforce this same gate ' +
+        '(ADR-082; #567 closed the earlier generate_docx gap). ' +
         'Provide exactly one of specId (see get_spec) or packageId (see list_packages).',
       inputSchema: {
         specId: z.uuid().optional().describe('Spec UUID — readiness findings for one spec'),

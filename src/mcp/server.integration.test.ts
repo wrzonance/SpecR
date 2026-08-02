@@ -790,6 +790,31 @@ describe('tool: generate_docx', () => {
     const result = b['result'] as Record<string, unknown>;
     expect(result['isError']).toBe(true);
   });
+
+  // #567 review finding: generate_docx's inputSchema was built by SPREADING
+  // GenerateBodySchema.shape, which drops the schema's `.strict()`. The SDK
+  // rebuilds a raw shape with `z.object()`, whose default behavior STRIPS
+  // unknown keys — so `mdoe: 'final'` arrived with `mode` undefined and the
+  // ADR-079 readiness gate silently no-opped, handing back a draft DOCX with
+  // no error at all. REST rejects the same typo (#406). Registering the
+  // strict object schema itself is what closes it; the typo must never
+  // produce a document.
+  it('generate_docx: a misspelled `mdoe` is rejected, never silently stripped into a gate no-op', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'generate_docx',
+      arguments: { specId: mcpSpecId, mdoe: 'final' },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    // The SDK's own InvalidParams (-32602) surfaces as an isError tool result.
+    expect(result['isError']).toBe(true);
+    const text = (result['content'] as { text: string }[])[0]?.text ?? '';
+    expect(text).toContain('unrecognized_keys');
+    expect(text).toContain('mdoe');
+    // The load-bearing part: no document came back. A stripped key would have
+    // produced a perfectly valid draft DOCX instead.
+    expect(text).not.toContain('contentBase64');
+  });
 });
 
 describe('GET /mcp', () => {
@@ -975,23 +1000,27 @@ describe('capability gating (#43)', () => {
 
 // Review finding (#406): readiness_report's description previously claimed
 // generate_docx honors `mode: 'final'` gating alongside issue_package_revision —
-// false. generate_docx's inputSchema carries no mode/overrideReadinessGate
-// fields and handleGenerateDocx never calls the readiness gate (only the REST
-// POST /specs/:id/generate route does). The description must document that
-// gap accurately instead of promising a guarantee the tool doesn't keep.
-describe('tool: readiness_report — description accuracy (review finding, #406)', () => {
-  it('does not claim generate_docx enforces the mode: "final" readiness gate', async () => {
+// false at the time, because generate_docx's inputSchema carried no
+// mode/overrideReadinessGate fields and handleGenerateDocx never called the
+// readiness gate (only the REST POST /specs/:id/generate route did). #567
+// closed that gap (ADR-082): generate_docx now accepts mode/overrideReadinessGate
+// and handleGenerateDocx calls checkMcpReadinessGate, the same
+// assertReadyForFinal path enforceReadinessGate uses on the REST side. The
+// description now documents that generate_docx and issue_package_revision
+// both enforce the gate, rather than carrying the old, now-false disclaimer.
+describe('tool: readiness_report — description accuracy (#406, closed by #567/ADR-082)', () => {
+  it('documents that generate_docx now enforces the mode: "final" readiness gate', async () => {
     const body = await mcpCall(`${baseUrl}/mcp`, 'tools/list', {});
     const b = body as { result: { tools: { name: string; description?: string }[] } };
     const tool = b.result.tools.find((t) => t.name === 'readiness_report');
     expect(tool).toBeDefined();
     const description = tool?.description ?? '';
-    expect(description).not.toMatch(/generate_docx\)\s*would let through/);
-    // Still documents the one MCP tool that genuinely gates on mode: 'final'.
+    // Still documents issue_package_revision as a mode: 'final' gate...
     expect(description).toContain('issue_package_revision');
-    // Documents generate_docx's gap explicitly rather than staying silent
-    // about the divergence from the REST route it's mapped to.
-    expect(description).toMatch(/generate_docx.*(does not|doesn't|never).*(mode|gate)/is);
+    // ...and now documents generate_docx as enforcing the same gate (#567),
+    // rather than the old "gap" disclaimer this test used to pin.
+    expect(description).toMatch(/generate_docx.*(enforce|gate)/is);
+    expect(description).not.toMatch(/generate_docx.*(does not|doesn't|never).*(mode|gate)/is);
   });
 });
 
