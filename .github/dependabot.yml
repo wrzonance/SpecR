@@ -1,68 +1,34 @@
-# Dependabot runs alongside Mend Renovate (renovate.json) on purpose.
+# Dependabot is scoped to GitHub Actions only. Renovate (renovate.json) owns npm.
 #
-# Every Renovate run in this org was suppressed by Mend's platform-level
-# `mode=silent`, which blocked all PRs and Dependency Dashboards. Dependabot is
-# enabled here so dependency updates stay visible, and so the two tools can be
-# compared side by side before we settle on one. Expect duplicate PRs until then
-# -- that is intentional, not a misconfiguration.
+# Both tools previously ran across npm as well, deliberately: every Renovate run
+# in this org had been suppressed by Mend's platform-level `mode=silent`, so
+# Dependabot was enabled to keep dependency updates visible while the two were
+# compared. Renovate is now producing PRs, and the comparison is settled.
 #
-# Node pin (ADR-081): Dependabot has NO equivalent of Renovate's
-# `constraintsFiltering` — its ignore/allow/versioning-strategy/groups levers all
-# operate on semver update *type*, never on runtime compatibility. It therefore
+# Renovate owns npm because it is the only one of the two that can honor the
+# Node 24 pin (ADR-081). Renovate auto-detects the constraint from `engines.node`
+# and `.nvmrc` and filters candidate releases through `constraintsFiltering:
+# "strict"`, so a package requiring a newer Node is never proposed. Dependabot
+# has no equivalent — its ignore / allow / versioning-strategy / groups levers
+# all operate on the semver update *type*, never on runtime compatibility, so it
 # cannot be told "only propose updates whose engines.node overlaps ours".
 #
-# Two mitigations, since it stays enabled for coverage:
-#   1. `@types/node` majors are ignored below, so it cannot repeat PR #557
-#      (proposing @types/node 26 against a pinned Node 24 runtime).
-#   2. Everything else relies on CI: `pnpm check:node-pin` fails on declaration
-#      drift, and pnpm's `engineStrict` fails the install itself on a wrong
-#      runtime. Treat any Dependabot npm PR as needing an engines glance.
+# Running both across npm also produced two competing PRs for every update, each
+# needing the same manual fix (e.g. #578 and #564 on 2026-08-01, both red because
+# the group carried a prettier bump neither bot reformats for).
+#
+# Actions are a different story: there is no runtime-compatibility question in a
+# `uses:` pin, so Dependabot's semver-only view is sufficient and its Actions
+# support is good. It keeps that job.
+#
+# Security alerts are unaffected by this file — Dependabot security updates are
+# configured in repository settings, not here, and continue to cover npm.
 version: 2
 
 updates:
-  # --- root pnpm workspace (Dependabot handles pnpm under the npm ecosystem) ---
-  - package-ecosystem: "npm"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 20
-    commit-message:
-      prefix: "chore(deps)"
-    groups:
-      npm-minor-patch:
-        update-types:
-          - "minor"
-          - "patch"
-    ignore:
-      # Mirrors renovate.json: major bumps to the OOXML/DOCX libs can change
-      # numbering or content-control behavior, so they are opted out entirely
-      # rather than opened and closed every week.
-      - dependency-name: "docx"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "jszip"
-        update-types: ["version-update:semver-major"]
-      # Node pin (ADR-081): @types/node tracks the runtime major, never ahead of it.
-      - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
-
-  - package-ecosystem: "npm"
-    directory: "/tools/verify"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 20
-    commit-message:
-      prefix: "chore(deps)"
-    groups:
-      verify-minor-patch:
-        update-types:
-          - "minor"
-          - "patch"
-    ignore:
-      # Node pin (ADR-081): @types/node tracks the runtime major, never ahead of it.
-      - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
-
   # --- workflow action pins ---
+  # SHA-pinned per security.md; Dependabot updates the pin and the trailing
+  # version comment together.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
