@@ -34,6 +34,14 @@ function parse<T>(res: ToolResult): T {
   return JSON.parse(res.content[0]!.text) as T;
 }
 
+function textOf(res: ToolResult): string {
+  return res.content[0]?.text ?? '';
+}
+
+function structuredContentOf(res: ToolResult): unknown {
+  return 'structuredContent' in res ? res.structuredContent : undefined;
+}
+
 async function insertSpec(section: string, title: string): Promise<string> {
   const r = await pool.query<{ id: string }>(
     `INSERT INTO specs (section, title, source, library_id)
@@ -153,6 +161,30 @@ describe('update_paragraph MCP tool', () => {
       expectedVersion: current + 100, // mismatch → StaleVersionError → tool error
     });
     expect(isToolError(res)).toBe(true);
+    // #583/ADR-084: mirrors REST's gateErrorResponse 409 body field-for-field
+    // so an agent can re-read the current version instead of regexing prose.
+    expect(structuredContentOf(res)).toEqual({ currentVersion: current });
+  });
+
+  it('an archived spec is a write-forbidden tool error with no structuredContent (#583/ADR-084)', async () => {
+    const archivedSpecId = await insertSpec('26 05 00', 'Archived Fixture');
+    const archivedBodyId = await insertParagraph(archivedSpecId, 'pr1', 'Provide conduit.');
+    await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [
+      archivedSpecId,
+    ]);
+    try {
+      const res = await handleUpdateParagraph({
+        specId: archivedSpecId,
+        nodeId: archivedBodyId,
+        text: 'attempted edit',
+      });
+      expect(isToolError(res)).toBe(true);
+      expect(textOf(res)).toBe('spec is archived and cannot be edited');
+      expect(structuredContentOf(res)).toBeUndefined();
+      expect('structuredContent' in res).toBe(false);
+    } finally {
+      await pool.query('DELETE FROM specs WHERE id = $1', [archivedSpecId]);
+    }
   });
 
   it('rejects a direct write to a locked object row, mirroring the REST 422 (#519, ADR-072 decision 3)', async () => {

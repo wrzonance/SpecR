@@ -24,10 +24,15 @@ import { toolError, ok, type ToolResult } from './handlers.js';
 // message crosses the boundary — never a stack trace.
 function gateToolError(err: unknown): ToolResult | null {
   if (err instanceof StaleVersionError) {
+    // ADR-084: mirrors REST's 409 body (src/api/edit-gate-response.ts) field-for-
+    // field so an agent can re-read the current version instead of regexing prose.
     return toolError(
-      `stale version — current contentVersion is ${err.currentVersion}; refetch and retry`
+      `stale version — current contentVersion is ${err.currentVersion}; refetch and retry`,
+      { structuredContent: { currentVersion: err.currentVersion } }
     );
   }
+  // ADR-084: REST's 409 body for this class carries nothing beyond `error` — no
+  // structuredContent to mirror, so the omission here is deliberate, not unfinished.
   if (err instanceof SpecWriteForbiddenError) return toolError(err.message);
   if (err instanceof SpecNotFoundError) return toolError('spec not found');
   return null;
