@@ -65,9 +65,8 @@ describe('apply_merge: stale version returns currentVersion as structuredContent
   it('surfaces structuredContent.currentVersion matching the error class field', async () => {
     const { StaleVersionError } = await import('../db/index.js');
     const { applyMerge } = await import('../merge/index.js');
-    vi.mocked(applyMerge).mockRejectedValueOnce(
-      new StaleVersionError('stale write: expected version 5, current is 9', 9)
-    );
+    const err = new StaleVersionError('stale write: expected version 5, current is 9', 9);
+    vi.mocked(applyMerge).mockRejectedValueOnce(err);
 
     const { handleApplyMerge } = await import('./merge-handlers.js');
     const result = await handleApplyMerge({
@@ -84,6 +83,15 @@ describe('apply_merge: stale version returns currentVersion as structuredContent
       'stale version — current contentVersion is 9; re-run get_spec_diff and retry'
     );
     expect(structuredContentOf(result)).toEqual({ currentVersion: 9 });
+
+    // Cross-check against the actual REST gateErrorResponse (src/api/edit-gate-
+    // response.ts) on the SAME error instance — pins the parity claim against
+    // the real function, not just a hardcoded duplicate literal that could
+    // drift from it unnoticed.
+    const { gateErrorResponse } = await import('../api/edit-gate-response.js');
+    const rest = gateErrorResponse(err);
+    expect(rest?.status).toBe(409);
+    expect(structuredContentOf(result)).toEqual({ currentVersion: rest?.body.currentVersion });
   });
 });
 
@@ -91,9 +99,8 @@ describe('apply_merge: write-forbidden has no structuredContent — REST 409 car
   it('returns the message as prose with no structuredContent key', async () => {
     const { SpecWriteForbiddenError } = await import('../db/index.js');
     const { applyMerge } = await import('../merge/index.js');
-    vi.mocked(applyMerge).mockRejectedValueOnce(
-      new SpecWriteForbiddenError('spec is archived and cannot be edited')
-    );
+    const err = new SpecWriteForbiddenError('spec is archived and cannot be edited');
+    vi.mocked(applyMerge).mockRejectedValueOnce(err);
 
     const { handleApplyMerge } = await import('./merge-handlers.js');
     const result = await handleApplyMerge({
@@ -106,5 +113,16 @@ describe('apply_merge: write-forbidden has no structuredContent — REST 409 car
     expect(textOf(result)).toBe('spec is archived and cannot be edited');
     expect(structuredContentOf(result)).toBeUndefined();
     expect(hasStructuredContentKey(result)).toBe(false);
+
+    // Cross-check against the actual REST gateErrorResponse on the SAME error
+    // instance: confirm its 409 body genuinely carries nothing beyond `error`
+    // for this class, rather than trusting a comment that it does.
+    const { gateErrorResponse } = await import('../api/edit-gate-response.js');
+    const rest = gateErrorResponse(err);
+    expect(rest?.status).toBe(409);
+    expect(Object.keys(rest?.body ?? {}).sort((a, b) => a.localeCompare(b))).toEqual([
+      'error',
+      'success',
+    ]);
   });
 });

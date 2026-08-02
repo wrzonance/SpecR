@@ -57,9 +57,8 @@ function hasStructuredContentKey(result: ToolResult): boolean {
 describe('update_paragraph: stale version returns currentVersion as structuredContent alongside prose (#583)', () => {
   it('surfaces structuredContent.currentVersion matching the error class field', async () => {
     const { StaleVersionError, updateParagraphText } = await import('../db/index.js');
-    vi.mocked(updateParagraphText).mockRejectedValueOnce(
-      new StaleVersionError('stale write: expected version 3, current is 7', 7)
-    );
+    const err = new StaleVersionError('stale write: expected version 3, current is 7', 7);
+    vi.mocked(updateParagraphText).mockRejectedValueOnce(err);
 
     const { handleUpdateParagraph } = await import('./paragraph-handlers.js');
     const result = await handleUpdateParagraph({
@@ -72,15 +71,23 @@ describe('update_paragraph: stale version returns currentVersion as structuredCo
     expect(result).toMatchObject({ isError: true });
     expect(textOf(result)).toContain('stale version — current contentVersion is 7');
     expect(structuredContentOf(result)).toEqual({ currentVersion: 7 });
+
+    // Cross-check against the actual REST gateErrorResponse (src/api/edit-gate-
+    // response.ts) on the SAME error instance — pins the parity claim against
+    // the real function, not just a hardcoded duplicate literal that could
+    // drift from it unnoticed.
+    const { gateErrorResponse } = await import('../api/edit-gate-response.js');
+    const rest = gateErrorResponse(err);
+    expect(rest?.status).toBe(409);
+    expect(structuredContentOf(result)).toEqual({ currentVersion: rest?.body.currentVersion });
   });
 });
 
 describe('update_paragraph: write-forbidden has no structuredContent — REST 409 carries none either (#583)', () => {
   it('returns the message as prose with no structuredContent key', async () => {
     const { SpecWriteForbiddenError, updateParagraphText } = await import('../db/index.js');
-    vi.mocked(updateParagraphText).mockRejectedValueOnce(
-      new SpecWriteForbiddenError('spec is archived and cannot be edited')
-    );
+    const err = new SpecWriteForbiddenError('spec is archived and cannot be edited');
+    vi.mocked(updateParagraphText).mockRejectedValueOnce(err);
 
     const { handleUpdateParagraph } = await import('./paragraph-handlers.js');
     const result = await handleUpdateParagraph({
@@ -93,5 +100,16 @@ describe('update_paragraph: write-forbidden has no structuredContent — REST 40
     expect(textOf(result)).toBe('spec is archived and cannot be edited');
     expect(structuredContentOf(result)).toBeUndefined();
     expect(hasStructuredContentKey(result)).toBe(false);
+
+    // Cross-check against the actual REST gateErrorResponse on the SAME error
+    // instance: confirm its 409 body genuinely carries nothing beyond `error`
+    // for this class, rather than trusting a comment that it does.
+    const { gateErrorResponse } = await import('../api/edit-gate-response.js');
+    const rest = gateErrorResponse(err);
+    expect(rest?.status).toBe(409);
+    expect(Object.keys(rest?.body ?? {}).sort((a, b) => a.localeCompare(b))).toEqual([
+      'error',
+      'success',
+    ]);
   });
 });

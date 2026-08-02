@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterAll } from 'vitest';
-import { createSpec, insertTree, pool, SYSTEM_ACTOR_LABEL } from '../db/index.js';
+import {
+  createSpec,
+  insertTree,
+  pool,
+  SYSTEM_ACTOR_LABEL,
+  StaleVersionError,
+  SpecWriteForbiddenError,
+} from '../db/index.js';
+import { gateErrorResponse } from '../api/edit-gate-response.js';
 import { historyActor } from '../test-utils/history-actor.js';
 import { handleApplyMerge } from './merge-handlers.js';
 import type { ToolResult } from './handlers.js';
@@ -139,6 +147,12 @@ describe('apply_merge MCP tool', () => {
     expect(textOf(res)).toBe(
       `stale version — current contentVersion is ${current}; re-run get_spec_diff and retry`
     );
+    // Cross-check against the actual REST gateErrorResponse (src/api/edit-gate-
+    // response.ts) for an equivalent error over this same live currentVersion —
+    // pins the parity claim against the real function, not a hardcoded literal.
+    const rest = gateErrorResponse(new StaleVersionError('stale write', current));
+    expect(rest?.status).toBe(409);
+    expect(structuredContentOf(res)).toEqual({ currentVersion: rest?.body.currentVersion });
   });
 
   it('an archived spec is a write-forbidden tool error with no structuredContent (#583/ADR-084)', async () => {
@@ -149,6 +163,16 @@ describe('apply_merge MCP tool', () => {
     expect(textOf(res)).toBe('spec is archived and cannot be edited');
     expect(structuredContentOf(res)).toBeUndefined();
     expect('structuredContent' in res).toBe(false);
+    // Cross-check against the actual REST gateErrorResponse: confirm its 409
+    // body for this class genuinely carries nothing beyond `error`.
+    const rest = gateErrorResponse(
+      new SpecWriteForbiddenError('spec is archived and cannot be edited')
+    );
+    expect(rest?.status).toBe(409);
+    expect(Object.keys(rest?.body ?? {}).sort((a, b) => a.localeCompare(b))).toEqual([
+      'error',
+      'success',
+    ]);
   });
 
   it('a missing spec and a malformed diff are tool errors', async () => {
