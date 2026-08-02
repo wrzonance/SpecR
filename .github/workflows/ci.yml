@@ -42,6 +42,12 @@ jobs:
       - name: Check Node pin (no drift)
         run: pnpm check:node-pin
 
+      # Asserts every `uses:` ref across .github/workflows/*.yml is pinned to a
+      # 40-char commit SHA with a trailing version comment (security.md) — a
+      # floating tag executes in this repo with whatever the job grants it.
+      - name: Check Action pins (no floating refs)
+        run: pnpm check:action-pins
+
       - name: Check formatting (prettier)
         run: pnpm format:check
 
