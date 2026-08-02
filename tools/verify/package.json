@@ -29,7 +29,7 @@
   "devDependencies": {
     "@eslint/js": "latest",
     "@types/express": "^5.0.6",
-    "@types/multer": "^1.0.0",
+    "@types/multer": "^2.2.0",
     "@types/node": "^24.13.3",
     "@types/pngjs": "^6.0.5",
     "eslint": "^9.0.0",
