@@ -15,6 +15,7 @@
     "start": "node --env-file-if-exists=.env dist/index.js",
     "lint": "eslint src/ && tsc --noEmit && prettier --check src/",
     "check:node-pin": "tsx scripts/check-node-pin.ts",
+    "check:action-pins": "tsx scripts/check-action-pins.ts",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
     "test": "vitest run --project unit",
