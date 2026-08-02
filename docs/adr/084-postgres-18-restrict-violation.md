@@ -72,8 +72,22 @@ the cost is one extra comparison.
 
 ## Consequences
 
-- The error-translation layer behaves identically on 16 and 18 for RESTRICT
-  deletes, so the move is not a one-way door.
+- **Classification** of a RESTRICT-blocked delete is identical on 16 and 18 —
+  `isRestrictedDeleteViolation` returns true on both — so the move is not a
+  one-way door and the predicate still works for anyone running 16 locally.
+  The resulting **HTTP status is not** identical, and cannot be:
+
+  | Server | SQLSTATE | `pgErrorToHttp` |
+  | --- | --- | --- |
+  | ≤ 16 | `23503` | 404 — that code must keep its references-a-missing-row meaning, which is what every override map in the API uses it for |
+  | 18 | `23001` | 409 — its own code, and the more accurate answer for a blocked delete |
+
+  Only 18 is a supported target after this change, so 409 is the behaviour that
+  ships. The 404 on 16 is recorded because a developer running 16 locally will
+  observe it, and because the asymmetry is what makes a naive
+  "assert 409 everywhere" test pass on 18 and fail on 16 —
+  `src/lib/pg-errors.integration.test.ts` therefore asserts that a mapping
+  *exists* and leaves the exact `23001` → 409 pair to the unit test.
 - `pgErrorToHttp` gains a mapping no route exercises **today** — the other three
   `ON DELETE RESTRICT` foreign keys (`projects.client_id`, the package-revision
   parent, and the spec style source) have no DELETE endpoint for the parent row.
