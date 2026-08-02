@@ -74,7 +74,7 @@
     "ajv-formats": "^3.0.1",
     "depcheck": "^1.0.0",
     "dotenv": "^16.4.7",
-    "eslint": "^9.0.0",
+    "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-sonarjs": "^4.0.3",
     "markdown-it": "^14.3.0",
