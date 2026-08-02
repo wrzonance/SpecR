@@ -82,7 +82,10 @@ describe('pipeline (orchestration + no-escape boundary)', () => {
     runStore = createRunStore(workRoot);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // #604: drain any run still writing into workRoot before removing it —
+    // rmSync races a detached executeRun() otherwise (ENOTEMPTY).
+    await runStore.waitForIdle();
     rmSync(workRoot, { recursive: true, force: true });
   });
 
@@ -129,6 +132,25 @@ describe('pipeline (orchestration + no-escape boundary)', () => {
     await runStore.waitForIdle();
 
     expect(uploadResolved).toBe(true);
+  });
+
+  it('run-store: waitForIdle drains an in-flight run before its workRoot can be safely removed', async () => {
+    const apiClient = stubApiClient();
+    const pipeline = createPipeline({ apiClient, runStore });
+
+    // Deliberately not awaited — mirrors startRun's real fire-and-forget
+    // callers (e.g. src/api/parse.ts). waitForIdle is the only thing this
+    // test relies on to know the run finished.
+    const runId = pipeline.startRun({
+      referenceBuffer: Buffer.from('docx bytes'),
+      referenceFilename: 'reference.docx',
+    });
+
+    await runStore.waitForIdle();
+
+    const run = runStore.getRun(runId);
+    if (run === undefined) throw new Error('run missing after waitForIdle resolved');
+    expect(run.status).not.toBe('running');
   });
 
   it('drives a successful run through upload -> parse -> import -> generate, then stops', async () => {
