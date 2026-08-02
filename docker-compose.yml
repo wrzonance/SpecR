@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: postgres:18
     environment:
       POSTGRES_USER: specr
       POSTGRES_PASSWORD: specr
@@ -10,7 +10,12 @@ services:
       # points DATABASE_URL at it); defaults to 5432 for `docker compose up`/CI.
       - "${SPECR_DB_HOST_PORT:-5432}:5432"
     volumes:
-      - specr_pgdata:/var/lib/postgresql/data
+      # Postgres 18+ images store data under a major-version-specific subdirectory
+      # of /var/lib/postgresql itself (not .../postgresql/data as on 16 and earlier)
+      # to support pg_ctlcluster-style in-place major upgrades — mounting the old
+      # .../data path makes the image treat the (empty) volume as a stale <18 data
+      # dir and refuse to start. See docker-library/postgres#1259.
+      - specr_pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U specr"]
       interval: 5s

@@ -97,7 +97,7 @@ pnpm seed               # seed CSI section reference data (spec_sections)
 Integration tests and DB-query tests run against a real Postgres — never mocked.
 
 ```bash
-docker compose up -d postgres        # postgres:16, db/user/pass all "specr", :5432
+docker compose up -d postgres        # postgres:18, db/user/pass all "specr", :5432
 # native: Arch `sudo pacman -S postgresql` · Ubuntu `sudo apt install postgresql libpq-dev`
 ```
 

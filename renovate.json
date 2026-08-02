@@ -49,10 +49,10 @@
       "allowedVersions": "<10.0.0"
     },
     {
-      "description": "Database pin: stay on Postgres 16 (EOL 2028-11-09). Postgres 18 is blocked by a real regression — SQLSTATE does not reach the pg driver, so pgErrorToHttp's 23505/23503/23514 mappings degrade to generic 500s; measured 2 integration failures on 18.4 against 27/27 passing on 16. Tracked in #599. Bounded so the bump stops being re-proposed while it is knowingly deferred.",
+      "description": "Database pin: stay on Postgres 18 (EOL 2030-11-14). The earlier block on 18 was a misdiagnosis — SQLSTATE reaches the driver fine; Postgres 18 reports an ON DELETE RESTRICT rejection as the SQL-standard restrict_violation (23001) instead of the generic foreign_key_violation (23503), which the error map did not recognise. Resolved in #599 (ADR-084) by accepting both codes. Bounded rather than unpinned so 18.x patches flow while a future major stays a deliberate, tested move — same shape as the node (<25), typescript (<6.0.0) and eslint (<10.0.0) bounds.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["postgres"],
-      "allowedVersions": "<17"
+      "allowedVersions": "<19"
     },
     {
       "matchManagers": ["github-actions"],
