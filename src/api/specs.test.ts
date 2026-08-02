@@ -74,7 +74,7 @@ describe('getSpecHandler', () => {
     vi.mocked(getOnboardingStatus).mockResolvedValueOnce('active');
     vi.mocked(getSpecWithdrawnAt).mockResolvedValueOnce('2026-06-27T00:00:00.000Z');
     const { getSpecHandler } = await import('./specs.js');
-    const req = { params: { id: 'abc' } } as unknown as Request;
+    const req = { params: { id: VALID_ID } } as unknown as Request;
     const res = makeRes();
     await getSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(200);
@@ -103,7 +103,7 @@ describe('getSpecHandler', () => {
     vi.mocked(getOnboardingStatus).mockResolvedValueOnce('review');
     vi.mocked(getSpecWithdrawnAt).mockResolvedValueOnce(null);
     const { getSpecHandler } = await import('./specs.js');
-    const req = { params: { id: 'abc' } } as unknown as Request;
+    const req = { params: { id: VALID_ID } } as unknown as Request;
     const res = makeRes();
     await getSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(200);
@@ -127,7 +127,7 @@ describe('getSpecHandler', () => {
     vi.mocked(getOnboardingStatus).mockReturnValueOnce(onboardingStatus.promise);
     vi.mocked(getSpecWithdrawnAt).mockReturnValueOnce(withdrawnAt.promise);
     const { getSpecHandler } = await import('./specs.js');
-    const req = { params: { id: 'abc' } } as unknown as Request;
+    const req = { params: { id: VALID_ID } } as unknown as Request;
     const res = makeRes();
 
     const handled = getSpecHandler(req, res as unknown as Response);
@@ -135,9 +135,9 @@ describe('getSpecHandler', () => {
     await Promise.resolve();
 
     try {
-      expect(getSpecStyleSource).toHaveBeenCalledWith('abc');
-      expect(getOnboardingStatus).toHaveBeenCalledWith('abc');
-      expect(getSpecWithdrawnAt).toHaveBeenCalledWith('abc');
+      expect(getSpecStyleSource).toHaveBeenCalledWith(VALID_ID);
+      expect(getOnboardingStatus).toHaveBeenCalledWith(VALID_ID);
+      expect(getSpecWithdrawnAt).toHaveBeenCalledWith(VALID_ID);
     } finally {
       styleSource.resolve(null);
       onboardingStatus.resolve('active');
@@ -150,7 +150,7 @@ describe('getSpecHandler', () => {
     const { getSpecTree } = await import('../db/index.js');
     vi.mocked(getSpecTree).mockResolvedValueOnce(null);
     const { getSpecHandler } = await import('./specs.js');
-    const req = { params: { id: 'missing' } } as unknown as Request;
+    const req = { params: { id: VALID_ID } } as unknown as Request;
     const res = makeRes();
     await getSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(404);
@@ -162,20 +162,34 @@ describe('getSpecHandler', () => {
     const { getSpecTree } = await import('../db/index.js');
     vi.mocked(getSpecTree).mockRejectedValueOnce(new Error('db down'));
     const { getSpecHandler } = await import('./specs.js');
-    const req = { params: { id: 'abc' } } as unknown as Request;
+    const req = { params: { id: VALID_ID } } as unknown as Request;
     const res = makeRes();
     await getSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(500);
   });
 
   it('returns 400 when id param is missing', async () => {
+    const { getSpecTree } = await import('../db/index.js');
     const { getSpecHandler } = await import('./specs.js');
     const req = { params: {} } as unknown as Request;
     const res = makeRes();
     await getSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(400);
     const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(body['error']).toBe('missing spec id');
+    expect(body['error']).toBe('invalid spec id');
+    expect(getSpecTree).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 on a malformed (non-UUID) id', async () => {
+    const { getSpecTree } = await import('../db/index.js');
+    const { getSpecHandler } = await import('./specs.js');
+    const req = { params: { id: 'nope' } } as unknown as Request;
+    const res = makeRes();
+    await getSpecHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['error']).toBe('invalid spec id');
+    expect(getSpecTree).not.toHaveBeenCalled();
   });
 });
 
@@ -286,7 +300,7 @@ describe('updateSpecHandler', () => {
       section: '27 21 00',
     });
     const { updateSpecHandler } = await import('./specs.js');
-    const req = { params: { id: 'abc' }, body: { title: 'New Title' } } as unknown as Request;
+    const req = { params: { id: VALID_ID }, body: { title: 'New Title' } } as unknown as Request;
     const res = makeRes();
     await updateSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(200);
@@ -298,7 +312,7 @@ describe('updateSpecHandler', () => {
     const { updateSpec } = await import('../db/index.js');
     vi.mocked(updateSpec).mockResolvedValueOnce(null);
     const { updateSpecHandler } = await import('./specs.js');
-    const req = { params: { id: 'missing' }, body: { title: 'x' } } as unknown as Request;
+    const req = { params: { id: VALID_ID }, body: { title: 'x' } } as unknown as Request;
     const res = makeRes();
     await updateSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(404);
@@ -308,20 +322,34 @@ describe('updateSpecHandler', () => {
     const { updateSpec } = await import('../db/index.js');
     vi.mocked(updateSpec).mockRejectedValueOnce(new Error('db down'));
     const { updateSpecHandler } = await import('./specs.js');
-    const req = { params: { id: 'abc' }, body: {} } as unknown as Request;
+    const req = { params: { id: VALID_ID }, body: {} } as unknown as Request;
     const res = makeRes();
     await updateSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(500);
   });
 
   it('returns 400 when id param is missing', async () => {
+    const { updateSpec } = await import('../db/index.js');
     const { updateSpecHandler } = await import('./specs.js');
     const req = { params: {}, body: { title: 'x' } } as unknown as Request;
     const res = makeRes();
     await updateSpecHandler(req, res as unknown as Response);
     expect(res.status).toHaveBeenCalledWith(400);
     const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(body['error']).toBe('missing spec id');
+    expect(body['error']).toBe('invalid spec id');
+    expect(updateSpec).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 on a malformed (non-UUID) id', async () => {
+    const { updateSpec } = await import('../db/index.js');
+    const { updateSpecHandler } = await import('./specs.js');
+    const req = { params: { id: 'nope' }, body: { title: 'x' } } as unknown as Request;
+    const res = makeRes();
+    await updateSpecHandler(req, res as unknown as Response);
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body['error']).toBe('invalid spec id');
+    expect(updateSpec).not.toHaveBeenCalled();
   });
 });
 
