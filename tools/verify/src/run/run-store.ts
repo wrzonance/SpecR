@@ -54,12 +54,19 @@ export interface RunStore {
    */
   trackPending(completion: Promise<void>): void;
   /**
-   * Resolve once every promise currently registered via trackPending has
-   * settled — the precondition "nothing is still writing under workRoot".
-   * Callers that own workRoot's lifecycle (e.g. test teardown about to
-   * rmSync it) must await this first. Snapshots the pending set at call
-   * time — work registered *after* this call starts is not waited on by
-   * it. Never rejects; no-ops immediately when nothing is pending. (#604)
+   * Resolve once nothing is registered via trackPending any more — the
+   * precondition "nothing is still writing under workRoot". Callers that own
+   * workRoot's lifecycle (e.g. test teardown about to rmSync it) must await
+   * this first.
+   *
+   * Drains until the pending set is *empty*, rather than awaiting a snapshot
+   * taken at call time: a run registered while the drain is in flight would
+   * otherwise be left writing into a directory the caller is about to remove,
+   * which is the exact race this exists to close. The corollary is that a
+   * caller which keeps starting new runs never observes idle — that is the
+   * honest answer for a teardown gate, not a hang to work around.
+   *
+   * Never rejects; no-ops immediately when nothing is pending. (#604)
    */
   waitForIdle(): Promise<void>;
 }
@@ -132,8 +139,16 @@ export function createRunStore(workRoot: string = DEFAULT_WORK_ROOT): RunStore {
       });
   }
 
-  function waitForIdle(): Promise<void> {
-    return Promise.allSettled(Array.from(pending)).then(() => undefined);
+  async function waitForIdle(): Promise<void> {
+    // Loop rather than awaiting a single snapshot: each trackPending entry
+    // self-removes in a `.finally`, which runs a microtask *after* the
+    // promise settles, and a detached run may register more work while we
+    // wait. Re-reading the live set until it is empty is what makes the
+    // post-condition "nothing is writing" actually true. Already-settled
+    // entries resolve immediately, so this converges.
+    while (pending.size > 0) {
+      await Promise.allSettled(Array.from(pending));
+    }
   }
 
   function createRun(input: CreateRunInput): RunRecord {

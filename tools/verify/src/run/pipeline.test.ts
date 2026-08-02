@@ -232,6 +232,11 @@ describe('pipeline (orchestration + no-escape boundary)', () => {
 
       expect(idleSettled).toBe(true);
     } finally {
+      // Release the intercepted write even on the failure path. Without this,
+      // a failed waitFor/assertion leaves the write promise permanently
+      // unsettled, so the run never settles, so afterEach's waitForIdle()
+      // never resolves — turning a clean test failure into a suite hang.
+      releaseWrite?.();
       writeFileControl.interceptGeneratedWrite = undefined;
     }
   });

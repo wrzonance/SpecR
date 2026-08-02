@@ -163,26 +163,40 @@ describe('run-store (trackPending / waitForIdle — #604)', () => {
     expect(settled).toBe(true);
   });
 
-  it('waitForIdle snapshots the pending set at call time — work tracked after the call is not awaited by it', async () => {
-    let resolveA: () => void = () => {
-      throw new Error('resolveA not assigned');
+  it('waitForIdle drains work registered *while* it is waiting, not just a call-time snapshot', async () => {
+    // The teardown gate's whole point is "nothing is writing under workRoot".
+    // A snapshot taken at call time would report idle while a run registered
+    // mid-drain is still writing — into a directory the caller is about to
+    // rmSync. So later arrivals must extend the wait, not be ignored.
+    const resolvers: Array<() => void> = [];
+    const track = (): void => {
+      store.trackPending(
+        new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        })
+      );
     };
-    const pendingA = new Promise<void>((resolve) => {
-      resolveA = resolve;
-    });
-    store.trackPending(pendingA);
 
+    track();
     const idle = store.waitForIdle();
 
-    // Registered after waitForIdle() was already called — must not be
-    // required to settle for `idle` to resolve.
-    const pendingB = new Promise<void>(() => {
-      /* never settles */
+    let idleSettled = false;
+    void idle.then(() => {
+      idleSettled = true;
     });
-    store.trackPending(pendingB);
 
-    resolveA();
-    await expect(idle).resolves.toBeUndefined(); // resolves despite pendingB being permanently unsettled
+    // Registered after waitForIdle() was already called.
+    track();
+
+    // Release only the first — the second is still outstanding, so idle must
+    // not have settled.
+    resolvers[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(idleSettled).toBe(false);
+
+    resolvers[1]?.();
+    await expect(idle).resolves.toBeUndefined();
+    expect(idleSettled).toBe(true);
   });
 
   it('waitForIdle no-ops immediately when nothing is pending', async () => {
@@ -207,10 +221,25 @@ describe('run-store (trackPending / waitForIdle — #604)', () => {
       await store.waitForIdle();
       await new Promise((resolve) => setImmediate(resolve));
 
-      globalThis.gc?.();
-      await new Promise((resolve) => setImmediate(resolve));
+      // A single gc() pass is not a guarantee — V8 may keep a just-settled
+      // promise reachable for another cycle, which would make a one-shot
+      // assertion flaky. Retry a bounded number of times.
+      //
+      // The yields are load-bearing, not padding: per spec a WeakRef.deref()
+      // that returns the target keeps it alive for the remainder of the
+      // current job. Checking the ref and then calling gc() in the same turn
+      // would therefore pin the very object we are asking to be collected —
+      // the reason a naive retry loop fails where a single pass succeeds. So
+      // each iteration ends its job before the next gc().
+      let collected = false;
+      for (let attempt = 0; attempt < 10 && !collected; attempt += 1) {
+        globalThis.gc?.();
+        await new Promise((resolve) => setImmediate(resolve));
+        collected = ref.deref() === undefined;
+        await new Promise((resolve) => setImmediate(resolve));
+      }
 
-      expect(ref.deref()).toBeUndefined();
+      expect(collected).toBe(true);
     }
   );
 });
