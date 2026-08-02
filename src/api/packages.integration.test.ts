@@ -122,6 +122,12 @@ describe('POST /projects/:id/packages', () => {
     const res = await json('POST', `/projects/${p1}/packages`, { name: '' });
     expect(res.status).toBe(422);
   });
+
+  it('400 — malformed (non-UUID) project id (#568)', async () => {
+    const res = await json('POST', '/projects/not-a-uuid/packages', { name: 'X' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
+  });
 });
 
 describe('PUT /packages/:id/specs — ordered membership', () => {
@@ -173,6 +179,12 @@ describe('PUT /packages/:id/specs — ordered membership', () => {
     const res = await json('PUT', `/packages/${ZERO}/specs`, { specIds: [steel1] });
     expect(res.status).toBe(404);
   });
+
+  it('400 — malformed (non-UUID) package id (#568)', async () => {
+    const res = await json('PUT', '/packages/not-a-uuid/specs', { specIds: [] });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid package id' });
+  });
 });
 
 describe('GET /projects/:id/packages', () => {
@@ -190,6 +202,12 @@ describe('GET /projects/:id/packages', () => {
   it('404 for unknown project', async () => {
     const res = await json('GET', `/projects/${ZERO}/packages`);
     expect(res.status).toBe(404);
+  });
+
+  it('400 — malformed (non-UUID) project id (#568)', async () => {
+    const res = await json('GET', '/projects/not-a-uuid/packages');
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
   });
 });
 
@@ -220,5 +238,11 @@ describe('DELETE /packages/:id', () => {
   it('404 for unknown package', async () => {
     const res = await fetch(`${baseUrl}/packages/${ZERO}`, { method: 'DELETE' });
     expect(res.status).toBe(404);
+  });
+
+  it('400 — malformed (non-UUID) package id (#568)', async () => {
+    const res = await fetch(`${baseUrl}/packages/not-a-uuid`, { method: 'DELETE' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid package id' });
   });
 });

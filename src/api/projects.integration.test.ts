@@ -205,6 +205,12 @@ describe('GET /projects/:id', () => {
     const res = await fetch(`${baseUrl}/projects/00000000-0000-0000-0000-000000000000`);
     expect(res.status).toBe(404);
   });
+
+  it('400 — malformed (non-UUID) project id (#568)', async () => {
+    const res = await fetch(`${baseUrl}/projects/not-a-uuid`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
+  });
 });
 
 describe('GET /projects', () => {
@@ -305,6 +311,12 @@ describe('POST /projects/:id/specs (section-based copy-on-derive)', () => {
     expect(res.status).toBe(404);
   });
 
+  it('400 — malformed (non-UUID) project id (#568)', async () => {
+    const res = await postJSON('/projects/not-a-uuid/specs', { section: '03 30 00' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
+  });
+
   it('DELETE clean clone returns 200 and deletes the copy, master survives', async () => {
     const res = await fetch(`${baseUrl}/projects/${projectId}/specs/${cloneA}`, {
       method: 'DELETE',
@@ -337,6 +349,22 @@ describe('POST /projects/:id/specs (section-based copy-on-derive)', () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it('DELETE 400 — malformed (non-UUID) project id (#568)', async () => {
+    const res = await fetch(`${baseUrl}/projects/not-a-uuid/specs/${specA}`, {
+      method: 'DELETE',
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
+  });
+
+  it('DELETE 400 — malformed (non-UUID) spec id (#568)', async () => {
+    const res = await fetch(`${baseUrl}/projects/${projectId}/specs/not-a-uuid`, {
+      method: 'DELETE',
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid spec id' });
+  });
 });
 
 describe('GET /projects/:id/references/broken — availableFrom advisory', () => {
@@ -361,6 +389,12 @@ describe('GET /projects/:id/references/broken — availableFrom advisory', () =>
     const ref = refs.find((r) => r['targetSpecSection'] === '09 91 00');
     expect(ref).toBeDefined();
     expect(ref?.['availableFrom']).toEqual([expect.objectContaining({ libraryId: companyLibId })]);
+  });
+
+  it('400 — malformed (non-UUID) project id (#568)', async () => {
+    const res = await fetch(`${baseUrl}/projects/not-a-uuid/references/broken`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
   });
 });
 
@@ -439,6 +473,7 @@ describe('PUT /projects/:id/sources', () => {
   it('400 — malformed project id (not a UUID)', async () => {
     const res = await putSources('not-a-uuid', [companyId]);
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
   });
 });
 
@@ -549,6 +584,7 @@ describe('DELETE /projects/:id (soft-delete) + POST /projects/:id/restore', () =
   it('400 — malformed (non-UUID) project id on delete', async () => {
     const res = await deleteProject('not-a-uuid', { deletedBy: 'alice' });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
   });
 
   it('404 — delete unknown project', async () => {
@@ -559,6 +595,7 @@ describe('DELETE /projects/:id (soft-delete) + POST /projects/:id/restore', () =
   it('400 — malformed (non-UUID) project id on restore', async () => {
     const res = await fetch(`${baseUrl}/projects/not-a-uuid/restore`, { method: 'POST' });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
   });
 
   it('404 — restore unknown project', async () => {
@@ -607,6 +644,7 @@ describe('PATCH /projects/:id', () => {
       body: JSON.stringify({ name: 'x' }),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: 'invalid project id' });
   });
 
   it('400s an empty name', async () => {

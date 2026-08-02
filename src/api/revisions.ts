@@ -10,15 +10,13 @@ import {
 import type { CreateRevisionBody } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
+import { parsePathUuid } from './path-params.js';
 
 /** POST /packages/:id/revisions — issue an immutable snapshot (ADR-015 D5).
  *  Returns a summary; the frozen trees are read via GET /revisions/:id. */
 export async function createRevisionHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing package id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'package id');
+  if (id === null) return;
   try {
     const body = req.body as CreateRevisionBody;
     const revision = await createPackageRevision(id, body, pool);
@@ -54,11 +52,8 @@ export async function createRevisionHandler(req: Request, res: Response): Promis
  *  summaries, ordered by sortOrder. Metadata only; frozen trees are read per
  *  revision via GET /revisions/:id. 404 when the package is unknown. */
 export async function listPackageRevisionsHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing package id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'package id');
+  if (id === null) return;
   try {
     const revisions = await listPackageRevisions(id, pool);
     if (revisions === null) {
@@ -74,11 +69,8 @@ export async function listPackageRevisionsHandler(req: Request, res: Response): 
 
 /** GET /revisions/:id — frozen trees in membership order, validated on read. */
 export async function getRevisionHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing revision id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'revision id');
+  if (id === null) return;
   try {
     const revision = await getPackageRevision(id, pool);
     if (revision === null) {

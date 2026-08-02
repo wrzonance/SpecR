@@ -24,6 +24,7 @@ import { DisciplineFilter } from '../lib/discipline-filter.js';
 import { logger } from '../lib/logger.js';
 import { pgErrorToHttp } from '../lib/pg-errors.js';
 import { SectionNumberFormatSchema } from '../lib/section-number.js';
+import { parsePathUuid } from './path-params.js';
 
 const PatchProjectBody = z
   .object({
@@ -76,12 +77,8 @@ export async function listProjectsHandler(_req: Request, res: Response): Promise
 }
 
 export async function setProjectSourcesHandler(req: Request, res: Response): Promise<void> {
-  const parsedId = z.uuid().safeParse(req.params['id']);
-  if (!parsedId.success) {
-    res.status(400).json({ success: false, error: 'invalid project id' });
-    return;
-  }
-  const id = parsedId.data;
+  const id = parsePathUuid(req, res, 'project id');
+  if (id === null) return;
   const parsed = SetProjectSourcesBodySchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -114,11 +111,8 @@ export async function setProjectSourcesHandler(req: Request, res: Response): Pro
 }
 
 export async function getProjectHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing project id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'project id');
+  if (id === null) return;
   try {
     const project = await findProjectById(id, pool);
     if (!project) {
@@ -138,11 +132,8 @@ export async function getProjectHandler(req: Request, res: Response): Promise<vo
  * a blank or whitespace-only value means no filter.
  */
 export async function listProjectSpecsHandler(req: Request, res: Response): Promise<void> {
-  const parsedId = z.uuid().safeParse(req.params['id']);
-  if (!parsedId.success) {
-    res.status(400).json({ success: false, error: 'invalid project id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'project id');
+  if (id === null) return;
   // Blank is unset — `?discipline=` returns the full listing, not an empty one (#548).
   const parsedDiscipline = DisciplineFilter.safeParse(req.query['discipline']);
   if (!parsedDiscipline.success) {
@@ -151,16 +142,12 @@ export async function listProjectSpecsHandler(req: Request, res: Response): Prom
   }
   const discipline = parsedDiscipline.data;
   try {
-    const project = await findProjectById(parsedId.data, pool);
+    const project = await findProjectById(id, pool);
     if (!project) {
       res.status(404).json({ success: false, error: 'project not found' });
       return;
     }
-    const specs = await listProjectSpecs(
-      parsedId.data,
-      discipline !== undefined ? { discipline } : {},
-      pool
-    );
+    const specs = await listProjectSpecs(id, discipline !== undefined ? { discipline } : {}, pool);
     res.status(200).json({ success: true, data: specs });
   } catch (err) {
     logger.error({ err }, 'list project specs failed');
@@ -169,11 +156,8 @@ export async function listProjectSpecsHandler(req: Request, res: Response): Prom
 }
 
 export async function addSectionToProjectHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing project id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'project id');
+  if (id === null) return;
   try {
     const body = req.body as AddSectionToProjectBody;
     const result = await addSectionToProject(id, body.section, pool);
@@ -198,16 +182,10 @@ export async function addSectionToProjectHandler(req: Request, res: Response): P
 }
 
 export async function removeSectionFromProjectHandler(req: Request, res: Response): Promise<void> {
-  const projectId = req.params['id'];
-  const specId = req.params['specId'];
-  if (!projectId || typeof projectId !== 'string') {
-    res.status(400).json({ success: false, error: 'missing project id' });
-    return;
-  }
-  if (!specId || typeof specId !== 'string') {
-    res.status(400).json({ success: false, error: 'missing spec id' });
-    return;
-  }
+  const projectId = parsePathUuid(req, res, 'project id');
+  if (projectId === null) return;
+  const specId = parsePathUuid(req, res, 'spec id', 'specId');
+  if (specId === null) return;
   const force = req.query['force'] === 'true';
   try {
     const outcome = await removeSectionFromProject(projectId, specId, force, pool);
@@ -237,11 +215,8 @@ export async function removeSectionFromProjectHandler(req: Request, res: Respons
 }
 
 export async function getBrokenRefsHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params['id'];
-  if (!id || typeof id !== 'string') {
-    res.status(400).json({ success: false, error: 'missing project id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'project id');
+  if (id === null) return;
   try {
     const refs = await getBrokenRefs(id, pool);
     res.status(200).json({ success: true, data: refs });
@@ -252,12 +227,8 @@ export async function getBrokenRefsHandler(req: Request, res: Response): Promise
 }
 
 export async function patchProjectHandler(req: Request, res: Response): Promise<void> {
-  const parsedId = z.uuid().safeParse(req.params['id']);
-  if (!parsedId.success) {
-    res.status(400).json({ success: false, error: 'invalid project id' });
-    return;
-  }
-  const id = parsedId.data;
+  const id = parsePathUuid(req, res, 'project id');
+  if (id === null) return;
   const parsed = PatchProjectBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -300,11 +271,8 @@ export async function patchProjectHandler(req: Request, res: Response): Promise<
 }
 
 export async function deleteProjectHandler(req: Request, res: Response): Promise<void> {
-  const parsedId = z.uuid().safeParse(req.params['id']);
-  if (!parsedId.success) {
-    res.status(400).json({ success: false, error: 'invalid project id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'project id');
+  if (id === null) return;
   const parsed = DeleteProjectBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ success: false, error: 'deletedBy is required' });
@@ -313,7 +281,7 @@ export async function deleteProjectHandler(req: Request, res: Response): Promise
   try {
     // Idempotent: re-deleting returns the EXISTING tombstone (ADR-031), so the
     // original who/when is never clobbered by a later delete.
-    const tombstone = await softDeleteProject(parsedId.data, parsed.data.deletedBy, pool);
+    const tombstone = await softDeleteProject(id, parsed.data.deletedBy, pool);
     if (!tombstone) {
       res.status(404).json({ success: false, error: 'project not found' });
       return;
@@ -326,14 +294,11 @@ export async function deleteProjectHandler(req: Request, res: Response): Promise
 }
 
 export async function restoreProjectHandler(req: Request, res: Response): Promise<void> {
-  const parsedId = z.uuid().safeParse(req.params['id']);
-  if (!parsedId.success) {
-    res.status(400).json({ success: false, error: 'invalid project id' });
-    return;
-  }
+  const id = parsePathUuid(req, res, 'project id');
+  if (id === null) return;
   try {
     // Idempotent: restoring a non-deleted project is a 200 no-op (ADR-031).
-    const restored = await restoreProject(parsedId.data, pool);
+    const restored = await restoreProject(id, pool);
     if (!restored) {
       res.status(404).json({ success: false, error: 'project not found' });
       return;

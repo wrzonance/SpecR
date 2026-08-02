@@ -394,22 +394,37 @@ describe('POST /templates/import', () => {
     expect(body.error).toBe('template name already exists');
   });
 
-  it('400 when name field is missing', async () => {
+  it('422 when name field is missing (shared CreateTemplateBodySchema, #568)', async () => {
     const buf = await buildFixtureDocx();
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(buf)], { type: DOCX_MIME }), 'template.docx');
     const res = await fetch(`${baseUrl}/templates/import`, { method: 'POST', body: form });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const body = (await res.json()) as ImportErrorBody;
-    expect(body.success).toBe(false);
+    expect(body).toEqual({ success: false, error: 'validation failed' });
   });
 
-  it('400 when name field is empty string', async () => {
+  it('422 when name field is empty string (shared CreateTemplateBodySchema, #568)', async () => {
     const buf = await buildFixtureDocx();
     const res = await postImport(buf, { name: '' });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     const body = (await res.json()) as ImportErrorBody;
-    expect(body.success).toBe(false);
+    expect(body).toEqual({ success: false, error: 'validation failed' });
+  });
+
+  it('422 — whitespace-only name (POST /templates/import, #568)', async () => {
+    // Regression: the hand-written ImportBodySchema had no `.trim()`, so a
+    // whitespace-only name passed Zod's minLength(1) check and reached the
+    // DB, where `style_templates_name_non_empty_check` fired as pg 23514 —
+    // a code src/api/templates.ts's own pgErrorToHttp map never named, so it
+    // fell through to pg-errors.ts's default 23514->422 mapping instead of
+    // being rejected cleanly at the boundary. The shared, trimming schema
+    // now rejects it before any query is issued.
+    const buf = await buildFixtureDocx();
+    const res = await postImport(buf, { name: '   ' });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as ImportErrorBody;
+    expect(body).toEqual({ success: false, error: 'validation failed' });
   });
 
   it('400 when no file is provided', async () => {

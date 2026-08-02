@@ -2041,6 +2041,8 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/ProjectWithToc'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -3446,6 +3448,8 @@ paths:
                           specId:
                             type: string
                             format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -3524,6 +3528,8 @@ paths:
                         type: array
                         items:
                           $ref: '#/components/schemas/BrokenRef'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -3643,6 +3649,8 @@ paths:
                         type: array
                         items:
                           $ref: '#/components/schemas/PackageWithSpecs'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -3746,6 +3754,8 @@ paths:
                           packageId:
                             type: string
                             format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -3785,6 +3795,8 @@ paths:
                         type: array
                         items:
                           $ref: '#/components/schemas/RevisionSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -3886,6 +3898,8 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/RevisionWithTrees'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
