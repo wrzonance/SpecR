@@ -38,6 +38,12 @@ export default defineConfig({
           environment: 'node',
           include: ['src/**/*.integration.test.ts'],
           testTimeout: 30_000,
+          // Matches testTimeout. Vitest's hookTimeout defaults to 10s
+          // independently of testTimeout, which is tight for beforeAll hooks
+          // that parse+insert large fixtures (e.g. the 461-node 27_10_00.SEC
+          // tree in src/parser/sec/index.integration.test.ts) under shared-
+          // machine load. See issue #608.
+          hookTimeout: 30_000,
           // Serialize integration test files — they share a single PostgreSQL
           // instance and otherwise race on FK constraints + unique keys.
           // Vitest 4: `fileParallelism: false` replaces v3's
