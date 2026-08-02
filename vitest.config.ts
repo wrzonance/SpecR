@@ -30,6 +30,11 @@ export default defineConfig({
           // ADR-081) carry regression tests like any other code.
           include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
           exclude: ['src/**/*.integration.test.ts'],
+          // Seeds placeholder DATABASE_URL/NODE_ENV (#472) before any test
+          // file's imports run, so src/lib/env.ts's import-time validation
+          // never process.exit(1)s the no-DB unit suite when those vars
+          // aren't already set in the shell.
+          setupFiles: ['./src/test-utils/unit-env-setup.ts'],
         },
       },
       {
