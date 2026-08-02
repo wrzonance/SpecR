@@ -168,7 +168,7 @@ describe('update_paragraph MCP tool', () => {
       expectedVersion: current + 100, // mismatch → StaleVersionError → tool error
     });
     expect(isToolError(res)).toBe(true);
-    // #583/ADR-085: mirrors REST's gateErrorResponse 409 body field-for-field
+    // #583/ADR-085: carries REST's one actionable supplemental field
     // so an agent can re-read the current version instead of regexing prose.
     expect(structuredContentOf(res)).toEqual({ currentVersion: current });
     // Full prose too, including the trailing guidance clause (paragraph-handlers.ts:30) —

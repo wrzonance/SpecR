@@ -10,8 +10,10 @@ import { toolError, ok, type ToolResult } from './handlers.js';
 // merge contract is identical across surfaces. Only messages cross the boundary.
 function mergeToolError(err: unknown): ToolResult | null {
   if (err instanceof StaleVersionError) {
-    // ADR-085: mirrors REST's 409 body (src/api/edit-gate-response.ts) field-for-
-    // field so an agent can re-read the current version instead of regexing prose.
+    // ADR-085: carries REST's one actionable supplemental field (src/api/
+    // edit-gate-response.ts) so an agent can re-read the current version instead
+    // of regexing prose. REST's `success`/`error` are not duplicated here — they
+    // already have MCP equivalents in `isError` and the text content.
     return toolError(
       `stale version — current contentVersion is ${err.currentVersion}; re-run get_spec_diff and retry`,
       { structuredContent: { currentVersion: err.currentVersion } }

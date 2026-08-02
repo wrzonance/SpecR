@@ -3,10 +3,11 @@
 // #583 (follow-up to #569/ADR-083, decided in ADR-085): apply_merge's
 // StaleVersionError/SpecWriteForbiddenError branches previously flattened
 // both into prose only. StaleVersionError now surfaces `currentVersion` as
-// structuredContent — mirroring both the error class's own field and REST's
-// gateErrorResponse 409 body (src/api/edit-gate-response.ts) field-for-field
-// — while SpecWriteForbiddenError stays prose-only, matching that REST body
-// having nothing beyond `error` for that class.
+// structuredContent — REST's one actionable supplemental field in
+// gateErrorResponse's 409 body (src/api/edit-gate-response.ts); its `success`
+// and `error` are not duplicated, having MCP equivalents in `isError` and the
+// text content. SpecWriteForbiddenError stays prose-only, matching that REST
+// body having nothing beyond `error` for that class.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import type { ToolResult } from './tool-result.js';

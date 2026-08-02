@@ -42,8 +42,12 @@ if (err instanceof SpecWriteForbiddenError) {
 ```
 
 **`stale_version` → `structuredContent: { currentVersion: err.currentVersion }`.**
-This mirrors both `StaleVersionError`'s own field and REST's 409 body
-field-for-field:
+This carries REST's one *actionable supplemental* field. It is deliberately not
+a byte-copy of the 409 body: REST's `success: false` and `error` have direct MCP
+equivalents outside `structuredContent` — `isError: true` and the text content —
+so duplicating them into the structured channel would give an agent two sources
+of truth for the same fact. `currentVersion` is the only field with no such
+equivalent, and therefore the only one that has to be structured:
 
 ```ts
 if (err instanceof StaleVersionError) {
