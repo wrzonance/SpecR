@@ -8,11 +8,15 @@
 # Renovate owns npm because it is the only one of the two that can honor the
 # Node 24 pin (ADR-081). Renovate auto-detects the constraint from `engines.node`
 # and `.nvmrc` and filters candidate releases through `constraintsFiltering:
-# "strict"`, so a runtime dependency requiring a newer Node is never proposed.
-# That filter is scoped to `dependencies` in renovate.json — deliberately, since
-# strict filtering across devDependencies excludes far more than expected — so
-# devDependencies fall back to the same CI backstop everything else has:
-# `pnpm check:node-pin` plus pnpm's `engineStrict`.
+# "strict"`, so a runtime release whose declared `engines.node` excludes Node 24
+# is not proposed. Two limits worth knowing rather than assuming away:
+#   - it filters on DECLARED metadata, so a release that ships no `engines.node`
+#     stays eligible (pnpm's `engineStrict` only rejects a package that itself
+#     claims incompatibility, so it cannot backstop absent metadata either) —
+#     that residue is caught by tests at runtime, not by either tool;
+#   - the rule is scoped to `dependencies` in renovate.json, deliberately, since
+#     strict filtering across devDependencies excludes far more than expected.
+# `pnpm check:node-pin` covers declaration drift across the pinned files.
 #
 # Dependabot has no equivalent filter at any scope — its ignore / allow /
 # versioning-strategy / groups levers all operate on the semver update *type*,
@@ -33,8 +37,11 @@ version: 2
 
 updates:
   # --- workflow action pins ---
-  # SHA-pinned per security.md; Dependabot updates the pin and the trailing
-  # version comment together.
+  # Where an action is SHA-pinned (security.md), Dependabot updates the pin and
+  # the trailing version comment together. ci.yml, release.yml and codeql.yml are
+  # fully SHA-pinned; claude.yml still uses floating `@v7`/`@v1` tags — tracked
+  # in #600. Dependabot bumps a floating tag but cannot make it immutable, so it
+  # is not a substitute for the pin.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
