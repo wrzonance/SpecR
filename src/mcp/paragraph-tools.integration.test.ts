@@ -164,6 +164,11 @@ describe('update_paragraph MCP tool', () => {
     // #583/ADR-084: mirrors REST's gateErrorResponse 409 body field-for-field
     // so an agent can re-read the current version instead of regexing prose.
     expect(structuredContentOf(res)).toEqual({ currentVersion: current });
+    // Full prose too, including the trailing guidance clause (paragraph-handlers.ts:30) —
+    // structuredContent alone leaves that clause unpinned at the integration boundary.
+    expect(textOf(res)).toBe(
+      `stale version — current contentVersion is ${current}; refetch and retry`
+    );
   });
 
   it('an archived spec is a write-forbidden tool error with no structuredContent (#583/ADR-084)', async () => {

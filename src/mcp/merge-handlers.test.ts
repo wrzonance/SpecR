@@ -78,7 +78,11 @@ describe('apply_merge: stale version returns currentVersion as structuredContent
     });
 
     expect(result).toMatchObject({ isError: true });
-    expect(textOf(result)).toContain('stale version — current contentVersion is 9');
+    // Full message, not a substring — pins the trailing guidance clause too
+    // (merge-handlers.ts:16), not just the version-number prefix.
+    expect(textOf(result)).toBe(
+      'stale version — current contentVersion is 9; re-run get_spec_diff and retry'
+    );
     expect(structuredContentOf(result)).toEqual({ currentVersion: 9 });
   });
 });
