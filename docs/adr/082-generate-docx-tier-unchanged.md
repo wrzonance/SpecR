@@ -8,8 +8,10 @@ Accepted
 
 \#567 wires `generate_docx`'s MCP tool through to the ADR-079 issuance-readiness gate — the same
 `assertReadyForFinal`/`ReadinessBlockedError` call REST's `enforceReadinessGate` already makes, now
-reachable from `generate_docx`'s `mode`/`overrideReadinessGate` body fields (spread from the shared
-`GenerateBodySchema`, matching REST's own request shape). The issue that opened this workstream (#550
+reachable from `generate_docx`'s `mode`/`overrideReadinessGate` body fields (the shared strict
+`GenerateBodySchema` is registered directly — not spread as `.shape`, which would drop `.strict()`
+and let a misspelled `mode` silently bypass the gate — matching REST's own request shape). The issue
+that opened this workstream (#550
 Workstream A) flagged this explicitly: _"`overrideReadinessGate` is capability-sensitive — decide and
 document whether it stays exposed at the `write` tier or is gated."_
 

@@ -23,4 +23,11 @@ describe('src/mcp/handlers.ts and tools.ts line budget (#567)', () => {
   it('tools.ts stays at or under the 400-line hard cap', () => {
     expect(lineCount(import.meta.url, './tools.ts')).toBeLessThanOrEqual(MAX_LINES);
   });
+
+  // The extraction target itself: generate-docx-handler.ts exists only because
+  // handlers.ts hit the cap, so leaving it unguarded just relocates the growth
+  // this suite exists to catch.
+  it('generate-docx-handler.ts stays at or under the 400-line hard cap', () => {
+    expect(lineCount(import.meta.url, './generate-docx-handler.ts')).toBeLessThanOrEqual(MAX_LINES);
+  });
 });
