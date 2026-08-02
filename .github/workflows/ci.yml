@@ -12,7 +12,7 @@ permissions:
   security-events: write
 
 env:
-  PNPM_VERSION: "11.11.0"
+  PNPM_VERSION: "11.17.0"
 
 jobs:
   # ─── Lint ────────────────────────────────────────────────────────────
