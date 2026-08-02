@@ -1,9 +1,12 @@
 import { pool, DatabaseError } from '../index.js';
 import { NumberingProfileSchema, NumberingProfileReadSchema } from '../../ast/index.js';
 import type { NumberingProfile } from '../../ast/index.js';
-import { getPgCode } from '../../lib/pg-errors.js';
+import { isRestrictedDeleteViolation } from '../../lib/pg-errors.js';
 
-/** Raised when a DELETE targets a profile that is still referenced by one or more specs (pg 23503). */
+/**
+ * Raised when a DELETE targets a profile that is still referenced by one or more
+ * specs — a RESTRICT FK rejection (23503 on Postgres <=16, 23001 on Postgres 18).
+ */
 export class NumberingProfileInUseError extends DatabaseError {}
 
 export interface NumberingProfileRow {
@@ -156,7 +159,8 @@ export async function updateNumberingProfile(
  * The built-in CSI Default (`library_id IS NULL`) is never deletable — this query
  * silently excludes it, so callers get `false` (→ 404) rather than accidentally
  * removing the shared fallback row.
- * Throws NumberingProfileInUseError when a spec still references this profile (pg 23503 RESTRICT).
+ * Throws NumberingProfileInUseError when a spec still references this profile
+ * (a RESTRICT FK rejection — 23503 on Postgres <=16, 23001 on Postgres 18).
  */
 export async function deleteNumberingProfile(id: string): Promise<boolean> {
   try {
@@ -170,7 +174,7 @@ export async function deleteNumberingProfile(id: string): Promise<boolean> {
       err instanceof DatabaseError
         ? err
         : new DatabaseError(`deleteNumberingProfile: delete failed for ${id}`, { cause: err });
-    if (getPgCode(dbErr) === '23503') {
+    if (isRestrictedDeleteViolation(dbErr)) {
       throw new NumberingProfileInUseError(
         `numbering profile ${id} is referenced by one or more specs`,
         { cause: err }
