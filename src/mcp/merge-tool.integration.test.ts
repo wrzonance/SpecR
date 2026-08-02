@@ -139,7 +139,7 @@ describe('apply_merge MCP tool', () => {
       expectedVersion: current + 100,
     });
     expect(isToolError(res)).toBe(true);
-    // #583/ADR-084: mirrors REST's gateErrorResponse 409 body field-for-field
+    // #583/ADR-085: mirrors REST's gateErrorResponse 409 body field-for-field
     // so an agent can re-read the current version instead of regexing prose.
     expect(structuredContentOf(res)).toEqual({ currentVersion: current });
     // Full prose too, including the trailing guidance clause (merge-handlers.ts:16) —
@@ -155,7 +155,7 @@ describe('apply_merge MCP tool', () => {
     expect(structuredContentOf(res)).toEqual({ currentVersion: rest?.body.currentVersion });
   });
 
-  it('an archived spec is a write-forbidden tool error with no structuredContent (#583/ADR-084)', async () => {
+  it('an archived spec is a write-forbidden tool error with no structuredContent (#583/ADR-085)', async () => {
     const { specId, paragraphId } = await createSpecFixture();
     await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [specId]);
     const res = await handleApplyMerge({ specId, accept: [], diff: diffFor(paragraphId) });

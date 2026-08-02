@@ -1,4 +1,4 @@
-# ADR-084: structured content for merge/paragraph edit-gate conflicts
+# ADR-085: structured content for merge/paragraph edit-gate conflicts
 
 ## Status
 

@@ -1,6 +1,6 @@
 // src/mcp/paragraph-handlers.test.ts
 //
-// #583 (follow-up to #569/ADR-083, decided in ADR-084): the paragraph write
+// #583 (follow-up to #569/ADR-083, decided in ADR-085): the paragraph write
 // tools' StaleVersionError/SpecWriteForbiddenError branches (shared via
 // gateToolError across handleUpdateParagraph, handleInsertParagraph,
 // handleRemoveParagraph and handleAcceptCommentAsNote) previously flattened

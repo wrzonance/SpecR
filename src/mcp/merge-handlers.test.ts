@@ -1,6 +1,6 @@
 // src/mcp/merge-handlers.test.ts
 //
-// #583 (follow-up to #569/ADR-083, decided in ADR-084): apply_merge's
+// #583 (follow-up to #569/ADR-083, decided in ADR-085): apply_merge's
 // StaleVersionError/SpecWriteForbiddenError branches previously flattened
 // both into prose only. StaleVersionError now surfaces `currentVersion` as
 // structuredContent — mirroring both the error class's own field and REST's

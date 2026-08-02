@@ -10,14 +10,14 @@ import { toolError, ok, type ToolResult } from './handlers.js';
 // merge contract is identical across surfaces. Only messages cross the boundary.
 function mergeToolError(err: unknown): ToolResult | null {
   if (err instanceof StaleVersionError) {
-    // ADR-084: mirrors REST's 409 body (src/api/edit-gate-response.ts) field-for-
+    // ADR-085: mirrors REST's 409 body (src/api/edit-gate-response.ts) field-for-
     // field so an agent can re-read the current version instead of regexing prose.
     return toolError(
       `stale version — current contentVersion is ${err.currentVersion}; re-run get_spec_diff and retry`,
       { structuredContent: { currentVersion: err.currentVersion } }
     );
   }
-  // ADR-084: REST's 409 body for this class carries nothing beyond `error` — no
+  // ADR-085: REST's 409 body for this class carries nothing beyond `error` — no
   // structuredContent to mirror, so the omission here is deliberate, not unfinished.
   if (err instanceof SpecWriteForbiddenError) return toolError(err.message);
   if (err instanceof SpecNotFoundError) return toolError('spec not found');
