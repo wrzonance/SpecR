@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { ActionPinError, extractUsesValues, parsePinnedActionRef } from './check-action-pins.js';
+import {
+  ActionPinError,
+  checkAllWorkflowRefs,
+  extractUsesValues,
+  parsePinnedActionRef,
+} from './check-action-pins.js';
 
 describe('parsePinnedActionRef', () => {
   it('accepts a commit-SHA pin with a trailing version comment', () => {
@@ -79,5 +84,17 @@ describe('extractUsesValues', () => {
 
   it('returns an empty list for a file with no uses: lines', () => {
     expect(extractUsesValues('name: CI\non:\n  push:\n')).toEqual([]);
+  });
+});
+
+describe('checkAllWorkflowRefs against the real .github/workflows directory', () => {
+  // Regression (#600): claude.yml referenced actions/checkout@v7 and
+  // anthropics/claude-code-action@v1 — both floating tags — in a job also
+  // granted id-token: write. This runs the same scan `pnpm check:action-pins`
+  // runs in CI, but as a vitest boundary test against the real files on disk
+  // (not hardcoded fixture strings), so a future PR that reintroduces a
+  // floating ref anywhere under .github/workflows/ fails locally too.
+  it('finds zero unpinned action refs across every workflow file', () => {
+    expect(checkAllWorkflowRefs()).toEqual([]);
   });
 });

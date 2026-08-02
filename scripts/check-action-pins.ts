@@ -115,10 +115,18 @@ const checkFile = (filename: string): ActionPinError[] => {
   return errors;
 };
 
+/**
+ * Scan every workflow file under `.github/workflows/` for unpinned `uses:`
+ * refs. Exported so `check-action-pins.test.ts` can assert this repo's real
+ * files pass the same gate `pnpm check:action-pins` runs in CI (#600
+ * regression), not just the parser's hardcoded-string unit cases.
+ */
+export const checkAllWorkflowRefs = (): ActionPinError[] => workflowFiles().flatMap(checkFile);
+
 const main = (): void => {
   let errors: ActionPinError[];
   try {
-    errors = workflowFiles().flatMap(checkFile);
+    errors = checkAllWorkflowRefs();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`✗ Action pin check failed: ${message}`);
