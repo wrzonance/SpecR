@@ -16,3 +16,12 @@ packages: []
 # (native binary build) is required by vitest/tsx, same as at the repo root.
 allowBuilds:
   esbuild: true
+
+# Mirrors the root's engineStrict (ADR-081) — and it MUST be repeated here.
+# pnpm reads settings from the nearest pnpm-workspace.yaml walking up from the
+# cwd and stops at the first one; because this file makes tools/verify its own
+# isolated workspace root, the repo root's engineStrict never applies to
+# `pnpm --dir tools/verify install`. Without this line the harness installs
+# happily on a wrong Node despite its own engines.node range — measured: exit 0
+# on Node 26.4.0 against engines ">=24 <25".
+engineStrict: true

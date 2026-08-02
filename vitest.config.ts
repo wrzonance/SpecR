@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
@@ -26,7 +26,9 @@ export default defineConfig({
         test: {
           name: 'unit',
           environment: 'node',
-          include: ['src/**/*.test.ts'],
+          // scripts/ is included so repo-owned CI gates (e.g. check-node-pin,
+          // ADR-081) carry regression tests like any other code.
+          include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
           exclude: ['src/**/*.integration.test.ts'],
         },
       },
@@ -45,4 +47,4 @@ export default defineConfig({
       },
     ],
   },
-})
+});
