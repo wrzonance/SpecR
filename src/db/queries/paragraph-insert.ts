@@ -126,8 +126,7 @@ function resolveInsertableNodeType(
 }
 
 type ExplicitIdResolution =
-  | { readonly proceed: true }
-  | { readonly proceed: false; readonly result: InsertParagraphResult };
+  { readonly proceed: true } | { readonly proceed: false; readonly result: InsertParagraphResult };
 
 /** Resolve an `input.explicitId` (the merge added-op apply, #374) against
  *  global DB state, under the anchor `FOR UPDATE` lock already held. The

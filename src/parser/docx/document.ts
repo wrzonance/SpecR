@@ -334,8 +334,7 @@ export function parseDocument(
   }
 
   const doc = (parsed as Record<string, unknown>)['w:document'] as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   const body = doc?.['w:body'] as Record<string, unknown> | undefined;
   if (!body) {
     throw new ParserError('word/document.xml missing w:body element', {

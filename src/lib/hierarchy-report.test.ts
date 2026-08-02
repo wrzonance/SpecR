@@ -113,6 +113,9 @@ describe('buildHierarchyReport — ordering, counts, and edge cases', () => {
     expect(report.paragraphs).toHaveLength(4); // p1, a1, a2, a3
     const confidences = report.paragraphs.map((p) => p.confidence);
     expect(confidences).toEqual([...confidences].sort((x, y) => x - y));
+    // 0.1 is a literal floor constant, not accumulated arithmetic — exact
+    // equality is correct here.
+    // eslint-disable-next-line sonarjs/no-floating-point-equality
     expect(confidences[0]).toBe(0.1);
   });
 

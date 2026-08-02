@@ -348,9 +348,10 @@ export function captureTablesForRegion(
 
   const captured = captureTable(first, known, order, partMedia);
   const extraTables = tables.slice(1);
-  const extraUnmodeled: readonly PartialUnmodeled[] = extraTables.map(
-    (tbl): PartialUnmodeled => ({ kind: 'table', detail: compact(tbl) })
-  );
+  const extraUnmodeled: readonly PartialUnmodeled[] = extraTables.map((tbl): PartialUnmodeled => ({
+    kind: 'table',
+    detail: compact(tbl),
+  }));
   // #505: each EXTRA root-level table is still preserved verbatim above
   // (never lost) — but any drawing living anywhere inside one (at any depth)
   // is ALSO itemized as its own unresolvedReference when the part's own

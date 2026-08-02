@@ -104,10 +104,17 @@ CI's lint job and locally.
   disabled; `node-version` datasource and `@types/node` are bounded `<25.0.0`.
 - *Dependabot* has no equivalent of `constraintsFiltering` — its `ignore` /
   `allow` / `versioning-strategy` / `groups` levers act on semver update *type*,
-  never on runtime compatibility. It cannot be made Node-aware. It keeps its
-  coverage role (ADR of record: it runs alongside Renovate deliberately), with an
-  explicit `@types/node` major ignore so it cannot repeat PR #557, and CI as the
-  real backstop.
+  never on runtime compatibility. It cannot be made Node-aware.
+
+  It was initially kept on npm alongside Renovate for coverage, guarded by an
+  explicit `@types/node` major ignore. That was revisited on 2026-08-02: because
+  it cannot honor the pin, and because running both across npm produced two
+  competing PRs per update (#578 and #564 needed the identical manual fix),
+  **Dependabot is now scoped to GitHub Actions only** and Renovate owns npm.
+  Actions carry no runtime-compatibility question in a `uses:` pin, so
+  Dependabot's semver-only view is sufficient there. Dependabot *security*
+  updates are configured in repository settings rather than `dependabot.yml`,
+  so npm advisories are unaffected by the scoping.
 
 ## Consequences
 

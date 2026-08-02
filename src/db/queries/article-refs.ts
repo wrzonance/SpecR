@@ -96,9 +96,7 @@ export async function classifyScopedRefs(
 
 export interface ReferenceConsistencyFinding {
   readonly type:
-    | 'related_listed_not_cited'
-    | 'related_cited_not_listed'
-    | 'standard_cited_not_listed';
+    'related_listed_not_cited' | 'related_cited_not_listed' | 'standard_cited_not_listed';
   readonly sourceSpecId: string;
   readonly sourceSpecSection: string;
   readonly sourceParagraphId: string;
