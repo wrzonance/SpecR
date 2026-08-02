@@ -39,6 +39,22 @@
       "allowedVersions": "<25.0.0"
     },
     {
+      "description": "Toolchain pin: stay on TypeScript 5.x. TS 6.0 (2026-03-23) and 7.0 postdate the training cutoffs of the models doing implementation work here (Sonnet 5 / Fable 5: Jan 2026), so a compiler they cannot write against reliably is a poor trade for capability this project does not need. Declined three times (#565, #560, #593/#597/#598) — bounded so it stops being re-proposed weekly. Lift deliberately, moving root and tools/verify together.",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<6.0.0"
+    },
+    {
+      "description": "Toolchain pin: stay on ESLint 9.x. ESLint 10 (2026-02-06) postdates the same model cutoffs, and the flat config here is agent-edited often enough that the cost is real. Declined in #573/#559 — bounded so it stops recurring. Lift deliberately, moving root and tools/verify together.",
+      "matchPackageNames": ["eslint"],
+      "allowedVersions": "<10.0.0"
+    },
+    {
+      "description": "Database pin: stay on Postgres 16 (EOL 2028-11-09). Postgres 18 is blocked by a real regression — SQLSTATE does not reach the pg driver, so pgErrorToHttp's 23505/23503/23514 mappings degrade to generic 500s; measured 2 integration failures on 18.4 against 27/27 passing on 16. Tracked in #599. Bounded so the bump stops being re-proposed while it is knowingly deferred.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["postgres"],
+      "allowedVersions": "<17"
+    },
+    {
       "matchManagers": ["github-actions"],
       "labels": ["ci"],
       "commitMessagePrefix": "chore(ci):",
