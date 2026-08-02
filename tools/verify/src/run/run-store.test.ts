@@ -93,3 +93,96 @@ describe('run-store (immutability + manifest persistence)', () => {
     expect(JSON.parse(readFileSync(manifestFile, 'utf8'))).toEqual(updated);
   });
 });
+
+// #604: trackPending/waitForIdle let a lifecycle owner (e.g. a test's
+// afterEach) drain a detached run's outstanding async work before removing
+// workRoot out from under it. Deliberately not testing "the internal Set
+// self-cleans" as its own case — that's an internal-memory concern, not a
+// boundary invariant (see repo convention: test module boundaries, not
+// internals); it's exercised implicitly by every waitForIdle call below
+// actually settling rather than hanging.
+describe('run-store (trackPending / waitForIdle — #604)', () => {
+  let workRoot: string;
+  let store: RunStore;
+
+  beforeEach(() => {
+    workRoot = mkdtempSync(path.join(tmpdir(), 'specr-verify-run-store-pending-'));
+    store = createRunStore(workRoot);
+  });
+
+  afterEach(() => {
+    rmSync(workRoot, { recursive: true, force: true });
+  });
+
+  it('trackPending never throws and never produces an unhandled rejection for a rejecting promise', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    try {
+      expect(() => {
+        store.trackPending(Promise.reject(new Error('boom')));
+      }).not.toThrow();
+
+      await store.waitForIdle();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandledRejection);
+    }
+  });
+
+  it('waitForIdle resolves once every tracked promise has settled, and never rejects even when one rejects', async () => {
+    let resolveA: () => void = () => {
+      throw new Error('resolveA not assigned');
+    };
+    const pending = new Promise<void>((resolve) => {
+      resolveA = resolve;
+    });
+
+    store.trackPending(pending);
+    store.trackPending(Promise.reject(new Error('a rejecting tracked promise')));
+
+    let settled = false;
+    const idle = store.waitForIdle().then(() => {
+      settled = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+
+    resolveA();
+    await idle;
+
+    expect(settled).toBe(true);
+  });
+
+  it('waitForIdle snapshots the pending set at call time — work tracked after the call is not awaited by it', async () => {
+    let resolveA: () => void = () => {
+      throw new Error('resolveA not assigned');
+    };
+    const pendingA = new Promise<void>((resolve) => {
+      resolveA = resolve;
+    });
+    store.trackPending(pendingA);
+
+    const idle = store.waitForIdle();
+
+    // Registered after waitForIdle() was already called — must not be
+    // required to settle for `idle` to resolve.
+    const pendingB = new Promise<void>(() => {
+      /* never settles */
+    });
+    store.trackPending(pendingB);
+
+    resolveA();
+    await expect(idle).resolves.toBeUndefined(); // resolves despite pendingB being permanently unsettled
+  });
+
+  it('waitForIdle no-ops immediately when nothing is pending', async () => {
+    await expect(store.waitForIdle()).resolves.toBeUndefined();
+  });
+});
