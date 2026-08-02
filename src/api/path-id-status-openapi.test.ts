@@ -33,6 +33,41 @@ function operation(doc: OpenApiDoc, path: string, method: string): z.infer<typeo
   return OperationSchema.parse(raw);
 }
 
+// The full ErrorResponse component (openapi.yaml): an object *requiring* both
+// keys, with `success` pinned to false and `error` a string. Asserting the
+// whole shape — not just that the two property names exist — is what stops an
+// ad hoc one-off error object (optional `success`, `error: object`, …) from
+// silently satisfying these tests.
+const ErrorResponseShapeSchema = z.object({
+  type: z.literal('object'),
+  required: z.array(z.string()),
+  properties: z.object({
+    success: z.object({ type: z.literal('boolean'), enum: z.array(z.boolean()) }),
+    error: z.object({ type: z.literal('string') }),
+  }),
+});
+
+function expectErrorResponseSchema(
+  responses: z.infer<typeof OperationSchema>['responses'],
+  status: string,
+  label: string
+): void {
+  const response = responses?.[status];
+  expect(response, `${label} does not document a ${status} response`).toBeDefined();
+  const schema = response?.content?.['application/json']?.schema;
+  expect(schema, `${label} ${status} has no application/json schema`).toBeDefined();
+
+  const parsed = ErrorResponseShapeSchema.safeParse(schema);
+  expect(parsed.success, `${label} ${status} is not the ErrorResponse shape`).toBe(true);
+  if (!parsed.success) return;
+  expect(parsed.data.required, `${label} ${status} must require success + error`).toEqual(
+    expect.arrayContaining(['success', 'error'])
+  );
+  expect(parsed.data.properties.success.enum, `${label} ${status} success must be false`).toEqual([
+    false,
+  ]);
+}
+
 // Every {method, path} whose handler reads a uuid-typed path param through
 // parsePathUuid. Mirrors the call sites wired in router.ts — see
 // src/api/projects.ts, packages.ts, and revisions.ts.
@@ -61,19 +96,9 @@ describe('openapi.yaml documents the parsePathUuid 400 on every migrated operati
     async ({ method, path }) => {
       const doc = await loadSpec();
       const op = operation(doc, path, method);
-      const badRequest = op.responses?.['400'];
-      expect(badRequest, `${method} ${path} does not document a 400 response`).toBeDefined();
-      const schema = badRequest?.content?.['application/json']?.schema;
-      expect(schema, `${method} ${path} 400 has no application/json schema`).toBeDefined();
       // ErrorResponse always requires `success: false` + `error: string` —
       // confirm the 400 targets that shape, not some ad hoc one-off object.
-      const properties = z
-        .object({ properties: z.record(z.string(), z.unknown()).optional() })
-        .parse(schema).properties;
-      expect(properties, `${method} ${path} 400 schema has no properties`).toHaveProperty(
-        'success'
-      );
-      expect(properties).toHaveProperty('error');
+      expectErrorResponseSchema(op.responses, '400', `${method} ${path}`);
     }
   );
 });
@@ -82,6 +107,6 @@ describe('openapi.yaml documents the shared-schema 422 on POST /templates/import
   it('documents 422 (not a second, ad hoc 400) for a name that fails CreateTemplateBodySchema', async () => {
     const doc = await loadSpec();
     const op = operation(doc, '/templates/import', 'post');
-    expect(op.responses?.['422']).toBeDefined();
+    expectErrorResponseSchema(op.responses, '422', 'post /templates/import');
   });
 });
