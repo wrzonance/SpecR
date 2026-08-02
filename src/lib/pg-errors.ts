@@ -15,6 +15,20 @@ export function getPgCode(err: unknown): string | undefined {
 }
 
 /**
+ * True iff err is blocked by an ON DELETE RESTRICT foreign key — i.e. another
+ * row still references the one being deleted. Postgres <=16 reports this as
+ * the generic foreign_key_violation (23503); Postgres 18 disambiguates the
+ * RESTRICT-specific case as restrict_violation (23001) per the SQL standard,
+ * reserving 23503 for the insert/update-references-missing-row direction.
+ * Callers that guard a DELETE against a RESTRICT-protected parent must accept
+ * BOTH codes to work on Postgres 16 and 18 alike.
+ */
+export function isRestrictedDeleteViolation(err: unknown): boolean {
+  const code = getPgCode(err);
+  return code === '23503' || code === '23001';
+}
+
+/**
  * Map a pg error code to an HTTP status + message pair, or null if unrecognised.
  * Callers may pass a `messages` override to customise the human-readable string
  * for a specific code without duplicating the code-lookup logic.
