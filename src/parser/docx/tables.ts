@@ -28,8 +28,7 @@ interface TableCell {
 type TableRow = readonly TableCell[];
 
 export type ClassifiedTopLevelTable =
-  | { readonly kind: 'visible' }
-  | { readonly kind: 'hidden'; readonly table: RetainedTable };
+  { readonly kind: 'visible' } | { readonly kind: 'hidden'; readonly table: RetainedTable };
 
 export interface TableExtractionResult {
   readonly hiddenTables: readonly RetainedTable[];

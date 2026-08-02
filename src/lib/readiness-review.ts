@@ -2,10 +2,7 @@ import type { SpecNode, SpecTree } from '../ast/index.js';
 import { summarizeHighlightReview, type HighlightReviewReport } from './highlight-review.js';
 
 export type ReadinessFindingKind =
-  | 'unresolved_choice_token'
-  | 'specifier_note_present'
-  | 'open_comment'
-  | 'body_object_present';
+  'unresolved_choice_token' | 'specifier_note_present' | 'open_comment' | 'body_object_present';
 
 // One resolvable blocker an editor must clear before a spec can leave the
 // firm as Final (ADR-079). Every variant carries `nodeId`/`text` so a caller

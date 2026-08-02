@@ -42,6 +42,20 @@ export default defineConfig(
       'max-lines': 'off',
       // Integration tests use console.warn/info for fixture diagnostics — not production code.
       'no-console': 'off',
+      // eslint-plugin-sonarjs 4.1 added these two as errors. Both are style
+      // opinions about how assertions are written, not correctness checks:
+      // `parameterized-tests` wants sibling `it()` cases collapsed into
+      // `it.each`, which loses the individually-named regressions this repo
+      // deliberately writes one-per-symptom; `prefer-specific-assertions`
+      // wants `toHaveLength` over `.length` comparisons. Declining the new
+      // opinions in tests — note this is opting out of newly-added rules, not
+      // silencing a gate that ever caught a defect here.
+      'sonarjs/parameterized-tests': 'off',
+      'sonarjs/prefer-specific-assertions': 'off',
+      // `sonarjs/no-floating-point-equality` stays ON: it would catch a real
+      // comparison against computed float arithmetic. The few exact-equality
+      // assertions in this repo compare against literal constants the source
+      // sets directly and carry a targeted inline disable at the call site.
     },
   },
   // scripts/ are CLI entry points — console.log is the intended output mechanism.

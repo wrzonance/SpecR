@@ -38,10 +38,7 @@ export async function getSpecStyleSource(specId: string): Promise<SpecStyleSourc
 
 /** Outcome of assigning a style template to a spec (library scoping enforced, #318). */
 export type SetSpecStyleResult =
-  | 'assigned'
-  | 'spec-not-found'
-  | 'template-not-found'
-  | 'library-mismatch';
+  'assigned' | 'spec-not-found' | 'template-not-found' | 'library-mismatch';
 
 /**
  * Assign (or replace) the spec's style template, enforcing library scoping (#318,

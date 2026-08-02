@@ -177,6 +177,9 @@ describe('classify — highlight meanings rung', () => {
       defaultEditability: 'locked',
     });
     expect(out.editability).toBe('choice');
+    // 0.85 is a literal constant the classifier assigns, not the result of float
+    // arithmetic — exact equality is the assertion we want.
+    // eslint-disable-next-line sonarjs/no-floating-point-equality
     expect(out.confidence).toBe(0.85);
     expect(out.evidence[0]).toEqual({
       rule: 'highlightMeanings[yellow]',
