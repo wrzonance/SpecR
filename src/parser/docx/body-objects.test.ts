@@ -169,6 +169,21 @@ function hiddenTextBoxParagraph(interiorText: string): string {
   return `<w:p>${hiddenTextBoxRun(interiorText)}</w:p>`;
 }
 
+// A hidden, FLOATING, VML text box RUN — deliberately the opposite
+// generation ('vml' vs textBoxRun's 'drawingml') AND the opposite floating
+// value (position:absolute vs textBoxRun's inline) from `textBoxRun`, so a
+// test pairing the two can tell whether captured object metadata came from
+// THIS entry or the other one. Hidden via the interior run's own
+// `w:rPr>w:vanish`, mirroring hiddenTextBoxRun's convention.
+function hiddenFloatingVmlTextBoxRun(interiorText: string): string {
+  const hiddenInterior = `<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>${interiorText}</w:t></w:r></w:p>`;
+  return (
+    '<w:r><w:pict><v:shape style="position:absolute"><v:textbox><w:txbxContent>' +
+    hiddenInterior +
+    '</w:txbxContent></v:textbox></v:shape></w:pict></w:r>'
+  );
+}
+
 // A text box hidden via its HOST paragraph mark (w:pPr>w:rPr>w:vanish) rather
 // than the interior run — the other of the two mechanisms the review finding
 // named.
@@ -557,6 +572,33 @@ describe('extractBodyObjects — mixed-visibility text boxes in ONE host paragra
 
     expect(result.paragraphObjects).toEqual([]);
     expect(result.dropped).toEqual([]);
+  });
+});
+
+describe('extractBodyObjects — shared object metadata sources from the first VISIBLE entry (ADR-086 decision 5)', () => {
+  // Review finding (#515): every mixed-visibility fixture elsewhere in this
+  // suite pairs two structurally-identical, non-floating textBoxRun/
+  // hiddenTextBoxRun entries, so `chosen.classification` (kind/floating/
+  // generation) is indistinguishable from `textBoxEntries[0]`'s in every one
+  // of those assertions — none of them would fail if buildTextBoxObject
+  // regressed to picking the first entry regardless of visibility (the exact
+  // pre-#515 bug ADR-086 decision 5 documents). This pairs a HIDDEN,
+  // FLOATING, VML box first with a VISIBLE, non-floating, DrawingML box
+  // second: `textBoxEntries[0]` and the correct VISIBLE choice disagree on
+  // BOTH `generation` and `floating`, so a regression to first-entry-
+  // regardless-of-visibility flips both fields and fails this test.
+  it("a hidden floating VML box first + a visible inline DrawingML box second reports the VISIBLE box's generation/floating, not the first entry's", () => {
+    const body = twoDrawingRunsParagraph(
+      hiddenFloatingVmlTextBoxRun('hidden vml text'),
+      textBoxRun('visible drawingml text')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible drawingml text']);
+    expect(object?.generation).toBe('drawingml');
+    expect(object?.floating).toBe(false);
   });
 });
 
