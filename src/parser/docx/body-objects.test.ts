@@ -403,6 +403,39 @@ describe('extractBodyObjects — hidden (vanish) text boxes (ADR-038 parity)', (
   });
 });
 
+describe('extractBodyObjects — buildTextBoxObject hiddenFlags wiring (#515 task 4)', () => {
+  // Regression pin: resolveHiddenTxbxContentNodes (#515 task 1) fails closed
+  // on any boundary-count/flag-count mismatch — a host paragraph with one
+  // text box has exactly one w:txbxContent boundary, so a naive `[]` (0
+  // entries) mismatches 1 vs. 0 and wrongly suppresses it entirely. The
+  // wiring must correlate a count-correct flag for the single already-known-
+  // visible entry instead.
+  it('backward compatibility: a single visible text box still surfaces interiorTexts (not fail-closed suppressed by a naive empty flags array)', () => {
+    const body = textBoxParagraph('visible box text');
+    const result = extract(body);
+    expect(result.paragraphObjects).toHaveLength(1);
+    expect(result.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible box text',
+    ]);
+  });
+
+  it('interiorTexts 1:1 anchors: the visible text box interior paragraph carries a w:sdt round-trip anchor whose uuid matches interiorTexts', () => {
+    const body = textBoxParagraph('anchored box text');
+    const result = extract(body);
+    const object = result.paragraphObjects[0]?.object;
+    const id = object?.interiorTexts[0]?.id;
+    expect(id).toBeDefined();
+    expect(tagValues(object?.blob ?? [])).toEqual([`${UUID_TAG_PREFIX}${id}`]);
+  });
+
+  it('round-trip byte-identity: the wiring does not change hidden (all-vanish) text box handling — still no object, no dropped entry', () => {
+    const body = hiddenTextBoxParagraph('secret box text');
+    const result = extract(body);
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  });
+});
+
 describe('extractBodyObjects — tier-classification exclusion', () => {
   it('captures a cell paragraph that looks like a numbered tier ("1. Foo") as verbatim interior text, never a tier node', () => {
     const body = table(row(cell(para('1. Foo'))));

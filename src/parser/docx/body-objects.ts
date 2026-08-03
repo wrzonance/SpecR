@@ -26,6 +26,7 @@ import { classifyBodyDrawing, unwrapAlternateContent } from './body-drawings.js'
 import { isDrawingRun, runsOf } from './header-footer-region.js';
 import { wrapBlobParagraphWithAnchor } from './object-anchor.js';
 import { stripAlternateContentFallback } from './alternate-content.js';
+import { resolveHiddenTxbxContentNodes } from './body-text-box-visibility.js';
 import type { ClassifiedTopLevelTable } from './tables.js';
 import type { BodyDrawingClassification } from './body-drawings.js';
 import type { BodyOrder, BodyOrderTable } from './body-order.js';
@@ -350,9 +351,19 @@ function isDroppedEntry(
   return entry.classification.kind !== 'textBox';
 }
 
+// `hiddenFlags` (#515, ADR-086) is one entry per textBox-classified
+// DrawingRunEntry found in the host paragraph's `raw` (grouped-mode) tree,
+// IN DOCUMENT ORDER — resolveHiddenTxbxContentNodes correlates it against
+// this blob's own w:txbxContent boundaries by that same order; the array
+// MUST be count-correct (one entry per boundary in the blob) or every
+// boundary fails closed as hidden. The current single caller
+// (collectParagraphDrawing) still passes a single known-visible flag for
+// the one entry it finds, until a follow-up task supplies real per-box
+// flags across every textBox entry in the paragraph.
 function buildTextBoxObject(
   hostBlob: readonly ObjectBlobNode[],
-  classification: TextBoxClassification
+  classification: TextBoxClassification,
+  hiddenFlags: readonly boolean[]
 ): CapturedBodyObject | undefined {
   const hostNode = hostBlob[0];
   if (!hostNode) return undefined;
@@ -362,7 +373,8 @@ function buildTextBoxObject(
   // stale mc:Fallback (VML) branch, doubling interiorTexts and letting an
   // interior text edit diverge from a fallback nobody edited.
   const normalized = stripAlternateContentFallback(hostNode);
-  const anchored = anchorInteriorParagraphs(normalized);
+  const hiddenSet = resolveHiddenTxbxContentNodes(normalized, hiddenFlags);
+  const anchored = anchorInteriorParagraphs(normalized, hiddenSet);
   return {
     kind: 'textBox',
     floating: classification.floating,
@@ -468,7 +480,16 @@ function collectParagraphDrawing(
     return { dropped: isParagraphVanish(raw, styleMap) ? [] : dropped };
   }
   const blob = paragraphBlobs[paragraphIndex];
-  const object = blob ? buildTextBoxObject(blob, textBoxEntry.classification) : undefined;
+  // Correlated flags for the SINGLE entry found above (`entries.find`), not a
+  // blind `[]`: resolveHiddenTxbxContentNodes fails closed on any
+  // boundary-count/flag-count mismatch, and a host paragraph carrying one
+  // text box has exactly one w:txbxContent boundary — an empty array would
+  // mismatch 1 vs. 0 and wrongly suppress it. The one flag is always `false`
+  // here: `isHiddenTextBox` above already returned before reaching this line
+  // otherwise. A follow-up task replaces this with real per-box flags across
+  // every textBox entry (#515's actual mixed visible/hidden fix); this keeps
+  // today's single-box behavior byte-for-byte unchanged in the meantime.
+  const object = blob ? buildTextBoxObject(blob, textBoxEntry.classification, [false]) : undefined;
   return object ? { object: { paragraphIndex, object }, dropped: [] } : { dropped: [] };
 }
 
