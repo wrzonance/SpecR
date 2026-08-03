@@ -24,6 +24,7 @@ import { classifyTopLevelTables } from './tables.js';
 import { extractParagraphText, isParagraphVanish } from './document.js';
 import { classifyBodyDrawing, unwrapAlternateContent } from './body-drawings.js';
 import { isDrawingRun, runsOf } from './header-footer-region.js';
+import { pairRunOrder } from './header-footer-run-order.js';
 import { wrapBlobParagraphWithAnchor } from './object-anchor.js';
 import { stripAlternateContentFallback } from './alternate-content.js';
 import { resolveHiddenTxbxContentNodes } from './body-text-box-visibility.js';
@@ -327,9 +328,29 @@ interface DrawingRunEntry {
 // (no-suppression). The whole host paragraph still round-trips
 // byte-identical either way (decision 1's opaque-blob capture); this only
 // affects which interior paragraphs get an SDT anchor + objectText leaf.
-function classifyParagraphDrawings(raw: Record<string, unknown>): readonly DrawingRunEntry[] {
+//
+// `paragraphNode` (#515 review, CRITICAL) is the SAME paragraph's own
+// preserveOrder-mode `ObjectBlobNode` (body-order.ts's `paragraphBlobs[i]`)
+// — a plain `runsOf(raw)` walk only preserves relative order among SAME-tag
+// siblings of `raw`'s grouped-mode tree (a w:r wrapped in w:hyperlink/
+// w:ins/w:del sorts to the END, after every un-wrapped w:r, regardless of
+// where it truly sits), which desyncs from resolveHiddenTxbxContentNodes'
+// TRUE-document-order `w:txbxContent` boundaries and can pair a hidden box's
+// flag onto a visible box's boundary (or vice versa) — see
+// body-text-box-visibility.ts. Pairing `raw` against `paragraphNode`'s own
+// true-order children (`pairRunOrder`, header-footer-run-order.ts) recovers
+// the correct order `runsOf`'s optional `order` param restores. Falls back
+// to unordered `runsOf(raw)` only when no paragraphNode is available (never
+// true for a real caller — every rawParagraphs entry has an index-aligned
+// paragraphBlobs entry, body-order.test.ts's own pinned invariant — kept as
+// a total, non-throwing fallback rather than an unreachable assertion).
+function classifyParagraphDrawings(
+  raw: Record<string, unknown>,
+  paragraphNode: ObjectBlobNode | undefined
+): readonly DrawingRunEntry[] {
+  const order = paragraphNode ? pairRunOrder(raw, childrenOf(paragraphNode)) : undefined;
   const entries: DrawingRunEntry[] = [];
-  for (const run of runsOf(raw)) {
+  for (const run of runsOf(raw, order)) {
     const unwrapped = unwrapAlternateContent(run);
     if (isDrawingRun(unwrapped)) {
       entries.push({ run: unwrapped, classification: classifyBodyDrawing(unwrapped) });
@@ -351,15 +372,20 @@ function isDroppedEntry(
 }
 
 // `hiddenFlags` (ADR-086) is one entry per textBox-classified DrawingRunEntry
-// found in the host paragraph's `raw` (grouped-mode) tree, IN DOCUMENT
-// ORDER — resolveHiddenTxbxContentNodes correlates it against this blob's
-// own w:txbxContent boundaries by that same order; the array MUST be
-// count-correct (one entry per boundary in the blob) or every boundary
-// fails closed as hidden. collectParagraphDrawing supplies one real,
-// per-box flag for every textBox entry in the paragraph (mapping the
-// existing isHiddenTextBox check over each), so a hidden box's interior
-// stays opaque (no objectText leaf) while a co-occurring visible box in the
-// same paragraph is still anchored normally.
+// found in the host paragraph's `raw` (grouped-mode) tree, IN TRUE DOCUMENT
+// ORDER — classifyParagraphDrawings now walks `raw` via a `pairRunOrder`
+// side-table (#515 review, CRITICAL) rather than `raw`'s own grouped-mode
+// traversal order, so this is genuinely the same order
+// resolveHiddenTxbxContentNodes' `hostNode` walk finds its w:txbxContent
+// boundaries in — not merely "same order raw's tree happens to iterate in",
+// which silently diverges whenever a text-box run sits inside a
+// differently-tagged wrapper (w:hyperlink, w:ins/w:del) next to plain w:r
+// siblings. The array MUST still be count-correct (one entry per boundary in
+// the blob) or every boundary fails closed as hidden. collectParagraphDrawing
+// supplies one real, per-box flag for every textBox entry in the paragraph
+// (mapping the existing isHiddenTextBox check over each), so a hidden box's
+// interior stays opaque (no objectText leaf) while a co-occurring visible
+// box in the same paragraph is still anchored normally.
 function buildTextBoxObject(
   hostBlob: readonly ObjectBlobNode[],
   classification: TextBoxClassification,
@@ -473,7 +499,8 @@ function collectParagraphDrawing(
   paragraphIndex: number,
   styleMap: StyleMap
 ): ParagraphDrawingResult {
-  const entries = classifyParagraphDrawings(raw);
+  const blob = paragraphBlobs[paragraphIndex];
+  const entries = classifyParagraphDrawings(raw, blob?.[0]);
   const textBoxEntries = entries.filter(isTextBoxEntry);
   const dropped = entries.filter(isDroppedEntry).map((e) => e.classification);
   if (textBoxEntries.length === 0) {
@@ -500,7 +527,6 @@ function collectParagraphDrawing(
   if (!chosen) {
     return { dropped };
   }
-  const blob = paragraphBlobs[paragraphIndex];
   const object = blob ? buildTextBoxObject(blob, chosen.classification, hiddenFlags) : undefined;
   return object ? { object: { paragraphIndex, object }, dropped: [] } : { dropped: [] };
 }

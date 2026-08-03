@@ -5,10 +5,16 @@
 // trees are independently parsed and share no node identity, so this module
 // correlates them by DOCUMENT ORDER: `hiddenFlags[i]` describes the i'th
 // `w:txbxContent` boundary found (depth-first, left to right) under a host
-// paragraph's own blob children — the same order `runsOf(raw)` walks the
-// grouped-mode side (ADR-072 design). Self-contained: no cross-import from
-// body-objects.ts, mirroring the established per-module tagOf/childrenOf
-// duplication already used by body-order.ts and body-objects.ts.
+// paragraph's own blob children — the same TRUE document order
+// body-objects.ts's `classifyParagraphDrawings` now walks the grouped-mode
+// side in, via `pairRunOrder` (header-footer-run-order.ts) paired against
+// this SAME paragraph's own preserveOrder blob (#515 review, CRITICAL — a
+// raw `runsOf(raw)` walk with no order side-table only preserves relative
+// order among SAME-tag siblings, desyncing whenever a text-box run sits
+// inside a differently-tagged wrapper like w:hyperlink). Self-contained: no
+// cross-import from body-objects.ts, mirroring the established per-module
+// tagOf/childrenOf duplication already used by body-order.ts and
+// body-objects.ts.
 
 import type { ObjectBlobNode } from '../../ast/index.js';
 

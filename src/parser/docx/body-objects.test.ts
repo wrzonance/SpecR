@@ -499,6 +499,9 @@ describe('extractBodyObjects — mixed-visibility text boxes in ONE host paragra
     const object = result.paragraphObjects[0]?.object;
     expect(object?.interiorTexts.map((t) => t.text)).toEqual(['first text', 'second text']);
     expect(result.dropped).toEqual([]);
+    const anchorCount = tagValues(object?.blob ?? []).length;
+    expect(anchorCount).toBe(object?.interiorTexts.length);
+    expect(anchorCount).toBe(2);
   });
 
   // visible+hidden: the FIRST box is visible, the SECOND is hidden. Privacy
@@ -554,6 +557,33 @@ describe('extractBodyObjects — mixed-visibility text boxes in ONE host paragra
 
     expect(result.paragraphObjects).toEqual([]);
     expect(result.dropped).toEqual([]);
+  });
+});
+
+describe('extractBodyObjects — text box wrapped in a differently-tagged sibling (#515 review CRITICAL)', () => {
+  // classifyParagraphDrawings walks raw's GROUPED-mode tree, which only
+  // preserves relative order among SAME-tag siblings (header-footer-run-
+  // order.ts's own documented limitation) — a text-box run wrapped in
+  // w:hyperlink (a realistic shape: a hyperlinked, or tracked-change-
+  // inserted, text box) used to get pushed to the END of the traversal
+  // regardless of where it actually sits, desyncing hiddenFlags from
+  // resolveHiddenTxbxContentNodes' TRUE-document-order w:txbxContent
+  // boundaries — leaking the hidden box's text and suppressing the visible
+  // box that came after it.
+  it('correlates hiddenFlags by TRUE document order even when the hidden box sits inside a w:hyperlink between two plain-run boxes', () => {
+    const body =
+      `<w:p>${textBoxRun('first text')}` +
+      `<w:hyperlink>${hiddenTextBoxRun('secret text')}</w:hyperlink>` +
+      `${textBoxRun('third text')}</w:p>`;
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['first text', 'third text']);
+    expect(object?.interiorTexts.map((t) => t.text)).not.toContain('secret text');
+    const anchorCount = tagValues(object?.blob ?? []).length;
+    expect(anchorCount).toBe(object?.interiorTexts.length);
+    expect(anchorCount).toBe(2);
   });
 });
 
