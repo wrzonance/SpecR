@@ -2,9 +2,126 @@ import { DatabaseError } from '../index.js';
 import type { Pool } from 'pg';
 import type { SecRef } from '../../ast/types.js';
 import { logger } from '../../lib/logger.js';
+import { insertRowsInChunks, formatIdsPreview } from './batch-insert.js';
+import type { ColumnSpec, ChunkFailureContext } from './batch-insert.js';
 
 interface Queryable {
   query: Pool['query'];
+}
+
+/** Column order for a batched `INSERT INTO spec_references`, matching
+ *  {@link ResolvedRefRow}'s field order exactly — {@link refRowToParams} must
+ *  emit params in this same order. No casts: every column is a plain
+ *  text/boolean value. */
+const REF_COLUMNS: readonly ColumnSpec[] = [
+  { name: 'source_spec_id' },
+  { name: 'source_paragraph_id' },
+  { name: 'target_type' },
+  { name: 'target_spec_section' },
+  { name: 'target_spec_id' },
+  { name: 'standard_code' },
+  { name: 'reference_text' },
+];
+
+/** One `spec_references` row after target-spec resolution: every field a
+ *  {@link SecRef} needs plus the spec it belongs to, ready to bind in
+ *  {@link REF_COLUMNS} order. */
+interface ResolvedRefRow {
+  readonly sourceSpecId: string;
+  readonly sourceParagraphId: string;
+  readonly targetType: string;
+  readonly targetSpecSection: string | null;
+  readonly targetSpecId: string | null;
+  readonly standardCode: string | null;
+  readonly referenceText: string;
+}
+
+/** One row's bind params, in {@link REF_COLUMNS} order. Pure — no I/O. */
+function refRowToParams(row: ResolvedRefRow): readonly unknown[] {
+  return [
+    row.sourceSpecId,
+    row.sourceParagraphId,
+    row.targetType,
+    row.targetSpecSection,
+    row.targetSpecId,
+    row.standardCode,
+    row.referenceText,
+  ];
+}
+
+/** Unique `targetSpecSection` values among `section`-typed refs, in first-seen
+ *  order — the sections {@link fetchSectionSpecIds} needs to resolve in a
+ *  single query instead of insertRefs's former one-SELECT-per-ref loop. */
+function distinctSections(refs: readonly SecRef[]): readonly string[] {
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    if (ref.targetType === 'section') {
+      seen.add(ref.targetSpecSection);
+    }
+  }
+  return [...seen];
+}
+
+/** Resolves every section in `sections` to its spec id via one batched
+ *  `= ANY($1)` SELECT — a no-op (zero queries) when `sections` is empty, so a
+ *  standard-only ref batch never touches `specs` at all. Deliberately carries
+ *  no `ORDER BY`: when more than one spec shares a section, which id a repeat
+ *  section resolves to is arbitrary (unspecified Postgres row order) —
+ *  matching the pre-batch code's own `LIMIT 1` arbitrary tie-break exactly.
+ *  Not fixed here; out of this change's pure-performance scope. */
+async function fetchSectionSpecIds(
+  pool: Queryable,
+  sections: readonly string[]
+): Promise<ReadonlyMap<string, string>> {
+  if (sections.length === 0) return new Map();
+  try {
+    const result = await pool.query<{ id: string; section: string }>(
+      'SELECT id, section FROM specs WHERE section = ANY($1::text[])',
+      [sections]
+    );
+    const bySection = new Map<string, string>();
+    for (const row of result.rows) {
+      bySection.set(row.section, row.id);
+    }
+    return bySection;
+  } catch (err) {
+    throw new DatabaseError('insertRefs: failed to resolve target spec ids for sections', {
+      cause: err,
+    });
+  }
+}
+
+/** Pure, total: pairs each ref with its resolved target spec id (via the
+ *  pre-fetched `sectionToSpecId` map, `section` refs only — `standard` refs
+ *  always carry a null target) into one {@link ResolvedRefRow} per ref, in
+ *  input order. */
+function resolveRefRows(
+  refs: readonly SecRef[],
+  specId: string,
+  sectionToSpecId: ReadonlyMap<string, string>
+): readonly ResolvedRefRow[] {
+  return refs.map((ref) => ({
+    sourceSpecId: specId,
+    sourceParagraphId: ref.sourceNodeId,
+    targetType: ref.targetType,
+    targetSpecSection: ref.targetType === 'section' ? ref.targetSpecSection : null,
+    targetSpecId:
+      ref.targetType === 'section' ? (sectionToSpecId.get(ref.targetSpecSection) ?? null) : null,
+    standardCode: ref.targetType === 'standard' ? ref.standardCode : null,
+    referenceText: ref.referenceText,
+  }));
+}
+
+/** Builds the batch-error message for a failed reference chunk (#618): names
+ *  which chunk failed (1-based, out of how many), how many refs it carried,
+ *  and a bounded preview of the failing rows' source paragraph ids — a
+ *  per-chunk identity rather than the single failing ref's id, since one
+ *  INSERT now carries many refs. */
+function buildInsertRefsErrorMessage(ctx: ChunkFailureContext): string {
+  return (
+    `insertRefs: failed to insert reference batch ${ctx.chunkIndex + 1}/${ctx.totalChunks} ` +
+    `(${ctx.rowCount} refs, source paragraphs: ${formatIdsPreview(ctx.ids)})`
+  );
 }
 
 interface OutboundReferenceRow {
@@ -81,39 +198,19 @@ export async function insertRefs(
     return;
   }
 
-  for (const ref of refs) {
-    try {
-      let targetSpecId: string | null = null;
+  const sections = distinctSections(refs);
+  const sectionToSpecId = await fetchSectionSpecIds(pool, sections);
+  const rows = resolveRefRows(refs, specId, sectionToSpecId);
 
-      if (ref.targetType === 'section' && ref.targetSpecSection) {
-        const result = await pool.query<{ id: string }>(
-          'SELECT id FROM specs WHERE section = $1 LIMIT 1',
-          [ref.targetSpecSection]
-        );
-        targetSpecId = result.rows[0]?.id ?? null;
-      }
-
-      await pool.query(
-        `INSERT INTO spec_references
-           (source_spec_id, source_paragraph_id, target_type,
-            target_spec_section, target_spec_id, standard_code, reference_text)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          specId,
-          ref.sourceNodeId,
-          ref.targetType,
-          ref.targetSpecSection ?? null,
-          targetSpecId,
-          ref.standardCode ?? null,
-          ref.referenceText,
-        ]
-      );
-    } catch (err) {
-      throw new DatabaseError(`insertRefs: failed on ref ${ref.sourceNodeId} (${ref.targetType})`, {
-        cause: err,
-      });
-    }
-  }
+  await insertRowsInChunks({
+    db: pool,
+    table: 'spec_references',
+    columns: REF_COLUMNS,
+    rows,
+    toParams: refRowToParams,
+    idOf: (row) => row.sourceParagraphId,
+    buildErrorMessage: buildInsertRefsErrorMessage,
+  });
 
   logger.info({ specId, count: refs.length }, 'insertRefs: references inserted');
 }
