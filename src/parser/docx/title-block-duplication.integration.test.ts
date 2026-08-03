@@ -131,14 +131,25 @@ const ARTIFACT = resolve('docs/references/MANUFACTURER_EXAMPLES/parsing-needs-fi
 describe.runIf(existsSync(ARTIFACT))(
   '#510 leading title-block suppression — a hand-authored doc',
   () => {
-    it('drops the leading SECTION-line + title-line pair, leaving only PART roots', async () => {
+    // This artifact has no docProps/core.xml, so section/title only resolve
+    // via content inference, which runs in the parse() orchestrator — not
+    // parseDocx() alone (mirrors the no-core.docx test above; see #538).
+    it('drops the leading SECTION-line + title-line pair, tolerating retained object/vanish roots', async () => {
       const buffer = readFileSync(ARTIFACT);
-      const tree = await parseDocx(buffer);
+      const { tree, sectionInference } = await parse(buffer, 'parsing-needs-fixing.docx');
+
+      // Precondition: identity really did come from content, not metadata.
+      expect(sectionInference.method).not.toBe('metadata');
+      expect(tree.section).toBe(SECTION);
+      expect(tree.title).toBe(TITLE);
 
       expect(leakedIdentityRoots(tree)).toHaveLength(0);
-      // Every root is a real PART heading — the duplicated lines produced no
-      // SpecNode at all, matching the #292 "suppressed -> no SpecNode" precedent.
-      expect(tree.parts.every((n) => n.type === 'part')).toBe(true);
+      // Every root is either a real PART, the retained body-object table root
+      // (#300/ADR-072), or an intentionally-hidden root (#292/#296) — not an
+      // unrelated stray root type re-typing the tree's identity.
+      expect(
+        tree.parts.every((n) => n.type === 'part' || n.type === 'object' || n.meta.vanish === true)
+      ).toBe(true);
     });
   }
 );
