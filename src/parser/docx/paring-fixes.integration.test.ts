@@ -40,8 +40,17 @@ describe.skipIf(!AVAILABLE)('paring-fixes.docx — Related Sections numbering (#
     // isNoteParagraph's /note/i regex, so they were misclassified as note nodes
     // instead of being suppressed as rule delimiters. #292's role==='rule' check
     // now runs ahead of that style-based note check and correctly suppresses
-    // them, so the genuine STNoteSpec note-text floor here is 2, not 4. Re-pinned
+    // them, so the genuine STNoteSpec notes here are exactly 2, not 4. Re-pinned
     // per #512/#471/#514 and ADR-086 — see ADR-086 for the full rationale.
-    expect(children.filter((n) => n.type === 'note').length).toBeGreaterThanOrEqual(2);
+    //
+    // Pinned by identity, not by a floor: a `>= 2` floor would also pass the exact
+    // pre-da0c4656 output (2 prose notes + 2 asterisk rows), so a regression that
+    // resurrected the rule rows as notes would slip through it unnoticed.
+    const notes = children.filter((n) => n.type === 'note');
+    expect(notes).toHaveLength(2);
+    expect(notes[0]?.text).toMatch(/^Include the Related Section references/);
+    expect(notes[1]?.text).toMatch(/^The list below includes related sections/);
+    // The rule rows are 85 asterisks wide in this fixture — none may survive as a note.
+    expect(notes.some((n) => /^\*+$/.test(n.text.trim()))).toBe(false);
   });
 });
