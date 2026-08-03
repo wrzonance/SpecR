@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { pool, SYSTEM_ACTOR_LABEL, lockedObjectMessage } from '../db/index.js';
+import {
+  pool,
+  SYSTEM_ACTOR_LABEL,
+  lockedObjectMessage,
+  StaleVersionError,
+  SpecWriteForbiddenError,
+} from '../db/index.js';
+import { gateErrorResponse } from '../api/edit-gate-response.js';
 import { historyActor } from '../test-utils/history-actor.js';
 import {
   handleUpdateParagraph,
@@ -32,6 +39,14 @@ function isToolError(res: ToolResult): boolean {
 
 function parse<T>(res: ToolResult): T {
   return JSON.parse(res.content[0]!.text) as T;
+}
+
+function textOf(res: ToolResult): string {
+  return res.content[0]?.text ?? '';
+}
+
+function structuredContentOf(res: ToolResult): unknown {
+  return 'structuredContent' in res ? res.structuredContent : undefined;
 }
 
 async function insertSpec(section: string, title: string): Promise<string> {
@@ -153,6 +168,51 @@ describe('update_paragraph MCP tool', () => {
       expectedVersion: current + 100, // mismatch → StaleVersionError → tool error
     });
     expect(isToolError(res)).toBe(true);
+    // #583/ADR-085: carries REST's one actionable supplemental field
+    // so an agent can re-read the current version instead of regexing prose.
+    expect(structuredContentOf(res)).toEqual({ currentVersion: current });
+    // Full prose too, including the trailing guidance clause (paragraph-handlers.ts:30) —
+    // structuredContent alone leaves that clause unpinned at the integration boundary.
+    expect(textOf(res)).toBe(
+      `stale version — current contentVersion is ${current}; refetch and retry`
+    );
+    // Cross-check against the actual REST gateErrorResponse (src/api/edit-gate-
+    // response.ts) for an equivalent error over this same live currentVersion —
+    // pins the parity claim against the real function, not a hardcoded literal.
+    const rest = gateErrorResponse(new StaleVersionError('stale write', current));
+    expect(rest?.status).toBe(409);
+    expect(structuredContentOf(res)).toEqual({ currentVersion: rest?.body.currentVersion });
+  });
+
+  it('an archived spec is a write-forbidden tool error with no structuredContent (#583/ADR-085)', async () => {
+    const archivedSpecId = await insertSpec('26 05 00', 'Archived Fixture');
+    const archivedBodyId = await insertParagraph(archivedSpecId, 'pr1', 'Provide conduit.');
+    await pool.query(`UPDATE specs SET lifecycle_state = 'archived' WHERE id = $1`, [
+      archivedSpecId,
+    ]);
+    try {
+      const res = await handleUpdateParagraph({
+        specId: archivedSpecId,
+        nodeId: archivedBodyId,
+        text: 'attempted edit',
+      });
+      expect(isToolError(res)).toBe(true);
+      expect(textOf(res)).toBe('spec is archived and cannot be edited');
+      expect(structuredContentOf(res)).toBeUndefined();
+      expect('structuredContent' in res).toBe(false);
+      // Cross-check against the actual REST gateErrorResponse: confirm its 409
+      // body for this class genuinely carries nothing beyond `error`.
+      const rest = gateErrorResponse(
+        new SpecWriteForbiddenError('spec is archived and cannot be edited')
+      );
+      expect(rest?.status).toBe(409);
+      expect(Object.keys(rest?.body ?? {}).sort((a, b) => a.localeCompare(b))).toEqual([
+        'error',
+        'success',
+      ]);
+    } finally {
+      await pool.query('DELETE FROM specs WHERE id = $1', [archivedSpecId]);
+    }
   });
 
   it('rejects a direct write to a locked object row, mirroring the REST 422 (#519, ADR-072 decision 3)', async () => {

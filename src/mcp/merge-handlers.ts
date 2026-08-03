@@ -10,10 +10,17 @@ import { toolError, ok, type ToolResult } from './handlers.js';
 // merge contract is identical across surfaces. Only messages cross the boundary.
 function mergeToolError(err: unknown): ToolResult | null {
   if (err instanceof StaleVersionError) {
+    // ADR-085: carries REST's one actionable supplemental field (src/api/
+    // edit-gate-response.ts) so an agent can re-read the current version instead
+    // of regexing prose. REST's `success`/`error` are not duplicated here — they
+    // already have MCP equivalents in `isError` and the text content.
     return toolError(
-      `stale version — current contentVersion is ${err.currentVersion}; re-run get_spec_diff and retry`
+      `stale version — current contentVersion is ${err.currentVersion}; re-run get_spec_diff and retry`,
+      { structuredContent: { currentVersion: err.currentVersion } }
     );
   }
+  // ADR-085: REST's 409 body for this class carries nothing beyond `error` — no
+  // structuredContent to mirror, so the omission here is deliberate, not unfinished.
   if (err instanceof SpecWriteForbiddenError) return toolError(err.message);
   if (err instanceof SpecNotFoundError) return toolError('spec not found');
   // InvalidAcceptedChangeError extends MergeError — check the subclass first.

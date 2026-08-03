@@ -24,10 +24,17 @@ import { toolError, ok, type ToolResult } from './handlers.js';
 // message crosses the boundary — never a stack trace.
 function gateToolError(err: unknown): ToolResult | null {
   if (err instanceof StaleVersionError) {
+    // ADR-085: carries REST's one actionable supplemental field (src/api/
+    // edit-gate-response.ts) so an agent can re-read the current version instead
+    // of regexing prose. REST's `success`/`error` are not duplicated here — they
+    // already have MCP equivalents in `isError` and the text content.
     return toolError(
-      `stale version — current contentVersion is ${err.currentVersion}; refetch and retry`
+      `stale version — current contentVersion is ${err.currentVersion}; refetch and retry`,
+      { structuredContent: { currentVersion: err.currentVersion } }
     );
   }
+  // ADR-085: REST's 409 body for this class carries nothing beyond `error` — no
+  // structuredContent to mirror, so the omission here is deliberate, not unfinished.
   if (err instanceof SpecWriteForbiddenError) return toolError(err.message);
   if (err instanceof SpecNotFoundError) return toolError('spec not found');
   return null;
