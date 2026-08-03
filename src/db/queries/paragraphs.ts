@@ -8,7 +8,6 @@ import type {
   ObjectMeta,
   ParagraphAssociation,
   SignalConflict,
-  SignalProvenance,
   SourceFacts,
   SpecNode,
   SpecNodeInference,
@@ -19,28 +18,14 @@ import { parseNodeType } from './node-type.js';
 import { deriveInference } from './inference-meta.js';
 import { parseObjectMeta } from './object-meta.js';
 import { rewriteObjectTextBlob } from './object-text-edit.js';
+import { insertRowsInChunks, formatIdsPreview } from './batch-insert.js';
+import type { FlatRow } from './paragraphs-batch.js';
+import { PARAGRAPH_COLUMNS, paragraphRowToParams } from './paragraphs-batch.js';
 
 export interface Queryable {
   query: Pool['query'];
 }
 import { logger } from '../../lib/logger.js';
-
-interface FlatRow {
-  readonly id: string;
-  readonly specId: string;
-  readonly parentId: string | null;
-  readonly nodeType: string;
-  readonly text: string;
-  readonly position: number;
-  readonly vanish: boolean;
-  readonly conflicts: readonly SignalConflict[];
-  readonly sourceFacts: SourceFacts;
-  readonly signalProvenance: SignalProvenance | null;
-  /** Captured DOCX body object (#300, ADR-072). Non-null only on `type: 'object'` rows. */
-  readonly objectData: ObjectMeta | null;
-  /** Manual page break (#497, ADR-075). True === node begins on a new page. */
-  readonly pageBreakBefore: boolean;
-}
 
 function hasSourceFacts(sourceFacts: SourceFacts): boolean {
   return Object.keys(sourceFacts).length > 0;
@@ -73,6 +58,23 @@ function flattenDfs(
   });
 }
 
+/** Builds the batch-error message for a failed paragraph chunk (#618): names
+ *  which chunk failed (1-based, out of how many), how many rows it carried,
+ *  and a bounded preview of the failing rows' ids — a per-chunk identity
+ *  rather than the single failing row's id, since one INSERT now carries
+ *  many rows. */
+function buildInsertTreeErrorMessage(ctx: {
+  readonly chunkIndex: number;
+  readonly totalChunks: number;
+  readonly rowCount: number;
+  readonly ids: readonly string[];
+}): string {
+  return (
+    `insertTree: failed to insert paragraph batch ${ctx.chunkIndex + 1}/${ctx.totalChunks} ` +
+    `(${ctx.rowCount} rows: ${formatIdsPreview(ctx.ids)})`
+  );
+}
+
 export async function insertTree(tree: SpecTree, specId: string, pool: Queryable): Promise<void> {
   const rows: FlatRow[] = [];
   flattenDfs(tree.parts, specId, null, rows);
@@ -82,32 +84,16 @@ export async function insertTree(tree: SpecTree, specId: string, pool: Queryable
     return;
   }
 
-  for (const row of rows) {
-    try {
-      await pool.query(
-        `INSERT INTO paragraphs
-           (id, spec_id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-            signal_provenance, object_data, page_break_before)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12)`,
-        [
-          row.id,
-          row.specId,
-          row.parentId,
-          row.nodeType,
-          row.text,
-          row.position,
-          row.vanish,
-          JSON.stringify(row.conflicts),
-          JSON.stringify(row.sourceFacts),
-          row.signalProvenance ? JSON.stringify(row.signalProvenance) : null,
-          row.objectData ? JSON.stringify(row.objectData) : null,
-          row.pageBreakBefore,
-        ]
-      );
-    } catch (err) {
-      throw new DatabaseError(`insertTree: failed to insert paragraph ${row.id}`, { cause: err });
-    }
-  }
+  await insertRowsInChunks({
+    db: pool,
+    table: 'paragraphs',
+    columns: PARAGRAPH_COLUMNS,
+    rows,
+    toParams: paragraphRowToParams,
+    idOf: (row) => row.id,
+    buildErrorMessage: buildInsertTreeErrorMessage,
+  });
+
   logger.info({ specId, count: rows.length }, 'insertTree: paragraphs inserted');
 }
 
