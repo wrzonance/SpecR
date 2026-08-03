@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterEach } from 'vitest';
 import { pool } from '../index.js';
 import {
@@ -8,6 +9,11 @@ import {
   UFGS_REFERENCE_LIBRARY,
   DEFAULT_COMPANY_LIBRARY,
 } from './libraries.js';
+
+// Per-run suffix so this suite's client-library names cannot collide with a
+// leftover row from a prior run that skipped its afterEach (process kill,
+// hookTimeout). See issue #623.
+const suffix = randomUUID().slice(0, 8);
 
 // Namespaces reserved by this file: '99 77 %' spec sections, project
 // 'lib-xor-test-project', and every non-built-in library row.
@@ -39,17 +45,18 @@ describe('migration 016 — backfill and built-ins', () => {
 
 describe('libraries CRUD', () => {
   it('createLibrary → findLibraryById round-trips a client master with parent lineage', async () => {
+    const acmeName = `Acme Client Master ${suffix}`;
     const company = await findLibraryByName(DEFAULT_COMPANY_LIBRARY);
     const created = await createLibrary({
       tier: 'client',
-      name: 'Acme Client Master',
+      name: acmeName,
       owner: 'Acme Corp',
       parentLibraryId: company!.id,
     });
     const found = await findLibraryById(created.id);
     expect(found).toMatchObject({
       tier: 'client',
-      name: 'Acme Client Master',
+      name: acmeName,
       owner: 'Acme Corp',
       parentLibraryId: company!.id,
     });
@@ -79,7 +86,7 @@ describe('libraries CRUD', () => {
 
 describe('specs ownership — ADR-015 D1', () => {
   it('db: the same (section, source) coexists in two libraries without conflict (#92)', async () => {
-    const other = await createLibrary({ tier: 'client', name: 'Second Library' });
+    const other = await createLibrary({ tier: 'client', name: `Second Library ${suffix}` });
     const company = await findLibraryByName(DEFAULT_COMPANY_LIBRARY);
     await pool.query(
       `INSERT INTO specs (section, title, source, library_id) VALUES ('99 77 01', 'Copy A', 'arcat', $1)`,
