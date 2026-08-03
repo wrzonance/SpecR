@@ -48,7 +48,7 @@ import { registerHistoryTools } from './history-tools.js';
 import { registerCheckpointTools } from './checkpoint-tools.js';
 import { registerLanguageRuleTools } from './language-rule-tools.js';
 import { registerLanguageRuleFindingsTools } from './language-rule-findings-tools.js';
-import { createRegistrar, type ToolRegistrar } from './tool-registry.js';
+import { createRegistrar, type ToolRegistrar, type RegisteredTools } from './tool-registry.js';
 import { parseAllowedTiers, TOOL_TIER_VALUES, type ToolTier } from './capabilities.js';
 import { config } from '../lib/env.js';
 import type { ToolError, ToolResult } from './tool-result.js';
@@ -375,7 +375,7 @@ function registerLoaderTools(reg: ToolRegistrar): void {
 export function registerTools(
   server: McpServer,
   opts?: { readonly allowedTiers?: ReadonlySet<ToolTier> }
-): readonly string[] {
+): RegisteredTools {
   const allowedTiers = opts?.allowedTiers ?? parseAllowedTiers(config.MCP_ALLOWED_TIERS);
   const reg = createRegistrar(server, allowedTiers);
   registerLibraryTools(reg);
@@ -415,7 +415,7 @@ export function registerTools(
   registerOpenCommentsTools(reg);
   registerReadinessTools(reg);
   registerOnboardingTools(reg);
-  return reg.declared;
+  return { names: reg.declared, schemas: reg.schemas };
 }
 
 // Test-only convenience: declared names with every tier allowed. Used by the contract test.
