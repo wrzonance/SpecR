@@ -25,6 +25,10 @@ import { handleCreateProject } from './create-project-handler.js';
 import { handleCreateClient } from './clients-handlers.js';
 import { handleResolveUser } from './users-handlers.js';
 import { handleCreateClientLibrary } from './library-management-handlers.js';
+import { handleDeleteSpec } from './spec-lifecycle-handlers.js';
+import { handleDeletePackage } from './package-handlers.js';
+import { handleDeleteProject } from './project-handlers.js';
+import { handleSubmittalRegister } from './submittal-register-handler.js';
 import type { ToolResult } from './tool-result.js';
 
 const WRITE_METHODS: ReadonlySet<string> = new Set(['post', 'put', 'patch', 'delete']);
@@ -57,6 +61,93 @@ async function seedLibraryId(): Promise<string> {
   return id;
 }
 
+// specs has no LIKE-filterable "name" column (only section/title/source), so — unlike
+// projects/clients/libraries/users below — its fixture rows can't be swept by a generic
+// FIXTURE_PREFIX%-name DELETE. Every spec id these seed helpers mint is tracked here and
+// reclaimed explicitly in afterAll instead.
+const trackedSpecIds: string[] = [];
+
+/** delete_spec (withdrawSpec) only withdraws library masters (409s on a project copy), and
+ * it's a SOFT tombstone — the row survives with `withdrawn_at` set, so it needs afterAll
+ * teardown (tracked above), unlike delete_package's hard delete below. */
+async function seedWithdrawableSpecId(): Promise<string> {
+  const libraryId = await seedLibraryId();
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO specs (section, title, source, library_id)
+     VALUES ('05 12 00', $1, $2, $3) RETURNING id`,
+    [uniq('withdrawable-spec'), uniq('s'), libraryId]
+  );
+  const id = res.rows[0]?.id;
+  if (id === undefined) throw new Error('withdrawable spec insert returned no id');
+  trackedSpecIds.push(id);
+  return id;
+}
+
+/** delete_package hard-deletes (`DELETE FROM design_packages`), so the row is gone the
+ * moment the driven case invokes it — no tracking needed. Its throwaway parent project is
+ * FIXTURE_PREFIX-named, swept by the generic projects DELETE in afterAll regardless. */
+async function seedDeletablePackageId(): Promise<string> {
+  const projectRes = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+    [uniq('package-project')]
+  );
+  const projectId = projectRes.rows[0]?.id;
+  if (projectId === undefined) throw new Error('package project insert returned no id');
+  const packageRes = await pool.query<{ id: string }>(
+    `INSERT INTO design_packages (project_id, name, position) VALUES ($1, $2, 1) RETURNING id`,
+    [projectId, uniq('package')]
+  );
+  const id = packageRes.rows[0]?.id;
+  if (id === undefined) throw new Error('deletable package insert returned no id');
+  return id;
+}
+
+/** delete_project soft-deletes (tombstones with deleted_at), but the row is still named
+ * FIXTURE_PREFIX-* — the generic projects DELETE in afterAll reclaims it regardless of
+ * deleted_at, so no separate tracking is needed here. */
+async function seedDeletableProjectId(): Promise<string> {
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+    [uniq('deletable-project')]
+  );
+  const id = res.rows[0]?.id;
+  if (id === undefined) throw new Error('deletable project insert returned no id');
+  return id;
+}
+
+/** submittal_register needs a project with at least one of its own specs assigned
+ * (project_specs), mirroring submittal-register.integration.test.ts's project-only seed but
+ * extended with a real spec so the driven case exercises the non-empty specIds path. The
+ * project is name-swept in afterAll; the spec is tracked (see trackedSpecIds above). */
+async function seedSubmittalRegisterFixture(): Promise<{
+  readonly projectId: string;
+  readonly specId: string;
+}> {
+  const projectRes = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+    [uniq('sr-project')]
+  );
+  const projectId = projectRes.rows[0]?.id;
+  if (projectId === undefined) throw new Error('submittal-register project insert returned no id');
+
+  const libraryId = await seedLibraryId();
+  const specRes = await pool.query<{ id: string }>(
+    `INSERT INTO specs (section, title, source, library_id)
+     VALUES ('23 05 00', $1, $2, $3) RETURNING id`,
+    [uniq('sr-spec'), uniq('s'), libraryId]
+  );
+  const specId = specRes.rows[0]?.id;
+  if (specId === undefined) throw new Error('submittal-register spec insert returned no id');
+  trackedSpecIds.push(specId);
+
+  await pool.query(`INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)`, [
+    projectId,
+    specId,
+  ]);
+
+  return { projectId, specId };
+}
+
 const INV6_DRIVEN: readonly DrivenCase[] = [
   {
     op: 'post /projects',
@@ -83,6 +174,37 @@ const INV6_DRIVEN: readonly DrivenCase[] = [
     status: 201,
     invoke: () => handleCreateClientLibrary({ name: uniq('lib') }),
   },
+  {
+    op: 'post /projects/{}/submittal-register',
+    tool: 'submittal_register',
+    status: 200,
+    invoke: async () => {
+      const fixture = await seedSubmittalRegisterFixture();
+      return handleSubmittalRegister({ projectId: fixture.projectId, specIds: [fixture.specId] });
+    },
+  },
+  {
+    op: 'delete /specs/{}',
+    tool: 'delete_spec',
+    status: 200,
+    invoke: async () => handleDeleteSpec({ specId: await seedWithdrawableSpecId() }),
+  },
+  {
+    op: 'delete /packages/{}',
+    tool: 'delete_package',
+    status: 200,
+    invoke: async () => handleDeletePackage({ packageId: await seedDeletablePackageId() }),
+  },
+  {
+    op: 'delete /projects/{}',
+    tool: 'delete_project',
+    status: 200,
+    invoke: async () =>
+      handleDeleteProject({
+        projectId: await seedDeletableProjectId(),
+        deletedBy: uniq('deleter'),
+      }),
+  },
 ];
 
 /** The write-mapped (POST/PUT/PATCH/DELETE) tool universe INV-6 must account for, restricted to
@@ -103,7 +225,12 @@ async function writeMappedJsonOps(): Promise<ReadonlySet<string>> {
 
 describe('INV-6: response-shape validation for write-mapped tools', () => {
   afterAll(async () => {
+    // Projects first: cascades away project_specs, so the specs it referenced can then be
+    // deleted (their project_specs.spec_id FK is RESTRICT, not CASCADE) without ordering games.
     await pool.query(`DELETE FROM projects WHERE name LIKE $1`, [`${FIXTURE_PREFIX}%`]);
+    if (trackedSpecIds.length > 0) {
+      await pool.query(`DELETE FROM specs WHERE id = ANY($1::uuid[])`, [trackedSpecIds]);
+    }
     await pool.query(`DELETE FROM clients WHERE name LIKE $1`, [`${FIXTURE_PREFIX}%`]);
     await pool.query(`DELETE FROM libraries WHERE name LIKE $1 AND tier = 'client'`, [
       `${FIXTURE_PREFIX}%`,
@@ -162,5 +289,38 @@ describe('INV-6: response-shape validation for write-mapped tools', () => {
 
   it('INV-6 ratchet: write-pending burn-down never grows', () => {
     expect(INV6_WRITE_PENDING.size).toBeLessThanOrEqual(INV6_WRITE_PENDING_BASELINE);
+  });
+
+  it('INV-6 fixture hygiene: every new seed helper is reclaimed by end of run', async () => {
+    // delete_package hard-deletes its own row — assert that self-clean is real, immediately,
+    // not just assumed.
+    const packageId = await seedDeletablePackageId();
+    await handleDeletePackage({ packageId });
+    const packageRow = await pool.query('SELECT 1 FROM design_packages WHERE id = $1', [packageId]);
+    expect(packageRow.rowCount).toBe(0);
+
+    // delete_spec only tombstones (withdrawn_at) — the row survives, so it must be tracked
+    // for explicit afterAll teardown rather than assumed self-cleaning.
+    const specId = await seedWithdrawableSpecId();
+    expect(trackedSpecIds).toContain(specId);
+
+    // delete_project also only tombstones (deleted_at) — its row survives too, reclaimed by
+    // the generic "projects WHERE name LIKE FIXTURE_PREFIX%" sweep in afterAll rather than
+    // explicit tracking. Assert the naming invariant that sweep depends on.
+    const deletableProjectId = await seedDeletableProjectId();
+    const deletableProjectRow = await pool.query<{ name: string }>(
+      'SELECT name FROM projects WHERE id = $1',
+      [deletableProjectId]
+    );
+    expect(deletableProjectRow.rows[0]?.name.startsWith(FIXTURE_PREFIX)).toBe(true);
+
+    // submittal_register's throwaway project is swept the same way; its spec is tracked.
+    const fixture = await seedSubmittalRegisterFixture();
+    const srProjectRow = await pool.query<{ name: string }>(
+      'SELECT name FROM projects WHERE id = $1',
+      [fixture.projectId]
+    );
+    expect(srProjectRow.rows[0]?.name.startsWith(FIXTURE_PREFIX)).toBe(true);
+    expect(trackedSpecIds).toContain(fixture.specId);
   });
 });

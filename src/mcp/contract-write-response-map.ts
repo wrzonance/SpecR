@@ -33,15 +33,12 @@ export const INV6_WRITE_PENDING: ReadonlySet<string> = new Set([
   'delete /libraries/{}/disciplines',
   'delete /libraries/{}/header-footer',
   'delete /libraries/{}/language-rules',
-  'delete /packages/{}',
   'delete /packages/{}/header-footer',
-  'delete /projects/{}',
   'delete /projects/{}/header-footer',
   'delete /projects/{}/language-rules',
   'delete /projects/{}/revision-nomenclature',
   'delete /projects/{}/specs/{}',
   'delete /revisions/{}/header-footer',
-  'delete /specs/{}',
   'delete /specs/{}/lock',
   'delete /specs/{}/style-source',
   'patch /clients/{}',
@@ -62,7 +59,6 @@ export const INV6_WRITE_PENDING: ReadonlySet<string> = new Set([
   'post /projects/{}/restore',
   'post /projects/{}/revision-nomenclature/clone',
   'post /projects/{}/specs',
-  'post /projects/{}/submittal-register',
   'post /reports/compare',
   'post /specs/{}/checkpoints',
   'post /specs/{}/diff',
@@ -101,8 +97,10 @@ export const INV6_WRITE_PENDING: ReadonlySet<string> = new Set([
 /**
  * INV-6 ratchet baseline (#549). The write-pending burn-down (INV6_WRITE_PENDING.size) must never
  * grow past this count, mirroring INV5_READ_PENDING_BASELINE. Verified by direct count on
- * 2026-08-02: the set held exactly 66 entries at the time this ratchet was introduced (71
- * write-mapped JSON ops total, minus 4 driven — create_project, create_client, resolve_user,
- * create_client_library — minus 1 exempt — parse_document).
+ * 2026-08-03 (#627): the set holds exactly 62 entries (71 write-mapped JSON ops total, minus 8
+ * driven — create_project, create_client, resolve_user, create_client_library,
+ * submittal_register, delete_spec, delete_package, delete_project — minus 1 exempt —
+ * parse_document). Was 66 as of 2026-08-02, before submittal_register/delete_spec/delete_package/
+ * delete_project were promoted out of this set.
  */
-export const INV6_WRITE_PENDING_BASELINE = 66;
+export const INV6_WRITE_PENDING_BASELINE = 62;
