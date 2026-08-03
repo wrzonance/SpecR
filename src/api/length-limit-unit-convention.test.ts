@@ -1,11 +1,11 @@
 // src/api/length-limit-unit-convention.test.ts
 //
-// #626 (ADR-086) — Zod's `.max(n)` delegates to `String.prototype.length`
+// #626 (ADR-088) — Zod's `.max(n)` delegates to `String.prototype.length`
 // (UTF-16 code units); JSON Schema's `maxLength` keyword (used by every
 // `openapi.yaml` field it mirrors) is defined in Unicode code points. For
 // any character outside the Basic Multilingual Plane the two counts diverge
 // by up to 2x, so a spec-compliant client can construct a payload the
-// documented contract says is valid but the server 422s. ADR-086 chose
+// documented contract says is valid but the server 422s. ADR-088 chose
 // "accept and document" over changing enforcement: every paired site's
 // `openapi.yaml` description states the UTF-16 convention verbatim
 // (`UTF16_LENGTH_LIMIT_NOTE`).
@@ -25,11 +25,11 @@
 // sha256 (openapi.yaml, fixed 64-char hex digest) and imageData (base64
 // byte-size cap) are deliberately excluded from the drift guard above —
 // both alphabets are ASCII-only, so UTF-16-unit count and Unicode-code-point
-// count are always identical there. See ADR-086 for the full inventory and
+// count are always identical there. See ADR-088 for the full inventory and
 // reasoning. That exclusion is itself pinned below: each site's maxLength is
 // asserted unchanged and its description is asserted to NOT carry
 // UTF16_LENGTH_LIMIT_NOTE, so an edit that accidentally moves either field
-// into ADR-086's scope (or drifts its maxLength) fails loudly instead of
+// into ADR-088's scope (or drifts its maxLength) fails loudly instead of
 // going unpinned.
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
@@ -42,7 +42,7 @@ import { ResolveUserBody } from './users.js';
 // A non-BMP character: U+1F600 GRINNING FACE, 1 Unicode code point, 2 UTF-16
 // code units (a surrogate pair). Repeating it N times yields a string whose
 // `.length` (UTF-16 units) is 2N and whose `[...str].length` (code points)
-// is N — the exact divergence ADR-086 documents.
+// is N — the exact divergence ADR-088 documents.
 const ASTRAL_CHAR = '\u{1F600}';
 
 const DescribedLengthFieldSchema = z.object({
@@ -50,7 +50,7 @@ const DescribedLengthFieldSchema = z.object({
   description: z.string(),
 });
 
-// sha256/imageData carry no ADR-086 note (they're out of scope), and sha256
+// sha256/imageData carry no ADR-088 note (they're out of scope), and sha256
 // has no `description` key at all — description is optional here, unlike
 // DescribedLengthFieldSchema above.
 const AsciiOnlyLengthFieldSchema = z.object({
@@ -192,7 +192,7 @@ const ASCII_ONLY_EXCLUDED_SITES: readonly AsciiOnlyExcludedSite[] = [
   },
 ];
 
-describe('openapi.yaml — length-limit unit convention is documented at every paired site (#626, ADR-086)', () => {
+describe('openapi.yaml — length-limit unit convention is documented at every paired site (#626, ADR-088)', () => {
   it.each(LENGTH_LIMIT_SITES)(
     '$name: maxLength matches the Zod bound and the description states the UTF-16 convention',
     async ({ expectedMax, select }) => {
@@ -204,14 +204,14 @@ describe('openapi.yaml — length-limit unit convention is documented at every p
       ).toBe(expectedMax);
       expect(
         field.description,
-        'openapi.yaml description must state the UTF-16 length-limit convention verbatim (ADR-086) — ' +
+        'openapi.yaml description must state the UTF-16 length-limit convention verbatim (ADR-088) — ' +
           'a reader of this field alone must not assume JSON Schema maxLength code-point semantics'
       ).toContain(UTF16_LENGTH_LIMIT_NOTE);
     }
   );
 });
 
-describe('openapi.yaml — ASCII-only sites stay excluded from the ADR-086 note (#626)', () => {
+describe('openapi.yaml — ASCII-only sites stay excluded from the ADR-088 note (#626)', () => {
   it.each(ASCII_ONLY_EXCLUDED_SITES)(
     '$name: maxLength is pinned and the description does not carry the UTF-16 note',
     async ({ expectedMax, select }) => {
@@ -219,19 +219,19 @@ describe('openapi.yaml — ASCII-only sites stay excluded from the ADR-086 note 
       const field = select(raw);
       expect(
         field.maxLength,
-        'openapi.yaml maxLength drifted for an ASCII-only field ADR-086 deliberately excludes'
+        'openapi.yaml maxLength drifted for an ASCII-only field ADR-088 deliberately excludes'
       ).toBe(expectedMax);
       expect(
         field.description ?? '',
         'this field is ASCII-only (UTF-16-unit count == Unicode-code-point count), so it must never carry ' +
-          'UTF16_LENGTH_LIMIT_NOTE — if it does, ADR-086 scope has drifted and this site belongs in ' +
+          'UTF16_LENGTH_LIMIT_NOTE — if it does, ADR-088 scope has drifted and this site belongs in ' +
           'LENGTH_LIMIT_SITES above instead'
       ).not.toContain(UTF16_LENGTH_LIMIT_NOTE);
     }
   );
 });
 
-describe('length limits: astral-character UTF-16 boundary (#626, ADR-086 — pins CURRENT unchanged behavior)', () => {
+describe('length limits: astral-character UTF-16 boundary (#626, ADR-088 — pins CURRENT unchanged behavior)', () => {
   it('ActorLabel: astral character at maxLength boundary is accepted, one UTF-16 unit over is rejected', () => {
     const atLimit = ASTRAL_CHAR.repeat(100); // 100 code points = 200 UTF-16 units
     const overLimit = `${atLimit}x`; // 201 UTF-16 units

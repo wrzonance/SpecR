@@ -1903,7 +1903,7 @@ paths:
                     to the trimmed value. This limit is counted in UTF-16 code units
                     (JavaScript string length), not Unicode code points — characters
                     outside the Basic Multilingual Plane (e.g. emoji) count as 2. See
-                    ADR-086.
+                    ADR-088.
       responses:
         '200':
           description: User resolved (existing or newly created)
@@ -6312,7 +6312,7 @@ components:
         and the 1-200 length bounds apply to the trimmed value. This limit is
         counted in UTF-16 code units (JavaScript string length), not Unicode code
         points — characters outside the Basic Multilingual Plane (e.g. emoji)
-        count as 2. See ADR-086.
+        count as 2. See ADR-088.
 
     # ── Envelope shapes ────────────────────────────────────────────────────────
 
@@ -8864,7 +8864,7 @@ components:
                   type: string
                 # ASCII-only hex digest — UTF-16-unit count and Unicode
                 # code-point count are always identical here, so this field
-                # is out of scope for the ADR-086 length-limit convention.
+                # is out of scope for the ADR-088 length-limit convention.
                 sha256:
                   type: string
                   minLength: 64
@@ -10097,7 +10097,7 @@ components:
                 by GET responses, which carries no such bound. This limit is
                 counted in UTF-16 code units (JavaScript string length), not
                 Unicode code points — characters outside the Basic
-                Multilingual Plane (e.g. emoji) count as 2. See ADR-086.
+                Multilingual Plane (e.g. emoji) count as 2. See ADR-088.
     LanguageRulesWrite:
       allOf:
         - $ref: '#/components/schemas/LanguageRules'
@@ -10794,7 +10794,7 @@ components:
           description: >
             This limit is counted in UTF-16 code units (JavaScript string
             length), not Unicode code points — characters outside the Basic
-            Multilingual Plane (e.g. emoji) count as 2. See ADR-086.
+            Multilingual Plane (e.g. emoji) count as 2. See ADR-088.
         sourceUrl:
           type: [string, 'null']
           format: uri
@@ -10802,7 +10802,7 @@ components:
           description: >
             This limit is counted in UTF-16 code units (JavaScript string
             length), not Unicode code points — characters outside the Basic
-            Multilingual Plane (e.g. emoji) count as 2. See ADR-086.
+            Multilingual Plane (e.g. emoji) count as 2. See ADR-088.
         title:
           type: [string, 'null']
           minLength: 1
@@ -10810,14 +10810,14 @@ components:
           description: >
             This limit is counted in UTF-16 code units (JavaScript string
             length), not Unicode code points — characters outside the Basic
-            Multilingual Plane (e.g. emoji) count as 2. See ADR-086.
+            Multilingual Plane (e.g. emoji) count as 2. See ADR-088.
         notes:
           type: [string, 'null']
           maxLength: 5000
           description: >
             This limit is counted in UTF-16 code units (JavaScript string
             length), not Unicode code points — characters outside the Basic
-            Multilingual Plane (e.g. emoji) count as 2. See ADR-086.
+            Multilingual Plane (e.g. emoji) count as 2. See ADR-088.
 
     # ── Header/footer config (#476, ADR-040) ─────────────────────────────────────
 
@@ -10907,7 +10907,7 @@ components:
                       suffix: { type: string }
                       # ASCII-only base64 alphabet — UTF-16-unit count and
                       # Unicode code-point count are always identical here,
-                      # so this field is out of scope for the ADR-086
+                      # so this field is out of scope for the ADR-088
                       # length-limit convention.
                       imageData:
                         type: string

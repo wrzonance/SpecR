@@ -1,7 +1,7 @@
 /**
  * Canonical prose appended to every `openapi.yaml` field description that
  * pairs a Zod `.max(n)` / `.check(z.maxLength(n))` with a JSON Schema
- * `maxLength: n` (#626, ADR-086).
+ * `maxLength: n` (#626, ADR-088).
  *
  * Zod's length checks delegate to JavaScript `String.prototype.length`
  * (UTF-16 code units); JSON Schema's `maxLength` keyword is defined in
@@ -17,4 +17,4 @@
 export const UTF16_LENGTH_LIMIT_NOTE =
   'This limit is counted in UTF-16 code units (JavaScript string length), ' +
   'not Unicode code points — characters outside the Basic Multilingual ' +
-  'Plane (e.g. emoji) count as 2. See ADR-086.';
+  'Plane (e.g. emoji) count as 2. See ADR-088.';

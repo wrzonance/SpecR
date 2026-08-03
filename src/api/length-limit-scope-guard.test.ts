@@ -1,9 +1,9 @@
 // src/api/length-limit-scope-guard.test.ts
 //
-// #626 (ADR-086) is a docs-only "accept and document" change: it must never
+// #626 (ADR-088) is a docs-only "accept and document" change: it must never
 // touch the MCP contract machinery (contract-map.ts,
 // contract-schema-sharing-map.ts, contract-write-response-map.ts) that a
-// sibling workstream is concurrently mid-edit on — see ADR-086's rejected
+// sibling workstream is concurrently mid-edit on — see ADR-088's rejected
 // option for why. A collision there wouldn't just conflict on merge, it
 // would corrupt the ADR-044 REST<->MCP parity gates the sibling PR is
 // actively changing.
@@ -51,7 +51,7 @@ function changedGuardedFiles(mergeBase: string): string[] {
   return output.split('\n').filter((line) => line.length > 0);
 }
 
-describe('scope guard: #626 (ADR-086) never touches MCP contract machinery', () => {
+describe('scope guard: #626 (ADR-088) never touches MCP contract machinery', () => {
   it('leaves contract-map.ts, contract-schema-sharing-map.ts, and contract-write-response-map.ts untouched', (ctx) => {
     const mergeBase = resolveMergeBaseWithOriginMain();
     if (mergeBase === undefined) {
