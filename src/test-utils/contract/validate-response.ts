@@ -33,6 +33,27 @@ const ResponseObject = z.object({
 const OperationObject = z.object({
   responses: z.record(z.string(), ResponseObject).optional(),
 });
+
+// Request-body schema, narrowed only to the shape operationParamKeys() reads: either a direct
+// `properties` map, or (for the 3 `oneOf`-composed bodies — the two general-spec PUTs and
+// POST /packages/{id}/revisions) a `oneOf` array of branch schemas each with their own
+// `properties`. Everything else (types, formats, nested schemas) is deliberately untyped here.
+const RequestBodySchemaObject = z.object({
+  properties: z.record(z.string(), z.unknown()).optional(),
+  oneOf: z.array(z.object({ properties: z.record(z.string(), z.unknown()).optional() })).optional(),
+});
+const RequestBodyContent = z.record(
+  z.string(),
+  z.object({ schema: RequestBodySchemaObject.optional() })
+);
+const ParameterObject = z.object({
+  name: z.string(),
+  in: z.string(),
+});
+const OperationWithParamsObject = z.object({
+  parameters: z.array(ParameterObject).optional(),
+  requestBody: z.object({ content: RequestBodyContent.optional() }).optional(),
+});
 const OpenApiDocSchema = z.object({
   servers: z.array(z.object({ url: z.string() })).optional(),
   paths: z.record(z.string(), z.record(z.string(), z.unknown())),
@@ -135,4 +156,54 @@ export function successJsonOps(doc: OpenApiDoc): string[] {
     if (has2xxJson) out.push(`${method} ${normalizePath(path)}`);
   }
   return out;
+}
+
+export interface ParamSet {
+  readonly query: ReadonlySet<string>;
+  readonly body: ReadonlySet<string>;
+}
+
+type RequestBodySchema = z.infer<typeof RequestBodySchemaObject>;
+
+// A direct `properties` map wins outright; otherwise union every `oneOf` branch's
+// `properties` (the 3 composed-body ops) so INV-4 stays meaningful instead of passing
+// vacuously for exactly the operations this helper exists to check.
+function bodyPropertyKeys(schema: RequestBodySchema | undefined): ReadonlySet<string> {
+  if (schema?.properties !== undefined) return new Set(Object.keys(schema.properties));
+  const branches = schema?.oneOf ?? [];
+  const keys = new Set<string>();
+  for (const branch of branches) {
+    for (const key of Object.keys(branch.properties ?? {})) keys.add(key);
+  }
+  return keys;
+}
+
+// application/json wins when present; otherwise fall back to multipart/form-data (the 5
+// file-upload ops). A requestBody with neither content type yields an empty set.
+function requestBodyKeys(
+  content: z.infer<typeof RequestBodyContent> | undefined
+): ReadonlySet<string> {
+  const jsonSchema = content?.['application/json']?.schema;
+  if (jsonSchema !== undefined) return bodyPropertyKeys(jsonSchema);
+  return bodyPropertyKeys(content?.['multipart/form-data']?.schema);
+}
+
+/** Query-param names and request-body top-level property names an operation documents in
+ * openapi.yaml, for cross-checking against an MCP tool's flat `inputSchema` (INV-4). Path
+ * params are deliberately excluded: REST path segments are generic (`{id}`, `{nodeId}`)
+ * while MCP tools disambiguate them (`projectId`, `paragraphId`) across a flat arg list, so
+ * name-matching would be systematically wrong. Throws only when `method`+`pathTemplate` is
+ * not a real operation in `doc` (mirrors {@link assertResponse}'s "no such op" failure). */
+export function operationParamKeys(
+  doc: OpenApiDoc,
+  method: string,
+  pathTemplate: string
+): ParamSet {
+  const raw = doc.paths[pathTemplate]?.[method.toLowerCase()];
+  if (raw === undefined) throw new Error(`No OpenAPI operation: ${method} ${pathTemplate}`);
+  const op = OperationWithParamsObject.parse(raw);
+  const query = new Set(
+    (op.parameters ?? []).filter((param) => param.in === 'query').map((param) => param.name)
+  );
+  return { query, body: requestBodyKeys(op.requestBody?.content) };
 }
