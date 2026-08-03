@@ -12,7 +12,7 @@ and "Contractor" as the only recognized parties (never "subcontractor" or
 "electrical contractor"), the firm's own name for the architect/engineer of record
 ("A/E", "Megacorp", "Bob's Consulting"), avoidance of reinforcing words ("all",
 "any", "every", "strict", "very") that create ambiguity a contractor can exploit
-("well, you said *any* of these, not *all* of these"). None of this is checked
+("well, you said _any_ of these, not _all_ of these"). None of this is checked
 today; no issue, PR, or ADR touches it.
 
 The tension is deliberate and already on the record: ADR-019 stakes SpecR out as a
@@ -35,7 +35,7 @@ need.
 SpecR ships the **rule engine and the schema**; it ships **zero rule content**. A
 library with no language-rule profile lints nothing — there is no built-in default
 list of banned words, required parties, or reinforcing terms, unlike ADR-022's
-convention profiles (which *do* seed a built-in default because structural
+convention profiles (which _do_ seed a built-in default because structural
 detection, unlike word choice, is not a content opinion). Every category
 (`bannedTerms`, `reinforcingWords`, `partyVocabulary`, `requiredPhrases`) starts
 empty until a firm authors it. This is the whole of what makes language linting
@@ -56,7 +56,7 @@ tier participates without one.
 A project optionally belongs to a client (`projects.client_id → clients.id`,
 migration 040), and a client optionally owns a library
 (`clients.library_id → libraries.id`). Resolving a project's language rules
-therefore *may* pick up one additional layer — the client's library profile — via
+therefore _may_ pick up one additional layer — the client's library profile — via
 exactly one conditional join: `projects.client_id → clients.library_id →
 language_rule_profiles.library_id`. This is not a recursive hierarchy walk and
 cannot become one: `clients.library_id` points at a library, never at another
@@ -68,7 +68,7 @@ a different resolution algorithm.
 ### D4 — Project-copy specs resolve through their originating library, not just their own project
 
 A spec created by copying a master into a project (`specs.parent_spec_id` points at
-the master row) must still see the *master's* library-level language rules, not
+the master row) must still see the _master's_ library-level language rules, not
 only the project's own profile — the firm's banned-word list should not silently
 stop applying just because the paragraph now lives in a project-owned copy.
 `resolveAuthoringLibraryId` computes this with
@@ -101,8 +101,8 @@ degrades to no linting, not a failure.
 ### D6 — Matching: lookaround boundaries, not `\b` (spike correction, supersedes the pre-spike design)
 
 Literal terms (`isRegex` false or absent) are matched with
-`` new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'gi') ``, never
-`` new RegExp(`\\b${escaped}\\b`, 'gi') ``. This is the one place in this feature a
+``new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'gi')``, never
+``new RegExp(`\\b${escaped}\\b`, 'gi')``. This is the one place in this feature a
 naive implementer will reach for `\b` and silently ship a regression, so it is
 called out here explicitly, not left to a code comment alone.
 
@@ -113,7 +113,7 @@ Rep." — is exactly the issue's own party-vocabulary example, and for such a te
 never matches. There is no exception thrown, no warning logged; the firm's party
 name simply never gets flagged, and nothing in the system says so. Lookaround does
 not have this failure mode because it asserts only against the character
-*outside* the match, independent of what the term's own edge character is. Spike-
+_outside_ the match, independent of what the term's own edge character is. Spike-
 verified: `(?<![A-Za-z0-9_])install(?![A-Za-z0-9_])` correctly excludes "installer"
 but matches standalone "install"; `(?<![A-Za-z0-9_])any(?![A-Za-z0-9_])` excludes
 "anyway" but matches standalone "any"; `(?<![A-Za-z0-9_])A\.E\.(?![A-Za-z0-9_])`
@@ -207,20 +207,30 @@ singleton per scope, so nothing needs naming.
 **Negative / trade-offs**
 
 - `checkRegexPatterns`' `MAX_REGEX_PATTERNS` (64) and `MAX_REGEX_PATTERN_LENGTH`
-  (200) bounds apply only to `isRegex: true` terms. Literal terms — the majority
-  of a real firm's list — have no count or length bound. This is not a security
-  gap (literal terms are always escaped before use, never interpreted as regex
-  syntax), but it is a conscious v1 choice given `scanParagraphForCategory`'s
-  O(terms × paragraphs) scan cost: a firm with an unusually large literal-term
-  list pays that cost with no platform-side guard today. A future bound (mirroring
-  the regex-term limits) is a reasonable follow-up if real firm lists prove large
-  enough to matter; it is not needed to ship v1.
+  (200) bounds apply only to `isRegex: true` terms. This ADR originally deferred
+  a matching bound for literal terms — the majority of a real firm's list — as a
+  v1 non-goal; that deferral is now closed (#541).
+  `LanguageRulesWriteSchema` (`src/ast/language-rule-schemas.ts`) adds
+  `MAX_LITERAL_TERM_LENGTH` (500 characters per literal term) and
+  `MAX_LITERAL_TERMS` (500 literal terms, flattened across all four categories)
+  as a `.check()` layered on the base `LanguageRulesSchema`, the exact write-
+  only-sibling-schema pattern `HeaderFooterCompositionWriteSchema` established
+  for ADR-070 — the base schema stays unbounded so `mapRow` keeps reading
+  pre-existing rows regardless of size (grandfathered), and only the write path
+  (`validateRules`, the sole caller behind `PUT /libraries/:id/language-rules`
+  and `PUT /projects/:id/language-rules`) enforces the new bound. Combined with
+  the unchanged 64-term regex cap, a profile now carries at most 564 total terms.
+  This also resolves the O(terms × paragraphs) scan-cost concern the original
+  deferral cited: `scanParagraphsForTermCategories` now precompiles each
+  category's term matchers once (via `compileTermMatchers`) before scanning
+  paragraphs, instead of rebuilding a matcher for every (paragraph, term) pair,
+  so the bounded term count no longer multiplies scan cost by paragraph count.
 - Two additional scope-resolution layers (client, project) beyond the library
   mean a findings report can be affected by a profile the requester did not
   directly edit — expected and desired (D5), but worth remembering when
   debugging "why did this term get flagged" reports: the answer may live in a
   parent scope.
-- `requiredPhrases`' whole-spec-presence check (D8) cannot report *where* the
+- `requiredPhrases`' whole-spec-presence check (D8) cannot report _where_ the
   gap is beyond "somewhere in this spec" — there is no such location to report
   for an absence. This is a schema-level limitation, not an implementation bug.
 
@@ -230,7 +240,7 @@ singleton per scope, so nothing needs naming.
   satisfy)
 - ADR-015 (library tiers, `parent_spec_id` chain-of-custody — reused by D4)
 - ADR-022 (convention profiles — nearest existing scoped-JSONB-profile precedent;
-  this ADR deliberately does *not* copy its built-in-default behavior, see D1)
+  this ADR deliberately does _not_ copy its built-in-default behavior, see D1)
 - migration 022 (`division_general_specs` — the two-column XOR scope precedent
   this feature's scope table mirrors, D2)
 - migration 040 (`clients` — the single conditional hop this feature's company
