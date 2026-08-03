@@ -120,6 +120,40 @@ function vmlTextBoxParagraph(interiorText: string): string {
   );
 }
 
+// One inline DrawingML text-box RUN (no host <w:p> wrapper) whose
+// txbxContent holds `interiorXml` verbatim — a building block for
+// mixedVisibilityTwoTextBoxParagraph below, mirroring
+// body-objects.test.ts's own textBoxRun/hiddenTextBoxRun convention (xmlns:a
+// declared INLINE on <a:graphic>, same as floatingAlternateContentTextBoxParagraph
+// above, never on the source root).
+function textBoxRunXml(docPrId: number, interiorXml: string): string {
+  return (
+    `<w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="${docPrId}"/>` +
+    '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+    '<a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+    '<wps:wsp><wps:txbx><w:txbxContent>' +
+    interiorXml +
+    '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r>'
+  );
+}
+
+// #515/ADR-086: ONE host paragraph carrying TWO separate DrawingML text-box
+// runs — the FIRST visible, the SECOND hidden via its own interior run's
+// `w:rPr>w:vanish` (mirrors body-objects.test.ts's hiddenTextBoxRun). This is
+// the shape the fix targets: a hidden SECOND box must never suppress the
+// visible FIRST box's interior text (no-suppression) nor leak its own
+// interior text into interiorTexts (privacy) — while the HOST paragraph's
+// full OOXML, hidden box included, still round-trips byte-for-byte through
+// generate + re-parse untouched (ADR-072 decision 1: the opaque
+// w:txbxContent subtree is passed through by reference, never reinterpreted).
+function mixedVisibilityTwoTextBoxParagraph(visibleText: string, hiddenText: string): string {
+  const visibleRun = textBoxRunXml(1, para(visibleText));
+  const hiddenInterior = `<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>${hiddenText}</w:t></w:r></w:p>`;
+  const hiddenRun = textBoxRunXml(2, hiddenInterior);
+  return `<w:p>${visibleRun}${hiddenRun}</w:p>`;
+}
+
 function flatten(nodes: readonly SpecNode[]): SpecNode[] {
   return [...nodes, ...nodes.flatMap((n) => flatten(n.children))];
 }
@@ -385,6 +419,51 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
     // ...and the a: prefix is bound in scope (inline on the graphic, as Word
     // emits) — never left dangling by docx's a-less generated document root.
     expect(docXml).toMatch(/<a:graphic[^>]*xmlns:a=/);
+  });
+
+  // #515/ADR-086: the unit-level suites (body-objects.test.ts,
+  // body-text-box-visibility.test.ts) pin no-suppression + privacy at the
+  // extractBodyObjects/blob-anchor boundary. This is the one test in the
+  // whole #515 program that proves it holds THROUGH the generator: a full
+  // parse -> generate -> re-parse cycle on a host paragraph carrying one
+  // visible and one hidden text box, checking BOTH the SpecTree-level
+  // objectText exposure AND the raw re-emitted OOXML's byte-for-byte content.
+  it('a mixed-visibility paragraph (one visible, one hidden text box) round-trips its FULL host blob byte-for-byte, while interiorTexts exposes only the visible box (#515)', async () => {
+    const source = await makeDocx(
+      para('Intro paragraph.') +
+        mixedVisibilityTwoTextBoxParagraph('Visible box text', 'Secret hidden box text')
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const before = objectNodesOf(tree);
+    expect(before).toHaveLength(1);
+    expectObjectMeta(before[0], { kind: 'textBox', generation: 'drawingml', floating: false });
+    // Privacy: the hidden SECOND box's interior text never reaches
+    // interiorTexts — the fix suppresses the ANCHOR, not the OOXML content
+    // (checked directly against the generated document below).
+    expect(objectTextsOf(before[0] as SpecNode)).toEqual(['Visible box text']);
+
+    const docXmlBefore = await generatedDocumentXml(tree);
+    // The hidden box's OWN OOXML — including its w:vanish marker — survives
+    // untouched in the FIRST generation, proving the blob really does still
+    // carry the WHOLE host paragraph (both boxes), not just the visible one.
+    expect(docXmlBefore).toContain('Secret hidden box text');
+    expect(docXmlBefore).toContain('<w:vanish/>');
+
+    const reparsedTree = await regenerateAndReparse(tree);
+    const after = objectNodesOf(reparsedTree);
+
+    expect(after).toHaveLength(1);
+    expectObjectMeta(after[0], { kind: 'textBox', generation: 'drawingml', floating: false });
+    // No-suppression + privacy hold across a FULL regenerate -> re-parse
+    // cycle, not just the first capture.
+    expect(objectTextsOf(after[0] as SpecNode)).toEqual(['Visible box text']);
+
+    const docXmlAfter = await generatedDocumentXml(reparsedTree);
+    // Byte-identity: the hidden box's interior text and its w:vanish marker
+    // are still present verbatim after a SECOND regeneration — the opaque
+    // subtree was never reinterpreted, only ever passed through by reference.
+    expect(docXmlAfter).toContain('Secret hidden box text');
+    expect(docXmlAfter).toContain('<w:vanish/>');
   });
 });
 
