@@ -35,6 +35,19 @@ export default defineConfig({
           // never process.exit(1)s the no-DB unit suite when those vars
           // aren't already set in the shell.
           setupFiles: ['./src/test-utils/unit-env-setup.ts'],
+          // Caps concurrent Vitest worker processes for the unit project.
+          // Default (unbounded) worker count oversubscribes CPU on shared/
+          // contended machines (e.g. several parallel workflows on one
+          // sandbox), which starves fully-mocked, no-I/O tests of scheduler
+          // time and trips Vitest's 5s default testTimeout — not a slow
+          // test, pure CPU contention. Reproduced: under induced contention,
+          // unbounded workers timed out 14-28 tests per run across many
+          // unrelated files; --maxWorkers=4 held at 243/243 across repeated
+          // runs under the same contention. 4 is reused as-is from the
+          // issue's own verified-reliable value rather than re-derived. See
+          // issue #612 (root cause distinct from #608's integration
+          // hookTimeout, which stays untouched).
+          maxWorkers: 4,
         },
       },
       {
