@@ -6,16 +6,39 @@ import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool, createLibrary } from '../db/index.js';
 
-async function insertSpec(section: string, title: string): Promise<string> {
+async function insertSpec(section: string, title: string, libraryId: string): Promise<string> {
   const r = await pool.query<{ id: string }>(
     `INSERT INTO specs (section, title, source, library_id)
-     VALUES ($1, $2, 'unknown', (SELECT id FROM libraries WHERE name = 'Default Company Master'))
+     VALUES ($1, $2, 'unknown', $3)
      RETURNING id`,
-    [section, title]
+    [section, title, libraryId]
   );
   const row = r.rows[0];
   if (!row) throw new Error(`failed to insert spec ${section}`);
   return row.id;
+}
+
+/** Fixture: paragraph carrying an outgoing reference to `targetSection`, plus
+ *  the matching spec_references row. Used to model an unresolved cross-section
+ *  reference (drives the availableFrom broken-ref advisory). */
+async function insertBrokenRefFixture(
+  sourceSpecId: string,
+  targetSection: string,
+  referenceText: string
+): Promise<void> {
+  const paraRes = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, node_type, text, position)
+     VALUES ($1, 'article', $2, 1) RETURNING id`,
+    [sourceSpecId, referenceText]
+  );
+  const paraId = paraRes.rows[0]?.id;
+  if (!paraId) throw new Error(`failed to insert paragraph fixture for spec ${sourceSpecId}`);
+  await pool.query(
+    `INSERT INTO spec_references
+       (source_spec_id, source_paragraph_id, target_type, target_spec_section, reference_text)
+     VALUES ($1, $2, 'section', $3, $4)`,
+    [sourceSpecId, paraId, targetSection, referenceText]
+  );
 }
 
 async function insertProject(name: string): Promise<string> {
@@ -70,29 +93,20 @@ beforeAll(async () => {
   ]);
   companyLibId = companyId;
   [specA, specB] = await Promise.all([
-    insertSpec('03 30 00', 'Concrete'),
-    insertSpec('09 91 00', 'Painting'),
+    insertSpec('03 30 00', 'Concrete', companyLibId),
+    insertSpec('09 91 00', 'Painting', companyLibId),
   ]);
   testProjectId = await insertProject('Phase 1b Integration Test');
   await pool.query(
     `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1,$2,1),($1,$3,2)`,
     [testProjectId, specA, specB]
   );
-  // Fixture for availableFrom advisory test: specA (03 30 00) has an outgoing
-  // ref to 09 91 00, which specB covers in the company master.
-  const paraRes = await pool.query<{ id: string }>(
-    `INSERT INTO paragraphs (spec_id, node_type, text, position)
-     VALUES ($1, 'article', 'See Section 09 91 00', 1) RETURNING id`,
-    [specA]
-  );
-  const paraId = paraRes.rows[0]?.id;
-  if (!paraId) throw new Error('failed to insert paragraph fixture');
-  await pool.query(
-    `INSERT INTO spec_references
-       (source_spec_id, source_paragraph_id, target_type, target_spec_section, reference_text)
-     VALUES ($1, $2, 'section', '09 91 00', 'See Section 09 91 00')`,
-    [specA, paraId]
-  );
+  // Fixture consumed by sibling describes (e.g. POST /projects/:id/specs
+  // 'duplicate section' / '422 when no source holds the section'): specA
+  // (03 30 00) has an outgoing ref to 09 91 00, which specB covers in the
+  // company master. The availableFrom advisory test below uses its OWN
+  // isolated library instead of this shared one — see that describe block.
+  await insertBrokenRefFixture(specA, '09 91 00', 'See Section 09 91 00');
 });
 
 afterAll(async () => {
@@ -368,18 +382,68 @@ describe('POST /projects/:id/specs (section-based copy-on-derive)', () => {
 });
 
 describe('GET /projects/:id/references/broken — availableFrom advisory', () => {
-  it('broken ref lists the source libraries that hold the missing section', async () => {
+  // Root cause (#522): resolveSection's tie-break (src/db/queries/derive.ts,
+  // `ORDER BY ps.priority, s.created_at, s.id`) has no dedup guard on
+  // (library_id, section) and deterministically picks the OLDEST matching spec
+  // row. Against a freshly migrated+seeded DB this is a non-issue — but a dev
+  // DB that has previously run this suite (or crashed mid-run) can carry a
+  // leftover, older '03 30 00' spec in the shared, name-looked-up 'Default
+  // Company Master' library. That older row shadows this describe block's own
+  // freshly-inserted master, so the clone made from POST .../specs carries
+  // none of THIS fixture's outgoing references — the broken-ref list comes
+  // back empty and `.find(...)` yields undefined. Fix: give this describe
+  // block its own uniquely-named library, so its fixtures can never be
+  // shadowed by ambient rows in the shared company master.
+  let advisoryLibId: string;
+  let advisoryMasterId: string;
+  let advisoryTargetId: string;
+  // Set inside the test — its clone (parent_spec_id -> advisoryMasterId) must
+  // be torn down before the master specs, ahead of the module-level apiProjects
+  // cleanup (which runs after every describe block's own afterAll).
+  let advisoryProjectId: string | undefined;
+
+  beforeAll(async () => {
+    const lib = await createLibrary({ tier: 'company', name: `Advisory Master ${Date.now()}` });
+    advisoryLibId = lib.id;
+    [advisoryMasterId, advisoryTargetId] = await Promise.all([
+      insertSpec('03 30 00', 'Advisory Concrete', advisoryLibId),
+      insertSpec('09 91 00', 'Advisory Painting', advisoryLibId),
+    ]);
+    await insertBrokenRefFixture(advisoryMasterId, '09 91 00', 'See Section 09 91 00');
+  });
+
+  afterAll(async () => {
+    // The clone made by POST .../specs (project_id = advisoryProjectId,
+    // parent_spec_id -> advisoryMasterId) is FK-RESTRICT on its parent — it
+    // must go before the master specs, so this can't wait for the
+    // module-level apiProjects cleanup at the bottom of the file.
+    if (advisoryProjectId) {
+      await pool.query('DELETE FROM project_specs WHERE project_id = $1', [advisoryProjectId]);
+      await pool.query('DELETE FROM specs WHERE project_id = $1', [advisoryProjectId]);
+    }
+    await pool.query('DELETE FROM specs WHERE id = ANY($1)', [
+      [advisoryMasterId, advisoryTargetId],
+    ]);
+    // project_sources.library_id is FK-RESTRICT too — same reasoning as the
+    // 'PUT /projects/:id/sources' describe block below.
+    await pool.query('DELETE FROM project_sources WHERE library_id = $1', [advisoryLibId]);
+    await pool.query('DELETE FROM libraries WHERE id = $1', [advisoryLibId]);
+  });
+
+  it('broken ref lists the source libraries that hold the missing section (isolated fixture library — immune to ambient/duplicate 03 30 00 rows in the shared Default Company Master, #522)', async () => {
     const created = await postJSON('/projects', {
       name: `Advisory ${Date.now()}`,
-      sourceLibraryIds: [companyLibId],
+      sourceLibraryIds: [advisoryLibId],
     });
     const pid = (
       ((await created.json()) as Record<string, unknown>)['data'] as Record<string, unknown>
     )['projectId'] as string;
+    advisoryProjectId = pid;
     apiProjects.push(pid);
-    // Clone 03 30 00 — master specA has an outgoing ref to 09 91 00 (specB in the
-    // company master). Since 09 91 00 is not yet in the project, the clone ref is
-    // is_broken=true; availableFrom should name the company master library.
+    // Clone 03 30 00 — advisoryMasterId has an outgoing ref to 09 91 00
+    // (advisoryTargetId, in the same dedicated library). Since 09 91 00 is not
+    // yet in the project, the clone ref is is_broken=true; availableFrom
+    // should name the dedicated advisory library.
     await postJSON(`/projects/${pid}/specs`, { section: '03 30 00' });
     const res = await fetch(`${baseUrl}/projects/${pid}/references/broken`);
     expect(res.status).toBe(200);
@@ -388,7 +452,7 @@ describe('GET /projects/:id/references/broken — availableFrom advisory', () =>
     >;
     const ref = refs.find((r) => r['targetSpecSection'] === '09 91 00');
     expect(ref).toBeDefined();
-    expect(ref?.['availableFrom']).toEqual([expect.objectContaining({ libraryId: companyLibId })]);
+    expect(ref?.['availableFrom']).toEqual([expect.objectContaining({ libraryId: advisoryLibId })]);
   });
 
   it('400 — malformed (non-UUID) project id (#568)', async () => {
