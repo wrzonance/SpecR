@@ -176,12 +176,18 @@ interface ChildrenTransformResult {
 // `w:p` — that is what lets one recursive walk serve both a table root
 // (`w:tbl`, never itself `w:p`) and a text box's host paragraph root
 // (`w:p`, which must NOT be mistaken for one of its own interior leaves).
-function transformInteriorParagraphs(node: ObjectBlobNode): InteriorTransformResult {
+// `hiddenSubtrees` (#515, ADR-086) is the set of `w:txbxContent` boundary
+// nodes — identity-matched, produced by resolveHiddenTxbxContentNodes — this
+// walk must treat as opaque; see transformChildren's pass-through branch.
+function transformInteriorParagraphs(
+  node: ObjectBlobNode,
+  hiddenSubtrees: ReadonlySet<ObjectBlobNode>
+): InteriorTransformResult {
   const tag = tagOf(node);
   if (!tag) return { node, interiorTexts: [] };
   const value = node[tag];
   if (!isBlobNodeArray(value)) return { node, interiorTexts: [] };
-  const { children, interiorTexts } = transformChildren(value);
+  const { children, interiorTexts } = transformChildren(value, hiddenSubtrees);
   const attrs = node[':@'];
   // `as ObjectBlobNode` mirrors object-anchor.ts's own established narrowing
   // (see wrapBlobParagraphWithAnchor): ObjectBlobNode's index signature plus
@@ -199,10 +205,22 @@ function transformInteriorParagraphs(node: ObjectBlobNode): InteriorTransformRes
 // "objectText non-emptiness precondition" pins this as THIS layer's job, not
 // wrapBlobParagraphWithAnchor's — an anchor with no corresponding objectText
 // leaf would be a dangling, never-reachable UUID.
-function transformChildren(children: readonly ObjectBlobNode[]): ChildrenTransformResult {
+function transformChildren(
+  children: readonly ObjectBlobNode[],
+  hiddenSubtrees: ReadonlySet<ObjectBlobNode>
+): ChildrenTransformResult {
   const newChildren: ObjectBlobNode[] = [];
   const interiorTexts: CapturedObjectText[] = [];
   for (const child of children) {
+    // #515: a hidden w:txbxContent boundary is opaque — pushed through by
+    // the SAME reference (provably serialization-unaffected), contributing
+    // no interiorTexts, never recursed into. Checked BEFORE the 'w:p' check
+    // since a text box's host paragraph itself can never be a boundary, but
+    // this branch must still win over any nested w:p the boundary contains.
+    if (hiddenSubtrees.has(child)) {
+      newChildren.push(child);
+      continue;
+    }
     if (tagOf(child) === 'w:p') {
       const text = extractBlobText(child);
       if (text.trim().length === 0) {
@@ -214,15 +232,25 @@ function transformChildren(children: readonly ObjectBlobNode[]): ChildrenTransfo
       interiorTexts.push({ id, text });
       continue;
     }
-    const transformed = transformInteriorParagraphs(child);
+    const transformed = transformInteriorParagraphs(child, hiddenSubtrees);
     newChildren.push(transformed.node);
     interiorTexts.push(...transformed.interiorTexts);
   }
   return { children: newChildren, interiorTexts };
 }
 
-function anchorInteriorParagraphs(root: ObjectBlobNode): InteriorTransformResult {
-  return transformInteriorParagraphs(root);
+/** The public entry point for the interior-paragraph anchor walk (#515,
+ * ADR-086): both {@link buildTableObject} and (a later task)
+ * {@link buildTextBoxObject} call this, never the two private inner
+ * functions directly. `hiddenSubtrees` defaults to an empty set — a no-op —
+ * so every EXISTING call site (buildTableObject's own
+ * `anchorInteriorParagraphs(normalized)`) compiles and behaves byte-for-byte
+ * unchanged with zero edits. */
+export function anchorInteriorParagraphs(
+  root: ObjectBlobNode,
+  hiddenSubtrees: ReadonlySet<ObjectBlobNode> = new Set()
+): InteriorTransformResult {
+  return transformInteriorParagraphs(root, hiddenSubtrees);
 }
 
 // ─── table capture ──────────────────────────────────────────────────────────

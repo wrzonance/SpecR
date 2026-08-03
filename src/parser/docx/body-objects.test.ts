@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { extractBodyObjects } from './body-objects.js';
+import { extractBodyObjects, anchorInteriorParagraphs } from './body-objects.js';
 import { computeBodyOrder } from './body-order.js';
 import { createDocumentXmlParser, createOrderedDocumentXmlBuilder, toArray } from './xml-utils.js';
 import { buildStyleMap } from './styles.js';
 import { UUID_TAG_PREFIX } from '../../ast/index.js';
 import type { StyleMap } from './types.js';
 import type { BodyObjectExtractionResult } from './body-objects.js';
+import type { ObjectBlobNode } from '../../ast/index.js';
 
 const NS = [
   'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"',
@@ -206,6 +207,88 @@ function tagValues(blob: readonly unknown[]): readonly string[] {
   const xml = createOrderedDocumentXmlBuilder().build(blob);
   return [...xml.matchAll(/<w:tag w:val="([^"]*)"/g)].map((m) => m[1] ?? '');
 }
+
+// Hand-built ObjectBlobNode fixtures (preserveOrder-mode shape) for
+// anchorInteriorParagraphs's own unit tests below — mirrors
+// body-text-box-visibility.test.ts's own fixture style rather than reusing
+// the XML-string builders above (`para`, `textBoxParagraph`, …), which build
+// a DIFFERENT shape (raw XML strings, not ObjectBlobNode trees).
+function blobTextNode(text: string): ObjectBlobNode {
+  return { '#text': text };
+}
+
+function blobPara(text: string): ObjectBlobNode {
+  return { 'w:p': [{ 'w:r': [{ 'w:t': [blobTextNode(text)] }] }] };
+}
+
+function blobTxbxContent(text: string): ObjectBlobNode {
+  return { 'w:txbxContent': [blobPara(text)] };
+}
+
+// A drawing run wrapping one txbxContent boundary, nested several levels deep
+// (w:r > w:drawing > a:graphic > a:graphicData > wps:txbx > w:txbxContent) —
+// the same nesting shape body-text-box-visibility.test.ts's drawingRun uses.
+function blobDrawingRun(content: ObjectBlobNode): ObjectBlobNode {
+  return {
+    'w:r': [{ 'w:drawing': [{ 'a:graphic': [{ 'a:graphicData': [{ 'wps:txbx': [content] }] }] }] }],
+  };
+}
+
+function blobHostParagraph(children: readonly ObjectBlobNode[]): ObjectBlobNode {
+  return { 'w:p': children };
+}
+
+// Depth-first search for the first `w:txbxContent`-tagged descendant of
+// `node` (including `node` itself) — a local test-only helper, not a
+// duplicate of body-objects.ts's own collection logic (this one is used only
+// to LOCATE the boundary in the returned tree for a reference-identity check).
+function findTxbxContentNode(node: ObjectBlobNode): ObjectBlobNode | undefined {
+  const tag = Object.keys(node).find((key) => key !== ':@');
+  if (tag === 'w:txbxContent') return node;
+  const value = tag ? node[tag] : undefined;
+  if (!Array.isArray(value)) return undefined;
+  for (const child of value as readonly ObjectBlobNode[]) {
+    const found = findTxbxContentNode(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+describe('anchorInteriorParagraphs — hiddenSubtrees pass-through (#515 task 3)', () => {
+  it('backward compatibility: default (no hiddenSubtrees) anchors an interior paragraph exactly as before', () => {
+    const inner = blobTxbxContent('interior text');
+    const host = blobHostParagraph([blobDrawingRun(inner)]);
+
+    const result = anchorInteriorParagraphs(host);
+
+    expect(result.interiorTexts.map((t) => t.text)).toEqual(['interior text']);
+    // The w:txbxContent boundary itself gets REBUILT (its interior w:p is
+    // anchored), so it must NOT be the same reference as the original —
+    // proves this test's control case actually exercises the anchor path.
+    expect(findTxbxContentNode(result.node)).not.toBe(inner);
+  });
+
+  it('round-trip byte-identity: a hiddenSubtrees-matched w:txbxContent node passes through UNCHANGED (same reference), contributing no interiorTexts', () => {
+    const inner = blobTxbxContent('secret interior text');
+    const host = blobHostParagraph([blobDrawingRun(inner)]);
+
+    const result = anchorInteriorParagraphs(host, new Set([inner]));
+
+    expect(result.interiorTexts).toEqual([]);
+    // Same object reference, never rebuilt or recursed into — the exact
+    // invariant buildTextBoxObject's future wiring (a later task) depends on
+    // for provable serialization equivalence.
+    expect(findTxbxContentNode(result.node)).toBe(inner);
+  });
+
+  it('backward compatibility: buildTableObject-style caller (single-argument call) still type-checks and anchors normally', () => {
+    // Mirrors buildTableObject's own zero-edit call site:
+    // `anchorInteriorParagraphs(normalized)`, no second argument.
+    const host = blobHostParagraph([blobPara('table cell text')]);
+    const result = anchorInteriorParagraphs(host);
+    expect(result.interiorTexts.map((t) => t.text)).toEqual(['table cell text']);
+  });
+});
 
 describe('extractBodyObjects — no-silent-loss across tables, text boxes, and dropped drawables', () => {
   it('captures a table and a text box, and drops a chart, all from one document — nothing lost', () => {
