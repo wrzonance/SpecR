@@ -2,7 +2,7 @@
 // (#150, task 4/8): upload -> parse -> import -> generate. Mirrors
 // src/api/parse.ts's fire-and-forget pattern — startRun() creates the
 // RunRecord synchronously and returns its runId immediately; the actual
-// work happens in executeRun(), invoked with `void` so its caller (a
+// work happens in executeRun(), started in the background so its caller (a
 // future HTTP handler) never awaits it.
 //
 // Per issue #150 design decision 3, this pipeline stops at 'generate'.
@@ -22,6 +22,16 @@
 // without duplicating either — its RunRecord has no templateId of its own,
 // which is exactly why runGenerate's templateId param widened to
 // `string | undefined`.
+//
+// executeRun's completion is still fire-and-forget from startRun's caller's
+// perspective, but it is NOT discarded (#604): startRun hands the promise to
+// deps.runStore.trackPending() instead of a bare `void`. This exists so a
+// lifecycle owner that controls this store's workRoot — e.g. a test's
+// afterEach about to rmSync it — can await runStore.waitForIdle() first and
+// know every detached run has actually finished writing before the
+// directory disappears out from under it. Do not revert this to a bare
+// `void executeRun(...)`; that reintroduces the workRoot-removal race
+// waitForIdle exists to close.
 
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
@@ -183,7 +193,7 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       ...(input.options?.section !== undefined ? { section: input.options.section } : {}),
       ...(input.options?.title !== undefined ? { title: input.options.title } : {}),
     });
-    void executeRun(deps, record, input);
+    deps.runStore.trackPending(executeRun(deps, record, input));
     return record.runId;
   }
 

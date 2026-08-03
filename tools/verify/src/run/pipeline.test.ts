@@ -14,10 +14,35 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPipeline, runGenerate } from './pipeline.js';
 import { createRunStore, type RunStore } from './run-store.js';
 import type { ApiClient, GenerateDocxOptions } from '../api-client/client.js';
+
+// Controllable interception point for the generate stage's writeFile call
+// (#604) — see the "waitForIdle does not settle" test below. `vi.hoisted`
+// keeps this state reachable from the mock factory, which vitest hoists
+// above this file's top-level `let`/`const` declarations. Every other
+// writeFile call (e.g. reference.docx) always falls through to the real
+// implementation, so the rest of this suite's real-disk assertions are
+// unaffected.
+const writeFileControl = vi.hoisted(() => ({
+  interceptGeneratedWrite: undefined as (() => Promise<void>) | undefined,
+}));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    writeFile: (filePath: string, data: Uint8Array): Promise<void> => {
+      const intercept = writeFileControl.interceptGeneratedWrite;
+      if (intercept !== undefined && filePath.endsWith('generated.docx')) {
+        return intercept();
+      }
+      return actual.writeFile(filePath, data);
+    },
+  };
+});
 
 function stubApiClient(overrides: Partial<ApiClient> = {}): ApiClient {
   const defaults: ApiClient = {
@@ -82,7 +107,10 @@ describe('pipeline (orchestration + no-escape boundary)', () => {
     runStore = createRunStore(workRoot);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // #604: drain any run still writing into workRoot before removing it —
+    // rmSync races a detached executeRun() otherwise (ENOTEMPTY).
+    await runStore.waitForIdle();
     rmSync(workRoot, { recursive: true, force: true });
   });
 
@@ -98,6 +126,119 @@ describe('pipeline (orchestration + no-escape boundary)', () => {
     const record = runStore.getRun(runId);
     expect(record).toBeDefined();
     expect(record?.referenceFilename).toBe('reference.docx');
+  });
+
+  it('tracks a detached run started through a spread-wrapped RunStore, so waitForIdle drains it (#604)', async () => {
+    let uploadResolved = false;
+    const apiClient = stubApiClient({
+      uploadForParse: () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            uploadResolved = true;
+            resolve('job-1');
+          }, 20);
+        }),
+    });
+    // A plain spread — like brokenRunStore's own `{ ...base, ... }` shape —
+    // must still forward to trackPending/waitForIdle's closure-bound
+    // functions over the *base* store's `pending` Set, not lose them.
+    const wrappedStore: RunStore = { ...runStore };
+    const pipeline = createPipeline({ apiClient, runStore: wrappedStore });
+
+    pipeline.startRun({
+      referenceBuffer: Buffer.from('docx bytes'),
+      referenceFilename: 'reference.docx',
+    });
+
+    // If startRun still discarded executeRun's completion via a bare
+    // `void`, nothing would be registered in the base store's pending set,
+    // and this would resolve immediately — well before the delayed
+    // uploadForParse settles.
+    await runStore.waitForIdle();
+
+    expect(uploadResolved).toBe(true);
+  });
+
+  it('run-store: waitForIdle drains an in-flight run before its workRoot can be safely removed', async () => {
+    const apiClient = stubApiClient();
+    const pipeline = createPipeline({ apiClient, runStore });
+
+    // Deliberately not awaited — mirrors startRun's real fire-and-forget
+    // callers (e.g. src/api/parse.ts). waitForIdle is the only thing this
+    // test relies on to know the run finished.
+    const runId = pipeline.startRun({
+      referenceBuffer: Buffer.from('docx bytes'),
+      referenceFilename: 'reference.docx',
+    });
+
+    await runStore.waitForIdle();
+
+    const run = runStore.getRun(runId);
+    if (run === undefined) throw new Error('run missing after waitForIdle resolved');
+    expect(run.status).not.toBe('running');
+
+    // The in-memory status check above pins nothing about the run's actual
+    // disk writes (#604 finding): if runGenerate's final writeFile were ever
+    // changed to fire-and-forget (`void writeFile(...)`) ahead of the
+    // 'complete' updateRun() call, executeRun's tracked promise — and thus
+    // waitForIdle() — would settle before generated.docx actually landed on
+    // disk, while `run.status` would already read 'complete'. Assert the
+    // real artifact is there, and that the run's directory is immediately,
+    // deterministically removable right after waitForIdle resolves — the
+    // exact precondition this test's name claims to pin.
+    const generatedPath = run.artifacts.generatedPath;
+    if (generatedPath === undefined) throw new Error('generatedPath missing after waitForIdle');
+    expect(existsSync(generatedPath)).toBe(true);
+    expect(() => rmSync(runStore.runDir(runId), { recursive: true })).not.toThrow();
+  });
+
+  it("waitForIdle does not settle until the generate stage's writeFile has actually settled (#604)", async () => {
+    // A real-disk race (tiny buffer, tmpfs) settles too fast to reliably
+    // catch a regression to `void writeFile(...)` — see the previous test's
+    // comment. This test controls the writeFile promise directly so the
+    // assertion is deterministic regardless of disk speed: it proves
+    // waitForIdle()'s pending promise is genuinely chained through
+    // generated.docx's write, not just through the synchronous code that
+    // follows it.
+    let releaseWrite: (() => void) | undefined;
+    writeFileControl.interceptGeneratedWrite = () =>
+      new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+
+    try {
+      const apiClient = stubApiClient();
+      const pipeline = createPipeline({ apiClient, runStore });
+
+      pipeline.startRun({
+        referenceBuffer: Buffer.from('docx bytes'),
+        referenceFilename: 'reference.docx',
+      });
+
+      await waitFor(() => releaseWrite !== undefined);
+
+      let idleSettled = false;
+      const idle = runStore.waitForIdle().then(() => {
+        idleSettled = true;
+      });
+
+      // Give the microtask/timer queue ample room to (wrongly) settle
+      // waitForIdle if the write were not actually being awaited.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(idleSettled).toBe(false);
+
+      releaseWrite?.();
+      await idle;
+
+      expect(idleSettled).toBe(true);
+    } finally {
+      // Release the intercepted write even on the failure path. Without this,
+      // a failed waitFor/assertion leaves the write promise permanently
+      // unsettled, so the run never settles, so afterEach's waitForIdle()
+      // never resolves — turning a clean test failure into a suite hang.
+      releaseWrite?.();
+      writeFileControl.interceptGeneratedWrite = undefined;
+    }
   });
 
   it('drives a successful run through upload -> parse -> import -> generate, then stops', async () => {

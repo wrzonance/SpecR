@@ -93,3 +93,153 @@ describe('run-store (immutability + manifest persistence)', () => {
     expect(JSON.parse(readFileSync(manifestFile, 'utf8'))).toEqual(updated);
   });
 });
+
+// #604: trackPending/waitForIdle let a lifecycle owner (e.g. a test's
+// afterEach) drain a detached run's outstanding async work before removing
+// workRoot out from under it. The tests below pin waitForIdle's observable
+// contract (resolves once tracked work settles, snapshots at call time,
+// never rejects/hangs). The "pending never grows unbounded" self-cleaning
+// claim is a distinct, memory-only invariant — no timing/rejection
+// assertion on waitForIdle can distinguish a self-cleaning Set from one
+// that retains settled promises forever, so it is NOT implicitly covered
+// by those cases. It gets its own explicit, reachability-based regression
+// test below (WeakRef + --expose-gc, skipped when the flag isn't present).
+describe('run-store (trackPending / waitForIdle — #604)', () => {
+  let workRoot: string;
+  let store: RunStore;
+
+  beforeEach(() => {
+    workRoot = mkdtempSync(path.join(tmpdir(), 'specr-verify-run-store-pending-'));
+    store = createRunStore(workRoot);
+  });
+
+  afterEach(() => {
+    rmSync(workRoot, { recursive: true, force: true });
+  });
+
+  it('trackPending never throws and never produces an unhandled rejection for a rejecting promise', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    try {
+      expect(() => {
+        store.trackPending(Promise.reject(new Error('boom')));
+      }).not.toThrow();
+
+      await store.waitForIdle();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandledRejection);
+    }
+  });
+
+  it('waitForIdle resolves once every tracked promise has settled, and never rejects even when one rejects', async () => {
+    let resolveA: () => void = () => {
+      throw new Error('resolveA not assigned');
+    };
+    const pending = new Promise<void>((resolve) => {
+      resolveA = resolve;
+    });
+
+    store.trackPending(pending);
+    store.trackPending(Promise.reject(new Error('a rejecting tracked promise')));
+
+    let settled = false;
+    const idle = store.waitForIdle().then(() => {
+      settled = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+
+    resolveA();
+    await idle;
+
+    expect(settled).toBe(true);
+  });
+
+  it('waitForIdle drains work registered *while* it is waiting, not just a call-time snapshot', async () => {
+    // The teardown gate's whole point is "nothing is writing under workRoot".
+    // A snapshot taken at call time would report idle while a run registered
+    // mid-drain is still writing — into a directory the caller is about to
+    // rmSync. So later arrivals must extend the wait, not be ignored.
+    const resolvers: Array<() => void> = [];
+    const track = (): void => {
+      store.trackPending(
+        new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        })
+      );
+    };
+
+    track();
+    const idle = store.waitForIdle();
+
+    let idleSettled = false;
+    void idle.then(() => {
+      idleSettled = true;
+    });
+
+    // Registered after waitForIdle() was already called.
+    track();
+
+    // Release only the first — the second is still outstanding, so idle must
+    // not have settled.
+    resolvers[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(idleSettled).toBe(false);
+
+    resolvers[1]?.();
+    await expect(idle).resolves.toBeUndefined();
+    expect(idleSettled).toBe(true);
+  });
+
+  it('waitForIdle no-ops immediately when nothing is pending', async () => {
+    await expect(store.waitForIdle()).resolves.toBeUndefined();
+  });
+
+  // Requires `--expose-gc` (wired into this package's `test` script) to
+  // force a deterministic collection; skips rather than false-passing on a
+  // runner that starts node without the flag.
+  it.skipIf(typeof globalThis.gc !== 'function')(
+    'trackPending releases its reference to a settled promise, so pending never grows unbounded',
+    async () => {
+      let ref!: WeakRef<Promise<void>>;
+      (() => {
+        const completion = Promise.resolve();
+        ref = new WeakRef(completion);
+        store.trackPending(completion);
+      })();
+
+      // Let the tracked promise settle and its `.finally` cleanup run
+      // before forcing a collection pass.
+      await store.waitForIdle();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // A single gc() pass is not a guarantee — V8 may keep a just-settled
+      // promise reachable for another cycle, which would make a one-shot
+      // assertion flaky. Retry a bounded number of times.
+      //
+      // The yields are load-bearing, not padding: per spec a WeakRef.deref()
+      // that returns the target keeps it alive for the remainder of the
+      // current job. Checking the ref and then calling gc() in the same turn
+      // would therefore pin the very object we are asking to be collected —
+      // the reason a naive retry loop fails where a single pass succeeds. So
+      // each iteration ends its job before the next gc().
+      let collected = false;
+      for (let attempt = 0; attempt < 10 && !collected; attempt += 1) {
+        globalThis.gc?.();
+        await new Promise((resolve) => setImmediate(resolve));
+        collected = ref.deref() === undefined;
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+
+      expect(collected).toBe(true);
+    }
+  );
+});
