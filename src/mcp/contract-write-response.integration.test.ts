@@ -190,6 +190,15 @@ const INV6_DRIVEN: readonly DrivenCase[] = [
     invoke: async () => handleDeleteSpec({ specId: await seedWithdrawableSpecId() }),
   },
   {
+    // SCOPE NOTE: INV-6 validates the payload against the op's OpenAPI response schema, which is
+    // not `additionalProperties: false` — so an UNDOCUMENTED EXTRA key passes. delete_package is
+    // the one driven op where that matters today: REST returns `{ packageId }`
+    // (api/packages.ts:deletePackageHandler) and openapi documents exactly that, while
+    // handleDeletePackage returns `{ deleted: true, packageId }`. The `deleted` key is a real,
+    // PRE-EXISTING REST<->MCP divergence this gate cannot see; driving the op still proves the
+    // documented fields are present and correctly typed (a dropped `packageId` fails here), which
+    // is what INV-6 claims — no more. Aligning the handler is a production change tracked in #640,
+    // deliberately not folded into this test-only PR.
     op: 'delete /packages/{}',
     tool: 'delete_package',
     status: 200,
