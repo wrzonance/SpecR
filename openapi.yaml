@@ -9991,6 +9991,13 @@ components:
         term:
           type: string
           minLength: 1
+          maxLength: 500
+          description: >
+            For a literal term (isRegex omitted or false) this length bound is
+            enforced at write time (#541, LanguageRulesWriteSchema) — a PUT
+            exceeding it is rejected. Pre-existing rows longer than this are
+            grandfathered and continue to read successfully; the bound is
+            structural here purely to document the write-time contract.
         isRegex:
           type: boolean
           description: Interpret `term` as a regex pattern; a literal term is boundary-matched instead.
@@ -10000,18 +10007,29 @@ components:
     LanguageRules:
       type: object
       additionalProperties: false
+      description: >
+        Each array below caps at 500 LITERAL (isRegex omitted or false) terms,
+        enforced at write time across bannedTerms/reinforcingWords/
+        partyVocabulary/requiredPhrases combined (#541,
+        LanguageRulesWriteSchema) — a PUT whose literal terms exceed this
+        combined total is rejected. Pre-existing profiles over the cap are
+        grandfathered and continue to read successfully.
       properties:
         bannedTerms:
           type: array
+          maxItems: 500
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
         reinforcingWords:
           type: array
+          maxItems: 500
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
         partyVocabulary:
           type: array
+          maxItems: 500
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
         requiredPhrases:
           type: array
+          maxItems: 500
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
     LanguageRuleProfile:
       type: object
