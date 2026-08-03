@@ -12,6 +12,7 @@ import {
   OPS_WITH_OBJECT_LEVEL_RULE,
   SCHEMA_SHARING_EXEMPT,
   SCHEMA_SHARING_PENDING,
+  SCHEMA_SHARING_PENDING_BASELINE,
 } from './contract-schema-sharing-map.js';
 import { toolInputKeys, isFullSchemaInstance } from './tool-schema-introspect.js';
 import {
@@ -122,8 +123,42 @@ describe('Item 5: schema-instance-sharing (object-level rules survive SDK regist
     }
   });
 
-  it('submittal_register stays PENDING (#550) — never silently EXEMPT, never asserted-failing here', () => {
+  // Self-cleaning burn-down. Every PENDING entry must describe a gap that is STILL REAL: the op's
+  // tool must still register a raw shape. The moment the gap closes — e.g. #550 switching
+  // submittal_register from a `.shape` spread to `.extend()` — this fails and demands the entry be
+  // deleted, at which point the main gate above picks the op up and proves the rule survives.
+  // Without this, a resolved gap could sit in PENDING forever, claiming an unresolved divergence
+  // that no longer exists (the main gate filters pending ops out before checking them).
+  it.each([...SCHEMA_SHARING_PENDING])(
+    '%s: the deferred gap is still real (a fixed op must leave SCHEMA_SHARING_PENDING)',
+    (op) => {
+      const tool = OP_TO_TOOL.get(op);
+      expect(tool, `${op} is not in OP_TO_TOOL`).toBeDefined();
+      const schema = schemas.get(tool!);
+      expect(schema, `${tool} (${op}) registers no inputSchema`).toBeDefined();
+      expect(
+        isFullSchemaInstance(schema),
+        `${tool} (${op}) now registers a full schema instance, so its object-level rule survives ` +
+          'and the deferred gap is CLOSED — delete this entry from SCHEMA_SHARING_PENDING (the ' +
+          'main Item 5 gate then covers the op) and lower SCHEMA_SHARING_PENDING_BASELINE.'
+      ).toBe(false);
+    }
+  );
+
+  it('Item 5 ratchet: schema-sharing pending burn-down never grows', () => {
+    expect(SCHEMA_SHARING_PENDING.size).toBeLessThanOrEqual(SCHEMA_SHARING_PENDING_BASELINE);
+  });
+
+  // Anti-laundering pin: while the #550 gap is open, that op must sit in PENDING and never be
+  // moved into SCHEMA_SHARING_EXEMPT (reserved for VERIFIED-safe cases). Guarded on the gap still
+  // being open so it cannot fight the self-cleaning gate above — once #550's fix lands, that gate
+  // demands the PENDING entry be deleted and this pin goes quiet instead of pinning a stale entry
+  // in place. Delete this test together with the entry.
+  it('submittal_register: while the #550 gap is open it stays PENDING, never silently EXEMPT', () => {
     const op = 'post /projects/{}/submittal-register';
+    const tool = OP_TO_TOOL.get(op);
+    expect(tool, `${op} is not in OP_TO_TOOL`).toBeDefined();
+    if (isFullSchemaInstance(schemas.get(tool!))) return; // gap closed — the self-cleaning gate owns it
     expect(SCHEMA_SHARING_PENDING.has(op)).toBe(true);
     expect(SCHEMA_SHARING_EXEMPT.has(op)).toBe(false);
   });

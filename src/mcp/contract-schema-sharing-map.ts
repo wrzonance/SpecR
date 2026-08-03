@@ -201,6 +201,11 @@ export const SCHEMA_SHARING_EXEMPT: ReadonlyMap<string, string> = new Map([
 // re-asserts it), deferred to a follow-up issue rather than fixed in THIS PR — kept out of
 // SCHEMA_SHARING_EXEMPT (which is only for VERIFIED-safe cases) so the gate stays honest about
 // what's actually unresolved. Never both PENDING and EXEMPT for the same op.
+//
+// SELF-CLEANING: the gate asserts every entry here STILL fails isFullSchemaInstance() — an op
+// whose gap gets closed makes its own entry fail, forcing deletion. So this set can never sit on
+// an already-resolved gap, and a removed entry falls straight back into the main Item 5 check.
+// Bounded on the other side by SCHEMA_SHARING_PENDING_BASELINE below.
 export const SCHEMA_SHARING_PENDING: ReadonlySet<string> = new Set([
   // submittal_register spreads SubmittalRegisterBodySchema.shape into its inputSchema
   // (tools.ts), losing the duplicate-specIds .check() at the SDK layer — the same gap as the
@@ -213,3 +218,13 @@ export const SCHEMA_SHARING_PENDING: ReadonlySet<string> = new Set([
   // second parse). Never assert-failing in THIS PR's own test run; #550 promotes or fixes it.
   'post /projects/{}/submittal-register',
 ]);
+
+/**
+ * Item 5 ratchet baseline (#549). SCHEMA_SHARING_PENDING.size must never grow past this count,
+ * mirroring INV5_READ_PENDING_BASELINE (contract-map.ts) and INV6_WRITE_PENDING_BASELINE
+ * (contract-write-response-map.ts). Without it the burn-down set is the one place a future
+ * schema-sharing divergence could be parked silently — the exact failure mode this gate exists to
+ * close. Verified by direct count on 2026-08-03: the set held exactly 1 entry when the ratchet was
+ * introduced. Lower it whenever an entry graduates out.
+ */
+export const SCHEMA_SHARING_PENDING_BASELINE = 1;
