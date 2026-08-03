@@ -51,10 +51,35 @@ are both restricted to an ASCII-only alphabet. Every character in both alphabets
 single UTF-16 unit *and* a single Unicode code point, so the two counting methods are
 always numerically identical at those two sites — there is no divergence for either
 direction to fix, so they are excluded from this decision rather than silently skipped.
-The MCP twins of the 7 in-scope sites (`RecordStandardVerificationShape` in
-`src/mcp/standards-handlers.ts`, `ResolveUserShape` in `src/mcp/users-handlers.ts`)
-already reuse the same REST Zod validators, so they inherit whichever convention this
-ADR picks with no separate MCP-side change.
+### The MCP surface is in scope too
+
+`openapi.yaml` is not the only place this repo publishes these bounds. Each MCP tool's
+JSON Schema is **generated** from its Zod shape, and the SDK copies a declarative
+`.max(n)` / `z.maxLength(n)` straight through as `maxLength: n`. An MCP client therefore
+reads the same code-point-defined keyword the REST contract does — mechanically, with no
+prose to consult unless the field's `.describe()` carries it. Enumerated by generating
+every registered tool's schema (not by grep), the MCP surface publishes **139**
+`maxLength` fields:
+
+| MCP fields | Origin | Disposition |
+|---|---|---|
+| 5 | `ResolveUserShape.label`; `RecordStandardVerificationShape.{currentVersion,sourceUrl,title,notes}` | in scope — note added |
+| 6 | `actorLabel` on `update_paragraph`, `insert_paragraph`, `remove_paragraph`, `accept_comment_as_note`, `apply_merge`, `create_checkpoint` | in scope — note added |
+| 128 | `imageData` (every header/footer region × variant on 4 `set_*_header_footer` tools) | excluded — ASCII-only base64 |
+
+The first group does **not** reuse the REST validators — `ResolveUserShape` and
+`RecordStandardVerificationShape` each re-declare their own `.max(n)` literals, so they
+inherit nothing and were annotated individually. The second group *is* genuine reuse of
+the shared `ActorLabelSchema` (`src/ast/actor-schemas.ts`), so the note lives on that
+schema and propagates to all six tools; the two sites that override with their own
+`.describe()` (`MergeFieldsShape.actorLabel`, `AcceptCommentShape.actorLabel`) append it
+explicitly. `LanguageRuleTermWrite.term` has no MCP twin that publishes a bound.
+
+Because the MCP inventory is generated rather than hand-authored, a future tool can
+publish a fresh `maxLength` with no contract file edited. That is pinned as an invariant
+rather than an inventory: `src/mcp/length-limit-unit-convention.test.ts` walks every
+registered tool's generated schema and fails on any `maxLength` that carries neither the
+note nor a justified ASCII-only exemption.
 
 ## Decision
 
@@ -125,7 +150,14 @@ consumer, and wastes the inventory work this issue already did. Rejected.
   (`src/lib/length-limit-note.ts`'s `UTF16_LENGTH_LIMIT_NOTE`) stating the limit is
   counted in UTF-16 code units, referencing this ADR. A drift-guard test
   (`src/api/length-limit-unit-convention.test.ts`) pins the exact wording so the prose
-  and the constant cannot silently diverge.
+  and the constant cannot silently diverge, and pins each MCP twin's bound against its
+  REST counterpart so the two surfaces cannot drift apart numerically.
+- All 11 in-scope MCP tool fields carry the same sentence in their `.describe()`, so the
+  generated tool schemas document the divergence as fully as `openapi.yaml` does. The
+  MCP side is gated by an invariant sweep rather than a site list
+  (`src/mcp/length-limit-unit-convention.test.ts`), because those schemas are generated:
+  a new tool publishing a bare `maxLength` fails by default instead of slipping past an
+  enumeration.
 - No enforced behavior changes anywhere. The blast radius this ADR accepts, unchanged
   from before: a caller writing 250+ astral characters (emoji, rare CJK, math
   alphanumerics) into one of these descriptive fields gets a 422 that a strictly

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ActorLabelSchema } from './actor-schemas.js';
 import { ObjectKindSchema } from './object-schemas.js';
+import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
 
 // Request-body schema for applying an accepted merge (POST /specs/:id/merge and the
 // apply_merge MCP tool). The nested DiffResultSchema mirrors the merge module's
@@ -118,7 +119,8 @@ export const MergeFieldsShape = {
   // never passed through as a whole object, so exactOptionalPropertyTypes is a
   // non-issue here.
   actorLabel: ActorLabelSchema.optional().describe(
-    'Caller identity attributed to this merge in paragraph history; omitted falls back to a system sentinel'
+    'Caller identity attributed to this merge in paragraph history; omitted falls back to a ' +
+      `system sentinel. ${UTF16_LENGTH_LIMIT_NOTE}`
   ),
 };
 

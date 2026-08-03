@@ -16,6 +16,7 @@ import {
   ActorLabelSchema,
 } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
+import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
 
 // Map an edit-gate error (ADR-018) to a tool error, or null to fall through to the
@@ -158,7 +159,8 @@ export const AcceptCommentShape = {
     .min(0)
     .describe('Zero-based index into the anchor paragraph’s source_facts.comments'),
   actorLabel: ActorLabelSchema.optional().describe(
-    'Caller identity attributed to the resulting note in paragraph history; omitted falls back to a system sentinel'
+    'Caller identity attributed to the resulting note in paragraph history; omitted falls back ' +
+      `to a system sentinel. ${UTF16_LENGTH_LIMIT_NOTE}`
   ),
 };
 const AcceptCommentArgs = z.object(AcceptCommentShape);

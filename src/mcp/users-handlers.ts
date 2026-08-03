@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { resolveOrCreateUserByLabel, listUsers, getUser } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
 
 export const UserIdShape = {
@@ -17,7 +18,7 @@ export const ResolveUserShape = {
     .describe(
       'Actor label to resolve or create (case-sensitive, exact-match identity — spoofable ' +
         'pre-#43, same trust tier as ADR-018 lock holder; idempotent — same label always ' +
-        'returns the same user.id)'
+        `returns the same user.id). ${UTF16_LENGTH_LIMIT_NOTE}`
     ),
 };
 const ResolveUserArgs = z.object(ResolveUserShape);

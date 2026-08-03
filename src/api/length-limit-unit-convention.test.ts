@@ -38,6 +38,8 @@ import { ActorLabelSchema } from '../ast/index.js';
 import { loadRawSpec } from '../test-utils/contract/validate-response.js';
 import { VerificationBodySchema } from './standards.js';
 import { ResolveUserBody } from './users.js';
+import { ResolveUserShape } from '../mcp/users-handlers.js';
+import { RecordStandardVerificationShape } from '../mcp/standards-handlers.js';
 
 // A non-BMP character: U+1F600 GRINNING FACE, 1 Unicode code point, 2 UTF-16
 // code units (a surrogate pair). Repeating it N times yields a string whose
@@ -227,6 +229,92 @@ describe('openapi.yaml — ASCII-only sites stay excluded from the ADR-088 note 
           'UTF16_LENGTH_LIMIT_NOTE — if it does, ADR-088 scope has drifted and this site belongs in ' +
           'LENGTH_LIMIT_SITES above instead'
       ).not.toContain(UTF16_LENGTH_LIMIT_NOTE);
+    }
+  );
+});
+
+// The MCP twins of these REST sites are NOT reuses of the REST validators —
+// `ResolveUserShape` (src/mcp/users-handlers.ts) and
+// `RecordStandardVerificationShape` (src/mcp/standards-handlers.ts) each
+// declare their own `.max(n)` literals. Because those are declarative Zod
+// checks, the MCP SDK's schema generator copies both the bound and the
+// `.describe()` prose into each tool's published JSON Schema — so an MCP
+// client sees a machine-readable `maxLength: n` with exactly the code-point
+// semantics ADR-088 documents as wrong. Leaving the note off that surface
+// would make #626 a partial fix, which the issue calls out as worse than
+// none. These pin the note and the bound on the MCP side too.
+interface McpTwinSite {
+  name: string;
+  expectedMax: number;
+  field: { description?: string | undefined; safeParse: (v: unknown) => { success: boolean } };
+  /** URL-format fields can't take astral padding — pin their bound in ASCII. */
+  probe: 'astral' | 'ascii-url';
+}
+
+const MCP_TWIN_SITES: readonly McpTwinSite[] = [
+  {
+    name: 'resolve_user.label',
+    expectedMax: 200,
+    field: ResolveUserShape.label,
+    probe: 'astral',
+  },
+  {
+    name: 'record_standard_verification.currentVersion',
+    expectedMax: 200,
+    field: RecordStandardVerificationShape.currentVersion,
+    probe: 'astral',
+  },
+  {
+    name: 'record_standard_verification.sourceUrl',
+    expectedMax: 2000,
+    field: RecordStandardVerificationShape.sourceUrl,
+    probe: 'ascii-url',
+  },
+  {
+    name: 'record_standard_verification.title',
+    expectedMax: 500,
+    field: RecordStandardVerificationShape.title,
+    probe: 'astral',
+  },
+  {
+    name: 'record_standard_verification.notes',
+    expectedMax: 5000,
+    field: RecordStandardVerificationShape.notes,
+    probe: 'astral',
+  },
+];
+
+/** A string of exactly `units` UTF-16 code units for the given probe style. */
+function probeString(probe: McpTwinSite['probe'], units: number): string {
+  if (probe === 'ascii-url') {
+    const prefix = 'https://example.com/';
+    return prefix + 'a'.repeat(units - prefix.length);
+  }
+  // Astral: 2 UTF-16 units per code point, plus one ASCII filler when odd.
+  return ASTRAL_CHAR.repeat(Math.floor(units / 2)) + (units % 2 === 1 ? 'x' : '');
+}
+
+// Note-presence across the WHOLE MCP surface is asserted by the invariant sweep
+// in src/mcp/length-limit-unit-convention.test.ts. What that sweep cannot see is
+// whether each twin's bound still MATCHES its REST counterpart and is still
+// counted in UTF-16 units — a twin silently drifting to .max(199), or to a
+// code-point check, would keep its note and pass there. That is this block's job.
+describe('MCP tool shapes — twin length bounds stay identical to their REST counterparts (#626)', () => {
+  it.each(MCP_TWIN_SITES)(
+    '$name: bound is $expectedMax UTF-16 code units, matching its REST twin',
+    ({ expectedMax, field, probe }) => {
+      const atLimit = probeString(probe, expectedMax);
+      const overLimit = probeString(probe, expectedMax + 1);
+
+      expect(atLimit).toHaveLength(expectedMax);
+      expect(overLimit).toHaveLength(expectedMax + 1);
+      expect(
+        field.safeParse(atLimit).success,
+        'MCP twin bound drifted from its REST counterpart, or stopped counting UTF-16 code units'
+      ).toBe(true);
+      expect(field.safeParse(overLimit).success, 'MCP twin accepted one unit over its bound').toBe(
+        false
+      );
     }
   );
 });
