@@ -4,7 +4,7 @@ import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool, createLibrary } from '../db/index.js';
-import { MAX_LITERAL_TERMS } from '../ast/language-rule-schemas.js';
+import { MAX_LITERAL_TERMS } from '../ast/index.js';
 
 // ─── Test setup ───────────────────────────────────────────────────────────────
 

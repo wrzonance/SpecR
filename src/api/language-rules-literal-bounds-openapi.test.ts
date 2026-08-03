@@ -45,7 +45,7 @@
 // exceeding the combined total.
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { MAX_LITERAL_TERM_LENGTH, MAX_LITERAL_TERMS } from '../ast/language-rule-schemas.js';
+import { MAX_LITERAL_TERM_LENGTH, MAX_LITERAL_TERMS } from '../ast/index.js';
 import { MAX_REGEX_PATTERNS } from '../lib/regex-safety.js';
 import { loadRawSpec } from '../test-utils/contract/validate-response.js';
 
