@@ -178,7 +178,7 @@ interface ChildrenTransformResult {
 // `w:p` — that is what lets one recursive walk serve both a table root
 // (`w:tbl`, never itself `w:p`) and a text box's host paragraph root
 // (`w:p`, which must NOT be mistaken for one of its own interior leaves).
-// `hiddenSubtrees` (#515, ADR-086) is the set of `w:txbxContent` boundary
+// `hiddenSubtrees` (#515, ADR-087) is the set of `w:txbxContent` boundary
 // nodes — identity-matched, produced by resolveHiddenTxbxContentNodes — this
 // walk must treat as opaque; see transformChildren's pass-through branch.
 function transformInteriorParagraphs(
@@ -242,7 +242,7 @@ function transformChildren(
 }
 
 /** The public entry point for the interior-paragraph anchor walk (#515,
- * ADR-086): both {@link buildTableObject} and (a later task)
+ * ADR-087): both {@link buildTableObject} and (a later task)
  * {@link buildTextBoxObject} call this, never the two private inner
  * functions directly. `hiddenSubtrees` defaults to an empty set — a no-op —
  * so every EXISTING call site (buildTableObject's own
@@ -371,7 +371,7 @@ function isDroppedEntry(
   return entry.classification.kind !== 'textBox';
 }
 
-// `hiddenFlags` (ADR-086) is one entry per textBox-classified DrawingRunEntry
+// `hiddenFlags` (ADR-087) is one entry per textBox-classified DrawingRunEntry
 // found in the host paragraph's `raw` (grouped-mode) tree, IN TRUE DOCUMENT
 // ORDER — classifyParagraphDrawings now walks `raw` via a `pairRunOrder`
 // side-table (#515 review, CRITICAL) rather than `raw`'s own grouped-mode
@@ -521,7 +521,7 @@ function collectParagraphDrawing(
   }
   // Shared kind/floating/generation metadata comes from the FIRST VISIBLE
   // entry — a deliberate, documented behavior change from the old
-  // first-entry-regardless-of-visibility pick (ADR-086). Bounds-guarded via
+  // first-entry-regardless-of-visibility pick (ADR-087). Bounds-guarded via
   // the `findIndex` result rather than a non-null assertion.
   const chosen = textBoxEntries[visibleIndex];
   if (!chosen) {

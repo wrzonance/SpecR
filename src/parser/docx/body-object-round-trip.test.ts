@@ -138,7 +138,7 @@ function textBoxRunXml(docPrId: number, interiorXml: string): string {
   );
 }
 
-// #515/ADR-086: ONE host paragraph carrying TWO separate DrawingML text-box
+// #515/ADR-087: ONE host paragraph carrying TWO separate DrawingML text-box
 // runs — the FIRST visible, the SECOND hidden via its own interior run's
 // `w:rPr>w:vanish` (mirrors body-objects.test.ts's hiddenTextBoxRun). This is
 // the shape the fix targets: a hidden SECOND box must never suppress the
@@ -421,7 +421,7 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
     expect(docXml).toMatch(/<a:graphic[^>]*xmlns:a=/);
   });
 
-  // #515/ADR-086: the unit-level suites (body-objects.test.ts,
+  // #515/ADR-087: the unit-level suites (body-objects.test.ts,
   // body-text-box-visibility.test.ts) pin no-suppression + privacy at the
   // extractBodyObjects/blob-anchor boundary. This is the one test in the
   // whole #515 program that proves it holds THROUGH the generator: a full

@@ -1,4 +1,4 @@
-# ADR-086: per-text-box hidden/visible decision, not first-entry-wins
+# ADR-087: per-text-box hidden/visible decision, not first-entry-wins
 
 ## Status
 

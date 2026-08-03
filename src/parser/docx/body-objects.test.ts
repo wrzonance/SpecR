@@ -575,14 +575,14 @@ describe('extractBodyObjects — mixed-visibility text boxes in ONE host paragra
   });
 });
 
-describe('extractBodyObjects — shared object metadata sources from the first VISIBLE entry (ADR-086 decision 5)', () => {
+describe('extractBodyObjects — shared object metadata sources from the first VISIBLE entry (ADR-087 decision 5)', () => {
   // Review finding (#515): every mixed-visibility fixture elsewhere in this
   // suite pairs two structurally-identical, non-floating textBoxRun/
   // hiddenTextBoxRun entries, so `chosen.classification` (kind/floating/
   // generation) is indistinguishable from `textBoxEntries[0]`'s in every one
   // of those assertions — none of them would fail if buildTextBoxObject
   // regressed to picking the first entry regardless of visibility (the exact
-  // pre-#515 bug ADR-086 decision 5 documents). This pairs a HIDDEN,
+  // pre-#515 bug ADR-087 decision 5 documents). This pairs a HIDDEN,
   // FLOATING, VML box first with a VISIBLE, non-floating, DrawingML box
   // second: `textBoxEntries[0]` and the correct VISIBLE choice disagree on
   // BOTH `generation` and `floating`, so a regression to first-entry-

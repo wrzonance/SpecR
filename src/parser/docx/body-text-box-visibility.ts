@@ -1,4 +1,4 @@
-// Hidden-vs-visible txbxContent correlation (#515, ADR-086): body-objects.ts's
+// Hidden-vs-visible txbxContent correlation (#515, ADR-087): body-objects.ts's
 // anchor walk operates on the preserveOrder-mode blob tree (`ObjectBlobNode`),
 // while text-box hidden detection (`isHiddenTextBox` et al.) operates on the
 // grouped-mode `raw` tree the rest of document.ts already parsed. The two
