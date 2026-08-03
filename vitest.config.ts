@@ -1,4 +1,15 @@
+import { availableParallelism } from 'node:os';
+
 import { defineConfig } from 'vitest/config';
+
+// The unit project's worker ceiling. 4 is the issue's own verified-reliable
+// value on the 24-core reproduction host, but Vitest takes an explicit
+// maxWorkers verbatim — resolveMaxWorkers() applies no CPU clamp of its own —
+// so a bare 4 would *raise* parallelism on a small runner (a 2-CPU host
+// defaults to max(cpus - 1, 1) = 1 worker). Deriving the cap keeps this a
+// ceiling everywhere: never above 4, and never above what Vitest would have
+// chosen unaided.
+const UNIT_MAX_WORKERS = Math.min(4, Math.max(availableParallelism() - 1, 1));
 
 export default defineConfig({
   test: {
@@ -35,6 +46,19 @@ export default defineConfig({
           // never process.exit(1)s the no-DB unit suite when those vars
           // aren't already set in the shell.
           setupFiles: ['./src/test-utils/unit-env-setup.ts'],
+          // Caps concurrent Vitest worker processes for the unit project.
+          // Default (unbounded) worker count oversubscribes CPU on shared/
+          // contended machines (e.g. several parallel workflows on one
+          // sandbox), which starves fully-mocked, no-I/O tests of scheduler
+          // time and trips Vitest's 5s default testTimeout — not a slow
+          // test, pure CPU contention. Reproduced: under induced contention,
+          // unbounded workers timed out 14-28 tests per run across many
+          // unrelated files; --maxWorkers=4 held at 243/243 across repeated
+          // runs under the same contention. See issue #612 (root cause
+          // distinct from #608's integration hookTimeout, which stays
+          // untouched) and UNIT_MAX_WORKERS above for why the cap is derived
+          // from the host's CPU count rather than hardcoded to 4.
+          maxWorkers: UNIT_MAX_WORKERS,
         },
       },
       {
