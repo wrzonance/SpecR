@@ -296,15 +296,13 @@ export {
 // Single-spec generation-context resolution (#267/#304) — scopes a spec to its
 // sole owning project once, yielding both the section-number-format fallback
 // and the effective header/footer config from ONE ownership snapshot (or null
-// fields when orphaned/ambiguous/unconfigured). `resolveSpecHeaderFooterContext`
-// is the header/footer-only view for callers without a format fallback.
+// fields when orphaned/ambiguous/unconfigured).
 // `resolveProjectManualHeaderFooterContext`/`resolveRevisionHeaderFooterContext`
 // (#481) are the whole-manual counterparts: project- and revision-scoped
 // header/footer resolution for the /projects/{id}/generate and
 // /revisions/{id}/generate DOCX builds.
 export {
   resolveSpecGenerationContext,
-  resolveSpecHeaderFooterContext,
   resolveProjectManualHeaderFooterContext,
   resolveRevisionHeaderFooterContext,
 } from './queries/header-footer-context.js';

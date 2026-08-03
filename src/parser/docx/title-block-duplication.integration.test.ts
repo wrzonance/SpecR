@@ -5,6 +5,39 @@ import JSZip from 'jszip';
 import { parseDocx } from './index.js';
 import { parse } from '../index.js';
 
+// Reads one dc:* field out of docProps/core.xml, keeping the three states a
+// caller needs to tell apart distinct: `''` for a present-but-empty element
+// (paired `<dc:title></dc:title>` or self-closing `<dc:title/>`), and `null`
+// for an element that is absent from the part altogether. Collapsing the two
+// would let a fixture whose field is simply missing satisfy a precondition
+// that claims to pin the present-but-empty path.
+function readCoreField(xml: string, tag: 'dc:title' | 'dc:subject'): string | null {
+  const paired = new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(xml);
+  if (paired) return paired[1] ?? '';
+  return new RegExp(`<${tag}\\s*/>`).test(xml) ? '' : null;
+}
+
+// Reads docProps/core.xml's dc:title/dc:subject so a caller can pin exactly
+// which parseCoreMetadata (src/parser/docx/core-metadata.ts) code path a
+// fixture exercises, rather than assert it in a comment. Each field is `''`
+// when present-but-empty and `null` when the element is absent; the whole
+// result is null only when the core.xml part itself is absent from the zip.
+//
+// This probe alone cannot separate empty-but-present fields from malformed
+// markup: a mismatched/unclosed tag also misses both patterns and reads as an
+// absent element, yet parseCoreMetadata() would route it through its
+// XMLValidator guard to the 'core-metadata-unreadable' path instead. Pair it
+// with a warning assertion on the parsed tree to pin the empty-field path.
+async function readCoreTitleSubject(
+  buffer: Buffer
+): Promise<{ title: string | null; subject: string | null } | null> {
+  const zip = await JSZip.loadAsync(buffer);
+  const coreFile = zip.file('docProps/core.xml');
+  if (!coreFile) return null;
+  const xml = await coreFile.async('string');
+  return { title: readCoreField(xml, 'dc:title'), subject: readCoreField(xml, 'dc:subject') };
+}
+
 const SECTION = '01 88 13.13';
 const TITLE = 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS';
 
@@ -131,14 +164,60 @@ const ARTIFACT = resolve('docs/references/MANUFACTURER_EXAMPLES/parsing-needs-fi
 describe.runIf(existsSync(ARTIFACT))(
   '#510 leading title-block suppression — a hand-authored doc',
   () => {
-    it('drops the leading SECTION-line + title-line pair, leaving only PART roots', async () => {
+    // This artifact DOES have docProps/core.xml, but with present-but-empty
+    // dc:title/dc:subject — parseCoreMetadata() (core-metadata.ts) normalizes
+    // that to the UNKNOWN_SECTION_IDENTITY sentinel, so section/title still
+    // resolve via content inference, which runs in the parse() orchestrator —
+    // not parseDocx() alone. That sentinel currently converges with the
+    // no-core.docx sibling test's genuinely-absent-coreXml ternary branch
+    // (src/parser/docx/index.ts's `entries.coreXml ? parseCoreMetadata(...) :
+    // {...}`), but this test exercises the OTHER branch of that ternary — the
+    // two are not guaranteed to stay equivalent if parseCoreMetadata's
+    // empty-field handling ever diverges from the null-coreXml fallback
+    // (e.g. one gains a distinct ParseWarning/method and the other doesn't).
+    it('drops the leading SECTION-line + title-line pair, tolerating retained object/vanish roots', async () => {
       const buffer = readFileSync(ARTIFACT);
-      const tree = await parseDocx(buffer);
+
+      // Precondition, made executable rather than merely asserted in prose:
+      // core.xml is present with empty dc:title/dc:subject, so this test
+      // exercises parseCoreMetadata()'s empty-field normalization — not the
+      // ternary's null-coreXml branch the comment above used to (wrongly)
+      // claim. `''` here means present-but-empty specifically: an absent
+      // element reads as null and fails this assertion.
+      const coreFields = await readCoreTitleSubject(buffer);
+      expect(coreFields).toEqual({ title: '', subject: '' });
+
+      const { tree, sectionInference } = await parse(buffer, 'parsing-needs-fixing.docx');
+
+      // ...and core.xml is well-formed, so the empty fields really are the
+      // empty-field path and not the XMLValidator-rejected 'unreadable' one
+      // the regex probe above cannot distinguish from it.
+      expect(tree.warnings ?? []).not.toContainEqual(
+        expect.objectContaining({ type: 'core-metadata-unreadable' })
+      );
+
+      // Precondition: identity really did come from content, not metadata.
+      expect(sectionInference.method).not.toBe('metadata');
+      expect(tree.section).toBe(SECTION);
+      expect(tree.title).toBe(TITLE);
 
       expect(leakedIdentityRoots(tree)).toHaveLength(0);
-      // Every root is a real PART heading — the duplicated lines produced no
-      // SpecNode at all, matching the #292 "suppressed -> no SpecNode" precedent.
-      expect(tree.parts.every((n) => n.type === 'part')).toBe(true);
+      // The three real PART roots survive verbatim. Asserted positively and by
+      // identity because the tolerance check below is an `every()` — vacuously
+      // true for an empty array, and satisfiable by the object/vanish roots
+      // alone, so on its own it would still pass a regression that dropped
+      // GENERAL/PRODUCTS/EXECUTION entirely.
+      expect(tree.parts.filter((n) => n.type === 'part').map((n) => n.text)).toEqual([
+        'GENERAL',
+        'PRODUCTS',
+        'EXECUTION',
+      ]);
+      // Beyond those, the only tolerated roots are the retained body-object
+      // table root (#300/ADR-072) and intentionally-hidden roots (#292/#296) —
+      // not an unrelated stray root type re-typing the tree's identity.
+      expect(
+        tree.parts.every((n) => n.type === 'part' || n.type === 'object' || n.meta.vanish === true)
+      ).toBe(true);
     });
   }
 );

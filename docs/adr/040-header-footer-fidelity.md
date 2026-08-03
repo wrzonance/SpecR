@@ -107,6 +107,13 @@ This is an **accepted, documented migration caveat**, not a defect:
 
 ### Update (#304)
 
+> **Superseded (#590):** `resolveSpecHeaderFooterContext` no longer exists. PR #584
+> collapsed `generate_docx`'s two independent ownership snapshots into a single
+> `resolveSpecGenerationContext` call, removing this helper's last caller; #590
+> deleted it. The resolution behaviour described below is unchanged — it is now
+> reached through `resolveSpecGenerationContext(...).headerFooter`. The paragraph
+> is kept as-written because it records the decision as it shipped.
+
 Single-spec resolution and rendering shipped: `resolveSpecHeaderFooterContext`
 (`src/db/queries/header-footer-context.ts`) resolves a spec's sole owning
 project through `resolveHeaderFooterConfig` and assembles a generator-ready
