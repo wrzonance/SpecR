@@ -33,6 +33,7 @@ function fakeRegistrar(): { registrar: ToolRegistrar; descriptions: Map<string, 
   const descriptions = new Map<string, string>();
   const registrar: ToolRegistrar = {
     declared: [],
+    schemas: new Map(),
     register(name, config) {
       descriptions.set(name, config.description);
     },

@@ -40,6 +40,7 @@ function fakeRegistrar(): {
     captured,
     registrar: {
       declared: [],
+      schemas: new Map(),
       register(name, config) {
         captured.set(name, { description: config.description });
       },

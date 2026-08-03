@@ -36,7 +36,8 @@ const EXEMPT = new Set<string>([
 
 function declaredToolNames(): readonly string[] {
   const server = new McpServer({ name: 'contract', version: '0' });
-  return registerTools(server, { allowedTiers: ALL_TIERS }); // throws if any tool lacks a tier (INV-3)
+  // throws if any tool lacks a tier (INV-3)
+  return registerTools(server, { allowedTiers: ALL_TIERS }).names;
 }
 
 // ── INV-5 (#403): tool response-shape validation ─────────────────────────────

@@ -27,6 +27,7 @@ function fakeRegistrar(): { registrar: ToolRegistrar; recorded: Map<string, Reco
   const recorded = new Map<string, Recorded>();
   const registrar: ToolRegistrar = {
     declared: [],
+    schemas: new Map(),
     register(name, config) {
       recorded.set(name, { description: config.description, inputSchema: config.inputSchema });
     },
