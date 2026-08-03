@@ -5,27 +5,37 @@ import JSZip from 'jszip';
 import { parseDocx } from './index.js';
 import { parse } from '../index.js';
 
-// Reads docProps/core.xml's dc:title/dc:subject text (empty string if the tag
-// is present-but-empty) so a caller can pin exactly which parseCoreMetadata
-// (src/parser/docx/core-metadata.ts) code path a fixture exercises, rather
-// than assert it in a comment. Returns null only when the part is genuinely
-// absent from the zip — never for an empty-but-present tag.
+// Reads one dc:* field out of docProps/core.xml, keeping the three states a
+// caller needs to tell apart distinct: `''` for a present-but-empty element
+// (paired `<dc:title></dc:title>` or self-closing `<dc:title/>`), and `null`
+// for an element that is absent from the part altogether. Collapsing the two
+// would let a fixture whose field is simply missing satisfy a precondition
+// that claims to pin the present-but-empty path.
+function readCoreField(xml: string, tag: 'dc:title' | 'dc:subject'): string | null {
+  const paired = new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(xml);
+  if (paired) return paired[1] ?? '';
+  return new RegExp(`<${tag}\\s*/>`).test(xml) ? '' : null;
+}
+
+// Reads docProps/core.xml's dc:title/dc:subject so a caller can pin exactly
+// which parseCoreMetadata (src/parser/docx/core-metadata.ts) code path a
+// fixture exercises, rather than assert it in a comment. Each field is `''`
+// when present-but-empty and `null` when the element is absent; the whole
+// result is null only when the core.xml part itself is absent from the zip.
 //
 // This probe alone cannot separate empty-but-present fields from malformed
-// markup: a mismatched/unclosed tag also misses both regexes and yields
-// `{ title: '', subject: '' }`, yet parseCoreMetadata() would route it through
-// its XMLValidator guard to the 'core-metadata-unreadable' path instead. Pair
-// it with a warning assertion on the parsed tree to pin the empty-field path.
+// markup: a mismatched/unclosed tag also misses both patterns and reads as an
+// absent element, yet parseCoreMetadata() would route it through its
+// XMLValidator guard to the 'core-metadata-unreadable' path instead. Pair it
+// with a warning assertion on the parsed tree to pin the empty-field path.
 async function readCoreTitleSubject(
   buffer: Buffer
-): Promise<{ title: string; subject: string } | null> {
+): Promise<{ title: string | null; subject: string | null } | null> {
   const zip = await JSZip.loadAsync(buffer);
   const coreFile = zip.file('docProps/core.xml');
   if (!coreFile) return null;
   const xml = await coreFile.async('string');
-  const title = /<dc:title>([^<]*)<\/dc:title>/.exec(xml)?.[1] ?? '';
-  const subject = /<dc:subject>([^<]*)<\/dc:subject>/.exec(xml)?.[1] ?? '';
-  return { title, subject };
+  return { title: readCoreField(xml, 'dc:title'), subject: readCoreField(xml, 'dc:subject') };
 }
 
 const SECTION = '01 88 13.13';
@@ -172,7 +182,8 @@ describe.runIf(existsSync(ARTIFACT))(
       // core.xml is present with empty dc:title/dc:subject, so this test
       // exercises parseCoreMetadata()'s empty-field normalization — not the
       // ternary's null-coreXml branch the comment above used to (wrongly)
-      // claim.
+      // claim. `''` here means present-but-empty specifically: an absent
+      // element reads as null and fails this assertion.
       const coreFields = await readCoreTitleSubject(buffer);
       expect(coreFields).toEqual({ title: '', subject: '' });
 
