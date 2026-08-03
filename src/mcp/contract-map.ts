@@ -228,6 +228,75 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ],
 ]);
 
+/**
+ * INV-4 (request-parameter parity, #549). REST operations whose documented query/body param
+ * names legitimately do NOT all appear verbatim in their mapped MCP tool's `inputSchema` — each
+ * entry carries a reason, mirroring MCP_UNEXPOSED/INV5_SHAPE_EXEMPT. Keyed by op string (not
+ * tool name — several tools cover 2+ ops, e.g. get_reference_graph, and an exemption is scoped
+ * to the specific op whose params don't line up, not every op that tool happens to answer).
+ */
+export const INV4_PARAM_EXEMPT: ReadonlyMap<string, string> = new Map([
+  [
+    'post /parse',
+    'REST accepts the DOCX/SEC as a multipart `file` field; MCP has no raw binary-upload ' +
+      'channel, so parse_document takes `filename` + `contentBase64` instead — the same file, ' +
+      'a JSON-RPC-compatible encoding rather than a missing capability.',
+  ],
+  [
+    'post /templates/import',
+    'REST accepts the template DOCX as a multipart `file` field; import_template takes ' +
+      '`contentBase64` instead, same posture as post /parse above (no MCP raw-upload channel).',
+  ],
+  [
+    'post /numbering-profiles/snapshot',
+    'REST accepts the source DOCX as a multipart `file` field; snapshot_numbering_profile ' +
+      'takes `contentBase64` instead, same posture as post /parse above.',
+  ],
+  [
+    'post /specs/{}/diff',
+    'REST accepts the returned DOCX as a multipart `file` field; get_spec_diff takes an ' +
+      'optional `contentBase64` instead, same posture as post /parse above.',
+  ],
+  [
+    'get /search',
+    "REST names the free-text query param `q`; search_library's inputSchema names the same " +
+      "parameter `query` — a deliberately friendlier MCP name (matching the tool's natural-" +
+      'language framing), not an undiscoverable field. Every other GET /search param ' +
+      '(libraryId, projectId, division, part, nodeType, limit) matches verbatim.',
+  ],
+  [
+    'post /packages/{}/revisions',
+    'REST accepts a `oneOf` legacy `{ label }` body OR the structured `{ type, ... }` body; ' +
+      'issue_package_revision deliberately exposes only the structured form (see the doc ' +
+      'comment on IssuePackageRevisionShape in package-revision-handlers.ts) — the legacy ' +
+      'body is accepted for backward compatibility on REST, not offered to agents.',
+  ],
+  [
+    'put /libraries/{}/header-footer',
+    'REST flattens HeaderFooterComposition to top-level body properties; the set_*_header_footer ' +
+      'tools nest the same schema under one `config` field instead (see the "CORRECTED (spike ' +
+      'finding #1)" comment on SetLibraryHeaderFooterShape in header-footer-handlers.ts) — its ' +
+      'top-level catchall would silently strip unrecognized extension keys if spread into a flat ' +
+      'args shape, so it is kept as one opaque nested schema. Same posture for the project/' +
+      'package/revision set tools below.',
+  ],
+  [
+    'put /projects/{}/header-footer',
+    'See put /libraries/{}/header-footer above — same `config`-nesting rationale ' +
+      '(HeaderFooterCompositionWriteSchema catchall).',
+  ],
+  [
+    'put /packages/{}/header-footer',
+    'See put /libraries/{}/header-footer above — same `config`-nesting rationale ' +
+      '(HeaderFooterCompositionWriteSchema catchall).',
+  ],
+  [
+    'put /revisions/{}/header-footer',
+    'See put /libraries/{}/header-footer above — same `config`-nesting rationale ' +
+      '(HeaderFooterCompositionWriteSchema catchall).',
+  ],
+]);
+
 /** Tools with no single REST equivalent — allowed to map to nothing (INV-2). */
 export const MCP_NATIVE: ReadonlySet<string> = new Set([
   // search_library now pairs with GET /search (see OP_TO_TOOL, #445).

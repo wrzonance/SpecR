@@ -2,8 +2,6 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { pool } from '../db/index.js';
 import { handleCreateProject } from './create-project-handler.js';
 import { handleListLibraries } from './handlers.js';
-import { CreateProjectBodySchema } from '../ast/index.js';
-import { loadSpec } from '../test-utils/contract/validate-response.js';
 
 const created: string[] = [];
 afterAll(async () => {
@@ -36,16 +34,6 @@ describe('create_project MCP tool', () => {
   it('returns a tool error (never throws) on invalid input', async () => {
     const res = await handleCreateProject({ name: '', sourceLibraryIds: [] });
     expect('isError' in res && res.isError).toBe(true);
-  });
-
-  it('INV-4: the tool input schema covers the OpenAPI required request fields', async () => {
-    const doc = await loadSpec();
-    const op = doc.paths['/projects']?.['post'] as {
-      requestBody?: { content: { 'application/json': { schema: { required?: string[] } } } };
-    };
-    const required = op.requestBody?.content['application/json'].schema.required ?? [];
-    const toolKeys = Object.keys(CreateProjectBodySchema.shape);
-    for (const field of required) expect(toolKeys).toContain(field);
   });
 
   it('list_libraries surfaces the library IDs create_project needs (MCP-only discoverability)', async () => {

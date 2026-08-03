@@ -146,6 +146,19 @@ export function specOperationManifest(doc: OpenApiDoc): string[] {
   return eachOperation(doc).map(({ method, path }) => `${method} ${normalizePath(path)}`);
 }
 
+/** Maps every operation's normalized `"method /path"` key (path params collapsed to `{}` —
+ * the format OP_TO_TOOL/contract-map.ts use) to its literal openapi.yaml path template, for
+ * callers that need to go from a contract-map op string back to a path indexable via
+ * `doc.paths`/{@link operationParamKeys}. One-to-one: openapi.yaml declares each operation once,
+ * so no two literal paths collapse to the same normalized key. */
+export function operationPathTemplates(doc: OpenApiDoc): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  for (const { method, path } of eachOperation(doc)) {
+    out.set(`${method} ${normalizePath(path)}`, path);
+  }
+  return out;
+}
+
 export function successJsonOps(doc: OpenApiDoc): string[] {
   const out: string[] = [];
   for (const { method, path, raw } of eachOperation(doc)) {
