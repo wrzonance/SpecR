@@ -125,6 +125,36 @@ describe('insertRefs — section refs', () => {
     const insertCall = vi.mocked(query).mock.calls[1];
     expect(insertCall?.[1]?.[4]).toBeNull();
   });
+
+  // `specs.section` is only unique per (section, source, library_id) / (section,
+  // project_id) — migration 016 — so one section can match several specs. The
+  // pre-batch code took `SELECT id … LIMIT 1`, i.e. the FIRST row. A last-wins
+  // map would repoint target_spec_id at the LAST duplicate instead, silently
+  // changing which spec a ref resolves to.
+  it('insertRefs: duplicate section — resolves to the FIRST matching spec, not the last', async () => {
+    const { pool } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        { id: 'spec-first', section: '03 30 00' },
+        { id: 'spec-second', section: '03 30 00' },
+        { id: 'spec-third', section: '03 30 00' },
+      ],
+    } as never);
+    vi.mocked(query).mockResolvedValueOnce({ rows: [] } as never);
+
+    const ref = {
+      sourceNodeId: 'node-dup',
+      targetType: 'section' as const,
+      targetSpecSection: '03 30 00',
+      referenceText: 'See section 03 30 00',
+    };
+    const { insertRefs } = await import('./refs.js');
+    await insertRefs([ref], 'spec-uuid-1', pool);
+
+    const insertCall = vi.mocked(query).mock.calls[1];
+    expect(insertCall?.[1]?.[4]).toBe('spec-first');
+  });
 });
 
 describe('insertRefs — standard refs', () => {
@@ -225,6 +255,38 @@ describe('insertRefs — error handling', () => {
     const { insertRefs } = await import('./refs.js');
     await expect(insertRefs([ref], 'spec-uuid-1', pool)).rejects.toBeInstanceOf(DatabaseError);
     expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
+  });
+
+  // The batched SELECT resolves every section at once, so its failure message
+  // must name the sections it was resolving — otherwise a resolution failure
+  // reports no identity at all, unlike the per-ref code it replaced.
+  it('insertRefs: section-resolution failure names the sections it was resolving', async () => {
+    const { pool, DatabaseError } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockRejectedValueOnce(new Error('connection reset'));
+
+    const refs = [
+      {
+        sourceNodeId: 'node-y',
+        targetType: 'section' as const,
+        targetSpecSection: '03 30 00',
+        referenceText: 'See 03 30 00',
+      },
+      {
+        sourceNodeId: 'node-z',
+        targetType: 'section' as const,
+        targetSpecSection: '09 91 26',
+        referenceText: 'See 09 91 26',
+      },
+    ];
+    const { insertRefs } = await import('./refs.js');
+    await expect(insertRefs(refs, 'spec-uuid-1', pool)).rejects.toSatisfy(
+      (err) =>
+        err instanceof DatabaseError &&
+        err.message.includes('2 section(s)') &&
+        err.message.includes('03 30 00') &&
+        err.message.includes('09 91 26')
+    );
   });
 });
 

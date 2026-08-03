@@ -64,11 +64,18 @@ function distinctSections(refs: readonly SecRef[]): readonly string[] {
 
 /** Resolves every section in `sections` to its spec id via one batched
  *  `= ANY($1)` SELECT — a no-op (zero queries) when `sections` is empty, so a
- *  standard-only ref batch never touches `specs` at all. Deliberately carries
- *  no `ORDER BY`: when more than one spec shares a section, which id a repeat
- *  section resolves to is arbitrary (unspecified Postgres row order) —
- *  matching the pre-batch code's own `LIMIT 1` arbitrary tie-break exactly.
- *  Not fixed here; out of this change's pure-performance scope. */
+ *  standard-only ref batch never touches `specs` at all.
+ *
+ *  `specs.section` is not globally unique (uniqueness is per
+ *  `(section, source, library_id)` and per `(section, project_id)` — migration
+ *  016), so a section can legitimately match several specs. Which one wins is
+ *  arbitrary in both the old and new code, but **first-row-wins is what the
+ *  pre-batch `SELECT … LIMIT 1` actually did**, so this keeps the first row and
+ *  ignores later duplicates. A last-wins map would silently repoint
+ *  `target_spec_id` at a different spec than the per-ref code chose — a
+ *  behavior change this pure-performance batching must not make. Neither form
+ *  carries an `ORDER BY`; making duplicate resolution genuinely deterministic
+ *  is a separate concern, out of this change's scope. */
 async function fetchSectionSpecIds(
   pool: Queryable,
   sections: readonly string[]
@@ -81,13 +88,17 @@ async function fetchSectionSpecIds(
     );
     const bySection = new Map<string, string>();
     for (const row of result.rows) {
-      bySection.set(row.section, row.id);
+      if (!bySection.has(row.section)) {
+        bySection.set(row.section, row.id);
+      }
     }
     return bySection;
   } catch (err) {
-    throw new DatabaseError('insertRefs: failed to resolve target spec ids for sections', {
-      cause: err,
-    });
+    throw new DatabaseError(
+      `insertRefs: failed to resolve target spec ids for ${sections.length} section(s) ` +
+        `(${formatIdsPreview(sections)})`,
+      { cause: err }
+    );
   }
 }
 
