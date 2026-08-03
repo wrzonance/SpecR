@@ -40,10 +40,12 @@ describe('insertRefs — section refs', () => {
     vi.clearAllMocks();
   });
 
-  it('SELECTs target_spec_id for section refs then INSERTs', async () => {
+  it('resolves target_spec_id via one batched SELECT then issues one INSERT (2 total calls)', async () => {
     const { pool } = await import('../index.js');
     const { query } = pool;
-    vi.mocked(query).mockResolvedValueOnce({ rows: [{ id: 'target-spec-42' }] } as never);
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [{ id: 'target-spec-42', section: '03 30 00' }],
+    } as never);
     vi.mocked(query).mockResolvedValueOnce({ rows: [] } as never);
 
     const ref = {
@@ -57,11 +59,52 @@ describe('insertRefs — section refs', () => {
 
     expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
     const selectCall = vi.mocked(query).mock.calls[0];
-    expect(selectCall?.[0]).toContain('SELECT id FROM specs');
-    expect(selectCall?.[1]?.[0]).toBe('03 30 00');
+    expect(selectCall?.[0]).toContain('SELECT id, section FROM specs');
+    expect(selectCall?.[1]?.[0]).toEqual(['03 30 00']);
 
     const insertCall = vi.mocked(query).mock.calls[1];
+    expect(insertCall?.[0]).toContain('INSERT INTO spec_references');
     expect(insertCall?.[1]?.[4]).toBe('target-spec-42');
+  });
+
+  it('resolves multiple distinct sections in one SELECT (not one per ref)', async () => {
+    const { pool } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        { id: 'target-1', section: '03 30 00' },
+        { id: 'target-2', section: '09 91 00' },
+      ],
+    } as never);
+    vi.mocked(query).mockResolvedValueOnce({ rows: [] } as never);
+
+    const refs = [
+      {
+        sourceNodeId: 'node-1',
+        targetType: 'section' as const,
+        targetSpecSection: '03 30 00',
+        referenceText: 'See section 03 30 00',
+      },
+      {
+        sourceNodeId: 'node-2',
+        targetType: 'section' as const,
+        targetSpecSection: '09 91 00',
+        referenceText: 'See section 09 91 00',
+      },
+      // A repeated section must not add a second SELECT param.
+      {
+        sourceNodeId: 'node-3',
+        targetType: 'section' as const,
+        targetSpecSection: '03 30 00',
+        referenceText: 'See section 03 30 00 again',
+      },
+    ];
+    const { insertRefs } = await import('./refs.js');
+    await insertRefs(refs, 'spec-uuid-1', pool);
+
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
+    const selectCall = vi.mocked(query).mock.calls[0];
+    expect(selectCall?.[1]?.[0]).toEqual(['03 30 00', '09 91 00']);
   });
 
   it('sets target_spec_id null when section ref has no matching spec', async () => {
@@ -82,6 +125,36 @@ describe('insertRefs — section refs', () => {
     const insertCall = vi.mocked(query).mock.calls[1];
     expect(insertCall?.[1]?.[4]).toBeNull();
   });
+
+  // `specs.section` is only unique per (section, source, library_id) / (section,
+  // project_id) — migration 016 — so one section can match several specs. The
+  // pre-batch code took `SELECT id … LIMIT 1`, i.e. the FIRST row. A last-wins
+  // map would repoint target_spec_id at the LAST duplicate instead, silently
+  // changing which spec a ref resolves to.
+  it('insertRefs: duplicate section — resolves to the FIRST matching spec, not the last', async () => {
+    const { pool } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        { id: 'spec-first', section: '03 30 00' },
+        { id: 'spec-second', section: '03 30 00' },
+        { id: 'spec-third', section: '03 30 00' },
+      ],
+    } as never);
+    vi.mocked(query).mockResolvedValueOnce({ rows: [] } as never);
+
+    const ref = {
+      sourceNodeId: 'node-dup',
+      targetType: 'section' as const,
+      targetSpecSection: '03 30 00',
+      referenceText: 'See section 03 30 00',
+    };
+    const { insertRefs } = await import('./refs.js');
+    await insertRefs([ref], 'spec-uuid-1', pool);
+
+    const insertCall = vi.mocked(query).mock.calls[1];
+    expect(insertCall?.[1]?.[4]).toBe('spec-first');
+  });
 });
 
 describe('insertRefs — standard refs', () => {
@@ -90,7 +163,7 @@ describe('insertRefs — standard refs', () => {
     vi.clearAllMocks();
   });
 
-  it('skips SELECT for standard refs and inserts directly', async () => {
+  it('skips the SELECT for standard-only refs and issues one batched INSERT', async () => {
     const { pool } = await import('../index.js');
     const { query } = pool;
     vi.mocked(query).mockResolvedValueOnce({ rows: [] } as never);
@@ -111,7 +184,7 @@ describe('insertRefs — standard refs', () => {
     expect(insertCall?.[1]?.[5]).toBe('ASTM C150');
   });
 
-  it('inserts multiple refs in order', async () => {
+  it('inserts multiple refs in one batched INSERT, params in row-major order preserved', async () => {
     const { pool } = await import('../index.js');
     const { query } = pool;
     vi.mocked(query).mockResolvedValue({ rows: [] } as never);
@@ -133,9 +206,12 @@ describe('insertRefs — standard refs', () => {
     const { insertRefs } = await import('./refs.js');
     await insertRefs(refs, 'spec-uuid-1', pool);
 
-    expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(query).mock.calls[0]?.[1]?.[5]).toBe('ACI 318');
-    expect(vi.mocked(query).mock.calls[1]?.[1]?.[5]).toBe('ASTM A36');
+    // One batched INSERT, not one per ref.
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
+    const params = vi.mocked(query).mock.calls[0]?.[1] ?? [];
+    // 7 columns/row: standard_code sits at column index 5 of each row's slice.
+    expect(params[5]).toBe('ACI 318');
+    expect(params[12]).toBe('ASTM A36');
   });
 });
 
@@ -145,7 +221,7 @@ describe('insertRefs — error handling', () => {
     vi.clearAllMocks();
   });
 
-  it('wraps query errors in DatabaseError', async () => {
+  it('wraps a failed batched INSERT in DatabaseError with a chunk-identified message', async () => {
     const { pool, DatabaseError } = await import('../index.js');
     const { query } = pool;
     vi.mocked(query).mockRejectedValueOnce(new Error('timeout'));
@@ -157,7 +233,60 @@ describe('insertRefs — error handling', () => {
       referenceText: 'ISO 9001',
     };
     const { insertRefs } = await import('./refs.js');
+    await expect(insertRefs([ref], 'spec-uuid-1', pool)).rejects.toSatisfy(
+      (err) =>
+        err instanceof DatabaseError &&
+        err.message.includes('insertRefs: failed to insert reference batch 1/1') &&
+        err.message.includes('node-x')
+    );
+  });
+
+  it('wraps a failed fetchSectionSpecIds SELECT in DatabaseError without attempting the INSERT', async () => {
+    const { pool, DatabaseError } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockRejectedValueOnce(new Error('connection reset'));
+
+    const ref = {
+      sourceNodeId: 'node-y',
+      targetType: 'section' as const,
+      targetSpecSection: '03 30 00',
+      referenceText: 'See section 03 30 00',
+    };
+    const { insertRefs } = await import('./refs.js');
     await expect(insertRefs([ref], 'spec-uuid-1', pool)).rejects.toBeInstanceOf(DatabaseError);
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
+  });
+
+  // The batched SELECT resolves every section at once, so its failure message
+  // must name the sections it was resolving — otherwise a resolution failure
+  // reports no identity at all, unlike the per-ref code it replaced.
+  it('insertRefs: section-resolution failure names the sections it was resolving', async () => {
+    const { pool, DatabaseError } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockRejectedValueOnce(new Error('connection reset'));
+
+    const refs = [
+      {
+        sourceNodeId: 'node-y',
+        targetType: 'section' as const,
+        targetSpecSection: '03 30 00',
+        referenceText: 'See 03 30 00',
+      },
+      {
+        sourceNodeId: 'node-z',
+        targetType: 'section' as const,
+        targetSpecSection: '09 91 26',
+        referenceText: 'See 09 91 26',
+      },
+    ];
+    const { insertRefs } = await import('./refs.js');
+    await expect(insertRefs(refs, 'spec-uuid-1', pool)).rejects.toSatisfy(
+      (err) =>
+        err instanceof DatabaseError &&
+        err.message.includes('2 section(s)') &&
+        err.message.includes('03 30 00') &&
+        err.message.includes('09 91 26')
+    );
   });
 });
 
