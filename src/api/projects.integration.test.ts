@@ -91,7 +91,20 @@ beforeAll(async () => {
     getLibraryId('Default Company Master'),
     getLibraryId('UFGS Reference'),
   ]);
-  companyLibId = companyId;
+  // The module-level spec fixtures get their OWN uniquely-named company library
+  // rather than the shared, name-looked-up 'Default Company Master' (#522).
+  // Inserting them into the shared library is ambient-state dependent two ways:
+  // a leftover ('03 30 00','unknown') row from a crashed prior run collides on
+  // specs_section_source_library_unique and aborts this whole file, and an
+  // older leftover under a different source shadows these fixtures in
+  // resolveSection's `ORDER BY ps.priority, s.created_at, s.id` tie-break.
+  // `companyId` (the real shared library) stays in use for the describes that
+  // only need a source-library id and never insert specs into it.
+  const moduleLib = await createLibrary({
+    tier: 'company',
+    name: `Projects API Master ${randomUUID()}`,
+  });
+  companyLibId = moduleLib.id;
   [specA, specB] = await Promise.all([
     insertSpec('03 30 00', 'Concrete', companyLibId),
     insertSpec('09 91 00', 'Painting', companyLibId),
@@ -123,6 +136,13 @@ afterAll(async () => {
   // project_specs rows (project_id FK is CASCADE), unblocking specA/specB deletion.
   await pool.query('DELETE FROM projects WHERE id = $1', [testProjectId]);
   await pool.query('DELETE FROM specs WHERE id = ANY($1)', [[specA, specB]]);
+  // project_sources.library_id is FK-RESTRICT (project_id is CASCADE, so the
+  // project deletes above already took most of these); clear any remainder
+  // before dropping the module fixture library.
+  if (companyLibId) {
+    await pool.query('DELETE FROM project_sources WHERE library_id = $1', [companyLibId]);
+    await pool.query('DELETE FROM libraries WHERE id = $1', [companyLibId]);
+  }
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err != null ? reject(err) : resolve()));
   });
@@ -403,12 +423,19 @@ describe('GET /projects/:id/references/broken — availableFrom advisory', () =>
   let advisoryProjectId: string | undefined;
 
   beforeAll(async () => {
-    const lib = await createLibrary({ tier: 'company', name: `Advisory Master ${Date.now()}` });
+    // randomUUID, not Date.now() — libraries.name is UNIQUE and millisecond
+    // resolution collides between concurrent suite runs against one database.
+    const lib = await createLibrary({
+      tier: 'company',
+      name: `Advisory Master ${randomUUID()}`,
+    });
     advisoryLibId = lib.id;
-    [advisoryMasterId, advisoryTargetId] = await Promise.all([
-      insertSpec('03 30 00', 'Advisory Concrete', advisoryLibId),
-      insertSpec('09 91 00', 'Advisory Painting', advisoryLibId),
-    ]);
+    // Sequential, not Promise.all: a rejected second insert would leave the
+    // first row committed but its id unrecorded, so afterAll could neither
+    // delete the spec nor (FK-RESTRICT) the library — leaking exactly the kind
+    // of ambient row this test exists to be immune to.
+    advisoryMasterId = await insertSpec('03 30 00', 'Advisory Concrete', advisoryLibId);
+    advisoryTargetId = await insertSpec('09 91 00', 'Advisory Painting', advisoryLibId);
     await insertBrokenRefFixture(advisoryMasterId, '09 91 00', 'See Section 09 91 00');
   });
 
