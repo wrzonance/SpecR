@@ -24,7 +24,9 @@ if (
   unitProject instanceof Promise ||
   integrationProject instanceof Promise
 ) {
-  throw new Error('vitest.config.ts: expected inline project config objects, not config-file paths');
+  throw new Error(
+    'vitest.config.ts: expected inline project config objects, not config-file paths'
+  );
 }
 
 describe('vitest.config.ts unit project', () => {
