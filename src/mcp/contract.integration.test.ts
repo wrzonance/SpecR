@@ -15,6 +15,7 @@ import {
   MCP_NATIVE,
   INV5_SHAPE_EXEMPT,
   INV5_READ_PENDING,
+  INV5_READ_PENDING_BASELINE,
 } from './contract-map.js';
 import { handleListLibraries, handleListProjects, handleParseDocument } from './handlers.js';
 import { handleListTemplates } from './template-handlers.js';
@@ -36,7 +37,8 @@ const EXEMPT = new Set<string>([
 
 function declaredToolNames(): readonly string[] {
   const server = new McpServer({ name: 'contract', version: '0' });
-  return registerTools(server, { allowedTiers: ALL_TIERS }); // throws if any tool lacks a tier (INV-3)
+  // throws if any tool lacks a tier (INV-3)
+  return registerTools(server, { allowedTiers: ALL_TIERS }).names;
 }
 
 // ── INV-5 (#403): tool response-shape validation ─────────────────────────────
@@ -273,5 +275,9 @@ describe('MCP contract (REST <-> MCP parity)', () => {
     }
     for (const t of INV5_SHAPE_EXEMPT.keys())
       expect(INV5_READ_PENDING.has(t), `${t} both shape-exempt and pending`).toBe(false);
+  });
+
+  it('INV-5 ratchet: read-pending burn-down never grows', () => {
+    expect(INV5_READ_PENDING.size).toBeLessThanOrEqual(INV5_READ_PENDING_BASELINE);
   });
 });

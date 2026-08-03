@@ -228,6 +228,132 @@ export const MCP_UNEXPOSED: ReadonlyMap<string, string> = new Map([
   ],
 ]);
 
+/**
+ * A FIELD-SCOPED INV-4 waiver: only the named `params` are excused for that op; every other
+ * documented param stays under the gate. Deliberately not an op-wide waiver — an op-wide one
+ * suppresses far more than its reason justifies (e.g. exempting GET /search for its `q` -> `query`
+ * rename would also stop checking libraryId/projectId/division/part/nodeType/limit, so silently
+ * dropping `limit` from search_library would still pass). The `params` list is itself gated: each
+ * entry must name a param the op really documents AND that its tool really lacks, so an exemption
+ * cannot outlive the divergence it describes.
+ */
+export interface ParamExemption {
+  readonly params: readonly string[];
+  readonly reason: string;
+}
+
+/**
+ * INV-4 (request-parameter parity, #549). REST operations whose documented query/body param
+ * names legitimately do NOT all appear verbatim in their mapped MCP tool's `inputSchema` — each
+ * entry carries a reason, mirroring MCP_UNEXPOSED/INV5_SHAPE_EXEMPT. Keyed by op string (not
+ * tool name — several tools cover 2+ ops, e.g. get_reference_graph, and an exemption is scoped
+ * to the specific op whose params don't line up, not every op that tool happens to answer).
+ */
+export const INV4_PARAM_EXEMPT: ReadonlyMap<string, ParamExemption> = new Map([
+  [
+    'post /parse',
+    {
+      params: ['file'],
+      reason:
+        'REST accepts the DOCX/SEC as a multipart `file` field; MCP has no raw binary-upload ' +
+        'channel, so parse_document takes `filename` + `contentBase64` instead — the same file, ' +
+        'a JSON-RPC-compatible encoding rather than a missing capability. Every other documented ' +
+        'field (section, title, numberingProfileId) matches verbatim and stays gated.',
+    },
+  ],
+  [
+    'post /templates/import',
+    {
+      params: ['file'],
+      reason:
+        'REST accepts the template DOCX as a multipart `file` field; import_template takes ' +
+        '`contentBase64` instead, same posture as post /parse above (no MCP raw-upload channel). ' +
+        'name/owner match verbatim and stay gated.',
+    },
+  ],
+  [
+    'post /numbering-profiles/snapshot',
+    {
+      params: ['file'],
+      reason:
+        'REST accepts the source DOCX as a multipart `file` field; snapshot_numbering_profile ' +
+        'takes `contentBase64` instead, same posture as post /parse above.',
+    },
+  ],
+  [
+    'post /specs/{}/diff',
+    {
+      params: ['file'],
+      reason:
+        'REST accepts the returned DOCX as a multipart `file` field; get_spec_diff takes an ' +
+        'optional `contentBase64` instead, same posture as post /parse above.',
+    },
+  ],
+  [
+    'get /search',
+    {
+      params: ['q'],
+      reason:
+        "REST names the free-text query param `q`; search_library's inputSchema names the same " +
+        "parameter `query` — a deliberately friendlier MCP name (matching the tool's natural-" +
+        'language framing), not an undiscoverable field. Every other GET /search param ' +
+        '(libraryId, projectId, division, part, nodeType, limit) matches verbatim and stays gated.',
+    },
+  ],
+  [
+    'post /packages/{}/revisions',
+    {
+      params: ['label'],
+      reason:
+        'REST accepts a `oneOf` legacy `{ label }` body OR the structured `{ type, ... }` body; ' +
+        'issue_package_revision deliberately exposes only the structured form (see the doc ' +
+        'comment on IssuePackageRevisionShape in package-revision-handlers.ts) — the legacy ' +
+        'body is accepted for backward compatibility on REST, not offered to agents. Only the ' +
+        'legacy `label` is excused; every structured field stays gated.',
+    },
+  ],
+  [
+    'put /libraries/{}/header-footer',
+    {
+      params: ['header', 'footer', 'style', 'variants', 'pageNumbering', 'raw'],
+      reason:
+        'REST flattens HeaderFooterComposition to top-level body properties; the ' +
+        'set_*_header_footer tools nest the same schema under one `config` field instead (see the ' +
+        '"CORRECTED (spike finding #1)" comment on SetLibraryHeaderFooterShape in ' +
+        'header-footer-handlers.ts) — its top-level catchall would silently strip unrecognized ' +
+        'extension keys if spread into a flat args shape, so it is kept as one opaque nested ' +
+        'schema. Same posture for the project/package/revision set tools below.',
+    },
+  ],
+  [
+    'put /projects/{}/header-footer',
+    {
+      params: ['header', 'footer', 'style', 'variants', 'pageNumbering', 'raw'],
+      reason:
+        'See put /libraries/{}/header-footer above — same `config`-nesting rationale ' +
+        '(HeaderFooterCompositionWriteSchema catchall).',
+    },
+  ],
+  [
+    'put /packages/{}/header-footer',
+    {
+      params: ['header', 'footer', 'style', 'variants', 'pageNumbering', 'raw'],
+      reason:
+        'See put /libraries/{}/header-footer above — same `config`-nesting rationale ' +
+        '(HeaderFooterCompositionWriteSchema catchall).',
+    },
+  ],
+  [
+    'put /revisions/{}/header-footer',
+    {
+      params: ['header', 'footer', 'style', 'variants', 'pageNumbering', 'raw'],
+      reason:
+        'See put /libraries/{}/header-footer above — same `config`-nesting rationale ' +
+        '(HeaderFooterCompositionWriteSchema catchall).',
+    },
+  ],
+]);
+
 /** Tools with no single REST equivalent — allowed to map to nothing (INV-2). */
 export const MCP_NATIVE: ReadonlySet<string> = new Set([
   // search_library now pairs with GET /search (see OP_TO_TOOL, #445).
@@ -356,3 +482,12 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'get_project_language_rules',
   'get_language_findings',
 ]);
+
+/**
+ * INV-5 ratchet baseline (#549). The read-pending burn-down (INV5_READ_PENDING.size) must never
+ * grow past this count — entries graduate out as fixtures land (see the comment above the set),
+ * and the ratchet test in contract.integration.test.ts fails loudly if a future change adds a new
+ * pending entry without also graduating one out. Verified by direct count on 2026-08-02: the set
+ * held exactly 44 entries at the time this ratchet was introduced.
+ */
+export const INV5_READ_PENDING_BASELINE = 44;

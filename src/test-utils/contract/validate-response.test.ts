@@ -5,7 +5,11 @@ import {
   successJsonOps,
   loadSpec,
   loadRawSpec,
+  operationParamKeys,
 } from './validate-response.js';
+import type { OpenApiDoc } from './validate-response.js';
+
+const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
 
 // Narrow shape for the raw (un-dereferenced) request-body schema a #377 write op documents.
 interface RawRequestBodySchema {
@@ -37,17 +41,57 @@ describe('contract validate-response helper', () => {
     await expect(assertResponse('get', '/health', 200, body)).rejects.toThrow(/does not match/);
   });
 
-  it('no-ops for an operation without a JSON response schema', async () => {
-    // 204 No Content has no application/json schema
+  it('no-ops for a DOCUMENTED response that has no JSON schema', async () => {
+    // DELETE /templates/{id} documents 204 with no content at all
     await expect(
-      assertResponse('delete', '/specs/{id}/lock', 204, undefined)
+      assertResponse('delete', '/templates/{id}', 204, undefined)
     ).resolves.toBeUndefined();
+  });
+
+  it('rejects a status the operation does not document, instead of passing vacuously', async () => {
+    // DELETE /specs/{id}/lock documents 200 (not 204). Treating an undocumented status as a
+    // "no JSON schema" no-op would validate nothing and stay green forever.
+    await expect(assertResponse('delete', '/specs/{id}/lock', 204, undefined)).rejects.toThrow(
+      /documents no 204 response/
+    );
   });
 
   it('normalizes path params to {} so manifests are param-name agnostic', async () => {
     const doc = await loadSpec();
     expect(specOperationManifest(doc)).toContain('get /specs/{}');
     expect(successJsonOps(doc)).toContain('get /health');
+  });
+});
+
+// operationParamKeys() feeds INV-4; anything it silently under-reports becomes an INV-4 check that
+// passes vacuously. Synthetic docs (no such op exists in openapi.yaml yet) pin the two ways that
+// could happen: a body carrying BOTH a base `properties` map and `oneOf` branches, and a body
+// composed in a way this narrow reader cannot destructure at all.
+describe('operationParamKeys body-key derivation', () => {
+  function docWithBodySchema(schema: unknown): OpenApiDoc {
+    return {
+      paths: {
+        '/synthetic': {
+          post: { requestBody: { content: { 'application/json': { schema } } }, responses: {} },
+        },
+      },
+    };
+  }
+
+  it('unions base properties with every oneOf branch instead of letting the base win', () => {
+    const doc = docWithBodySchema({
+      properties: { kind: {} },
+      oneOf: [{ properties: { branchA: {} } }, { properties: { branchB: {} } }],
+    });
+    const { body } = operationParamKeys(doc, 'post', '/synthetic');
+    expect([...body].sort((a, b) => a.localeCompare(b))).toEqual(['branchA', 'branchB', 'kind']);
+  });
+
+  it('throws for a documented requestBody whose top-level keys cannot be derived', () => {
+    // allOf composition is not destructured by this reader — returning {} would make INV-4 green
+    // for an operation whose params were never actually compared.
+    const doc = docWithBodySchema({ allOf: [{ properties: { hidden: {} } }] });
+    expect(() => operationParamKeys(doc, 'post', '/synthetic')).toThrow(/pass vacuously/);
   });
 });
 
@@ -187,5 +231,83 @@ describe('actorLabel additive request coverage (#377)', () => {
       required: ['noteId'],
       properties: { noteId: { type: 'string', format: 'uuid' } },
     });
+  });
+});
+
+// #549 — operationParamKeys() feeds INV-4 (MCP tool inputSchema vs. its mapped REST op).
+// These pin the boundary invariants: total over every real op, never vacuously empty for an
+// op with a real requestBody, plus one worked example per source branch (direct properties,
+// oneOf union, multipart fallback) and the unknown-op failure mode.
+describe('operationParamKeys()', () => {
+  it('throws for a method+path that is not a real operation', async () => {
+    const doc = await loadSpec();
+    expect(() => operationParamKeys(doc, 'get', '/not-a-real-path')).toThrow(
+      /No OpenAPI operation: get \/not-a-real-path/
+    );
+  });
+
+  it('is total: never throws for any real operation in openapi.yaml', async () => {
+    const doc = await loadSpec();
+    for (const [path, item] of Object.entries(doc.paths)) {
+      for (const method of HTTP_METHODS) {
+        if (item[method] === undefined) continue;
+        expect(() => operationParamKeys(doc, method, path)).not.toThrow();
+      }
+    }
+  });
+
+  it('is never vacuously empty for an operation with a real requestBody', async () => {
+    const doc = await loadSpec();
+    for (const [path, item] of Object.entries(doc.paths)) {
+      for (const method of HTTP_METHODS) {
+        const raw = item[method] as { requestBody?: { content?: unknown } } | undefined;
+        if (raw?.requestBody?.content === undefined) continue;
+        const { body } = operationParamKeys(doc, method, path);
+        expect(body.size, `${method} ${path} requestBody yields no keys`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('collects operation-level query param names', async () => {
+    const doc = await loadSpec();
+    const { query } = operationParamKeys(doc, 'get', '/search');
+    expect(query).toEqual(
+      new Set(['q', 'libraryId', 'projectId', 'division', 'part', 'nodeType', 'limit'])
+    );
+  });
+
+  it('excludes path params — they are not documented under `parameters[].in === query`', async () => {
+    const doc = await loadSpec();
+    const { query } = operationParamKeys(doc, 'get', '/specs/{id}');
+    expect(query.has('id')).toBe(false);
+  });
+
+  it('unions oneOf branch properties for a composed request body', async () => {
+    const doc = await loadSpec();
+    const { body } = operationParamKeys(
+      doc,
+      'put',
+      '/libraries/{libraryId}/divisions/{division}/general-spec'
+    );
+    expect(body).toEqual(new Set(['generalSpecId', 'notes', 'status']));
+  });
+
+  it('reads direct top-level properties for a plain JSON request body', async () => {
+    const doc = await loadSpec();
+    const { body } = operationParamKeys(doc, 'post', '/specs/{id}/paragraphs');
+    expect(body.has('actorLabel')).toBe(true);
+  });
+
+  it('falls back to multipart/form-data properties for a file-upload op', async () => {
+    const doc = await loadSpec();
+    const { body } = operationParamKeys(doc, 'post', '/parse');
+    expect(body).toEqual(new Set(['file', 'section', 'title', 'numberingProfileId']));
+  });
+
+  it('yields an empty ParamSet for an operation with no params and no body', async () => {
+    const doc = await loadSpec();
+    const { query, body } = operationParamKeys(doc, 'get', '/health');
+    expect(query.size).toBe(0);
+    expect(body.size).toBe(0);
   });
 });
