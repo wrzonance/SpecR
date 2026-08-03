@@ -13,10 +13,8 @@
 //
 // So this asserts the invariant instead of the inventory: walk EVERY
 // registered tool's generated JSON Schema and require that every `maxLength`
-// it publishes either carries UTF16_LENGTH_LIMIT_NOTE in its description, or
-// names a field on the documented ASCII-only exclusion list (where the UTF-16
-// count and the Unicode code-point count are provably identical, so there is
-// no divergence to document). A new bare `maxLength` fails here by default.
+// it publishes carries UTF16_LENGTH_LIMIT_NOTE in its description. There is no
+// exemption list — a new bare `maxLength` fails here by default.
 //
 // Why it matters on this surface specifically: JSON Schema's `maxLength` is
 // defined in Unicode code points, Zod's `.max()`/`z.maxLength()` counts UTF-16
@@ -30,90 +28,50 @@ import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
 import { registerTools } from './tools.js';
 import { TOOL_TIER_VALUES } from './capabilities.js';
 
-/**
- * Field names whose alphabet is ASCII-only, so `.length` (UTF-16 units) and
- * `[...str].length` (code points) are always numerically identical and there
- * is nothing for ADR-088 to document. Keep this list minimal and justified —
- * adding a name here is how a real divergence would get hidden.
- */
-const ASCII_ONLY_FIELDS: ReadonlySet<string> = new Set([
-  // base64 payload, RFC 4648 alphabet (ADR-069 byte cap)
-  'imageData',
-]);
+// There is deliberately NO exemption list here. An earlier revision exempted
+// `imageData` as "ASCII-only base64", but that field is validated as a plain
+// bounded string with no base64 pattern behind it, so astral text reaches it
+// like anywhere else — the exemption was convenient rather than true. A
+// name-keyed allowlist would also have silently covered any future unrelated
+// field that happened to share the name. Every published bound is documented.
 
 interface LengthField {
   readonly path: string;
   readonly maxLength: number;
   readonly description: string;
-  readonly fieldName: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
 /** This node's own `maxLength`, if it declares one. */
-function ownLengthField(
-  schema: Record<string, unknown>,
-  path: string,
-  fieldName: string
-): LengthField[] {
+function ownLengthField(schema: Record<string, unknown>, path: string): LengthField[] {
   const max = schema['maxLength'];
   if (typeof max !== 'number') return [];
   const description = schema['description'];
   return [
-    {
-      path,
-      maxLength: max,
-      description: typeof description === 'string' ? description : '',
-      fieldName,
-    },
+    { path, maxLength: max, description: typeof description === 'string' ? description : '' },
   ];
 }
 
-/** Named object properties — each descends under its own field name. */
-function childrenOfProperties(schema: Record<string, unknown>, path: string): LengthField[] {
-  const properties = schema['properties'];
-  if (!isRecord(properties)) return [];
-  return Object.entries(properties).flatMap(([key, value]) =>
-    collectLengthFields(value, `${path}.${key}`, key)
-  );
-}
-
-/** Array/record element schemas — the field name carries through unchanged. */
-function childrenOfContainers(
-  schema: Record<string, unknown>,
-  path: string,
-  fieldName: string
-): LengthField[] {
-  return (['items', 'additionalProperties'] as const)
-    .map((key) => schema[key])
-    .filter(isRecord)
-    .flatMap((value) => collectLengthFields(value, `${path}[]`, fieldName));
-}
-
-/** anyOf/oneOf/allOf branches — likewise keep the field name. */
-function childrenOfCombinators(
-  schema: Record<string, unknown>,
-  path: string,
-  fieldName: string
-): LengthField[] {
-  return (['anyOf', 'oneOf', 'allOf'] as const).flatMap((key) => {
-    const branches = schema[key];
-    if (!Array.isArray(branches)) return [];
-    return branches.flatMap((branch: unknown, index: number) =>
-      collectLengthFields(branch, `${path}/${key}${index}`, fieldName)
-    );
-  });
-}
-
-/** Recursively collect every `maxLength` in a generated JSON Schema. */
-function collectLengthFields(node: unknown, path: string, fieldName: string): LengthField[] {
+/**
+ * Recursively collect every `maxLength` in a generated JSON Schema.
+ *
+ * Structure-agnostic on purpose: it descends through every object value and
+ * array element rather than following the keywords a JSON Schema is *expected*
+ * to nest under. An earlier revision walked only properties/items/combinators
+ * and was blind to `$defs`/`definitions` — a bound behind a `$ref` (which Zod
+ * emits for any schema carrying `.meta({ id })`) would have gone unchecked
+ * while the sweep still reported a clean pass.
+ */
+function collectLengthFields(node: unknown, path: string): LengthField[] {
+  if (Array.isArray(node)) {
+    return node.flatMap((item, index) => collectLengthFields(item, `${path}[${index}]`));
+  }
   if (!isRecord(node)) return [];
   return [
-    ...ownLengthField(node, path, fieldName),
-    ...childrenOfProperties(node, path),
-    ...childrenOfContainers(node, path, fieldName),
-    ...childrenOfCombinators(node, path, fieldName),
+    ...ownLengthField(node, path),
+    ...Object.entries(node).flatMap(([key, value]) => collectLengthFields(value, `${path}.${key}`)),
   ];
 }
 
@@ -134,7 +92,7 @@ function allPublishedLengthFields(): LengthField[] {
         ? (inputSchema as z.ZodType)
         : z.object(inputSchema as z.ZodRawShape);
     const generated = toJsonSchemaCompat(asObject as never, { io: 'input' } as never);
-    fields.push(...collectLengthFields(generated, toolName, toolName));
+    fields.push(...collectLengthFields(generated, toolName));
   }
   return fields;
 }
@@ -149,19 +107,18 @@ describe('MCP tool schemas — every published maxLength documents the ADR-088 u
     ).toBeGreaterThan(10);
   });
 
-  it('no tool publishes a maxLength without either the UTF-16 note or an ASCII-only exemption', () => {
+  it('no tool publishes a maxLength without the UTF-16 note', () => {
     const undocumented = allPublishedLengthFields().filter(
-      (field) =>
-        !ASCII_ONLY_FIELDS.has(field.fieldName) &&
-        !field.description.includes(UTF16_LENGTH_LIMIT_NOTE)
+      (field) => !field.description.includes(UTF16_LENGTH_LIMIT_NOTE)
     );
 
     expect(
       undocumented.map((field) => `${field.path} (maxLength: ${field.maxLength})`),
       'these MCP tool fields publish a JSON Schema maxLength — which the spec defines in Unicode ' +
         'code points — while Zod enforces it in UTF-16 code units, and their description does not ' +
-        'say so. Append UTF16_LENGTH_LIMIT_NOTE to the field’s .describe(), or, if the field’s ' +
-        'alphabet is provably ASCII-only, add it to ASCII_ONLY_FIELDS above with a justification'
+        'say so. Append UTF16_LENGTH_LIMIT_NOTE to the field’s .describe(). Do not add an ' +
+        'exemption instead: a bound that is published is a bound a client can be misled by, and ' +
+        '"the alphabet looks ASCII" is not enforcement unless a pattern actually constrains it'
     ).toEqual([]);
   });
 });

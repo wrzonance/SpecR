@@ -10905,10 +10905,6 @@ components:
                       format: { type: string }
                       prefix: { type: string }
                       suffix: { type: string }
-                      # ASCII-only base64 alphabet — UTF-16-unit count and
-                      # Unicode code-point count are always identical here,
-                      # so this field is out of scope for the ADR-088
-                      # length-limit convention.
                       imageData:
                         type: string
                         maxLength: 6990508
@@ -10924,6 +10920,14 @@ components:
                           (`MAX_IMAGE_BASE64_LENGTH`,
                           `src/lib/image-media-type.ts`) enforced by the
                           paired Zod schema (`src/ast/header-footer-schemas.ts`).
+                          That cap is a plain string length with no base64
+                          pattern behind it, so the alphabet is not actually
+                          constrained to ASCII and the unit convention below
+                          applies here like anywhere else.
+                          This limit is counted in UTF-16 code units (JavaScript
+                          string length), not Unicode code points — characters
+                          outside the Basic Multilingual Plane (e.g. emoji)
+                          count as 2. See ADR-088.
                       imageMediaType: { type: string }
                       widthEmu: { type: integer, minimum: 1 }
                       heightEmu: { type: integer, minimum: 1 }
