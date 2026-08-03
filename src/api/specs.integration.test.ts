@@ -78,6 +78,13 @@ describe('GET /specs/:id (integration)', () => {
     expect(body['error']).toBe('spec not found');
   });
 
+  it('regression #587: 400 — malformed (non-UUID) spec id, not a 500', async () => {
+    const res = await fetch(`${baseUrl}/specs/not-a-uuid`);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(400);
+    expect(body['error']).toBe('invalid spec id');
+  });
+
   it('regression #152: parsed spec returns reconstructed paragraph tree, not parts: []', async () => {
     const res = await fetch(`${baseUrl}/specs/${testSpecId}`);
     const body = (await res.json()) as Record<string, unknown>;
@@ -146,6 +153,17 @@ describe('PATCH /specs/:id (integration)', () => {
       body: JSON.stringify({ title: 'whatever' }),
     });
     expect(res.status).toBe(404);
+  });
+
+  it('regression #587: 400 — malformed (non-UUID) spec id, not a 500', async () => {
+    const res = await fetch(`${baseUrl}/specs/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'whatever' }),
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(400);
+    expect(body['error']).toBe('invalid spec id');
   });
 
   it('accepts a dotted-suffix section', async () => {
