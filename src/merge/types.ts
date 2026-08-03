@@ -76,7 +76,7 @@ export type ConflictDiff = ModifiedDiff;
  * - `theirs` ABSENT — #525 whole-object-delete case: every one of the
  *   object's interior child anchors is absent from the returned DOCX; there
  *   is no `theirs` block to fingerprint because the object itself is gone.
- *   See docs/adr/090-whole-object-delete-detection.md.
+ *   See docs/adr/089-whole-object-delete-detection.md.
  */
 export interface ObjectConflictDiff {
   readonly objectId: string;

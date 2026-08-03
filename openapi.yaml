@@ -8360,7 +8360,7 @@ components:
         missing from the returned DOCX entirely — the editor deleted the
         whole table/text box in Word, so there is no matching object left to
         fingerprint (#525). See
-        docs/adr/090-whole-object-delete-detection.md.
+        docs/adr/089-whole-object-delete-detection.md.
       properties:
         objectId:
           type: string

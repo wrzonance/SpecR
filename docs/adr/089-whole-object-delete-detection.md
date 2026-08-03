@@ -1,4 +1,4 @@
-# ADR-090: whole-object-delete detection reuses ObjectConflictDiff with an optional `theirs`
+# ADR-089: whole-object-delete detection reuses ObjectConflictDiff with an optional `theirs`
 
 ## Status
 
