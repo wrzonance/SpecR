@@ -63,7 +63,12 @@ async function waitForJob(jobId: string, maxMs = 20_000): Promise<JobData> {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
     const res = await fetch(`${baseUrl}/parse/jobs/${jobId}`);
-    const body = (await res.json()) as { success: boolean; data: JobData };
+    const body = (await res.json()) as { success: boolean; data?: JobData };
+    // Surface the real status: an error envelope carries no `data`, and
+    // reading through it would throw a TypeError that buries the 404/500.
+    if (res.status !== 200 || !body.data) {
+      throw new Error(`job ${jobId} poll failed: ${res.status}`);
+    }
     if (body.data.status === 'complete' || body.data.status === 'failed') return body.data;
     await new Promise((r) => setTimeout(r, 300));
   }
