@@ -1,3 +1,5 @@
+import { availableParallelism } from 'node:os';
+
 import { describe, expect, it } from 'vitest';
 
 import rootConfig from '../vitest.config.js';
@@ -41,7 +43,19 @@ describe('vitest.config.ts unit project', () => {
   // assertion, a future edit that silently drops or changes maxWorkers would
   // leave CI green while the regression this issue fixes resurfaces.
   it('caps maxWorkers at 4 to avoid CPU-oversubscription timeouts (#612)', () => {
-    expect(unitProject.test?.maxWorkers).toBe(4);
+    expect(unitProject.test?.maxWorkers).toBeGreaterThanOrEqual(1);
+    expect(unitProject.test?.maxWorkers).toBeLessThanOrEqual(4);
+  });
+
+  // The other half of "cap": Vitest applies an explicit maxWorkers verbatim
+  // (resolveMaxWorkers() adds no CPU clamp), so a hardcoded ceiling that
+  // exceeds the host's CPU count would *raise* parallelism on a small runner
+  // — a 2-CPU host defaults to 1 worker — recreating the very contention this
+  // issue fixes. Asserts the config can only ever reduce parallelism relative
+  // to what Vitest would have chosen unaided, on whatever host runs the suite.
+  it('never exceeds the CPU-aware default it replaces (#612)', () => {
+    const vitestDefault = Math.max(availableParallelism() - 1, 1);
+    expect(unitProject.test?.maxWorkers).toBeLessThanOrEqual(vitestDefault);
   });
 });
 
