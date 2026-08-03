@@ -220,6 +220,27 @@ export const SCHEMA_SHARING_PENDING: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Counterexamples for the Item 5 behavioral gate: op -> an args object the op's object-level rule
+ * MUST reject. `isFullSchemaInstance()` alone is only a structural proxy — it cannot tell
+ * `Schema.extend({...})` (rule intact) from a hand-rebuilt `z.object({ ...Schema.shape, ... })`
+ * (rule GONE), because both are schema instances. Verified: for GenerateBodySchema the rebuilt
+ * form passes `isFullSchemaInstance` while ACCEPTING `{ mdoe: 'final' }`, so the structural check
+ * alone would stay green through exactly the regression #567 closed. Each probe proves the rule
+ * actually runs at the SDK layer. Every op the main gate checks must have one — enforced by the
+ * gate, so an op graduating out of EXEMPT/PENDING cannot land in the checked bucket with only the
+ * weaker structural proof.
+ */
+export const SCHEMA_SHARING_REJECT_PROBES: ReadonlyMap<string, unknown> = new Map([
+  [
+    'post /specs/{}/generate',
+    // GenerateBodySchema.strict(): a misspelled `mdoe` must be REJECTED, not stripped. Stripping
+    // leaves `mode` undefined, so the ADR-079 readiness gate silently no-ops and hands back a
+    // draft with no error at all (see the comment on generate_docx's inputSchema in tools.ts).
+    { specId: '11111111-1111-4111-8111-111111111111', mdoe: 'final' },
+  ],
+]);
+
+/**
  * Item 5 ratchet baseline (#549). SCHEMA_SHARING_PENDING.size must never grow past this count,
  * mirroring INV5_READ_PENDING_BASELINE (contract-map.ts) and INV6_WRITE_PENDING_BASELINE
  * (contract-write-response-map.ts). Without it the burn-down set is the one place a future

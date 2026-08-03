@@ -7,6 +7,7 @@ import {
   loadRawSpec,
   operationParamKeys,
 } from './validate-response.js';
+import type { OpenApiDoc } from './validate-response.js';
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
 
@@ -40,17 +41,57 @@ describe('contract validate-response helper', () => {
     await expect(assertResponse('get', '/health', 200, body)).rejects.toThrow(/does not match/);
   });
 
-  it('no-ops for an operation without a JSON response schema', async () => {
-    // 204 No Content has no application/json schema
+  it('no-ops for a DOCUMENTED response that has no JSON schema', async () => {
+    // DELETE /templates/{id} documents 204 with no content at all
     await expect(
-      assertResponse('delete', '/specs/{id}/lock', 204, undefined)
+      assertResponse('delete', '/templates/{id}', 204, undefined)
     ).resolves.toBeUndefined();
+  });
+
+  it('rejects a status the operation does not document, instead of passing vacuously', async () => {
+    // DELETE /specs/{id}/lock documents 200 (not 204). Treating an undocumented status as a
+    // "no JSON schema" no-op would validate nothing and stay green forever.
+    await expect(assertResponse('delete', '/specs/{id}/lock', 204, undefined)).rejects.toThrow(
+      /documents no 204 response/
+    );
   });
 
   it('normalizes path params to {} so manifests are param-name agnostic', async () => {
     const doc = await loadSpec();
     expect(specOperationManifest(doc)).toContain('get /specs/{}');
     expect(successJsonOps(doc)).toContain('get /health');
+  });
+});
+
+// operationParamKeys() feeds INV-4; anything it silently under-reports becomes an INV-4 check that
+// passes vacuously. Synthetic docs (no such op exists in openapi.yaml yet) pin the two ways that
+// could happen: a body carrying BOTH a base `properties` map and `oneOf` branches, and a body
+// composed in a way this narrow reader cannot destructure at all.
+describe('operationParamKeys body-key derivation', () => {
+  function docWithBodySchema(schema: unknown): OpenApiDoc {
+    return {
+      paths: {
+        '/synthetic': {
+          post: { requestBody: { content: { 'application/json': { schema } } }, responses: {} },
+        },
+      },
+    };
+  }
+
+  it('unions base properties with every oneOf branch instead of letting the base win', () => {
+    const doc = docWithBodySchema({
+      properties: { kind: {} },
+      oneOf: [{ properties: { branchA: {} } }, { properties: { branchB: {} } }],
+    });
+    const { body } = operationParamKeys(doc, 'post', '/synthetic');
+    expect([...body].sort((a, b) => a.localeCompare(b))).toEqual(['branchA', 'branchB', 'kind']);
+  });
+
+  it('throws for a documented requestBody whose top-level keys cannot be derived', () => {
+    // allOf composition is not destructured by this reader — returning {} would make INV-4 green
+    // for an operation whose params were never actually compared.
+    const doc = docWithBodySchema({ allOf: [{ properties: { hidden: {} } }] });
+    expect(() => operationParamKeys(doc, 'post', '/synthetic')).toThrow(/pass vacuously/);
   });
 });
 

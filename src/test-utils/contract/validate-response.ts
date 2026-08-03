@@ -106,8 +106,18 @@ export async function assertResponse(
   const rawOp = doc.paths[pathTemplate]?.[method.toLowerCase()];
   if (rawOp === undefined) throw new Error(`No OpenAPI operation: ${method} ${pathTemplate}`);
   const op = OperationObject.parse(rawOp);
-  const schema = op.responses?.[String(status)]?.content?.['application/json']?.schema;
-  if (!schema) return; // non-JSON (binary / 204 / multipart) — out of scope
+  // An UNDOCUMENTED status must fail loud, not fall through to the no-JSON no-op below. Collapsing
+  // the two means a caller pinned to a status openapi.yaml no longer documents (e.g. a 201 changed
+  // to 200) silently validates NOTHING and stays green forever — the gate quietly stops gating.
+  const response = op.responses?.[String(status)];
+  if (response === undefined) {
+    throw new Error(
+      `${method} ${pathTemplate} documents no ${status} response in openapi.yaml — the assertion ` +
+        'would pass vacuously; fix the expected status or document it.'
+    );
+  }
+  const schema = response.content?.['application/json']?.schema;
+  if (!schema) return; // documented non-JSON (binary / no-content / multipart) — out of scope
   const validate = getValidator(schema);
   if (!validate(body)) {
     throw new Error(
@@ -178,14 +188,14 @@ export interface ParamSet {
 
 type RequestBodySchema = z.infer<typeof RequestBodySchemaObject>;
 
-// A direct `properties` map wins outright; otherwise union every `oneOf` branch's
-// `properties` (the 3 composed-body ops) so INV-4 stays meaningful instead of passing
-// vacuously for exactly the operations this helper exists to check.
+// Union of the direct `properties` map AND every `oneOf` branch's `properties` (the 3 composed-body
+// ops), so INV-4 stays meaningful instead of passing vacuously for exactly the operations this
+// helper exists to check. Unioning rather than letting a direct `properties` win outright matters
+// for a schema carrying both (a discriminator alongside branch-specific fields): short-circuiting
+// on the base map would drop every branch field without any signal.
 function bodyPropertyKeys(schema: RequestBodySchema | undefined): ReadonlySet<string> {
-  if (schema?.properties !== undefined) return new Set(Object.keys(schema.properties));
-  const branches = schema?.oneOf ?? [];
-  const keys = new Set<string>();
-  for (const branch of branches) {
+  const keys = new Set(Object.keys(schema?.properties ?? {}));
+  for (const branch of schema?.oneOf ?? []) {
     for (const key of Object.keys(branch.properties ?? {})) keys.add(key);
   }
   return keys;
@@ -218,5 +228,17 @@ export function operationParamKeys(
   const query = new Set(
     (op.parameters ?? []).filter((param) => param.in === 'query').map((param) => param.name)
   );
-  return { query, body: requestBodyKeys(op.requestBody?.content) };
+  const body = requestBodyKeys(op.requestBody?.content);
+  // Fail loud rather than hand back an empty set: a documented requestBody whose top-level keys
+  // this narrow reader cannot derive (an unsupported composition — allOf, a nested anyOf, a
+  // non-object body) would make INV-4 pass vacuously for that op, which is the failure mode the
+  // gate exists to prevent. No current operation trips this; it fires when one is introduced.
+  if (op.requestBody !== undefined && body.size === 0) {
+    throw new Error(
+      `${method} ${pathTemplate} documents a requestBody but no top-level properties could be ` +
+        'derived from it — INV-4 would pass vacuously. Extend bodyPropertyKeys() to handle this ' +
+        'schema composition.'
+    );
+  }
+  return { query, body };
 }

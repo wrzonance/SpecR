@@ -2,6 +2,7 @@
 import {
   normalizeObjectSchema,
   getObjectShape,
+  safeParse,
 } from '@modelcontextprotocol/sdk/server/zod-compat.js';
 import type { ToolInputSchema } from './tool-registry.js';
 
@@ -43,4 +44,22 @@ export function toolInputKeys(schema: ToolInputSchema | undefined): ReadonlySet<
 export function isFullSchemaInstance(schema: ToolInputSchema | undefined): boolean {
   if (schema === undefined) return false;
   return Object.is(normalizeObjectSchema(schema), schema);
+}
+
+/**
+ * True iff the SDK's own validation of `schema` REJECTS `value`.
+ *
+ * `isFullSchemaInstance()` is a structural proxy, and a proxy has a blind spot: it distinguishes a
+ * raw `{ ...Schema.shape }` literal from a schema instance, but NOT `Schema.extend({...})` (rule
+ * intact) from a hand-rebuilt `z.object({ ...Schema.shape, ... })` (rule GONE) — both are schema
+ * instances, so a refactor to the latter drops the object-level rule with the structural check
+ * still green. This closes that hole by proving the rule actually RUNS: it validates through
+ * `normalizeObjectSchema` + the SDK's own `safeParse`, i.e. the exact path the SDK takes for
+ * incoming tool arguments, so a counterexample the REST schema rejects must be rejected here too.
+ */
+export function sdkRejects(schema: ToolInputSchema | undefined, value: unknown): boolean {
+  if (schema === undefined) return false;
+  const objectSchema = normalizeObjectSchema(schema);
+  if (objectSchema === undefined) return false;
+  return !safeParse(objectSchema, value).success;
 }

@@ -13,8 +13,9 @@ import {
   SCHEMA_SHARING_EXEMPT,
   SCHEMA_SHARING_PENDING,
   SCHEMA_SHARING_PENDING_BASELINE,
+  SCHEMA_SHARING_REJECT_PROBES,
 } from './contract-schema-sharing-map.js';
-import { toolInputKeys, isFullSchemaInstance } from './tool-schema-introspect.js';
+import { toolInputKeys, isFullSchemaInstance, sdkRejects } from './tool-schema-introspect.js';
 import {
   loadSpec,
   operationParamKeys,
@@ -29,7 +30,9 @@ function registeredSchemas(): ReadonlyMap<string, ToolInputSchema> {
 
 describe('INV-4: request-parameter parity (REST op params <-> MCP tool inputSchema)', () => {
   const schemas = registeredSchemas();
-  const parityCases = [...OP_TO_TOOL].filter(([op]) => !INV4_PARAM_EXEMPT.has(op));
+  // EVERY mapped op is a case — exemptions are subtracted param-by-param below, never op-wide, so
+  // an op excused for one renamed field is still gated on all its other fields.
+  const parityCases = [...OP_TO_TOOL];
 
   it.each(parityCases)(
     '%s -> %s: every documented query/body param is in the tool inputSchema',
@@ -40,24 +43,51 @@ describe('INV-4: request-parameter parity (REST op params <-> MCP tool inputSche
       const [method] = op.split(' ');
       const { query, body } = operationParamKeys(doc, method!, literalPath!);
       const expected = new Set([...query, ...body]);
+      const excused = new Set(INV4_PARAM_EXEMPT.get(op)?.params ?? []);
       const actual = toolInputKeys(schemas.get(tool));
-      const missing = [...expected].filter((key) => !actual.has(key));
+      const missing = [...expected].filter((key) => !actual.has(key) && !excused.has(key));
       expect(
         missing,
         `${tool} (${op}) is missing REST param(s) [${missing.join(', ')}] — either add them to ` +
-          'the tool inputSchema, or add a reasoned INV4_PARAM_EXEMPT entry in contract-map.ts'
+          'the tool inputSchema, or add them to a reasoned INV4_PARAM_EXEMPT entry in ' +
+          'contract-map.ts (field-scoped: list the specific params, not the whole op)'
       ).toEqual([]);
     }
   );
 
-  it('INV-4 exemption hygiene: every INV4_PARAM_EXEMPT entry keys a real op and carries a reason', () => {
-    for (const [op, reason] of INV4_PARAM_EXEMPT) {
+  // Self-cleaning exemption hygiene: an excused param must (a) really be documented by the op and
+  // (b) really be absent from the tool. (a) catches a stale name left behind by an openapi rename;
+  // (b) forces the waiver's removal once the tool adopts the param verbatim — so the exemption
+  // list can never quietly suppress a check that has become unnecessary.
+  it.each([...INV4_PARAM_EXEMPT])(
+    'INV-4 exemption hygiene: %s excuses only params that are documented and genuinely absent',
+    async (op, { params, reason }) => {
       expect(OP_TO_TOOL.has(op), `INV4_PARAM_EXEMPT references unknown op "${op}"`).toBe(true);
       expect(reason.length > 0, `INV4_PARAM_EXEMPT entry for "${op}" has an empty reason`).toBe(
         true
       );
+      expect(params.length > 0, `INV4_PARAM_EXEMPT entry for "${op}" excuses no params`).toBe(true);
+      const doc = await loadSpec();
+      const literalPath = operationPathTemplates(doc).get(op);
+      expect(literalPath, `${op} has no matching literal path in openapi.yaml`).toBeDefined();
+      const [method] = op.split(' ');
+      const { query, body } = operationParamKeys(doc, method!, literalPath!);
+      const documented = new Set([...query, ...body]);
+      const actual = toolInputKeys(schemas.get(OP_TO_TOOL.get(op)!));
+      for (const param of params) {
+        expect(
+          documented.has(param),
+          `INV4_PARAM_EXEMPT excuses "${param}" for ${op}, but openapi.yaml documents no such ` +
+            'query/body param — the exemption is stale; drop or rename it'
+        ).toBe(true);
+        expect(
+          actual.has(param),
+          `INV4_PARAM_EXEMPT excuses "${param}" for ${op}, but the tool now declares it — the ` +
+            'divergence is gone; delete this param from the exemption so the gate covers it'
+        ).toBe(false);
+      }
     }
-  });
+  );
 });
 
 // ── Item 5 (#549): schema-instance-sharing gate ──────────────────────────────
@@ -90,6 +120,44 @@ describe('Item 5: schema-instance-sharing (object-level rules survive SDK regist
       ).toBe(true);
     }
   );
+
+  // The structural check above is a PROXY, and it has a blind spot: `z.object({ ...Schema.shape })`
+  // is a schema instance too, so it passes isFullSchemaInstance while having dropped the very rule
+  // the gate is about (verified — see SCHEMA_SHARING_REJECT_PROBES). This proves the rule actually
+  // RUNS by pushing a counterexample through the SDK's own validation path. Every checked op must
+  // have a probe, so an op graduating out of EXEMPT/PENDING cannot enter the checked bucket with
+  // only the weaker structural proof.
+  it.each(checkedCases)(
+    '%s -> %s: the object-level rule actually RUNS (SDK-level parse rejects a counterexample)',
+    (op, rule) => {
+      const probe = SCHEMA_SHARING_REJECT_PROBES.get(op);
+      expect(
+        SCHEMA_SHARING_REJECT_PROBES.has(op),
+        `no SCHEMA_SHARING_REJECT_PROBES entry for checked op "${op}" — add an args object its ` +
+          `rule (${rule}) must reject; the structural check alone cannot prove the rule survived`
+      ).toBe(true);
+      const tool = OP_TO_TOOL.get(op);
+      expect(tool, `${op} is not in OP_TO_TOOL`).toBeDefined();
+      expect(
+        sdkRejects(schemas.get(tool!), probe),
+        `${tool} (${op}) ACCEPTS ${JSON.stringify(probe)} at the SDK layer — its object-level ` +
+          `rule (${rule}) is not running, even though the schema is registered as a full ` +
+          'instance. A `z.object({ ...Schema.shape })` rebuild drops the rule while still looking ' +
+          'structurally correct; register the schema itself or via .extend().'
+      ).toBe(true);
+    }
+  );
+
+  it('Item 5 probe hygiene: every reject-probe keys an op the main gate actually checks', () => {
+    const checked = new Set(checkedCases.map(([op]) => op));
+    for (const op of SCHEMA_SHARING_REJECT_PROBES.keys()) {
+      expect(
+        checked.has(op),
+        `SCHEMA_SHARING_REJECT_PROBES has an entry for "${op}", which the main Item 5 gate does ` +
+          'not check (it is exempt, pending, or has no object-level rule) — the probe never runs'
+      ).toBe(true);
+    }
+  });
 
   it('Item 5 completeness: every OPS_WITH_OBJECT_LEVEL_RULE entry is checked, exempt, or pending — never both exempt and pending', () => {
     for (const op of OPS_WITH_OBJECT_LEVEL_RULE.keys()) {
