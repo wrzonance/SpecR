@@ -6,7 +6,6 @@ import { createPackage } from './packages.js';
 import { createPackageRevision } from './revisions.js';
 import { upsertHeaderFooterConfig } from './header-footer.js';
 import {
-  resolveSpecHeaderFooterContext,
   resolveSpecGenerationContext,
   resolveProjectManualHeaderFooterContext,
   resolveRevisionHeaderFooterContext,
@@ -83,110 +82,6 @@ afterEach(async () => {
   await pool.query(`DELETE FROM libraries WHERE name LIKE $1`, [`${TEST_PREFIX}%`]);
 });
 
-describe('resolveSpecHeaderFooterContext', () => {
-  it('I2: orphan spec (no owning project) resolves to null', async () => {
-    const specId = await insertSpec('09 91 26.01');
-    await expect(resolveSpecHeaderFooterContext(specId)).resolves.toBeNull();
-  });
-
-  it('I2: ambiguously owned spec (2+ projects) resolves to null', async () => {
-    const specId = await insertSpec('09 91 26.02');
-    const p1 = await insertProject(`${TEST_PREFIX}p1`);
-    const p2 = await insertProject(`${TEST_PREFIX}p2`);
-    await attachSpecToProject(p1, specId);
-    await attachSpecToProject(p2, specId);
-    await expect(resolveSpecHeaderFooterContext(specId)).resolves.toBeNull();
-  });
-
-  it('I1: sole project with zero configured header/footer layers resolves to null, not an empty composition', async () => {
-    const specId = await insertSpec('09 91 26.03');
-    const projectId = await insertProject(`${TEST_PREFIX}p3`);
-    await attachSpecToProject(projectId, specId);
-    await expect(resolveSpecHeaderFooterContext(specId)).resolves.toBeNull();
-  });
-
-  it('resolves composition + projectName/clientName for a sole project under a configured client layer', async () => {
-    const company = await createLibrary({ tier: 'company', name: `${TEST_PREFIX}company` });
-    const client = await createLibrary({
-      tier: 'client',
-      name: `${TEST_PREFIX}client`,
-      parentLibraryId: company.id,
-    });
-    const specId = await insertSpec('09 91 26.04');
-    const projectId = await insertProject(`${TEST_PREFIX}p4`);
-    await attachSpecToProject(projectId, specId);
-    await pool.query(
-      `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
-      [projectId, client.id]
-    );
-    await upsertHeaderFooterConfig(
-      { clientLibraryId: client.id },
-      { header: { left: { content: [{ kind: 'clientName' }] } } }
-    );
-
-    const context = await resolveSpecHeaderFooterContext(specId);
-
-    expect(context?.composition).toEqual({
-      header: { left: { content: [{ kind: 'clientName' }] } },
-    });
-    expect(context?.fieldValues).toEqual({
-      projectName: `${TEST_PREFIX}p4`,
-      clientName: `${TEST_PREFIX}client`,
-    });
-  });
-
-  it('no client source on the project chain (null clientLibraryId) omits clientName rather than throwing', async () => {
-    const specId = await insertSpec('09 91 26.05');
-    const projectId = await insertProject(`${TEST_PREFIX}p5`);
-    await attachSpecToProject(projectId, specId);
-    await upsertHeaderFooterConfig(
-      { projectId },
-      { footer: { right: { content: [{ kind: 'pageNumber' }] } } }
-    );
-
-    const context = await resolveSpecHeaderFooterContext(specId);
-
-    expect(context?.fieldValues.clientName).toBeUndefined();
-    expect(context?.fieldValues.projectName).toBe(`${TEST_PREFIX}p5`);
-  });
-
-  it('client library deleted between context resolution and name lookup (stale clientLibraryId) omits clientName rather than throwing', async () => {
-    const company = await createLibrary({ tier: 'company', name: `${TEST_PREFIX}company-race` });
-    const client = await createLibrary({
-      tier: 'client',
-      name: `${TEST_PREFIX}client-race`,
-      parentLibraryId: company.id,
-    });
-    const specId = await insertSpec('09 91 26.06');
-    const projectId = await insertProject(`${TEST_PREFIX}p6`);
-    await attachSpecToProject(projectId, specId);
-    await pool.query(
-      `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
-      [projectId, client.id]
-    );
-    await upsertHeaderFooterConfig(
-      { projectId },
-      { footer: { right: { content: [{ kind: 'pageNumber' }] } } }
-    );
-
-    const context = await resolveSpecHeaderFooterContext(
-      specId,
-      raceLibraryDeletionOnLookup(client.id)
-    );
-
-    expect(context?.fieldValues.clientName).toBeUndefined();
-    expect(context?.fieldValues.projectName).toBe(`${TEST_PREFIX}p6`);
-    const remaining = await pool.query('SELECT id FROM libraries WHERE id = $1', [client.id]);
-    expect(remaining.rows).toHaveLength(0);
-  });
-
-  it('I3: a genuine database failure propagates as DatabaseError, not swallowed', async () => {
-    await expect(resolveSpecHeaderFooterContext('not-a-valid-uuid')).rejects.toBeInstanceOf(
-      DatabaseError
-    );
-  });
-});
-
 describe('resolveSpecGenerationContext', () => {
   it('orphan spec (no owning project) → both fields null', async () => {
     const specId = await insertSpec('09 92 26.01');
@@ -238,6 +133,72 @@ describe('resolveSpecGenerationContext', () => {
     expect(context.headerFooter?.composition).toEqual({
       footer: { right: { content: [{ kind: 'pageNumber' }] } },
     });
+  });
+
+  it('resolves composition + projectName/clientName for a sole project under a configured client layer', async () => {
+    const company = await createLibrary({ tier: 'company', name: `${TEST_PREFIX}company` });
+    const client = await createLibrary({
+      tier: 'client',
+      name: `${TEST_PREFIX}client`,
+      parentLibraryId: company.id,
+    });
+    const specId = await insertSpec('09 92 26.05');
+    const projectId = await insertProject(`${TEST_PREFIX}g5`);
+    await attachSpecToProject(projectId, specId);
+    await pool.query(
+      `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
+      [projectId, client.id]
+    );
+    await upsertHeaderFooterConfig(
+      { clientLibraryId: client.id },
+      { header: { left: { content: [{ kind: 'clientName' }] } } }
+    );
+
+    const { headerFooter } = await resolveSpecGenerationContext(specId);
+
+    expect(headerFooter?.composition).toEqual({
+      header: { left: { content: [{ kind: 'clientName' }] } },
+    });
+    expect(headerFooter?.fieldValues).toEqual({
+      projectName: `${TEST_PREFIX}g5`,
+      clientName: `${TEST_PREFIX}client`,
+    });
+  });
+
+  it('client library deleted between context resolution and name lookup (stale clientLibraryId) omits clientName rather than throwing', async () => {
+    const company = await createLibrary({ tier: 'company', name: `${TEST_PREFIX}company-race` });
+    const client = await createLibrary({
+      tier: 'client',
+      name: `${TEST_PREFIX}client-race`,
+      parentLibraryId: company.id,
+    });
+    const specId = await insertSpec('09 92 26.06');
+    const projectId = await insertProject(`${TEST_PREFIX}g6`);
+    await attachSpecToProject(projectId, specId);
+    await pool.query(
+      `INSERT INTO project_sources (project_id, library_id, priority) VALUES ($1, $2, 1)`,
+      [projectId, client.id]
+    );
+    await upsertHeaderFooterConfig(
+      { projectId },
+      { footer: { right: { content: [{ kind: 'pageNumber' }] } } }
+    );
+
+    const { headerFooter } = await resolveSpecGenerationContext(
+      specId,
+      raceLibraryDeletionOnLookup(client.id)
+    );
+
+    expect(headerFooter?.fieldValues.clientName).toBeUndefined();
+    expect(headerFooter?.fieldValues.projectName).toBe(`${TEST_PREFIX}g6`);
+    const remaining = await pool.query('SELECT id FROM libraries WHERE id = $1', [client.id]);
+    expect(remaining.rows).toHaveLength(0);
+  });
+
+  it('I3: a genuine database failure propagates as DatabaseError, not swallowed', async () => {
+    await expect(resolveSpecGenerationContext('not-a-valid-uuid')).rejects.toBeInstanceOf(
+      DatabaseError
+    );
   });
 });
 

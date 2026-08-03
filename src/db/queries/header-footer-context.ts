@@ -38,8 +38,8 @@ export interface ProjectIdentity {
  * stamps it separately. `packageName`/`revisionName`/`revisionLabel` are
  * populated on the revision-scoped manual path
  * (`resolveRevisionHeaderFooterContext`) but always resolve `undefined` on
- * the single-spec path (`resolveSpecHeaderFooterContext`) — a bare `specId`
- * has no verified, unambiguous package/revision (#304).
+ * the single-spec path (`resolveSpecGenerationContext`'s `.headerFooter`) —
+ * a bare `specId` has no verified, unambiguous package/revision (#304).
  */
 export interface HeaderFooterFieldSource {
   readonly packageName?: string;
@@ -197,25 +197,12 @@ export async function resolveSpecGenerationContext(
 }
 
 /**
- * Header/footer-only view of `resolveSpecGenerationContext` for callers that
- * do not resolve a section-number format (the MCP `generate_docx` path). Null
- * when the spec is orphaned/ambiguously owned or the owner has zero configured
- * layers — the one gate that keeps `generateDocx`'s output byte-identical to
- * the pre-#304 baseline.
- */
-export async function resolveSpecHeaderFooterContext(
-  specId: string,
-  db: Queryable = pool
-): Promise<HeaderFooterGenerationContext | null> {
-  return (await resolveSpecGenerationContext(specId, db)).headerFooter;
-}
-
-/**
  * Resolve the header/footer generation context for a whole-manual (project)
  * DOCX build (#481) — the project-scoped counterpart to
- * `resolveSpecHeaderFooterContext`. Callers here already hold a verified
- * project (e.g. `findProjectById`), so unlike the single-spec path there is
- * no sole-ownership lookup to perform first: `projectId`/`projectName` are
+ * `resolveSpecGenerationContext`'s `.headerFooter` (the single-spec path).
+ * Callers here already hold a verified project (e.g. `findProjectById`), so
+ * unlike the single-spec path there is no sole-ownership lookup to perform
+ * first: `projectId`/`projectName` are
  * taken as given and passed straight through to the shared builder. Null
  * when the project's client→project chain has zero configured layers.
  */

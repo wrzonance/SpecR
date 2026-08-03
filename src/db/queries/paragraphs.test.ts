@@ -19,13 +19,26 @@ vi.mock('../../lib/logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
+// PARAGRAPH_COLUMNS carries 12 columns per row (id, spec_id, parent_id, node_type,
+// text, position, vanish, conflicts, source_facts, signal_provenance, object_data,
+// page_break_before) — the batched INSERT flattens all rows of a chunk into one
+// params array, row-major, so row N's fields start at params[N * 12].
+const PARAGRAPH_COLS = 12;
+function rowParams(
+  params: readonly unknown[] | undefined,
+  rowIndex: number
+): readonly unknown[] | undefined {
+  if (!params) return undefined;
+  return params.slice(rowIndex * PARAGRAPH_COLS, rowIndex * PARAGRAPH_COLS + PARAGRAPH_COLS);
+}
+
 describe('insertTree — DFS ordering', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
   });
 
-  it('inserts each node in DFS order', async () => {
+  it('inserts each node in DFS order within a single batched INSERT', async () => {
     const { pool } = await import('../index.js');
     const { query } = pool;
     vi.mocked(query).mockResolvedValue({ rows: [] } as never);
@@ -56,14 +69,99 @@ describe('insertTree — DFS ordering', () => {
 
     await insertTree(tree, 'spec-uuid-1', pool);
 
-    expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
-    const firstCall = vi.mocked(query).mock.calls[0];
-    expect(firstCall?.[1]?.[0]).toBe('part-1');
-    expect(firstCall?.[1]?.[2]).toBeNull();
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(query).mock.calls[0];
 
-    const secondCall = vi.mocked(query).mock.calls[1];
-    expect(secondCall?.[1]?.[0]).toBe('article-1');
-    expect(secondCall?.[1]?.[2]).toBe('part-1');
+    const firstRow = rowParams(call?.[1], 0);
+    expect(firstRow?.[0]).toBe('part-1');
+    expect(firstRow?.[2]).toBeNull();
+
+    const secondRow = rowParams(call?.[1], 1);
+    expect(secondRow?.[0]).toBe('article-1');
+    expect(secondRow?.[2]).toBe('part-1');
+  });
+});
+
+// flattenDfs invariant (#618): a DFS walk of the tree always visits a parent
+// before any of its descendants, so the flattened rows array — and therefore
+// every batched INSERT's row-major params — always places a parent's row at a
+// strictly lower row index than every one of its children's rows. Exercised
+// through insertTree (flattenDfs itself is an internal, unexported helper)
+// with a 4-level chain so the invariant is pinned across more than one hop.
+describe('insertTree — parent-before-child row ordering (flattenDfs invariant)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  it('places every child row at a strictly greater index than its parent row', async () => {
+    const { pool } = await import('../index.js');
+    const { query } = pool;
+    vi.mocked(query).mockResolvedValue({ rows: [] } as never);
+
+    const { insertTree } = await import('./paragraphs.js');
+    const tree = {
+      id: 'tree-chain',
+      section: '01 00 00',
+      title: 'General',
+      parts: [
+        {
+          id: 'part-1',
+          type: 'part' as const,
+          text: 'GENERAL',
+          children: [
+            {
+              id: 'article-1',
+              type: 'article' as const,
+              text: 'Summary',
+              children: [
+                {
+                  id: 'pr1-1',
+                  type: 'pr1' as const,
+                  text: 'A.',
+                  children: [
+                    {
+                      id: 'pr2-1',
+                      type: 'pr2' as const,
+                      text: '1.',
+                      children: [],
+                      meta: { source: 'ufgs' as const },
+                    },
+                  ],
+                  meta: { source: 'ufgs' as const },
+                },
+              ],
+              meta: { source: 'ufgs' as const },
+            },
+          ],
+          meta: { source: 'ufgs' as const },
+        },
+      ],
+    };
+
+    await insertTree(tree, 'spec-uuid-1', pool);
+
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
+    const params = vi.mocked(query).mock.calls[0]?.[1] as readonly unknown[] | undefined;
+    const idToRowIndex = new Map<string, number>();
+    const rowCount = (params?.length ?? 0) / PARAGRAPH_COLS;
+    for (let row = 0; row < rowCount; row++) {
+      const id = rowParams(params, row)?.[0];
+      if (typeof id === 'string') idToRowIndex.set(id, row);
+    }
+
+    const chain: ReadonlyArray<readonly [child: string, parent: string]> = [
+      ['article-1', 'part-1'],
+      ['pr1-1', 'article-1'],
+      ['pr2-1', 'pr1-1'],
+    ];
+    for (const [child, parent] of chain) {
+      const childIndex = idToRowIndex.get(child);
+      const parentIndex = idToRowIndex.get(parent);
+      expect(childIndex).toBeDefined();
+      expect(parentIndex).toBeDefined();
+      expect(childIndex as number).toBeGreaterThan(parentIndex as number);
+    }
   });
 });
 
@@ -98,7 +196,8 @@ describe('insertTree — vanish flag', () => {
 
     expect(vi.mocked(query)).toHaveBeenCalledTimes(1);
     const call = vi.mocked(query).mock.calls[0];
-    expect(call?.[1]?.[6]).toBe(true);
+    const firstRow = rowParams(call?.[1], 0);
+    expect(firstRow?.[6]).toBe(true);
   });
 });
 
@@ -163,8 +262,9 @@ describe('insertTree — 1-based position', () => {
     const firstInsert = vi
       .mocked(pool.query)
       .mock.calls.find((c) => typeof c[0] === 'string' && c[0].includes('INSERT INTO paragraphs'));
-    // position is $6 (index 5 in params array)
-    expect(firstInsert?.[1]?.[5]).toBe(1);
+    // position is column index 5 within each row's 12-column slice
+    const firstRow = rowParams(firstInsert?.[1], 0);
+    expect(firstRow?.[5]).toBe(1);
   });
 });
 
