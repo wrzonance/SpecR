@@ -350,15 +350,16 @@ function isDroppedEntry(
   return entry.classification.kind !== 'textBox';
 }
 
-// `hiddenFlags` (#515, ADR-086) is one entry per textBox-classified
-// DrawingRunEntry found in the host paragraph's `raw` (grouped-mode) tree,
-// IN DOCUMENT ORDER — resolveHiddenTxbxContentNodes correlates it against
-// this blob's own w:txbxContent boundaries by that same order; the array
-// MUST be count-correct (one entry per boundary in the blob) or every
-// boundary fails closed as hidden. The current single caller
-// (collectParagraphDrawing) still passes a single known-visible flag for
-// the one entry it finds, until a follow-up task supplies real per-box
-// flags across every textBox entry in the paragraph.
+// `hiddenFlags` (ADR-086) is one entry per textBox-classified DrawingRunEntry
+// found in the host paragraph's `raw` (grouped-mode) tree, IN DOCUMENT
+// ORDER — resolveHiddenTxbxContentNodes correlates it against this blob's
+// own w:txbxContent boundaries by that same order; the array MUST be
+// count-correct (one entry per boundary in the blob) or every boundary
+// fails closed as hidden. collectParagraphDrawing supplies one real,
+// per-box flag for every textBox entry in the paragraph (mapping the
+// existing isHiddenTextBox check over each), so a hidden box's interior
+// stays opaque (no objectText leaf) while a co-occurring visible box in the
+// same paragraph is still anchored normally.
 function buildTextBoxObject(
   hostBlob: readonly ObjectBlobNode[],
   classification: TextBoxClassification,
