@@ -64,19 +64,25 @@ export interface ModifiedDiff {
 export type ConflictDiff = ModifiedDiff;
 
 /**
- * One atomic structural conflict on a body-level object (#520): the base-side
- * snapshot's fingerprint (object-fingerprint.ts) diverges from the matching
- * theirs `ExtractedObjectBlock`'s — a row/column added or removed, a
- * textBox/table kind change, etc. Reported as ONE conflict rather than
- * leaking into per-child paragraph noise. `affectedUuids` (the object's
- * base-side interior child anchors) are excluded from modified/deleted/
- * conflicts above for the same paragraphs.
+ * One atomic structural conflict on a body-level object: either a structural
+ * divergence (#520) or a whole-object deletion (#525). `affectedUuids` (the
+ * object's base-side interior child anchors) are excluded from
+ * modified/deleted/conflicts above for the same paragraphs either way.
+ *
+ * - `theirs` PRESENT — #520 structural-diverge case: a `theirs` block was
+ *   matched (shares ≥1 interior child uuid with `affectedUuids`) but its
+ *   fingerprint diverges from `base` (row/column added or removed, a
+ *   textBox/table kind change, etc).
+ * - `theirs` ABSENT — #525 whole-object-delete case: every one of the
+ *   object's interior child anchors is absent from the returned DOCX; there
+ *   is no `theirs` block to fingerprint because the object itself is gone.
+ *   See docs/adr/090-whole-object-delete-detection.md.
  */
 export interface ObjectConflictDiff {
   readonly objectId: string;
   readonly affectedUuids: readonly string[];
   readonly base: ObjectStructureFingerprint;
-  readonly theirs: ObjectStructureFingerprint;
+  readonly theirs?: ObjectStructureFingerprint;
 }
 
 export interface DiffResult {

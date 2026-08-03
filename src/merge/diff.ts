@@ -79,8 +79,8 @@ function unknownUuidWarning(
  * own in the DOCX (only their interior paragraphs are `w:sdt`-anchored), so
  * pairing goes through the child-uuid sets rather than a shared id. A
  * childless snapshot, or one whose children are ALL absent from every theirs
- * block, has no match: its diff falls through to ordinary per-child
- * paragraph classification instead of a whole-object signal.
+ * block, has no match: its diff falls through to `isWholeObjectDeletion`
+ * (#525) rather than a structural-diverge signal.
  */
 function findMatchingBlock(
   childUuids: readonly string[],
@@ -92,22 +92,53 @@ function findMatchingBlock(
 }
 
 /**
- * Structural-conflict detection for body-level objects (#520): pairs each
- * base-side snapshot to its matching theirs block (findMatchingBlock), then
- * compares text-blind fingerprints (object-fingerprint.ts). A structural
- * divergence is reported as ONE atomic conflict; classifyBase excludes its
- * `affectedUuids` from every other bucket so the same edit never also surfaces
- * as noisy per-child deletes/modifications.
+ * True when a base-side object's interior children are ALL absent from the
+ * returned DOCX's controlled paragraphs (#525) — the editor deleted the
+ * whole object (table/text box) in Word, so none of its anchors survived
+ * anywhere in `theirs`, not just outside a matched block.
+ *
+ * Deliberately checks `theirsControlled` membership directly rather than
+ * relying on `findMatchingBlock(...) === undefined` alone: a child uuid can
+ * survive as a stray paragraph outside any object block while its object
+ * still vanished (see the "KNOWN AMBIGUITY: object block gone, one interior
+ * anchor survives outside it" test in diff.test.ts) — that partial-escape
+ * case must NOT be treated as a clean whole-object deletion, so it falls
+ * through to ordinary per-child classification instead.
+ */
+function isWholeObjectDeletion(
+  childUuids: readonly string[],
+  theirsControlled: ReadonlyMap<string, string>
+): boolean {
+  return childUuids.length > 0 && childUuids.every((uuid) => !theirsControlled.has(uuid));
+}
+
+/**
+ * Structural-conflict detection for body-level objects: pairs each base-side
+ * snapshot to its matching theirs block (findMatchingBlock), then compares
+ * text-blind fingerprints (object-fingerprint.ts) — a structural divergence
+ * (#520) is reported as ONE atomic conflict with `theirs` populated. When no
+ * block matches AND every interior child anchor is absent from `theirs`
+ * entirely (#525, isWholeObjectDeletion), the whole-object deletion is also
+ * reported as ONE atomic conflict, `theirs` omitted (the object itself is
+ * gone — there is nothing to fingerprint). Either way, classifyBase excludes
+ * `affectedUuids` from every other bucket so the same edit never also
+ * surfaces as noisy per-child deletes/modifications.
  */
 function detectObjectConflicts(
   snapshots: readonly ObjectStructuralSnapshot[],
-  theirsBlocks: readonly ExtractedObjectBlock[]
+  theirsBlocks: readonly ExtractedObjectBlock[],
+  theirsControlled: ReadonlyMap<string, string>
 ): readonly ObjectConflictDiff[] {
   const conflicts: ObjectConflictDiff[] = [];
   for (const snapshot of snapshots) {
     const block = findMatchingBlock(snapshot.childUuids, theirsBlocks);
-    if (block === undefined) continue;
     const base = fingerprintBlob(snapshot.meta.blob);
+    if (block === undefined) {
+      if (isWholeObjectDeletion(snapshot.childUuids, theirsControlled)) {
+        conflicts.push({ objectId: snapshot.objectId, affectedUuids: snapshot.childUuids, base });
+      }
+      continue;
+    }
     if (!fingerprintsDiverge(base, block.fingerprint)) continue;
     conflicts.push({
       objectId: snapshot.objectId,
@@ -165,7 +196,11 @@ export function computeDiff(
   const oursMap = new Map(ours.map((s) => [s.uuid, s.text]));
   const baseUuids = buildBaseUuids(base);
 
-  const objectConflicts = detectObjectConflicts(objectSnapshots, theirs.objectBlocks);
+  const objectConflicts = detectObjectConflicts(
+    objectSnapshots,
+    theirs.objectBlocks,
+    theirs.controlled
+  );
   const excludedUuids = buildExcludedUuids(objectSnapshots, objectConflicts);
   const { modified, deleted, conflicts } = classifyBase(
     base,

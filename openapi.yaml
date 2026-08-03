@@ -8339,17 +8339,28 @@ components:
 
     ObjectConflictDiff:
       type: object
-      required: [objectId, affectedUuids, base, theirs]
+      required: [objectId, affectedUuids, base]
       description: >
-        One atomic structural conflict on a body-level table/text box (#520):
-        the base-side object's structure diverges from the matching object in
-        the returned DOCX (`theirs`) — a row/column added or removed, a
-        table/text-box kind change, etc. Reported once per object rather than
-        leaking into per-child-paragraph noise; `affectedUuids` (the object's
-        base-side interior child anchors) never also appear in
+        One atomic structural conflict on a body-level table/text box —
+        either a structural divergence (#520) or a whole-object deletion
+        (#525). Reported once per object rather than leaking into
+        per-child-paragraph noise; `affectedUuids` (the object's base-side
+        interior child anchors) never also appear in
         `modified`/`deleted`/`conflicts` above. Detection-only — accepting
         `objectId` or any `affectedUuids` entry is always rejected 400; the
         table/text box must be resolved by hand.
+
+
+        `theirs` PRESENT: the base-side object's structure diverges from the
+        matching object in the returned DOCX — a row/column added or
+        removed, a table/text-box kind change, etc (#520).
+
+
+        `theirs` ABSENT: every one of the object's interior child anchors is
+        missing from the returned DOCX entirely — the editor deleted the
+        whole table/text box in Word, so there is no matching object left to
+        fingerprint (#525). See
+        docs/adr/090-whole-object-delete-detection.md.
       properties:
         objectId:
           type: string
@@ -8365,6 +8376,9 @@ components:
           $ref: '#/components/schemas/ObjectStructureFingerprint'
         theirs:
           $ref: '#/components/schemas/ObjectStructureFingerprint'
+          description: >
+            Absent when the object was deleted whole in the returned DOCX
+            (#525) — there is no matching object to fingerprint.
 
     DiffResult:
       type: object
@@ -8391,8 +8405,9 @@ components:
         objectConflicts:
           type: array
           description: >
-            Atomic structural conflicts on body-level tables/text boxes
-            (#520). Never auto-mergeable — see ObjectConflictDiff.
+            Atomic structural conflicts on body-level tables/text boxes,
+            including whole-object deletions (#520, #525). Never
+            auto-mergeable — see ObjectConflictDiff.
           items:
             $ref: '#/components/schemas/ObjectConflictDiff'
         warnings:
