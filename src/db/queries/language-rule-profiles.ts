@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { pool, DatabaseError } from '../index.js';
-import { LanguageRulesSchema } from '../../ast/index.js';
+import { LanguageRulesSchema, LanguageRulesWriteSchema } from '../../ast/index.js';
 import type { LanguageRules, LanguageRuleTerm } from '../../ast/index.js';
 import { checkRegexPatterns } from '../../lib/regex-safety.js';
 
@@ -90,8 +90,11 @@ function regexTermsIn(terms: readonly LanguageRuleTerm[] | undefined): readonly 
 // Every isRegex:true term across all 4 categories, flattened for one bounds
 // check. Literal terms never appear here — they are always escaped before use
 // (src/db/queries/language-rule-findings.ts), never interpreted as regex
-// syntax, so they carry no ReDoS risk and are deliberately left unbounded in
-// count/length (ADR-080 "Negative" consequences — a conscious v1 trade-off).
+// syntax, so they carry no ReDoS risk and this check never applies to them.
+// (Literal terms DO carry their own independent count/length bound — #541,
+// LanguageRulesWriteSchema in ast/language-rule-schemas.ts — but that bound
+// exists to cap per-scan matcher-compilation cost, not for ReDoS safety, and
+// is enforced separately below via validateRules' safeParse.)
 function allRegexTerms(rules: LanguageRules): readonly string[] {
   return [
     ...regexTermsIn(rules.bannedTerms),
@@ -102,18 +105,23 @@ function allRegexTerms(rules: LanguageRules): readonly string[] {
 }
 
 /**
- * Write boundary: shape-validate against LanguageRulesSchema, then bound every
- * isRegex:true term's pattern across all four categories with the shared
- * ReDoS/length/count guard (ADR-080 D6). Captured facts are never rejected;
- * unsafe regex authoring is.
+ * Write boundary: shape- AND size-validate against LanguageRulesWriteSchema
+ * (LanguageRulesSchema plus the literal-term count/length bound, #541), then
+ * bound every isRegex:true term's pattern across all four categories with the
+ * shared ReDoS/length/count guard (ADR-080 D6). Captured facts are never
+ * rejected; unsafe regex authoring and unbounded literal-term growth are. The
+ * two bounds are independent and never summed — a profile may carry up to 64
+ * regex terms AND up to MAX_LITERAL_TERMS literal terms at once.
  *
- * The shape failure is wrapped, not rethrown: `parse` would surface a raw
+ * The shape/size failure is wrapped, not rethrown: `parse` would surface a raw
  * ZodError at this module's boundary, and only the REST handler pre-validates
  * its body — MCP and direct db callers do not. The ZodError is chained as the
- * cause so the field-level detail survives.
+ * cause so the field-level detail survives. mapRow's read path stays on the
+ * base LanguageRulesSchema (unbounded), so pre-existing rows that already
+ * exceed the literal-term bound keep reading successfully — grandfathered.
  */
 export function validateRules(rules: LanguageRules): LanguageRules {
-  const result = LanguageRulesSchema.safeParse(rules);
+  const result = LanguageRulesWriteSchema.safeParse(rules);
   if (!result.success) {
     throw new LanguageRuleValidationError('malformed language rules', { cause: result.error });
   }
