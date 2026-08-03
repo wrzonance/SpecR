@@ -7330,8 +7330,7 @@ components:
 
     ReadinessSummary:
       type: object
-      required:
-        [unresolvedChoiceToken, specifierNotePresent, openComment, bodyObjectPresent, total]
+      required: [unresolvedChoiceToken, specifierNotePresent, openComment, bodyObjectPresent, total]
       properties:
         unresolvedChoiceToken: { type: integer, minimum: 0 }
         specifierNotePresent: { type: integer, minimum: 0 }
@@ -8460,7 +8459,18 @@ components:
     ParagraphHistoryEntry:
       type: object
       required:
-        [specId, custody, version, text, nodeType, op, contentVersion, snapshotAt, userId, actorLabel]
+        [
+          specId,
+          custody,
+          version,
+          text,
+          nodeType,
+          op,
+          contentVersion,
+          snapshotAt,
+          userId,
+          actorLabel,
+        ]
       properties:
         specId:
           type: string
@@ -8468,7 +8478,7 @@ components:
         custody:
           type: string
           enum: [origin, spec]
-          description: "`origin` is a pre-derive master iteration; `spec` is the requested branch"
+          description: '`origin` is a pre-derive master iteration; `spec` is the requested branch'
         version:
           type: integer
           minimum: 1
@@ -8476,7 +8486,23 @@ components:
           type: string
         nodeType:
           type: string
-          enum: [spec, part, article, pr1, pr2, pr3, pr4, pr5, pr6, pr7, note, continuation, object, objectText]
+          enum:
+            [
+              spec,
+              part,
+              article,
+              pr1,
+              pr2,
+              pr3,
+              pr4,
+              pr5,
+              pr6,
+              pr7,
+              note,
+              continuation,
+              object,
+              objectText,
+            ]
         op:
           type: string
           enum: [edit, insert, remove, restore, merge, accept-note, restructure]
@@ -8495,7 +8521,7 @@ components:
             tip/derive-point entry or a pre-046 row with no attributed actor.
         actorLabel:
           type: [string, 'null']
-          description: "`users.label` for `userId` — null exactly when userId is null."
+          description: '`users.label` for `userId` — null exactly when userId is null.'
 
     ParagraphHistorySession:
       type: object
@@ -9991,13 +10017,15 @@ components:
         term:
           type: string
           minLength: 1
-          maxLength: 500
           description: >
-            For a literal term (isRegex omitted or false) this length bound is
-            enforced at write time (#541, LanguageRulesWriteSchema) — a PUT
-            exceeding it is rejected. Pre-existing rows longer than this are
-            grandfathered and continue to read successfully; the bound is
-            structural here purely to document the write-time contract.
+            For a literal term (isRegex omitted or false), #541's
+            LanguageRulesWriteSchema bounds this to 500 characters — but ONLY
+            at the PUT write boundary (see PutLanguageRulesBody's own rules
+            override). This shared read/response schema is deliberately
+            unbounded: mapRow's GET read path stays on the unbounded
+            LanguageRulesSchema so a pre-existing (or directly-inserted) row
+            longer than 500 characters keeps reading successfully —
+            grandfathered, never rejected by GET's own response contract.
         isRegex:
           type: boolean
           description: Interpret `term` as a regex pattern; a literal term is boundary-matched instead.
@@ -10008,65 +10036,106 @@ components:
       type: object
       additionalProperties: false
       description: >
-        Each array below caps at 500 LITERAL (isRegex omitted or false) terms,
-        enforced at write time across bannedTerms/reinforcingWords/
-        partyVocabulary/requiredPhrases combined (#541,
-        LanguageRulesWriteSchema) — a PUT whose literal terms exceed this
-        combined total is rejected. Pre-existing profiles over the cap are
-        grandfathered and continue to read successfully.
+        Read/response shape — deliberately unbounded (see LanguageRuleTerm).
+        #541's combined 500-literal-term cap across bannedTerms/
+        reinforcingWords/partyVocabulary/requiredPhrases is enforced only at
+        the PUT write boundary (LanguageRulesWriteSchema); a grandfathered
+        profile already over that cap must still GET successfully against
+        this schema.
       properties:
         bannedTerms:
           type: array
-          maxItems: 500
-          description: >
-            maxItems here is NOT independent of the other 3 literal-term
-            fields: bannedTerms/reinforcingWords/partyVocabulary/
-            requiredPhrases share ONE combined write-time cap of 500 literal
-            (isRegex omitted or false) terms total (#541,
-            LanguageRulesWriteSchema). A PUT can be within this field's own
-            maxItems and still be rejected 422 if the 4 categories' literal
-            terms sum past 500 — do not generate per-field validation that
-            treats this 500 as available on its own.
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
         reinforcingWords:
           type: array
-          maxItems: 500
-          description: >
-            maxItems here is NOT independent of the other 3 literal-term
-            fields: bannedTerms/reinforcingWords/partyVocabulary/
-            requiredPhrases share ONE combined write-time cap of 500 literal
-            (isRegex omitted or false) terms total (#541,
-            LanguageRulesWriteSchema). A PUT can be within this field's own
-            maxItems and still be rejected 422 if the 4 categories' literal
-            terms sum past 500 — do not generate per-field validation that
-            treats this 500 as available on its own.
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
         partyVocabulary:
           type: array
-          maxItems: 500
-          description: >
-            maxItems here is NOT independent of the other 3 literal-term
-            fields: bannedTerms/reinforcingWords/partyVocabulary/
-            requiredPhrases share ONE combined write-time cap of 500 literal
-            (isRegex omitted or false) terms total (#541,
-            LanguageRulesWriteSchema). A PUT can be within this field's own
-            maxItems and still be rejected 422 if the 4 categories' literal
-            terms sum past 500 — do not generate per-field validation that
-            treats this 500 as available on its own.
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
         requiredPhrases:
           type: array
-          maxItems: 500
-          description: >
-            maxItems here is NOT independent of the other 3 literal-term
-            fields: bannedTerms/reinforcingWords/partyVocabulary/
-            requiredPhrases share ONE combined write-time cap of 500 literal
-            (isRegex omitted or false) terms total (#541,
-            LanguageRulesWriteSchema). A PUT can be within this field's own
-            maxItems and still be rejected 422 if the 4 categories' literal
-            terms sum past 500 — do not generate per-field validation that
-            treats this 500 as available on its own.
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
+    LanguageRuleTermWrite:
+      allOf:
+        - $ref: '#/components/schemas/LanguageRuleTerm'
+        - type: object
+          properties:
+            term:
+              maxLength: 500
+              description: >
+                Write-boundary bound (#541, LanguageRulesWriteSchema): a PUT
+                literal term (isRegex omitted or false) exceeding 500
+                characters is rejected 422. Pre-existing rows longer than
+                this are grandfathered — see LanguageRuleTerm, the shape used
+                by GET responses, which carries no such bound.
+    LanguageRulesWrite:
+      allOf:
+        - $ref: '#/components/schemas/LanguageRules'
+        - type: object
+          description: >
+            PUT request shape only — mirrors LanguageRulesWriteSchema
+            (#541). Each array below caps at 500 LITERAL (isRegex omitted or
+            false) terms, enforced at write time across
+            bannedTerms/reinforcingWords/partyVocabulary/requiredPhrases
+            COMBINED, not independently per field: a PUT can be within one
+            field's own maxItems and still be rejected 422 if the 4
+            categories' literal terms sum past 500. GET responses are never
+            validated against this shape — see LanguageRules, which carries
+            no such bound, so a grandfathered over-cap profile still reads
+            successfully.
+          properties:
+            bannedTerms:
+              type: array
+              maxItems: 500
+              description: >
+                maxItems here is NOT independent of the other 3 literal-term
+                fields: bannedTerms/reinforcingWords/partyVocabulary/
+                requiredPhrases share ONE combined write-time cap of 500
+                literal (isRegex omitted or false) terms total (#541,
+                LanguageRulesWriteSchema). A PUT can be within this field's
+                own maxItems and still be rejected 422 if the 4 categories'
+                literal terms sum past 500 — do not generate per-field
+                validation that treats this 500 as available on its own.
+              items: { $ref: '#/components/schemas/LanguageRuleTermWrite' }
+            reinforcingWords:
+              type: array
+              maxItems: 500
+              description: >
+                maxItems here is NOT independent of the other 3 literal-term
+                fields: bannedTerms/reinforcingWords/partyVocabulary/
+                requiredPhrases share ONE combined write-time cap of 500
+                literal (isRegex omitted or false) terms total (#541,
+                LanguageRulesWriteSchema). A PUT can be within this field's
+                own maxItems and still be rejected 422 if the 4 categories'
+                literal terms sum past 500 — do not generate per-field
+                validation that treats this 500 as available on its own.
+              items: { $ref: '#/components/schemas/LanguageRuleTermWrite' }
+            partyVocabulary:
+              type: array
+              maxItems: 500
+              description: >
+                maxItems here is NOT independent of the other 3 literal-term
+                fields: bannedTerms/reinforcingWords/partyVocabulary/
+                requiredPhrases share ONE combined write-time cap of 500
+                literal (isRegex omitted or false) terms total (#541,
+                LanguageRulesWriteSchema). A PUT can be within this field's
+                own maxItems and still be rejected 422 if the 4 categories'
+                literal terms sum past 500 — do not generate per-field
+                validation that treats this 500 as available on its own.
+              items: { $ref: '#/components/schemas/LanguageRuleTermWrite' }
+            requiredPhrases:
+              type: array
+              maxItems: 500
+              description: >
+                maxItems here is NOT independent of the other 3 literal-term
+                fields: bannedTerms/reinforcingWords/partyVocabulary/
+                requiredPhrases share ONE combined write-time cap of 500
+                literal (isRegex omitted or false) terms total (#541,
+                LanguageRulesWriteSchema). A PUT can be within this field's
+                own maxItems and still be rejected 422 if the 4 categories'
+                literal terms sum past 500 — do not generate per-field
+                validation that treats this 500 as available on its own.
+              items: { $ref: '#/components/schemas/LanguageRuleTermWrite' }
     LanguageRuleProfile:
       type: object
       required: [id, scope, ownerId, rules, createdAt, updatedAt]
@@ -10087,7 +10156,7 @@ components:
       additionalProperties: false
       required: [rules]
       properties:
-        rules: { $ref: '#/components/schemas/LanguageRules' }
+        rules: { $ref: '#/components/schemas/LanguageRulesWrite' }
 
     # ── Revision nomenclature profiles (ADR-025 / #209) ───────────────────────
 
