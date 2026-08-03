@@ -17,11 +17,13 @@ export async function handleSubmittalRegister({
   projectId: string;
   specIds: readonly string[];
 }): Promise<ToolResult> {
-  // The MCP tool schema spreads SubmittalRegisterBodySchema.shape into a
-  // ZodRawShape for the SDK's inputSchema, which drops the schema's
-  // object-level .check() duplicate-id refinement. Re-validate here so
-  // duplicate specIds still surface the shared schema's own message instead
-  // of falling through to getSubmittalRegister's "not in project" check.
+  // The registered inputSchema now uses SubmittalRegisterBodySchema.extend()
+  // (#550 F3), so the SDK's own tools/call validation already enforces the
+  // object-level .check() duplicate-id refinement before this handler runs —
+  // a duplicate call surfaces as an SDK "Input validation error" isError
+  // result and never reaches this line. This safeParse is a defensive
+  // backstop for any caller that invokes this handler directly, outside the
+  // SDK-mediated tools/call path.
   const validated = SubmittalRegisterBodySchema.safeParse({ specIds });
   if (!validated.success) {
     return toolErr(validated.error.issues[0]?.message ?? 'invalid specIds');
