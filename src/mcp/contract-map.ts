@@ -425,3 +425,12 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'get_project_language_rules',
   'get_language_findings',
 ]);
+
+/**
+ * INV-5 ratchet baseline (#549). The read-pending burn-down (INV5_READ_PENDING.size) must never
+ * grow past this count — entries graduate out as fixtures land (see the comment above the set),
+ * and the ratchet test in contract.integration.test.ts fails loudly if a future change adds a new
+ * pending entry without also graduating one out. Verified by direct count on 2026-08-02: the set
+ * held exactly 44 entries at the time this ratchet was introduced.
+ */
+export const INV5_READ_PENDING_BASELINE = 44;

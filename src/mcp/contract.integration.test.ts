@@ -15,6 +15,7 @@ import {
   MCP_NATIVE,
   INV5_SHAPE_EXEMPT,
   INV5_READ_PENDING,
+  INV5_READ_PENDING_BASELINE,
 } from './contract-map.js';
 import { handleListLibraries, handleListProjects, handleParseDocument } from './handlers.js';
 import { handleListTemplates } from './template-handlers.js';
@@ -274,5 +275,9 @@ describe('MCP contract (REST <-> MCP parity)', () => {
     }
     for (const t of INV5_SHAPE_EXEMPT.keys())
       expect(INV5_READ_PENDING.has(t), `${t} both shape-exempt and pending`).toBe(false);
+  });
+
+  it('INV-5 ratchet: read-pending burn-down never grows', () => {
+    expect(INV5_READ_PENDING.size).toBeLessThanOrEqual(INV5_READ_PENDING_BASELINE);
   });
 });
