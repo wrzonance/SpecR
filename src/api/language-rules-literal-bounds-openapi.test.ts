@@ -21,11 +21,18 @@
 // See src/api/contract.integration.test.ts's "GET reflects a grandfathered
 // profile..." test for the end-to-end proof.
 //
-// Review finding (#541 follow-up): each of bannedTerms/reinforcingWords/
-// partyVocabulary/requiredPhrases declares `maxItems: 500` INDEPENDENTLY, but
-// the real write-boundary bound (LanguageRulesWriteSchema/MAX_LITERAL_TERMS)
-// is a combined cap of 500 literal terms flattened across all 4 categories
-// together. A client that reads only one field's own schema/description (the
+// Review finding (#541 follow-up, adversarial review): each of bannedTerms/
+// reinforcingWords/partyVocabulary/requiredPhrases declares its own
+// `maxItems`, but no per-field cap of that size actually exists. Two separate
+// combined caps do — MAX_LITERAL_TERMS literal terms and MAX_REGEX_PATTERNS
+// regex patterns, each flattened across all 4 categories together and never
+// summed against the other. maxItems therefore has to be the SUM of the two
+// (a coarse ceiling on the largest array the server will accept), and the
+// drift guard below pins exactly that. An earlier revision declared
+// MAX_LITERAL_TERMS alone, which under-stated the contract in the direction
+// that actually breaks clients: a spec-conformant client would have rejected
+// a 500-literal + 64-regex array that validateRules accepts.
+// A client that reads only one field's own schema/description (the
 // common case for generated-client docs, which render properties in
 // isolation) would reasonably conclude each array independently allows 500 —
 // a belief the LanguageRulesWrite object-level description alone does not
@@ -39,7 +46,19 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { MAX_LITERAL_TERM_LENGTH, MAX_LITERAL_TERMS } from '../ast/language-rule-schemas.js';
+import { MAX_REGEX_PATTERNS } from '../lib/regex-safety.js';
 import { loadRawSpec } from '../test-utils/contract/validate-response.js';
+
+// The honest per-array ceiling. The literal-term cap (MAX_LITERAL_TERMS) and
+// the regex-pattern cap (MAX_REGEX_PATTERNS) are independent and never summed
+// against each other — validateRules accepts a single bannedTerms array
+// holding MAX_LITERAL_TERMS literal terms AND MAX_REGEX_PATTERNS regex terms
+// at once (pinned by language-rule-profiles.test.ts's "the literal-term bound
+// and the regex-term bound are independent and unsummed" case). So the largest
+// array the server actually accepts is their SUM, and openapi.yaml's maxItems
+// must not declare anything smaller or the contract would reject a payload the
+// server takes.
+const MAX_ARRAY_ITEMS = MAX_LITERAL_TERMS + MAX_REGEX_PATTERNS;
 
 const LanguageRulesArrayFieldSchema = z.object({
   type: z.literal('array'),
@@ -127,13 +146,17 @@ describe('openapi.yaml — language-rule literal-term bounds mirror the Zod writ
   });
 
   it.each(['bannedTerms', 'reinforcingWords', 'partyVocabulary', 'requiredPhrases'] as const)(
-    'LanguageRulesWrite.%s.maxItems equals MAX_LITERAL_TERMS (drift guard)',
+    'LanguageRulesWrite.%s.maxItems equals MAX_LITERAL_TERMS + MAX_REGEX_PATTERNS (drift guard)',
     async (field) => {
       const raw = RawSpecSchema.parse(await loadRawSpec());
       expect(
         raw.components.schemas.LanguageRulesWrite.allOf[1].properties[field].maxItems,
-        `openapi.yaml LanguageRulesWrite.${field}.maxItems drifted from MAX_LITERAL_TERMS — update openapi.yaml when the constant changes`
-      ).toBe(MAX_LITERAL_TERMS);
+        `openapi.yaml LanguageRulesWrite.${field}.maxItems drifted from MAX_LITERAL_TERMS + ` +
+          'MAX_REGEX_PATTERNS — update openapi.yaml when either constant changes. It must equal ' +
+          'their SUM, not MAX_LITERAL_TERMS alone: the two caps are independent, so one array may ' +
+          'hold the full literal quota AND the full regex quota at once, and a maxItems of just ' +
+          'MAX_LITERAL_TERMS would make the contract reject a payload validateRules accepts'
+      ).toBe(MAX_ARRAY_ITEMS);
     }
   );
 

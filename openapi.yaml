@@ -5903,8 +5903,14 @@ paths:
       summary: Create or replace a library's language-lint rule profile
       description: >
         Upsert (ADR-080) — one profile per library. Malformed rules shape is
-        rejected with 400; an unsafe or oversized `isRegex: true` term pattern
-        is bounded at the write boundary and rejected with 422.
+        rejected with 400. Two further write-boundary bounds are rejected with
+        422: an unsafe or oversized `isRegex: true` term pattern (ADR-080 D6),
+        and — since #541 — a literal (isRegex omitted or false) term longer
+        than 500 characters or a profile carrying more than 500 literal terms
+        combined across bannedTerms/reinforcingWords/partyVocabulary/
+        requiredPhrases. Pre-existing profiles already exceeding the literal
+        bounds are grandfathered: the bounds gate writes only, so GET keeps
+        returning such a profile unchanged.
       tags: [language-rules]
       parameters:
         - $ref: '#/components/parameters/ConventionLibraryId'
@@ -5929,7 +5935,10 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422':
-          description: Unsafe or oversized `isRegex` term pattern
+          description: >
+            Write-boundary bound violated — an unsafe or oversized `isRegex`
+            term pattern, or (#541) a literal term over 500 characters or
+            more than 500 literal terms combined across the 4 categories
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -5996,8 +6005,14 @@ paths:
       summary: Create or replace a project's language-lint rule profile
       description: >
         Upsert (ADR-080) — one profile per project. Malformed rules shape is
-        rejected with 400; an unsafe or oversized `isRegex: true` term pattern
-        is bounded at the write boundary and rejected with 422.
+        rejected with 400. Two further write-boundary bounds are rejected with
+        422: an unsafe or oversized `isRegex: true` term pattern (ADR-080 D6),
+        and — since #541 — a literal (isRegex omitted or false) term longer
+        than 500 characters or a profile carrying more than 500 literal terms
+        combined across bannedTerms/reinforcingWords/partyVocabulary/
+        requiredPhrases. Pre-existing profiles already exceeding the literal
+        bounds are grandfathered: the bounds gate writes only, so GET keeps
+        returning such a profile unchanged.
       tags: [language-rules]
       parameters:
         - $ref: '#/components/parameters/ProjectId'
@@ -6022,7 +6037,10 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422':
-          description: Unsafe or oversized `isRegex` term pattern
+          description: >
+            Write-boundary bound violated — an unsafe or oversized `isRegex`
+            term pattern, or (#541) a literal term over 500 characters or
+            more than 500 literal terms combined across the 4 categories
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -10073,68 +10091,102 @@ components:
         - $ref: '#/components/schemas/LanguageRules'
         - type: object
           description: >
-            PUT request shape only — mirrors LanguageRulesWriteSchema
-            (#541). Each array below caps at 500 LITERAL (isRegex omitted or
-            false) terms, enforced at write time across
-            bannedTerms/reinforcingWords/partyVocabulary/requiredPhrases
-            COMBINED, not independently per field: a PUT can be within one
-            field's own maxItems and still be rejected 422 if the 4
-            categories' literal terms sum past 500. GET responses are never
-            validated against this shape — see LanguageRules, which carries
-            no such bound, so a grandfathered over-cap profile still reads
-            successfully.
+            PUT request shape only — mirrors LanguageRulesWriteSchema (#541)
+            plus checkRegexPatterns (ADR-080 D6). Two INDEPENDENT write-time
+            caps apply, and neither is per-field: 500 LITERAL (isRegex
+            omitted or false) terms COMBINED across
+            bannedTerms/reinforcingWords/partyVocabulary/requiredPhrases, and
+            64 `isRegex: true` patterns COMBINED across those same 4
+            categories. The caps are never summed against each other — one
+            array may legitimately hold 500 literal terms AND 64 regex terms
+            at once, which is why each array's maxItems below is 564
+            (500 + 64), a COARSE ceiling rather than a restatement of either
+            cap. Consequently a PUT can be well within every field's own
+            maxItems and still be rejected 422 once the 4 categories' literal
+            terms sum past 500 or their regex terms sum past 64. GET
+            responses are never validated against this shape — see
+            LanguageRules, which carries no such bound, so a grandfathered
+            over-cap profile still reads successfully.
           properties:
             bannedTerms:
               type: array
-              maxItems: 500
+              maxItems: 564
               description: >
-                maxItems here is NOT independent of the other 3 literal-term
-                fields: bannedTerms/reinforcingWords/partyVocabulary/
-                requiredPhrases share ONE combined write-time cap of 500
-                literal (isRegex omitted or false) terms total (#541,
-                LanguageRulesWriteSchema). A PUT can be within this field's
-                own maxItems and still be rejected 422 if the 4 categories'
-                literal terms sum past 500 — do not generate per-field
-                validation that treats this 500 as available on its own.
+                maxItems here is a COARSE per-array ceiling, NOT a cap this
+                field owns: 564 = the 500 combined literal-term cap
+                (MAX_LITERAL_TERMS) plus the 64 combined regex-pattern cap
+                (MAX_REGEX_PATTERNS), because one array may legitimately hold
+                both at once. Neither sub-cap is independent of the other 3
+                literal-term fields: bannedTerms/reinforcingWords/
+                partyVocabulary/requiredPhrases share ONE combined write-time
+                cap of 500 literal (isRegex omitted or false) terms total
+                (#541, LanguageRulesWriteSchema) AND ONE combined cap of 64
+                `isRegex: true` patterns total (ADR-080 D6,
+                checkRegexPatterns). A PUT can be within this field's own
+                maxItems and still be rejected 422 if the 4 categories'
+                literal terms sum past 500 or their regex terms sum past 64 —
+                do not generate per-field validation that treats 564, 500, or
+                64 as available on its own.
               items: { $ref: '#/components/schemas/LanguageRuleTermWrite' }
             reinforcingWords:
               type: array
-              maxItems: 500
+              maxItems: 564
               description: >
-                maxItems here is NOT independent of the other 3 literal-term
-                fields: bannedTerms/reinforcingWords/partyVocabulary/
-                requiredPhrases share ONE combined write-time cap of 500
-                literal (isRegex omitted or false) terms total (#541,
-                LanguageRulesWriteSchema). A PUT can be within this field's
-                own maxItems and still be rejected 422 if the 4 categories'
-                literal terms sum past 500 — do not generate per-field
-                validation that treats this 500 as available on its own.
+                maxItems here is a COARSE per-array ceiling, NOT a cap this
+                field owns: 564 = the 500 combined literal-term cap
+                (MAX_LITERAL_TERMS) plus the 64 combined regex-pattern cap
+                (MAX_REGEX_PATTERNS), because one array may legitimately hold
+                both at once. Neither sub-cap is independent of the other 3
+                literal-term fields: bannedTerms/reinforcingWords/
+                partyVocabulary/requiredPhrases share ONE combined write-time
+                cap of 500 literal (isRegex omitted or false) terms total
+                (#541, LanguageRulesWriteSchema) AND ONE combined cap of 64
+                `isRegex: true` patterns total (ADR-080 D6,
+                checkRegexPatterns). A PUT can be within this field's own
+                maxItems and still be rejected 422 if the 4 categories'
+                literal terms sum past 500 or their regex terms sum past 64 —
+                do not generate per-field validation that treats 564, 500, or
+                64 as available on its own.
               items: { $ref: '#/components/schemas/LanguageRuleTermWrite' }
             partyVocabulary:
               type: array
-              maxItems: 500
+              maxItems: 564
               description: >
-                maxItems here is NOT independent of the other 3 literal-term
-                fields: bannedTerms/reinforcingWords/partyVocabulary/
-                requiredPhrases share ONE combined write-time cap of 500
-                literal (isRegex omitted or false) terms total (#541,
-                LanguageRulesWriteSchema). A PUT can be within this field's
-                own maxItems and still be rejected 422 if the 4 categories'
-                literal terms sum past 500 — do not generate per-field
-                validation that treats this 500 as available on its own.
+                maxItems here is a COARSE per-array ceiling, NOT a cap this
+                field owns: 564 = the 500 combined literal-term cap
+                (MAX_LITERAL_TERMS) plus the 64 combined regex-pattern cap
+                (MAX_REGEX_PATTERNS), because one array may legitimately hold
+                both at once. Neither sub-cap is independent of the other 3
+                literal-term fields: bannedTerms/reinforcingWords/
+                partyVocabulary/requiredPhrases share ONE combined write-time
+                cap of 500 literal (isRegex omitted or false) terms total
+                (#541, LanguageRulesWriteSchema) AND ONE combined cap of 64
+                `isRegex: true` patterns total (ADR-080 D6,
+                checkRegexPatterns). A PUT can be within this field's own
+                maxItems and still be rejected 422 if the 4 categories'
+                literal terms sum past 500 or their regex terms sum past 64 —
+                do not generate per-field validation that treats 564, 500, or
+                64 as available on its own.
               items: { $ref: '#/components/schemas/LanguageRuleTermWrite' }
             requiredPhrases:
               type: array
-              maxItems: 500
+              maxItems: 564
               description: >
-                maxItems here is NOT independent of the other 3 literal-term
-                fields: bannedTerms/reinforcingWords/partyVocabulary/
-                requiredPhrases share ONE combined write-time cap of 500
-                literal (isRegex omitted or false) terms total (#541,
-                LanguageRulesWriteSchema). A PUT can be within this field's
-                own maxItems and still be rejected 422 if the 4 categories'
-                literal terms sum past 500 — do not generate per-field
-                validation that treats this 500 as available on its own.
+                maxItems here is a COARSE per-array ceiling, NOT a cap this
+                field owns: 564 = the 500 combined literal-term cap
+                (MAX_LITERAL_TERMS) plus the 64 combined regex-pattern cap
+                (MAX_REGEX_PATTERNS), because one array may legitimately hold
+                both at once. Neither sub-cap is independent of the other 3
+                literal-term fields: bannedTerms/reinforcingWords/
+                partyVocabulary/requiredPhrases share ONE combined write-time
+                cap of 500 literal (isRegex omitted or false) terms total
+                (#541, LanguageRulesWriteSchema) AND ONE combined cap of 64
+                `isRegex: true` patterns total (ADR-080 D6,
+                checkRegexPatterns). A PUT can be within this field's own
+                maxItems and still be rejected 422 if the 4 categories'
+                literal terms sum past 500 or their regex terms sum past 64 —
+                do not generate per-field validation that treats 564, 500, or
+                64 as available on its own.
               items: { $ref: '#/components/schemas/LanguageRuleTermWrite' }
     LanguageRuleProfile:
       type: object
