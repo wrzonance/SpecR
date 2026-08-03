@@ -486,6 +486,77 @@ describe('extractBodyObjects — mixed visible/hidden text boxes in one host par
   });
 });
 
+describe('extractBodyObjects — mixed-visibility text boxes in ONE host paragraph (#515)', () => {
+  // two-visible: both text boxes in the host paragraph are visible — every
+  // interior paragraph gets its own w:sdt anchor, and interiorTexts stays
+  // 1:1 with the anchors actually baked into the blob (no box's text is
+  // dropped just because it shares a host paragraph with another box).
+  it('two-visible: both text boxes surface their interior text, 1:1 with the anchors baked into blob', () => {
+    const body = twoDrawingRunsParagraph(textBoxRun('first text'), textBoxRun('second text'));
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['first text', 'second text']);
+    expect(result.dropped).toEqual([]);
+  });
+
+  // visible+hidden: the FIRST box is visible, the SECOND is hidden. Privacy
+  // (no-leak): the hidden box's interior text never reaches interiorTexts.
+  // The tagValues(blob) count is the independent, blob-level check that the
+  // hidden box's w:txbxContent boundary was left un-anchored (opaque
+  // pass-through) rather than merely filtered out of interiorTexts while
+  // still secretly anchored in the blob.
+  it('visible+hidden: interiorTexts.length matches the anchors baked into blob — the hidden second box leaks nothing', () => {
+    const body = twoDrawingRunsParagraph(
+      textBoxRun('visible first'),
+      hiddenTextBoxRun('hidden second')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible first']);
+    expect(object?.interiorTexts.map((t) => t.text)).not.toContain('hidden second');
+    const anchorCount = tagValues(object?.blob ?? []).length;
+    expect(anchorCount).toBe(object?.interiorTexts.length);
+    expect(anchorCount).toBe(1);
+  });
+
+  // hidden+visible: the FIRST box is hidden, the SECOND is visible.
+  // No-suppression (no-loss): the visible second box's text is not dropped
+  // just because the first box in the same host paragraph is hidden. Same
+  // blob-level tagValues check as above, mirrored for the opposite order.
+  it('hidden+visible: interiorTexts.length matches the anchors baked into blob — the visible second box is never suppressed', () => {
+    const body = twoDrawingRunsParagraph(
+      hiddenTextBoxRun('hidden first'),
+      textBoxRun('visible second')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible second']);
+    const anchorCount = tagValues(object?.blob ?? []).length;
+    expect(anchorCount).toBe(object?.interiorTexts.length);
+    expect(anchorCount).toBe(1);
+  });
+
+  // two-hidden: both text boxes in the host paragraph are hidden — the whole
+  // paragraph produces no object (nothing visible to capture) and no dropped
+  // entry (both boxes are intentionally hidden, not lost).
+  it('two-hidden: two hidden text boxes in one host paragraph produce no object and no dropped entry', () => {
+    const body = twoDrawingRunsParagraph(
+      hiddenTextBoxRun('hidden first'),
+      hiddenTextBoxRun('hidden second')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  });
+});
+
 describe('extractBodyObjects — tier-classification exclusion', () => {
   it('captures a cell paragraph that looks like a numbered tier ("1. Foo") as verbatim interior text, never a tier node', () => {
     const body = table(row(cell(para('1. Foo'))));
