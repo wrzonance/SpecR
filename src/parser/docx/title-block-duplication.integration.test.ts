@@ -5,6 +5,23 @@ import JSZip from 'jszip';
 import { parseDocx } from './index.js';
 import { parse } from '../index.js';
 
+// Reads docProps/core.xml's dc:title/dc:subject text (empty string if the tag
+// is present-but-empty) so a caller can pin exactly which parseCoreMetadata
+// (src/parser/docx/core-metadata.ts) code path a fixture exercises, rather
+// than assert it in a comment. Returns null only when the part is genuinely
+// absent from the zip — never for an empty-but-present tag.
+async function readCoreTitleSubject(
+  buffer: Buffer
+): Promise<{ title: string; subject: string } | null> {
+  const zip = await JSZip.loadAsync(buffer);
+  const coreFile = zip.file('docProps/core.xml');
+  if (!coreFile) return null;
+  const xml = await coreFile.async('string');
+  const title = /<dc:title>([^<]*)<\/dc:title>/.exec(xml)?.[1] ?? '';
+  const subject = /<dc:subject>([^<]*)<\/dc:subject>/.exec(xml)?.[1] ?? '';
+  return { title, subject };
+}
+
 const SECTION = '01 88 13.13';
 const TITLE = 'CLEAN ZONE PRE-CERTIFICATION PROTOCOLS';
 
@@ -131,11 +148,28 @@ const ARTIFACT = resolve('docs/references/MANUFACTURER_EXAMPLES/parsing-needs-fi
 describe.runIf(existsSync(ARTIFACT))(
   '#510 leading title-block suppression — a hand-authored doc',
   () => {
-    // This artifact has no docProps/core.xml, so section/title only resolve
-    // via content inference, which runs in the parse() orchestrator — not
-    // parseDocx() alone (mirrors the no-core.docx test above; see #538).
+    // This artifact DOES have docProps/core.xml, but with present-but-empty
+    // dc:title/dc:subject — parseCoreMetadata() (core-metadata.ts) normalizes
+    // that to the UNKNOWN_SECTION_IDENTITY sentinel, so section/title still
+    // resolve via content inference, which runs in the parse() orchestrator —
+    // not parseDocx() alone. That sentinel currently converges with the
+    // no-core.docx sibling test's genuinely-absent-coreXml ternary branch
+    // (src/parser/docx/index.ts's `entries.coreXml ? parseCoreMetadata(...) :
+    // {...}`), but this test exercises the OTHER branch of that ternary — the
+    // two are not guaranteed to stay equivalent if parseCoreMetadata's
+    // empty-field handling ever diverges from the null-coreXml fallback
+    // (e.g. one gains a distinct ParseWarning/method and the other doesn't).
     it('drops the leading SECTION-line + title-line pair, tolerating retained object/vanish roots', async () => {
       const buffer = readFileSync(ARTIFACT);
+
+      // Precondition, made executable rather than merely asserted in prose:
+      // core.xml is present with empty dc:title/dc:subject, so this test
+      // exercises parseCoreMetadata()'s empty-field normalization — not the
+      // ternary's null-coreXml branch the comment above used to (wrongly)
+      // claim.
+      const coreFields = await readCoreTitleSubject(buffer);
+      expect(coreFields).toEqual({ title: '', subject: '' });
+
       const { tree, sectionInference } = await parse(buffer, 'parsing-needs-fixing.docx');
 
       // Precondition: identity really did come from content, not metadata.
