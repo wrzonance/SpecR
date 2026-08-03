@@ -23,9 +23,14 @@
 //    counting behavior as a regression guard, not a behavior change.
 //
 // sha256 (openapi.yaml, fixed 64-char hex digest) and imageData (base64
-// byte-size cap) are deliberately excluded — both alphabets are ASCII-only,
-// so UTF-16-unit count and Unicode-code-point count are always identical
-// there. See ADR-086 for the full inventory and reasoning.
+// byte-size cap) are deliberately excluded from the drift guard above —
+// both alphabets are ASCII-only, so UTF-16-unit count and Unicode-code-point
+// count are always identical there. See ADR-086 for the full inventory and
+// reasoning. That exclusion is itself pinned below: each site's maxLength is
+// asserted unchanged and its description is asserted to NOT carry
+// UTF16_LENGTH_LIMIT_NOTE, so an edit that accidentally moves either field
+// into ADR-086's scope (or drifts its maxLength) fails loudly instead of
+// going unpinned.
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
@@ -43,6 +48,14 @@ const ASTRAL_CHAR = '\u{1F600}';
 const DescribedLengthFieldSchema = z.object({
   maxLength: z.number(),
   description: z.string(),
+});
+
+// sha256/imageData carry no ADR-086 note (they're out of scope), and sha256
+// has no `description` key at all — description is optional here, unlike
+// DescribedLengthFieldSchema above.
+const AsciiOnlyLengthFieldSchema = z.object({
+  maxLength: z.number(),
+  description: z.string().optional(),
 });
 
 const RawSpecSchema = z.object({
@@ -76,6 +89,35 @@ const RawSpecSchema = z.object({
           sourceUrl: DescribedLengthFieldSchema,
           title: DescribedLengthFieldSchema,
           notes: DescribedLengthFieldSchema,
+        }),
+      }),
+      SpecLineage: z.object({
+        properties: z.object({
+          originMeta: z.object({
+            oneOf: z.tuple([
+              z.object({
+                properties: z.object({ sha256: AsciiOnlyLengthFieldSchema }),
+              }),
+              z.unknown(),
+            ]),
+          }),
+        }),
+      }),
+      HeaderFooterComposition: z.object({
+        properties: z.object({
+          header: z.object({
+            properties: z.object({
+              left: z.object({
+                properties: z.object({
+                  content: z.object({
+                    items: z.object({
+                      properties: z.object({ imageData: AsciiOnlyLengthFieldSchema }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          }),
         }),
       }),
     }),
@@ -128,6 +170,28 @@ const LENGTH_LIMIT_SITES: readonly LengthLimitSite[] = [
   },
 ];
 
+interface AsciiOnlyExcludedSite {
+  name: string;
+  expectedMax: number;
+  select: (spec: RawSpec) => { maxLength: number; description?: string | undefined };
+}
+
+const ASCII_ONLY_EXCLUDED_SITES: readonly AsciiOnlyExcludedSite[] = [
+  {
+    name: 'SpecLineage.originMeta.sha256 (fixed 64-char hex digest)',
+    expectedMax: 64,
+    select: (spec) =>
+      spec.components.schemas.SpecLineage.properties.originMeta.oneOf[0].properties.sha256,
+  },
+  {
+    name: 'HeaderFooterComposition header.left.content[].imageData (base64 image bytes, ADR-069)',
+    expectedMax: 6990508,
+    select: (spec) =>
+      spec.components.schemas.HeaderFooterComposition.properties.header.properties.left.properties
+        .content.items.properties.imageData,
+  },
+];
+
 describe('openapi.yaml — length-limit unit convention is documented at every paired site (#626, ADR-086)', () => {
   it.each(LENGTH_LIMIT_SITES)(
     '$name: maxLength matches the Zod bound and the description states the UTF-16 convention',
@@ -143,6 +207,26 @@ describe('openapi.yaml — length-limit unit convention is documented at every p
         'openapi.yaml description must state the UTF-16 length-limit convention verbatim (ADR-086) — ' +
           'a reader of this field alone must not assume JSON Schema maxLength code-point semantics'
       ).toContain(UTF16_LENGTH_LIMIT_NOTE);
+    }
+  );
+});
+
+describe('openapi.yaml — ASCII-only sites stay excluded from the ADR-086 note (#626)', () => {
+  it.each(ASCII_ONLY_EXCLUDED_SITES)(
+    '$name: maxLength is pinned and the description does not carry the UTF-16 note',
+    async ({ expectedMax, select }) => {
+      const raw = RawSpecSchema.parse(await loadRawSpec());
+      const field = select(raw);
+      expect(
+        field.maxLength,
+        'openapi.yaml maxLength drifted for an ASCII-only field ADR-086 deliberately excludes'
+      ).toBe(expectedMax);
+      expect(
+        field.description ?? '',
+        'this field is ASCII-only (UTF-16-unit count == Unicode-code-point count), so it must never carry ' +
+          'UTF16_LENGTH_LIMIT_NOTE — if it does, ADR-086 scope has drifted and this site belongs in ' +
+          'LENGTH_LIMIT_SITES above instead'
+      ).not.toContain(UTF16_LENGTH_LIMIT_NOTE);
     }
   );
 });

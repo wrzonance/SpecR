@@ -18,6 +18,8 @@
 // for real only where CI already fetches full history (`fetch-depth: 0`).
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const GUARDED_MCP_CONTRACT_FILES = [
   'src/mcp/contract-map.ts',
@@ -62,5 +64,56 @@ describe('scope guard: #626 (ADR-086) never touches MCP contract machinery', () 
       changed,
       `#626 must stay docs-only; these MCP contract files must not appear in the branch diff: ${changed.join(', ')}`
     ).toEqual([]);
+  });
+});
+
+// The guard above is only real enforcement in a job whose checkout resolves
+// `origin/main` — otherwise resolveMergeBaseWithOriginMain() always throws
+// and every run silently ctx.skip()s. `.github/workflows/ci.yml`'s `test`
+// job (the one that actually runs this file via `pnpm test`) used a default
+// `actions/checkout` with no `fetch-depth` override, which is shallow
+// (depth 1) and never creates a local `origin/main` ref — unlike the
+// `verify-harness` and `loc-check` jobs, which this file's own header comment
+// cites as the pattern it follows. This pins the fix at the config level so a
+// future edit to ci.yml can't silently reintroduce the self-skip.
+const CI_WORKFLOW_PATH = join(import.meta.dirname, '..', '..', '.github', 'workflows', 'ci.yml');
+
+/** Slice out one top-level job's body (2-space-indented `<jobName>:` through the next). */
+function extractJobBlock(yaml: string, jobName: string): string {
+  const lines = yaml.split('\n');
+  const startIndex = lines.findIndex((line) => line === `  ${jobName}:`);
+  if (startIndex === -1) {
+    throw new Error(`job "${jobName}" not found in ${CI_WORKFLOW_PATH}`);
+  }
+  const rest = lines.slice(startIndex + 1);
+  const endOffset = rest.findIndex((line) => /^ {2}\S/.test(line));
+  return (endOffset === -1 ? rest : rest.slice(0, endOffset)).join('\n');
+}
+
+/** Whether a line starts a new `steps:` list entry (`- uses:` / `- name:`). */
+const isStepStartLine = (line: string): boolean => /^\s*- (uses|name):/.test(line);
+
+/** Whether the job block's first `actions/checkout` step sets `fetch-depth: 0`. */
+function checkoutStepHasFetchDepthZero(jobBlock: string): boolean {
+  const lines = jobBlock.split('\n');
+  const checkoutIndex = lines.findIndex((line) => line.includes('uses: actions/checkout@'));
+  if (checkoutIndex === -1) return false;
+  const linesFromCheckout = lines.slice(checkoutIndex);
+  const nextStepOffset = linesFromCheckout.slice(1).findIndex(isStepStartLine);
+  const checkoutStepLines =
+    nextStepOffset === -1 ? linesFromCheckout : linesFromCheckout.slice(0, nextStepOffset + 1);
+  return checkoutStepLines.some((line) => /fetch-depth:\s*0\b/.test(line));
+}
+
+describe('ci.yml: the job that runs this file checks out full history', () => {
+  it('the "test" job checkout sets fetch-depth: 0, so the scope guard above asserts for real instead of self-skipping', () => {
+    const yaml = readFileSync(CI_WORKFLOW_PATH, 'utf8');
+    const jobBlock = extractJobBlock(yaml, 'test');
+    expect(
+      checkoutStepHasFetchDepthZero(jobBlock),
+      '.github/workflows/ci.yml "test" job checkout must set fetch-depth: 0 (matching verify-harness/loc-check) — ' +
+        'without it, git merge-base origin/main HEAD always throws in the job that runs `pnpm test`, so the scope ' +
+        'guard test above always ctx.skip()s instead of asserting'
+    ).toBe(true);
   });
 });

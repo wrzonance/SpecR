@@ -83,7 +83,14 @@ jobs:
       NODE_ENV: test
 
     steps:
+      # fetch-depth: 0 so `origin/main` is resolvable, same as verify-harness
+      # and loc-check below — without it, this job is a shallow (depth 1)
+      # checkout with no local origin/main ref, so
+      # length-limit-scope-guard.test.ts's git-merge-base check (this job is
+      # the one `pnpm test` runs it in) self-skips rather than asserting.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
