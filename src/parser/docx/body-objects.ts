@@ -318,16 +318,15 @@ interface DrawingRunEntry {
 // EVERY drawing-bearing run is classified — never just the first — so a
 // paragraph carrying more than one separate drawing (rare — Word normally
 // puts one drawing per paragraph) never loses one to the other in the
-// `dropped` accounting. LIMITATION (tracked in #515): two SEPARATE text boxes
-// in ONE host paragraph are only partly handled. collectParagraphDrawing
-// decides visibility from the FIRST text-box run alone, while
-// buildTextBoxObject's anchorInteriorParagraphs walk surfaces objectText from
-// EVERY text box in the host blob — so two visible boxes both contribute
-// objectText, but a mixed visible/hidden pair mis-handles the hidden box
-// (a hidden second box's text is surfaced; a hidden first box suppresses a
-// visible second). The whole host paragraph still round-trips byte-identical
-// either way (decision 1's opaque-blob capture); only read-path objectText is
-// affected.
+// `dropped` accounting. FIXED (#515): two SEPARATE text boxes in ONE host
+// paragraph are now fully handled — collectParagraphDrawing decides
+// visibility PER text-box entry (`entries.filter`, one correlated
+// hiddenFlag per box) rather than from the first box alone, so a hidden box
+// never leaks its interior text (privacy) and a visible box is never
+// suppressed just because another box in the same paragraph is hidden
+// (no-suppression). The whole host paragraph still round-trips
+// byte-identical either way (decision 1's opaque-blob capture); this only
+// affects which interior paragraphs get an SDT anchor + objectText leaf.
 function classifyParagraphDrawings(raw: Record<string, unknown>): readonly DrawingRunEntry[] {
   const entries: DrawingRunEntry[] = [];
   for (const run of runsOf(raw)) {
@@ -449,16 +448,24 @@ function isHiddenTextBox(
   return isParagraphVanish(raw, styleMap) || isTextBoxInteriorHidden(drawingRun, styleMap);
 }
 
-// One paragraph's worth of drawing extraction: at most one object (the first
-// textBox entry found, if any and not fully hidden) plus every non-textBox
-// classification collected as its own dropped entry. Returns fresh data
-// rather than mutating a shared accumulator — mirrors transformChildren's
-// own {children, interiorTexts} return-shape above.
+// One paragraph's worth of drawing extraction: at most one object (built
+// from the first VISIBLE textBox entry's classification, if any text box is
+// visible) plus every non-textBox classification collected as its own
+// dropped entry. Returns fresh data rather than mutating a shared
+// accumulator — mirrors transformChildren's own {children, interiorTexts}
+// return-shape above.
 interface ParagraphDrawingResult {
   readonly object?: CapturedParagraphObject;
   readonly dropped: readonly DroppedDrawable[];
 }
 
+// #515: EVERY textBox entry is evaluated (`entries.filter`, not the old
+// `.find`), so a host paragraph carrying two or more SEPARATE text boxes
+// gets one correlated hidden flag per box — the exact count
+// resolveHiddenTxbxContentNodes needs to match the blob's real
+// w:txbxContent boundary count, instead of a single flag whose count
+// silently mismatched (2 boundaries vs. 1 flag) and fell back to the
+// fail-closed "suppress everything" guard.
 function collectParagraphDrawing(
   paragraphBlobs: readonly (readonly ObjectBlobNode[])[],
   raw: Record<string, unknown>,
@@ -466,30 +473,34 @@ function collectParagraphDrawing(
   styleMap: StyleMap
 ): ParagraphDrawingResult {
   const entries = classifyParagraphDrawings(raw);
-  const textBoxEntry = entries.find(isTextBoxEntry);
+  const textBoxEntries = entries.filter(isTextBoxEntry);
   const dropped = entries.filter(isDroppedEntry).map((e) => e.classification);
-  if (!textBoxEntry) {
+  if (textBoxEntries.length === 0) {
     return { dropped };
   }
-  // A hidden text box captures no object, so a co-occurring non-textBox drawable
-  // (chart/smartArt/OLE/image) is preserved nowhere and would be silently lost —
-  // still report it as dropped. The one exception: when the HOST paragraph itself
-  // is vanish, that drawable is intentionally hidden too, so drop nothing (ADR-072
-  // decision 9's no-silent-loss posture only covers genuinely omitted content).
-  if (isHiddenTextBox(raw, textBoxEntry.run, styleMap)) {
+  const hiddenFlags = textBoxEntries.map((entry) => isHiddenTextBox(raw, entry.run, styleMap));
+  const visibleIndex = hiddenFlags.findIndex((hidden) => !hidden);
+  // Every text box in the host paragraph is hidden: no object captures the
+  // blob, so a co-occurring non-textBox drawable (chart/smartArt/OLE/image)
+  // is preserved nowhere and would be silently lost — still report it as
+  // dropped. The one exception: when the HOST paragraph itself is vanish,
+  // that drawable is intentionally hidden too, so drop nothing (ADR-072
+  // decision 9's no-silent-loss posture only covers genuinely omitted
+  // content). Unchanged from the pre-#515 branch, now correctly decided
+  // over ALL boxes instead of just the first.
+  if (visibleIndex === -1) {
     return { dropped: isParagraphVanish(raw, styleMap) ? [] : dropped };
   }
+  // Shared kind/floating/generation metadata comes from the FIRST VISIBLE
+  // entry — a deliberate, documented behavior change from the old
+  // first-entry-regardless-of-visibility pick (ADR-086). Bounds-guarded via
+  // the `findIndex` result rather than a non-null assertion.
+  const chosen = textBoxEntries[visibleIndex];
+  if (!chosen) {
+    return { dropped };
+  }
   const blob = paragraphBlobs[paragraphIndex];
-  // Correlated flags for the SINGLE entry found above (`entries.find`), not a
-  // blind `[]`: resolveHiddenTxbxContentNodes fails closed on any
-  // boundary-count/flag-count mismatch, and a host paragraph carrying one
-  // text box has exactly one w:txbxContent boundary — an empty array would
-  // mismatch 1 vs. 0 and wrongly suppress it. The one flag is always `false`
-  // here: `isHiddenTextBox` above already returned before reaching this line
-  // otherwise. A follow-up task replaces this with real per-box flags across
-  // every textBox entry (#515's actual mixed visible/hidden fix); this keeps
-  // today's single-box behavior byte-for-byte unchanged in the meantime.
-  const object = blob ? buildTextBoxObject(blob, textBoxEntry.classification, [false]) : undefined;
+  const object = blob ? buildTextBoxObject(blob, chosen.classification, hiddenFlags) : undefined;
   return object ? { object: { paragraphIndex, object }, dropped: [] } : { dropped: [] };
 }
 

@@ -436,6 +436,56 @@ describe('extractBodyObjects — buildTextBoxObject hiddenFlags wiring (#515 tas
   });
 });
 
+describe('extractBodyObjects — mixed visible/hidden text boxes in one host paragraph (#515 task 5)', () => {
+  // Privacy (no-leak): before this fix, collectParagraphDrawing decided
+  // visibility from the FIRST text-box entry alone while buildTextBoxObject's
+  // anchor walk surfaced objectText from EVERY text box in the host blob — so
+  // a hidden SECOND box's interior text leaked into interiorTexts alongside
+  // the visible first box's text.
+  it('privacy: a hidden SECOND text box never leaks its interior text when a visible first box is captured', () => {
+    const body = twoDrawingRunsParagraph(
+      textBoxRun('visible text'),
+      hiddenTextBoxRun('secret text')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible text']);
+    expect(object?.interiorTexts.map((t) => t.text)).not.toContain('secret text');
+  });
+
+  // No-suppression (no-loss): before this fix, a hidden FIRST box alone
+  // decided the whole paragraph's fate, so a visible SECOND box's text was
+  // entirely lost (treated as if the whole paragraph were hidden).
+  it('no-suppression: a visible SECOND text box still surfaces its text when the FIRST box is hidden', () => {
+    const body = twoDrawingRunsParagraph(
+      hiddenTextBoxRun('secret text'),
+      textBoxRun('visible text')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible text']);
+  });
+
+  // All-hidden preserved: when EVERY text box in the host paragraph is
+  // hidden, the paragraph produces no object and no dropped entry — same
+  // outcome as the single-box all-hidden case, now correctly decided over
+  // every box rather than just the first.
+  it('all-hidden preserved: two hidden text boxes in one host paragraph produce no object and no dropped entry', () => {
+    const body = twoDrawingRunsParagraph(
+      hiddenTextBoxRun('secret one'),
+      hiddenTextBoxRun('secret two')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  });
+});
+
 describe('extractBodyObjects — tier-classification exclusion', () => {
   it('captures a cell paragraph that looks like a numbered tier ("1. Foo") as verbatim interior text, never a tier node', () => {
     const body = table(row(cell(para('1. Foo'))));
