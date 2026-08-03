@@ -31,6 +31,28 @@ async function insertMaster(libraryId: string, section: string, title: string): 
   return r.rows[0].id;
 }
 
+/** Same as insertMaster but with an explicit source (to coexist with another
+ *  spec on the same (library_id, section) under specs_section_source_library_
+ *  unique) and an explicit created_at offset from now(), so a same-library
+ *  duplicate's resolution order is pinned deterministically rather than
+ *  relying on wall-clock insert timing (#522). */
+async function insertMasterWithSource(
+  libraryId: string,
+  section: string,
+  title: string,
+  source: string,
+  createdAtOffset: string
+): Promise<string> {
+  const r = await pool.query<{ id: string }>(
+    `INSERT INTO specs (section, title, source, library_id, created_at)
+     VALUES ($1, $2, $3, $4, now() + $5::interval)
+     RETURNING id`,
+    [section, title, source, libraryId, createdAtOffset]
+  );
+  if (!r.rows[0]) throw new Error('insertMasterWithSource failed');
+  return r.rows[0].id;
+}
+
 async function insertParagraph(
   specId: string,
   parentId: string | null,
@@ -310,6 +332,57 @@ describe('addSectionToProject — resolution', () => {
     const result = await addSectionToProject(projectId, '04 20 00', pool);
     expect(result.source.libraryId).toBe(clientLib);
     expect(result.shadowed).toEqual([{ libraryId: companyLib, name: `Derive Co ${suffix}` }]);
+  });
+
+  it('same-library duplicate (library_id, section) rows resolve to the OLDER row — including its refs, not the newer one (#522)', async () => {
+    // Root cause of #522: resolveSection has no dedup guard on (library_id,
+    // section) — its tie-break (ORDER BY ps.priority, s.created_at, s.id)
+    // deterministically picks the OLDEST matching row within a library. A
+    // caller that relies on a SHARED, name-looked-up library (rather than a
+    // fixture-owned one) can be silently shadowed by a leftover/ambient row.
+    // This pins that tie-break directly: seed an older "decoy" row with no
+    // outgoing refs, then a newer "fresh" row carrying an outgoing ref, both
+    // in companyLib for the same section — and assert the clone comes from
+    // the decoy (title *and* refs), never the fresh row.
+    const section = '11 12 00';
+    const decoyId = await insertMasterWithSource(
+      companyLib,
+      section,
+      'Decoy Older',
+      'arcat',
+      '-1 hour'
+    );
+    const freshId = await insertMasterWithSource(
+      companyLib,
+      section,
+      'Fresh Newer',
+      'unknown',
+      '0 seconds'
+    );
+    const freshPara = await insertParagraph(freshId, null, 'part', 'PART 1 GENERAL', 1);
+    await pool.query(
+      `INSERT INTO spec_references
+         (source_spec_id, source_paragraph_id, target_type, target_spec_section, reference_text)
+       VALUES ($1, $2, 'section', '09 91 00', 'See Section 09 91 00')`,
+      [freshId, freshPara]
+    );
+
+    const projectId = await newProject([companyLib]);
+    const added = await addSectionToProject(projectId, section, pool);
+
+    const spec = await pool.query<{ parent_spec_id: string; title: string }>(
+      `SELECT parent_spec_id, title FROM specs WHERE id = $1`,
+      [added.specId]
+    );
+    expect(spec.rows[0]).toEqual({ parent_spec_id: decoyId, title: 'Decoy Older' });
+    expect(spec.rows[0]?.parent_spec_id).not.toBe(freshId);
+
+    const clonedRefs = await pool.query('SELECT 1 FROM spec_references WHERE source_spec_id = $1', [
+      added.specId,
+    ]);
+    // The decoy carries no outgoing refs — if the clone had instead resolved
+    // from the fresh row, this would find the 09 91 00 reference cloned in.
+    expect(clonedRefs.rowCount).toBe(0);
   });
 
   it('no source holds the section → SectionUnresolvedError', async () => {
