@@ -98,9 +98,37 @@ export function buildTermMatcher(rule: LanguageRuleTerm): RegExp | null {
   return new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'gi');
 }
 
-function matchTermInText(text: string, term: LanguageRuleTerm): RegExpExecArray | null {
-  const matcher = buildTermMatcher(term);
-  return matcher ? matcher.exec(text) : null;
+/** A term paired with its once-built matcher (`null` preserves
+ *  `buildTermMatcher`'s existing degrade-on-invalid-pattern contract). Built
+ *  once per category per scan instead of once per (paragraph, term) pair —
+ *  see `compileTermMatchers`. */
+interface CompiledTermMatcher {
+  readonly term: LanguageRuleTerm;
+  readonly matcher: RegExp | null;
+}
+
+/** Builds each term's matcher exactly once so a scan over N paragraphs does
+ *  not reconstruct the same RegExp N times per term (#541). Exported so
+ *  callers — including the regression test for the lastIndex-reuse trap —
+ *  can compile once and pass the same matchers to `scanParagraphForCategory`
+ *  across multiple paragraphs. */
+export function compileTermMatchers(
+  terms: readonly LanguageRuleTerm[]
+): readonly CompiledTermMatcher[] {
+  return terms.map((term) => ({ term, matcher: buildTermMatcher(term) }));
+}
+
+/** Executes a compiled matcher against `text`, resetting `lastIndex` to 0
+ *  immediately beforehand. Every `buildTermMatcher` output carries the `g`
+ *  flag, so a matcher reused across paragraphs (as `compileTermMatchers`
+ *  now enables) must not carry forward `lastIndex` from a previous `.exec()`
+ *  call — otherwise a term that matched paragraph 1 could silently stop
+ *  matching from paragraph 2 onward, depending on where the earlier match
+ *  landed in that paragraph's text. */
+function execCompiledMatcher(compiled: CompiledTermMatcher, text: string): RegExpExecArray | null {
+  if (!compiled.matcher) return null;
+  compiled.matcher.lastIndex = 0;
+  return compiled.matcher.exec(text);
 }
 
 function toTermFlaggedFinding(
@@ -121,17 +149,20 @@ function toTermFlaggedFinding(
   };
 }
 
-/** One paragraph against one category's term list. A term with no match, or
- *  whose matcher degraded to `null` (invalid `isRegex` pattern), contributes
- *  no finding — it is skipped, never thrown (opt-in, ADR-080 D1/D6). */
+/** One paragraph against one category's already-compiled term matchers. A
+ *  term with no match, or whose matcher degraded to `null` (invalid
+ *  `isRegex` pattern), contributes no finding — it is skipped, never thrown
+ *  (opt-in, ADR-080 D1/D6). Takes `CompiledTermMatcher[]`, not raw terms, so
+ *  callers scanning many paragraphs build each term's matcher once (#541)
+ *  via `compileTermMatchers`. */
 export function scanParagraphForCategory(
   p: LanguageScanParagraph,
-  terms: readonly LanguageRuleTerm[],
+  matchers: readonly CompiledTermMatcher[],
   category: LanguageFindingCategory
 ): readonly LanguageFinding[] {
-  return terms.flatMap((term) => {
-    const match = matchTermInText(p.text, term);
-    return match ? [toTermFlaggedFinding(p, term, category, match)] : [];
+  return matchers.flatMap((compiled) => {
+    const match = execCompiledMatcher(compiled, p.text);
+    return match ? [toTermFlaggedFinding(p, compiled.term, category, match)] : [];
   });
 }
 
@@ -264,19 +295,24 @@ interface SpecScanResult {
   readonly configured: boolean;
 }
 
+// Each category's terms are compiled to matchers once here, then reused
+// across every paragraph in the flatMap below — not rebuilt per (paragraph,
+// term) pair (#541). This is the whole point of CompiledTermMatcher: a
+// profile's term list does not change paragraph to paragraph within one scan.
 function scanParagraphsForTermCategories(
   paragraphs: readonly LanguageScanParagraph[],
   rules: LanguageRules
 ): readonly LanguageFinding[] {
+  const bannedTermMatchers = compileTermMatchers(rules.bannedTerms ?? []);
+  const reinforcingWordMatchers = compileTermMatchers(rules.reinforcingWords ?? []);
+  const partyVocabularyMatchers = compileTermMatchers(rules.partyVocabulary ?? []);
   return [
+    ...paragraphs.flatMap((p) => scanParagraphForCategory(p, bannedTermMatchers, 'bannedTerm')),
     ...paragraphs.flatMap((p) =>
-      scanParagraphForCategory(p, rules.bannedTerms ?? [], 'bannedTerm')
+      scanParagraphForCategory(p, reinforcingWordMatchers, 'reinforcingWord')
     ),
     ...paragraphs.flatMap((p) =>
-      scanParagraphForCategory(p, rules.reinforcingWords ?? [], 'reinforcingWord')
-    ),
-    ...paragraphs.flatMap((p) =>
-      scanParagraphForCategory(p, rules.partyVocabulary ?? [], 'partyVocabulary')
+      scanParagraphForCategory(p, partyVocabularyMatchers, 'partyVocabulary')
     ),
   ];
 }

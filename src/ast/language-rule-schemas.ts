@@ -46,3 +46,66 @@ export const PutLanguageRulesBodySchema = z
 export type LanguageRuleTerm = z.infer<typeof LanguageRuleTermSchema>;
 export type LanguageRules = z.infer<typeof LanguageRulesSchema>;
 export type PutLanguageRulesBody = z.infer<typeof PutLanguageRulesBodySchema>;
+
+// #541 — write-boundary bounds on literal (isRegex !== true) terms, mirroring
+// the ReDoS/length/count guard `checkRegexPatterns` already applies to
+// isRegex:true terms (src/lib/regex-safety.ts, MAX_REGEX_PATTERN_LENGTH=200 /
+// MAX_REGEX_PATTERNS=64). Literal text carries no ReDoS risk — it is always
+// escaped before use (src/db/queries/language-rule-findings.ts), never
+// interpreted as regex syntax — so this bound exists purely to keep a
+// profile's total term count (and the resulting per-scan matcher-compilation
+// cost) from growing unbounded, not for safety. 500 (not 200, the regex
+// SOURCE cap) because a literal term is a natural-language phrase, not a
+// short regex source — matching this codebase's existing prose-length
+// convention (e.g. openapi.yaml title fields cap at 500). 500 whole-profile
+// terms (not 64, the regex-term cap) because ADR-080 frames literal terms as
+// the majority of a real firm's list.
+export const MAX_LITERAL_TERM_LENGTH = 500;
+export const MAX_LITERAL_TERMS = 500;
+
+function isLiteralTerm(term: LanguageRuleTerm): boolean {
+  return term.isRegex !== true;
+}
+
+// Every literal term's text across all 4 categories, flattened for one bounds
+// check — mirrors allRegexTerms' whole-profile scope
+// (src/db/queries/language-rule-profiles.ts) but over the disjoint
+// isRegex !== true subset.
+function literalTermTextsIn(rules: LanguageRules): readonly string[] {
+  const categories: ReadonlyArray<readonly LanguageRuleTerm[] | undefined> = [
+    rules.bannedTerms,
+    rules.reinforcingWords,
+    rules.partyVocabulary,
+    rules.requiredPhrases,
+  ];
+  return categories.flatMap((terms) =>
+    (terms ?? []).filter(isLiteralTerm).map((term) => term.term)
+  );
+}
+
+// Write-path schema: the structural schema (LanguageRulesSchema, still used
+// unbounded by mapRow's read path) PLUS the literal-term size invariant.
+// Follows the HeaderFooterCompositionWriteSchema precedent (ADR-070,
+// header-footer-schemas.ts) verbatim — a write-only sibling `.check()` layered
+// on an otherwise-identical base schema, so existing rows whose literal terms
+// already exceed this bound keep reading successfully (grandfathered) while
+// only new writes are held to it.
+export const LanguageRulesWriteSchema = LanguageRulesSchema.check((ctx) => {
+  const literalTerms = literalTermTextsIn(ctx.value);
+  if (literalTerms.some((term) => term.length > MAX_LITERAL_TERM_LENGTH)) {
+    ctx.issues.push({
+      code: 'custom',
+      input: ctx.value,
+      message: `a literal term exceeds ${MAX_LITERAL_TERM_LENGTH} characters`,
+    });
+  }
+  if (literalTerms.length > MAX_LITERAL_TERMS) {
+    ctx.issues.push({
+      code: 'custom',
+      input: ctx.value,
+      message:
+        'too many literal terms across bannedTerms/reinforcingWords/' +
+        `partyVocabulary/requiredPhrases (max ${MAX_LITERAL_TERMS})`,
+    });
+  }
+});

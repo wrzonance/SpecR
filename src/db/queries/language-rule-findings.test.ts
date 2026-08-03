@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   escapeLiteralForRegex,
   buildTermMatcher,
+  compileTermMatchers,
   scanParagraphForCategory,
   scanSpecForMissingPhrases,
   type LanguageScanParagraph,
@@ -75,7 +76,7 @@ describe('scanParagraphForCategory', () => {
   it('flags a matched literal term with category, location, and the matched text', () => {
     const p = paragraph('Submit shop drawings to the A.E. for review.');
     const terms: readonly LanguageRuleTerm[] = [{ term: 'A.E.', suggestion: 'use the firm name' }];
-    expect(scanParagraphForCategory(p, terms, 'partyVocabulary')).toEqual([
+    expect(scanParagraphForCategory(p, compileTermMatchers(terms), 'partyVocabulary')).toEqual([
       {
         type: 'language_term_flagged',
         category: 'partyVocabulary',
@@ -91,13 +92,23 @@ describe('scanParagraphForCategory', () => {
 
   it('a term with no suggestion authored reports suggestion: null, not undefined', () => {
     const p = paragraph('The Contractor shall comply.');
-    const findings = scanParagraphForCategory(p, [{ term: 'shall' }], 'bannedTerm');
+    const findings = scanParagraphForCategory(
+      p,
+      compileTermMatchers([{ term: 'shall' }]),
+      'bannedTerm'
+    );
     expect(findings[0]?.suggestion ?? null).toBeNull();
   });
 
   it('does not flag a term that never appears in the paragraph', () => {
     const p = paragraph('Provide painting per manufacturer instructions.');
-    expect(scanParagraphForCategory(p, [{ term: 'subcontractor' }], 'partyVocabulary')).toEqual([]);
+    expect(
+      scanParagraphForCategory(
+        p,
+        compileTermMatchers([{ term: 'subcontractor' }]),
+        'partyVocabulary'
+      )
+    ).toEqual([]);
   });
 
   it('an invalid isRegex:true term is skipped, not thrown, alongside a valid term', () => {
@@ -106,15 +117,49 @@ describe('scanParagraphForCategory', () => {
       { term: '(unterminated', isRegex: true },
       { term: 'A.E.' },
     ];
-    const findings = scanParagraphForCategory(p, terms, 'partyVocabulary');
+    const findings = scanParagraphForCategory(p, compileTermMatchers(terms), 'partyVocabulary');
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ term: 'A.E.' });
   });
 
   it('opt-in default: an empty terms list produces no findings', () => {
     const p = paragraph('The Contractor shall comply with all requirements.');
-    expect(scanParagraphForCategory(p, [], 'bannedTerm')).toEqual([]);
+    expect(scanParagraphForCategory(p, compileTermMatchers([]), 'bannedTerm')).toEqual([]);
   });
+
+  it(
+    'reusing one compiled matcher list across paragraphs never skips a later match ' +
+      '(RegExp.lastIndex carryover, #541)',
+    () => {
+      // Regression: buildTermMatcher's matchers carry the "g" flag, so a
+      // matcher's lastIndex advances after a match. compileTermMatchers
+      // exists so a term's matcher is built once and reused across every
+      // paragraph in a scan — that reuse must not let a match found in an
+      // earlier paragraph suppress an otherwise-identical match in a later
+      // one via a stale lastIndex.
+      const terms: readonly LanguageRuleTerm[] = [{ term: 'A.E.' }];
+      const matchers = compileTermMatchers(terms);
+      const firstParagraph: LanguageScanParagraph = {
+        id: 'para-1',
+        specId: 'spec-1',
+        section: '09 91 26',
+        text: 'Submit shop drawings to the A.E. for review.',
+      };
+      const secondParagraph: LanguageScanParagraph = {
+        id: 'para-2',
+        specId: 'spec-1',
+        section: '09 91 26',
+        text: 'Route the submittal to the A.E. before fabrication.',
+      };
+
+      const firstFindings = scanParagraphForCategory(firstParagraph, matchers, 'partyVocabulary');
+      const secondFindings = scanParagraphForCategory(secondParagraph, matchers, 'partyVocabulary');
+
+      expect(firstFindings).toHaveLength(1);
+      expect(secondFindings).toHaveLength(1);
+      expect(secondFindings[0]).toMatchObject({ paragraphId: 'para-2', matchedText: 'A.E.' });
+    }
+  );
 });
 
 describe('scanSpecForMissingPhrases — whole-spec presence, never paragraph-located (D8)', () => {

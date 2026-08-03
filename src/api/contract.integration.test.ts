@@ -11,6 +11,7 @@ import {
   loadSpec,
 } from '../test-utils/contract/validate-response.js';
 import { pool, createLibrary } from '../db/index.js';
+import { MAX_LITERAL_TERM_LENGTH } from '../ast/index.js';
 
 // MCP is registered separately (not on `router`); exclude defensively.
 const EXCLUDE = new Set(['post /mcp', 'get /mcp', 'delete /mcp']);
@@ -735,6 +736,33 @@ describe('language-lint rule profile + findings endpoints (#411, ADR-080)', () =
     const delBody = (await del.json()) as { data: { libraryId: string } };
     expect(delBody.data.libraryId).toBe(languageRuleLibraryId);
     await assertResponse('delete', '/libraries/{id}/language-rules', 200, delBody);
+  });
+
+  it('GET reflects a grandfathered profile whose literal term exceeds the #541 write-time bound', async () => {
+    // #541's MAX_LITERAL_TERM_LENGTH is enforced by LanguageRulesWriteSchema at
+    // the PUT boundary only (validateRules) — mapRow's read path stays on the
+    // unbounded LanguageRulesSchema so a row inserted before the bound existed
+    // (or via direct SQL) keeps reading successfully. openapi.yaml's GET
+    // response schema must mirror that: it must NOT reject this payload with
+    // its own maxLength/maxItems, even though the shared PUT request schema
+    // does. Insert directly, bypassing validateRules entirely, exactly as the
+    // grandfathering invariant requires.
+    const oversizedTerm = 'x'.repeat(MAX_LITERAL_TERM_LENGTH + 1);
+    await pool.query('INSERT INTO language_rule_profiles (library_id, rules) VALUES ($1, $2)', [
+      languageRuleLibraryId,
+      JSON.stringify({ bannedTerms: [{ term: oversizedTerm }] }),
+    ]);
+    try {
+      const get = await fetch(`${baseUrl}/libraries/${languageRuleLibraryId}/language-rules`);
+      expect(get.status).toBe(200);
+      const body = (await get.json()) as { data: { rules: { bannedTerms: { term: string }[] } } };
+      expect(body.data.rules.bannedTerms[0]?.term).toBe(oversizedTerm);
+      await assertResponse('get', '/libraries/{id}/language-rules', 200, body);
+    } finally {
+      await pool.query('DELETE FROM language_rule_profiles WHERE library_id = $1', [
+        languageRuleLibraryId,
+      ]);
+    }
   });
 
   it('project-scope PUT/GET/DELETE match their documented schemas', async () => {
