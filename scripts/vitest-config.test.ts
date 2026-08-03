@@ -33,6 +33,16 @@ describe('vitest.config.ts unit project', () => {
   it("does not override testTimeout, leaving Vitest's 5000ms default in force", () => {
     expect(unitProject.test?.testTimeout).toBeUndefined();
   });
+
+  // Pins the actual #612 fix: capping the unit project's worker count so
+  // fully-mocked, no-I/O tests don't get starved of scheduler time (and trip
+  // Vitest's 5s default testTimeout) when CPU is oversubscribed by unrelated
+  // parallel workflows on a shared/contended machine. Without this
+  // assertion, a future edit that silently drops or changes maxWorkers would
+  // leave CI green while the regression this issue fixes resurfaces.
+  it('caps maxWorkers at 4 to avoid CPU-oversubscription timeouts (#612)', () => {
+    expect(unitProject.test?.maxWorkers).toBe(4);
+  });
 });
 
 describe('vitest.config.ts integration project', () => {
