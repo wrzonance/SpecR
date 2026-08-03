@@ -10018,18 +10018,54 @@ components:
         bannedTerms:
           type: array
           maxItems: 500
+          description: >
+            maxItems here is NOT independent of the other 3 literal-term
+            fields: bannedTerms/reinforcingWords/partyVocabulary/
+            requiredPhrases share ONE combined write-time cap of 500 literal
+            (isRegex omitted or false) terms total (#541,
+            LanguageRulesWriteSchema). A PUT can be within this field's own
+            maxItems and still be rejected 422 if the 4 categories' literal
+            terms sum past 500 — do not generate per-field validation that
+            treats this 500 as available on its own.
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
         reinforcingWords:
           type: array
           maxItems: 500
+          description: >
+            maxItems here is NOT independent of the other 3 literal-term
+            fields: bannedTerms/reinforcingWords/partyVocabulary/
+            requiredPhrases share ONE combined write-time cap of 500 literal
+            (isRegex omitted or false) terms total (#541,
+            LanguageRulesWriteSchema). A PUT can be within this field's own
+            maxItems and still be rejected 422 if the 4 categories' literal
+            terms sum past 500 — do not generate per-field validation that
+            treats this 500 as available on its own.
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
         partyVocabulary:
           type: array
           maxItems: 500
+          description: >
+            maxItems here is NOT independent of the other 3 literal-term
+            fields: bannedTerms/reinforcingWords/partyVocabulary/
+            requiredPhrases share ONE combined write-time cap of 500 literal
+            (isRegex omitted or false) terms total (#541,
+            LanguageRulesWriteSchema). A PUT can be within this field's own
+            maxItems and still be rejected 422 if the 4 categories' literal
+            terms sum past 500 — do not generate per-field validation that
+            treats this 500 as available on its own.
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
         requiredPhrases:
           type: array
           maxItems: 500
+          description: >
+            maxItems here is NOT independent of the other 3 literal-term
+            fields: bannedTerms/reinforcingWords/partyVocabulary/
+            requiredPhrases share ONE combined write-time cap of 500 literal
+            (isRegex omitted or false) terms total (#541,
+            LanguageRulesWriteSchema). A PUT can be within this field's own
+            maxItems and still be rejected 422 if the 4 categories' literal
+            terms sum past 500 — do not generate per-field validation that
+            treats this 500 as available on its own.
           items: { $ref: '#/components/schemas/LanguageRuleTerm' }
     LanguageRuleProfile:
       type: object

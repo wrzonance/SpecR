@@ -4,6 +4,7 @@ import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool, createLibrary } from '../db/index.js';
+import { MAX_LITERAL_TERMS } from '../ast/language-rule-schemas.js';
 
 // ─── Test setup ───────────────────────────────────────────────────────────────
 
@@ -183,6 +184,37 @@ describe.each(SCOPE_CASES)('$label scope: /$label/{id}/language-rules', (scopeCa
       rules: { bannedTerms: [{ term: 'a'.repeat(500), isRegex: true }] },
     });
     expect(res.status).toBe(422);
+  });
+
+  // #541 review finding — openapi.yaml documents bannedTerms/reinforcingWords/
+  // partyVocabulary/requiredPhrases as EACH independently capped at
+  // MAX_LITERAL_TERMS (maxItems: 500 per field). The real write-boundary
+  // bound is a combined cap of MAX_LITERAL_TERMS literal terms flattened
+  // across all 4 categories together. This spreads terms across TWO fields,
+  // each comfortably within its own documented per-field maxItems, but whose
+  // sum exceeds the combined cap — the exact payload shape a client that
+  // trusted only the per-field maxItems would build and expect to succeed.
+  it('422 — literal terms spread across 2 fields, each within its own maxItems, but over the combined cap', async () => {
+    const ownerId = await scopeCase.makeOwner();
+    const perField = Math.ceil((MAX_LITERAL_TERMS + 1) / 2);
+    const terms = (prefix: string): Array<{ term: string }> =>
+      Array.from({ length: perField }, (_, i) => ({ term: `${prefix}-${i}` }));
+    const res = await put(path(ownerId), {
+      rules: {
+        bannedTerms: terms('banned'),
+        reinforcingWords: terms('reinforcing'),
+      },
+    });
+    expect(res.status).toBe(422);
+    const json = (await res.json()) as { success: false; error: string };
+    // validateRules wraps the underlying Zod issue text (which does say "too
+    // many literal terms...") in a generic message at this module boundary —
+    // see the LanguageRuleValidationError throw site in
+    // src/db/queries/language-rule-profiles.ts. The response body is asserted
+    // against what the API actually returns; the point pinned here is the
+    // STATUS CODE — that combined-cap enforcement fires even though every
+    // individual field stayed within its own documented maxItems.
+    expect(json.error).toMatch(/malformed language rules/i);
   });
 
   it('404 — PUT against a nonexistent owner (scope error, not a 500)', async () => {
