@@ -112,8 +112,7 @@ export async function insertRowsInChunks<T>(args: {
   const chunks = chunkRows(rows, chunkSize);
   const columnListSql = buildColumnListSql(columns);
 
-  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-    const chunk = chunks[chunkIndex]!;
+  for (const [chunkIndex, chunk] of chunks.entries()) {
     const valuesSql = buildValuesSql(columns, chunk.length);
     const params = chunk.flatMap(toParams);
     try {
