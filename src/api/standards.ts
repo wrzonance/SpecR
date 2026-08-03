@@ -12,7 +12,7 @@ import { logger } from '../lib/logger.js';
 
 const UUID = z.uuid();
 
-const VerificationBodySchema = z.object({
+export const VerificationBodySchema = z.object({
   status: z.enum(['current', 'superseded', 'withdrawn', 'unknown']).optional(),
   currentVersion: z.string().trim().min(1).max(200).nullish(),
   sourceUrl: z.url().max(2000).nullish(),

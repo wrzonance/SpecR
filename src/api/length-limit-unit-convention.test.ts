@@ -1,0 +1,180 @@
+// src/api/length-limit-unit-convention.test.ts
+//
+// #626 (ADR-086) — Zod's `.max(n)` delegates to `String.prototype.length`
+// (UTF-16 code units); JSON Schema's `maxLength` keyword (used by every
+// `openapi.yaml` field it mirrors) is defined in Unicode code points. For
+// any character outside the Basic Multilingual Plane the two counts diverge
+// by up to 2x, so a spec-compliant client can construct a payload the
+// documented contract says is valid but the server 422s. ADR-086 chose
+// "accept and document" over changing enforcement: every paired site's
+// `openapi.yaml` description states the UTF-16 convention verbatim
+// (`UTF16_LENGTH_LIMIT_NOTE`).
+//
+// This file has two jobs, mirroring the established `*-openapi.test.ts`
+// idiom (see header-footer-image-cap-openapi.test.ts,
+// language-rules-literal-bounds-openapi.test.ts):
+//
+// 1. Drift guard — every in-scope site's `openapi.yaml` description contains
+//    the canonical note verbatim and its `maxLength` matches the expected
+//    bound, so the prose and the spec cannot silently diverge.
+// 2. Boundary pin — a representative sample of the *unchanged* Zod
+//    validators is exercised at the UTF-16 boundary with a non-BMP
+//    character (U+1F600, 2 UTF-16 units per code point) to pin the current
+//    counting behavior as a regression guard, not a behavior change.
+//
+// sha256 (openapi.yaml, fixed 64-char hex digest) and imageData (base64
+// byte-size cap) are deliberately excluded — both alphabets are ASCII-only,
+// so UTF-16-unit count and Unicode-code-point count are always identical
+// there. See ADR-086 for the full inventory and reasoning.
+import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
+import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
+import { ActorLabelSchema } from '../ast/index.js';
+import { loadRawSpec } from '../test-utils/contract/validate-response.js';
+import { VerificationBodySchema } from './standards.js';
+import { ResolveUserBody } from './users.js';
+
+// A non-BMP character: U+1F600 GRINNING FACE, 1 Unicode code point, 2 UTF-16
+// code units (a surrogate pair). Repeating it N times yields a string whose
+// `.length` (UTF-16 units) is 2N and whose `[...str].length` (code points)
+// is N — the exact divergence ADR-086 documents.
+const ASTRAL_CHAR = '\u{1F600}';
+
+const DescribedLengthFieldSchema = z.object({
+  maxLength: z.number(),
+  description: z.string(),
+});
+
+const RawSpecSchema = z.object({
+  paths: z.object({
+    '/users': z.object({
+      post: z.object({
+        requestBody: z.object({
+          content: z.object({
+            'application/json': z.object({
+              schema: z.object({
+                properties: z.object({ label: DescribedLengthFieldSchema }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  }),
+  components: z.object({
+    schemas: z.object({
+      ActorLabel: DescribedLengthFieldSchema,
+      LanguageRuleTermWrite: z.object({
+        allOf: z.tuple([
+          z.unknown(),
+          z.object({ properties: z.object({ term: DescribedLengthFieldSchema }) }),
+        ]),
+      }),
+      StandardVerificationBody: z.object({
+        properties: z.object({
+          currentVersion: DescribedLengthFieldSchema,
+          sourceUrl: DescribedLengthFieldSchema,
+          title: DescribedLengthFieldSchema,
+          notes: DescribedLengthFieldSchema,
+        }),
+      }),
+    }),
+  }),
+});
+type RawSpec = z.infer<typeof RawSpecSchema>;
+
+interface LengthLimitSite {
+  name: string;
+  expectedMax: number;
+  select: (spec: RawSpec) => { maxLength: number; description: string };
+}
+
+const LENGTH_LIMIT_SITES: readonly LengthLimitSite[] = [
+  {
+    name: 'POST /users label (request body)',
+    expectedMax: 200,
+    select: (spec) =>
+      spec.paths['/users'].post.requestBody.content['application/json'].schema.properties.label,
+  },
+  {
+    name: 'ActorLabel',
+    expectedMax: 200,
+    select: (spec) => spec.components.schemas.ActorLabel,
+  },
+  {
+    name: 'LanguageRuleTermWrite.term',
+    expectedMax: 500,
+    select: (spec) => spec.components.schemas.LanguageRuleTermWrite.allOf[1].properties.term,
+  },
+  {
+    name: 'StandardVerificationBody.currentVersion',
+    expectedMax: 200,
+    select: (spec) => spec.components.schemas.StandardVerificationBody.properties.currentVersion,
+  },
+  {
+    name: 'StandardVerificationBody.sourceUrl',
+    expectedMax: 2000,
+    select: (spec) => spec.components.schemas.StandardVerificationBody.properties.sourceUrl,
+  },
+  {
+    name: 'StandardVerificationBody.title',
+    expectedMax: 500,
+    select: (spec) => spec.components.schemas.StandardVerificationBody.properties.title,
+  },
+  {
+    name: 'StandardVerificationBody.notes',
+    expectedMax: 5000,
+    select: (spec) => spec.components.schemas.StandardVerificationBody.properties.notes,
+  },
+];
+
+describe('openapi.yaml — length-limit unit convention is documented at every paired site (#626, ADR-086)', () => {
+  it.each(LENGTH_LIMIT_SITES)(
+    '$name: maxLength matches the Zod bound and the description states the UTF-16 convention',
+    async ({ expectedMax, select }) => {
+      const raw = RawSpecSchema.parse(await loadRawSpec());
+      const field = select(raw);
+      expect(
+        field.maxLength,
+        'openapi.yaml maxLength drifted from the paired Zod .max() bound'
+      ).toBe(expectedMax);
+      expect(
+        field.description,
+        'openapi.yaml description must state the UTF-16 length-limit convention verbatim (ADR-086) — ' +
+          'a reader of this field alone must not assume JSON Schema maxLength code-point semantics'
+      ).toContain(UTF16_LENGTH_LIMIT_NOTE);
+    }
+  );
+});
+
+describe('length limits: astral-character UTF-16 boundary (#626, ADR-086 — pins CURRENT unchanged behavior)', () => {
+  it('ActorLabel: astral character at maxLength boundary is accepted, one UTF-16 unit over is rejected', () => {
+    const atLimit = ASTRAL_CHAR.repeat(100); // 100 code points = 200 UTF-16 units
+    const overLimit = `${atLimit}x`; // 201 UTF-16 units
+
+    expect(atLimit).toHaveLength(200);
+    expect(ActorLabelSchema.safeParse(atLimit).success).toBe(true);
+    expect(overLimit).toHaveLength(201);
+    expect(ActorLabelSchema.safeParse(overLimit).success).toBe(false);
+  });
+
+  it('StandardVerificationBody.notes: astral character at maxLength boundary is accepted, one UTF-16 unit over is rejected', () => {
+    const atLimit = ASTRAL_CHAR.repeat(2500); // 2500 code points = 5000 UTF-16 units
+    const overLimit = `${atLimit}x`; // 5001 UTF-16 units
+
+    expect(atLimit).toHaveLength(5000);
+    expect(VerificationBodySchema.shape.notes.safeParse(atLimit).success).toBe(true);
+    expect(overLimit).toHaveLength(5001);
+    expect(VerificationBodySchema.shape.notes.safeParse(overLimit).success).toBe(false);
+  });
+
+  it('POST /users label: astral character at maxLength boundary is accepted, one UTF-16 unit over is rejected', () => {
+    const atLimit = ASTRAL_CHAR.repeat(100); // 100 code points = 200 UTF-16 units
+    const overLimit = `${atLimit}x`; // 201 UTF-16 units
+
+    expect(atLimit).toHaveLength(200);
+    expect(ResolveUserBody.safeParse({ label: atLimit }).success).toBe(true);
+    expect(overLimit).toHaveLength(201);
+    expect(ResolveUserBody.safeParse({ label: overLimit }).success).toBe(false);
+  });
+});
