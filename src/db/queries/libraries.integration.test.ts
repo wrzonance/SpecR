@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { pool } from '../index.js';
 import {
   createLibrary,
@@ -10,22 +10,29 @@ import {
   DEFAULT_COMPANY_LIBRARY,
 } from './libraries.js';
 
-// Per-run suffix so this suite's client-library names cannot collide with a
-// leftover row from a prior run that skipped its afterEach (process kill,
-// hookTimeout). See issue #623.
+// Per-run suffix on this suite's client-library names. Secondary to the
+// beforeAll sweep below: it keeps concurrently-inspected rows attributable and
+// avoids a hard unique-key failure if that sweep is ever narrowed. 32 bits, so
+// it makes a collision improbable rather than impossible. See issue #623.
 const suffix = randomUUID().slice(0, 8);
 
 // Namespaces reserved by this file: '99 77 %' spec sections, project
 // 'lib-xor-test-project', and every non-built-in library row.
 // Cleanup order is FK-safe: specs → projects → libraries.
-afterEach(async () => {
+async function clearReservedNamespaces(): Promise<void> {
   await pool.query(`DELETE FROM specs WHERE section LIKE '99 77 %'`);
   await pool.query(`DELETE FROM projects WHERE name = 'lib-xor-test-project'`);
   await pool.query(`DELETE FROM libraries WHERE name NOT IN ($1, $2)`, [
     UFGS_REFERENCE_LIBRARY,
     DEFAULT_COMPANY_LIBRARY,
   ]);
-});
+}
+
+// Residue from a prior run that never reached its afterEach (process kill,
+// hookTimeout) is cleared BEFORE the first test, not incidentally by the first
+// test's teardown — so a filtered run (`-t`) starts as clean as a full one.
+beforeAll(clearReservedNamespaces);
+afterEach(clearReservedNamespaces);
 
 describe('migration 016 — backfill and built-ins', () => {
   it('db: no spec is ownerless after backfill', async () => {
