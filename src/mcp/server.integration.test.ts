@@ -817,6 +817,34 @@ describe('tool: generate_docx', () => {
   });
 });
 
+describe('tool: submittal_register', () => {
+  // #550 finding 3: submittal_register's inputSchema was built by SPREADING
+  // SubmittalRegisterBodySchema.shape, which drops the schema's object-level
+  // .check() duplicate-id refinement (the same shape-spread trap generate_docx
+  // hit in #567, above — there it was .strict(), here it's .check()). With
+  // duplicates silently accepted, getSubmittalRegister's ANY($2::uuid[]) SELECT
+  // returns 1 distinct row for 2 identical ids, the rows.length !== specIds.length
+  // guard fires, and the caller is wrongly told the spec "is not in project."
+  // Asserting isError alone has no teeth here: the handler's own defensive
+  // safeParse (submittal-register-handler.ts) would also produce isError:true
+  // with the bare "specIds must not contain duplicates" message even if the
+  // registered schema itself still accepted the call. The 'Input validation
+  // error' prefix is the SDK's own — it appears only when the registered
+  // inputSchema rejects the call before the handler ever runs.
+  it('mcp: submittal_register rejects duplicate specIds (#550 F3 — .shape spread dropped the object-level .check)', async () => {
+    const body = await mcpCall(`${baseUrl}/mcp`, 'tools/call', {
+      name: 'submittal_register',
+      arguments: { projectId: mcpProjectId, specIds: [mcpSpecId, mcpSpecId] },
+    });
+    const b = body as Record<string, unknown>;
+    const result = b['result'] as Record<string, unknown>;
+    expect(result['isError']).toBe(true);
+    const text = (result['content'] as { text: string }[])[0]?.text ?? '';
+    expect(text).toContain('Input validation error');
+    expect(text).toContain('specIds must not contain duplicates');
+  });
+});
+
 describe('GET /mcp', () => {
   it('returns 405 in stateless mode', async () => {
     const res = await fetch(`${baseUrl}/mcp`);

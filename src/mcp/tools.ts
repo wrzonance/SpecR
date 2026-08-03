@@ -292,10 +292,16 @@ function registerSubmittalTools(reg: ToolRegistrar): void {
         'Build a product-driven submittal register for selected project specs. ' +
         'Rows come from PART 2 product candidates, required submittal types come ' +
         'from the PART 1 Submittals article, and datasheet links come from paragraph associations.',
-      inputSchema: {
+      // `.extend()`, NOT `{ projectId, ...SubmittalRegisterBodySchema.shape }`: see the
+      // generate_docx comment above for the general trap (shape-spread drops object-level
+      // rules). Here the dropped rule is a `.check()`, not `.strict()` — the failure mode is
+      // duplicate specIds being silently ACCEPTED (not an unknown key silently stripped): the
+      // SDK rebuilds a bare `z.object()` from the spread shape, which carries only the
+      // per-key field schemas, so `specIds must not contain duplicates` never runs (#550 F3).
+      // `.extend()` carries the parent `.check()` forward.
+      inputSchema: SubmittalRegisterBodySchema.extend({
         projectId: z.uuid().describe('Project UUID (from list_projects)'),
-        ...SubmittalRegisterBodySchema.shape,
-      },
+      }),
     },
     handleSubmittalRegister
   );
