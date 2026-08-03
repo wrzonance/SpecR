@@ -10,6 +10,12 @@ import { parse } from '../index.js';
 // (src/parser/docx/core-metadata.ts) code path a fixture exercises, rather
 // than assert it in a comment. Returns null only when the part is genuinely
 // absent from the zip — never for an empty-but-present tag.
+//
+// This probe alone cannot separate empty-but-present fields from malformed
+// markup: a mismatched/unclosed tag also misses both regexes and yields
+// `{ title: '', subject: '' }`, yet parseCoreMetadata() would route it through
+// its XMLValidator guard to the 'core-metadata-unreadable' path instead. Pair
+// it with a warning assertion on the parsed tree to pin the empty-field path.
 async function readCoreTitleSubject(
   buffer: Buffer
 ): Promise<{ title: string; subject: string } | null> {
@@ -172,15 +178,32 @@ describe.runIf(existsSync(ARTIFACT))(
 
       const { tree, sectionInference } = await parse(buffer, 'parsing-needs-fixing.docx');
 
+      // ...and core.xml is well-formed, so the empty fields really are the
+      // empty-field path and not the XMLValidator-rejected 'unreadable' one
+      // the regex probe above cannot distinguish from it.
+      expect(tree.warnings ?? []).not.toContainEqual(
+        expect.objectContaining({ type: 'core-metadata-unreadable' })
+      );
+
       // Precondition: identity really did come from content, not metadata.
       expect(sectionInference.method).not.toBe('metadata');
       expect(tree.section).toBe(SECTION);
       expect(tree.title).toBe(TITLE);
 
       expect(leakedIdentityRoots(tree)).toHaveLength(0);
-      // Every root is either a real PART, the retained body-object table root
-      // (#300/ADR-072), or an intentionally-hidden root (#292/#296) — not an
-      // unrelated stray root type re-typing the tree's identity.
+      // The three real PART roots survive verbatim. Asserted positively and by
+      // identity because the tolerance check below is an `every()` — vacuously
+      // true for an empty array, and satisfiable by the object/vanish roots
+      // alone, so on its own it would still pass a regression that dropped
+      // GENERAL/PRODUCTS/EXECUTION entirely.
+      expect(tree.parts.filter((n) => n.type === 'part').map((n) => n.text)).toEqual([
+        'GENERAL',
+        'PRODUCTS',
+        'EXECUTION',
+      ]);
+      // Beyond those, the only tolerated roots are the retained body-object
+      // table root (#300/ADR-072) and intentionally-hidden roots (#292/#296) —
+      // not an unrelated stray root type re-typing the tree's identity.
       expect(
         tree.parts.every((n) => n.type === 'part' || n.type === 'object' || n.meta.vanish === true)
       ).toBe(true);
