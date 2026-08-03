@@ -130,6 +130,38 @@ rather than accidentally reflecting only the first. The existing
 vanish-paragraph exception (host paragraph itself `w:vanish` → don't report
 co-occurring drawables as dropped) is unchanged.
 
+**7. Classification must see exactly the content the blob retains — so
+`mc:Fallback` runs are excluded.** The correlation in decision 3 is a count
+correspondence between two independently-derived sequences: hidden flags
+from the grouped `raw` tree, and `w:txbxContent` boundaries from the blob
+*after* `stripAlternateContentFallback` has spliced out every `mc:Fallback`
+branch (ADR-072 decision 9). Any content the blob discards but the grouped
+walk still classifies breaks that correspondence and trips the fail-closed
+guard — suppressing legitimately visible content.
+
+This is not hypothetical. When `mc:AlternateContent` sits at BLOCK level,
+wrapping whole `w:r` elements per branch
+(`w:p > mc:AlternateContent > mc:Choice > w:r`), `runsOf` collects the
+Fallback's text-box run as well as the Choice's, yielding two flags against
+one surviving boundary — and the visible `mc:Choice` box's interior text was
+suppressed entirely. (The run-level shape Word normally emits,
+`w:r > mc:AlternateContent > mc:Choice > w:drawing`, puts no `w:r` inside the
+Fallback and was never affected, which is why the original spike missed it.)
+
+`collectFallbackRuns` (`body-objects.ts`) therefore excludes every run living
+under an `mc:Fallback` subtree from classification. It reuses `runsOf` on each
+Fallback subtree rather than re-implementing `collectRunsAndFields`'
+traversal, so the two cannot drift. Dropping these runs is also correct
+independently of the correlation: a Fallback is an alternate *rendering* of
+the same content, never additional content, so it must contribute neither an
+`objectText` leaf nor a `dropped` entry. Both shapes are pinned in
+`body-objects.test.ts`.
+
+The general rule this generalizes to: **any future grouped-side signal must
+be derived from the same normalized view the blob keeps**, or it must carry
+its own correspondence proof. A count guard only fails closed safely when
+both sides are scoped to the same content.
+
 ## Consequences
 
 - A host paragraph mixing a hidden and a visible text box now round-trips

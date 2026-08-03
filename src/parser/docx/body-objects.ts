@@ -316,6 +316,57 @@ interface DrawingRunEntry {
   readonly classification: BodyDrawingClassification;
 }
 
+// Every grouped-mode run living inside an `mc:Fallback` subtree of `raw`
+// (#515 review, CRITICAL). The captured blob has its `mc:Fallback` branches
+// spliced out by stripAlternateContentFallback before the anchor walk sees
+// it, so a Fallback run classified here would contribute a hidden flag with
+// no surviving `w:txbxContent` boundary to correlate against —
+// resolveHiddenTxbxContentNodes' count guard then fails closed and
+// suppresses the VISIBLE mc:Choice box's interior text entirely.
+//
+// This only bites when `mc:AlternateContent` sits at BLOCK level, wrapping
+// whole `w:r` elements in each branch (`w:p > mc:AlternateContent >
+// mc:Choice > w:r`); the run-level shape Word normally emits
+// (`w:r > mc:AlternateContent > mc:Choice > w:drawing`) puts no `w:r` inside
+// the Fallback at all and was never affected. Both shapes are pinned in
+// body-objects.test.ts.
+//
+// Reuses `runsOf` on each Fallback subtree rather than re-implementing
+// collectRunsAndFields' traversal, so the two can never drift; `runsOf`
+// returns the raw `w:r` element objects themselves (only `w:fldSimple`
+// pieces are re-wrapped), making this a sound reference-identity set.
+function collectFallbackRuns(value: unknown): ReadonlySet<Record<string, unknown>> {
+  const found = new Set<Record<string, unknown>>();
+  collectFallbackRunsInto(value, found);
+  return found;
+}
+
+// Every run inside one `mc:Fallback` value — grouped mode may hold either a
+// single node or an array of them, hence toArray.
+function addFallbackSubtreeRuns(child: unknown, acc: Set<Record<string, unknown>>): void {
+  const branches = toArray<Record<string, unknown>>(
+    child as readonly Record<string, unknown>[] | undefined
+  );
+  for (const branch of branches) {
+    for (const run of runsOf(branch)) acc.add(run);
+  }
+}
+
+function collectFallbackRunsInto(value: unknown, acc: Set<Record<string, unknown>>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectFallbackRunsInto(item, acc);
+    return;
+  }
+  if (value === null || typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'mc:Fallback') {
+      addFallbackSubtreeRuns(child, acc);
+      continue;
+    }
+    collectFallbackRunsInto(child, acc);
+  }
+}
+
 // EVERY drawing-bearing run is classified — never just the first — so a
 // paragraph carrying more than one separate drawing (rare — Word normally
 // puts one drawing per paragraph) never loses one to the other in the
@@ -349,8 +400,10 @@ function classifyParagraphDrawings(
   paragraphNode: ObjectBlobNode | undefined
 ): readonly DrawingRunEntry[] {
   const order = paragraphNode ? pairRunOrder(raw, childrenOf(paragraphNode)) : undefined;
+  const fallbackRuns = collectFallbackRuns(raw);
   const entries: DrawingRunEntry[] = [];
   for (const run of runsOf(raw, order)) {
+    if (fallbackRuns.has(run)) continue;
     const unwrapped = unwrapAlternateContent(run);
     if (isDrawingRun(unwrapped)) {
       entries.push({ run: unwrapped, classification: classifyBodyDrawing(unwrapped) });
