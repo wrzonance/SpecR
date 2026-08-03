@@ -154,6 +154,15 @@ function mixedVisibilityTwoTextBoxParagraph(visibleText: string, hiddenText: str
   return `<w:p>${visibleRun}${hiddenRun}</w:p>`;
 }
 
+// Every `w:txbxContent` subtree in a generated document.xml, as its exact
+// serialized string (#515 adversarial review) — the unit a byte-identity
+// assertion has to compare. Non-greedy and flat: no fixture in this file
+// nests one text box inside another, so a nesting-aware scanner would be
+// unexercised machinery.
+function txbxContentBlocks(docXml: string): readonly string[] {
+  return [...docXml.matchAll(/<w:txbxContent>[\s\S]*?<\/w:txbxContent>/g)].map((m) => m[0]);
+}
+
 function flatten(nodes: readonly SpecNode[]): SpecNode[] {
   return [...nodes, ...nodes.flatMap((n) => flatten(n.children))];
 }
@@ -443,11 +452,20 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
     expect(objectTextsOf(before[0] as SpecNode)).toEqual(['Visible box text']);
 
     const docXmlBefore = await generatedDocumentXml(tree);
-    // The hidden box's OWN OOXML — including its w:vanish marker — survives
-    // untouched in the FIRST generation, proving the blob really does still
-    // carry the WHOLE host paragraph (both boxes), not just the visible one.
-    expect(docXmlBefore).toContain('Secret hidden box text');
-    expect(docXmlBefore).toContain('<w:vanish/>');
+    // Both boxes' interiors survive the FIRST generation, proving the blob
+    // really does still carry the WHOLE host paragraph — not just the
+    // visible box — and that the hidden one is the vanish-marked subtree.
+    const blocksBefore = txbxContentBlocks(docXmlBefore);
+    expect(blocksBefore).toHaveLength(2);
+    const hiddenBefore = blocksBefore.find((b) => b.includes('Secret hidden box text'));
+    expect(hiddenBefore).toBeDefined();
+    expect(hiddenBefore).toContain('<w:vanish/>');
+    // Privacy at the OOXML layer: the hidden box's subtree carries NO SDT
+    // round-trip anchor, so no objectText leaf can ever be minted for it and
+    // no edit path can address it. This is the blob-level counterpart to the
+    // SpecTree-level objectText assertion above.
+    expect(hiddenBefore).not.toContain('<w:sdt');
+    expect(hiddenBefore).not.toContain('w:tag');
 
     const reparsedTree = await regenerateAndReparse(tree);
     const after = objectNodesOf(reparsedTree);
@@ -459,11 +477,22 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
     expect(objectTextsOf(after[0] as SpecNode)).toEqual(['Visible box text']);
 
     const docXmlAfter = await generatedDocumentXml(reparsedTree);
-    // Byte-identity: the hidden box's interior text and its w:vanish marker
-    // are still present verbatim after a SECOND regeneration — the opaque
-    // subtree was never reinterpreted, only ever passed through by reference.
-    expect(docXmlAfter).toContain('Secret hidden box text');
-    expect(docXmlAfter).toContain('<w:vanish/>');
+    const blocksAfter = txbxContentBlocks(docXmlAfter);
+    expect(blocksAfter).toHaveLength(2);
+    const hiddenAfter = blocksAfter.find((b) => b.includes('Secret hidden box text'));
+    // Byte-identity, actually asserted on bytes (#515 adversarial review): the
+    // hidden box's ENTIRE w:txbxContent serialization is compared string-for-
+    // string across the second generation, not merely probed for two
+    // substrings. A dropped attribute, a reordered or re-wrapped run, a moved
+    // w:vanish, or any other silent reinterpretation of the opaque subtree
+    // fails here — substring checks alone would pass through all of them.
+    expect(hiddenAfter).toBe(hiddenBefore);
+    // The VISIBLE box's subtree is deliberately NOT compared byte-for-byte:
+    // a fresh SDT anchor uuid is minted on every capture (this file's own
+    // header records id as excluded from round-trip identity), so its
+    // serialization legitimately differs between generations. Its content is
+    // pinned by the objectTexts assertions above instead.
+    expect(blocksAfter.filter((b) => b.includes('Visible box text'))).toHaveLength(1);
   });
 });
 
