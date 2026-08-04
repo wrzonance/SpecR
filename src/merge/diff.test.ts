@@ -398,7 +398,12 @@ describe('computeDiff', () => {
       expect(result.conflicts).toEqual([]);
     });
 
-    it('object with all children absent from theirs (no matching block) falls through to per-child deletes, never a whole-object signal', () => {
+    it('merge: whole-object delete — all interior anchors gone from theirs', () => {
+      // #525: the editor deleted the WHOLE table in Word, so none of its interior
+      // anchors survive anywhere in theirs.controlled (not just outside a matched
+      // block) — this must emit one atomic objectConflicts entry (theirs absent),
+      // NOT per-child deletes, or the generator re-emits the deleted blob verbatim
+      // on the next round-trip while the diff misleadingly reports interior deletes.
       const baseSnapshot = tableSnapshot(OBJ1, [['A1', 'B1']], [U1, U2]);
       const result = computeDiff(
         [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
@@ -406,8 +411,77 @@ describe('computeDiff', () => {
         extract([]), // no object blocks and no controlled uuids at all in theirs
         [baseSnapshot]
       );
+      expect(result.objectConflicts).toEqual([
+        { objectId: OBJ1, affectedUuids: [U1, U2], base: fingerprintBlob(baseSnapshot.meta.blob) },
+      ]);
+      expect(result.objectConflicts[0]).not.toHaveProperty('theirs');
+      expect(result.deleted).toEqual([]);
+      expect(result.modified).toEqual([]);
+      expect(result.conflicts).toEqual([]);
+    });
+
+    it('partial interior deletion (some but not all anchored children removed) keeps the #520 structural-diverge path, not a whole-object signal', () => {
+      // AC boundary: only U2 is removed from the table's interior anchors while the
+      // table block itself survives (still matched by findMatchingBlock via U1) —
+      // this must stay the EXISTING #520 diverging-fingerprint path (theirs present),
+      // never get reclassified as a #525 whole-object delete.
+      const baseSnapshot = tableSnapshot(OBJ1, [['A1', 'B1']], [U1, U2]);
+      const theirsBlock = tableBlock([['A1']], [U1]); // U2's cell is gone → 1 column, not 2
+      const result = computeDiff(
+        [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+        [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+        extract([[U1, 'cell one']], [], [], [theirsBlock]),
+        [baseSnapshot]
+      );
+      expect(result.objectConflicts).toEqual([
+        {
+          objectId: OBJ1,
+          affectedUuids: [U1, U2],
+          base: fingerprintBlob(baseSnapshot.meta.blob),
+          theirs: theirsBlock.fingerprint,
+        },
+      ]);
+      expect(result.deleted).toEqual([]);
+      expect(result.modified).toEqual([]);
+      expect(result.conflicts).toEqual([]);
+    });
+
+    it('KNOWN AMBIGUITY: object block gone, but one interior anchor survives outside it — falls through to ordinary per-child diffing, not a whole-object signal', () => {
+      // #525 explicitly does not resolve this sub-case: the table block itself is
+      // entirely absent from theirs.objectBlocks (findMatchingBlock === undefined,
+      // as in a clean whole-object delete), yet U1 still exists in theirs.controlled
+      // as a stray paragraph outside any object block — e.g. Word left one cell's
+      // text behind as a loose paragraph while the table markup itself vanished.
+      // isWholeObjectDeletion correctly refuses to call this a clean whole-object
+      // delete (not ALL children are absent), so it falls through to ordinary
+      // per-child classification: U1 diffs normally (modified), U2 (genuinely gone)
+      // reads as an ordinary delete. This is a real ambiguity — the source doesn't
+      // decidably say whether the editor meant "delete the table" or "delete the
+      // table but keep this one cell's text as a paragraph" — so it is pinned as
+      // current behavior here rather than silently picked, per CLAUDE.md.
+      const baseSnapshot = tableSnapshot(OBJ1, [['A1', 'B1']], [U1, U2]);
+      const result = computeDiff(
+        [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+        [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+        extract([[U1, 'surviving stray text']]), // no objectBlocks; U1 survives as a stray controlled paragraph
+        [baseSnapshot]
+      );
       expect(result.objectConflicts).toEqual([]);
-      expect(result.deleted).toEqual([U1, U2]);
+      expect(result.modified).toEqual([
+        { uuid: U1, base: 'cell one', theirs: 'surviving stray text', ours: 'cell one' },
+      ]);
+      expect(result.deleted).toEqual([U2]);
+      expect(result.conflicts).toEqual([]);
+    });
+
+    it('childless object snapshot → no objectConflicts signal from either #520 or #525 paths', () => {
+      // childUuids: [] is the pre-existing always-childless case (an object with no
+      // w:sdt-anchored interior paragraphs at all) — isWholeObjectDeletion's
+      // childUuids.length > 0 guard must keep this a no-op, same as before #525.
+      const snapshot = tableSnapshot(OBJ1, [['A1', 'B1']], []);
+      const result = computeDiff([snap(OBJ1, '')], [snap(OBJ1, '')], extract([]), [snapshot]);
+      expect(result.objectConflicts).toEqual([]);
+      expect(result.deleted).toEqual([]);
       expect(result.modified).toEqual([]);
       expect(result.conflicts).toEqual([]);
     });

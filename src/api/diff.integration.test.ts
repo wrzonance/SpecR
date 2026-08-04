@@ -79,6 +79,26 @@ function replaceParagraphText(xml: string): string {
   return xml.replace(ORIGINAL_TEXT, REVISED_TEXT);
 }
 
+/**
+ * #525: simulate an editor deleting a whole table in Word — strip the entire
+ * `w:tbl` element carrying `anchorUuid`, so NONE of the object's interior
+ * anchors survive anywhere in the returned DOCX. Matches the exact `<w:tbl>`
+ * open tag (never the `<w:tblPr>`/`<w:tblGrid>` children that sit between it
+ * and the anchor) and throws loudly if either bound is missing, so a
+ * generator change that adds attributes fails the test instead of silently
+ * mis-stripping.
+ */
+function removeTableContaining(anchorUuid: string): (xml: string) => string {
+  return (xml) => {
+    const tagIndex = xml.indexOf(`specr-uuid-${anchorUuid}`);
+    if (tagIndex === -1) throw new Error('expected object anchor tag missing');
+    const start = xml.lastIndexOf('<w:tbl>', tagIndex);
+    const end = xml.indexOf('</w:tbl>', tagIndex);
+    if (start === -1 || end === -1) throw new Error('table bounds missing');
+    return xml.slice(0, start) + xml.slice(end + '</w:tbl>'.length);
+  };
+}
+
 function removeContentControl(xml: string): string {
   const tagIndex = xml.indexOf(`specr-uuid-${paragraphId}`);
   if (tagIndex === -1) throw new Error('expected content-control tag missing');
@@ -377,6 +397,64 @@ describe('body-level object round-trip — real wiring (#520 review finding)', (
         objectConflicts: [],
         warnings: [],
       });
+    }
+  );
+
+  // #525 adversarial-review finding: the whole-object-delete detection added
+  // in this PR was only ever exercised at the computeDiff unit level
+  // (merge/diff.test.ts) and, for the accept-rejection posture, against a
+  // hand-built ObjectConflictDiff (merge/conflict.integration.test.ts) —
+  // neither runs the real DB → generateDocx → extractContentControls →
+  // getObjectStructuralSnapshots → computeDiff wiring, nor the optional-
+  // `theirs` DiffResultSchema serialization at the API boundary. A regression
+  // in any of those would silently reinstate the original corruption (the
+  // deleted table reappears, the delete misreported as child paragraph
+  // deletions) while every other added test still passed.
+  it(
+    'deleting the whole table in Word surfaces as ONE atomic objectConflict with `theirs` ' +
+      'absent — never as per-child paragraph deletions (#525)',
+    async () => {
+      const generateRes = await fetch(`${baseUrl}/specs/${objSpecId}/generate`, { method: 'POST' });
+      expect(generateRes.status).toBe(200);
+      const buffer = Buffer.from(await generateRes.arrayBuffer());
+      const edited = await updateDocumentXml(buffer, removeTableContaining(OBJ_TEXT_ID));
+
+      const form = new FormData();
+      form.append(
+        'file',
+        new Blob([new Uint8Array(edited)], { type: DOCX_MIME }),
+        'object-deleted.docx'
+      );
+      const diffRes = await fetch(`${baseUrl}/specs/${objSpecId}/diff`, {
+        method: 'POST',
+        body: form,
+      });
+      const body = (await diffRes.json()) as ApiResponse<DiffResult>;
+
+      expect(diffRes.status).toBe(200);
+      const diff = body.data;
+      expect(diff).toBeDefined();
+      if (!diff) return;
+
+      expect(diff.objectConflicts).toHaveLength(1);
+      const [conflict] = diff.objectConflicts;
+      expect(conflict).toBeDefined();
+      if (!conflict) return;
+
+      expect(conflict.objectId).toBe(OBJ_OBJECT_ID);
+      expect(conflict.affectedUuids).toEqual([OBJ_TEXT_ID]);
+      expect(conflict.base).toMatchObject({ kind: 'table', rows: 1, columns: 1 });
+      // the object itself is gone from theirs, so there is nothing to
+      // fingerprint — `theirs` must be ABSENT, not present-and-undefined
+      // (ADR-089; `.exactOptional()` in ast/merge-schemas.ts)
+      expect('theirs' in conflict).toBe(false);
+
+      // the whole point of #525: the delete is reported once, atomically —
+      // the object's interior anchor never leaks into per-child noise
+      expect(diff.deleted).toEqual([]);
+      expect(diff.modified).toEqual([]);
+      expect(diff.conflicts).toEqual([]);
+      expect(diff.added).toEqual([]);
     }
   );
 });

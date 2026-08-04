@@ -37,13 +37,18 @@ const ObjectStructureFingerprintSchema = z.object({
 });
 
 // Mirrors ObjectConflictDiff (src/merge/types.ts) — one atomic structural conflict
-// on a body-level table/text box (#520): detection-only, an accept always rejects
-// (validateAccepted, src/merge/conflict.ts).
+// on a body-level table/text box: either a structural divergence (#520, `theirs`
+// present) or a whole-object deletion (#525, `theirs` absent — the object itself
+// is gone from `theirs`, so there is nothing to fingerprint). Either way,
+// detection-only: an accept always rejects (validateAccepted, src/merge/conflict.ts).
+// `.exactOptional()`, not `.optional()`, for the same exactOptionalPropertyTypes
+// reason as rows/columns above — `theirs?: ObjectStructureFingerprint`, not
+// `theirs?: ObjectStructureFingerprint | undefined`.
 const ObjectConflictDiffSchema = z.object({
   objectId: z.uuid(),
   affectedUuids: z.array(z.uuid()),
   base: ObjectStructureFingerprintSchema,
-  theirs: ObjectStructureFingerprintSchema,
+  theirs: ObjectStructureFingerprintSchema.exactOptional(),
 });
 
 export const DiffResultSchema = z

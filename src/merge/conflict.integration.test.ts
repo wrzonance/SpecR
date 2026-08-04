@@ -360,6 +360,55 @@ describe('applyAccepted — object-conflict rejection (#520)', () => {
   });
 });
 
+describe('applyAccepted — whole-object-delete conflict rejection (#525)', () => {
+  // #525: an ObjectConflictDiff with `theirs` absent (the whole-object-delete
+  // case) must be rejected through the exact same detection-only path as the
+  // #520 structural-diverge case above — validateAccepted/applicableChanges
+  // never branch on `.theirs`, so this proves that reuse holds with zero
+  // changes to conflict.ts.
+  const baseFingerprint: ObjectStructureFingerprint = {
+    kind: 'table',
+    rows: 2,
+    columns: 2,
+    hash: 'a',
+  };
+
+  it("rejects accepting a whole-object-delete's object-row id, making no writes", async () => {
+    const { specId, pr1Id } = await createFixture();
+    const objectId = randomUUID();
+    const diff = diffWith({
+      objectConflicts: [{ objectId, affectedUuids: [pr1Id], base: baseFingerprint }],
+    });
+
+    await expect(
+      runApplyAccepted((client, ctx) => applyAccepted(specId, [objectId], diff, client, ctx))
+    ).rejects.toThrow(/atomic object-structural conflict/);
+
+    const row = await paragraphRow(pr1Id);
+    expect(row.vanish).toBe(false);
+    expect(await paragraphVersions(pr1Id)).toEqual([]);
+  });
+
+  it('rejects the whole accept call even when other accepted uuids in the same call are otherwise valid', async () => {
+    const { specId, pr1Id, pr1SecondId } = await createFixture();
+    const objectId = randomUUID();
+    const diff = diffWith({
+      deleted: [pr1SecondId],
+      objectConflicts: [{ objectId, affectedUuids: [pr1Id], base: baseFingerprint }],
+    });
+
+    await expect(
+      runApplyAccepted((client, ctx) =>
+        applyAccepted(specId, [pr1SecondId, objectId], diff, client, ctx)
+      )
+    ).rejects.toThrow(/atomic object-structural conflict/);
+
+    const row = await paragraphRow(pr1SecondId);
+    expect(row.vanish).toBe(false);
+    expect(await paragraphVersions(pr1SecondId)).toEqual([]);
+  });
+});
+
 describe('applyAccepted — atomicity', () => {
   it('a mid-call failure rolls back every write the call made, inside the caller-owned transaction', async () => {
     const { specId, pr1Id } = await createFixture();
