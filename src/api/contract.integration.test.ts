@@ -5,6 +5,7 @@ import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import {
   assertResponse,
+  assertResponseExact,
   expressRouteManifest,
   specOperationManifest,
   successJsonOps,
@@ -53,9 +54,7 @@ const RESPONSE_COVERED = new Set([
   'get /packages/{}/header-footer/resolved',
   'get /revisions/{}/header-footer/resolved',
   // version-history checkpoints and pending summaries (ADR-052 D3/D4/D9,
-  // issue #380 task 11) — dedicated response-contract test below. Sibling op
-  // `patch /specs/{}/paragraphs/{}/reject` returns a SpecNode and is
-  // allowlisted instead (see the SpecNode-cycle comment above).
+  // issue #380 task 11) — dedicated response-contract test below.
   'post /specs/{}/checkpoints',
   'get /specs/{}/checkpoints',
   'post /projects/{}/checkpoints',
@@ -71,6 +70,16 @@ const RESPONSE_COVERED = new Set([
   'put /projects/{}/language-rules',
   'delete /projects/{}/language-rules',
   'get /projects/{}/language-findings',
+  // #649: loadSpec() switched from full $ref dereference to bundle, so ajv can compile the
+  // self-referential SpecNode/SpecTree response schemas these six operations' success bodies
+  // embed instead of stack-overflowing on a literal circular JS object. Response-verified (and
+  // INV-6 exact-match-verified) in the dedicated checkpoint/reject test block below.
+  'get /specs/{}',
+  'post /specs/{}/paragraphs',
+  'patch /specs/{}/paragraphs/{}',
+  'patch /specs/{}/paragraphs/{}/removal',
+  'patch /specs/{}/paragraphs/{}/reject',
+  'get /revisions/{}',
 ]);
 
 // Documented JSON ops not yet response-verified (burned down in PR2…N).
@@ -91,8 +100,6 @@ const RESPONSE_ALLOWLIST = new Set([
   'get /projects/{}/references/broken',
   'get /projects/{}/references/inbound',
   'get /projects/{}/specs/{}/references',
-  'get /revisions/{}',
-  'get /specs/{}',
   'get /specs/{}/hierarchy-report',
   'get /specs/{}/lineage',
   'get /specs/{}/paragraphs/{}/history',
@@ -102,16 +109,6 @@ const RESPONSE_ALLOWLIST = new Set([
   'get /templates/{}',
   'patch /libraries/{}',
   'patch /specs/{}',
-  // SpecNode is self-referential (children: SpecNode[]); loadSpec()'s full
-  // $ref dereference turns that into a real object-identity cycle that blows
-  // ajv's schema-traversal stack (json-schema-traverse has no cycle guard).
-  // Every op whose success body embeds a SpecNode is allowlisted for that
-  // structural reason, not because it lacks a test — see each op's own
-  // integration test for real (non-schema) response assertions instead.
-  'patch /specs/{}/paragraphs/{}',
-  'patch /specs/{}/paragraphs/{}/removal',
-  'post /specs/{}/paragraphs',
-  'patch /specs/{}/paragraphs/{}/reject', // ADR-052 D4, issue #380 — same SpecNode cycle
   'patch /templates/{}',
   'post /clients',
   'get /clients',
@@ -642,13 +639,27 @@ describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D
     expect(getCp.status).toBe(200);
     await assertResponse('get', '/checkpoints/{id}', 200, await getCp.json());
 
-    // 3. An edit made after the checkpoint is pending — content_version 1 -> 2.
+    // 3. An edit made after the checkpoint is pending — content_version 1 -> 2. PATCH
+    //    .../paragraphs/{nodeId}'s response is a SpecNode (#649: previously unvalidated — its
+    //    self-referential `children: SpecNode[]` schema stack-overflowed ajv's compile-time
+    //    traversal under loadSpec()'s full dereference; bundling + mirror-qualified $refs fixes
+    //    that). Exact-match + a spliced undocumented key proves INV-6 actually reaches this op.
     const edit = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${paragraphId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: 'Edited pending text.', actorLabel }),
     });
     expect(edit.status).toBe(200);
+    const editBody = (await edit.json()) as { data: { id: string; text: string; meta: object } };
+    expect(editBody.data.text).toBe('Edited pending text.');
+    await assertResponse('patch', '/specs/{id}/paragraphs/{nodeId}', 200, editBody);
+    await assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}', 200, editBody);
+    await expect(
+      assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}', 200, {
+        ...editBody,
+        data: { ...editBody.data, rogueKey: 'nope' },
+      })
+    ).rejects.toThrow(/does not document/);
 
     // 4. The spec pending-summary reflects exactly that one pending paragraph.
     const specPending = await fetch(`${baseUrl}/specs/${specId}/pending-summary`);
@@ -695,10 +706,9 @@ describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D
     // 7. Rejecting to the ORIGINAL (earlier) checkpoint restores the pre-edit
     //    text — proving the boundary lookup targets checkpointId's own sealed
     //    content_version (1), not the project checkpoint's later one (2).
-    //    No assertResponse here: the response body is a SpecNode, whose
-    //    self-referential schema stack-overflows ajv after loadSpec()'s full
-    //    dereference (see the RESPONSE_ALLOWLIST comment above) — the same
-    //    reason its sibling paragraph-mutation ops skip schema validation.
+    //    PATCH .../reject's response is a SpecNode (#649 — same fix as step 3's PATCH; ADR-052 D4,
+    //    issue #380 previously called out the identical self-referential-schema stack overflow as
+    //    the reason this op skipped schema validation entirely).
     const reject = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${paragraphId}/reject`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -707,6 +717,171 @@ describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D
     expect(reject.status).toBe(200);
     const rejectBody = (await reject.json()) as { data: { text: string } };
     expect(rejectBody.data.text).toBe(ORIGINAL_TEXT);
+    await assertResponse('patch', '/specs/{id}/paragraphs/{nodeId}/reject', 200, rejectBody);
+    await assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}/reject', 200, rejectBody);
+    await expect(
+      assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}/reject', 200, {
+        ...rejectBody,
+        data: { ...(rejectBody.data as object), rogueKey: 'nope' },
+      })
+    ).rejects.toThrow(/does not document/);
+
+    // 8. GET /specs/{id} returns the full SpecTree — matches its documented schema exactly, and
+    //    rejects a spliced undocumented key both at the top level (the data wrapper) and nested two
+    //    levels deep inside `data.parts` (SpecTree's own recursive SpecNode `children` position) —
+    //    #649's six unvalidated operations were exactly the ones whose response embeds this
+    //    self-referential shape somewhere.
+    const getSpec = await fetch(`${baseUrl}/specs/${specId}`);
+    expect(getSpec.status).toBe(200);
+    const getSpecBody = (await getSpec.json()) as {
+      data: { id: string; parts: readonly { id: string; type: string }[] };
+    };
+    expect(getSpecBody.data.id).toBe(specId);
+    await assertResponse('get', '/specs/{id}', 200, getSpecBody);
+    await assertResponseExact('get', '/specs/{id}', 200, getSpecBody);
+    await expect(
+      assertResponseExact('get', '/specs/{id}', 200, {
+        ...getSpecBody,
+        data: { ...getSpecBody.data, rogueKey: 'nope' },
+      })
+    ).rejects.toThrow(/does not document/);
+    const firstPart = getSpecBody.data.parts[0];
+    if (firstPart === undefined) throw new Error('checkpoint fixture spec tree has no parts');
+    await expect(
+      assertResponseExact('get', '/specs/{id}', 200, {
+        ...getSpecBody,
+        data: {
+          ...getSpecBody.data,
+          parts: [{ ...firstPart, rogueKey: 'nope' }, ...getSpecBody.data.parts.slice(1)],
+        },
+      })
+    ).rejects.toThrow(/does not document/);
+
+    // 9. POST /specs/{id}/paragraphs inserts a new sibling paragraph — response is a SpecNode
+    //    (201), same exact-match + splice-rejection proof as the PATCH ops above.
+    const insertParagraph = await fetch(`${baseUrl}/specs/${specId}/paragraphs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        anchorNodeId: paragraphId,
+        text: 'Inserted paragraph text.',
+        actorLabel,
+      }),
+    });
+    expect(insertParagraph.status).toBe(201);
+    const insertedBody = (await insertParagraph.json()) as { data: { id: string; text: string } };
+    expect(insertedBody.data.text).toBe('Inserted paragraph text.');
+    await assertResponse('post', '/specs/{id}/paragraphs', 201, insertedBody);
+    await assertResponseExact('post', '/specs/{id}/paragraphs', 201, insertedBody);
+    await expect(
+      assertResponseExact('post', '/specs/{id}/paragraphs', 201, {
+        ...insertedBody,
+        data: { ...insertedBody.data, rogueKey: 'nope' },
+      })
+    ).rejects.toThrow(/does not document/);
+    const insertedNodeId = insertedBody.data.id;
+
+    // 10. PATCH .../paragraphs/{nodeId}/removal toggles the just-inserted paragraph's `vanish`
+    //     flag — response is again a SpecNode.
+    const removal = await fetch(`${baseUrl}/specs/${specId}/paragraphs/${insertedNodeId}/removal`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ removed: true, actorLabel }),
+    });
+    expect(removal.status).toBe(200);
+    const removalBody = (await removal.json()) as {
+      data: { id: string; meta: { vanish?: boolean } };
+    };
+    expect(removalBody.data.meta.vanish).toBe(true);
+    await assertResponse('patch', '/specs/{id}/paragraphs/{nodeId}/removal', 200, removalBody);
+    await assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}/removal', 200, removalBody);
+    await expect(
+      assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}/removal', 200, {
+        ...removalBody,
+        data: { ...removalBody.data, rogueKey: 'nope' },
+      })
+    ).rejects.toThrow(/does not document/);
+  });
+
+  it('GET /revisions/{id} matches its documented schema exactly, including its embedded SpecTree', async () => {
+    const { specId, projectId } = fixture;
+    const pkg = await fetch(`${baseUrl}/projects/${projectId}/packages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: `contract-revision-pkg-${Date.now()}` }),
+    });
+    expect(pkg.status).toBe(201);
+    const pkgBody = (await pkg.json()) as { data: { packageId: string } };
+    const packageId = pkgBody.data.packageId;
+    // setPackageSpecs requires every member spec to already be on the project's TOC
+    // (project_specs) — the checkpoint fixture's spec carries a `project_id` column but was
+    // inserted directly via SQL, never added to project_specs.
+    await pool.query(
+      'INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)',
+      [projectId, specId]
+    );
+    try {
+      const setMembers = await fetch(`${baseUrl}/packages/${packageId}/specs`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ specIds: [specId] }),
+      });
+      expect(setMembers.status).toBe(200);
+
+      const issue = await fetch(`${baseUrl}/packages/${packageId}/revisions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: 'Contract GET /revisions/{id} baseline' }),
+      });
+      expect(issue.status).toBe(201);
+      const issueBody = (await issue.json()) as { data: { revisionId: string } };
+      const revisionId = issueBody.data.revisionId;
+
+      // GET /revisions/{id}'s `data` is RevisionWithTrees, which embeds `specs[].tree` — a full
+      // SpecTree, the same self-referential shape as GET /specs/{id}'s `data` (#649). Splice both
+      // at the top level and nested inside the frozen tree's `parts`.
+      const getRevision = await fetch(`${baseUrl}/revisions/${revisionId}`);
+      expect(getRevision.status).toBe(200);
+      const getRevisionBody = (await getRevision.json()) as {
+        data: {
+          revisionId: string;
+          specs: readonly { specId: string; tree: { parts: readonly unknown[] } }[];
+        };
+      };
+      expect(getRevisionBody.data.revisionId).toBe(revisionId);
+      await assertResponse('get', '/revisions/{id}', 200, getRevisionBody);
+      await assertResponseExact('get', '/revisions/{id}', 200, getRevisionBody);
+      await expect(
+        assertResponseExact('get', '/revisions/{id}', 200, {
+          ...getRevisionBody,
+          data: { ...getRevisionBody.data, rogueKey: 'nope' },
+        })
+      ).rejects.toThrow(/does not document/);
+      const firstSpecEntry = getRevisionBody.data.specs[0];
+      if (firstSpecEntry === undefined) throw new Error('issued revision has no member specs');
+      await expect(
+        assertResponseExact('get', '/revisions/{id}', 200, {
+          ...getRevisionBody,
+          data: {
+            ...getRevisionBody.data,
+            specs: [
+              { ...firstSpecEntry, tree: { ...firstSpecEntry.tree, rogueKey: 'nope' } },
+              ...getRevisionBody.data.specs.slice(1),
+            ],
+          },
+        })
+      ).rejects.toThrow(/does not document/);
+    } finally {
+      // package_revisions.package_id and package_revision_specs.revision_id both CASCADE from
+      // design_packages (021_create_package_revisions.ts), so deleting the package alone is enough
+      // there. project_specs.spec_id is RESTRICT (007_create_project_specs.ts), so it must be
+      // cleaned up explicitly before the outer afterAll's `DELETE FROM specs`.
+      await pool.query('DELETE FROM design_packages WHERE id = $1', [packageId]);
+      await pool.query('DELETE FROM project_specs WHERE project_id = $1 AND spec_id = $2', [
+        projectId,
+        specId,
+      ]);
+    }
   });
 });
 
