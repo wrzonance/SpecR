@@ -77,7 +77,18 @@ export default defineConfig({
           // instance and otherwise race on FK constraints + unique keys.
           // Vitest 4: `fileParallelism: false` replaces v3's
           // `pool: 'forks' + poolOptions.forks.singleFork`. See issue #73.
+          //
+          // This scopes to files WITHIN ONE Vitest invocation only — it does
+          // nothing across two separate `pnpm test:integration` processes
+          // pointed at the same DATABASE_URL, which still race on the shared
+          // database. That cross-invocation case is handled separately, below,
+          // by a session-level PostgreSQL advisory lock (ADR-090, #638).
           fileParallelism: false,
+          // Serializes concurrent `pnpm test:integration` INVOCATIONS (not
+          // files — see fileParallelism above) against the same DATABASE_URL,
+          // via a session advisory lock held for the whole run. See ADR-090
+          // and src/test-utils/integration-lock.global-setup.ts (#638).
+          globalSetup: ['./src/test-utils/integration-lock.global-setup.ts'],
         },
       },
     ],
