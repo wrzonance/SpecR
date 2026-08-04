@@ -177,7 +177,14 @@ function isOnOffEnabled(node: ObjectBlobNode): boolean {
 // known scope limit, and no fixture in the 39-file DOCX corpus uses that
 // shape (0 files reference a vanish character style via w:rStyle). That
 // residual gap under-suppresses (a visible leak), never over-suppresses.
-function hasRunVanish(node: ObjectBlobNode): boolean {
+//
+// EXPORTED so object-blob-edit.ts's `rewriteFirstText` applies the SAME rule
+// when it writes an edit back. That walk's stated contract is to reach text
+// "wherever capture read it from"; once capture started skipping vanish runs,
+// a second, drifting copy of this predicate there would place edits into
+// hidden runs and blank the visible ones. One definition, both directions
+// (ADR-092).
+export function hasRunVanish(node: ObjectBlobNode): boolean {
   if (tagOf(node) !== 'w:r') return false;
   const rPr = directChildrenByTag(node, 'w:rPr')[0];
   if (!rPr) return false;

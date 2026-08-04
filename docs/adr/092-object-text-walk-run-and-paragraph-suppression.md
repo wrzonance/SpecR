@@ -180,6 +180,40 @@ every non-suppressed `w:t` reachable from a node) changes only in which text
 counts as "non-suppressed" for VANISH runs — rule-row text is untouched, at
 any depth, inside any object capture.
 
+**Every reader of an object-text anchor must apply the SAME visibility rule
+(adversarial-review finding, P1).** Dropping vanish runs from `collectText`
+changes what an anchored interior paragraph's `objectText` MEANS: it is now
+the paragraph's VISIBLE text, not all of its text. Any other walk that reads
+or writes the same anchor and still assumes "all text" silently
+desynchronizes from it. Two such walks exist, and they land differently:
+
+- `object-blob-edit.ts`'s `rewriteFirstText` — **fixed here.** It writes an
+  edit into the first `w:t` leaf and blanks the rest. Its own docstring
+  already promised it mirrors `collectText` ("an edit reaches the text
+  wherever capture read it from"), and that promise silently became false.
+  On a paragraph whose HIDDEN run precedes its visible one, the edit landed
+  in the hidden run — invisible in Word — while the visible run was blanked,
+  destroying real text. It now skips vanish runs via the SAME exported
+  `hasRunVanish`, one definition rather than a second copy free to drift, and
+  leaves skipped runs untouched instead of blanking them.
+- `merge/extract.ts`'s `visibleText` — **NOT changed here; escalated.**
+  Verified empirically: for an SDT-anchored cell paragraph mixing a hidden
+  and a visible run it extracts `"HIDDEN SECRETvisible text"` where the AST
+  now stores `"visible text"`, so an untouched round-tripped DOCX can report
+  as modified. The obvious remedy — make `visibleText` skip vanish runs — is
+  **wrong as stated**: it is merge's general paragraph walk, and the
+  paragraph tier deliberately KEEPS hidden-run text in a mixed paragraph
+  (`document.ts`'s `extractParagraphText`, pinned by the "does NOT mark
+  vanish when only some runs are hidden" KNOWN AMBIGUITY test). Applying it
+  bluntly would create the mirror divergence for every ordinary paragraph. A
+  correct fix must scope visibility to object interiors only, which means
+  threading a new mode through `walkBlocks`/`visitParagraph`/`visibleText`
+  and changing merge's notion of text for every table-cell paragraph — a
+  merge-engine semantics change that belongs in its own ADR and PR, not
+  smuggled into this one. It is latent today: no corpus fixture puts a mixed
+  visible/hidden run pair inside a captured object (0/705 on
+  `pnpm fixture:diff`). Recorded here rather than left to be rediscovered.
+
 ## Consequences
 
 - A visible outer text box containing a hidden nested text box now exposes
