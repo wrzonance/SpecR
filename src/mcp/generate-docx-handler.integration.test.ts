@@ -83,8 +83,11 @@ async function docPartsFromZipBuffer(buf: Buffer): Promise<DocParts> {
   };
 }
 
-async function restDocParts(body: Record<string, unknown>): Promise<DocParts> {
-  const res = await fetch(`${baseUrl}/specs/${testSpecId}/generate`, {
+async function restDocParts(
+  body: Record<string, unknown>,
+  specId: string = testSpecId
+): Promise<DocParts> {
+  const res = await fetch(`${baseUrl}/specs/${specId}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -187,6 +190,138 @@ describe('generate_docx templateId resolution parity (#567)', () => {
     expect(result).toMatchObject({ isError: true });
     const text = (result as { content: { text: string }[] }).content[0]?.text ?? '';
     expect(text).toContain('template not found');
+  });
+});
+
+// ADR-079 (#627): checkMcpReadinessGate mirrors src/api/readiness-guard.ts's
+// enforceReadinessGate, mapping a ReadinessBlockedError into the same
+// two-key `{error, findings}` shape REST's 422 body carries — but REST's
+// error message additionally carries an HTTP-only pointer suffix
+// (" — see GET .../readiness-report") that has no MCP equivalent. This
+// block pins that the two surfaces stay in lockstep everywhere else:
+// same findings, same base message, same override/clean-render behavior.
+// blockedSpecId's sole content is a `note` node (mirrored verbatim from
+// src/api/generate.integration.test.ts's blocked-spec fixture), which
+// unconditionally yields a `specifier_note_present` finding.
+interface ReadinessErrorBody {
+  readonly error: string;
+  readonly findings: readonly { readonly type: string; readonly nodeId?: string }[];
+}
+
+const READINESS_POINTER_SUFFIX = ' — see GET .../readiness-report';
+
+/** Strips REST's HTTP-only pointer suffix so the remaining base message can
+ *  be compared against MCP's undecorated equivalent — the one deliberate
+ *  difference in an otherwise fully-shared mapping. */
+function stripReadinessPointer(message: string): string {
+  return message.endsWith(READINESS_POINTER_SUFFIX)
+    ? message.slice(0, -READINESS_POINTER_SUFFIX.length)
+    : message;
+}
+
+/** POSTs { mode: 'final', ...overrides } to REST /specs/:id/generate and
+ *  parses a 422 response into ReadinessErrorBody. Throws if REST doesn't
+ *  block (a passing case belongs in the byte-parity describe above, not
+ *  here). */
+async function restReadinessError(
+  specId: string,
+  overrides: Record<string, unknown> = {}
+): Promise<ReadinessErrorBody> {
+  const res = await fetch(`${baseUrl}/specs/${specId}/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'final', ...overrides }),
+  });
+  if (res.status !== 422) {
+    throw new Error(`expected REST to block with 422, got ${res.status}`);
+  }
+  const body = (await res.json()) as { error: string; findings: ReadinessErrorBody['findings'] };
+  return { error: body.error, findings: body.findings };
+}
+
+/** Calls handleGenerateDocx({ specId, mode: 'final', ...overrides }) and
+ *  parses its isError JSON text into ReadinessErrorBody. Throws if the call
+ *  does not come back as isError. */
+async function mcpReadinessError(
+  specId: string,
+  overrides: Record<string, unknown> = {}
+): Promise<ReadinessErrorBody> {
+  const result = await handleGenerateDocx({ specId, mode: 'final', ...overrides });
+  if (!('isError' in result) || result.isError !== true) {
+    throw new Error('expected MCP generate_docx to return isError');
+  }
+  const text = result.content[0]?.text ?? '';
+  return JSON.parse(text) as ReadinessErrorBody;
+}
+
+describe('generate_docx readiness-gate parity (ADR-079, #627)', () => {
+  let blockedSpecId: string;
+  let blockedNoteId: string;
+
+  beforeAll(async () => {
+    const specRes = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ($1, $2, $3, (SELECT id FROM libraries WHERE name = 'UFGS Reference'))
+       RETURNING id`,
+      ['09 91 14', 'MCP Readiness Gate Parity Test', 'ufgs']
+    );
+    const specRow = specRes.rows[0];
+    if (!specRow) throw new Error('failed to insert blocked spec');
+    blockedSpecId = specRow.id;
+
+    const partRes = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, vanish)
+       VALUES ($1, NULL, 'part', 'GENERAL', 1, false) RETURNING id`,
+      [blockedSpecId]
+    );
+    const partRow = partRes.rows[0];
+    if (!partRow) throw new Error('failed to insert blocked part');
+
+    const articleRes = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, vanish)
+       VALUES ($1, $2, 'article', 'SUMMARY', 1, false) RETURNING id`,
+      [blockedSpecId, partRow.id]
+    );
+    const articleRow = articleRes.rows[0];
+    if (!articleRow) throw new Error('failed to insert blocked article');
+
+    const noteRes = await pool.query<{ id: string }>(
+      `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, vanish)
+       VALUES ($1, $2, 'note', 'Confirm topcoat sheen with owner.', 1, false) RETURNING id`,
+      [blockedSpecId, articleRow.id]
+    );
+    const noteRow = noteRes.rows[0];
+    if (!noteRow) throw new Error('failed to insert blocked note');
+    blockedNoteId = noteRow.id;
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [blockedSpecId]);
+  });
+
+  it('mode: final blocked -> REST 422 and MCP isError carry the same findings and the same base message (pointer suffix stripped)', async () => {
+    const rest = await restReadinessError(blockedSpecId);
+    const mcp = await mcpReadinessError(blockedSpecId);
+    expect(mcp.findings).toEqual(rest.findings);
+    expect(mcp.findings).toEqual([
+      {
+        type: 'specifier_note_present',
+        nodeId: blockedNoteId,
+        text: 'Confirm topcoat sheen with owner.',
+      },
+    ]);
+    expect(mcp.error).toBe(stripReadinessPointer(rest.error));
+  });
+
+  it('mode: final + overrideReadinessGate -> both REST and MCP render successfully with identical document.xml/numbering.xml', async () => {
+    const rest = await restDocParts({ mode: 'final', overrideReadinessGate: true }, blockedSpecId);
+    const mcp = await mcpDocParts({
+      specId: blockedSpecId,
+      mode: 'final',
+      overrideReadinessGate: true,
+    });
+    expect(mcp.documentXml).toBe(rest.documentXml);
+    expect(mcp.numberingXml).toBe(rest.numberingXml);
   });
 });
 
