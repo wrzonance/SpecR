@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-091](091-length-limit-code-point-enforcement.md) (#642) — Option 2
+(code-point enforcement), rejected below as an interim scope decision, was adopted once
+given its own PR. The Context/Decision/Consequences below are the historical record of
+why "accept and document" was chosen at the time; they are not rewritten.
 
 ## Context
 

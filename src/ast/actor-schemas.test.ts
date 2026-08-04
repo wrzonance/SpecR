@@ -32,6 +32,17 @@ describe('ActorLabelSchema (#377)', () => {
     // public user API (1-200) rejects; keep the two in lockstep.
     expect(ActorLabelSchema.safeParse('a'.repeat(201)).success).toBe(false);
   });
+  // #642, ADR-091 — bounded in Unicode CODE POINTS, not UTF-16 code units.
+  // U+1F600 GRINNING FACE is 1 code point / 2 UTF-16 units, so 200 of them is
+  // a 400-.length string that a UTF-16-unit-counting regression would reject.
+  it('accepts a label at the 200-code-point bound made of astral (non-BMP) characters', () => {
+    const atLimit = '\u{1F600}'.repeat(200);
+    expect(atLimit).toHaveLength(400); // UTF-16 units — sanity-checks the fixture itself
+    expect(ActorLabelSchema.safeParse(atLimit).success).toBe(true);
+  });
+  it('rejects 201 code points of astral characters', () => {
+    expect(ActorLabelSchema.safeParse('\u{1F600}'.repeat(201)).success).toBe(false);
+  });
 });
 
 // ── AcceptNoteBodySchema — accept-as-note's first-ever request body (#377) ──

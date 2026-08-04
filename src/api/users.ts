@@ -2,10 +2,20 @@ import { z } from 'zod';
 import type { Request, Response } from 'express';
 import { resolveOrCreateUserByLabel, listUsers, getUser } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+import { codePointMax } from '../lib/length-limit.js';
+import { MAX_LABEL_LENGTH } from '../lib/label-length.js';
 
 const UUID_SCHEMA = z.uuid();
+
+// #642, ADR-091: bounded in UNICODE CODE POINTS (matching the openapi.yaml
+// maxLength keyword it's paired with), not UTF-16 code units.
 export const ResolveUserBody = z.object({
-  label: z.string().trim().min(1).max(200),
+  label: codePointMax(z.string().trim().min(1), MAX_LABEL_LENGTH, {
+    description:
+      'Leading/trailing whitespace is trimmed before resolution, and whitespace-only values ' +
+      `are rejected; the 1-${MAX_LABEL_LENGTH} length bounds (Unicode code points) apply to ` +
+      'the trimmed value.',
+  }),
 });
 
 export async function resolveUserHandler(req: Request, res: Response): Promise<void> {

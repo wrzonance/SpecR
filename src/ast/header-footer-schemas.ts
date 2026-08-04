@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
-import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
+import { codePointMax } from '../lib/length-limit.js';
 import { HEADER_FOOTER_JSON_BODY_LIMIT_BYTES } from '../lib/header-footer-body-limit.js';
 
 // JSONB-backed header/footer composition follows ADR-021: known keys are typed,
@@ -23,45 +23,44 @@ export const HeaderFooterFieldKindSchema = z.enum([
   'image',
 ]);
 
-const HeaderFooterFieldSchema = z
-  .object({
-    kind: HeaderFooterFieldKindSchema,
-    source: z.enum(['issuance', 'current']).exactOptional(),
-    text: z.string().exactOptional(),
-    label: z.string().exactOptional(),
-    format: z.string().exactOptional(),
-    prefix: z.string().exactOptional(),
-    suffix: z.string().exactOptional(),
-    // `kind: 'image'` fields (#308, ADR-069). `imageData` is base64; the size cap
-    // is enforced here (encoded-length-first, matching decodeBase64Payload's
-    // posture) so an oversized payload is rejected before any buffer is
-    // materialized. `imageMediaType` is deliberately OPEN (mirrors
-    // `ruleLine.style`) — the generator never trusts it and re-sniffs the actual
-    // bytes (src/lib/image-media-type.ts); an unsupported/stale value here still
-    // round-trips, it just won't render.
-    // The cap is a plain string length with NO base64 pattern behind it (malformed
-    // payloads round-trip by design, see above), so the field's alphabet is not
-    // actually constrained to RFC 4648 ASCII — an astral-character payload counts
-    // 2 UTF-16 units per code point here but 1 code point against the JSON Schema
-    // `maxLength` this bound is published as. It therefore carries the ADR-088 note
-    // like every other published bound rather than claiming an ASCII exemption.
-    imageData: z
-      .string()
-      .max(MAX_IMAGE_BASE64_LENGTH, {
-        error: `imageData exceeds the ${MAX_IMAGE_BASE64_LENGTH}-char base64 size cap`,
-      })
-      .describe(
-        'Base64-encoded image bytes. The cap is a plain string length with no ' +
-          'base64 pattern behind it, so the alphabet is not actually constrained ' +
-          `to ASCII. ${UTF16_LENGTH_LIMIT_NOTE}`
-      )
-      .exactOptional(),
-    imageMediaType: z.string().exactOptional(),
-    widthEmu: z.number().int().positive().exactOptional(),
-    heightEmu: z.number().int().positive().exactOptional(),
-    altText: z.string().exactOptional(),
-  })
-  .catchall(JsonValue);
+// Exported as a plain shape (not just the assembled schema below) so callers
+// that need the raw `imageData` field itself — e.g.
+// length-limit-unit-convention.test.ts asserting it carries the
+// x-length-unit marker (#642, ADR-091) — can reach it without a second,
+// drift-prone definition.
+export const HeaderFooterFieldShape = {
+  kind: HeaderFooterFieldKindSchema,
+  source: z.enum(['issuance', 'current']).exactOptional(),
+  text: z.string().exactOptional(),
+  label: z.string().exactOptional(),
+  format: z.string().exactOptional(),
+  prefix: z.string().exactOptional(),
+  suffix: z.string().exactOptional(),
+  // `kind: 'image'` fields (#308, ADR-069). `imageData` is base64; the size cap
+  // is enforced here (encoded-length-first, matching decodeBase64Payload's
+  // posture) so an oversized payload is rejected before any buffer is
+  // materialized. `imageMediaType` is deliberately OPEN (mirrors
+  // `ruleLine.style`) — the generator never trusts it and re-sniffs the actual
+  // bytes (src/lib/image-media-type.ts); an unsupported/stale value here still
+  // round-trips, it just won't render.
+  // The cap is a plain string length with NO base64 pattern behind it (malformed
+  // payloads round-trip by design, see above), so the field's alphabet is not
+  // actually constrained to RFC 4648 ASCII. codePointMax (#642, ADR-091) bounds
+  // and publishes this in UNICODE CODE POINTS — the unit the openapi.yaml
+  // `maxLength` keyword this bound is published as actually means.
+  imageData: codePointMax(z.string(), MAX_IMAGE_BASE64_LENGTH, {
+    message: `imageData exceeds the ${MAX_IMAGE_BASE64_LENGTH}-code-point base64 size cap`,
+    description:
+      'Base64-encoded image bytes. The cap is a plain string length with no ' +
+      'base64 pattern behind it, so the alphabet is not actually constrained to ASCII.',
+  }).exactOptional(),
+  imageMediaType: z.string().exactOptional(),
+  widthEmu: z.number().int().positive().exactOptional(),
+  heightEmu: z.number().int().positive().exactOptional(),
+  altText: z.string().exactOptional(),
+};
+
+const HeaderFooterFieldSchema = z.object(HeaderFooterFieldShape).catchall(JsonValue);
 
 const HeaderFooterVisualStyleSchema = z
   .object({

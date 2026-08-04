@@ -91,6 +91,26 @@ describe('POST /users', () => {
     const res = await req('POST', '/users', { label: 'a'.repeat(201) });
     expect(res.status).toBe(400);
   });
+
+  // #642, ADR-091 — the 200 bound is counted in Unicode CODE POINTS, not
+  // UTF-16 code units. U+1F600 GRINNING FACE is 1 code point / 2 UTF-16
+  // units, so a UTF-16-unit-counting regression would reject this label at
+  // roughly half its real code-point length.
+  it('accepts a label at exactly the 200-code-point bound built from astral (non-BMP) characters', async () => {
+    const prefix = 'api-users-test-astral-';
+    const label = prefix + '\u{1F600}'.repeat(200 - [...prefix].length);
+    expect([...label]).toHaveLength(200);
+    const res = await req('POST', '/users', { label });
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects a label one code point over the 200-code-point bound, built from astral characters', async () => {
+    const prefix = 'api-users-test-astral-';
+    const label = prefix + '\u{1F600}'.repeat(201 - [...prefix].length);
+    expect([...label]).toHaveLength(201);
+    const res = await req('POST', '/users', { label });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('GET /users', () => {
