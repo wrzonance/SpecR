@@ -62,7 +62,20 @@ export async function rewriteObjectTextBlob(
       );
     }
 
-    const newBlob = replaceAnchoredParagraphText(meta.blob, anchorUuid, newText);
+    // #650 — the SAME resolved character-style-id set capture consulted
+    // (persisted on the object row itself as ObjectMeta.vanishCharStyleIds,
+    // since styles.xml is unavailable here at rewrite time) so a run capture
+    // skipped as w:rStyle-hidden is skipped by the rewrite walk too. `?? []`
+    // covers a pre-#650 backfill row that carries no such key at all —
+    // identical to today's unchanged behaviour (no run treated as hidden by
+    // style).
+    const vanishCharStyleIds = new Set(meta.vanishCharStyleIds ?? []);
+    const newBlob = replaceAnchoredParagraphText(
+      meta.blob,
+      anchorUuid,
+      newText,
+      vanishCharStyleIds
+    );
     if (!newBlob) {
       throw new DatabaseError(
         `rewriteObjectTextBlob: anchor ${anchorUuid} not found in object ${parentId}'s blob`

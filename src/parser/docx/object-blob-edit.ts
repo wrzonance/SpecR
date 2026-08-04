@@ -193,20 +193,25 @@ interface TextPlacement {
  * (ADR-072's no-silent-loss posture), and leaving it keeps the post-edit
  * visible text exactly equal to `newText`, which is what capture will read
  * back. */
-function rewriteFirstText(node: ObjectBlobNode, newText: string, placed: boolean): TextPlacement {
+function rewriteFirstText(
+  node: ObjectBlobNode,
+  newText: string,
+  placed: boolean,
+  vanishCharStyleIds: ReadonlySet<string>
+): TextPlacement {
   const tag = tagOf(node);
   if (!tag) return { node, placed };
   if (tag === 'w:t') {
     return { node: rewriteTextNode(node, placed ? '' : newText), placed: true };
   }
-  if (hasRunVanish(node)) return { node, placed };
+  if (hasRunVanish(node, vanishCharStyleIds)) return { node, placed };
   const value = node[tag];
   if (!isBlobNodeArray(value)) return { node, placed };
   let changed = false;
   let nowPlaced = placed;
   const newChildren: ObjectBlobNode[] = [];
   for (const child of value) {
-    const result = rewriteFirstText(child, newText, nowPlaced);
+    const result = rewriteFirstText(child, newText, nowPlaced, vanishCharStyleIds);
     if (result.node !== child) changed = true;
     nowPlaced = result.placed;
     newChildren.push(result.node);
@@ -228,22 +233,31 @@ function rewriteFirstText(node: ObjectBlobNode, newText: string, placed: boolean
  * never anchors a whitespace-only paragraph, body-objects.ts's
  * `transformChildren`), kept only for totality on malformed input.
  */
-function replaceParagraphContent(paragraph: ObjectBlobNode, newText: string): ObjectBlobNode {
+function replaceParagraphContent(
+  paragraph: ObjectBlobNode,
+  newText: string,
+  vanishCharStyleIds: ReadonlySet<string>
+): ObjectBlobNode {
   const tag = tagOf(paragraph);
   // Malformed defensive no-op — mirrors body-objects.ts's own
   // transformInteriorParagraphs guard; a paragraph the parser itself wrapped
   // always has exactly one tag.
   if (!tag) return paragraph;
-  const rewritten = rewriteFirstText(paragraph, newText, false);
+  const rewritten = rewriteFirstText(paragraph, newText, false, vanishCharStyleIds);
   if (rewritten.placed) return rewritten.node;
   const children = childrenOf(paragraph);
   const newRun: ObjectBlobNode = { 'w:r': [{ 'w:t': [{ '#text': newText }] }] };
   return withChildren(paragraph, tag, [...children, newRun]);
 }
 
-function rebuildMatchedSdt(sdtNode: ObjectBlobNode, uuid: string, newText: string): ObjectBlobNode {
+function rebuildMatchedSdt(
+  sdtNode: ObjectBlobNode,
+  uuid: string,
+  newText: string,
+  vanishCharStyleIds: ReadonlySet<string>
+): ObjectBlobNode {
   const paragraph = interiorParagraphOf(sdtNode, uuid); // throws on malformed
-  const newParagraph = replaceParagraphContent(paragraph, newText);
+  const newParagraph = replaceParagraphContent(paragraph, newText, vanishCharStyleIds);
   const newSdtChildren = childrenOf(sdtNode).map((child) =>
     tagOf(child) === 'w:sdtContent' ? withChildren(child, 'w:sdtContent', [newParagraph]) : child
   );
@@ -259,7 +273,8 @@ function rebuildNode(
   node: ObjectBlobNode,
   uuid: string,
   newText: string,
-  placed: boolean
+  placed: boolean,
+  vanishCharStyleIds: ReadonlySet<string>
 ): RebuildResult {
   const tag = tagOf(node);
   if (!tag) return { node, placed };
@@ -270,14 +285,14 @@ function rebuildNode(
   if (!isBlobNodeArray(value)) return { node, placed };
 
   if (!placed && tag === 'w:sdt' && readSdtUuid(node) === uuid) {
-    return { node: rebuildMatchedSdt(node, uuid, newText), placed: true };
+    return { node: rebuildMatchedSdt(node, uuid, newText, vanishCharStyleIds), placed: true };
   }
 
   let changed = false;
   let nowPlaced = placed;
   const newChildren: ObjectBlobNode[] = [];
   for (const child of value) {
-    const result = rebuildNode(child, uuid, newText, nowPlaced);
+    const result = rebuildNode(child, uuid, newText, nowPlaced, vanishCharStyleIds);
     if (result.node !== child) changed = true;
     if (result.placed) nowPlaced = true;
     newChildren.push(result.node);
@@ -296,16 +311,26 @@ function rebuildNode(
  * `uuid` is not anchored anywhere in `blob` (total). Throws `ParserError` if
  * the matched anchor's own `w:sdtContent` is corrupted (see
  * `interiorParagraphOf`).
+ *
+ * `vanishCharStyleIds` (#650, optional, defaults to an empty set) is the
+ * SAME resolved character-style-id set body-objects.ts's `collectText`
+ * consulted at capture time (persisted as `ObjectMeta.vanishCharStyleIds`) —
+ * threaded through `rewriteFirstText`'s `hasRunVanish` call so this walk
+ * skips exactly the runs capture skipped, whether hidden by a direct
+ * `w:rPr>w:vanish` or by a `w:rStyle` reference into that set. A default of
+ * `new Set()` keeps this call byte-for-byte unchanged for callers with no
+ * style data to offer.
  */
 export function replaceAnchoredParagraphText(
   blob: readonly ObjectBlobNode[],
   uuid: string,
-  newText: string
+  newText: string,
+  vanishCharStyleIds: ReadonlySet<string> = new Set()
 ): readonly ObjectBlobNode[] | undefined {
   let placed = false;
   const newBlob: ObjectBlobNode[] = [];
   for (const node of blob) {
-    const result = rebuildNode(node, uuid, newText, placed);
+    const result = rebuildNode(node, uuid, newText, placed, vanishCharStyleIds);
     if (result.placed) placed = true;
     newBlob.push(result.node);
   }
