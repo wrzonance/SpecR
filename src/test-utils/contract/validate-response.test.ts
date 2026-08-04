@@ -677,6 +677,32 @@ describe('successJsonOps — sweep vacuity under a $ref-pointer 2xx response (#6
   });
 });
 
+// resolveResponseSchema shares successJsonOps' $ref-pointer 2xx exposure: it parsed the raw response
+// entry straight into ResponseObject (no `$ref` field), so a $ref-pointer 2xx response silently lost
+// its `$ref` key and read as `{ content: undefined }` — falling into the "documented non-JSON" no-op
+// branch instead of resolving the pointer and validating against its real schema. That reopens the
+// exact vacuous-gate class #649 fixed for successJsonOps, one call site over: assertResponse and
+// assertResponseExact (both built on resolveResponseSchema) would silently no-op for such an
+// operation instead of validating the response body at all. No 2xx response in today's openapi.yaml
+// is `$ref`'d this way (only 4xx/5xx are), so this is pinned against a synthetic doc.
+describe('resolveResponseSchema resolves a $ref-pointer 2xx response (#649)', () => {
+  it('resolves the $ref and returns its schema, instead of treating it as documented non-JSON', () => {
+    const doc: OpenApiDoc = {
+      paths: {
+        '/synthetic': {
+          get: { responses: { '200': { $ref: '#/components/responses/Ok' } } },
+        },
+      },
+      components: {
+        responses: {
+          Ok: { content: { 'application/json': { schema: { type: 'object' } } } },
+        },
+      },
+    };
+    expect(resolveResponseSchema(doc, 'get', '/synthetic', 200)).toEqual({ type: 'object' });
+  });
+});
+
 // operationParamKeys() feeds INV-4; anything it silently under-reports becomes an INV-4 check that
 // passes vacuously. Synthetic docs (no such op exists in openapi.yaml yet) pin the two ways that
 // could happen: a body carrying BOTH a base `properties` map and `oneOf` branches, and a body

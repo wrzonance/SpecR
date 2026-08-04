@@ -45,17 +45,14 @@ const SchemaObject = z.record(z.string(), z.unknown());
 const ResponseObject = z.object({
   content: z.record(z.string(), z.object({ schema: SchemaObject.optional() })).optional(),
 });
-const OperationObject = z.object({
-  responses: z.record(z.string(), ResponseObject).optional(),
-});
 // Raw (possibly `$ref`'d — e.g. `#/components/responses/BadRequest`) response entries, resolved
-// one at a time via {@link resolveIfRef} in successJsonOps() before parsing into ResponseObject.
-// OperationObject above parses every response through ResponseObject up front, which strips a
-// `$ref` key immediately (ResponseObject has no `$ref` field) — successJsonOps needs the pointer
-// to survive long enough to resolve it, so it narrows through this raw shape instead (#649: no 2xx
+// one at a time via {@link resolveIfRef} in successJsonOps() and resolveResponseSchema() before
+// parsing into ResponseObject. Parsing a response entry straight into ResponseObject strips a
+// `$ref` key immediately (ResponseObject has no `$ref` field) — both callers need the pointer to
+// survive long enough to resolve it, so they narrow through this raw shape instead (#649: no 2xx
 // response in today's openapi.yaml is `$ref`'d this way, only 4xx/5xx are, but bundling leaves the
-// door open and a silently-dropped 2xx op would make the response-covered/allowlist sweep pass
-// vacuously for it).
+// door open and a silently-dropped 2xx op would make the response-covered/allowlist sweep, or
+// assertResponse/assertResponseExact themselves, pass vacuously for it).
 const RawOperationObject = z.object({
   responses: z.record(z.string(), z.unknown()).optional(),
 });
@@ -177,17 +174,24 @@ export function resolveResponseSchema(
 ): AnySchemaObject | undefined {
   const rawOp = doc.paths[pathTemplate]?.[method.toLowerCase()];
   if (rawOp === undefined) throw new Error(`No OpenAPI operation: ${method} ${pathTemplate}`);
-  const op = OperationObject.parse(rawOp);
+  // Parsed via RawOperationObject so a `$ref`-pointer response entry — e.g.
+  // `{ $ref: '#/components/responses/Ok' }` — survives long enough to resolve below (#649: parsing
+  // straight into ResponseObject silently strips a `$ref` key, since ResponseObject has no `$ref`
+  // field, and the stripped entry would read as `{ content: undefined }` — falling into the
+  // documented-non-JSON no-op below instead of ever reaching the real schema; the same vacuous-gate
+  // shape successJsonOps was fixed against, one call site over).
+  const op = RawOperationObject.parse(rawOp);
   // An UNDOCUMENTED status must fail loud, not fall through to the no-JSON no-op below. Collapsing
   // the two means a caller pinned to a status openapi.yaml no longer documents (e.g. a 201 changed
   // to 200) silently validates NOTHING and stays green forever — the gate quietly stops gating.
-  const response = op.responses?.[String(status)];
-  if (response === undefined) {
+  const rawResponse = op.responses?.[String(status)];
+  if (rawResponse === undefined) {
     throw new Error(
       `${method} ${pathTemplate} documents no ${status} response in openapi.yaml — the assertion ` +
         'would pass vacuously; fix the expected status or document it.'
     );
   }
+  const response = ResponseObject.parse(resolveIfRef(doc, rawResponse));
   const json = response.content?.['application/json'];
   // No `application/json` media type at all — a documented binary / no-content / multipart
   // response. There is genuinely nothing to validate, so both callers no-op.
