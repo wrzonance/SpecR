@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { pool } from '../index.js';
 import {
@@ -157,5 +159,83 @@ describe('specs ownership — ADR-015 D1', () => {
         [projectId]
       )
     ).rejects.toThrow(/specs_section_project_unique/);
+  });
+});
+
+describe('#623 regression — residue from a prior run is swept before the first test', () => {
+  // The reported symptom was "run the suite twice against the same database and
+  // libraries fails 11/11". The reachable path is a FILTERED run (`vitest -t`):
+  // on a full run the afterEach sweep always precedes a colliding test, so the
+  // leak is masked and the bug "does not reproduce". This test reproduces the
+  // collision directly instead of shelling out to a nested filtered runner —
+  // see the PR thread for why that mechanism was declined.
+  it('libraries: leaked 99 77 residue collides on specs_section_source_library_unique until the reserved-namespace sweep clears it FK-first', async () => {
+    const company = await findLibraryByName(DEFAULT_COMPANY_LIBRARY);
+
+    // Exactly what a run killed before its afterEach leaves behind: a
+    // non-built-in library plus a spec row that references it.
+    const leaked = await createLibrary({
+      tier: 'client',
+      name: `Leaked Residue ${randomUUID().slice(0, 8)}`,
+      owner: 'Prior Run',
+      parentLibraryId: company!.id,
+    });
+    await pool.query(
+      `INSERT INTO specs (section, title, source, library_id) VALUES ('99 77 42', 'Leaked', 'arcat', $1)`,
+      [leaked.id]
+    );
+
+    // The symptom: the next run's insert collides with the leaked row.
+    await expect(
+      pool.query(
+        `INSERT INTO specs (section, title, source, library_id) VALUES ('99 77 42', 'Fresh', 'arcat', $1)`,
+        [leaked.id]
+      )
+    ).rejects.toThrow(/specs_section_source_library_unique/);
+
+    // And why recovery used to mean dropping the database: the leaked library
+    // cannot just be deleted while a spec still references it. FK order is the
+    // load-bearing part of the sweep, not an incidental detail.
+    await expect(pool.query(`DELETE FROM libraries WHERE id = $1`, [leaked.id])).rejects.toThrow(
+      /specs_library_id_fkey/
+    );
+
+    // The sweep that beforeAll runs clears it, specs → projects → libraries.
+    await clearReservedNamespaces();
+    expect(await findLibraryById(leaked.id)).toBeNull();
+
+    // The previously-colliding insert now succeeds — this is the state a
+    // filtered run gets on a residue-carrying database once beforeAll sweeps.
+    const fresh = await createLibrary({
+      tier: 'client',
+      name: `Post Sweep ${randomUUID().slice(0, 8)}`,
+      owner: 'Fresh Run',
+      parentLibraryId: company!.id,
+    });
+    const reinsert = await pool.query(
+      `INSERT INTO specs (section, title, source, library_id) VALUES ('99 77 42', 'Fresh', 'arcat', $1) RETURNING id`,
+      [fresh.id]
+    );
+    expect(reinsert.rows).toHaveLength(1);
+
+    // The sweep must not take the built-ins with it.
+    expect(await findLibraryByName(UFGS_REFERENCE_LIBRARY)).not.toBeNull();
+    expect(await findLibraryByName(DEFAULT_COMPANY_LIBRARY)).not.toBeNull();
+  });
+
+  // The test above proves the sweep is correct, but it calls the helper
+  // directly — so it would still pass if the beforeAll registration were
+  // deleted, which is the actual fix for #623. By the time any test in this
+  // file executes, beforeAll has already run, so the pre-sweep state is not
+  // observable from inside the suite and the wiring cannot be asserted
+  // behaviourally without a nested runner. Pin it at the source instead, the
+  // same way src/mcp/tool-schema-introspect.test.ts pins its own invariants.
+  it('libraries: the reserved-namespace sweep is registered on beforeAll, not only afterEach', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('./libraries.integration.test.ts', import.meta.url)),
+      'utf8'
+    );
+    expect(source).toMatch(/beforeAll\(\s*clearReservedNamespaces\s*\)/);
+    expect(source).toMatch(/afterEach\(\s*clearReservedNamespaces\s*\)/);
   });
 });
