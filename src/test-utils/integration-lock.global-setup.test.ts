@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { DatabaseError } from '../db/errors.js';
 
 // Unit-level coverage for the advisory-lock mechanism (ADR-090, #638): the
 // original PR shipped with zero tests anywhere in the diff for the module
@@ -58,19 +59,41 @@ describe('integration-lock.global-setup: acquire', () => {
   // exists, so Vitest never gets a handle it could close the connection with.
   // Unless setup closes it itself, `connect()` having already succeeded leaves
   // a live socket keeping the event loop alive on the way out.
-  it('closes the dedicated client when the non-blocking probe rejects, and rethrows the original error', async () => {
+  it('closes the dedicated client when the non-blocking probe rejects, and rethrows it as a typed DatabaseError', async () => {
     const boom = new Error('terminating connection due to administrator command');
     query.mockRejectedValueOnce(boom);
 
     const setup = (await import('./integration-lock.global-setup.js')).default;
 
-    await expect(setup()).rejects.toBe(boom);
+    // setup() is invoked ONCE and the rejection captured: each mock above is a
+    // *Once* mock, so a second call would not reproduce the same failure.
+    const err: unknown = await setup().catch((caught: unknown) => caught);
+    expect(err).toBeInstanceOf(DatabaseError);
+    expect((err as Error).cause, 'the original pg error must survive as cause').toBe(boom);
     expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  // CodeRabbit #644: connect() itself can reject (bad DATABASE_URL, server
+  // down, TLS refusal) BEFORE any lock query runs. That path never reached
+  // acquireOrClose, so nothing closed the client and nothing typed the error.
+  it('wraps a client.connect() rejection as DatabaseError without attempting a lock query', async () => {
+    const boom = new Error('ECONNREFUSED 127.0.0.1:5432');
+    connect.mockRejectedValueOnce(boom);
+
+    const setup = (await import('./integration-lock.global-setup.js')).default;
+
+    const err: unknown = await setup().catch((caught: unknown) => caught);
+    expect(err).toBeInstanceOf(DatabaseError);
+    expect((err as Error).cause).toBe(boom);
+    expect(
+      query,
+      'no lock query can be attempted on a connection that never opened'
+    ).not.toHaveBeenCalled();
   });
 
   // The blocking acquire is the likelier one to fail in practice: a
   // `statement_timeout` shorter than the holding run cancels it outright.
-  it('closes the dedicated client when the blocking pg_advisory_lock rejects, and rethrows the original error', async () => {
+  it('closes the dedicated client when the blocking pg_advisory_lock rejects, and rethrows it as a typed DatabaseError', async () => {
     const boom = new Error('canceling statement due to statement timeout');
     query
       .mockResolvedValueOnce({ rows: [{ pg_try_advisory_lock: false }] })
@@ -78,21 +101,29 @@ describe('integration-lock.global-setup: acquire', () => {
 
     const setup = (await import('./integration-lock.global-setup.js')).default;
 
-    await expect(setup()).rejects.toBe(boom);
+    // setup() is invoked ONCE and the rejection captured: each mock above is a
+    // *Once* mock, so a second call would not reproduce the same failure.
+    const err: unknown = await setup().catch((caught: unknown) => caught);
+    expect(err).toBeInstanceOf(DatabaseError);
+    expect((err as Error).cause, 'the original pg error must survive as cause').toBe(boom);
     expect(end).toHaveBeenCalledTimes(1);
   });
 
   // The cleanup is best-effort: if closing the socket ALSO fails there is
   // nothing further to do, and surfacing that secondary error would hide why
   // the run actually failed to start.
-  it('still rethrows the original acquire error when the cleanup client.end() also fails', async () => {
+  it('still surfaces the original acquire error as DatabaseError.cause when the cleanup client.end() also fails', async () => {
     const boom = new Error('canceling statement due to statement timeout');
     query.mockRejectedValueOnce(boom);
     end.mockRejectedValueOnce(new Error('socket already closed'));
 
     const setup = (await import('./integration-lock.global-setup.js')).default;
 
-    await expect(setup()).rejects.toBe(boom);
+    // setup() is invoked ONCE and the rejection captured: each mock above is a
+    // *Once* mock, so a second call would not reproduce the same failure.
+    const err: unknown = await setup().catch((caught: unknown) => caught);
+    expect(err).toBeInstanceOf(DatabaseError);
+    expect((err as Error).cause, 'the original pg error must survive as cause').toBe(boom);
     expect(end).toHaveBeenCalledTimes(1);
   });
 });

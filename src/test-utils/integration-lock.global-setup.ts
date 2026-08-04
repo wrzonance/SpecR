@@ -1,10 +1,14 @@
 import { Client } from 'pg';
+import { DatabaseError } from '../db/errors.js';
 import { config } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
 
 /**
  * Serializes concurrent `pnpm test:integration` invocations against the same
- * `DATABASE_URL` (ADR-090, #638). `vitest.config.ts`'s `fileParallelism: false`
+ * PostgreSQL database (ADR-090, #638). Scope is the DATABASE, not the
+ * connection string: an advisory lock's tag includes the database OID, so two
+ * different `DATABASE_URL`s pointing at one database still contend, and the
+ * same key in two different databases does not. `vitest.config.ts`'s `fileParallelism: false`
  * only serializes test *files* within a single Vitest process — two separate
  * invocations still race on the shared database (blanket teardown deleting a
  * concurrent run's fixtures, unique-key collisions on reserved section
@@ -30,10 +34,11 @@ import { logger } from '../lib/logger.js';
  */
 
 // One fixed key for the whole repo: any two invocations pointed at the same
-// DATABASE_URL must serialize regardless of which database that is, and
+// database must serialize regardless of how they were addressed, and
 // invocations on different databases (the per-agent isolated-DB workflow)
-// never contend with each other in the first place — Postgres advisory locks
-// are scoped per-connection-to-a-database, so the shared key is safe. Plain
+// never contend with each other in the first place — a Postgres advisory
+// lock's tag includes the database OID, so the shared key is safe (and two
+// different DATABASE_URLs resolving to ONE database still serialize). Plain
 // JS number (not bigint): well within Number.MAX_SAFE_INTEGER, and pg's
 // parameter serialization for `bigint` values is not something to depend on
 // for a one-off constant — a plain integer round-trips through pg_advisory_lock's
@@ -64,7 +69,7 @@ async function acquireOrClose(client: Client): Promise<void> {
 
     logger.info(
       { lockKey: INTEGRATION_LOCK_KEY },
-      'integration-lock: waiting on another pnpm test:integration invocation against this DATABASE_URL'
+      'integration-lock: waiting on another pnpm test:integration invocation against this database'
     );
     await client.query('SELECT pg_advisory_lock($1)', [INTEGRATION_LOCK_KEY]);
   } catch (err) {
@@ -82,8 +87,16 @@ async function acquireOrClose(client: Client): Promise<void> {
 
 export default async function setup(): Promise<() => Promise<void>> {
   const client = new Client({ connectionString: config.DATABASE_URL });
-  await client.connect();
-  await acquireOrClose(client);
+  // Module boundary: `globalSetup` is the surface Vitest calls, so a raw `pg`
+  // error must not escape it untyped (CLAUDE.md). `acquireOrClose` has already
+  // closed the client on its own failure path; this only re-labels the error,
+  // chaining the original as `cause` so the why-chain survives to the console.
+  try {
+    await client.connect();
+    await acquireOrClose(client);
+  } catch (err) {
+    throw new DatabaseError('could not acquire the integration-test advisory lock', { cause: err });
+  }
 
   return async function teardown(): Promise<void> {
     // Best-effort unlock: a failure here (e.g. the connection already

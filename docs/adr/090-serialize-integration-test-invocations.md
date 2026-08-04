@@ -131,7 +131,7 @@ one run's logged unlock and the next's first test starting).
 
 ## Consequences
 
-- Two `pnpm test:integration` invocations against the same `DATABASE_URL` are
+- Two `pnpm test:integration` invocations against the same database are
   now safe: they deterministically serialize instead of racing. Neither
   cross-run fixture deletion nor a `99 77 %`/23505 collision is reachable
   under the lock, because at most one invocation ever touches a given
@@ -141,8 +141,11 @@ one run's logged unlock and the next's first test starting).
   the same database concurrently, which the advisory-lock acquire/probe adds
   negligible overhead to (`SELECT pg_try_advisory_lock($1)` is one query).
 - The per-agent isolated-database workflow is untouched and unaffected: lock
-  contention is scoped per `DATABASE_URL`, and agents already run against
-  distinct databases, so they never see each other's lock.
+  contention is scoped per PostgreSQL database (the lock tag includes the
+  database OID, so two different connection strings pointing at the SAME
+  database DO contend, while the same key in two different databases does
+  not), and agents already run against distinct databases, so they never see
+  each other's lock.
 - Postgres releases a session-level advisory lock automatically when the
   holding connection drops (verified in the spike via `kill -9` on the
   holding process, confirmed the next waiter re-acquired in ~0.06s) — a
