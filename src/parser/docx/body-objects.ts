@@ -19,7 +19,7 @@
 // itself for an interior leaf.
 
 import { v4 as uuidv4 } from 'uuid';
-import { createOrderedDocumentXmlBuilder, toArray } from './xml-utils.js';
+import { createOrderedDocumentXmlBuilder, getAttrVal, toArray } from './xml-utils.js';
 import { classifyTopLevelTables } from './tables.js';
 import { extractParagraphText, isParagraphVanish } from './document.js';
 import { classifyBodyDrawing, unwrapAlternateContent } from './body-drawings.js';
@@ -141,22 +141,47 @@ function tableDimensions(tableNode: ObjectBlobNode): TableDimensions {
 
 // ─── interior paragraph text + SDT anchoring ────────────────────────────────
 
-// #641: presence-only w:rPr>w:vanish check on a run, blob-tree-side (mirrors
-// document.ts's paragraphMarkVanish presence-only convention, but on the
-// preserveOrder ObjectBlobNode shape rather than document.ts's grouped `raw`
-// tree — the two trees are structurally different and this module already
-// keeps its own self-contained tagOf/childrenOf/directChildrenByTag trio
-// rather than importing document.ts's, per the established per-module
-// pattern body-text-box-visibility.ts's own header documents). Deliberately
-// narrower than document.ts's runIsVanish: no w:val negation (an explicit
-// `w:vanish w:val="0"` — vanishingly rare, ADR-092 records this as a scope
-// limit) and no character-style-referenced vanish (w:rStyle resolution needs
-// a StyleMap, which this leaf-level blob-tree walk does not thread through).
+// `w:vanish` is an OOXML ST_OnOff toggle (ECMA-376 §17.3.2.45): bare or
+// `w:val` in {1,true,on} means ON; an explicit `w:val` in {0,false,off} means
+// the toggle is switched OFF — a VISIBLE run — most often because the run is
+// overriding an inherited vanish from its style. Treating the mere PRESENCE
+// of the element as "hidden" therefore suppresses visible text.
+//
+// This is not hypothetical: two real CPI corpus fixtures carry 15
+// `<w:vanish w:val="0"/>` runs between them, several of them text-bearing
+// (`CPI_COMMUNICATIONS_RACK_MOUNTED_POWER_PROTECTION_CSIMFS.docx` has
+// "Select voltage/phase; breaker number, " and "rating" in exactly that
+// shape). Since collectText's suppression below is a text-DROPPING path,
+// getting this backwards would silently lose visible spec text inside a
+// captured table/text-box — the opposite of ADR-072's no-silent-loss
+// posture. Erring toward keeping text is the safe direction: a missed
+// suppression is a visible leak a test can catch, a wrong suppression is
+// invisible data loss.
+function isOnOffEnabled(node: ObjectBlobNode): boolean {
+  const val = getAttrVal(node[':@']).toLowerCase();
+  return val !== '0' && val !== 'false' && val !== 'off';
+}
+
+// #641: w:rPr>w:vanish check on a run, blob-tree-side — on the preserveOrder
+// ObjectBlobNode shape rather than document.ts's grouped `raw` tree. The two
+// trees are structurally different, and this module already keeps its own
+// self-contained tagOf/childrenOf/directChildrenByTag trio rather than
+// importing document.ts's, per the established per-module pattern
+// body-text-box-visibility.ts's own header documents.
+//
+// Narrower than document.ts's runIsVanish in ONE respect: no
+// character-style-referenced vanish (a `w:rStyle` pointing at a character
+// style that itself carries w:vanish). Resolving that needs the StyleMap's
+// `vanishCharStyleIds`, which extractBodyObjects receives but does not
+// currently thread down to this leaf-level walk; ADR-092 records it as a
+// known scope limit, and no fixture in the 39-file DOCX corpus uses that
+// shape (0 files reference a vanish character style via w:rStyle). That
+// residual gap under-suppresses (a visible leak), never over-suppresses.
 function hasRunVanish(node: ObjectBlobNode): boolean {
   if (tagOf(node) !== 'w:r') return false;
   const rPr = directChildrenByTag(node, 'w:rPr')[0];
   if (!rPr) return false;
-  return directChildrenByTag(rPr, 'w:vanish').length > 0;
+  return directChildrenByTag(rPr, 'w:vanish').some(isOnOffEnabled);
 }
 
 // w:t's sole text payload, or undefined for a text-less/malformed node —

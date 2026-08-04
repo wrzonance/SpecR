@@ -1025,6 +1025,56 @@ describe('extractBodyObjects — #641 nested text box inside a text box (run-van
   // buildTableObject treats it as ONE anchored leaf via extractBlobText —
   // proving the nested hidden run's text never leaks into interiorTexts via
   // the table capture path, not merely the text-box one.
+  // Over-suppression guard (adversarial-review finding). `w:vanish` is an
+  // OOXML ST_OnOff toggle: `<w:vanish w:val="0"/>` means the toggle is
+  // switched OFF — a VISIBLE run, typically overriding an inherited vanish
+  // from its style. A presence-only check would read that as hidden and
+  // SILENTLY DROP visible spec text. Not hypothetical: two real CPI corpus
+  // fixtures carry 15 such runs between them, several text-bearing (see
+  // hasRunVanish's own comment). These two tests pin the SURVIVAL direction
+  // — that visible content still comes through — which is the direction a
+  // suppression bug hides in: over-suppression looks like correct privacy
+  // behaviour and produces no error, only missing text.
+  it('a run with <w:vanish w:val="0"/> (toggle OFF) is VISIBLE — its text must survive, text-box path', () => {
+    const interior =
+      '<w:p><w:r><w:t>visible part </w:t></w:r>' +
+      '<w:r><w:rPr><w:vanish w:val="0"/></w:rPr><w:t>also visible</w:t></w:r></w:p>';
+    const result = extract(textBoxHostParagraph(interior));
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    expect(result.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part also visible',
+    ]);
+  });
+
+  it('a run with <w:vanish w:val="0"/> (toggle OFF) is VISIBLE — its text must survive, table path', () => {
+    const cellPara =
+      '<w:p><w:r><w:t>visible part </w:t></w:r>' +
+      '<w:r><w:rPr><w:vanish w:val="0"/></w:rPr><w:t>also visible</w:t></w:r></w:p>';
+    const result = extract(table(row(cell(cellPara))));
+
+    expect(result.tableObjects).toHaveLength(1);
+    expect(result.tableObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part also visible',
+    ]);
+  });
+
+  // The ON side of the same toggle, so the pair brackets the behaviour:
+  // an explicit truthy w:val must still suppress, exactly like a bare
+  // <w:vanish/>. Without this, isOnOffEnabled could regress to "always
+  // false" (suppress nothing) and the survival tests above would still pass.
+  it('a run with an explicit <w:vanish w:val="1"/> (toggle ON) is still hidden', () => {
+    const interior =
+      '<w:p><w:r><w:t>visible part </w:t></w:r>' +
+      '<w:r><w:rPr><w:vanish w:val="1"/></w:rPr><w:t>hidden part</w:t></w:r></w:p>';
+    const result = extract(textBoxHostParagraph(interior));
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    expect(result.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part ',
+    ]);
+  });
+
   it('a table cell with a nested hidden text box exposes only its own visible text — the nested vanish run never leaks in (table analogue)', () => {
     const cellParaWithNestedHiddenBox =
       '<w:p><w:r><w:t>cell visible</w:t></w:r>' +

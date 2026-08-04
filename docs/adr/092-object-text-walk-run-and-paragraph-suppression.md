@@ -83,9 +83,8 @@ at all, and is what this ADR adopts.
 
 **1. `collectText` skips a `w:r` flagged by a new `hasRunVanish` predicate,
 at whatever depth it is encountered (#641 fix).** `hasRunVanish(node)` is
-presence-only — true iff `node` is tagged `w:r` and has a direct `w:rPr`
-child that itself has a direct `w:vanish` child — mirroring `document.ts`'s
-`paragraphMarkVanish` presence-only convention, but reimplemented on
+true iff `node` is tagged `w:r` and has a direct `w:rPr` child that itself
+has a direct `w:vanish` child **whose ST_OnOff toggle is ON** — reimplemented on
 `body-objects.ts`'s own `ObjectBlobNode` (preserveOrder-mode blob tree)
 navigation trio (`tagOf`/`childrenOf`/`directChildrenByTag`), the same
 self-contained per-module-helper pattern `body-text-box-visibility.ts`
@@ -117,13 +116,37 @@ the SAME `ObjectBlobNode` tree the anchoring walk already holds a reference
 to — no second tree, no positional correlation, no fail-closed guard needed
 because there is nothing to desynchronize.
 
-**Scope limit, recorded rather than silently narrowed:** `hasRunVanish` is
-presence-only. It does not evaluate `w:vanish/@w:val="0"` (an explicit
-un-hide, vanishingly rare in practice) and does not resolve a
-character-style-referenced vanish (`w:rStyle` pointing at a style whose own
-`rPr` carries `w:vanish` — `document.ts`'s `runIsVanish` does this via a
-`vanishCharStyleIds` set built from a `StyleMap`, which this leaf-level
-blob-tree walk does not thread through). If full-corpus revalidation ever
+**`w:vanish` is honoured as an ST_OnOff toggle, NOT as element presence
+(adversarial-review correction).** An earlier revision of this ADR made
+`hasRunVanish` presence-only and dismissed `<w:vanish w:val="0"/>` as
+"vanishingly rare". That was wrong on both counts. ECMA-376 §17.3.2.45 makes
+`w:vanish` a toggle property: an explicit `w:val` of `0`/`false`/`off` means
+the toggle is switched OFF — a **visible** run, usually one overriding an
+inherited vanish from its style — and the corpus contains it. Two real CPI
+fixtures carry 15 `<w:vanish w:val="0"/>` runs between them, several
+text-bearing (`CPI_COMMUNICATIONS_RACK_MOUNTED_POWER_PROTECTION_CSIMFS.docx`
+holds "Select voltage/phase; breaker number, " and "rating" in exactly that
+shape). Because `collectText`'s new branch DROPS text, a presence-only read
+would silently delete visible spec text from a captured table/text-box —
+the same over-suppression class as the #636 near-miss, and the opposite of
+ADR-072's no-silent-loss posture. The asymmetry decides the default: a
+missed suppression is a visible leak a test can catch, a wrong suppression
+is invisible data loss. `isOnOffEnabled` therefore treats only an explicit
+falsy `w:val` as "off", and regression tests pin the SURVIVAL direction
+(text with `w:val="0"` must come through) alongside the ON direction
+(`w:val="1"` and a bare `<w:vanish/>` must still suppress).
+
+**Scope limit, recorded rather than silently narrowed:** `hasRunVanish` does
+not resolve a character-style-referenced vanish (`w:rStyle` pointing at a
+style whose own `rPr` carries `w:vanish` — `document.ts`'s `runIsVanish`
+does this via a `vanishCharStyleIds` set built from a `StyleMap`).
+`extractBodyObjects` does receive a `StyleMap`, but it is not currently
+threaded down through `anchorInteriorParagraphs` to this leaf-level walk.
+The residual gap was measured, not assumed: no fixture in the 39-file DOCX
+corpus references a vanish character style via `w:rStyle` (0 files). It errs
+toward UNDER-suppression — a visible leak, detectable by a test — never
+toward the silent data loss the toggle bug above would have caused. If
+full-corpus revalidation ever
 surfaces a leak traceable to one of these narrower cases, it is a new,
 separately-triaged defect — not evidence this ADR silently under-scoped
 `hasRunVanish`; the full corpus (705 fixtures, `pnpm fixture:diff`) showed no
@@ -181,10 +204,12 @@ any depth, inside any object capture.
   unverified against real-world documents beyond the hand-built regression
   fixtures in `body-objects.test.ts` — expected, logged here rather than
   silently assumed identical.
-- `hasRunVanish`'s presence-only scope (no `w:val="0"` negation, no
-  `w:rStyle` character-style resolution) is a documented boundary, not a
-  silent gap — see decision 1. A future report of a leak traceable to either
-  narrower case is new evidence, not proof this ADR mis-scoped the fix.
+- `hasRunVanish` honours `w:vanish` as an ST_OnOff toggle; its one remaining
+  scope limit (no `w:rStyle` character-style resolution) is a documented
+  boundary, not a silent gap — see decision 1. That limit under-suppresses
+  rather than over-suppresses, so its failure mode is a detectable leak, not
+  invisible data loss. A future report of a leak traceable to it is new
+  evidence, not proof this ADR mis-scoped the fix.
 - No public/exported struct changed: `CapturedObjectText`, `CapturedBodyObject`,
   `ChildrenTransformResult`/`InteriorTransformResult`, and every `ObjectBlobNode`
   shape are byte-for-byte unchanged — this ADR only changes which text
