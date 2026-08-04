@@ -12,12 +12,6 @@
     "reason": "LIKE pattern, not a captured id"
   },
   {
-    "filePath": "src/api/contract.integration.test.ts",
-    "line": 226,
-    "snippet": "DELETE FROM header_footer_configs",
-    "reason": "no WHERE clause — whole-table delete"
-  },
-  {
     "filePath": "src/api/conventions.integration.test.ts",
     "line": 39,
     "snippet": "DELETE FROM editing_conventions WHERE library_id IS NOT NULL",
