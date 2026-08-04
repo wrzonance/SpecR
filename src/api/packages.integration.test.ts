@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import express from 'express';
 import type { Server } from 'http';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
-import { pool } from '../db/index.js';
+import { pool, createLibrary } from '../db/index.js';
 
 const ZERO = '00000000-0000-0000-0000-000000000000';
 
@@ -67,11 +68,16 @@ beforeAll(async () => {
   });
   const address = server.address();
   baseUrl = `http://localhost:${typeof address === 'object' && address !== null ? address.port : 3000}`;
-  const lib = await pool.query<{ id: string }>(
-    `SELECT id FROM libraries WHERE name = 'Default Company Master'`
-  );
-  if (!lib.rows[0]) throw new Error('Default Company Master missing — run migrations');
-  companyId = lib.rows[0].id;
+  // Isolated, uniquely-named company library — NOT the shared, name-looked-up
+  // 'Default Company Master'. Inserting fixture masters into the shared
+  // library is ambient-state dependent: resolveSection's
+  // `ORDER BY ps.priority, s.created_at, s.id` tie-break silently prefers an
+  // older leftover row over this file's fresh fixture (same class as #522/#631).
+  const lib = await createLibrary({
+    tier: 'company',
+    name: `Packages API Master ${randomUUID()}`,
+  });
+  companyId = lib.id;
   await insertMaster('05 12 00', 'Structural Steel Framing');
   await insertMaster('23 09 23', 'Direct Digital Control');
   const proj1 = await createProjectWithSections(`Pkg API P1 ${Date.now()}`, [
@@ -91,6 +97,13 @@ afterAll(async () => {
   await pool.query('DELETE FROM specs WHERE project_id = ANY($1)', [projectIds]);
   await pool.query('DELETE FROM projects WHERE id = ANY($1)', [projectIds]);
   await pool.query('DELETE FROM specs WHERE id = ANY($1)', [masterIds]);
+  // project_sources.library_id is FK-RESTRICT (project_id is CASCADE, so the
+  // project deletes above already took most of these); clear any remainder
+  // before dropping the isolated fixture library.
+  if (companyId) {
+    await pool.query('DELETE FROM project_sources WHERE library_id = $1', [companyId]);
+    await pool.query('DELETE FROM libraries WHERE id = $1', [companyId]);
+  }
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err != null ? reject(err) : resolve()));
   });
