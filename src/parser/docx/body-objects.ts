@@ -19,7 +19,7 @@
 // itself for an interior leaf.
 
 import { v4 as uuidv4 } from 'uuid';
-import { createOrderedDocumentXmlBuilder, toArray } from './xml-utils.js';
+import { createOrderedDocumentXmlBuilder, getAttrVal, toArray } from './xml-utils.js';
 import { classifyTopLevelTables } from './tables.js';
 import { extractParagraphText, isParagraphVanish } from './document.js';
 import { classifyBodyDrawing, unwrapAlternateContent } from './body-drawings.js';
@@ -141,19 +141,87 @@ function tableDimensions(tableNode: ObjectBlobNode): TableDimensions {
 
 // ─── interior paragraph text + SDT anchoring ────────────────────────────────
 
+// `w:vanish` is an OOXML ST_OnOff toggle (ECMA-376 §17.3.2.45): bare or
+// `w:val` in {1,true,on} means ON; an explicit `w:val` in {0,false,off} means
+// the toggle is switched OFF — a VISIBLE run — most often because the run is
+// overriding an inherited vanish from its style. Treating the mere PRESENCE
+// of the element as "hidden" therefore suppresses visible text.
+//
+// This is not hypothetical: two real CPI corpus fixtures carry 15
+// `<w:vanish w:val="0"/>` runs between them, several of them text-bearing
+// (`CPI_COMMUNICATIONS_RACK_MOUNTED_POWER_PROTECTION_CSIMFS.docx` has
+// "Select voltage/phase; breaker number, " and "rating" in exactly that
+// shape). Since collectText's suppression below is a text-DROPPING path,
+// getting this backwards would silently lose visible spec text inside a
+// captured table/text-box — the opposite of ADR-072's no-silent-loss
+// posture. Erring toward keeping text is the safe direction: a missed
+// suppression is a visible leak a test can catch, a wrong suppression is
+// invisible data loss.
+function isOnOffEnabled(node: ObjectBlobNode): boolean {
+  const val = getAttrVal(node[':@']).toLowerCase();
+  return val !== '0' && val !== 'false' && val !== 'off';
+}
+
+// #641: w:rPr>w:vanish check on a run, blob-tree-side — on the preserveOrder
+// ObjectBlobNode shape rather than document.ts's grouped `raw` tree. The two
+// trees are structurally different, and this module already keeps its own
+// self-contained tagOf/childrenOf/directChildrenByTag trio rather than
+// importing document.ts's, per the established per-module pattern
+// body-text-box-visibility.ts's own header documents.
+//
+// Narrower than document.ts's runIsVanish in ONE respect: no
+// character-style-referenced vanish (a `w:rStyle` pointing at a character
+// style that itself carries w:vanish). Resolving that needs the StyleMap's
+// `vanishCharStyleIds`, which extractBodyObjects receives but does not
+// currently thread down to this leaf-level walk; ADR-092 records it as a
+// known scope limit, and no fixture in the 39-file DOCX corpus uses that
+// shape (0 files reference a vanish character style via w:rStyle). That
+// residual gap under-suppresses (a visible leak), never over-suppresses.
+//
+// EXPORTED so object-blob-edit.ts's `rewriteFirstText` applies the SAME rule
+// when it writes an edit back. That walk's stated contract is to reach text
+// "wherever capture read it from"; once capture started skipping vanish runs,
+// a second, drifting copy of this predicate there would place edits into
+// hidden runs and blank the visible ones. One definition, both directions
+// (ADR-092).
+export function hasRunVanish(node: ObjectBlobNode): boolean {
+  if (tagOf(node) !== 'w:r') return false;
+  const rPr = directChildrenByTag(node, 'w:rPr')[0];
+  if (!rPr) return false;
+  return directChildrenByTag(rPr, 'w:vanish').some(isOnOffEnabled);
+}
+
+// w:t's sole text payload, or undefined for a text-less/malformed node —
+// split out of collectText below purely to keep that function's cognitive
+// complexity under the repo's eslint cap; no behavior of its own.
+function textOfWtNode(node: ObjectBlobNode): string | undefined {
+  const first = childrenOf(node)[0];
+  const text = first ? first['#text'] : undefined;
+  return typeof text === 'string' ? text : undefined;
+}
+
 // w:t is the ONLY text-bearing leaf a run ever carries (mirrors
 // document.ts's extractRunText); walking every descendant regardless of
 // wrapper (w:hyperlink, w:ins/w:del, w:sdt) reaches wrapped text the same
 // way document.ts's collectRuns does, with no per-wrapper special-casing.
+//
+// #641: a w:r flagged hasRunVanish is skipped entirely — no text pushed, no
+// descent into its subtree. This walk already passes transparently through
+// nested w:txbxContent boundaries (body-text-box-visibility.ts deliberately
+// treats a nested text box's interior as opaque and never adds it to
+// hiddenSubtrees — see ADR-092), so this single run-level check is what
+// keeps a hidden run's text from leaking into an ancestor interior
+// paragraph's captured text, whether that run sits directly in the
+// paragraph or several levels down inside a nested text box's own interior.
 function collectText(children: readonly ObjectBlobNode[], acc: string[]): void {
   for (const child of children) {
     const tag = tagOf(child);
     if (tag === 'w:t') {
-      const first = childrenOf(child)[0];
-      const text = first ? first['#text'] : undefined;
-      if (typeof text === 'string') acc.push(text);
+      const text = textOfWtNode(child);
+      if (text !== undefined) acc.push(text);
       continue;
     }
+    if (tag === 'w:r' && hasRunVanish(child)) continue;
     collectText(childrenOf(child), acc);
   }
 }
@@ -207,6 +275,20 @@ function transformInteriorParagraphs(
 // "objectText non-emptiness precondition" pins this as THIS layer's job, not
 // wrapBlobParagraphWithAnchor's — an anchor with no corresponding objectText
 // leaf would be a dangling, never-reachable UUID.
+//
+// #633 investigation (ADR-092): a decorative asterisk rule row inside a
+// captured object's interior paragraph is DELIBERATELY left verbatim here,
+// never routed through isRuleRow/classifyOne's paragraph-tier suppression.
+// ADR-072 decision 14 (#300) already establishes this — a captured
+// table/text-box's cell text is a faithful, out-of-band, VERBATIM mirror of
+// the source document, never re-run through the paragraph-tier note-region
+// engine — and note-region-corpus.integration.test.ts's own
+// OBJECT_VERBATIM_TABLE-scoped regression test pins hidden-text-test.docx's
+// body table rendering its 4 asterisk-rule cells verbatim as EXACTLY that
+// invariant. Adding a rule-row suppression branch here would silently
+// reinterpret locked object content and break that existing, deliberate
+// test. See hidden-text.integration.test.ts's own updated assertion for the
+// other half of this investigation.
 function transformChildren(
   children: readonly ObjectBlobNode[],
   hiddenSubtrees: ReadonlySet<ObjectBlobNode>

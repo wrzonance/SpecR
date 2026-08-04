@@ -274,4 +274,67 @@ describe('replaceAnchoredParagraphText', () => {
     // exactly one occurrence of the new text — no X X duplication
     expect([...xml.matchAll(/once/g)]).toHaveLength(1);
   });
+  // #641 adversarial-review finding (P1). body-objects.ts's capture walk now
+  // SKIPS vanish runs, so this rewrite walk must skip them too — the two are
+  // documented as mirror images. The dangerous ordering is HIDDEN-FIRST: with
+  // a presence-blind walk the edit lands in the hidden run (so the user's new
+  // text is invisible in Word) AND the following visible run is blanked (so
+  // real spec text is destroyed). Both halves are asserted.
+  it('places the edit in the first VISIBLE run when a hidden run precedes it, and never blanks the visible one', () => {
+    const hidden: ObjectBlobNode = {
+      'w:r': [{ 'w:rPr': [{ 'w:vanish': [] }] }, { 'w:t': [{ '#text': 'HIDDEN SECRET' }] }],
+    };
+    const interior = paragraph(hidden, run('visible original'));
+    const blob = [cell(wrapBlobParagraphWithAnchor(interior, UUID_A))];
+
+    const result = replaceAnchoredParagraphText(blob, UUID_A, 'edited text');
+    expect(result).toBeDefined();
+    const xml = toXml(result as readonly ObjectBlobNode[]);
+
+    // the edit went into the VISIBLE run
+    expect(xml).toContain('edited text');
+    expect(xml).not.toContain('visible original');
+    // the hidden run is untouched — neither overwritten with the edit nor blanked
+    expect(xml).toContain('HIDDEN SECRET');
+    // exactly one copy of the new text — it did not also land in the hidden run
+    expect([...xml.matchAll(/edited text/g)]).toHaveLength(1);
+  });
+
+  // The reverse ordering, which a naive "skip the first run" fix would break:
+  // a VISIBLE run first, then a hidden one. The visible run takes the edit and
+  // the trailing hidden run must still be left alone rather than blanked.
+  it('places the edit in the visible run when the hidden run follows it, leaving the hidden run intact', () => {
+    const hidden: ObjectBlobNode = {
+      'w:r': [{ 'w:rPr': [{ 'w:vanish': [] }] }, { 'w:t': [{ '#text': 'HIDDEN SECRET' }] }],
+    };
+    const interior = paragraph(run('visible original'), hidden);
+    const blob = [cell(wrapBlobParagraphWithAnchor(interior, UUID_A))];
+
+    const result = replaceAnchoredParagraphText(blob, UUID_A, 'edited text');
+    const xml = toXml(result as readonly ObjectBlobNode[]);
+
+    expect(xml).toContain('edited text');
+    expect(xml).not.toContain('visible original');
+    expect(xml).toContain('HIDDEN SECRET');
+    expect([...xml.matchAll(/edited text/g)]).toHaveLength(1);
+  });
+
+  // A run whose w:vanish toggle is explicitly OFF is VISIBLE and must behave
+  // like any ordinary run — it is a legitimate edit target, not a skipped one.
+  it('treats a <w:vanish w:val="0"/> run as visible and edits it normally', () => {
+    const toggledOff = {
+      'w:r': [
+        { 'w:rPr': [{ 'w:vanish': [], ':@': { '@_w:val': '0' } }] },
+        { 'w:t': [{ '#text': 'visible original' }] },
+      ],
+    } as ObjectBlobNode;
+    const interior = paragraph(toggledOff);
+    const blob = [cell(wrapBlobParagraphWithAnchor(interior, UUID_A))];
+
+    const result = replaceAnchoredParagraphText(blob, UUID_A, 'edited text');
+    const xml = toXml(result as readonly ObjectBlobNode[]);
+
+    expect(xml).toContain('edited text');
+    expect(xml).not.toContain('visible original');
+  });
 });

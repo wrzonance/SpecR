@@ -109,6 +109,27 @@ function resolveJustification(
   return styleId ? styleMap.resolvedJc.get(styleId) : undefined;
 }
 
+// `w:vanish` is an OOXML ST_OnOff TOGGLE (ECMA-376 §17.3.2.45), not a marker
+// whose presence alone means "hidden": bare, or `w:val` in {1,true,on}, is ON;
+// an explicit `w:val` in {0,false,off} switches it OFF, marking a VISIBLE run
+// or paragraph mark — typically one overriding an inherited vanish from its
+// style. Both vanish checks below feed hidden-content suppression, so reading
+// presence as "hidden" drops visible spec text.
+//
+// Real corpus shape, not a hypothetical: two CPI fixtures carry 15
+// `<w:vanish w:val="0"/>` occurrences between them, several on text-bearing
+// runs (`CPI_COMMUNICATIONS_RACK_MOUNTED_POWER_PROTECTION_CSIMFS.docx` holds
+// "Select voltage/phase; breaker number, " and "rating" in exactly that
+// shape). Those paragraphs happen to already resolve hidden through their
+// `CMT` paragraph style, so honouring the toggle changes no fixture's output
+// today (0/705 on `pnpm fixture:diff`) — it removes a latent silent-data-loss
+// path rather than fixing a live regression. Mirrors body-objects.ts's own
+// `isOnOffEnabled` on the preserveOrder blob tree (ADR-092).
+function isOnOffEnabled(node: unknown): boolean {
+  const val = getAttrVal(node).toLowerCase();
+  return val !== '0' && val !== 'false' && val !== 'off';
+}
+
 function runIsVanish(
   run: Record<string, unknown>,
   vanishCharStyleIds: ReadonlySet<string>
@@ -116,7 +137,7 @@ function runIsVanish(
   const rPr = run['w:rPr'];
   if (typeof rPr === 'object' && rPr !== null) {
     const rec = rPr as Record<string, unknown>;
-    if ('w:vanish' in rec) return true;
+    if ('w:vanish' in rec && isOnOffEnabled(rec['w:vanish'])) return true;
     const rStyle = getAttrVal(rec['w:rStyle']);
     if (rStyle && vanishCharStyleIds.has(rStyle)) return true;
   }
@@ -166,7 +187,8 @@ function allTextRunsVanish(
 function paragraphMarkVanish(pPr: Record<string, unknown> | undefined): boolean {
   const raw = pPr?.['w:rPr'];
   if (raw === null || typeof raw !== 'object') return false;
-  return 'w:vanish' in (raw as Record<string, unknown>);
+  const rec = raw as Record<string, unknown>;
+  return 'w:vanish' in rec && isOnOffEnabled(rec['w:vanish']);
 }
 
 function resolveParagraphVanish(

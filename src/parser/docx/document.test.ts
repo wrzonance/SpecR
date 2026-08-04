@@ -200,6 +200,48 @@ describe('parseDocument — pPr field extraction', () => {
     expect(paras[0]?.isVanish).toBe(true);
   });
 
+  // `w:vanish` is an ST_OnOff TOGGLE (ECMA-376 §17.3.2.45), so an explicit
+  // `w:val="0"` switches it OFF — the run is VISIBLE, usually because it is
+  // overriding an inherited vanish. Reading element presence as "hidden"
+  // would classify this whole paragraph hidden and silently drop real spec
+  // text. Two real CPI fixtures carry text-bearing runs in exactly this
+  // shape. These two tests pin the SURVIVAL direction — the direction an
+  // over-suppression bug hides in, since it raises no error, only missing
+  // text.
+  it('does NOT mark vanish when the only vanish run carries w:val="0" (toggle OFF)', () => {
+    const styles = buildStyleMap(
+      `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>`
+    );
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+    <w:p><w:r><w:rPr><w:vanish w:val="0"/></w:rPr><w:t>visible spec text</w:t></w:r></w:p>
+  </w:body></w:document>`;
+    expect(parseDocument(xml, emptyNumberingMap(), styles)[0]?.isVanish).toBe(false);
+  });
+
+  it('does NOT mark vanish from a paragraph mark whose w:vanish carries w:val="0"', () => {
+    const styles = buildStyleMap(
+      `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>`
+    );
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+    <w:p><w:pPr><w:rPr><w:vanish w:val="0"/></w:rPr></w:pPr><w:r><w:t>visible spec text</w:t></w:r></w:p>
+  </w:body></w:document>`;
+    expect(parseDocument(xml, emptyNumberingMap(), styles)[0]?.isVanish).toBe(false);
+  });
+
+  // The ON side, so the pair brackets the toggle: an explicit truthy w:val
+  // must still hide, exactly like the bare <w:vanish/> above. Without this,
+  // isOnOffEnabled could regress to "always false" (nothing ever hidden) and
+  // both survival tests would still pass.
+  it('detects vanish from an explicit w:val="1" run (toggle ON)', () => {
+    const styles = buildStyleMap(
+      `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>`
+    );
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+    <w:p><w:r><w:rPr><w:vanish w:val="1"/></w:rPr><w:t>secret</w:t></w:r></w:p>
+  </w:body></w:document>`;
+    expect(parseDocument(xml, emptyNumberingMap(), styles)[0]?.isVanish).toBe(true);
+  });
+
   it('detects vanish inherited from the paragraph style', () => {
     const styles =
       buildStyleMap(`<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">

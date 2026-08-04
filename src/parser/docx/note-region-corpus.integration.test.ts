@@ -54,7 +54,7 @@ const DRIFT_DISENGAGED = new Set(DRIFT_REGRESSIONS.map((r) => r.file));
 // Body objects (#300, ADR-072): a captured table/text-box's cell text is a faithful,
 // out-of-band, VERBATIM mirror of the original document — never re-run through the
 // paragraph-tier note-region engine (that's a Signal-classification concern the object
-// capture pass sits entirely outside of, ADR-072 decision 8). hidden-text-test.docx has
+// capture pass sits entirely outside of, ADR-072 decision 14). hidden-text-test.docx has
 // a real submittal-matrix table whose cells include an asterisk-rule row a spec author
 // used as in-cell visual separation; #300 now renders that table's content (previously
 // dropped silently — see the `table-content-skipped` warning it used to only count), so

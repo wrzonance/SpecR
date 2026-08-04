@@ -86,7 +86,7 @@ function parseOrderedBody(documentXml: string): readonly ObjectBlobNode[] {
  * Walks word/document.xml's w:body DIRECT children only (fast-xml-parser
  * preserveOrder mode) — a w:tbl or w:p nested inside a table cell is never
  * visited, mirroring tables.ts's findTopLevelTables scope (KNOWN AMBIGUITY,
- * #293 design decision #6, carried forward by ADR-072 decision 8).
+ * #293 design decision #6, carried forward by ADR-072 decision 20).
  */
 export function computeBodyOrder(documentXml: string): BodyOrder {
   const roots = parseOrderedBody(documentXml);

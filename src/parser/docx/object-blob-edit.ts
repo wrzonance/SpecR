@@ -25,6 +25,7 @@
 // this file's own "non-anchor siblings are untouched" test.
 
 import { ParserError } from '../error.js';
+import { hasRunVanish } from './body-objects.js';
 import { UUID_TAG_PREFIX } from '../../ast/index.js';
 import type { ObjectBlobNode } from '../../ast/index.js';
 
@@ -179,13 +180,26 @@ interface TextPlacement {
  * hyperlink or a tracked-change wrapper is rewritten in place, never left
  * stale beside a freshly appended duplicate run. Each rewritten `w:t` keeps
  * its own attributes, so a run's multiple `w:t` leaves are handled one-by-one
- * (no `X X` duplication) and `xml:space="preserve"` survives. */
+ * (no `X X` duplication) and `xml:space="preserve"` survives.
+ *
+ * "Exactly as `collectText`" is load-bearing, not decorative (#641 review):
+ * capture SKIPS a vanish run, so this walk must skip it too, using the SAME
+ * exported `hasRunVanish` predicate rather than a second copy that can drift.
+ * Without the skip, an interior paragraph whose HIDDEN run precedes its
+ * visible one would take the edit into the hidden run and blank the visible
+ * one — the edit vanishes from the document and real text is destroyed. A
+ * skipped vanish run is left untouched rather than blanked: its text is
+ * locked, out-of-band content this edit path has no mandate to rewrite
+ * (ADR-072's no-silent-loss posture), and leaving it keeps the post-edit
+ * visible text exactly equal to `newText`, which is what capture will read
+ * back. */
 function rewriteFirstText(node: ObjectBlobNode, newText: string, placed: boolean): TextPlacement {
   const tag = tagOf(node);
   if (!tag) return { node, placed };
   if (tag === 'w:t') {
     return { node: rewriteTextNode(node, placed ? '' : newText), placed: true };
   }
+  if (hasRunVanish(node)) return { node, placed };
   const value = node[tag];
   if (!isBlobNodeArray(value)) return { node, placed };
   let changed = false;
