@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Pool } from 'pg';
 import { deleteCapturedFixtures } from './integration-fixture-cleanup.js';
+import { DatabaseError } from '../db/errors.js';
 
 function fakePool(): { pool: Pool; query: ReturnType<typeof vi.fn> } {
   const query = vi.fn().mockResolvedValue({ rows: [] });
@@ -46,10 +47,22 @@ describe('deleteCapturedFixtures', () => {
   });
 
   it('wraps a query failure in a DatabaseError with cause chained', async () => {
-    const pool = { query: vi.fn().mockRejectedValue(new Error('pg exploded')) } as unknown as Pool;
+    const pgError = new Error('pg exploded');
+    const pool = { query: vi.fn().mockRejectedValue(pgError) } as unknown as Pool;
 
     await expect(deleteCapturedFixtures(pool, { specIds: ['spec-1'] })).rejects.toThrow(
-      /failed to delete captured integration-test fixtures/
+      DatabaseError
     );
+
+    try {
+      await deleteCapturedFixtures(pool, { specIds: ['spec-1'] });
+      expect.unreachable('expected deleteCapturedFixtures to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DatabaseError);
+      expect((err as DatabaseError).message).toMatch(
+        /failed to delete captured integration-test fixtures/
+      );
+      expect((err as DatabaseError).cause).toBe(pgError);
+    }
   });
 });
