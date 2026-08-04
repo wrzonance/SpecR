@@ -155,15 +155,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-// Maps each visited node to the `viaAllOf` context it was FIRST processed under.
+// Maps each visited node's ORIGINAL object identity to the (up to two) clones already computed
+// for it, keyed by the `viaAllOf` context each clone was computed under.
 // $RefParser.dereference() reuses one object instance for every `$ref` pointer that targets the
 // same component, so the identical node can legitimately be reached twice in one tree walk under
 // TWO DIFFERENT contexts — e.g. once as a raw allOf branch (must stay unmarked) and once nested
 // under a sibling's `properties`/`oneOf`/`anyOf`/`items` (must be marked). A plain visited-Set
 // cannot distinguish those: it conflates "already visited" with "already decided", so whichever
-// context reaches the node FIRST wins and the second visit silently no-ops — see addUnevaluated-
-// PropertiesFalse below for how `seen` resolves that.
-type SeenContexts = Map<object, boolean>;
+// context reaches the node FIRST wins and the second visit silently no-ops. Keying by the
+// ORIGINAL node (never mutated — see addUnevaluatedPropertiesFalse below) rather than by
+// whatever the first visit produced also matters: a divergent-context clone must be built from
+// the pristine original, never from a sibling context's already-marked output, or its mark
+// leaks across contexts.
+type SeenContexts = Map<object, Map<boolean, Record<string, unknown>>>;
 
 function walkProperties(schema: Record<string, unknown>, seen: SeenContexts): void {
   if (!isPlainObject(schema['properties'])) return;
@@ -207,16 +211,27 @@ function addUnevaluatedPropertiesFalse(
   viaAllOf: boolean
 ): unknown {
   if (!isPlainObject(node)) return node;
-  const priorContext = seen.get(node);
-  // Same node, same context: either a true cycle (dereferenced schemas can be self-referential —
-  // stop recursing) or a harmless duplicate reference already processed correctly for this
-  // context. Either way the existing (in-progress or finished) node is the right answer.
-  if (priorContext === viaAllOf) return node;
-  // Same node, a DIFFERENT context than its first visit: the shared identity needs a different
-  // unevaluatedProperties decision per context, so clone before mutating — reusing the shared
-  // node here would silently overwrite (or be silently dropped by) the first context's decision.
-  const schema = priorContext === undefined ? node : structuredClone(node);
-  seen.set(schema, viaAllOf);
+  const contexts = seen.get(node);
+  const cached = contexts?.get(viaAllOf);
+  // Same original node, same context: either a true cycle (dereferenced schemas can be
+  // self-referential — stop recursing) or a harmless duplicate reference already processed for
+  // this context. Either way the existing (in-progress or finished) clone is the right answer.
+  if (cached !== undefined) return cached;
+  // Always build a fresh SHALLOW clone from the pristine original `node` — never mutate it and
+  // never derive one context's clone from another context's already-processed output. `node` may
+  // be reused by $RefParser across multiple reference paths, so a different context reaching the
+  // same node needs its own independent decision computed from the untouched original; deriving
+  // it from a sibling context's clone would leak that sibling's mark across contexts (#640). The
+  // shallow copy is sufficient because every nested key touched below (`properties`, `allOf` /
+  // `oneOf` / `anyOf`, `items`) is always REASSIGNED to a brand-new value from a recursive call,
+  // never mutated in place, so the shallow-copied top level never aliases mutated nested state.
+  const schema: Record<string, unknown> = { ...node };
+  // Register the in-progress clone under its context BEFORE recursing, so a self-referential
+  // schema reached again under the SAME context returns this (own, safely mutable) clone instead
+  // of recursing forever.
+  const perNode = contexts ?? new Map<boolean, Record<string, unknown>>();
+  perNode.set(viaAllOf, schema);
+  seen.set(node, perNode);
   walkProperties(schema, seen);
   walkComposition(schema, seen);
   walkItems(schema, seen);

@@ -177,6 +177,36 @@ describe('assertResponseExact (#640) — exact-key-match against openapi.yaml', 
     expect(viaProperties.unevaluatedProperties).toBe(false); // reached via properties: marked
     expect(viaAllOf).not.toBe(viaProperties); // divergent contexts get independent clones
   });
+
+  // Same shared-node-two-contexts shape as above, but with the branch order REVERSED: the
+  // properties-context (marked) visit happens FIRST and the allOf-context (never-marked) visit
+  // happens SECOND. A divergent-context clone taken from the shared node AFTER its first visit
+  // already mutated that node leaks the first visit's mark onto the second visit's clone — the
+  // allOf branch would come back marked, which is exactly the "allOf branch gets marked
+  // directly" defect this whole walker exists to prevent. The prior test's branch order can't
+  // catch this: it visits the allOf (unmarked) context first, so there is nothing yet to leak.
+  it('marks a schema reached via two different composition contexts independently — properties-first branch order', () => {
+    const shared = { type: 'object', properties: { name: { type: 'string' } } };
+    const schema = {
+      oneOf: [
+        { type: 'object', properties: { wrapped: shared } },
+        { type: 'object', allOf: [shared] },
+      ],
+    };
+
+    const marked = markUnevaluatedPropertiesFalse(schema) as {
+      oneOf: [
+        { properties: { wrapped: { unevaluatedProperties?: boolean } } },
+        { allOf: [{ unevaluatedProperties?: boolean }] },
+      ];
+    };
+    const viaProperties = marked.oneOf[0].properties.wrapped;
+    const viaAllOf = marked.oneOf[1].allOf[0];
+
+    expect(viaProperties.unevaluatedProperties).toBe(false); // reached via properties: marked
+    expect(viaAllOf.unevaluatedProperties).toBeUndefined(); // allOf branch: never marked directly
+    expect(viaAllOf).not.toBe(viaProperties); // divergent contexts get independent clones
+  });
 });
 
 // operationParamKeys() feeds INV-4; anything it silently under-reports becomes an INV-4 check that
