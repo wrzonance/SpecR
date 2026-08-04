@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import {
   assertResponse,
+  assertResponseExact,
   specOperationManifest,
   successJsonOps,
   loadSpec,
   loadRawSpec,
   operationParamKeys,
+  markUnevaluatedPropertiesFalse,
+  resolveResponseSchema,
+  getValidator,
 } from './validate-response.js';
 import type { OpenApiDoc } from './validate-response.js';
 
@@ -60,6 +64,313 @@ describe('contract validate-response helper', () => {
     const doc = await loadSpec();
     expect(specOperationManifest(doc)).toContain('get /specs/{}');
     expect(successJsonOps(doc)).toContain('get /health');
+  });
+});
+
+// #640 — assertResponse's schema-CONFORMANCE check lets an undocumented extra key pass silently
+// (the vacuous-gate hole delete_package's stray `deleted` field exploited). assertResponseExact
+// closes it via a structuredClone'd + `unevaluatedProperties: false`-augmented schema, compiled
+// through a FRESH ajv instance rather than getValidator()'s shared WeakMap. /health is the
+// worked example because its response is allOf-composed (SuccessResponse + an inline object) —
+// exactly the shape whose walker had to mark only the allOf-OWNING node, never a branch.
+describe('assertResponseExact (#640) — exact-key-match against openapi.yaml', () => {
+  const validHealthBody = { success: true, data: { db: 'connected', uptime: 5 } };
+
+  it('accepts a fully-conformant body — zero false positives on the documented shape', async () => {
+    await expect(
+      assertResponseExact('get', '/health', 200, validHealthBody)
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects a top-level key the allOf-composed schema does not document', async () => {
+    const body = { ...validHealthBody, extra: 'nope' };
+    await expect(assertResponseExact('get', '/health', 200, body)).rejects.toThrow(
+      /does not document/
+    );
+  });
+
+  it('rejects a key nested under `data` that the schema does not document', async () => {
+    const body = { success: true, data: { ...validHealthBody.data, extra: 'nope' } };
+    await expect(assertResponseExact('get', '/health', 200, body)).rejects.toThrow(
+      /does not document/
+    );
+  });
+
+  it("shares resolveResponseSchema's contract with assertResponse: undocumented status fails loud, documented non-JSON no-ops", async () => {
+    await expect(assertResponseExact('delete', '/specs/{id}/lock', 204, undefined)).rejects.toThrow(
+      /documents no 204 response/
+    );
+    await expect(
+      assertResponseExact('delete', '/templates/{id}', 204, undefined)
+    ).resolves.toBeUndefined();
+  });
+
+  // Pipeline-level smoke check: it only has teeth alongside the dedicated no-mutation unit test
+  // below, because getValidator()'s WeakMap for this op's schema is already warmed by the
+  // 'accepts a fully-conformant body' test above (same describe block, runs first) — so a
+  // regression that made assertResponseExact mutate the shared schema in place would compile a
+  // corrupted validator into a FRESH cache slot instead, which this stale-cache read can't see.
+  // The behavior itself is still real and worth pinning; `markUnevaluatedPropertiesFalse never
+  // mutates its input schema` below is what actually proves the no-mutation invariant.
+  it('never mutates or caches through the shared ajv WeakMap — assertResponse stays permissive on the same op afterward', async () => {
+    const bodyWithExtra = { ...validHealthBody, extra: 'nope' };
+    // The exact variant rejects the extra key...
+    await expect(assertResponseExact('get', '/health', 200, bodyWithExtra)).rejects.toThrow();
+    // ...but assertResponse — reading the SAME operation's schema through getValidator()'s shared
+    // cache — must still accept it.
+    await expect(assertResponse('get', '/health', 200, bodyWithExtra)).resolves.toBeUndefined();
+  });
+
+  it('assertResponse behavior is unchanged: still permissive of undocumented extra keys', async () => {
+    const bodyWithExtra = { ...validHealthBody, extra: 'nope' };
+    await expect(assertResponse('get', '/health', 200, bodyWithExtra)).resolves.toBeUndefined();
+  });
+
+  // Proves the no-mutation invariant directly against markUnevaluatedPropertiesFalse's own input,
+  // independent of any ajv WeakMap cache-warmth ordering (unlike the pipeline check above, this
+  // fails deterministically for a regression that reintroduces in-place mutation, regardless of
+  // test execution order or which ops earlier tests happened to warm).
+  it('markUnevaluatedPropertiesFalse never mutates its input schema', () => {
+    const original = {
+      type: 'object',
+      properties: {
+        keep: { type: 'string' },
+        nested: { type: 'object', properties: { inner: { type: 'string' } } },
+      },
+    };
+    const snapshot = structuredClone(original);
+
+    const marked = markUnevaluatedPropertiesFalse(original) as {
+      unevaluatedProperties?: boolean;
+      properties: { nested: { unevaluatedProperties?: boolean } };
+    };
+
+    expect(original).toEqual(snapshot); // input object graph is byte-for-byte untouched
+    expect(marked).not.toBe(original); // caller always gets an independent clone
+    expect(marked.unevaluatedProperties).toBe(false);
+    expect(marked.properties.nested.unevaluatedProperties).toBe(false);
+  });
+
+  // A dereferenced schema can reach the SAME object identity (one $ref target reused by
+  // $RefParser.dereference for every pointer to it) through two different composition contexts
+  // in one tree: once as a raw allOf branch (must stay unmarked — see unevaluated-properties.ts's
+  // applicator classification) and once nested under a sibling's properties (must be marked). A visited-Set that
+  // only tracks "already seen" — not "seen under which context" — lets whichever context visits
+  // first silently decide for both, dropping the second context's mark.
+  it('marks a schema reached via two different composition contexts independently, not first-visit-wins', () => {
+    const shared = { type: 'object', properties: { name: { type: 'string' } } };
+    const schema = {
+      oneOf: [
+        { type: 'object', allOf: [shared] },
+        { type: 'object', properties: { wrapped: shared } },
+      ],
+    };
+
+    const marked = markUnevaluatedPropertiesFalse(schema) as {
+      oneOf: [
+        { allOf: [{ unevaluatedProperties?: boolean }] },
+        { properties: { wrapped: { unevaluatedProperties?: boolean } } },
+      ];
+    };
+    const viaAllOf = marked.oneOf[0].allOf[0];
+    const viaProperties = marked.oneOf[1].properties.wrapped;
+
+    expect(viaAllOf.unevaluatedProperties).toBeUndefined(); // allOf branch: never marked directly
+    expect(viaProperties.unevaluatedProperties).toBe(false); // reached via properties: marked
+    expect(viaAllOf).not.toBe(viaProperties); // divergent contexts get independent clones
+  });
+
+  // Same shared-node-two-contexts shape as above, but with the branch order REVERSED: the
+  // properties-context (marked) visit happens FIRST and the allOf-context (never-marked) visit
+  // happens SECOND. A divergent-context clone taken from the shared node AFTER its first visit
+  // already mutated that node leaks the first visit's mark onto the second visit's clone — the
+  // allOf branch would come back marked, which is exactly the "allOf branch gets marked
+  // directly" defect this whole walker exists to prevent. The prior test's branch order can't
+  // catch this: it visits the allOf (unmarked) context first, so there is nothing yet to leak.
+  it('marks a schema reached via two different composition contexts independently — properties-first branch order', () => {
+    const shared = { type: 'object', properties: { name: { type: 'string' } } };
+    const schema = {
+      oneOf: [
+        { type: 'object', properties: { wrapped: shared } },
+        { type: 'object', allOf: [shared] },
+      ],
+    };
+
+    const marked = markUnevaluatedPropertiesFalse(schema) as {
+      oneOf: [
+        { properties: { wrapped: { unevaluatedProperties?: boolean } } },
+        { allOf: [{ unevaluatedProperties?: boolean }] },
+      ];
+    };
+    const viaProperties = marked.oneOf[0].properties.wrapped;
+    const viaAllOf = marked.oneOf[1].allOf[0];
+
+    expect(viaProperties.unevaluatedProperties).toBe(false); // reached via properties: marked
+    expect(viaAllOf.unevaluatedProperties).toBeUndefined(); // allOf branch: never marked directly
+    expect(viaAllOf).not.toBe(viaProperties); // divergent contexts get independent clones
+  });
+});
+
+// #640 adversarial-review follow-ups. The walker's job is to make the gate strict WITHOUT making it
+// wrong: a vacuous branch lets an undocumented key through silently (the bug #640 exists to kill),
+// while a false positive rejects a fully-documented payload and gets the gate weakened or reverted.
+// Each case below is one applicator shape that used to fail one of those two ways.
+describe('markUnevaluatedPropertiesFalse — JSON-Schema 2020-12 applicator coverage (#640)', () => {
+  function validator(schema: object): (body: unknown) => boolean {
+    return getValidator(markUnevaluatedPropertiesFalse(schema)) as (body: unknown) => boolean;
+  }
+
+  // `unevaluatedProperties` on a oneOf/anyOf BRANCH is evaluated standalone against the whole
+  // instance, so it cannot see keys the branch's PARENT evaluates — marking branches rejected
+  // `{ common, a }` here. Only the composition OWNER may be marked; it unions its own `properties`
+  // annotations with the successful branch's.
+  it('accepts a payload split across a composition owner and its oneOf branch, and still rejects extras', () => {
+    const validate = validator({
+      type: 'object',
+      properties: { common: { type: 'string' } },
+      oneOf: [
+        { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+        { type: 'object', properties: { b: { type: 'string' } }, required: ['b'] },
+      ],
+    });
+    expect(validate({ common: 'x', a: 'y' })).toBe(true); // no false positive
+    expect(validate({ common: 'x', a: 'y', rogue: 1 })).toBe(false); // still exact
+  });
+
+  // anyOf combines the annotations of EVERY successful branch — the "exactly one branch applies"
+  // assumption that justified marking branches is simply false here.
+  it('combines annotations across all successful anyOf branches', () => {
+    const validate = validator({
+      type: 'object',
+      anyOf: [{ properties: { a: { type: 'string' } } }, { properties: { b: { type: 'string' } } }],
+    });
+    expect(validate({ a: 'x', b: 'y' })).toBe(true);
+    expect(validate({ a: 'x', rogue: 1 })).toBe(false);
+  });
+
+  // Objects reachable only through these keywords were never walked, so every key inside them was
+  // undocumented-but-accepted — a vacuous gate at exactly the nesting depth #640 cares about.
+  it.each([
+    {
+      keyword: 'patternProperties',
+      schema: {
+        type: 'object',
+        patternProperties: { '^x-': { type: 'object', properties: { known: { type: 'string' } } } },
+      },
+      valid: { 'x-one': { known: 'v' } },
+      extra: { 'x-one': { known: 'v', rogue: 1 } },
+    },
+    {
+      keyword: 'additionalProperties (schema-valued)',
+      schema: {
+        type: 'object',
+        additionalProperties: { type: 'object', properties: { known: { type: 'string' } } },
+      },
+      valid: { any: { known: 'v' } },
+      extra: { any: { known: 'v', rogue: 1 } },
+    },
+    {
+      keyword: 'prefixItems',
+      schema: {
+        type: 'array',
+        prefixItems: [{ type: 'object', properties: { a: { type: 'string' } } }],
+      },
+      valid: [{ a: 'x' }],
+      extra: [{ a: 'x', rogue: 1 }],
+    },
+    {
+      keyword: 'contains',
+      schema: {
+        type: 'array',
+        contains: { type: 'object', properties: { a: { type: 'string' } } },
+      },
+      valid: [{ a: 'x' }],
+      extra: [{ a: 'x', rogue: 1 }],
+    },
+    {
+      // CodeRabbit #645: `unevaluatedItems` is the 2020-12 Unevaluated-vocabulary sibling of
+      // `items`/`contains` — an object subschema under it evaluates properties, so omitting it
+      // from the walker let an undocumented key inside an array item pass the exact gate.
+      keyword: 'unevaluatedItems (schema-valued)',
+      schema: {
+        type: 'array',
+        prefixItems: [{ type: 'string' }],
+        unevaluatedItems: { type: 'object', properties: { a: { type: 'string' } } },
+      },
+      valid: ['head', { a: 'x' }],
+      extra: ['head', { a: 'x', rogue: 1 }],
+    },
+    {
+      // CodeRabbit #645: the walker already treated `dependentSchemas` as an in-place applicator
+      // and `evaluatesProperties` already counted it, but nothing exercised that traversal —
+      // an untested branch is indistinguishable from a missing one.
+      keyword: 'dependentSchemas',
+      schema: {
+        type: 'object',
+        properties: { trigger: { type: 'string' } },
+        dependentSchemas: {
+          trigger: {
+            properties: { nested: { type: 'object', properties: { a: { type: 'string' } } } },
+          },
+        },
+      },
+      valid: { trigger: 't', nested: { a: 'x' } },
+      extra: { trigger: 't', nested: { a: 'x', rogue: 1 } },
+    },
+    {
+      keyword: 'if/then',
+      schema: {
+        type: 'object',
+        properties: { kind: { type: 'string' } },
+        if: { properties: { kind: { const: 'x' } }, required: ['kind'] },
+        then: { properties: { extra: { type: 'string' } } },
+      },
+      valid: { kind: 'x', extra: 'e' },
+      extra: { kind: 'x', rogue: 1 },
+    },
+  ])('closes objects reached through $keyword', ({ schema, valid, extra }) => {
+    const validate = validator(schema);
+    expect(validate(valid)).toBe(true);
+    expect(validate(extra)).toBe(false);
+  });
+
+  // A node that evaluates NO properties of its own must not be marked: closing it would reject
+  // every key of an otherwise-unconstrained object.
+  it('leaves a schema that evaluates no properties unmarked', () => {
+    const marked = markUnevaluatedPropertiesFalse({ type: 'object' }) as {
+      unevaluatedProperties?: boolean;
+    };
+    expect(marked.unevaluatedProperties).toBeUndefined();
+  });
+});
+
+// resolveResponseSchema's two fail-loud guards exist so a gate can never "validate" nothing and
+// stay green. Neither shape exists in today's openapi.yaml, so both are pinned against a synthetic
+// doc — an untested guard is indistinguishable from a missing one.
+describe('resolveResponseSchema vacuity guards (#640)', () => {
+  function docWithResponse(response: unknown): OpenApiDoc {
+    return { paths: { '/synthetic': { get: { responses: { '200': response } } } } };
+  }
+
+  it('throws for an application/json response documenting no schema', () => {
+    const doc = docWithResponse({ content: { 'application/json': {} } });
+    expect(() => resolveResponseSchema(doc, 'get', '/synthetic', 200)).toThrow(
+      /application\/json response with no schema/
+    );
+  });
+
+  it('no-ops (returns undefined) for a documented response with no application/json at all', () => {
+    const doc = docWithResponse({ content: { 'application/pdf': { schema: { type: 'string' } } } });
+    expect(resolveResponseSchema(doc, 'get', '/synthetic', 200)).toBeUndefined();
+  });
+
+  it('still throws for a status the operation does not document', () => {
+    const doc = docWithResponse({
+      content: { 'application/json': { schema: { type: 'object' } } },
+    });
+    expect(() => resolveResponseSchema(doc, 'get', '/synthetic', 404)).toThrow(
+      /documents no 404 response/
+    );
   });
 });
 

@@ -4,6 +4,11 @@ import type { Router } from 'express';
 import $RefParser from '@apidevtools/json-schema-ref-parser';
 import type { ValidateFunction, AnySchemaObject } from 'ajv';
 import { z } from 'zod';
+import { markUnevaluatedPropertiesFalse } from './unevaluated-properties.js';
+
+// Re-exported so the walker's boundary invariants (no input mutation, per-context marking) can be
+// pinned from the same module surface the contract tests already import.
+export { markUnevaluatedPropertiesFalse };
 
 // ajv and ajv-formats are CJS-only packages with no exports map; under
 // moduleResolution:NodeNext they must be loaded via createRequire.
@@ -96,13 +101,20 @@ export function getValidator(schema: AnySchemaObject): ValidateFunction {
   return compiled;
 }
 
-export async function assertResponse(
+/** Shared by assertResponse (schema-conformance) and assertResponseExact (exact-key-match): looks
+ * up the operation, fails loud on the two shapes that would make an assertion pass VACUOUSLY (an
+ * undocumented status; an `application/json` response documenting no schema), and returns the
+ * documented `application/json` schema — or `undefined` for a documented non-JSON response
+ * (binary / no-content / multipart), which both callers treat as an out-of-scope no-op.
+ * Exported so those vacuity guards can be pinned against a synthetic `doc`: neither shape exists in
+ * today's openapi.yaml, so neither is reachable through `assertResponse`'s real-spec surface — and
+ * an unreachable guard nobody tests is exactly how a gate quietly stops gating. */
+export function resolveResponseSchema(
+  doc: OpenApiDoc,
   method: string,
   pathTemplate: string,
-  status: number,
-  body: unknown
-): Promise<void> {
-  const doc = await loadSpec();
+  status: number
+): AnySchemaObject | undefined {
   const rawOp = doc.paths[pathTemplate]?.[method.toLowerCase()];
   if (rawOp === undefined) throw new Error(`No OpenAPI operation: ${method} ${pathTemplate}`);
   const op = OperationObject.parse(rawOp);
@@ -116,13 +128,71 @@ export async function assertResponse(
         'would pass vacuously; fix the expected status or document it.'
     );
   }
-  const schema = response.content?.['application/json']?.schema;
+  const json = response.content?.['application/json'];
+  // No `application/json` media type at all — a documented binary / no-content / multipart
+  // response. There is genuinely nothing to validate, so both callers no-op.
+  if (json === undefined) return undefined;
+  // An `application/json` response that documents NO schema is a different animal, and collapsing
+  // it into the no-op above is the same vacuity bug as the undocumented-status case: successJsonOps
+  // still counts the op as in-scope JSON (it keys off the media type, not the schema), so INV-5/6
+  // would "validate" it against nothing and stay green forever. Fail loud instead.
+  if (json.schema === undefined) {
+    throw new Error(
+      `${method} ${pathTemplate} documents a ${status} application/json response with no schema ` +
+        'in openapi.yaml — the assertion would pass vacuously; document the response schema.'
+    );
+  }
+  return json.schema;
+}
+
+export async function assertResponse(
+  method: string,
+  pathTemplate: string,
+  status: number,
+  body: unknown
+): Promise<void> {
+  const doc = await loadSpec();
+  const schema = resolveResponseSchema(doc, method, pathTemplate, status);
   if (!schema) return; // documented non-JSON (binary / no-content / multipart) — out of scope
   const validate = getValidator(schema);
   if (!validate(body)) {
     throw new Error(
       `Response body for ${method} ${pathTemplate} (${status}) does not match openapi.yaml: ` +
         ajv.errorsText(validate.errors)
+    );
+  }
+}
+
+/** Exact-key-match variant of {@link assertResponse}: rejects any response key the openapi.yaml
+ * schema doesn't document, closing the vacuous-gate hole #640 found (schema conformance alone lets
+ * an undocumented extra key — e.g. `delete_package`'s `deleted`, since fixed — pass silently).
+ * Compiles a FRESH, uncached ajv validator against a `structuredClone`d + augmented copy of the
+ * schema — never mutates or caches through {@link getValidator}'s shared WeakMap, which INV-5's
+ * `assertResponse` call site also reads and would otherwise corrupt. Same "no such op" /
+ * "undocumented status" / "documented non-JSON → no-op" contract as `assertResponse`. */
+export async function assertResponseExact(
+  method: string,
+  pathTemplate: string,
+  status: number,
+  body: unknown
+): Promise<void> {
+  const doc = await loadSpec();
+  const schema = resolveResponseSchema(doc, method, pathTemplate, status);
+  if (!schema) return; // documented non-JSON (binary / no-content / multipart) — out of scope
+  const exactSchema = markUnevaluatedPropertiesFalse(schema);
+  const validate = ajv.compile(exactSchema);
+  if (!validate(body)) {
+    // The exact schema still enforces `required` and field types, so a failure here is not
+    // necessarily an undocumented key. Report the key-specific message only when ajv actually
+    // says so; otherwise a missing required field would be misdiagnosed as an extra one.
+    const extraKey = validate.errors?.some((e) => e.keyword === 'unevaluatedProperties');
+    const detail = ajv.errorsText(validate.errors);
+    throw new Error(
+      extraKey
+        ? `Response body for ${method} ${pathTemplate} (${status}) carries keys openapi.yaml does ` +
+            `not document: ${detail}`
+        : `Response body for ${method} ${pathTemplate} (${status}) does not match its documented ` +
+            `response schema exactly: ${detail}`
     );
   }
 }
