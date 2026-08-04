@@ -71,6 +71,13 @@ const tableRow = (cellsXml: readonly string[]): string =>
   `<w:tr>${cellsXml.map(tableCell).join('')}</w:tr>`;
 const table = (rowsXml: readonly string[]): string => `<w:tbl>${rowsXml.join('')}</w:tbl>`;
 
+/** A run with w:vanish bare/enabled (ST_OnOff ON — hidden). */
+const hiddenRun = (text: string): string =>
+  `<w:r><w:rPr><w:vanish/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r>`;
+/** A run with w:vanish explicitly val="0" (ST_OnOff OFF — visible, #648). */
+const visibleOffRun = (text: string): string =>
+  `<w:r><w:rPr><w:vanish w:val="0"/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r>`;
+
 describe('extractContentControls', () => {
   it('roundtrip: recovers every SpecNode id → text from generateDocx output', async () => {
     const buffer = await generateDocx(TREE);
@@ -351,5 +358,38 @@ describe('extractContentControls — object-block extraction (#520)', () => {
     expect(result.objectBlocks).toHaveLength(1);
     expect(result.objectBlocks[0]?.fingerprint.kind).toBe('table');
     expect(result.objectBlocks[0]?.interiorUuids).toEqual([U1, U2]);
+  });
+});
+
+// #648: visibleText had no w:vanish handling at all, so it disagreed with the
+// object-tier AST walk (which already drops hidden runs — #641/ADR-092): an
+// untouched round-tripped DOCX with this shape could report as modified. The
+// fix is deliberately scoped to OBJECT INTERIORS ONLY (table/drawing/pict) —
+// the ordinary paragraph tier's KNOWN AMBIGUITY (document.test.ts near line
+// 259: a mixed hidden/visible paragraph is treated as visible) must not
+// change, and is pinned explicitly below as the regression this issue most
+// risks.
+describe('extractContentControls — object-interior vanish handling (#648)', () => {
+  it('object interior: a table-cell paragraph mixing hidden and visible runs extracts only the visible text', async () => {
+    const body = table([tableRow([sdt(U1, para(hiddenRun('secret ') + run('visible')))])]);
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('visible');
+  });
+
+  // KNOWN AMBIGUITY (unchanged by #648, mirrors document.test.ts near line 259):
+  // an ORDINARY paragraph mixing hidden and visible runs is NOT object-interior,
+  // so it still yields both concatenated — the visible text is real content, and
+  // only a fully-hidden paragraph would drop out. A blanket hidden-run skip here
+  // was proposed during PR 647's review and rejected on exactly this ground.
+  it('ordinary paragraph tier is UNCHANGED: a mixed hidden/visible paragraph still yields both, concatenated', async () => {
+    const body = sdt(U1, para(hiddenRun('secret ') + run('visible')));
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('secret visible');
+  });
+
+  it('object interior: a run whose w:vanish carries val="0" is VISIBLE (ST_OnOff toggle, not presence-only)', async () => {
+    const body = table([tableRow([sdt(U1, para(visibleOffRun('kept ') + run('too')))])]);
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('kept too');
   });
 });

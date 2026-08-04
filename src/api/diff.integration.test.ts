@@ -317,6 +317,48 @@ function anchoredTableMeta(anchorUuid: string, text: string): ObjectMeta {
   };
 }
 
+/**
+ * #648: a table cell mixing one hidden (w:vanish) run and one visible run.
+ * `visibleText` matches ONLY the visible run — the object tier's AST
+ * (objectText, via parser/docx/body-objects.ts's collectText) already drops
+ * hidden runs (#641/ADR-092), so this is what a correctly round-tripped
+ * capture must store. Before the #648 fix, merge/extract.ts's visibleText
+ * had no vanish handling at all and would concatenate the hidden run's text
+ * in front of the visible one, diverging from this AST snapshot and reading
+ * an untouched round-tripped DOCX as modified.
+ */
+function anchoredMixedVisibilityTableMeta(
+  anchorUuid: string,
+  hiddenText: string,
+  visibleRunText: string
+): ObjectMeta {
+  const anchoredCell: ObjectBlobNode = {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `specr-uuid-${anchorUuid}` } }] },
+      {
+        'w:sdtContent': [
+          {
+            'w:p': [
+              {
+                'w:r': [{ 'w:rPr': [{ 'w:vanish': [] }] }, { 'w:t': [{ '#text': hiddenText }] }],
+              },
+              { 'w:r': [{ 'w:t': [{ '#text': visibleRunText }] }] },
+            ],
+          },
+        ],
+      },
+    ],
+  } as ObjectBlobNode;
+  return {
+    kind: 'table',
+    floating: false,
+    generation: 'drawingml',
+    rows: 1,
+    columns: 1,
+    blob: [{ 'w:tbl': [{ 'w:tr': [{ 'w:tc': [anchoredCell] }] }] }],
+  };
+}
+
 describe('body-level object round-trip — real wiring (#520 review finding)', () => {
   const OBJ_PART_ID = randomUUID();
   const OBJ_OBJECT_ID = randomUUID();
@@ -455,6 +497,111 @@ describe('body-level object round-trip — real wiring (#520 review finding)', (
       expect(diff.modified).toEqual([]);
       expect(diff.conflicts).toEqual([]);
       expect(diff.added).toEqual([]);
+    }
+  );
+});
+
+// #648: an object-interior table cell mixing a hidden and a visible run.
+// Before the fix, merge/extract.ts's visibleText had no w:vanish handling at
+// all, so it disagreed with the AST (objectText, which already drops hidden
+// runs — #641/ADR-092): an untouched round-tripped DOCX with this shape would
+// report as modified. Proved at the real wiring — DB → generateDocx →
+// extractContentControls → getObjectStructuralSnapshots → computeDiff — not
+// just at the unit level, since that is where the two code paths' divergence
+// actually surfaces as a false diff entry.
+describe('body-level object round-trip — hidden/visible run mix (#648)', () => {
+  const VAN_PART_ID = randomUUID();
+  const VAN_OBJECT_ID = randomUUID();
+  const VAN_TEXT_ID = randomUUID();
+  const VAN_HIDDEN_TEXT = 'Hidden internal guidance. ';
+  const VAN_VISIBLE_TEXT = 'Visible spec cell text.';
+  let vanSpecId: string;
+
+  beforeAll(async () => {
+    vanSpecId = await createSpec({
+      section: '09 91 26',
+      title: 'Object Vanish Diff Wiring Spec',
+      source: `d648diff_${randomUUID().slice(0, 8)}`,
+    });
+    await insertTree(
+      {
+        id: vanSpecId,
+        section: '09 91 26',
+        title: 'Object Vanish Diff Wiring Spec',
+        parts: [
+          {
+            id: VAN_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            meta: {},
+            children: [
+              {
+                id: VAN_OBJECT_ID,
+                type: 'object',
+                text: '',
+                meta: {
+                  object: anchoredMixedVisibilityTableMeta(
+                    VAN_TEXT_ID,
+                    VAN_HIDDEN_TEXT,
+                    VAN_VISIBLE_TEXT
+                  ),
+                },
+                children: [
+                  {
+                    id: VAN_TEXT_ID,
+                    type: 'objectText',
+                    // Matches the object tier's AST (visible run only) —
+                    // never the hidden run's text (#641/ADR-092).
+                    text: VAN_VISIBLE_TEXT,
+                    meta: {},
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      vanSpecId,
+      pool
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [vanSpecId]);
+  });
+
+  it(
+    'an unmodified generated DOCX round-trips with an empty diff — the hidden run never ' +
+      'leaks into the object-interior text merge extracts',
+    async () => {
+      const generateRes = await fetch(`${baseUrl}/specs/${vanSpecId}/generate`, {
+        method: 'POST',
+      });
+      expect(generateRes.status).toBe(200);
+      const buffer = Buffer.from(await generateRes.arrayBuffer());
+
+      const form = new FormData();
+      form.append(
+        'file',
+        new Blob([new Uint8Array(buffer)], { type: DOCX_MIME }),
+        'object-vanish.docx'
+      );
+      const diffRes = await fetch(`${baseUrl}/specs/${vanSpecId}/diff`, {
+        method: 'POST',
+        body: form,
+      });
+      const body = (await diffRes.json()) as ApiResponse<DiffResult>;
+
+      expect(diffRes.status).toBe(200);
+      expect(body.data).toEqual({
+        added: [],
+        modified: [],
+        deleted: [],
+        conflicts: [],
+        objectConflicts: [],
+        warnings: [],
+      });
     }
   );
 });

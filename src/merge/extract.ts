@@ -4,6 +4,15 @@ import { UUID_TAG_PREFIX } from '../ast/index.js';
 import { MergeError } from './error.js';
 import { fingerprintBlob } from './object-fingerprint.js';
 import type { ExtractResult, ExtractedObjectBlock, TrackChangeRecord } from './types.js';
+import type { ObjectBlobNode } from '../ast/index.js';
+// #648/ADR-092: a narrow, deliberate exception to module-boundaries.md's
+// "merge/ knows nothing about parsing" prose line — hasRunVanish is the
+// SINGLE ST_OnOff-aware vanish predicate shared by object capture
+// (body-objects.ts) and object-blob edit rewrite (object-blob-edit.ts); a
+// second copy here would reintroduce the exact capture/rewrite drift
+// ADR-092 closed. Reached through the parser's own barrel (parser/index.ts),
+// per the repo's sibling-barrel-only import rule.
+import { hasRunVanish } from '../parser/index.js';
 
 // preserveOrder keeps w:sdt blocks and bare w:p siblings in document order —
 // required for orphan indexes (non-preserveOrder grouping destroys ordering).
@@ -20,10 +29,13 @@ const xmlParser = new XMLParser({
 });
 
 // fast-xml-parser preserveOrder node: one element key → children array,
-// '#text' → string, ':@' → attribute record.
-interface OrderedNode {
-  readonly [key: string]: unknown;
-}
+// '#text' → string, ':@' → attribute record. This is the SAME runtime shape
+// as ast/object-schemas.ts's ObjectBlobNode (both describe fast-xml-parser's
+// preserveOrder output), so extract.ts aliases it directly rather than
+// keeping a second, duplicate node-shape definition — that alignment is
+// also what lets hasRunVanish (which is typed against ObjectBlobNode) accept
+// an extract.ts node with zero cross-boundary cast (#648).
+type OrderedNode = ObjectBlobNode;
 
 interface ParaContext {
   readonly uuid: string | undefined;
@@ -32,6 +44,14 @@ interface ParaContext {
    *  text-box run (visitRunNode's w:drawing/w:pict branch) capture interior
    *  specr-uuid anchors without threading the whole ExtractAcc through. */
   readonly controlled: Map<string, string>;
+  /** true once the walk has descended into a body-level object block
+   *  (w:tbl/w:drawing/w:pict — OBJECT_BLOCK_TAGS). Object-interior paragraphs
+   *  must match the AST's objectText, which already drops hidden runs
+   *  (issue #641/ADR-092); the ordinary paragraph tier's KNOWN AMBIGUITY
+   *  (a mixed hidden/visible paragraph is treated as visible — see
+   *  document.test.ts near line 259) is deliberately untouched outside an
+   *  object interior. See visibleText's use of this flag (#648). */
+  readonly objectInterior: boolean;
 }
 
 interface ExtractAcc {
@@ -65,8 +85,12 @@ function childrenOf(node: OrderedNode, tag: string): readonly OrderedNode[] {
 
 function attrStr(node: OrderedNode, name: string): string | undefined {
   const attrs = node[':@'];
-  if (typeof attrs !== 'object' || attrs === null) return undefined;
-  const value = (attrs as Record<string, unknown>)[name];
+  // ObjectBlobNode's `:@` is `Readonly<Record<string, string | number>> |
+  // undefined` (an optional property, never nullable) — `typeof attrs !==
+  // 'object'` alone already excludes `undefined` (whose typeof is
+  // 'undefined'), so no separate null check or value cast is needed.
+  if (typeof attrs !== 'object') return undefined;
+  const value = attrs[name];
   return typeof value === 'string' ? value : undefined;
 }
 
@@ -149,7 +173,9 @@ function visitRunNode(node: OrderedNode, tag: string, ctx: ParaContext): string 
  * are discarded — a drawing/shape body has no CSI tier to anchor an addition
  * against, mirroring the table-cell anchorless rule. Track-change records
  * ARE preserved: `ctx.records` is the same array reference as the top-level
- * walk's.
+ * walk's. objectInterior is forced true (#648): this function is only ever
+ * reached from visitRunNode's w:drawing/w:pict dispatch, i.e. a text-box
+ * interior, which is object territory by construction.
  */
 function collectDrawingAnchors(nodes: readonly OrderedNode[], ctx: ParaContext): void {
   const throwawayAcc: ExtractAcc = {
@@ -157,15 +183,29 @@ function collectDrawingAnchors(nodes: readonly OrderedNode[], ctx: ParaContext):
     orphans: [],
     records: ctx.records,
   };
-  walkBlocks(nodes, undefined, throwawayAcc, { index: 0, lastControlledUuid: undefined }, false);
+  walkBlocks(
+    nodes,
+    undefined,
+    throwawayAcc,
+    { index: 0, lastControlledUuid: undefined },
+    false,
+    true
+  );
 }
 
-/** Visible (post virtual-accept) text of paragraph content nodes, in order. */
+/** Visible (post virtual-accept) text of paragraph content nodes, in order.
+ *  Inside an object interior (ctx.objectInterior), a run whose w:vanish is
+ *  enabled (hasRunVanish, ST_OnOff-aware) is skipped — matching the object
+ *  tier's objectText, which already drops the same runs (#641/ADR-092). This
+ *  check is intentionally scoped to objectInterior only: the ordinary
+ *  paragraph tier's KNOWN AMBIGUITY (a mixed hidden/visible paragraph reads
+ *  as visible) is out of scope for #648 and must not change. */
 function visibleText(nodes: readonly OrderedNode[], ctx: ParaContext): string {
   let out = '';
   for (const node of nodes) {
     const tag = tagOf(node);
     if (tag === undefined || tag === '#text' || PROPERTY_TAGS.has(tag)) continue;
+    if (ctx.objectInterior && hasRunVanish(node)) continue;
     out += visitRunNode(node, tag, ctx);
   }
   return out;
@@ -204,12 +244,14 @@ function visitParagraph(
   uuid: string | undefined,
   acc: ExtractAcc,
   state: WalkState,
-  inTable: boolean
+  inTable: boolean,
+  objectInterior: boolean
 ): WalkState {
   const text = visibleText(childrenOf(node, 'w:p'), {
     uuid,
     records: acc.records,
     controlled: acc.controlled,
+    objectInterior,
   });
   if (!text.trim()) return state; // whitespace-only spacer paragraphs ignored
   if (uuid !== undefined) {
@@ -226,33 +268,51 @@ function visitParagraph(
   return { index: state.index + 1, lastControlledUuid: state.lastControlledUuid };
 }
 
-/** Walk block-level nodes in document order, tracking the enclosing sdt uuid
- *  and whether the walk has descended into a w:tbl (table cells never anchor). */
+const OBJECT_BLOCK_TAGS = new Set(['w:tbl', 'w:drawing', 'w:pict']);
+
+/** Walk block-level nodes in document order, tracking the enclosing sdt uuid,
+ *  whether the walk has descended into a w:tbl (table cells never anchor),
+ *  and whether it has descended into a body-level object block (#648 —
+ *  OBJECT_BLOCK_TAGS: w:tbl/w:drawing/w:pict; a visibleText vanish-skip). */
 function walkBlocks(
   nodes: readonly OrderedNode[],
   uuid: string | undefined,
   acc: ExtractAcc,
   state: WalkState,
-  inTable: boolean
+  inTable: boolean,
+  objectInterior: boolean
 ): WalkState {
   let s = state;
   for (const node of nodes) {
     const tag = tagOf(node);
     if (tag === undefined || tag === '#text' || PROPERTY_TAGS.has(tag)) continue;
     if (tag === 'w:sdt') {
-      s = walkBlocks(childrenOf(node, tag), readSdtUuid(node) ?? uuid, acc, s, inTable);
+      s = walkBlocks(
+        childrenOf(node, tag),
+        readSdtUuid(node) ?? uuid,
+        acc,
+        s,
+        inTable,
+        objectInterior
+      );
     } else if (tag === 'w:p') {
-      s = visitParagraph(node, uuid, acc, s, inTable);
+      s = visitParagraph(node, uuid, acc, s, inTable, objectInterior);
     } else {
       // w:document, w:body, w:sdtContent, w:tbl, … — a w:tbl marks its whole
-      // subtree as table-descended so its cell paragraphs stay anchorless.
-      s = walkBlocks(childrenOf(node, tag), uuid, acc, s, inTable || tag === 'w:tbl');
+      // subtree as table-descended so its cell paragraphs stay anchorless;
+      // any OBJECT_BLOCK_TAGS tag also marks its subtree as object-interior.
+      s = walkBlocks(
+        childrenOf(node, tag),
+        uuid,
+        acc,
+        s,
+        inTable || tag === 'w:tbl',
+        objectInterior || OBJECT_BLOCK_TAGS.has(tag)
+      );
     }
   }
   return s;
 }
-
-const OBJECT_BLOCK_TAGS = new Set(['w:tbl', 'w:drawing', 'w:pict']);
 
 /** Every specr-uuid `w:sdt` anchor's uuid found anywhere in `nodes`, in document order. */
 function findInteriorUuids(nodes: readonly OrderedNode[]): string[] {
@@ -334,7 +394,8 @@ export async function extractContentControls(docxBuffer: Buffer): Promise<Extrac
   const nodes = parseDocumentXml(xml);
 
   const acc: ExtractAcc = { controlled: new Map(), orphans: [], records: [] };
-  walkBlocks(nodes, undefined, acc, { index: 0, lastControlledUuid: undefined }, false);
+  // Document root starts outside both a table and an object interior.
+  walkBlocks(nodes, undefined, acc, { index: 0, lastControlledUuid: undefined }, false, false);
 
   return {
     controlled: acc.controlled,
