@@ -29,6 +29,40 @@ function buildDeepSpecNode(depth: number): unknown {
   return node;
 }
 
+/** A minimal, fully-documented SpecNode — every field either required by the schema or a real
+ * optional the openapi.yaml SpecNode component declares. Shared by the six-op acceptance sweep
+ * below (#649) so each op's worked example stays legible instead of re-deriving the shape. */
+function cleanSpecNode(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return { id: NODE_ID, type: 'pr1', text: 'clean', children: [], meta: {}, ...overrides };
+}
+
+/** A minimal, fully-documented SpecTree (GET /specs/{id}'s `data`) — required fields only, plus
+ * one real SpecNode child so the SpecTree → SpecNode $ref chain is actually exercised. */
+function cleanSpecTree(): Record<string, unknown> {
+  return { id: NODE_ID, section: '09 91 26', title: 'Sample Section', parts: [cleanSpecNode()] };
+}
+
+/** A minimal, fully-documented RevisionWithTrees (GET /revisions/{id}'s `data`) — every required
+ * field, with one RevisionSpecEntry whose `tree` is a real SpecTree so the deepest real $ref chain
+ * in openapi.yaml (RevisionWithTrees → RevisionSpecEntry → SpecTree → SpecNode) is exercised. */
+function cleanRevisionWithTrees(): Record<string, unknown> {
+  return {
+    revisionId: NODE_ID,
+    packageId: NODE_ID,
+    label: 'Rev A',
+    displayName: 'Revision A',
+    type: 'draft',
+    date: '2026-01-01',
+    sortOrder: 1,
+    number: null,
+    attributes: {},
+    issuedAt: '2026-01-01T00:00:00Z',
+    specs: [{ specId: NODE_ID, position: 1, tree: cleanSpecTree() }],
+    parentRevisionId: null,
+    baseRevisionId: null,
+  };
+}
+
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
 
 // Narrow shape for the raw (un-dereferenced) request-body schema a #377 write op documents.
@@ -336,16 +370,8 @@ describe('#649: self-referential SpecNode/SpecTree schemas compile and validate'
   // — and a standalone SuccessResponse only "sees" its own `success` key, never a sibling allOf
   // branch's `data` key, so it would reject a fully clean, fully-documented payload. Driving a real
   // op's exact-match check against a genuinely clean body proves the two-mirror split avoids this.
-  it('assertResponseExact accepts a clean SuccessResponse-enveloped SpecNode payload (no false rejection)', async () => {
-    const body = {
-      success: true,
-      data: { id: NODE_ID, type: 'pr1', text: 'clean', children: [], meta: {} },
-    };
-    await expect(
-      assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}', 200, body)
-    ).resolves.toBeUndefined();
-  });
-
+  // (The accept case itself is now one row of the six-op sweep below; this test asserts the
+  // rejection half, which the sweep — accept-only by design — doesn't cover.)
   it('assertResponseExact rejects an undocumented key nested inside SpecNode.children, not just at the top level', async () => {
     const body = {
       success: true,
@@ -360,6 +386,76 @@ describe('#649: self-referential SpecNode/SpecTree schemas compile and validate'
     await expect(
       assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}', 200, body)
     ).rejects.toThrow(/does not document/);
+  });
+});
+
+// #649 acceptance criterion 4: "Confirm the six ops above now actually validate — drive each and
+// assert a real response passes." The it.each above only proves each schema COMPILES; this drives
+// assertResponseExact — the strictest of the two checks (INV-6, #640) — against a real,
+// fully-documented payload for every one of the six, closing the gap between "compiles" and
+// "a real response is actually accepted end-to-end". A regression that mis-registered even one
+// mirror entry, or mis-qualified a single `$ref` along one of these ops' real (sometimes multi-hop:
+// RevisionWithTrees → RevisionSpecEntry → SpecTree → SpecNode) reference chains, would surface here
+// as a false rejection — a failure mode a compile-only check cannot see.
+describe('assertResponseExact accepts a real payload for all six previously-unvalidated operations (#649)', () => {
+  it.each([
+    ['get', '/specs/{id}', 200, { success: true, data: cleanSpecTree() }] as const,
+    ['post', '/specs/{id}/paragraphs', 201, { success: true, data: cleanSpecNode() }] as const,
+    [
+      'patch',
+      '/specs/{id}/paragraphs/{nodeId}',
+      200,
+      { success: true, data: cleanSpecNode() },
+    ] as const,
+    [
+      'patch',
+      '/specs/{id}/paragraphs/{nodeId}/removal',
+      200,
+      { success: true, data: cleanSpecNode() },
+    ] as const,
+    [
+      'patch',
+      '/specs/{id}/paragraphs/{nodeId}/reject',
+      200,
+      { success: true, data: cleanSpecNode() },
+    ] as const,
+    ['get', '/revisions/{id}', 200, { success: true, data: cleanRevisionWithTrees() }] as const,
+  ])(
+    '%s %s (%i) accepts its fully-documented worked example',
+    async (method, path, status, body) => {
+      await expect(assertResponseExact(method, path, status, body)).resolves.toBeUndefined();
+    }
+  );
+});
+
+// #649 — the LOCAL-walking-context invariant, proven against a REAL dual-context $ref rather than
+// a hand-built one: SuccessResponse is referenced from openapi.yaml in TWO genuinely different
+// contexts. At ~130 other ops it is always an allOf BRANCH (IN_PLACE — never marked directly, see
+// unevaluated-properties.ts's applicator classification). But DELETE /specs/{id}/lock's 200
+// response schema is a bare `$ref: SuccessResponse` with no allOf wrapper at all — SuccessResponse
+// is the response schema itself (CHILD context — the top-level call), and MUST be marked directly
+// there, or an undocumented key on this one op would silently pass. Qualification keyed on the
+// component's identity alone (rather than the LOCAL context of each individual `$ref` occurrence)
+// would make this op inherit whichever mirror the other ~130 in-place occurrences last touched,
+// and either always reject (breaking every allOf-composed response) or always accept (reopening
+// #640 for this op specifically) — this is the real-spec case the hand-built qualifyRef tests above
+// exist to generalize from.
+describe('assertResponseExact — SuccessResponse in two real contexts proves LOCAL $ref qualification (#649)', () => {
+  it('rejects an undocumented key where SuccessResponse is the bare top-level schema (CHILD context)', async () => {
+    await expect(
+      assertResponseExact('delete', '/specs/{id}/lock', 200, { success: true, extra: 'nope' })
+    ).rejects.toThrow(/does not document/);
+  });
+
+  it('accepts the exact documented shape for that same bare-SuccessResponse op', async () => {
+    await expect(
+      assertResponseExact('delete', '/specs/{id}/lock', 200, { success: true })
+    ).resolves.toBeUndefined();
+  });
+
+  it("still permits SuccessResponse's allOf-branch sibling keys elsewhere — same component, IN_PLACE context, never marked directly", async () => {
+    const body = { success: true, data: { db: 'connected', uptime: 5 } };
+    await expect(assertResponseExact('get', '/health', 200, body)).resolves.toBeUndefined();
   });
 });
 
