@@ -4,16 +4,18 @@
 // gate at all — a silently dropped or malformed field on a write response has nothing here to
 // catch it. INV-6 closes that hole with the same driven/exempt/pending posture INV-5 uses: a
 // driven case invokes a write tool against a fresh row and validates its BARE payload (wrapped as
-// the REST envelope `{ success: true, data }`) against the mapped op's OpenAPI response schema —
-// correct by construction for tools built on `ok(await dbFn())`, whose underlying db function is
-// the exact one the REST route also calls.
+// the REST envelope `{ success: true, data }`) EXACTLY against the mapped op's OpenAPI response
+// schema — no undocumented extra keys accepted (#640 hardened this from schema-conformance to
+// exact-key-match via assertResponseExact, after a conformance-only check let delete_package's
+// undocumented `deleted` key pass silently). Correct by construction for tools built on
+// `ok(await dbFn())`, whose underlying db function is the exact one the REST route also calls.
 import { afterAll, describe, expect, it } from 'vitest';
 import { pool } from '../db/index.js';
 import {
   loadSpec,
   operationPathTemplates,
   successJsonOps,
-  assertResponse,
+  assertResponseExact,
 } from '../test-utils/contract/validate-response.js';
 import { OP_TO_TOOL } from './contract-map.js';
 import {
@@ -190,15 +192,6 @@ const INV6_DRIVEN: readonly DrivenCase[] = [
     invoke: async () => handleDeleteSpec({ specId: await seedWithdrawableSpecId() }),
   },
   {
-    // SCOPE NOTE: INV-6 validates the payload against the op's OpenAPI response schema, which is
-    // not `additionalProperties: false` — so an UNDOCUMENTED EXTRA key passes. delete_package is
-    // the one driven op where that matters today: REST returns `{ packageId }`
-    // (api/packages.ts:deletePackageHandler) and openapi documents exactly that, while
-    // handleDeletePackage returns `{ deleted: true, packageId }`. The `deleted` key is a real,
-    // PRE-EXISTING REST<->MCP divergence this gate cannot see; driving the op still proves the
-    // documented fields are present and correctly typed (a dropped `packageId` fails here), which
-    // is what INV-6 claims — no more. Aligning the handler is a production change tracked in #640,
-    // deliberately not folded into this test-only PR.
     op: 'delete /packages/{}',
     tool: 'delete_package',
     status: 200,
@@ -248,7 +241,8 @@ describe('INV-6: response-shape validation for write-mapped tools', () => {
   });
 
   it.each(INV6_DRIVEN)(
-    'INV-6: $op -> $tool output validates against its mapped op response schema',
+    'INV-6: $op -> $tool output validates EXACTLY against its mapped op response schema ' +
+      '(no undocumented extra keys — #640)',
     async ({ op, tool, status, invoke }) => {
       const doc = await loadSpec();
       const literalPath = operationPathTemplates(doc).get(op);
@@ -258,9 +252,28 @@ describe('INV-6: response-shape validation for write-mapped tools', () => {
       ).toBeDefined();
       const [method] = op.split(' ');
       const payload = parsePayload(await invoke());
-      await assertResponse(method!, literalPath!, status, { success: true, data: payload });
+      await assertResponseExact(method!, literalPath!, status, { success: true, data: payload });
     }
   );
+
+  it('INV-6 regression (#640): delete_package rejects a reintroduced undocumented `deleted` key', async () => {
+    // Permanent form of the issue's mandated mutation-verification: drives a real delete_package
+    // success payload, splices `deleted: true` back onto it (simulating the fixed bug regressing),
+    // and asserts assertResponseExact rejects it — proving the exact-match gate, not just the
+    // handler fix, is what would catch a recurrence.
+    const doc = await loadSpec();
+    const literalPath = operationPathTemplates(doc).get('delete /packages/{}');
+    expect(
+      literalPath,
+      'delete /packages/{} has no matching literal path in openapi.yaml'
+    ).toBeDefined();
+    const packageId = await seedDeletablePackageId();
+    const payload = parsePayload(await handleDeletePackage({ packageId }));
+    const regressed = { ...(payload as Record<string, unknown>), deleted: true };
+    await expect(
+      assertResponseExact('delete', literalPath!, 200, { success: true, data: regressed })
+    ).rejects.toThrow(/does not document/);
+  });
 
   it('INV-6 completeness: every write-mapped JSON op is driven, exempt, or pending', async () => {
     const inScope = await writeMappedJsonOps();
