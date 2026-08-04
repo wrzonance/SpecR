@@ -17,8 +17,8 @@ sibling gap, decisions #5/#7 of #520): there is no reliable base↔theirs
 identity for the object row itself without either anchoring it directly or a
 positional/ordinal heuristic that is itself ambiguous under reorder.
 
-#525 found the resulting gap has a silent-corruption consequence, not just a
-missing feature. When an editor deletes an **entire** object in Word — every
+Issue #525 found the resulting gap has a silent-corruption consequence, not
+just a missing feature. When an editor deletes an **entire** object in Word — every
 one of its interior anchors disappears from `theirs`, not just some —
 `findMatchingBlock` returns `undefined`, so no `ObjectConflictDiff` is
 emitted. The object's own row is unconditionally excluded from
