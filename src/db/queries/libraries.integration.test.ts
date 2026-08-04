@@ -1,4 +1,7 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { pool } from '../index.js';
 import {
   createLibrary,
@@ -9,17 +12,29 @@ import {
   DEFAULT_COMPANY_LIBRARY,
 } from './libraries.js';
 
+// Per-run suffix on this suite's client-library names. Secondary to the
+// beforeAll sweep below: it keeps concurrently-inspected rows attributable and
+// avoids a hard unique-key failure if that sweep is ever narrowed. 32 bits, so
+// it makes a collision improbable rather than impossible. See issue #623.
+const suffix = randomUUID().slice(0, 8);
+
 // Namespaces reserved by this file: '99 77 %' spec sections, project
 // 'lib-xor-test-project', and every non-built-in library row.
 // Cleanup order is FK-safe: specs → projects → libraries.
-afterEach(async () => {
+async function clearReservedNamespaces(): Promise<void> {
   await pool.query(`DELETE FROM specs WHERE section LIKE '99 77 %'`);
   await pool.query(`DELETE FROM projects WHERE name = 'lib-xor-test-project'`);
   await pool.query(`DELETE FROM libraries WHERE name NOT IN ($1, $2)`, [
     UFGS_REFERENCE_LIBRARY,
     DEFAULT_COMPANY_LIBRARY,
   ]);
-});
+}
+
+// Residue from a prior run that never reached its afterEach (process kill,
+// hookTimeout) is cleared BEFORE the first test, not incidentally by the first
+// test's teardown — so a filtered run (`-t`) starts as clean as a full one.
+beforeAll(clearReservedNamespaces);
+afterEach(clearReservedNamespaces);
 
 describe('migration 016 — backfill and built-ins', () => {
   it('db: no spec is ownerless after backfill', async () => {
@@ -39,17 +54,18 @@ describe('migration 016 — backfill and built-ins', () => {
 
 describe('libraries CRUD', () => {
   it('createLibrary → findLibraryById round-trips a client master with parent lineage', async () => {
+    const acmeName = `Acme Client Master ${suffix}`;
     const company = await findLibraryByName(DEFAULT_COMPANY_LIBRARY);
     const created = await createLibrary({
       tier: 'client',
-      name: 'Acme Client Master',
+      name: acmeName,
       owner: 'Acme Corp',
       parentLibraryId: company!.id,
     });
     const found = await findLibraryById(created.id);
     expect(found).toMatchObject({
       tier: 'client',
-      name: 'Acme Client Master',
+      name: acmeName,
       owner: 'Acme Corp',
       parentLibraryId: company!.id,
     });
@@ -79,7 +95,7 @@ describe('libraries CRUD', () => {
 
 describe('specs ownership — ADR-015 D1', () => {
   it('db: the same (section, source) coexists in two libraries without conflict (#92)', async () => {
-    const other = await createLibrary({ tier: 'client', name: 'Second Library' });
+    const other = await createLibrary({ tier: 'client', name: `Second Library ${suffix}` });
     const company = await findLibraryByName(DEFAULT_COMPANY_LIBRARY);
     await pool.query(
       `INSERT INTO specs (section, title, source, library_id) VALUES ('99 77 01', 'Copy A', 'arcat', $1)`,
@@ -143,5 +159,83 @@ describe('specs ownership — ADR-015 D1', () => {
         [projectId]
       )
     ).rejects.toThrow(/specs_section_project_unique/);
+  });
+});
+
+describe('#623 regression — residue from a prior run is swept before the first test', () => {
+  // The reported symptom was "run the suite twice against the same database and
+  // libraries fails 11/11". The reachable path is a FILTERED run (`vitest -t`):
+  // on a full run the afterEach sweep always precedes a colliding test, so the
+  // leak is masked and the bug "does not reproduce". This test reproduces the
+  // collision directly instead of shelling out to a nested filtered runner —
+  // see the PR thread for why that mechanism was declined.
+  it('libraries: leaked 99 77 residue collides on specs_section_source_library_unique until the reserved-namespace sweep clears it FK-first', async () => {
+    const company = await findLibraryByName(DEFAULT_COMPANY_LIBRARY);
+
+    // Exactly what a run killed before its afterEach leaves behind: a
+    // non-built-in library plus a spec row that references it.
+    const leaked = await createLibrary({
+      tier: 'client',
+      name: `Leaked Residue ${randomUUID().slice(0, 8)}`,
+      owner: 'Prior Run',
+      parentLibraryId: company!.id,
+    });
+    await pool.query(
+      `INSERT INTO specs (section, title, source, library_id) VALUES ('99 77 42', 'Leaked', 'arcat', $1)`,
+      [leaked.id]
+    );
+
+    // The symptom: the next run's insert collides with the leaked row.
+    await expect(
+      pool.query(
+        `INSERT INTO specs (section, title, source, library_id) VALUES ('99 77 42', 'Fresh', 'arcat', $1)`,
+        [leaked.id]
+      )
+    ).rejects.toThrow(/specs_section_source_library_unique/);
+
+    // And why recovery used to mean dropping the database: the leaked library
+    // cannot just be deleted while a spec still references it. FK order is the
+    // load-bearing part of the sweep, not an incidental detail.
+    await expect(pool.query(`DELETE FROM libraries WHERE id = $1`, [leaked.id])).rejects.toThrow(
+      /specs_library_id_fkey/
+    );
+
+    // The sweep that beforeAll runs clears it, specs → projects → libraries.
+    await clearReservedNamespaces();
+    expect(await findLibraryById(leaked.id)).toBeNull();
+
+    // The previously-colliding insert now succeeds — this is the state a
+    // filtered run gets on a residue-carrying database once beforeAll sweeps.
+    const fresh = await createLibrary({
+      tier: 'client',
+      name: `Post Sweep ${randomUUID().slice(0, 8)}`,
+      owner: 'Fresh Run',
+      parentLibraryId: company!.id,
+    });
+    const reinsert = await pool.query(
+      `INSERT INTO specs (section, title, source, library_id) VALUES ('99 77 42', 'Fresh', 'arcat', $1) RETURNING id`,
+      [fresh.id]
+    );
+    expect(reinsert.rows).toHaveLength(1);
+
+    // The sweep must not take the built-ins with it.
+    expect(await findLibraryByName(UFGS_REFERENCE_LIBRARY)).not.toBeNull();
+    expect(await findLibraryByName(DEFAULT_COMPANY_LIBRARY)).not.toBeNull();
+  });
+
+  // The test above proves the sweep is correct, but it calls the helper
+  // directly — so it would still pass if the beforeAll registration were
+  // deleted, which is the actual fix for #623. By the time any test in this
+  // file executes, beforeAll has already run, so the pre-sweep state is not
+  // observable from inside the suite and the wiring cannot be asserted
+  // behaviourally without a nested runner. Pin it at the source instead, the
+  // same way src/mcp/tool-schema-introspect.test.ts pins its own invariants.
+  it('libraries: the reserved-namespace sweep is registered on beforeAll, not only afterEach', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('./libraries.integration.test.ts', import.meta.url)),
+      'utf8'
+    );
+    expect(source).toMatch(/beforeAll\(\s*clearReservedNamespaces\s*\)/);
+    expect(source).toMatch(/afterEach\(\s*clearReservedNamespaces\s*\)/);
   });
 });
