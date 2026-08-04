@@ -8,6 +8,7 @@ import {
   type RecordVerificationInput,
 } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
 
 export const ListLibraryStandardsShape = {
@@ -38,10 +39,19 @@ export const RecordStandardVerificationShape = {
     .min(1)
     .max(200)
     .optional()
-    .describe('Current published version/designation'),
-  sourceUrl: z.url().max(2000).optional().describe('Authoritative source URL for the standard'),
-  title: z.string().min(1).max(500).optional().describe('Standard title'),
-  notes: z.string().max(5000).optional().describe('Reviewer notes'),
+    .describe(`Current published version/designation. ${UTF16_LENGTH_LIMIT_NOTE}`),
+  sourceUrl: z
+    .url()
+    .max(2000)
+    .optional()
+    .describe(`Authoritative source URL for the standard. ${UTF16_LENGTH_LIMIT_NOTE}`),
+  title: z
+    .string()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe(`Standard title. ${UTF16_LENGTH_LIMIT_NOTE}`),
+  notes: z.string().max(5000).optional().describe(`Reviewer notes. ${UTF16_LENGTH_LIMIT_NOTE}`),
 };
 const RecordStandardVerificationArgs = z.object(RecordStandardVerificationShape);
 

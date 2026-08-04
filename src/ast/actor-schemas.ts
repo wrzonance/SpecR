@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
 
 // ── Actor attribution (#377 / ADR-052 D1) ────────────────────────────────────
 // A caller-supplied identity label threaded through every paragraph/merge
@@ -20,7 +21,23 @@ import { z } from 'zod';
 // users row the public user API rejects, and GET /users would then surface a label it
 // calls invalid. users.label is a bare `text` column (migration 045 CHECKs only
 // non-empty), so this app-layer bound is the only thing enforcing the ceiling.
-export const ActorLabelSchema = z.string().trim().check(z.minLength(1), z.maxLength(200));
+// The `.describe()` is not decoration: this schema is reused verbatim by six MCP
+// tool shapes (update/insert/remove_paragraph, accept_comment_as_note, apply_merge,
+// create_checkpoint), and the MCP SDK copies a declarative `z.maxLength(200)` into
+// each tool's published JSON Schema as `maxLength: 200` — a keyword JSON Schema
+// defines in Unicode code points while this check counts UTF-16 code units. The note
+// travels with the bound so every generated tool schema documents the ADR-088
+// divergence, matching what openapi.yaml states for the REST twin. Embedding sites
+// that supply their own `.describe()` must append the note themselves (see
+// MergeFieldsShape.actorLabel and AcceptCommentShape.actorLabel).
+export const ActorLabelSchema = z
+  .string()
+  .trim()
+  .check(z.minLength(1), z.maxLength(200))
+  .describe(
+    'Caller identity label attributed to this write in paragraph history; resolves to a ' +
+      `users row and shares the POST /users 1-200 length contract. ${UTF16_LENGTH_LIMIT_NOTE}`
+  );
 
 // Accept-as-note (#251/#377) had no request body before #377 — the target
 // comment is identified entirely by path params (nodeId, index). actorLabel

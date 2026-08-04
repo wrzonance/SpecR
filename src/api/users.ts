@@ -4,7 +4,7 @@ import { resolveOrCreateUserByLabel, listUsers, getUser } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 
 const UUID_SCHEMA = z.uuid();
-const ResolveUserBody = z.object({
+export const ResolveUserBody = z.object({
   label: z.string().trim().min(1).max(200),
 });
 
