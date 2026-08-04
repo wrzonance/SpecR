@@ -93,10 +93,12 @@ describe('codePointLength', () => {
 
     codePointLength(countingIterable, 5);
 
-    // The real implementation stops once `count > limit` (limit=5 → 7
-    // `.next()` calls). An array-materializing rewrite must exhaust the
-    // iterator first, which here would mean 7,000,001 calls.
-    expect(nextCalls).toBeLessThan(100);
+    // The real implementation stops once `count > limit`: 5 `.next()` calls
+    // to reach count=5, plus 1 more to reach count=6 (> limit) and trigger
+    // the return — 6 `.next()` calls total for limit=5. An array-
+    // materializing rewrite must exhaust the iterator first, which here
+    // would mean 7,000,001 calls.
+    expect(nextCalls).toBe(6);
   });
 });
 
