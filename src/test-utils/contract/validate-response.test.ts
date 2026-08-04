@@ -201,6 +201,42 @@ describe('assertResponseExact (#640) — exact-key-match against openapi.yaml', 
     expect(marked.properties.nested.unevaluatedProperties).toBe(false);
   });
 
+  // The no-mutation test above only exercises the DEFAULT (no-options) call shape. Production never
+  // calls it that way: assertResponseExact and registerComponentMirrors (schema-refs.ts) both always
+  // pass `{ inPlace, qualifyRef: buildMirrorQualifyRef() }` — and registerComponentMirrors runs this
+  // directly against every doc-owned `components.schemas` entry of the SINGLE cached `loadSpec()`
+  // document, shared for the lifetime of the process. A regression that mutated the original only
+  // along the qualifyRef/inPlace branch (e.g. rewriting `node['$ref']` instead of the cloned
+  // `schema['$ref']` inside markObject) would corrupt that shared component schema for every later
+  // reader, yet leave the default-options test above green — it never passes qualifyRef or inPlace,
+  // and its hand-built schema has no `$ref` at all, so it can't reach that branch.
+  it.each([false, true])(
+    'never mutates its input via the qualifyRef/inPlace path production actually calls (inPlace=%s)',
+    (inPlace) => {
+      const original = {
+        type: 'object',
+        properties: {
+          child: { $ref: '#/components/schemas/Foo' },
+          nested: { type: 'object', properties: { inner: { type: 'string' } } },
+        },
+      };
+      const snapshot = structuredClone(original);
+
+      const marked = markUnevaluatedPropertiesFalse(original, {
+        inPlace,
+        qualifyRef: buildMirrorQualifyRef(),
+      }) as {
+        properties: { child: { $ref: string }; nested: { unevaluatedProperties?: boolean } };
+      };
+
+      expect(original).toEqual(snapshot); // input object graph is byte-for-byte untouched
+      expect(marked).not.toBe(original); // caller always gets an independent clone
+      // The clone itself IS rewritten — proving this isn't a no-op qualifyRef that happens to
+      // dodge the mutation question entirely.
+      expect(marked.properties.child.$ref).not.toBe('#/components/schemas/Foo');
+    }
+  );
+
   // Pins the walker's SHARED-OBJECT-IDENTITY cycle guard (SeenContexts in unevaluated-properties.ts)
   // — a mechanism orthogonal to, and unaffected by, #649's switch from dereference to bundle. It has
   // nothing to do with `$ref` strings: it's a hand-built schema where ONE JS object (`shared`) is
