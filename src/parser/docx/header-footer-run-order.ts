@@ -26,8 +26,12 @@ import type { HeaderFooterUnmodeledEntry } from './types.js';
 
 // fast-xml-parser preserveOrder node: one element key -> children array,
 // '#text' -> string, ':@' -> attribute record. Mirrors merge/extract.ts's own
-// OrderedNode and source-facts.ts's equivalent parser config.
-interface OrderedNode {
+// OrderedNode and source-facts.ts's equivalent parser config. Exported (#515)
+// so a caller that already holds a DIFFERENT preserveOrder shape structurally
+// compatible with this one — e.g. body-objects.ts's own `ObjectBlobNode`,
+// which is exactly this shape plus a narrower value type — can type a
+// `pairRunOrder` call without an unsafe cast.
+export interface OrderedNode {
   readonly [key: string]: unknown;
 }
 
@@ -123,6 +127,26 @@ function parseOrdered(
 }
 
 /**
+ * Pairs an ALREADY-PARSED preserveOrder node list (`orderedSiblings`) against
+ * the SAME xml's grouped-mode counterpart (`groupedNode`), building the
+ * run-ordinal side-table `computeRunOrder` returns (#515). Factored out of
+ * `computeRunOrder` so a caller that already holds its own preserveOrder tree
+ * — body-objects.ts's own per-paragraph `ObjectBlobNode`, built once by
+ * body-order.ts's `computeBodyOrder` — can reuse the identical tag +
+ * occurrence-cursor pairing algorithm to correlate a GROUPED-mode paragraph
+ * against it, with no redundant XML re-parse and no risk of the pairing
+ * logic drifting between two hand-copied implementations.
+ */
+export function pairRunOrder(
+  groupedNode: Record<string, unknown>,
+  orderedSiblings: readonly OrderedNode[]
+): RunOrder {
+  const order = new Map<Record<string, unknown>, number>();
+  walkOrder(groupedNode, orderedSiblings, order, { next: 0 });
+  return order;
+}
+
+/**
  * Build the run-ordinal side-table for one header/footer part: every w:r and
  * w:fldSimple grouped-mode object — however deeply nested inside
  * w:hyperlink/w:ins/w:del/w:sdt wrappers — is keyed to its TRUE document-
@@ -139,7 +163,5 @@ export function computeRunOrder(
   region: HeaderFooterUnmodeledEntry['region']
 ): RunOrder {
   const orderedRoot = findChild(parseOrdered(partXml, region), rootTag);
-  const order = new Map<Record<string, unknown>, number>();
-  walkOrder(groupedRoot, orderedRoot, order, { next: 0 });
-  return order;
+  return pairRunOrder(groupedRoot, orderedRoot);
 }

@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { extractBodyObjects } from './body-objects.js';
+import { extractBodyObjects, anchorInteriorParagraphs } from './body-objects.js';
 import { computeBodyOrder } from './body-order.js';
 import { createDocumentXmlParser, createOrderedDocumentXmlBuilder, toArray } from './xml-utils.js';
 import { buildStyleMap } from './styles.js';
 import { UUID_TAG_PREFIX } from '../../ast/index.js';
 import type { StyleMap } from './types.js';
 import type { BodyObjectExtractionResult } from './body-objects.js';
+import type { ObjectBlobNode } from '../../ast/index.js';
 
 const NS = [
   'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"',
@@ -168,6 +169,21 @@ function hiddenTextBoxParagraph(interiorText: string): string {
   return `<w:p>${hiddenTextBoxRun(interiorText)}</w:p>`;
 }
 
+// A hidden, FLOATING, VML text box RUN — deliberately the opposite
+// generation ('vml' vs textBoxRun's 'drawingml') AND the opposite floating
+// value (position:absolute vs textBoxRun's inline) from `textBoxRun`, so a
+// test pairing the two can tell whether captured object metadata came from
+// THIS entry or the other one. Hidden via the interior run's own
+// `w:rPr>w:vanish`, mirroring hiddenTextBoxRun's convention.
+function hiddenFloatingVmlTextBoxRun(interiorText: string): string {
+  const hiddenInterior = `<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>${interiorText}</w:t></w:r></w:p>`;
+  return (
+    '<w:r><w:pict><v:shape style="position:absolute"><v:textbox><w:txbxContent>' +
+    hiddenInterior +
+    '</w:txbxContent></v:textbox></v:shape></w:pict></w:r>'
+  );
+}
+
 // A text box hidden via its HOST paragraph mark (w:pPr>w:rPr>w:vanish) rather
 // than the interior run — the other of the two mechanisms the review finding
 // named.
@@ -206,6 +222,102 @@ function tagValues(blob: readonly unknown[]): readonly string[] {
   const xml = createOrderedDocumentXmlBuilder().build(blob);
   return [...xml.matchAll(/<w:tag w:val="([^"]*)"/g)].map((m) => m[1] ?? '');
 }
+
+// The interiorTexts <-> blob-anchor 1:1 invariant, asserted on the anchor
+// VALUES rather than only their count (#515 adversarial review): equal counts
+// alone would still pass if the sole surviving anchor carried a uuid that
+// belongs to no interiorTexts entry — a dangling anchor beside an unanchored
+// leaf. Comparing the exact `w:tag w:val` set against
+// `UUID_TAG_PREFIX + id`, in blob document order, closes that gap.
+function expectAnchorsMatchInteriorTexts(
+  object: BodyObjectExtractionResult['paragraphObjects'][number]['object'] | undefined
+): void {
+  expect(tagValues(object?.blob ?? [])).toEqual(
+    (object?.interiorTexts ?? []).map(({ id }) => `${UUID_TAG_PREFIX}${id}`)
+  );
+}
+
+// Hand-built ObjectBlobNode fixtures (preserveOrder-mode shape) for
+// anchorInteriorParagraphs's own unit tests below — mirrors
+// body-text-box-visibility.test.ts's own fixture style rather than reusing
+// the XML-string builders above (`para`, `textBoxParagraph`, …), which build
+// a DIFFERENT shape (raw XML strings, not ObjectBlobNode trees).
+function blobTextNode(text: string): ObjectBlobNode {
+  return { '#text': text };
+}
+
+function blobPara(text: string): ObjectBlobNode {
+  return { 'w:p': [{ 'w:r': [{ 'w:t': [blobTextNode(text)] }] }] };
+}
+
+function blobTxbxContent(text: string): ObjectBlobNode {
+  return { 'w:txbxContent': [blobPara(text)] };
+}
+
+// A drawing run wrapping one txbxContent boundary, nested several levels deep
+// (w:r > w:drawing > a:graphic > a:graphicData > wps:txbx > w:txbxContent) —
+// the same nesting shape body-text-box-visibility.test.ts's drawingRun uses.
+function blobDrawingRun(content: ObjectBlobNode): ObjectBlobNode {
+  return {
+    'w:r': [{ 'w:drawing': [{ 'a:graphic': [{ 'a:graphicData': [{ 'wps:txbx': [content] }] }] }] }],
+  };
+}
+
+function blobHostParagraph(children: readonly ObjectBlobNode[]): ObjectBlobNode {
+  return { 'w:p': children };
+}
+
+// Depth-first search for the first `w:txbxContent`-tagged descendant of
+// `node` (including `node` itself) — a local test-only helper, not a
+// duplicate of body-objects.ts's own collection logic (this one is used only
+// to LOCATE the boundary in the returned tree for a reference-identity check).
+function findTxbxContentNode(node: ObjectBlobNode): ObjectBlobNode | undefined {
+  const tag = Object.keys(node).find((key) => key !== ':@');
+  if (tag === 'w:txbxContent') return node;
+  const value = tag ? node[tag] : undefined;
+  if (!Array.isArray(value)) return undefined;
+  for (const child of value as readonly ObjectBlobNode[]) {
+    const found = findTxbxContentNode(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+describe('anchorInteriorParagraphs — hiddenSubtrees pass-through (#515 task 3)', () => {
+  it('backward compatibility: default (no hiddenSubtrees) anchors an interior paragraph exactly as before', () => {
+    const inner = blobTxbxContent('interior text');
+    const host = blobHostParagraph([blobDrawingRun(inner)]);
+
+    const result = anchorInteriorParagraphs(host);
+
+    expect(result.interiorTexts.map((t) => t.text)).toEqual(['interior text']);
+    // The w:txbxContent boundary itself gets REBUILT (its interior w:p is
+    // anchored), so it must NOT be the same reference as the original —
+    // proves this test's control case actually exercises the anchor path.
+    expect(findTxbxContentNode(result.node)).not.toBe(inner);
+  });
+
+  it('round-trip byte-identity: a hiddenSubtrees-matched w:txbxContent node passes through UNCHANGED (same reference), contributing no interiorTexts', () => {
+    const inner = blobTxbxContent('secret interior text');
+    const host = blobHostParagraph([blobDrawingRun(inner)]);
+
+    const result = anchorInteriorParagraphs(host, new Set([inner]));
+
+    expect(result.interiorTexts).toEqual([]);
+    // Same object reference, never rebuilt or recursed into — the exact
+    // invariant buildTextBoxObject's future wiring (a later task) depends on
+    // for provable serialization equivalence.
+    expect(findTxbxContentNode(result.node)).toBe(inner);
+  });
+
+  it('backward compatibility: buildTableObject-style caller (single-argument call) still type-checks and anchors normally', () => {
+    // Mirrors buildTableObject's own zero-edit call site:
+    // `anchorInteriorParagraphs(normalized)`, no second argument.
+    const host = blobHostParagraph([blobPara('table cell text')]);
+    const result = anchorInteriorParagraphs(host);
+    expect(result.interiorTexts.map((t) => t.text)).toEqual(['table cell text']);
+  });
+});
 
 describe('extractBodyObjects — no-silent-loss across tables, text boxes, and dropped drawables', () => {
   it('captures a table and a text box, and drops a chart, all from one document — nothing lost', () => {
@@ -317,6 +429,276 @@ describe('extractBodyObjects — hidden (vanish) text boxes (ADR-038 parity)', (
     expect(result.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
       'visible',
     ]);
+  });
+});
+
+describe('extractBodyObjects — buildTextBoxObject hiddenFlags wiring (#515 task 4)', () => {
+  // Regression pin: resolveHiddenTxbxContentNodes (#515 task 1) fails closed
+  // on any boundary-count/flag-count mismatch — a host paragraph with one
+  // text box has exactly one w:txbxContent boundary, so a naive `[]` (0
+  // entries) mismatches 1 vs. 0 and wrongly suppresses it entirely. The
+  // wiring must correlate a count-correct flag for the single already-known-
+  // visible entry instead.
+  it('backward compatibility: a single visible text box still surfaces interiorTexts (not fail-closed suppressed by a naive empty flags array)', () => {
+    const body = textBoxParagraph('visible box text');
+    const result = extract(body);
+    expect(result.paragraphObjects).toHaveLength(1);
+    expect(result.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible box text',
+    ]);
+  });
+
+  it('interiorTexts 1:1 anchors: the visible text box interior paragraph carries a w:sdt round-trip anchor whose uuid matches interiorTexts', () => {
+    const body = textBoxParagraph('anchored box text');
+    const result = extract(body);
+    const object = result.paragraphObjects[0]?.object;
+    const id = object?.interiorTexts[0]?.id;
+    expect(id).toBeDefined();
+    expect(tagValues(object?.blob ?? [])).toEqual([`${UUID_TAG_PREFIX}${id}`]);
+  });
+
+  it('round-trip byte-identity: the wiring does not change hidden (all-vanish) text box handling — still no object, no dropped entry', () => {
+    const body = hiddenTextBoxParagraph('secret box text');
+    const result = extract(body);
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  });
+});
+
+describe('extractBodyObjects — mixed visible/hidden text boxes in one host paragraph (#515 task 5)', () => {
+  // Privacy (no-leak): before this fix, collectParagraphDrawing decided
+  // visibility from the FIRST text-box entry alone while buildTextBoxObject's
+  // anchor walk surfaced objectText from EVERY text box in the host blob — so
+  // a hidden SECOND box's interior text leaked into interiorTexts alongside
+  // the visible first box's text.
+  it('privacy: a hidden SECOND text box never leaks its interior text when a visible first box is captured', () => {
+    const body = twoDrawingRunsParagraph(
+      textBoxRun('visible text'),
+      hiddenTextBoxRun('secret text')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible text']);
+    expect(object?.interiorTexts.map((t) => t.text)).not.toContain('secret text');
+  });
+
+  // No-suppression (no-loss): before this fix, a hidden FIRST box alone
+  // decided the whole paragraph's fate, so a visible SECOND box's text was
+  // entirely lost (treated as if the whole paragraph were hidden).
+  it('no-suppression: a visible SECOND text box still surfaces its text when the FIRST box is hidden', () => {
+    const body = twoDrawingRunsParagraph(
+      hiddenTextBoxRun('secret text'),
+      textBoxRun('visible text')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible text']);
+  });
+
+  // All-hidden preserved: when EVERY text box in the host paragraph is
+  // hidden, the paragraph produces no object and no dropped entry — same
+  // outcome as the single-box all-hidden case, now correctly decided over
+  // every box rather than just the first.
+  it('all-hidden preserved: two hidden text boxes in one host paragraph produce no object and no dropped entry', () => {
+    const body = twoDrawingRunsParagraph(
+      hiddenTextBoxRun('secret one'),
+      hiddenTextBoxRun('secret two')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  });
+});
+
+describe('extractBodyObjects — mixed-visibility text boxes in ONE host paragraph (#515)', () => {
+  // two-visible: both text boxes in the host paragraph are visible — every
+  // interior paragraph gets its own w:sdt anchor, and interiorTexts stays
+  // 1:1 with the anchors actually baked into the blob (no box's text is
+  // dropped just because it shares a host paragraph with another box).
+  it('two-visible: both text boxes surface their interior text, 1:1 with the anchors baked into blob', () => {
+    const body = twoDrawingRunsParagraph(textBoxRun('first text'), textBoxRun('second text'));
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['first text', 'second text']);
+    expect(result.dropped).toEqual([]);
+    expectAnchorsMatchInteriorTexts(object);
+    expect(tagValues(object?.blob ?? [])).toHaveLength(2);
+  });
+
+  // visible+hidden: the FIRST box is visible, the SECOND is hidden. Privacy
+  // (no-leak): the hidden box's interior text never reaches interiorTexts.
+  // The tagValues(blob) count is the independent, blob-level check that the
+  // hidden box's w:txbxContent boundary was left un-anchored (opaque
+  // pass-through) rather than merely filtered out of interiorTexts while
+  // still secretly anchored in the blob.
+  it('visible+hidden: interiorTexts.length matches the anchors baked into blob — the hidden second box leaks nothing', () => {
+    const body = twoDrawingRunsParagraph(
+      textBoxRun('visible first'),
+      hiddenTextBoxRun('hidden second')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible first']);
+    expect(object?.interiorTexts.map((t) => t.text)).not.toContain('hidden second');
+    expectAnchorsMatchInteriorTexts(object);
+    expect(tagValues(object?.blob ?? [])).toHaveLength(1);
+  });
+
+  // hidden+visible: the FIRST box is hidden, the SECOND is visible.
+  // No-suppression (no-loss): the visible second box's text is not dropped
+  // just because the first box in the same host paragraph is hidden. Same
+  // blob-level tagValues check as above, mirrored for the opposite order.
+  it('hidden+visible: interiorTexts.length matches the anchors baked into blob — the visible second box is never suppressed', () => {
+    const body = twoDrawingRunsParagraph(
+      hiddenTextBoxRun('hidden first'),
+      textBoxRun('visible second')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible second']);
+    expectAnchorsMatchInteriorTexts(object);
+    expect(tagValues(object?.blob ?? [])).toHaveLength(1);
+  });
+
+  // two-hidden: both text boxes in the host paragraph are hidden — the whole
+  // paragraph produces no object (nothing visible to capture) and no dropped
+  // entry (both boxes are intentionally hidden, not lost).
+  it('two-hidden: two hidden text boxes in one host paragraph produce no object and no dropped entry', () => {
+    const body = twoDrawingRunsParagraph(
+      hiddenTextBoxRun('hidden first'),
+      hiddenTextBoxRun('hidden second')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  });
+});
+
+describe('extractBodyObjects — shared object metadata sources from the first VISIBLE entry (ADR-087 decision 5)', () => {
+  // Review finding (#515): every mixed-visibility fixture elsewhere in this
+  // suite pairs two structurally-identical, non-floating textBoxRun/
+  // hiddenTextBoxRun entries, so `chosen.classification` (kind/floating/
+  // generation) is indistinguishable from `textBoxEntries[0]`'s in every one
+  // of those assertions — none of them would fail if buildTextBoxObject
+  // regressed to picking the first entry regardless of visibility (the exact
+  // pre-#515 bug ADR-087 decision 5 documents). This pairs a HIDDEN,
+  // FLOATING, VML box first with a VISIBLE, non-floating, DrawingML box
+  // second: `textBoxEntries[0]` and the correct VISIBLE choice disagree on
+  // BOTH `generation` and `floating`, so a regression to first-entry-
+  // regardless-of-visibility flips both fields and fails this test.
+  it("a hidden floating VML box first + a visible inline DrawingML box second reports the VISIBLE box's generation/floating, not the first entry's", () => {
+    const body = twoDrawingRunsParagraph(
+      hiddenFloatingVmlTextBoxRun('hidden vml text'),
+      textBoxRun('visible drawingml text')
+    );
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible drawingml text']);
+    expect(object?.generation).toBe('drawingml');
+    expect(object?.floating).toBe(false);
+  });
+});
+
+describe('extractBodyObjects — text box wrapped in a differently-tagged sibling (#515 review CRITICAL)', () => {
+  // classifyParagraphDrawings walks raw's GROUPED-mode tree, which only
+  // preserves relative order among SAME-tag siblings (header-footer-run-
+  // order.ts's own documented limitation) — a text-box run wrapped in
+  // w:hyperlink (a realistic shape: a hyperlinked, or tracked-change-
+  // inserted, text box) used to get pushed to the END of the traversal
+  // regardless of where it actually sits, desyncing hiddenFlags from
+  // resolveHiddenTxbxContentNodes' TRUE-document-order w:txbxContent
+  // boundaries — leaking the hidden box's text and suppressing the visible
+  // box that came after it.
+  it('correlates hiddenFlags by TRUE document order even when the hidden box sits inside a w:hyperlink between two plain-run boxes', () => {
+    const body =
+      `<w:p>${textBoxRun('first text')}` +
+      `<w:hyperlink>${hiddenTextBoxRun('secret text')}</w:hyperlink>` +
+      `${textBoxRun('third text')}</w:p>`;
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['first text', 'third text']);
+    expect(object?.interiorTexts.map((t) => t.text)).not.toContain('secret text');
+    expectAnchorsMatchInteriorTexts(object);
+    expect(tagValues(object?.blob ?? [])).toHaveLength(2);
+  });
+});
+
+describe('extractBodyObjects — BLOCK-level mc:AlternateContent (#515 adversarial review)', () => {
+  // Regression pin for a data-loss bug the #515 fix itself introduced and
+  // this test now closes. Hidden flags come from the UN-normalized grouped
+  // `raw` tree; w:txbxContent boundaries come from the blob AFTER
+  // stripAlternateContentFallback has spliced out every mc:Fallback. When
+  // mc:AlternateContent sits at BLOCK level — wrapping whole `w:r` elements
+  // per branch rather than the run-level shape Word usually emits — the
+  // Fallback's own text-box run was classified too, producing 2 flags
+  // against 1 surviving boundary. resolveHiddenTxbxContentNodes' count guard
+  // then failed closed and suppressed the VISIBLE mc:Choice box's interior
+  // text entirely (verified: 'Choice visible text' on origin/main, [] on the
+  // pre-fix branch). collectFallbackRuns excludes Fallback runs from
+  // classification, restoring the count correspondence.
+  it('a block-level mc:AlternateContent still surfaces the visible mc:Choice box text — the discarded mc:Fallback run never miscounts the flags', () => {
+    const body =
+      '<w:p><mc:AlternateContent>' +
+      `<mc:Choice Requires="wps">${textBoxRun('choice visible text')}</mc:Choice>` +
+      '<mc:Fallback><w:r><w:pict><v:shape><v:textbox><w:txbxContent>' +
+      para('fallback text') +
+      '</w:txbxContent></v:textbox></v:shape></w:pict></w:r></mc:Fallback>' +
+      '</mc:AlternateContent></w:p>';
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['choice visible text']);
+    // The discarded Fallback branch contributes neither interior text nor a
+    // dropped entry — it is an alternate rendering of the SAME content, never
+    // additional content that could be silently lost.
+    expect(object?.interiorTexts.map((t) => t.text)).not.toContain('fallback text');
+    expect(result.dropped).toEqual([]);
+    expectAnchorsMatchInteriorTexts(object);
+  });
+
+  // The run-level shape (w:r > mc:AlternateContent > mc:Choice > w:drawing)
+  // puts no w:r inside the Fallback at all, so it was never affected — pinned
+  // here alongside the block-level case so a future change to
+  // collectFallbackRuns cannot regress either shape unnoticed.
+  it('the run-level mc:AlternateContent shape Word normally emits is unaffected', () => {
+    const result = extract(alternateContentTextBoxParagraph('choice text', 'fallback text'));
+
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['choice text']);
+    expectAnchorsMatchInteriorTexts(object);
+  });
+
+  // Privacy still holds at block level: a hidden mc:Choice box leaks nothing,
+  // and its Fallback twin does not accidentally resurrect the content.
+  it('a hidden block-level mc:Choice text box captures no object and leaks no interior text', () => {
+    const body =
+      '<w:p><mc:AlternateContent>' +
+      `<mc:Choice Requires="wps">${hiddenTextBoxRun('choice secret text')}</mc:Choice>` +
+      '<mc:Fallback><w:r><w:pict><v:shape><v:textbox><w:txbxContent>' +
+      para('fallback text') +
+      '</w:txbxContent></v:textbox></v:shape></w:pict></w:r></mc:Fallback>' +
+      '</mc:AlternateContent></w:p>';
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
   });
 });
 
