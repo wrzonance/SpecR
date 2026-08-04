@@ -49,6 +49,14 @@ export interface CapturedObjectText {
  * this, plus a fresh uuid/label, into the actual SpecNode + its `objectText`
  * children). `blob` already carries every interior paragraph's SDT anchor —
  * it is the exact node tree the parent `object.meta.object.blob` will store.
+ *
+ * `vanishCharStyleIds` (#650) is the SAME `StyleMap.vanishCharStyleIds` set
+ * used to decide which interior runs `collectText` skipped during capture —
+ * carried forward unfiltered (the full resolved set, not a subset narrowed to
+ * what this particular object actually referenced; simplicity, zero
+ * correctness cost) so `body-object-attach.ts`'s `toObjectMeta` can persist
+ * it and the edit rewrite path (`object-text-edit.ts`) can rebuild the same
+ * `ReadonlySet` at write time without re-parsing `styles.xml`.
  */
 export interface CapturedBodyObject {
   readonly kind: ObjectKind;
@@ -58,6 +66,7 @@ export interface CapturedBodyObject {
   readonly columns?: number;
   readonly blob: readonly ObjectBlobNode[];
   readonly interiorTexts: readonly CapturedObjectText[];
+  readonly vanishCharStyleIds: ReadonlySet<string>;
 }
 
 /** An out-of-scope body drawable SpecR could not capture (ADR-072 decision
@@ -176,10 +185,11 @@ function isOnOffEnabled(node: ObjectBlobNode): boolean {
 // themselves carry an enabled `w:vanish`). No special-casing between the two
 // signals — a resolved-off direct `<w:vanish w:val="0"/>` does not override a
 // matching rStyle, mirroring document.ts's own behaviour exactly (#650).
-// `vanishCharStyleIds` defaults to an empty set so every pre-existing
-// single-argument call site (collectText below, object-blob-edit.ts's
-// rewriteFirstText, and #648's extract.ts) keeps compiling and behaving
-// byte-for-byte unchanged.
+// `vanishCharStyleIds` defaults to an empty set so a caller that has none to
+// offer (object-blob-edit.ts's rewriteFirstText before its own #650 wiring,
+// #648's extract.ts) keeps compiling and behaving byte-for-byte unchanged.
+// collectText below now threads the real set through on every call — see its
+// own comment.
 //
 // EXPORTED so object-blob-edit.ts's `rewriteFirstText` applies the SAME rule
 // when it writes an edit back. That walk's stated contract is to reach text
@@ -222,15 +232,25 @@ function textOfWtNode(node: ObjectBlobNode): string | undefined {
 // wrapper (w:hyperlink, w:ins/w:del, w:sdt) reaches wrapped text the same
 // way document.ts's collectRuns does, with no per-wrapper special-casing.
 //
-// #641: a w:r flagged hasRunVanish is skipped entirely — no text pushed, no
-// descent into its subtree. This walk already passes transparently through
-// nested w:txbxContent boundaries (body-text-box-visibility.ts deliberately
-// treats a nested text box's interior as opaque and never adds it to
-// hiddenSubtrees — see ADR-092), so this single run-level check is what
-// keeps a hidden run's text from leaking into an ancestor interior
-// paragraph's captured text, whether that run sits directly in the
-// paragraph or several levels down inside a nested text box's own interior.
-function collectText(children: readonly ObjectBlobNode[], acc: string[]): void {
+// #641/#650: a w:r flagged hasRunVanish is skipped entirely — no text
+// pushed, no descent into its subtree. This walk already passes
+// transparently through nested w:txbxContent boundaries
+// (body-text-box-visibility.ts deliberately treats a nested text box's
+// interior as opaque and never adds it to hiddenSubtrees — see ADR-092), so
+// this single run-level check is what keeps a hidden run's text from
+// leaking into an ancestor interior paragraph's captured text, whether that
+// run sits directly in the paragraph or several levels down inside a nested
+// text box's own interior. `vanishCharStyleIds` is threaded down from the
+// object builders (buildTableObject/buildTextBoxObject, both fed by the
+// caller's `StyleMap.vanishCharStyleIds`) so a run hidden ONLY via a
+// `w:rStyle`-referenced character style is excluded here exactly like a
+// direct `w:rPr>w:vanish` run — the same `hasRunVanish` predicate,
+// same signal set, one call site deciding capture.
+function collectText(
+  children: readonly ObjectBlobNode[],
+  acc: string[],
+  vanishCharStyleIds: ReadonlySet<string>
+): void {
   for (const child of children) {
     const tag = tagOf(child);
     if (tag === 'w:t') {
@@ -238,14 +258,14 @@ function collectText(children: readonly ObjectBlobNode[], acc: string[]): void {
       if (text !== undefined) acc.push(text);
       continue;
     }
-    if (tag === 'w:r' && hasRunVanish(child)) continue;
-    collectText(childrenOf(child), acc);
+    if (tag === 'w:r' && hasRunVanish(child, vanishCharStyleIds)) continue;
+    collectText(childrenOf(child), acc, vanishCharStyleIds);
   }
 }
 
-function extractBlobText(node: ObjectBlobNode): string {
+function extractBlobText(node: ObjectBlobNode, vanishCharStyleIds: ReadonlySet<string>): string {
   const acc: string[] = [];
-  collectText([node], acc);
+  collectText([node], acc, vanishCharStyleIds);
   return acc.join('');
 }
 
@@ -268,13 +288,14 @@ interface ChildrenTransformResult {
 // walk must treat as opaque; see transformChildren's pass-through branch.
 function transformInteriorParagraphs(
   node: ObjectBlobNode,
-  hiddenSubtrees: ReadonlySet<ObjectBlobNode>
+  hiddenSubtrees: ReadonlySet<ObjectBlobNode>,
+  vanishCharStyleIds: ReadonlySet<string>
 ): InteriorTransformResult {
   const tag = tagOf(node);
   if (!tag) return { node, interiorTexts: [] };
   const value = node[tag];
   if (!isBlobNodeArray(value)) return { node, interiorTexts: [] };
-  const { children, interiorTexts } = transformChildren(value, hiddenSubtrees);
+  const { children, interiorTexts } = transformChildren(value, hiddenSubtrees, vanishCharStyleIds);
   const attrs = node[':@'];
   // `as ObjectBlobNode` mirrors object-anchor.ts's own established narrowing
   // (see wrapBlobParagraphWithAnchor): ObjectBlobNode's index signature plus
@@ -308,7 +329,8 @@ function transformInteriorParagraphs(
 // other half of this investigation.
 function transformChildren(
   children: readonly ObjectBlobNode[],
-  hiddenSubtrees: ReadonlySet<ObjectBlobNode>
+  hiddenSubtrees: ReadonlySet<ObjectBlobNode>,
+  vanishCharStyleIds: ReadonlySet<string>
 ): ChildrenTransformResult {
   const newChildren: ObjectBlobNode[] = [];
   const interiorTexts: CapturedObjectText[] = [];
@@ -323,7 +345,7 @@ function transformChildren(
       continue;
     }
     if (tagOf(child) === 'w:p') {
-      const text = extractBlobText(child);
+      const text = extractBlobText(child, vanishCharStyleIds);
       if (text.trim().length === 0) {
         newChildren.push(child);
         continue;
@@ -333,7 +355,7 @@ function transformChildren(
       interiorTexts.push({ id, text });
       continue;
     }
-    const transformed = transformInteriorParagraphs(child, hiddenSubtrees);
+    const transformed = transformInteriorParagraphs(child, hiddenSubtrees, vanishCharStyleIds);
     newChildren.push(transformed.node);
     interiorTexts.push(...transformed.interiorTexts);
   }
@@ -341,17 +363,19 @@ function transformChildren(
 }
 
 /** The public entry point for the interior-paragraph anchor walk (#515,
- * ADR-087): both {@link buildTableObject} and (a later task)
- * {@link buildTextBoxObject} call this, never the two private inner
- * functions directly. `hiddenSubtrees` defaults to an empty set — a no-op —
- * so every EXISTING call site (buildTableObject's own
- * `anchorInteriorParagraphs(normalized)`) compiles and behaves byte-for-byte
- * unchanged with zero edits. */
+ * ADR-087): both {@link buildTableObject} and {@link buildTextBoxObject} call
+ * this, never the two private inner functions directly. Both `hiddenSubtrees`
+ * (the #515 `w:txbxContent` boundary set) and `vanishCharStyleIds` (#650, the
+ * `StyleMap.vanishCharStyleIds` set `collectText` consults to skip
+ * rStyle-hidden runs) default to an empty set — a no-op — so a caller with
+ * neither to offer compiles and behaves byte-for-byte unchanged with zero
+ * edits. */
 export function anchorInteriorParagraphs(
   root: ObjectBlobNode,
-  hiddenSubtrees: ReadonlySet<ObjectBlobNode> = new Set()
+  hiddenSubtrees: ReadonlySet<ObjectBlobNode> = new Set(),
+  vanishCharStyleIds: ReadonlySet<string> = new Set()
 ): InteriorTransformResult {
-  return transformInteriorParagraphs(root, hiddenSubtrees);
+  return transformInteriorParagraphs(root, hiddenSubtrees, vanishCharStyleIds);
 }
 
 // ─── table capture ──────────────────────────────────────────────────────────
@@ -365,7 +389,10 @@ function classifyTableVisibility(
   return classifyTopLevelTables(wrapped, styleMap)[0];
 }
 
-function buildTableObject(blob: readonly ObjectBlobNode[]): CapturedBodyObject | undefined {
+function buildTableObject(
+  blob: readonly ObjectBlobNode[],
+  styleMap: StyleMap
+): CapturedBodyObject | undefined {
   const tableNode = blob[0];
   if (!tableNode) return undefined;
   // #517: normalize mc:AlternateContent to its mc:Choice branch BEFORE
@@ -377,7 +404,10 @@ function buildTableObject(blob: readonly ObjectBlobNode[]): CapturedBodyObject |
   // doubling interiorTexts.
   const normalized = stripAlternateContentFallback(tableNode);
   const dims = tableDimensions(normalized);
-  const anchored = anchorInteriorParagraphs(normalized);
+  // #650: no hiddenSubtrees applies to a table root (that set is a text-box
+  // concept, resolveHiddenTxbxContentNodes), so the middle arg stays the
+  // default empty set — only vanishCharStyleIds is threaded through here.
+  const anchored = anchorInteriorParagraphs(normalized, undefined, styleMap.vanishCharStyleIds);
   return {
     kind: 'table',
     floating: false,
@@ -385,6 +415,7 @@ function buildTableObject(blob: readonly ObjectBlobNode[]): CapturedBodyObject |
     ...dims,
     blob: [anchored.node],
     interiorTexts: anchored.interiorTexts,
+    vanishCharStyleIds: styleMap.vanishCharStyleIds,
   };
 }
 
@@ -396,7 +427,7 @@ function extractTableObjects(
   for (const table of tables) {
     const classification = classifyTableVisibility(table.blob, styleMap);
     if (!classification || classification.kind === 'hidden') continue;
-    const object = buildTableObject(table.blob);
+    const object = buildTableObject(table.blob, styleMap);
     if (object) captured.push({ precedingParagraphIndex: table.precedingParagraphIndex, object });
   }
   return captured;
@@ -555,7 +586,8 @@ function isDroppedEntry(
 function buildTextBoxObject(
   hostBlob: readonly ObjectBlobNode[],
   classification: TextBoxClassification,
-  hiddenFlags: readonly boolean[]
+  hiddenFlags: readonly boolean[],
+  styleMap: StyleMap
 ): CapturedBodyObject | undefined {
   const hostNode = hostBlob[0];
   if (!hostNode) return undefined;
@@ -566,13 +598,14 @@ function buildTextBoxObject(
   // interior text edit diverge from a fallback nobody edited.
   const normalized = stripAlternateContentFallback(hostNode);
   const hiddenSet = resolveHiddenTxbxContentNodes(normalized, hiddenFlags);
-  const anchored = anchorInteriorParagraphs(normalized, hiddenSet);
+  const anchored = anchorInteriorParagraphs(normalized, hiddenSet, styleMap.vanishCharStyleIds);
   return {
     kind: 'textBox',
     floating: classification.floating,
     generation: classification.generation,
     blob: [anchored.node],
     interiorTexts: anchored.interiorTexts,
+    vanishCharStyleIds: styleMap.vanishCharStyleIds,
   };
 }
 
@@ -693,7 +726,9 @@ function collectParagraphDrawing(
   if (!chosen) {
     return { dropped };
   }
-  const object = blob ? buildTextBoxObject(blob, chosen.classification, hiddenFlags) : undefined;
+  const object = blob
+    ? buildTextBoxObject(blob, chosen.classification, hiddenFlags, styleMap)
+    : undefined;
   return object ? { object: { paragraphIndex, object }, dropped: [] } : { dropped: [] };
 }
 

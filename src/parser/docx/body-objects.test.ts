@@ -297,7 +297,11 @@ function blobHostParagraph(children: readonly ObjectBlobNode[]): ObjectBlobNode 
 // Hand-built w:r fixtures for hasRunVanish's own unit tests (#650) — isolated
 // from the full extractBodyObjects walk so the predicate's OWN contract
 // (direct w:vanish OR rStyle-referenced character-style vanish) is pinned
-// independently of collectText's threading, which a later task wires up.
+// independently of collectText's threading. collectText now threads
+// vanishCharStyleIds all the way from the builders' StyleMap down to this
+// exact predicate (see the "rStyle-referenced vanish character style" describe
+// block below for the end-to-end capture coverage) — these isolated fixtures
+// still earn their keep as a focused unit test of the predicate alone.
 function blobRun(rPrChildren: readonly ObjectBlobNode[]): ObjectBlobNode {
   return { 'w:r': [{ 'w:rPr': rPrChildren }, { 'w:t': [blobTextNode('x')] }] };
 }
@@ -398,6 +402,102 @@ describe('hasRunVanish — rStyle-referenced character-style vanish (#650, captu
     const rewriteResult = hasRunVanish(node, vanishCharStyleIds);
     expect(captureResult).toBe(rewriteResult);
     expect(captureResult).toBe(true);
+  });
+});
+
+// #650: builds a StyleMap with ONE character style, `styleId`, carrying
+// `<w:vanish/>` (or `<w:vanish w:val={val}/>` when `val` is given — e.g. `'0'`
+// for the resolved-off toggle case). Mirrors styles.test.ts's own
+// character-style-vanish fixture shape exactly, but goes through
+// buildStyleMap so the resulting StyleMap.vanishCharStyleIds is the SAME kind
+// of value buildTableObject/buildTextBoxObject receive from a real caller —
+// this is what proves the threading end-to-end, not just hasRunVanish alone.
+function charVanishStyleMap(styleId: string, val?: string): StyleMap {
+  const vanishAttr = val !== undefined ? ` w:val="${val}"` : '';
+  return buildStyleMap(
+    '<?xml version="1.0"?>' +
+      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      `<w:style w:type="character" w:styleId="${styleId}"><w:name w:val="${styleId}"/>` +
+      `<w:rPr><w:vanish${vanishAttr}/></w:rPr></w:style></w:styles>`
+  );
+}
+
+// A paragraph mixing one plain visible run with a SECOND run whose
+// `w:rPr>w:rStyle` references `styleId` — the rStyle-vanish analogue of the
+// direct-`w:vanish` mixed-run fixtures used throughout this file (e.g. line
+// ~1007's "single interior paragraph mixing one visible run and one vanish
+// run"). Whether `styledText` actually gets suppressed depends entirely on
+// whether the StyleMap passed to `extract` resolves `styleId` into
+// `vanishCharStyleIds` — this builder makes no assumption either way.
+function rStyleRunPara(visibleText: string, styledText: string, styleId: string): string {
+  return (
+    `<w:p><w:r><w:t>${visibleText}</w:t></w:r>` +
+    `<w:r><w:rPr><w:rStyle w:val="${styleId}"/></w:rPr><w:t>${styledText}</w:t></w:r></w:p>`
+  );
+}
+
+describe('extractBodyObjects — #650 rStyle-referenced character-style vanish threaded through capture', () => {
+  it('table path: excludes a run whose w:rStyle references a vanish character style, keeps the unrelated visible run', () => {
+    const styleMap = charVanishStyleMap('HiddenChar');
+    const cellPara = rStyleRunPara('visible part ', 'hidden style part', 'HiddenChar');
+    const result = extract(table(row(cell(cellPara))), styleMap);
+
+    expect(result.tableObjects).toHaveLength(1);
+    const object = result.tableObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible part ']);
+    expect(object?.vanishCharStyleIds).toEqual(styleMap.vanishCharStyleIds);
+  });
+
+  it('text box path: excludes a run whose w:rStyle references a vanish character style, keeps the unrelated visible run', () => {
+    const styleMap = charVanishStyleMap('HiddenChar');
+    const interior = rStyleRunPara('visible part ', 'hidden style part', 'HiddenChar');
+    const result = extract(textBoxHostParagraph(interior), styleMap);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible part ']);
+    expect(object?.vanishCharStyleIds).toEqual(styleMap.vanishCharStyleIds);
+  });
+
+  // Over-suppression guard, ported to the full capture boundary (mirrors the
+  // toggle-OFF direct-w:vanish tests below in the #641 describe block, but
+  // for the STYLE-referenced signal): a character style whose OWN w:vanish is
+  // resolved OFF (`w:val="0"`) must never end up in vanishCharStyleIds
+  // (styles.test.ts's own contract), so a run referencing it via w:rStyle is
+  // never suppressed — visible text must survive on both capture paths.
+  it('a resolved-off <w:vanish w:val="0"/> on the referenced character style never suppresses — text survives, table + text-box paths', () => {
+    const styleMap = charVanishStyleMap('ToggleOffChar', '0');
+    expect(styleMap.vanishCharStyleIds.has('ToggleOffChar')).toBe(false);
+
+    const cellPara = rStyleRunPara('visible part ', 'also visible', 'ToggleOffChar');
+    const tableResult = extract(table(row(cell(cellPara))), styleMap);
+    expect(tableResult.tableObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part also visible',
+    ]);
+
+    const interior = rStyleRunPara('visible part ', 'also visible', 'ToggleOffChar');
+    const boxResult = extract(textBoxHostParagraph(interior), styleMap);
+    expect(boxResult.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part also visible',
+    ]);
+  });
+
+  // An rStyle reference to a styleId the caller's StyleMap never resolved to
+  // vanish (here: EMPTY_STYLES, no character styles at all) must never
+  // suppress — proves the threaded set genuinely gates the check rather than
+  // any rStyle presence being treated as hidden.
+  it('an rStyle reference absent from the StyleMap never suppresses — unrelated visible content survives', () => {
+    const interior = rStyleRunPara('visible part ', 'unstyled elsewhere', 'HiddenChar');
+    const result = extract(textBoxHostParagraph(interior));
+
+    expect(result.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part unstyled elsewhere',
+    ]);
+  });
+
+  it('defaults to an empty vanishCharStyleIds set on the captured object when the StyleMap has no character-style vanish', () => {
+    const result = extract(table(row(cell(para('cell text')))));
+    expect(result.tableObjects[0]?.object.vanishCharStyleIds).toEqual(new Set());
   });
 });
 

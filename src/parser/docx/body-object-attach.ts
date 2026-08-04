@@ -33,6 +33,13 @@ function parseRawBodyParagraphs(documentXml: string): readonly Record<string, un
   );
 }
 
+// #650: vanishCharStyleIds is persisted as a SORTED array — never a Set — so
+// the JSONB column and fixture snapshots serialize deterministically
+// regardless of the StyleMap's own (unordered) iteration order. Omitted
+// entirely when empty, mirroring rows/columns' exactOptional-omission
+// convention above: an absent key and an empty array are fully
+// interchangeable (ObjectMetaSchema's own doc comment), so a table/text-box
+// with no style-vanished runs round-trips byte-identical to today's rows.
 function toObjectMeta(captured: CapturedBodyObject): ObjectMeta {
   return {
     kind: captured.kind,
@@ -40,6 +47,9 @@ function toObjectMeta(captured: CapturedBodyObject): ObjectMeta {
     generation: captured.generation,
     ...(captured.rows !== undefined ? { rows: captured.rows } : {}),
     ...(captured.columns !== undefined ? { columns: captured.columns } : {}),
+    ...(captured.vanishCharStyleIds.size > 0
+      ? { vanishCharStyleIds: [...captured.vanishCharStyleIds].sort() }
+      : {}),
     blob: [...captured.blob],
   };
 }
