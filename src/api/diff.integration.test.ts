@@ -746,13 +746,18 @@ describe('body-level object round-trip — textBox fingerprint symmetry (#652)',
     expect(diffRes.status).toBe(200);
     // The assertion that fails without the #652 fix: base hashed the host
     // w:p, theirs hashed the bare w:drawing, so objectConflicts held one
-    // entry. Asserting the WHOLE diff (not objectConflicts alone) also keeps
-    // this gate from going vacuous: `detectObjectConflicts` only reports a
-    // fingerprint divergence for a block `findMatchingBlock` actually matched
-    // by interior uuid, so a future regression that stopped
-    // `findInteriorUuids` from seeing the text box's interior anchor would
-    // silently satisfy an objectConflicts-only check — but it would surface
-    // here as a `deleted`/`modified` entry for the objectText uuid instead.
+    // entry.
+    //
+    // Non-vacuity is established by mutation, not by this shape: reverting
+    // fingerprintRoot's host-paragraph pick makes ONLY this test fail, and it
+    // fails carrying BOTH a base and a theirs fingerprint — which
+    // detectObjectConflicts emits only for a block findMatchingBlock actually
+    // matched by interior uuid, so the findInteriorUuids path is provably
+    // live here. (Asserting the whole diff rather than objectConflicts alone
+    // is broader coverage of the object round trip, but it is NOT by itself a
+    // guard on findInteriorUuids: theirsControlled is built by walkBlocks
+    // independently, so interior text would still round-trip cleanly if
+    // interior-uuid collection regressed. extract.test.ts pins that path.)
     expect(body.data).toEqual({
       added: [],
       modified: [],
