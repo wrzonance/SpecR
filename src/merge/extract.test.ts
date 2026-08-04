@@ -425,28 +425,36 @@ describe('extractContentControls — object-interior vanish handling (#648)', ()
 
   // Structural guard (not a behavior test): #648's fix reaches vanish detection
   // through the single, already-existing hasRunVanish predicate (body-objects.ts,
-  // #641/ADR-092) rather than growing a second, drifting w:vanish reader inside
+  // #641/ADR-092) rather than growing a second, drifting vanish reader inside
   // merge/. Pins the manual "grep -rn vanish src/merge/" audit from #648's
   // verification as an automated regression guard, so a future change can't
   // silently reintroduce a second predicate that disagrees with the first.
-  it('src/merge/*.ts touches raw w:vanish only through extract.ts, and only via the imported hasRunVanish', () => {
+  //
+  // Deliberately does NOT scan file contents for the literal string "w:vanish"
+  // — that coupled the guard to a doc comment's exact prose (#650) and made a
+  // purely cosmetic reword of extract.ts's comments fail CI with no functional
+  // change. Instead it asserts the two things that actually matter: no file
+  // declares its own vanish-named predicate, and extract.ts both imports and
+  // calls the shared one.
+  it('src/merge/*.ts declares no local vanish predicate, and extract.ts calls the imported hasRunVanish', () => {
     const nonTestFiles = readdirSync(MERGE_DIR).filter(
       (name) => name.endsWith('.ts') && !name.endsWith('.test.ts')
     );
 
-    const filesReferencingRawVanishTag = nonTestFiles.filter((name) =>
-      readFileSync(join(MERGE_DIR, name), 'utf8').includes('w:vanish')
-    );
-    expect(filesReferencingRawVanishTag).toEqual(['extract.ts']);
+    // No locally-declared vanish predicate anywhere in merge/ — hasRunVanish
+    // must remain the ONLY definition, never a second, independently-drifting one.
+    for (const name of nonTestFiles) {
+      const src = readFileSync(join(MERGE_DIR, name), 'utf8');
+      const localVanishDeclarations =
+        src.match(/\b(?:function|const)\s+\w*[Vv]anish\w*\s*[:(=]/g) ?? [];
+      expect(localVanishDeclarations).toEqual([]);
+    }
 
     const extractSrc = readFileSync(join(MERGE_DIR, 'extract.ts'), 'utf8');
     expect(extractSrc).toMatch(
       /import\s*\{\s*hasRunVanish\s*\}\s*from\s*'\.\.\/parser\/index\.js';/
     );
-    // No locally-declared vanish predicate alongside the import — hasRunVanish
-    // must remain the ONLY definition, never a second, independently-drifting one.
-    const localVanishDeclarations =
-      extractSrc.match(/\b(?:function|const)\s+\w*[Vv]anish\w*\s*[:(=]/g) ?? [];
-    expect(localVanishDeclarations).toEqual([]);
+    // The import must actually be exercised, not just present.
+    expect(extractSrc).toMatch(/\bhasRunVanish\(/);
   });
 });
