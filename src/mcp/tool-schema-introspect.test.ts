@@ -121,5 +121,32 @@ describe('boundary invariant: no private zod-v4 internals, no unsafe cast', () =
     it('UNSAFE_CAST does not false-positive on a generic instantiation', () => {
       expect(UNSAFE_CAST.test('const p: Promise<any> = fetchSchema();')).toBe(false);
     });
+
+    // KNOWN AMBIGUITY: `Promise <any>` (whitespace before the type arguments) is
+    // valid TypeScript that UNSAFE_CAST reports as a cast. The lookbehind only
+    // inspects the immediately preceding character, which here is a space, so the
+    // generic-instantiation exclusion above does not apply.
+    //
+    // Accepted deliberately, on two grounds:
+    //
+    // 1. It is unreachable in this repo. `prettier --check src/` is an enforced CI
+    //    gate (CLAUDE.md), and prettier rewrites `Promise <any>` to `Promise<any>`,
+    //    so the shape cannot survive in a committed source file — which is the only
+    //    thing this regex is ever run against.
+    // 2. Every narrower rule costs a false NEGATIVE. Widening the lookbehind to skip
+    //    whitespace (`(?<![\w$]\s*)`) — i.e. inspecting the preceding non-whitespace
+    //    token — also excludes `return <any>x`, a real cast preceded by a keyword.
+    //    Pinned below so that trade is never made silently.
+    //
+    // A false positive on this gate fails loudly and gets fixed; a false negative
+    // lets the banned construct through unnoticed. Prefer the loud failure.
+    // Distinguishing the two properly needs a type-vs-keyword-aware scan, not a regex.
+    it('UNSAFE_CAST over-matches a spaced generic instantiation — accepted, prettier prevents it', () => {
+      expect(UNSAFE_CAST.test('const p: Promise <any> = fetchSchema();')).toBe(true);
+    });
+
+    it('UNSAFE_CAST catches an angle-bracket cast preceded by a keyword, not just a bracket', () => {
+      expect(UNSAFE_CAST.test('  return <any>schema;')).toBe(true);
+    });
   });
 });
