@@ -293,3 +293,53 @@ describe('SpecNodeSchema — editability fixation for object/objectText (#300)',
     expect(SpecNodeSchema.safeParse(malformed).success).toBe(false);
   });
 });
+
+// ── type<->meta.object presence coupling (#650 Part B) ─────────────────────
+// An 'object' node is meaningless without its captured blob, and a non-object
+// node must never carry one (a leftover/misattached meta.object would silently
+// smuggle a captured OOXML blob onto a node no renderer expects it on). Scoped
+// strictly to presence — this must never re-derive or assert editability
+// (classify.ts already owns producing that pairing).
+describe('SpecNodeSchema — type<->meta.object presence coupling (#650)', () => {
+  const validObject = {
+    kind: 'table' as const,
+    floating: false,
+    generation: 'drawingml' as const,
+    rows: 1,
+    columns: 1,
+    blob: TABLE_BLOB,
+  };
+
+  it('rejects type=object with no meta.object', () => {
+    const node = {
+      id: VALID_UUID,
+      type: 'object',
+      text: 'Table (1x1)',
+      children: [],
+      meta: {},
+    };
+    expect(SpecNodeSchema.safeParse(node).success).toBe(false);
+  });
+
+  it('rejects a non-object type carrying a meta.object', () => {
+    const node = {
+      id: VALID_UUID,
+      type: 'article',
+      text: 'REFERENCES',
+      children: [],
+      meta: { object: validObject },
+    };
+    expect(SpecNodeSchema.safeParse(node).success).toBe(false);
+  });
+
+  it('accepts type=object with meta.object present (control)', () => {
+    const node = {
+      id: VALID_UUID,
+      type: 'object',
+      text: 'Table (1x1)',
+      children: [],
+      meta: { object: validObject },
+    };
+    expect(SpecNodeSchema.safeParse(node).success).toBe(true);
+  });
+});
