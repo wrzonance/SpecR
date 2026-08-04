@@ -48,7 +48,7 @@ function toObjectMeta(captured: CapturedBodyObject): ObjectMeta {
     ...(captured.rows !== undefined ? { rows: captured.rows } : {}),
     ...(captured.columns !== undefined ? { columns: captured.columns } : {}),
     ...(captured.vanishCharStyleIds.size > 0
-      ? { vanishCharStyleIds: [...captured.vanishCharStyleIds].sort() }
+      ? { vanishCharStyleIds: [...captured.vanishCharStyleIds].sort((a, b) => a.localeCompare(b)) }
       : {}),
     blob: [...captured.blob],
   };
