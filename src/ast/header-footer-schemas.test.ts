@@ -294,6 +294,26 @@ describe('HeaderFooterCompositionSchema — image fields (#308, ADR-069)', () =>
     ).toThrow();
   });
 
+  // #642, ADR-091 — bounded in Unicode CODE POINTS, not UTF-16 code units.
+  // imageData looks ASCII-only (base64) but nothing in the schema enforces
+  // that alphabet, so an astral payload reaches it exactly like any other
+  // string field — this is the case a UTF-16-unit-counting regression would
+  // silently reject at half the documented limit.
+  it('accepts imageData exactly at the MAX_IMAGE_BASE64_LENGTH cap made of astral (non-BMP) characters', () => {
+    const imageData = '\u{1F600}'.repeat(MAX_IMAGE_BASE64_LENGTH);
+    const input = { header: { left: { content: [{ kind: 'image', imageData }] } } };
+    expect(HeaderFooterCompositionSchema.parse(input)).toEqual(input);
+  });
+
+  it('rejects imageData one code point past the MAX_IMAGE_BASE64_LENGTH cap, made of astral characters', () => {
+    const imageData = '\u{1F600}'.repeat(MAX_IMAGE_BASE64_LENGTH + 1);
+    expect(() =>
+      HeaderFooterCompositionSchema.parse({
+        header: { left: { content: [{ kind: 'image', imageData }] } },
+      })
+    ).toThrow();
+  });
+
   it('still rejects an unrecognized field kind now that "image" is a valid kind (catchall must not swallow typed-field errors)', () => {
     expect(() =>
       HeaderFooterCompositionSchema.parse({

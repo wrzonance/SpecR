@@ -1,34 +1,46 @@
 // src/api/length-limit-unit-convention.test.ts
 //
-// #626 (ADR-088) — Zod's `.max(n)` delegates to `String.prototype.length`
-// (UTF-16 code units); JSON Schema's `maxLength` keyword (used by every
-// `openapi.yaml` field it mirrors) is defined in Unicode code points. For
-// any character outside the Basic Multilingual Plane the two counts diverge
-// by up to 2x, so a spec-compliant client can construct a payload the
-// documented contract says is valid but the server 422s. ADR-088 chose
-// "accept and document" over changing enforcement: every published bound's
-// `openapi.yaml` description states the UTF-16 convention verbatim
-// (`UTF16_LENGTH_LIMIT_NOTE`).
+// #642 (ADR-091) — JSON Schema's `maxLength` keyword (used by every
+// `openapi.yaml` field it mirrors) is defined in UNICODE CODE POINTS. This
+// repo used to enforce these bounds in UTF-16 code units (#626/ADR-088,
+// documented not fixed); codePointMax (src/lib/length-limit.ts) is now the
+// single helper every bounded string field routes through, so the published
+// number and the enforced one derive from one constant instead of drifting
+// independently.
 //
 // This file has two jobs. The MCP half of the same convention is gated
 // separately in src/mcp/length-limit-unit-convention.test.ts.
 //
 // 1. Coverage sweep — walk the WHOLE spec and require every `maxLength` it
-//    publishes to carry the note, rather than checking a hand-listed set of
-//    sites. An enumerated list cannot fail for a bound nobody remembered to
-//    add to it, which is the exact way this convention would rot: #626 calls
-//    a partial fix worse than none.
-// 2. Bound parity — for each documented bound, read `n` FROM THE SPEC and
-//    prove the paired Zod validator accepts exactly `n` UTF-16 code units and
-//    rejects `n + 1`. Nothing here hardcodes an expected number, so the test
-//    fails if EITHER side drifts: an earlier revision compared the spec against
-//    a hardcoded literal and a Zod bound silently dropping 200 -> 199 passed
-//    the whole suite.
+//    publishes to carry NO stale UTF-16 note (the old #626 convention this
+//    change retires), rather than checking a hand-listed set of sites.
+// 2. Bound parity — for each documented bound, prove: the spec's declared
+//    maxLength === the imported TS constant that defines it === the boundary
+//    Zod actually enforces, counted in UNICODE CODE POINTS (a NON-BMP probe,
+//    not a UTF-16-unit one) === the Zod field's generated schema carries the
+//    x-length-unit marker. Comparing against an IMPORTED CONSTANT (not a
+//    hardcoded literal) is deliberate: PR #637 shipped a version of this
+//    gate that compared openapi.yaml against a hardcoded number, so a Zod
+//    bound could drift 200->199 with nothing to catch it. Importing the same
+//    constant the schema is built from closes that hole.
 import { describe, it, expect } from 'vitest';
-import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
-import { ActorLabelSchema, LanguageRulesWriteSchema } from '../ast/index.js';
+import { z } from 'zod';
+import {
+  ActorLabelSchema,
+  LanguageRulesWriteSchema,
+  MAX_LITERAL_TERM_LENGTH,
+} from '../ast/index.js';
 import { MAX_IMAGE_BASE64_LENGTH } from '../lib/image-media-type.js';
+import { MAX_LABEL_LENGTH } from '../lib/label-length.js';
+import {
+  MAX_CURRENT_VERSION_LENGTH,
+  MAX_SOURCE_URL_LENGTH,
+  MAX_TITLE_LENGTH,
+  MAX_NOTES_LENGTH,
+} from '../lib/standards-verification-length.js';
+import { LENGTH_UNIT_META_KEY, CODE_POINT_LENGTH_UNIT } from '../lib/length-limit.js';
 import { loadRawSpec } from '../test-utils/contract/validate-response.js';
+import { collectLengthFields, type LengthField } from '../test-utils/contract/length-fields.js';
 import { VerificationBodySchema } from './standards.js';
 import { ResolveUserBody } from './users.js';
 import { ResolveUserShape } from '../mcp/users-handlers.js';
@@ -36,63 +48,27 @@ import { RecordStandardVerificationShape } from '../mcp/standards-handlers.js';
 
 // A non-BMP character: U+1F600 GRINNING FACE, 1 Unicode code point, 2 UTF-16
 // code units (a surrogate pair). Repeating it N times yields a string whose
-// `.length` (UTF-16 units) is 2N and whose `[...str].length` (code points)
-// is N — the exact divergence ADR-088 documents.
+// `[...str].length` (code points) is N and whose `.length` (UTF-16 units) is
+// 2N — the exact divergence ADR-091 fixes. Probing with THIS character
+// (never a plain ASCII one) is what makes these assertions fail if enforcement
+// ever regresses back to counting UTF-16 units.
 const ASTRAL_CHAR = '\u{1F600}';
 
-/** A string of exactly `units` UTF-16 code units, mostly astral characters. */
-function astralOfLength(units: number): string {
-  return ASTRAL_CHAR.repeat(Math.floor(units / 2)) + (units % 2 === 1 ? 'x' : '');
+/** A string of exactly `codePoints` Unicode code points, all astral. */
+function astralOfCodePointLength(codePoints: number): string {
+  return ASTRAL_CHAR.repeat(codePoints);
 }
 
 /** Same, but a syntactically valid URL (astral characters are legal in a path). */
-function astralUrlOfLength(units: number): string {
+function astralUrlOfCodePointLength(codePoints: number): string {
   const prefix = 'https://example.com/';
-  return prefix + astralOfLength(units - prefix.length);
+  return prefix + astralOfCodePointLength(codePoints - [...prefix].length);
 }
 
 // ── Spec-wide inventory ──────────────────────────────────────────────────────
 
-interface SpecLengthField {
-  readonly path: string;
-  readonly maxLength: number;
-  readonly description: string;
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
-
-/** This node's own `maxLength`, if it declares one. */
-function ownSpecLengthField(node: Record<string, unknown>, path: string): SpecLengthField[] {
-  const max = node['maxLength'];
-  if (typeof max !== 'number') return [];
-  const description = node['description'];
-  return [
-    { path, maxLength: max, description: typeof description === 'string' ? description : '' },
-  ];
-}
-
 /**
- * Every `maxLength` anywhere in the document. Deliberately structure-agnostic:
- * it descends through every object value and array element rather than
- * following a known OpenAPI shape, so a bound introduced under a keyword this
- * test never anticipated is still found.
- */
-function collectSpecLengthFields(node: unknown, path: string): SpecLengthField[] {
-  if (Array.isArray(node)) {
-    return node.flatMap((item, index) => collectSpecLengthFields(item, `${path}[${index}]`));
-  }
-  if (!isRecord(node)) return [];
-  return [
-    ...ownSpecLengthField(node, path),
-    ...Object.entries(node).flatMap(([key, value]) =>
-      collectSpecLengthFields(value, `${path}.${key}`)
-    ),
-  ];
-}
-
-/**
- * Bounds that legitimately carry no ADR-088 note, by exact path suffix.
+ * Bounds that legitimately carry no published bound, by exact path suffix.
  *
  * `sha256` is the only one. It is a fixed 64-character hex digest that the
  * server GENERATES and only ever returns (SpecLineage appears solely in the
@@ -100,18 +76,23 @@ function collectSpecLengthFields(node: unknown, path: string): SpecLengthField[]
  * an astral payload into it and the two counting methods can never disagree
  * there. Contrast `imageData`, which looks ASCII-only but is validated as a
  * plain bounded string with no base64 pattern behind it, so it IS reachable and
- * is documented like every other bound rather than exempted.
+ * is bounded like every other field rather than exempted.
  */
 const UNDOCUMENTED_BOUND_EXEMPTIONS: readonly string[] = ['.sha256'];
 
-const isExempt = (field: SpecLengthField): boolean =>
+const isExempt = (field: LengthField): boolean =>
   UNDOCUMENTED_BOUND_EXEMPTIONS.some((suffix) => field.path.endsWith(suffix));
 
-async function specLengthFields(): Promise<SpecLengthField[]> {
-  return collectSpecLengthFields(await loadRawSpec(), 'openapi');
+async function specLengthFields(): Promise<LengthField[]> {
+  return collectLengthFields(await loadRawSpec(), 'openapi');
 }
 
-describe('openapi.yaml — every published maxLength documents the ADR-088 unit convention (#626)', () => {
+// The prose sentence #626/ADR-088 required and #642/ADR-091 retires. A stale
+// copy left behind on any site would (wrongly) tell a reader the server still
+// diverges from the published contract.
+const STALE_UTF16_NOTE_FRAGMENT = 'UTF-16 code units';
+
+describe('openapi.yaml — no field claims a UTF-16/code-point divergence that no longer exists (#642)', () => {
   it('the spec publishes maxLength bounds at all (guards against a vacuous sweep)', async () => {
     expect(
       (await specLengthFields()).length,
@@ -120,19 +101,16 @@ describe('openapi.yaml — every published maxLength documents the ADR-088 unit 
     ).toBeGreaterThan(5);
   });
 
-  it('no bound is published without either the UTF-16 note or a documented exemption', async () => {
-    const undocumented = (await specLengthFields())
-      .filter((field) => !isExempt(field))
-      .filter((field) => !field.description.includes(UTF16_LENGTH_LIMIT_NOTE))
+  it('no published bound describes itself as UTF-16-code-unit-counted', async () => {
+    const stale = (await specLengthFields())
+      .filter((field) => field.description.includes(STALE_UTF16_NOTE_FRAGMENT))
       .map((field) => `${field.path} (maxLength: ${field.maxLength})`);
 
     expect(
-      undocumented,
-      'these openapi.yaml fields publish a maxLength — which JSON Schema defines in Unicode code ' +
-        'points — while Zod enforces it in UTF-16 code units, and their description does not say ' +
-        'so. Add UTF16_LENGTH_LIMIT_NOTE to the description, or, if the bound is genuinely ' +
-        'unreachable by client-supplied astral text, add it to UNDOCUMENTED_BOUND_EXEMPTIONS with ' +
-        'a justification'
+      stale,
+      'these openapi.yaml fields still claim a UTF-16-vs-code-point divergence (ADR-088) that ' +
+        'ADR-091 fixed by enforcing code points directly — remove the stale sentence from the ' +
+        'description'
     ).toEqual([]);
   });
 
@@ -147,15 +125,30 @@ describe('openapi.yaml — every published maxLength documents the ADR-088 unit 
   });
 });
 
-// ── Bound parity: the spec's number is the number Zod actually enforces ──────
+// ── Bound parity: spec === imported constant === Zod enforcement === marker ──
+
+/** Every `maxLength` a Zod field publishes on its own generated schema, walking through any `.optional()`/`.nullish()` wrap. */
+function fieldLengthFields(schema: z.ZodType): LengthField[] {
+  const generated = z.toJSONSchema(schema, { io: 'input' });
+  return collectLengthFields(generated, 'field');
+}
+
+function carriesCodePointMarker(schema: z.ZodType): boolean {
+  return fieldLengthFields(schema).some(
+    (field) => field.node[LENGTH_UNIT_META_KEY] === CODE_POINT_LENGTH_UNIT
+  );
+}
 
 interface BoundSite {
   readonly name: string;
   /** Unique path suffix identifying this bound in the spec inventory. */
   readonly pathEndsWith: string;
+  readonly max: number;
   /** Does the paired Zod validator accept this string? */
   readonly accepts: (value: string) => boolean;
-  readonly probe: (units: number) => string;
+  /** The Zod field itself, for asserting the code-point-unit marker. Omitted only for LanguageRuleTermWrite.term, whose bound is an object-level `.check()`, not a field-level codePointMax (see ADR-091). */
+  readonly field?: z.ZodType;
+  readonly probe: (codePoints: number) => string;
 }
 
 const succeeds =
@@ -167,56 +160,67 @@ const BOUND_SITES: readonly BoundSite[] = [
   {
     name: 'POST /users label',
     pathEndsWith: '.properties.label',
+    max: MAX_LABEL_LENGTH,
     accepts: succeeds((value) => ResolveUserBody.safeParse({ label: value })),
-    probe: astralOfLength,
+    field: ResolveUserBody.shape.label,
+    probe: astralOfCodePointLength,
   },
   {
     name: 'ActorLabel',
     pathEndsWith: 'components.schemas.ActorLabel',
+    max: MAX_LABEL_LENGTH,
     accepts: succeeds((value) => ActorLabelSchema.safeParse(value)),
-    probe: astralOfLength,
+    field: ActorLabelSchema,
+    probe: astralOfCodePointLength,
   },
   {
     name: 'LanguageRuleTermWrite.term',
     pathEndsWith: '.properties.term',
+    max: MAX_LITERAL_TERM_LENGTH, // object-level check, not field-level codePointMax; see `field` doc above
     accepts: succeeds((value) =>
       LanguageRulesWriteSchema.safeParse({ bannedTerms: [{ term: value }] })
     ),
-    probe: astralOfLength,
+    probe: astralOfCodePointLength,
   },
   {
     name: 'StandardVerificationBody.currentVersion',
     pathEndsWith: 'StandardVerificationBody.properties.currentVersion',
+    max: MAX_CURRENT_VERSION_LENGTH,
     accepts: succeeds((value) => VerificationBodySchema.shape.currentVersion.safeParse(value)),
-    probe: astralOfLength,
+    field: VerificationBodySchema.shape.currentVersion,
+    probe: astralOfCodePointLength,
   },
   {
     name: 'StandardVerificationBody.sourceUrl',
     pathEndsWith: 'StandardVerificationBody.properties.sourceUrl',
+    max: MAX_SOURCE_URL_LENGTH,
     accepts: succeeds((value) => VerificationBodySchema.shape.sourceUrl.safeParse(value)),
-    probe: astralUrlOfLength,
+    field: VerificationBodySchema.shape.sourceUrl,
+    probe: astralUrlOfCodePointLength,
   },
   {
     name: 'StandardVerificationBody.title',
     pathEndsWith: 'StandardVerificationBody.properties.title',
+    max: MAX_TITLE_LENGTH,
     accepts: succeeds((value) => VerificationBodySchema.shape.title.safeParse(value)),
-    probe: astralOfLength,
+    field: VerificationBodySchema.shape.title,
+    probe: astralOfCodePointLength,
   },
   {
     name: 'StandardVerificationBody.notes',
     pathEndsWith: 'StandardVerificationBody.properties.notes',
+    max: MAX_NOTES_LENGTH,
     accepts: succeeds((value) => VerificationBodySchema.shape.notes.safeParse(value)),
-    probe: astralOfLength,
+    field: VerificationBodySchema.shape.notes,
+    probe: astralOfCodePointLength,
   },
 ];
 
-describe('openapi.yaml bounds match what Zod enforces, counted in UTF-16 code units (#626)', () => {
+describe('openapi.yaml bounds match the imported constant and what Zod enforces, in Unicode code points (#642)', () => {
   it.each(BOUND_SITES)(
-    '$name: the spec’s maxLength is exactly the Zod bound, and one UTF-16 unit over is rejected',
-    async ({ pathEndsWith, accepts, probe }) => {
-      const matches = (await specLengthFields()).filter((field) =>
-        field.path.endsWith(pathEndsWith)
-      );
+    '$name: spec maxLength === imported constant === Zod boundary (code points), one over is rejected',
+    async ({ pathEndsWith, max, accepts, field, probe }) => {
+      const matches = (await specLengthFields()).filter((f) => f.path.endsWith(pathEndsWith));
       expect(
         matches.length,
         `expected exactly one openapi.yaml bound at a path ending "${pathEndsWith}" — ` +
@@ -225,28 +229,41 @@ describe('openapi.yaml bounds match what Zod enforces, counted in UTF-16 code un
       ).toBe(1);
       const declared = matches[0]?.maxLength ?? 0;
 
+      expect(
+        declared,
+        'openapi.yaml maxLength drifted from the imported TS constant that is supposed to define it'
+      ).toBe(max);
+
       const atLimit = probe(declared);
       const overLimit = probe(declared + 1);
-      expect(atLimit).toHaveLength(declared);
-      expect(overLimit).toHaveLength(declared + 1);
+      expect([...atLimit]).toHaveLength(declared);
+      expect([...overLimit]).toHaveLength(declared + 1);
 
       expect(
         accepts(atLimit),
-        'Zod rejected a payload of exactly the spec’s maxLength in UTF-16 code units — the ' +
+        'Zod rejected a payload of exactly the spec’s maxLength in Unicode code points — the ' +
           'enforced bound drifted below the documented one, so the contract now over-promises'
       ).toBe(true);
       expect(
         accepts(overLimit),
-        'Zod accepted one UTF-16 code unit MORE than the spec’s maxLength — the enforced bound ' +
-          'drifted above the documented one, or the check stopped counting UTF-16 units'
+        'Zod accepted one Unicode code point MORE than the spec’s maxLength — the enforced bound ' +
+          'drifted above the documented one, or the check stopped counting code points'
       ).toBe(false);
+
+      if (field !== undefined) {
+        expect(
+          carriesCodePointMarker(field),
+          `${pathEndsWith}'s Zod field does not carry the x-length-unit: unicode-code-point ` +
+            'marker — it was not built via codePointMax (src/lib/length-limit.ts)'
+        ).toBe(true);
+      }
     }
   );
 
   // imageData's bound is ~7M characters; probing it behaviorally would allocate
   // two ~14 MB strings per run for no extra signal. Bind the published number to
   // the constant that defines it instead.
-  it('imageData: every published bound equals MAX_IMAGE_BASE64_LENGTH', async () => {
+  it('imageData: every published bound equals MAX_IMAGE_BASE64_LENGTH and carries the code-point marker', async () => {
     const imageBounds = (await specLengthFields()).filter((field) =>
       field.path.endsWith('.imageData')
     );
@@ -265,68 +282,75 @@ describe('openapi.yaml bounds match what Zod enforces, counted in UTF-16 code un
 
 // Note-presence across the WHOLE MCP surface is asserted by the invariant sweep
 // in src/mcp/length-limit-unit-convention.test.ts. What that sweep cannot see is
-// whether each twin's bound still MATCHES its REST counterpart and is still
-// counted in UTF-16 units — a twin silently drifting to .max(199), or to a
-// code-point check, would keep its note and pass there. That is this block's job.
-// It matters because these two shapes do NOT reuse the REST validators: they
-// re-declare their own `.max(n)` literals, so nothing but this test holds the two
-// surfaces to the same number.
+// whether each twin's bound still MATCHES its REST counterpart, is counted in
+// Unicode code points, and carries the marker — a twin silently drifting to
+// .max(199), or back to a UTF-16-unit check, would keep publishing SOME
+// maxLength and pass there. That is this block's job. It matters because these
+// two shapes do NOT reuse the REST validators: they import the same numeric
+// constant but build their own codePointMax call, so nothing but this test
+// holds the two surfaces to the same enforced behavior.
 interface McpTwinSite {
   readonly name: string;
   readonly expectedMax: number;
-  readonly field: { safeParse: (value: unknown) => { success: boolean } };
-  readonly probe: (units: number) => string;
+  readonly field: z.ZodType;
+  readonly probe: (codePoints: number) => string;
 }
 
 const MCP_TWIN_SITES: readonly McpTwinSite[] = [
   {
     name: 'resolve_user.label',
-    expectedMax: 200,
+    expectedMax: MAX_LABEL_LENGTH,
     field: ResolveUserShape.label,
-    probe: astralOfLength,
+    probe: astralOfCodePointLength,
   },
   {
     name: 'record_standard_verification.currentVersion',
-    expectedMax: 200,
+    expectedMax: MAX_CURRENT_VERSION_LENGTH,
     field: RecordStandardVerificationShape.currentVersion,
-    probe: astralOfLength,
+    probe: astralOfCodePointLength,
   },
   {
     name: 'record_standard_verification.sourceUrl',
-    expectedMax: 2000,
+    expectedMax: MAX_SOURCE_URL_LENGTH,
     field: RecordStandardVerificationShape.sourceUrl,
-    probe: astralUrlOfLength,
+    probe: astralUrlOfCodePointLength,
   },
   {
     name: 'record_standard_verification.title',
-    expectedMax: 500,
+    expectedMax: MAX_TITLE_LENGTH,
     field: RecordStandardVerificationShape.title,
-    probe: astralOfLength,
+    probe: astralOfCodePointLength,
   },
   {
     name: 'record_standard_verification.notes',
-    expectedMax: 5000,
+    expectedMax: MAX_NOTES_LENGTH,
     field: RecordStandardVerificationShape.notes,
-    probe: astralOfLength,
+    probe: astralOfCodePointLength,
   },
 ];
 
-describe('MCP tool shapes — twin length bounds stay identical to their REST counterparts (#626)', () => {
+describe('MCP tool shapes — twin length bounds stay identical to their REST counterparts, in code points (#642)', () => {
   it.each(MCP_TWIN_SITES)(
-    '$name: bound is $expectedMax UTF-16 code units, matching its REST twin',
-    ({ expectedMax, field, probe }) => {
+    '$name: bound is $expectedMax Unicode code points, matching its REST twin, and carries the marker',
+    ({ name, expectedMax, field, probe }) => {
       const atLimit = probe(expectedMax);
       const overLimit = probe(expectedMax + 1);
 
-      expect(atLimit).toHaveLength(expectedMax);
-      expect(overLimit).toHaveLength(expectedMax + 1);
+      expect([...atLimit]).toHaveLength(expectedMax);
+      expect([...overLimit]).toHaveLength(expectedMax + 1);
       expect(
         field.safeParse(atLimit).success,
-        'MCP twin bound drifted from its REST counterpart, or stopped counting UTF-16 code units'
+        'MCP twin bound drifted from its REST counterpart, or stopped counting Unicode code points'
       ).toBe(true);
-      expect(field.safeParse(overLimit).success, 'MCP twin accepted one unit over its bound').toBe(
-        false
-      );
+      expect(
+        field.safeParse(overLimit).success,
+        'MCP twin accepted one code point over its bound'
+      ).toBe(false);
+      expect(
+        carriesCodePointMarker(field),
+        `${name} does not carry the x-length-unit: unicode-code-point marker — it was not built ` +
+          'via codePointMax (src/lib/length-limit.ts)'
+      ).toBe(true);
     }
   );
 });
