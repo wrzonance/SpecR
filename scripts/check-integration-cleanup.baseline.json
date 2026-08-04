@@ -427,43 +427,43 @@
   },
   {
     "filePath": "src/db/queries/specs.integration.test.ts",
-    "line": 326,
+    "line": 333,
     "snippet": "DELETE FROM specs WHERE section IN ('99 88 77.10 20', 'unknown') AND source = 'arcat'",
     "reason": "hardcoded literal equality, not a captured id"
   },
   {
     "filePath": "src/db/queries/specs.integration.test.ts",
-    "line": 374,
+    "line": 381,
     "snippet": "DELETE FROM specs WHERE section = '99 66 00'",
     "reason": "hardcoded literal equality, not a captured id"
   },
   {
     "filePath": "src/db/queries/specs.integration.test.ts",
-    "line": 426,
+    "line": 433,
     "snippet": "DELETE FROM specs WHERE section = '99 67 00'",
     "reason": "hardcoded literal equality, not a captured id"
   },
   {
     "filePath": "src/db/queries/specs.integration.test.ts",
-    "line": 513,
+    "line": 520,
     "snippet": "DELETE FROM specs WHERE section = '98 00 00'",
     "reason": "hardcoded literal equality, not a captured id"
   },
   {
     "filePath": "src/db/queries/specs.integration.test.ts",
-    "line": 566,
+    "line": 573,
     "snippet": "DELETE FROM specs WHERE section = '99 00 10'",
     "reason": "hardcoded literal equality, not a captured id"
   },
   {
     "filePath": "src/db/queries/specs.integration.test.ts",
-    "line": 578,
+    "line": 585,
     "snippet": "DELETE FROM libraries WHERE name = $1",
     "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
   },
   {
     "filePath": "src/db/queries/specs.integration.test.ts",
-    "line": 613,
+    "line": 620,
     "snippet": "DELETE FROM specs WHERE section = '99 68 00'",
     "reason": "hardcoded literal equality, not a captured id"
   },

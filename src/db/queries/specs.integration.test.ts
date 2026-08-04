@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { pool, createLibrary } from '../index.js';
 import { createSpec, persistParsedSpec, updateSpec, withdrawSpec } from './specs.js';
@@ -29,21 +29,28 @@ afterEach(async () => {
 
 describe('afterEach teardown is id-scoped, not section-pattern (#442)', () => {
   // Stands in for a row this file's tests did not create — e.g. a concurrent
-  // process's fixture at the same section value. Cleaned up once via
-  // `afterAll`, deliberately outside the per-test `afterEach` above, so the
-  // second test below can observe whether that hook touched it.
+  // process's fixture at the same section value. Created in `beforeAll` and
+  // torn down in `afterAll`, both deliberately outside the per-test
+  // `afterEach` above, so the second test below can observe whether that hook
+  // touched it. Setting it up in a hook rather than in the first `it` keeps
+  // the second test from depending on a sibling test having run: under `-t`
+  // filtering or a shuffled order it would otherwise read an undefined id and
+  // fail for the wrong reason — the very cross-test coupling this file fixes.
   let foreignSpecId: string;
+
+  beforeAll(async () => {
+    foreignSpecId = await createSpec({
+      section: '99 00 00',
+      title: 'Foreign Fixture (simulated concurrent run)',
+      source: 'arcat',
+    });
+  });
 
   afterAll(async () => {
     await deleteCapturedFixtures(pool, { specIds: [foreignSpecId] });
   });
 
   it('a sibling test creates its own 99 00 00 row alongside a foreign one', async () => {
-    foreignSpecId = await createSpec({
-      section: '99 00 00',
-      title: 'Foreign Fixture (simulated concurrent run)',
-      source: 'arcat',
-    });
     // Distinct `source` so this insert doesn't collide with the foreign row
     // on the (section, source, library_id) unique constraint — both target
     // section '99 00 00' and the same default library.

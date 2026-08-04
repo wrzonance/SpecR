@@ -4,10 +4,11 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
-  ALLOWLISTED_PATTERN_DELETE_FILES,
+  ALLOWLISTED_PATTERN_DELETES,
   IntegrationCleanupError,
   type CleanupViolation,
   findIntegrationCleanupViolations,
+  isAllowlistedPatternDelete,
   scanFileForPatternDeletes,
 } from './check-integration-cleanup.js';
 
@@ -63,6 +64,32 @@ describe('scanFileForPatternDeletes', () => {
       expect(violations).toHaveLength(1);
       expect(violations[0]?.line).toBe(2);
     });
+
+    // Regression: the gate must not be defeated by reformatting alone. A
+    // pattern sweep written across lines, in lowercase, or with the DELETE
+    // keyword pushed off the opening quote is the same hazard as the tidy
+    // one-line uppercase spelling, and must land on the DELETE keyword's line.
+    it.each([
+      ['leading whitespace after the opening quote', '`  DELETE FROM specs WHERE name LIKE $1`', 1],
+      ['lowercase SQL', "'delete from specs where name like $1'", 1],
+      ['DELETE and FROM split across lines', '`DELETE\n   FROM specs WHERE name LIKE $1`', 1],
+      ['the statement starting on the line after the quote', '`\n  DELETE FROM specs`', 2],
+    ])('%s', (_label, snippet, expectedLine) => {
+      const violations = scanFileForPatternDeletes('fixture.ts', snippet);
+      expect(violations).toHaveLength(1);
+      expect(violations[0]?.line).toBe(expectedLine);
+    });
+
+    // Regression: one id-scoped branch does not make the predicate safe —
+    // the OR branch can still delete rows the test never captured.
+    it('an OR branch that is not id-scoped', () => {
+      const violations = scanFileForPatternDeletes(
+        'fixture.ts',
+        "await pool.query('DELETE FROM specs WHERE id = $1 OR title = $2', [id, title]);"
+      );
+      expect(violations).toHaveLength(1);
+      expect(violations[0]?.reason).toBe('an OR branch is not id-scoped');
+    });
   });
 
   describe('does not flag an id-scoped DELETE', () => {
@@ -80,6 +107,10 @@ describe('scanFileForPatternDeletes', () => {
       [
         'a nested id-scoped subquery',
         "await pool.query('DELETE FROM paragraphs WHERE spec_id IN (SELECT id FROM specs WHERE project_id = ANY($1))', [ids]);",
+      ],
+      [
+        'every OR branch id-scoped',
+        "await pool.query('DELETE FROM specs WHERE library_id = ANY($1::uuid[]) OR project_id = $2', [ids, id]);",
       ],
     ])('%s', (_label, snippet) => {
       expect(scanFileForPatternDeletes('fixture.ts', snippet)).toHaveLength(0);
@@ -124,12 +155,24 @@ describe('findIntegrationCleanupViolations', () => {
     }
   });
 
-  it('never reports a violation from an allowlisted file', () => {
+  it('never reports an allowlisted statement', () => {
     const violations = findIntegrationCleanupViolations(ROOT);
-    const allowlistedHits = violations.filter((v) =>
-      ALLOWLISTED_PATTERN_DELETE_FILES.has(v.filePath)
-    );
+    const allowlistedHits = violations.filter((v) => isAllowlistedPatternDelete(v.filePath, v.snippet));
     expect(allowlistedHits).toEqual([]);
+  });
+
+  // Regression: allowlisting is keyed to reviewed STATEMENTS, not whole
+  // files. A file-level exclusion would silently accept any future unrelated
+  // sweep — including a whole-table wipe — added to the same file.
+  it('still reports a NON-allowlisted delete inside an allowlisted file', () => {
+    const [allowlistedFile] = [...ALLOWLISTED_PATTERN_DELETES.keys()];
+    expect(allowlistedFile).toBeDefined();
+    const violations = scanFileForPatternDeletes(
+      allowlistedFile as string,
+      'await pool.query(`DELETE FROM header_footer_configs`);'
+    );
+    expect(violations).toHaveLength(1);
+    expect(isAllowlistedPatternDelete(violations[0]!.filePath, violations[0]!.snippet)).toBe(false);
   });
 
   // Runs unconditionally: pure filesystem scan, no DATABASE_URL, no seeded

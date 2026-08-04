@@ -37,20 +37,41 @@ export interface CleanupViolation {
 }
 
 /**
- * Files where a name/prefix-pattern `DELETE` is a deliberate, reviewed
- * choice rather than an oversight — see the file's own inline ADR-090/#638
- * comments for why an id-scoped rewrite doesn't apply there. Paths are
- * `/`-joined, relative to the repo root.
+ * The individual `DELETE` statements where a name/prefix pattern is a
+ * deliberate, reviewed choice rather than an oversight — see each file's own
+ * inline ADR-090/#638 comments for why an id-scoped rewrite doesn't apply.
+ * File paths are `/`-joined, relative to the repo root; each value holds the
+ * exact statement snippets that were reviewed.
+ *
+ * Keyed to STATEMENTS, not whole files, on purpose: a file-level exclusion
+ * would silently accept any future unrelated pattern — or whole-table — delete
+ * added to the same file, which is precisely the class this gate exists to
+ * catch. Adding a new pattern delete to an allowlisted file still fails the
+ * ratchet until it is reviewed and listed here (or baselined).
  */
-export const ALLOWLISTED_PATTERN_DELETE_FILES: ReadonlySet<string> = new Set([
-  'src/db/queries/libraries.integration.test.ts',
+export const ALLOWLISTED_PATTERN_DELETES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  [
+    'src/db/queries/libraries.integration.test.ts',
+    new Set([
+      `DELETE FROM specs WHERE section LIKE '99 77 %'`,
+      `DELETE FROM projects WHERE name = 'lib-xor-test-project'`,
+    ]) as ReadonlySet<string>,
+  ],
 ]);
+
+/** True when this exact statement snippet is a reviewed, allowlisted delete. */
+export const isAllowlistedPatternDelete = (filePath: string, snippet: string): boolean =>
+  ALLOWLISTED_PATTERN_DELETES.get(filePath)?.has(snippet) ?? false;
 
 // Captures a `DELETE FROM ...` SQL string, quote-delimited by backtick,
 // single, or double quote — non-greedy up to the SAME delimiter, so a
 // multi-line template-literal query (`DELETE FROM x\n WHERE ...`) is
-// captured whole.
-const DELETE_STATEMENT = /(`|'|")(DELETE FROM[\s\S]*?)\1/g;
+// captured whole. Leading whitespace after the opening quote, any internal
+// whitespace between DELETE and FROM, and any casing are all tolerated: a
+// query written as `\n  delete\n  from x ...` is the same hazard as the
+// one-line uppercase form, and a gate that only matched the tidy spelling
+// would be bypassed by reformatting alone.
+const DELETE_STATEMENT = /(`|'|")\s*(DELETE\s+FROM[\s\S]*?)\1/gi;
 
 // A WHERE-clause comparison is id-scoped when it targets a column named
 // "id" or ending "_id" and binds it to a query parameter, directly
@@ -59,16 +80,33 @@ const DELETE_STATEMENT = /(`|'|")(DELETE FROM[\s\S]*?)\1/g;
 const ID_SCOPED_COMPARISON = /\b\w*_?id\s*(?:=\s*ANY\(\$\d+|=\s*\$\d+|IN\s*\(SELECT\s+id\s+FROM)/i;
 const PATTERN_INDICATORS = /\bLIKE\b|=\s*'[^']*'|IS\s+NOT\s+NULL/i;
 
+/** Everything after the first `WHERE`, or `''` when the statement has none. */
+const whereClauseOf = (statement: string): string => {
+  const match = /\bWHERE\b([\s\S]*)$/i.exec(statement);
+  return match?.[1] ?? '';
+};
+
+/**
+ * True when some `OR` branch of the predicate is not itself id-scoped.
+ *
+ * `WHERE id = $1 OR name = $2` binds a param on both sides, so a whole-clause
+ * token search sees an id comparison and calls it safe — while the second
+ * branch can still delete rows the test never captured. Every branch has to
+ * carry its own id scope. `AND` needs no such treatment: it only narrows.
+ */
+const hasUnscopedOrBranch = (whereClause: string): boolean =>
+  whereClause.split(/\bOR\b/i).some((branch) => !ID_SCOPED_COMPARISON.test(branch));
+
 /**
  * True when a captured `DELETE FROM ...` statement is NOT scoped to ids the
  * test captured itself: a whole-table wipe (no `WHERE`), a `LIKE` pattern, a
- * hardcoded literal equality, an `IS NOT NULL` sweep, or simply no id-scoped
- * comparison at all.
+ * hardcoded literal equality, an `IS NOT NULL` sweep, an `OR` branch that
+ * escapes the id scope, or simply no id-scoped comparison at all.
  */
 const isPatternDelete = (statement: string): boolean => {
   if (!/\bWHERE\b/i.test(statement)) return true;
   if (PATTERN_INDICATORS.test(statement)) return true;
-  return !ID_SCOPED_COMPARISON.test(statement);
+  return hasUnscopedOrBranch(whereClauseOf(statement));
 };
 
 const patternDeleteReason = (statement: string): string => {
@@ -76,6 +114,10 @@ const patternDeleteReason = (statement: string): string => {
   if (/\bLIKE\b/i.test(statement)) return 'LIKE pattern, not a captured id';
   if (/IS\s+NOT\s+NULL/i.test(statement)) return 'IS NOT NULL sweep, not a captured id';
   if (/=\s*'[^']*'/.test(statement)) return 'hardcoded literal equality, not a captured id';
+  const whereClause = whereClauseOf(statement);
+  if (ID_SCOPED_COMPARISON.test(whereClause) && hasUnscopedOrBranch(whereClause)) {
+    return 'an OR branch is not id-scoped';
+  }
   return 'no id-scoped comparison (id = $n / id = ANY($n))';
 };
 
@@ -146,7 +188,12 @@ export const scanFileForPatternDeletes = (
   while ((match = pattern.exec(cleaned)) !== null) {
     const statement = match[2] ?? '';
     if (!isPatternDelete(statement)) continue;
-    const line = cleaned.slice(0, match.index).split('\n').length;
+    // Report the line the DELETE keyword sits on, not the opening quote's:
+    // the two differ once whitespace follows the quote. match[0] is exactly
+    // quote + whitespace + statement + quote, so the statement's offset is
+    // the match length minus the statement and its closing quote.
+    const deleteOffset = match.index + (match[0].length - statement.length - 1);
+    const line = cleaned.slice(0, deleteOffset).split('\n').length;
     const snippet = (statement.split('\n')[0] ?? '').trim().slice(0, 120);
     violations.push({ filePath, line, snippet, reason: patternDeleteReason(statement) });
   }
@@ -168,16 +215,17 @@ const listIntegrationTestFiles = (rootDir: string): readonly string[] => {
 
 /**
  * Walks `rootDir` (pass the repo root) for every `src/**\/*.integration.test.ts`
- * file and returns the non-id-scoped `DELETE` statements found, excluding
- * `ALLOWLISTED_PATTERN_DELETE_FILES`. Throws `IntegrationCleanupError` only
- * on a filesystem read failure — never silently skips a file it can't read.
+ * file and returns the non-id-scoped `DELETE` statements found, excluding the
+ * individually reviewed statements in `ALLOWLISTED_PATTERN_DELETES`. Every
+ * file is scanned — allowlisting drops single statements, never whole files.
+ * Throws `IntegrationCleanupError` only on a filesystem read failure — never
+ * silently skips a file it can't read.
  */
 export const findIntegrationCleanupViolations = (rootDir: string): readonly CleanupViolation[] => {
   const srcDir = join(rootDir, 'src');
   const violations: CleanupViolation[] = [];
   for (const absolutePath of listIntegrationTestFiles(srcDir)) {
     const relativePath = relative(rootDir, absolutePath).split(sep).join('/');
-    if (ALLOWLISTED_PATTERN_DELETE_FILES.has(relativePath)) continue;
 
     let fileText: string;
     try {
@@ -185,7 +233,11 @@ export const findIntegrationCleanupViolations = (rootDir: string): readonly Clea
     } catch (err) {
       throw new IntegrationCleanupError(`could not read ${relativePath}`, { cause: err });
     }
-    violations.push(...scanFileForPatternDeletes(relativePath, fileText));
+    violations.push(
+      ...scanFileForPatternDeletes(relativePath, fileText).filter(
+        (violation) => !isAllowlistedPatternDelete(violation.filePath, violation.snippet)
+      )
+    );
   }
   return violations;
 };
