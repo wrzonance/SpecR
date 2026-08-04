@@ -62,8 +62,22 @@ async function clearReservedNamespaces(): Promise<void> {
   // Specs cloned out of a doomed library point back at its masters via
   // specs.parent_spec_id (NO ACTION), and project_specs/package_specs RESTRICT
   // the clones — so the whole derived project has to go before the masters can.
+  // Current project_sources is NOT sufficient on its own: setProjectSources
+  // (src/db/queries/projects.ts) replaces a project's source list without
+  // re-resolving specs already cloned from the old sources (copies are
+  // immutable, ADR-015 D2), so a project can still hold a clone of a doomed
+  // master while no longer being linked to that library. Discovering projects
+  // only through project_sources misses exactly those, and the masters delete
+  // below then fails on specs_parent_spec_id_fkey. Union in the clones'
+  // owners so a project is condemned when it holds a doomed master's clone,
+  // however it came to hold it.
   const derived = await pool.query<{ project_id: string }>(
-    `SELECT DISTINCT project_id FROM project_sources WHERE library_id = ANY($1)`,
+    `SELECT DISTINCT project_id FROM project_sources WHERE library_id = ANY($1)
+     UNION
+     SELECT DISTINCT clone.project_id
+       FROM specs clone
+       JOIN specs master ON master.id = clone.parent_spec_id
+      WHERE master.library_id = ANY($1) AND clone.project_id IS NOT NULL`,
     [libraryIds]
   );
   const projectIds = derived.rows.map((r) => r.project_id);
@@ -353,17 +367,67 @@ describe('#623 regression — residue from a prior run is swept before the first
     expect(await findLibraryByName(DEFAULT_COMPANY_LIBRARY)).not.toBeNull();
   });
 
+  // A project keeps its clones when its source list is replaced — copies are
+  // immutable (ADR-015 D2), and setProjectSources says so explicitly. So a
+  // project can hold a clone of a doomed library's master while no longer
+  // having any project_sources row pointing at that library. Discovering
+  // condemned projects through project_sources alone misses exactly those, and
+  // the masters delete then fails on specs_parent_spec_id_fkey — verified
+  // against a live database before the fix: all 16 tests here reported
+  // SKIPPED, because beforeAll threw.
+  it('libraries: leaked clone whose project no longer sources the doomed library does not wedge the sweep on specs_parent_spec_id_fkey', async () => {
+    const leaked = await createLibrary({
+      tier: 'client',
+      name: `Leaked Clone Source ${randomUUID().slice(0, 8)}`,
+    });
+    const master = await pool.query<{ id: string }>(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ('05 12 00', 'Orphaned Clone Master', 'unknown', $1) RETURNING id`,
+      [leaked.id]
+    );
+    const project = await pool.query<{ id: string }>(
+      `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+      [`orphaned-clone-project-${randomUUID().slice(0, 8)}`]
+    );
+    // Deliberately NO project_sources row: this is the post-replacement state.
+    await pool.query(
+      `INSERT INTO specs (section, title, source, project_id, parent_spec_id)
+       VALUES ('05 12 00', 'Orphaned Clone', 'unknown', $1, $2)`,
+      [project.rows[0]!.id, master.rows[0]!.id]
+    );
+
+    // Pre-fix behaviour: the masters delete the sweep performs, unaided by any
+    // knowledge of the clone hanging off it.
+    await expect(
+      pool.query(`DELETE FROM specs WHERE library_id = $1`, [leaked.id])
+    ).rejects.toThrow(/specs_parent_spec_id_fkey/);
+
+    await expect(clearReservedNamespaces()).resolves.toBeUndefined();
+    expect(await findLibraryById(leaked.id)).toBeNull();
+    expect(await findLibraryByName(UFGS_REFERENCE_LIBRARY)).not.toBeNull();
+    expect(await findLibraryByName(DEFAULT_COMPANY_LIBRARY)).not.toBeNull();
+  });
+
   // The built-in convention (library_id IS NULL) is not a child of any doomed
   // library and must survive the sweep — conventions.integration.test.ts and
   // the resolution chain both depend on that singleton still being there.
+  // Both counts are asserted to be exactly 1, not merely equal to each other:
+  // an equality-only assertion is satisfied by 0 === 0, so widening the
+  // convention delete to `DELETE FROM editing_conventions` (the precise
+  // mistake this test exists to catch) would leave it green.
   it('libraries: the reserved-namespace sweep leaves the built-in (library_id IS NULL) editing convention intact', async () => {
-    const before = await pool.query<{ n: number }>(
-      `SELECT COUNT(*)::int AS n FROM editing_conventions WHERE library_id IS NULL`
-    );
+    const countBuiltIn = async (): Promise<number | undefined> => {
+      const r = await pool.query<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM editing_conventions WHERE library_id IS NULL`
+      );
+      return r.rows[0]?.n;
+    };
+
+    // Precondition: migration 024 seeds exactly one built-in and creates
+    // editing_conventions_builtin_singleton, the partial unique index on
+    // (library_id IS NULL) that keeps it a singleton.
+    expect(await countBuiltIn()).toBe(1);
     await clearReservedNamespaces();
-    const after = await pool.query<{ n: number }>(
-      `SELECT COUNT(*)::int AS n FROM editing_conventions WHERE library_id IS NULL`
-    );
-    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+    expect(await countBuiltIn()).toBe(1);
   });
 });

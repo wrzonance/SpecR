@@ -52,9 +52,13 @@ project and released in that hook's teardown closure.
 Mechanism (`src/test-utils/integration-lock.global-setup.ts`):
 
 - Opens one dedicated `pg.Client` — never the shared `pool`/`createPool()`
-  from `src/db/index.ts` — because a session advisory lock must stay pinned
-  to a single physical connection for the run's lifetime, and a `Pool` checks
-  connections in and out per query, which would silently drop the lock.
+  from `src/db/index.ts` — because a session advisory lock belongs to the one
+  backend session that acquired it, and a `Pool` checks connections in and out
+  per query. A pool does not drop the lock early; it strands it. The acquiring
+  connection returns to the pool still holding the lock, and the later
+  `pg_advisory_unlock` most likely runs on a different backend, where it is a
+  no-op that returns false — leaving the lock held by an idle pooled session
+  and blocking every subsequent invocation until the pool closes it.
 - Probes non-blocking first (`pg_try_advisory_lock`). If another invocation
   already holds it, logs **once** via the pino logger (`src/lib/logger.js`)
   that this run is waiting on another `pnpm test:integration` invocation,

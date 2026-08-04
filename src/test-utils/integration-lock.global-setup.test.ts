@@ -53,6 +53,48 @@ describe('integration-lock.global-setup: acquire', () => {
     expect(query).toHaveBeenCalledTimes(2);
     expect(query.mock.calls[1]?.[0]).toMatch(/^SELECT pg_advisory_lock\(\$1\)$/);
   });
+
+  // A failed acquire throws out of globalSetup before the teardown closure
+  // exists, so Vitest never gets a handle it could close the connection with.
+  // Unless setup closes it itself, `connect()` having already succeeded leaves
+  // a live socket keeping the event loop alive on the way out.
+  it('closes the dedicated client when the non-blocking probe rejects, and rethrows the original error', async () => {
+    const boom = new Error('terminating connection due to administrator command');
+    query.mockRejectedValueOnce(boom);
+
+    const setup = (await import('./integration-lock.global-setup.js')).default;
+
+    await expect(setup()).rejects.toBe(boom);
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  // The blocking acquire is the likelier one to fail in practice: a
+  // `statement_timeout` shorter than the holding run cancels it outright.
+  it('closes the dedicated client when the blocking pg_advisory_lock rejects, and rethrows the original error', async () => {
+    const boom = new Error('canceling statement due to statement timeout');
+    query
+      .mockResolvedValueOnce({ rows: [{ pg_try_advisory_lock: false }] })
+      .mockRejectedValueOnce(boom);
+
+    const setup = (await import('./integration-lock.global-setup.js')).default;
+
+    await expect(setup()).rejects.toBe(boom);
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  // The cleanup is best-effort: if closing the socket ALSO fails there is
+  // nothing further to do, and surfacing that secondary error would hide why
+  // the run actually failed to start.
+  it('still rethrows the original acquire error when the cleanup client.end() also fails', async () => {
+    const boom = new Error('canceling statement due to statement timeout');
+    query.mockRejectedValueOnce(boom);
+    end.mockRejectedValueOnce(new Error('socket already closed'));
+
+    const setup = (await import('./integration-lock.global-setup.js')).default;
+
+    await expect(setup()).rejects.toBe(boom);
+    expect(end).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('integration-lock.global-setup: teardown', () => {

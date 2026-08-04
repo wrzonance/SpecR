@@ -46,8 +46,32 @@ interface NodeIds {
   readonly pr1: string;
 }
 
+// createSpec commits the spec row before insertTree runs, but the caller only
+// receives the id — and can only capture it for teardown — once BOTH have
+// succeeded. So an insertTree failure used to strand a committed spec row that
+// nothing would ever delete: the id-scoped afterEach below never learns about
+// it, where the `WHERE section LIKE '99 00 0%'` sweep it replaced would have
+// swept it up. Reachable: insertTree writes paragraph rows at fixed literal
+// ids, and src/db/queries/search.integration.test.ts seeds paragraphs at the
+// same '3000…0001/2/3' ids, so residue from a killed run makes insertTree
+// fail on the paragraph primary key with the spec row already committed.
+// seedSpec therefore cleans up its own orphan before rethrowing.
 async function seedSpec(section: string, ids: NodeIds): Promise<string> {
   const specId = await createSpec({ section, title: 'Editability Test', source: 'arcat' });
+  try {
+    return await insertSeedTree(section, ids, specId);
+  } catch (err) {
+    try {
+      await deleteCapturedFixtures(pool, { specIds: [specId] });
+    } catch {
+      // Best-effort: a failed cleanup must not mask why the seed failed, and
+      // leaves the orphan exactly where the pre-fix code left it anyway.
+    }
+    throw err;
+  }
+}
+
+async function insertSeedTree(section: string, ids: NodeIds, specId: string): Promise<string> {
   await insertTree(
     {
       id: specId,

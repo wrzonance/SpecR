@@ -19,9 +19,14 @@ import { logger } from '../lib/logger.js';
  * before any suite can touch the database.
  *
  * A dedicated `pg.Client` — never the shared `pool`/`createPool()` from
- * `src/db/index.ts` — because a session advisory lock is pinned to one
- * physical connection for its lifetime, and a `Pool` checks connections in
- * and out per query, which would silently release the lock between queries.
+ * `src/db/index.ts` — because a session advisory lock belongs to the one
+ * backend session that took it, and a `Pool` checks connections in and out
+ * per query. The failure a pool causes is not an early release but the
+ * opposite: the lock stays held by whichever backend ran the acquire, that
+ * connection goes back to the pool idle, and a later
+ * `pg_advisory_unlock` is likely to run on a DIFFERENT backend — where it is
+ * a no-op returning false. The lock is then stranded on an idle pooled
+ * session until the pool closes it, and every subsequent invocation blocks.
  */
 
 // One fixed key for the whole repo: any two invocations pointed at the same
@@ -35,23 +40,50 @@ import { logger } from '../lib/logger.js';
 // bigint parameter via Postgres's own untyped-parameter coercion.
 const INTEGRATION_LOCK_KEY = 638_073;
 
-export default async function setup(): Promise<() => Promise<void>> {
-  const client = new Client({ connectionString: config.DATABASE_URL });
-  await client.connect();
+/**
+ * Probes non-blocking first, and only falls back to the blocking acquire when
+ * another invocation already holds the lock — so the "this run is waiting" log
+ * fires exactly once, and only when it is true.
+ *
+ * Once `connect()` has succeeded the caller owns an open socket that Vitest can
+ * only close through the teardown closure `setup` returns at the end. Every
+ * failure before that return must therefore close the client here — otherwise a
+ * rejected acquire (e.g. a `statement_timeout` shorter than the holding run,
+ * which cancels the blocking `pg_advisory_lock`) throws out of `globalSetup`
+ * leaving a live connection behind and the event loop alive on the way out.
+ * The original error is rethrown unchanged; the cleanup is best-effort and
+ * never masks it.
+ */
+async function acquireOrClose(client: Client): Promise<void> {
+  try {
+    const probe = await client.query<{ pg_try_advisory_lock: boolean }>(
+      'SELECT pg_try_advisory_lock($1)',
+      [INTEGRATION_LOCK_KEY]
+    );
+    if (probe.rows[0]?.pg_try_advisory_lock ?? false) return;
 
-  const probe = await client.query<{ pg_try_advisory_lock: boolean }>(
-    'SELECT pg_try_advisory_lock($1)',
-    [INTEGRATION_LOCK_KEY]
-  );
-  const acquiredImmediately = probe.rows[0]?.pg_try_advisory_lock ?? false;
-
-  if (!acquiredImmediately) {
     logger.info(
       { lockKey: INTEGRATION_LOCK_KEY },
       'integration-lock: waiting on another pnpm test:integration invocation against this DATABASE_URL'
     );
     await client.query('SELECT pg_advisory_lock($1)', [INTEGRATION_LOCK_KEY]);
+  } catch (err) {
+    try {
+      await client.end();
+    } catch (endErr) {
+      logger.error(
+        { err: endErr },
+        'integration-lock: client.end() failed while cleaning up a failed lock acquisition'
+      );
+    }
+    throw err;
   }
+}
+
+export default async function setup(): Promise<() => Promise<void>> {
+  const client = new Client({ connectionString: config.DATABASE_URL });
+  await client.connect();
+  await acquireOrClose(client);
 
   return async function teardown(): Promise<void> {
     // Best-effort unlock: a failure here (e.g. the connection already
