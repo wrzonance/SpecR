@@ -105,10 +105,15 @@ beforeAll(async () => {
     name: `Projects API Master ${randomUUID()}`,
   });
   companyLibId = moduleLib.id;
-  [specA, specB] = await Promise.all([
-    insertSpec('03 30 00', 'Concrete', companyLibId),
-    insertSpec('09 91 00', 'Painting', companyLibId),
-  ]);
+  // Sequential, not Promise.all: on a partial failure Promise.all rejects
+  // before the destructuring assigns either id, so afterAll's
+  // `DELETE FROM specs WHERE id = ANY(...)` would skip the row that DID insert,
+  // and its FK would then block deleting companyLibId — leaking exactly the
+  // residue this file exists to stop depending on. Assigning each id as it is
+  // created lets cleanup record partial progress. Same reason the advisory
+  // fixture below is sequential.
+  specA = await insertSpec('03 30 00', 'Concrete', companyLibId);
+  specB = await insertSpec('09 91 00', 'Painting', companyLibId);
   testProjectId = await insertProject('Phase 1b Integration Test');
   await pool.query(
     `INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1,$2,1),($1,$3,2)`,
