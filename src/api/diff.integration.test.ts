@@ -9,6 +9,7 @@ import { registerMcpRoutes } from '../mcp/server.js';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import type { ObjectBlobNode, ObjectMeta } from '../ast/index.js';
+import { assertResponseExact } from '../test-utils/contract/validate-response.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const ORIGINAL_TEXT = 'Install listed copper cabling.';
@@ -99,13 +100,22 @@ function removeTableContaining(anchorUuid: string): (xml: string) => string {
   };
 }
 
+/** Strips one paragraph's `w:sdt` content control entirely, simulating an editor deleting it in
+ *  Word — the paragraph's uuid then reads as absent from `theirs` (#465: a delete/modify conflict
+ *  when `ours` also diverged from `base`, a plain delete otherwise). */
+function removeContentControlFor(uuid: string): (xml: string) => string {
+  return (xml) => {
+    const tagIndex = xml.indexOf(`specr-uuid-${uuid}`);
+    if (tagIndex === -1) throw new Error('expected content-control tag missing');
+    const start = xml.lastIndexOf('<w:sdt>', tagIndex);
+    const end = xml.indexOf('</w:sdt>', tagIndex);
+    if (start === -1 || end === -1) throw new Error('content control bounds missing');
+    return xml.slice(0, start) + xml.slice(end + '</w:sdt>'.length);
+  };
+}
+
 function removeContentControl(xml: string): string {
-  const tagIndex = xml.indexOf(`specr-uuid-${paragraphId}`);
-  if (tagIndex === -1) throw new Error('expected content-control tag missing');
-  const start = xml.lastIndexOf('<w:sdt>', tagIndex);
-  const end = xml.indexOf('</w:sdt>', tagIndex);
-  if (start === -1 || end === -1) throw new Error('content control bounds missing');
-  return xml.slice(0, start) + xml.slice(end + '</w:sdt>'.length);
+  return removeContentControlFor(paragraphId)(xml);
 }
 
 beforeAll(async () => {
@@ -458,6 +468,162 @@ describe('body-level object round-trip — real wiring (#520 review finding)', (
       expect(diff.modified).toEqual([]);
       expect(diff.conflicts).toEqual([]);
       expect(diff.added).toEqual([]);
+    }
+  );
+});
+
+// #465 task 5: the delete/modify conflict bucket (DeleteConflictDiff, DiffResultSchema,
+// openapi.yaml's DiffResult/DeleteConflictDiff components) was only ever exercised with
+// hand-built fixtures at the unit level (merge/diff.test.ts, ast/merge-schemas.test.ts). This
+// drives the REAL DB → generateDocx → extractContentControls → computeDiff wiring, validates the
+// wire response EXACTLY against openapi.yaml (no undocumented/missing key survives), and proves
+// REST and the MCP get_spec_diff tool agree byte-for-byte on the new bucket (INV-1/2/3).
+describe('delete/modify conflict wire scenario (#465)', () => {
+  const DC_PART_ID = randomUUID();
+  const DC_ARTICLE_ID = randomUUID();
+  const DC_PARAGRAPH_ID = randomUUID();
+  const DC_BASE_TEXT = 'Provide corrosion-resistant conduit supports.';
+  const DC_OURS_TEXT = 'Provide corrosion-resistant conduit supports, stainless steel only.';
+  let dcSpecId: string;
+
+  beforeAll(async () => {
+    dcSpecId = await createSpec({
+      section: '26 05 33',
+      title: 'Delete Conflict Wire Spec',
+      source: `d465_${randomUUID().slice(0, 8)}`,
+    });
+    await insertTree(
+      {
+        id: dcSpecId,
+        section: '26 05 33',
+        title: 'Delete Conflict Wire Spec',
+        parts: [
+          {
+            id: DC_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            meta: {},
+            children: [
+              {
+                id: DC_ARTICLE_ID,
+                type: 'article',
+                text: 'SUMMARY',
+                meta: {},
+                children: [
+                  {
+                    id: DC_PARAGRAPH_ID,
+                    type: 'pr1',
+                    text: DC_BASE_TEXT,
+                    meta: {},
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      dcSpecId,
+      pool
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [dcSpecId]);
+  });
+
+  /**
+   * Seeds a genuine base/ours divergence — deliberately by direct SQL, not the
+   * `PATCH .../paragraphs/{nodeId}` API. Every write path that API reaches
+   * (`applyParagraphUpdate`, `applyTextChange`, `setVanishRow`) bumps
+   * `base_version` and inserts the matching `paragraph_versions` row in the SAME
+   * transaction as the text write, so `getParagraphSnapshots`'s `base_version`
+   * join and `getCurrentParagraphSnapshots`'s live read are structurally always
+   * equal after any API-driven edit — there is no API call that can produce a
+   * base/ours divergence to diff against. Inserting the `paragraph_versions[1]`
+   * row directly pins `base` to the original text while the second UPDATE moves
+   * `paragraphs.text` (`ours`) without touching `base_version`, reproducing
+   * exactly the precondition classifyBase's `deleteConflict` branch exists to
+   * catch, regardless of which future mechanism (concurrent edit, DMS sync)
+   * ends up producing it for real.
+   */
+  async function seedOursDivergedFromBase(): Promise<void> {
+    await pool.query(
+      `INSERT INTO paragraph_versions (paragraph_id, spec_id, version, text, node_type, op)
+       VALUES ($1, $2, 1, $3, 'pr1', 'edit')`,
+      [DC_PARAGRAPH_ID, dcSpecId, DC_BASE_TEXT]
+    );
+    await pool.query(`UPDATE paragraphs SET text = $2 WHERE id = $1`, [
+      DC_PARAGRAPH_ID,
+      DC_OURS_TEXT,
+    ]);
+  }
+
+  it(
+    'DB edit + DOCX missing the same paragraph surfaces ONE populated deleteConflicts entry, ' +
+      'not a plain delete — byte-exact against openapi.yaml and identical over REST vs MCP',
+    async () => {
+      const generateRes = await fetch(`${baseUrl}/specs/${dcSpecId}/generate`, { method: 'POST' });
+      expect(generateRes.status).toBe(200);
+      const baseBuffer = Buffer.from(await generateRes.arrayBuffer());
+
+      // `ours` diverges from `base`: the writer's edit reached the DB after the snapshot was
+      // taken (see seedOursDivergedFromBase for why this can't be done through the PATCH API).
+      await seedOursDivergedFromBase();
+
+      // `theirs`: the editor deleted the paragraph's content control entirely in Word.
+      const edited = await updateDocumentXml(baseBuffer, removeContentControlFor(DC_PARAGRAPH_ID));
+
+      const form = new FormData();
+      form.append(
+        'file',
+        new Blob([new Uint8Array(edited)], { type: DOCX_MIME }),
+        'delete-conflict.docx'
+      );
+      const diffRes = await fetch(`${baseUrl}/specs/${dcSpecId}/diff`, {
+        method: 'POST',
+        body: form,
+      });
+      const body = (await diffRes.json()) as ApiResponse<DiffResult>;
+
+      expect(diffRes.status).toBe(200);
+      // Exact-key-match against openapi.yaml's documented DiffResult/DeleteConflictDiff shape —
+      // proves the OpenAPI contract gate is green for the REAL wire body (RED before this task's
+      // openapi.yaml edit: `deleteConflicts` was an undocumented extra key).
+      await assertResponseExact('post', '/specs/{id}/diff', 200, body);
+
+      const diff = body.data;
+      expect(diff).toBeDefined();
+      if (!diff) return;
+
+      expect(diff.deleteConflicts).toHaveLength(1);
+      const [entry] = diff.deleteConflicts;
+      expect(entry).toBeDefined();
+      if (!entry) return;
+
+      expect(entry).toEqual({ uuid: DC_PARAGRAPH_ID, base: DC_BASE_TEXT, ours: DC_OURS_TEXT });
+      // Absence, not an empty-string sentinel (#465 design decision, src/merge/types.ts) — the
+      // wire entry must carry NO `theirs` key at all, under every code path from DB to JSON.
+      expect('theirs' in entry).toBe(false);
+
+      // The delete/modify collision is reported once, in its own bucket — never as a plain
+      // delete (which would silently discard the writer's divergent edit on accept).
+      expect(diff.deleted).toEqual([]);
+      expect(diff.modified).toEqual([]);
+      expect(diff.conflicts).toEqual([]);
+
+      // REST/MCP parity (INV-1/2/3): get_spec_diff must return the identical DiffResult,
+      // including the new deleteConflicts bucket, byte-for-byte.
+      const rpc = await mcpCall('tools/call', {
+        name: 'get_spec_diff',
+        arguments: { specId: dcSpecId, contentBase64: edited.toString('base64') },
+      });
+      const result = rpc['result'] as Record<string, unknown>;
+      const content = result['content'] as { type: string; text: string }[];
+      const mcp = JSON.parse(content[0]?.text ?? '{}') as DiffResult;
+
+      expect(result['isError']).toBeUndefined();
+      expect(mcp).toEqual(diff);
     }
   );
 });
