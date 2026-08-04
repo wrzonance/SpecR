@@ -4,6 +4,11 @@ import type { Router } from 'express';
 import $RefParser from '@apidevtools/json-schema-ref-parser';
 import type { ValidateFunction, AnySchemaObject } from 'ajv';
 import { z } from 'zod';
+import { markUnevaluatedPropertiesFalse } from './unevaluated-properties.js';
+
+// Re-exported so the walker's boundary invariants (no input mutation, per-context marking) can be
+// pinned from the same module surface the contract tests already import.
+export { markUnevaluatedPropertiesFalse };
 
 // ajv and ajv-formats are CJS-only packages with no exports map; under
 // moduleResolution:NodeNext they must be loaded via createRequire.
@@ -96,11 +101,15 @@ export function getValidator(schema: AnySchemaObject): ValidateFunction {
   return compiled;
 }
 
-// Shared by assertResponse (schema-conformance) and assertResponseExact (exact-key-match): looks
-// up the operation, fails loud on an undocumented status (see assertResponse's comment below), and
-// returns the documented application/json schema — or undefined for a documented non-JSON response
-// (binary / no-content / multipart), which both callers treat as an out-of-scope no-op.
-function resolveResponseSchema(
+/** Shared by assertResponse (schema-conformance) and assertResponseExact (exact-key-match): looks
+ * up the operation, fails loud on the two shapes that would make an assertion pass VACUOUSLY (an
+ * undocumented status; an `application/json` response documenting no schema), and returns the
+ * documented `application/json` schema — or `undefined` for a documented non-JSON response
+ * (binary / no-content / multipart), which both callers treat as an out-of-scope no-op.
+ * Exported so those vacuity guards can be pinned against a synthetic `doc`: neither shape exists in
+ * today's openapi.yaml, so neither is reachable through `assertResponse`'s real-spec surface — and
+ * an unreachable guard nobody tests is exactly how a gate quietly stops gating. */
+export function resolveResponseSchema(
   doc: OpenApiDoc,
   method: string,
   pathTemplate: string,
@@ -119,7 +128,21 @@ function resolveResponseSchema(
         'would pass vacuously; fix the expected status or document it.'
     );
   }
-  return response.content?.['application/json']?.schema;
+  const json = response.content?.['application/json'];
+  // No `application/json` media type at all — a documented binary / no-content / multipart
+  // response. There is genuinely nothing to validate, so both callers no-op.
+  if (json === undefined) return undefined;
+  // An `application/json` response that documents NO schema is a different animal, and collapsing
+  // it into the no-op above is the same vacuity bug as the undocumented-status case: successJsonOps
+  // still counts the op as in-scope JSON (it keys off the media type, not the schema), so INV-5/6
+  // would "validate" it against nothing and stay green forever. Fail loud instead.
+  if (json.schema === undefined) {
+    throw new Error(
+      `${method} ${pathTemplate} documents a ${status} application/json response with no schema ` +
+        'in openapi.yaml — the assertion would pass vacuously; document the response schema.'
+    );
+  }
+  return json.schema;
 }
 
 export async function assertResponse(
@@ -138,122 +161,6 @@ export async function assertResponse(
         ajv.errorsText(validate.errors)
     );
   }
-}
-
-// Recursively injects `unevaluatedProperties: false` into a cloned schema so ajv rejects any key
-// the schema's own subtree doesn't account for — INV-6's driven cases use assertResponse (schema
-// CONFORMANCE only: an extra, undocumented key still passes, exactly the #640 vacuous-gate hole).
-// `viaAllOf` is true only for a node reached through a parent's `allOf` array: `unevaluatedProperties`
-// is scoped to what a schema object's OWN subtree evaluates, so marking an individual allOf BRANCH
-// would make that branch, applied standalone, blind to keys its allOf SIBLING evaluates (e.g. the
-// `{data:...}` branch rejecting `success`, which only the sibling SuccessResponse branch declares).
-// Only the node that OWNS the `allOf` keyword may be marked; its branches are still walked (to
-// protect deeper objects, e.g. a `properties.data` nested under a branch) but never marked
-// themselves. oneOf/anyOf don't share this problem — exactly one branch applies, so each branch is
-// evaluated standalone and marking every branch independently is correct.
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-// Maps each visited node's ORIGINAL object identity to the (up to two) clones already computed
-// for it, keyed by the `viaAllOf` context each clone was computed under.
-// $RefParser.dereference() reuses one object instance for every `$ref` pointer that targets the
-// same component, so the identical node can legitimately be reached twice in one tree walk under
-// TWO DIFFERENT contexts — e.g. once as a raw allOf branch (must stay unmarked) and once nested
-// under a sibling's `properties`/`oneOf`/`anyOf`/`items` (must be marked). A plain visited-Set
-// cannot distinguish those: it conflates "already visited" with "already decided", so whichever
-// context reaches the node FIRST wins and the second visit silently no-ops. Keying by the
-// ORIGINAL node (never mutated — see addUnevaluatedPropertiesFalse below) rather than by
-// whatever the first visit produced also matters: a divergent-context clone must be built from
-// the pristine original, never from a sibling context's already-marked output, or its mark
-// leaks across contexts.
-type SeenContexts = Map<object, Map<boolean, Record<string, unknown>>>;
-
-function walkProperties(schema: Record<string, unknown>, seen: SeenContexts): void {
-  if (!isPlainObject(schema['properties'])) return;
-  const props: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(schema['properties'])) {
-    props[key] = addUnevaluatedPropertiesFalse(value, seen, false);
-  }
-  schema['properties'] = props;
-}
-
-// allOf branches are walked with viaAllOf=true so THEY are never marked directly — only the node
-// that OWNS this `allOf` keyword may be (see addUnevaluatedPropertiesFalse below). oneOf/anyOf
-// branches are each evaluated in isolation (exactly one matches), so they're walked and marked
-// like any standalone schema.
-function walkComposition(schema: Record<string, unknown>, seen: SeenContexts): void {
-  for (const composeKey of ['allOf', 'oneOf', 'anyOf'] as const) {
-    const branches = schema[composeKey];
-    if (!Array.isArray(branches)) continue;
-    schema[composeKey] = branches.map((branch) =>
-      addUnevaluatedPropertiesFalse(branch, seen, composeKey === 'allOf')
-    );
-  }
-}
-
-function walkItems(schema: Record<string, unknown>, seen: SeenContexts): void {
-  if (isPlainObject(schema['items'])) {
-    schema['items'] = addUnevaluatedPropertiesFalse(schema['items'], seen, false);
-  }
-}
-
-function shouldMarkUnevaluated(schema: Record<string, unknown>, viaAllOf: boolean): boolean {
-  if (viaAllOf) return false;
-  const declaresOwnKeys = 'additionalProperties' in schema || 'unevaluatedProperties' in schema;
-  if (declaresOwnKeys) return false;
-  return isPlainObject(schema['properties']) || Array.isArray(schema['allOf']);
-}
-
-function addUnevaluatedPropertiesFalse(
-  node: unknown,
-  seen: SeenContexts,
-  viaAllOf: boolean
-): unknown {
-  if (!isPlainObject(node)) return node;
-  const contexts = seen.get(node);
-  const cached = contexts?.get(viaAllOf);
-  // Same original node, same context: either a true cycle (dereferenced schemas can be
-  // self-referential — stop recursing) or a harmless duplicate reference already processed for
-  // this context. Either way the existing (in-progress or finished) clone is the right answer.
-  if (cached !== undefined) return cached;
-  // Always build a fresh SHALLOW clone from the pristine original `node` — never mutate it and
-  // never derive one context's clone from another context's already-processed output. `node` may
-  // be reused by $RefParser across multiple reference paths, so a different context reaching the
-  // same node needs its own independent decision computed from the untouched original; deriving
-  // it from a sibling context's clone would leak that sibling's mark across contexts (#640). The
-  // shallow copy is sufficient because every nested key touched below (`properties`, `allOf` /
-  // `oneOf` / `anyOf`, `items`) is always REASSIGNED to a brand-new value from a recursive call,
-  // never mutated in place, so the shallow-copied top level never aliases mutated nested state.
-  const schema: Record<string, unknown> = { ...node };
-  // Register the in-progress clone under its context BEFORE recursing, so a self-referential
-  // schema reached again under the SAME context returns this (own, safely mutable) clone instead
-  // of recursing forever.
-  const perNode = contexts ?? new Map<boolean, Record<string, unknown>>();
-  perNode.set(viaAllOf, schema);
-  seen.set(node, perNode);
-  walkProperties(schema, seen);
-  walkComposition(schema, seen);
-  walkItems(schema, seen);
-  if (shouldMarkUnevaluated(schema, viaAllOf)) {
-    schema['unevaluatedProperties'] = false;
-  }
-  return schema;
-}
-
-/** Boundary wrapper around {@link addUnevaluatedPropertiesFalse}: clones `schema` and marks every
- * eligible node with `unevaluatedProperties: false` (see that function's comment for the exact
- * marking rules). Never mutates its input — the returned tree is always a fresh clone, safe to
- * compile through an uncached ajv instance without corrupting {@link getValidator}'s shared
- * WeakMap or any other reader of the original schema object. Exported so the no-mutation and
- * divergent-composition-context invariants can be pinned directly against this boundary, not the
- * WeakMap-caching side effects of a full assertResponseExact() call. */
-export function markUnevaluatedPropertiesFalse(schema: AnySchemaObject): AnySchemaObject {
-  return addUnevaluatedPropertiesFalse(
-    structuredClone(schema),
-    new Map(),
-    false
-  ) as AnySchemaObject;
 }
 
 /** Exact-key-match variant of {@link assertResponse}: rejects any response key the openapi.yaml

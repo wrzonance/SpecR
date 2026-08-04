@@ -8,6 +8,8 @@ import {
   loadRawSpec,
   operationParamKeys,
   markUnevaluatedPropertiesFalse,
+  resolveResponseSchema,
+  getValidator,
 } from './validate-response.js';
 import type { OpenApiDoc } from './validate-response.js';
 
@@ -151,8 +153,8 @@ describe('assertResponseExact (#640) — exact-key-match against openapi.yaml', 
 
   // A dereferenced schema can reach the SAME object identity (one $ref target reused by
   // $RefParser.dereference for every pointer to it) through two different composition contexts
-  // in one tree: once as a raw allOf branch (must stay unmarked — see addUnevaluatedPropertiesFalse's
-  // comment) and once nested under a sibling's properties (must be marked). A visited-Set that
+  // in one tree: once as a raw allOf branch (must stay unmarked — see unevaluated-properties.ts's
+  // applicator classification) and once nested under a sibling's properties (must be marked). A visited-Set that
   // only tracks "already seen" — not "seen under which context" — lets whichever context visits
   // first silently decide for both, dropping the second context's mark.
   it('marks a schema reached via two different composition contexts independently, not first-visit-wins', () => {
@@ -206,6 +208,139 @@ describe('assertResponseExact (#640) — exact-key-match against openapi.yaml', 
     expect(viaProperties.unevaluatedProperties).toBe(false); // reached via properties: marked
     expect(viaAllOf.unevaluatedProperties).toBeUndefined(); // allOf branch: never marked directly
     expect(viaAllOf).not.toBe(viaProperties); // divergent contexts get independent clones
+  });
+});
+
+// #640 adversarial-review follow-ups. The walker's job is to make the gate strict WITHOUT making it
+// wrong: a vacuous branch lets an undocumented key through silently (the bug #640 exists to kill),
+// while a false positive rejects a fully-documented payload and gets the gate weakened or reverted.
+// Each case below is one applicator shape that used to fail one of those two ways.
+describe('markUnevaluatedPropertiesFalse — JSON-Schema 2020-12 applicator coverage (#640)', () => {
+  function validator(schema: object): (body: unknown) => boolean {
+    return getValidator(markUnevaluatedPropertiesFalse(schema)) as (body: unknown) => boolean;
+  }
+
+  // `unevaluatedProperties` on a oneOf/anyOf BRANCH is evaluated standalone against the whole
+  // instance, so it cannot see keys the branch's PARENT evaluates — marking branches rejected
+  // `{ common, a }` here. Only the composition OWNER may be marked; it unions its own `properties`
+  // annotations with the successful branch's.
+  it('accepts a payload split across a composition owner and its oneOf branch, and still rejects extras', () => {
+    const validate = validator({
+      type: 'object',
+      properties: { common: { type: 'string' } },
+      oneOf: [
+        { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+        { type: 'object', properties: { b: { type: 'string' } }, required: ['b'] },
+      ],
+    });
+    expect(validate({ common: 'x', a: 'y' })).toBe(true); // no false positive
+    expect(validate({ common: 'x', a: 'y', rogue: 1 })).toBe(false); // still exact
+  });
+
+  // anyOf combines the annotations of EVERY successful branch — the "exactly one branch applies"
+  // assumption that justified marking branches is simply false here.
+  it('combines annotations across all successful anyOf branches', () => {
+    const validate = validator({
+      type: 'object',
+      anyOf: [{ properties: { a: { type: 'string' } } }, { properties: { b: { type: 'string' } } }],
+    });
+    expect(validate({ a: 'x', b: 'y' })).toBe(true);
+    expect(validate({ a: 'x', rogue: 1 })).toBe(false);
+  });
+
+  // Objects reachable only through these keywords were never walked, so every key inside them was
+  // undocumented-but-accepted — a vacuous gate at exactly the nesting depth #640 cares about.
+  it.each([
+    {
+      keyword: 'patternProperties',
+      schema: {
+        type: 'object',
+        patternProperties: { '^x-': { type: 'object', properties: { known: { type: 'string' } } } },
+      },
+      valid: { 'x-one': { known: 'v' } },
+      extra: { 'x-one': { known: 'v', rogue: 1 } },
+    },
+    {
+      keyword: 'additionalProperties (schema-valued)',
+      schema: {
+        type: 'object',
+        additionalProperties: { type: 'object', properties: { known: { type: 'string' } } },
+      },
+      valid: { any: { known: 'v' } },
+      extra: { any: { known: 'v', rogue: 1 } },
+    },
+    {
+      keyword: 'prefixItems',
+      schema: {
+        type: 'array',
+        prefixItems: [{ type: 'object', properties: { a: { type: 'string' } } }],
+      },
+      valid: [{ a: 'x' }],
+      extra: [{ a: 'x', rogue: 1 }],
+    },
+    {
+      keyword: 'contains',
+      schema: {
+        type: 'array',
+        contains: { type: 'object', properties: { a: { type: 'string' } } },
+      },
+      valid: [{ a: 'x' }],
+      extra: [{ a: 'x', rogue: 1 }],
+    },
+    {
+      keyword: 'if/then',
+      schema: {
+        type: 'object',
+        properties: { kind: { type: 'string' } },
+        if: { properties: { kind: { const: 'x' } }, required: ['kind'] },
+        then: { properties: { extra: { type: 'string' } } },
+      },
+      valid: { kind: 'x', extra: 'e' },
+      extra: { kind: 'x', rogue: 1 },
+    },
+  ])('closes objects reached through $keyword', ({ schema, valid, extra }) => {
+    const validate = validator(schema);
+    expect(validate(valid)).toBe(true);
+    expect(validate(extra)).toBe(false);
+  });
+
+  // A node that evaluates NO properties of its own must not be marked: closing it would reject
+  // every key of an otherwise-unconstrained object.
+  it('leaves a schema that evaluates no properties unmarked', () => {
+    const marked = markUnevaluatedPropertiesFalse({ type: 'object' }) as {
+      unevaluatedProperties?: boolean;
+    };
+    expect(marked.unevaluatedProperties).toBeUndefined();
+  });
+});
+
+// resolveResponseSchema's two fail-loud guards exist so a gate can never "validate" nothing and
+// stay green. Neither shape exists in today's openapi.yaml, so both are pinned against a synthetic
+// doc — an untested guard is indistinguishable from a missing one.
+describe('resolveResponseSchema vacuity guards (#640)', () => {
+  function docWithResponse(response: unknown): OpenApiDoc {
+    return { paths: { '/synthetic': { get: { responses: { '200': response } } } } };
+  }
+
+  it('throws for an application/json response documenting no schema', () => {
+    const doc = docWithResponse({ content: { 'application/json': {} } });
+    expect(() => resolveResponseSchema(doc, 'get', '/synthetic', 200)).toThrow(
+      /application\/json response with no schema/
+    );
+  });
+
+  it('no-ops (returns undefined) for a documented response with no application/json at all', () => {
+    const doc = docWithResponse({ content: { 'application/pdf': { schema: { type: 'string' } } } });
+    expect(resolveResponseSchema(doc, 'get', '/synthetic', 200)).toBeUndefined();
+  });
+
+  it('still throws for a status the operation does not document', () => {
+    const doc = docWithResponse({
+      content: { 'application/json': { schema: { type: 'object' } } },
+    });
+    expect(() => resolveResponseSchema(doc, 'get', '/synthetic', 404)).toThrow(
+      /documents no 404 response/
+    );
   });
 });
 
