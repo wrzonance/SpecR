@@ -103,7 +103,9 @@ describe('design package MCP tools', () => {
 
     const del = await handleDeletePackage({ packageId: created.packageId });
     expect(isToolError(del)).toBe(false);
-    expect(parse<{ deleted: boolean }>(del).deleted).toBe(true);
+    // #640: handleDeletePackage's success payload is exactly { packageId }, matching the
+    // documented `delete /packages/{id}` 200 response — no extra `deleted` key.
+    expect(parse<{ packageId: string }>(del)).toEqual({ packageId: created.packageId });
   });
 
   it('create_package rejects an unknown project, a duplicate name, and bad input', async () => {

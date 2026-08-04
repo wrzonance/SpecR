@@ -101,7 +101,12 @@ export async function handleDeletePackage(args: unknown): Promise<ToolResult> {
   try {
     const deleted = await deletePackage(packageId, pool);
     if (!deleted) return toolError(`package not found: id=${packageId}`);
-    return ok({ deleted: true, packageId });
+    // Contract-bound to `delete /packages/{id}`'s documented 200 response ({ packageId } only —
+    // openapi.yaml, mirrored by REST's deletePackageHandler). The previous `deleted: true` key was
+    // undocumented and had no REST counterpart (#640) — OBSERVABLE MCP RESPONSE CHANGE: a consumer
+    // reading `.deleted` off this tool's result breaks. Acceptable because delete_package is a
+    // contract-bound MCP surface (ADR-044) and a 200 already signals success.
+    return ok({ packageId });
   } catch (err) {
     return internalError(err, 'delete_package');
   }

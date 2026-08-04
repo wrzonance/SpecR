@@ -96,13 +96,16 @@ export function getValidator(schema: AnySchemaObject): ValidateFunction {
   return compiled;
 }
 
-export async function assertResponse(
+// Shared by assertResponse (schema-conformance) and assertResponseExact (exact-key-match): looks
+// up the operation, fails loud on an undocumented status (see assertResponse's comment below), and
+// returns the documented application/json schema — or undefined for a documented non-JSON response
+// (binary / no-content / multipart), which both callers treat as an out-of-scope no-op.
+function resolveResponseSchema(
+  doc: OpenApiDoc,
   method: string,
   pathTemplate: string,
-  status: number,
-  body: unknown
-): Promise<void> {
-  const doc = await loadSpec();
+  status: number
+): AnySchemaObject | undefined {
   const rawOp = doc.paths[pathTemplate]?.[method.toLowerCase()];
   if (rawOp === undefined) throw new Error(`No OpenAPI operation: ${method} ${pathTemplate}`);
   const op = OperationObject.parse(rawOp);
@@ -116,13 +119,122 @@ export async function assertResponse(
         'would pass vacuously; fix the expected status or document it.'
     );
   }
-  const schema = response.content?.['application/json']?.schema;
+  return response.content?.['application/json']?.schema;
+}
+
+export async function assertResponse(
+  method: string,
+  pathTemplate: string,
+  status: number,
+  body: unknown
+): Promise<void> {
+  const doc = await loadSpec();
+  const schema = resolveResponseSchema(doc, method, pathTemplate, status);
   if (!schema) return; // documented non-JSON (binary / no-content / multipart) — out of scope
   const validate = getValidator(schema);
   if (!validate(body)) {
     throw new Error(
       `Response body for ${method} ${pathTemplate} (${status}) does not match openapi.yaml: ` +
         ajv.errorsText(validate.errors)
+    );
+  }
+}
+
+// Recursively injects `unevaluatedProperties: false` into a cloned schema so ajv rejects any key
+// the schema's own subtree doesn't account for — INV-6's driven cases use assertResponse (schema
+// CONFORMANCE only: an extra, undocumented key still passes, exactly the #640 vacuous-gate hole).
+// `viaAllOf` is true only for a node reached through a parent's `allOf` array: `unevaluatedProperties`
+// is scoped to what a schema object's OWN subtree evaluates, so marking an individual allOf BRANCH
+// would make that branch, applied standalone, blind to keys its allOf SIBLING evaluates (e.g. the
+// `{data:...}` branch rejecting `success`, which only the sibling SuccessResponse branch declares).
+// Only the node that OWNS the `allOf` keyword may be marked; its branches are still walked (to
+// protect deeper objects, e.g. a `properties.data` nested under a branch) but never marked
+// themselves. oneOf/anyOf don't share this problem — exactly one branch applies, so each branch is
+// evaluated standalone and marking every branch independently is correct.
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function walkProperties(schema: Record<string, unknown>, seen: Set<object>): void {
+  if (!isPlainObject(schema['properties'])) return;
+  const props: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema['properties'])) {
+    props[key] = addUnevaluatedPropertiesFalse(value, seen, false);
+  }
+  schema['properties'] = props;
+}
+
+// allOf branches are walked with viaAllOf=true so THEY are never marked directly — only the node
+// that OWNS this `allOf` keyword may be (see addUnevaluatedPropertiesFalse below). oneOf/anyOf
+// branches are each evaluated in isolation (exactly one matches), so they're walked and marked
+// like any standalone schema.
+function walkComposition(schema: Record<string, unknown>, seen: Set<object>): void {
+  for (const composeKey of ['allOf', 'oneOf', 'anyOf'] as const) {
+    const branches = schema[composeKey];
+    if (!Array.isArray(branches)) continue;
+    schema[composeKey] = branches.map((branch) =>
+      addUnevaluatedPropertiesFalse(branch, seen, composeKey === 'allOf')
+    );
+  }
+}
+
+function walkItems(schema: Record<string, unknown>, seen: Set<object>): void {
+  if (isPlainObject(schema['items'])) {
+    schema['items'] = addUnevaluatedPropertiesFalse(schema['items'], seen, false);
+  }
+}
+
+function shouldMarkUnevaluated(schema: Record<string, unknown>, viaAllOf: boolean): boolean {
+  if (viaAllOf) return false;
+  const declaresOwnKeys = 'additionalProperties' in schema || 'unevaluatedProperties' in schema;
+  if (declaresOwnKeys) return false;
+  return isPlainObject(schema['properties']) || Array.isArray(schema['allOf']);
+}
+
+function addUnevaluatedPropertiesFalse(
+  node: unknown,
+  seen: Set<object>,
+  viaAllOf: boolean
+): unknown {
+  if (!isPlainObject(node)) return node;
+  if (seen.has(node)) return node; // cycle guard — dereferenced schemas can be self-referential
+  seen.add(node);
+  const schema = node;
+  walkProperties(schema, seen);
+  walkComposition(schema, seen);
+  walkItems(schema, seen);
+  if (shouldMarkUnevaluated(schema, viaAllOf)) {
+    schema['unevaluatedProperties'] = false;
+  }
+  return schema;
+}
+
+/** Exact-key-match variant of {@link assertResponse}: rejects any response key the openapi.yaml
+ * schema doesn't document, closing the vacuous-gate hole #640 found (schema conformance alone lets
+ * an undocumented extra key — e.g. `delete_package`'s `deleted`, since fixed — pass silently).
+ * Compiles a FRESH, uncached ajv validator against a `structuredClone`d + augmented copy of the
+ * schema — never mutates or caches through {@link getValidator}'s shared WeakMap, which INV-5's
+ * `assertResponse` call site also reads and would otherwise corrupt. Same "no such op" /
+ * "undocumented status" / "documented non-JSON → no-op" contract as `assertResponse`. */
+export async function assertResponseExact(
+  method: string,
+  pathTemplate: string,
+  status: number,
+  body: unknown
+): Promise<void> {
+  const doc = await loadSpec();
+  const schema = resolveResponseSchema(doc, method, pathTemplate, status);
+  if (!schema) return; // documented non-JSON (binary / no-content / multipart) — out of scope
+  const exactSchema = addUnevaluatedPropertiesFalse(
+    structuredClone(schema),
+    new Set(),
+    false
+  ) as AnySchemaObject;
+  const validate = ajv.compile(exactSchema);
+  if (!validate(body)) {
+    throw new Error(
+      `Response body for ${method} ${pathTemplate} (${status}) carries keys openapi.yaml does ` +
+        `not document: ${ajv.errorsText(validate.errors)}`
     );
   }
 }
