@@ -4,11 +4,20 @@ import type { Router } from 'express';
 import $RefParser from '@apidevtools/json-schema-ref-parser';
 import type { ValidateFunction, AnySchemaObject } from 'ajv';
 import { z } from 'zod';
-import { markUnevaluatedPropertiesFalse } from './unevaluated-properties.js';
+import { markUnevaluatedPropertiesFalse, buildMirrorQualifyRef } from './unevaluated-properties.js';
+import {
+  resolveIfRef,
+  qualifyRefs,
+  registerComponentMirrors,
+  DOC_SCHEMA_ID,
+} from './schema-refs.js';
 
 // Re-exported so the walker's boundary invariants (no input mutation, per-context marking) can be
 // pinned from the same module surface the contract tests already import.
-export { markUnevaluatedPropertiesFalse };
+export { markUnevaluatedPropertiesFalse, buildMirrorQualifyRef };
+// Re-exported (#649): consumers that need a component's actual resolved shape — not just to
+// validate a response body against it — reach for this instead of hand-rolling ref-resolution.
+export { resolveIfRef };
 
 // ajv and ajv-formats are CJS-only packages with no exports map; under
 // moduleResolution:NodeNext they must be loaded via createRequire.
@@ -17,6 +26,7 @@ const require = createRequire(import.meta.url);
 interface AjvInstance {
   compile(schema: AnySchemaObject): ValidateFunction;
   errorsText(errors?: ValidateFunction['errors']): string;
+  addSchema(schema: AnySchemaObject, key: string): unknown;
 }
 interface AjvConstructor {
   new (opts: { strict: boolean; allErrors: boolean }): AjvInstance;
@@ -40,28 +50,48 @@ const OperationObject = z.object({
 });
 
 // Request-body schema, narrowed only to the shape operationParamKeys() reads: either a direct
-// `properties` map, or (for the 3 `oneOf`-composed bodies — the two general-spec PUTs and
-// POST /packages/{id}/revisions) a `oneOf` array of branch schemas each with their own
-// `properties`. Everything else (types, formats, nested schemas) is deliberately untyped here.
+// `properties` map, or (for the request bodies that are a top-level `$ref` to a component, or
+// `oneOf`-composed — the two general-spec PUTs and POST /packages/{id}/revisions) a `oneOf` array
+// of branch schemas each with their own `properties`. Everything else (types, formats, nested
+// schemas) is deliberately untyped here. Never itself sees a raw `$ref` key — callers resolve one
+// level of top-level `$ref` via {@link resolveIfRef} BEFORE parsing into this shape (#649: bundling
+// leaves component-referencing request bodies like MergeRequest as a literal `{ $ref }` pointer
+// instead of dereference's fully-inlined object).
+const RequestBodyBranchObject = z.object({
+  properties: z.record(z.string(), z.unknown()).optional(),
+});
+// `oneOf` branches are `z.unknown()` here, not narrowed directly: each may itself be a top-level
+// `$ref` (post /packages/{id}/revisions' CreateRevisionLegacyBody/CreateRevisionStructuredBody,
+// #649), resolved per-branch in bodyPropertyKeys() before parsing into RequestBodyBranchObject.
 const RequestBodySchemaObject = z.object({
   properties: z.record(z.string(), z.unknown()).optional(),
-  oneOf: z.array(z.object({ properties: z.record(z.string(), z.unknown()).optional() })).optional(),
+  oneOf: z.array(z.unknown()).optional(),
 });
-const RequestBodyContent = z.record(
-  z.string(),
-  z.object({ schema: RequestBodySchemaObject.optional() })
-);
+const MediaTypeObject = z.object({ schema: z.unknown().optional() });
+const RequestBodyContent = z.record(z.string(), MediaTypeObject);
 const ParameterObject = z.object({
   name: z.string(),
   in: z.string(),
 });
+// Raw (possibly `$ref`'d — e.g. `#/components/parameters/SpecId`) parameter entries, resolved one
+// at a time via {@link resolveIfRef} in operationParamKeys() before parsing into ParameterObject.
 const OperationWithParamsObject = z.object({
-  parameters: z.array(ParameterObject).optional(),
+  parameters: z.array(z.unknown()).optional(),
   requestBody: z.object({ content: RequestBodyContent.optional() }).optional(),
+});
+const ComponentsObject = z.object({
+  schemas: z.record(z.string(), z.unknown()).optional(),
+  responses: z.record(z.string(), z.unknown()).optional(),
+  parameters: z.record(z.string(), z.unknown()).optional(),
 });
 const OpenApiDocSchema = z.object({
   servers: z.array(z.object({ url: z.string() })).optional(),
   paths: z.record(z.string(), z.record(z.string(), z.unknown())),
+  // Was silently stripped by Zod's default object behavior before #649 — harmless under
+  // dereference (nothing read it), but load-bearing under bundle: ajv needs
+  // `doc.components.schemas` present in the REGISTERED document for any
+  // `#/components/schemas/X` pointer left in `doc.paths` to resolve at compile/validate time.
+  components: ComponentsObject.optional(),
 });
 export type OpenApiDoc = z.infer<typeof OpenApiDocSchema>;
 
@@ -74,7 +104,20 @@ function normalizePath(path: string): string {
 
 let specPromise: Promise<OpenApiDoc> | null = null;
 export function loadSpec(): Promise<OpenApiDoc> {
-  specPromise ??= $RefParser.dereference(SPEC_PATH).then((raw) => OpenApiDocSchema.parse(raw));
+  // bundle, not dereference (#649): dereference resolves every `$ref` into its literal target,
+  // which for a self-referential component (SpecNode: `children: SpecNode[]`) builds a real
+  // circular JS object that blows ajv's compile-time schema traversal (RangeError: maximum call
+  // stack size exceeded) for every response whose success body embeds one. bundle preserves `$ref`
+  // pointers for openapi.yaml's purely-internal refs (confirmed: zero external-file refs in this
+  // single-file spec, so bundle's output is structurally identical to `loadRawSpec()`'s un-
+  // dereferenced parse) — ajv resolves them lazily at validate time instead, which is exactly what
+  // lets it handle real recursion without ever materializing a circular object.
+  specPromise ??= $RefParser.bundle(SPEC_PATH).then((raw) => {
+    const doc = OpenApiDocSchema.parse(raw);
+    ajv.addSchema(doc, DOC_SCHEMA_ID);
+    registerComponentMirrors(ajv, doc);
+    return doc;
+  });
   return specPromise;
 }
 
@@ -93,10 +136,16 @@ export function loadRawSpec(): Promise<unknown> {
 // Exported so contract tests can compile+run an arbitrary component schema directly
 // (e.g. cross-checking a request-body schema against a hand-duplicated Zod shape),
 // not just a response schema reached through assertResponse.
+//
+// Cache key is the ORIGINAL, unqualified `schema` object (never the qualified clone) so repeated
+// calls for the same op+status keep hitting the same compiled validator. A schema with no `$ref` at
+// all (every hand-built schema in this module's own tests) round-trips through qualifyRefs as a
+// harmless no-op clone, so callers never need `loadSpec()` to have registered {@link DOC_SCHEMA_ID}
+// first unless their schema actually contains a `$ref`.
 export function getValidator(schema: AnySchemaObject): ValidateFunction {
   const cached = validators.get(schema);
   if (cached !== undefined) return cached;
-  const compiled = ajv.compile(schema);
+  const compiled = ajv.compile(qualifyRefs(schema, DOC_SCHEMA_ID));
   validators.set(schema, compiled);
   return compiled;
 }
@@ -179,7 +228,15 @@ export async function assertResponseExact(
   const doc = await loadSpec();
   const schema = resolveResponseSchema(doc, method, pathTemplate, status);
   if (!schema) return; // documented non-JSON (binary / no-content / multipart) — out of scope
-  const exactSchema = markUnevaluatedPropertiesFalse(schema);
+  // Mark against the mirror-qualifying callback (#649), the SAME one loadSpec() used to build
+  // CHILD_MIRROR_ID/IN_PLACE_MIRROR_ID — so a `$ref` nested anywhere in this response's own tree
+  // (e.g. `data: { $ref: SpecTree }`) resolves into an already-marked mirror entry instead of an
+  // unresolvable dangling pointer or, worse, an unmarked one that would silently reopen #640 for
+  // exactly the operations this issue exists to close.
+  const exactSchema = markUnevaluatedPropertiesFalse(schema, {
+    inPlace: false,
+    qualifyRef: buildMirrorQualifyRef(),
+  });
   const validate = ajv.compile(exactSchema);
   if (!validate(body)) {
     // The exact schema still enforces `required` and field types, so a failure here is not
@@ -256,16 +313,22 @@ export interface ParamSet {
   readonly body: ReadonlySet<string>;
 }
 
-type RequestBodySchema = z.infer<typeof RequestBodySchemaObject>;
-
 // Union of the direct `properties` map AND every `oneOf` branch's `properties` (the 3 composed-body
 // ops), so INV-4 stays meaningful instead of passing vacuously for exactly the operations this
 // helper exists to check. Unioning rather than letting a direct `properties` win outright matters
 // for a schema carrying both (a discriminator alongside branch-specific fields): short-circuiting
-// on the base map would drop every branch field without any signal.
-function bodyPropertyKeys(schema: RequestBodySchema | undefined): ReadonlySet<string> {
-  const keys = new Set(Object.keys(schema?.properties ?? {}));
-  for (const branch of schema?.oneOf ?? []) {
+// on the base map would drop every branch field without any signal. `rawSchema` is resolved via
+// {@link resolveIfRef} BEFORE parsing into `RequestBodySchemaObject` — #649: many request bodies
+// (MergeRequest, CreateAssociation, PutConventionBody, HeaderFooterComposition, …) are a top-level
+// `$ref` to a component, which bundling leaves as a literal `{ $ref }` pointer instead of
+// dereference's fully-inlined object; parsing that bare pointer through a schema with no `$ref`
+// field would silently strip it and yield an empty (vacuously-passing) key set.
+function bodyPropertyKeys(doc: OpenApiDoc, rawSchema: unknown): ReadonlySet<string> {
+  if (rawSchema === undefined) return new Set();
+  const schema = RequestBodySchemaObject.parse(resolveIfRef(doc, rawSchema));
+  const keys = new Set(Object.keys(schema.properties ?? {}));
+  for (const rawBranch of schema.oneOf ?? []) {
+    const branch = RequestBodyBranchObject.parse(resolveIfRef(doc, rawBranch));
     for (const key of Object.keys(branch.properties ?? {})) keys.add(key);
   }
   return keys;
@@ -274,11 +337,12 @@ function bodyPropertyKeys(schema: RequestBodySchema | undefined): ReadonlySet<st
 // application/json wins when present; otherwise fall back to multipart/form-data (the 5
 // file-upload ops). A requestBody with neither content type yields an empty set.
 function requestBodyKeys(
+  doc: OpenApiDoc,
   content: z.infer<typeof RequestBodyContent> | undefined
 ): ReadonlySet<string> {
   const jsonSchema = content?.['application/json']?.schema;
-  if (jsonSchema !== undefined) return bodyPropertyKeys(jsonSchema);
-  return bodyPropertyKeys(content?.['multipart/form-data']?.schema);
+  if (jsonSchema !== undefined) return bodyPropertyKeys(doc, jsonSchema);
+  return bodyPropertyKeys(doc, content?.['multipart/form-data']?.schema);
 }
 
 /** Query-param names and request-body top-level property names an operation documents in
@@ -295,10 +359,15 @@ export function operationParamKeys(
   const raw = doc.paths[pathTemplate]?.[method.toLowerCase()];
   if (raw === undefined) throw new Error(`No OpenAPI operation: ${method} ${pathTemplate}`);
   const op = OperationWithParamsObject.parse(raw);
-  const query = new Set(
-    (op.parameters ?? []).filter((param) => param.in === 'query').map((param) => param.name)
+  // Each entry may itself be a `$ref` (e.g. `#/components/parameters/SpecId`, #649) rather than an
+  // inline parameter object — resolve before narrowing into ParameterObject.
+  const parameters = (op.parameters ?? []).map((param) =>
+    ParameterObject.parse(resolveIfRef(doc, param))
   );
-  const body = requestBodyKeys(op.requestBody?.content);
+  const query = new Set(
+    parameters.filter((param) => param.in === 'query').map((param) => param.name)
+  );
+  const body = requestBodyKeys(doc, op.requestBody?.content);
   // Fail loud rather than hand back an empty set: a documented requestBody whose top-level keys
   // this narrow reader cannot derive (an unsupported composition — allOf, a nested anyOf, a
   // non-object body) would make INV-4 pass vacuously for that op, which is the failure mode the
