@@ -69,6 +69,35 @@ describe('codePointLength', () => {
     expect(codePointLength(huge, 7_000_000)).toBe(7_000_000);
     expect(codePointLength(huge, 6_999_999)).toBe(7_000_000);
   });
+
+  it('short-circuits the underlying iterator instead of exhausting it (regression guard: an array-based rewrite — e.g. `[...value].length` — must fully consume the iterator to build the array before it can compare against `limit`, so it would drive nextCalls into the millions here)', () => {
+    let nextCalls = 0;
+    // A minimal string-shaped iterable standing in for the real 7M-character
+    // imageData string: same `[Symbol.iterator]()` contract, but counts how
+    // many times `.next()` is pulled instead of paying for 7M real
+    // characters. `codePointLength` only ever reads `value[Symbol.iterator]`,
+    // so this is indistinguishable from a real string at the call site.
+    const countingIterable = {
+      [Symbol.iterator]: () => {
+        let index = 0;
+        return {
+          next: (): IteratorResult<string> => {
+            nextCalls += 1;
+            if (index >= 7_000_000) return { done: true, value: undefined };
+            index += 1;
+            return { done: false, value: 'a' };
+          },
+        };
+      },
+    } as unknown as string;
+
+    codePointLength(countingIterable, 5);
+
+    // The real implementation stops once `count > limit` (limit=5 → 7
+    // `.next()` calls). An array-materializing rewrite must exhaust the
+    // iterator first, which here would mean 7,000,001 calls.
+    expect(nextCalls).toBeLessThan(100);
+  });
 });
 
 describe('codePointMax', () => {

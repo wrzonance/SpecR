@@ -27,6 +27,7 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
   ActorLabelSchema,
+  HeaderFooterFieldShape,
   LanguageRulesWriteSchema,
   MAX_LITERAL_TERM_LENGTH,
 } from '../ast/index.js';
@@ -275,6 +276,11 @@ describe('openapi.yaml bounds match the imported constant and what Zod enforces,
         MAX_IMAGE_BASE64_LENGTH
       );
     }
+    expect(
+      carriesCodePointMarker(HeaderFooterFieldShape.imageData),
+      'imageData’s Zod field does not carry the x-length-unit: unicode-code-point marker — ' +
+        'it was not built via codePointMax (src/ast/header-footer-schemas.ts)'
+    ).toBe(true);
   });
 });
 

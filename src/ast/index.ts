@@ -157,6 +157,7 @@ export {
   HeaderFooterCompositionSchema,
   HeaderFooterCompositionWriteSchema,
   HeaderFooterFieldKindSchema,
+  HeaderFooterFieldShape,
   HeaderFooterVariantSchema,
   HeaderFooterUnmodeledEntrySchema,
   PageNumberingModeSchema,
