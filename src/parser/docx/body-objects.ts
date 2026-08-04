@@ -332,9 +332,23 @@ interface DrawingRunEntry {
 // body-objects.test.ts.
 //
 // Reuses `runsOf` on each Fallback subtree rather than re-implementing
-// collectRunsAndFields' traversal, so the two can never drift; `runsOf`
-// returns the raw `w:r` element objects themselves (only `w:fldSimple`
-// pieces are re-wrapped), making this a sound reference-identity set.
+// collectRunsAndFields' traversal, so the two can never drift.
+//
+// On the reference-identity of this Set (#636 review): `runsOf` returns raw
+// `w:r` element objects by reference, but `pushTerminalRun` re-wraps every
+// `w:fldSimple` under a FRESH `{ 'w:fldSimple': element }` object per call —
+// so a field piece collected here is never reference-equal to the one the
+// classification loop below sees, and `fallbackRuns.has(...)` misses it.
+// That miss is inert, not tolerated: the loop's own `isDrawingRun` gate is
+// `'w:drawing' in run || 'w:pict' in run`, and a field piece's only key is
+// `w:fldSimple` (`unwrapAlternateContent` returns it unchanged, having no
+// `mc:AlternateContent` key), so a field piece can never become a
+// DrawingRunEntry by either route. The exclusion set only has to be exact
+// for runs that CAN classify as drawings, and those are raw `w:r` objects
+// carried by reference. If `isDrawingRun` ever widens to accept a field
+// piece, this Set must switch to a normalized key first — see
+// `runOrderKey` in header-footer-region.ts, which unwraps for exactly this
+// reason.
 function collectFallbackRuns(value: unknown): ReadonlySet<Record<string, unknown>> {
   const found = new Set<Record<string, unknown>>();
   collectFallbackRunsInto(value, found);

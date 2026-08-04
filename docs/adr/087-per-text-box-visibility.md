@@ -48,10 +48,16 @@ knowable from the grouped-mode `raw` tree.
 `collectParagraphDrawing` now does `entries.filter(isTextBoxEntry)` instead
 of `.find`, and maps the existing `isHiddenTextBox(raw, entry.run,
 styleMap)` primitive over every entry to produce `hiddenFlags: readonly
-boolean[]` — one flag per text box, in the same document order
-`classifyParagraphDrawings`/`runsOf(raw)` already walk. No new
-hidden-detection logic; the same per-entry check that previously ran once
-now runs once per box.
+boolean[]` — one flag per text box, in TRUE document order.
+`classifyParagraphDrawings` obtains that order by pairing the grouped `raw`
+tree against the same paragraph's own preserve-order blob via `pairRunOrder`
+(`header-footer-run-order.ts`). A plain `runsOf(raw)` walk is NOT sufficient:
+it only preserves relative order among same-tag siblings, so a text-box run
+inside a differently-tagged wrapper (`w:hyperlink`, `w:ins`/`w:del`) sorts to
+the end and desyncs from the blob's boundary order — which would pair a
+hidden box's flag onto a visible box's boundary. The pairing is load-bearing;
+do not remove it. No new hidden-detection logic; the same per-entry check
+that previously ran once now runs once per box.
 
 **2. Correlate the two trees by document order, not by node identity.**
 A new sibling module, `src/parser/docx/body-text-box-visibility.ts`, exports
@@ -131,7 +137,7 @@ vanish-paragraph exception (host paragraph itself `w:vanish` → don't report
 co-occurring drawables as dropped) is unchanged.
 
 **7. Classification must see exactly the content the blob retains — so
-`mc:Fallback` runs are excluded.** The correlation in decision 3 is a count
+`mc:Fallback` runs are excluded.** The correlation in decision 2 is a count
 correspondence between two independently-derived sequences: hidden flags
 from the grouped `raw` tree, and `w:txbxContent` boundaries from the blob
 *after* `stripAlternateContentFallback` has spliced out every `mc:Fallback`
@@ -173,8 +179,11 @@ both sides are scoped to the same content.
 - No public/exported struct changed — `CapturedBodyObject`,
   `CapturedParagraphObject`, `ParagraphDrawingResult`, and friends are
   byte-for-byte unchanged. This is a read-path/internal-correlation fix
-  only; `hiddenFlags: []` (the pre-#515 shape, one paragraph one text box)
-  preserves today's exact behavior.
+  only. Callers must supply one flag per text-box entry: `hiddenFlags: []`
+  against a paragraph holding one `w:txbxContent` boundary is a 1-vs-0 count
+  mismatch, so the decision-2 fail-closed guard suppresses the VISIBLE box.
+  Pinned by `body-objects.test.ts`'s 'backward compatibility: a single visible
+  text box still surfaces interiorTexts' regression test.
 - The pre-existing `dropped: []` whenever a text-box object IS built (as
   opposed to the all-hidden branch, which computes `dropped` for real) is
   unchanged by this ADR — it is a pre-existing quirk, out of scope for
