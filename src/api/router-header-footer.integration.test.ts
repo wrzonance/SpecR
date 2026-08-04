@@ -47,7 +47,12 @@ function uniqueSuffix(): string {
 }
 
 afterEach(async () => {
-  await pool.query(`DELETE FROM header_footer_configs`);
+  // No explicit `header_footer_configs` delete: that table's `scope_xor` CHECK
+  // forces exactly ONE of client_library_id/project_id/package_id/revision_id
+  // to be non-null, and all four FKs are `ON DELETE CASCADE` — so every row
+  // this file creates is necessarily owned by, and removed with, one of the
+  // rows deleted below. A whole-table wipe here would also destroy a
+  // concurrent invocation's rows (#638/ADR-090) for no benefit (#442).
   await pool.query(`DELETE FROM libraries WHERE name LIKE $1`, [`${TEST_PREFIX}%`]);
 });
 

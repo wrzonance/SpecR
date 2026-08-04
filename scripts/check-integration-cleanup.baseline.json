@@ -73,79 +73,61 @@
   },
   {
     "filePath": "src/api/header-footer-body-limit.integration.test.ts",
-    "line": 67,
-    "snippet": "DELETE FROM header_footer_configs",
-    "reason": "no WHERE clause — whole-table delete"
-  },
-  {
-    "filePath": "src/api/header-footer-body-limit.integration.test.ts",
-    "line": 68,
+    "line": 73,
     "snippet": "DELETE FROM libraries WHERE name LIKE $1",
-    "reason": "LIKE pattern, not a captured id"
-  },
-  {
-    "filePath": "src/api/header-footer-resolve.integration.test.ts",
-    "line": 100,
-    "snippet": "DELETE FROM header_footer_configs",
-    "reason": "no WHERE clause — whole-table delete"
-  },
-  {
-    "filePath": "src/api/header-footer-resolve.integration.test.ts",
-    "line": 102,
-    "snippet": "DELETE FROM project_sources",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/api/header-footer-resolve.integration.test.ts",
     "line": 107,
-    "snippet": "DELETE FROM package_revisions",
-    "reason": "LIKE pattern, not a captured id"
-  },
-  {
-    "filePath": "src/api/header-footer-resolve.integration.test.ts",
-    "line": 111,
-    "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
+    "snippet": "DELETE FROM project_sources",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/api/header-footer-resolve.integration.test.ts",
     "line": 112,
+    "snippet": "DELETE FROM package_revisions",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer-resolve.integration.test.ts",
+    "line": 116,
+    "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer-resolve.integration.test.ts",
+    "line": 117,
     "snippet": "DELETE FROM projects WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/api/header-footer-resolve.integration.test.ts",
-    "line": 113,
+    "line": 118,
     "snippet": "DELETE FROM libraries WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/api/header-footer.integration.test.ts",
-    "line": 87,
-    "snippet": "DELETE FROM header_footer_configs",
-    "reason": "no WHERE clause — whole-table delete"
-  },
-  {
-    "filePath": "src/api/header-footer.integration.test.ts",
-    "line": 89,
+    "line": 94,
     "snippet": "DELETE FROM package_revisions",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/api/header-footer.integration.test.ts",
-    "line": 93,
+    "line": 98,
     "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/api/header-footer.integration.test.ts",
-    "line": 94,
+    "line": 99,
     "snippet": "DELETE FROM projects WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/api/header-footer.integration.test.ts",
-    "line": 95,
+    "line": 100,
     "snippet": "DELETE FROM libraries WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
@@ -241,13 +223,7 @@
   },
   {
     "filePath": "src/api/router-header-footer.integration.test.ts",
-    "line": 50,
-    "snippet": "DELETE FROM header_footer_configs",
-    "reason": "no WHERE clause — whole-table delete"
-  },
-  {
-    "filePath": "src/api/router-header-footer.integration.test.ts",
-    "line": 51,
+    "line": 56,
     "snippet": "DELETE FROM libraries WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
@@ -319,61 +295,49 @@
   },
   {
     "filePath": "src/db/queries/header-footer-context.integration.test.ts",
-    "line": 75,
-    "snippet": "DELETE FROM header_footer_configs",
-    "reason": "no WHERE clause — whole-table delete"
-  },
-  {
-    "filePath": "src/db/queries/header-footer-context.integration.test.ts",
-    "line": 77,
+    "line": 82,
     "snippet": "DELETE FROM project_specs WHERE project_id IN (SELECT id FROM projects WHERE name LIKE $1)",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/db/queries/header-footer-context.integration.test.ts",
-    "line": 80,
+    "line": 85,
     "snippet": "DELETE FROM projects WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/db/queries/header-footer-context.integration.test.ts",
-    "line": 81,
+    "line": 86,
     "snippet": "DELETE FROM specs WHERE title LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/db/queries/header-footer-context.integration.test.ts",
-    "line": 82,
+    "line": 87,
     "snippet": "DELETE FROM libraries WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/db/queries/header-footer.integration.test.ts",
-    "line": 86,
-    "snippet": "DELETE FROM header_footer_configs",
-    "reason": "no WHERE clause — whole-table delete"
-  },
-  {
-    "filePath": "src/db/queries/header-footer.integration.test.ts",
-    "line": 88,
+    "line": 93,
     "snippet": "DELETE FROM package_revisions",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/db/queries/header-footer.integration.test.ts",
-    "line": 92,
+    "line": 97,
     "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/db/queries/header-footer.integration.test.ts",
-    "line": 93,
+    "line": 98,
     "snippet": "DELETE FROM projects WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/db/queries/header-footer.integration.test.ts",
-    "line": 94,
+    "line": 99,
     "snippet": "DELETE FROM libraries WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
@@ -631,67 +595,55 @@
   },
   {
     "filePath": "src/mcp/header-footer-handlers.integration.test.ts",
-    "line": 90,
-    "snippet": "DELETE FROM header_footer_configs",
-    "reason": "no WHERE clause — whole-table delete"
-  },
-  {
-    "filePath": "src/mcp/header-footer-handlers.integration.test.ts",
-    "line": 92,
+    "line": 97,
     "snippet": "DELETE FROM package_revisions",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/mcp/header-footer-handlers.integration.test.ts",
-    "line": 96,
+    "line": 101,
     "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/mcp/header-footer-handlers.integration.test.ts",
-    "line": 97,
+    "line": 102,
     "snippet": "DELETE FROM projects WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/mcp/header-footer-handlers.integration.test.ts",
-    "line": 98,
+    "line": 103,
     "snippet": "DELETE FROM libraries WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
-    "line": 71,
-    "snippet": "DELETE FROM header_footer_configs",
-    "reason": "no WHERE clause — whole-table delete"
-  },
-  {
-    "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
-    "line": 73,
+    "line": 78,
     "snippet": "DELETE FROM project_sources",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
-    "line": 78,
+    "line": 83,
     "snippet": "DELETE FROM package_revisions",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
-    "line": 82,
+    "line": 87,
     "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
-    "line": 83,
+    "line": 88,
     "snippet": "DELETE FROM projects WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
   {
     "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
-    "line": 84,
+    "line": 89,
     "snippet": "DELETE FROM libraries WHERE name LIKE $1",
     "reason": "LIKE pattern, not a captured id"
   },
