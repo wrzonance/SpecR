@@ -40,13 +40,13 @@ delimiter is never structural content. The three-times-filed confusion is
 because the original `#122` test comment ("The leading specifier-note
 banners remain... floor of 4") predates `da0c4656` — per `git log --follow`
 only one other commit (`9fcf6007`) ever touched that test file — and
-describes what the *old* code accidentally did, not a deliberate invariant.
+describes what the _old_ code accidentally did, not a deliberate invariant.
 
 ## Decision
 
 Keep `role === 'rule'` suppression running ahead of the style-based note
 check in `classifyOne`, exactly as `da0c4656`/#292 shipped it. Re-pin
-`paring-fixes.integration.test.ts`'s note-count floor to 2 — the genuine
+`paring-fixes.integration.test.ts`'s note count to **exactly** 2 — the genuine
 `STNoteSpec` note-text paragraph count — with the assertion comment
 rewritten to cite this ADR and the causal commit, so a fourth filer finds
 the answer instead of refiling. Add a regression test in
@@ -62,11 +62,13 @@ in the renderer's own output, not merely a test-assertion mismatch.
 
 ## Consequences
 
-- Zero `src/` diff: this ADR and its accompanying test changes touch no
-  production code path. `pnpm fixture:diff` across the full corpus is
+- No production-code path under `src/` changed; the regression tests that did
+  change also live under `src/`. `pnpm fixture:diff` across the full corpus is
   expected to show literally zero diff.
-- The `paring-fixes.integration.test.ts` floor of 2 is now the documented,
-  intentional invariant — any future PR that changes it must cite a new
+- The `paring-fixes.integration.test.ts` **exact count** of 2 is now the
+  documented, intentional invariant — deliberately not a `>= 2` floor, which
+  would still admit the historical four-note output this ADR exists to rule
+  out — and any future PR that changes it must cite a new
   causal commit or mark the change `KNOWN AMBIGUITY`, per this repo's
   standing rule for note-count/behavior changes.
 - Future asterisk-rule-row work should keep the `role === 'rule'` check
