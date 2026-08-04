@@ -157,24 +157,53 @@ describe('computeDiff', () => {
     expect(result.deleteConflicts).toEqual([]);
   });
 
-  it('theirs-deletes a paragraph ours edited since base → classified as a plain delete', () => {
-    // KNOWN AMBIGUITY (#465): classifyBase checks "missing from theirs → deleted"
-    // BEFORE consulting ours, so an owner delete of a paragraph the spec writer
-    // edited in the DB since base (ours "writer edit" ≠ base "base text") is emitted
-    // as a plain delete, not the git-style delete/modify conflict ADR-005 line 29
-    // implies. Accepting it (since #374) vanishes the writer's edit — reversibly
-    // (setVanishRow + paragraph_versions snapshot), but without surfacing the
-    // divergence. Pinned here as current behavior; the fix (a delete/modify-conflict
-    // category + apply-time guard) is a /diff contract change tracked in #465.
+  it('delete/modify conflict: theirs deletes a paragraph ours edited since base → deleteConflicts entry, not a plain delete', () => {
+    // #465 (ADR-005 line 29): an owner delete of a paragraph the spec writer edited
+    // in the DB since base (ours "writer edit" ≠ base "base text") is a git-style
+    // delete/modify conflict, not a plain delete — classifyBase now consults ours
+    // BEFORE bucketing a theirs-absent base row so accepting it can no longer
+    // silently vanish the writer's edit (see the apply-time stale guard in
+    // conflict.ts, which threads DeleteConflictDiff.ours through as an expected-text
+    // check before writing the vanish).
     const result = computeDiff([snap(U1, 'base text')], [snap(U1, 'writer edit')], extract([]), []);
-    expect(result.deleted).toEqual([U1]);
+    expect(result.deleted).toEqual([]);
     expect(result.conflicts).toEqual([]);
     expect(result.modified).toEqual([]);
-    // #465: the deleteConflicts bucket exists on the wire (DiffResult/schema)
-    // but classifyBase does not yet route into it — this case still lands in
-    // `deleted` above, same as before. The reorder that actually moves it here
-    // is a follow-up change; this assertion pins today's placeholder behavior.
+    expect(result.deleteConflicts).toEqual([{ uuid: U1, base: 'base text', ours: 'writer edit' }]);
+  });
+
+  it('delete/modify boundary: theirs deletes a paragraph ours never touched (ours === base) → plain delete, not a conflict', () => {
+    // Boundary case for the #465 reorder: ours falling back to base text (no DB
+    // edit since the snapshot) must still land in `deleted`, not deleteConflicts —
+    // the new branch only diverts when ours actually changed.
+    const result = computeDiff([snap(U1, 'base text')], [snap(U1, 'base text')], extract([]), []);
+    expect(result.deleted).toEqual([U1]);
     expect(result.deleteConflicts).toEqual([]);
+    expect(result.conflicts).toEqual([]);
+    expect(result.modified).toEqual([]);
+  });
+
+  it('delete/modify conflict composes with object exclusion (#520/#525): a uuid excluded as an object child never surfaces in deleteConflicts', () => {
+    // #520/#525 exclude a structurally-conflicting object's child anchors from
+    // every per-paragraph bucket so the same edit doesn't also surface as noisy
+    // per-child deletes/modifications — deleteConflicts (#465) must honor that
+    // exclusion the same way deleted/modified/conflicts already do, even though
+    // the excluded child's ours text diverged from base (which would otherwise
+    // route it into deleteConflicts).
+    const baseSnapshot = tableSnapshot(OBJ1, [['A1', 'B1']], [U1, U2]);
+    const result = computeDiff(
+      [snap(OBJ1, ''), snap(U1, 'cell one'), snap(U2, 'cell two')],
+      [snap(OBJ1, ''), snap(U1, 'writer edited cell'), snap(U2, 'cell two')],
+      extract([]), // no object blocks and no controlled uuids at all in theirs
+      [baseSnapshot]
+    );
+    expect(result.objectConflicts).toEqual([
+      { objectId: OBJ1, affectedUuids: [U1, U2], base: fingerprintBlob(baseSnapshot.meta.blob) },
+    ]);
+    expect(result.deleteConflicts).toEqual([]);
+    expect(result.deleted).toEqual([]);
+    expect(result.modified).toEqual([]);
+    expect(result.conflicts).toEqual([]);
   });
 
   it('paragraph absent from ours falls back to base text → theirs change is modified, not conflict', () => {

@@ -21,18 +21,61 @@ export interface DiffOptions {
 interface BaseClassification {
   readonly modified: readonly ModifiedDiff[];
   readonly deleted: readonly string[];
-  // #465: always [] for now — classifyBase does not yet distinguish a plain
-  // delete from a delete/modify conflict; that reorder lands in a follow-up
-  // change. Wired through here so DiffResult's new required field compiles.
   readonly deleteConflicts: readonly DeleteConflictDiff[];
   readonly conflicts: readonly ConflictDiff[];
 }
 
-// Per-base-paragraph rules (ADR-005):
-//   missing from theirs            → deleted
-//   theirs changed, ours unchanged → modified (auto-applicable)
-//   theirs unchanged               → no entry (incl. ours-only: change already in DB)
-//   both changed                   → conflict
+/** Discriminated classification of a single base-paragraph row (ADR-005 line 29). */
+type RowClassification =
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'deleted'; readonly uuid: string }
+  | { readonly kind: 'deleteConflict'; readonly entry: DeleteConflictDiff }
+  | { readonly kind: 'modified'; readonly entry: ModifiedDiff }
+  | { readonly kind: 'conflict'; readonly entry: ConflictDiff };
+
+/**
+ * A base row absent from theirs (#465): a clean delete when ours never
+ * diverged from base since the snapshot, otherwise a delete/modify conflict
+ * — split out of classifyRow to keep cognitive complexity down.
+ */
+function classifyMissingFromTheirs(
+  uuid: string,
+  baseText: string,
+  oursMap: ReadonlyMap<string, string>
+): RowClassification {
+  const oursText = oursMap.get(uuid) ?? baseText;
+  return oursText === baseText
+    ? { kind: 'deleted', uuid }
+    : { kind: 'deleteConflict', entry: { uuid, base: baseText, ours: oursText } };
+}
+
+/** One base row's classification, independent of the excludedUuids (#520) filter. */
+function classifyRow(
+  uuid: string,
+  baseText: string,
+  oursMap: ReadonlyMap<string, string>,
+  theirsMap: ReadonlyMap<string, string>
+): RowClassification {
+  const theirsText = theirsMap.get(uuid);
+  if (theirsText === undefined) return classifyMissingFromTheirs(uuid, baseText, oursMap);
+  if (theirsText === baseText) return { kind: 'unchanged' };
+  const oursText = oursMap.get(uuid) ?? baseText;
+  const entry: ModifiedDiff = { uuid, base: baseText, theirs: theirsText, ours: oursText };
+  return oursText !== baseText ? { kind: 'conflict', entry } : { kind: 'modified', entry };
+}
+
+// Per-base-paragraph rules (ADR-005 line 29):
+//   missing from theirs, ours unchanged → deleted (clean delete, auto-applicable)
+//   missing from theirs, ours changed   → deleteConflicts (#465: delete/modify
+//                                          conflict — theirs deleted the paragraph
+//                                          while ours diverged from base since the
+//                                          snapshot was taken; accepting a plain
+//                                          `deleted` here would silently vanish the
+//                                          writer's edit, so it gets its own bucket
+//                                          instead of being folded into `deleted`)
+//   theirs changed, ours unchanged      → modified (auto-applicable)
+//   theirs unchanged                    → no entry (incl. ours-only: change already in DB)
+//   both changed                        → conflict
 // `excludedUuids` (#520) skips a base row entirely: a body-level object's own
 // uuid (it carries no theirs anchor of its own, so it would otherwise read as
 // an unconditional delete) and any child anchor already covered by a detected
@@ -45,23 +88,28 @@ function classifyBase(
 ): BaseClassification {
   const modified: ModifiedDiff[] = [];
   const deleted: string[] = [];
-  // #465: reorder logic (checking ours before bucketing a theirs-absent base
-  // row) is a follow-up change — this array stays empty until then.
   const deleteConflicts: DeleteConflictDiff[] = [];
   const conflicts: ConflictDiff[] = [];
 
   for (const { uuid, text: baseText } of base) {
     if (excludedUuids.has(uuid)) continue;
-    const theirsText = theirsMap.get(uuid);
-    if (theirsText === undefined) {
-      deleted.push(uuid);
-      continue;
+    const result = classifyRow(uuid, baseText, oursMap, theirsMap);
+    switch (result.kind) {
+      case 'unchanged':
+        break;
+      case 'deleted':
+        deleted.push(result.uuid);
+        break;
+      case 'deleteConflict':
+        deleteConflicts.push(result.entry);
+        break;
+      case 'modified':
+        modified.push(result.entry);
+        break;
+      case 'conflict':
+        conflicts.push(result.entry);
+        break;
     }
-    if (theirsText === baseText) continue;
-    const oursText = oursMap.get(uuid) ?? baseText;
-    const entry: ModifiedDiff = { uuid, base: baseText, theirs: theirsText, ours: oursText };
-    if (oursText !== baseText) conflicts.push(entry);
-    else modified.push(entry);
   }
 
   return { modified, deleted, deleteConflicts, conflicts };
