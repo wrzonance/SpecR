@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { generateDocx } from '../generator/index.js';
 import { extractContentControls } from './extract.js';
 import { MergeError } from './error.js';
 import type { SpecTree } from '../ast/types.js';
+
+const MERGE_DIR = join(process.cwd(), 'src/merge');
 
 const PART_ID = '00000000-0000-0000-0000-000000000002';
 const ART_ID = '00000000-0000-0000-0000-000000000003';
@@ -391,5 +395,32 @@ describe('extractContentControls — object-interior vanish handling (#648)', ()
     const body = table([tableRow([sdt(U1, para(visibleOffRun('kept ') + run('too')))])]);
     const result = await extractContentControls(await craftDocx(body));
     expect(result.controlled.get(U1)).toBe('kept too');
+  });
+
+  // Structural guard (not a behavior test): #648's fix reaches vanish detection
+  // through the single, already-existing hasRunVanish predicate (body-objects.ts,
+  // #641/ADR-092) rather than growing a second, drifting w:vanish reader inside
+  // merge/. Pins the manual "grep -rn vanish src/merge/" audit from #648's
+  // verification as an automated regression guard, so a future change can't
+  // silently reintroduce a second predicate that disagrees with the first.
+  it('src/merge/*.ts touches raw w:vanish only through extract.ts, and only via the imported hasRunVanish', () => {
+    const nonTestFiles = readdirSync(MERGE_DIR).filter(
+      (name) => name.endsWith('.ts') && !name.endsWith('.test.ts')
+    );
+
+    const filesReferencingRawVanishTag = nonTestFiles.filter((name) =>
+      readFileSync(join(MERGE_DIR, name), 'utf8').includes('w:vanish')
+    );
+    expect(filesReferencingRawVanishTag).toEqual(['extract.ts']);
+
+    const extractSrc = readFileSync(join(MERGE_DIR, 'extract.ts'), 'utf8');
+    expect(extractSrc).toMatch(
+      /import\s*\{\s*hasRunVanish\s*\}\s*from\s*'\.\.\/parser\/index\.js';/
+    );
+    // No locally-declared vanish predicate alongside the import — hasRunVanish
+    // must remain the ONLY definition, never a second, independently-drifting one.
+    const localVanishDeclarations =
+      extractSrc.match(/\b(?:function|const)\s+\w*[Vv]anish\w*\s*[:(=]/g) ?? [];
+    expect(localVanishDeclarations).toEqual([]);
   });
 });
