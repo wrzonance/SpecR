@@ -992,6 +992,52 @@ describe('extractBodyObjects — #641 nested text box inside a text box (run-van
     expect(actualBytes).toBe(expectedBytes);
     expect(actualBytes).toContain('NESTED SECRET');
   });
+
+  // Review finding (medium): the two tests above only pin the run-vanish walk
+  // via the text-box CAPTURE path (buildTextBoxObject). collectText is
+  // SHARED — buildTableObject calls the exact same anchorInteriorParagraphs /
+  // collectText walk (see body-objects.ts's own header comment on
+  // anchorInteriorParagraphs) — but nothing in this suite independently
+  // verified that for the table path before this test. The direct table
+  // analogue of the mixed-run test above: a VISIBLE table cell whose sole
+  // paragraph has one plain run and one w:rPr>w:vanish run. Unlike
+  // vanishPara's all-vanish cell (line ~402, which never reaches collectText
+  // at all — the whole cell/table is classified fully-hidden by the
+  // pre-existing ADR-038 path), this cell has a visible run too, so the
+  // table is NOT fully hidden and buildTableObject's own collectText call is
+  // genuinely exercised.
+  it('a visible table cell paragraph mixing one visible run and one vanish run excludes only the vanish run (table analogue)', () => {
+    const mixedRunCellPara =
+      '<w:p><w:r><w:t>visible part </w:t></w:r>' +
+      '<w:r><w:rPr><w:vanish/></w:rPr><w:t>hidden part</w:t></w:r></w:p>';
+    const body = table(row(cell(mixedRunCellPara)));
+    const result = extract(body);
+
+    expect(result.tableObjects).toHaveLength(1);
+    const object = result.tableObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible part ']);
+  });
+
+  // Table analogue of the nested-text-box-inside-a-text-box test above (line
+  // ~917): a table cell's own paragraph carries a visible run PLUS a nested
+  // drawing (text box) run whose interior is hidden (w:rPr>w:vanish). The
+  // cell paragraph is visible overall (its own text is non-empty), so
+  // buildTableObject treats it as ONE anchored leaf via extractBlobText —
+  // proving the nested hidden run's text never leaks into interiorTexts via
+  // the table capture path, not merely the text-box one.
+  it('a table cell with a nested hidden text box exposes only its own visible text — the nested vanish run never leaks in (table analogue)', () => {
+    const cellParaWithNestedHiddenBox =
+      '<w:p><w:r><w:t>cell visible</w:t></w:r>' +
+      hiddenTextBoxRun('NESTED TABLE SECRET') +
+      '</w:p>';
+    const body = table(row(cell(cellParaWithNestedHiddenBox)));
+    const result = extract(body);
+
+    expect(result.tableObjects).toHaveLength(1);
+    const object = result.tableObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['cell visible']);
+    expect(object?.interiorTexts.map((t) => t.text).join('')).not.toContain('NESTED TABLE SECRET');
+  });
 });
 
 describe('extractBodyObjects — #633 investigation: decorative asterisk rule rows are VERBATIM inside a captured object (refutation, not a bug)', () => {
