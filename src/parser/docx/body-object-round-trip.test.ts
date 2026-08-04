@@ -50,6 +50,18 @@ const MINIMAL_STYLES =
   '<?xml version="1.0" encoding="UTF-8"?>' +
   '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>';
 
+// #650 task 6/10: a `styles.xml` defining ONE character style ("HiddenChar")
+// that carries an enabled `w:vanish` — the source data
+// styleVanishTextBoxParagraph's second run references via `w:rStyle`, never
+// a direct `w:rPr>w:vanish` on the run itself. This is what exercises
+// `StyleMap.vanishCharStyleIds` end to end, distinct from every other test
+// in this file (which hides a run/paragraph directly).
+const VANISH_CHAR_STYLE_STYLES =
+  '<?xml version="1.0" encoding="UTF-8"?>' +
+  '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+  '<w:style w:type="character" w:styleId="HiddenChar"><w:rPr><w:vanish/></w:rPr></w:style>' +
+  '</w:styles>';
+
 function makeDocumentXml(bodyXml: string): string {
   return (
     `<?xml version="1.0" encoding="UTF-8"?><w:document ${NS}>` +
@@ -57,9 +69,9 @@ function makeDocumentXml(bodyXml: string): string {
   );
 }
 
-async function makeDocx(bodyXml: string): Promise<Buffer> {
+async function makeDocx(bodyXml: string, stylesXml: string = MINIMAL_STYLES): Promise<Buffer> {
   const zip = new JSZip();
-  zip.file('word/styles.xml', MINIMAL_STYLES);
+  zip.file('word/styles.xml', stylesXml);
   zip.file('word/document.xml', makeDocumentXml(bodyXml));
   return zip.generateAsync({ type: 'nodebuffer' });
 }
@@ -150,6 +162,25 @@ function textBoxRunXml(docPrId: number, interiorXml: string): string {
 function mixedVisibilityTwoTextBoxParagraph(visibleText: string, hiddenText: string): string {
   const visibleRun = textBoxRunXml(1, para(visibleText));
   const hiddenInterior = `<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>${hiddenText}</w:t></w:r></w:p>`;
+  const hiddenRun = textBoxRunXml(2, hiddenInterior);
+  return `<w:p>${visibleRun}${hiddenRun}</w:p>`;
+}
+
+// #650 task 6/10: the SAME two-separate-boxes shape as
+// mixedVisibilityTwoTextBoxParagraph above, except the SECOND box is hidden
+// PURELY via a `w:rStyle` reference into `VANISH_CHAR_STYLE_STYLES`'s
+// "HiddenChar" character style — never a direct `w:rPr>w:vanish` on the run
+// itself. Two SEPARATE boxes (not one paragraph mixing a visible and a
+// style-hidden run) so the hidden box's own interior paragraph carries NO
+// visible text at all and is therefore NEVER SDT-anchored
+// (body-objects.ts's transformChildren only anchors non-empty-text interior
+// paragraphs) — required for a true byte-identity comparison below: an
+// anchored paragraph mints a FRESH uuid on every capture by design (this
+// file's own header), so only an unanchored subtree can ever be byte-
+// identical across a regenerate + re-parse cycle.
+function styleVanishTwoTextBoxParagraph(visibleText: string, hiddenText: string): string {
+  const visibleRun = textBoxRunXml(1, para(visibleText));
+  const hiddenInterior = `<w:p><w:r><w:rPr><w:rStyle w:val="HiddenChar"/></w:rPr><w:t>${hiddenText}</w:t></w:r></w:p>`;
   const hiddenRun = textBoxRunXml(2, hiddenInterior);
   return `<w:p>${visibleRun}${hiddenRun}</w:p>`;
 }
@@ -492,6 +523,76 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
     // header records id as excluded from round-trip identity), so its
     // serialization legitimately differs between generations. Its content is
     // pinned by the objectTexts assertions above instead.
+    expect(blocksAfter.filter((b) => b.includes('Visible box text'))).toHaveLength(1);
+  });
+
+  // #650 task 6/10: every test above hides content via a DIRECT
+  // `w:rPr>w:vanish` (i.e. WITHOUT `vanishCharStyleIds` — that set stays
+  // empty throughout). This is the WITH case: a box hidden PURELY via a
+  // `w:rStyle` reference into a character style that itself carries
+  // `w:vanish` (VANISH_CHAR_STYLE_STYLES's "HiddenChar"). Mirrors the
+  // mixed-visibility test above exactly (two separate boxes, one visible,
+  // one hidden), swapping only the hiding mechanism, and pins three things
+  // with real byte/string equality, never substring containment:
+  //   1. Privacy at capture — the style-hidden box's text never reaches
+  //      interiorTexts, and `ObjectMeta.vanishCharStyleIds` persists the id.
+  //   2. Byte-identity — the hidden box's ENTIRE w:txbxContent (rStyle
+  //      reference included) survives a regenerate + re-parse cycle
+  //      string-for-string, exactly like the direct-vanish case.
+  //   3. Privacy SURVIVES the round trip too — the SECOND parse's own
+  //      `vanishCharStyleIds` resolution must recover "HiddenChar" from the
+  //      REGENERATED document's own styles.xml, or the previously-hidden
+  //      box's text would surface as visible plain text on re-parse (the
+  //      real bug this test caught during task 6's investigation, fixed in
+  //      generator/object-vanish-styles.ts rather than merely documented).
+  it('a text box hidden ONLY via a w:rStyle-referenced vanish character style is excluded from interiorTexts and stays hidden across a full byte-identical regenerate + re-parse cycle (#650)', async () => {
+    const source = await makeDocx(
+      para('Intro paragraph.') +
+        styleVanishTwoTextBoxParagraph('Visible box text', 'Secret style-hidden box text'),
+      VANISH_CHAR_STYLE_STYLES
+    );
+    const { tree } = await parse(source, 'source.docx');
+    const before = objectNodesOf(tree);
+    expect(before).toHaveLength(1);
+    expectObjectMeta(before[0], { kind: 'textBox', generation: 'drawingml', floating: false });
+    // Privacy at capture: the style-hidden box's text never reaches interiorTexts.
+    expect(objectTextsOf(before[0] as SpecNode)).toEqual(['Visible box text']);
+    expect(before[0]?.meta.object?.vanishCharStyleIds).toEqual(['HiddenChar']);
+
+    const docXmlBefore = await generatedDocumentXml(tree);
+    const blocksBefore = txbxContentBlocks(docXmlBefore);
+    expect(blocksBefore).toHaveLength(2);
+    const hiddenBefore = blocksBefore.find((b) => b.includes('Secret style-hidden box text'));
+    expect(hiddenBefore).toBeDefined();
+    // The opaque blob still carries the hidden box's OWN OOXML verbatim —
+    // capture suppresses the ANCHOR, never the underlying content (ADR-072
+    // decision 1) — and, being fully text-empty once its one run is
+    // excluded, it never gets an SDT anchor at all (no round-trip merge
+    // locator can ever address hidden style-vanished content either).
+    expect(hiddenBefore).toContain('<w:rStyle w:val="HiddenChar"/>');
+    expect(hiddenBefore).not.toContain('<w:sdt');
+    expect(hiddenBefore).not.toContain('w:tag');
+
+    const reparsedTree = await regenerateAndReparse(tree);
+    const after = objectNodesOf(reparsedTree);
+
+    expect(after).toHaveLength(1);
+    expectObjectMeta(after[0], { kind: 'textBox', generation: 'drawingml', floating: false });
+    // Privacy holds across the FULL regenerate -> re-parse cycle: the
+    // regenerated document carries a reconstructed "HiddenChar" character
+    // style (generator/object-vanish-styles.ts), so the SECOND parse
+    // resolves the SAME vanishCharStyleIds and the box stays excluded.
+    expect(objectTextsOf(after[0] as SpecNode)).toEqual(['Visible box text']);
+    expect(after[0]?.meta.object?.vanishCharStyleIds).toEqual(['HiddenChar']);
+
+    const docXmlAfter = await generatedDocumentXml(reparsedTree);
+    const blocksAfter = txbxContentBlocks(docXmlAfter);
+    expect(blocksAfter).toHaveLength(2);
+    const hiddenAfter = blocksAfter.find((b) => b.includes('Secret style-hidden box text'));
+    // Byte-identity, actually asserted on bytes: the hidden box's ENTIRE
+    // w:txbxContent serialization is compared string-for-string across the
+    // second generation, never merely probed for a substring.
+    expect(hiddenAfter).toBe(hiddenBefore);
     expect(blocksAfter.filter((b) => b.includes('Visible box text'))).toHaveLength(1);
   });
 });

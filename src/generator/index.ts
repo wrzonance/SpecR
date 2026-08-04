@@ -23,6 +23,11 @@ import {
 import { renderHeaderFooterComposition } from './header-footer.js';
 import type { HeaderFooterRenderResult } from './header-footer.js';
 import type { HeaderFooterFieldContext, HeaderFooterFieldValues } from './header-footer-fields.js';
+import {
+  collectVanishCharacterStyleIds,
+  vanishCharacterStyleOptions,
+} from './object-vanish-styles.js';
+import type { IStylesOptions } from 'docx';
 
 export { generateSec } from './sec/index.js';
 export { renderMarkdown } from './markdown.js';
@@ -212,6 +217,16 @@ function documentLevelOptions(render: HeaderFooterRenderResult | undefined): {
   return render?.evenAndOddHeaders ? { evenAndOddHeaderAndFooters: true } : {};
 }
 
+// #650 task 6/10: a `styles` block is only emitted when at least one
+// captured object across `trees` actually referenced a vanish-resolved
+// character style — the overwhelmingly common case has none, and this keeps
+// that case's output byte-identical to before this fix (see
+// object-vanish-styles.ts's own module comment for why this exists).
+function vanishStylesOptions(trees: readonly SpecTree[]): { readonly styles?: IStylesOptions } {
+  const ids = collectVanishCharacterStyleIds(trees);
+  return ids.length > 0 ? { styles: { characterStyles: vanishCharacterStyleOptions(ids) } } : {};
+}
+
 // Section-level options driven by a header/footer render: docx's
 // ISectionOptions carries `headers`/`footers` as siblings of `properties`,
 // while titlePage/page-number-start/page-size live inside `properties` —
@@ -272,6 +287,7 @@ export async function generateDocx(
     const pageSize = resolvePageSize(tree.pageSize);
     const doc = new Document({
       ...documentLevelOptions(render),
+      ...vanishStylesOptions([tree]),
       numbering: { config: [buildSpecNumberingConfig(rules, SPEC_NUM_REF)] },
       sections: [{ ...sectionHeaderFooterOptions(render, pageSize), children }],
     });
@@ -352,6 +368,7 @@ export async function generateManual(
     const frontMatterPageSize = resolvePageSize(trees[0]?.pageSize);
     const doc = new Document({
       ...documentLevelOptions(firstRender),
+      ...vanishStylesOptions(trees),
       numbering: { config: sections.map((s) => buildSpecNumberingConfig(rules, s.reference)) },
       sections: [
         {
