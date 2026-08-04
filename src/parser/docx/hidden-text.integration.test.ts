@@ -20,7 +20,7 @@ describe.runIf(existsSync(FIXTURE))('hidden-text-test.docx end-to-end (#294)', (
     // never survive — that's the paragraph-tier note-region engine's
     // suppression contract (ADR-086, classifyOne's role === 'rule' check).
     // `objectText` nodes are excluded from this check on purpose: they are a
-    // captured table/text-box's interior text, which ADR-072 decision 8
+    // captured table/text-box's interior text, which ADR-072 decision 14
     // (#300) already establishes is a VERBATIM, out-of-band mirror of the
     // source document, never re-run through paragraph-tier suppression. This
     // fixture's body table legitimately contributes 4 verbatim asterisk-rule

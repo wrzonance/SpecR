@@ -44,7 +44,7 @@ decision 2) never fires — the object is still captured, only its **text** is
 wrong.
 
 **#633 — a REFUTATION, not a defect: `hidden-text.integration.test.ts`'s
-assertion never accounted for ADR-072 decision 8.** The issue reported that
+assertion never accounted for ADR-072 decision 14.** The issue reported that
 `hidden-text.integration.test.ts`'s "no node's trimmed text is 5+ asterisks"
 assertion fails deterministically against `hidden-text-test.docx`, with 4
 leaked `objectText` nodes traced to `body-objects.ts`'s interior-paragraph
@@ -63,7 +63,7 @@ explicitly: *"a captured table/text-box's cell text is a faithful,
 out-of-band, VERBATIM mirror of the original document — never re-run through
 the paragraph-tier note-region engine... Suppressing it would mean silently
 reinterpreting locked table content, the opposite of this file's own
-no-silent-loss contract."* This is ADR-072 decision 8, already shipped as
+no-silent-loss contract."* This is ADR-072 decision 14, already shipped as
 part of #300, and it applies to text boxes exactly as much as tables (the
 comment names both). `hidden-text-test.docx` is even already carved OUT of
 `note-region-corpus.integration.test.ts`'s corpus-wide asterisk sweep for
@@ -130,7 +130,7 @@ separately-triaged defect — not evidence this ADR silently under-scoped
 such case at the time of this fix (see Consequences).
 
 **2. `body-objects.ts` gets NO rule-row/`isRuleRow` suppression branch —
-object-captured interior text stays verbatim, exactly as ADR-072 decision 8
+object-captured interior text stays verbatim, exactly as ADR-072 decision 14
 already decided (#633 resolved as direction (b), a test fix).**
 `transformChildren`'s `w:p` leaf-eligibility guard is UNCHANGED
 (`text.trim().length === 0`, the pre-existing empty-paragraph check). No
@@ -138,7 +138,7 @@ already decided (#633 resolved as direction (b), a test fix).**
 `buildTableObject` or `buildTextBoxObject`.
 
 **3. `hidden-text.integration.test.ts`'s bare-asterisk assertion is narrowed
-to exclude `objectText` nodes**, with a comment citing ADR-072 decision 8 and
+to exclude `objectText` nodes**, with a comment citing ADR-072 decision 14 and
 `note-region-corpus.integration.test.ts`'s `OBJECT_VERBATIM_TABLE`-scoped
 regression test for this same fixture. The assertion's INTENT — no
 paragraph-tier asterisk-rule wall survives suppression (ADR-086) — is
@@ -192,7 +192,7 @@ any depth, inside any object capture.
 - Cross-references: ADR-087 (per-text-box visibility) decision 7's
   same-normalized-view rule is the reasoning this ADR follows by NOT
   extending `hiddenSubtrees`/`hiddenFlags` correlation to nested boundaries;
-  ADR-072 decision 8 (#300) is the ALREADY-DECIDED rule this ADR discovered
+  ADR-072 decision 14 (#300) is the ALREADY-DECIDED rule this ADR discovered
   #633's report conflicts with, and defers to rather than silently
   overriding; ADR-086 (asterisk rule rows stay suppressed, not notes) governs
   the PARAGRAPH-tier flow only and is untouched — `inference.ts`,

@@ -1045,7 +1045,7 @@ describe('extractBodyObjects — #633 investigation: decorative asterisk rule ro
   // silent absence of a suppression branch: a rule-row-only interior
   // paragraph inside a captured text box (or table — see the sibling test
   // below) is captured VERBATIM, exactly like any other interior text.
-  // ADR-072 decision 8 (#300) already establishes this — a captured
+  // ADR-072 decision 14 (#300) already establishes this — a captured
   // table/text-box's cell text is a faithful, out-of-band, VERBATIM mirror
   // of the source document, never re-run through the paragraph-tier
   // note-region/rule-row engine — and

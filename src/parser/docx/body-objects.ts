@@ -247,7 +247,7 @@ function transformInteriorParagraphs(
 // #633 investigation (ADR-092): a decorative asterisk rule row inside a
 // captured object's interior paragraph is DELIBERATELY left verbatim here,
 // never routed through isRuleRow/classifyOne's paragraph-tier suppression.
-// ADR-072 decision 8 (#300) already establishes this — a captured
+// ADR-072 decision 14 (#300) already establishes this — a captured
 // table/text-box's cell text is a faithful, out-of-band, VERBATIM mirror of
 // the source document, never re-run through the paragraph-tier note-region
 // engine — and note-region-corpus.integration.test.ts's own
