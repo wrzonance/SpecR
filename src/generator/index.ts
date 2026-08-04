@@ -27,6 +27,7 @@ import {
   collectVanishCharacterStyleIds,
   vanishCharacterStyleOptions,
 } from './object-vanish-styles.js';
+import { namespaceVanishTrees } from './object-vanish-namespace.js';
 import type { IStylesOptions } from 'docx';
 
 export { generateSec } from './sec/index.js';
@@ -348,10 +349,17 @@ export async function generateManual(
     throw new GeneratorError('cannot generate a manual with no sections');
   }
   try {
+    // #650 review: give every source tree its own private namespace for the
+    // vanish-character-style ids its own captured objects reference, so two
+    // different source documents combined into this manual can never let one
+    // tree's vanish stub overwrite another tree's unrelated same-named style
+    // (see object-vanish-namespace.ts). A no-op for the common case of no
+    // vanish ids anywhere, or a single-section manual.
+    const scopedTrees = namespaceVanishTrees(trees);
     const rules = styleRules !== undefined ? buildRuleMap(styleRules) : undefined;
     const format = options?.sectionNumberFormat ?? 'canonical';
     const frontMatter = buildFrontMatter(meta, styleRules);
-    const sections = trees.map((tree, i) => {
+    const sections = scopedTrees.map((tree, i) => {
       const reference = `${SPEC_NUM_REF}-${i}`;
       const render = renderOptionalHeaderFooter(tree, format, options);
       return {
@@ -361,14 +369,16 @@ export async function generateManual(
       };
     });
     const firstRender =
-      trees[0] !== undefined ? renderOptionalHeaderFooter(trees[0], format, options) : undefined;
+      scopedTrees[0] !== undefined
+        ? renderOptionalHeaderFooter(scopedTrees[0], format, options)
+        : undefined;
     // Front matter has no source SpecTree of its own — its page size (#509)
-    // resolves from `trees[0]`, deliberately not `firstRender` (a
+    // resolves from `scopedTrees[0]`, deliberately not `firstRender` (a
     // header/footer render, unrelated to page dimensions).
-    const frontMatterPageSize = resolvePageSize(trees[0]?.pageSize);
+    const frontMatterPageSize = resolvePageSize(scopedTrees[0]?.pageSize);
     const doc = new Document({
       ...documentLevelOptions(firstRender),
-      ...vanishStylesOptions(trees),
+      ...vanishStylesOptions(scopedTrees),
       numbering: { config: sections.map((s) => buildSpecNumberingConfig(rules, s.reference)) },
       sections: [
         {

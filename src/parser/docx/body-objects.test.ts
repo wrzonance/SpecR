@@ -3,6 +3,7 @@ import { extractBodyObjects, anchorInteriorParagraphs, hasRunVanish } from './bo
 import { computeBodyOrder } from './body-order.js';
 import { createDocumentXmlParser, createOrderedDocumentXmlBuilder, toArray } from './xml-utils.js';
 import { buildStyleMap } from './styles.js';
+import { replaceAnchoredParagraphText } from './object-blob-edit.js';
 import { UUID_TAG_PREFIX } from '../../ast/index.js';
 import type { StyleMap } from './types.js';
 import type { BodyObjectExtractionResult } from './body-objects.js';
@@ -395,13 +396,76 @@ describe('hasRunVanish — rStyle-referenced character-style vanish (#650, captu
     expect(hasRunVanish(run)).toBe(false);
   });
 
-  it('capture and rewrite are decided by the exact same predicate — same input yields the same output on both call shapes', () => {
+  // #650 review (verified finding): the ORIGINAL version of this test called
+  // `hasRunVanish` twice with the exact same literal arguments and compared
+  // the two results — that can never fail for a deterministic pure function,
+  // so it never actually exercised either real call site. This replacement
+  // derives `vanishCharStyleIds` from a REAL `extractBodyObjects` capture and
+  // feeds that exact captured value into the REAL `replaceAnchoredParagraphText`
+  // rewrite path (object-blob-edit.ts) on the SAME source blob — the two
+  // production call sites `hasRunVanish`'s own doc comment says must share
+  // one predicate (ADR-092) — proving they actually agree end-to-end. See the
+  // "hidden-first paragraph" end-to-end test below.
+  it('hasRunVanish is a pure, deterministic predicate (same input, same output) — a necessary but not sufficient property; see the end-to-end test below for the real shared-object proof', () => {
     const node = blobRun([blobRStyle('HiddenChar')]);
     const vanishCharStyleIds = new Set(['HiddenChar']);
-    const captureResult = hasRunVanish(node, vanishCharStyleIds);
-    const rewriteResult = hasRunVanish(node, vanishCharStyleIds);
-    expect(captureResult).toBe(rewriteResult);
-    expect(captureResult).toBe(true);
+    expect(hasRunVanish(node, vanishCharStyleIds)).toBe(hasRunVanish(node, vanishCharStyleIds));
+  });
+
+  // A paragraph with the VANISH run FIRST in document order and the VISIBLE
+  // run second — the exact shape rewriteFirstText's own doc comment warns
+  // about ("an interior paragraph whose HIDDEN run precedes its visible one
+  // would take the edit into the hidden run and blank the visible one").
+  // With the visible run first (this file's other rStyleRunPara fixtures),
+  // a drifted rewrite predicate that failed to skip vanish runs would still
+  // accidentally land the edit in the right place, because the visible run
+  // is reached first regardless — this ordering is the one place capture and
+  // rewrite disagreeing would actually be OBSERVABLE.
+  function hiddenFirstRStyleRunPara(
+    styledText: string,
+    visibleText: string,
+    styleId: string
+  ): string {
+    return (
+      `<w:p><w:r><w:rPr><w:rStyle w:val="${styleId}"/></w:rPr><w:t>${styledText}</w:t></w:r>` +
+      `<w:r><w:t>${visibleText}</w:t></w:r></w:p>`
+    );
+  }
+
+  it('end-to-end: vanishCharStyleIds captured by extractBodyObjects, fed into replaceAnchoredParagraphText on the SAME blob, skips the SAME hidden run capture skipped', () => {
+    const styleMap = charVanishStyleMap('HiddenChar');
+    const cellPara = hiddenFirstRStyleRunPara('hidden style part', 'visible part', 'HiddenChar');
+    const result = extract(table(row(cell(cellPara))), styleMap);
+    expect(result.tableObjects).toHaveLength(1);
+
+    // Non-null assertions below are safe given the length assertion above —
+    // kept as plain property access (not `?.`/`??`) so this test's own
+    // complexity stays readable rather than accumulating optional-chaining
+    // branches unrelated to the invariant it pins.
+    const object = result.tableObjects[0]!.object;
+    // Capture side: the hidden run never reaches interiorTexts.
+    expect(object.interiorTexts.map((t) => t.text)).toEqual(['visible part']);
+    expect(object.interiorTexts).toHaveLength(1);
+    const uuid = object.interiorTexts[0]!.id;
+
+    // Rewrite side: feed the EXACT vanishCharStyleIds capture persisted —
+    // never a fresh literal Set built by this test — into the real
+    // production rewrite entry point, on the object's own captured blob.
+    const vanishCharStyleIds = new Set(object.vanishCharStyleIds);
+    const rewritten = replaceAnchoredParagraphText(
+      object.blob,
+      uuid,
+      'replaced visible part',
+      vanishCharStyleIds
+    );
+    expect(rewritten).toBeDefined();
+
+    const xml = createOrderedDocumentXmlBuilder().build(rewritten!);
+    // The rewrite reached past the hidden run — its original text is
+    // untouched, never blanked and never overwritten with the new text.
+    expect(xml).toContain('hidden style part');
+    // The edit landed in the visible run, which is what a caller asked for.
+    expect(xml).toContain('replaced visible part');
   });
 });
 
