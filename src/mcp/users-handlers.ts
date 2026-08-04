@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { resolveOrCreateUserByLabel, listUsers, getUser } from '../db/index.js';
 import { logger } from '../lib/logger.js';
-import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
+import { codePointMax } from '../lib/length-limit.js';
+import { MAX_LABEL_LENGTH } from '../lib/label-length.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
 
 export const UserIdShape = {
@@ -9,17 +10,16 @@ export const UserIdShape = {
 };
 const UserIdArgs = z.object(UserIdShape);
 
+// #642, ADR-091: bounded in Unicode code points via MAX_LABEL_LENGTH
+// (src/lib/label-length.ts), shared with the REST twin (POST /users,
+// src/api/users.ts) even though this shape doesn't reuse that validator.
 export const ResolveUserShape = {
-  label: z
-    .string()
-    .trim()
-    .min(1)
-    .max(200)
-    .describe(
+  label: codePointMax(z.string().trim().min(1), MAX_LABEL_LENGTH, {
+    description:
       'Actor label to resolve or create (case-sensitive, exact-match identity — spoofable ' +
-        'pre-#43, same trust tier as ADR-018 lock holder; idempotent — same label always ' +
-        `returns the same user.id). ${UTF16_LENGTH_LIMIT_NOTE}`
-    ),
+      'pre-#43, same trust tier as ADR-018 lock holder; idempotent — same label always ' +
+      'returns the same user.id).',
+  }),
 };
 const ResolveUserArgs = z.object(ResolveUserShape);
 

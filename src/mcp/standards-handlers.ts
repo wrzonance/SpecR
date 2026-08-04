@@ -8,7 +8,13 @@ import {
   type RecordVerificationInput,
 } from '../db/index.js';
 import { logger } from '../lib/logger.js';
-import { UTF16_LENGTH_LIMIT_NOTE } from '../lib/length-limit-note.js';
+import { codePointMax } from '../lib/length-limit.js';
+import {
+  MAX_CURRENT_VERSION_LENGTH,
+  MAX_SOURCE_URL_LENGTH,
+  MAX_TITLE_LENGTH,
+  MAX_NOTES_LENGTH,
+} from '../lib/standards-verification-length.js';
 import { toolError, ok, type ToolResult } from './handlers.js';
 
 export const ListLibraryStandardsShape = {
@@ -34,24 +40,22 @@ export const RecordStandardVerificationShape = {
     .enum(['current', 'superseded', 'withdrawn', 'unknown'])
     .optional()
     .describe('Currency verdict (default unknown)'),
-  currentVersion: z
-    .string()
-    .min(1)
-    .max(200)
-    .optional()
-    .describe(`Current published version/designation. ${UTF16_LENGTH_LIMIT_NOTE}`),
-  sourceUrl: z
-    .url()
-    .max(2000)
-    .optional()
-    .describe(`Authoritative source URL for the standard. ${UTF16_LENGTH_LIMIT_NOTE}`),
-  title: z
-    .string()
-    .min(1)
-    .max(500)
-    .optional()
-    .describe(`Standard title. ${UTF16_LENGTH_LIMIT_NOTE}`),
-  notes: z.string().max(5000).optional().describe(`Reviewer notes. ${UTF16_LENGTH_LIMIT_NOTE}`),
+  // #642, ADR-091: bounded in Unicode code points via the MAX_* constants
+  // (src/lib/standards-verification-length.ts), shared with the REST twin
+  // (VerificationBodySchema, src/api/standards.ts) even though this shape
+  // doesn't reuse that validator.
+  currentVersion: codePointMax(z.string().min(1), MAX_CURRENT_VERSION_LENGTH, {
+    description: 'Current published version/designation.',
+  }).optional(),
+  sourceUrl: codePointMax(z.url(), MAX_SOURCE_URL_LENGTH, {
+    description: 'Authoritative source URL for the standard.',
+  }).optional(),
+  title: codePointMax(z.string().min(1), MAX_TITLE_LENGTH, {
+    description: 'Standard title.',
+  }).optional(),
+  notes: codePointMax(z.string(), MAX_NOTES_LENGTH, {
+    description: 'Reviewer notes.',
+  }).optional(),
 };
 const RecordStandardVerificationArgs = z.object(RecordStandardVerificationShape);
 

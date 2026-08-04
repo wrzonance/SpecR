@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { codePointLength } from '../lib/length-limit.js';
 
 // #411 / ADR-080 — a firm's own language-lint vocabulary: banned terms,
 // reinforcing words to avoid, recognized party names, and phrases a spec must
@@ -90,9 +91,20 @@ function literalTermTextsIn(rules: LanguageRules): readonly string[] {
 // on an otherwise-identical base schema, so existing rows whose literal terms
 // already exceed this bound keep reading successfully (grandfathered) while
 // only new writes are held to it.
+//
+// Counted in UNICODE CODE POINTS (#642, ADR-091), matching the openapi.yaml
+// LanguageRuleTermWrite.term maxLength keyword. This stays an OBJECT-LEVEL
+// `.check()` rather than a field-level `codePointMax` — the 500-code-point
+// bound applies only to literal (isRegex !== true) terms; a field-level bound
+// on `term` itself would incorrectly also constrain regex-pattern terms,
+// which have their own separate ReDoS-safety bound (src/lib/regex-safety.ts).
 export const LanguageRulesWriteSchema = LanguageRulesSchema.check((ctx) => {
   const literalTerms = literalTermTextsIn(ctx.value);
-  if (literalTerms.some((term) => term.length > MAX_LITERAL_TERM_LENGTH)) {
+  if (
+    literalTerms.some(
+      (term) => codePointLength(term, MAX_LITERAL_TERM_LENGTH) > MAX_LITERAL_TERM_LENGTH
+    )
+  ) {
     ctx.issues.push({
       code: 'custom',
       input: ctx.value,
