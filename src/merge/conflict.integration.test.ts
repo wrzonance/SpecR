@@ -5,6 +5,7 @@ import { pool, lazyHistoryContext } from '../db/index.js';
 import type { ParagraphHistoryContext } from '../db/index.js';
 import { applyAccepted, InvalidAcceptedChangeError } from './conflict.js';
 import { applyMerge } from './apply-merge.js';
+import { MergeError } from './error.js';
 import type { DiffResult } from './types.js';
 import type { ObjectStructureFingerprint } from './object-fingerprint.js';
 import { findAnchoredParagraph } from '../parser/index.js';
@@ -642,6 +643,71 @@ describe('applyAccepted — deleted-op apply', () => {
     const row = await paragraphRow(articleId);
     expect(row.vanish).toBe(false);
     expect(await paragraphVersions(articleId)).toEqual([]);
+  });
+});
+
+// #465: a DeleteConflictDiff (theirs deleted a base paragraph while ours
+// diverged from base since the snapshot) accepts through the SAME
+// setVanishRow path as an ordinary diff.deleted entry — accepting it means
+// "discard my divergent edit, take the deletion" — but guards against a
+// THIRD divergence: the row changing again between diff-compute time and
+// accept time. Plain diff.deleted entries carry no such guard (matches
+// pre-#465 behavior byte-for-byte).
+describe('applyAccepted — delete-conflict apply (#465)', () => {
+  it('accepting a matching-ours delete-conflict produces the identical DB effect as accepting a plain deleted entry', async () => {
+    const { specId, pr1Id } = await createFixture();
+    const diff = diffWith({
+      deleteConflicts: [{ uuid: pr1Id, base: 'Base text.', ours: PR1_TEXT }],
+    });
+
+    const result = await runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, [pr1Id], diff, client, ctx)
+    );
+
+    expect(result).toEqual({ applied: 1, rejected: 0 });
+    const row = await paragraphRow(pr1Id);
+    expect(row.exists).toBe(true);
+    expect(row.vanish).toBe(true);
+    expect(row.baseVersion).toBe(2);
+    expect(await paragraphVersions(pr1Id)).toEqual([
+      { text: PR1_TEXT, nodeType: 'pr1', version: 2 },
+    ]);
+  });
+
+  it('accepting a delete-conflict whose ours no longer matches the current row throws a bare MergeError and makes no write', async () => {
+    const { specId, pr1Id } = await createFixture();
+    const diff = diffWith({
+      deleteConflicts: [{ uuid: pr1Id, base: 'Base text.', ours: 'Stale divergent edit.' }],
+    });
+
+    const rejection = runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, [pr1Id], diff, client, ctx)
+    );
+    await expect(rejection).rejects.toBeInstanceOf(MergeError);
+    await expect(rejection).rejects.not.toBeInstanceOf(InvalidAcceptedChangeError);
+    await expect(rejection).rejects.toThrow(/stale diff for paragraph/);
+
+    const row = await paragraphRow(pr1Id);
+    expect(row.exists).toBe(true);
+    expect(row.vanish).toBe(false);
+    expect(row.baseVersion).toBe(1);
+    expect(await paragraphVersions(pr1Id)).toEqual([]);
+  });
+
+  it('a plain deleted entry applies with no stale guard even when the same call also accepts a delete-conflict for another uuid', async () => {
+    const { specId, pr1Id, pr1SecondId } = await createFixture();
+    const diff = diffWith({
+      deleted: [pr1Id],
+      deleteConflicts: [{ uuid: pr1SecondId, base: 'Base text.', ours: PR1_SECOND_TEXT }],
+    });
+
+    const result = await runApplyAccepted((client, ctx) =>
+      applyAccepted(specId, [pr1Id, pr1SecondId], diff, client, ctx)
+    );
+
+    expect(result).toEqual({ applied: 2, rejected: 0 });
+    expect((await paragraphRow(pr1Id)).vanish).toBe(true);
+    expect((await paragraphRow(pr1SecondId)).vanish).toBe(true);
   });
 });
 
