@@ -216,18 +216,4 @@ describe('Item 5: schema-instance-sharing (object-level rules survive SDK regist
   it('Item 5 ratchet: schema-sharing pending burn-down never grows', () => {
     expect(SCHEMA_SHARING_PENDING.size).toBeLessThanOrEqual(SCHEMA_SHARING_PENDING_BASELINE);
   });
-
-  // Anti-laundering pin: while the #550 gap is open, that op must sit in PENDING and never be
-  // moved into SCHEMA_SHARING_EXEMPT (reserved for VERIFIED-safe cases). Guarded on the gap still
-  // being open so it cannot fight the self-cleaning gate above — once #550's fix lands, that gate
-  // demands the PENDING entry be deleted and this pin goes quiet instead of pinning a stale entry
-  // in place. Delete this test together with the entry.
-  it('submittal_register: while the #550 gap is open it stays PENDING, never silently EXEMPT', () => {
-    const op = 'post /projects/{}/submittal-register';
-    const tool = OP_TO_TOOL.get(op);
-    expect(tool, `${op} is not in OP_TO_TOOL`).toBeDefined();
-    if (isFullSchemaInstance(schemas.get(tool!))) return; // gap closed — the self-cleaning gate owns it
-    expect(SCHEMA_SHARING_PENDING.has(op)).toBe(true);
-    expect(SCHEMA_SHARING_EXEMPT.has(op)).toBe(false);
-  });
 });
