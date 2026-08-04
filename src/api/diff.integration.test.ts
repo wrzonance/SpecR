@@ -605,3 +605,161 @@ describe('body-level object round-trip — hidden/visible run mix (#648)', () =>
     }
   );
 });
+
+/**
+ * #652: a textBox-kind body object, whose blob root is the HOST body
+ * paragraph (`w:p`) carrying the `w:r > w:drawing` run — the capture shape
+ * `parser/docx/body-objects.ts` documents in its module comment and
+ * `buildTextBoxObject` actually produces (`blob: [anchored.node]`, where
+ * `anchorInteriorParagraphs` preserves the root's own tag and only wraps
+ * INTERIOR paragraphs with SDT anchors).
+ *
+ * A table's blob root is the `w:tbl` itself, which is also exactly what
+ * `merge/extract.ts`'s `walkObjectBlocks` matches — so the table tier is
+ * symmetric and every existing table-based test passes. For a textBox the
+ * two sides used to hash different trees: base fingerprinted the host `w:p`,
+ * theirs fingerprinted the bare `w:drawing`, so `fingerprintsDiverge` was
+ * ALWAYS true and any untouched round trip false-reported an objectConflict.
+ */
+function anchoredTextBoxMeta(anchorUuid: string, text: string): ObjectMeta {
+  const anchoredInterior: ObjectBlobNode = {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `specr-uuid-${anchorUuid}` } }] },
+      { 'w:sdtContent': [{ 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': text }] }] }] }] },
+    ],
+  } as ObjectBlobNode;
+  return {
+    kind: 'textBox',
+    floating: false,
+    generation: 'drawingml',
+    blob: [
+      {
+        'w:p': [
+          {
+            'w:r': [
+              {
+                'w:drawing': [
+                  {
+                    'wp:inline': [
+                      {
+                        'a:graphic': [
+                          {
+                            'a:graphicData': [
+                              {
+                                'wps:wsp': [
+                                  { 'wps:txbx': [{ 'w:txbxContent': [anchoredInterior] }] },
+                                ],
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+// #652: the textBox counterpart of the table-kind wiring test above. Proved
+// at the real wiring — DB → generateDocx → extractContentControls →
+// getObjectStructuralSnapshots → computeDiff — because the asymmetry is
+// between two production call sites (diff.ts fingerprints the stored blob
+// root; extract.ts fingerprints the matched OBJECT_BLOCK_TAGS node), so a
+// unit test on either side alone cannot see it.
+describe('body-level object round-trip — textBox fingerprint symmetry (#652)', () => {
+  const TB_PART_ID = randomUUID();
+  const TB_OBJECT_ID = randomUUID();
+  const TB_TEXT_ID = randomUUID();
+  const TB_TEXT = 'Text box interior paragraph.';
+  let tbSpecId: string;
+
+  beforeAll(async () => {
+    tbSpecId = await createSpec({
+      section: '09 91 26',
+      title: 'Object TextBox Diff Wiring Spec',
+      source: `d652diff_${randomUUID().slice(0, 8)}`,
+    });
+    await insertTree(
+      {
+        id: tbSpecId,
+        section: '09 91 26',
+        title: 'Object TextBox Diff Wiring Spec',
+        parts: [
+          {
+            id: TB_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            meta: {},
+            children: [
+              {
+                id: TB_OBJECT_ID,
+                type: 'object',
+                text: '',
+                meta: { object: anchoredTextBoxMeta(TB_TEXT_ID, TB_TEXT) },
+                children: [
+                  {
+                    id: TB_TEXT_ID,
+                    type: 'objectText',
+                    text: TB_TEXT,
+                    meta: {},
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      tbSpecId,
+      pool
+    );
+  });
+
+  afterAll(async () => {
+    // id-scoped teardown: only the spec row this describe block created.
+    await pool.query('DELETE FROM specs WHERE id = $1', [tbSpecId]);
+  });
+
+  it('an unmodified generated DOCX round-trips with ZERO objectConflicts', async () => {
+    const generateRes = await fetch(`${baseUrl}/specs/${tbSpecId}/generate`, { method: 'POST' });
+    expect(generateRes.status).toBe(200);
+    const buffer = Buffer.from(await generateRes.arrayBuffer());
+
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([new Uint8Array(buffer)], { type: DOCX_MIME }),
+      'object-textbox.docx'
+    );
+    const diffRes = await fetch(`${baseUrl}/specs/${tbSpecId}/diff`, {
+      method: 'POST',
+      body: form,
+    });
+    const body = (await diffRes.json()) as ApiResponse<DiffResult>;
+
+    expect(diffRes.status).toBe(200);
+    // The assertion that fails without the #652 fix: base hashed the host
+    // w:p, theirs hashed the bare w:drawing, so objectConflicts held one
+    // entry. Asserting the WHOLE diff (not objectConflicts alone) also keeps
+    // this gate from going vacuous: `detectObjectConflicts` only reports a
+    // fingerprint divergence for a block `findMatchingBlock` actually matched
+    // by interior uuid, so a future regression that stopped
+    // `findInteriorUuids` from seeing the text box's interior anchor would
+    // silently satisfy an objectConflicts-only check — but it would surface
+    // here as a `deleted`/`modified` entry for the objectText uuid instead.
+    expect(body.data).toEqual({
+      added: [],
+      modified: [],
+      deleted: [],
+      conflicts: [],
+      objectConflicts: [],
+      warnings: [],
+    });
+  });
+});

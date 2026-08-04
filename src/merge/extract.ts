@@ -352,7 +352,8 @@ function findInteriorUuids(nodes: readonly OrderedNode[]): string[] {
 function walkObjectBlocks(
   nodes: readonly OrderedNode[],
   inBlock: boolean,
-  blocks: ExtractedObjectBlock[]
+  blocks: ExtractedObjectBlock[],
+  hostParagraph: OrderedNode | undefined
 ): void {
   for (const node of nodes) {
     const tag = tagOf(node);
@@ -361,16 +362,62 @@ function walkObjectBlocks(
     if (isObjectTag && !inBlock) {
       blocks.push({
         interiorUuids: findInteriorUuids(childrenOf(node, tag)),
-        fingerprint: fingerprintBlob([node]),
+        fingerprint: fingerprintBlob([fingerprintRoot(node, tag, hostParagraph)]),
       });
     }
-    walkObjectBlocks(childrenOf(node, tag), inBlock || isObjectTag, blocks);
+    walkObjectBlocks(
+      childrenOf(node, tag),
+      inBlock || isObjectTag,
+      blocks,
+      // A w:p becomes the host for any drawing run nested beneath it; deeper
+      // non-paragraph nodes inherit it unchanged.
+      tag === 'w:p' ? node : hostParagraph
+    );
   }
+}
+
+/** Tags whose captured blob root is the HOST body `w:p`, not the tag itself. */
+const PARAGRAPH_HOSTED_OBJECT_TAGS = new Set(['w:drawing', 'w:pict']);
+
+/**
+ * The node to fingerprint for a detected object block (#652) — it MUST be the
+ * same root that capture stored as `ObjectMeta.blob[0]`, because diff.ts's
+ * `detectObjectConflicts` fingerprints that stored blob directly and compares
+ * the two hashes.
+ *
+ * The two capture kinds do not agree on what their root is
+ * (parser/docx/body-objects.ts's module comment, "Two capture paths, one
+ * shape"): a table's blob root is the `w:tbl` itself, so the matched tag IS
+ * the root; a textBox/pict's blob root is the HOST body paragraph (`w:p`)
+ * carrying the `w:r > w:drawing`/`w:pict` run, so the matched tag is one
+ * wrapper layer BELOW the root.
+ *
+ * Fingerprinting the matched tag unconditionally is what made the table tier
+ * symmetric (and every table test pass) while making the textBox tier compare
+ * a bare `w:drawing(...)` shape against a stored `w:p(w:r(w:drawing(...)))`
+ * shape — hashes that can never match, so every untouched round trip of a
+ * text box reported a false `objectConflict`.
+ *
+ * Mirroring capture here (rather than changing capture to store the bare
+ * node) keeps `buildObjectBlocks`'s re-emit contract intact: the generator
+ * emits `blob[0]` as a body child, and a bare `w:drawing` is not a valid
+ * block-level body child — it must sit inside a run inside a paragraph.
+ */
+function fingerprintRoot(
+  node: OrderedNode,
+  tag: string,
+  hostParagraph: OrderedNode | undefined
+): OrderedNode {
+  if (!PARAGRAPH_HOSTED_OBJECT_TAGS.has(tag)) return node;
+  // A drawing with no enclosing w:p is malformed OOXML; degrade to the bare
+  // node rather than throwing — extract.ts never rejects a document it can
+  // still partially read.
+  return hostParagraph ?? node;
 }
 
 function extractObjectBlocks(nodes: readonly OrderedNode[]): ExtractedObjectBlock[] {
   const blocks: ExtractedObjectBlock[] = [];
-  walkObjectBlocks(nodes, false, blocks);
+  walkObjectBlocks(nodes, false, blocks, undefined);
   return blocks;
 }
 
