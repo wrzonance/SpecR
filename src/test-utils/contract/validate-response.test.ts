@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   assertResponse,
+  assertResponseExact,
   specOperationManifest,
   successJsonOps,
   loadSpec,
@@ -60,6 +61,61 @@ describe('contract validate-response helper', () => {
     const doc = await loadSpec();
     expect(specOperationManifest(doc)).toContain('get /specs/{}');
     expect(successJsonOps(doc)).toContain('get /health');
+  });
+});
+
+// #640 — assertResponse's schema-CONFORMANCE check lets an undocumented extra key pass silently
+// (the vacuous-gate hole delete_package's stray `deleted` field exploited). assertResponseExact
+// closes it via a structuredClone'd + `unevaluatedProperties: false`-augmented schema, compiled
+// through a FRESH ajv instance rather than getValidator()'s shared WeakMap. /health is the
+// worked example because its response is allOf-composed (SuccessResponse + an inline object) —
+// exactly the shape whose walker had to mark only the allOf-OWNING node, never a branch.
+describe('assertResponseExact (#640) — exact-key-match against openapi.yaml', () => {
+  const validHealthBody = { success: true, data: { db: 'connected', uptime: 5 } };
+
+  it('accepts a fully-conformant body — zero false positives on the documented shape', async () => {
+    await expect(
+      assertResponseExact('get', '/health', 200, validHealthBody)
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects a top-level key the allOf-composed schema does not document', async () => {
+    const body = { ...validHealthBody, extra: 'nope' };
+    await expect(assertResponseExact('get', '/health', 200, body)).rejects.toThrow(
+      /does not document/
+    );
+  });
+
+  it('rejects a key nested under `data` that the schema does not document', async () => {
+    const body = { success: true, data: { ...validHealthBody.data, extra: 'nope' } };
+    await expect(assertResponseExact('get', '/health', 200, body)).rejects.toThrow(
+      /does not document/
+    );
+  });
+
+  it("shares resolveResponseSchema's contract with assertResponse: undocumented status fails loud, documented non-JSON no-ops", async () => {
+    await expect(assertResponseExact('delete', '/specs/{id}/lock', 204, undefined)).rejects.toThrow(
+      /documents no 204 response/
+    );
+    await expect(
+      assertResponseExact('delete', '/templates/{id}', 204, undefined)
+    ).resolves.toBeUndefined();
+  });
+
+  it('never mutates or caches through the shared ajv WeakMap — assertResponse stays permissive on the same op afterward', async () => {
+    const bodyWithExtra = { ...validHealthBody, extra: 'nope' };
+    // The exact variant rejects the extra key...
+    await expect(assertResponseExact('get', '/health', 200, bodyWithExtra)).rejects.toThrow();
+    // ...but assertResponse — reading the SAME operation's schema through getValidator()'s shared
+    // cache — must still accept it. If assertResponseExact mutated the schema object in place
+    // (instead of operating on a structuredClone) or wrote its compiled validator into the shared
+    // WeakMap, this call would now incorrectly reject too.
+    await expect(assertResponse('get', '/health', 200, bodyWithExtra)).resolves.toBeUndefined();
+  });
+
+  it('assertResponse behavior is unchanged: still permissive of undocumented extra keys', async () => {
+    const bodyWithExtra = { ...validHealthBody, extra: 'nope' };
+    await expect(assertResponse('get', '/health', 200, bodyWithExtra)).resolves.toBeUndefined();
   });
 });
 
