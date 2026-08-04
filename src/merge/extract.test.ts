@@ -397,6 +397,32 @@ describe('extractContentControls — object-interior vanish handling (#648)', ()
     expect(result.controlled.get(U1)).toBe('kept too');
   });
 
+  // collectDrawingAnchors (the w:drawing/w:pict text-box interior walk, gap-1
+  // #520) forces objectInterior=true through a call site separate from the
+  // generic OBJECT_BLOCK_TAGS union path that reaches w:tbl. Without a test
+  // driving a hidden/visible mixed run through THIS specific path, a
+  // regression that broke vanish-skipping only for drawing/pict (e.g.
+  // collectDrawingAnchors's hard-coded `true` reverted to `false`, or never
+  // threaded through at all) would pass every other #648 test while silently
+  // reintroducing the false-modified bug for 2 of the 3 OBJECT_BLOCK_TAGS.
+  it('object interior (DrawingML text box): a mixed hidden/visible paragraph inside the box extracts only the visible text', async () => {
+    const body = sdt(
+      U1,
+      para(run('before ') + drawingTextBoxRun(sdt(U2, para(hiddenRun('secret ') + run('visible')))))
+    );
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U2)).toBe('visible');
+  });
+
+  it('object interior (VML text box): a mixed hidden/visible paragraph inside the box extracts only the visible text', async () => {
+    const body = sdt(
+      U1,
+      para(run('before ') + vmlTextBoxRun(sdt(U2, para(hiddenRun('secret ') + run('visible')))))
+    );
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U2)).toBe('visible');
+  });
+
   // Structural guard (not a behavior test): #648's fix reaches vanish detection
   // through the single, already-existing hasRunVanish predicate (body-objects.ts,
   // #641/ADR-092) rather than growing a second, drifting w:vanish reader inside
