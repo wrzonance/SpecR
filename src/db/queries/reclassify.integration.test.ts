@@ -165,30 +165,43 @@ describe('reclassifySpec', () => {
     // to the built-in Industry Default — not return no-convention.
     // Clear any leftover from a prior failed run (specs.project_id is not
     // ON DELETE CASCADE, so a failed cleanup can orphan the copy + project).
+    // This pre-test sweep is crash-residue recovery, not concurrent-run
+    // protection — it is only ever reached while this invocation holds the
+    // integration-suite advisory lock (ADR-090, #638), so no live concurrent
+    // invocation's row can be swept here.
     await pool.query(`DELETE FROM specs WHERE title = 'project copy' AND section = '00 00 08'`);
     await pool.query(`DELETE FROM projects WHERE name = 'recl-builtin-fallback'`);
     const proj = await pool.query<{ id: string }>(
       `INSERT INTO projects (name) VALUES ('recl-builtin-fallback') RETURNING id`
     );
     const projectId = proj.rows[0]!.id;
-    const copy = await pool.query<{ id: string }>(
-      `INSERT INTO specs (section, title, source, project_id) VALUES ('00 00 08', 'project copy', 'arcat', $1) RETURNING id`,
-      [projectId]
-    );
-    const copyId = copy.rows[0]!.id;
-    const p = await pool.query<{ id: string }>(
-      `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
-       VALUES ($1, 'pr1', 'NOTES TO SPECIFIER', 1, $2::jsonb) RETURNING id`,
-      [copyId, JSON.stringify({ banner: 'NOTES TO SPECIFIER' })]
-    );
-    const bannerNode = p.rows[0]!.id;
-    const out = await reclassifySpec(copyId, {});
-    expect(out.status).toBe('ok');
-    if (out.status !== 'ok') throw new Error('expected ok');
-    expect(out.report.entries.find((e) => e.nodeId === bannerNode)?.after).toBe('note');
-    // specs.project_id is not ON DELETE CASCADE — delete the copy before the project.
-    await pool.query(`DELETE FROM specs WHERE id = $1`, [copyId]);
-    await pool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+    // try/finally: an assertion failure below must not skip cleanup and leave
+    // a name-collidable row for the NEXT run's pre-test sweep to depend on
+    // (#638) — the id-scoped delete in `finally` runs regardless of outcome.
+    try {
+      const copy = await pool.query<{ id: string }>(
+        `INSERT INTO specs (section, title, source, project_id) VALUES ('00 00 08', 'project copy', 'arcat', $1) RETURNING id`,
+        [projectId]
+      );
+      const copyId = copy.rows[0]!.id;
+      try {
+        const p = await pool.query<{ id: string }>(
+          `INSERT INTO paragraphs (spec_id, node_type, text, position, source_facts)
+           VALUES ($1, 'pr1', 'NOTES TO SPECIFIER', 1, $2::jsonb) RETURNING id`,
+          [copyId, JSON.stringify({ banner: 'NOTES TO SPECIFIER' })]
+        );
+        const bannerNode = p.rows[0]!.id;
+        const out = await reclassifySpec(copyId, {});
+        expect(out.status).toBe('ok');
+        if (out.status !== 'ok') throw new Error('expected ok');
+        expect(out.report.entries.find((e) => e.nodeId === bannerNode)?.after).toBe('note');
+      } finally {
+        // specs.project_id is not ON DELETE CASCADE — delete the copy before the project.
+        await pool.query(`DELETE FROM specs WHERE id = $1`, [copyId]);
+      }
+    } finally {
+      await pool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+    }
   });
 
   it('rejects request-supplied noteBanners with a catastrophic regex before classifying', async () => {
