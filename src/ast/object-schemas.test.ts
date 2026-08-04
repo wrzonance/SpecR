@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import {
   ObjectKindSchema,
   ObjectGenerationSchema,
@@ -341,5 +344,57 @@ describe('SpecNodeSchema — type<->meta.object presence coupling (#650)', () =>
       meta: { object: validObject },
     };
     expect(SpecNodeSchema.safeParse(node).success).toBe(true);
+  });
+});
+
+// ── .shape spread audit (#650 Task 9/10) ────────────────────────────────────
+// contract-schema-sharing-map.ts's Item 5 gate exists because a `{
+// ...Schema.shape }` rebuild silently drops a schema's own object-level
+// `.check()`/`.strict()` rule when an MCP tool's inputSchema is built by
+// spreading a REST body schema (isFullSchemaInstance, tool-schema-
+// introspect.ts). ObjectMetaSchema gained the kind/rows/columns cross-field
+// check and SpecNodeSchema gained the type<->meta.object presence check in
+// this issue, so both need the same audit that map runs for every REST body
+// schema with an object-level rule: does anything spread `.shape` off them
+// and lose the rule?
+//
+// The answer here is non-applicability, not enforcement: neither schema is
+// ever an MCP tool's inputSchema (or nested inside one) — src/mcp/tools.ts
+// and every src/mcp/*-handlers.ts file were grepped for both schema names and
+// found clean. Both schemas are consumed exclusively via `.parse()`/
+// `.safeParse()` on the full schema instance — db/queries/object-meta.ts
+// (parseObjectMeta/updateObjectData), revision-snapshot.ts, revision-diff.ts,
+// history-diff.ts — which is why their cross-field checks already run intact
+// wherever these schemas are actually used today (see the DB-boundary
+// rejection tests in object-meta.test.ts). This test makes that a durable,
+// CI-enforced fact instead of a point-in-time grep result recorded only in a
+// PR body: a future PR that spreads either schema's `.shape` into a hand-
+// built object (MCP tool or otherwise) fails it immediately.
+describe('ObjectMetaSchema / SpecNodeSchema — .shape spread audit (#650)', () => {
+  const srcRoot = fileURLToPath(new URL('..', import.meta.url));
+  const selfFile = fileURLToPath(import.meta.url);
+
+  function tsFilesUnder(root: string): string[] {
+    return readdirSync(root, { recursive: true })
+      .filter((entry): entry is string => typeof entry === 'string' && entry.endsWith('.ts'))
+      .map((entry) => path.join(root, entry));
+  }
+
+  it('no file under src/ spreads ObjectMetaSchema.shape or SpecNodeSchema.shape', () => {
+    const offenders = tsFilesUnder(srcRoot)
+      .filter((file) => file !== selfFile)
+      .flatMap((file) => {
+        const text = readFileSync(file, 'utf8');
+        const hits: string[] = [];
+        if (/ObjectMetaSchema\.shape/.test(text)) hits.push(`${file}: ObjectMetaSchema.shape`);
+        if (/SpecNodeSchema\.shape/.test(text)) hits.push(`${file}: SpecNodeSchema.shape`);
+        return hits;
+      });
+    expect(offenders).toEqual([]);
+  });
+
+  it('the MCP tool surface (src/mcp/tools.ts) never references either schema — no tool input can lose their checks', () => {
+    const toolsSource = readFileSync(path.join(srcRoot, 'mcp', 'tools.ts'), 'utf8');
+    expect(toolsSource).not.toMatch(/ObjectMetaSchema|SpecNodeSchema/);
   });
 });
