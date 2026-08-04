@@ -319,6 +319,33 @@ describe('insert_paragraph MCP tool', () => {
     });
     expect(isToolError(explicit)).toBe(false);
   });
+
+  it('rejects an explicit nodeType that is a legal insertable type in general but not a legal sibling of THIS anchor (#383)', async () => {
+    // pr2 is never a sibling of pr1 — pr2 nests as a pr1's CHILD, so an
+    // explicit pr2 requested after a pr1 anchor is structurally incompatible
+    // even though pr2 is on the insertable list.
+    const res = await handleInsertParagraph({
+      specId,
+      anchorNodeId: bodyId,
+      text: 'Should not become a mis-tiered pr2.',
+      nodeType: 'pr2',
+    });
+    expect(isToolError(res)).toBe(true);
+    expect(textOf(res)).toContain('"pr2"');
+  });
+
+  it('accepts any insertable explicit type after a note anchor — KNOWN AMBIGUITY: a note has no tier to mismatch against (#383)', async () => {
+    // KNOWN AMBIGUITY (#383): a note carries no CSI tier of its own, so it
+    // cannot constrain what tier follows it — any already-insertable type
+    // (not just the pr1 the earlier test above pins) is deliberately accepted.
+    const res = await handleInsertParagraph({
+      specId,
+      anchorNodeId: noteId,
+      text: 'Explicit article after a note.',
+      nodeType: 'article',
+    });
+    expect(isToolError(res)).toBe(false);
+  });
 });
 
 describe('insert_paragraph MCP tool — actorLabel attribution (#377)', () => {

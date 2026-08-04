@@ -12,6 +12,7 @@ let specId: string;
 let otherSpecId: string;
 let anchorId: string;
 let partId: string;
+let articleId: string;
 
 async function insertSpec(section: string, title: string): Promise<string> {
   const result = await pool.query<{ id: string }>(
@@ -67,7 +68,8 @@ beforeAll(async () => {
   specId = await insertSpec('27 21 10', 'Insert Endpoint Test');
   otherSpecId = await insertSpec('09 91 27', 'Insert Endpoint Other');
   partId = await insertParagraph(specId, null, 'part', 'GENERAL', 1);
-  anchorId = await insertParagraph(specId, partId, 'pr1', 'Anchor paragraph.', 1);
+  articleId = await insertParagraph(specId, partId, 'article', 'SCOPE', 1);
+  anchorId = await insertParagraph(specId, articleId, 'pr1', 'Anchor paragraph.', 1);
 });
 
 afterAll(async () => {
@@ -93,7 +95,7 @@ describe('POST /specs/:id/paragraphs (integration)', () => {
       'SELECT parent_id, position FROM paragraphs WHERE id = $1',
       [body.data.id]
     );
-    expect(row.rows[0]?.parent_id).toBe(partId);
+    expect(row.rows[0]?.parent_id).toBe(articleId);
     expect(row.rows[0]?.position).toBe(2);
   });
 
@@ -123,6 +125,30 @@ describe('POST /specs/:id/paragraphs (integration)', () => {
     const body = (await res.json()) as { success: boolean; error: string };
     expect(body.success).toBe(false);
     expect(body.error).toContain('part');
+  });
+
+  it('422s a pr1 requested after an article anchor — cross-tier insert would orphan the pr1 under the article (#383)', async () => {
+    const res = await postInsert(specId, {
+      anchorNodeId: articleId,
+      text: 'Should not become a mis-tiered pr1.',
+      nodeType: 'pr1',
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('pr1');
+  });
+
+  it('422s an article requested after a pr1 anchor — cross-tier insert would land it a tier below its part parent (#383)', async () => {
+    const res = await postInsert(specId, {
+      anchorNodeId: anchorId,
+      text: 'Should not become a mis-tiered article.',
+      nodeType: 'article',
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('article');
   });
 
   it('409s a stale expectedVersion with the current version', async () => {

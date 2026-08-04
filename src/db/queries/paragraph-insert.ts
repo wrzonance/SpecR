@@ -17,8 +17,14 @@ import { fetchSubtreeNode } from './paragraphs.js';
 /** Outcome of {@link insertSiblingRow}. `invalid-type` carries the type that
  *  was refused — an explicit request outside the insertable set (schema-blocked
  *  at the API, but the DB revalidates), a defaulted non-insertable anchor type
- *  (part/note), or a root (PART) anchor, which has no insertable sibling
- *  regardless of an explicit override.
+ *  (part/note), a root (PART) anchor, which has no insertable sibling
+ *  regardless of an explicit override, or an explicit type that IS insertable
+ *  in general but is structurally incompatible with THIS anchor's tier — e.g.
+ *  `pr1` after an `article` anchor, or `article` after a `pr1` anchor. Both
+ *  would land the new row at the anchor's parent, one CSI tier removed from
+ *  where that type belongs (#383). See {@link resolveInsertableNodeType} for
+ *  the sibling-compatibility rule, including its one deliberate exception
+ *  (a `note` anchor).
  *
  *  The last four statuses are only reachable when `input.explicitId` is set —
  *  the merge engine's added-op apply (#374). The standalone
@@ -103,10 +109,36 @@ type NodeTypeResolution =
   | { readonly ok: true; readonly nodeType: string }
   | { readonly ok: false; readonly result: InsertParagraphResult };
 
-/** Insertable-type membership check on the already-locked, ownership-verified
- *  anchor row (spec ownership is checked upstream in {@link insertSiblingRow}).
- *  Factored out to keep the caller's cyclomatic complexity under the enforced
- *  max. Pure — no I/O. */
+/** Is `nodeType` a legal SIBLING of `anchorNodeType` (same parent_id)? Pure,
+ *  called only after `nodeType` has already passed the insertable-set check —
+ *  this narrows further, from "insertable somewhere" to "insertable HERE".
+ *
+ *  Three ways to pass (#383 — settled by the repository owner, not
+ *  re-litigated here):
+ *  1. `nodeType === anchorNodeType` — the general rule. insertSiblingRow
+ *     always writes the new row at the anchor's OWN parent_id, so a sibling's
+ *     only proven-legal type is the type the anchor itself already
+ *     demonstrates as legal there (e.g. pr2 is never a sibling of pr1 — pr2
+ *     nests AS a pr1's child, so pr1-after-pr1 is the only same-tier explicit
+ *     type an article's pr1 children accept).
+ *  2. `nodeType === 'continuation'` — a continuation carries no CSI tier of
+ *     its own; it continues the PRECEDING node's text and is legal at any
+ *     tier.
+ *  3. `anchorNodeType === 'note'` — KNOWN AMBIGUITY (#383): a note carries no
+ *     CSI tier of its own (it's an editorial aside, not a body paragraph), so
+ *     it cannot constrain what tier follows it, and notes legitimately
+ *     interleave among body paragraphs of any tier. Permit any
+ *     already-insertable type here rather than guessing a tier from a node
+ *     that doesn't have one — this is deliberately permissive, not an
+ *     oversight. */
+function isSiblingCompatible(anchorNodeType: string, nodeType: string): boolean {
+  return nodeType === anchorNodeType || nodeType === 'continuation' || anchorNodeType === 'note';
+}
+
+/** Insertable-type membership + sibling-compatibility check on the
+ *  already-locked, ownership-verified anchor row (spec ownership is checked
+ *  upstream in {@link insertSiblingRow}). Factored out to keep the caller's
+ *  cyclomatic complexity under the enforced max. Pure — no I/O. */
 function resolveInsertableNodeType(
   anchor: AnchorRow,
   input: InsertParagraphInput
@@ -119,7 +151,7 @@ function resolveInsertableNodeType(
   // the renderers then mislabel as a PART and round-trip breaks.
   const insertable =
     anchor.node_type !== 'part' && InsertableNodeTypeSchema.safeParse(nodeType).success;
-  if (!insertable) {
+  if (!insertable || !isSiblingCompatible(anchor.node_type, nodeType)) {
     return { ok: false, result: { status: 'invalid-type', nodeType } };
   }
   return { ok: true, nodeType };
@@ -306,7 +338,12 @@ async function runInsert(
  * Insert a new paragraph immediately after `input.anchorNodeId`, as its
  * sibling (same parent), shifting later siblings down one position (#372).
  * The node type defaults to the anchor's own; only body paragraphs, articles,
- * and continuations are insertable — a part or note default is refused.
+ * and continuations are insertable — a part or note default is refused. An
+ * explicit `nodeType` must additionally be a legal sibling of the anchor
+ * (#383, {@link isSiblingCompatible}) — its own tier, `continuation`, or any
+ * type when the anchor is a `note` — else the anchor's tier and the new
+ * row's tier would disagree (e.g. a `pr1` requested after an `article`
+ * anchor).
  *
  * Passes the composed edit gate first (ADR-018): the spec must be writable
  * and, when `expectedVersion` is given, at that version — a stale value

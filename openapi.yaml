@@ -434,6 +434,12 @@ paths:
         or note) requires an explicit `nodeType`, otherwise the request is
         rejected 422. Parts are never insertable (a CSI section keeps its
         three-part shape) and notes materialize via accept-as-note instead.
+        An explicit `nodeType` must also be a legal sibling of the anchor: its
+        own type, `continuation` (legal at any tier), or any insertable type
+        when the anchor is a `note` (a note carries no tier of its own). A
+        mismatched tier — e.g. `pr1` after an `article` anchor, or `article`
+        after a `pr1` anchor — is rejected 422, since it would place the new
+        node one CSI tier away from where that type belongs.
 
 
         Inserting is a content write: it passes the composed edit gate

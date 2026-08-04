@@ -83,6 +83,32 @@ describe('update_paragraph: stale version returns currentVersion as structuredCo
   });
 });
 
+describe('insert_paragraph: rejects a cross-tier explicit nodeType via invalid-type (#383)', () => {
+  it('surfaces the DB core invalid-type rejection as a toolError naming the rejected type', async () => {
+    // insertSiblingRow's sibling-compatibility check (paragraph-insert.ts,
+    // #383) rejects a pr1 requested after an article anchor — this pins that
+    // the MCP handler's already-generic invalid-type branch surfaces it
+    // without any handler-side change, at the mocked DB boundary.
+    const { insertParagraphAfter } = await import('../db/index.js');
+    vi.mocked(insertParagraphAfter).mockResolvedValueOnce({
+      status: 'invalid-type',
+      nodeType: 'pr1',
+    });
+
+    const { handleInsertParagraph } = await import('./paragraph-handlers.js');
+    const result = await handleInsertParagraph({
+      specId: SPEC_ID,
+      anchorNodeId: NODE_ID,
+      text: 'Should not become a mis-tiered pr1.',
+      nodeType: 'pr1',
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(textOf(result)).toContain('"pr1"');
+    expect(structuredContentOf(result)).toBeUndefined();
+  });
+});
+
 describe('update_paragraph: write-forbidden has no structuredContent — REST 409 carries none either (#583)', () => {
   it('returns the message as prose with no structuredContent key', async () => {
     const { SpecWriteForbiddenError, updateParagraphText } = await import('../db/index.js');
