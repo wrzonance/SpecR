@@ -64,17 +64,89 @@ describe('boundary invariant: no private zod-v4 internals, no unsafe cast', () =
   // a mismatch with `as unknown as` or a bare `as`. If a future edit reaches
   // for either, this test names exactly what broke instead of surfacing as a
   // silent behavioral drift from the SDK's own normalization.
+  //
+  // These are pattern-based, not literal-substring, checks: a plain
+  // `.not.toContain('_zod.')` / `.not.toContain('as any')` only catches the
+  // exact spelling on the day it was written — bracket-notation access
+  // (`x['_zod']`), an angle-bracket type assertion (`<any>x`), or extra
+  // whitespace inside `as unknown as` all bypass a literal substring match
+  // while doing the exact same unsafe thing. The regexes below are verified
+  // against those bypass shapes in the second describe block, so the check
+  // is pinned to the behavior it exists to catch, not to today's formatting.
   const source = readFileSync(
     fileURLToPath(new URL('./tool-schema-introspect.ts', import.meta.url)),
     'utf8'
   );
 
-  it('never reads zod v4 private internals (_zod.)', () => {
-    expect(source).not.toContain('_zod.');
+  // Dot access (`_zod.def`) or bracket access (`['_zod']` / `["_zod"]`),
+  // tolerant of whitespace around the brackets/quotes.
+  const PRIVATE_ZOD_INTERNAL = /\.\s*_zod\b|\[\s*(['"])_zod\1\s*\]/;
+
+  // `as any`, `as unknown as <Type>` (any amount of whitespace, including
+  // newlines, between the tokens), or an angle-bracket assertion
+  // (`<any>x` / `<unknown>x`). The negative lookbehind on the angle-bracket
+  // form excludes generic instantiations like `Promise<any>`, which are
+  // preceded by an identifier character rather than an expression boundary.
+  const UNSAFE_CAST = /\bas\s+any\b|\bas\s+unknown\s+as\b|(?<![\w$])<\s*(?:any|unknown)\s*>/;
+
+  it('never reads zod v4 private internals (_zod.), including bracket-notation access', () => {
+    expect(PRIVATE_ZOD_INTERNAL.test(source)).toBe(false);
   });
 
-  it('never performs an unsafe cast (as unknown as / as any)', () => {
-    expect(source).not.toContain('as unknown as');
-    expect(source).not.toContain('as any');
+  it('never performs an unsafe cast (as unknown as / as any / angle-bracket assertion)', () => {
+    expect(UNSAFE_CAST.test(source)).toBe(false);
+  });
+
+  describe('the checks above actually catch respelled bypasses (not just the literal substrings)', () => {
+    it('PRIVATE_ZOD_INTERNAL catches single-quoted bracket access', () => {
+      expect(PRIVATE_ZOD_INTERNAL.test("const shape = schema['_zod'].def.shape;")).toBe(true);
+    });
+
+    it('PRIVATE_ZOD_INTERNAL catches double-quoted bracket access with extra whitespace', () => {
+      expect(PRIVATE_ZOD_INTERNAL.test('const shape = schema[ "_zod" ].def.shape;')).toBe(true);
+    });
+
+    it('UNSAFE_CAST catches an angle-bracket cast to any', () => {
+      expect(UNSAFE_CAST.test('const shape = (<any>schema).def;')).toBe(true);
+    });
+
+    it('UNSAFE_CAST catches an angle-bracket cast to unknown', () => {
+      expect(UNSAFE_CAST.test('const shape = (<unknown>schema) as Shape;')).toBe(true);
+    });
+
+    it('UNSAFE_CAST catches "as unknown as" split across a newline', () => {
+      expect(UNSAFE_CAST.test('const shape = schema as unknown\n  as Shape;')).toBe(true);
+    });
+
+    it('UNSAFE_CAST does not false-positive on a generic instantiation', () => {
+      expect(UNSAFE_CAST.test('const p: Promise<any> = fetchSchema();')).toBe(false);
+    });
+
+    // KNOWN AMBIGUITY: `Promise <any>` (whitespace before the type arguments) is
+    // valid TypeScript that UNSAFE_CAST reports as a cast. The lookbehind only
+    // inspects the immediately preceding character, which here is a space, so the
+    // generic-instantiation exclusion above does not apply.
+    //
+    // Accepted deliberately, on two grounds:
+    //
+    // 1. It is unreachable in this repo. `prettier --check src/` is an enforced CI
+    //    gate (CLAUDE.md), and prettier rewrites `Promise <any>` to `Promise<any>`,
+    //    so the shape cannot survive in a committed source file — which is the only
+    //    thing this regex is ever run against.
+    // 2. Every narrower rule costs a false NEGATIVE. Widening the lookbehind to skip
+    //    whitespace (`(?<![\w$]\s*)`) — i.e. inspecting the preceding non-whitespace
+    //    token — also excludes `return <any>x`, a real cast preceded by a keyword.
+    //    Pinned below so that trade is never made silently.
+    //
+    // A false positive on this gate fails loudly and gets fixed; a false negative
+    // lets the banned construct through unnoticed. Prefer the loud failure.
+    // Distinguishing the two properly needs a type-vs-keyword-aware scan, not a regex.
+    it('UNSAFE_CAST over-matches a spaced generic instantiation — accepted, prettier prevents it', () => {
+      expect(UNSAFE_CAST.test('const p: Promise <any> = fetchSchema();')).toBe(true);
+    });
+
+    it('UNSAFE_CAST catches an angle-bracket cast preceded by a keyword, not just a bracket', () => {
+      expect(UNSAFE_CAST.test('  return <any>schema;')).toBe(true);
+    });
   });
 });

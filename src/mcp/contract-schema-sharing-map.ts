@@ -206,18 +206,11 @@ export const SCHEMA_SHARING_EXEMPT: ReadonlyMap<string, string> = new Map([
 // whose gap gets closed makes its own entry fail, forcing deletion. So this set can never sit on
 // an already-resolved gap, and a removed entry falls straight back into the main Item 5 check.
 // Bounded on the other side by SCHEMA_SHARING_PENDING_BASELINE below.
-export const SCHEMA_SHARING_PENDING: ReadonlySet<string> = new Set([
-  // submittal_register spreads SubmittalRegisterBodySchema.shape into its inputSchema
-  // (tools.ts), losing the duplicate-specIds .check() at the SDK layer — the same gap as the
-  // EXEMPT handler-re-validates cases above. handleSubmittalRegister DOES independently
-  // safeParse the full SubmittalRegisterBodySchema (submittal-register-handler.ts), so this is
-  // not presently a live bug either. It stays PENDING rather than EXEMPT because #550 (REST↔MCP
-  // parity audit) already owns consolidating this exact op's schema-sharing story end-to-end —
-  // recording it EXEMPT here would let a partial, ad hoc fix quietly close out what #550 is
-  // meant to resolve properly (e.g. switching to a shared `.extend()` reference instead of a
-  // second parse). Never assert-failing in THIS PR's own test run; #550 promotes or fixes it.
-  'post /projects/{}/submittal-register',
-]);
+// Empty as of #550 (closed 2026-08-03): submittal_register now registers
+// SubmittalRegisterBodySchema.extend({ projectId }) in tools.ts (not a `.shape` spread), so the
+// duplicate-specIds `.check()` survives SDK registration and runs at the SDK layer — verified by
+// SCHEMA_SHARING_REJECT_PROBES below. The op graduated into the main Item 5 checked bucket.
+export const SCHEMA_SHARING_PENDING: ReadonlySet<string> = new Set([]);
 
 /**
  * Counterexamples for the Item 5 behavioral gate: op -> an args object the op's object-level rule
@@ -238,6 +231,16 @@ export const SCHEMA_SHARING_REJECT_PROBES: ReadonlyMap<string, unknown> = new Ma
     // draft with no error at all (see the comment on generate_docx's inputSchema in tools.ts).
     { specId: '11111111-1111-4111-8111-111111111111', mdoe: 'final' },
   ],
+  [
+    'post /projects/{}/submittal-register',
+    // SubmittalRegisterBodySchema.check(): duplicate specIds must be REJECTED, not silently
+    // accepted. A `{ ...Schema.shape }` rebuild drops the `.check()` refinement while still
+    // looking structurally correct (isFullSchemaInstance would pass) — #550 F3.
+    {
+      projectId: '11111111-1111-4111-8111-111111111111',
+      specIds: ['22222222-2222-4222-8222-222222222222', '22222222-2222-4222-8222-222222222222'],
+    },
+  ],
 ]);
 
 /**
@@ -245,7 +248,7 @@ export const SCHEMA_SHARING_REJECT_PROBES: ReadonlyMap<string, unknown> = new Ma
  * mirroring INV5_READ_PENDING_BASELINE (contract-map.ts) and INV6_WRITE_PENDING_BASELINE
  * (contract-write-response-map.ts). Without it the burn-down set is the one place a future
  * schema-sharing divergence could be parked silently — the exact failure mode this gate exists to
- * close. Verified by direct count on 2026-08-03: the set held exactly 1 entry when the ratchet was
- * introduced. Lower it whenever an entry graduates out.
+ * close. Lowered to 0 on 2026-08-03 (#627) when submittal_register — the set's only entry —
+ * graduated out following #550's fix. Lower it whenever an entry graduates out.
  */
-export const SCHEMA_SHARING_PENDING_BASELINE = 1;
+export const SCHEMA_SHARING_PENDING_BASELINE = 0;
