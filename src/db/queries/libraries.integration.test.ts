@@ -19,15 +19,45 @@ import {
 const suffix = randomUUID().slice(0, 8);
 
 // Namespaces reserved by this file: '99 77 %' spec sections, project
-// 'lib-xor-test-project', and every non-built-in library row.
-// Cleanup order is FK-safe: specs → projects → libraries.
+// 'lib-xor-test-project', and every non-built-in library row — plus everything
+// derived from those libraries. Deleting the library row alone is not enough
+// once other suites own isolated fixture libraries (#631, #522): a run that
+// dies before its own afterAll leaves master specs in real sections behind, and
+// specs_library_id_fkey then makes the library undeletable, so this sweep — and
+// with it the whole suite — fails in beforeAll on every subsequent run until
+// the database is dropped by hand. That is the exact failure mode #623 exists
+// to prevent, so the sweep clears the dependents too.
+// Cleanup order is FK-safe: packages → membership → clones → projects →
+// masters → sources → libraries.
 async function clearReservedNamespaces(): Promise<void> {
   await pool.query(`DELETE FROM specs WHERE section LIKE '99 77 %'`);
   await pool.query(`DELETE FROM projects WHERE name = 'lib-xor-test-project'`);
-  await pool.query(`DELETE FROM libraries WHERE name NOT IN ($1, $2)`, [
-    UFGS_REFERENCE_LIBRARY,
-    DEFAULT_COMPANY_LIBRARY,
-  ]);
+
+  const doomed = await pool.query<{ id: string }>(
+    `SELECT id FROM libraries WHERE name NOT IN ($1, $2)`,
+    [UFGS_REFERENCE_LIBRARY, DEFAULT_COMPANY_LIBRARY]
+  );
+  const libraryIds = doomed.rows.map((r) => r.id);
+  if (libraryIds.length === 0) return;
+
+  // Specs cloned out of a doomed library point back at its masters via
+  // specs.parent_spec_id (NO ACTION), and project_specs/package_specs RESTRICT
+  // the clones — so the whole derived project has to go before the masters can.
+  const derived = await pool.query<{ project_id: string }>(
+    `SELECT DISTINCT project_id FROM project_sources WHERE library_id = ANY($1)`,
+    [libraryIds]
+  );
+  const projectIds = derived.rows.map((r) => r.project_id);
+  if (projectIds.length > 0) {
+    await pool.query('DELETE FROM design_packages WHERE project_id = ANY($1)', [projectIds]);
+    await pool.query('DELETE FROM project_specs WHERE project_id = ANY($1)', [projectIds]);
+    await pool.query('DELETE FROM specs WHERE project_id = ANY($1)', [projectIds]);
+    await pool.query('DELETE FROM projects WHERE id = ANY($1)', [projectIds]);
+  }
+
+  await pool.query('DELETE FROM specs WHERE library_id = ANY($1)', [libraryIds]);
+  await pool.query('DELETE FROM project_sources WHERE library_id = ANY($1)', [libraryIds]);
+  await pool.query('DELETE FROM libraries WHERE id = ANY($1)', [libraryIds]);
 }
 
 // Residue from a prior run that never reached its afterEach (process kill,
@@ -219,6 +249,34 @@ describe('#623 regression — residue from a prior run is swept before the first
     expect(reinsert.rows).toHaveLength(1);
 
     // The sweep must not take the built-ins with it.
+    expect(await findLibraryByName(UFGS_REFERENCE_LIBRARY)).not.toBeNull();
+    expect(await findLibraryByName(DEFAULT_COMPANY_LIBRARY)).not.toBeNull();
+  });
+
+  // Sibling suites now build isolated fixture libraries instead of borrowing
+  // 'Default Company Master' (#631, #522). Their masters sit in REAL sections,
+  // outside this file's '99 77 %' namespace, so a sweep that only cleared
+  // '99 77 %' left them behind and then died on specs_library_id_fkey — taking
+  // all 13 tests here down in beforeAll, on this run and every run after it.
+  it('libraries: leaked fixture-library master in a real section does not wedge the reserved-namespace sweep on specs_library_id_fkey', async () => {
+    const leaked = await createLibrary({
+      tier: 'company',
+      name: `Leaked Fixture Master ${randomUUID().slice(0, 8)}`,
+    });
+    await pool.query(
+      `INSERT INTO specs (section, title, source, library_id)
+       VALUES ('05 12 00', 'Structural Steel Framing', 'unknown', $1)`,
+      [leaked.id]
+    );
+
+    // Pre-fix behaviour: the bare library delete the sweep used to run.
+    await expect(pool.query(`DELETE FROM libraries WHERE id = $1`, [leaked.id])).rejects.toThrow(
+      /specs_library_id_fkey/
+    );
+
+    // The sweep clears the master first, so the library goes with it.
+    await expect(clearReservedNamespaces()).resolves.toBeUndefined();
+    expect(await findLibraryById(leaked.id)).toBeNull();
     expect(await findLibraryByName(UFGS_REFERENCE_LIBRARY)).not.toBeNull();
     expect(await findLibraryByName(DEFAULT_COMPANY_LIBRARY)).not.toBeNull();
   });
