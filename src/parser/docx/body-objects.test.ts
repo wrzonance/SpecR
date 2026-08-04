@@ -993,3 +993,38 @@ describe('extractBodyObjects — #641 nested text box inside a text box (run-van
     expect(actualBytes).toContain('NESTED SECRET');
   });
 });
+
+describe('extractBodyObjects — #633 investigation: decorative asterisk rule rows are VERBATIM inside a captured object (refutation, not a bug)', () => {
+  // #633 investigation outcome, pinned positively rather than left as a
+  // silent absence of a suppression branch: a rule-row-only interior
+  // paragraph inside a captured text box (or table — see the sibling test
+  // below) is captured VERBATIM, exactly like any other interior text.
+  // ADR-072 decision 8 (#300) already establishes this — a captured
+  // table/text-box's cell text is a faithful, out-of-band, VERBATIM mirror
+  // of the source document, never re-run through the paragraph-tier
+  // note-region/rule-row engine — and
+  // note-region-corpus.integration.test.ts's own OBJECT_VERBATIM_TABLE-scoped
+  // regression test pins the real hidden-text-test.docx fixture's body table
+  // rendering its 4 asterisk-rule cells verbatim as exactly that invariant.
+  // Suppressing it here would silently reinterpret locked object content —
+  // the opposite of ADR-072's no-silent-loss posture — and would break that
+  // existing test. See hidden-text.integration.test.ts's own narrowed
+  // bare-asterisk assertion (ADR-092) for the other half of this
+  // investigation: the corpus-gated #294 failure was a test-assertion gap,
+  // not a parser defect.
+  it('a rule-row-only interior paragraph inside a text box is captured verbatim, not suppressed', () => {
+    const body = textBoxParagraph('*****');
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    expect(result.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual(['*****']);
+  });
+
+  it('a rule-row-only interior cell paragraph inside a table is captured verbatim, not suppressed', () => {
+    const body = table(row(cell(para('*****'))));
+    const result = extract(body);
+
+    expect(result.tableObjects).toHaveLength(1);
+    expect(result.tableObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual(['*****']);
+  });
+});

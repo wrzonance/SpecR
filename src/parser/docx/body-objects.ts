@@ -243,6 +243,20 @@ function transformInteriorParagraphs(
 // "objectText non-emptiness precondition" pins this as THIS layer's job, not
 // wrapBlobParagraphWithAnchor's — an anchor with no corresponding objectText
 // leaf would be a dangling, never-reachable UUID.
+//
+// #633 investigation (ADR-092): a decorative asterisk rule row inside a
+// captured object's interior paragraph is DELIBERATELY left verbatim here,
+// never routed through isRuleRow/classifyOne's paragraph-tier suppression.
+// ADR-072 decision 8 (#300) already establishes this — a captured
+// table/text-box's cell text is a faithful, out-of-band, VERBATIM mirror of
+// the source document, never re-run through the paragraph-tier note-region
+// engine — and note-region-corpus.integration.test.ts's own
+// OBJECT_VERBATIM_TABLE-scoped regression test pins hidden-text-test.docx's
+// body table rendering its 4 asterisk-rule cells verbatim as EXACTLY that
+// invariant. Adding a rule-row suppression branch here would silently
+// reinterpret locked object content and break that existing, deliberate
+// test. See hidden-text.integration.test.ts's own updated assertion for the
+// other half of this investigation.
 function transformChildren(
   children: readonly ObjectBlobNode[],
   hiddenSubtrees: ReadonlySet<ObjectBlobNode>
