@@ -9,6 +9,7 @@ import {
   clearEditabilityOverride,
 } from './editability.js';
 import type { ClassifyResult } from '../../conventions/index.js';
+import { deleteCapturedFixtures } from '../../test-utils/integration-fixture-cleanup.js';
 
 const PR1_ID = '20000000-0000-0000-0000-000000000003';
 const PART_ID = '20000000-0000-0000-0000-000000000001';
@@ -45,8 +46,32 @@ interface NodeIds {
   readonly pr1: string;
 }
 
+// createSpec commits the spec row before insertTree runs, but the caller only
+// receives the id — and can only capture it for teardown — once BOTH have
+// succeeded. So an insertTree failure used to strand a committed spec row that
+// nothing would ever delete: the id-scoped afterEach below never learns about
+// it, where the `WHERE section LIKE '99 00 0%'` sweep it replaced would have
+// swept it up. Reachable: insertTree writes paragraph rows at fixed literal
+// ids, and src/db/queries/search.integration.test.ts seeds paragraphs at the
+// same '3000…0001/2/3' ids, so residue from a killed run makes insertTree
+// fail on the paragraph primary key with the spec row already committed.
+// seedSpec therefore cleans up its own orphan before rethrowing.
 async function seedSpec(section: string, ids: NodeIds): Promise<string> {
   const specId = await createSpec({ section, title: 'Editability Test', source: 'arcat' });
+  try {
+    return await insertSeedTree(section, ids, specId);
+  } catch (err) {
+    try {
+      await deleteCapturedFixtures(pool, { specIds: [specId] });
+    } catch {
+      // Best-effort: a failed cleanup must not mask why the seed failed, and
+      // leaves the orphan exactly where the pre-fix code left it anyway.
+    }
+    throw err;
+  }
+}
+
+async function insertSeedTree(section: string, ids: NodeIds, specId: string): Promise<string> {
   await insertTree(
     {
       id: specId,
@@ -85,13 +110,20 @@ async function readPr1(specId: string) {
 
 describe('editability storage (O-7 / #134)', () => {
   let specId: string;
+  // Every spec this describe block creates, id-scoped so afterEach only ever
+  // deletes rows THIS test inserted — never a concurrent invocation's (#638,
+  // ADR-090). Previously a `WHERE section LIKE '99 00 0%'` pattern delete,
+  // which would also match (and destroy) another live run's fixtures.
+  let createdSpecIds: string[];
 
   beforeEach(async () => {
+    createdSpecIds = [];
     specId = await seedSpec('99 00 01', { part: PART_ID, article: ARTICLE_ID, pr1: PR1_ID });
+    createdSpecIds.push(specId);
   });
 
   afterEach(async () => {
-    await pool.query("DELETE FROM specs WHERE section LIKE '99 00 0%'");
+    await deleteCapturedFixtures(pool, { specIds: createdSpecIds });
   });
 
   it('round-trip: store classification → getSpecTree reads back identical', async () => {
@@ -157,6 +189,7 @@ describe('editability storage (O-7 / #134)', () => {
       article: SIB_ARTICLE_ID,
       pr1: SIB_PR1_ID,
     });
+    createdSpecIds.push(siblingId);
 
     await storeClassifications(siblingId, FIRST); // FIRST.nodeId === PR1_ID (specId's node)
 
