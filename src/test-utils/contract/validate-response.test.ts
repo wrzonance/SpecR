@@ -7,6 +7,7 @@ import {
   loadSpec,
   loadRawSpec,
   operationParamKeys,
+  markUnevaluatedPropertiesFalse,
 } from './validate-response.js';
 import type { OpenApiDoc } from './validate-response.js';
 
@@ -102,20 +103,79 @@ describe('assertResponseExact (#640) — exact-key-match against openapi.yaml', 
     ).resolves.toBeUndefined();
   });
 
+  // Pipeline-level smoke check: it only has teeth alongside the dedicated no-mutation unit test
+  // below, because getValidator()'s WeakMap for this op's schema is already warmed by the
+  // 'accepts a fully-conformant body' test above (same describe block, runs first) — so a
+  // regression that made assertResponseExact mutate the shared schema in place would compile a
+  // corrupted validator into a FRESH cache slot instead, which this stale-cache read can't see.
+  // The behavior itself is still real and worth pinning; `markUnevaluatedPropertiesFalse never
+  // mutates its input schema` below is what actually proves the no-mutation invariant.
   it('never mutates or caches through the shared ajv WeakMap — assertResponse stays permissive on the same op afterward', async () => {
     const bodyWithExtra = { ...validHealthBody, extra: 'nope' };
     // The exact variant rejects the extra key...
     await expect(assertResponseExact('get', '/health', 200, bodyWithExtra)).rejects.toThrow();
     // ...but assertResponse — reading the SAME operation's schema through getValidator()'s shared
-    // cache — must still accept it. If assertResponseExact mutated the schema object in place
-    // (instead of operating on a structuredClone) or wrote its compiled validator into the shared
-    // WeakMap, this call would now incorrectly reject too.
+    // cache — must still accept it.
     await expect(assertResponse('get', '/health', 200, bodyWithExtra)).resolves.toBeUndefined();
   });
 
   it('assertResponse behavior is unchanged: still permissive of undocumented extra keys', async () => {
     const bodyWithExtra = { ...validHealthBody, extra: 'nope' };
     await expect(assertResponse('get', '/health', 200, bodyWithExtra)).resolves.toBeUndefined();
+  });
+
+  // Proves the no-mutation invariant directly against markUnevaluatedPropertiesFalse's own input,
+  // independent of any ajv WeakMap cache-warmth ordering (unlike the pipeline check above, this
+  // fails deterministically for a regression that reintroduces in-place mutation, regardless of
+  // test execution order or which ops earlier tests happened to warm).
+  it('markUnevaluatedPropertiesFalse never mutates its input schema', () => {
+    const original = {
+      type: 'object',
+      properties: {
+        keep: { type: 'string' },
+        nested: { type: 'object', properties: { inner: { type: 'string' } } },
+      },
+    };
+    const snapshot = structuredClone(original);
+
+    const marked = markUnevaluatedPropertiesFalse(original) as {
+      unevaluatedProperties?: boolean;
+      properties: { nested: { unevaluatedProperties?: boolean } };
+    };
+
+    expect(original).toEqual(snapshot); // input object graph is byte-for-byte untouched
+    expect(marked).not.toBe(original); // caller always gets an independent clone
+    expect(marked.unevaluatedProperties).toBe(false);
+    expect(marked.properties.nested.unevaluatedProperties).toBe(false);
+  });
+
+  // A dereferenced schema can reach the SAME object identity (one $ref target reused by
+  // $RefParser.dereference for every pointer to it) through two different composition contexts
+  // in one tree: once as a raw allOf branch (must stay unmarked — see addUnevaluatedPropertiesFalse's
+  // comment) and once nested under a sibling's properties (must be marked). A visited-Set that
+  // only tracks "already seen" — not "seen under which context" — lets whichever context visits
+  // first silently decide for both, dropping the second context's mark.
+  it('marks a schema reached via two different composition contexts independently, not first-visit-wins', () => {
+    const shared = { type: 'object', properties: { name: { type: 'string' } } };
+    const schema = {
+      oneOf: [
+        { type: 'object', allOf: [shared] },
+        { type: 'object', properties: { wrapped: shared } },
+      ],
+    };
+
+    const marked = markUnevaluatedPropertiesFalse(schema) as {
+      oneOf: [
+        { allOf: [{ unevaluatedProperties?: boolean }] },
+        { properties: { wrapped: { unevaluatedProperties?: boolean } } },
+      ];
+    };
+    const viaAllOf = marked.oneOf[0].allOf[0];
+    const viaProperties = marked.oneOf[1].properties.wrapped;
+
+    expect(viaAllOf.unevaluatedProperties).toBeUndefined(); // allOf branch: never marked directly
+    expect(viaProperties.unevaluatedProperties).toBe(false); // reached via properties: marked
+    expect(viaAllOf).not.toBe(viaProperties); // divergent contexts get independent clones
   });
 });
 

@@ -155,7 +155,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function walkProperties(schema: Record<string, unknown>, seen: Set<object>): void {
+// Maps each visited node to the `viaAllOf` context it was FIRST processed under.
+// $RefParser.dereference() reuses one object instance for every `$ref` pointer that targets the
+// same component, so the identical node can legitimately be reached twice in one tree walk under
+// TWO DIFFERENT contexts — e.g. once as a raw allOf branch (must stay unmarked) and once nested
+// under a sibling's `properties`/`oneOf`/`anyOf`/`items` (must be marked). A plain visited-Set
+// cannot distinguish those: it conflates "already visited" with "already decided", so whichever
+// context reaches the node FIRST wins and the second visit silently no-ops — see addUnevaluated-
+// PropertiesFalse below for how `seen` resolves that.
+type SeenContexts = Map<object, boolean>;
+
+function walkProperties(schema: Record<string, unknown>, seen: SeenContexts): void {
   if (!isPlainObject(schema['properties'])) return;
   const props: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema['properties'])) {
@@ -168,7 +178,7 @@ function walkProperties(schema: Record<string, unknown>, seen: Set<object>): voi
 // that OWNS this `allOf` keyword may be (see addUnevaluatedPropertiesFalse below). oneOf/anyOf
 // branches are each evaluated in isolation (exactly one matches), so they're walked and marked
 // like any standalone schema.
-function walkComposition(schema: Record<string, unknown>, seen: Set<object>): void {
+function walkComposition(schema: Record<string, unknown>, seen: SeenContexts): void {
   for (const composeKey of ['allOf', 'oneOf', 'anyOf'] as const) {
     const branches = schema[composeKey];
     if (!Array.isArray(branches)) continue;
@@ -178,7 +188,7 @@ function walkComposition(schema: Record<string, unknown>, seen: Set<object>): vo
   }
 }
 
-function walkItems(schema: Record<string, unknown>, seen: Set<object>): void {
+function walkItems(schema: Record<string, unknown>, seen: SeenContexts): void {
   if (isPlainObject(schema['items'])) {
     schema['items'] = addUnevaluatedPropertiesFalse(schema['items'], seen, false);
   }
@@ -193,13 +203,20 @@ function shouldMarkUnevaluated(schema: Record<string, unknown>, viaAllOf: boolea
 
 function addUnevaluatedPropertiesFalse(
   node: unknown,
-  seen: Set<object>,
+  seen: SeenContexts,
   viaAllOf: boolean
 ): unknown {
   if (!isPlainObject(node)) return node;
-  if (seen.has(node)) return node; // cycle guard — dereferenced schemas can be self-referential
-  seen.add(node);
-  const schema = node;
+  const priorContext = seen.get(node);
+  // Same node, same context: either a true cycle (dereferenced schemas can be self-referential —
+  // stop recursing) or a harmless duplicate reference already processed correctly for this
+  // context. Either way the existing (in-progress or finished) node is the right answer.
+  if (priorContext === viaAllOf) return node;
+  // Same node, a DIFFERENT context than its first visit: the shared identity needs a different
+  // unevaluatedProperties decision per context, so clone before mutating — reusing the shared
+  // node here would silently overwrite (or be silently dropped by) the first context's decision.
+  const schema = priorContext === undefined ? node : structuredClone(node);
+  seen.set(schema, viaAllOf);
   walkProperties(schema, seen);
   walkComposition(schema, seen);
   walkItems(schema, seen);
@@ -207,6 +224,21 @@ function addUnevaluatedPropertiesFalse(
     schema['unevaluatedProperties'] = false;
   }
   return schema;
+}
+
+/** Boundary wrapper around {@link addUnevaluatedPropertiesFalse}: clones `schema` and marks every
+ * eligible node with `unevaluatedProperties: false` (see that function's comment for the exact
+ * marking rules). Never mutates its input — the returned tree is always a fresh clone, safe to
+ * compile through an uncached ajv instance without corrupting {@link getValidator}'s shared
+ * WeakMap or any other reader of the original schema object. Exported so the no-mutation and
+ * divergent-composition-context invariants can be pinned directly against this boundary, not the
+ * WeakMap-caching side effects of a full assertResponseExact() call. */
+export function markUnevaluatedPropertiesFalse(schema: AnySchemaObject): AnySchemaObject {
+  return addUnevaluatedPropertiesFalse(
+    structuredClone(schema),
+    new Map(),
+    false
+  ) as AnySchemaObject;
 }
 
 /** Exact-key-match variant of {@link assertResponse}: rejects any response key the openapi.yaml
@@ -225,11 +257,7 @@ export async function assertResponseExact(
   const doc = await loadSpec();
   const schema = resolveResponseSchema(doc, method, pathTemplate, status);
   if (!schema) return; // documented non-JSON (binary / no-content / multipart) — out of scope
-  const exactSchema = addUnevaluatedPropertiesFalse(
-    structuredClone(schema),
-    new Set(),
-    false
-  ) as AnySchemaObject;
+  const exactSchema = markUnevaluatedPropertiesFalse(schema);
   const validate = ajv.compile(exactSchema);
   if (!validate(body)) {
     throw new Error(
