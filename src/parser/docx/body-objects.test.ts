@@ -397,19 +397,29 @@ describe('hasRunVanish — rStyle-referenced character-style vanish (#650, captu
   });
 
   // #650 review (verified finding): the ORIGINAL version of this test called
-  // `hasRunVanish` twice with the exact same literal arguments and compared
-  // the two results — that can never fail for a deterministic pure function,
-  // so it never actually exercised either real call site. This replacement
-  // derives `vanishCharStyleIds` from a REAL `extractBodyObjects` capture and
-  // feeds that exact captured value into the REAL `replaceAnchoredParagraphText`
-  // rewrite path (object-blob-edit.ts) on the SAME source blob — the two
-  // production call sites `hasRunVanish`'s own doc comment says must share
-  // one predicate (ADR-092) — proving they actually agree end-to-end. See the
-  // "hidden-first paragraph" end-to-end test below.
-  it('hasRunVanish is a pure, deterministic predicate (same input, same output) — a necessary but not sufficient property; see the end-to-end test below for the real shared-object proof', () => {
-    const node = blobRun([blobRStyle('HiddenChar')]);
-    const vanishCharStyleIds = new Set(['HiddenChar']);
-    expect(hasRunVanish(node, vanishCharStyleIds)).toBe(hasRunVanish(node, vanishCharStyleIds));
+  // `hasRunVanish` ONCE, then compared that return value against a SECOND
+  // call using the exact same node/Set references — a tautology that can
+  // never fail for a deterministic function (any return value, even a wrong
+  // one, equals itself), so it never actually exercised the implementation.
+  // Fixed to call the predicate on two INDEPENDENTLY constructed (but
+  // structurally identical) node instances, asserting the concrete expected
+  // verdict on each call rather than comparing the pair to each other, and
+  // confirming the predicate does not mutate the node it inspects. The full
+  // end-to-end proof that capture and rewrite actually AGREE on one real
+  // `vanishCharStyleIds` value derived from an `extractBodyObjects` capture
+  // and fed into `replaceAnchoredParagraphText` (object-blob-edit.ts) — the
+  // two production call sites `hasRunVanish`'s own doc comment says must
+  // share one predicate (ADR-092) — lives in the "hidden-first paragraph"
+  // end-to-end test below.
+  it('hasRunVanish is a pure, deterministic predicate: two independently built, structurally identical runs get the same real verdict, without mutating their input', () => {
+    const buildHiddenRun = (): ObjectBlobNode => blobRun([blobRStyle('HiddenChar')]);
+    const firstNode = buildHiddenRun();
+    const secondNode = buildHiddenRun();
+    const beforeCall = structuredClone(firstNode);
+
+    expect(hasRunVanish(firstNode, new Set(['HiddenChar']))).toBe(true);
+    expect(hasRunVanish(secondNode, new Set(['HiddenChar']))).toBe(true);
+    expect(firstNode).toEqual(beforeCall);
   });
 
   // A paragraph with the VANISH run FIRST in document order and the VISIBLE
