@@ -111,6 +111,55 @@ describe('ObjectMetaSchema', () => {
   });
 });
 
+// ── kind/rows/columns cross-field check (#650 Part B) ──────────────────────
+// rows/columns are table-grid dimensions; a textBox has no grid. The check
+// names exactly kind, rows, columns — it must never touch vanishCharStyleIds
+// or any other field, additive or otherwise.
+describe('ObjectMetaSchema — textBox/rows/columns cross-field check (#650)', () => {
+  const baseTextBox = {
+    kind: 'textBox' as const,
+    floating: true,
+    generation: 'vml' as const,
+    blob: [{ '#text': 'boxed text' }],
+  };
+  const baseTable = {
+    kind: 'table' as const,
+    floating: false,
+    generation: 'drawingml' as const,
+    rows: 1,
+    columns: 1,
+    blob: TABLE_BLOB,
+  };
+
+  it('rejects a textBox with rows set', () => {
+    expect(ObjectMetaSchema.safeParse({ ...baseTextBox, rows: 1 }).success).toBe(false);
+  });
+
+  it('rejects a textBox with columns set', () => {
+    expect(ObjectMetaSchema.safeParse({ ...baseTextBox, columns: 1 }).success).toBe(false);
+  });
+
+  it('accepts a textBox with neither rows nor columns', () => {
+    expect(ObjectMetaSchema.safeParse(baseTextBox).success).toBe(true);
+  });
+
+  it('leaves table with rows/columns unaffected', () => {
+    expect(ObjectMetaSchema.safeParse(baseTable).success).toBe(true);
+  });
+
+  it('accepts a textBox with vanishCharStyleIds populated and no rows/columns — the check never touches vanishCharStyleIds', () => {
+    const result = ObjectMetaSchema.safeParse({
+      ...baseTextBox,
+      vanishCharStyleIds: ['HiddenChar'],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.vanishCharStyleIds).toEqual(['HiddenChar']);
+    expect(result.data.rows).toBeUndefined();
+    expect(result.data.columns).toBeUndefined();
+  });
+});
+
 // ── vanishCharStyleIds (#650) ───────────────────────────────────────────────
 // Resolved w:rStyle → character-style w:vanish IDs, captured alongside the
 // object so capture and rewrite share one source of truth without needing

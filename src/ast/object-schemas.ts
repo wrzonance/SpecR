@@ -83,15 +83,33 @@ export const ObjectBlobNodeSchema: z.ZodType<ObjectBlobNode> = z.custom<ObjectBl
  * fully interchangeable (today's behaviour — no runs treated as hidden by
  * style), so a row captured before this change loads/edits unchanged.
  */
-export const ObjectMetaSchema = z.object({
-  kind: ObjectKindSchema,
-  floating: z.boolean(),
-  generation: ObjectGenerationSchema,
-  rows: z.number().int().positive().exactOptional(),
-  columns: z.number().int().positive().exactOptional(),
-  vanishCharStyleIds: z.array(z.string()).exactOptional(),
-  blob: z.array(ObjectBlobNodeSchema).check(z.minLength(1)),
-});
+export const ObjectMetaSchema = z
+  .object({
+    kind: ObjectKindSchema,
+    floating: z.boolean(),
+    generation: ObjectGenerationSchema,
+    rows: z.number().int().positive().exactOptional(),
+    columns: z.number().int().positive().exactOptional(),
+    vanishCharStyleIds: z.array(z.string()).exactOptional(),
+    blob: z.array(ObjectBlobNodeSchema).check(z.minLength(1)),
+  })
+  .check((ctx) => {
+    // rows/columns are table-grid dimensions; a textBox has no grid to
+    // describe. Named fields only (kind, rows, columns) — this must never
+    // scan for or react to other fields (vanishCharStyleIds included), so
+    // future additive fields stay structurally untouched by this rule.
+    const { kind, rows, columns } = ctx.value;
+    if (kind !== 'textBox') return;
+    const offendingKeys: string[] = [];
+    if (rows !== undefined) offendingKeys.push('rows');
+    if (columns !== undefined) offendingKeys.push('columns');
+    if (offendingKeys.length === 0) return;
+    ctx.issues.push({
+      code: 'custom',
+      input: ctx.value,
+      message: `textBox objects have no grid — ${offendingKeys.join(', ')} must not be set`,
+    });
+  });
 
 export type ObjectKind = z.infer<typeof ObjectKindSchema>;
 export type ObjectGeneration = z.infer<typeof ObjectGenerationSchema>;
