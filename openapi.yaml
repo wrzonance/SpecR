@@ -8132,6 +8132,17 @@ components:
           type: integer
           minimum: 1
           description: Table column count (table kind only).
+        vanishCharStyleIds:
+          type: array
+          description: >-
+            Resolved character-style IDs (#650) carrying an enabled
+            `w:vanish` — the styles a run's `w:rStyle` must resolve through
+            to be treated as hidden. Captured at import so hidden text stays
+            excluded from `objectText` on later edits, without needing
+            `styles.xml` at edit time. Absent and `[]` are interchangeable;
+            an object captured before this field existed has neither.
+          items:
+            type: string
         blob:
           type: array
           description: >-

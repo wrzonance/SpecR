@@ -111,6 +111,65 @@ describe('ObjectMetaSchema', () => {
   });
 });
 
+// ── vanishCharStyleIds (#650) ───────────────────────────────────────────────
+// Resolved w:rStyle → character-style w:vanish IDs, captured alongside the
+// object so capture and rewrite share one source of truth without needing
+// styles.xml at rewrite time. Additive JSONB field: absent and [] are
+// interchangeable, and a row captured before this change (no key at all)
+// must still load/parse identically to today.
+describe('ObjectMetaSchema — vanishCharStyleIds (#650)', () => {
+  const validTable = {
+    kind: 'table' as const,
+    floating: false,
+    generation: 'drawingml' as const,
+    rows: 1,
+    columns: 1,
+    blob: TABLE_BLOB,
+  };
+
+  it('a row/object captured before this change (no vanishCharStyleIds key) loads identically', () => {
+    const result = ObjectMetaSchema.safeParse(validTable);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect('vanishCharStyleIds' in result.data).toBe(false);
+  });
+
+  it('accepts a table object with a populated vanishCharStyleIds array', () => {
+    const withVanish = { ...validTable, vanishCharStyleIds: ['HiddenChar', 'Redacted'] };
+    const result = ObjectMetaSchema.safeParse(withVanish);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.vanishCharStyleIds).toEqual(['HiddenChar', 'Redacted']);
+  });
+
+  it('accepts an empty vanishCharStyleIds array, interchangeable with absent', () => {
+    expect(ObjectMetaSchema.safeParse({ ...validTable, vanishCharStyleIds: [] }).success).toBe(
+      true
+    );
+  });
+
+  it('rejects a non-string entry in vanishCharStyleIds', () => {
+    const bad = { ...validTable, vanishCharStyleIds: ['HiddenChar', 42] };
+    expect(ObjectMetaSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('a textBox object (no rows/columns) still validates with vanishCharStyleIds populated — the field never couples to kind', () => {
+    const textBox = {
+      kind: 'textBox' as const,
+      floating: true,
+      generation: 'vml' as const,
+      blob: [{ '#text': 'boxed text' }],
+      vanishCharStyleIds: ['HiddenChar'],
+    };
+    const result = ObjectMetaSchema.safeParse(textBox);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.vanishCharStyleIds).toEqual(['HiddenChar']);
+    expect(result.data.rows).toBeUndefined();
+    expect(result.data.columns).toBeUndefined();
+  });
+});
+
 // ── Editability fixation (#300, ADR-072 decision 2) ────────────────────────
 // An 'object' node is always locked (a captured OOXML blob is never
 // paragraph-editable text) and its 'objectText' children are always editable

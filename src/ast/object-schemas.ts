@@ -72,6 +72,16 @@ export const ObjectBlobNodeSchema: z.ZodType<ObjectBlobNode> = z.custom<ObjectBl
  * decision 2). `rows`/`columns` are table-only (grid dimensions); `blob` is
  * the object's own top-level OOXML node(s) in document order, always
  * non-empty — an object with no captured content is never modeled at all.
+ *
+ * `vanishCharStyleIds` (#650) is the resolved set of character-style IDs
+ * that carry an enabled `w:vanish` — i.e. the `StyleMap.vanishCharStyleIds`
+ * a run's `w:rStyle` must resolve through to be treated as hidden. It is
+ * captured alongside the object so capture (`collectText`) and the edit
+ * rewrite path (`rewriteFirstText`) share one persisted source of truth
+ * without needing `styles.xml` at rewrite time, where it is unavailable.
+ * Additive JSONB field, no migration: an absent key and an empty array are
+ * fully interchangeable (today's behaviour — no runs treated as hidden by
+ * style), so a row captured before this change loads/edits unchanged.
  */
 export const ObjectMetaSchema = z.object({
   kind: ObjectKindSchema,
@@ -79,6 +89,7 @@ export const ObjectMetaSchema = z.object({
   generation: ObjectGenerationSchema,
   rows: z.number().int().positive().exactOptional(),
   columns: z.number().int().positive().exactOptional(),
+  vanishCharStyleIds: z.array(z.string()).exactOptional(),
   blob: z.array(ObjectBlobNodeSchema).check(z.minLength(1)),
 });
 
