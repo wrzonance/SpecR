@@ -310,6 +310,48 @@ describe('classifyParagraphs + buildTree — asterisk-rule note regions (#292)',
     expect(children).toHaveLength(2);
   });
 
+  // classifyOne checks role === 'rule' FIRST, ahead of the style-based note check (see
+  // the comment at that call site) — a rule row whose Word style resolves to a genuine
+  // note-family name (e.g. STNoteSpec, which matches isNoteParagraph's /note/i regex)
+  // must still be suppressed as a rule delimiter, never misclassified as a note node.
+  // Re-pins the invariant behind #512/#471/#514 and ADR-086.
+  it("a rule row carrying a note-family style (e.g. STNoteSpec) still suppresses — role==='rule' runs ahead of the style-based note check (#512/#471/#514)", () => {
+    const styleMap: StyleMap = {
+      styles: new Map([['STNoteSpec', { styleId: 'STNoteSpec', name: 'STNoteSpec' }]]),
+      resolvedNumPr: new Map(),
+      resolvedJc: new Map(),
+      vanishStyleIds: new Set(),
+      vanishCharStyleIds: new Set(),
+    };
+    const classified = classifyParagraphs(
+      [
+        makePara({ numId: 1, ilvl: 0, text: 'PART 1 - GENERAL' }),
+        makePara({ styleId: 'STNoteSpec', text: '*****' }),
+        makePara({
+          styleId: 'STNoteSpec',
+          text: 'Delete items below not applicable to this project.',
+        }),
+        makePara({ styleId: 'STNoteSpec', text: '*****' }),
+      ],
+      numMap(1),
+      styleMap
+    );
+    // Both rule rows suppress despite the note-family style — never classified as notes.
+    expect(classified[1]!.suppressed).toBe(true);
+    expect(classified[1]!.isNote).not.toBe(true);
+    expect(classified[3]!.suppressed).toBe(true);
+    expect(classified[3]!.isNote).not.toBe(true);
+    // The enclosed prose is the genuine note.
+    expect(classified[2]!.isNote).toBe(true);
+
+    const tree = buildTree(classified, '01 00 00', 'T', 'arcat');
+    const children = tree.parts[0]!.children;
+    expect(children).toHaveLength(1);
+    expect(children[0]!.type).toBe('note');
+    // No rule-row text ever survives into a SpecNode's text field.
+    expect(children.some((n) => n.text === '*****')).toBe(false);
+  });
+
   // Regression guard: dash/equals decoration rules (e.g. "----", "====") are handled
   // exclusively by the existing isDecorationSeparator path (heuristics.ts) and must
   // NOT be affected by the new rule-row-first check — isRuleRow is asterisk-only.
