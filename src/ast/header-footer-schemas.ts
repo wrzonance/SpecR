@@ -50,7 +50,11 @@ const HeaderFooterFieldSchema = z
       .max(MAX_IMAGE_BASE64_LENGTH, {
         error: `imageData exceeds the ${MAX_IMAGE_BASE64_LENGTH}-char base64 size cap`,
       })
-      .describe(`Base64-encoded image bytes. ${UTF16_LENGTH_LIMIT_NOTE}`)
+      .describe(
+        'Base64-encoded image bytes. The cap is a plain string length with no ' +
+          'base64 pattern behind it, so the alphabet is not actually constrained ' +
+          `to ASCII. ${UTF16_LENGTH_LIMIT_NOTE}`
+      )
       .exactOptional(),
     imageMediaType: z.string().exactOptional(),
     widthEmu: z.number().int().positive().exactOptional(),

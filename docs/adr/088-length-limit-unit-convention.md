@@ -19,7 +19,7 @@ For any character outside the Basic Multilingual Plane (emoji, many CJK Extensio
 characters, mathematical alphanumeric symbols), one code point is two UTF-16 units, so
 the documented limit and the enforced limit diverge by up to 2x:
 
-```
+```text
 emoji count (code points):        251
 JS .length (UTF-16 units):        502
 Zod .max(500) would:              REJECT
