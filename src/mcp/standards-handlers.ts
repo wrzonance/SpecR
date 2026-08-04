@@ -44,13 +44,22 @@ export const RecordStandardVerificationShape = {
   // (src/lib/standards-verification-length.ts), shared with the REST twin
   // (VerificationBodySchema, src/api/standards.ts) even though this shape
   // doesn't reuse that validator.
-  currentVersion: codePointMax(z.string().min(1), MAX_CURRENT_VERSION_LENGTH, {
+  //
+  // `.trim()` before `.min(1)` matches the REST twin exactly, and orgCode /
+  // standardCode above for the same reason. It is not cosmetic: without it
+  // these two fields NORMALIZED differently across the two surfaces — MCP
+  // accepted a whitespace-only title that REST rejects, and counted padding
+  // toward the bound that REST trims away. ADR-026 makes openapi.yaml
+  // authoritative and ADR-044 binds this tool surface to REST, so REST is the
+  // reference side. A shared bound is not parity if the two sides disagree
+  // about which string the bound applies to.
+  currentVersion: codePointMax(z.string().trim().min(1), MAX_CURRENT_VERSION_LENGTH, {
     description: 'Current published version/designation.',
   }).optional(),
   sourceUrl: codePointMax(z.url(), MAX_SOURCE_URL_LENGTH, {
     description: 'Authoritative source URL for the standard.',
   }).optional(),
-  title: codePointMax(z.string().min(1), MAX_TITLE_LENGTH, {
+  title: codePointMax(z.string().trim().min(1), MAX_TITLE_LENGTH, {
     description: 'Standard title.',
   }).optional(),
   notes: codePointMax(z.string(), MAX_NOTES_LENGTH, {

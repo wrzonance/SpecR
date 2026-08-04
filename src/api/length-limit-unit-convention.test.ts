@@ -381,6 +381,8 @@ interface McpTwinSite {
   readonly name: string;
   readonly expectedMax: number;
   readonly field: z.ZodType;
+  /** The REST field this twin must behave identically to. REST is the reference side: openapi.yaml is authoritative (ADR-026) and the tool surface is bound to it (ADR-044). */
+  readonly restField: z.ZodType;
   readonly probe: (codePoints: number) => string;
 }
 
@@ -389,30 +391,35 @@ const MCP_TWIN_SITES: readonly McpTwinSite[] = [
     name: 'resolve_user.label',
     expectedMax: MAX_LABEL_LENGTH,
     field: ResolveUserShape.label,
+    restField: ResolveUserBody.shape.label,
     probe: astralOfCodePointLength,
   },
   {
     name: 'record_standard_verification.currentVersion',
     expectedMax: MAX_CURRENT_VERSION_LENGTH,
     field: RecordStandardVerificationShape.currentVersion,
+    restField: VerificationBodySchema.shape.currentVersion,
     probe: astralOfCodePointLength,
   },
   {
     name: 'record_standard_verification.sourceUrl',
     expectedMax: MAX_SOURCE_URL_LENGTH,
     field: RecordStandardVerificationShape.sourceUrl,
+    restField: VerificationBodySchema.shape.sourceUrl,
     probe: astralUrlOfCodePointLength,
   },
   {
     name: 'record_standard_verification.title',
     expectedMax: MAX_TITLE_LENGTH,
     field: RecordStandardVerificationShape.title,
+    restField: VerificationBodySchema.shape.title,
     probe: astralOfCodePointLength,
   },
   {
     name: 'record_standard_verification.notes',
     expectedMax: MAX_NOTES_LENGTH,
     field: RecordStandardVerificationShape.notes,
+    restField: VerificationBodySchema.shape.notes,
     probe: astralOfCodePointLength,
   },
 ];
@@ -439,6 +446,54 @@ describe('MCP tool shapes — twin length bounds stay identical to their REST co
         `${name} does not carry the x-length-unit: unicode-code-point marker — it was not built ` +
           'via codePointMax (src/lib/length-limit.ts)'
       ).toBe(true);
+    }
+  );
+
+  // The assertions above compare the BOUND — same number, same unit, same
+  // marker. They were blind to which STRING that bound applies to, and a real
+  // divergence hid in that blind spot: the MCP twins for currentVersion and
+  // title lacked the `.trim()` their REST counterparts have, so MCP accepted a
+  // whitespace-only title REST rejects, and counted padding toward the bound
+  // REST trims away. Both sides still bounded at the same number in the same
+  // unit, so every assertion above passed.
+  //
+  // A shared bound is not parity if the two surfaces disagree about what they
+  // are bounding. This compares NORMALIZATION as well: for each probe both
+  // surfaces must agree on acceptance AND, when both accept, produce the same
+  // parsed value. Output equality is the load-bearing half — '  abc  ' is
+  // accepted by both a trimming and a non-trimming field, and only the parsed
+  // result distinguishes them.
+  const NORMALIZATION_PROBES: readonly string[] = [
+    '   ',
+    '  abc  ',
+    '\tleading',
+    'trailing\n',
+    '  https://example.com/x  ',
+    'https://example.com/x',
+  ];
+
+  it.each(MCP_TWIN_SITES)(
+    '$name: normalizes whitespace identically to its REST twin (same acceptance, same parsed value)',
+    ({ name, field, restField }) => {
+      for (const probe of NORMALIZATION_PROBES) {
+        const mcp = field.safeParse(probe);
+        const rest = restField.safeParse(probe);
+
+        expect(
+          mcp.success,
+          `${name} and its REST twin disagree on whether ${JSON.stringify(probe)} is valid ` +
+            `(MCP ${mcp.success ? 'accepted' : 'rejected'}, REST ${rest.success ? 'accepted' : 'rejected'}). ` +
+            'REST is the reference side (ADR-026/ADR-044) — align the MCP shape to it'
+        ).toBe(rest.success);
+
+        if (mcp.success && rest.success) {
+          expect(
+            mcp.data,
+            `${name} and its REST twin both accept ${JSON.stringify(probe)} but normalize it ` +
+              'differently — one trims and the other does not, so the same input is stored two ways'
+          ).toEqual(rest.data);
+        }
+      }
     }
   );
 });
