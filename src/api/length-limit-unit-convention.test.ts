@@ -157,6 +157,14 @@ const succeeds =
   (value: string): boolean =>
     parse(value).success;
 
+/**
+ * imageData is bound-checked as a group rather than per-site: the same field
+ * recurs at ~32 header/footer paths, and probing its ~7M-character bound
+ * behaviorally would allocate two ~14 MB strings per run. Its own `it()` below
+ * pins the number and the marker; the coverage assertion treats it as claimed.
+ */
+const IMAGE_DATA_PATH_SUFFIX = '.imageData';
+
 const BOUND_SITES: readonly BoundSite[] = [
   {
     name: 'POST /users label',
@@ -266,7 +274,7 @@ describe('openapi.yaml bounds match the imported constant and what Zod enforces,
   // the constant that defines it instead.
   it('imageData: every published bound equals MAX_IMAGE_BASE64_LENGTH and carries the code-point marker', async () => {
     const imageBounds = (await specLengthFields()).filter((field) =>
-      field.path.endsWith('.imageData')
+      field.path.endsWith(IMAGE_DATA_PATH_SUFFIX)
     );
     expect(imageBounds.length, 'expected at least one imageData bound in the spec').toBeGreaterThan(
       0
@@ -281,6 +289,80 @@ describe('openapi.yaml bounds match the imported constant and what Zod enforces,
       'imageData’s Zod field does not carry the x-length-unit: unicode-code-point marker — ' +
         'it was not built via codePointMax (src/ast/header-footer-schemas.ts)'
     ).toBe(true);
+  });
+
+  // The two assertions above are hand-listed, and a hand-listed gate only
+  // covers what someone remembered to list. The MCP half has no such hole: it
+  // sweeps every GENERATED tool schema, so a new bound fails by default. The
+  // REST half cannot sweep the same way — openapi.yaml is hand-authored, so
+  // nothing mechanically links a YAML path to the Zod schema behind it.
+  //
+  // This closes that gap from the other end: rather than checking each listed
+  // site, require the listed sites to COVER the spec. Add a `maxLength` to
+  // openapi.yaml backed by a raw `.max(n)`, by metadata only, or by no
+  // validator at all, and it lands here as unclaimed until a BOUND_SITES entry
+  // pins its real enforced boundary. Verified by mutation: adding a bare
+  // `maxLength: 77` to an unbounded property passed every other assertion in
+  // both gate files and was caught only by this one.
+  it('every published bound is claimed by a behavioral parity entry (a new maxLength cannot be added without one)', async () => {
+    const unclaimed = (await specLengthFields())
+      .filter((field) => !isExempt(field))
+      .filter((field) => !field.path.endsWith(IMAGE_DATA_PATH_SUFFIX))
+      .filter((field) => !BOUND_SITES.some((site) => field.path.endsWith(site.pathEndsWith)))
+      .map((field) => `${field.path} (maxLength: ${field.maxLength})`);
+
+    expect(
+      [...new Set(unclaimed)],
+      'these openapi.yaml bounds are published to clients but no BOUND_SITES entry proves what the ' +
+        'server actually enforces at them, so the number could be fiction. Add a BOUND_SITES entry ' +
+        'pinning the field’s real code-point boundary — do not add an exemption instead'
+    ).toEqual([]);
+  });
+});
+
+// ── Trimmed fields: which string the bound counts ───────────────────────────
+
+// An adversarial review flagged that for fields built as
+// `codePointMax(z.string().trim().min(1), n)` the refinement runs on the
+// TRIMMED value, while JSON Schema's `maxLength` describes the RAW instance —
+// so `n` spaces plus one character is n+1 raw code points, rejected by a
+// client validating against the published schema but accepted by the server.
+//
+// That behavior is DELIBERATE and pre-dates #642: trimming is an input
+// normalization, and openapi.yaml states the post-trim contract in prose at
+// every trimmed site ("the bound applies to the trimmed value"). #642 changed
+// the counting UNIT, not which string is counted, and reordering the bound
+// ahead of `.trim()` would NARROW what the server accepts — the opposite
+// direction from this PR's announced widening, and unannounced.
+//
+// So this pins the semantics instead of changing them: each trimmed field
+// accepts an over-length-but-whitespace-padded value, each untrimmed field
+// does not, and both are asserted so a future reorder cannot flip either
+// silently without a test turning red.
+describe('trimmed bounds count the trimmed value, untrimmed bounds count the raw one (#642)', () => {
+  const padded = (codePoints: number): string => ' '.repeat(codePoints) + 'x';
+
+  it('currentVersion (trimmed) accepts whitespace padding beyond its published bound', () => {
+    const overRaw = padded(MAX_CURRENT_VERSION_LENGTH);
+    expect([...overRaw]).toHaveLength(MAX_CURRENT_VERSION_LENGTH + 1);
+    expect(
+      VerificationBodySchema.shape.currentVersion.safeParse(overRaw).success,
+      'a trimmed field stopped accepting whitespace-padded input — the bound moved ahead of ' +
+        '.trim(), narrowing what the server accepts; openapi.yaml documents the post-trim contract'
+    ).toBe(true);
+  });
+
+  it('title (trimmed) accepts whitespace padding beyond its published bound', () => {
+    const overRaw = padded(MAX_TITLE_LENGTH);
+    expect([...overRaw]).toHaveLength(MAX_TITLE_LENGTH + 1);
+    expect(VerificationBodySchema.shape.title.safeParse(overRaw).success).toBe(true);
+  });
+
+  it('notes (NOT trimmed) rejects one code point over, padding or not', () => {
+    expect(
+      VerificationBodySchema.shape.notes.safeParse(padded(MAX_NOTES_LENGTH)).success,
+      'notes has no .trim(), so its bound counts the raw value — whitespace must not buy extra room'
+    ).toBe(false);
   });
 });
 

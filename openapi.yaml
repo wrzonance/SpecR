@@ -10799,7 +10799,10 @@ components:
           type: [string, 'null']
           minLength: 1
           maxLength: 200
-          description: 'Bounded in Unicode code points.'
+          description: >
+            Bounded in Unicode code points. Leading/trailing whitespace is
+            trimmed before validation, so the bound applies to the trimmed
+            value (same contract as ActorLabel).
         sourceUrl:
           type: [string, 'null']
           format: uri
@@ -10809,7 +10812,10 @@ components:
           type: [string, 'null']
           minLength: 1
           maxLength: 500
-          description: 'Bounded in Unicode code points.'
+          description: >
+            Bounded in Unicode code points. Leading/trailing whitespace is
+            trimmed before validation, so the bound applies to the trimmed
+            value (same contract as ActorLabel).
         notes:
           type: [string, 'null']
           maxLength: 5000
