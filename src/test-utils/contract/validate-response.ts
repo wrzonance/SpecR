@@ -48,6 +48,17 @@ const ResponseObject = z.object({
 const OperationObject = z.object({
   responses: z.record(z.string(), ResponseObject).optional(),
 });
+// Raw (possibly `$ref`'d — e.g. `#/components/responses/BadRequest`) response entries, resolved
+// one at a time via {@link resolveIfRef} in successJsonOps() before parsing into ResponseObject.
+// OperationObject above parses every response through ResponseObject up front, which strips a
+// `$ref` key immediately (ResponseObject has no `$ref` field) — successJsonOps needs the pointer
+// to survive long enough to resolve it, so it narrows through this raw shape instead (#649: no 2xx
+// response in today's openapi.yaml is `$ref`'d this way, only 4xx/5xx are, but bundling leaves the
+// door open and a silently-dropped 2xx op would make the response-covered/allowlist sweep pass
+// vacuously for it).
+const RawOperationObject = z.object({
+  responses: z.record(z.string(), z.unknown()).optional(),
+});
 
 // Request-body schema, narrowed only to the shape operationParamKeys() reads: either a direct
 // `properties` map, or (for the request bodies that are a top-level `$ref` to a component, or
@@ -299,10 +310,12 @@ export function operationPathTemplates(doc: OpenApiDoc): ReadonlyMap<string, str
 export function successJsonOps(doc: OpenApiDoc): string[] {
   const out: string[] = [];
   for (const { method, path, raw } of eachOperation(doc)) {
-    const op = OperationObject.parse(raw);
-    const has2xxJson = Object.entries(op.responses ?? {}).some(
-      ([status, r]) => status.startsWith('2') && r.content?.['application/json'] !== undefined
-    );
+    const op = RawOperationObject.parse(raw);
+    const has2xxJson = Object.entries(op.responses ?? {}).some(([status, rawResponse]) => {
+      if (!status.startsWith('2')) return false;
+      const response = ResponseObject.parse(resolveIfRef(doc, rawResponse));
+      return response.content?.['application/json'] !== undefined;
+    });
     if (has2xxJson) out.push(`${method} ${normalizePath(path)}`);
   }
   return out;

@@ -17,6 +17,15 @@ import { MAX_LITERAL_TERM_LENGTH } from '../ast/index.js';
 // MCP is registered separately (not on `router`); exclude defensively.
 const EXCLUDE = new Set(['post /mcp', 'get /mcp', 'delete /mcp']);
 
+// #649: a splice at the top level of `data` alone doesn't prove INV-6 reaches every nesting depth a
+// SpecNode response can carry — its own `children: SpecNode[]` is self-referential. Each of the
+// four direct-SpecNode-response ops below returns a fixture paragraph with an empty `children`
+// array, so this synthesizes one leaf child (otherwise-valid) carrying the undocumented key, to
+// prove assertResponseExact's recursive mirror walk reaches into it rather than stopping at `data`.
+function rogueChild(id: string): Record<string, unknown> {
+  return { id, type: 'pr1', text: 'nested', children: [], meta: {}, rogueKey: 'nope' };
+}
+
 // Response bodies asserted in this file.
 const RESPONSE_COVERED = new Set([
   'delete /projects/{}/revision-nomenclature',
@@ -660,6 +669,14 @@ describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D
         data: { ...editBody.data, rogueKey: 'nope' },
       })
     ).rejects.toThrow(/does not document/);
+    // #649: the same undocumented key, nested one level down inside `data.children` — proves the
+    // rejection isn't limited to the top level of this self-referential SpecNode response.
+    await expect(
+      assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}', 200, {
+        ...editBody,
+        data: { ...editBody.data, children: [rogueChild(paragraphId)] },
+      })
+    ).rejects.toThrow(/does not document/);
 
     // 4. The spec pending-summary reflects exactly that one pending paragraph.
     const specPending = await fetch(`${baseUrl}/specs/${specId}/pending-summary`);
@@ -725,6 +742,13 @@ describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D
         data: { ...(rejectBody.data as object), rogueKey: 'nope' },
       })
     ).rejects.toThrow(/does not document/);
+    // #649: nested one level down inside `data.children` — see rogueChild's comment above.
+    await expect(
+      assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}/reject', 200, {
+        ...rejectBody,
+        data: { ...(rejectBody.data as object), children: [rogueChild(paragraphId)] },
+      })
+    ).rejects.toThrow(/does not document/);
 
     // 8. GET /specs/{id} returns the full SpecTree — matches its documented schema exactly, and
     //    rejects a spliced undocumented key both at the top level (the data wrapper) and nested two
@@ -779,6 +803,13 @@ describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D
         data: { ...insertedBody.data, rogueKey: 'nope' },
       })
     ).rejects.toThrow(/does not document/);
+    // #649: nested one level down inside `data.children` — see rogueChild's comment above.
+    await expect(
+      assertResponseExact('post', '/specs/{id}/paragraphs', 201, {
+        ...insertedBody,
+        data: { ...insertedBody.data, children: [rogueChild(insertedBody.data.id)] },
+      })
+    ).rejects.toThrow(/does not document/);
     const insertedNodeId = insertedBody.data.id;
 
     // 10. PATCH .../paragraphs/{nodeId}/removal toggles the just-inserted paragraph's `vanish`
@@ -799,6 +830,13 @@ describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D
       assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}/removal', 200, {
         ...removalBody,
         data: { ...removalBody.data, rogueKey: 'nope' },
+      })
+    ).rejects.toThrow(/does not document/);
+    // #649: nested one level down inside `data.children` — see rogueChild's comment above.
+    await expect(
+      assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}/removal', 200, {
+        ...removalBody,
+        data: { ...removalBody.data, children: [rogueChild(insertedNodeId)] },
       })
     ).rejects.toThrow(/does not document/);
   });

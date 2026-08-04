@@ -540,6 +540,47 @@ describe('resolveResponseSchema vacuity guards (#640)', () => {
   });
 });
 
+// #649: loadSpec() switched from $RefParser.dereference to .bundle, which leaves every `$ref` —
+// including a 2xx RESPONSE OBJECT itself, not just schema fields inside it — as a literal
+// `{ $ref }` pointer instead of an inlined object. successJsonOps() feeds the "every success-JSON
+// operation is response-covered or explicitly allowlisted" sweep (contract.integration.test.ts):
+// an operation successJsonOps silently fails to count never appears in EITHER RESPONSE_COVERED or
+// the "uncovered" failure list, so the sweep passes vacuously for it — exactly the failure mode
+// #640's fail-loud guards elsewhere in this file exist to prevent. No operation in today's
+// openapi.yaml documents a 2xx response as a bare `$ref` to `components/responses/*` (only 4xx/5xx
+// do), so this is pinned against a synthetic doc, matching the vacuity-guard pattern above.
+describe('successJsonOps — sweep vacuity under a $ref-pointer 2xx response (#649)', () => {
+  it('still counts a 2xx response that is itself a $ref to components/responses/*, not silently dropped by the bundle switch', () => {
+    const doc: OpenApiDoc = {
+      paths: {
+        '/synthetic': {
+          get: { responses: { '200': { $ref: '#/components/responses/Ok' } } },
+        },
+      },
+      components: {
+        responses: {
+          Ok: { content: { 'application/json': { schema: { type: 'object' } } } },
+        },
+      },
+    };
+    expect(successJsonOps(doc)).toContain('get /synthetic');
+  });
+
+  it('still excludes a $ref-pointer 2xx response with no application/json content', () => {
+    const doc: OpenApiDoc = {
+      paths: {
+        '/synthetic': {
+          get: { responses: { '200': { $ref: '#/components/responses/NoContent' } } },
+        },
+      },
+      components: {
+        responses: { NoContent: {} },
+      },
+    };
+    expect(successJsonOps(doc)).not.toContain('get /synthetic');
+  });
+});
+
 // operationParamKeys() feeds INV-4; anything it silently under-reports becomes an INV-4 check that
 // passes vacuously. Synthetic docs (no such op exists in openapi.yaml yet) pin the two ways that
 // could happen: a body carrying BOTH a base `properties` map and `oneOf` branches, and a body
