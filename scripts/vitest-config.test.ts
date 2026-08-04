@@ -71,4 +71,14 @@ describe('vitest.config.ts integration project', () => {
       fileParallelism: false,
     });
   });
+
+  // Pins the #638 fix: without this assertion, deleting the globalSetup
+  // entry (the entire cross-invocation advisory-lock mechanism, ADR-090)
+  // from vitest.config.ts left every other assertion in this describe block
+  // green.
+  it('registers the ADR-090 advisory-lock globalSetup hook (#638)', () => {
+    expect(integrationProject.test?.globalSetup).toEqual([
+      './src/test-utils/integration-lock.global-setup.ts',
+    ]);
+  });
 });

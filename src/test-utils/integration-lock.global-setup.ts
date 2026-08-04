@@ -54,6 +54,10 @@ export default async function setup(): Promise<() => Promise<void>> {
   }
 
   return async function teardown(): Promise<void> {
+    // Best-effort unlock: a failure here (e.g. the connection already
+    // dropped) must never propagate past teardown (ADR-090) — the process is
+    // exiting either way, and a dropped session-scoped advisory lock is
+    // released by Postgres automatically when its owning connection closes.
     try {
       const result = await client.query<{ pg_advisory_unlock: boolean }>(
         'SELECT pg_advisory_unlock($1)',
@@ -63,8 +67,20 @@ export default async function setup(): Promise<() => Promise<void>> {
         { unlocked: result.rows[0]?.pg_advisory_unlock ?? false },
         'integration-lock: released'
       );
+    } catch (err) {
+      logger.error(
+        { err },
+        'integration-lock: pg_advisory_unlock query failed; the lock is released implicitly when the connection below closes'
+      );
     } finally {
-      await client.end();
+      // Unconditional, and itself never allowed to throw past this function
+      // — the same invariant applies to closing the connection as to the
+      // unlock query above.
+      try {
+        await client.end();
+      } catch (err) {
+        logger.error({ err }, 'integration-lock: client.end() failed during teardown');
+      }
     }
   };
 }

@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { pool } from '../index.js';
 import {
@@ -32,7 +30,14 @@ const suffix = randomUUID().slice(0, 8);
 // for this sweep to collide with. Both call sites below stay unchanged
 // (byte-identical to the #629 source-text pin below) precisely because the
 // fix is structural (the lock), not a rewrite of this function's body.
+// Incremented on every call so the wiring test below can observe, from
+// behaviour rather than source text, whether beforeAll actually ran — see
+// that test for why this is the only way to pin the #623 registration
+// without a nested runner.
+let clearReservedNamespacesCallCount = 0;
+
 async function clearReservedNamespaces(): Promise<void> {
+  clearReservedNamespacesCallCount += 1;
   await pool.query(`DELETE FROM specs WHERE section LIKE '99 77 %'`);
   await pool.query(`DELETE FROM projects WHERE name = 'lib-xor-test-project'`);
   await pool.query(`DELETE FROM libraries WHERE name NOT IN ($1, $2)`, [
@@ -46,6 +51,22 @@ async function clearReservedNamespaces(): Promise<void> {
 // test's teardown — so a filtered run (`-t`) starts as clean as a full one.
 beforeAll(clearReservedNamespaces);
 afterEach(clearReservedNamespaces);
+
+// #623: proves the sweep is wired into beforeAll — not just afterEach — by
+// observing actual hook execution instead of pinning source text with a
+// regex (which stays green even if the `beforeAll(clearReservedNamespaces)`
+// call above is deleted or commented out, since the string it searches for
+// is still present elsewhere in the file). This MUST be the first `it` Vitest
+// executes in this file: by the time it runs, beforeAll has already fired
+// exactly once (Vitest blocks test collection/execution on it) and no
+// afterEach can have fired yet, because no test has completed. A call count
+// of exactly 1 at that point can only have come from the beforeAll
+// registration — if it's ever deleted, the count is 0 and this test fails.
+describe('reserved-namespace sweep wiring (#623)', () => {
+  it('libraries: the reserved-namespace sweep has run exactly once before the first test body executes', () => {
+    expect(clearReservedNamespacesCallCount).toBe(1);
+  });
+});
 
 describe('migration 016 — backfill and built-ins', () => {
   it('db: no spec is ownerless after backfill', async () => {
@@ -232,21 +253,5 @@ describe('#623 regression — residue from a prior run is swept before the first
     // The sweep must not take the built-ins with it.
     expect(await findLibraryByName(UFGS_REFERENCE_LIBRARY)).not.toBeNull();
     expect(await findLibraryByName(DEFAULT_COMPANY_LIBRARY)).not.toBeNull();
-  });
-
-  // The test above proves the sweep is correct, but it calls the helper
-  // directly — so it would still pass if the beforeAll registration were
-  // deleted, which is the actual fix for #623. By the time any test in this
-  // file executes, beforeAll has already run, so the pre-sweep state is not
-  // observable from inside the suite and the wiring cannot be asserted
-  // behaviourally without a nested runner. Pin it at the source instead, the
-  // same way src/mcp/tool-schema-introspect.test.ts pins its own invariants.
-  it('libraries: the reserved-namespace sweep is registered on beforeAll, not only afterEach', () => {
-    const source = readFileSync(
-      fileURLToPath(new URL('./libraries.integration.test.ts', import.meta.url)),
-      'utf8'
-    );
-    expect(source).toMatch(/beforeAll\(\s*clearReservedNamespaces\s*\)/);
-    expect(source).toMatch(/afterEach\(\s*clearReservedNamespaces\s*\)/);
   });
 });
