@@ -12,6 +12,18 @@ import type { ObjectBlobNode } from '../ast/index.js';
 // second copy here would reintroduce the exact capture/rewrite drift
 // ADR-092 closed. Reached through the parser's own barrel (parser/index.ts),
 // per the repo's sibling-barrel-only import rule.
+//
+// The barrel does transitively load parser/pdf/index.ts's static pdfjs-dist /
+// unpdf / tesseract.js imports (~+370ms, ~+290MB RSS on a cold graph), so this
+// line was reviewed as a possible cold-start regression and deliberately kept:
+// every production path that reaches merge/ ALREADY loads parser/index.js in
+// the same file — src/api/diff.ts imports assertDocxSafe one line above its
+// ../merge/index.js import, as does src/mcp/handlers.ts — and no merge-only
+// worker, script, or CLI exists. Net production cost is therefore zero; the
+// only module graph that grows is merge/extract.test.ts (31 tests, ~1.4s).
+// Deep-importing ../parser/docx/body-objects.js instead would trade that zero
+// for a strictly deeper violation of the same module-boundaries.md rule, and
+// relocating hasRunVanish is what ADR-092 exists to prevent.
 import { hasRunVanish } from '../parser/index.js';
 
 // preserveOrder keeps w:sdt blocks and bare w:p siblings in document order —
