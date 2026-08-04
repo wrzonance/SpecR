@@ -50,6 +50,12 @@ const CHILD_SINGLES = [
   'contains',
   'additionalProperties',
   'unevaluatedProperties',
+  // `unevaluatedItems` applies to array items no other array keyword evaluated (2020-12
+  // Unevaluated vocabulary), so it is a CHILD applicator like `items`/`contains` — an object
+  // subschema under it evaluates properties and must be marked. Unreachable through today's
+  // openapi.yaml (zero occurrences), but this list is the walker's definition of "every place a
+  // subschema can hide"; omitting one keyword is how the hole this module closes reopens.
+  'unevaluatedItems',
 ] as const;
 
 /** Maps each visited node's ORIGINAL object identity to the (up to two) clones already computed for
@@ -128,8 +134,11 @@ function shouldMark(schema: Record<string, unknown>, inPlace: boolean): boolean 
   return evaluatesProperties(schema);
 }
 
-function mark(node: unknown, seen: SeenContexts, inPlace: boolean): unknown {
-  if (!isPlainObject(node)) return node;
+function markObject(
+  node: Record<string, unknown>,
+  seen: SeenContexts,
+  inPlace: boolean
+): Record<string, unknown> {
   const contexts = seen.get(node);
   const cached = contexts?.get(inPlace);
   // Same original node, same context: either a true cycle (dereferenced schemas can be
@@ -155,6 +164,13 @@ function mark(node: unknown, seen: SeenContexts, inPlace: boolean): unknown {
  * properties at its own instance location (see the applicator classification above). Never mutates
  * its input — the returned tree is always a fresh clone, safe to compile through an uncached ajv
  * instance without corrupting any other reader of the original schema object. */
+function mark(node: unknown, seen: SeenContexts, inPlace: boolean): unknown {
+  return isPlainObject(node) ? markObject(node, seen, inPlace) : node;
+}
+
 export function markUnevaluatedPropertiesFalse(schema: AnySchemaObject): AnySchemaObject {
-  return mark(structuredClone(schema), new Map(), false) as AnySchemaObject;
+  // No assertion at this boundary (CLAUDE.md): `markObject` is typed to return an object, and
+  // `AnySchemaObject` is structurally a `Record<string, unknown>`, so the return type is proven
+  // by the signature rather than asserted over an `unknown`.
+  return markObject(structuredClone(schema), new Map(), false);
 }

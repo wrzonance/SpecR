@@ -61,8 +61,13 @@ and separately-audited universe) is unchanged and still uses `assertResponse`.
 `assertResponseExact`:
 
 - Shares op/status/schema lookup with `assertResponse` via an extracted
-  `resolveResponseSchema` helper (no behavior change to `assertResponse` or
-  INV-5's call site).
+  `resolveResponseSchema` helper. Every currently documented response shape
+  behaves exactly as before at INV-5's call sites; the extraction does add
+  two fail-loud paths `assertResponse` did not previously have (an
+  undocumented status, and an `application/json` response carrying no
+  schema), both described under "Vacuity guards" below. Neither is reachable
+  through today's openapi.yaml — which is why they are pinned against a
+  synthetic document rather than the real spec.
 - `structuredClone`s the resolved response schema (cycle-safe for the
   self-referential shapes some dereferenced components can have) and walks
   it (`src/test-utils/contract/unevaluated-properties.ts`), injecting

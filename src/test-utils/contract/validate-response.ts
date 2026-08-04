@@ -182,9 +182,17 @@ export async function assertResponseExact(
   const exactSchema = markUnevaluatedPropertiesFalse(schema);
   const validate = ajv.compile(exactSchema);
   if (!validate(body)) {
+    // The exact schema still enforces `required` and field types, so a failure here is not
+    // necessarily an undocumented key. Report the key-specific message only when ajv actually
+    // says so; otherwise a missing required field would be misdiagnosed as an extra one.
+    const extraKey = validate.errors?.some((e) => e.keyword === 'unevaluatedProperties');
+    const detail = ajv.errorsText(validate.errors);
     throw new Error(
-      `Response body for ${method} ${pathTemplate} (${status}) carries keys openapi.yaml does ` +
-        `not document: ${ajv.errorsText(validate.errors)}`
+      extraKey
+        ? `Response body for ${method} ${pathTemplate} (${status}) carries keys openapi.yaml does ` +
+            `not document: ${detail}`
+        : `Response body for ${method} ${pathTemplate} (${status}) does not match its documented ` +
+            `response schema exactly: ${detail}`
     );
   }
 }

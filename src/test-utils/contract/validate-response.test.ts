@@ -288,6 +288,36 @@ describe('markUnevaluatedPropertiesFalse — JSON-Schema 2020-12 applicator cove
       extra: [{ a: 'x', rogue: 1 }],
     },
     {
+      // CodeRabbit #645: `unevaluatedItems` is the 2020-12 Unevaluated-vocabulary sibling of
+      // `items`/`contains` — an object subschema under it evaluates properties, so omitting it
+      // from the walker let an undocumented key inside an array item pass the exact gate.
+      keyword: 'unevaluatedItems (schema-valued)',
+      schema: {
+        type: 'array',
+        prefixItems: [{ type: 'string' }],
+        unevaluatedItems: { type: 'object', properties: { a: { type: 'string' } } },
+      },
+      valid: ['head', { a: 'x' }],
+      extra: ['head', { a: 'x', rogue: 1 }],
+    },
+    {
+      // CodeRabbit #645: the walker already treated `dependentSchemas` as an in-place applicator
+      // and `evaluatesProperties` already counted it, but nothing exercised that traversal —
+      // an untested branch is indistinguishable from a missing one.
+      keyword: 'dependentSchemas',
+      schema: {
+        type: 'object',
+        properties: { trigger: { type: 'string' } },
+        dependentSchemas: {
+          trigger: {
+            properties: { nested: { type: 'object', properties: { a: { type: 'string' } } } },
+          },
+        },
+      },
+      valid: { trigger: 't', nested: { a: 'x' } },
+      extra: { trigger: 't', nested: { a: 'x', rogue: 1 } },
+    },
+    {
       keyword: 'if/then',
       schema: {
         type: 'object',
