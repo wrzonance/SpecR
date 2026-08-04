@@ -136,23 +136,21 @@ falsy `w:val` as "off", and regression tests pin the SURVIVAL direction
 (text with `w:val="0"` must come through) alongside the ON direction
 (`w:val="1"` and a bare `<w:vanish/>` must still suppress).
 
-**Scope limit — CLOSED by ADR-094 (#650), left here for the historical
-record.** As originally shipped, `hasRunVanish` did not resolve a
-character-style-referenced vanish (`w:rStyle` pointing at a style whose own
-`rPr` carries `w:vanish` — `document.ts`'s `runIsVanish` already resolved
-this via a `vanishCharStyleIds` set built from a `StyleMap`).
-`extractBodyObjects` received a `StyleMap`, but it was not threaded down
-through `anchorInteriorParagraphs` to this leaf-level walk. The gap was
-measured, not assumed, at the time: no fixture in the 39-file DOCX corpus
-referenced a vanish character style via `w:rStyle` (0 files) — production-
-reachable (trivial for a Word user to define) but corpus-unreachable — and
-it erred toward UNDER-suppression (a visible leak, detectable by a test),
-never toward the silent data loss the toggle bug above would have caused.
-ADR-094 closes it by persisting the resolved `vanishCharStyleIds` set
-alongside each captured object, so `hasRunVanish` resolves both signals in
-both capture and the edit-rewrite walk without needing `styles.xml` at
-rewrite time. Read ADR-094 for the current behaviour; this paragraph is not
-current documentation.
+**Scope limit, recorded rather than silently narrowed:** `hasRunVanish` does
+not resolve a character-style-referenced vanish (`w:rStyle` pointing at a
+style whose own `rPr` carries `w:vanish` — `document.ts`'s `runIsVanish`
+does this via a `vanishCharStyleIds` set built from a `StyleMap`).
+`extractBodyObjects` does receive a `StyleMap`, but it is not currently
+threaded down through `anchorInteriorParagraphs` to this leaf-level walk.
+The residual gap was measured, not assumed: no fixture in the 39-file DOCX
+corpus references a vanish character style via `w:rStyle` (0 files). It errs
+toward UNDER-suppression — a visible leak, detectable by a test — never
+toward the silent data loss the toggle bug above would have caused. If
+full-corpus revalidation ever
+surfaces a leak traceable to one of these narrower cases, it is a new,
+separately-triaged defect — not evidence this ADR silently under-scoped
+`hasRunVanish`; the full corpus (705 fixtures, `pnpm fixture:diff`) showed no
+such case at the time of this fix (see Consequences).
 
 **2. `body-objects.ts` gets NO rule-row/`isRuleRow` suppression branch —
 object-captured interior text stays verbatim, exactly as ADR-072 decision 14
@@ -240,12 +238,12 @@ desynchronizes from it. Two such walks exist, and they land differently:
   unverified against real-world documents beyond the hand-built regression
   fixtures in `body-objects.test.ts` — expected, logged here rather than
   silently assumed identical.
-- `hasRunVanish` honours `w:vanish` as an ST_OnOff toggle; the `w:rStyle`
-  character-style scope limit recorded here (decision 1) under-suppressed
-  rather than over-suppressed, so its failure mode was a detectable leak, not
-  invisible data loss — and it is now CLOSED, not merely documented: ADR-094
-  (#650) persists the resolved `vanishCharStyleIds` set on the captured
-  object so `hasRunVanish` resolves both signals in both capture and rewrite.
+- `hasRunVanish` honours `w:vanish` as an ST_OnOff toggle; its one remaining
+  scope limit (no `w:rStyle` character-style resolution) is a documented
+  boundary, not a silent gap — see decision 1. That limit under-suppresses
+  rather than over-suppresses, so its failure mode is a detectable leak, not
+  invisible data loss. A future report of a leak traceable to it is new
+  evidence, not proof this ADR mis-scoped the fix.
 - No public/exported struct changed: `CapturedObjectText`, `CapturedBodyObject`,
   `ChildrenTransformResult`/`InteriorTransformResult`, and every `ObjectBlobNode`
   shape are byte-for-byte unchanged — this ADR only changes which text
