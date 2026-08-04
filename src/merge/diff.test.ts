@@ -121,6 +121,7 @@ describe('computeDiff', () => {
       added: [],
       modified: [],
       deleted: [],
+      deleteConflicts: [],
       conflicts: [],
       objectConflicts: [],
       warnings: [],
@@ -139,6 +140,23 @@ describe('computeDiff', () => {
     expect(result.conflicts).toEqual([]);
   });
 
+  it('deleteConflicts (#465) is always present on the returned DiffResult, empty until classifyBase routes into it', () => {
+    // Task 1/6: the bucket exists on the wire but nothing populates it yet —
+    // pins that computeDiff always returns the field (never omits/undefines
+    // it), across an ordinary delete, an ordinary modify, and an unchanged
+    // paragraph, so downstream Zod parsing/consumers never see it missing.
+    const result = computeDiff(
+      [snap(U1, 'kept'), snap(U2, 'removed'), snap('u3', 'base text')],
+      [snap(U1, 'kept'), snap(U2, 'removed'), snap('u3', 'base text')],
+      extract([
+        [U1, 'kept'],
+        ['u3', 'owner edit'],
+      ]),
+      []
+    );
+    expect(result.deleteConflicts).toEqual([]);
+  });
+
   it('theirs-deletes a paragraph ours edited since base → classified as a plain delete', () => {
     // KNOWN AMBIGUITY (#465): classifyBase checks "missing from theirs → deleted"
     // BEFORE consulting ours, so an owner delete of a paragraph the spec writer
@@ -152,6 +170,11 @@ describe('computeDiff', () => {
     expect(result.deleted).toEqual([U1]);
     expect(result.conflicts).toEqual([]);
     expect(result.modified).toEqual([]);
+    // #465: the deleteConflicts bucket exists on the wire (DiffResult/schema)
+    // but classifyBase does not yet route into it — this case still lands in
+    // `deleted` above, same as before. The reorder that actually moves it here
+    // is a follow-up change; this assertion pins today's placeholder behavior.
+    expect(result.deleteConflicts).toEqual([]);
   });
 
   it('paragraph absent from ours falls back to base text → theirs change is modified, not conflict', () => {
@@ -227,6 +250,7 @@ describe('computeDiff', () => {
       added: [],
       modified: [],
       deleted: [],
+      deleteConflicts: [],
       conflicts: [],
       objectConflicts: [],
       warnings: [],

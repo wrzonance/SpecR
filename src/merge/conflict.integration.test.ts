@@ -77,6 +77,7 @@ function diffWith(overrides: Partial<DiffResult>): DiffResult {
     added: [],
     modified: [],
     deleted: [],
+    deleteConflicts: [],
     conflicts: [],
     objectConflicts: [],
     warnings: [],

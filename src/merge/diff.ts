@@ -4,6 +4,7 @@ import type { ObjectStructuralSnapshot } from '../db/index.js';
 import { fingerprintBlob, fingerprintsDiverge } from './object-fingerprint.js';
 import type {
   ConflictDiff,
+  DeleteConflictDiff,
   DiffResult,
   ExtractedObjectBlock,
   ExtractResult,
@@ -20,6 +21,10 @@ export interface DiffOptions {
 interface BaseClassification {
   readonly modified: readonly ModifiedDiff[];
   readonly deleted: readonly string[];
+  // #465: always [] for now — classifyBase does not yet distinguish a plain
+  // delete from a delete/modify conflict; that reorder lands in a follow-up
+  // change. Wired through here so DiffResult's new required field compiles.
+  readonly deleteConflicts: readonly DeleteConflictDiff[];
   readonly conflicts: readonly ConflictDiff[];
 }
 
@@ -40,6 +45,9 @@ function classifyBase(
 ): BaseClassification {
   const modified: ModifiedDiff[] = [];
   const deleted: string[] = [];
+  // #465: reorder logic (checking ours before bucketing a theirs-absent base
+  // row) is a follow-up change — this array stays empty until then.
+  const deleteConflicts: DeleteConflictDiff[] = [];
   const conflicts: ConflictDiff[] = [];
 
   for (const { uuid, text: baseText } of base) {
@@ -56,7 +64,7 @@ function classifyBase(
     else modified.push(entry);
   }
 
-  return { modified, deleted, conflicts };
+  return { modified, deleted, deleteConflicts, conflicts };
 }
 
 function buildBaseUuids(base: readonly ParagraphSnapshot[]): ReadonlySet<string> {
@@ -202,7 +210,7 @@ export function computeDiff(
     theirs.controlled
   );
   const excludedUuids = buildExcludedUuids(objectSnapshots, objectConflicts);
-  const { modified, deleted, conflicts } = classifyBase(
+  const { modified, deleted, deleteConflicts, conflicts } = classifyBase(
     base,
     oursMap,
     theirs.controlled,
@@ -225,5 +233,5 @@ export function computeDiff(
     warnings.push(`document contained ${count} track-change ${phrase} as accepted`);
   }
 
-  return { added, modified, deleted, conflicts, objectConflicts, warnings };
+  return { added, modified, deleted, deleteConflicts, conflicts, objectConflicts, warnings };
 }
