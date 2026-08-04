@@ -199,6 +199,33 @@ function hostMarkHiddenTextBoxParagraph(interiorText: string): string {
   );
 }
 
+// #641 fixture builders: like textBoxParagraph/hostMarkHiddenTextBoxParagraph
+// above, but take arbitrary interior XML rather than a single plain-text
+// paragraph, so a text box's OWN interior paragraph can itself carry a
+// NESTED drawing run (a text box inside a text box).
+function textBoxHostParagraph(interiorXml: string): string {
+  return (
+    '<w:p><w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+    '<wps:wsp><wps:txbx><w:txbxContent>' +
+    interiorXml +
+    '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r></w:p>'
+  );
+}
+
+function hostMarkHiddenTextBoxHostParagraph(interiorXml: string): string {
+  return (
+    '<w:p><w:pPr><w:rPr><w:vanish/></w:rPr></w:pPr>' +
+    '<w:r><w:drawing><wp:inline><wp:extent cx="100" cy="100"/><wp:docPr id="1"/>' +
+    '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+    '<wps:wsp><wps:txbx><w:txbxContent>' +
+    interiorXml +
+    '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>' +
+    '</wp:inline></w:drawing></w:r></w:p>'
+  );
+}
+
 // Mirrors document.ts's own createDocumentXmlParser(['w:p','w:r','w:hyperlink'])
 // config, so this test feeds extractBodyObjects the SAME shape of rawParagraphs
 // index.ts (a later task) will thread in from document.ts's own parse.
@@ -281,6 +308,25 @@ function findTxbxContentNode(node: ObjectBlobNode): ObjectBlobNode | undefined {
     if (found) return found;
   }
   return undefined;
+}
+
+// #641: depth-first collection of EVERY `w:txbxContent`-tagged descendant of
+// `node`, in document order — UNLIKE findTxbxContentNode above (and unlike
+// body-text-box-visibility.ts's own production collectTxbxContentNodes),
+// this one keeps recursing INTO a found boundary's own children, so a
+// text-box-inside-a-text-box fixture yields BOTH the outer and the nested
+// boundary (outer first). Test-only: used to locate the SAME nested
+// w:txbxContent node in two independently-built trees for the byte-identity
+// round-trip assertion below.
+function collectAllTxbxContentNodes(node: ObjectBlobNode): ObjectBlobNode[] {
+  const tag = Object.keys(node).find((key) => key !== ':@');
+  const found: ObjectBlobNode[] = tag === 'w:txbxContent' ? [node] : [];
+  const value = tag ? node[tag] : undefined;
+  if (!Array.isArray(value)) return found;
+  for (const child of value as readonly ObjectBlobNode[]) {
+    found.push(...collectAllTxbxContentNodes(child));
+  }
+  return found;
 }
 
 describe('anchorInteriorParagraphs — hiddenSubtrees pass-through (#515 task 3)', () => {
@@ -855,5 +901,95 @@ describe('extractBodyObjects — table dimensions', () => {
     const result = extract(body);
     expect(result.tableObjects[0]?.object.columns).toBe(3);
     expect(result.tableObjects[0]?.object.rows).toBe(2);
+  });
+});
+
+describe('extractBodyObjects — #641 nested text box inside a text box (run-vanish text walk)', () => {
+  // The main #641 repro: one host paragraph carries a VISIBLE outer text box.
+  // That box's own interior paragraph mixes a visible run ('Outer visible')
+  // with a SECOND run holding a NESTED drawing whose own w:txbxContent
+  // interior paragraph carries a w:vanish run ('NESTED SECRET'). Before the
+  // fix, extractBlobText walked every w:t descendant of the outer interior
+  // paragraph regardless of depth or vanish, concatenating the nested
+  // secret into the SAME CapturedObjectText as the outer's own visible text
+  // (verified against unmodified body-objects.ts: interiorTexts === [{ text:
+  // 'Outer visibleNESTED SECRET' }]).
+  it('a visible outer text box exposes only its own text — a hidden run nested inside a NESTED text box never leaks in', () => {
+    const outerInterior =
+      '<w:p><w:r><w:t>Outer visible</w:t></w:r>' + hiddenTextBoxRun('NESTED SECRET') + '</w:p>';
+    const body = textBoxHostParagraph(outerInterior);
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['Outer visible']);
+    expect(object?.interiorTexts.map((t) => t.text).join('')).not.toContain('NESTED SECRET');
+  });
+
+  // Related, "likely same fix" case named in #641: the vanish run does NOT
+  // need to sit inside a nested text box at all — a single interior
+  // paragraph mixing one plain visible run and one w:rPr>w:vanish run (no
+  // nesting) leaked the vanish run's text the same way, via the same
+  // depth-unaware extractBlobText walk. One mechanism (collectText's
+  // per-w:r vanish skip) closes both shapes.
+  it('a single interior paragraph mixing one visible run and one vanish run (no nesting) excludes only the vanish run', () => {
+    const interior =
+      '<w:p><w:r><w:t>visible part </w:t></w:r>' +
+      '<w:r><w:rPr><w:vanish/></w:rPr><w:t>hidden part</w:t></w:r></w:p>';
+    const body = textBoxHostParagraph(interior);
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible part ']);
+  });
+
+  // Opposite pairing, pinning EXISTING (unchanged) behavior rather than
+  // exercising the new run-vanish walk: when the OUTER box itself is hidden
+  // (host paragraph mark vanish), the whole host paragraph is excluded by
+  // the pre-existing ADR-087 box-level mechanism before any interior text
+  // walk ever runs — so a VISIBLE text box nested inside the hidden outer
+  // box is never rescued into its own object. No object at all is produced,
+  // same as any other fully-hidden text box.
+  it('a hidden outer text box produces no object at all — a visible NESTED text box inside it is not rescued', () => {
+    const outerInterior =
+      '<w:p><w:r><w:t>Outer text</w:t></w:r>' + textBoxRun('nested visible text') + '</w:p>';
+    const body = hostMarkHiddenTextBoxHostParagraph(outerInterior);
+    const result = extract(body);
+
+    expect(result.paragraphObjects).toEqual([]);
+    expect(result.dropped).toEqual([]);
+  });
+
+  // Byte-identical round-trip (hard acceptance criterion): the nested
+  // w:txbxContent boundary's OOXML is never touched by the fix — only
+  // EXCLUDED from the text walk. Compares the SAME nested boundary's
+  // serialized bytes from two independently-built trees: (a) the raw
+  // preserveOrder blob computeBodyOrder produces BEFORE extraction ever
+  // runs, and (b) the captured object's blob AFTER extraction. Both go
+  // through the identical parser/builder pipeline, so exact string equality
+  // proves the nested subtree round-trips byte-for-byte — not merely that
+  // some substring survives.
+  it('round-trip byte-identity: the nested text box boundary serializes identically before and after extraction', () => {
+    const outerInterior =
+      '<w:p><w:r><w:t>Outer visible</w:t></w:r>' + hiddenTextBoxRun('NESTED SECRET') + '</w:p>';
+    const body = textBoxHostParagraph(outerInterior);
+    const xml = makeDocXml(body);
+
+    const preExtractionHostNode = computeBodyOrder(xml).paragraphBlobs[0]?.[0];
+    expect(preExtractionHostNode).toBeDefined();
+    const expectedNested = collectAllTxbxContentNodes(preExtractionHostNode as ObjectBlobNode)[1];
+    expect(expectedNested).toBeDefined();
+    const expectedBytes = createOrderedDocumentXmlBuilder().build([expectedNested]);
+
+    const result = extractBodyObjects(computeBodyOrder(xml), rawParagraphsOf(xml), EMPTY_STYLES);
+    const capturedHostNode = result.paragraphObjects[0]?.object.blob[0];
+    expect(capturedHostNode).toBeDefined();
+    const actualNested = collectAllTxbxContentNodes(capturedHostNode as ObjectBlobNode)[1];
+    expect(actualNested).toBeDefined();
+    const actualBytes = createOrderedDocumentXmlBuilder().build([actualNested]);
+
+    expect(actualBytes).toBe(expectedBytes);
+    expect(actualBytes).toContain('NESTED SECRET');
   });
 });

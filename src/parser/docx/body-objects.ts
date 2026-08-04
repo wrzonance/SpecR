@@ -141,19 +141,55 @@ function tableDimensions(tableNode: ObjectBlobNode): TableDimensions {
 
 // ─── interior paragraph text + SDT anchoring ────────────────────────────────
 
+// #641: presence-only w:rPr>w:vanish check on a run, blob-tree-side (mirrors
+// document.ts's paragraphMarkVanish presence-only convention, but on the
+// preserveOrder ObjectBlobNode shape rather than document.ts's grouped `raw`
+// tree — the two trees are structurally different and this module already
+// keeps its own self-contained tagOf/childrenOf/directChildrenByTag trio
+// rather than importing document.ts's, per the established per-module
+// pattern body-text-box-visibility.ts's own header documents). Deliberately
+// narrower than document.ts's runIsVanish: no w:val negation (an explicit
+// `w:vanish w:val="0"` — vanishingly rare, ADR-092 records this as a scope
+// limit) and no character-style-referenced vanish (w:rStyle resolution needs
+// a StyleMap, which this leaf-level blob-tree walk does not thread through).
+function hasRunVanish(node: ObjectBlobNode): boolean {
+  if (tagOf(node) !== 'w:r') return false;
+  const rPr = directChildrenByTag(node, 'w:rPr')[0];
+  if (!rPr) return false;
+  return directChildrenByTag(rPr, 'w:vanish').length > 0;
+}
+
+// w:t's sole text payload, or undefined for a text-less/malformed node —
+// split out of collectText below purely to keep that function's cognitive
+// complexity under the repo's eslint cap; no behavior of its own.
+function textOfWtNode(node: ObjectBlobNode): string | undefined {
+  const first = childrenOf(node)[0];
+  const text = first ? first['#text'] : undefined;
+  return typeof text === 'string' ? text : undefined;
+}
+
 // w:t is the ONLY text-bearing leaf a run ever carries (mirrors
 // document.ts's extractRunText); walking every descendant regardless of
 // wrapper (w:hyperlink, w:ins/w:del, w:sdt) reaches wrapped text the same
 // way document.ts's collectRuns does, with no per-wrapper special-casing.
+//
+// #641: a w:r flagged hasRunVanish is skipped entirely — no text pushed, no
+// descent into its subtree. This walk already passes transparently through
+// nested w:txbxContent boundaries (body-text-box-visibility.ts deliberately
+// treats a nested text box's interior as opaque and never adds it to
+// hiddenSubtrees — see ADR-092), so this single run-level check is what
+// keeps a hidden run's text from leaking into an ancestor interior
+// paragraph's captured text, whether that run sits directly in the
+// paragraph or several levels down inside a nested text box's own interior.
 function collectText(children: readonly ObjectBlobNode[], acc: string[]): void {
   for (const child of children) {
     const tag = tagOf(child);
     if (tag === 'w:t') {
-      const first = childrenOf(child)[0];
-      const text = first ? first['#text'] : undefined;
-      if (typeof text === 'string') acc.push(text);
+      const text = textOfWtNode(child);
+      if (text !== undefined) acc.push(text);
       continue;
     }
+    if (tag === 'w:r' && hasRunVanish(child)) continue;
     collectText(childrenOf(child), acc);
   }
 }
