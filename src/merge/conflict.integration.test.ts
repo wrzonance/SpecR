@@ -669,9 +669,13 @@ describe('applyAccepted — delete-conflict apply (#465)', () => {
     expect(row.exists).toBe(true);
     expect(row.vanish).toBe(true);
     expect(row.baseVersion).toBe(2);
-    expect(await paragraphVersions(pr1Id)).toEqual([
-      { text: PR1_TEXT, nodeType: 'pr1', version: 2 },
-    ]);
+    const rows = await historyRowsFor(pr1Id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ text: PR1_TEXT, nodeType: 'pr1', version: 2 });
+    // The payload is untagged by origin — a delete-conflict accept writes the
+    // SAME { kind: 'merge', diffKind: 'deleted' } as a plain diff.deleted
+    // accept below, never a distinct 'delete-conflict'/'deleteConflict' tag.
+    expect(rows[0]?.payload).toEqual({ kind: 'merge', diffKind: 'deleted' });
   });
 
   it('accepting a delete-conflict whose ours no longer matches the current row throws a bare MergeError and makes no write', async () => {
@@ -708,6 +712,12 @@ describe('applyAccepted — delete-conflict apply (#465)', () => {
     expect(result).toEqual({ applied: 2, rejected: 0 });
     expect((await paragraphRow(pr1Id)).vanish).toBe(true);
     expect((await paragraphRow(pr1SecondId)).vanish).toBe(true);
+    // Both the plain deleted entry and the delete-conflict entry write the
+    // identical payload — the two origins are indistinguishable in history.
+    const plainDeletedRows = await historyRowsFor(pr1Id);
+    expect(plainDeletedRows[0]?.payload).toEqual({ kind: 'merge', diffKind: 'deleted' });
+    const deleteConflictRows = await historyRowsFor(pr1SecondId);
+    expect(deleteConflictRows[0]?.payload).toEqual({ kind: 'merge', diffKind: 'deleted' });
   });
 });
 
