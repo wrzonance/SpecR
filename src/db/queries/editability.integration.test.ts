@@ -9,6 +9,7 @@ import {
   clearEditabilityOverride,
 } from './editability.js';
 import type { ClassifyResult } from '../../conventions/index.js';
+import { deleteCapturedFixtures } from '../../test-utils/integration-fixture-cleanup.js';
 
 const PR1_ID = '20000000-0000-0000-0000-000000000003';
 const PART_ID = '20000000-0000-0000-0000-000000000001';
@@ -85,13 +86,20 @@ async function readPr1(specId: string) {
 
 describe('editability storage (O-7 / #134)', () => {
   let specId: string;
+  // Every spec this describe block creates, id-scoped so afterEach only ever
+  // deletes rows THIS test inserted — never a concurrent invocation's (#638,
+  // ADR-090). Previously a `WHERE section LIKE '99 00 0%'` pattern delete,
+  // which would also match (and destroy) another live run's fixtures.
+  let createdSpecIds: string[];
 
   beforeEach(async () => {
+    createdSpecIds = [];
     specId = await seedSpec('99 00 01', { part: PART_ID, article: ARTICLE_ID, pr1: PR1_ID });
+    createdSpecIds.push(specId);
   });
 
   afterEach(async () => {
-    await pool.query("DELETE FROM specs WHERE section LIKE '99 00 0%'");
+    await deleteCapturedFixtures(pool, { specIds: createdSpecIds });
   });
 
   it('round-trip: store classification → getSpecTree reads back identical', async () => {
@@ -157,6 +165,7 @@ describe('editability storage (O-7 / #134)', () => {
       article: SIB_ARTICLE_ID,
       pr1: SIB_PR1_ID,
     });
+    createdSpecIds.push(siblingId);
 
     await storeClassifications(siblingId, FIRST); // FIRST.nodeId === PR1_ID (specId's node)
 

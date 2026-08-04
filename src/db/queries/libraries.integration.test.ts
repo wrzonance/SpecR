@@ -21,6 +21,17 @@ const suffix = randomUUID().slice(0, 8);
 // Namespaces reserved by this file: '99 77 %' spec sections, project
 // 'lib-xor-test-project', and every non-built-in library row.
 // Cleanup order is FK-safe: specs → projects → libraries.
+//
+// This blanket, name-agnostic sweep looks unsafe against a CONCURRENT
+// `pnpm test:integration` invocation on the same DATABASE_URL — and used to
+// be (#638): it would delete another live invocation's fixtures regardless
+// of how they're named. It is safe now: the `integration` project's
+// globalSetup (src/test-utils/integration-lock.global-setup.ts, ADR-090)
+// holds a session advisory lock for the whole run, so at most one invocation
+// ever touches a given database at a time — there is no concurrent run left
+// for this sweep to collide with. Both call sites below stay unchanged
+// (byte-identical to the #629 source-text pin below) precisely because the
+// fix is structural (the lock), not a rewrite of this function's body.
 async function clearReservedNamespaces(): Promise<void> {
   await pool.query(`DELETE FROM specs WHERE section LIKE '99 77 %'`);
   await pool.query(`DELETE FROM projects WHERE name = 'lib-xor-test-project'`);
