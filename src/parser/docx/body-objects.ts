@@ -162,21 +162,24 @@ function isOnOffEnabled(node: ObjectBlobNode): boolean {
   return val !== '0' && val !== 'false' && val !== 'off';
 }
 
-// #641: w:rPr>w:vanish check on a run, blob-tree-side — on the preserveOrder
-// ObjectBlobNode shape rather than document.ts's grouped `raw` tree. The two
-// trees are structurally different, and this module already keeps its own
-// self-contained tagOf/childrenOf/directChildrenByTag trio rather than
-// importing document.ts's, per the established per-module pattern
-// body-text-box-visibility.ts's own header documents.
+// #641/#650: w:rPr>w:vanish check on a run, blob-tree-side — on the
+// preserveOrder ObjectBlobNode shape rather than document.ts's grouped `raw`
+// tree. The two trees are structurally different, and this module already
+// keeps its own self-contained tagOf/childrenOf/directChildrenByTag trio
+// rather than importing document.ts's, per the established per-module
+// pattern body-text-box-visibility.ts's own header documents.
 //
-// Narrower than document.ts's runIsVanish in ONE respect: no
-// character-style-referenced vanish (a `w:rStyle` pointing at a character
-// style that itself carries w:vanish). Resolving that needs the StyleMap's
-// `vanishCharStyleIds`, which extractBodyObjects receives but does not
-// currently thread down to this leaf-level walk; ADR-092 records it as a
-// known scope limit, and no fixture in the 39-file DOCX corpus uses that
-// shape (0 files reference a vanish character style via w:rStyle). That
-// residual gap under-suppresses (a visible leak), never over-suppresses.
+// Straight OR port of document.ts's own `runIsVanish`: a run is hidden if
+// EITHER its own `w:rPr>w:vanish` is an enabled ST_OnOff toggle, OR its
+// `w:rPr>w:rStyle` names a character style present in the caller's
+// `vanishCharStyleIds` (the StyleMap's resolved set of character styles that
+// themselves carry an enabled `w:vanish`). No special-casing between the two
+// signals — a resolved-off direct `<w:vanish w:val="0"/>` does not override a
+// matching rStyle, mirroring document.ts's own behaviour exactly (#650).
+// `vanishCharStyleIds` defaults to an empty set so every pre-existing
+// single-argument call site (collectText below, object-blob-edit.ts's
+// rewriteFirstText, and #648's extract.ts) keeps compiling and behaving
+// byte-for-byte unchanged.
 //
 // EXPORTED so object-blob-edit.ts's `rewriteFirstText` applies the SAME rule
 // when it writes an edit back. That walk's stated contract is to reach text
@@ -184,11 +187,25 @@ function isOnOffEnabled(node: ObjectBlobNode): boolean {
 // a second, drifting copy of this predicate there would place edits into
 // hidden runs and blank the visible ones. One definition, both directions
 // (ADR-092).
-export function hasRunVanish(node: ObjectBlobNode): boolean {
+export function hasRunVanish(
+  node: ObjectBlobNode,
+  vanishCharStyleIds: ReadonlySet<string> = new Set()
+): boolean {
   if (tagOf(node) !== 'w:r') return false;
   const rPr = directChildrenByTag(node, 'w:rPr')[0];
   if (!rPr) return false;
-  return directChildrenByTag(rPr, 'w:vanish').some(isOnOffEnabled);
+  return resolveRunVanish(rPr, vanishCharStyleIds);
+}
+
+// The two OR'd vanish signals, split out of hasRunVanish purely to keep that
+// function's cognitive complexity low — no behavior of its own. `getAttrVal`
+// applied to the w:rStyle node's own `:@` attrs mirrors isOnOffEnabled's
+// identical read of a w:vanish node's `:@` below.
+function resolveRunVanish(rPr: ObjectBlobNode, vanishCharStyleIds: ReadonlySet<string>): boolean {
+  if (directChildrenByTag(rPr, 'w:vanish').some(isOnOffEnabled)) return true;
+  const rStyleNode = directChildrenByTag(rPr, 'w:rStyle')[0];
+  const rStyle = rStyleNode ? getAttrVal(rStyleNode[':@']) : '';
+  return rStyle !== '' && vanishCharStyleIds.has(rStyle);
 }
 
 // w:t's sole text payload, or undefined for a text-less/malformed node —

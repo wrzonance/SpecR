@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractBodyObjects, anchorInteriorParagraphs } from './body-objects.js';
+import { extractBodyObjects, anchorInteriorParagraphs, hasRunVanish } from './body-objects.js';
 import { computeBodyOrder } from './body-order.js';
 import { createDocumentXmlParser, createOrderedDocumentXmlBuilder, toArray } from './xml-utils.js';
 import { buildStyleMap } from './styles.js';
@@ -294,6 +294,34 @@ function blobHostParagraph(children: readonly ObjectBlobNode[]): ObjectBlobNode 
   return { 'w:p': children };
 }
 
+// Hand-built w:r fixtures for hasRunVanish's own unit tests (#650) — isolated
+// from the full extractBodyObjects walk so the predicate's OWN contract
+// (direct w:vanish OR rStyle-referenced character-style vanish) is pinned
+// independently of collectText's threading, which a later task wires up.
+function blobRun(rPrChildren: readonly ObjectBlobNode[]): ObjectBlobNode {
+  return { 'w:r': [{ 'w:rPr': rPrChildren }, { 'w:t': [blobTextNode('x')] }] };
+}
+
+// Computed `[tag]` keys (rather than a literal `'w:vanish':`/`'w:rStyle':`
+// property) mirror body-objects.ts's own `rebuilt` helper — the established
+// workaround for the same TS limitation (index signature + intersected `:@`
+// key can't both be checked against one hand-assembled literal at once, see
+// that function's comment) that a bare literal key + `:@` sibling hits.
+function attrNode(tag: string, val?: string): ObjectBlobNode {
+  const children: readonly ObjectBlobNode[] = [];
+  return (
+    val !== undefined ? { [tag]: children, ':@': { '@_w:val': val } } : { [tag]: children }
+  ) as ObjectBlobNode;
+}
+
+function blobVanish(val?: string): ObjectBlobNode {
+  return attrNode('w:vanish', val);
+}
+
+function blobRStyle(styleId: string): ObjectBlobNode {
+  return attrNode('w:rStyle', styleId);
+}
+
 // Depth-first search for the first `w:txbxContent`-tagged descendant of
 // `node` (including `node` itself) — a local test-only helper, not a
 // duplicate of body-objects.ts's own collection logic (this one is used only
@@ -328,6 +356,50 @@ function collectAllTxbxContentNodes(node: ObjectBlobNode): ObjectBlobNode[] {
   }
   return found;
 }
+
+describe('hasRunVanish — rStyle-referenced character-style vanish (#650, capture+rewrite shared predicate)', () => {
+  it('resolves hidden via w:rStyle referencing a vanish character style id present in vanishCharStyleIds', () => {
+    const run = blobRun([blobRStyle('HiddenChar')]);
+    expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(true);
+  });
+
+  it('a w:rStyle reference NOT present in vanishCharStyleIds stays visible', () => {
+    const run = blobRun([blobRStyle('PlainChar')]);
+    expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(false);
+  });
+
+  // Straight OR port of document.ts's runIsVanish (#650 spike): a resolved-off
+  // direct <w:vanish w:val="0"/> does NOT override a matching rStyle — the
+  // two signals combine via plain OR, never special-cased against each other.
+  it('a resolved-off direct <w:vanish w:val="0"/> does not override a matching rStyle — still hidden', () => {
+    const run = blobRun([blobVanish('0'), blobRStyle('HiddenChar')]);
+    expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(true);
+  });
+
+  // The other half of the same invariant, phrased from the "never suppresses"
+  // direction: a resolved-off direct w:vanish with NO matching rStyle must
+  // never itself suppress visible text — this is the over-suppression guard
+  // hasRunVanish's own doc comment warns about, now re-pinned for the
+  // rStyle-aware predicate.
+  it('a resolved-off direct <w:vanish w:val="0"/> with no rStyle match never suppresses — stays visible', () => {
+    const run = blobRun([blobVanish('0')]);
+    expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(false);
+  });
+
+  it('hasRunVanish() with no 2nd arg is unchanged — an rStyle-only run stays visible for a caller that passes none', () => {
+    const run = blobRun([blobRStyle('HiddenChar')]);
+    expect(hasRunVanish(run)).toBe(false);
+  });
+
+  it('capture and rewrite are decided by the exact same predicate — same input yields the same output on both call shapes', () => {
+    const node = blobRun([blobRStyle('HiddenChar')]);
+    const vanishCharStyleIds = new Set(['HiddenChar']);
+    const captureResult = hasRunVanish(node, vanishCharStyleIds);
+    const rewriteResult = hasRunVanish(node, vanishCharStyleIds);
+    expect(captureResult).toBe(rewriteResult);
+    expect(captureResult).toBe(true);
+  });
+});
 
 describe('anchorInteriorParagraphs — hiddenSubtrees pass-through (#515 task 3)', () => {
   it('backward compatibility: default (no hiddenSubtrees) anchors an interior paragraph exactly as before', () => {
