@@ -28,7 +28,7 @@ const suffix = randomUUID().slice(0, 8);
 // the database is dropped by hand. That is the exact failure mode #623 exists
 // to prevent, so the sweep clears the dependents too.
 // Cleanup order is FK-safe: packages → membership → clones → projects →
-// masters → sources → libraries.
+// masters → sources → conventions → libraries.
 async function clearReservedNamespaces(): Promise<void> {
   await pool.query(`DELETE FROM specs WHERE section LIKE '99 77 %'`);
   await pool.query(`DELETE FROM projects WHERE name = 'lib-xor-test-project'`);
@@ -57,6 +57,13 @@ async function clearReservedNamespaces(): Promise<void> {
 
   await pool.query('DELETE FROM specs WHERE library_id = ANY($1)', [libraryIds]);
   await pool.query('DELETE FROM project_sources WHERE library_id = ANY($1)', [libraryIds]);
+  // editing_conventions.library_id is the third and last FK to `libraries`
+  // that BLOCKS a delete (NO ACTION); every other child of `libraries` is
+  // ON DELETE CASCADE or SET NULL and needs no help. Enumerated from
+  // pg_constraint against a migrated database rather than by reading
+  // migrations, so a table added later that also blocks shows up as a failing
+  // sweep here rather than as a wedged database.
+  await pool.query('DELETE FROM editing_conventions WHERE library_id = ANY($1)', [libraryIds]);
   await pool.query('DELETE FROM libraries WHERE id = ANY($1)', [libraryIds]);
 }
 
@@ -295,5 +302,49 @@ describe('#623 regression — residue from a prior run is swept before the first
     );
     expect(source).toMatch(/beforeAll\(\s*clearReservedNamespaces\s*\)/);
     expect(source).toMatch(/afterEach\(\s*clearReservedNamespaces\s*\)/);
+  });
+
+  // specs is not the only NO ACTION child of `libraries`.
+  // src/db/queries/conventions.integration.test.ts creates client libraries
+  // ('conv-test-roundtrip', 'conv-test-own', …) and hangs an
+  // editing_conventions row off each, and editing_conventions.library_id is
+  // NO ACTION too — so the same kill-before-cleanup leak wedges this sweep on
+  // editing_conventions_library_id_fkey instead. Verified against a live
+  // database before the fix: beforeAll threw and every test in this file
+  // reported SKIPPED, which is strictly worse than a failure because a
+  // green-looking "skipped" is easy to miss.
+  it('libraries: leaked fixture-library editing convention does not wedge the reserved-namespace sweep on editing_conventions_library_id_fkey', async () => {
+    const leaked = await createLibrary({
+      tier: 'client',
+      name: `Leaked Convention Owner ${randomUUID().slice(0, 8)}`,
+    });
+    await pool.query(
+      `INSERT INTO editing_conventions (library_id, name, rules) VALUES ($1, $2, '{}'::jsonb)`,
+      [leaked.id, `Leaked Profile ${randomUUID().slice(0, 8)}`]
+    );
+
+    // Pre-fix behaviour: the library delete the sweep performs, unaided.
+    await expect(pool.query(`DELETE FROM libraries WHERE id = $1`, [leaked.id])).rejects.toThrow(
+      /editing_conventions_library_id_fkey/
+    );
+
+    await expect(clearReservedNamespaces()).resolves.toBeUndefined();
+    expect(await findLibraryById(leaked.id)).toBeNull();
+    expect(await findLibraryByName(UFGS_REFERENCE_LIBRARY)).not.toBeNull();
+    expect(await findLibraryByName(DEFAULT_COMPANY_LIBRARY)).not.toBeNull();
+  });
+
+  // The built-in convention (library_id IS NULL) is not a child of any doomed
+  // library and must survive the sweep — conventions.integration.test.ts and
+  // the resolution chain both depend on that singleton still being there.
+  it('libraries: the reserved-namespace sweep leaves the built-in (library_id IS NULL) editing convention intact', async () => {
+    const before = await pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM editing_conventions WHERE library_id IS NULL`
+    );
+    await clearReservedNamespaces();
+    const after = await pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM editing_conventions WHERE library_id IS NULL`
+    );
+    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
   });
 });
