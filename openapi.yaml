@@ -1899,11 +1899,8 @@ paths:
                   pattern: '[\s\S]*\S[\s\S]*'
                   description: >
                     Leading/trailing whitespace is trimmed before resolution, and
-                    whitespace-only values are rejected; the 1-200 length bounds apply
-                    to the trimmed value. This limit is counted in UTF-16 code units
-                    (JavaScript string length), not Unicode code points — characters
-                    outside the Basic Multilingual Plane (e.g. emoji) count as 2. See
-                    ADR-088.
+                    whitespace-only values are rejected; the 1-200 length bounds
+                    (Unicode code points) apply to the trimmed value.
       responses:
         '200':
           description: User resolved (existing or newly created)
@@ -6309,10 +6306,8 @@ components:
         Optional caller identity attributed to a paragraph-history write (#377);
         omitted falls back to a system sentinel. Resolves to a users.label and
         shares its contract: trimmed before resolution, whitespace-only rejected,
-        and the 1-200 length bounds apply to the trimmed value. This limit is
-        counted in UTF-16 code units (JavaScript string length), not Unicode code
-        points — characters outside the Basic Multilingual Plane (e.g. emoji)
-        count as 2. See ADR-088.
+        and the 1-200 length bounds (Unicode code points) apply to the trimmed
+        value.
 
     # ── Envelope shapes ────────────────────────────────────────────────────────
 
@@ -8877,9 +8872,10 @@ components:
               properties:
                 filename:
                   type: string
-                # ASCII-only hex digest — UTF-16-unit count and Unicode
-                # code-point count are always identical here, so this field
-                # is out of scope for the ADR-088 length-limit convention.
+                # Fixed-length, server-generated hex digest, response-only —
+                # excluded from the ADR-091 code-point-length convention on
+                # reachability, not alphabet (see UNDOCUMENTED_BOUND_EXEMPTIONS,
+                # src/api/length-limit-unit-convention.test.ts).
                 sha256:
                   type: string
                   minLength: 64
@@ -10106,13 +10102,10 @@ components:
               maxLength: 500
               description: >
                 Write-boundary bound (#541, LanguageRulesWriteSchema): a PUT
-                literal term (isRegex omitted or false) exceeding 500
-                characters is rejected 422. Pre-existing rows longer than
+                literal term (isRegex omitted or false) exceeding 500 Unicode
+                code points is rejected 422. Pre-existing rows longer than
                 this are grandfathered — see LanguageRuleTerm, the shape used
-                by GET responses, which carries no such bound. This limit is
-                counted in UTF-16 code units (JavaScript string length), not
-                Unicode code points — characters outside the Basic
-                Multilingual Plane (e.g. emoji) count as 2. See ADR-088.
+                by GET responses, which carries no such bound.
     LanguageRulesWrite:
       allOf:
         - $ref: '#/components/schemas/LanguageRules'
@@ -10807,32 +10800,26 @@ components:
           minLength: 1
           maxLength: 200
           description: >
-            This limit is counted in UTF-16 code units (JavaScript string
-            length), not Unicode code points — characters outside the Basic
-            Multilingual Plane (e.g. emoji) count as 2. See ADR-088.
+            Bounded in Unicode code points. Leading/trailing whitespace is
+            trimmed before validation, so the bound applies to the trimmed
+            value (same contract as ActorLabel).
         sourceUrl:
           type: [string, 'null']
           format: uri
           maxLength: 2000
-          description: >
-            This limit is counted in UTF-16 code units (JavaScript string
-            length), not Unicode code points — characters outside the Basic
-            Multilingual Plane (e.g. emoji) count as 2. See ADR-088.
+          description: 'Bounded in Unicode code points.'
         title:
           type: [string, 'null']
           minLength: 1
           maxLength: 500
           description: >
-            This limit is counted in UTF-16 code units (JavaScript string
-            length), not Unicode code points — characters outside the Basic
-            Multilingual Plane (e.g. emoji) count as 2. See ADR-088.
+            Bounded in Unicode code points. Leading/trailing whitespace is
+            trimmed before validation, so the bound applies to the trimmed
+            value (same contract as ActorLabel).
         notes:
           type: [string, 'null']
           maxLength: 5000
-          description: >
-            This limit is counted in UTF-16 code units (JavaScript string
-            length), not Unicode code points — characters outside the Basic
-            Multilingual Plane (e.g. emoji) count as 2. See ADR-088.
+          description: 'Bounded in Unicode code points.'
 
     # ── Header/footer config (#476, ADR-040) ─────────────────────────────────────
 
@@ -10933,16 +10920,12 @@ components:
                           `maxLength` is the base64-string cap corresponding
                           to the 5 MB decoded-byte limit
                           (`MAX_IMAGE_BASE64_LENGTH`,
-                          `src/lib/image-media-type.ts`) enforced by the
-                          paired Zod schema (`src/ast/header-footer-schemas.ts`).
-                          That cap is a plain string length with no base64
-                          pattern behind it, so the alphabet is not actually
-                          constrained to ASCII and the unit convention below
-                          applies here like anywhere else.
-                          This limit is counted in UTF-16 code units (JavaScript
-                          string length), not Unicode code points — characters
-                          outside the Basic Multilingual Plane (e.g. emoji)
-                          count as 2. See ADR-088.
+                          `src/lib/image-media-type.ts`), bounded in Unicode
+                          code points, enforced by the paired Zod schema
+                          (`src/ast/header-footer-schemas.ts`). That cap is a
+                          plain string length with no base64 pattern behind
+                          it, so the alphabet is not actually constrained to
+                          ASCII.
                       imageMediaType: { type: string }
                       widthEmu: { type: integer, minimum: 1 }
                       heightEmu: { type: integer, minimum: 1 }

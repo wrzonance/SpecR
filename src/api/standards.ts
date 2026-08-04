@@ -9,15 +9,27 @@ import {
   type RecordVerificationInput,
 } from '../db/index.js';
 import { logger } from '../lib/logger.js';
+import { codePointMax } from '../lib/length-limit.js';
+import {
+  MAX_CURRENT_VERSION_LENGTH,
+  MAX_SOURCE_URL_LENGTH,
+  MAX_TITLE_LENGTH,
+  MAX_NOTES_LENGTH,
+} from '../lib/standards-verification-length.js';
 
 const UUID = z.uuid();
 
+// #642, ADR-091: every bound below is Unicode CODE POINTS, matching the
+// openapi.yaml maxLength keyword it pairs with. The four MAX_* constants
+// live in src/lib/standards-verification-length.ts so the MCP twin
+// (RecordStandardVerificationShape, src/mcp/standards-handlers.ts, which does
+// not reuse this schema) shares the same numbers.
 export const VerificationBodySchema = z.object({
   status: z.enum(['current', 'superseded', 'withdrawn', 'unknown']).optional(),
-  currentVersion: z.string().trim().min(1).max(200).nullish(),
-  sourceUrl: z.url().max(2000).nullish(),
-  title: z.string().trim().min(1).max(500).nullish(),
-  notes: z.string().max(5000).nullish(),
+  currentVersion: codePointMax(z.string().trim().min(1), MAX_CURRENT_VERSION_LENGTH).nullish(),
+  sourceUrl: codePointMax(z.url(), MAX_SOURCE_URL_LENGTH).nullish(),
+  title: codePointMax(z.string().trim().min(1), MAX_TITLE_LENGTH).nullish(),
+  notes: codePointMax(z.string(), MAX_NOTES_LENGTH).nullish(),
 });
 
 async function respondRollup(
