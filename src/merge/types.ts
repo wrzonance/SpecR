@@ -64,6 +64,26 @@ export interface ModifiedDiff {
 export type ConflictDiff = ModifiedDiff;
 
 /**
+ * One base-paragraph that theirs deleted while ours diverged from base since
+ * the snapshot was taken (#465) — the git-style delete/modify conflict
+ * ADR-005 line 29 names but classifyBase previously folded into a plain
+ * `deleted` entry, silently discarding the writer's edit on accept.
+ *
+ * Deliberately has NO `theirs` key — not an empty-string sentinel, an
+ * outright omission — because theirs is ALWAYS absent for this bucket: the
+ * paragraph is gone from the returned DOCX, so there is no theirs text to
+ * carry. Reusing ModifiedDiff (whose `theirs` is a required string) was
+ * rejected: representing "absent" as `theirs: ''` is indistinguishable from
+ * a real empty-string edit and risks a blank-on-accept bug if a future
+ * writer forgets to special-case it.
+ */
+export interface DeleteConflictDiff {
+  readonly uuid: string;
+  readonly base: string;
+  readonly ours: string;
+}
+
+/**
  * One atomic structural conflict on a body-level object: either a structural
  * divergence (#520) or a whole-object deletion (#525). `affectedUuids` (the
  * object's base-side interior child anchors) are excluded from
@@ -90,6 +110,13 @@ export interface DiffResult {
   readonly modified: readonly ModifiedDiff[];
   /** uuids present in base but absent from theirs */
   readonly deleted: readonly string[];
+  /**
+   * uuids present in base and absent from theirs (same "missing from theirs"
+   * branch as `deleted` above — these are siblings), but where ours also
+   * diverged from base since the snapshot was taken (#465): a delete/modify
+   * conflict, not a clean delete.
+   */
+  readonly deleteConflicts: readonly DeleteConflictDiff[];
   readonly conflicts: readonly ConflictDiff[];
   /** atomic structural conflicts on body-level objects (#520) */
   readonly objectConflicts: readonly ObjectConflictDiff[];

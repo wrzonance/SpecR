@@ -57,6 +57,7 @@ const DIFF = {
   added: [],
   modified: [],
   deleted: [],
+  deleteConflicts: [],
   conflicts: [],
   objectConflicts: [],
   warnings: [],
