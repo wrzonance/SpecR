@@ -169,28 +169,37 @@ describe('integration: 27_10_00.SEC via Buffer + assertSecSafe (encoding fix)', 
 });
 
 describe('integration: idempotency', () => {
+  // Own beforeAll — do not rely on the '27_41_00.SEC' describe block above
+  // having already run and populated `specs`/`paragraphs`. loadFixture's
+  // upsert (ON CONFLICT ... DO UPDATE) makes calling it a second time for
+  // the same fixture safe even when that earlier block DID already run in
+  // the same file: it resolves to the same row rather than inserting a
+  // duplicate. This describe block's assertions must hold whether it runs
+  // after its siblings (full-file run) or entirely on its own, e.g.
+  // `vitest run -t "integration: idempotency"` (#442).
+  let specId: string;
+
+  beforeAll(async () => {
+    const result = await loadFixture('27_41_00.SEC', (id) => cleanupIds.push(id));
+    specId = result.specId;
+  });
+
   it('re-loading 27_41_00 produces same paragraph count', async () => {
     const before = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM paragraphs
-       WHERE spec_id = (SELECT id FROM specs WHERE section = '27 41 00' AND source = 'ufgs')`
+      `SELECT COUNT(*) AS count FROM paragraphs WHERE spec_id = $1`,
+      [specId]
     );
     const countBefore = parseInt(before.rows[0]?.count ?? '0', 10);
     expect(countBefore).toBeGreaterThan(0);
 
-    const specRow = await pool.query<{ id: string }>(
-      `SELECT id FROM specs WHERE section = '27 41 00' AND source = 'ufgs'`
-    );
-    const existingId = specRow.rows[0]?.id;
-    if (existingId) {
-      const xml = await readFile(join(FIXTURES, '27_41_00.SEC'), 'latin1');
-      const { tree } = parseSec(xml);
-      await pool.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [existingId]);
-      await insertTree(tree, existingId, pool);
-    }
+    const xml = await readFile(join(FIXTURES, '27_41_00.SEC'), 'latin1');
+    const { tree } = parseSec(xml);
+    await pool.query(`DELETE FROM paragraphs WHERE spec_id = $1`, [specId]);
+    await insertTree(tree, specId, pool);
 
     const after = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM paragraphs
-       WHERE spec_id = (SELECT id FROM specs WHERE section = '27 41 00' AND source = 'ufgs')`
+      `SELECT COUNT(*) AS count FROM paragraphs WHERE spec_id = $1`,
+      [specId]
     );
     expect(parseInt(after.rows[0]?.count ?? '0', 10)).toBe(countBefore);
   });

@@ -273,13 +273,35 @@ export const SpecNodeMetaSchema = z.object({
 });
 
 export const SpecNodeSchema: z.ZodType<SpecNode> = z.lazy(() =>
-  z.object({
-    id: z.uuid(),
-    type: NodeTypeSchema,
-    text: z.string().check(z.minLength(1)),
-    children: z.array(SpecNodeSchema),
-    meta: SpecNodeMetaSchema,
-  })
+  z
+    .object({
+      id: z.uuid(),
+      type: NodeTypeSchema,
+      text: z.string().check(z.minLength(1)),
+      children: z.array(SpecNodeSchema),
+      meta: SpecNodeMetaSchema,
+    })
+    .check((ctx) => {
+      // type<->meta.object presence coupling (#650 Part B): an 'object' node
+      // is meaningless without its captured blob, and no other node type may
+      // carry one. Presence only — never re-derives editability, which
+      // classify.ts already owns producing alongside this pairing.
+      const { type, meta } = ctx.value;
+      const hasObject = meta.object !== undefined;
+      if (type === 'object' && !hasObject) {
+        ctx.issues.push({
+          code: 'custom',
+          input: ctx.value,
+          message: "an 'object' node requires meta.object",
+        });
+      } else if (type !== 'object' && hasObject) {
+        ctx.issues.push({
+          code: 'custom',
+          input: ctx.value,
+          message: `meta.object must only be set on an 'object' node, not '${type}'`,
+        });
+      }
+    })
 );
 
 export const SecRefSchema = z.discriminatedUnion('targetType', [

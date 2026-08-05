@@ -12,6 +12,8 @@ let specId: string;
 let otherSpecId: string;
 let anchorId: string;
 let partId: string;
+let articleId: string;
+let continuationId: string;
 
 async function insertSpec(section: string, title: string): Promise<string> {
   const result = await pool.query<{ id: string }>(
@@ -67,7 +69,10 @@ beforeAll(async () => {
   specId = await insertSpec('27 21 10', 'Insert Endpoint Test');
   otherSpecId = await insertSpec('09 91 27', 'Insert Endpoint Other');
   partId = await insertParagraph(specId, null, 'part', 'GENERAL', 1);
-  anchorId = await insertParagraph(specId, partId, 'pr1', 'Anchor paragraph.', 1);
+  articleId = await insertParagraph(specId, partId, 'article', 'SCOPE', 1);
+  anchorId = await insertParagraph(specId, articleId, 'pr1', 'Anchor paragraph.', 1);
+  // Continues the pr1 above it and carries no tier of its own (#383).
+  continuationId = await insertParagraph(specId, articleId, 'continuation', '…continued.', 2);
 });
 
 afterAll(async () => {
@@ -93,7 +98,7 @@ describe('POST /specs/:id/paragraphs (integration)', () => {
       'SELECT parent_id, position FROM paragraphs WHERE id = $1',
       [body.data.id]
     );
-    expect(row.rows[0]?.parent_id).toBe(partId);
+    expect(row.rows[0]?.parent_id).toBe(articleId);
     expect(row.rows[0]?.position).toBe(2);
   });
 
@@ -123,6 +128,62 @@ describe('POST /specs/:id/paragraphs (integration)', () => {
     const body = (await res.json()) as { success: boolean; error: string };
     expect(body.success).toBe(false);
     expect(body.error).toContain('part');
+  });
+
+  it('422s a pr1 requested after an article anchor — cross-tier insert would orphan the pr1 under the article (#383)', async () => {
+    const res = await postInsert(specId, {
+      anchorNodeId: articleId,
+      text: 'Should not become a mis-tiered pr1.',
+      nodeType: 'pr1',
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('pr1');
+    // The 422 must not offer the very type it just rejected as the remedy: the
+    // previous wording ended "pass nodeType (article, pr1–pr7, or
+    // continuation)", which listed `pr1` as the fix for a rejected `pr1` and
+    // left the caller no way to correct the request. State the tier rule
+    // instead (#383).
+    expect(body.error).not.toContain('pass nodeType (');
+    expect(body.error).toContain("must match the anchor's own type");
+    // The rejection text must state the COMPLETE rule, including the
+    // tierless-anchor exception. Both surfaces originally hand-copied a
+    // message naming only the match-or-continuation rules, so an editor whose
+    // insert after a `note` anchor is perfectly legal would have read that
+    // their request violated a rule it does not violate. The behavioural
+    // tests below cover that inserts after a tierless anchor SUCCEED; this
+    // pins that the message a caller actually reads says so too, which is the
+    // half that silently drifted. Matches on the concept, not the prose, so
+    // rewording stays free.
+    expect(body.error).toMatch(/tierless/i);
+  });
+
+  it('422s an article requested after a pr1 anchor — cross-tier insert would land it a tier below its part parent (#383)', async () => {
+    const res = await postInsert(specId, {
+      anchorNodeId: anchorId,
+      text: 'Should not become a mis-tiered article.',
+      nodeType: 'article',
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('article');
+  });
+
+  // KNOWN AMBIGUITY (#383): a continuation is tierless — it inherits the tier
+  // of whatever it continues rather than stating one, so it cannot constrain
+  // what tier follows it. This previously 422'd, refusing a legitimate insert.
+  it('201s an explicit pr1 after a continuation anchor — KNOWN AMBIGUITY: a continuation has no tier of its own to mismatch against (#383)', async () => {
+    const res = await postInsert(specId, {
+      anchorNodeId: continuationId,
+      text: 'A pr1 after a continuation.',
+      nodeType: 'pr1',
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { success: boolean; data: { type: string } };
+    expect(body.success).toBe(true);
+    expect(body.data.type).toBe('pr1');
   });
 
   it('409s a stale expectedVersion with the current version', async () => {

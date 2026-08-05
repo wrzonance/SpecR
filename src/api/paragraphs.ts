@@ -10,6 +10,7 @@ import {
   setParagraphVanish,
   insertParagraphAfter,
   lockedObjectMessage,
+  invalidInsertTypeMessage,
 } from '../db/index.js';
 import type { UpdateParagraphResult } from '../db/index.js';
 import { gateErrorResponse } from './edit-gate-response.js';
@@ -53,7 +54,7 @@ export async function insertParagraphHandler(req: Request, res: Response): Promi
       case 'invalid-type':
         res.status(422).json({
           success: false,
-          error: `node type "${result.nodeType}" cannot be inserted — pass nodeType (article, pr1–pr7, or continuation)`,
+          error: invalidInsertTypeMessage(result.nodeType),
         });
         return;
       case 'created':

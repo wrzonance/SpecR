@@ -33,6 +33,29 @@ function parseRawBodyParagraphs(documentXml: string): readonly Record<string, un
   );
 }
 
+// #650: vanishCharStyleIds is persisted as a SORTED array — never a Set — so
+// the JSONB column and fixture snapshots serialize deterministically
+// regardless of the StyleMap's own (unordered) iteration order.
+//
+// byCodeUnit, NOT `localeCompare`: without an explicit locale the latter
+// follows the HOST's default collation, so the same styles.xml would persist
+// a different array order on a machine with a different locale — defeating
+// the determinism this sort exists for, in a value written to JSONB and
+// compared across environments. A bare `.sort()` would be equally
+// deterministic but trips the repo's `sonarjs/no-alphabetical-sort` rule,
+// which requires an explicit comparator; spelling the code-unit comparison
+// out satisfies both that rule and cross-host reproducibility. Style IDs are
+// opaque OOXML identifiers, never presented to a user, so locale-aware
+// alphabetical ordering has no value here. Omitted
+// entirely when empty, mirroring rows/columns' exactOptional-omission
+// convention above: an absent key and an empty array are fully
+// interchangeable (ObjectMetaSchema's own doc comment), so a table/text-box
+// with no style-vanished runs round-trips byte-identical to today's rows.
+const byCodeUnit = (a: string, b: string): number => {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+};
+
 function toObjectMeta(captured: CapturedBodyObject): ObjectMeta {
   return {
     kind: captured.kind,
@@ -40,6 +63,9 @@ function toObjectMeta(captured: CapturedBodyObject): ObjectMeta {
     generation: captured.generation,
     ...(captured.rows !== undefined ? { rows: captured.rows } : {}),
     ...(captured.columns !== undefined ? { columns: captured.columns } : {}),
+    ...(captured.vanishCharStyleIds.size > 0
+      ? { vanishCharStyleIds: [...captured.vanishCharStyleIds].sort(byCodeUnit) }
+      : {}),
     blob: [...captured.blob],
   };
 }

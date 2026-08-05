@@ -11,6 +11,8 @@ const ART_ID = 'c1000000-0000-0000-0000-000000000002';
 const PR1_FIRST_ID = 'c1000000-0000-0000-0000-000000000003';
 const PR1_MIDDLE_ID = 'c1000000-0000-0000-0000-000000000004';
 const PR1_LAST_ID = 'c1000000-0000-0000-0000-000000000005';
+const NOTE_ID = 'c1000000-0000-0000-0000-000000000006';
+const CONT_ID = 'c1000000-0000-0000-0000-000000000007';
 
 async function contentVersion(specId: string): Promise<number> {
   const res = await pool.query<{ content_version: number }>(
@@ -87,6 +89,18 @@ beforeAll(async () => {
       [id, SPEC_ID, ART_ID, text, position]
     );
   }
+  await pool.query(
+    `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
+     VALUES ($1,$2,$3,'note','A specifier note.',4) ON CONFLICT (id) DO NOTHING`,
+    [NOTE_ID, SPEC_ID, ART_ID]
+  );
+  // A continuation sitting among the article's pr1 children — it continues the
+  // preceding pr1's text and carries no tier of its own (#383).
+  await pool.query(
+    `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
+     VALUES ($1,$2,$3,'continuation','…continued text.',5) ON CONFLICT (id) DO NOTHING`,
+    [CONT_ID, SPEC_ID, ART_ID]
+  );
 });
 
 afterAll(async () => {
@@ -141,15 +155,18 @@ describe('insertParagraphAfter', () => {
     expect(await positionOf(PR1_LAST_ID)).toBe(lastPosBefore + 1);
   });
 
-  it('honors an explicit nodeType', async () => {
+  it('honors an explicit nodeType that matches the sibling-compatibility rule', async () => {
+    // 'continuation' is legal at any tier (#383 rule 2) — pr2 is NOT, because
+    // pr2 nests as a pr1's CHILD, not as pr1's sibling (see the cross-tier
+    // rejection tests below).
     const result = await insertParagraphAfter(SPEC_ID, {
       anchorNodeId: PR1_FIRST_ID,
-      text: 'Explicitly a pr2.',
-      nodeType: 'pr2',
+      text: 'Explicitly a continuation.',
+      nodeType: 'continuation',
     });
     expect(result.status).toBe('created');
     if (result.status !== 'created') return;
-    expect(result.node.type).toBe('pr2');
+    expect(result.node.type).toBe('continuation');
   });
 
   it('inserts a sibling article when the anchor is an article', async () => {
@@ -185,6 +202,64 @@ describe('insertParagraphAfter', () => {
       nodeType: 'article',
     });
     expect(result).toEqual({ status: 'invalid-type', nodeType: 'article' });
+  });
+
+  it('rejects a pr1 requested after an article anchor — would orphan the pr1 under the article, skipping the pr1 tier it belongs at (#383)', async () => {
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: ART_ID,
+      text: 'Should not become a mis-tiered pr1.',
+      nodeType: 'pr1',
+    });
+    expect(result).toEqual({ status: 'invalid-type', nodeType: 'pr1' });
+  });
+
+  it('rejects an article requested after a pr1 anchor — would land an article as a pr1-tier sibling instead of a part child (#383)', async () => {
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: PR1_FIRST_ID,
+      text: 'Should not become a mis-tiered article.',
+      nodeType: 'article',
+    });
+    expect(result).toEqual({ status: 'invalid-type', nodeType: 'article' });
+  });
+
+  it('rejects a pr2 requested after a pr1 anchor — pr2 nests as a pr1 child, never as a pr1 sibling (#383)', async () => {
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: PR1_FIRST_ID,
+      text: 'Should not become a mis-tiered pr2.',
+      nodeType: 'pr2',
+    });
+    expect(result).toEqual({ status: 'invalid-type', nodeType: 'pr2' });
+  });
+
+  // KNOWN AMBIGUITY (#383): a note carries no CSI tier of its own — it cannot
+  // constrain what tier follows it, so any already-insertable type is accepted
+  // after a note anchor. This is deliberate permissiveness, not an oversight;
+  // see isSiblingCompatible's doc comment in paragraph-insert.ts.
+  it('accepts any insertable explicit type after a note anchor — KNOWN AMBIGUITY: a note has no tier to mismatch against (#383)', async () => {
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: NOTE_ID,
+      text: 'A pr3 after a note.',
+      nodeType: 'pr3',
+    });
+    expect(result.status).toBe('created');
+    if (result.status !== 'created') return;
+    expect(result.node.type).toBe('pr3');
+  });
+
+  // KNOWN AMBIGUITY (#383): a continuation is the OTHER tierless anchor — it
+  // continues the preceding node's text and inherits that node's tier rather
+  // than stating one, so like a note it cannot constrain what tier follows it.
+  // A pr1 after a continuation that itself follows a pr1 is ordinary,
+  // well-formed content; rejecting it refused a legitimate insert.
+  it('accepts an explicit pr1 after a continuation anchor — KNOWN AMBIGUITY: a continuation inherits its tier and has none of its own to mismatch against (#383)', async () => {
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: CONT_ID,
+      text: 'A pr1 after a continuation.',
+      nodeType: 'pr1',
+    });
+    expect(result.status).toBe('created');
+    if (result.status !== 'created') return;
+    expect(result.node.type).toBe('pr1');
   });
 
   it('reports not-found for an unknown anchor', async () => {
