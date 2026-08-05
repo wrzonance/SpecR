@@ -599,6 +599,25 @@ describe('markUnevaluatedPropertiesFalse — JSON-Schema 2020-12 applicator cove
       extra: ['head', { a: 'x', rogue: 1 }],
     },
     {
+      // #649 mutation-verify sweep: `unevaluatedProperties` was the ONE entry in CHILD_SINGLES
+      // whose removal left the whole suite green — the surviving mutant this case kills. It is the
+      // object-side twin of the `unevaluatedItems` case above (both are zero-occurrence in today's
+      // openapi.yaml), and it has a second, subtler reason to exist: `shouldMark` deliberately
+      // refuses to mark a node that DECLARES `unevaluatedProperties`, treating it as an openness
+      // decision openapi.yaml already made. That refusal is correct for the declaring node, but it
+      // must not stop the walker descending INTO the schema-valued subschema, which sits at a CHILD
+      // instance location and closes normally. Drop the keyword from CHILD_SINGLES and `extra`
+      // below starts passing — an undocumented key accepted one level down.
+      keyword: 'unevaluatedProperties (schema-valued)',
+      schema: {
+        type: 'object',
+        properties: { known: { type: 'string' } },
+        unevaluatedProperties: { type: 'object', properties: { a: { type: 'string' } } },
+      },
+      valid: { known: 'head', other: { a: 'x' } },
+      extra: { known: 'head', other: { a: 'x', rogue: 1 } },
+    },
+    {
       // CodeRabbit #645: the walker already treated `dependentSchemas` as an in-place applicator
       // and `evaluatesProperties` already counted it, but nothing exercised that traversal —
       // an untested branch is indistinguishable from a missing one.
