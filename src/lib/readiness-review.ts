@@ -78,8 +78,17 @@ function openCommentFindings(node: SpecNode): readonly ReadinessFinding[] {
     }));
 }
 
+// `object.kind === 'textBox'` AND unacknowledged. Acknowledgement (#545,
+// ADR-079 follow-on) clears this finding WITHOUT changing rendering — it is
+// a separate, additive piece of state, never the vanish mechanism (see the
+// comment above REMOVABLE_NODE_TYPES, paragraph-vanish.ts, for why vanish
+// cannot be reused here).
 function bodyObjectFinding(node: SpecNode): readonly ReadinessFinding[] {
-  if (node.type === 'object' && node.meta.object?.kind === 'textBox') {
+  if (
+    node.type === 'object' &&
+    node.meta.object?.kind === 'textBox' &&
+    node.meta.acknowledged !== true
+  ) {
     return [
       { type: 'body_object_present', nodeId: node.id, text: node.text, objectKind: 'textBox' },
     ];
@@ -87,15 +96,27 @@ function bodyObjectFinding(node: SpecNode): readonly ReadinessFinding[] {
   return [];
 }
 
-// A `note` always flags, checked before `meta.vanish` is ever consulted —
-// mirrors the generator's own rendering order (generator/index.ts emits
-// `note` unconditionally, then gates every other type on `vanish`). Every
-// other node type short-circuits to no findings once vanished: nothing
-// renders it in any output format, so a hidden choice token, comment, or
-// text box cannot block an issuance the reader will never see (ADR-079
-// decision 5, vanish-asymmetry-by-type).
+// A `note` always flags UNLESS acknowledged (#545), checked before
+// `meta.vanish` is ever consulted — mirrors the generator's own rendering
+// order (generator/index.ts emits `note` unconditionally, then gates every
+// other type on `vanish`). Acknowledgement clears the finding without
+// suppressing the note — it still renders exactly as before; only the
+// gate's view of it changes. Every other node type short-circuits to no
+// findings once vanished: nothing renders it in any output format, so a
+// hidden choice token, comment, or text box cannot block an issuance the
+// reader will never see (ADR-079 decision 5, vanish-asymmetry-by-type).
 function assessNode(node: SpecNode): readonly ReadinessFinding[] {
   if (node.type === 'note') {
+    // Acknowledgement clears ONLY `specifier_note_present` — a note's OWN
+    // source facts (an open comment, an unresolved choice token) are
+    // different finding kinds with their own supported clearing paths
+    // (comment closure / text edit), so they must keep blocking. Returning
+    // a bare `[]` here would let an acknowledged note smuggle unresolved
+    // review material past a final-mode issuance: pre-#545 the note itself
+    // always blocked, so those facts never needed their own guard.
+    if (node.meta.acknowledged === true) {
+      return [...choiceTokenFindings(node), ...openCommentFindings(node)];
+    }
     return [{ type: 'specifier_note_present', nodeId: node.id, text: node.text }];
   }
   if (node.meta.vanish === true) return [];

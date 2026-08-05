@@ -442,6 +442,17 @@ describe('SpecNodeMetaSchema', () => {
     expect(result.pageBreakBefore).toBe(true);
   });
 
+  // #545 adversarial-review finding — the exact same bug class as #497 above.
+  // `acknowledged` was added to the SpecNodeMeta TS type but not to this
+  // schema, so z.object silently STRIPPED it on every validation path.
+  // `validateTree` (revision-snapshot.ts) sits on package issuance and
+  // revision freeze, so an acknowledged note re-blocked a package issuance
+  // and frozen snapshots lost the state entirely.
+  it('preserves acknowledged through validation (#545)', () => {
+    const result = SpecNodeMetaSchema.parse({ acknowledged: true });
+    expect(result.acknowledged).toBe(true);
+  });
+
   it('rejects invalid source color coverage', () => {
     expect(() =>
       SpecNodeMetaSchema.parse({

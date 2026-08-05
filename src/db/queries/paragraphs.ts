@@ -3,7 +3,7 @@ import { assertSpecWritable } from './edit-gate.js';
 import { bumpSpecContentVersion } from './content-version.js';
 import { recordParagraphHistory, resolveHistoryContext } from './paragraph-history.js';
 import type { Pool, PoolClient } from 'pg';
-import { NodeTypeSchema, parseSourceFacts, deriveArticleRole } from '../../ast/index.js';
+import { NodeTypeSchema, parseSourceFacts } from '../../ast/index.js';
 import type {
   ObjectMeta,
   ParagraphAssociation,
@@ -14,13 +14,14 @@ import type {
   SpecTree,
 } from '../../ast/index.js';
 import { listAssociationsForParagraph } from './associations.js';
-import { parseNodeType } from './node-type.js';
 import { deriveInference } from './inference-meta.js';
 import { parseObjectMeta } from './object-meta.js';
 import { rewriteObjectTextBlob } from './object-text-edit.js';
 import { insertRowsInChunks, formatIdsPreview } from './batch-insert.js';
 import type { FlatRow } from './paragraphs-batch.js';
 import { PARAGRAPH_COLUMNS, paragraphRowToParams } from './paragraphs-batch.js';
+import { deriveNextSourceFacts } from './source-facts-rederive.js';
+import { buildSubtree, type SubtreeRow } from './paragraph-subtree.js';
 
 export interface Queryable {
   query: Pool['query'];
@@ -53,6 +54,7 @@ function flattenDfs(
         : null,
       objectData: node.meta.object ?? null,
       pageBreakBefore: node.meta.pageBreakBefore ?? false,
+      acknowledged: node.meta.acknowledged ?? false,
     });
     flattenDfs(node.children, specId, node.id, rows);
   });
@@ -114,6 +116,8 @@ export interface ParagraphRow {
   readonly object?: ObjectMeta;
   /** Manual page break (#497, ADR-075). Present only when true. */
   readonly pageBreakBefore?: boolean;
+  /** Per-node acknowledgement (#545, ADR-079 follow-on). Present only when true. */
+  readonly acknowledged?: boolean;
 }
 
 export interface ParagraphWithAncestors {
@@ -131,6 +135,7 @@ interface ChainRow {
   readonly signalProvenance: unknown;
   readonly objectData: unknown;
   readonly pageBreakBefore: boolean;
+  readonly acknowledged: boolean;
   readonly depth: number;
 }
 
@@ -158,6 +163,7 @@ function toParagraphRow(r: ChainRow): ParagraphRow {
     ...(inference ? { inference } : {}),
     ...(objectMeta ? { object: objectMeta } : {}),
     ...(r.pageBreakBefore ? { pageBreakBefore: true } : {}),
+    ...(r.acknowledged ? { acknowledged: true } : {}),
   };
 }
 
@@ -182,17 +188,19 @@ export async function getParagraphWithAncestors(
     const result = await pool.query<ChainRow>(
       `WITH RECURSIVE chain AS (
          SELECT id, node_type, text, vanish, conflicts, source_facts, signal_provenance,
-                object_data, page_break_before, parent_id, 0 AS depth
+                object_data, page_break_before, acknowledged, parent_id, 0 AS depth
          FROM paragraphs WHERE id = $1
          UNION ALL
          SELECT p.id, p.node_type, p.text, p.vanish, p.conflicts, p.source_facts,
-                p.signal_provenance, p.object_data, p.page_break_before, p.parent_id, c.depth + 1
+                p.signal_provenance, p.object_data, p.page_break_before, p.acknowledged,
+                p.parent_id, c.depth + 1
          FROM paragraphs p JOIN chain c ON p.id = c.parent_id
          WHERE c.depth + 1 < 10
        )
        SELECT id, node_type AS "nodeType", text, vanish, conflicts,
               source_facts AS "sourceFacts", signal_provenance AS "signalProvenance",
-              object_data AS "objectData", page_break_before AS "pageBreakBefore", depth
+              object_data AS "objectData", page_break_before AS "pageBreakBefore",
+              acknowledged, depth
        FROM chain ORDER BY depth DESC`,
       [id]
     );
@@ -209,61 +217,6 @@ export async function getParagraphWithAncestors(
   } catch (err) {
     throw new DatabaseError('getParagraphWithAncestors failed', { cause: err });
   }
-}
-
-interface SubtreeRow {
-  readonly id: string;
-  readonly parentId: string | null;
-  readonly nodeType: string;
-  readonly text: string;
-  readonly position: number;
-  readonly vanish: boolean;
-  readonly conflicts: readonly SignalConflict[];
-  readonly sourceFacts: SourceFacts;
-  readonly signalProvenance: unknown;
-  readonly objectData: unknown;
-  readonly pageBreakBefore: boolean;
-}
-
-/** Assemble subtree rows (a node plus all its descendants) into one SpecNode
- *  rooted at `rootId`. Mirrors buildNodeTree's meta shaping (specs.ts) but roots
- *  at a non-null parent rather than the forest roots. */
-function buildSubtree(rows: readonly SubtreeRow[], rootId: string): SpecNode | null {
-  const childrenByParent = new Map<string | null, SubtreeRow[]>();
-  for (const row of rows) {
-    childrenByParent.set(row.parentId, [...(childrenByParent.get(row.parentId) ?? []), row]);
-  }
-  const root = rows.find((r) => r.id === rootId);
-  if (!root) return null;
-
-  const build = (row: SubtreeRow): SpecNode => {
-    // Normalize through the schema so legacy comment facts gain the backfilled
-    // `closed` flag before they reach the API response (#262).
-    const sourceFacts = parseSourceFacts(row.sourceFacts);
-    const articleRole = row.nodeType === 'article' ? deriveArticleRole(row.text) : undefined;
-    const nodeType = parseNodeType(row.nodeType, 'buildSubtree');
-    const inference = deriveInference(row.signalProvenance, row.conflicts, nodeType);
-    const objectMeta = parseObjectMeta(nodeType, row.objectData, 'buildSubtree');
-    return {
-      id: row.id,
-      type: nodeType,
-      text: row.text,
-      children: (childrenByParent.get(row.id) ?? [])
-        .sort((a, b) => a.position - b.position)
-        .map(build),
-      meta: {
-        ...(row.vanish ? { vanish: true } : {}),
-        ...(row.conflicts.length > 0 ? { conflicts: row.conflicts } : {}),
-        ...(hasSourceFacts(sourceFacts) ? { sourceFacts } : {}),
-        ...(articleRole !== undefined ? { articleRole } : {}),
-        ...(inference ? { inference } : {}),
-        ...(objectMeta ? { object: objectMeta } : {}),
-        ...(row.pageBreakBefore ? { pageBreakBefore: true } : {}),
-      },
-    };
-  };
-
-  return build(root);
 }
 
 /** Outcome of {@link updateParagraphText}: the spec/node pairing is validated
@@ -297,18 +250,19 @@ export async function fetchSubtreeNode(
   const result = await db.query<SubtreeRow>(
     `WITH RECURSIVE subtree AS (
        SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
-              signal_provenance, object_data, page_break_before
+              signal_provenance, object_data, page_break_before, acknowledged
        FROM paragraphs WHERE id = $1 AND spec_id = $2
        UNION ALL
        SELECT p.id, p.parent_id, p.node_type, p.text, p.position, p.vanish,
-              p.conflicts, p.source_facts, p.signal_provenance, p.object_data, p.page_break_before
+              p.conflicts, p.source_facts, p.signal_provenance, p.object_data,
+              p.page_break_before, p.acknowledged
        FROM paragraphs p JOIN subtree s ON p.parent_id = s.id
        WHERE p.spec_id = $2
      )
      SELECT id, parent_id AS "parentId", node_type AS "nodeType", text, position,
             vanish, conflicts, source_facts AS "sourceFacts",
             signal_provenance AS "signalProvenance", object_data AS "objectData",
-            page_break_before AS "pageBreakBefore"
+            page_break_before AS "pageBreakBefore", acknowledged
      FROM subtree`,
     [nodeId, specId]
   );
@@ -336,15 +290,24 @@ async function fetchUpdateOwnerRow(
   client: PoolClient,
   nodeId: string
 ): Promise<
-  { specId: string; nodeType: string; baseVersion: number; parentId: string | null } | undefined
+  | {
+      specId: string;
+      nodeType: string;
+      baseVersion: number;
+      parentId: string | null;
+      sourceFacts: SourceFacts;
+    }
+  | undefined
 > {
   const owner = await client.query<{
     spec_id: string;
     node_type: string;
     base_version: number;
     parent_id: string | null;
+    source_facts: unknown;
   }>(
-    `SELECT spec_id, node_type, base_version, parent_id FROM paragraphs WHERE id = $1 FOR UPDATE`,
+    `SELECT spec_id, node_type, base_version, parent_id, source_facts
+     FROM paragraphs WHERE id = $1 FOR UPDATE`,
     [nodeId]
   );
   const row = owner.rows[0];
@@ -354,6 +317,9 @@ async function fetchUpdateOwnerRow(
     nodeType: row.node_type,
     baseVersion: row.base_version,
     parentId: row.parent_id,
+    // Normalize through the schema so legacy comment facts gain the
+    // backfilled `closed` flag before deriveNextSourceFacts reads them (#262).
+    sourceFacts: parseSourceFacts(row.source_facts),
   };
 }
 
@@ -427,9 +393,17 @@ async function applyParagraphUpdate(
   }
 
   const nextVersion = ownerRow.baseVersion + 1;
+  // #545 — re-derive ONLY the choiceTokens portion of source_facts from the
+  // new text, in the same statement/transaction as the text write, so
+  // resolving a placeholder (e.g. a one-option bracket token replaced by
+  // real text) clears its unresolved_choice_token finding immediately.
+  // Every other source_facts key (notably `comments` — an OOXML-only,
+  // non-text-derivable artifact) survives byte-identical.
+  const nextSourceFacts = deriveNextSourceFacts(ownerRow.sourceFacts, text);
   await client.query(
-    `UPDATE paragraphs SET text = $2, base_version = $3, updated_at = now() WHERE id = $1`,
-    [nodeId, text, nextVersion]
+    `UPDATE paragraphs SET text = $2, base_version = $3, source_facts = $4::jsonb, updated_at = now()
+     WHERE id = $1`,
+    [nodeId, text, nextVersion, JSON.stringify(nextSourceFacts)]
   );
   await rewriteObjectTextIfNeeded(client, specId, ownerRow, nodeId, text);
 

@@ -123,6 +123,7 @@ export interface ParagraphTreeRow {
   readonly editability_override: unknown;
   readonly object_data: unknown;
   readonly page_break_before: boolean;
+  readonly acknowledged: boolean;
 }
 
 function hasSourceFacts(sourceFacts: SourceFacts): boolean {
@@ -152,6 +153,7 @@ function buildNodeMeta(
     ...(articleRole !== undefined ? { articleRole } : {}),
     ...(objectMeta ? { object: objectMeta } : {}),
     ...(row.page_break_before ? { pageBreakBefore: true } : {}),
+    ...(row.acknowledged ? { acknowledged: true } : {}),
   };
 }
 
@@ -209,7 +211,7 @@ export async function getSpecTree(
     const paraResult = await db.query<ParagraphTreeRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
               signal_provenance, classification, editability_override, object_data,
-              page_break_before
+              page_break_before, acknowledged
        FROM paragraphs WHERE spec_id = $1`,
       [id]
     );

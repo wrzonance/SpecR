@@ -89,6 +89,13 @@ const RESPONSE_COVERED = new Set([
   'patch /specs/{}/paragraphs/{}/removal',
   'patch /specs/{}/paragraphs/{}/reject',
   'get /revisions/{}',
+  // #545's two clearance ops return a SpecNode for the same reason and were
+  // allowlisted on that basis while this branch was open. #649 removed the
+  // reason, so they are response-verified (and INV-6 exact-match-verified)
+  // instead — in readiness-clearance.integration.test.ts, next to the
+  // behavioural assertions, rather than in the block below.
+  'patch /specs/{}/paragraphs/{}/acknowledgement',
+  'patch /specs/{}/paragraphs/{}/comments/{}/closure',
 ]);
 
 // Documented JSON ops not yet response-verified (burned down in PR2…N).

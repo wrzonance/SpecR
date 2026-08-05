@@ -13,6 +13,8 @@ import {
   handleRemoveParagraph,
   handleInsertParagraph,
   handleAcceptCommentAsNote,
+  handleAcknowledgeParagraph,
+  handleSetCommentClosed,
 } from './paragraph-handlers.js';
 import {
   handleListAssociations,
@@ -110,6 +112,29 @@ async function insertAnchoredObjectPair(
   ]);
 
   return { objectId, textId };
+}
+
+let commentAnchorPosition = 100;
+
+/** A `pr1` paragraph carrying a single `source_facts.comments[0]` entry
+ * (#545, ADR-079 follow-on) — the minimal fixture `set_comment_closed`
+ * needs to exercise the real toggle end to end. Each call claims a fresh
+ * `position` so parallel-inserted anchors never collide. */
+async function insertCommentAnchor(specForAnchor: string, closed = false): Promise<string> {
+  const r = await pool.query<{ id: string }>(
+    `INSERT INTO paragraphs (spec_id, parent_id, node_type, text, position, base_version, source_facts)
+     VALUES ($1, NULL, 'pr1', 'Comment anchor.', $2, 1, $3::jsonb) RETURNING id`,
+    [
+      specForAnchor,
+      commentAnchorPosition++,
+      JSON.stringify({
+        comments: [{ author: 'Reviewer', text: 'Verify substrate.', anchor: [0, 5], closed }],
+      }),
+    ]
+  );
+  const id = r.rows[0]?.id;
+  if (!id) throw new Error('failed to insert comment anchor');
+  return id;
 }
 
 beforeAll(async () => {
@@ -570,5 +595,146 @@ describe('accept_comment_as_note MCP tool — actorLabel attribution (#377)', ()
     expect(isToolError(res)).toBe(false);
     const noteId = parse<{ noteId: string }>(res).noteId;
     expect(await historyActor(pool, noteId, 1)).toBe(SYSTEM_ACTOR_LABEL);
+  });
+});
+
+// #545 review finding: acknowledge_paragraph and set_comment_closed (both
+// registered in paragraph-tools.ts, ADR-079 follow-on) had no test that ever
+// called them through the MCP tool path — only structural contract-map /
+// capability-tier checks touched their names. These drive the real handlers
+// end-to-end against the DB, mirroring the coverage every other paragraph-
+// mutation tool above already has.
+describe('acknowledge_paragraph MCP tool', () => {
+  it('acknowledges a note node and un-acknowledging is a real toggle, not one-way', async () => {
+    const target = await insertParagraph(specId, 'note', 'Confirm sheen with owner.');
+
+    const on = await handleAcknowledgeParagraph({ specId, nodeId: target, acknowledged: true });
+    expect(isToolError(on)).toBe(false);
+    const onNode = parse<{ id: string; meta: { acknowledged?: boolean } }>(on);
+    expect(onNode.id).toBe(target);
+    expect(onNode.meta.acknowledged).toBe(true);
+
+    const off = await handleAcknowledgeParagraph({ specId, nodeId: target, acknowledged: false });
+    expect(isToolError(off)).toBe(false);
+    // Absent/false === not acknowledged (src/ast/types.ts) — the DB layer omits
+    // the key entirely rather than round-tripping an explicit `false`.
+    expect(parse<{ meta: { acknowledged?: boolean } }>(off).meta.acknowledged).toBeUndefined();
+  });
+
+  it('rejects a node type that cannot be acknowledged (ordinary pr1 body text, #545 not-acknowledgeable → 422 in REST)', async () => {
+    const target = await insertParagraph(specId, 'pr1', 'Ordinary body text.');
+    const res = await handleAcknowledgeParagraph({ specId, nodeId: target, acknowledged: true });
+    expect(isToolError(res)).toBe(true);
+    expect(res.content[0]!.text).toContain('cannot be acknowledged');
+  });
+
+  it('rejects a missing node and a node from a different spec', async () => {
+    expect(
+      isToolError(await handleAcknowledgeParagraph({ specId, nodeId: MISSING, acknowledged: true }))
+    ).toBe(true);
+    const target = await insertParagraph(specId, 'note', 'Cross-spec probe.');
+    expect(
+      isToolError(
+        await handleAcknowledgeParagraph({
+          specId: otherSpecId,
+          nodeId: target,
+          acknowledged: true,
+        })
+      )
+    ).toBe(true);
+  });
+});
+
+describe('acknowledge_paragraph MCP tool — actorLabel attribution (#377)', () => {
+  it('a supplied actorLabel attributes the acknowledge history row', async () => {
+    const target = await insertParagraph(specId, 'note', 'Ack attribution target.');
+    const res = await handleAcknowledgeParagraph({
+      specId,
+      nodeId: target,
+      acknowledged: true,
+      actorLabel: 'mcp.bot',
+    });
+    expect(isToolError(res)).toBe(false);
+    expect(await historyActor(pool, target, 2)).toBe('mcp.bot'); // base_version 1 → 2
+  });
+
+  it('omitting actorLabel attributes the acknowledge history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const target = await insertParagraph(specId, 'note', 'Ack attribution target 2.');
+    const res = await handleAcknowledgeParagraph({ specId, nodeId: target, acknowledged: true });
+    expect(isToolError(res)).toBe(false);
+    expect(await historyActor(pool, target, 2)).toBe(SYSTEM_ACTOR_LABEL);
+  });
+});
+
+describe('set_comment_closed MCP tool', () => {
+  it('closes then reopens a comment, returning the updated node each time', async () => {
+    const anchor = await insertCommentAnchor(specId, false);
+
+    const closed = await handleSetCommentClosed({ specId, nodeId: anchor, index: 0, closed: true });
+    expect(isToolError(closed)).toBe(false);
+    const closedNode = parse<{
+      id: string;
+      meta: { sourceFacts?: { comments?: readonly { closed: boolean }[] } };
+    }>(closed);
+    expect(closedNode.id).toBe(anchor);
+    expect(closedNode.meta.sourceFacts?.comments?.[0]?.closed).toBe(true);
+
+    const reopened = await handleSetCommentClosed({
+      specId,
+      nodeId: anchor,
+      index: 0,
+      closed: false,
+    });
+    expect(isToolError(reopened)).toBe(false);
+    const reopenedNode = parse<{
+      meta: { sourceFacts?: { comments?: readonly { closed: boolean }[] } };
+    }>(reopened);
+    expect(reopenedNode.meta.sourceFacts?.comments?.[0]?.closed).toBe(false);
+  });
+
+  it('returns a tool error for a comment index that does not exist (a lookup miss, 404 in REST)', async () => {
+    const anchor = await insertCommentAnchor(specId, false);
+    const res = await handleSetCommentClosed({ specId, nodeId: anchor, index: 5, closed: true });
+    expect(isToolError(res)).toBe(true);
+    expect(res.content[0]!.text).toContain('no comment');
+  });
+
+  it('rejects a missing anchor and an anchor from a different spec', async () => {
+    expect(
+      isToolError(await handleSetCommentClosed({ specId, nodeId: MISSING, index: 0, closed: true }))
+    ).toBe(true);
+    const anchor = await insertCommentAnchor(specId, false);
+    expect(
+      isToolError(
+        await handleSetCommentClosed({
+          specId: otherSpecId,
+          nodeId: anchor,
+          index: 0,
+          closed: true,
+        })
+      )
+    ).toBe(true);
+  });
+});
+
+describe('set_comment_closed MCP tool — actorLabel attribution (#377)', () => {
+  it('a supplied actorLabel attributes the closure history row', async () => {
+    const anchor = await insertCommentAnchor(specId, false);
+    const res = await handleSetCommentClosed({
+      specId,
+      nodeId: anchor,
+      index: 0,
+      closed: true,
+      actorLabel: 'mcp.bot',
+    });
+    expect(isToolError(res)).toBe(false);
+    expect(await historyActor(pool, anchor, 2)).toBe('mcp.bot'); // base_version 1 → 2
+  });
+
+  it('omitting actorLabel attributes the closure history row to the SYSTEM_ACTOR_LABEL sentinel', async () => {
+    const anchor = await insertCommentAnchor(specId, false);
+    const res = await handleSetCommentClosed({ specId, nodeId: anchor, index: 0, closed: true });
+    expect(isToolError(res)).toBe(false);
+    expect(await historyActor(pool, anchor, 2)).toBe(SYSTEM_ACTOR_LABEL);
   });
 });

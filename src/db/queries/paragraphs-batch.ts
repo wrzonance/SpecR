@@ -24,6 +24,8 @@ export interface FlatRow {
   readonly objectData: ObjectMeta | null;
   /** Manual page break (#497, ADR-075). True === node begins on a new page. */
   readonly pageBreakBefore: boolean;
+  /** Per-node acknowledgement (#545, ADR-079 follow-on). True === acknowledged. */
+  readonly acknowledged: boolean;
 }
 
 /** Column order for a batched `INSERT INTO paragraphs`, matching
@@ -42,6 +44,7 @@ export const PARAGRAPH_COLUMNS: readonly ColumnSpec[] = [
   { name: 'signal_provenance', cast: 'jsonb' },
   { name: 'object_data', cast: 'jsonb' },
   { name: 'page_break_before' },
+  { name: 'acknowledged' },
 ];
 
 /** One row's bind params, in {@link PARAGRAPH_COLUMNS} order. Pure — no I/O. */
@@ -59,5 +62,6 @@ export function paragraphRowToParams(row: FlatRow): readonly unknown[] {
     row.signalProvenance ? JSON.stringify(row.signalProvenance) : null,
     row.objectData ? JSON.stringify(row.objectData) : null,
     row.pageBreakBefore,
+    row.acknowledged,
   ];
 }

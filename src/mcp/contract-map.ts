@@ -47,6 +47,9 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['post /specs/{}/paragraphs/{}/associations', 'create_association'],
   ['delete /specs/{}/paragraphs/{}/associations/{}', 'delete_association'], // destructive tier
   ['post /specs/{}/paragraphs/{}/comments/{}/accept-as-note', 'accept_comment_as_note'],
+  // #545, ADR-079 follow-on — the two remaining supported readiness-clearing paths
+  ['patch /specs/{}/paragraphs/{}/acknowledgement', 'acknowledge_paragraph'],
+  ['patch /specs/{}/paragraphs/{}/comments/{}/closure', 'set_comment_closed'],
   // wave 4 — spec lifecycle
   ['patch /specs/{}', 'update_spec'],
   ['post /specs/{}/finalize', 'finalize_spec'],

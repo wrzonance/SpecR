@@ -714,6 +714,68 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /specs/{id}/paragraphs/{nodeId}/acknowledgement:
+    patch:
+      operationId: acknowledgeParagraph
+      summary: Acknowledge or un-acknowledge a note or textBox object node
+      description: >
+        Per-node acknowledgement (#545, ADR-079 follow-on): the specifier
+        affirms they have read and accepted a `note` or a `textBox` `object`
+        node. `acknowledged: true` clears the issuance-readiness gate's
+        `specifier_note_present` / `body_object_present` finding for it
+        WITHOUT removing or hiding the content — it still renders exactly as
+        before in every output format. `acknowledged: false` reverses it.
+        Deliberately separate state from `vanish`: only `note` nodes and
+        `textBox`-kind `object` nodes are acknowledgeable — a `table`-kind
+        object (structural content, ADR-072) or any other node type is
+        rejected 422. The toggle is idempotent — re-sending the same value is
+        a no-op that returns the node unchanged without minting a new content
+        version. The node must belong to the spec in the path (else 403). The
+        composed edit gate (ADR-018) rejects an archived spec or one locked
+        upstream in a DMS (409).
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [acknowledged]
+              properties:
+                acknowledged:
+                  type: boolean
+                  description: true to acknowledge, false to un-acknowledge.
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
+      responses:
+        '200':
+          description: Updated paragraph node (with its subtree)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecNode'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/WriteConflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /specs/{id}/paragraphs/{nodeId}/reject:
     patch:
       operationId: rejectParagraph
@@ -986,6 +1048,75 @@ paths:
                         format: uuid
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /specs/{id}/paragraphs/{nodeId}/comments/{index}/closure:
+    patch:
+      operationId: setCommentClosed
+      summary: Close or reopen a source-document review comment
+      description: >
+        A mutable comment-closure toggle (#545, ADR-079 follow-on) — the only
+        supported path to clear the issuance-readiness gate's `open_comment`
+        finding on an existing spec. `closed: true` closes the comment at
+        `index` (captured in `source_facts.comments`); `false` reopens it.
+        The node must belong to the spec (else 403). `no-comment` (no comment
+        exists at `index`) is a lookup miss → 404, not a validation failure.
+        The toggle is idempotent — re-sending the same value is a no-op that
+        returns the node unchanged without minting a new content version.
+        Passes the composed edit gate (ADR-018): archived/upstream-locked →
+        409. `POST .../accept-as-note` also closes the originating comment as
+        part of accepting it (#545) — this endpoint is for closing (or
+        reopening) a comment independently of accepting it as a note.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+        - $ref: '#/components/parameters/NodeId'
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+          description: Zero-based index into the anchor's source_facts.comments.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [closed]
+              properties:
+                closed:
+                  type: boolean
+                  description: true to close, false to reopen.
+                actorLabel:
+                  $ref: '#/components/schemas/ActorLabel'
+      responses:
+        '200':
+          description: Updated paragraph node (with its subtree)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SpecNode'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Paragraph not found, or no comment exists at that index
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          $ref: '#/components/responses/WriteConflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -8069,6 +8200,15 @@ components:
             vanish:
               type: boolean
               description: Hidden (w:vanish) paragraph — editorial note, not owner-facing
+            acknowledged:
+              type: boolean
+              description: >-
+                A specifier has read and accepted this `note` or `textBox`
+                `object` node (#545, ADR-079 follow-on), clearing the
+                issuance-readiness gate's `specifier_note_present` /
+                `body_object_present` finding for it WITHOUT removing or
+                hiding the content — it still renders exactly as before.
+                Deliberately separate from `vanish`. Present only when true.
             pageBreakBefore:
               type: boolean
               description: >-
@@ -8643,7 +8783,26 @@ components:
             ]
         op:
           type: string
-          enum: [edit, insert, remove, restore, merge, accept-note, restructure]
+          description: >
+            Mirrors the `paragraph_versions.op` enum exactly (migrations
+            046/055). `acknowledge`/`unacknowledge` and
+            `close-comment`/`reopen-comment` are the ADR-079 follow-on
+            readiness-clearance ops (#545) — each writes a history row, so a
+            real history response can carry them.
+          enum:
+            [
+              edit,
+              insert,
+              remove,
+              restore,
+              merge,
+              accept-note,
+              restructure,
+              acknowledge,
+              unacknowledge,
+              close-comment,
+              reopen-comment,
+            ]
         contentVersion:
           type: [integer, 'null']
           minimum: 1

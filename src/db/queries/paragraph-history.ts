@@ -20,6 +20,15 @@ export const PARAGRAPH_HISTORY_OPS = [
   'merge',
   'accept-note',
   'restructure',
+  // #545, ADR-079 follow-on: acknowledge/unacknowledge (the note/textBox
+  // acknowledgement toggle) and close-comment/reopen-comment (the mutable
+  // comment-closure toggle, including the side effect wired into
+  // acceptCommentAsNote). Mirrors migration 055's identical OPS_SQL_LIST —
+  // keep the two in lockstep by hand (migrations are frozen snapshots).
+  'acknowledge',
+  'unacknowledge',
+  'close-comment',
+  'reopen-comment',
 ] as const;
 
 export type ParagraphHistoryOp = (typeof PARAGRAPH_HISTORY_OPS)[number];

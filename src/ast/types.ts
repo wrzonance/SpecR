@@ -172,6 +172,19 @@ export interface SpecNodeMeta {
    * derives `alignedBy: 'origin'` from structural keys alone (ADR-078 D6).
    */
   readonly originParagraphId?: string;
+  /**
+   * Per-node acknowledgement (#545, ADR-079 follow-on): the specifier
+   * affirms they have read and accepted a `note` or a `textBox` `object`
+   * node, clearing the readiness gate's `specifier_note_present` /
+   * `body_object_present` finding for it WITHOUT removing or hiding the
+   * content. Deliberately separate from `vanish` — reusing vanish here would
+   * silently lie about the removal contract (see the comment above
+   * `REMOVABLE_NODE_TYPES`, paragraph-vanish.ts, which excludes `note` and
+   * `object` for exactly this reason). Absent/false === not acknowledged.
+   * MUST NEVER be consulted by any renderer — it only affects readiness
+   * evaluation.
+   */
+  readonly acknowledged?: boolean;
 }
 
 export interface SpecNode {

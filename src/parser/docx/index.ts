@@ -324,6 +324,7 @@ export { stripLeadingTitleBlockRoots } from './heuristics.js';
 export { resolveStyleCascade } from './resolver.js';
 export { scoreHierarchyConfidence } from './hierarchy-confidence.js';
 export { findAnchoredParagraph, replaceAnchoredParagraphText } from './object-blob-edit.js';
+export { scanChoiceTokens } from './choice-tokens.js';
 // #648: hasRunVanish is the single ST_OnOff-aware vanish predicate shared by
 // object capture and object-blob edit rewrite (ADR-092); re-exported so
 // merge/extract.ts can reuse it through this barrel instead of writing a

@@ -138,7 +138,7 @@ import { CompareRequestSchema } from '../reporting/index.js';
 import { postSubmittalRegisterHandler } from './submittal-register.js';
 import { getSpecOpenCommentsHandler, getProjectOpenCommentsHandler } from './open-comments.js';
 import { getSpecReadinessHandler, getPackageReadinessHandler } from './readiness.js';
-import { patchEditabilityHandler, reclassifyHandler, acceptAsNoteHandler } from './editability.js';
+import { registerParagraphClearanceRoutes } from './paragraph-clearance-routes.js';
 import {
   createAssociationHandler,
   listAssociationsHandler,
@@ -211,11 +211,9 @@ router.post('/specs/:id/restore', restoreSpecHandler);
 router.post('/specs/:id/paragraphs', insertParagraphHandler);
 router.patch('/specs/:id/paragraphs/:nodeId', updateParagraphHandler);
 router.patch('/specs/:id/paragraphs/:nodeId/removal', removeParagraphHandler);
-router.patch('/specs/:id/paragraphs/:nodeId/editability', patchEditabilityHandler);
-router.post('/specs/:id/reclassify', reclassifyHandler);
 router.post('/specs/:id/finalize', finalizeSpecHandler);
 router.post('/specs/:id/reopen', reopenSpecHandler);
-router.post('/specs/:id/paragraphs/:nodeId/comments/:index/accept-as-note', acceptAsNoteHandler);
+registerParagraphClearanceRoutes(router);
 router.get('/specs/:id/lock', getLockHandler);
 router.put('/specs/:id/lock', acquireLockHandler);
 router.delete('/specs/:id/lock', releaseLockHandler);
