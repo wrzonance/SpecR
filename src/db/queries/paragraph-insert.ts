@@ -153,6 +153,24 @@ function isSiblingCompatible(anchorNodeType: string, nodeType: string): boolean 
   );
 }
 
+/** The user-facing 'invalid-type' rejection text, owned HERE beside the rule
+ *  it describes ({@link isSiblingCompatible}) rather than written out at each
+ *  surface. Both the REST route (`api/paragraphs.ts`) and the MCP handler
+ *  (`mcp/paragraph-handlers.ts`) render this exact string, and the two cannot
+ *  reach each other directly (mcp/ must not import api/ internals), so a
+ *  hand-copied message in each was the only alternative — and it had already
+ *  drifted: both copies stated only rules 1 and 2 and omitted the tierless-
+ *  anchor exception, telling an editor their legal insert after a `note` was
+ *  illegal. One definition keeps every surface honest as the rule evolves. */
+export function invalidInsertTypeMessage(nodeType: string): string {
+  return (
+    `node type "${nodeType}" cannot be inserted here — nodeType must match the anchor's ` +
+    'own type, or be continuation (legal at any tier); after a tierless anchor (a note or ' +
+    'a continuation, neither of which carries a tier) any insertable type is allowed. ' +
+    'Parts and notes are never insertable.'
+  );
+}
+
 /** Insertable-type membership + sibling-compatibility check on the
  *  already-locked, ownership-verified anchor row (spec ownership is checked
  *  upstream in {@link insertSiblingRow}). Factored out to keep the caller's

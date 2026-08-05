@@ -5,6 +5,7 @@ import {
   acceptCommentAsNote,
   insertParagraphAfter,
   lockedObjectMessage,
+  invalidInsertTypeMessage,
   StaleVersionError,
   SpecWriteForbiddenError,
   SpecNotFoundError,
@@ -102,9 +103,7 @@ export async function handleInsertParagraph(args: unknown): Promise<ToolResult> 
       return toolError('anchor paragraph does not belong to this spec');
     }
     if (result.status === 'invalid-type') {
-      return toolError(
-        `node type "${result.nodeType}" cannot be inserted here — nodeType must match the anchor's own type or be continuation; parts and notes are never insertable`
-      );
+      return toolError(invalidInsertTypeMessage(result.nodeType));
     }
     return ok(result.node);
   } catch (err) {

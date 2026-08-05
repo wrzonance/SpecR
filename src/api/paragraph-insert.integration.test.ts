@@ -147,6 +147,16 @@ describe('POST /specs/:id/paragraphs (integration)', () => {
     // instead (#383).
     expect(body.error).not.toContain('pass nodeType (');
     expect(body.error).toContain("must match the anchor's own type");
+    // The rejection text must state the COMPLETE rule, including the
+    // tierless-anchor exception. Both surfaces originally hand-copied a
+    // message naming only the match-or-continuation rules, so an editor whose
+    // insert after a `note` anchor is perfectly legal would have read that
+    // their request violated a rule it does not violate. The behavioural
+    // tests below cover that inserts after a tierless anchor SUCCEED; this
+    // pins that the message a caller actually reads says so too, which is the
+    // half that silently drifted. Matches on the concept, not the prose, so
+    // rewording stays free.
+    expect(body.error).toMatch(/tierless/i);
   });
 
   it('422s an article requested after a pr1 anchor — cross-tier insert would land it a tier below its part parent (#383)', async () => {
