@@ -137,6 +137,13 @@ describe('POST /specs/:id/paragraphs (integration)', () => {
     const body = (await res.json()) as { success: boolean; error: string };
     expect(body.success).toBe(false);
     expect(body.error).toContain('pr1');
+    // The 422 must not offer the very type it just rejected as the remedy: the
+    // previous wording ended "pass nodeType (article, pr1–pr7, or
+    // continuation)", which listed `pr1` as the fix for a rejected `pr1` and
+    // left the caller no way to correct the request. State the tier rule
+    // instead (#383).
+    expect(body.error).not.toContain('pass nodeType (');
+    expect(body.error).toContain("must match the anchor's own type");
   });
 
   it('422s an article requested after a pr1 anchor — cross-tier insert would land it a tier below its part parent (#383)', async () => {

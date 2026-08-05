@@ -53,7 +53,7 @@ export async function insertParagraphHandler(req: Request, res: Response): Promi
       case 'invalid-type':
         res.status(422).json({
           success: false,
-          error: `node type "${result.nodeType}" cannot be inserted — pass nodeType (article, pr1–pr7, or continuation)`,
+          error: `node type "${result.nodeType}" cannot be inserted here — nodeType must match the anchor's own type or be continuation; parts and notes are never insertable`,
         });
         return;
       case 'created':

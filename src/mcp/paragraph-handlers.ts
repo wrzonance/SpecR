@@ -103,7 +103,7 @@ export async function handleInsertParagraph(args: unknown): Promise<ToolResult> 
     }
     if (result.status === 'invalid-type') {
       return toolError(
-        `node type "${result.nodeType}" cannot be inserted — pass nodeType (article, pr1–pr7, or continuation)`
+        `node type "${result.nodeType}" cannot be inserted here — nodeType must match the anchor's own type or be continuation; parts and notes are never insertable`
       );
     }
     return ok(result.node);
