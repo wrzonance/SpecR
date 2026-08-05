@@ -66,6 +66,48 @@ function rewrittenParagraph(text: string): ObjectBlobNode {
   return { 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': text }] }] }] };
 }
 
+// #650 — an anchored paragraph whose interior carries a run hidden ONLY via
+// w:rStyle (named in the object row's own persisted vanishCharStyleIds meta
+// field) ahead of an ordinary visible run.
+function styleHiddenAnchoredParagraph(
+  uuid: string,
+  hiddenText: string,
+  visibleText: string
+): ObjectBlobNode {
+  return {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `${UUID_TAG_PREFIX}${uuid}` } }] },
+      {
+        'w:sdtContent': [
+          {
+            'w:p': [
+              {
+                'w:r': [
+                  { 'w:rPr': [{ 'w:rStyle': [], ':@': { '@_w:val': 'HiddenChar' } }] },
+                  { 'w:t': [{ '#text': hiddenText }] },
+                ],
+              },
+              { 'w:r': [{ 'w:t': [{ '#text': visibleText }] }] },
+            ],
+          },
+        ],
+      },
+    ],
+  } as ObjectBlobNode;
+}
+
+function tableMetaWithVanishStyle(hiddenText: string, visibleText: string): ObjectMeta {
+  return {
+    kind: 'table',
+    floating: false,
+    generation: 'drawingml',
+    rows: 1,
+    columns: 1,
+    vanishCharStyleIds: ['HiddenChar'],
+    blob: [{ 'w:tc': [styleHiddenAnchoredParagraph(UUID_A, hiddenText, visibleText)] }],
+  };
+}
+
 describe('rewriteObjectTextBlob — DB orchestration for anchored object-blob edits (#519)', () => {
   let specId: string;
 
@@ -189,4 +231,66 @@ describe('rewriteObjectTextBlob — DB orchestration for anchored object-blob ed
       expect(findAnchoredParagraph(meta.blob, UUID_B)).toEqual(rewrittenParagraph('concurrent B'));
     }
   );
+
+  // #650 regression — the exact capture-only-fix gap: without threading the
+  // object row's own persisted vanishCharStyleIds into the rewrite path, an
+  // edit would land in the w:rStyle-hidden run (invisible in Word) and blank
+  // the visible run beside it. rewriteObjectTextBlob must read
+  // meta.vanishCharStyleIds and apply the SAME predicate capture used.
+  it(
+    '#650 regression: rewrite lands the edit in the next VISIBLE run, not a run hidden via ' +
+      "w:rStyle — using the object row's own persisted vanishCharStyleIds",
+    async () => {
+      const objectId = await insertObjectRow(
+        tableMetaWithVanishStyle('HIDDEN SECRET', 'visible original')
+      );
+
+      await runInTransaction((client) =>
+        rewriteObjectTextBlob(client, specId, objectId, UUID_A, 'edited text')
+      );
+
+      const meta = await objectDataOf(objectId);
+      const found = findAnchoredParagraph(meta.blob, UUID_A);
+      const xml = JSON.stringify(found);
+      expect(xml).toContain('edited text');
+      expect(xml).not.toContain('visible original');
+      // the rStyle-hidden run is untouched — neither overwritten nor blanked
+      expect(xml).toContain('HIDDEN SECRET');
+      // vanishCharStyleIds itself round-trips unchanged alongside the edit
+      expect(meta.vanishCharStyleIds).toEqual(['HiddenChar']);
+    }
+  );
+
+  // #650 — JSONB persistence round-trip: vanishCharStyleIds survives a
+  // rewrite byte-identical, alongside every other unrelated meta field.
+  it('invariant: vanishCharStyleIds round-trips byte-identical through a rewrite', async () => {
+    const meta = tableMetaWithVanishStyle('HIDDEN SECRET', 'original');
+    const objectId = await insertObjectRow(meta);
+
+    await runInTransaction((client) =>
+      rewriteObjectTextBlob(client, specId, objectId, UUID_A, 'rewritten')
+    );
+
+    const after = await objectDataOf(objectId);
+    expect(after.vanishCharStyleIds).toEqual(meta.vanishCharStyleIds);
+    expect(after.kind).toBe(meta.kind);
+    expect(after.rows).toBe(meta.rows);
+    expect(after.columns).toBe(meta.columns);
+  });
+
+  // #650 — backfill row: a row captured BEFORE this change carries no
+  // vanishCharStyleIds key at all. rewriteObjectTextBlob must treat that
+  // exactly like an empty set (today's unchanged behaviour), never throw or
+  // misbehave on the absent field.
+  it('backfill: a row with vanishCharStyleIds entirely absent edits normally, field stays absent', async () => {
+    const objectId = await insertObjectRow(twoCellTableMeta('original A', 'original B'));
+
+    await runInTransaction((client) =>
+      rewriteObjectTextBlob(client, specId, objectId, UUID_A, 'rewritten A')
+    );
+
+    const meta = await objectDataOf(objectId);
+    expect(meta.vanishCharStyleIds).toBeUndefined();
+    expect(findAnchoredParagraph(meta.blob, UUID_A)).toEqual(rewrittenParagraph('rewritten A'));
+  });
 });

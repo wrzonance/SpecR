@@ -48,11 +48,23 @@ function parseNumPr(pPr: Record<string, unknown>): NumPrResult {
   return { kind: 'active', numPr: { numId, ilvl } };
 }
 
+// w:vanish is an OOXML ST_OnOff TOGGLE (ECMA-376 §17.3.2.45), not a bare
+// presence marker: an explicit w:val in {0,false,off} switches it OFF even
+// though the element is present. Mirrors document.ts's isOnOffEnabled/
+// runIsVanish handling of the same toggle on runs.
+function isOnOffEnabled(node: unknown): boolean {
+  const val = getAttrVal(node).toLowerCase();
+  return val !== '0' && val !== 'false' && val !== 'off';
+}
+
 function parseVanish(raw: Record<string, unknown>): boolean {
   const pPr = asRecord(raw['w:pPr']);
   const pRpr = asRecord(pPr?.['w:rPr']);
   const rPr = asRecord(raw['w:rPr']);
-  return (pRpr !== undefined && 'w:vanish' in pRpr) || (rPr !== undefined && 'w:vanish' in rPr);
+  return (
+    (pRpr !== undefined && 'w:vanish' in pRpr && isOnOffEnabled(pRpr['w:vanish'])) ||
+    (rPr !== undefined && 'w:vanish' in rPr && isOnOffEnabled(rPr['w:vanish']))
+  );
 }
 
 // CT_OnOff, presence-aware: undefined when the style's pPr has no
@@ -195,7 +207,7 @@ function parseCharacterStyles(root: Record<string, unknown>): Map<string, CharSt
     const basedOn = getAttrVal(rec['w:basedOn']);
     styles.set(styleId, {
       ...(basedOn ? { basedOn } : {}),
-      isVanish: rPr !== undefined && 'w:vanish' in rPr,
+      isVanish: rPr !== undefined && 'w:vanish' in rPr && isOnOffEnabled(rPr['w:vanish']),
     });
   }
   return styles;

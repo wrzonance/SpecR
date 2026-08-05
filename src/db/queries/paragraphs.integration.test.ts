@@ -451,6 +451,109 @@ describe('body objects — read-path parity (#300, ADR-072)', () => {
   });
 });
 
+// #650 — vanishCharStyleIds must reach a real DATABASE column and come back,
+// not merely round-trip in memory. PR #536 (`pageSize`) is the precedent this
+// block exists to rule out: an additive SpecTree field that every in-memory
+// test passed while the save/load mappers silently dropped it. So each case
+// below drives the CANONICAL write path (insertTree, the same one the DOCX
+// import uses) and then asserts twice — once against the raw `object_data`
+// JSONB column via SQL (proof the value is on disk, not in a cache), and once
+// through the real read mappers (getSpecTree / fetchSubtreeNode).
+const VANISH_STYLE_OBJECT_META: ObjectMeta = {
+  kind: 'table',
+  floating: false,
+  generation: 'drawingml',
+  rows: 1,
+  columns: 1,
+  vanishCharStyleIds: ['AlsoHidden', 'HiddenChar'],
+  blob: [{ 'w:tbl': [{ 'w:tblPr': [] }] }],
+};
+
+describe('body objects — vanishCharStyleIds DB persistence (#650)', () => {
+  const VS_PART_ID = 'd0000000-0000-0000-0000-000000000650';
+  const VS_OBJECT_ID = 'd0000000-0000-0000-0000-000000000651';
+  let vsSpecId: string;
+
+  async function insertObjectTree(meta: ObjectMeta): Promise<void> {
+    await insertTree(
+      {
+        id: vsSpecId,
+        section: '99 00 50',
+        title: 'Vanish Style Persistence',
+        parts: [
+          {
+            id: VS_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            children: [
+              {
+                id: VS_OBJECT_ID,
+                type: 'object',
+                text: '[TABLE]',
+                children: [],
+                meta: { object: meta },
+              },
+            ],
+            meta: {},
+          },
+        ],
+      },
+      vsSpecId,
+      pool
+    );
+  }
+
+  beforeEach(async () => {
+    vsSpecId = await createSpec({
+      section: '99 00 50',
+      title: 'Vanish Style Persistence',
+      source: 'arcat',
+    });
+  });
+
+  afterEach(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [vsSpecId]);
+  });
+
+  it('persistence: vanishCharStyleIds is written to the object_data JSONB COLUMN by insertTree', async () => {
+    await insertObjectTree(VANISH_STYLE_OBJECT_META);
+
+    // Read the column directly — a passing in-memory assertion cannot prove
+    // this, and the #536 regression is exactly a value that never got here.
+    const raw = await pool.query<{ ids: readonly string[] | null }>(
+      `SELECT object_data->'vanishCharStyleIds' AS ids FROM paragraphs WHERE id = $1`,
+      [VS_OBJECT_ID]
+    );
+    expect(raw.rows[0]!.ids).toEqual(['AlsoHidden', 'HiddenChar']);
+  });
+
+  it('round-trip: getSpecTree and fetchSubtreeNode both return vanishCharStyleIds verbatim', async () => {
+    await insertObjectTree(VANISH_STYLE_OBJECT_META);
+
+    const fullTree = await getSpecTree(vsSpecId);
+    const treeNode = fullTree!.tree.parts[0]!.children[0]!;
+    expect(treeNode.meta.object).toEqual(VANISH_STYLE_OBJECT_META);
+    expect(treeNode.meta.object!.vanishCharStyleIds).toEqual(['AlsoHidden', 'HiddenChar']);
+
+    const subtreeNode = await fetchSubtreeNode(pool, vsSpecId, VS_OBJECT_ID);
+    expect(subtreeNode!.meta.object!.vanishCharStyleIds).toEqual(['AlsoHidden', 'HiddenChar']);
+  });
+
+  it('backfill: an object with NO vanishCharStyleIds persists and reads back with the key absent, never fabricated', async () => {
+    await insertObjectTree(TABLE_OBJECT_META);
+
+    const raw = await pool.query<{ ids: readonly string[] | null }>(
+      `SELECT object_data->'vanishCharStyleIds' AS ids FROM paragraphs WHERE id = $1`,
+      [VS_OBJECT_ID]
+    );
+    expect(raw.rows[0]!.ids).toBeNull();
+
+    const fullTree = await getSpecTree(vsSpecId);
+    const treeNode = fullTree!.tree.parts[0]!.children[0]!;
+    expect(treeNode.meta.object!.vanishCharStyleIds).toBeUndefined();
+  });
+});
+
 // #519 (ADR-072 decision 3) — the write-path wiring in applyParagraphUpdate:
 // an `object` row is locked (its content is a captured OOXML blob, never a
 // plain text write); an `objectText` row's edit is dispatched into its

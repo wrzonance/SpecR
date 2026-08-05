@@ -7992,6 +7992,27 @@ components:
     SpecNode:
       type: object
       required: [id, type, text, children, meta]
+      allOf:
+        # Cross-field invariant enforced by SpecNodeSchema's `.check()`
+        # (src/ast/spec-tree-schemas.ts, #650 Part B): `meta.object` is
+        # present on EXACTLY the `object` node type — an 'object' node is
+        # meaningless without its captured blob, and no other node type may
+        # carry one. A biconditional, hence the else-branch.
+        - if:
+            required: [type]
+            properties:
+              type:
+                const: object
+          then:
+            required: [meta]
+            properties:
+              meta:
+                required: [object]
+          else:
+            properties:
+              meta:
+                not:
+                  required: [object]
       properties:
         id:
           type: string
@@ -8113,6 +8134,22 @@ components:
         round-trips its OOXML byte-for-byte via `blob` rather than modeling
         its interior as CSI structure.
       required: [kind, floating, generation, blob]
+      allOf:
+        # Cross-field invariant enforced by ObjectMetaSchema's `.check()`
+        # (src/ast/object-schemas.ts, #516): rows/columns are table-grid
+        # dimensions, and a textBox has no grid to describe. Stated
+        # structurally so a consumer generating types/validators from this
+        # contract rejects the same shapes the server does.
+        - if:
+            required: [kind]
+            properties:
+              kind:
+                const: textBox
+          then:
+            not:
+              anyOf:
+                - required: [rows]
+                - required: [columns]
       properties:
         kind:
           type: string
@@ -8132,6 +8169,17 @@ components:
           type: integer
           minimum: 1
           description: Table column count (table kind only).
+        vanishCharStyleIds:
+          type: array
+          description: >-
+            Resolved character-style IDs (#650) carrying an enabled
+            `w:vanish` — the styles a run's `w:rStyle` must resolve through
+            to be treated as hidden. Captured at import so hidden text stays
+            excluded from `objectText` on later edits, without needing
+            `styles.xml` at edit time. Absent and `[]` are interchangeable;
+            an object captured before this field existed has neither.
+          items:
+            type: string
         blob:
           type: array
           description: >-
