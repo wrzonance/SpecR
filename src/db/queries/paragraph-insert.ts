@@ -24,7 +24,7 @@ import { fetchSubtreeNode } from './paragraphs.js';
  *  would land the new row at the anchor's parent, one CSI tier removed from
  *  where that type belongs (#383). See {@link resolveInsertableNodeType} for
  *  the sibling-compatibility rule, including its one deliberate exception
- *  (a `note` anchor).
+ *  (a TIERLESS anchor — `note` or `continuation`).
  *
  *  The last four statuses are only reachable when `input.explicitId` is set —
  *  the merge engine's added-op apply (#374). The standalone
@@ -109,6 +109,13 @@ type NodeTypeResolution =
   | { readonly ok: true; readonly nodeType: string }
   | { readonly ok: false; readonly result: InsertParagraphResult };
 
+// Anchor types that carry NO CSI tier of their own (#383). A `note` is an
+// editorial aside, not a body paragraph; a `continuation` continues the
+// PRECEDING node's text and inherits whatever tier that node has. Neither
+// states a tier, so neither can constrain the tier of what follows it — see
+// the KNOWN AMBIGUITY on {@link isSiblingCompatible}.
+const TIERLESS_ANCHOR_NODE_TYPES: ReadonlySet<string> = new Set(['note', 'continuation']);
+
 /** Is `nodeType` a legal SIBLING of `anchorNodeType` (same parent_id)? Pure,
  *  called only after `nodeType` has already passed the insertable-set check —
  *  this narrows further, from "insertable somewhere" to "insertable HERE".
@@ -124,15 +131,26 @@ type NodeTypeResolution =
  *  2. `nodeType === 'continuation'` — a continuation carries no CSI tier of
  *     its own; it continues the PRECEDING node's text and is legal at any
  *     tier.
- *  3. `anchorNodeType === 'note'` — KNOWN AMBIGUITY (#383): a note carries no
- *     CSI tier of its own (it's an editorial aside, not a body paragraph), so
- *     it cannot constrain what tier follows it, and notes legitimately
- *     interleave among body paragraphs of any tier. Permit any
- *     already-insertable type here rather than guessing a tier from a node
- *     that doesn't have one — this is deliberately permissive, not an
- *     oversight. */
+ *  3. `anchorNodeType` is TIERLESS (`note` or `continuation`) — KNOWN
+ *     AMBIGUITY (#383): the constraint in rule 1 only works because the anchor
+ *     DEMONSTRATES a legal tier at its parent. A tierless anchor demonstrates
+ *     nothing: a `note` is an editorial aside and a `continuation` merely
+ *     continues the preceding node's text, so neither states a tier of its own
+ *     and neither can constrain the tier of what follows it. Both legitimately
+ *     interleave among body paragraphs of any tier — a `pr1` after a
+ *     `continuation` that itself follows a `pr1` is ordinary, well-formed
+ *     content. Permit any already-insertable type here rather than guessing a
+ *     tier from a node that doesn't have one: deriving it from the target
+ *     PARENT instead is the parent→child table this rule deliberately avoids,
+ *     which mis-rejects ilvl-gapped legacy data (the CPI offset case, where a
+ *     `pr3` legitimately sits under an `article`). Deliberately permissive,
+ *     not an oversight. */
 function isSiblingCompatible(anchorNodeType: string, nodeType: string): boolean {
-  return nodeType === anchorNodeType || nodeType === 'continuation' || anchorNodeType === 'note';
+  return (
+    nodeType === anchorNodeType ||
+    nodeType === 'continuation' ||
+    TIERLESS_ANCHOR_NODE_TYPES.has(anchorNodeType)
+  );
 }
 
 /** Insertable-type membership + sibling-compatibility check on the
@@ -341,7 +359,8 @@ async function runInsert(
  * and continuations are insertable — a part or note default is refused. An
  * explicit `nodeType` must additionally be a legal sibling of the anchor
  * (#383, {@link isSiblingCompatible}) — its own tier, `continuation`, or any
- * type when the anchor is a `note` — else the anchor's tier and the new
+ * type when the anchor is TIERLESS (a `note` or a `continuation`, neither of
+ * which states a tier to match against) — else the anchor's tier and the new
  * row's tier would disagree (e.g. a `pr1` requested after an `article`
  * anchor).
  *

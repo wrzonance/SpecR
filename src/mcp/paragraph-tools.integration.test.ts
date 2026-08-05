@@ -30,6 +30,7 @@ let specId: string;
 let otherSpecId: string;
 let bodyId: string;
 let noteId: string;
+let continuationId: string;
 
 // Assert on the VALUE, not mere key presence, so the checks survive a handler that
 // ever returns an explicit `isError: false` on success (mirrors the wave-2 helper).
@@ -122,6 +123,8 @@ beforeAll(async () => {
   otherSpecId = await insertSpec('09 91 26', 'Painting');
   bodyId = await insertParagraph(specId, 'pr1', 'Provide cabling.');
   noteId = await insertParagraph(specId, 'note', 'Editor note.');
+  // The other tierless anchor: continues the preceding node's text (#383).
+  continuationId = await insertParagraph(specId, 'continuation', '…continued.');
 });
 
 afterAll(async () => {
@@ -343,6 +346,19 @@ describe('insert_paragraph MCP tool', () => {
       anchorNodeId: noteId,
       text: 'Explicit article after a note.',
       nodeType: 'article',
+    });
+    expect(isToolError(res)).toBe(false);
+  });
+
+  it('accepts an explicit pr1 after a continuation anchor — KNOWN AMBIGUITY: a continuation inherits its tier rather than stating one (#383)', async () => {
+    // KNOWN AMBIGUITY (#383): the second tierless anchor type. A continuation
+    // continues the preceding node's text, so it has no tier of its own for an
+    // explicit nodeType to mismatch against — this previously errored.
+    const res = await handleInsertParagraph({
+      specId,
+      anchorNodeId: continuationId,
+      text: 'A pr1 after a continuation.',
+      nodeType: 'pr1',
     });
     expect(isToolError(res)).toBe(false);
   });

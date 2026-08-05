@@ -13,6 +13,7 @@ let otherSpecId: string;
 let anchorId: string;
 let partId: string;
 let articleId: string;
+let continuationId: string;
 
 async function insertSpec(section: string, title: string): Promise<string> {
   const result = await pool.query<{ id: string }>(
@@ -70,6 +71,8 @@ beforeAll(async () => {
   partId = await insertParagraph(specId, null, 'part', 'GENERAL', 1);
   articleId = await insertParagraph(specId, partId, 'article', 'SCOPE', 1);
   anchorId = await insertParagraph(specId, articleId, 'pr1', 'Anchor paragraph.', 1);
+  // Continues the pr1 above it and carries no tier of its own (#383).
+  continuationId = await insertParagraph(specId, articleId, 'continuation', '…continued.', 2);
 });
 
 afterAll(async () => {
@@ -156,6 +159,21 @@ describe('POST /specs/:id/paragraphs (integration)', () => {
     const body = (await res.json()) as { success: boolean; error: string };
     expect(body.success).toBe(false);
     expect(body.error).toContain('article');
+  });
+
+  // KNOWN AMBIGUITY (#383): a continuation is tierless — it inherits the tier
+  // of whatever it continues rather than stating one, so it cannot constrain
+  // what tier follows it. This previously 422'd, refusing a legitimate insert.
+  it('201s an explicit pr1 after a continuation anchor — KNOWN AMBIGUITY: a continuation has no tier of its own to mismatch against (#383)', async () => {
+    const res = await postInsert(specId, {
+      anchorNodeId: continuationId,
+      text: 'A pr1 after a continuation.',
+      nodeType: 'pr1',
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { success: boolean; data: { type: string } };
+    expect(body.success).toBe(true);
+    expect(body.data.type).toBe('pr1');
   });
 
   it('409s a stale expectedVersion with the current version', async () => {

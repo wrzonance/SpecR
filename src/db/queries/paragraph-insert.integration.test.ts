@@ -12,6 +12,7 @@ const PR1_FIRST_ID = 'c1000000-0000-0000-0000-000000000003';
 const PR1_MIDDLE_ID = 'c1000000-0000-0000-0000-000000000004';
 const PR1_LAST_ID = 'c1000000-0000-0000-0000-000000000005';
 const NOTE_ID = 'c1000000-0000-0000-0000-000000000006';
+const CONT_ID = 'c1000000-0000-0000-0000-000000000007';
 
 async function contentVersion(specId: string): Promise<number> {
   const res = await pool.query<{ content_version: number }>(
@@ -92,6 +93,13 @@ beforeAll(async () => {
     `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
      VALUES ($1,$2,$3,'note','A specifier note.',4) ON CONFLICT (id) DO NOTHING`,
     [NOTE_ID, SPEC_ID, ART_ID]
+  );
+  // A continuation sitting among the article's pr1 children — it continues the
+  // preceding pr1's text and carries no tier of its own (#383).
+  await pool.query(
+    `INSERT INTO paragraphs (id, spec_id, parent_id, node_type, text, position)
+     VALUES ($1,$2,$3,'continuation','…continued text.',5) ON CONFLICT (id) DO NOTHING`,
+    [CONT_ID, SPEC_ID, ART_ID]
   );
 });
 
@@ -236,6 +244,22 @@ describe('insertParagraphAfter', () => {
     expect(result.status).toBe('created');
     if (result.status !== 'created') return;
     expect(result.node.type).toBe('pr3');
+  });
+
+  // KNOWN AMBIGUITY (#383): a continuation is the OTHER tierless anchor — it
+  // continues the preceding node's text and inherits that node's tier rather
+  // than stating one, so like a note it cannot constrain what tier follows it.
+  // A pr1 after a continuation that itself follows a pr1 is ordinary,
+  // well-formed content; rejecting it refused a legitimate insert.
+  it('accepts an explicit pr1 after a continuation anchor — KNOWN AMBIGUITY: a continuation inherits its tier and has none of its own to mismatch against (#383)', async () => {
+    const result = await insertParagraphAfter(SPEC_ID, {
+      anchorNodeId: CONT_ID,
+      text: 'A pr1 after a continuation.',
+      nodeType: 'pr1',
+    });
+    expect(result.status).toBe('created');
+    if (result.status !== 'created') return;
+    expect(result.node.type).toBe('pr1');
   });
 
   it('reports not-found for an unknown anchor', async () => {
