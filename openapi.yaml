@@ -434,6 +434,14 @@ paths:
         or note) requires an explicit `nodeType`, otherwise the request is
         rejected 422. Parts are never insertable (a CSI section keeps its
         three-part shape) and notes materialize via accept-as-note instead.
+        An explicit `nodeType` must also be a legal sibling of the anchor: its
+        own type, `continuation` (legal at any tier), or any insertable type
+        when the anchor is tierless — a `note` or a `continuation`, neither of
+        which carries a CSI tier of its own and so cannot constrain the tier of
+        what follows it. A mismatched tier — e.g. `pr1` after an `article`
+        anchor, or `article` after a `pr1` anchor — is rejected 422, since it
+        would place the new node one CSI tier away from where that type
+        belongs.
 
 
         Inserting is a content write: it passes the composed edit gate
@@ -1676,6 +1684,15 @@ paths:
         400 — a structural change on a table/text box (a row/column added or
         removed, a kind change) cannot be auto-merged and must be resolved by
         hand.
+
+
+        `diff.deleteConflicts` (#465) entries ARE auto-mergeable, unlike
+        `objectConflicts` — accepting one discards the divergent `ours` edit
+        and applies the deletion, the same `vanish` path `diff.deleted`
+        uses; omitting the uuid from `accept` keeps the edit untouched. If
+        the paragraph's text changed again between diff-compute time and
+        accept time, the merge is rejected 409 rather than silently
+        discarding a THIRD, never-seen edit.
       tags: [specs]
       parameters:
         - $ref: '#/components/parameters/SpecId'
@@ -8123,6 +8140,27 @@ components:
     SpecNode:
       type: object
       required: [id, type, text, children, meta]
+      allOf:
+        # Cross-field invariant enforced by SpecNodeSchema's `.check()`
+        # (src/ast/spec-tree-schemas.ts, #650 Part B): `meta.object` is
+        # present on EXACTLY the `object` node type — an 'object' node is
+        # meaningless without its captured blob, and no other node type may
+        # carry one. A biconditional, hence the else-branch.
+        - if:
+            required: [type]
+            properties:
+              type:
+                const: object
+          then:
+            required: [meta]
+            properties:
+              meta:
+                required: [object]
+          else:
+            properties:
+              meta:
+                not:
+                  required: [object]
       properties:
         id:
           type: string
@@ -8253,6 +8291,22 @@ components:
         round-trips its OOXML byte-for-byte via `blob` rather than modeling
         its interior as CSI structure.
       required: [kind, floating, generation, blob]
+      allOf:
+        # Cross-field invariant enforced by ObjectMetaSchema's `.check()`
+        # (src/ast/object-schemas.ts, #516): rows/columns are table-grid
+        # dimensions, and a textBox has no grid to describe. Stated
+        # structurally so a consumer generating types/validators from this
+        # contract rejects the same shapes the server does.
+        - if:
+            required: [kind]
+            properties:
+              kind:
+                const: textBox
+          then:
+            not:
+              anyOf:
+                - required: [rows]
+                - required: [columns]
       properties:
         kind:
           type: string
@@ -8272,6 +8326,17 @@ components:
           type: integer
           minimum: 1
           description: Table column count (table kind only).
+        vanishCharStyleIds:
+          type: array
+          description: >-
+            Resolved character-style IDs (#650) carrying an enabled
+            `w:vanish` — the styles a run's `w:rStyle` must resolve through
+            to be treated as hidden. Captured at import so hidden text stays
+            excluded from `objectText` on later edits, without needing
+            `styles.xml` at edit time. Absent and `[]` are interchangeable;
+            an object captured before this field existed has neither.
+          items:
+            type: string
         blob:
           type: array
           description: >-
@@ -8455,6 +8520,34 @@ components:
           type: string
           description: Current DB text
 
+    DeleteConflictDiff:
+      type: object
+      required: [uuid, base, ours]
+      description: >
+        One base paragraph theirs deleted (#465) while ours also diverged
+        from base since the snapshot was taken — a git-style delete/modify
+        conflict (ADR-005) that would silently vanish the writer's edit if
+        folded into a plain `deleted` uuid. Reported separately so the
+        divergent edit is never lost without the caller knowing.
+
+
+        Carries NO `theirs` key at all — not an empty-string sentinel, an
+        outright omission — because there is nothing to fingerprint or carry:
+        the paragraph is gone from the returned DOCX. Accepting a
+        `deleteConflicts` entry via `/specs/{id}/merge` discards `ours` and
+        applies the deletion, mirroring `diff.deleted`; omitting it keeps the
+        divergent edit untouched.
+      properties:
+        uuid:
+          type: string
+          format: uuid
+        base:
+          type: string
+          description: Base snapshot text
+        ours:
+          type: string
+          description: Current DB text, diverged from base
+
     ObjectStructureFingerprint:
       type: object
       required: [kind, hash]
@@ -8523,7 +8616,8 @@ components:
 
     DiffResult:
       type: object
-      required: [added, modified, deleted, conflicts, objectConflicts, warnings]
+      required:
+        [added, modified, deleted, deleteConflicts, conflicts, objectConflicts, warnings]
       properties:
         added:
           type: array
@@ -8538,6 +8632,16 @@ components:
           items:
             type: string
             format: uuid
+        deleteConflicts:
+          type: array
+          description: >
+            uuids present in base and absent from the returned DOCX (the same
+            "missing from theirs" origin as `deleted` above — these are
+            siblings), but where the current DB text also diverged from base
+            since the snapshot was taken (#465): a delete/modify conflict,
+            not a clean delete.
+          items:
+            $ref: '#/components/schemas/DeleteConflictDiff'
         conflicts:
           type: array
           description: Same shape as modified; present when ours and theirs both changed
@@ -8567,8 +8671,8 @@ components:
             type: string
             format: uuid
           description: >
-            UUIDs from `diff.modified`, `diff.conflicts`, `diff.added`, or
-            `diff.deleted` to apply.
+            UUIDs from `diff.modified`, `diff.conflicts`, `diff.added`,
+            `diff.deleted`, or `diff.deleteConflicts` to apply.
         diff:
           $ref: '#/components/schemas/DiffResult'
         expectedVersion:

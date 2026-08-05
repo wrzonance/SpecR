@@ -19,6 +19,21 @@ const EMPTY_STYLES: StyleMap = buildStyleMap(
   `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>`
 );
 
+// Two vanish character styles, declared in styles.xml document order "Zeta"
+// THEN "HiddenChar" — the REVERSE of their sorted order. `characterStyleVanishIds`
+// (styles.ts) builds `StyleMap.vanishCharStyleIds` as a `Set` populated by
+// iterating `styles.keys()`, i.e. styles.xml document order — so an insertion-
+// order Set here would yield `['Zeta', 'HiddenChar']`. Feeding this through
+// `toObjectMeta`'s `.sort()` (body-object-attach.ts, #650) must recover the
+// deterministic `['HiddenChar', 'Zeta']` regardless.
+const TWO_VANISH_STYLES: StyleMap = buildStyleMap(
+  '<?xml version="1.0"?>' +
+    '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+    '<w:style w:type="character" w:styleId="Zeta"><w:rPr><w:vanish/></w:rPr></w:style>' +
+    '<w:style w:type="character" w:styleId="HiddenChar"><w:rPr><w:vanish/></w:rPr></w:style>' +
+    '</w:styles>'
+);
+
 function makeDocXml(bodyXml: string): string {
   return (
     `<?xml version="1.0" encoding="UTF-8"?><w:document ${NS}>` +
@@ -120,6 +135,32 @@ describe('captureBodyObjectsForTree — object/objectText node shape', () => {
     expect(object?.children).toHaveLength(1);
     expect(object?.children[0]?.type).toBe('objectText');
     expect(object?.children[0]?.text).toBe('cell one');
+  });
+});
+
+// #650 review finding: toObjectMeta's `.sort((a,b) => a.localeCompare(b))`
+// on vanishCharStyleIds — added specifically for deterministic JSONB/fixture-
+// snapshot serialization — was never exercised by any test with 2+ ids,
+// so a regression dropping or breaking the sort would go undetected.
+describe('captureBodyObjectsForTree — vanishCharStyleIds is sorted, not insertion order (#650)', () => {
+  it('persists two vanish character-style ids sorted, even though styles.xml declares them in the REVERSE order', () => {
+    // Both ids must be REFERENCED by this object's own blob: capture persists
+    // the referenced subset, not the document-wide set (adversarial-review
+    // finding, #650 — see referencedVanishCharStyleIds). A visible run keeps
+    // the cell from collapsing to empty text.
+    const cellPara =
+      '<w:p><w:r><w:t>cell one</w:t></w:r>' +
+      '<w:r><w:rPr><w:rStyle w:val="Zeta"/></w:rPr><w:t>zeta hidden</w:t></w:r>' +
+      '<w:r><w:rPr><w:rStyle w:val="HiddenChar"/></w:rPr><w:t>char hidden</w:t></w:r></w:p>';
+    const body = table(row(cell(cellPara)));
+    const xml = makeDocXml(body);
+
+    const attachment = captureBodyObjectsForTree(xml, TWO_VANISH_STYLES);
+
+    const object = attachment.objectsBeforeFirst[0];
+    // TWO_VANISH_STYLES declares "Zeta" before "HiddenChar" — an unsorted
+    // Set-iteration-order array would come out ['Zeta', 'HiddenChar'].
+    expect(object?.meta.object?.vanishCharStyleIds).toEqual(['HiddenChar', 'Zeta']);
   });
 });
 

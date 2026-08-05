@@ -77,6 +77,7 @@ function diffFor(paragraphId: string): Record<string, unknown> {
       { uuid: paragraphId, base: ORIGINAL_TEXT, theirs: REVISED_TEXT, ours: ORIGINAL_TEXT },
     ],
     deleted: [],
+    deleteConflicts: [],
     conflicts: [],
     objectConflicts: [],
     warnings: [],

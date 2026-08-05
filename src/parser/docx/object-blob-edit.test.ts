@@ -337,4 +337,66 @@ describe('replaceAnchoredParagraphText', () => {
     expect(xml).toContain('edited text');
     expect(xml).not.toContain('visible original');
   });
+
+  // #650 — capture's collectText resolves a run hidden ONLY via a w:rStyle
+  // reference (not a direct w:rPr>w:vanish) against the captured
+  // vanishCharStyleIds set. The rewrite walk must apply the SAME rule with
+  // the SAME set, via replaceAnchoredParagraphText's new optional trailing
+  // param — otherwise capture and rewrite disagree about which run is
+  // hidden, and an edit can land in a run the document never shows.
+  it('skips a run hidden via w:rStyle when the matching vanishCharStyleIds set is passed', () => {
+    const hiddenViaStyle = {
+      'w:r': [
+        { 'w:rPr': [{ 'w:rStyle': [], ':@': { '@_w:val': 'HiddenChar' } }] },
+        { 'w:t': [{ '#text': 'HIDDEN VIA STYLE' }] },
+      ],
+    } as ObjectBlobNode;
+    const interior = paragraph(hiddenViaStyle, run('visible original'));
+    const blob = [cell(wrapBlobParagraphWithAnchor(interior, UUID_A))];
+
+    const result = replaceAnchoredParagraphText(
+      blob,
+      UUID_A,
+      'edited text',
+      new Set(['HiddenChar'])
+    );
+    expect(result).toBeDefined();
+    const xml = toXml(result as readonly ObjectBlobNode[]);
+
+    // the edit went into the VISIBLE run
+    expect(xml).toContain('edited text');
+    expect(xml).not.toContain('visible original');
+    // the rStyle-hidden run is untouched — neither overwritten nor blanked
+    expect(xml).toContain('HIDDEN VIA STYLE');
+    expect([...xml.matchAll(/edited text/g)]).toHaveLength(1);
+  });
+
+  // Without the matching vanishCharStyleIds set (the default empty set,
+  // e.g. a caller with no style map to offer), a run hidden only via
+  // w:rStyle cannot be recognized as hidden — the predicate has no style
+  // data to resolve the rStyle name against. This documents the boundary
+  // (mirrors hasRunVanish's own default-empty-set behaviour) rather than
+  // asserting a false capability.
+  it('treats an w:rStyle-hidden run as visible when vanishCharStyleIds is omitted (default empty set)', () => {
+    const hiddenViaStyle = {
+      'w:r': [
+        { 'w:rPr': [{ 'w:rStyle': [], ':@': { '@_w:val': 'HiddenChar' } }] },
+        { 'w:t': [{ '#text': 'HIDDEN VIA STYLE' }] },
+      ],
+    } as ObjectBlobNode;
+    const interior = paragraph(hiddenViaStyle, run('visible original'));
+    const blob = [cell(wrapBlobParagraphWithAnchor(interior, UUID_A))];
+
+    const result = replaceAnchoredParagraphText(blob, UUID_A, 'edited text');
+    expect(result).toBeDefined();
+    const xml = toXml(result as readonly ObjectBlobNode[]);
+
+    // no vanishCharStyleIds offered: the rStyle run is treated as an
+    // ordinary run and, being first in document order, takes the edit —
+    // the second run is then blanked per the usual multi-run rewrite
+    // semantics (see "multi-run rewrite" invariant above), not skipped.
+    expect(xml).toContain('edited text');
+    expect(xml).not.toContain('visible original');
+    expect(xml).not.toContain('HIDDEN VIA STYLE');
+  });
 });

@@ -266,4 +266,22 @@ describe('vanish resolution', () => {
     expect(m.vanishCharStyleIds.has('ChildHide')).toBe(true);
     expect(m.vanishCharStyleIds.has('BaseHide')).toBe(true);
   });
+
+  // w:vanish is an OOXML ST_OnOff toggle (ECMA-376 §17.3.2.45), not a bare marker:
+  // an explicit w:val="0" on the STYLE's own rPr switches vanish OFF and must not
+  // mark the style hidden. Presence-only checks ('w:vanish' in rPr) get this wrong.
+  it('does not mark a character style vanish when its own w:vanish w:val is 0', () => {
+    const xml = `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:style w:styleId="NotHiddenChar" w:type="character"><w:name w:val="NotHiddenChar"/><w:rPr><w:vanish w:val="0"/></w:rPr></w:style>
+    </w:styles>`;
+    const m = buildStyleMap(xml);
+    expect(m.vanishCharStyleIds.has('NotHiddenChar')).toBe(false);
+  });
+
+  it('does not mark a paragraph style vanish when its own w:vanish w:val is 0', () => {
+    const xml = `<?xml version="1.0"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:style w:styleId="NotHiddenPara" w:type="paragraph"><w:name w:val="NotHiddenPara"/><w:rPr><w:vanish w:val="0"/></w:rPr></w:style>
+    </w:styles>`;
+    expect(buildStyleMap(xml).vanishStyleIds.has('NotHiddenPara')).toBe(false);
+  });
 });

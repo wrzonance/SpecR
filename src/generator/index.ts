@@ -23,6 +23,12 @@ import {
 import { renderHeaderFooterComposition } from './header-footer.js';
 import type { HeaderFooterRenderResult } from './header-footer.js';
 import type { HeaderFooterFieldContext, HeaderFooterFieldValues } from './header-footer-fields.js';
+import {
+  collectVanishCharacterStyleIds,
+  vanishCharacterStyleOptions,
+} from './object-vanish-styles.js';
+import { namespaceVanishTrees } from './object-vanish-namespace.js';
+import type { IStylesOptions } from 'docx';
 
 export { generateSec } from './sec/index.js';
 export { renderMarkdown } from './markdown.js';
@@ -212,6 +218,16 @@ function documentLevelOptions(render: HeaderFooterRenderResult | undefined): {
   return render?.evenAndOddHeaders ? { evenAndOddHeaderAndFooters: true } : {};
 }
 
+// #650 task 6/10: a `styles` block is only emitted when at least one
+// captured object across `trees` actually referenced a vanish-resolved
+// character style — the overwhelmingly common case has none, and this keeps
+// that case's output byte-identical to before this fix (see
+// object-vanish-styles.ts's own module comment for why this exists).
+function vanishStylesOptions(trees: readonly SpecTree[]): { readonly styles?: IStylesOptions } {
+  const ids = collectVanishCharacterStyleIds(trees);
+  return ids.length > 0 ? { styles: { characterStyles: vanishCharacterStyleOptions(ids) } } : {};
+}
+
 // Section-level options driven by a header/footer render: docx's
 // ISectionOptions carries `headers`/`footers` as siblings of `properties`,
 // while titlePage/page-number-start/page-size live inside `properties` —
@@ -267,11 +283,19 @@ export async function generateDocx(
     const rules = styleRules !== undefined ? buildRuleMap(styleRules) : undefined;
     const format = options?.sectionNumberFormat ?? 'canonical';
     const ctx = sectionContext(format, SPEC_NUM_REF, rules);
-    const children = buildSectionChildren(tree, ctx);
+    // #650 (adversarial-review finding): namespace vanish character-style ids
+    // on the SINGLE-tree path too, not only in multi-tree generateManual. A
+    // raw id here can equal one dolanmiu/docx itself emits (`Hyperlink` being
+    // the realistic case), which would append a duplicate `w:styleId` and let
+    // the minted `w:vanish` attach to unrelated VISIBLE text. Returned by
+    // reference — byte-identical output — when the tree carries no vanish ids.
+    const [scopedTree = tree] = namespaceVanishTrees([tree]);
+    const children = buildSectionChildren(scopedTree, ctx);
     const render = renderOptionalHeaderFooter(tree, format, options);
     const pageSize = resolvePageSize(tree.pageSize);
     const doc = new Document({
       ...documentLevelOptions(render),
+      ...vanishStylesOptions([scopedTree]),
       numbering: { config: [buildSpecNumberingConfig(rules, SPEC_NUM_REF)] },
       sections: [{ ...sectionHeaderFooterOptions(render, pageSize), children }],
     });
@@ -332,10 +356,17 @@ export async function generateManual(
     throw new GeneratorError('cannot generate a manual with no sections');
   }
   try {
+    // #650 review: give every source tree its own private namespace for the
+    // vanish-character-style ids its own captured objects reference, so two
+    // different source documents combined into this manual can never let one
+    // tree's vanish stub overwrite another tree's unrelated same-named style
+    // (see object-vanish-namespace.ts). A no-op for the common case of no
+    // vanish ids anywhere, or a single-section manual.
+    const scopedTrees = namespaceVanishTrees(trees);
     const rules = styleRules !== undefined ? buildRuleMap(styleRules) : undefined;
     const format = options?.sectionNumberFormat ?? 'canonical';
     const frontMatter = buildFrontMatter(meta, styleRules);
-    const sections = trees.map((tree, i) => {
+    const sections = scopedTrees.map((tree, i) => {
       const reference = `${SPEC_NUM_REF}-${i}`;
       const render = renderOptionalHeaderFooter(tree, format, options);
       return {
@@ -345,13 +376,16 @@ export async function generateManual(
       };
     });
     const firstRender =
-      trees[0] !== undefined ? renderOptionalHeaderFooter(trees[0], format, options) : undefined;
+      scopedTrees[0] !== undefined
+        ? renderOptionalHeaderFooter(scopedTrees[0], format, options)
+        : undefined;
     // Front matter has no source SpecTree of its own — its page size (#509)
-    // resolves from `trees[0]`, deliberately not `firstRender` (a
+    // resolves from `scopedTrees[0]`, deliberately not `firstRender` (a
     // header/footer render, unrelated to page dimensions).
-    const frontMatterPageSize = resolvePageSize(trees[0]?.pageSize);
+    const frontMatterPageSize = resolvePageSize(scopedTrees[0]?.pageSize);
     const doc = new Document({
       ...documentLevelOptions(firstRender),
+      ...vanishStylesOptions(scopedTrees),
       numbering: { config: sections.map((s) => buildSpecNumberingConfig(rules, s.reference)) },
       sections: [
         {

@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { extractBodyObjects, anchorInteriorParagraphs } from './body-objects.js';
+import { extractBodyObjects, anchorInteriorParagraphs, hasRunVanish } from './body-objects.js';
 import { computeBodyOrder } from './body-order.js';
 import { createDocumentXmlParser, createOrderedDocumentXmlBuilder, toArray } from './xml-utils.js';
 import { buildStyleMap } from './styles.js';
+import { replaceAnchoredParagraphText } from './object-blob-edit.js';
 import { UUID_TAG_PREFIX } from '../../ast/index.js';
 import type { StyleMap } from './types.js';
 import type { BodyObjectExtractionResult } from './body-objects.js';
@@ -294,6 +295,38 @@ function blobHostParagraph(children: readonly ObjectBlobNode[]): ObjectBlobNode 
   return { 'w:p': children };
 }
 
+// Hand-built w:r fixtures for hasRunVanish's own unit tests (#650) — isolated
+// from the full extractBodyObjects walk so the predicate's OWN contract
+// (direct w:vanish OR rStyle-referenced character-style vanish) is pinned
+// independently of collectText's threading. collectText now threads
+// vanishCharStyleIds all the way from the builders' StyleMap down to this
+// exact predicate (see the "rStyle-referenced vanish character style" describe
+// block below for the end-to-end capture coverage) — these isolated fixtures
+// still earn their keep as a focused unit test of the predicate alone.
+function blobRun(rPrChildren: readonly ObjectBlobNode[]): ObjectBlobNode {
+  return { 'w:r': [{ 'w:rPr': rPrChildren }, { 'w:t': [blobTextNode('x')] }] };
+}
+
+// Computed `[tag]` keys (rather than a literal `'w:vanish':`/`'w:rStyle':`
+// property) mirror body-objects.ts's own `rebuilt` helper — the established
+// workaround for the same TS limitation (index signature + intersected `:@`
+// key can't both be checked against one hand-assembled literal at once, see
+// that function's comment) that a bare literal key + `:@` sibling hits.
+function attrNode(tag: string, val?: string): ObjectBlobNode {
+  const children: readonly ObjectBlobNode[] = [];
+  return (
+    val !== undefined ? { [tag]: children, ':@': { '@_w:val': val } } : { [tag]: children }
+  ) as ObjectBlobNode;
+}
+
+function blobVanish(val?: string): ObjectBlobNode {
+  return attrNode('w:vanish', val);
+}
+
+function blobRStyle(styleId: string): ObjectBlobNode {
+  return attrNode('w:rStyle', styleId);
+}
+
 // Depth-first search for the first `w:txbxContent`-tagged descendant of
 // `node` (including `node` itself) — a local test-only helper, not a
 // duplicate of body-objects.ts's own collection logic (this one is used only
@@ -328,6 +361,273 @@ function collectAllTxbxContentNodes(node: ObjectBlobNode): ObjectBlobNode[] {
   }
   return found;
 }
+
+describe('hasRunVanish — rStyle-referenced character-style vanish (#650, capture+rewrite shared predicate)', () => {
+  it('resolves hidden via w:rStyle referencing a vanish character style id present in vanishCharStyleIds', () => {
+    const run = blobRun([blobRStyle('HiddenChar')]);
+    expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(true);
+  });
+
+  it('a w:rStyle reference NOT present in vanishCharStyleIds stays visible', () => {
+    const run = blobRun([blobRStyle('PlainChar')]);
+    expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(false);
+  });
+
+  // ORACLE CHANGE, deliberate (adversarial-review finding, #650). This test
+  // previously asserted the OPPOSITE — that a resolved-off direct
+  // `<w:vanish w:val="0"/>` does NOT override a matching rStyle, because the
+  // predicate was written as a straight OR port of document.ts's runIsVanish.
+  // That was wrong, and wrong in the dangerous direction: ECMA-376 §17.7.3
+  // makes DIRECT formatting definitive for a toggle property, so a run that
+  // explicitly writes `w:val="0"` is the author switching the style's vanish
+  // back OFF. OR-ing made that run invisible instead — over-suppression, i.e.
+  // silently dropping text the author deliberately made visible, which is the
+  // failure mode that produces no error and merely looks like correct privacy
+  // behaviour. The OR was a NEW path this branch introduced, so the fix lands
+  // here rather than becoming long-lived shipped behaviour.
+  it('a resolved-off direct <w:vanish w:val="0"/> OVERRIDES a matching rStyle — the run is VISIBLE', () => {
+    const run = blobRun([blobVanish('0'), blobRStyle('HiddenChar')]);
+    expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(false);
+  });
+
+  // The ON side of the same tri-state, so the pair brackets it: an enabled
+  // direct w:vanish still hides regardless of the rStyle, and a run with NO
+  // direct w:vanish at all still falls through to the rStyle (above). Without
+  // this, resolveRunVanish could regress to "direct w:vanish always wins as
+  // false" and the override test would still pass.
+  it('an enabled direct <w:vanish/> still hides even when the rStyle is not a vanish style', () => {
+    const run = blobRun([blobVanish(), blobRStyle('PlainChar')]);
+    expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(true);
+  });
+
+  // The other half of the same invariant, phrased from the "never suppresses"
+  // direction: a resolved-off direct w:vanish with NO matching rStyle must
+  // never itself suppress visible text — this is the over-suppression guard
+  // hasRunVanish's own doc comment warns about, now re-pinned for the
+  // rStyle-aware predicate.
+  it('a resolved-off direct <w:vanish w:val="0"/> with no rStyle match never suppresses — stays visible', () => {
+    const run = blobRun([blobVanish('0')]);
+    expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(false);
+  });
+
+  it('hasRunVanish() with no 2nd arg is unchanged — an rStyle-only run stays visible for a caller that passes none', () => {
+    const run = blobRun([blobRStyle('HiddenChar')]);
+    expect(hasRunVanish(run)).toBe(false);
+  });
+
+  // #650 review (verified finding): the ORIGINAL version of this test called
+  // `hasRunVanish` ONCE, then compared that return value against a SECOND
+  // call using the exact same node/Set references — a tautology that can
+  // never fail for a deterministic function (any return value, even a wrong
+  // one, equals itself), so it never actually exercised the implementation.
+  // Fixed to call the predicate on two INDEPENDENTLY constructed (but
+  // structurally identical) node instances, asserting the concrete expected
+  // verdict on each call rather than comparing the pair to each other, and
+  // confirming the predicate does not mutate the node it inspects. The full
+  // end-to-end proof that capture and rewrite actually AGREE on one real
+  // `vanishCharStyleIds` value derived from an `extractBodyObjects` capture
+  // and fed into `replaceAnchoredParagraphText` (object-blob-edit.ts) — the
+  // two production call sites `hasRunVanish`'s own doc comment says must
+  // share one predicate (ADR-092) — lives in the "hidden-first paragraph"
+  // end-to-end test below.
+  it('hasRunVanish is a pure, deterministic predicate: two independently built, structurally identical runs get the same real verdict, without mutating their input', () => {
+    const buildHiddenRun = (): ObjectBlobNode => blobRun([blobRStyle('HiddenChar')]);
+    const firstNode = buildHiddenRun();
+    const secondNode = buildHiddenRun();
+    const beforeCall = structuredClone(firstNode);
+
+    expect(hasRunVanish(firstNode, new Set(['HiddenChar']))).toBe(true);
+    expect(hasRunVanish(secondNode, new Set(['HiddenChar']))).toBe(true);
+    expect(firstNode).toEqual(beforeCall);
+  });
+
+  // A paragraph with the VANISH run FIRST in document order and the VISIBLE
+  // run second — the exact shape rewriteFirstText's own doc comment warns
+  // about ("an interior paragraph whose HIDDEN run precedes its visible one
+  // would take the edit into the hidden run and blank the visible one").
+  // With the visible run first (this file's other rStyleRunPara fixtures),
+  // a drifted rewrite predicate that failed to skip vanish runs would still
+  // accidentally land the edit in the right place, because the visible run
+  // is reached first regardless — this ordering is the one place capture and
+  // rewrite disagreeing would actually be OBSERVABLE.
+  function hiddenFirstRStyleRunPara(
+    styledText: string,
+    visibleText: string,
+    styleId: string
+  ): string {
+    return (
+      `<w:p><w:r><w:rPr><w:rStyle w:val="${styleId}"/></w:rPr><w:t>${styledText}</w:t></w:r>` +
+      `<w:r><w:t>${visibleText}</w:t></w:r></w:p>`
+    );
+  }
+
+  it('end-to-end: vanishCharStyleIds captured by extractBodyObjects, fed into replaceAnchoredParagraphText on the SAME blob, skips the SAME hidden run capture skipped', () => {
+    const styleMap = charVanishStyleMap('HiddenChar');
+    const cellPara = hiddenFirstRStyleRunPara('hidden style part', 'visible part', 'HiddenChar');
+    const result = extract(table(row(cell(cellPara))), styleMap);
+    expect(result.tableObjects).toHaveLength(1);
+
+    // Non-null assertions below are safe given the length assertion above —
+    // kept as plain property access (not `?.`/`??`) so this test's own
+    // complexity stays readable rather than accumulating optional-chaining
+    // branches unrelated to the invariant it pins.
+    const object = result.tableObjects[0]!.object;
+    // Capture side: the hidden run never reaches interiorTexts.
+    expect(object.interiorTexts.map((t) => t.text)).toEqual(['visible part']);
+    expect(object.interiorTexts).toHaveLength(1);
+    const uuid = object.interiorTexts[0]!.id;
+
+    // Rewrite side: feed the EXACT vanishCharStyleIds capture persisted —
+    // never a fresh literal Set built by this test — into the real
+    // production rewrite entry point, on the object's own captured blob.
+    const vanishCharStyleIds = new Set(object.vanishCharStyleIds);
+    const rewritten = replaceAnchoredParagraphText(
+      object.blob,
+      uuid,
+      'replaced visible part',
+      vanishCharStyleIds
+    );
+    expect(rewritten).toBeDefined();
+
+    const xml = createOrderedDocumentXmlBuilder().build(rewritten!);
+    // The rewrite reached past the hidden run — its original text is
+    // untouched, never blanked and never overwritten with the new text.
+    expect(xml).toContain('hidden style part');
+    // The edit landed in the visible run, which is what a caller asked for.
+    expect(xml).toContain('replaced visible part');
+  });
+});
+
+// #650: builds a StyleMap with ONE character style, `styleId`, carrying
+// `<w:vanish/>` (or `<w:vanish w:val={val}/>` when `val` is given — e.g. `'0'`
+// for the resolved-off toggle case). Mirrors styles.test.ts's own
+// character-style-vanish fixture shape exactly, but goes through
+// buildStyleMap so the resulting StyleMap.vanishCharStyleIds is the SAME kind
+// of value buildTableObject/buildTextBoxObject receive from a real caller —
+// this is what proves the threading end-to-end, not just hasRunVanish alone.
+function charVanishStyleMap(styleId: string, val?: string): StyleMap {
+  const vanishAttr = val !== undefined ? ` w:val="${val}"` : '';
+  return buildStyleMap(
+    '<?xml version="1.0"?>' +
+      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      `<w:style w:type="character" w:styleId="${styleId}"><w:name w:val="${styleId}"/>` +
+      `<w:rPr><w:vanish${vanishAttr}/></w:rPr></w:style></w:styles>`
+  );
+}
+
+// A paragraph mixing one plain visible run with a SECOND run whose
+// `w:rPr>w:rStyle` references `styleId` — the rStyle-vanish analogue of the
+// direct-`w:vanish` mixed-run fixtures used throughout this file (e.g. line
+// ~1007's "single interior paragraph mixing one visible run and one vanish
+// run"). Whether `styledText` actually gets suppressed depends entirely on
+// whether the StyleMap passed to `extract` resolves `styleId` into
+// `vanishCharStyleIds` — this builder makes no assumption either way.
+function rStyleRunPara(visibleText: string, styledText: string, styleId: string): string {
+  return (
+    `<w:p><w:r><w:t>${visibleText}</w:t></w:r>` +
+    `<w:r><w:rPr><w:rStyle w:val="${styleId}"/></w:rPr><w:t>${styledText}</w:t></w:r></w:p>`
+  );
+}
+
+describe('extractBodyObjects — #650 rStyle-referenced character-style vanish threaded through capture', () => {
+  it('table path: excludes a run whose w:rStyle references a vanish character style, keeps the unrelated visible run', () => {
+    const styleMap = charVanishStyleMap('HiddenChar');
+    const cellPara = rStyleRunPara('visible part ', 'hidden style part', 'HiddenChar');
+    const result = extract(table(row(cell(cellPara))), styleMap);
+
+    expect(result.tableObjects).toHaveLength(1);
+    const object = result.tableObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible part ']);
+    expect(object?.vanishCharStyleIds).toEqual(styleMap.vanishCharStyleIds);
+  });
+
+  it('text box path: excludes a run whose w:rStyle references a vanish character style, keeps the unrelated visible run', () => {
+    const styleMap = charVanishStyleMap('HiddenChar');
+    const interior = rStyleRunPara('visible part ', 'hidden style part', 'HiddenChar');
+    const result = extract(textBoxHostParagraph(interior), styleMap);
+
+    expect(result.paragraphObjects).toHaveLength(1);
+    const object = result.paragraphObjects[0]?.object;
+    expect(object?.interiorTexts.map((t) => t.text)).toEqual(['visible part ']);
+    expect(object?.vanishCharStyleIds).toEqual(styleMap.vanishCharStyleIds);
+  });
+
+  // Over-suppression guard, ported to the full capture boundary (mirrors the
+  // toggle-OFF direct-w:vanish tests below in the #641 describe block, but
+  // for the STYLE-referenced signal): a character style whose OWN w:vanish is
+  // resolved OFF (`w:val="0"`) must never end up in vanishCharStyleIds
+  // (styles.test.ts's own contract), so a run referencing it via w:rStyle is
+  // never suppressed — visible text must survive on both capture paths.
+  it('a resolved-off <w:vanish w:val="0"/> on the referenced character style never suppresses — text survives, table + text-box paths', () => {
+    const styleMap = charVanishStyleMap('ToggleOffChar', '0');
+    expect(styleMap.vanishCharStyleIds.has('ToggleOffChar')).toBe(false);
+
+    const cellPara = rStyleRunPara('visible part ', 'also visible', 'ToggleOffChar');
+    const tableResult = extract(table(row(cell(cellPara))), styleMap);
+    expect(tableResult.tableObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part also visible',
+    ]);
+
+    const interior = rStyleRunPara('visible part ', 'also visible', 'ToggleOffChar');
+    const boxResult = extract(textBoxHostParagraph(interior), styleMap);
+    expect(boxResult.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part also visible',
+    ]);
+  });
+
+  // An rStyle reference to a styleId the caller's StyleMap never resolved to
+  // vanish (here: EMPTY_STYLES, no character styles at all) must never
+  // suppress — proves the threaded set genuinely gates the check rather than
+  // any rStyle presence being treated as hidden.
+  it('an rStyle reference absent from the StyleMap never suppresses — unrelated visible content survives', () => {
+    const interior = rStyleRunPara('visible part ', 'unstyled elsewhere', 'HiddenChar');
+    const result = extract(textBoxHostParagraph(interior));
+
+    expect(result.paragraphObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part unstyled elsewhere',
+    ]);
+  });
+
+  it('defaults to an empty vanishCharStyleIds set on the captured object when the StyleMap has no character-style vanish', () => {
+    const result = extract(table(row(cell(para('cell text')))));
+    expect(result.tableObjects[0]?.object.vanishCharStyleIds).toEqual(new Set());
+  });
+
+  // Adversarial-review finding (#650): the captured set must be the ids THIS
+  // object's blob actually references, not the whole document's. Persisting
+  // the document-wide set on every object is O(objects × vanish styles) into
+  // JSONB, and — worse than the storage — it makes the generator mint a
+  // vanish style stub for an id no blob references, needlessly widening the
+  // surface on which a minted id can collide with a style the document uses
+  // for VISIBLE text.
+  it('an object whose blob references NO vanish style persists an empty set, even when the document defines one', () => {
+    const styleMap = charVanishStyleMap('HiddenChar');
+    const result = extract(table(row(cell(para('plain visible text')))), styleMap);
+
+    expect(styleMap.vanishCharStyleIds.has('HiddenChar')).toBe(true);
+    expect(result.tableObjects[0]?.object.vanishCharStyleIds).toEqual(new Set());
+  });
+
+  it('captures only the referenced subset when the document defines more vanish styles than the blob uses', () => {
+    const styleMap = buildStyleMap(
+      '<?xml version="1.0"?>' +
+        '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+        '<w:style w:type="character" w:styleId="UsedChar"><w:name w:val="UsedChar"/>' +
+        '<w:rPr><w:vanish/></w:rPr></w:style>' +
+        '<w:style w:type="character" w:styleId="UnusedChar"><w:name w:val="UnusedChar"/>' +
+        '<w:rPr><w:vanish/></w:rPr></w:style></w:styles>'
+    );
+    const cellPara = rStyleRunPara('visible part ', 'hidden style part', 'UsedChar');
+    const result = extract(table(row(cell(cellPara))), styleMap);
+
+    expect(styleMap.vanishCharStyleIds).toEqual(new Set(['UsedChar', 'UnusedChar']));
+    // Only the referenced id is persisted — and suppression still works.
+    expect(result.tableObjects[0]?.object.vanishCharStyleIds).toEqual(new Set(['UsedChar']));
+    expect(result.tableObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part ',
+    ]);
+  });
+});
 
 describe('anchorInteriorParagraphs — hiddenSubtrees pass-through (#515 task 3)', () => {
   it('backward compatibility: default (no hiddenSubtrees) anchors an interior paragraph exactly as before', () => {

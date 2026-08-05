@@ -7,7 +7,7 @@ import {
 } from '../db/index.js';
 import type { InsertParagraphResult, ParagraphHistoryContext } from '../db/index.js';
 import { MergeError } from './error.js';
-import type { DiffResult, ModifiedDiff, ParagraphDiff } from './types.js';
+import type { DeleteConflictDiff, DiffResult, ModifiedDiff, ParagraphDiff } from './types.js';
 
 export class InvalidAcceptedChangeError extends MergeError {}
 
@@ -26,18 +26,23 @@ interface ParagraphRow {
   readonly parentId: string | null;
 }
 
-// One accepted uuid resolves to exactly one of these four apply strategies —
+// One accepted uuid resolves to exactly one of these five apply strategies —
 // 'conflicts' shares the modified/'text' path since it is the same shape
 // (ModifiedDiff) and the same ours/theirs apply logic. `diffKind` on the 'text'
 // variant records WHICH bucket (modified vs conflict) the entry came from, set
 // once here where the origin bucket is still known — applyTextChange has no
 // other way to recover it, and the write-history payload (#377, ADR-052 D1)
-// needs it to describe the merge. 'object-conflict' (#520) is detection-only:
-// it never reaches an apply strategy — validateAccepted rejects every uuid
-// resolving to it up front, before the write loop in applyAccepted runs, so
-// an atomic object-structural conflict (row/column/kind change on a table or
-// text box) can never be partially materialized by accepting one of its
-// affected child uuids or the object's own row id.
+// needs it to describe the merge. 'delete-conflict' (#465) applies through the
+// SAME setVanishRow path as 'deleted' — accepting it means "discard my
+// divergent edit, take the deletion" — but carries its DeleteConflictDiff
+// payload through so applyDeletedChange can guard against a THIRD divergence
+// (the row changing again between diff-compute time and accept time); see
+// applyNonAddedChange. 'object-conflict' (#520) is detection-only: it never
+// reaches an apply strategy — validateAccepted rejects every uuid resolving to
+// it up front, before the write loop in applyAccepted runs, so an atomic
+// object-structural conflict (row/column/kind change on a table or text box)
+// can never be partially materialized by accepting one of its affected child
+// uuids or the object's own row id.
 type ApplicableChange =
   | {
       readonly kind: 'text';
@@ -46,6 +51,7 @@ type ApplicableChange =
     }
   | { readonly kind: 'added'; readonly change: ParagraphDiff }
   | { readonly kind: 'deleted' }
+  | { readonly kind: 'delete-conflict'; readonly change: DeleteConflictDiff }
   | { readonly kind: 'object-conflict' };
 
 /** The 'text' branch of {@link ApplicableChange} — applyTextChange's own param
@@ -91,6 +97,10 @@ function applicableChanges(diff: DiffResult): ReadonlyMap<string, ApplicableChan
       { kind: 'added', change: c },
     ]),
     ...diff.deleted.map((uuid): [string, ApplicableChange] => [uuidKey(uuid), { kind: 'deleted' }]),
+    ...diff.deleteConflicts.map((c): [string, ApplicableChange] => [
+      uuidKey(c.uuid),
+      { kind: 'delete-conflict', change: c },
+    ]),
     ...objectConflictEntries(diff),
   ]);
 }
@@ -114,6 +124,7 @@ function diffEntryCount(diff: DiffResult): number {
     diff.conflicts.length +
     diff.added.length +
     diff.deleted.length +
+    diff.deleteConflicts.length +
     diff.objectConflicts.length
   );
 }
@@ -123,7 +134,21 @@ function diffEntryCount(diff: DiffResult): number {
  *  box's row/column/kind change cannot be auto-merged by accepting one of its
  *  pieces; the object must be resolved by hand. Runs over every accepted uuid
  *  up front (applyAccepted's write loop starts only after this returns), so
- *  no partial materialization of an object conflict is possible. */
+ *  no partial materialization of an object conflict is possible.
+ *
+ *  Deliberately does NOT reject 'delete-conflict' (#465) uuids the way it
+ *  rejects 'object-conflict' ones — the two are not the same shape of
+ *  problem. An object-structural conflict has no per-piece accept path at
+ *  all (there is no way to "accept half a table"), so it must always be
+ *  resolved by hand. A delete/modify collision on a single paragraph IS
+ *  meant to be resolvable per-uuid: accept it (discard the writer's
+ *  divergent edit, informed of it via the enriched diff entry) or simply
+ *  omit that uuid from `acceptedIds` (keep the edit, do nothing). The stale
+ *  guard inside applyDeletedChange exists to catch a THIRD divergence — the
+ *  row changing again between diff-compute time and accept time — not to
+ *  block ordinary acceptance the way this function blocks object conflicts.
+ *  A future reader should not "fix" this by copying the object-conflict
+ *  rejection branch below onto 'delete-conflict'. */
 function validateAccepted(
   acceptedIds: readonly string[],
   applicable: ReadonlyMap<string, ApplicableChange>
@@ -398,13 +423,32 @@ async function applyAcceptedAdded(
 /** Applies one deleted-op by delegating to setVanishRow(..., true) — never a
  *  hard delete. Uses the pre-toggle image setVanishRow returns to snapshot
  *  the paragraph_versions row (#377, ADR-052 D1) under op 'merge' without a
- *  second FOR UPDATE round-trip. */
+ *  second FOR UPDATE round-trip.
+ *
+ *  `expectedOurs` (#465) is set only when this uuid resolved to a
+ *  DeleteConflictDiff — accepting it means "discard my divergent edit, take
+ *  theirs's deletion", but the divergent edit it was diffed against may have
+ *  moved again since diff-compute time. When defined, locks the row first
+ *  (reusing lockParagraph — the same FOR UPDATE helper applyTextChange uses)
+ *  and throws a bare MergeError, mirroring applyTextChange's own stale guard
+ *  (same message shape, same class → HTTP 409), if the current text no
+ *  longer matches. Undefined (the ordinary diff.deleted case) skips the lock
+ *  entirely — zero extra DB round-trip, behavior byte-identical to
+ *  pre-#465. If no row is found under the guard, it is skipped and control
+ *  falls through unchanged to setVanishRow's own not-found handling below. */
 async function applyDeletedChange(
   specId: string,
   uuid: string,
   client: PoolClient,
-  resolveCtx: () => Promise<ParagraphHistoryContext>
+  resolveCtx: () => Promise<ParagraphHistoryContext>,
+  expectedOurs?: string
 ): Promise<boolean> {
+  if (expectedOurs !== undefined) {
+    const row = await lockParagraph(specId, uuid, client);
+    if (row && row.text !== expectedOurs) {
+      throw new MergeError(`stale diff for paragraph ${uuid}`);
+    }
+  }
   const result = await setVanishRow(client, specId, uuid, true);
   if (result.status === 'not-removable') {
     throw new InvalidAcceptedChangeError(
@@ -432,6 +476,42 @@ async function applyDeletedChange(
     payload: { kind: 'merge', diffKind: 'deleted' },
   });
   return true;
+}
+
+/** The non-'added' branch of {@link ApplicableChange} — applyAccepted defers
+ *  'added' entries to applyAcceptedAdded (they must apply in document order,
+ *  not accept-array order), so every OTHER kind funnels through here. */
+type NonAddedChange = Exclude<ApplicableChange, { readonly kind: 'added' }>;
+
+/** Dispatches one already-classified, non-'added' change to its apply
+ *  strategy. A `switch` with NO `default` case over `change.kind`'s 4
+ *  remaining literals — the repo's `noImplicitReturns` lint rule makes `tsc`
+ *  itself prove every literal is handled: a missing case leaves a code path
+ *  that falls out of the function without returning, which `tsc` flags. Adding
+ *  a `default` would silently defeat that exhaustiveness check the next time
+ *  {@link ApplicableChange} grows a variant. */
+async function applyNonAddedChange(
+  specId: string,
+  uuid: string,
+  change: NonAddedChange,
+  client: PoolClient,
+  resolveCtx: () => Promise<ParagraphHistoryContext>
+): Promise<boolean> {
+  switch (change.kind) {
+    case 'text':
+      return applyTextChange(specId, change, client, resolveCtx);
+    case 'deleted':
+      return applyDeletedChange(specId, uuid, client, resolveCtx);
+    case 'delete-conflict':
+      return applyDeletedChange(specId, uuid, client, resolveCtx, change.change.ours);
+    case 'object-conflict':
+      // Unreachable — validateAccepted already rejected every object-conflict
+      // uuid before applyAccepted's write loop started running.
+      throw new InvalidAcceptedChangeError(
+        `accepted UUID ${uuid} is part of an atomic object-structural conflict and cannot be ` +
+          'auto-merged — resolve the table/text box by hand (KNOWN AMBIGUITY)'
+      );
+  }
 }
 
 /**
@@ -474,10 +554,7 @@ export async function applyAccepted(
       addedEntries.push(change.change);
       continue;
     }
-    const wasApplied =
-      change.kind === 'text'
-        ? await applyTextChange(specId, change, client, resolveCtx)
-        : await applyDeletedChange(specId, uuid, client, resolveCtx);
+    const wasApplied = await applyNonAddedChange(specId, uuid, change, client, resolveCtx);
     if (wasApplied) applied += 1;
   }
   applied += await applyAcceptedAdded(specId, addedEntries, diff.added, client, resolveCtx);

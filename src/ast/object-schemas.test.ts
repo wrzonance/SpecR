@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import {
   ObjectKindSchema,
   ObjectGenerationSchema,
@@ -111,6 +114,114 @@ describe('ObjectMetaSchema', () => {
   });
 });
 
+// ── kind/rows/columns cross-field check (#650 Part B) ──────────────────────
+// rows/columns are table-grid dimensions; a textBox has no grid. The check
+// names exactly kind, rows, columns — it must never touch vanishCharStyleIds
+// or any other field, additive or otherwise.
+describe('ObjectMetaSchema — textBox/rows/columns cross-field check (#650)', () => {
+  const baseTextBox = {
+    kind: 'textBox' as const,
+    floating: true,
+    generation: 'vml' as const,
+    blob: [{ '#text': 'boxed text' }],
+  };
+  const baseTable = {
+    kind: 'table' as const,
+    floating: false,
+    generation: 'drawingml' as const,
+    rows: 1,
+    columns: 1,
+    blob: TABLE_BLOB,
+  };
+
+  it('rejects a textBox with rows set', () => {
+    expect(ObjectMetaSchema.safeParse({ ...baseTextBox, rows: 1 }).success).toBe(false);
+  });
+
+  it('rejects a textBox with columns set', () => {
+    expect(ObjectMetaSchema.safeParse({ ...baseTextBox, columns: 1 }).success).toBe(false);
+  });
+
+  it('accepts a textBox with neither rows nor columns', () => {
+    expect(ObjectMetaSchema.safeParse(baseTextBox).success).toBe(true);
+  });
+
+  it('leaves table with rows/columns unaffected', () => {
+    expect(ObjectMetaSchema.safeParse(baseTable).success).toBe(true);
+  });
+
+  it('accepts a textBox with vanishCharStyleIds populated and no rows/columns — the check never touches vanishCharStyleIds', () => {
+    const result = ObjectMetaSchema.safeParse({
+      ...baseTextBox,
+      vanishCharStyleIds: ['HiddenChar'],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.vanishCharStyleIds).toEqual(['HiddenChar']);
+    expect(result.data.rows).toBeUndefined();
+    expect(result.data.columns).toBeUndefined();
+  });
+});
+
+// ── vanishCharStyleIds (#650) ───────────────────────────────────────────────
+// Resolved w:rStyle → character-style w:vanish IDs, captured alongside the
+// object so capture and rewrite share one source of truth without needing
+// styles.xml at rewrite time. Additive JSONB field: absent and [] are
+// interchangeable, and a row captured before this change (no key at all)
+// must still load/parse identically to today.
+describe('ObjectMetaSchema — vanishCharStyleIds (#650)', () => {
+  const validTable = {
+    kind: 'table' as const,
+    floating: false,
+    generation: 'drawingml' as const,
+    rows: 1,
+    columns: 1,
+    blob: TABLE_BLOB,
+  };
+
+  it('a row/object captured before this change (no vanishCharStyleIds key) loads identically', () => {
+    const result = ObjectMetaSchema.safeParse(validTable);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect('vanishCharStyleIds' in result.data).toBe(false);
+  });
+
+  it('accepts a table object with a populated vanishCharStyleIds array', () => {
+    const withVanish = { ...validTable, vanishCharStyleIds: ['HiddenChar', 'Redacted'] };
+    const result = ObjectMetaSchema.safeParse(withVanish);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.vanishCharStyleIds).toEqual(['HiddenChar', 'Redacted']);
+  });
+
+  it('accepts an empty vanishCharStyleIds array, interchangeable with absent', () => {
+    expect(ObjectMetaSchema.safeParse({ ...validTable, vanishCharStyleIds: [] }).success).toBe(
+      true
+    );
+  });
+
+  it('rejects a non-string entry in vanishCharStyleIds', () => {
+    const bad = { ...validTable, vanishCharStyleIds: ['HiddenChar', 42] };
+    expect(ObjectMetaSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('a textBox object (no rows/columns) still validates with vanishCharStyleIds populated — the field never couples to kind', () => {
+    const textBox = {
+      kind: 'textBox' as const,
+      floating: true,
+      generation: 'vml' as const,
+      blob: [{ '#text': 'boxed text' }],
+      vanishCharStyleIds: ['HiddenChar'],
+    };
+    const result = ObjectMetaSchema.safeParse(textBox);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.vanishCharStyleIds).toEqual(['HiddenChar']);
+    expect(result.data.rows).toBeUndefined();
+    expect(result.data.columns).toBeUndefined();
+  });
+});
+
 // ── Editability fixation (#300, ADR-072 decision 2) ────────────────────────
 // An 'object' node is always locked (a captured OOXML blob is never
 // paragraph-editable text) and its 'objectText' children are always editable
@@ -183,5 +294,107 @@ describe('SpecNodeSchema — editability fixation for object/objectText (#300)',
       meta: { ...objectNode.meta, object: { kind: 'table', floating: false } },
     };
     expect(SpecNodeSchema.safeParse(malformed).success).toBe(false);
+  });
+});
+
+// ── type<->meta.object presence coupling (#650 Part B) ─────────────────────
+// An 'object' node is meaningless without its captured blob, and a non-object
+// node must never carry one (a leftover/misattached meta.object would silently
+// smuggle a captured OOXML blob onto a node no renderer expects it on). Scoped
+// strictly to presence — this must never re-derive or assert editability
+// (classify.ts already owns producing that pairing).
+describe('SpecNodeSchema — type<->meta.object presence coupling (#650)', () => {
+  const validObject = {
+    kind: 'table' as const,
+    floating: false,
+    generation: 'drawingml' as const,
+    rows: 1,
+    columns: 1,
+    blob: TABLE_BLOB,
+  };
+
+  it('rejects type=object with no meta.object', () => {
+    const node = {
+      id: VALID_UUID,
+      type: 'object',
+      text: 'Table (1x1)',
+      children: [],
+      meta: {},
+    };
+    expect(SpecNodeSchema.safeParse(node).success).toBe(false);
+  });
+
+  it('rejects a non-object type carrying a meta.object', () => {
+    const node = {
+      id: VALID_UUID,
+      type: 'article',
+      text: 'REFERENCES',
+      children: [],
+      meta: { object: validObject },
+    };
+    expect(SpecNodeSchema.safeParse(node).success).toBe(false);
+  });
+
+  it('accepts type=object with meta.object present (control)', () => {
+    const node = {
+      id: VALID_UUID,
+      type: 'object',
+      text: 'Table (1x1)',
+      children: [],
+      meta: { object: validObject },
+    };
+    expect(SpecNodeSchema.safeParse(node).success).toBe(true);
+  });
+});
+
+// ── .shape spread audit (#650 Task 9/10) ────────────────────────────────────
+// contract-schema-sharing-map.ts's Item 5 gate exists because a `{
+// ...Schema.shape }` rebuild silently drops a schema's own object-level
+// `.check()`/`.strict()` rule when an MCP tool's inputSchema is built by
+// spreading a REST body schema (isFullSchemaInstance, tool-schema-
+// introspect.ts). ObjectMetaSchema gained the kind/rows/columns cross-field
+// check and SpecNodeSchema gained the type<->meta.object presence check in
+// this issue, so both need the same audit that map runs for every REST body
+// schema with an object-level rule: does anything spread `.shape` off them
+// and lose the rule?
+//
+// The answer here is non-applicability, not enforcement: neither schema is
+// ever an MCP tool's inputSchema (or nested inside one) — src/mcp/tools.ts
+// and every src/mcp/*-handlers.ts file were grepped for both schema names and
+// found clean. Both schemas are consumed exclusively via `.parse()`/
+// `.safeParse()` on the full schema instance — db/queries/object-meta.ts
+// (parseObjectMeta/updateObjectData), revision-snapshot.ts, revision-diff.ts,
+// history-diff.ts — which is why their cross-field checks already run intact
+// wherever these schemas are actually used today (see the DB-boundary
+// rejection tests in object-meta.test.ts). This test makes that a durable,
+// CI-enforced fact instead of a point-in-time grep result recorded only in a
+// PR body: a future PR that spreads either schema's `.shape` into a hand-
+// built object (MCP tool or otherwise) fails it immediately.
+describe('ObjectMetaSchema / SpecNodeSchema — .shape spread audit (#650)', () => {
+  const srcRoot = fileURLToPath(new URL('..', import.meta.url));
+  const selfFile = fileURLToPath(import.meta.url);
+
+  function tsFilesUnder(root: string): string[] {
+    return readdirSync(root, { recursive: true })
+      .filter((entry): entry is string => typeof entry === 'string' && entry.endsWith('.ts'))
+      .map((entry) => path.join(root, entry));
+  }
+
+  it('no file under src/ spreads ObjectMetaSchema.shape or SpecNodeSchema.shape', () => {
+    const offenders = tsFilesUnder(srcRoot)
+      .filter((file) => file !== selfFile)
+      .flatMap((file) => {
+        const text = readFileSync(file, 'utf8');
+        const hits: string[] = [];
+        if (/ObjectMetaSchema\.shape/.test(text)) hits.push(`${file}: ObjectMetaSchema.shape`);
+        if (/SpecNodeSchema\.shape/.test(text)) hits.push(`${file}: SpecNodeSchema.shape`);
+        return hits;
+      });
+    expect(offenders).toEqual([]);
+  });
+
+  it('the MCP tool surface (src/mcp/tools.ts) never references either schema — no tool input can lose their checks', () => {
+    const toolsSource = readFileSync(path.join(srcRoot, 'mcp', 'tools.ts'), 'utf8');
+    expect(toolsSource).not.toMatch(/ObjectMetaSchema|SpecNodeSchema/);
   });
 });

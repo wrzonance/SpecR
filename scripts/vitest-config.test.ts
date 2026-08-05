@@ -81,4 +81,14 @@ describe('vitest.config.ts integration project', () => {
       './src/test-utils/integration-lock.global-setup.ts',
     ]);
   });
+
+  // Pins the #442 fix: without this assertion, deleting the setupFiles
+  // entry leaves an ambient NODE_ENV=development free to re-arm the rate
+  // limiter (ADR-046) for `pnpm test:integration`, while every other
+  // assertion in this describe block stays green.
+  it('registers the NODE_ENV defense-in-depth setupFiles hook (#442)', () => {
+    expect(integrationProject.test?.setupFiles).toEqual([
+      './src/test-utils/integration-env-setup.ts',
+    ]);
+  });
 });

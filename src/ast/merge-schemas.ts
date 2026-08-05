@@ -21,6 +21,17 @@ const ModifiedDiffSchema = z.object({
   ours: z.string(),
 });
 
+// Mirrors DeleteConflictDiff (src/merge/types.ts, #465) — a base paragraph
+// theirs deleted while ours diverged from base since the snapshot. No
+// `theirs` key at all: it's always absent for this bucket (nothing to
+// fingerprint/carry once the paragraph is gone from theirs), so nothing here
+// needs `.exactOptional()` — every field is genuinely required.
+const DeleteConflictDiffSchema = z.object({
+  uuid: z.uuid(),
+  base: z.string(),
+  ours: z.string(),
+});
+
 // Mirrors ObjectStructureFingerprint (src/merge/object-fingerprint.ts). rows/columns
 // MUST be `.exactOptional()`, not `.optional()` — under this repo's
 // `exactOptionalPropertyTypes`, `.optional()` infers `rows?: number | undefined`,
@@ -56,6 +67,11 @@ export const DiffResultSchema = z
     added: z.array(ParagraphDiffSchema),
     modified: z.array(ModifiedDiffSchema),
     deleted: z.array(z.uuid()),
+    // Delete/modify conflicts (#465) — required, not optional, for the same
+    // reason as objectConflicts below: computeDiff always populates it
+    // (possibly []), and a client only ever resubmits what get_spec_diff just
+    // returned.
+    deleteConflicts: z.array(DeleteConflictDiffSchema),
     conflicts: z.array(ModifiedDiffSchema),
     // Atomic structural conflicts on body-level tables/text boxes (#520) —
     // required, not optional: computeDiff always populates it (possibly []), and
@@ -82,7 +98,7 @@ export const DiffResultSchema = z
       if (seen.has(key)) {
         ctx.addIssue({
           code: 'custom',
-          message: `duplicate diff uuid ${uuid} in bucket "${bucket}" — a uuid must appear in exactly one of modified/conflicts/added/deleted/objectConflicts`,
+          message: `duplicate diff uuid ${uuid} in bucket "${bucket}" — a uuid must appear in exactly one of modified/conflicts/added/deleted/deleteConflicts/objectConflicts`,
         });
         return;
       }
@@ -92,6 +108,7 @@ export const DiffResultSchema = z
     diff.conflicts.forEach((c) => visit(c.uuid, 'conflicts'));
     diff.added.forEach((c) => visit(c.uuid, 'added'));
     diff.deleted.forEach((u) => visit(u, 'deleted'));
+    diff.deleteConflicts.forEach((c) => visit(c.uuid, 'deleteConflicts'));
     // Both the object row's own id and each affected child anchor are excluded
     // from every other bucket by computeDiff's classifyBase (src/merge/diff.ts)
     // — mirror that exclusion here so a client-supplied diff can't reintroduce
