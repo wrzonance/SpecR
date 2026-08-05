@@ -1,10 +1,11 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { pool, createLibrary } from '../index.js';
 import { createSpec, persistParsedSpec, updateSpec, withdrawSpec } from './specs.js';
 import type { OriginMeta } from './specs.js';
 import { insertTree } from './paragraphs.js';
 import { getSpecTree } from './specs.js';
+import { deleteCapturedFixtures } from '../../test-utils/integration-fixture-cleanup.js';
 
 const SOURCE_FACTS = {
   comments: [{ author: 'Specifier', text: 'Verify finish.', anchor: [11, 15], closed: false }],
@@ -12,8 +13,62 @@ const SOURCE_FACTS = {
   reviewer: { severity: 'coordination', count: 2 },
 } as const;
 
+// Ids captured at every `createSpec({ section: '99 00 00', ... })` call site
+// in this file that has no more specific teardown of its own. Previously this
+// hook ran `DELETE FROM specs WHERE section = '99 00 00'` — a pattern match
+// that also deleted any OTHER row sharing that section value, including a
+// concurrent invocation's fixtures (#638, ADR-090) or, as pinned below, a
+// sibling test's own row. Delete-by-id only ever removes what this file's
+// tests actually inserted.
+let capturedSpecIds: string[] = [];
+
 afterEach(async () => {
-  await pool.query("DELETE FROM specs WHERE section = '99 00 00'");
+  await deleteCapturedFixtures(pool, { specIds: capturedSpecIds });
+  capturedSpecIds = [];
+});
+
+describe('afterEach teardown is id-scoped, not section-pattern (#442)', () => {
+  // Stands in for a row this file's tests did not create — e.g. a concurrent
+  // process's fixture at the same section value. Created in `beforeAll` and
+  // torn down in `afterAll`, both deliberately outside the per-test
+  // `afterEach` above, so the second test below can observe whether that hook
+  // touched it. Setting it up in a hook rather than in the first `it` keeps
+  // the second test from depending on a sibling test having run: under `-t`
+  // filtering or a shuffled order it would otherwise read an undefined id and
+  // fail for the wrong reason — the very cross-test coupling this file fixes.
+  let foreignSpecId: string;
+
+  beforeAll(async () => {
+    foreignSpecId = await createSpec({
+      section: '99 00 00',
+      title: 'Foreign Fixture (simulated concurrent run)',
+      source: 'arcat',
+    });
+  });
+
+  afterAll(async () => {
+    await deleteCapturedFixtures(pool, { specIds: [foreignSpecId] });
+  });
+
+  it('a sibling test creates its own 99 00 00 row alongside a foreign one', async () => {
+    // Distinct `source` so this insert doesn't collide with the foreign row
+    // on the (section, source, library_id) unique constraint — both target
+    // section '99 00 00' and the same default library.
+    const ownSpecId = await createSpec({
+      section: '99 00 00',
+      title: 'Own Fixture',
+      source: 'cpi',
+    });
+    capturedSpecIds.push(ownSpecId);
+    // The file-level afterEach for THIS test runs next: it must delete only
+    // ownSpecId, never foreignSpecId.
+    expect(ownSpecId).not.toBe(foreignSpecId);
+  });
+
+  it('the foreign row survives the file-level teardown triggered by the previous test (#442)', async () => {
+    const result = await pool.query('SELECT id FROM specs WHERE id = $1', [foreignSpecId]);
+    expect(result.rows).toHaveLength(1);
+  });
 });
 
 describe('getSpecTree', () => {
@@ -236,6 +291,7 @@ describe('getSpecTree — body objects (#300, ADR-072)', () => {
 describe('createSpec', () => {
   it('inserts a spec row and returns the UUID', async () => {
     const id = await createSpec({ section: '99 00 00', title: 'Test Spec', source: 'arcat' });
+    capturedSpecIds.push(id);
     expect(id).toMatch(/^[\da-f-]{36}$/);
 
     const result = await pool.query('SELECT id, section, title, source FROM specs WHERE id = $1', [
@@ -499,6 +555,7 @@ describe('persistParsedSpec — division general reconciliation', () => {
 describe('updateSpec — content_version bump (#93)', () => {
   it('bumps content_version when title changes; no-op update does not bump', async () => {
     const id = await createSpec({ section: '99 00 00', title: 'V1', source: 'arcat' });
+    capturedSpecIds.push(id);
     await updateSpec(id, { title: 'V2' });
     const r1 = await pool.query('SELECT content_version FROM specs WHERE id = $1', [id]);
     expect(r1.rows[0]).toMatchObject({ content_version: 2 });
@@ -509,6 +566,7 @@ describe('updateSpec — content_version bump (#93)', () => {
 
   it('bumps content_version when section changes', async () => {
     const id = await createSpec({ section: '99 00 00', title: 'V1', source: 'arcat' });
+    capturedSpecIds.push(id);
     await updateSpec(id, { section: '99 00 10' });
     const r = await pool.query('SELECT content_version FROM specs WHERE id = $1', [id]);
     expect(r.rows[0]).toMatchObject({ content_version: 2 });
