@@ -18,6 +18,7 @@ import { assertSpecWritable } from './edit-gate.js';
 import { bumpSpecContentVersion } from './content-version.js';
 import { recordParagraphHistory, resolveHistoryContext } from './paragraph-history.js';
 import { SourceFactsSchema } from '../../ast/index.js';
+import { deriveCommentClosureFacts } from './paragraph-comment-closure.js';
 import type { PoolClient } from 'pg';
 import type { ParagraphHistoryContext } from './paragraph-history.js';
 import type { ConventionRules, Editability } from '../../ast/index.js';
@@ -253,6 +254,15 @@ interface AnchorRow {
   readonly parent_id: string | null;
   readonly position: number;
   readonly source_facts: unknown;
+  // #545 — needed to close the anchor's originating comment as part of
+  // accepting it as a note (below): base_version to compute the anchor's
+  // own next version, text/node_type because recordParagraphHistory's
+  // contract is "always the paragraph's POST-write state" and this write's
+  // post-write text/type ARE the anchor's own, unchanged by this write
+  // (mirrors setVanishRow/setCommentClosedRow's identical pre-image reuse).
+  readonly base_version: number;
+  readonly text: string;
+  readonly node_type: string;
 }
 
 function commentTextAt(sourceFacts: unknown, index: number): string | null {
@@ -341,6 +351,51 @@ async function insertNoteSibling(
   return row.id;
 }
 
+/**
+ * #545 — the sharpest symptom this issue fixes: accepting a comment as a
+ * note used to leave the originating comment open, strictly increasing the
+ * number of blocking readiness findings (a new specifier_note_present PLUS
+ * the still-open open_comment). Closes `anchor`'s own `comments[index]` in
+ * the SAME transaction as the note insert, sharing the outer write's already-
+ * resolved `historyContext` (one content_version generation, not a second
+ * bump) — a no-op if the comment is somehow already closed. Per
+ * `paragraph-history.ts`'s own contract ("every content-mutating write path
+ * calls recordParagraphHistory exactly once per paragraph it touches"), the
+ * anchor gets its own `close-comment` history row: this write DOES mutate
+ * the anchor's `source_facts` and bump its `base_version`, so a concurrent
+ * optimistic-concurrency edit must see it.
+ */
+async function closeAnchorCommentIfOpen(
+  client: PoolClient,
+  anchor: AnchorRow,
+  anchorId: string,
+  index: number,
+  historyContext: ParagraphHistoryContext
+): Promise<void> {
+  const facts = SourceFactsSchema.parse(anchor.source_facts);
+  if (facts.comments?.[index]?.closed === true) return;
+  const nextFacts = deriveCommentClosureFacts(facts, index, true);
+  // Defensive only — commentTextAt already confirmed a comment exists at
+  // `index` before this is ever called, so nextFacts is never null here.
+  if (!nextFacts) return;
+  await client.query(
+    `UPDATE paragraphs SET source_facts = $2::jsonb, base_version = base_version + 1, updated_at = now()
+     WHERE id = $1`,
+    [anchorId, JSON.stringify(nextFacts)]
+  );
+  await recordParagraphHistory(client, {
+    paragraphId: anchorId,
+    specId: anchor.spec_id,
+    version: anchor.base_version + 1,
+    text: anchor.text,
+    nodeType: anchor.node_type,
+    op: 'close-comment',
+    contentVersion: historyContext.contentVersion,
+    userId: historyContext.userId,
+    payload: null,
+  });
+}
+
 async function runAccept(
   client: PoolClient,
   specId: string,
@@ -380,7 +435,8 @@ async function runAccept(
   const gate = await assertSpecWritable(client, specId);
 
   const anchorRes = await client.query<AnchorRow>(
-    `SELECT spec_id, parent_id, position, source_facts FROM paragraphs WHERE id = $1 FOR UPDATE`,
+    `SELECT spec_id, parent_id, position, source_facts, base_version, text, node_type
+     FROM paragraphs WHERE id = $1 FOR UPDATE`,
     [nodeId]
   );
   const anchor = anchorRes.rows[0];
@@ -406,6 +462,9 @@ async function runAccept(
     text,
     historyContext
   );
+  // #545 — accepting a comment as a note also closes the originating
+  // comment, so it no longer counts as a blocking open_comment finding.
+  await closeAnchorCommentIfOpen(client, anchor, nodeId, index, historyContext);
   return { status: 'created', noteId };
 }
 
@@ -418,6 +477,12 @@ async function runAccept(
  * omitted). Idempotent by provenance: a repeat accept of the same
  * (anchor, index) returns the existing note's id and writes nothing — no gate
  * check, no history row.
+ *
+ * #545: also closes the originating comment (`anchor.source_facts.comments
+ * [index].closed = true`) in the same transaction, under op
+ * `'close-comment'` — so accepting a comment as a note no longer strictly
+ * increases the readiness gate's blocking-finding count (a new note plus a
+ * still-open comment). A no-op if the comment is already closed.
  */
 export async function acceptCommentAsNote(
   specId: string,
