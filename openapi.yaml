@@ -8679,7 +8679,26 @@ components:
             ]
         op:
           type: string
-          enum: [edit, insert, remove, restore, merge, accept-note, restructure]
+          description: >
+            Mirrors the `paragraph_versions.op` enum exactly (migrations
+            046/055). `acknowledge`/`unacknowledge` and
+            `close-comment`/`reopen-comment` are the ADR-079 follow-on
+            readiness-clearance ops (#545) — each writes a history row, so a
+            real history response can carry them.
+          enum:
+            [
+              edit,
+              insert,
+              remove,
+              restore,
+              merge,
+              accept-note,
+              restructure,
+              acknowledge,
+              unacknowledge,
+              close-comment,
+              reopen-comment,
+            ]
         contentVersion:
           type: [integer, 'null']
           minimum: 1
