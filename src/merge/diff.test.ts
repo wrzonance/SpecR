@@ -141,10 +141,13 @@ describe('computeDiff', () => {
   });
 
   it('deleteConflicts (#465) is always present on the returned DiffResult, empty until classifyBase routes into it', () => {
-    // Task 1/6: the bucket exists on the wire but nothing populates it yet —
-    // pins that computeDiff always returns the field (never omits/undefines
-    // it), across an ordinary delete, an ordinary modify, and an unchanged
-    // paragraph, so downstream Zod parsing/consumers never see it missing.
+    // Pins that computeDiff ALWAYS returns the field (never omits/undefines
+    // it) and leaves it EMPTY for the three non-conflicting shapes exercised
+    // here — an ordinary delete (U2), an ordinary modify (u3), and an
+    // unchanged paragraph (U1) — so downstream Zod parsing/consumers never
+    // see it missing. classifyBase does populate the bucket (the next test
+    // pins a populated entry); "empty" here is this fixture's outcome, not a
+    // statement that the feature is unwired.
     const result = computeDiff(
       [snap(U1, 'kept'), snap(U2, 'removed'), snap('u3', 'base text')],
       [snap(U1, 'kept'), snap(U2, 'removed'), snap('u3', 'base text')],
