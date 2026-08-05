@@ -62,6 +62,26 @@ export { insertParagraphAfter, insertSiblingRow } from './queries/paragraph-inse
 export type { InsertParagraphResult, InsertParagraphInput } from './queries/paragraph-insert.js';
 export { setParagraphVanish, setVanishRow } from './queries/paragraph-vanish.js';
 export type { SetVanishResult, SetVanishRowResult } from './queries/paragraph-vanish.js';
+// #545, ADR-079 follow-on — the acknowledgement toggle (clears
+// specifier_note_present / body_object_present) and the comment-closure
+// toggle (clears open_comment), mirroring setParagraphVanish's gate-free/
+// gated core split exactly.
+export {
+  setParagraphAcknowledged,
+  setAcknowledgedRow,
+} from './queries/paragraph-acknowledgement.js';
+export type {
+  SetAcknowledgedResult,
+  SetAcknowledgedRowResult,
+} from './queries/paragraph-acknowledgement.js';
+export {
+  setParagraphCommentClosed,
+  setCommentClosedRow,
+} from './queries/paragraph-comment-closure.js';
+export type {
+  SetCommentClosedResult,
+  SetCommentClosedRowResult,
+} from './queries/paragraph-comment-closure.js';
 // ADR-052 D3/D4/D9 (#380) — checkpoints, coalesced paragraph-history sessions,
 // per-paragraph reject (a restore-to-version write through updateParagraphText
 // above), and pending-change summaries all barrel through checkpoint-index.ts

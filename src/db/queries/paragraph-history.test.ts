@@ -218,7 +218,7 @@ describe('lazyHistoryContext', () => {
 });
 
 describe('PARAGRAPH_HISTORY_OPS', () => {
-  it("mirrors migration 046's paragraph_versions_op_check CHECK constraint exactly", async () => {
+  it("mirrors migration 055's paragraph_versions_op_check CHECK constraint exactly", async () => {
     const { PARAGRAPH_HISTORY_OPS } = await import('./paragraph-history.js');
     expect(PARAGRAPH_HISTORY_OPS).toEqual([
       'edit',
@@ -228,6 +228,10 @@ describe('PARAGRAPH_HISTORY_OPS', () => {
       'merge',
       'accept-note',
       'restructure',
+      'acknowledge',
+      'unacknowledge',
+      'close-comment',
+      'reopen-comment',
     ]);
   });
 });

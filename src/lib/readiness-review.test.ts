@@ -162,6 +162,91 @@ describe('evaluateSpecReadiness', () => {
     expect(result.findings).toEqual([]);
     expect(result.highlightAdvisory.total).toBe(0);
   });
+
+  it('acknowledged note produces no specifier_note_present finding (#545)', () => {
+    const acknowledged = node({
+      id: 'n1',
+      type: 'note',
+      text: 'Coordinate with owner.',
+      meta: { acknowledged: true },
+    });
+
+    const result = evaluateSpecReadiness(treeOf([acknowledged]));
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it('unacknowledged note still blocks — acknowledgement gate is not vacuous (#545)', () => {
+    const unacknowledged = node({
+      id: 'n1',
+      type: 'note',
+      text: 'Coordinate with owner.',
+      meta: {},
+    });
+
+    const result = evaluateSpecReadiness(treeOf([unacknowledged]));
+
+    expect(result.findings).toEqual([
+      { type: 'specifier_note_present', nodeId: 'n1', text: 'Coordinate with owner.' },
+    ]);
+  });
+
+  it('acknowledged textBox object produces no body_object_present finding (#545)', () => {
+    const acknowledged = node({
+      id: 'o1',
+      type: 'object',
+      text: '',
+      meta: {
+        acknowledged: true,
+        object: { kind: 'textBox', floating: false, generation: 'drawingml', blob: [{}] },
+      },
+    });
+
+    const result = evaluateSpecReadiness(treeOf([acknowledged]));
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it('unacknowledged textBox object still blocks — acknowledgement gate is not vacuous (#545)', () => {
+    const unacknowledged = node({
+      id: 'o1',
+      type: 'object',
+      text: '',
+      meta: {
+        object: { kind: 'textBox', floating: false, generation: 'drawingml', blob: [{}] },
+      },
+    });
+
+    const result = evaluateSpecReadiness(treeOf([unacknowledged]));
+
+    expect(result.findings).toEqual([
+      { type: 'body_object_present', nodeId: 'o1', text: '', objectKind: 'textBox' },
+    ]);
+  });
+
+  it('meta.acknowledged on a non-note/object node is simply irrelevant, never a magic bypass', () => {
+    const acknowledgedButOrdinary = node({
+      id: 'p1',
+      type: 'pr1',
+      text: 'Provide <manufacturer>.',
+      meta: {
+        acknowledged: true,
+        sourceFacts: { choiceTokens: [{ kind: 'angle', options: ['A', 'B'], span: [8, 22] }] },
+      },
+    });
+
+    const result = evaluateSpecReadiness(treeOf([acknowledgedButOrdinary]));
+
+    expect(result.findings).toEqual([
+      {
+        type: 'unresolved_choice_token',
+        nodeId: 'p1',
+        text: 'Provide <manufacturer>.',
+        kind: 'angle',
+        options: ['A', 'B'],
+      },
+    ]);
+  });
 });
 
 describe('summarizeReadinessFindings', () => {

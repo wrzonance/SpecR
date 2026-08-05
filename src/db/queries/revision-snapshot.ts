@@ -97,7 +97,7 @@ export async function snapshotMemberTrees(
     const paras = await client.query<SnapshotParagraphRow>(
       `SELECT id, parent_id, node_type, text, position, vanish, conflicts, source_facts,
               signal_provenance, classification, editability_override, object_data,
-              page_break_before,
+              page_break_before, acknowledged,
               origin_paragraph_id AS "originParagraphId"
        FROM paragraphs WHERE spec_id = $1`,
       [member.spec_id]
