@@ -843,22 +843,27 @@ describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D
 
   it('GET /revisions/{id} matches its documented schema exactly, including its embedded SpecTree', async () => {
     const { specId, projectId } = fixture;
-    const pkg = await fetch(`${baseUrl}/projects/${projectId}/packages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: `contract-revision-pkg-${Date.now()}` }),
-    });
-    expect(pkg.status).toBe(201);
-    const pkgBody = (await pkg.json()) as { data: { packageId: string } };
-    const packageId = pkgBody.data.packageId;
-    // setPackageSpecs requires every member spec to already be on the project's TOC
-    // (project_specs) — the checkpoint fixture's spec carries a `project_id` column but was
-    // inserted directly via SQL, never added to project_specs.
-    await pool.query(
-      'INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)',
-      [projectId, specId]
-    );
+    // Both the package creation and the project_specs INSERT sit INSIDE the try: the package is
+    // created first, so if the INSERT below throws (a re-run where the row already exists, say),
+    // a version of this test that opened the try afterwards would skip the finally entirely and
+    // orphan the design_packages row it had just created — a leak that compounds every run.
+    let packageId: string | undefined;
     try {
+      const pkg = await fetch(`${baseUrl}/projects/${projectId}/packages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: `contract-revision-pkg-${Date.now()}` }),
+      });
+      expect(pkg.status).toBe(201);
+      const pkgBody = (await pkg.json()) as { data: { packageId: string } };
+      packageId = pkgBody.data.packageId;
+      // setPackageSpecs requires every member spec to already be on the project's TOC
+      // (project_specs) — the checkpoint fixture's spec carries a `project_id` column but was
+      // inserted directly via SQL, never added to project_specs.
+      await pool.query(
+        'INSERT INTO project_specs (project_id, spec_id, position) VALUES ($1, $2, 1)',
+        [projectId, specId]
+      );
       const setMembers = await fetch(`${baseUrl}/packages/${packageId}/specs`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -914,7 +919,13 @@ describe('checkpoint, pending-summary, and paragraph-reject endpoints (ADR-052 D
       // design_packages (021_create_package_revisions.ts), so deleting the package alone is enough
       // there. project_specs.spec_id is RESTRICT (007_create_project_specs.ts), so it must be
       // cleaned up explicitly before the outer afterAll's `DELETE FROM specs`.
-      await pool.query('DELETE FROM design_packages WHERE id = $1', [packageId]);
+      //
+      // packageId is undefined only when the package POST itself threw, in which case there is no
+      // row to remove; the project_specs delete runs unconditionally because it is id-scoped and
+      // a no-op when the INSERT never landed.
+      if (packageId !== undefined) {
+        await pool.query('DELETE FROM design_packages WHERE id = $1', [packageId]);
+      }
       await pool.query('DELETE FROM project_specs WHERE project_id = $1 AND spec_id = $2', [
         projectId,
         specId,

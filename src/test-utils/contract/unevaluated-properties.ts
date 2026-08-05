@@ -204,10 +204,12 @@ function markObject(
   // leak the sibling's mark across contexts). The shallow copy suffices because every nested key
   // touched below is REASSIGNED to a brand-new value from a recursive call, never mutated in place.
   const schema: Record<string, unknown> = { ...node };
-  // A bundled `$ref` pointer: rewrite it to the mirror-qualified id for THIS local context and stop
-  // — it has no other subschema-bearing keywords worth walking (siblings like `description` are
-  // plain data), and `shouldMark` below naturally leaves it unmarked since it evaluates no
-  // properties of its own (see the `$ref` note in the applicator-classification comment).
+  // A bundled `$ref` pointer: rewrite it to the mirror-qualified id for THIS local context. The
+  // walk then CONTINUES through the rest of the node rather than returning early — harmlessly, as
+  // a `$ref` node carries no other subschema-bearing keywords (siblings like `description` are
+  // plain data), so the recursion below finds nothing more to rewrite. `shouldMark` also leaves it
+  // unmarked, since it evaluates no properties of its own (see the `$ref` note in the
+  // applicator-classification comment).
   if (typeof schema['$ref'] === 'string') schema['$ref'] = qualifyRef(schema['$ref'], inPlace);
   // Register the in-progress clone under its context BEFORE recursing, so a schema reached again
   // under the SAME context (the shared-object-identity case above) returns this clone instead of

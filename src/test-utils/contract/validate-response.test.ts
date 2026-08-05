@@ -788,6 +788,30 @@ describe('operationParamKeys body-key derivation', () => {
     const doc = docWithBodySchema({ allOf: [{ properties: { hidden: {} } }] });
     expect(() => operationParamKeys(doc, 'post', '/synthetic')).toThrow(/pass vacuously/);
   });
+
+  // The whole-body guard above only fires when the derived set ends up EMPTY. A union whose other
+  // branches still contribute keys keeps body.size non-zero, so an underivable branch would slip
+  // through and INV-4 would compare a PARTIAL key set with no signal — the same vacuity class, one
+  // level down. Without the per-branch check this doc derives {ok} and passes silently.
+  it('throws when only SOME oneOf branches are derivable, rather than checking a partial key set', () => {
+    const doc = docWithBodySchema({
+      oneOf: [{ properties: { ok: {} } }, { allOf: [{ properties: { hidden: {} } }] }],
+    });
+    expect(() => operationParamKeys(doc, 'post', '/synthetic')).toThrow(
+      /branch \(index 1\) declares no top-level `properties`/
+    );
+  });
+
+  // Guards the guard: an explicitly empty `properties: {}` branch IS derivable — it genuinely
+  // declares no keys — so it must not be mistaken for an underivable composition and must not
+  // throw. Pins that the check keys on "could not derive", never on "derived nothing".
+  it('accepts a oneOf branch that explicitly declares an empty properties map', () => {
+    const doc = docWithBodySchema({
+      oneOf: [{ properties: { ok: {} } }, { properties: {} }],
+    });
+    const { body } = operationParamKeys(doc, 'post', '/synthetic');
+    expect([...body]).toEqual(['ok']);
+  });
 });
 
 // INV-5 (#403) drives an MCP tool, wraps its BARE payload as the REST envelope

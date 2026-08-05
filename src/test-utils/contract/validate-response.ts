@@ -344,9 +344,27 @@ function bodyPropertyKeys(doc: OpenApiDoc, rawSchema: unknown): ReadonlySet<stri
   if (rawSchema === undefined) return new Set();
   const schema = RequestBodySchemaObject.parse(resolveIfRef(doc, rawSchema));
   const keys = new Set(Object.keys(schema.properties ?? {}));
-  for (const rawBranch of schema.oneOf ?? []) {
+  for (const [index, rawBranch] of (schema.oneOf ?? []).entries()) {
     const branch = RequestBodyBranchObject.parse(resolveIfRef(doc, rawBranch));
-    for (const key of Object.keys(branch.properties ?? {})) keys.add(key);
+    // Per-BRANCH fail-loud, not just the whole-body one in operationParamKeys
+    // below. That guard fires only when the derived set ends up completely
+    // empty, so a union whose OTHER branches still contribute keys keeps
+    // `body.size` non-zero and hides an underivable branch entirely — INV-4
+    // then checks a partial key set with no signal, which is the same vacuity
+    // this reader exists to prevent, one level down. RequestBodyBranchObject
+    // is a plain z.object (not .strict()), so an allOf/nested-oneOf branch
+    // parses cleanly and silently yields `properties: undefined` rather than
+    // throwing — hence an explicit check. An explicitly empty
+    // `properties: {}` is DERIVABLE and legal; only "could not derive" fails.
+    if (branch.properties === undefined) {
+      throw new Error(
+        `a requestBody \`oneOf\` branch (index ${index}) declares no top-level \`properties\` — ` +
+          'an unsupported composition (allOf, a nested oneOf, a non-object branch) contributes ' +
+          'zero keys and would weaken INV-4 without emptying the key set. Extend ' +
+          'bodyPropertyKeys() to handle it.'
+      );
+    }
+    for (const key of Object.keys(branch.properties)) keys.add(key);
   }
   return keys;
 }

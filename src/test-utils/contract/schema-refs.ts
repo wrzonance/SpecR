@@ -52,7 +52,15 @@ export function resolveIfRef(doc: OpenApiDoc, value: unknown): unknown {
  * non-local ref instead of silently leaving it unqualified (which would let it accidentally resolve
  * against the wrong document by URI-shape coincidence). */
 export function qualifyRefs(schema: AnySchemaObject, toId: string): AnySchemaObject {
-  return qualifyRefValue(schema, toId) as AnySchemaObject;
+  const qualified = qualifyRefValue(schema, toId);
+  // qualifyRefValue is typed `unknown -> unknown` because it recurses over arbitrary schema
+  // values. Narrowing with a real runtime check rather than an `as` assertion: the input is an
+  // object schema and the walk preserves object-ness, so this never fires — but a genuine check
+  // costs nothing here and keeps the boundary free of a cast the repo's conventions reject.
+  if (typeof qualified !== 'object' || qualified === null || Array.isArray(qualified)) {
+    throw new Error('qualifyRefs: expected the qualified result to be an object schema');
+  }
+  return qualified;
 }
 
 function qualifyRefValue(value: unknown, toId: string): unknown {
