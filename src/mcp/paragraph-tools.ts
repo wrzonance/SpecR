@@ -3,10 +3,14 @@ import {
   handleRemoveParagraph,
   handleInsertParagraph,
   handleAcceptCommentAsNote,
+  handleAcknowledgeParagraph,
+  handleSetCommentClosed,
   UpdateParagraphShape,
   RemoveParagraphShape,
   InsertParagraphShape,
   AcceptCommentShape,
+  AcknowledgeParagraphShape,
+  SetCommentClosedShape,
 } from './paragraph-handlers.js';
 import {
   handleListAssociations,
@@ -20,6 +24,7 @@ import type { ToolRegistrar } from './tool-registry.js';
 
 export function registerParagraphTools(reg: ToolRegistrar): void {
   registerParagraphContentTools(reg);
+  registerAcknowledgementTool(reg);
   registerCommentResolutionTools(reg);
   registerAssociationTools(reg);
 }
@@ -67,6 +72,25 @@ function registerParagraphContentTools(reg: ToolRegistrar): void {
   );
 }
 
+// Split out of registerParagraphContentTools purely to keep that function
+// under the repo's enforced max-lines-per-function cap (#545 pushed it over).
+function registerAcknowledgementTool(reg: ToolRegistrar): void {
+  reg.register(
+    'acknowledge_paragraph',
+    {
+      description:
+        'Acknowledge or un-acknowledge a note or textBox object node (#545, ADR-079 ' +
+        'follow-on): affirms a specifier has read and accepted it, clearing the ' +
+        'issuance-readiness gate’s specifier_note_present / body_object_present finding ' +
+        'WITHOUT removing or hiding the content — it still renders exactly as before. ' +
+        'Only note nodes and textBox-kind object nodes are acknowledgeable (never a ' +
+        'table object). Idempotent.',
+      inputSchema: AcknowledgeParagraphShape,
+    },
+    handleAcknowledgeParagraph
+  );
+}
+
 function registerCommentResolutionTools(reg: ToolRegistrar): void {
   reg.register(
     'accept_comment_as_note',
@@ -79,6 +103,19 @@ function registerCommentResolutionTools(reg: ToolRegistrar): void {
       inputSchema: AcceptCommentShape,
     },
     handleAcceptCommentAsNote
+  );
+
+  reg.register(
+    'set_comment_closed',
+    {
+      description:
+        'Close or reopen a source-document review comment on an existing spec (#545, ' +
+        'ADR-079 follow-on) — the only supported path to clear the readiness gate’s ' +
+        'open_comment finding. index is the zero-based position in the anchor’s ' +
+        'source_facts.comments. Idempotent.',
+      inputSchema: SetCommentClosedShape,
+    },
+    handleSetCommentClosed
   );
 }
 

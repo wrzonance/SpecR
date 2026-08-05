@@ -83,6 +83,11 @@ export const TOOL_TIERS: ReadonlyMap<string, ToolTier> = new Map([
   ['list_associations', 'read'],
   ['create_association', 'write'],
   ['accept_comment_as_note', 'write'],
+  // #545, ADR-079 follow-on — clear specifier_note_present/body_object_present
+  // (acknowledge_paragraph) and open_comment (set_comment_closed). Both are
+  // reversible structural toggles, not destructive, mirroring remove_paragraph.
+  ['acknowledge_paragraph', 'write'],
+  ['set_comment_closed', 'write'],
   // wave 4 — spec lifecycle
   ['update_spec', 'write'],
   ['finalize_spec', 'write'],

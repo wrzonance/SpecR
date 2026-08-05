@@ -5,6 +5,8 @@ import {
   acceptCommentAsNote,
   insertParagraphAfter,
   lockedObjectMessage,
+  setParagraphAcknowledged,
+  setParagraphCommentClosed,
   StaleVersionError,
   SpecWriteForbiddenError,
   SpecNotFoundError,
@@ -13,6 +15,8 @@ import {
   UpdateParagraphBodySchema,
   PatchRemovalBodySchema,
   InsertParagraphBodySchema,
+  PatchAcknowledgementBodySchema,
+  PatchCommentClosureBodySchema,
   ActorLabelSchema,
 } from '../ast/index.js';
 import { logger } from '../lib/logger.js';
@@ -146,6 +150,76 @@ export async function handleRemoveParagraph(args: unknown): Promise<ToolResult> 
     if (gate) return gate;
     logger.error({ err }, 'mcp tool remove_paragraph failed');
     return toolError('Internal error — paragraph removal failed');
+  }
+}
+
+export const AcknowledgeParagraphShape = {
+  specId: z.uuid().describe('Spec UUID (from get_spec / list_sections)'),
+  nodeId: z.uuid().describe('Paragraph UUID (a node id within the spec tree, from get_spec)'),
+  ...PatchAcknowledgementBodySchema.shape,
+};
+const AcknowledgeParagraphArgs = z.object(AcknowledgeParagraphShape);
+
+export async function handleAcknowledgeParagraph(args: unknown): Promise<ToolResult> {
+  const parsed = AcknowledgeParagraphArgs.safeParse(args);
+  if (!parsed.success) {
+    return toolError(
+      'invalid acknowledge_paragraph input: specId, nodeId (UUIDs) and acknowledged (boolean) are required'
+    );
+  }
+  const { specId, nodeId, acknowledged, actorLabel } = parsed.data;
+  try {
+    // Affirms a note/textBox object has been read and accepted (#545) —
+    // clears its readiness finding WITHOUT hiding the content.
+    const result = await setParagraphAcknowledged(specId, nodeId, acknowledged, actorLabel);
+    if (result.status === 'not-found') return toolError(`paragraph not found: id=${nodeId}`);
+    if (result.status === 'wrong-spec') return toolError('paragraph does not belong to this spec');
+    if (result.status === 'not-acknowledgeable') {
+      return toolError(
+        `node type "${result.nodeType}" cannot be acknowledged — only note nodes and textBox objects are`
+      );
+    }
+    return ok(result.node);
+  } catch (err) {
+    const gate = gateToolError(err);
+    if (gate) return gate;
+    logger.error({ err }, 'mcp tool acknowledge_paragraph failed');
+    return toolError('Internal error — paragraph acknowledgement failed');
+  }
+}
+
+export const SetCommentClosedShape = {
+  specId: z.uuid().describe('Spec UUID (from get_spec / list_sections)'),
+  nodeId: z.uuid().describe('Anchor paragraph UUID whose margin comment is being toggled'),
+  index: z
+    .number()
+    .int()
+    .min(0)
+    .describe('Zero-based index into the anchor paragraph’s source_facts.comments'),
+  ...PatchCommentClosureBodySchema.shape,
+};
+const SetCommentClosedArgs = z.object(SetCommentClosedShape);
+
+export async function handleSetCommentClosed(args: unknown): Promise<ToolResult> {
+  const parsed = SetCommentClosedArgs.safeParse(args);
+  if (!parsed.success) {
+    return toolError(
+      'invalid set_comment_closed input: specId, nodeId (UUIDs), index (integer ≥ 0), and closed (boolean) are required'
+    );
+  }
+  const { specId, nodeId, index, closed, actorLabel } = parsed.data;
+  try {
+    // The only supported path to clear open_comment (#545).
+    const result = await setParagraphCommentClosed(specId, nodeId, index, closed, actorLabel);
+    if (result.status === 'not-found') return toolError(`paragraph not found: id=${nodeId}`);
+    if (result.status === 'wrong-spec') return toolError('paragraph does not belong to this spec');
+    if (result.status === 'no-comment') return toolError(`no comment at index ${index}`);
+    return ok(result.node);
+  } catch (err) {
+    const gate = gateToolError(err);
+    if (gate) return gate;
+    logger.error({ err }, 'mcp tool set_comment_closed failed');
+    return toolError('Internal error — comment closure toggle failed');
   }
 }
 

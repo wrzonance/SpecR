@@ -49,6 +49,9 @@ export const INV6_WRITE_PENDING: ReadonlySet<string> = new Set([
   'patch /specs/{}/paragraphs/{}',
   'patch /specs/{}/paragraphs/{}/editability',
   'patch /specs/{}/paragraphs/{}/removal',
+  // #545, ADR-079 follow-on — same SpecNode-mirroring posture as removal above.
+  'patch /specs/{}/paragraphs/{}/acknowledgement',
+  'patch /specs/{}/paragraphs/{}/comments/{}/closure',
   'patch /templates/{}',
   'post /libraries/{}/conventions/clone',
   'post /libraries/{}/numbering-profiles',
@@ -96,11 +99,12 @@ export const INV6_WRITE_PENDING: ReadonlySet<string> = new Set([
 
 /**
  * INV-6 ratchet baseline (#549). The write-pending burn-down (INV6_WRITE_PENDING.size) must never
- * grow past this count, mirroring INV5_READ_PENDING_BASELINE. Verified by direct count on
- * 2026-08-03 (#627): the set holds exactly 62 entries (71 write-mapped JSON ops total, minus 8
- * driven — create_project, create_client, resolve_user, create_client_library,
- * submittal_register, delete_spec, delete_package, delete_project — minus 1 exempt —
- * parse_document). Was 66 as of 2026-08-02, before submittal_register/delete_spec/delete_package/
- * delete_project were promoted out of this set.
+ * grow past this count, mirroring INV5_READ_PENDING_BASELINE — EXCEPT when new write-mapped JSON
+ * ops are genuinely added to the API surface (a real scope increase, not a coverage regression),
+ * in which case the baseline moves up in lockstep with the new pending entries. Verified by direct
+ * count on 2026-08-04 (#545): the set holds exactly 64 entries — the prior 62 (#627, 2026-08-03)
+ * plus the two new ops this issue adds (`patch .../acknowledgement`, `patch .../comments/{}/
+ * closure`), both landing straight in this pending burn-down for the same SpecNode-mirroring
+ * reason `patch .../removal` already does.
  */
-export const INV6_WRITE_PENDING_BASELINE = 62;
+export const INV6_WRITE_PENDING_BASELINE = 64;
