@@ -144,7 +144,15 @@ describe('captureBodyObjectsForTree — object/objectText node shape', () => {
 // so a regression dropping or breaking the sort would go undetected.
 describe('captureBodyObjectsForTree — vanishCharStyleIds is sorted, not insertion order (#650)', () => {
   it('persists two vanish character-style ids sorted, even though styles.xml declares them in the REVERSE order', () => {
-    const body = table(row(cell(para('cell one'))));
+    // Both ids must be REFERENCED by this object's own blob: capture persists
+    // the referenced subset, not the document-wide set (adversarial-review
+    // finding, #650 — see referencedVanishCharStyleIds). A visible run keeps
+    // the cell from collapsing to empty text.
+    const cellPara =
+      '<w:p><w:r><w:t>cell one</w:t></w:r>' +
+      '<w:r><w:rPr><w:rStyle w:val="Zeta"/></w:rPr><w:t>zeta hidden</w:t></w:r>' +
+      '<w:r><w:rPr><w:rStyle w:val="HiddenChar"/></w:rPr><w:t>char hidden</w:t></w:r></w:p>';
+    const body = table(row(cell(cellPara)));
     const xml = makeDocXml(body);
 
     const attachment = captureBodyObjectsForTree(xml, TWO_VANISH_STYLES);

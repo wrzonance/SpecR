@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { namespaceVanishTrees } from './object-vanish-namespace.js';
-import type { ObjectBlobNode, SpecNode, SpecTree } from '../ast/index.js';
+import type { ObjectBlobNode, ObjectMeta, SpecNode, SpecTree } from '../ast/index.js';
 
 // Minimal SpecNode/SpecTree builders — mirrors object-vanish-styles.test.ts's
 // own local convention: this module only ever reads/rewrites
@@ -95,15 +95,67 @@ function rStyleValOf(blob: readonly ObjectBlobNode[]): string | undefined {
   return undefined;
 }
 
+// The captured ObjectMeta of the first tree's first part — the shape every
+// assertion below reaches for. Extracted so each test reads one short chain
+// instead of a four-level optional dig (which trips the repo's complexity cap).
+function firstObjectMeta(trees: readonly SpecTree[]): ObjectMeta | undefined {
+  return trees[0]?.parts[0]?.meta.object;
+}
+
+function firstVanishIds(trees: readonly SpecTree[]): readonly string[] | undefined {
+  return firstObjectMeta(trees)?.vanishCharStyleIds;
+}
+
 describe('namespaceVanishTrees', () => {
   it('returns the same array reference for zero trees', () => {
     const trees: SpecTree[] = [];
     expect(namespaceVanishTrees(trees)).toBe(trees);
   });
 
-  it('returns the same array reference for a single tree, even with vanish ids', () => {
-    const trees = [tree('t0', [objectNode('Hidden1', 'secret', ['Hidden1'])])];
-    expect(namespaceVanishTrees(trees)).toBe(trees);
+  // ORACLE CHANGE, deliberate (adversarial-review finding, #650). This test
+  // previously asserted a single tree was returned untouched, on the reasoning
+  // that one tree cannot collide with a SIBLING tree. It can still collide
+  // with dolanmiu/docx's OWN built-in character styles (`Hyperlink`,
+  // `Strong`, …), which the generator emits into the same styles.xml — a
+  // duplicate `w:styleId` whose minted `w:vanish` can hide unrelated VISIBLE
+  // text. Single-tree generateDocx therefore namespaces too.
+  it('namespaces a SINGLE tree too — a raw id could collide with a docx built-in style', () => {
+    const trees = [tree('t0', [objectNode('Hyperlink', 'secret', ['Hyperlink'])])];
+    const result = namespaceVanishTrees(trees);
+
+    expect(result).not.toBe(trees);
+    expect(firstVanishIds(result)).toEqual(['Hyperlink#specr-vanish-t0']);
+  });
+
+  // Namespacing must be IDEMPOTENT. Re-parsing a generated document hands
+  // back the NAMESPACED id as that tree's raw captured id, so generating
+  // again from it must reproduce the same id — not stack a second suffix.
+  // Without the strip-before-mint in allocateNamespacedId, each round-trip
+  // cycle grew the id without bound and broke the byte-identical blob
+  // round-trip invariant that body-object-round-trip.test.ts asserts.
+  it('is idempotent: re-namespacing an already-namespaced tree reproduces the SAME id', () => {
+    const once = namespaceVanishTrees([tree('t0', [objectNode('X', 'secret', ['X'])])]);
+    expect(firstVanishIds(once)).toEqual(['X#specr-vanish-t0']);
+
+    const twice = namespaceVanishTrees(once);
+    expect(firstVanishIds(twice)).toEqual(['X#specr-vanish-t0']);
+    expect(rStyleValOf(firstObjectMeta(twice)?.blob ?? [])).toBe('X#specr-vanish-t0');
+  });
+
+  // The collision-checked allocator (adversarial-review finding, #650):
+  // NAMESPACE_SEPARATOR is not reserved by OOXML, so a source document may
+  // already use the exact id the naive mint would produce. Minting it anyway
+  // would point the vanish stub at that document's own visible-text style.
+  it('avoids a raw style id that already looks namespaced, rather than assuming the suffix cannot occur', () => {
+    const collidingRaw = 'X#specr-vanish-t0';
+    const trees = [
+      tree('t0', [objectNode('X', 'secret', ['X'])]),
+      tree('t1', [objectNode(collidingRaw, 'visible elsewhere')]),
+    ];
+    const result = namespaceVanishTrees(trees);
+
+    expect(firstVanishIds(result)).not.toEqual([collidingRaw]);
+    expect(firstVanishIds(result)).toEqual(['X#specr-vanish-t0-1']);
   });
 
   it('returns the same array reference when no tree in a multi-tree manual has any vanish ids', () => {

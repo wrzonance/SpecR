@@ -283,12 +283,19 @@ export async function generateDocx(
     const rules = styleRules !== undefined ? buildRuleMap(styleRules) : undefined;
     const format = options?.sectionNumberFormat ?? 'canonical';
     const ctx = sectionContext(format, SPEC_NUM_REF, rules);
-    const children = buildSectionChildren(tree, ctx);
+    // #650 (adversarial-review finding): namespace vanish character-style ids
+    // on the SINGLE-tree path too, not only in multi-tree generateManual. A
+    // raw id here can equal one dolanmiu/docx itself emits (`Hyperlink` being
+    // the realistic case), which would append a duplicate `w:styleId` and let
+    // the minted `w:vanish` attach to unrelated VISIBLE text. Returned by
+    // reference — byte-identical output — when the tree carries no vanish ids.
+    const [scopedTree = tree] = namespaceVanishTrees([tree]);
+    const children = buildSectionChildren(scopedTree, ctx);
     const render = renderOptionalHeaderFooter(tree, format, options);
     const pageSize = resolvePageSize(tree.pageSize);
     const doc = new Document({
       ...documentLevelOptions(render),
-      ...vanishStylesOptions([tree]),
+      ...vanishStylesOptions([scopedTree]),
       numbering: { config: [buildSpecNumberingConfig(rules, SPEC_NUM_REF)] },
       sections: [{ ...sectionHeaderFooterOptions(render, pageSize), children }],
     });

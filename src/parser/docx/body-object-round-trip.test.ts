@@ -569,7 +569,12 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
     // decision 1) — and, being fully text-empty once its one run is
     // excluded, it never gets an SDT anchor at all (no round-trip merge
     // locator can ever address hidden style-vanished content either).
-    expect(hiddenBefore).toContain('<w:rStyle w:val="HiddenChar"/>');
+    // The reference is NAMESPACED on the way out (adversarial-review finding,
+    // #650): the generator mints a tree-scoped `w:styleId` so its vanish stub
+    // can never collide with a docx built-in (`Hyperlink`, `Strong`, …) or
+    // with another source document's unrelated style of the same name. The
+    // style's human-facing `name` is de-namespaced back to "HiddenChar".
+    expect(hiddenBefore).toContain('<w:rStyle w:val="HiddenChar#specr-vanish-t0"/>');
     expect(hiddenBefore).not.toContain('<w:sdt');
     expect(hiddenBefore).not.toContain('w:tag');
 
@@ -583,7 +588,12 @@ describe('body object round trip — parse -> generate -> re-parse (#517, WS2 ta
     // style (generator/object-vanish-styles.ts), so the SECOND parse
     // resolves the SAME vanishCharStyleIds and the box stays excluded.
     expect(objectTextsOf(after[0] as SpecNode)).toEqual(['Visible box text']);
-    expect(after[0]?.meta.object?.vanishCharStyleIds).toEqual(['HiddenChar']);
+    // The re-parse resolves the id the REGENERATED document actually carries,
+    // i.e. the namespaced one. Re-namespacing is idempotent (the allocator
+    // strips any existing suffix before minting), which is what keeps the
+    // byte-identity assertion below true across repeated cycles instead of
+    // stacking a fresh suffix on every generation.
+    expect(after[0]?.meta.object?.vanishCharStyleIds).toEqual(['HiddenChar#specr-vanish-t0']);
 
     const docXmlAfter = await generatedDocumentXml(reparsedTree);
     const blocksAfter = txbxContentBlocks(docXmlAfter);

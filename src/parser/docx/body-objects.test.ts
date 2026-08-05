@@ -373,11 +373,30 @@ describe('hasRunVanish — rStyle-referenced character-style vanish (#650, captu
     expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(false);
   });
 
-  // Straight OR port of document.ts's runIsVanish (#650 spike): a resolved-off
-  // direct <w:vanish w:val="0"/> does NOT override a matching rStyle — the
-  // two signals combine via plain OR, never special-cased against each other.
-  it('a resolved-off direct <w:vanish w:val="0"/> does not override a matching rStyle — still hidden', () => {
+  // ORACLE CHANGE, deliberate (adversarial-review finding, #650). This test
+  // previously asserted the OPPOSITE — that a resolved-off direct
+  // `<w:vanish w:val="0"/>` does NOT override a matching rStyle, because the
+  // predicate was written as a straight OR port of document.ts's runIsVanish.
+  // That was wrong, and wrong in the dangerous direction: ECMA-376 §17.7.3
+  // makes DIRECT formatting definitive for a toggle property, so a run that
+  // explicitly writes `w:val="0"` is the author switching the style's vanish
+  // back OFF. OR-ing made that run invisible instead — over-suppression, i.e.
+  // silently dropping text the author deliberately made visible, which is the
+  // failure mode that produces no error and merely looks like correct privacy
+  // behaviour. The OR was a NEW path this branch introduced, so the fix lands
+  // here rather than becoming long-lived shipped behaviour.
+  it('a resolved-off direct <w:vanish w:val="0"/> OVERRIDES a matching rStyle — the run is VISIBLE', () => {
     const run = blobRun([blobVanish('0'), blobRStyle('HiddenChar')]);
+    expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(false);
+  });
+
+  // The ON side of the same tri-state, so the pair brackets it: an enabled
+  // direct w:vanish still hides regardless of the rStyle, and a run with NO
+  // direct w:vanish at all still falls through to the rStyle (above). Without
+  // this, resolveRunVanish could regress to "direct w:vanish always wins as
+  // false" and the override test would still pass.
+  it('an enabled direct <w:vanish/> still hides even when the rStyle is not a vanish style', () => {
+    const run = blobRun([blobVanish(), blobRStyle('PlainChar')]);
     expect(hasRunVanish(run, new Set(['HiddenChar']))).toBe(true);
   });
 
@@ -572,6 +591,41 @@ describe('extractBodyObjects — #650 rStyle-referenced character-style vanish t
   it('defaults to an empty vanishCharStyleIds set on the captured object when the StyleMap has no character-style vanish', () => {
     const result = extract(table(row(cell(para('cell text')))));
     expect(result.tableObjects[0]?.object.vanishCharStyleIds).toEqual(new Set());
+  });
+
+  // Adversarial-review finding (#650): the captured set must be the ids THIS
+  // object's blob actually references, not the whole document's. Persisting
+  // the document-wide set on every object is O(objects × vanish styles) into
+  // JSONB, and — worse than the storage — it makes the generator mint a
+  // vanish style stub for an id no blob references, needlessly widening the
+  // surface on which a minted id can collide with a style the document uses
+  // for VISIBLE text.
+  it('an object whose blob references NO vanish style persists an empty set, even when the document defines one', () => {
+    const styleMap = charVanishStyleMap('HiddenChar');
+    const result = extract(table(row(cell(para('plain visible text')))), styleMap);
+
+    expect(styleMap.vanishCharStyleIds.has('HiddenChar')).toBe(true);
+    expect(result.tableObjects[0]?.object.vanishCharStyleIds).toEqual(new Set());
+  });
+
+  it('captures only the referenced subset when the document defines more vanish styles than the blob uses', () => {
+    const styleMap = buildStyleMap(
+      '<?xml version="1.0"?>' +
+        '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+        '<w:style w:type="character" w:styleId="UsedChar"><w:name w:val="UsedChar"/>' +
+        '<w:rPr><w:vanish/></w:rPr></w:style>' +
+        '<w:style w:type="character" w:styleId="UnusedChar"><w:name w:val="UnusedChar"/>' +
+        '<w:rPr><w:vanish/></w:rPr></w:style></w:styles>'
+    );
+    const cellPara = rStyleRunPara('visible part ', 'hidden style part', 'UsedChar');
+    const result = extract(table(row(cell(cellPara))), styleMap);
+
+    expect(styleMap.vanishCharStyleIds).toEqual(new Set(['UsedChar', 'UnusedChar']));
+    // Only the referenced id is persisted — and suppression still works.
+    expect(result.tableObjects[0]?.object.vanishCharStyleIds).toEqual(new Set(['UsedChar']));
+    expect(result.tableObjects[0]?.object.interiorTexts.map((t) => t.text)).toEqual([
+      'visible part ',
+    ]);
   });
 });
 

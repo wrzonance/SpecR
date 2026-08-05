@@ -74,13 +74,77 @@ export function hasRunVanish(
   return resolveRunVanish(rPr, vanishCharStyleIds);
 }
 
-// The two OR'd vanish signals, split out of hasRunVanish purely to keep that
+// The two vanish signals, split out of hasRunVanish purely to keep that
 // function's cognitive complexity low — no behavior of its own. `getAttrVal`
 // applied to the w:rStyle node's own `:@` attrs mirrors isOnOffEnabled's
 // identical read of a w:vanish node's `:@` above.
+//
+// The signals are resolved as a TRI-STATE, not OR'd (adversarial-review
+// finding, #650). `w:vanish` on the run's own `w:rPr` is DIRECT formatting,
+// and ECMA-376 §17.7.3 makes direct formatting definitive for a toggle
+// property: it overrides whatever the referenced character style says. So
+//   - a direct `w:vanish` PRESENT and enabled  → hidden (never consult rStyle)
+//   - a direct `w:vanish` PRESENT and w:val=0  → VISIBLE, overriding an
+//     rStyle that is itself vanish — this is the whole point of writing it
+//   - no direct `w:vanish` at all              → fall through to the rStyle
+// OR-ing the two instead would make an explicit `<w:vanish w:val="0"/>`
+// unable to un-hide a run, suppressing text the author deliberately made
+// visible. That direction matters as much as the leak this predicate exists
+// to close: a missed suppression is a visible leak a test can catch, while a
+// wrong suppression is invisible data loss that merely LOOKS like correct
+// privacy behaviour. Over-suppression is not the safe side to err on.
+//
+// NOTE: document.ts's paragraph-tier `runIsVanish` still OR's the two signals
+// and therefore keeps the older behaviour. The divergence is deliberate and
+// narrow — this fix is scoped to the object tier's own NEW rStyle path rather
+// than silently changing long-shipped paragraph-tier classification in a
+// bugfix PR — and it is the object tier that is correct per ECMA-376.
 function resolveRunVanish(rPr: ObjectBlobNode, vanishCharStyleIds: ReadonlySet<string>): boolean {
-  if (directChildrenByTag(rPr, 'w:vanish').some(isOnOffEnabled)) return true;
+  const direct = directChildrenByTag(rPr, 'w:vanish');
+  if (direct.length > 0) return direct.some(isOnOffEnabled);
   const rStyleNode = directChildrenByTag(rPr, 'w:rStyle')[0];
   const rStyle = rStyleNode ? getAttrVal(rStyleNode[':@']) : '';
   return rStyle !== '' && vanishCharStyleIds.has(rStyle);
+}
+
+function collectRStyleIds(node: ObjectBlobNode, acc: Set<string>): void {
+  const tag = tagOf(node);
+  if (!tag) return;
+  if (tag === 'w:rStyle') {
+    const id = getAttrVal(node[':@']);
+    if (id !== '') acc.add(id);
+    return;
+  }
+  const value = node[tag];
+  if (!isBlobNodeArray(value)) return;
+  for (const child of value) collectRStyleIds(child, acc);
+}
+
+/**
+ * The subset of `vanishCharStyleIds` that `node`'s own subtree actually
+ * references through a `w:rPr>w:rStyle` (adversarial-review finding, #650).
+ *
+ * Persisting the document-wide set on EVERY captured object instead would be
+ * O(objects × vanish styles): each copy is materialized into that object's
+ * `object_data` JSONB, so it amplifies storage, worker transfer, and every
+ * API response, and the 50 MB DOCX input cap bounds only the sum of the
+ * inputs, never that product. Narrowing is also strictly SAFER, not merely
+ * smaller: the generator mints one `w:vanish` character-style stub per id it
+ * sees across the captured objects, so an id no blob ever references would
+ * otherwise mint a stub for nothing — needlessly widening the surface on
+ * which a minted id can collide with a style the document already uses for
+ * VISIBLE text.
+ *
+ * Narrowing costs no correctness: rewrite resolves runs only within this
+ * same blob, so any id that could ever match there is by definition
+ * referenced inside it and survives the intersection.
+ */
+export function referencedVanishCharStyleIds(
+  node: ObjectBlobNode,
+  vanishCharStyleIds: ReadonlySet<string>
+): ReadonlySet<string> {
+  if (vanishCharStyleIds.size === 0) return new Set();
+  const referenced = new Set<string>();
+  collectRStyleIds(node, referenced);
+  return new Set([...referenced].filter((id) => vanishCharStyleIds.has(id)));
 }

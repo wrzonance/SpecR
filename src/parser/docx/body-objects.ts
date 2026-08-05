@@ -28,7 +28,7 @@ import { pairRunOrder } from './header-footer-run-order.js';
 import { wrapBlobParagraphWithAnchor } from './object-anchor.js';
 import { stripAlternateContentFallback } from './alternate-content.js';
 import { resolveHiddenTxbxContentNodes } from './body-text-box-visibility.js';
-import { hasRunVanish } from './body-object-vanish.js';
+import { hasRunVanish, referencedVanishCharStyleIds } from './body-object-vanish.js';
 import type { ClassifiedTopLevelTable } from './tables.js';
 import type { BodyDrawingClassification } from './body-drawings.js';
 import type { BodyOrder, BodyOrderTable } from './body-order.js';
@@ -357,7 +357,7 @@ function buildTableObject(
     ...dims,
     blob: [anchored.node],
     interiorTexts: anchored.interiorTexts,
-    vanishCharStyleIds: styleMap.vanishCharStyleIds,
+    vanishCharStyleIds: referencedVanishCharStyleIds(anchored.node, styleMap.vanishCharStyleIds),
   };
 }
 
@@ -547,7 +547,7 @@ function buildTextBoxObject(
     generation: classification.generation,
     blob: [anchored.node],
     interiorTexts: anchored.interiorTexts,
-    vanishCharStyleIds: styleMap.vanishCharStyleIds,
+    vanishCharStyleIds: referencedVanishCharStyleIds(anchored.node, styleMap.vanishCharStyleIds),
   };
 }
 
