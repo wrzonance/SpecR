@@ -110,6 +110,10 @@ const RESPONSE_ALLOWLIST = new Set([
   // integration test for real (non-schema) response assertions instead.
   'patch /specs/{}/paragraphs/{}',
   'patch /specs/{}/paragraphs/{}/removal',
+  // #545, ADR-079 follow-on — same SpecNode-cycle reason; real (non-schema)
+  // response assertions live in readiness-clearance.integration.test.ts.
+  'patch /specs/{}/paragraphs/{}/acknowledgement',
+  'patch /specs/{}/paragraphs/{}/comments/{}/closure',
   'post /specs/{}/paragraphs',
   'patch /specs/{}/paragraphs/{}/reject', // ADR-052 D4, issue #380 — same SpecNode cycle
   'patch /templates/{}',
