@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { generateDocx } from '../generator/index.js';
 import { extractContentControls } from './extract.js';
 import { MergeError } from './error.js';
-import type { SpecTree } from '../ast/types.js';
+import type { SpecTree } from '../ast/index.js';
 
 const MERGE_DIR = join(process.cwd(), 'src/merge');
 
