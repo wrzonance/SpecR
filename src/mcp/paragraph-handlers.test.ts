@@ -18,7 +18,12 @@ import type { ToolResult } from './tool-result.js';
 vi.mock('../db/index.js', async () => {
   const { SpecNotFoundError, SpecWriteForbiddenError, StaleVersionError } =
     await import('../db/queries/edit-gate.js');
+  // The REAL message builder, not a hand-written stub: it is the string a
+  // caller actually reads, so a stub here would let the two drift and leave
+  // this test asserting against fiction (#383).
+  const { invalidInsertTypeMessage } = await import('../db/queries/paragraph-insert.js');
   return {
+    invalidInsertTypeMessage,
     SpecNotFoundError,
     SpecWriteForbiddenError,
     StaleVersionError,
@@ -80,6 +85,38 @@ describe('update_paragraph: stale version returns currentVersion as structuredCo
     const rest = gateErrorResponse(err);
     expect(rest?.status).toBe(409);
     expect(structuredContentOf(result)).toEqual({ currentVersion: rest?.body.currentVersion });
+  });
+});
+
+describe('insert_paragraph: rejects a cross-tier explicit nodeType via invalid-type (#383)', () => {
+  it('surfaces the DB core invalid-type rejection as a toolError naming the rejected type', async () => {
+    // insertSiblingRow's sibling-compatibility check (paragraph-insert.ts,
+    // #383) rejects a pr1 requested after an article anchor — this pins that
+    // the MCP handler's already-generic invalid-type branch surfaces it
+    // without any handler-side change, at the mocked DB boundary.
+    const { insertParagraphAfter } = await import('../db/index.js');
+    vi.mocked(insertParagraphAfter).mockResolvedValueOnce({
+      status: 'invalid-type',
+      nodeType: 'pr1',
+    });
+
+    const { handleInsertParagraph } = await import('./paragraph-handlers.js');
+    const result = await handleInsertParagraph({
+      specId: SPEC_ID,
+      anchorNodeId: NODE_ID,
+      text: 'Should not become a mis-tiered pr1.',
+      nodeType: 'pr1',
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(textOf(result)).toContain('"pr1"');
+    // The MCP surface must state the COMPLETE rule, exactly as REST does — the
+    // two originally hand-copied a message omitting the tierless-anchor
+    // exception, so an agent reading this rejection would conclude a legal
+    // insert after a `note` anchor was illegal and "correct" a valid request.
+    // Reachable only because the mock returns the real invalidInsertTypeMessage.
+    expect(textOf(result)).toMatch(/tierless/i);
+    expect(structuredContentOf(result)).toBeUndefined();
   });
 });
 
