@@ -13,7 +13,11 @@
 // those modules without a matching openapi.yaml edit fails here first.
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { loadSpec, type OpenApiDoc } from '../test-utils/contract/validate-response.js';
+import {
+  loadSpec,
+  resolveIfRef,
+  type OpenApiDoc,
+} from '../test-utils/contract/validate-response.js';
 
 const JsonSchemaObjectSchema = z.object({
   type: z.union([z.string(), z.array(z.string())]).optional(),
@@ -46,26 +50,37 @@ function jsonSchemaOf(content: z.infer<typeof ContentSchema> | undefined): unkno
   return media.schema;
 }
 
-/** Picks the oneOf/allOf branch whose `required` list names `field` — order-independent. */
-function branchRequiring(branches: readonly unknown[], field: string): JsonSchemaObject {
+/** Picks the oneOf/allOf branch whose `required` list names `field` — order-independent. Each
+ * branch is resolved via {@link resolveIfRef} before narrowing: bundling (#649) leaves a branch
+ * that is itself a top-level `$ref` (e.g. CreateRevisionLegacyBody/CreateRevisionStructuredBody)
+ * as a literal `{ $ref }` pointer instead of dereference's fully-inlined object. */
+function branchRequiring(
+  doc: OpenApiDoc,
+  branches: readonly unknown[],
+  field: string
+): JsonSchemaObject {
   const match = branches
-    .map((b) => JsonSchemaObjectSchema.parse(b))
+    .map((b) => JsonSchemaObjectSchema.parse(resolveIfRef(doc, b)))
     .find((b) => (b.required ?? []).includes(field));
   if (match === undefined) throw new Error(`no schema branch requires "${field}"`);
   return match;
 }
 
-/** Unwraps `data` out of the `allOf: [SuccessResponse, { data }]` envelope. */
-function dataSchemaOf(schema: unknown): unknown {
+/** Unwraps `data` out of the `allOf: [SuccessResponse, { data }]` envelope, resolving a `data`
+ * schema that is itself a top-level `$ref` (e.g. `{ $ref: RevisionWithTrees }`, #649). */
+function dataSchemaOf(doc: OpenApiDoc, schema: unknown): unknown {
   const allOf = z.object({ allOf: z.array(z.unknown()) }).parse(schema).allOf;
-  const holder = branchRequiring(allOf, 'data');
+  const holder = branchRequiring(doc, allOf, 'data');
   const properties = holder.properties;
   if (properties === undefined) throw new Error('data-bearing branch has no properties');
-  return properties['data'];
+  return resolveIfRef(doc, properties['data']);
 }
 
-function itemsOf(schema: unknown): unknown {
-  return z.object({ items: z.unknown() }).parse(schema).items;
+/** Resolves an array schema's `items` — itself commonly a top-level `$ref` (e.g. `#/.../
+ * RevisionSummary`, #649) — to its actual component shape. */
+function itemsOf(doc: OpenApiDoc, schema: unknown): unknown {
+  const items = z.object({ items: z.unknown() }).parse(schema).items;
+  return resolveIfRef(doc, items);
 }
 
 function expectNullableUuidField(schema: JsonSchemaObject, field: string): void {
@@ -82,7 +97,7 @@ describe('openapi.yaml — package_revisions.parent_revision_id (ADR-066 #389)',
     const oneOf = z
       .object({ oneOf: z.array(z.unknown()) })
       .parse(jsonSchemaOf(op.requestBody?.content)).oneOf;
-    const structured = branchRequiring(oneOf, 'type');
+    const structured = branchRequiring(doc, oneOf, 'type');
     const prop = JsonSchemaObjectSchema.parse((structured.properties ?? {})['parentRevisionId']);
     expect(prop.type).toBe('string');
     expect(prop.format).toBe('uuid');
@@ -95,7 +110,7 @@ describe('openapi.yaml — package_revisions.parent_revision_id (ADR-066 #389)',
     const oneOf = z
       .object({ oneOf: z.array(z.unknown()) })
       .parse(jsonSchemaOf(op.requestBody?.content)).oneOf;
-    const legacy = branchRequiring(oneOf, 'label');
+    const legacy = branchRequiring(doc, oneOf, 'label');
     expect(legacy.properties ?? {}).not.toHaveProperty('parentRevisionId');
   });
 
@@ -103,7 +118,7 @@ describe('openapi.yaml — package_revisions.parent_revision_id (ADR-066 #389)',
     const doc = await loadSpec();
     const op = operation(doc, '/packages/{id}/revisions', 'post');
     const revisionSummary = JsonSchemaObjectSchema.parse(
-      dataSchemaOf(jsonSchemaOf(op.responses?.['201']?.content))
+      dataSchemaOf(doc, jsonSchemaOf(op.responses?.['201']?.content))
     );
     expectNullableUuidField(revisionSummary, 'parentRevisionId');
   });
@@ -111,8 +126,8 @@ describe('openapi.yaml — package_revisions.parent_revision_id (ADR-066 #389)',
   it('RevisionSummary requires parentRevisionId on every list item (GET .../revisions 200)', async () => {
     const doc = await loadSpec();
     const op = operation(doc, '/packages/{id}/revisions', 'get');
-    const arraySchema = dataSchemaOf(jsonSchemaOf(op.responses?.['200']?.content));
-    const itemSchema = JsonSchemaObjectSchema.parse(itemsOf(arraySchema));
+    const arraySchema = dataSchemaOf(doc, jsonSchemaOf(op.responses?.['200']?.content));
+    const itemSchema = JsonSchemaObjectSchema.parse(itemsOf(doc, arraySchema));
     expectNullableUuidField(itemSchema, 'parentRevisionId');
   });
 
@@ -120,7 +135,7 @@ describe('openapi.yaml — package_revisions.parent_revision_id (ADR-066 #389)',
     const doc = await loadSpec();
     const op = operation(doc, '/revisions/{id}', 'get');
     const revisionWithTrees = JsonSchemaObjectSchema.parse(
-      dataSchemaOf(jsonSchemaOf(op.responses?.['200']?.content))
+      dataSchemaOf(doc, jsonSchemaOf(op.responses?.['200']?.content))
     );
     expectNullableUuidField(revisionWithTrees, 'parentRevisionId');
   });
@@ -148,12 +163,12 @@ describe('openapi.yaml — package_revisions.base_revision_id (ADR-066 #390)', (
     const branches = z
       .object({ oneOf: z.array(z.unknown()) })
       .parse(jsonSchemaOf(op.requestBody?.content)).oneOf;
-    const structured = branchRequiring(branches, 'type');
+    const structured = branchRequiring(doc, branches, 'type');
     const base = JsonSchemaObjectSchema.parse((structured.properties ?? {})['baseRevisionId']);
     expect(base.type).toBe('string');
     expect(base.format).toBe('uuid');
     expect(structured.required ?? []).not.toContain('baseRevisionId');
-    expect(branchRequiring(branches, 'label').properties ?? {}).not.toHaveProperty(
+    expect(branchRequiring(doc, branches, 'label').properties ?? {}).not.toHaveProperty(
       'baseRevisionId'
     );
   });
@@ -168,9 +183,12 @@ describe('openapi.yaml — package_revisions.base_revision_id (ADR-066 #390)', (
       const doc = await loadSpec();
       const op = operation(doc, path, method);
       const dataSchema = dataSchemaOf(
+        doc,
         jsonSchemaOf(op.responses?.[method === 'post' ? '201' : '200']?.content)
       );
-      const responseSchema = JsonSchemaObjectSchema.parse(list ? itemsOf(dataSchema) : dataSchema);
+      const responseSchema = JsonSchemaObjectSchema.parse(
+        list ? itemsOf(doc, dataSchema) : dataSchema
+      );
       expectNullableUuidField(responseSchema, 'baseRevisionId');
     }
   );

@@ -15,7 +15,11 @@
 // disciplines .integration.test.ts, all tagged "(#568)").
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { loadSpec, type OpenApiDoc } from '../test-utils/contract/validate-response.js';
+import {
+  loadSpec,
+  resolveIfRef,
+  type OpenApiDoc,
+} from '../test-utils/contract/validate-response.js';
 
 const MediaObjectSchema = z.object({ schema: z.unknown() });
 const ContentSchema = z.record(z.string(), MediaObjectSchema);
@@ -23,8 +27,13 @@ const ResponseObjectSchema = z.object({
   description: z.string().optional(),
   content: ContentSchema.optional(),
 });
+// `responses` values are `z.unknown()`, not narrowed directly: a status like 400/404/500 is
+// typically `$ref`'d to a shared `components/responses/*` entry (e.g. BadRequest) rather than
+// documented inline, which bundling (#649) leaves as a literal `{ $ref }` pointer instead of
+// dereference's fully-inlined response object — resolved per-status in operation()/
+// expectErrorResponseSchema() before parsing into ResponseObjectSchema.
 const OperationSchema = z.object({
-  responses: z.record(z.string(), ResponseObjectSchema).optional(),
+  responses: z.record(z.string(), z.unknown()).optional(),
 });
 
 function operation(doc: OpenApiDoc, path: string, method: string): z.infer<typeof OperationSchema> {
@@ -48,14 +57,17 @@ const ErrorResponseShapeSchema = z.object({
 });
 
 function expectErrorResponseSchema(
+  doc: OpenApiDoc,
   responses: z.infer<typeof OperationSchema>['responses'],
   status: string,
   label: string
 ): void {
-  const response = responses?.[status];
-  expect(response, `${label} does not document a ${status} response`).toBeDefined();
-  const schema = response?.content?.['application/json']?.schema;
-  expect(schema, `${label} ${status} has no application/json schema`).toBeDefined();
+  const rawResponse = responses?.[status];
+  expect(rawResponse, `${label} does not document a ${status} response`).toBeDefined();
+  const response = ResponseObjectSchema.parse(resolveIfRef(doc, rawResponse));
+  const rawSchema = response.content?.['application/json']?.schema;
+  expect(rawSchema, `${label} ${status} has no application/json schema`).toBeDefined();
+  const schema = resolveIfRef(doc, rawSchema);
 
   const parsed = ErrorResponseShapeSchema.safeParse(schema);
   expect(parsed.success, `${label} ${status} is not the ErrorResponse shape`).toBe(true);
@@ -100,7 +112,7 @@ describe('openapi.yaml documents the parsePathUuid 400 on every migrated operati
       const op = operation(doc, path, method);
       // ErrorResponse always requires `success: false` + `error: string` —
       // confirm the 400 targets that shape, not some ad hoc one-off object.
-      expectErrorResponseSchema(op.responses, '400', `${method} ${path}`);
+      expectErrorResponseSchema(doc, op.responses, '400', `${method} ${path}`);
     }
   );
 });
@@ -109,6 +121,6 @@ describe('openapi.yaml documents the shared-schema 422 on POST /templates/import
   it('documents 422 (not a second, ad hoc 400) for a name that fails CreateTemplateBodySchema', async () => {
     const doc = await loadSpec();
     const op = operation(doc, '/templates/import', 'post');
-    expectErrorResponseSchema(op.responses, '422', 'post /templates/import');
+    expectErrorResponseSchema(doc, op.responses, '422', 'post /templates/import');
   });
 });

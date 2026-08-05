@@ -8,10 +8,60 @@ import {
   loadRawSpec,
   operationParamKeys,
   markUnevaluatedPropertiesFalse,
+  buildMirrorQualifyRef,
   resolveResponseSchema,
   getValidator,
 } from './validate-response.js';
 import type { OpenApiDoc } from './validate-response.js';
+
+// A fixed-format UUID literal — ajv's `format: uuid` only checks shape, so every synthetic
+// SpecNode below reuses this rather than pulling in a real uuid generator.
+const NODE_ID = '11111111-1111-1111-1111-111111111111';
+
+/** Builds a `depth`-deep, self-referential SpecNode chain (`children: [child]` at every level) —
+ * the exact shape that made $RefParser.dereference() build a literal circular JS object and blow
+ * ajv's compile-time traversal stack before #649. */
+function buildDeepSpecNode(depth: number): unknown {
+  let node: unknown = { id: NODE_ID, type: 'pr1', text: 'leaf', children: [], meta: {} };
+  for (let i = 0; i < depth; i++) {
+    node = { id: NODE_ID, type: 'pr1', text: `depth-${i}`, children: [node], meta: {} };
+  }
+  return node;
+}
+
+/** A minimal, fully-documented SpecNode — every field either required by the schema or a real
+ * optional the openapi.yaml SpecNode component declares. Shared by the six-op acceptance sweep
+ * below (#649) so each op's worked example stays legible instead of re-deriving the shape. */
+function cleanSpecNode(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return { id: NODE_ID, type: 'pr1', text: 'clean', children: [], meta: {}, ...overrides };
+}
+
+/** A minimal, fully-documented SpecTree (GET /specs/{id}'s `data`) — required fields only, plus
+ * one real SpecNode child so the SpecTree → SpecNode $ref chain is actually exercised. */
+function cleanSpecTree(): Record<string, unknown> {
+  return { id: NODE_ID, section: '09 91 26', title: 'Sample Section', parts: [cleanSpecNode()] };
+}
+
+/** A minimal, fully-documented RevisionWithTrees (GET /revisions/{id}'s `data`) — every required
+ * field, with one RevisionSpecEntry whose `tree` is a real SpecTree so the deepest real $ref chain
+ * in openapi.yaml (RevisionWithTrees → RevisionSpecEntry → SpecTree → SpecNode) is exercised. */
+function cleanRevisionWithTrees(): Record<string, unknown> {
+  return {
+    revisionId: NODE_ID,
+    packageId: NODE_ID,
+    label: 'Rev A',
+    displayName: 'Revision A',
+    type: 'draft',
+    date: '2026-01-01',
+    sortOrder: 1,
+    number: null,
+    attributes: {},
+    issuedAt: '2026-01-01T00:00:00Z',
+    specs: [{ specId: NODE_ID, position: 1, tree: cleanSpecTree() }],
+    parentRevisionId: null,
+    baseRevisionId: null,
+  };
+}
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
 
@@ -151,12 +201,53 @@ describe('assertResponseExact (#640) — exact-key-match against openapi.yaml', 
     expect(marked.properties.nested.unevaluatedProperties).toBe(false);
   });
 
-  // A dereferenced schema can reach the SAME object identity (one $ref target reused by
-  // $RefParser.dereference for every pointer to it) through two different composition contexts
-  // in one tree: once as a raw allOf branch (must stay unmarked — see unevaluated-properties.ts's
-  // applicator classification) and once nested under a sibling's properties (must be marked). A visited-Set that
-  // only tracks "already seen" — not "seen under which context" — lets whichever context visits
-  // first silently decide for both, dropping the second context's mark.
+  // The no-mutation test above only exercises the DEFAULT (no-options) call shape. Production never
+  // calls it that way: assertResponseExact and registerComponentMirrors (schema-refs.ts) both always
+  // pass `{ inPlace, qualifyRef: buildMirrorQualifyRef() }` — and registerComponentMirrors runs this
+  // directly against every doc-owned `components.schemas` entry of the SINGLE cached `loadSpec()`
+  // document, shared for the lifetime of the process. A regression that mutated the original only
+  // along the qualifyRef/inPlace branch (e.g. rewriting `node['$ref']` instead of the cloned
+  // `schema['$ref']` inside markObject) would corrupt that shared component schema for every later
+  // reader, yet leave the default-options test above green — it never passes qualifyRef or inPlace,
+  // and its hand-built schema has no `$ref` at all, so it can't reach that branch.
+  it.each([false, true])(
+    'never mutates its input via the qualifyRef/inPlace path production actually calls (inPlace=%s)',
+    (inPlace) => {
+      const original = {
+        type: 'object',
+        properties: {
+          child: { $ref: '#/components/schemas/Foo' },
+          nested: { type: 'object', properties: { inner: { type: 'string' } } },
+        },
+      };
+      const snapshot = structuredClone(original);
+
+      const marked = markUnevaluatedPropertiesFalse(original, {
+        inPlace,
+        qualifyRef: buildMirrorQualifyRef(),
+      }) as {
+        properties: { child: { $ref: string }; nested: { unevaluatedProperties?: boolean } };
+      };
+
+      expect(original).toEqual(snapshot); // input object graph is byte-for-byte untouched
+      expect(marked).not.toBe(original); // caller always gets an independent clone
+      // The clone itself IS rewritten — proving this isn't a no-op qualifyRef that happens to
+      // dodge the mutation question entirely.
+      expect(marked.properties.child.$ref).not.toBe('#/components/schemas/Foo');
+    }
+  );
+
+  // Pins the walker's SHARED-OBJECT-IDENTITY cycle guard (SeenContexts in unevaluated-properties.ts)
+  // — a mechanism orthogonal to, and unaffected by, #649's switch from dereference to bundle. It has
+  // nothing to do with `$ref` strings: it's a hand-built schema where ONE JS object (`shared`) is
+  // literally reused at two composition sites in the SAME tree, the way any hand-authored or
+  // programmatically-assembled schema legitimately can (bundling doesn't produce this shape — a
+  // bundled `$ref` is a small, non-shared literal pointer object, handled separately by the
+  // `qualifyRef`-rewrite tests below). Reached once as a raw allOf branch (must stay unmarked — see
+  // unevaluated-properties.ts's applicator classification) and once nested under a sibling's
+  // properties (must be marked). A visited-Set that only tracks "already seen" — not "seen under
+  // which context" — lets whichever context visits first silently decide for both, dropping the
+  // second context's mark.
   it('marks a schema reached via two different composition contexts independently, not first-visit-wins', () => {
     const shared = { type: 'object', properties: { name: { type: 'string' } } };
     const schema = {
@@ -208,6 +299,199 @@ describe('assertResponseExact (#640) — exact-key-match against openapi.yaml', 
     expect(viaProperties.unevaluatedProperties).toBe(false); // reached via properties: marked
     expect(viaAllOf.unevaluatedProperties).toBeUndefined(); // allOf branch: never marked directly
     expect(viaAllOf).not.toBe(viaProperties); // divergent contexts get independent clones
+  });
+});
+
+// #649 — loadSpec() switched from $RefParser.dereference to .bundle so ajv can compile the
+// self-referential SpecNode/SpecTree response schemas six operations' success bodies embed
+// (previously a real circular JS object blew ajv's compile-time traversal stack). These pin the
+// mechanism directly: a bundled `$ref` is a literal pointer object, never inlined, and
+// markUnevaluatedPropertiesFalse's new `qualifyRef`/`inPlace` option rewrites it per LOCAL context.
+describe('markUnevaluatedPropertiesFalse — $ref qualification (#649)', () => {
+  it('rewrites a $ref via the qualifyRef callback and leaves the pointer node itself unmarked', () => {
+    const schema = { properties: { child: { $ref: '#/components/schemas/Foo' } } };
+    const marked = markUnevaluatedPropertiesFalse(schema, {
+      qualifyRef: (ref, inPlace) => `${inPlace ? 'in' : 'child'}:${ref}`,
+    }) as { properties: { child: { $ref: string; unevaluatedProperties?: boolean } } };
+    expect(marked.properties.child.$ref).toBe('child:#/components/schemas/Foo');
+    // A $ref-only node evaluates no properties of its own — marking it directly would be a false
+    // positive (it isn't the node that actually owns the properties it points at).
+    expect(marked.properties.child.unevaluatedProperties).toBeUndefined();
+  });
+
+  it('defaults qualifyRef to identity, matching every pre-#649 call site byte-for-byte', () => {
+    const schema = { properties: { child: { $ref: '#/x' } } };
+    const marked = markUnevaluatedPropertiesFalse(schema) as {
+      properties: { child: { $ref: string } };
+    };
+    expect(marked.properties.child.$ref).toBe('#/x');
+  });
+
+  // The sharpest correctness pitfall the dual-mirror design found (see the PR description): a
+  // CHILD-context keyword's `$ref` must be qualified with CHILD context even when the keyword
+  // itself sits inside an allOf branch being walked under IN_PLACE context — `walkSubschemas`
+  // hardcodes each keyword's context by category, never by the caller's own context, and this is
+  // what makes that true. Getting it backwards would let an unqualified/mis-qualified ref
+  // accidentally self-resolve against the WRONG mirror document by URI-shape coincidence rather
+  // than failing loudly (confirmed during implementation: this exact mutation didn't fail against
+  // real openapi.yaml schemas by coincidence, which is why this hand-built, ref-parser-independent
+  // case exists — a real-spec-driven test can pass by accident where a hand-built one can't).
+  it("qualifies a $ref inside `items` nested in an allOf branch using CHILD context, never leaking the branch's own IN_PLACE context", () => {
+    const contexts: boolean[] = [];
+    const qualifyRef = (ref: string, inPlace: boolean): string => {
+      contexts.push(inPlace);
+      return `${inPlace ? 'IN_PLACE' : 'CHILD'}:${ref}`;
+    };
+    const schema = {
+      allOf: [
+        {
+          type: 'object',
+          properties: {
+            list: { type: 'array', items: { $ref: '#/components/schemas/Foo' } },
+          },
+        },
+      ],
+    };
+    const marked = markUnevaluatedPropertiesFalse(schema, { qualifyRef }) as {
+      allOf: [{ properties: { list: { items: { $ref: string } } } }];
+    };
+    expect(marked.allOf[0].properties.list.items.$ref).toBe('CHILD:#/components/schemas/Foo');
+    expect(contexts).toEqual([false]); // never called with inPlace:true despite the allOf branch
+  });
+
+  it('buildMirrorQualifyRef throws on a non-local $ref instead of silently mis-qualifying it', () => {
+    expect(() =>
+      markUnevaluatedPropertiesFalse(
+        { properties: { child: { $ref: 'https://example.com/foo' } } },
+        { qualifyRef: buildMirrorQualifyRef() }
+      )
+    ).toThrow(/unsupported non-local/);
+  });
+});
+
+// The core bug this issue fixes, pinned directly: loadSpec()'s bundled document + getValidator's
+// $ref-qualification must compile and validate a genuinely self-referential SpecNode payload with
+// zero RangeError — no DB, no HTTP, just the compiled ajv validator against the real openapi.yaml.
+describe('#649: self-referential SpecNode/SpecTree schemas compile and validate', () => {
+  it('getValidator compiles POST /specs/{id}/paragraphs’s 201 schema and validates a 200-deep synthetic SpecNode without RangeError', async () => {
+    const doc = await loadSpec();
+    const schema = resolveResponseSchema(doc, 'post', '/specs/{id}/paragraphs', 201);
+    if (schema === undefined) throw new Error('expected a documented application/json schema');
+    const validate = getValidator(schema);
+    const body = { success: true, data: buildDeepSpecNode(200) };
+    expect(() => validate(body)).not.toThrow();
+    expect(validate(body)).toBe(true);
+  });
+
+  it.each([
+    ['get', '/specs/{id}', 200] as const,
+    ['post', '/specs/{id}/paragraphs', 201] as const,
+    ['patch', '/specs/{id}/paragraphs/{nodeId}', 200] as const,
+    ['patch', '/specs/{id}/paragraphs/{nodeId}/removal', 200] as const,
+    ['patch', '/specs/{id}/paragraphs/{nodeId}/reject', 200] as const,
+    ['get', '/revisions/{id}', 200] as const,
+  ])(
+    'the six previously-unvalidated operations (%s %s) each compile via getValidator',
+    async (method, path, status) => {
+      const doc = await loadSpec();
+      const schema = resolveResponseSchema(doc, method, path, status);
+      if (schema === undefined) throw new Error('expected a documented application/json schema');
+      expect(() => getValidator(schema)).not.toThrow();
+    }
+  );
+
+  // The false-rejection pitfall the dual-mirror design exists to avoid: SuccessResponse is an
+  // allOf-envelope branch for EVERY response, so a single "mark every component once, standalone"
+  // mirror makes IN_PLACE_MIRROR's SuccessResponse entry ALSO carry `unevaluatedProperties: false`
+  // — and a standalone SuccessResponse only "sees" its own `success` key, never a sibling allOf
+  // branch's `data` key, so it would reject a fully clean, fully-documented payload. Driving a real
+  // op's exact-match check against a genuinely clean body proves the two-mirror split avoids this.
+  // (The accept case itself is now one row of the six-op sweep below; this test asserts the
+  // rejection half, which the sweep — accept-only by design — doesn't cover.)
+  it('assertResponseExact rejects an undocumented key nested inside SpecNode.children, not just at the top level', async () => {
+    const body = {
+      success: true,
+      data: {
+        id: NODE_ID,
+        type: 'pr1',
+        text: 'parent',
+        children: [{ id: NODE_ID, type: 'pr2', text: 'child', children: [], meta: {}, rogue: 1 }],
+        meta: {},
+      },
+    };
+    await expect(
+      assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}', 200, body)
+    ).rejects.toThrow(/does not document/);
+  });
+});
+
+// #649 acceptance criterion 4: "Confirm the six ops above now actually validate — drive each and
+// assert a real response passes." The it.each above only proves each schema COMPILES; this drives
+// assertResponseExact — the strictest of the two checks (INV-6, #640) — against a real,
+// fully-documented payload for every one of the six, closing the gap between "compiles" and
+// "a real response is actually accepted end-to-end". A regression that mis-registered even one
+// mirror entry, or mis-qualified a single `$ref` along one of these ops' real (sometimes multi-hop:
+// RevisionWithTrees → RevisionSpecEntry → SpecTree → SpecNode) reference chains, would surface here
+// as a false rejection — a failure mode a compile-only check cannot see.
+describe('assertResponseExact accepts a real payload for all six previously-unvalidated operations (#649)', () => {
+  it.each([
+    ['get', '/specs/{id}', 200, { success: true, data: cleanSpecTree() }] as const,
+    ['post', '/specs/{id}/paragraphs', 201, { success: true, data: cleanSpecNode() }] as const,
+    [
+      'patch',
+      '/specs/{id}/paragraphs/{nodeId}',
+      200,
+      { success: true, data: cleanSpecNode() },
+    ] as const,
+    [
+      'patch',
+      '/specs/{id}/paragraphs/{nodeId}/removal',
+      200,
+      { success: true, data: cleanSpecNode() },
+    ] as const,
+    [
+      'patch',
+      '/specs/{id}/paragraphs/{nodeId}/reject',
+      200,
+      { success: true, data: cleanSpecNode() },
+    ] as const,
+    ['get', '/revisions/{id}', 200, { success: true, data: cleanRevisionWithTrees() }] as const,
+  ])(
+    '%s %s (%i) accepts its fully-documented worked example',
+    async (method, path, status, body) => {
+      await expect(assertResponseExact(method, path, status, body)).resolves.toBeUndefined();
+    }
+  );
+});
+
+// #649 — the LOCAL-walking-context invariant, proven against a REAL dual-context $ref rather than
+// a hand-built one: SuccessResponse is referenced from openapi.yaml in TWO genuinely different
+// contexts. At ~130 other ops it is always an allOf BRANCH (IN_PLACE — never marked directly, see
+// unevaluated-properties.ts's applicator classification). But DELETE /specs/{id}/lock's 200
+// response schema is a bare `$ref: SuccessResponse` with no allOf wrapper at all — SuccessResponse
+// is the response schema itself (CHILD context — the top-level call), and MUST be marked directly
+// there, or an undocumented key on this one op would silently pass. Qualification keyed on the
+// component's identity alone (rather than the LOCAL context of each individual `$ref` occurrence)
+// would make this op inherit whichever mirror the other ~130 in-place occurrences last touched,
+// and either always reject (breaking every allOf-composed response) or always accept (reopening
+// #640 for this op specifically) — this is the real-spec case the hand-built qualifyRef tests above
+// exist to generalize from.
+describe('assertResponseExact — SuccessResponse in two real contexts proves LOCAL $ref qualification (#649)', () => {
+  it('rejects an undocumented key where SuccessResponse is the bare top-level schema (CHILD context)', async () => {
+    await expect(
+      assertResponseExact('delete', '/specs/{id}/lock', 200, { success: true, extra: 'nope' })
+    ).rejects.toThrow(/does not document/);
+  });
+
+  it('accepts the exact documented shape for that same bare-SuccessResponse op', async () => {
+    await expect(
+      assertResponseExact('delete', '/specs/{id}/lock', 200, { success: true })
+    ).resolves.toBeUndefined();
+  });
+
+  it("still permits SuccessResponse's allOf-branch sibling keys elsewhere — same component, IN_PLACE context, never marked directly", async () => {
+    const body = { success: true, data: { db: 'connected', uptime: 5 } };
+    await expect(assertResponseExact('get', '/health', 200, body)).resolves.toBeUndefined();
   });
 });
 
@@ -270,6 +554,20 @@ describe('markUnevaluatedPropertiesFalse — JSON-Schema 2020-12 applicator cove
       extra: { any: { known: 'v', rogue: 1 } },
     },
     {
+      // #649: `items` is the CHILD_SINGLES entry that actually matters most — it's what recurses
+      // into SpecNode's own `children: SpecNode[]` array — yet no case here exercised it directly
+      // (only its cousins prefixItems/contains/unevaluatedItems were covered), so the issue's
+      // mandated mutation-verify bar ("remove one entry from CHILD_SINGLES, confirm the pinning
+      // test goes red") had nothing to go red for `items` specifically.
+      keyword: 'items',
+      schema: {
+        type: 'array',
+        items: { type: 'object', properties: { a: { type: 'string' } } },
+      },
+      valid: [{ a: 'x' }],
+      extra: [{ a: 'x', rogue: 1 }],
+    },
+    {
       keyword: 'prefixItems',
       schema: {
         type: 'array',
@@ -299,6 +597,25 @@ describe('markUnevaluatedPropertiesFalse — JSON-Schema 2020-12 applicator cove
       },
       valid: ['head', { a: 'x' }],
       extra: ['head', { a: 'x', rogue: 1 }],
+    },
+    {
+      // #649 mutation-verify sweep: `unevaluatedProperties` was the ONE entry in CHILD_SINGLES
+      // whose removal left the whole suite green — the surviving mutant this case kills. It is the
+      // object-side twin of the `unevaluatedItems` case above (both are zero-occurrence in today's
+      // openapi.yaml), and it has a second, subtler reason to exist: `shouldMark` deliberately
+      // refuses to mark a node that DECLARES `unevaluatedProperties`, treating it as an openness
+      // decision openapi.yaml already made. That refusal is correct for the declaring node, but it
+      // must not stop the walker descending INTO the schema-valued subschema, which sits at a CHILD
+      // instance location and closes normally. Drop the keyword from CHILD_SINGLES and `extra`
+      // below starts passing — an undocumented key accepted one level down.
+      keyword: 'unevaluatedProperties (schema-valued)',
+      schema: {
+        type: 'object',
+        properties: { known: { type: 'string' } },
+        unevaluatedProperties: { type: 'object', properties: { a: { type: 'string' } } },
+      },
+      valid: { known: 'head', other: { a: 'x' } },
+      extra: { known: 'head', other: { a: 'x', rogue: 1 } },
     },
     {
       // CodeRabbit #645: the walker already treated `dependentSchemas` as an in-place applicator
@@ -374,6 +691,73 @@ describe('resolveResponseSchema vacuity guards (#640)', () => {
   });
 });
 
+// #649: loadSpec() switched from $RefParser.dereference to .bundle, which leaves every `$ref` —
+// including a 2xx RESPONSE OBJECT itself, not just schema fields inside it — as a literal
+// `{ $ref }` pointer instead of an inlined object. successJsonOps() feeds the "every success-JSON
+// operation is response-covered or explicitly allowlisted" sweep (contract.integration.test.ts):
+// an operation successJsonOps silently fails to count never appears in EITHER RESPONSE_COVERED or
+// the "uncovered" failure list, so the sweep passes vacuously for it — exactly the failure mode
+// #640's fail-loud guards elsewhere in this file exist to prevent. No operation in today's
+// openapi.yaml documents a 2xx response as a bare `$ref` to `components/responses/*` (only 4xx/5xx
+// do), so this is pinned against a synthetic doc, matching the vacuity-guard pattern above.
+describe('successJsonOps — sweep vacuity under a $ref-pointer 2xx response (#649)', () => {
+  it('still counts a 2xx response that is itself a $ref to components/responses/*, not silently dropped by the bundle switch', () => {
+    const doc: OpenApiDoc = {
+      paths: {
+        '/synthetic': {
+          get: { responses: { '200': { $ref: '#/components/responses/Ok' } } },
+        },
+      },
+      components: {
+        responses: {
+          Ok: { content: { 'application/json': { schema: { type: 'object' } } } },
+        },
+      },
+    };
+    expect(successJsonOps(doc)).toContain('get /synthetic');
+  });
+
+  it('still excludes a $ref-pointer 2xx response with no application/json content', () => {
+    const doc: OpenApiDoc = {
+      paths: {
+        '/synthetic': {
+          get: { responses: { '200': { $ref: '#/components/responses/NoContent' } } },
+        },
+      },
+      components: {
+        responses: { NoContent: {} },
+      },
+    };
+    expect(successJsonOps(doc)).not.toContain('get /synthetic');
+  });
+});
+
+// resolveResponseSchema shares successJsonOps' $ref-pointer 2xx exposure: it parsed the raw response
+// entry straight into ResponseObject (no `$ref` field), so a $ref-pointer 2xx response silently lost
+// its `$ref` key and read as `{ content: undefined }` — falling into the "documented non-JSON" no-op
+// branch instead of resolving the pointer and validating against its real schema. That reopens the
+// exact vacuous-gate class #649 fixed for successJsonOps, one call site over: assertResponse and
+// assertResponseExact (both built on resolveResponseSchema) would silently no-op for such an
+// operation instead of validating the response body at all. No 2xx response in today's openapi.yaml
+// is `$ref`'d this way (only 4xx/5xx are), so this is pinned against a synthetic doc.
+describe('resolveResponseSchema resolves a $ref-pointer 2xx response (#649)', () => {
+  it('resolves the $ref and returns its schema, instead of treating it as documented non-JSON', () => {
+    const doc: OpenApiDoc = {
+      paths: {
+        '/synthetic': {
+          get: { responses: { '200': { $ref: '#/components/responses/Ok' } } },
+        },
+      },
+      components: {
+        responses: {
+          Ok: { content: { 'application/json': { schema: { type: 'object' } } } },
+        },
+      },
+    };
+    expect(resolveResponseSchema(doc, 'get', '/synthetic', 200)).toEqual({ type: 'object' });
+  });
+});
+
 // operationParamKeys() feeds INV-4; anything it silently under-reports becomes an INV-4 check that
 // passes vacuously. Synthetic docs (no such op exists in openapi.yaml yet) pin the two ways that
 // could happen: a body carrying BOTH a base `properties` map and `oneOf` branches, and a body
@@ -403,6 +787,30 @@ describe('operationParamKeys body-key derivation', () => {
     // for an operation whose params were never actually compared.
     const doc = docWithBodySchema({ allOf: [{ properties: { hidden: {} } }] });
     expect(() => operationParamKeys(doc, 'post', '/synthetic')).toThrow(/pass vacuously/);
+  });
+
+  // The whole-body guard above only fires when the derived set ends up EMPTY. A union whose other
+  // branches still contribute keys keeps body.size non-zero, so an underivable branch would slip
+  // through and INV-4 would compare a PARTIAL key set with no signal — the same vacuity class, one
+  // level down. Without the per-branch check this doc derives {ok} and passes silently.
+  it('throws when only SOME oneOf branches are derivable, rather than checking a partial key set', () => {
+    const doc = docWithBodySchema({
+      oneOf: [{ properties: { ok: {} } }, { allOf: [{ properties: { hidden: {} } }] }],
+    });
+    expect(() => operationParamKeys(doc, 'post', '/synthetic')).toThrow(
+      /branch \(index 1\) declares no top-level `properties`/
+    );
+  });
+
+  // Guards the guard: an explicitly empty `properties: {}` branch IS derivable — it genuinely
+  // declares no keys — so it must not be mistaken for an underivable composition and must not
+  // throw. Pins that the check keys on "could not derive", never on "derived nothing".
+  it('accepts a oneOf branch that explicitly declares an empty properties map', () => {
+    const doc = docWithBodySchema({
+      oneOf: [{ properties: { ok: {} } }, { properties: {} }],
+    });
+    const { body } = operationParamKeys(doc, 'post', '/synthetic');
+    expect([...body]).toEqual(['ok']);
   });
 });
 

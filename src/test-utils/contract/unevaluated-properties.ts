@@ -38,8 +38,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 // its own sub-instance, so each is marked like any top-level schema.
 //
 // `not` is deliberately absent: it succeeds precisely when its subschema FAILS, its annotations are
-// discarded, and injecting a marker inside it could flip the branch's result. `$ref` is absent
-// because every schema reaching this walker is already dereferenced (see loadSpec()).
+// discarded, and injecting a marker inside it could flip the branch's result. `$ref` is NOT a
+// subschema-bearing applicator the walker recurses into — since loadSpec() switched from
+// dereference to bundle (issue #649), a `$ref` pointer is a genuine terminal leaf: SpecNode's own
+// self-reference (`children: SpecNode[]`) would otherwise make dereference-then-walk build a
+// literal circular JS object and blow ajv's compile-time traversal stack. Instead `markObject`
+// below rewrites the pointer string (via `qualifyRef`) to target whichever mirror document matches
+// the LOCAL context of that specific `$ref` occurrence, and leaves resolving it to ajv at
+// validate-time, which walks the recursive structure lazily instead of eagerly. A `$ref` node
+// evaluates no properties of its OWN (no literal `properties`/`patternProperties` etc besides the
+// pointer), so `shouldMark` never marks it directly — the marking lives on the mirror entry the
+// pointer targets instead.
 const IN_PLACE_ARRAYS = ['allOf', 'oneOf', 'anyOf'] as const;
 const IN_PLACE_SINGLES = ['if', 'then', 'else'] as const;
 const IN_PLACE_MAPS = ['dependentSchemas'] as const;
@@ -71,16 +80,51 @@ const CHILD_SINGLES = [
  * contexts. */
 type SeenContexts = Map<object, Map<boolean, Record<string, unknown>>>;
 
+/** Rewrites a bundled `$ref` pointer (e.g. `#/components/schemas/SpecNode`) to target whichever
+ * mirror document matches the LOCAL walking context (`inPlace`) the ref was encountered under.
+ * The default (used whenever a caller doesn't need mirror-qualified refs — every pre-#649 call
+ * site) is the identity function, so existing callers/tests are byte-for-byte unaffected. */
+export type QualifyRef = (ref: string, inPlace: boolean) => string;
+
+export interface RefQualifyOptions {
+  readonly inPlace?: boolean;
+  readonly qualifyRef?: QualifyRef;
+}
+
+// The two mirror documents assertResponseExact/loadSpec register with ajv (#649): CHILD_MIRROR_ID
+// holds every component schema marked as if reached via a properties/items position,
+// IN_PLACE_MIRROR_ID holds every component marked as if reached via an allOf/oneOf/anyOf branch
+// (i.e. never marked directly — see the applicator classification above). A component referenced
+// from both contexts somewhere in openapi.yaml (confirmed: SuccessResponse, ErrorResponse, and 10
+// others) needs BOTH mirror entries, which is exactly why there are two documents rather than one.
+export const CHILD_MIRROR_ID = 'https://specr.internal/contract/unevaluated-properties/child';
+export const IN_PLACE_MIRROR_ID = 'https://specr.internal/contract/unevaluated-properties/in-place';
+
+const LOCAL_REF_PREFIX = '#/';
+
+/** Standard `qualifyRef` for the two component mirrors: rewrites a local `#/...` pointer to
+ * `<mirrorId>#/...`, choosing the mirror by the LOCAL context the pointer was found in — never the
+ * top-level call's own `inPlace`, which is what lets one component serve both contexts correctly. */
+export function buildMirrorQualifyRef(): QualifyRef {
+  return (ref, inPlace) => {
+    if (!ref.startsWith(LOCAL_REF_PREFIX)) {
+      throw new Error(`markUnevaluatedPropertiesFalse: unsupported non-local $ref "${ref}"`);
+    }
+    return `${inPlace ? IN_PLACE_MIRROR_ID : CHILD_MIRROR_ID}${ref}`;
+  };
+}
+
 function walkMap(
   schema: Record<string, unknown>,
   key: string,
   seen: SeenContexts,
-  inPlace: boolean
+  inPlace: boolean,
+  qualifyRef: QualifyRef
 ): void {
   const map = schema[key];
   if (!isPlainObject(map)) return;
   const out: Record<string, unknown> = {};
-  for (const [name, sub] of Object.entries(map)) out[name] = mark(sub, seen, inPlace);
+  for (const [name, sub] of Object.entries(map)) out[name] = mark(sub, seen, inPlace, qualifyRef);
   schema[key] = out;
 }
 
@@ -88,31 +132,37 @@ function walkArray(
   schema: Record<string, unknown>,
   key: string,
   seen: SeenContexts,
-  inPlace: boolean
+  inPlace: boolean,
+  qualifyRef: QualifyRef
 ): void {
   const branches = schema[key];
   if (!Array.isArray(branches)) return;
-  schema[key] = branches.map((branch) => mark(branch, seen, inPlace));
+  schema[key] = branches.map((branch) => mark(branch, seen, inPlace, qualifyRef));
 }
 
 function walkSingle(
   schema: Record<string, unknown>,
   key: string,
   seen: SeenContexts,
-  inPlace: boolean
+  inPlace: boolean,
+  qualifyRef: QualifyRef
 ): void {
   const sub = schema[key];
   if (!isPlainObject(sub)) return;
-  schema[key] = mark(sub, seen, inPlace);
+  schema[key] = mark(sub, seen, inPlace, qualifyRef);
 }
 
-function walkSubschemas(schema: Record<string, unknown>, seen: SeenContexts): void {
-  for (const key of CHILD_MAPS) walkMap(schema, key, seen, false);
-  for (const key of IN_PLACE_MAPS) walkMap(schema, key, seen, true);
-  for (const key of CHILD_ARRAYS) walkArray(schema, key, seen, false);
-  for (const key of IN_PLACE_ARRAYS) walkArray(schema, key, seen, true);
-  for (const key of CHILD_SINGLES) walkSingle(schema, key, seen, false);
-  for (const key of IN_PLACE_SINGLES) walkSingle(schema, key, seen, true);
+function walkSubschemas(
+  schema: Record<string, unknown>,
+  seen: SeenContexts,
+  qualifyRef: QualifyRef
+): void {
+  for (const key of CHILD_MAPS) walkMap(schema, key, seen, false, qualifyRef);
+  for (const key of IN_PLACE_MAPS) walkMap(schema, key, seen, true, qualifyRef);
+  for (const key of CHILD_ARRAYS) walkArray(schema, key, seen, false, qualifyRef);
+  for (const key of IN_PLACE_ARRAYS) walkArray(schema, key, seen, true, qualifyRef);
+  for (const key of CHILD_SINGLES) walkSingle(schema, key, seen, false, qualifyRef);
+  for (const key of IN_PLACE_SINGLES) walkSingle(schema, key, seen, true, qualifyRef);
 }
 
 /** True when this schema object itself evaluates object properties — via its own
@@ -137,25 +187,37 @@ function shouldMark(schema: Record<string, unknown>, inPlace: boolean): boolean 
 function markObject(
   node: Record<string, unknown>,
   seen: SeenContexts,
-  inPlace: boolean
+  inPlace: boolean,
+  qualifyRef: QualifyRef
 ): Record<string, unknown> {
   const contexts = seen.get(node);
   const cached = contexts?.get(inPlace);
-  // Same original node, same context: either a true cycle (dereferenced schemas can be
-  // self-referential — stop recursing) or a harmless duplicate reference already processed for this
-  // context. Either way the existing (in-progress or finished) clone is the right answer.
+  // Same original node, same context: either a true cycle (a schema that is its own ancestor
+  // through some OTHER shared-identity path — see the "two different composition contexts" tests)
+  // or a harmless duplicate reference already processed for this context. Either way the existing
+  // (in-progress or finished) clone is the right answer. `$ref` pointers themselves no longer create
+  // this kind of cycle post-#649 (see the applicator-classification comment above): a bundled `$ref`
+  // is a small, non-shared literal object rewritten in place, never resolved into its target here.
   if (cached !== undefined) return cached;
   // Always build a fresh SHALLOW clone from the pristine original `node` — never mutate it, and
   // never derive one context's clone from another context's already-processed output (that would
   // leak the sibling's mark across contexts). The shallow copy suffices because every nested key
   // touched below is REASSIGNED to a brand-new value from a recursive call, never mutated in place.
   const schema: Record<string, unknown> = { ...node };
-  // Register the in-progress clone under its context BEFORE recursing, so a self-referential schema
-  // reached again under the SAME context returns this clone instead of recursing forever.
+  // A bundled `$ref` pointer: rewrite it to the mirror-qualified id for THIS local context. The
+  // walk then CONTINUES through the rest of the node rather than returning early — harmlessly, as
+  // a `$ref` node carries no other subschema-bearing keywords (siblings like `description` are
+  // plain data), so the recursion below finds nothing more to rewrite. `shouldMark` also leaves it
+  // unmarked, since it evaluates no properties of its own (see the `$ref` note in the
+  // applicator-classification comment).
+  if (typeof schema['$ref'] === 'string') schema['$ref'] = qualifyRef(schema['$ref'], inPlace);
+  // Register the in-progress clone under its context BEFORE recursing, so a schema reached again
+  // under the SAME context (the shared-object-identity case above) returns this clone instead of
+  // recursing forever.
   const perNode = contexts ?? new Map<boolean, Record<string, unknown>>();
   perNode.set(inPlace, schema);
   seen.set(node, perNode);
-  walkSubschemas(schema, seen);
+  walkSubschemas(schema, seen, qualifyRef);
   if (shouldMark(schema, inPlace)) schema['unevaluatedProperties'] = false;
   return schema;
 }
@@ -164,13 +226,25 @@ function markObject(
  * properties at its own instance location (see the applicator classification above). Never mutates
  * its input — the returned tree is always a fresh clone, safe to compile through an uncached ajv
  * instance without corrupting any other reader of the original schema object. */
-function mark(node: unknown, seen: SeenContexts, inPlace: boolean): unknown {
-  return isPlainObject(node) ? markObject(node, seen, inPlace) : node;
+function mark(
+  node: unknown,
+  seen: SeenContexts,
+  inPlace: boolean,
+  qualifyRef: QualifyRef
+): unknown {
+  return isPlainObject(node) ? markObject(node, seen, inPlace, qualifyRef) : node;
 }
 
-export function markUnevaluatedPropertiesFalse(schema: AnySchemaObject): AnySchemaObject {
+const IDENTITY_QUALIFY_REF: QualifyRef = (ref) => ref;
+
+export function markUnevaluatedPropertiesFalse(
+  schema: AnySchemaObject,
+  options: RefQualifyOptions = {}
+): AnySchemaObject {
   // No assertion at this boundary (CLAUDE.md): `markObject` is typed to return an object, and
   // `AnySchemaObject` is structurally a `Record<string, unknown>`, so the return type is proven
   // by the signature rather than asserted over an `unknown`.
-  return markObject(structuredClone(schema), new Map(), false);
+  const inPlace = options.inPlace ?? false;
+  const qualifyRef = options.qualifyRef ?? IDENTITY_QUALIFY_REF;
+  return markObject(structuredClone(schema), new Map(), inPlace, qualifyRef);
 }
