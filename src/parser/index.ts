@@ -25,6 +25,7 @@ export {
   scoreHierarchyConfidence,
   findAnchoredParagraph,
   replaceAnchoredParagraphText,
+  scanChoiceTokens,
 } from './docx/index.js';
 export type {
   DocxStyleAnalysis,

@@ -324,6 +324,7 @@ export { stripLeadingTitleBlockRoots } from './heuristics.js';
 export { resolveStyleCascade } from './resolver.js';
 export { scoreHierarchyConfidence } from './hierarchy-confidence.js';
 export { findAnchoredParagraph, replaceAnchoredParagraphText } from './object-blob-edit.js';
+export { scanChoiceTokens } from './choice-tokens.js';
 export type { ClassifiedParagraph } from './types.js';
 export { deriveTemplate } from './derive-template.js';
 export { extractNumberingProfile };

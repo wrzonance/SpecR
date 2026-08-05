@@ -19,11 +19,11 @@ vi.mock('../../lib/logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-// PARAGRAPH_COLUMNS carries 12 columns per row (id, spec_id, parent_id, node_type,
+// PARAGRAPH_COLUMNS carries 13 columns per row (id, spec_id, parent_id, node_type,
 // text, position, vanish, conflicts, source_facts, signal_provenance, object_data,
-// page_break_before) — the batched INSERT flattens all rows of a chunk into one
-// params array, row-major, so row N's fields start at params[N * 12].
-const PARAGRAPH_COLS = 12;
+// page_break_before, acknowledged) — the batched INSERT flattens all rows of a
+// chunk into one params array, row-major, so row N's fields start at params[N * 13].
+const PARAGRAPH_COLS = 13;
 function rowParams(
   params: readonly unknown[] | undefined,
   rowIndex: number
