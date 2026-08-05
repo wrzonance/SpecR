@@ -175,11 +175,19 @@ function readinessInputFrom(input: string | CreatePackageRevisionInput): Readine
   return { mode: input.mode, overrideReadinessGate: input.overrideReadinessGate };
 }
 
-export function mapSummary(
+// The fields RevisionSummary and RevisionWithTrees share — everything except RevisionSummary's
+// `specCount` and RevisionWithTrees's `specs`. #649: getPackageRevision used to build its
+// RevisionWithTrees result as `{ ...mapSummary(...), specs }`, which spreads mapSummary's FULL
+// RevisionSummary (specCount included) and appends `specs` — TypeScript's excess-property check
+// never fires on a spread's inferred return type, so `specCount` silently rode along on every real
+// GET /revisions/{id} response despite openapi.yaml never documenting it on RevisionWithTrees. The
+// gap was invisible because that op had no response-schema validation at all until #649 fixed the
+// self-referential-schema stack overflow that had excluded it. Extracting the shared core here
+// makes each caller build the SPECIFIC shape its return type promises, not a superset of it.
+function mapRevisionCore(
   row: RevisionRow,
-  profile: RevisionNomenclatureProfile | null,
-  specCount: number
-): RevisionSummary {
+  profile: RevisionNomenclatureProfile | null
+): Omit<RevisionSummary, 'specCount'> {
   const date = revisionDateString(row.revision_date);
   const attributes = parseAttributes(row.attributes);
   const display = getRevisionDisplayIdentity(
@@ -200,10 +208,17 @@ export function mapSummary(
     number: display.number,
     attributes,
     issuedAt: row.issued_at.toISOString(),
-    specCount,
     parentRevisionId: row.parent_revision_id,
     baseRevisionId: row.base_revision_id,
   };
+}
+
+export function mapSummary(
+  row: RevisionRow,
+  profile: RevisionNomenclatureProfile | null,
+  specCount: number
+): RevisionSummary {
+  return { ...mapRevisionCore(row, profile), specCount };
 }
 
 async function profileForPackage(
@@ -347,7 +362,7 @@ export async function getPackageRevision(
       position: snap.position,
       tree: validateTree(snap.tree, snap.spec_id),
     }));
-    return { ...mapSummary(row, profile, specs.length), specs };
+    return { ...mapRevisionCore(row, profile), specs };
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError(`getPackageRevision: query failed for ${revisionId}`, { cause: err });

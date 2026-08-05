@@ -6,6 +6,7 @@ import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import { pool } from '../db/index.js';
 import type { SourceFacts } from '../ast/index.js';
+import { assertResponse, assertResponseExact } from '../test-utils/contract/validate-response.js';
 
 // #545, ADR-079 follow-on — end-to-end proof that every one of the four
 // readiness-finding kinds now has a SUPPORTED API path to clear it, driven
@@ -156,6 +157,29 @@ describe('PATCH .../acknowledgement — clears specifier_note_present / body_obj
     expect(ackBody.data.text).toBe('Confirm topcoat sheen with owner.');
     expect(ackBody.data.meta.acknowledged).toBe(true);
 
+    // This op is RESPONSE_COVERED in contract.integration.test.ts rather than
+    // allowlisted. It could not have been until #649 (PR 657): its success body
+    // is a SpecNode, whose self-referential `children: SpecNode[]` blew ajv's
+    // schema-traversal stack under loadSpec()'s old full $ref dereference, so
+    // every SpecNode-returning op was exempted for that structural reason.
+    // Bundling removed the reason, so the exemption goes with it — an endpoint
+    // that ships without a response check is a documented shape nothing proves.
+    await assertResponse('patch', '/specs/{id}/paragraphs/{nodeId}/acknowledgement', 200, ackBody);
+    await assertResponseExact(
+      'patch',
+      '/specs/{id}/paragraphs/{nodeId}/acknowledgement',
+      200,
+      ackBody
+    );
+    // INV-6: the exact-match variant genuinely rejects an undocumented key here,
+    // rather than passing vacuously — the failure mode #640 found.
+    await expect(
+      assertResponseExact('patch', '/specs/{id}/paragraphs/{nodeId}/acknowledgement', 200, {
+        ...ackBody,
+        data: { ...ackBody.data, rogueKey: 'nope' },
+      })
+    ).rejects.toThrow(/does not document/);
+
     expect(await readinessKinds(specId)).toEqual([]);
   });
 
@@ -215,6 +239,30 @@ describe('PATCH .../comments/:index/closure — the only supported path to clear
       closed: true,
     });
     expect(close.status).toBe(200);
+    // Response-covered for the same reason as the acknowledgement op above:
+    // #649 made this SpecNode-shaped body validatable, so it is checked rather
+    // than exempted.
+    await assertResponse(
+      'patch',
+      '/specs/{id}/paragraphs/{nodeId}/comments/{index}/closure',
+      200,
+      close.body
+    );
+    await assertResponseExact(
+      'patch',
+      '/specs/{id}/paragraphs/{nodeId}/comments/{index}/closure',
+      200,
+      close.body
+    );
+    const closeBody = close.body as { data: Record<string, unknown> };
+    await expect(
+      assertResponseExact(
+        'patch',
+        '/specs/{id}/paragraphs/{nodeId}/comments/{index}/closure',
+        200,
+        { ...closeBody, data: { ...closeBody.data, rogueKey: 'nope' } }
+      )
+    ).rejects.toThrow(/does not document/);
     expect(await readinessKinds(specId)).toEqual([]);
 
     const reopen = await req('PATCH', `/specs/${specId}/paragraphs/${nodeId}/comments/0/closure`, {
