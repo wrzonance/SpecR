@@ -242,6 +242,29 @@ export const PatchRemovalBodySchema = z.object({
 
 export type PatchRemovalBody = z.infer<typeof PatchRemovalBodySchema>;
 
+// #545, ADR-079 follow-on — per-node acknowledgement. `acknowledged: true`
+// clears the readiness gate's specifier_note_present / body_object_present
+// finding for a note or textBox object node WITHOUT removing or hiding the
+// content (a structural toggle, mirroring PatchRemovalBodySchema's shape —
+// no expectedVersion, matching that endpoint's precedent over
+// updateParagraphText's optimistic-concurrency shape).
+export const PatchAcknowledgementBodySchema = z.object({
+  acknowledged: z.boolean(),
+  actorLabel: ActorLabelSchema.exactOptional(),
+});
+
+export type PatchAcknowledgementBody = z.infer<typeof PatchAcknowledgementBodySchema>;
+
+// #545, ADR-079 follow-on — a mutable comment-closure toggle. `closed: true`
+// clears the readiness gate's open_comment finding for the comment at the
+// path's `:index`. Same structural-toggle shape as removal/acknowledgement.
+export const PatchCommentClosureBodySchema = z.object({
+  closed: z.boolean(),
+  actorLabel: ActorLabelSchema.exactOptional(),
+});
+
+export type PatchCommentClosureBody = z.infer<typeof PatchCommentClosureBodySchema>;
+
 // Reclassify input. `rules` (optional) supplies candidate rules for a preview;
 // omitted → resolve the spec's library convention profile. `preview: true`
 // computes the diff without persisting (preview-before-save). The rules schema

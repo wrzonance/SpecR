@@ -125,11 +125,15 @@ export {
   PatchEditabilityBodySchema,
   PatchRemovalBodySchema,
   ReclassifyBodySchema,
+  PatchAcknowledgementBodySchema,
+  PatchCommentClosureBodySchema,
 } from './spec-tree-schemas.js';
 export type {
   PatchEditabilityBody,
   PatchRemovalBody,
   ReclassifyBody,
+  PatchAcknowledgementBody,
+  PatchCommentClosureBody,
 } from './spec-tree-schemas.js';
 export { ActorLabelSchema, AcceptNoteBodySchema } from './actor-schemas.js';
 export type { AcceptNoteBody } from './actor-schemas.js';
