@@ -41,6 +41,20 @@ const OPS = [
 ] as const;
 const OPS_SQL_LIST = OPS.map((op) => `'${op}'`).join(', ');
 
+const PRIOR_OPS = ['edit', 'insert', 'remove', 'restore', 'merge', 'accept-note', 'restructure'];
+const PRIOR_OPS_SQL_LIST = PRIOR_OPS.map((op) => `'${op}'`).join(', ');
+// The four ops `up` adds. `down` must DELETE their history rows before it
+// re-narrows the CHECK, or re-adding the constraint fails outright
+// (ATRewriteTable: "check constraint is violated by some row") the moment the
+// feature has actually been used — verified against a live DB. Mirrors
+// migration 029's down, which deletes the pr6/pr7 style_rules its own up
+// widened the node_type CHECK to allow. Losing these rows is correct and not
+// extra data loss: they exist only to describe toggles of the `acknowledged`
+// column and the comment-closure flag that this same `down` removes/abandons.
+const ADDED_OPS_SQL_LIST = OPS.filter((op) => !PRIOR_OPS.includes(op))
+  .map((op) => `'${op}'`)
+  .join(', ');
+
 const CONSTRAINT_NAME = 'paragraph_versions_op_check';
 
 export const up = (pgm: MigrationBuilder): void => {
@@ -54,11 +68,10 @@ export const up = (pgm: MigrationBuilder): void => {
 };
 
 export const down = (pgm: MigrationBuilder): void => {
+  pgm.sql(`DELETE FROM paragraph_versions WHERE op IN (${ADDED_OPS_SQL_LIST})`);
   pgm.dropConstraint('paragraph_versions', CONSTRAINT_NAME);
   pgm.addConstraint('paragraph_versions', CONSTRAINT_NAME, {
-    check: `op IN (${['edit', 'insert', 'remove', 'restore', 'merge', 'accept-note', 'restructure']
-      .map((op) => `'${op}'`)
-      .join(', ')})`,
+    check: `op IN (${PRIOR_OPS_SQL_LIST})`,
   });
   pgm.dropColumns('paragraphs', ['acknowledged']);
 };
