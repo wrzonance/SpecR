@@ -45,13 +45,17 @@ function isOnOffEnabled(node: ObjectBlobNode): boolean {
   return val !== '0' && val !== 'false' && val !== 'off';
 }
 
-// Straight OR port of document.ts's own `runIsVanish`: a run is hidden if
-// EITHER its own `w:rPr>w:vanish` is an enabled ST_OnOff toggle, OR its
-// `w:rPr>w:rStyle` names a character style present in the caller's
+// A run is hidden when its own `w:rPr>w:vanish` is an enabled ST_OnOff
+// toggle, or — ONLY when no direct `w:vanish` is present at all — when its
+// `w:rPr>w:rStyle` names a character style in the caller's
 // `vanishCharStyleIds` (the StyleMap's resolved set of character styles that
-// themselves carry an enabled `w:vanish`). No special-casing between the two
-// signals — a resolved-off direct `<w:vanish w:val="0"/>` does not override a
-// matching rStyle, mirroring document.ts's own behaviour exactly (#650).
+// themselves carry an enabled `w:vanish`).
+//
+// The two signals resolve as a TRI-STATE, NOT an OR: direct formatting wins,
+// so a resolved-off `<w:vanish w:val="0"/>` DOES override a matching rStyle.
+// This deliberately diverges from document.ts's paragraph-tier `runIsVanish`,
+// which still OR's them. See resolveRunVanish below for the ECMA-376 §17.7.3
+// rationale and why over-suppression is the worse failure direction (#650).
 // `vanishCharStyleIds` defaults to an empty set so a caller that has none to
 // offer (object-blob-edit.ts's rewriteFirstText before its own #650 wiring,
 // #648's extract.ts) keeps compiling and behaving byte-for-byte unchanged.

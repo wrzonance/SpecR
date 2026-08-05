@@ -51,13 +51,17 @@ export interface CapturedObjectText {
  * children). `blob` already carries every interior paragraph's SDT anchor —
  * it is the exact node tree the parent `object.meta.object.blob` will store.
  *
- * `vanishCharStyleIds` (#650) is the SAME `StyleMap.vanishCharStyleIds` set
- * used to decide which interior runs `collectText` skipped during capture —
- * carried forward unfiltered (the full resolved set, not a subset narrowed to
- * what this particular object actually referenced; simplicity, zero
- * correctness cost) so `body-object-attach.ts`'s `toObjectMeta` can persist
- * it and the edit rewrite path (`object-text-edit.ts`) can rebuild the same
- * `ReadonlySet` at write time without re-parsing `styles.xml`.
+ * `vanishCharStyleIds` (#650) is drawn from the same
+ * `StyleMap.vanishCharStyleIds` set used to decide which interior runs
+ * `collectText` skipped during capture, but is NARROWED to the styles this
+ * particular object's own blob actually references — see
+ * `referencedVanishCharStyleIds` (body-object-vanish.ts), applied at both
+ * assignment sites (`buildTableObject`, `buildTextBoxObject`). Persisting the
+ * full document-wide set would write every other object's hidden-style ids
+ * into this object's row. `body-object-attach.ts`'s `toObjectMeta` persists
+ * the narrowed set, and the edit rewrite path (`object-text-edit.ts`)
+ * rebuilds the same `ReadonlySet` at write time without re-parsing
+ * `styles.xml`.
  */
 export interface CapturedBodyObject {
   readonly kind: ObjectKind;
