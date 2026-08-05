@@ -77,7 +77,18 @@ const DELETE_STATEMENT = /(`|'|")\s*(DELETE\s+FROM[\s\S]*?)\1/gi;
 // "id" or ending "_id" and binds it to a query parameter, directly
 // (`= $n` / `= ANY($n)`) or nested inside an id-scoped subquery
 // (`x_id IN (SELECT id FROM ...)`) — never a hardcoded literal or pattern.
-const ID_SCOPED_COMPARISON = /\b\w*_?id\s*(?:=\s*ANY\(\$\d+|=\s*\$\d+|IN\s*\(SELECT\s+id\s+FROM)/i;
+//
+// The column part is `(?:\w+_)?id`, NOT `\w*_?id`: the latter's `\w*` happily
+// consumed the leading characters of any word merely ENDING in "id", so
+// `WHERE valid = $1`, `paid`, `grid` and `overrid` all read as id-scoped and
+// sailed through. A boolean flag like `valid` can match arbitrarily many rows —
+// exactly the unscoped sweep this gate exists to catch, waved past by the check
+// itself. Requiring either a bare `id` or a `<something>_id` prefix keeps every
+// real column matching (`id`, `project_id`, `spec_id`, `library_id`) while the
+// word-boundary now rejects the lookalikes, since the `id` inside `valid` is
+// not preceded by one.
+const ID_SCOPED_COMPARISON =
+  /\b(?:\w+_)?id\s*(?:=\s*ANY\(\$\d+|=\s*\$\d+|IN\s*\(SELECT\s+id\s+FROM)/i;
 const PATTERN_INDICATORS = /\bLIKE\b|=\s*'[^']*'|IS\s+NOT\s+NULL/i;
 
 /** Everything after the first `WHERE`, or `''` when the statement has none. */
@@ -132,21 +143,43 @@ interface CommentScanState {
  * QUOTES a pattern-delete for documentation (several files do, citing the
  * old #638 bug) is never mistaken for live code. Carries block-comment state
  * across lines via a fold, never a mutated loop variable.
+ *
+ * This is a scanner, not a parser: it finds `/*` by position and does not
+ * know about string literals, so a `/*` sitting INSIDE a quoted string would
+ * open a block comment it never meant to open. That direction is a silent
+ * gate bypass (live `DELETE`s blanked and never reported), not a false
+ * positive, so it is checked rather than tolerated: if the fold ends still
+ * inside a block comment, the file either has genuinely unbalanced comment
+ * markers — it would not compile — or the scanner mis-read a string, and
+ * either way the result is untrustworthy. Fail loudly instead of returning a
+ * partially-blanked file that quietly passes.
+ *
+ * A stray `/*` that IS later closed stays undetectable here, but for any file
+ * already in the baseline the disappearing violations fail the exact-match
+ * ratchet; only a brand-new file could hide one. Full string-aware tokenizing
+ * is deliberately out of scope for a ~200-line hygiene gate.
  */
-const stripComments = (fileText: string): string =>
-  fileText
-    .split('\n')
-    .reduce<CommentScanState>(
-      (state, line) => {
-        const next = stripCommentFromLine(line, state.inBlockComment);
-        return {
-          cleanedLines: [...state.cleanedLines, next.text],
-          inBlockComment: next.inBlockComment,
-        };
-      },
-      { cleanedLines: [], inBlockComment: false }
-    )
-    .cleanedLines.join('\n');
+const stripComments = (filePath: string, fileText: string): string => {
+  const state = fileText.split('\n').reduce<CommentScanState>(
+    (acc, line) => {
+      const next = stripCommentFromLine(line, acc.inBlockComment);
+      return {
+        cleanedLines: [...acc.cleanedLines, next.text],
+        inBlockComment: next.inBlockComment,
+      };
+    },
+    { cleanedLines: [], inBlockComment: false }
+  );
+  if (state.inBlockComment) {
+    throw new IntegrationCleanupError(
+      `${filePath}: reached end of file still inside a block comment — either the file has ` +
+        'unbalanced `/*`/`*/` markers, or a `/*` inside a string literal opened one. Every ' +
+        'DELETE after that point would have been silently blanked, so this scan is not ' +
+        'trustworthy; fix the source or teach stripCommentFromLine about string literals.'
+    );
+  }
+  return state.cleanedLines.join('\n');
+};
 
 interface LineCommentResult {
   readonly text: string;
@@ -181,7 +214,7 @@ export const scanFileForPatternDeletes = (
   filePath: string,
   fileText: string
 ): readonly CleanupViolation[] => {
-  const cleaned = stripComments(fileText);
+  const cleaned = stripComments(filePath, fileText);
   const violations: CleanupViolation[] = [];
   const pattern = new RegExp(DELETE_STATEMENT.source, DELETE_STATEMENT.flags);
   let match: RegExpExecArray | null;

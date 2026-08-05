@@ -14,37 +14,78 @@ import {
 
 const ROOT = join(import.meta.dirname, '..');
 
+/** A baselined violation's identity: everything except `line`. */
+type CleanupViolationIdentity = Omit<CleanupViolation, 'line'>;
+
 // Read (not statically imported) so a malformed baseline surfaces as a test
 // failure with context, the same as any other fixture load in this repo.
-const readBaseline = (): readonly CleanupViolation[] => {
+//
+// The baseline stores identity ONLY — no `line`. It was dropped rather than
+// carried along: the ratchet never compared it, so it silently went stale the
+// moment any unrelated edit shifted a baselined statement, and a stale line
+// number is worse than none because a reader trusts it. `snippet` is the
+// durable locator, and a failing run reports live line numbers anyway.
+const readBaseline = (): readonly CleanupViolationIdentity[] => {
   const raw = readFileSync(
     join(import.meta.dirname, 'check-integration-cleanup.baseline.json'),
     'utf8'
   );
-  return JSON.parse(raw) as readonly CleanupViolation[];
+  return JSON.parse(raw) as readonly CleanupViolationIdentity[];
 };
 
 describe('scanFileForPatternDeletes', () => {
   describe('flags a non-id-scoped DELETE', () => {
+    // Each case asserts the EXACT reason, not merely that one exists: the reason
+    // is what a failing CI run shows the author, and `toBeTruthy()` would pass
+    // even if every branch collapsed onto one generic string, hiding a
+    // misclassification (a whole-table wipe reported as "no id-scoped
+    // comparison", say) behind a green diagnostic.
     it.each([
-      ['a LIKE pattern', 'await pool.query(`DELETE FROM projects WHERE name LIKE $1`, [x]);'],
+      [
+        'a LIKE pattern',
+        'await pool.query(`DELETE FROM projects WHERE name LIKE $1`, [x]);',
+        'LIKE pattern, not a captured id',
+      ],
       [
         'a hardcoded literal equality',
         "await pool.query(`DELETE FROM specs WHERE section = '99 00 00'`);",
+        'hardcoded literal equality, not a captured id',
       ],
       [
         'an IS NOT NULL sweep',
         'await pool.query(`DELETE FROM editing_conventions WHERE library_id IS NOT NULL`);',
+        'IS NOT NULL sweep, not a captured id',
       ],
-      ['no WHERE clause at all', 'await pool.query(`DELETE FROM header_footer_configs`);'],
+      [
+        'no WHERE clause at all',
+        'await pool.query(`DELETE FROM header_footer_configs`);',
+        'no WHERE clause — whole-table delete',
+      ],
       [
         'a bound param on a non-id column',
         'await pool.query(`DELETE FROM libraries WHERE name = $1`, [name]);',
+        'no id-scoped comparison (id = $n / id = ANY($n))',
       ],
-    ])('%s', (_label, snippet) => {
+      // Regression: ID_SCOPED_COMPARISON's column part was `\w*_?id`, whose
+      // `\w*` swallowed the leading characters of ANY word merely ending in
+      // "id" — so `valid`, `paid`, `grid` and `overrid` all read as id-scoped
+      // and passed. `WHERE valid = $1` is a boolean flag that can match
+      // arbitrarily many rows: the precise unscoped sweep this gate exists to
+      // catch, waved through by the check itself.
+      [
+        'a bound param on a boolean column ending in "id" (valid)',
+        'await pool.query(`DELETE FROM specs WHERE valid = $1`, [flag]);',
+        'no id-scoped comparison (id = $n / id = ANY($n))',
+      ],
+      [
+        'a bound param on another id-suffixed non-id column (paid)',
+        'await pool.query(`DELETE FROM invoices WHERE paid = $1`, [flag]);',
+        'no id-scoped comparison (id = $n / id = ANY($n))',
+      ],
+    ])('%s', (_label, snippet, expectedReason) => {
       const violations = scanFileForPatternDeletes('fixture.ts', snippet);
       expect(violations).toHaveLength(1);
-      expect(violations[0]?.reason).toBeTruthy();
+      expect(violations[0]?.reason).toBe(expectedReason);
     });
 
     // Regression: a multi-line template-literal query's WHERE clause lives on
@@ -129,6 +170,27 @@ describe('scanFileForPatternDeletes', () => {
       expect(scanFileForPatternDeletes('fixture.ts', snippet)).toHaveLength(0);
     });
 
+    // Regression: this scanner finds `/*` by position and knows nothing about
+    // string literals, so a `/*` inside a quoted string opens a block comment
+    // it never meant to open — blanking every following line, and with them
+    // any live DELETE. That is a SILENT BYPASS, not a false positive: the gate
+    // would report zero violations and pass. Unbalanced markers cannot occur
+    // in a file that compiles, so reaching EOF still inside a block comment
+    // means the scan is untrustworthy and must fail loudly rather than return
+    // a partially-blanked file.
+    it('throws when a file ends still inside a block comment, instead of silently blanking it', () => {
+      const snippet = [
+        "const marker = 'a /* b';",
+        'await pool.query(`DELETE FROM header_footer_configs`);',
+      ].join('\n');
+      expect(() => scanFileForPatternDeletes('fixture.ts', snippet)).toThrow(
+        IntegrationCleanupError
+      );
+      expect(() => scanFileForPatternDeletes('fixture.ts', snippet)).toThrow(
+        /still inside a block comment/
+      );
+    });
+
     // Regression: a JSDoc block comment can also quote a pattern-delete
     // inline, e.g. contract-write-response.integration.test.ts:88.
     it('a /** */ block comment that quotes a pattern-delete for documentation', () => {
@@ -191,20 +253,19 @@ describe('findIntegrationCleanupViolations', () => {
   //
   // Compared on IDENTITY — (filePath, snippet, reason) — deliberately
   // excluding `line`. A violation is the same violation whether it sits at
-  // line 80 or line 180: `line` is retained in the baseline JSON so a human
-  // can jump straight to it, but asserting on it would make this gate fail
-  // for a reason that has nothing to do with cleanup hygiene. Any unrelated
-  // PR that adds or removes lines ABOVE a baselined DELETE would shift it
-  // and turn this red — and with several branches editing baselined files
+  // line 80 or line 180, and asserting on position would make this gate fail
+  // for a reason that has nothing to do with cleanup hygiene: any unrelated
+  // PR that adds or removes lines ABOVE a baselined DELETE would shift it and
+  // turn this red. With several branches editing baselined files
   // concurrently, that is not hypothetical. Same reasoning as keying the
   // allowlist to statements rather than whole files.
   it('matches the checked-in baseline snapshot exactly', () => {
-    const identity = (v: CleanupViolation): Omit<CleanupViolation, 'line'> => ({
+    const identity = (v: CleanupViolation): CleanupViolationIdentity => ({
       filePath: v.filePath,
       snippet: v.snippet,
       reason: v.reason,
     });
     const violations = findIntegrationCleanupViolations(ROOT);
-    expect(violations.map(identity)).toEqual(readBaseline().map(identity));
+    expect(violations.map(identity)).toEqual(readBaseline());
   });
 });
