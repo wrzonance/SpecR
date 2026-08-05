@@ -107,7 +107,16 @@ function bodyObjectFinding(node: SpecNode): readonly ReadinessFinding[] {
 // reader will never see (ADR-079 decision 5, vanish-asymmetry-by-type).
 function assessNode(node: SpecNode): readonly ReadinessFinding[] {
   if (node.type === 'note') {
-    if (node.meta.acknowledged === true) return [];
+    // Acknowledgement clears ONLY `specifier_note_present` — a note's OWN
+    // source facts (an open comment, an unresolved choice token) are
+    // different finding kinds with their own supported clearing paths
+    // (comment closure / text edit), so they must keep blocking. Returning
+    // a bare `[]` here would let an acknowledged note smuggle unresolved
+    // review material past a final-mode issuance: pre-#545 the note itself
+    // always blocked, so those facts never needed their own guard.
+    if (node.meta.acknowledged === true) {
+      return [...choiceTokenFindings(node), ...openCommentFindings(node)];
+    }
     return [{ type: 'specifier_note_present', nodeId: node.id, text: node.text }];
   }
   if (node.meta.vanish === true) return [];

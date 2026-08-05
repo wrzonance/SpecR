@@ -288,6 +288,15 @@ export const SpecNodeMetaSchema = z.object({
   articleRole: ArticleRoleSchema.exactOptional(),
   object: ObjectMetaSchema.exactOptional(),
   pageBreakBefore: z.boolean().exactOptional(),
+  // #545, ADR-079 follow-on — per-node acknowledgement. MUST be mirrored
+  // here, not just on the `SpecNodeMeta` TS type: this schema has no
+  // `.catchall()`, so without this line `SpecTreeSchema.parse` silently
+  // strips `acknowledged` and every readiness finding it had cleared comes
+  // back. That is not theoretical — `validateTree` (revision-snapshot.ts)
+  // sits on the package-issuance and revision-freeze paths (revisions.ts,
+  // reporting.ts), so an acknowledged note would re-block a package
+  // issuance and frozen snapshots would lose the state entirely.
+  acknowledged: z.boolean().exactOptional(),
   // Origin paragraph UUID captured at revision-freeze time (#392, ADR-078).
   // Kept in lockstep with the `SpecNodeMeta` TS type (ast/types.ts): this
   // schema has no `.catchall()`, so a field added to the type but not
