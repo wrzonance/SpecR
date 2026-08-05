@@ -188,8 +188,23 @@ describe('findIntegrationCleanupViolations', () => {
   // gate that ratchets instead of asserting zero. Shrinking the violation
   // set (a fix) is equally required to update the baseline in the same PR:
   // both directions are a deliberate, reviewed acknowledgment, never silent.
+  //
+  // Compared on IDENTITY — (filePath, snippet, reason) — deliberately
+  // excluding `line`. A violation is the same violation whether it sits at
+  // line 80 or line 180: `line` is retained in the baseline JSON so a human
+  // can jump straight to it, but asserting on it would make this gate fail
+  // for a reason that has nothing to do with cleanup hygiene. Any unrelated
+  // PR that adds or removes lines ABOVE a baselined DELETE would shift it
+  // and turn this red — and with several branches editing baselined files
+  // concurrently, that is not hypothetical. Same reasoning as keying the
+  // allowlist to statements rather than whole files.
   it('matches the checked-in baseline snapshot exactly', () => {
+    const identity = (v: CleanupViolation): Omit<CleanupViolation, 'line'> => ({
+      filePath: v.filePath,
+      snippet: v.snippet,
+      reason: v.reason,
+    });
     const violations = findIntegrationCleanupViolations(ROOT);
-    expect(violations).toEqual(readBaseline());
+    expect(violations.map(identity)).toEqual(readBaseline().map(identity));
   });
 });
