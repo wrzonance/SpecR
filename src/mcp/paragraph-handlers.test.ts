@@ -18,7 +18,12 @@ import type { ToolResult } from './tool-result.js';
 vi.mock('../db/index.js', async () => {
   const { SpecNotFoundError, SpecWriteForbiddenError, StaleVersionError } =
     await import('../db/queries/edit-gate.js');
+  // The REAL message builder, not a hand-written stub: it is the string a
+  // caller actually reads, so a stub here would let the two drift and leave
+  // this test asserting against fiction (#383).
+  const { invalidInsertTypeMessage } = await import('../db/queries/paragraph-insert.js');
   return {
+    invalidInsertTypeMessage,
     SpecNotFoundError,
     SpecWriteForbiddenError,
     StaleVersionError,
@@ -105,6 +110,12 @@ describe('insert_paragraph: rejects a cross-tier explicit nodeType via invalid-t
 
     expect(result).toMatchObject({ isError: true });
     expect(textOf(result)).toContain('"pr1"');
+    // The MCP surface must state the COMPLETE rule, exactly as REST does — the
+    // two originally hand-copied a message omitting the tierless-anchor
+    // exception, so an agent reading this rejection would conclude a legal
+    // insert after a `note` anchor was illegal and "correct" a valid request.
+    // Reachable only because the mock returns the real invalidInsertTypeMessage.
+    expect(textOf(result)).toMatch(/tierless/i);
     expect(structuredContentOf(result)).toBeUndefined();
   });
 });
