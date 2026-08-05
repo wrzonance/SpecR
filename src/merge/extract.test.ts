@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { generateDocx } from '../generator/index.js';
 import { extractContentControls } from './extract.js';
 import { MergeError } from './error.js';
-import type { SpecTree } from '../ast/types.js';
+import type { SpecTree } from '../ast/index.js';
+
+const MERGE_DIR = join(process.cwd(), 'src/merge');
 
 const PART_ID = '00000000-0000-0000-0000-000000000002';
 const ART_ID = '00000000-0000-0000-0000-000000000003';
@@ -70,6 +74,13 @@ const tableCell = (cellXml: string): string => `<w:tc>${cellXml}</w:tc>`;
 const tableRow = (cellsXml: readonly string[]): string =>
   `<w:tr>${cellsXml.map(tableCell).join('')}</w:tr>`;
 const table = (rowsXml: readonly string[]): string => `<w:tbl>${rowsXml.join('')}</w:tbl>`;
+
+/** A run with w:vanish bare/enabled (ST_OnOff ON — hidden). */
+const hiddenRun = (text: string): string =>
+  `<w:r><w:rPr><w:vanish/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r>`;
+/** A run with w:vanish explicitly val="0" (ST_OnOff OFF — visible, #648). */
+const visibleOffRun = (text: string): string =>
+  `<w:r><w:rPr><w:vanish w:val="0"/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r>`;
 
 describe('extractContentControls', () => {
   it('roundtrip: recovers every SpecNode id → text from generateDocx output', async () => {
@@ -351,5 +362,99 @@ describe('extractContentControls — object-block extraction (#520)', () => {
     expect(result.objectBlocks).toHaveLength(1);
     expect(result.objectBlocks[0]?.fingerprint.kind).toBe('table');
     expect(result.objectBlocks[0]?.interiorUuids).toEqual([U1, U2]);
+  });
+});
+
+// #648: visibleText had no w:vanish handling at all, so it disagreed with the
+// object-tier AST walk (which already drops hidden runs — #641/ADR-092): an
+// untouched round-tripped DOCX with this shape could report as modified. The
+// fix is deliberately scoped to OBJECT INTERIORS ONLY (table/drawing/pict) —
+// the ordinary paragraph tier's KNOWN AMBIGUITY (document.test.ts near line
+// 259: a mixed hidden/visible paragraph is treated as visible) must not
+// change, and is pinned explicitly below as the regression this issue most
+// risks.
+describe('extractContentControls — object-interior vanish handling (#648)', () => {
+  it('object interior: a table-cell paragraph mixing hidden and visible runs extracts only the visible text', async () => {
+    const body = table([tableRow([sdt(U1, para(hiddenRun('secret ') + run('visible')))])]);
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('visible');
+  });
+
+  // KNOWN AMBIGUITY (unchanged by #648, mirrors document.test.ts near line 259):
+  // an ORDINARY paragraph mixing hidden and visible runs is NOT object-interior,
+  // so it still yields both concatenated — the visible text is real content, and
+  // only a fully-hidden paragraph would drop out. A blanket hidden-run skip here
+  // was proposed during PR 647's review and rejected on exactly this ground.
+  it('ordinary paragraph tier is UNCHANGED: a mixed hidden/visible paragraph still yields both, concatenated', async () => {
+    const body = sdt(U1, para(hiddenRun('secret ') + run('visible')));
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('secret visible');
+  });
+
+  it('object interior: a run whose w:vanish carries val="0" is VISIBLE (ST_OnOff toggle, not presence-only)', async () => {
+    const body = table([tableRow([sdt(U1, para(visibleOffRun('kept ') + run('too')))])]);
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U1)).toBe('kept too');
+  });
+
+  // collectDrawingAnchors (the w:drawing/w:pict text-box interior walk, gap-1
+  // #520) forces objectInterior=true through a call site separate from the
+  // generic OBJECT_BLOCK_TAGS union path that reaches w:tbl. Without a test
+  // driving a hidden/visible mixed run through THIS specific path, a
+  // regression that broke vanish-skipping only for drawing/pict (e.g.
+  // collectDrawingAnchors's hard-coded `true` reverted to `false`, or never
+  // threaded through at all) would pass every other #648 test while silently
+  // reintroducing the false-modified bug for 2 of the 3 OBJECT_BLOCK_TAGS.
+  it('object interior (DrawingML text box): a mixed hidden/visible paragraph inside the box extracts only the visible text', async () => {
+    const body = sdt(
+      U1,
+      para(run('before ') + drawingTextBoxRun(sdt(U2, para(hiddenRun('secret ') + run('visible')))))
+    );
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U2)).toBe('visible');
+  });
+
+  it('object interior (VML text box): a mixed hidden/visible paragraph inside the box extracts only the visible text', async () => {
+    const body = sdt(
+      U1,
+      para(run('before ') + vmlTextBoxRun(sdt(U2, para(hiddenRun('secret ') + run('visible')))))
+    );
+    const result = await extractContentControls(await craftDocx(body));
+    expect(result.controlled.get(U2)).toBe('visible');
+  });
+
+  // Structural guard (not a behavior test): #648's fix reaches vanish detection
+  // through the single, already-existing hasRunVanish predicate (body-objects.ts,
+  // #641/ADR-092) rather than growing a second, drifting vanish reader inside
+  // merge/. Pins the manual "grep -rn vanish src/merge/" audit from #648's
+  // verification as an automated regression guard, so a future change can't
+  // silently reintroduce a second predicate that disagrees with the first.
+  //
+  // Deliberately does NOT scan file contents for the literal string "w:vanish"
+  // — that coupled the guard to a doc comment's exact prose (#650) and made a
+  // purely cosmetic reword of extract.ts's comments fail CI with no functional
+  // change. Instead it asserts the two things that actually matter: no file
+  // declares its own vanish-named predicate, and extract.ts both imports and
+  // calls the shared one.
+  it('src/merge/*.ts declares no local vanish predicate, and extract.ts calls the imported hasRunVanish', () => {
+    const nonTestFiles = readdirSync(MERGE_DIR).filter(
+      (name) => name.endsWith('.ts') && !name.endsWith('.test.ts')
+    );
+
+    // No locally-declared vanish predicate anywhere in merge/ — hasRunVanish
+    // must remain the ONLY definition, never a second, independently-drifting one.
+    for (const name of nonTestFiles) {
+      const src = readFileSync(join(MERGE_DIR, name), 'utf8');
+      const localVanishDeclarations =
+        src.match(/\b(?:function|const)\s+\w*[Vv]anish\w*\s*[:(=]/g) ?? [];
+      expect(localVanishDeclarations).toEqual([]);
+    }
+
+    const extractSrc = readFileSync(join(MERGE_DIR, 'extract.ts'), 'utf8');
+    expect(extractSrc).toMatch(
+      /import\s*\{\s*hasRunVanish\s*\}\s*from\s*'\.\.\/parser\/index\.js';/
+    );
+    // The import must actually be exercised, not just present.
+    expect(extractSrc).toMatch(/\bhasRunVanish\(/);
   });
 });
