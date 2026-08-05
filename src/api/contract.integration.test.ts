@@ -229,7 +229,12 @@ async function createHeaderFooterFixture(): Promise<HeaderFooterFixture> {
 }
 
 async function deleteHeaderFooterFixture(fixture: HeaderFooterFixture): Promise<void> {
-  await pool.query('DELETE FROM header_footer_configs');
+  // No explicit `header_footer_configs` delete: every row this fixture's
+  // PUTs create is scoped (client_library_id/project_id/package_id/
+  // revision_id, migration 030) to one of the four ids below, each with
+  // `onDelete: CASCADE` — deleting the owning row cascades it away. A
+  // whole-table `DELETE FROM header_footer_configs` here would also wipe a
+  // concurrent test run's rows (#638/ADR-090).
   await pool.query('DELETE FROM package_revisions WHERE id = $1', [fixture.revisionId]);
   await pool.query('DELETE FROM design_packages WHERE id = $1', [fixture.packageId]);
   await pool.query('DELETE FROM projects WHERE id = $1', [fixture.projectId]);

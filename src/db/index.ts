@@ -58,7 +58,11 @@ export {
 // insertSiblingRow / setVanishRow are the gate-free DB cores behind
 // insertParagraphAfter / setParagraphVanish AND the merge engine's added/deleted-op
 // apply (src/merge/conflict.ts, #374) — its first cross-module consumer.
-export { insertParagraphAfter, insertSiblingRow } from './queries/paragraph-insert.js';
+export {
+  insertParagraphAfter,
+  insertSiblingRow,
+  invalidInsertTypeMessage,
+} from './queries/paragraph-insert.js';
 export type { InsertParagraphResult, InsertParagraphInput } from './queries/paragraph-insert.js';
 export { setParagraphVanish, setVanishRow } from './queries/paragraph-vanish.js';
 export type { SetVanishResult, SetVanishRowResult } from './queries/paragraph-vanish.js';

@@ -30,6 +30,7 @@ let specId: string;
 let otherSpecId: string;
 let bodyId: string;
 let noteId: string;
+let continuationId: string;
 
 // Assert on the VALUE, not mere key presence, so the checks survive a handler that
 // ever returns an explicit `isError: false` on success (mirrors the wave-2 helper).
@@ -122,6 +123,8 @@ beforeAll(async () => {
   otherSpecId = await insertSpec('09 91 26', 'Painting');
   bodyId = await insertParagraph(specId, 'pr1', 'Provide cabling.');
   noteId = await insertParagraph(specId, 'note', 'Editor note.');
+  // The other tierless anchor: continues the preceding node's text (#383).
+  continuationId = await insertParagraph(specId, 'continuation', '…continued.');
 });
 
 afterAll(async () => {
@@ -318,6 +321,46 @@ describe('insert_paragraph MCP tool', () => {
       nodeType: 'pr1',
     });
     expect(isToolError(explicit)).toBe(false);
+  });
+
+  it('rejects an explicit nodeType that is a legal insertable type in general but not a legal sibling of THIS anchor (#383)', async () => {
+    // pr2 is never a sibling of pr1 — pr2 nests as a pr1's CHILD, so an
+    // explicit pr2 requested after a pr1 anchor is structurally incompatible
+    // even though pr2 is on the insertable list.
+    const res = await handleInsertParagraph({
+      specId,
+      anchorNodeId: bodyId,
+      text: 'Should not become a mis-tiered pr2.',
+      nodeType: 'pr2',
+    });
+    expect(isToolError(res)).toBe(true);
+    expect(textOf(res)).toContain('"pr2"');
+  });
+
+  it('accepts any insertable explicit type after a note anchor — KNOWN AMBIGUITY: a note has no tier to mismatch against (#383)', async () => {
+    // KNOWN AMBIGUITY (#383): a note carries no CSI tier of its own, so it
+    // cannot constrain what tier follows it — any already-insertable type
+    // (not just the pr1 the earlier test above pins) is deliberately accepted.
+    const res = await handleInsertParagraph({
+      specId,
+      anchorNodeId: noteId,
+      text: 'Explicit article after a note.',
+      nodeType: 'article',
+    });
+    expect(isToolError(res)).toBe(false);
+  });
+
+  it('accepts an explicit pr1 after a continuation anchor — KNOWN AMBIGUITY: a continuation inherits its tier rather than stating one (#383)', async () => {
+    // KNOWN AMBIGUITY (#383): the second tierless anchor type. A continuation
+    // continues the preceding node's text, so it has no tier of its own for an
+    // explicit nodeType to mismatch against — this previously errored.
+    const res = await handleInsertParagraph({
+      specId,
+      anchorNodeId: continuationId,
+      text: 'A pr1 after a continuation.',
+      nodeType: 'pr1',
+    });
+    expect(isToolError(res)).toBe(false);
   });
 });
 

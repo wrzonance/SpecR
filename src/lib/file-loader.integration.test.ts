@@ -1,6 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import path from 'node:path';
-import { pool } from '../db/index.js';
+import { randomUUID } from 'node:crypto';
+import { pool, createLibrary, createSpec, UFGS_REFERENCE_LIBRARY } from '../db/index.js';
 import { loadFiles } from './file-loader.js';
 
 const PROJECT_ROOT = path.resolve(process.cwd());
@@ -9,6 +10,28 @@ const SEC_FIXTURE = path.join(PROJECT_ROOT, 'docs/references/UFGS/DIVISION_27/27
 afterAll(async () => {
   await pool.end();
 });
+
+// Crash-recovery cleanup for the dryRun test below: a prior interrupted run
+// of a NON-dry load against this same fixture could have left a stale row
+// (dryRun itself never persists — see file-loader.ts's processFile early
+// return). Scoped to the library a real load would actually target (UFGS
+// Reference, via resolveDefaultLibraryId('ufgs')) and deleted by id — a
+// blanket `DELETE ... WHERE section = ... AND source = ...` would also
+// destroy an unrelated row that merely shares those two columns in a
+// DIFFERENT library, e.g. a UFGS-sourced document copied into a firm's own
+// library (#442).
+async function deleteStaleUfgsRow(section: string): Promise<void> {
+  const stale = await pool.query<{ id: string }>(
+    `SELECT id FROM specs
+     WHERE section = $1 AND source = 'ufgs'
+       AND library_id = (SELECT id FROM libraries WHERE name = $2)`,
+    [section, UFGS_REFERENCE_LIBRARY]
+  );
+  const staleId = stale.rows[0]?.id;
+  if (staleId) {
+    await pool.query(`DELETE FROM specs WHERE id = $1`, [staleId]);
+  }
+}
 
 describe('loadFiles() integration', () => {
   it('loads a .SEC file — rows appear in specs and paragraphs tables', async () => {
@@ -75,17 +98,41 @@ describe('loadFiles() integration', () => {
   it('dryRun — parse succeeds, nothing written to DB for new spec', async () => {
     // Use 27_41_00.SEC (section "27 41 00") to test dryRun isolation
     const altFixture = path.join(PROJECT_ROOT, 'docs/references/UFGS/DIVISION_27/27_41_00.SEC');
-    // Delete any pre-existing row to ensure clean state
-    await pool.query(`DELETE FROM specs WHERE section = '27 41 00' AND source = 'ufgs'`);
+    await deleteStaleUfgsRow('27 41 00');
 
     const result = await loadFiles([altFixture], { dryRun: true });
 
     expect(result.succeeded).toBe(1);
 
     const row = await pool.query(
-      `SELECT id FROM specs WHERE section = '27 41 00' AND source = 'ufgs'`
+      `SELECT id FROM specs
+       WHERE section = '27 41 00' AND source = 'ufgs'
+         AND library_id = (SELECT id FROM libraries WHERE name = $1)`,
+      [UFGS_REFERENCE_LIBRARY]
     );
     expect(row.rows).toHaveLength(0);
+  });
+
+  it('crash-recovery cleanup is library-scoped — a foreign-library row sharing section+source survives (#442)', async () => {
+    const foreignLibrary = await createLibrary({
+      tier: 'company',
+      name: `Test Foreign Library ${randomUUID()}`,
+    });
+    const foreignSpecId = await createSpec({
+      section: '27 41 00',
+      title: 'Foreign copy sharing section+source',
+      source: 'ufgs',
+      libraryId: foreignLibrary.id,
+    });
+
+    try {
+      await deleteStaleUfgsRow('27 41 00');
+      const result = await pool.query('SELECT id FROM specs WHERE id = $1', [foreignSpecId]);
+      expect(result.rows).toHaveLength(1);
+    } finally {
+      await pool.query('DELETE FROM specs WHERE id = $1', [foreignSpecId]);
+      await pool.query('DELETE FROM libraries WHERE id = $1', [foreignLibrary.id]);
+    }
   });
 
   const AGENCY_FIXTURE = path.join(

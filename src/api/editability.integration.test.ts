@@ -104,6 +104,27 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
+// Crash-recovery cleanup for the 'project copy' fixture below: a prior
+// interrupted run could leave a stale project+copy pair behind (specs.
+// project_id is not ON DELETE CASCADE). Resolves the prior run's OWN project
+// by name first, then deletes the copy scoped to that resolved project_id
+// (specs_section_project_unique makes (project_id, section) a unique lookup)
+// rather than a title/section pattern that would also match an unrelated
+// spec merely sharing that title+section text under a DIFFERENT project
+// (#442, mirrors file-loader.integration.test.ts's deleteStaleUfgsRow).
+async function deleteStaleProjectCopy(projectName: string, section: string): Promise<void> {
+  const staleProject = await pool.query<{ id: string }>(`SELECT id FROM projects WHERE name = $1`, [
+    projectName,
+  ]);
+  const staleProjectId = staleProject.rows[0]?.id;
+  if (!staleProjectId) return;
+  await pool.query(`DELETE FROM specs WHERE project_id = $1 AND section = $2`, [
+    staleProjectId,
+    section,
+  ]);
+  await pool.query(`DELETE FROM projects WHERE id = $1`, [staleProjectId]);
+}
+
 describe('PATCH /specs/:id/paragraphs/:nodeId/editability', () => {
   it('sets the override and returns 200', async () => {
     const r = await req('PATCH', `/specs/${specId}/paragraphs/${nodeId}/editability`, {
@@ -266,8 +287,7 @@ describe('POST /specs/:id/reclassify', () => {
     // Pre-test sweep is crash-residue recovery only — safe under the
     // integration-suite advisory lock (ADR-090, #638): no concurrent
     // invocation is ever live while this one holds it.
-    await pool.query(`DELETE FROM specs WHERE title = 'api project copy' AND section = '99 99 95'`);
-    await pool.query(`DELETE FROM projects WHERE name = 'recl-api-builtin'`);
+    await deleteStaleProjectCopy('recl-api-builtin', '99 99 95');
     const proj = await pool.query<{ id: string }>(
       `INSERT INTO projects (name) VALUES ('recl-api-builtin') RETURNING id`
     );
@@ -295,6 +315,34 @@ describe('POST /specs/:id/reclassify', () => {
       }
     } finally {
       await pool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+    }
+  });
+
+  it("crash-recovery cleanup is project-scoped — a foreign project's row sharing title+section survives (#442)", async () => {
+    // Simulates a DIFFERENT project's working copy that happens to share the
+    // exact title+section text the pre-test sweep above targets. The old
+    // `DELETE FROM specs WHERE title = ... AND section = ...` pattern would
+    // destroy this row too; the id-scoped `deleteStaleProjectCopy` must not.
+    const foreignProject = await pool.query<{ id: string }>(
+      `INSERT INTO projects (name) VALUES ('recl-api-foreign-project-442') RETURNING id`
+    );
+    const foreignProjectId = foreignProject.rows[0]!.id;
+    try {
+      const foreignCopy = await pool.query<{ id: string }>(
+        `INSERT INTO specs (section, title, source, project_id)
+         VALUES ('99 99 95', 'api project copy', 'arcat', $1) RETURNING id`,
+        [foreignProjectId]
+      );
+      const foreignCopyId = foreignCopy.rows[0]!.id;
+      try {
+        await deleteStaleProjectCopy('recl-api-builtin', '99 99 95');
+        const row = await pool.query('SELECT id FROM specs WHERE id = $1', [foreignCopyId]);
+        expect(row.rows).toHaveLength(1);
+      } finally {
+        await pool.query(`DELETE FROM specs WHERE id = $1`, [foreignCopyId]);
+      }
+    } finally {
+      await pool.query(`DELETE FROM projects WHERE id = $1`, [foreignProjectId]);
     }
   });
 });

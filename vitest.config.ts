@@ -73,6 +73,13 @@ export default defineConfig({
           // tree in src/parser/sec/index.integration.test.ts) under shared-
           // machine load. See issue #608.
           hookTimeout: 30_000,
+          // Forces NODE_ENV=test before any test file's imports run, so an
+          // ambient NODE_ENV=development (common in a developer's shell, or
+          // a manually sourced .env — see CLAUDE.md) can't re-arm the rate
+          // limiter (ADR-046) mid-run. Unlike unit-env-setup.ts, never
+          // touches DATABASE_URL: this project runs against a real
+          // PostgreSQL instance. See #442.
+          setupFiles: ['./src/test-utils/integration-env-setup.ts'],
           // Serialize integration test files — they share a single PostgreSQL
           // instance and otherwise race on FK constraints + unique keys.
           // Vitest 4: `fileParallelism: false` replaces v3's

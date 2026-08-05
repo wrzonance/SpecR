@@ -1,0 +1,577 @@
+[
+  {
+    "filePath": "src/api/clients.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE 'api-client-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/clients.integration.test.ts",
+    "snippet": "DELETE FROM clients WHERE name LIKE 'api-client-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/conventions.integration.test.ts",
+    "snippet": "DELETE FROM editing_conventions WHERE library_id IS NOT NULL",
+    "reason": "IS NOT NULL sweep, not a captured id"
+  },
+  {
+    "filePath": "src/api/conventions.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'conv-api-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/disciplines.integration.test.ts",
+    "snippet": "DELETE FROM discipline_section_rules WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'disc-api-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/disciplines.integration.test.ts",
+    "snippet": "DELETE FROM project_specs WHERE project_id IN (SELECT id FROM projects WHERE name LIKE 'disc-api-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/disciplines.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE project_id IN (SELECT id FROM projects WHERE name LIKE 'disc-api-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/disciplines.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'disc-api-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/disciplines.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE 'disc-api-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/disciplines.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'disc-api-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/editability.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '99 99 96' AND title = 'Archived Accept'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/api/editability.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '99 99 94' AND title = 'Retry Archived'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer-body-limit.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer-resolve.integration.test.ts",
+    "snippet": "DELETE FROM project_sources",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer-resolve.integration.test.ts",
+    "snippet": "DELETE FROM package_revisions",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer-resolve.integration.test.ts",
+    "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer-resolve.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer-resolve.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer.integration.test.ts",
+    "snippet": "DELETE FROM package_revisions",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer.integration.test.ts",
+    "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/header-footer.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/language-rule-profiles.integration.test.ts",
+    "snippet": "DELETE FROM language_rule_profiles",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/language-rule-profiles.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'lang-api-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/language-rule-profiles.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE 'lang-api-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/libraries.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'lib-api-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/libraries.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'lib-api-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/numbering-profiles.integration.test.ts",
+    "snippet": "DELETE FROM numbering_profiles WHERE id = ANY($1::uuid[]) AND library_id IS NOT NULL",
+    "reason": "IS NOT NULL sweep, not a captured id"
+  },
+  {
+    "filePath": "src/api/onboarding-status.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'lib-fapi-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/onboarding-status.integration.test.ts",
+    "snippet": "DELETE FROM editing_conventions WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'lib-fapi-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/onboarding-status.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'lib-fapi-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/onboarding.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'lib-onboard-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/onboarding.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'lib-onboard-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/parse.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '01 11 00' AND source = 'ufgs'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/api/parse.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '01 11 00' AND source = 'ufgs'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/api/parse.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = $1 AND source = 'unknown'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/api/revision-nomenclature.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE 'nomen-api-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/router-header-footer.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/api/standards.integration.test.ts",
+    "snippet": "DELETE FROM standards WHERE org_code = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/api/style-source.integration.test.ts",
+    "snippet": "DELETE FROM style_templates WHERE name = ANY($1::text[])",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/api/templates-crud.integration.test.ts",
+    "snippet": "DELETE FROM style_templates WHERE name = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/api/templates.integration.test.ts",
+    "snippet": "DELETE FROM style_templates WHERE name = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/api/users.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label LIKE 'api-users-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/clients.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE 'client-it-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/clients.integration.test.ts",
+    "snippet": "DELETE FROM clients WHERE name LIKE 'client-it-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/conventions.integration.test.ts",
+    "snippet": "DELETE FROM editing_conventions WHERE library_id IS NOT NULL",
+    "reason": "IS NOT NULL sweep, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/conventions.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'conv-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/disciplines.integration.test.ts",
+    "snippet": "DELETE FROM discipline_section_rules",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/disciplines.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'disc-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/header-footer-context.integration.test.ts",
+    "snippet": "DELETE FROM project_specs WHERE project_id IN (SELECT id FROM projects WHERE name LIKE $1)",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/header-footer-context.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/header-footer-context.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE title LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/header-footer-context.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/header-footer.integration.test.ts",
+    "snippet": "DELETE FROM package_revisions",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/header-footer.integration.test.ts",
+    "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/header-footer.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/header-footer.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/numbering-profiles.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE title LIKE 'np-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/numbering-profiles.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'np-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/onboarding.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'lib-fin-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/onboarding.integration.test.ts",
+    "snippet": "DELETE FROM editing_conventions WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'lib-fin-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/onboarding.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'lib-fin-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/paragraph-history.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/paragraph-insert.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/db/queries/paragraph-vanish.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/db/queries/paragraphs.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/db/queries/reclassify.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '00 00 07' AND title = 'archived-retry'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/reclassify.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '00 00 09' AND title = 'gated'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/reclassify.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/db/queries/revit.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE id IN ($1, $2)",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/db/queries/revit.integration.test.ts",
+    "snippet": "DELETE FROM revit_parameter_mappings WHERE paragraph_id IN ($1, $2, $3)",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/db/queries/specs.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section IN ('99 88 77.10 20', 'unknown') AND source = 'arcat'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/specs.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '99 66 00'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/specs.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '99 67 00'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/specs.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '98 00 00'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/specs.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '99 00 10'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/specs.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/db/queries/specs.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE section = '99 68 00'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/standards-read.integration.test.ts",
+    "snippet": "DELETE FROM standards WHERE org_code = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/db/queries/style-source.integration.test.ts",
+    "snippet": "DELETE FROM style_templates WHERE name = ANY($1::text[])",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/db/queries/templates.integration.test.ts",
+    "snippet": "DELETE FROM style_templates WHERE name = ANY($1::text[])",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/db/queries/users.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/db/queries/versions.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label = 'capture-test-actor'",
+    "reason": "hardcoded literal equality, not a captured id"
+  },
+  {
+    "filePath": "src/lib/pg-errors.integration.test.ts",
+    "snippet": "DELETE FROM pgerr_parent WHERE id = 1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/lib/pg-errors.integration.test.ts",
+    "snippet": "DELETE FROM pgerr_parent WHERE id = 1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/lib/pg-errors.integration.test.ts",
+    "snippet": "DELETE FROM pgerr_parent WHERE id = 2",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/mcp/checkpoint-tools.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/mcp/clients.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE 'clients-mcp-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/clients.integration.test.ts",
+    "snippet": "DELETE FROM clients WHERE name LIKE 'clients-mcp-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/contract-write-response.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/contract-write-response.integration.test.ts",
+    "snippet": "DELETE FROM clients WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/contract-write-response.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE $1 AND tier = 'client'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/contract-write-response.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/discipline.integration.test.ts",
+    "snippet": "DELETE FROM discipline_section_rules WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'disc-mcp-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/discipline.integration.test.ts",
+    "snippet": "DELETE FROM project_specs WHERE project_id IN (SELECT id FROM projects WHERE name LIKE 'disc-mcp-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/discipline.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE project_id IN (SELECT id FROM projects WHERE name LIKE 'disc-mcp-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/discipline.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE library_id IN (SELECT id FROM libraries WHERE name LIKE 'disc-mcp-%')",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/discipline.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE 'disc-mcp-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/discipline.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'disc-mcp-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/header-footer-handlers.integration.test.ts",
+    "snippet": "DELETE FROM package_revisions",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/header-footer-handlers.integration.test.ts",
+    "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/header-footer-handlers.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/header-footer-handlers.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
+    "snippet": "DELETE FROM project_sources",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
+    "snippet": "DELETE FROM package_revisions",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
+    "snippet": "DELETE FROM design_packages WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
+    "snippet": "DELETE FROM projects WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/header-footer-resolve-handlers.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/library-management.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE title LIKE 'lm-mcp-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/library-management.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'lm-mcp-test-%' AND tier = 'client'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/library-management.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'lm-mcp-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/numbering-profile-crud.integration.test.ts",
+    "snippet": "DELETE FROM specs WHERE title LIKE 'np-mcp-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/numbering-profile-crud.integration.test.ts",
+    "snippet": "DELETE FROM libraries WHERE name LIKE 'np-mcp-test-%'",
+    "reason": "LIKE pattern, not a captured id"
+  },
+  {
+    "filePath": "src/mcp/standards.integration.test.ts",
+    "snippet": "DELETE FROM standards WHERE org_code = $1",
+    "reason": "no id-scoped comparison (id = $n / id = ANY($n))"
+  },
+  {
+    "filePath": "src/mcp/users.integration.test.ts",
+    "snippet": "DELETE FROM users WHERE label LIKE $1",
+    "reason": "LIKE pattern, not a captured id"
+  }
+]

@@ -9,6 +9,7 @@ import { registerMcpRoutes } from '../mcp/server.js';
 import { router } from './router.js';
 import { errorHandler } from './middleware/error.js';
 import type { ObjectBlobNode, ObjectMeta } from '../ast/index.js';
+import { assertResponseExact } from '../test-utils/contract/validate-response.js';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const ORIGINAL_TEXT = 'Install listed copper cabling.';
@@ -99,13 +100,22 @@ function removeTableContaining(anchorUuid: string): (xml: string) => string {
   };
 }
 
+/** Strips one paragraph's `w:sdt` content control entirely, simulating an editor deleting it in
+ *  Word — the paragraph's uuid then reads as absent from `theirs` (#465: a delete/modify conflict
+ *  when `ours` also diverged from `base`, a plain delete otherwise). */
+function removeContentControlFor(uuid: string): (xml: string) => string {
+  return (xml) => {
+    const tagIndex = xml.indexOf(`specr-uuid-${uuid}`);
+    if (tagIndex === -1) throw new Error('expected content-control tag missing');
+    const start = xml.lastIndexOf('<w:sdt>', tagIndex);
+    const end = xml.indexOf('</w:sdt>', tagIndex);
+    if (start === -1 || end === -1) throw new Error('content control bounds missing');
+    return xml.slice(0, start) + xml.slice(end + '</w:sdt>'.length);
+  };
+}
+
 function removeContentControl(xml: string): string {
-  const tagIndex = xml.indexOf(`specr-uuid-${paragraphId}`);
-  if (tagIndex === -1) throw new Error('expected content-control tag missing');
-  const start = xml.lastIndexOf('<w:sdt>', tagIndex);
-  const end = xml.indexOf('</w:sdt>', tagIndex);
-  if (start === -1 || end === -1) throw new Error('content control bounds missing');
-  return xml.slice(0, start) + xml.slice(end + '</w:sdt>'.length);
+  return removeContentControlFor(paragraphId)(xml);
 }
 
 beforeAll(async () => {
@@ -187,6 +197,7 @@ describe('POST /specs/:id/diff (integration)', () => {
       added: [],
       modified: [],
       deleted: [],
+      deleteConflicts: [],
       conflicts: [],
       objectConflicts: [],
       warnings: [],
@@ -284,6 +295,7 @@ describe('resource: specr://specs/{id}/diff', () => {
       added: [],
       modified: [],
       deleted: [],
+      deleteConflicts: [],
       conflicts: [],
       objectConflicts: [],
       warnings: [],
@@ -305,6 +317,48 @@ function anchoredTableMeta(anchorUuid: string, text: string): ObjectMeta {
     'w:sdt': [
       { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `specr-uuid-${anchorUuid}` } }] },
       { 'w:sdtContent': [{ 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': text }] }] }] }] },
+    ],
+  } as ObjectBlobNode;
+  return {
+    kind: 'table',
+    floating: false,
+    generation: 'drawingml',
+    rows: 1,
+    columns: 1,
+    blob: [{ 'w:tbl': [{ 'w:tr': [{ 'w:tc': [anchoredCell] }] }] }],
+  };
+}
+
+/**
+ * #648: a table cell mixing one hidden (w:vanish) run and one visible run.
+ * `visibleText` matches ONLY the visible run — the object tier's AST
+ * (objectText, via parser/docx/body-objects.ts's collectText) already drops
+ * hidden runs (#641/ADR-092), so this is what a correctly round-tripped
+ * capture must store. Before the #648 fix, merge/extract.ts's visibleText
+ * had no vanish handling at all and would concatenate the hidden run's text
+ * in front of the visible one, diverging from this AST snapshot and reading
+ * an untouched round-tripped DOCX as modified.
+ */
+function anchoredMixedVisibilityTableMeta(
+  anchorUuid: string,
+  hiddenText: string,
+  visibleRunText: string
+): ObjectMeta {
+  const anchoredCell: ObjectBlobNode = {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `specr-uuid-${anchorUuid}` } }] },
+      {
+        'w:sdtContent': [
+          {
+            'w:p': [
+              {
+                'w:r': [{ 'w:rPr': [{ 'w:vanish': [] }] }, { 'w:t': [{ '#text': hiddenText }] }],
+              },
+              { 'w:r': [{ 'w:t': [{ '#text': visibleRunText }] }] },
+            ],
+          },
+        ],
+      },
     ],
   } as ObjectBlobNode;
   return {
@@ -393,6 +447,7 @@ describe('body-level object round-trip — real wiring (#520 review finding)', (
         added: [],
         modified: [],
         deleted: [],
+        deleteConflicts: [],
         conflicts: [],
         objectConflicts: [],
         warnings: [],
@@ -457,4 +512,430 @@ describe('body-level object round-trip — real wiring (#520 review finding)', (
       expect(diff.added).toEqual([]);
     }
   );
+});
+
+// #465 task 5: the delete/modify conflict bucket (DeleteConflictDiff, DiffResultSchema,
+// openapi.yaml's DiffResult/DeleteConflictDiff components) was only ever exercised with
+// hand-built fixtures at the unit level (merge/diff.test.ts, ast/merge-schemas.test.ts). This
+// drives the REAL DB → generateDocx → extractContentControls → computeDiff wiring, validates the
+// wire response EXACTLY against openapi.yaml (no undocumented/missing key survives), and proves
+// REST and the MCP get_spec_diff tool agree byte-for-byte on the new bucket (INV-1/2/3).
+describe('delete/modify conflict wire scenario (#465)', () => {
+  const DC_PART_ID = randomUUID();
+  const DC_ARTICLE_ID = randomUUID();
+  const DC_PARAGRAPH_ID = randomUUID();
+  const DC_BASE_TEXT = 'Provide corrosion-resistant conduit supports.';
+  const DC_OURS_TEXT = 'Provide corrosion-resistant conduit supports, stainless steel only.';
+  let dcSpecId: string;
+
+  beforeAll(async () => {
+    dcSpecId = await createSpec({
+      section: '26 05 33',
+      title: 'Delete Conflict Wire Spec',
+      source: `d465_${randomUUID().slice(0, 8)}`,
+    });
+    await insertTree(
+      {
+        id: dcSpecId,
+        section: '26 05 33',
+        title: 'Delete Conflict Wire Spec',
+        parts: [
+          {
+            id: DC_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            meta: {},
+            children: [
+              {
+                id: DC_ARTICLE_ID,
+                type: 'article',
+                text: 'SUMMARY',
+                meta: {},
+                children: [
+                  {
+                    id: DC_PARAGRAPH_ID,
+                    type: 'pr1',
+                    text: DC_BASE_TEXT,
+                    meta: {},
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      dcSpecId,
+      pool
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [dcSpecId]);
+  });
+
+  /**
+   * Seeds a genuine base/ours divergence — deliberately by direct SQL, not the
+   * `PATCH .../paragraphs/{nodeId}` API. Every write path that API reaches
+   * (`applyParagraphUpdate`, `applyTextChange`, `setVanishRow`) bumps
+   * `base_version` and inserts the matching `paragraph_versions` row in the SAME
+   * transaction as the text write, so `getParagraphSnapshots`'s `base_version`
+   * join and `getCurrentParagraphSnapshots`'s live read are structurally always
+   * equal after any API-driven edit — there is no API call that can produce a
+   * base/ours divergence to diff against. Inserting the `paragraph_versions[1]`
+   * row directly pins `base` to the original text while the second UPDATE moves
+   * `paragraphs.text` (`ours`) without touching `base_version`, reproducing
+   * exactly the precondition classifyBase's `deleteConflict` branch exists to
+   * catch, regardless of which future mechanism (concurrent edit, DMS sync)
+   * ends up producing it for real.
+   */
+  async function seedOursDivergedFromBase(): Promise<void> {
+    await pool.query(
+      `INSERT INTO paragraph_versions (paragraph_id, spec_id, version, text, node_type, op)
+       VALUES ($1, $2, 1, $3, 'pr1', 'edit')`,
+      [DC_PARAGRAPH_ID, dcSpecId, DC_BASE_TEXT]
+    );
+    await pool.query(`UPDATE paragraphs SET text = $2 WHERE id = $1`, [
+      DC_PARAGRAPH_ID,
+      DC_OURS_TEXT,
+    ]);
+  }
+
+  it(
+    'DB edit + DOCX missing the same paragraph surfaces ONE populated deleteConflicts entry, ' +
+      'not a plain delete — byte-exact against openapi.yaml and identical over REST vs MCP',
+    async () => {
+      const generateRes = await fetch(`${baseUrl}/specs/${dcSpecId}/generate`, { method: 'POST' });
+      expect(generateRes.status).toBe(200);
+      const baseBuffer = Buffer.from(await generateRes.arrayBuffer());
+
+      // `ours` diverges from `base`: the writer's edit reached the DB after the snapshot was
+      // taken (see seedOursDivergedFromBase for why this can't be done through the PATCH API).
+      await seedOursDivergedFromBase();
+
+      // `theirs`: the editor deleted the paragraph's content control entirely in Word.
+      const edited = await updateDocumentXml(baseBuffer, removeContentControlFor(DC_PARAGRAPH_ID));
+
+      const form = new FormData();
+      form.append(
+        'file',
+        new Blob([new Uint8Array(edited)], { type: DOCX_MIME }),
+        'delete-conflict.docx'
+      );
+      const diffRes = await fetch(`${baseUrl}/specs/${dcSpecId}/diff`, {
+        method: 'POST',
+        body: form,
+      });
+      const body = (await diffRes.json()) as ApiResponse<DiffResult>;
+
+      expect(diffRes.status).toBe(200);
+      // Exact-key-match against openapi.yaml's documented DiffResult/DeleteConflictDiff shape —
+      // proves the OpenAPI contract gate is green for the REAL wire body (RED before this task's
+      // openapi.yaml edit: `deleteConflicts` was an undocumented extra key).
+      await assertResponseExact('post', '/specs/{id}/diff', 200, body);
+
+      const diff = body.data;
+      expect(diff).toBeDefined();
+      if (!diff) return;
+
+      expect(diff.deleteConflicts).toHaveLength(1);
+      const [entry] = diff.deleteConflicts;
+      expect(entry).toBeDefined();
+      if (!entry) return;
+
+      expect(entry).toEqual({ uuid: DC_PARAGRAPH_ID, base: DC_BASE_TEXT, ours: DC_OURS_TEXT });
+      // Absence, not an empty-string sentinel (#465 design decision, src/merge/types.ts) — the
+      // wire entry must carry NO `theirs` key at all, under every code path from DB to JSON.
+      expect('theirs' in entry).toBe(false);
+
+      // The delete/modify collision is reported once, in its own bucket — never as a plain
+      // delete (which would silently discard the writer's divergent edit on accept).
+      expect(diff.deleted).toEqual([]);
+      expect(diff.modified).toEqual([]);
+      expect(diff.conflicts).toEqual([]);
+
+      // REST/MCP parity (INV-1/2/3): get_spec_diff must return the identical DiffResult,
+      // including the new deleteConflicts bucket, byte-for-byte.
+      const rpc = await mcpCall('tools/call', {
+        name: 'get_spec_diff',
+        arguments: { specId: dcSpecId, contentBase64: edited.toString('base64') },
+      });
+      const result = rpc['result'] as Record<string, unknown>;
+      const content = result['content'] as { type: string; text: string }[];
+      const mcp = JSON.parse(content[0]?.text ?? '{}') as DiffResult;
+
+      expect(result['isError']).toBeUndefined();
+      expect(mcp).toEqual(diff);
+    }
+  );
+});
+
+// #648: an object-interior table cell mixing a hidden and a visible run.
+// Before the fix, merge/extract.ts's visibleText had no w:vanish handling at
+// all, so it disagreed with the AST (objectText, which already drops hidden
+// runs — #641/ADR-092): an untouched round-tripped DOCX with this shape would
+// report as modified. Proved at the real wiring — DB → generateDocx →
+// extractContentControls → getObjectStructuralSnapshots → computeDiff — not
+// just at the unit level, since that is where the two code paths' divergence
+// actually surfaces as a false diff entry.
+describe('body-level object round-trip — hidden/visible run mix (#648)', () => {
+  const VAN_PART_ID = randomUUID();
+  const VAN_OBJECT_ID = randomUUID();
+  const VAN_TEXT_ID = randomUUID();
+  const VAN_HIDDEN_TEXT = 'Hidden internal guidance. ';
+  const VAN_VISIBLE_TEXT = 'Visible spec cell text.';
+  let vanSpecId: string;
+
+  beforeAll(async () => {
+    vanSpecId = await createSpec({
+      section: '09 91 26',
+      title: 'Object Vanish Diff Wiring Spec',
+      source: `d648diff_${randomUUID().slice(0, 8)}`,
+    });
+    await insertTree(
+      {
+        id: vanSpecId,
+        section: '09 91 26',
+        title: 'Object Vanish Diff Wiring Spec',
+        parts: [
+          {
+            id: VAN_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            meta: {},
+            children: [
+              {
+                id: VAN_OBJECT_ID,
+                type: 'object',
+                text: '',
+                meta: {
+                  object: anchoredMixedVisibilityTableMeta(
+                    VAN_TEXT_ID,
+                    VAN_HIDDEN_TEXT,
+                    VAN_VISIBLE_TEXT
+                  ),
+                },
+                children: [
+                  {
+                    id: VAN_TEXT_ID,
+                    type: 'objectText',
+                    // Matches the object tier's AST (visible run only) —
+                    // never the hidden run's text (#641/ADR-092).
+                    text: VAN_VISIBLE_TEXT,
+                    meta: {},
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      vanSpecId,
+      pool
+    );
+  });
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM specs WHERE id = $1', [vanSpecId]);
+  });
+
+  it(
+    'an unmodified generated DOCX round-trips with an empty diff — the hidden run never ' +
+      'leaks into the object-interior text merge extracts',
+    async () => {
+      const generateRes = await fetch(`${baseUrl}/specs/${vanSpecId}/generate`, {
+        method: 'POST',
+      });
+      expect(generateRes.status).toBe(200);
+      const buffer = Buffer.from(await generateRes.arrayBuffer());
+
+      const form = new FormData();
+      form.append(
+        'file',
+        new Blob([new Uint8Array(buffer)], { type: DOCX_MIME }),
+        'object-vanish.docx'
+      );
+      const diffRes = await fetch(`${baseUrl}/specs/${vanSpecId}/diff`, {
+        method: 'POST',
+        body: form,
+      });
+      const body = (await diffRes.json()) as ApiResponse<DiffResult>;
+
+      expect(diffRes.status).toBe(200);
+      expect(body.data).toEqual({
+        added: [],
+        modified: [],
+        deleted: [],
+        deleteConflicts: [],
+        conflicts: [],
+        objectConflicts: [],
+        warnings: [],
+      });
+    }
+  );
+});
+
+/**
+ * #652: a textBox-kind body object, whose blob root is the HOST body
+ * paragraph (`w:p`) carrying the `w:r > w:drawing` run — the capture shape
+ * `parser/docx/body-objects.ts` documents in its module comment and
+ * `buildTextBoxObject` actually produces (`blob: [anchored.node]`, where
+ * `anchorInteriorParagraphs` preserves the root's own tag and only wraps
+ * INTERIOR paragraphs with SDT anchors).
+ *
+ * A table's blob root is the `w:tbl` itself, which is also exactly what
+ * `merge/extract.ts`'s `walkObjectBlocks` matches — so the table tier is
+ * symmetric and every existing table-based test passes. For a textBox the
+ * two sides used to hash different trees: base fingerprinted the host `w:p`,
+ * theirs fingerprinted the bare `w:drawing`, so `fingerprintsDiverge` was
+ * ALWAYS true and any untouched round trip false-reported an objectConflict.
+ */
+function anchoredTextBoxMeta(anchorUuid: string, text: string): ObjectMeta {
+  const anchoredInterior: ObjectBlobNode = {
+    'w:sdt': [
+      { 'w:sdtPr': [{ 'w:tag': [], ':@': { '@_w:val': `specr-uuid-${anchorUuid}` } }] },
+      { 'w:sdtContent': [{ 'w:p': [{ 'w:r': [{ 'w:t': [{ '#text': text }] }] }] }] },
+    ],
+  } as ObjectBlobNode;
+  return {
+    kind: 'textBox',
+    floating: false,
+    generation: 'drawingml',
+    blob: [
+      {
+        'w:p': [
+          {
+            'w:r': [
+              {
+                'w:drawing': [
+                  {
+                    'wp:inline': [
+                      {
+                        'a:graphic': [
+                          {
+                            'a:graphicData': [
+                              {
+                                'wps:wsp': [
+                                  { 'wps:txbx': [{ 'w:txbxContent': [anchoredInterior] }] },
+                                ],
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+// #652: the textBox counterpart of the table-kind wiring test above. Proved
+// at the real wiring — DB → generateDocx → extractContentControls →
+// getObjectStructuralSnapshots → computeDiff — because the asymmetry is
+// between two production call sites (diff.ts fingerprints the stored blob
+// root; extract.ts fingerprints the matched OBJECT_BLOCK_TAGS node), so a
+// unit test on either side alone cannot see it.
+describe('body-level object round-trip — textBox fingerprint symmetry (#652)', () => {
+  const TB_PART_ID = randomUUID();
+  const TB_OBJECT_ID = randomUUID();
+  const TB_TEXT_ID = randomUUID();
+  const TB_TEXT = 'Text box interior paragraph.';
+  let tbSpecId: string;
+
+  beforeAll(async () => {
+    tbSpecId = await createSpec({
+      section: '09 91 26',
+      title: 'Object TextBox Diff Wiring Spec',
+      source: `d652diff_${randomUUID().slice(0, 8)}`,
+    });
+    await insertTree(
+      {
+        id: tbSpecId,
+        section: '09 91 26',
+        title: 'Object TextBox Diff Wiring Spec',
+        parts: [
+          {
+            id: TB_PART_ID,
+            type: 'part',
+            text: 'GENERAL',
+            meta: {},
+            children: [
+              {
+                id: TB_OBJECT_ID,
+                type: 'object',
+                text: '',
+                meta: { object: anchoredTextBoxMeta(TB_TEXT_ID, TB_TEXT) },
+                children: [
+                  {
+                    id: TB_TEXT_ID,
+                    type: 'objectText',
+                    text: TB_TEXT,
+                    meta: {},
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      tbSpecId,
+      pool
+    );
+  });
+
+  afterAll(async () => {
+    // id-scoped teardown: only the spec row this describe block created.
+    await pool.query('DELETE FROM specs WHERE id = $1', [tbSpecId]);
+  });
+
+  it('an unmodified generated DOCX round-trips with ZERO objectConflicts', async () => {
+    const generateRes = await fetch(`${baseUrl}/specs/${tbSpecId}/generate`, { method: 'POST' });
+    expect(generateRes.status).toBe(200);
+    const buffer = Buffer.from(await generateRes.arrayBuffer());
+
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([new Uint8Array(buffer)], { type: DOCX_MIME }),
+      'object-textbox.docx'
+    );
+    const diffRes = await fetch(`${baseUrl}/specs/${tbSpecId}/diff`, {
+      method: 'POST',
+      body: form,
+    });
+    const body = (await diffRes.json()) as ApiResponse<DiffResult>;
+
+    expect(diffRes.status).toBe(200);
+    // The assertion that fails without the #652 fix: base hashed the host
+    // w:p, theirs hashed the bare w:drawing, so objectConflicts held one
+    // entry.
+    //
+    // Non-vacuity is established by mutation, not by this shape: reverting
+    // fingerprintRoot's host-paragraph pick makes ONLY this test fail, and it
+    // fails carrying BOTH a base and a theirs fingerprint — which
+    // detectObjectConflicts emits only for a block findMatchingBlock actually
+    // matched by interior uuid, so the findInteriorUuids path is provably
+    // live here. (Asserting the whole diff rather than objectConflicts alone
+    // is broader coverage of the object round trip, but it is NOT by itself a
+    // guard on findInteriorUuids: theirsControlled is built by walkBlocks
+    // independently, so interior text would still round-trip cleanly if
+    // interior-uuid collection regressed. extract.test.ts pins that path.)
+    expect(body.data).toEqual({
+      added: [],
+      modified: [],
+      deleted: [],
+      deleteConflicts: [],
+      conflicts: [],
+      objectConflicts: [],
+      warnings: [],
+    });
+  });
 });

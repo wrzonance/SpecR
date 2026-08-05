@@ -58,9 +58,13 @@ function registerParagraphContentTools(reg: ToolRegistrar): void {
       description:
         'Insert a new paragraph immediately after anchorNodeId, as its sibling (#372) — ' +
         'the WYSIWYG Enter gesture. nodeType defaults to the anchor’s own type; only ' +
-        'article, pr1–pr7, and continuation are insertable (never part or note). Bumps ' +
-        'the spec’s contentVersion; pass expectedVersion for the optimistic-concurrency ' +
-        'check. Returns the created SpecNode.',
+        'article, pr1–pr7, and continuation are insertable (never part or note). An ' +
+        'explicit nodeType must also match the anchor’s tier — its own type, ' +
+        'continuation (any tier), or any insertable type after a tierless anchor, ' +
+        'i.e. a note or a continuation, neither of which carries a tier (#383) — ' +
+        'a mismatched tier (e.g. pr1 after an article) is rejected. Bumps the spec’s ' +
+        'contentVersion; pass expectedVersion for the optimistic-concurrency check. ' +
+        'Returns the created SpecNode.',
       inputSchema: InsertParagraphShape,
     },
     handleInsertParagraph
