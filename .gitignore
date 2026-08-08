@@ -74,3 +74,8 @@ tools/verify/work/
 # with a HOME that cannot host the default store location — notably `pnpm install`
 # inside a container that bind-mounts this directory. Pure cache; never committed.
 .pnpm-store/
+
+# agentkit: .agent/ is working state; these two files are the declaration
+.agent/*
+!.agent/config.env
+!.agent/board.json

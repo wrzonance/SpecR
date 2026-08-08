@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "owner": "wrzonance",
+  "project": {
+    "number": 4,
+    "id": "PVT_kwDOEMq2wc4Ba8ZE",
+    "title": "SpecR"
+  },
+  "statusField": {
+    "id": "PVTSSF_lADOEMq2wc4Ba8ZEzhVwXig",
+    "name": "Status",
+    "options": {
+      "Backlog": "f75ad846",
+      "Ready": "61e4505c",
+      "In progress": "47fc9ee4",
+      "In review": "df73e18b",
+      "Done": "98236657"
+    }
+  },
+  "generatedAt": "2026-08-08T22:33:12Z",
+  "fingerprint": "sha256:1be025068f9b56aec7ef12222b4f08b7d28dad2a273f1a4a3c166eb5fa748d07"
+}
