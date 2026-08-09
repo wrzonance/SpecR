@@ -22,6 +22,7 @@ vi.mock('./handlers.js', () => ({ handleCoordinationReport: vi.fn() }));
 vi.mock('./reporting-handler.js', () => ({ handleCompareSpecs: vi.fn() }));
 vi.mock('./keynotes-handler.js', () => ({ handleGetProjectKeynotes: vi.fn() }));
 vi.mock('./reference-graph-handler.js', () => ({ handleGetReferenceGraph: vi.fn() }));
+vi.mock('./text-boxes-handler.js', () => ({ handleTextBoxesReport: vi.fn() }));
 
 import { registerReportTools } from './report-tools.js';
 import type { ToolRegistrar } from './tool-registry.js';

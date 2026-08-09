@@ -27,6 +27,8 @@ export const OP_TO_TOOL: ReadonlyMap<string, string> = new Map([
   ['post /projects/{}/submittal-register', 'submittal_register'],
   ['get /specs/{}/open-comments', 'open_comments_report'],
   ['get /projects/{}/open-comments', 'open_comments_report'],
+  ['get /specs/{}/text-boxes', 'text_boxes_report'],
+  ['get /projects/{}/text-boxes', 'text_boxes_report'],
   // issuance-readiness dry-run (#406 / ADR-079)
   ['get /specs/{}/readiness-report', 'readiness_report'],
   ['get /packages/{}/readiness-report', 'readiness_report'],
@@ -437,6 +439,9 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
   'get_project_keynotes',
   'list_revit_links',
   'open_comments_report',
+  // text_boxes_report mirrors both text-box REST reports 1:1, but a non-vacuous
+  // assertion needs a parsed spec containing a retained body object beyond `pnpm seed`.
+  'text_boxes_report',
   // readiness_report (#406 / ADR-079) mirrors its mapped REST GETs 1:1, but a non-vacuous
   // assertion needs a spec/package with seeded readiness-triggering content (a choice token,
   // note, open comment, or text box) beyond `pnpm seed` — same posture as open_comments_report.
@@ -491,6 +496,6 @@ export const INV5_READ_PENDING: ReadonlySet<string> = new Set([
  * grow past this count — entries graduate out as fixtures land (see the comment above the set),
  * and the ratchet test in contract.integration.test.ts fails loudly if a future change adds a new
  * pending entry without also graduating one out. Verified by direct count on 2026-08-02: the set
- * held exactly 44 entries at the time this ratchet was introduced.
+ * held exactly 45 entries after #409 added the text-box report's fixture-pending entry.
  */
-export const INV5_READ_PENDING_BASELINE = 44;
+export const INV5_READ_PENDING_BASELINE = 45;
