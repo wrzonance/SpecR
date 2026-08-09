@@ -4860,6 +4860,64 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
 
+  /specs/{id}/text-boxes:
+    get:
+      operationId: getSpecTextBoxes
+      summary: Retained body text boxes in a spec
+      description: >
+        Lists the retained body-level DrawingML/VML text boxes in one spec
+        (#409). Each item includes the owning object paragraph UUID, persisted
+        floating/generation metadata, and ordered text extracted from its
+        objectText children. Tables are excluded. Callout-vs-text-box is not
+        distinguished because the persisted ADR-072 model does not encode that
+        subtype.
+      tags: [specs]
+      parameters:
+        - $ref: '#/components/parameters/SpecId'
+      responses:
+        '200':
+          description: Text-box review report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/TextBoxesReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
+  /projects/{id}/text-boxes:
+    get:
+      operationId: getProjectTextBoxes
+      summary: Retained body text boxes across a project
+      description: >
+        Aggregates retained body-level DrawingML/VML text boxes across every
+        spec in a project, sorted by section (#409). Tables are excluded and
+        callout-vs-text-box is not distinguished because the persisted ADR-072
+        model does not encode that subtype.
+      tags: [projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Text-box review report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: '#/components/schemas/TextBoxesReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+
   /specs/{id}/readiness-report:
     get:
       operationId: getSpecReadinessReport
@@ -7416,6 +7474,53 @@ components:
           items: { $ref: '#/components/schemas/OpenComment' }
         summary: { $ref: '#/components/schemas/OpenCommentsSummary' }
 
+    # ── Text-box review report (#409) ─────────────────────────────────────────────
+
+    TextBoxReportScope:
+      oneOf:
+        - type: object
+          required: [kind, specId]
+          properties:
+            kind: { type: string, enum: [spec] }
+            specId: { type: string, format: uuid }
+        - type: object
+          required: [kind, projectId]
+          properties:
+            kind: { type: string, enum: [project] }
+            projectId: { type: string, format: uuid }
+      discriminator:
+        propertyName: kind
+    TextBoxReportItem:
+      type: object
+      required: [specId, specSection, paragraphId, floating, generation, interiorText]
+      properties:
+        specId: { type: string, format: uuid }
+        specSection: { type: string }
+        paragraphId:
+          type: string
+          format: uuid
+          description: UUID of the retained body-object paragraph.
+        floating: { type: boolean }
+        generation: { type: string, enum: [drawingml, vml] }
+        interiorText:
+          type: array
+          description: Ordered text extracted from the object's objectText children.
+          items: { type: string }
+    TextBoxReportSummary:
+      type: object
+      required: [textBoxes]
+      properties:
+        textBoxes: { type: integer, minimum: 0 }
+    TextBoxesReport:
+      type: object
+      required: [scope, textBoxes, summary]
+      properties:
+        scope: { $ref: '#/components/schemas/TextBoxReportScope' }
+        textBoxes:
+          type: array
+          items: { $ref: '#/components/schemas/TextBoxReportItem' }
+        summary: { $ref: '#/components/schemas/TextBoxReportSummary' }
+
     # ── Issuance readiness (ADR-079, #406) ────────────────────────────────────────
 
     IssuanceMode:
@@ -8616,8 +8721,7 @@ components:
 
     DiffResult:
       type: object
-      required:
-        [added, modified, deleted, deleteConflicts, conflicts, objectConflicts, warnings]
+      required: [added, modified, deleted, deleteConflicts, conflicts, objectConflicts, warnings]
       properties:
         added:
           type: array
