@@ -95,4 +95,28 @@ describe('text-box REST report (#409)', () => {
     const body = response.body as { data: { summary: { textBoxes: number } } };
     expect(body.data.summary.textBoxes).toBe(1);
   });
+
+  it('returns 400 with the spec GET error contract for a malformed id', async () => {
+    const response = await req('/specs/not-a-uuid/text-boxes');
+    expect(response.status).toBe(400);
+    await assertResponse('get', '/specs/{id}/text-boxes', 400, response.body);
+  });
+
+  it('returns 404 with the spec GET error contract for an unknown id', async () => {
+    const response = await req(`/specs/${randomUUID()}/text-boxes`);
+    expect(response.status).toBe(404);
+    await assertResponse('get', '/specs/{id}/text-boxes', 404, response.body);
+  });
+
+  it('returns 400 with the project GET error contract for a malformed id', async () => {
+    const response = await req('/projects/not-a-uuid/text-boxes');
+    expect(response.status).toBe(400);
+    await assertResponse('get', '/projects/{id}/text-boxes', 400, response.body);
+  });
+
+  it('returns 404 with the project GET error contract for an unknown id', async () => {
+    const response = await req(`/projects/${randomUUID()}/text-boxes`);
+    expect(response.status).toBe(404);
+    await assertResponse('get', '/projects/{id}/text-boxes', 404, response.body);
+  });
 });

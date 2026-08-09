@@ -143,7 +143,8 @@ export async function getTextBoxesReport(
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => undefined);
     if (err instanceof SpecNotFoundError || err instanceof ProjectNotFoundError) throw err;
-    throw new DatabaseError('getTextBoxesReport failed', { cause: err });
+    const id = scope.kind === 'spec' ? scope.specId : scope.projectId;
+    throw new DatabaseError(`getTextBoxesReport failed for ${scope.kind} ${id}`, { cause: err });
   } finally {
     if (client) client.release();
   }
