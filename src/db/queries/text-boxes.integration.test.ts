@@ -23,7 +23,7 @@ async function newSpec(section: string): Promise<string> {
     `INSERT INTO specs (section, title, source, library_id)
      VALUES ($1, $2, $3, (SELECT id FROM libraries WHERE name = 'Default Company Master'))
      RETURNING id`,
-    [section, `Text boxes ${section}`, `text-boxes-${suffix}-${section}`]
+    [section, `Text boxes ${section}`, `tb-${suffix}-${section}`]
   );
   const id = result.rows[0]?.id;
   if (id === undefined) throw new Error(`newSpec: no id for ${section}`);

@@ -79,6 +79,9 @@ const RESPONSE_COVERED = new Set([
   'put /projects/{}/language-rules',
   'delete /projects/{}/language-rules',
   'get /projects/{}/language-findings',
+  // text-box review reports (#409) — response-validated in text-boxes.integration.test.ts.
+  'get /specs/{}/text-boxes',
+  'get /projects/{}/text-boxes',
   // #649: loadSpec() switched from full $ref dereference to bundle, so ajv can compile the
   // self-referential SpecNode/SpecTree response schemas these six operations' success bodies
   // embed instead of stack-overflowing on a literal circular JS object. Response-verified (and

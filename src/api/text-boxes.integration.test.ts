@@ -40,7 +40,7 @@ beforeAll(async () => {
 
   const project = await pool.query<{ id: string }>(
     `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
-    [`text-box-api-${suffix}`]
+    [`tb-api-${suffix}`]
   );
   projectId = project.rows[0]!.id;
   const spec = await pool.query<{ id: string }>(
